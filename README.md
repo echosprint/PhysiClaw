@@ -1,8 +1,8 @@
 # PhysiClaw
 
-**What if AI could use your phone — exactly the way you do?**
+**What if an AI agent could use your phone — just like you do?**
 
-PhysiClaw gives AI agents a pair of eyes (camera) and a finger (robotic arm) to physically operate any phone. It looks at the screen, decides what to do, and taps — just like you would.
+PhysiClaw gives AI agents a pair of eyes (camera) and a finger (robotic arm) to physically operate any phone. It looks at the screen, decides what to do, and taps.
 
 Order food delivery. Check your email. Shop for groceries. Book a hotel. Any app, any phone, iOS or Android.
 
@@ -26,7 +26,7 @@ The tradeoff? PhysiClaw needs hardware: an embedded system running GRBL/grblHAL 
 Two cameras, two perspectives — just like you sitting at a desk:
 
 - **Top camera** looks straight down at the screen, reads what's on it
-- **Side camera** looks at the phone from ~45°, the way you'd glance at your desk — it sees where the stylus tip is relative to the screen, helping the AI confirm the stylus is at the right spot before tapping or swiping
+- **Side camera** looks at the phone from ~45°, the way you'd look at your phone on a desk — it sees where the stylus tip is relative to the screen, helping the AI confirm the stylus is at the right spot before tapping or swiping
 - **Stylus** moves on X/Y axes to reach any point on the screen, and pulls up/down (Z axis) to touch or release
 
 The loop is simple: **look → think → move → confirm → touch → repeat**.
@@ -40,7 +40,7 @@ Today's AI agents can control your computer — but they hit walls everywhere:
 - Want to book a ride? Another service integration.
 - Every new skill/service = new OAuth, new API, new setup. Tedious, fragile, limited.
 
-PhysiClaw takes a different approach: **let AI agent physically use your phone.** A camera sees the screen. A robotic finger taps it. No OAuth to apply for. No API to integrate. No app can detect or block it — because to the phone, it's just a finger.
+PhysiClaw takes a different approach: **let the AI agent physically use your phone.** A camera sees the screen. A robotic finger taps it. No OAuth to apply for. No API to integrate. No app can detect or block it — because to the phone, it's just a finger.
 
 One setup. Every app. Just put an unlocked phone on the desk.
 
@@ -104,7 +104,7 @@ One setup. Every app. Just put an unlocked phone on the desk.
 
 ### Phone Mounting
 
-- Phone placed face-up flat on the plotter platform
+- Phone placed face-up flat on the arm platform
 - Anti-slip pad + L-shaped blocks for positioning, ensuring consistent placement
 
 ## Communication Protocol (PhysiClaw ↔ GRBL Arm)
@@ -153,7 +153,7 @@ Python 3.11+
 pip install pyserial opencv-python mcp
 ```
 
-- pyserial: Serial port G-code for stepper motors and servo
+- pyserial: Send G-code to GRBL board via USB serial
 - opencv-python: USB camera capture
 - mcp: MCP Server framework
 
@@ -205,18 +205,18 @@ The AI agent does not output coordinates — only direction and distance level. 
 
 ### Gesture Implementation
 
-**Single Tap:** G0 to target → pen down → hold 50-100ms → pen up
+**Single Tap:** G0 to target → stylus down → hold 50-100ms → stylus up
 
-**Long Press:** G0 to target → pen down → hold 800ms → pen up
+**Long Press:** G0 to target → stylus down → hold 800ms → stylus up
 
-**Swipe:** G0 to start → pen down → G4 P0.03 → G1 to end F3000 → G4 P0.03 → pen up
+**Swipe:** G0 to start → stylus down → G4 P0.03 → G1 to end F3000 → G4 P0.03 → stylus up
 
-**Double Tap:** pen down 50ms → pen up → wait 100ms → pen down 50ms → pen up (interval < 300ms)
+**Double Tap:** stylus down 50ms → up → wait 100ms → stylus down 50ms → up (interval < 300ms)
 
 ### Why Two Cameras
 
-- Top-down camera: views screen content; captures clean screenshots when pen is retracted
-- Side camera: views stylus tip position relative to screen; from the side you can see both where the tip is on screen and how high it is above the surface
+- Top-down camera: views screen content; captures clean screenshots when stylus is retracted
+- Side camera: views stylus tip position relative to screen; shows both where the tip is
 
 ## Use Cases
 
