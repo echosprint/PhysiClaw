@@ -60,9 +60,9 @@ One setup. Every app. Just put an unlocked phone on the desk.
 │  Tools:                               │
 │   · screenshot_top   (top camera)     │
 │   · screenshot_side  (side camera)    │
-│   · move             (X/Y plane)     │
-│   · tap / swipe      (Z down + move) │
-│   · park             (retract)       │
+│   · move             (X/Y plane)      │
+│   · tap / swipe      (Z down + move)  │
+│   · park             (retract)        │
 └──────────┬────────────────┬───────────┘
            │                │
      USB Cameras      USB Serial (GRBL)
@@ -71,9 +71,9 @@ One setup. Every app. Just put an unlocked phone on the desk.
     ┌────────────┐   ┌───────────────┐
     │ Top Camera │   │ GRBL Board    │
     │ (screen)   │   │ (embedded)    │
-    ├────────────┤   │ X/Y gantry   │
-    │ Side Camera│   │ Z stylus     │
-    │ (stylus)   │   └──────┬───────┘
+    ├────────────┤   │ X/Y gantry    │
+    │ Side Camera│   │ Z stylus      │
+    │ (stylus)   │   └──────┬────────┘
     └────────────┘          │ touch
                             ▼
                    ┌─────────────────┐
