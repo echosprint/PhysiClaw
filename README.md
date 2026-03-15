@@ -9,7 +9,7 @@ Order food delivery. Check your email. Shop for groceries. Book a hotel. Any app
 No OAuth tokens. No ADB cables. No APIs. No app to install. No developer setup.
 Just unlock your phone, put it on the desk, and let the agent work.
 
-The tradeoff? PhysiClaw needs hardware: an embedded system running GRBL/grblHAL firmware to control a gantry (X/Y) and stylus (Z), plus two USB cameras. A small desk-sized rig that gives your AI agent physical presence.
+The tradeoff? PhysiClaw needs hardware: an embedded system running GRBL/grblHAL firmware to control a gantry (X/Y) and stylus (Z), plus two USB cameras. A compact desktop rig that gives your AI agent physical presence.
 
 ## How It Works
 
@@ -23,11 +23,11 @@ The tradeoff? PhysiClaw needs hardware: an embedded system running GRBL/grblHAL 
       └──────────────┘ (next action)         adjust & retry ◄┘
 ```
 
-Two cameras, two perspectives — just like you sitting at a desk:
+Two cameras, two perspectives:
 
-- **Top camera** looks straight down at the screen, reads what's on it
-- **Side camera** looks at the phone from ~45°, the way you'd look at your phone on a desk — it sees where the stylus tip is relative to the screen, helping the AI confirm the stylus is at the right spot before tapping or swiping
-- **Stylus** moves on X/Y axes to reach any point on the screen, and pulls up/down (Z axis) to touch or release
+- **Top camera** looks straight down at the screen — reads what's on it
+- **Side camera** views from ~45° — checks where the stylus tip is relative to the screen before tapping
+- **Stylus** moves on X/Y to reach any point, up/down (Z) to touch or release
 
 The loop is simple: **look → think → move → confirm → touch → repeat**.
 
@@ -139,7 +139,7 @@ Protocol: USB serial (CH340, 115200 baud). Send one line at a time, wait for `ok
 
 ### MCP Protocol (MCP Client → PhysiClaw)
 
-Tools communicate via stdio or SSE transporting JSON messages. MCP is a standard inter-process communication protocol, language-agnostic.
+Tools communicate via stdio or SSE with JSON messages. MCP is a standard, language-agnostic protocol.
 
 ## Tech Stack
 
@@ -157,7 +157,7 @@ pip install pyserial opencv-python mcp
 - opencv-python: USB camera capture
 - mcp: MCP Server framework
 
-No Anthropic SDK needed (Claude runs on the MCP client side, not inside PhysiClaw).
+No Anthropic SDK needed — Claude runs on the MCP client side.
 
 ### Platform Compatibility
 
@@ -212,11 +212,6 @@ The AI agent does not output coordinates — only direction and distance level. 
 **Swipe:** G0 to start → stylus down → G4 P0.03 → G1 to end F3000 → G4 P0.03 → stylus up
 
 **Double Tap:** stylus down 50ms → up → wait 100ms → stylus down 50ms → up (interval < 300ms)
-
-### Why Two Cameras
-
-- Top-down camera: views screen content; captures clean screenshots when stylus is retracted
-- Side camera: views stylus tip position relative to screen; shows both where the tip is
 
 ## Use Cases
 
