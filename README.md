@@ -27,7 +27,7 @@ PhysiClaw is an MCP Server that exposes hardware operation tools (screenshot, mo
 
 ## System Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────┐
 │  MCP Client (Claude Desktop / OpenClaw)      │
 │  Role: View photos, understand screen,       │
@@ -52,7 +52,7 @@ PhysiClaw is an MCP Server that exposes hardware operation tools (screenshot, mo
 
 ### Layer Responsibilities
 
-```
+```text
 ┌─────────────────────────────────────────┐
 │  AI (Brain)                              │
 │  · Understand screen content             │
@@ -80,7 +80,7 @@ PhysiClaw is an MCP Server that exposes hardware operation tools (screenshot, mo
 ### Bill of Materials
 
 | Purpose | Item | Qty | Est. Price |
-|---------|------|-----|------------|
+| ------- | ---- | --- | ---------- |
 | Mechanical platform | Paixi Kuaichaobao pen plotter P25 | 1 | Purchased |
 | Top-down camera | USB industrial camera 2MP fixed-focus low-distortion UVC | 1 | ~$14 |
 | Side camera | USB industrial camera (same as above) | 1 | ~$14 |
@@ -136,7 +136,7 @@ Backup (if plotter serial port doesn't work): Raspberry Pi 5 kit + A4988 driver 
 
 All commands used in this project:
 
-```
+```gcode
 G90                    # Absolute coordinate mode
 G91                    # Relative coordinate mode (primary mode)
 G0 Xxx Yyy Fxxx        # Rapid positioning
@@ -153,7 +153,7 @@ Communication rule: append `\n` to each command, wait for GRBL to reply `ok` bef
 ### Key GRBL Parameters
 
 | Parameter | Meaning | Typical Value |
-|-----------|---------|---------------|
+| --------- | ------- | ------------- |
 | `$100` / `$101` | Steps per mm (X/Y) | 80 |
 | `$110` / `$111` | Max speed mm/min (X/Y) | 5000 |
 | `$120` / `$121` | Acceleration mm/sec² (X/Y) | 200 |
@@ -185,7 +185,7 @@ Take one photo with screen on, one with screen off. Frame differencing finds the
 
 **Affine transform formula (system core):**
 
-```
+```text
 GRBL_X = a × Screen_X + b × Screen_Y + c
 GRBL_Y = d × Screen_X + e × Screen_Y + f
 ```
@@ -210,7 +210,7 @@ Python 3.11+
 
 ### Dependencies
 
-```
+```bash
 pip install pyserial opencv-python mcp
 ```
 
@@ -226,7 +226,7 @@ Mac / Windows / Linux (Raspberry Pi) all supported. The only platform difference
 
 ## Code Structure
 
-```
+```text
 physiclaw/
 ├── physiclaw_server.py   # MCP Server entry point, exposes tools
 ├── hand.py               # Serial G-code control for motors and servo
@@ -256,7 +256,7 @@ The LLM does not output coordinates — only direction and distance level. Each 
 **Distance Levels:**
 
 | Level | Meaning | Physical Displacement |
-|-------|---------|----------------------|
+| ----- | ------- | --------------------- |
 | far | Most of the screen | 20mm |
 | medium | A few icons | 8mm |
 | near | One icon | 3mm |
@@ -264,7 +264,7 @@ The LLM does not output coordinates — only direction and distance level. Each 
 
 **Full Operation Cycle:**
 
-```
+```text
 1. park()              → Retract pen out of frame
 2. screenshot_top()    → Take clean screenshot, Claude sees screen content
 3. Claude decides      → Outputs move command
@@ -284,7 +284,7 @@ AI reads coordinates from grid-overlaid photo, converts to GRBL coordinates via 
 **Available AI Actions:**
 
 | Action | Description | Parameters |
-|--------|-------------|------------|
+| ------ | ----------- | ---------- |
 | `tap` | Single tap | x, y |
 | `long_press` | Long press | x, y, duration_ms |
 | `swipe` | Swipe | x1, y1, x2, y2 |
@@ -296,7 +296,7 @@ AI reads coordinates from grid-overlaid photo, converts to GRBL coordinates via 
 
 **Operation Flow:**
 
-```
+```text
 1. Capture photo + overlay coordinate grid
 2. AI views image, reads coordinates
 3. Calibration formula: Screen coords → GRBL coords
@@ -338,11 +338,13 @@ AI reads coordinates from grid-overlaid photo, converts to GRBL coordinates via 
 ### Remote Deployment (Raspberry Pi)
 
 Change physiclaw_server.py to SSE transport:
+
 ```python
 mcp.run(transport="sse", host="0.0.0.0", port=8080)
 ```
 
 Client configuration:
+
 ```json
 {
   "mcpServers": {
@@ -357,7 +359,7 @@ Client configuration:
 ## Image Processing Notes
 
 | Issue | Solution |
-|-------|----------|
+| ----- | -------- |
 | Moiré patterns | Slightly defocus camera, or adjust shooting distance/angle |
 | Refresh rate flicker | Set exposure to integer multiple of refresh period (60Hz → 16.7ms), max brightness |
 | Reflections | Avoid direct light sources, add light shield or CPL polarizing filter |
@@ -409,7 +411,7 @@ If serial doesn't work: open the machine to check the main board chip, consider 
 ## Use Cases
 
 | Scenario | Can Complete Independently? |
-|----------|---------------------------|
+| -------- | -------------------------- |
 | Food delivery ordering | Yes, up to payment |
 | Reorder / order history | Yes, up to payment |
 | Ride-hailing (saved addresses) | Yes, up to payment |
@@ -431,7 +433,7 @@ Payment steps require human intervention (password / fingerprint / Face ID). Phy
 ## Phone Screen Size Reference
 
 | Model | Resolution (px) | Physical Size (mm) |
-|-------|-----------------|---------------------|
+| ----- | --------------- | ------------------- |
 | iPhone 15 | 1179 × 2556 | 71.6 × 147.5 |
 | iPhone 15 Pro | 1179 × 2556 | 70.6 × 146.6 |
 | Redmi K70 | 1220 × 2712 | 73.2 × 161.3 |
