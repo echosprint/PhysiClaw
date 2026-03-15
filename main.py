@@ -1,31 +1,24 @@
-import cv2
+import subprocess
 import sys
 from datetime import datetime
 
 
 def take_picture(output_path: str | None = None) -> str:
-    """Open the camera, take a picture, and save it."""
-    cap = cv2.VideoCapture(0)
-    if not cap.isOpened():
-        print("Error: Could not open camera.")
-        sys.exit(1)
-
-    # Allow camera to warm up by grabbing a few frames
-    for _ in range(30):
-        cap.read()
-
-    ret, frame = cap.read()
-    cap.release()
-
-    if not ret:
-        print("Error: Could not capture frame.")
-        sys.exit(1)
-
+    """Take a picture using imagesnap (macOS)."""
     if output_path is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_path = f"photo_{timestamp}.jpg"
 
-    cv2.imwrite(output_path, frame)
+    result = subprocess.run(
+        ["imagesnap", "-d", "UGREEN Camera 1080P", "-w", "1", output_path],
+        capture_output=True,
+        text=True,
+    )
+
+    if result.returncode != 0:
+        print(f"Error: {result.stderr.strip()}")
+        sys.exit(1)
+
     print(f"Picture saved to {output_path}")
     return output_path
 
