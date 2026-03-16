@@ -5,4 +5,4 @@ description = "Add your description here"
 license = "MIT"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = ["pyserial>=3.5"]
