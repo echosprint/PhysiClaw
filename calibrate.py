@@ -6,6 +6,10 @@ orange circle, then run:
 
     uv run python calibrate.py [--camera INDEX]
 
+Note: On macOS, OpenCV won't trigger the camera permission dialog.
+If the camera returns blank frames, run `imagesnap` once first to
+grant camera access to your terminal app, then re-run this script.
+
 Phases:
   1. Probe Z depth for tap contact  (center x10)
   2. Scan X offset for right circle  (right  x3)
@@ -21,66 +25,8 @@ import json
 import sys
 import time
 
-import cv2
-import numpy as np
-
+from camera import Camera
 from grbl_device import GrblDevice
-
-
-# ─── Camera ──────────────────────────────────────────────────────
-
-class TopCamera:
-    """Keep the top camera open for fast green-screen detection."""
-
-    def __init__(self, index=0):
-        self.cap = cv2.VideoCapture(index)
-        if not self.cap.isOpened():
-            raise RuntimeError(f"Cannot open camera index {index}")
-        # Warmup: discard initial auto-exposure frames
-        for _ in range(15):
-            self.cap.read()
-        print(f"Camera {index} ready")
-
-    def _fresh_frame(self):
-        """Flush buffered frames and return the latest one."""
-        for _ in range(4):
-            self.cap.grab()
-        ret, frame = self.cap.read()
-        return frame if ret else None
-
-    def is_green(self):
-        """Check if the phone screen is showing the green success flash."""
-        frame = self._fresh_frame()
-        if frame is None:
-            return False
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        # #22c55e ≈ HSV(145°, 83%, 77%) → OpenCV scale H=72, S=212, V=196
-        lower = np.array([35, 50, 50])
-        upper = np.array([90, 255, 255])
-        mask = cv2.inRange(hsv, lower, upper)
-        ratio = np.count_nonzero(mask) / mask.size
-        return ratio > 0.15
-
-    def wait_for_green(self, timeout=1.5):
-        """Poll for green screen within timeout."""
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            if self.is_green():
-                return True
-            time.sleep(0.05)
-        return False
-
-    def wait_for_white(self, timeout=3.0):
-        """Wait until the green flash clears."""
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            if not self.is_green():
-                return True
-            time.sleep(0.1)
-        return False
-
-    def close(self):
-        self.cap.release()
 
 
 # ─── Motion helpers ──────────────────────────────────────────────
@@ -109,7 +55,7 @@ def phase1_z(bot, cam):
     z_tap = None
 
     # Probe from 0.5 mm downward in 0.3 mm steps — cautious
-    for z_raw in np.arange(0.5, 8.0, 0.3):
+    for z_raw in [0.5 + i * 0.3 for i in range(25)]:
         z = round(float(z_raw), 2)
         print(f"  Probe Z={z:.2f} mm …", end=" ", flush=True)
         tap_once(bot, z, z_speed=3000)
@@ -161,7 +107,7 @@ def phase2_x(bot, cam, z_tap):
 
     # Right circle center is 12 % of viewport width from center.
     # Phone width ≈ 65-75 mm → ~8-9 mm.  Scan 3–18 mm in 1.5 mm steps.
-    for x_raw in np.arange(3.0, 18.0, 1.5):
+    for x_raw in [3.0 + i * 1.5 for i in range(10)]:
         x = round(float(x_raw), 2)
         print(f"  Try X={x:.1f} mm …", end=" ", flush=True)
         move_xy(bot, x, 0)
@@ -218,7 +164,7 @@ def phase3_y(bot, cam, z_tap):
 
     # Down circle center is 12 % of viewport height from center.
     # Phone height ≈ 130-155 mm → ~16-19 mm.  Scan 6–30 mm in 2 mm steps.
-    for y_raw in np.arange(6.0, 30.0, 2.0):
+    for y_raw in [6.0 + i * 2.0 for i in range(12)]:
         y = round(float(y_raw), 2)
         print(f"  Try Y={y:.1f} mm …", end=" ", flush=True)
         move_xy(bot, 0, y)
@@ -322,7 +268,7 @@ def phase5_swipe(bot, cam, z_tap, x_offset, y_offset):
         move_xy(bot, 0, 0)             # start at center
 
         success = False
-        for attempt in range(4):
+        for _ in range(4):
             print(f"  Swipe {name} …", end=" ", flush=True)
 
             # Pen down at center (start of swipe)
@@ -368,7 +314,7 @@ def main():
                         help="GRBL serial port (auto-detect if omitted)")
     args = parser.parse_args()
 
-    cam = TopCamera(args.camera)
+    cam = Camera(args.camera)
     bot = GrblDevice(args.port)
     bot.init()
 
