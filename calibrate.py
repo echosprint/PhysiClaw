@@ -122,9 +122,13 @@ def phase1_z(stylus_arm: StylusArm, cam: Camera) -> float | None:
 
         attempts += 1
 
-    z_tap = round(sum(z_hits) / len(z_hits), 2)
+    # Use the deeper side of hits — average alone sits right at threshold
+    # which causes unreliable contact. Bias toward max for sustained contact.
+    z_avg = sum(z_hits) / len(z_hits)
+    z_max = max(z_hits)
+    z_tap = round((z_avg + z_max) / 2, 2)  # midpoint between avg and deepest hit
     print(f"\n  Phase 1 done — z_tap = {z_tap} mm  "
-          f"(avg of {len(z_hits)} hits, range {min(z_hits):.2f}-{max(z_hits):.2f})")
+          f"(hits: {len(z_hits)}, range {min(z_hits):.2f}-{z_max:.2f}, avg {z_avg:.2f})")
     return z_tap
 
 
@@ -137,7 +141,8 @@ SCAN_DIRS = [
 ]
 
 # Distance candidates (mm) — 12 % of typical phone screen
-SCAN_DISTANCES = [3.0 + i * 1.5 for i in range(10)]
+# Range 3–25.5 mm covers phones from small (width ~37mm) to large (height ~210mm)
+SCAN_DISTANCES = [3.0 + i * 1.5 for i in range(16)]
 
 
 def _probe_direction(stylus_arm: StylusArm, cam: Camera, z_tap: float, directions: list[tuple[str, int, int]]) -> tuple[int, int, float] | None:
@@ -170,11 +175,13 @@ def _repeat_taps(stylus_arm: StylusArm, cam: Camera, z_tap: float, ax: int, ay: 
     """Tap the same target (count) more times to confirm."""
     successes = 0
     attempts = 0
-    x = round(ax * dist, 2)
-    y = round(ay * dist, 2)
     while successes < count and attempts < MAX_RETRIES:
         cam.wait_for_white()
         time.sleep(0.3)
+        # Add ±2mm noise on the perpendicular axis for exploration
+        noise = attempts % 5  # 0, 1, 2, 3, 4 mm
+        x = round(ax * dist + abs(ay) * noise, 2)
+        y = round(ay * dist + abs(ax) * noise, 2)
         move_xy(stylus_arm, x, y)
         print(f"  Confirm {successes + 1}/{count} …", end=" ", flush=True)
         tap_once(stylus_arm, z_tap)
@@ -275,7 +282,7 @@ def phase4_long_press(stylus_arm: StylusArm, cam: Camera) -> None:
             cam.wait_for_white()
             time.sleep(0.3)
         print(f"  Long press {successes + 1}/3 …", end=" ", flush=True)
-        stylus_arm._tap_with_vibration(duration=0.9)   # > 800 ms with margin
+        stylus_arm.long_press()
         time.sleep(0.3)
         if cam.wait_for_green(timeout=1.5):
             successes += 1
