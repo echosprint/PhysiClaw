@@ -26,27 +26,32 @@ import sys
 import time
 
 from camera import Camera
-from grbl_device import GrblDevice
+from stylus_arm import GrblDevice
 
 
 # ─── Motion helpers ──────────────────────────────────────────────
 
-def tap_once(bot, z_tap, z_speed=5000):
-    """Pen down then up at current XY position."""
-    bot._send(f'G1G90 Z{z_tap:.2f} F{z_speed}')
+def tap_once(stylus_arm, z_tap, z_speed=5000):
+    """Pen down then up at current XY position.
+
+    z_speed: default F5000 (83 mm/s) is slower than a human finger tap
+    (~F6000, 100 mm/s) for safety during calibration probing.
+    Capacitive screens register on contact, not speed, so this is fine.
+    """
+    stylus_arm._send(f'G1G90 Z{z_tap:.2f} F{z_speed}')
     time.sleep(0.15)
-    bot._send(f'G1G90 Z0.00 F{z_speed}')
+    stylus_arm._send(f'G1G90 Z0.00 F{z_speed}')
 
 
-def move_xy(bot, x, y, speed=8000):
+def move_xy(stylus_arm, x, y, speed=8000):
     """Rapid move to absolute XY (pen must be up)."""
-    bot._send(f'G0 X{x:.2f} Y{y:.2f} F{speed}')
+    stylus_arm._send(f'G0 X{x:.2f} Y{y:.2f} F{speed}')
     time.sleep(0.3)
 
 
 # ─── Phase 1: Z-axis probing ────────────────────────────────────
 
-def phase1_z(bot, cam):
+def phase1_z(stylus_arm, cam):
     """Probe Z depth for tap registration, then complete 10 center taps."""
     print("\n" + "=" * 50)
     print("PHASE 1: Z-axis calibration  (tap center ×10)")
@@ -54,11 +59,12 @@ def phase1_z(bot, cam):
 
     z_tap = None
 
-    # Probe from 0.5 mm downward in 0.3 mm steps — cautious
+    # Probe from 0.5 mm downward in 0.3 mm steps.
+    # F3000 (50 mm/s) — extra slow during probing to protect the screen.
     for z_raw in [0.5 + i * 0.3 for i in range(25)]:
         z = round(float(z_raw), 2)
         print(f"  Probe Z={z:.2f} mm …", end=" ", flush=True)
-        tap_once(bot, z, z_speed=3000)
+        tap_once(stylus_arm, z, z_speed=3000)
         time.sleep(0.3)
 
         if cam.wait_for_green(timeout=1.0):
@@ -79,7 +85,7 @@ def phase1_z(bot, cam):
         cam.wait_for_white()
         time.sleep(0.3)
         print(f"  Tap {successes + 1}/10 …", end=" ", flush=True)
-        tap_once(bot, z_tap)
+        tap_once(stylus_arm, z_tap)
         time.sleep(0.3)
         if cam.wait_for_green(timeout=1.0):
             successes += 1
@@ -94,7 +100,7 @@ def phase1_z(bot, cam):
 
 # ─── Phase 2: X calibration ─────────────────────────────────────
 
-def phase2_x(bot, cam, z_tap):
+def phase2_x(stylus_arm, cam, z_tap):
     """Scan X offsets to hit the right circle (left:62%, 12 % of screen width)."""
     print("\n" + "=" * 50)
     print("PHASE 2: X calibration  (tap right ×3)")
@@ -110,8 +116,8 @@ def phase2_x(bot, cam, z_tap):
     for x_raw in [3.0 + i * 1.5 for i in range(10)]:
         x = round(float(x_raw), 2)
         print(f"  Try X={x:.1f} mm …", end=" ", flush=True)
-        move_xy(bot, x, 0)
-        tap_once(bot, z_tap)
+        move_xy(stylus_arm, x, 0)
+        tap_once(stylus_arm, z_tap)
         time.sleep(0.3)
 
         if cam.wait_for_green(timeout=1.0):
@@ -131,9 +137,9 @@ def phase2_x(bot, cam, z_tap):
     while successes < 3 and attempts < 10:
         cam.wait_for_white()
         time.sleep(0.3)
-        move_xy(bot, x_offset, 0)
+        move_xy(stylus_arm, x_offset, 0)
         print(f"  Tap right {successes + 1}/3 …", end=" ", flush=True)
-        tap_once(bot, z_tap)
+        tap_once(stylus_arm, z_tap)
         time.sleep(0.3)
         if cam.wait_for_green(timeout=1.0):
             successes += 1
@@ -148,7 +154,7 @@ def phase2_x(bot, cam, z_tap):
 
 # ─── Phase 3: Y calibration ─────────────────────────────────────
 
-def phase3_y(bot, cam, z_tap):
+def phase3_y(stylus_arm, cam, z_tap):
     """Scan Y offsets to hit the down circle (top:62%, 12 % of screen height)."""
     print("\n" + "=" * 50)
     print("PHASE 3: Y calibration  (tap down ×3)")
@@ -158,7 +164,7 @@ def phase3_y(bot, cam, z_tap):
     time.sleep(0.5)
 
     # Return to center column first
-    move_xy(bot, 0, 0)
+    move_xy(stylus_arm, 0, 0)
 
     y_offset = None
 
@@ -167,8 +173,8 @@ def phase3_y(bot, cam, z_tap):
     for y_raw in [6.0 + i * 2.0 for i in range(12)]:
         y = round(float(y_raw), 2)
         print(f"  Try Y={y:.1f} mm …", end=" ", flush=True)
-        move_xy(bot, 0, y)
-        tap_once(bot, z_tap)
+        move_xy(stylus_arm, 0, y)
+        tap_once(stylus_arm, z_tap)
         time.sleep(0.3)
 
         if cam.wait_for_green(timeout=1.0):
@@ -188,9 +194,9 @@ def phase3_y(bot, cam, z_tap):
     while successes < 3 and attempts < 10:
         cam.wait_for_white()
         time.sleep(0.3)
-        move_xy(bot, 0, y_offset)
+        move_xy(stylus_arm, 0, y_offset)
         print(f"  Tap down {successes + 1}/3 …", end=" ", flush=True)
-        tap_once(bot, z_tap)
+        tap_once(stylus_arm, z_tap)
         time.sleep(0.3)
         if cam.wait_for_green(timeout=1.0):
             successes += 1
@@ -205,7 +211,7 @@ def phase3_y(bot, cam, z_tap):
 
 # ─── Phase 4: Long press ────────────────────────────────────────
 
-def phase4_long_press(bot, cam, z_tap):
+def phase4_long_press(stylus_arm, cam, z_tap):
     """Long press center ×3  (must hold > 800 ms)."""
     print("\n" + "=" * 50)
     print("PHASE 4: Long press center  (×3, 800 ms hold)")
@@ -213,10 +219,10 @@ def phase4_long_press(bot, cam, z_tap):
 
     cam.wait_for_white()
     time.sleep(0.5)
-    move_xy(bot, 0, 0)
+    move_xy(stylus_arm, 0, 0)
 
     # Patch Z_DOWN so the existing _tap_with_vibration uses our calibrated depth
-    bot.Z_DOWN = z_tap
+    stylus_arm.Z_DOWN = z_tap
 
     successes = 0
     attempts = 0
@@ -225,7 +231,7 @@ def phase4_long_press(bot, cam, z_tap):
             cam.wait_for_white()
             time.sleep(0.3)
         print(f"  Long press {successes + 1}/3 …", end=" ", flush=True)
-        bot._tap_with_vibration(duration=0.9)   # > 800 ms with margin
+        stylus_arm._tap_with_vibration(duration=0.9)   # > 800 ms with margin
         time.sleep(0.3)
         if cam.wait_for_green(timeout=1.5):
             successes += 1
@@ -239,7 +245,7 @@ def phase4_long_press(bot, cam, z_tap):
 
 # ─── Phase 5: Swipe ─────────────────────────────────────────────
 
-def phase5_swipe(bot, cam, z_tap, x_offset, y_offset):
+def phase5_swipe(stylus_arm, cam, z_tap, x_offset, y_offset):
     """Swipe in 4 directions from center (up / down / right / left)."""
     print("\n" + "=" * 50)
     print("PHASE 5: Swipe  (up → down → right → left)")
@@ -265,23 +271,23 @@ def phase5_swipe(bot, cam, z_tap, x_offset, y_offset):
     for name, dx, dy in directions:
         cam.wait_for_white()
         time.sleep(0.3)
-        move_xy(bot, 0, 0)             # start at center
+        move_xy(stylus_arm, 0, 0)             # start at center
 
         success = False
         for _ in range(4):
             print(f"  Swipe {name} …", end=" ", flush=True)
 
             # Pen down at center (start of swipe)
-            bot._send(f'G1G90 Z{z_tap:.2f} F5000')
+            stylus_arm._send(f'G1G90 Z{z_tap:.2f} F5000')
             time.sleep(0.1)
             # Drag to destination — G1 at controlled speed
-            bot._send(f'G1 X{dx:.2f} Y{dy:.2f} F{swipe_speed}')
+            stylus_arm._send(f'G1 X{dx:.2f} Y{dy:.2f} F{swipe_speed}')
             # Wait for motion to complete (distance / speed)
             dist = (dx ** 2 + dy ** 2) ** 0.5
             motion_time = (dist / swipe_speed) * 60   # seconds
             time.sleep(motion_time + 0.1)
             # Pen up
-            bot._send(f'G1G90 Z0.00 F5000')
+            stylus_arm._send(f'G1G90 Z0.00 F5000')
             time.sleep(0.3)
 
             if cam.wait_for_green(timeout=1.5):
@@ -290,16 +296,16 @@ def phase5_swipe(bot, cam, z_tap, x_offset, y_offset):
                 break
             else:
                 print("miss")
-                move_xy(bot, 0, 0)     # reset for retry
+                move_xy(stylus_arm, 0, 0)     # reset for retry
                 time.sleep(0.5)
 
         if not success:
             print(f"  WARNING: Swipe {name} failed after retries")
 
         # Return to center for next direction
-        bot._send(f'G1G90 Z0.00 F5000')
+        stylus_arm._send(f'G1G90 Z0.00 F5000')
         time.sleep(0.1)
-        move_xy(bot, 0, 0)
+        move_xy(stylus_arm, 0, 0)
 
     print("\n  Phase 5 done")
 
@@ -315,30 +321,30 @@ def main():
     args = parser.parse_args()
 
     cam = Camera(args.camera)
-    bot = GrblDevice(args.port)
-    bot.init()
+    stylus_arm = GrblDevice(args.port)
+    stylus_arm.setup()
 
     try:
         # Phase 1 — Z depth
-        z_tap = phase1_z(bot, cam)
+        z_tap = phase1_z(stylus_arm, cam)
         if z_tap is None:
             sys.exit(1)
 
         # Phase 2 — X mapping
-        x_offset = phase2_x(bot, cam, z_tap)
+        x_offset = phase2_x(stylus_arm, cam, z_tap)
         if x_offset is None:
             sys.exit(1)
 
         # Phase 3 — Y mapping
-        y_offset = phase3_y(bot, cam, z_tap)
+        y_offset = phase3_y(stylus_arm, cam, z_tap)
         if y_offset is None:
             sys.exit(1)
 
         # Phase 4 — long press verification
-        phase4_long_press(bot, cam, z_tap)
+        phase4_long_press(stylus_arm, cam, z_tap)
 
         # Phase 5 — swipe verification
-        phase5_swipe(bot, cam, z_tap, x_offset, y_offset)
+        phase5_swipe(stylus_arm, cam, z_tap, x_offset, y_offset)
 
         # ── Save results ─────────────────────────────────────
         result = {
@@ -362,9 +368,9 @@ def main():
         print(f"  Saved to calibration.json")
 
     finally:
-        bot.pen_up()
-        bot.home()
-        bot.close()
+        stylus_arm.pen_up()
+        stylus_arm.home()
+        stylus_arm.close()
         cam.close()
 
 

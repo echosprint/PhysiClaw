@@ -30,21 +30,23 @@ Key findings (from Kuixiang log analysis):
 import serial
 import time
 
-from find_grbl_port import find_grbl_port
+from serial_probe import detect_grbl
 
 
 # ─── Main class ──────────────────────────────────────────────
 
 class GrblDevice:
 
-    # Z-axis parameters (from Kuixiang logs)
-    Z_DOWN = 5.0    # pen down position (touching screen)
+    # Z-axis parameters
+    Z_DOWN = None   # pen down position — must be set by calibration (calibrate.py)
     Z_UP   = 0.0    # pen up position (spring rebound)
-    Z_SPEED = 20000 # Z-axis speed (GRBL truncates to $112=10000)
+    Z_SPEED = 6000  # Z-axis speed — matches human finger tap (~100 mm/s)
+                    # Kuixiang used F20000 but GRBL caps at $112=10000;
+                    # F6000 is realistic and avoids slamming the screen.
 
     def __init__(self, port=None, baudrate=115200):
         if port is None:
-            port = find_grbl_port()
+            port = detect_grbl()
         if port is None:
             raise Exception('GRBL device not found, please specify port manually')
 
@@ -95,14 +97,14 @@ class GrblDevice:
 
     # ─── Initialization ──────────────────────────────────────
 
-    def init(self):
+    def setup(self):
         """
         Follows Kuixiang initialization sequence:
         1. Wait for startup message
         2. Query version to confirm connection
         3. Set origin, units, coordinate mode
         """
-        print('\n=== Initializing ===')
+        print('\n=== Setup ===')
 
         # Wait and read startup message
         time.sleep(0.5)
@@ -128,7 +130,7 @@ class GrblDevice:
                                           # 80ms tap is well within range
                                           # auto power-off after 250ms idle, safer than $1=255
 
-        print('=== Initialization complete ===\n')
+        print('=== Setup complete ===\n')
 
     def unlock(self):
         """Clear alarm lock."""
@@ -143,10 +145,11 @@ class GrblDevice:
 
     def pen_down(self):
         """
-        Lower stylus → Kuixiang equivalent: G1G90 Z5.0F20000
-        G1G90: always reassert absolute mode to prevent Z-axis
-        crushing the screen due to mode errors
+        Lower stylus. G1G90: always reassert absolute mode to prevent
+        Z-axis crushing the screen due to mode errors.
         """
+        if self.Z_DOWN is None:
+            raise RuntimeError('Z_DOWN not set — run calibration first')
         self._send(f'G1G90 Z{self.Z_DOWN}F{self.Z_SPEED}')
 
     def pen_up(self):
@@ -266,86 +269,3 @@ class GrblDevice:
         """Close serial port."""
         self.ser.close()
         print('Serial port closed')
-
-
-# ─── Calibration tool ────────────────────────────────────────
-
-def calibrate(port=None):
-    """
-    Interactive coordinate calibration:
-    Align stylus to phone corners, record coordinates, calculate screen size.
-    """
-    bot = GrblDevice(port)
-    bot.init()
-
-    print('\n=== Calibration ===')
-    print('Align stylus to phone top-left corner, press Enter')
-    input()
-    bot.set_origin()
-    print('Top-left = (0, 0)')
-
-    print('\nManually move stylus to phone bottom-right corner, press Enter to query')
-    input()
-    bot._query_status()
-    print('Bottom-right coordinates shown in MPos above')
-    print('Record X Y values as SCREEN_W and SCREEN_H')
-
-    bot.close()
-
-
-# ─── Usage example ────────────────────────────────────────────
-
-if __name__ == '__main__':
-
-    # Run calibration first (first-time setup)
-    # calibrate()
-
-    # Fill in actual screen size from calibration results
-    SCREEN_W = 70    # mm, replace with measured value
-    SCREEN_H = 130   # mm, replace with measured value
-
-    bot = GrblDevice()
-    bot.init()
-
-    # ── Unlock phone example ─────────────────────────────────
-
-    # 1. Tap screen to wake (simulates tapping any point on screen)
-    bot.tap(SCREEN_W / 2, SCREEN_H / 2)
-    time.sleep(2)
-
-    # 2. Swipe up from bottom to unlock
-    bot.swipe_up_from_bottom(SCREEN_W, SCREEN_H)
-    time.sleep(2)
-
-    # 3. Tap password input area (if password is set)
-    # bot.tap(SCREEN_W / 2, SCREEN_H * 0.6)
-
-    # ── Common operations example ────────────────────────────
-
-    # Tap top-left app icon
-    bot.tap(10, 20)
-    time.sleep(2)
-
-    # Scroll up
-    bot.scroll_up(SCREEN_W / 2, SCREEN_H / 2, distance=30)
-    time.sleep(2)
-
-    # Double tap to zoom
-    bot.double_tap(SCREEN_W / 2, SCREEN_H / 2)
-    time.sleep(2)
-
-    # Long press
-    bot.long_press(SCREEN_W / 2, SCREEN_H / 2, duration=0.8)
-    time.sleep(2)
-
-    # Swipe right to go back
-    bot.swipe_right(SCREEN_W / 2, SCREEN_H / 2)
-    time.sleep(2)
-
-    # Swipe down from top to open notification panel
-    bot.swipe_down_from_top(SCREEN_W)
-    time.sleep(2)
-
-    # Done, return to origin
-    bot.home()
-    bot.close()

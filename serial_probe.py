@@ -50,7 +50,7 @@ def _port_priority(port_info) -> int:
     return 50      # unknown, probe after likely ones
 
 
-def find_grbl_port() -> str | None:
+def detect_grbl() -> str | None:
     """Scan serial ports and return the first GRBL device port, or None.
 
     Skips Bluetooth/debug ports and probes likely USB-serial ports first.
@@ -86,7 +86,7 @@ def find_grbl_port() -> str | None:
 
 
 def main() -> None:
-    port = find_grbl_port()
+    port = detect_grbl()
     print()
     if port:
         print(f"GRBL port: {port}")
