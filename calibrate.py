@@ -368,8 +368,8 @@ def main():
         print(f"  Saved to calibration.json")
 
     finally:
-        stylus_arm.pen_up()
-        stylus_arm.home()
+        stylus_arm._pen_up()
+        stylus_arm._send('G90G0 X0Y0')
         stylus_arm.close()
         cam.close()
 

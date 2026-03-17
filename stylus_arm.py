@@ -1,30 +1,18 @@
 """
-GRBL pen plotter → phone touch robot
-Reverse-engineered from Kuixiang engraving communication logs
+GRBL stylus arm controller for phone touch automation.
 
-Coordinate system:
-  - Before powering on, manually align the stylus to the phone's top-left corner,
-    then call init() to set the origin
-  - X positive = right
-  - Y positive = down
-  - Z=0  pen up (spring rebound position)
-  - Z=5  pen down (touching screen)
+IMPORTANT: The arm must be calibrated before use (run calibrate.py).
+Calibration determines:
+  - Z depth: how far the stylus tip must descend to touch the screen
+    (too far will break the phone screen)
+  - X/Y mapping: which arm axis maps to which phone axis
+    (e.g. arm X+ = phone right, arm Y+ = phone down)
+    (place the phone aligned with the arm axes, no rotation — portrait or landscape both work)
 
-Machine parameters (from $$):
-  $100=100  X-axis 100 steps/mm, min resolution 0.01mm
-  $101=100  Y-axis 100 steps/mm, min resolution 0.01mm
-  $102=50   Z-axis 50 steps/mm,  min resolution 0.02mm
-  $1=250    motor idle delay 250ms (covers 80ms tap, auto power-off 250ms after idle)
-  $110=12000 X-axis max speed
-  $111=12000 Y-axis max speed
-  $112=10000 Z-axis max speed (Kuixiang sets 20000, truncated to this)
-
-Key findings (from Kuixiang log analysis):
-  1. Pen down uses G1G90 Z5.0F20000, pen up uses G1G90 Z0.0F20000
-  2. During writing, XY commands are continuous, $1 timer keeps resetting, Z stays powered
-  3. Tapping requires a pause; during pause Z powers off after 25ms, spring rebounds
-  4. Swiping is same as writing — continuous XY motion, no $1 issue
-  5. Kuixiang never uses G4, relies on continuous XY motion to keep Z powered
+During calibration, the user manually positions the stylus right above
+the center orange circle on the phone — this becomes arm position (0, 0).
+After calibration, phone directions (right/left/up/down) are mapped
+to arm axes automatically. Z = Z_DOWN touches screen, Z = 0 lifts off.
 """
 
 import serial
@@ -40,9 +28,9 @@ class GrblDevice:
     # Z-axis parameters
     Z_DOWN = None   # pen down position — must be set by calibration (calibrate.py)
     Z_UP   = 0.0    # pen up position (spring rebound)
-    Z_SPEED = 6000  # Z-axis speed — matches human finger tap (~100 mm/s)
-                    # Kuixiang used F20000 but GRBL caps at $112=10000;
-                    # F6000 is realistic and avoids slamming the screen.
+    # Z-axis speed — matches human finger tap (~100 mm/s).
+    # F6000 is realistic and avoids slamming the screen.
+    Z_SPEED = 6000
 
     def __init__(self, port=None, baudrate=115200):
         if port is None:
@@ -99,7 +87,6 @@ class GrblDevice:
 
     def setup(self):
         """
-        Follows Kuixiang initialization sequence:
         1. Wait for startup message
         2. Query version to confirm connection
         3. Set origin, units, coordinate mode
@@ -133,7 +120,12 @@ class GrblDevice:
         print('=== Setup complete ===\n')
 
     def unlock(self):
-        """Clear alarm lock."""
+        """Clear alarm lock.
+
+        Uses $X (kill alarm) instead of $H (homing cycle) because
+        this pen plotter has no limit switches — $H would run the
+        axes into the frame and stall.
+        """
         self._send('$X')
 
     def set_origin(self):
@@ -141,9 +133,9 @@ class GrblDevice:
         self._send('G92 X0.0 Y0.0 Z0')
         print('Origin set to current position')
 
-    # ─── Basic motions (directly mapped to Kuixiang G-code) ──
+    # ─── Basic motions ──
 
-    def pen_down(self):
+    def _pen_down(self):
         """
         Lower stylus. G1G90: always reassert absolute mode to prevent
         Z-axis crushing the screen due to mode errors.
@@ -152,7 +144,7 @@ class GrblDevice:
             raise RuntimeError('Z_DOWN not set — run calibration first')
         self._send(f'G1G90 Z{self.Z_DOWN}F{self.Z_SPEED}')
 
-    def pen_up(self):
+    def _pen_up(self):
         """
         Raise stylus → Kuixiang equivalent: G1G90 Z0.0F20000
         Actively drive Z back to 0 instead of relying on spring,
@@ -160,25 +152,20 @@ class GrblDevice:
         """
         self._send(f'G1G90 Z{self.Z_UP}F{self.Z_SPEED}')
 
-    def move(self, x, y, speed=8000):
+    def _fast_move(self, x, y, speed=8000):
         """
-        Rapid move without touching screen → Kuixiang: G0 X...Y...F8000
-        Must call pen_up() before move(), otherwise it drags across screen
+        Rapid move without touching screen (G0). Pen must be up first.
         """
         self._send(f'G0 X{x:.3f}Y{y:.3f}F{speed}')
 
-    def draw(self, x, y, speed=8000):
+    def _linear_move(self, x, y, speed=8000):
         """
-        Move while touching screen (swipe/write) → Kuixiang: G1 X...Y...F8000
+        Linear move at controlled speed (G1) — used for swipe while pen is down.
         Continuous XY motion keeps resetting $1 timer, Z motor stays powered,
-        spring cannot rebound
+        spring cannot rebound.
         """
         self._send(f'G1 X{x:.3f}Y{y:.3f}F{speed}')
 
-    def home(self):
-        """Return to origin → Kuixiang: G90G0 X0Y0"""
-        self.pen_up()
-        self._send('G90G0 X0Y0')
 
     # ─── Tap mechanics ───────────────────────────────────────
 
@@ -191,79 +178,54 @@ class GrblDevice:
         Principle: Z-axis always has pending commands, $1 timer keeps resetting
         Amplitude: 0.02mm (Z-axis min step size), imperceptible to the screen
         """
-        self.pen_down()
+        self._pen_down()
         steps = max(1, int(duration / 0.02))
         for _ in range(steps):
             self._send(f'G1 Z{self.Z_DOWN - 0.02:.2f} F500')
             self._send(f'G1 Z{self.Z_DOWN:.2f} F500')
-        self.pen_up()
+        self._pen_up()
 
 
     # ─── Gestures ────────────────────────────────────────────
 
-    def tap(self, x, y, duration=0.08):
-        """
-        Single tap.
+    def tap(self, duration=0.08):
+        """Single tap at current position.
         duration: contact time in seconds. Phone threshold ~50ms, 80ms has margin.
         """
-        self.move(x, y)
         self._tap_with_vibration(duration)
 
-    def double_tap(self, x, y):
-        """Double tap (100ms gap between taps)."""
-        self.move(x, y)
+    def double_tap(self):
+        """Double tap at current position (100ms gap between taps)."""
         self._tap_with_vibration(0.08)
         time.sleep(0.1)
         self._tap_with_vibration(0.08)
 
-    def long_press(self, x, y, duration=0.8):
-        """
-        Long press (triggers context menu, text selection, etc.)
+    def long_press(self, duration=0.8):
+        """Long press at current position.
         iOS/Android long press threshold ~500ms, 800ms is safe.
         """
-        self.move(x, y)
         self._tap_with_vibration(duration)
 
-    def swipe(self, x1, y1, x2, y2, speed=6000):
+    SWIPE_DISTANCE = 15  # mm, default swipe length
+
+    def swipe(self, direction, distance=None, speed=6000):
+        """Swipe from current position in a cardinal direction.
+        direction: 'up', 'down', 'left', 'right'
+        distance: mm (defaults to SWIPE_DISTANCE)
+        speed: too fast = fling, too slow = long press. 6000mm/min ~ 100mm/s.
         """
-        Swipe gesture.
-        Continuous XY motion keeps $1 timer resetting, no spring rebound issue.
-        speed: too fast = fling, too slow = long press. 6000mm/min ≈ 100mm/s.
-        """
-        self.move(x1, y1)
-        self.pen_down()
-        self.draw(x2, y2, speed=speed)
-        self.pen_up()
-
-    def scroll_up(self, x, y, distance=30, speed=3000):
-        """
-        Scroll up (content moves up, finger swipes bottom to top).
-        distance: swipe distance in mm, larger = more scrolling.
-        speed: slow to trigger scroll instead of page switch.
-        """
-        self.swipe(x, y + distance/2, x, y - distance/2, speed=speed)
-
-    def scroll_down(self, x, y, distance=30, speed=3000):
-        """Scroll down (content moves down, finger swipes top to bottom)."""
-        self.swipe(x, y - distance/2, x, y + distance/2, speed=speed)
-
-    def swipe_left(self, x, y, distance=50, speed=8000):
-        """Swipe left (next page / switch app)."""
-        self.swipe(x + distance/2, y, x - distance/2, y, speed=speed)
-
-    def swipe_right(self, x, y, distance=50, speed=8000):
-        """Swipe right (go back)."""
-        self.swipe(x - distance/2, y, x + distance/2, y, speed=speed)
-
-    def swipe_up_from_bottom(self, screen_w, screen_h, speed=6000):
-        """Swipe up from bottom (home / open multitask)."""
-        x = screen_w / 2
-        self.swipe(x, screen_h - 5, x, screen_h * 0.3, speed=speed)
-
-    def swipe_down_from_top(self, screen_w, speed=4000):
-        """Swipe down from top (open notification panel)."""
-        x = screen_w / 2
-        self.swipe(x, 2, x, 40, speed=speed)
+        d = distance or self.SWIPE_DISTANCE
+        offsets = {
+            'up':    (0, -d),
+            'down':  (0,  d),
+            'left':  (-d, 0),
+            'right': ( d, 0),
+        }
+        dx, dy = offsets[direction]
+        self._pen_down()
+        self._send(f'G91 G1 X{dx:.3f}Y{dy:.3f}F{speed}')
+        self._send('G90')  # restore absolute mode
+        self._pen_up()
 
     def close(self):
         """Close serial port."""
