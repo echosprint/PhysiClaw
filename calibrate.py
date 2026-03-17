@@ -178,10 +178,10 @@ def _repeat_taps(stylus_arm: StylusArm, cam: Camera, z_tap: float, ax: int, ay: 
     while successes < count and attempts < MAX_RETRIES:
         cam.wait_for_white()
         time.sleep(0.3)
-        # Add ±2mm noise on the perpendicular axis for exploration
+        # Add noise along the scan axis to explore distance variation
         noise = attempts % 5  # 0, 1, 2, 3, 4 mm
-        x = round(ax * dist + abs(ay) * noise, 2)
-        y = round(ay * dist + abs(ax) * noise, 2)
+        x = round(ax * (dist + noise), 2)
+        y = round(ay * (dist + noise), 2)
         move_xy(stylus_arm, x, y)
         print(f"  Confirm {successes + 1}/{count} …", end=" ", flush=True)
         tap_once(stylus_arm, z_tap)

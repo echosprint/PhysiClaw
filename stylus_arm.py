@@ -234,16 +234,20 @@ class StylusArm:
         """
         Micro-vibration method: after pen down, continuously oscillate Z-axis
         by a tiny amount to keep the motor powered.
-        $1=250 covers short taps (80ms), but long press (800ms) needs this
+        $1=250 covers short taps (80ms), but long press (800ms+) needs this
         to prevent spring rebound.
-        Principle: Z-axis always has pending commands, $1 timer keeps resetting
-        Amplitude: 0.02mm (Z-axis min step size), imperceptible to the screen
+        Amplitude: 0.02mm (Z-axis min step size), imperceptible to the screen.
+        _send() waits for 'ok' before sending next — no buffer flooding.
         """
         self._pen_down()
         steps = max(1, int(duration / 0.02))
         for _ in range(steps):
-            self._send(GCODE_VIBRATE_A.format(z=self.Z_DOWN - 0.02))
-            self._send(GCODE_VIBRATE_A.format(z=self.Z_DOWN))
+            try:
+                self._send(GCODE_VIBRATE_A.format(z=self.Z_DOWN - 0.02))
+                self._send(GCODE_VIBRATE_A.format(z=self.Z_DOWN))
+            except Exception:
+                self.unlock()
+                break
         self._pen_up()
 
 
