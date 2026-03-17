@@ -38,7 +38,7 @@ GCODE_FAST_MOVE   = 'G0 X{x:.3f}Y{y:.3f}F{f}'        # rapid XY (G0)
 GCODE_LINEAR_MOVE = 'G1 X{x:.3f}Y{y:.3f}F{f}'        # controlled XY (G1)
 GCODE_REL_FAST    = 'G91G0 X{x:.3f}Y{y:.3f}'          # relative rapid
 GCODE_REL_LINEAR  = 'G91G1 X{x:.3f}Y{y:.3f}F{f}'     # relative linear
-GCODE_VIBRATE_A   = 'G1 Z{z:.2f} F500'     # vibration oscillation
+GCODE_Z_ADVANCE   = 'G1G90 Z{z:.2f}F{f}'              # slow Z advance for long press
 
 # ─── Main class ──────────────────────────────────────────────
 
@@ -54,7 +54,8 @@ class StylusArm:
     # Gesture timing (seconds)
     TAP_DURATION = 0.08        # phone threshold ~50ms, 80ms has margin
     DOUBLE_TAP_GAP = 0.1      # gap between two taps, must be < 300ms
-    LONG_PRESS_DURATION = 1.0  # iOS/Android threshold ~500ms, 800~1000ms is safe
+    LONG_PRESS_DURATION = 1.2  # iOS/Android threshold ~500ms, 800~1000ms is safe
+    LONG_PRESS_ADVANCE = 0.5  # mm extra Z to travel during long press hold
     SWIPE_DISTANCE = 15        # mm, default swipe length
     MOVE_DIRECTIONS = None     # set by load_calibration() — maps phone directions to arm (x, y)
     MOVE_DISTANCES = {
@@ -230,24 +231,26 @@ class StylusArm:
 
     # ─── Tap mechanics ───────────────────────────────────────
 
-    def _tap_with_vibration(self, duration=0.08):
-        """
-        Micro-vibration method: after pen down, continuously oscillate Z-axis
-        by a tiny amount to keep the motor powered.
-        $1=250 covers short taps (80ms), but long press (800ms+) needs this
-        to prevent spring rebound.
-        Amplitude: 0.02mm (Z-axis min step size), imperceptible to the screen.
-        _send() waits for 'ok' before sending next — no buffer flooding.
+    def _hold_contact(self, duration):
+        """Hold stylus on screen for duration seconds.
+        For short taps (< 250ms): just pen_down, motor stays powered within $1 timeout.
+        For long holds: slowly advance Z to keep motor active.
         """
         self._pen_down()
-        steps = max(1, int(duration / 0.02))
-        for _ in range(steps):
+        if duration <= 0.25:
+            # Short tap — $1=250ms covers this, no extra motion needed
+            time.sleep(duration)
+        else:
+            # Long hold — slow continuous Z advance keeps $1 timer resetting.
+            # Travel LONG_PRESS_ADVANCE mm over the duration at calculated feed rate.
+            z_end = self.Z_DOWN + self.LONG_PRESS_ADVANCE
+            feed = max(1, round(self.LONG_PRESS_ADVANCE / duration * 60))  # mm/min
             try:
-                self._send(GCODE_VIBRATE_A.format(z=self.Z_DOWN - 0.02))
-                self._send(GCODE_VIBRATE_A.format(z=self.Z_DOWN))
+                self._send(GCODE_Z_ADVANCE.format(z=z_end, f=feed))
             except Exception:
                 self.unlock()
-                break
+            # Wait for motion to complete
+            time.sleep(duration)
         self._pen_up()
 
 
@@ -263,22 +266,24 @@ class StylusArm:
             raise RuntimeError('MOVE_DIRECTIONS not set — run load_calibration() first')
         mx, my = self.MOVE_DIRECTIONS[direction]
         d = self.MOVE_DISTANCES[distance]
-        self._send(GCODE_REL_FAST.format(x=mx * d, y=my * d))
+        # Normalize diagonal vectors so actual distance matches intended distance
+        mag = (mx ** 2 + my ** 2) ** 0.5 or 1
+        self._send(GCODE_REL_FAST.format(x=mx / mag * d, y=my / mag * d))
         self._send(GCODE_ABSOLUTE)
 
     def tap(self):
         """Single tap at current position."""
-        self._tap_with_vibration(self.TAP_DURATION)
+        self._hold_contact(self.TAP_DURATION)
 
     def double_tap(self):
         """Double tap at current position."""
-        self._tap_with_vibration(self.TAP_DURATION)
+        self._hold_contact(self.TAP_DURATION)
         time.sleep(self.DOUBLE_TAP_GAP)
-        self._tap_with_vibration(self.TAP_DURATION)
+        self._hold_contact(self.TAP_DURATION)
 
     def long_press(self):
         """Long press at current position."""
-        self._tap_with_vibration(self.LONG_PRESS_DURATION)
+        self._hold_contact(self.LONG_PRESS_DURATION)
 
     def swipe(self, direction, speed='medium'):
         """Swipe from current position in a cardinal direction.
