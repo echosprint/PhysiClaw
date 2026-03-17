@@ -55,7 +55,7 @@ class StylusArm:
     TAP_DURATION = 0.08        # phone threshold ~50ms, 80ms has margin
     DOUBLE_TAP_GAP = 0.1      # gap between two taps, must be < 300ms
     LONG_PRESS_DURATION = 1.2  # iOS/Android threshold ~500ms, 800~1000ms is safe
-    LONG_PRESS_ADVANCE = 0.5  # mm extra Z to travel during long press hold
+    LONG_PRESS_ADVANCE = 0.25  # mm extra Z to travel during long press hold
     SWIPE_DISTANCE = 15        # mm, default swipe length
     MOVE_DIRECTIONS = None     # set by load_calibration() — maps phone directions to arm (x, y)
     MOVE_DISTANCES = {
@@ -234,24 +234,24 @@ class StylusArm:
     def _hold_contact(self, duration):
         """Hold stylus on screen for duration seconds.
         For short taps (< 250ms): just pen_down, motor stays powered within $1 timeout.
-        For long holds: slowly advance Z to keep motor active.
+        For long holds: temporarily set $1=255 to keep motor always on.
         """
+        if duration > 0.25:
+            self._set_idle_delay(255)
         self._pen_down()
-        if duration <= 0.25:
-            # Short tap — $1=250ms covers this, no extra motion needed
-            time.sleep(duration)
-        else:
-            # Long hold — slow continuous Z advance keeps $1 timer resetting.
-            # Travel LONG_PRESS_ADVANCE mm over the duration at calculated feed rate.
-            z_end = self.Z_DOWN + self.LONG_PRESS_ADVANCE
-            feed = max(1, round(self.LONG_PRESS_ADVANCE / duration * 60))  # mm/min
+        time.sleep(duration)
+        self._pen_up()
+        if duration > 0.25:
+            self._set_idle_delay(250)
+
+    def _set_idle_delay(self, ms):
+        """Set $1 motor idle delay. Retries on failure to prevent stuck state."""
+        for _ in range(3):
             try:
-                self._send(GCODE_Z_ADVANCE.format(z=z_end, f=feed))
+                self._send(f'$1={ms}')
+                return
             except Exception:
                 self.unlock()
-            # Wait for motion to complete
-            time.sleep(duration)
-        self._pen_up()
 
 
     # ─── Public API (for AI agent) ─────────────────────────
