@@ -26,7 +26,7 @@ import sys
 import time
 
 from camera import Camera
-from stylus_arm import GrblDevice
+from stylus_arm import StylusArm
 
 
 MAX_RETRIES = 20  # max attempts per phase before giving up
@@ -38,14 +38,14 @@ PROBE_Z_SPEED = 5000
 SLOW_Z_SPEED = 3000   # extra slow for initial Z probing
 
 
-def tap_once(arm, z_tap, z_speed=PROBE_Z_SPEED):
+def tap_once(arm: StylusArm, z_tap: float, z_speed: int = PROBE_Z_SPEED) -> None:
     """Pen down then up at current XY position."""
     arm._pen_down(z=z_tap, speed=z_speed)
     time.sleep(0.15)
     arm._pen_up()
 
 
-def move_xy(arm, x, y):
+def move_xy(arm: StylusArm, x: float, y: float) -> None:
     """Rapid move to absolute XY (pen must be up)."""
     arm._fast_move(x, y)
     time.sleep(0.3)
@@ -53,7 +53,7 @@ def move_xy(arm, x, y):
 
 # ─── Phase 1: Z-axis probing ────────────────────────────────────
 
-def phase1_z(stylus_arm, cam):
+def phase1_z(stylus_arm: StylusArm, cam: Camera) -> float | None:
     """Probe Z depth for tap registration, then complete 10 center taps."""
     print("\n" + "=" * 50)
     print("PHASE 1: Z-axis calibration  (tap center x10)")
@@ -140,8 +140,8 @@ SCAN_DIRS = [
 SCAN_DISTANCES = [3.0 + i * 1.5 for i in range(10)]
 
 
-def _probe_direction(stylus_arm, cam, z_tap, directions):
-    """Try each direction × distance until a green hit.
+def _probe_direction(stylus_arm: StylusArm, cam: Camera, z_tap: float, directions: list[tuple[str, int, int]]) -> tuple[int, int, float] | None:
+    """Try each direction x distance until a green hit.
     Return (axis_sign_x, axis_sign_y, distance_mm) or None.
     """
     for dir_name, ax, ay in directions:
@@ -166,7 +166,7 @@ def _probe_direction(stylus_arm, cam, z_tap, directions):
     return None
 
 
-def _repeat_taps(stylus_arm, cam, z_tap, ax, ay, dist, count):
+def _repeat_taps(stylus_arm: StylusArm, cam: Camera, z_tap: float, ax: int, ay: int, dist: float, count: int) -> int:
     """Tap the same target (count) more times to confirm."""
     successes = 0
     attempts = 0
@@ -190,7 +190,7 @@ def _repeat_taps(stylus_arm, cam, z_tap, ax, ay, dist, count):
 
 # ─── Phase 2: find phone-right direction ─────────────────────────
 
-def phase2_right(stylus_arm, cam, z_tap):
+def phase2_right(stylus_arm: StylusArm, cam: Camera, z_tap: float) -> tuple[int, int, float] | None:
     """Probe all 4 arm directions to find which one is phone-right."""
     print("\n" + "=" * 50)
     print("PHASE 2: Find phone-right direction  (tap right ×3)")
@@ -219,7 +219,7 @@ def phase2_right(stylus_arm, cam, z_tap):
 
 # ─── Phase 3: find phone-down direction ──────────────────────────
 
-def phase3_down(stylus_arm, cam, z_tap, right_vec):
+def phase3_down(stylus_arm: StylusArm, cam: Camera, z_tap: float, right_vec: tuple[int, int]) -> tuple[int, int, float] | None:
     """Probe the 2 perpendicular directions to find phone-down."""
     print("\n" + "=" * 50)
     print("PHASE 3: Find phone-down direction  (tap down ×3)")
@@ -258,7 +258,7 @@ def phase3_down(stylus_arm, cam, z_tap, right_vec):
 
 # ─── Phase 4: Long press ────────────────────────────────────────
 
-def phase4_long_press(stylus_arm, cam, z_tap):
+def phase4_long_press(stylus_arm: StylusArm, cam: Camera, z_tap: float) -> None:
     """Long press center ×3  (must hold > 800 ms)."""
     print("\n" + "=" * 50)
     print("PHASE 4: Long press center  (×3, 800 ms hold)")
@@ -292,7 +292,7 @@ def phase4_long_press(stylus_arm, cam, z_tap):
 
 # ─── Phase 5: Swipe ─────────────────────────────────────────────
 
-def phase5_swipe(stylus_arm, cam, z_tap, right_result, down_result):
+def phase5_swipe(stylus_arm: StylusArm, cam: Camera, z_tap: float, right_result: tuple[int, int, float], down_result: tuple[int, int, float]) -> None:
     """Swipe in 4 directions from center (up / down / right / left)."""
     print("\n" + "=" * 50)
     print("PHASE 5: Swipe  (up → down → right → left)")
@@ -364,7 +364,7 @@ def main():
     args = parser.parse_args()
 
     cam = Camera(args.camera)
-    stylus_arm = GrblDevice(args.port)
+    stylus_arm = StylusArm(args.port)
     stylus_arm.setup()
 
     try:

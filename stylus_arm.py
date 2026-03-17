@@ -42,7 +42,7 @@ GCODE_VIBRATE_A   = 'G1 Z{z:.2f} F500'     # vibration oscillation
 
 # ─── Main class ──────────────────────────────────────────────
 
-class GrblDevice:
+class StylusArm:
 
     # Z-axis parameters
     Z_DOWN = None   # pen down position — must be set by calibration (calibrate.py)
