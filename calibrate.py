@@ -59,44 +59,72 @@ def phase1_z(stylus_arm, cam):
     print("PHASE 1: Z-axis calibration  (tap center x10)")
     print("=" * 50)
 
-    z_tap = None
+    z_contact = None
 
-    # Probe from 0.5 mm downward in 0.3 mm steps.
+    # Probe from 0.5 mm downward in 0.3 mm steps, max 5 mm.
     # F3000 (50 mm/s) — extra slow during probing to protect the screen.
-    for z_raw in [0.5 + i * 0.3 for i in range(25)]:
+    for z_raw in [0.5 + i * 0.3 for i in range(16)]:
         z = round(float(z_raw), 2)
         print(f"  Probe Z={z:.2f} mm …", end=" ", flush=True)
         tap_once(stylus_arm, z, z_speed=SLOW_Z_SPEED)
         time.sleep(0.3)
 
         if cam.wait_for_green(timeout=1.0):
-            z_tap = round(z + 0.2, 2)          # small margin for reliability
-            print(f"CONTACT → using Z={z_tap:.2f} mm")
+            z_contact = z
+            print(f"CONTACT at Z={z_contact:.2f} mm")
             break
         else:
             print("no tap")
 
-    if z_tap is None:
-        print("\n  FAILED — no contact up to 8 mm. Check stylus alignment.")
+    if z_contact is None:
+        print("\n  FAILED — no contact up to 5 mm. Check stylus alignment.")
         return None
 
-    # Complete remaining 9 taps
+    # Find the contact boundary by zigzagging:
+    #   hit → retreat (smaller Z) until miss → advance (larger Z) until hit → ...
+    # Each direction change narrows in on the true contact threshold.
+    # Average all contact Z values for a robust result.
+    RETREAT_STEP = -0.06  # pull back after hit (larger step, move away fast)
+    ADVANCE_STEP = 0.3   # approach after miss (smaller step, careful near screen)
+
+    z_hits = [z_contact]
+    z_now = z_contact
+    step = RETREAT_STEP   # start by retreating
     successes = 1
     attempts = 0
-    while successes < 10 and attempts < MAX_RETRIES:
+
+    while successes < 10 and attempts < 2 * MAX_RETRIES:
         cam.wait_for_white()
         time.sleep(0.3)
-        print(f"  Tap {successes + 1}/10 …", end=" ", flush=True)
-        tap_once(stylus_arm, z_tap)
+
+        z_try = round(z_now + step, 2)
+        if z_try < 0.1:     # don't go above the screen
+            step = ADVANCE_STEP
+            z_try = round(z_now + step, 2)
+        if z_try > 5.0:     # don't press past safe limit
+            step = RETREAT_STEP
+            z_try = round(z_now + step, 2)
+
+        print(f"  Tap {successes + 1}/10 (Z={z_try:.2f}) …", end=" ", flush=True)
+        tap_once(stylus_arm, z_try, z_speed=SLOW_Z_SPEED)
         time.sleep(0.3)
+
         if cam.wait_for_green(timeout=1.0):
             successes += 1
+            z_hits.append(z_try)
+            z_now = z_try
+            step = RETREAT_STEP   # hit → retreat next
             print("ok")
         else:
+            z_now = z_try
+            step = ADVANCE_STEP  # miss → advance next
             print("miss")
+
         attempts += 1
 
-    print(f"\n  Phase 1 done — z_tap = {z_tap} mm  ({successes}/10)")
+    z_tap = round(sum(z_hits) / len(z_hits), 2)
+    print(f"\n  Phase 1 done — z_tap = {z_tap} mm  "
+          f"(avg of {len(z_hits)} hits, range {min(z_hits):.2f}-{max(z_hits):.2f})")
     return z_tap
 
 
