@@ -193,7 +193,7 @@ def _repeat_taps(stylus_arm: StylusArm, cam: Camera, z_tap: float, ax: int, ay: 
 def phase2_right(stylus_arm: StylusArm, cam: Camera, z_tap: float) -> tuple[int, int, float] | None:
     """Probe all 4 arm directions to find which one is phone-right."""
     print("\n" + "=" * 50)
-    print("PHASE 2: Find phone-right direction  (tap right ×3)")
+    print("PHASE 2: Find phone-right direction  (tap right x3)")
     print("=" * 50)
 
     cam.wait_for_white()
@@ -222,7 +222,7 @@ def phase2_right(stylus_arm: StylusArm, cam: Camera, z_tap: float) -> tuple[int,
 def phase3_down(stylus_arm: StylusArm, cam: Camera, z_tap: float, right_vec: tuple[int, int]) -> tuple[int, int, float] | None:
     """Probe the 2 perpendicular directions to find phone-down."""
     print("\n" + "=" * 50)
-    print("PHASE 3: Find phone-down direction  (tap down ×3)")
+    print("PHASE 3: Find phone-down direction  (tap down x3)")
     print("=" * 50)
 
     cam.wait_for_white()
@@ -252,24 +252,21 @@ def phase3_down(stylus_arm: StylusArm, cam: Camera, z_tap: float, right_vec: tup
     # Return to center
     move_xy(stylus_arm, 0, 0)
 
-    print(f"\n  Phase 3 done — down = ({ax}, {ay}) × {dist} mm")
+    print(f"\n  Phase 3 done — down = ({ax}, {ay}) x {dist} mm")
     return (ax, ay, dist)
 
 
 # ─── Phase 4: Long press ────────────────────────────────────────
 
-def phase4_long_press(stylus_arm: StylusArm, cam: Camera, z_tap: float) -> None:
-    """Long press center ×3  (must hold > 800 ms)."""
+def phase4_long_press(stylus_arm: StylusArm, cam: Camera) -> None:
+    """Long press center x3  (must hold > 800 ms)."""
     print("\n" + "=" * 50)
-    print("PHASE 4: Long press center  (×3, 800 ms hold)")
+    print("PHASE 4: Long press center  (x3, 800 ms hold)")
     print("=" * 50)
 
     cam.wait_for_white()
     time.sleep(0.5)
     move_xy(stylus_arm, 0, 0)
-
-    # Patch Z_DOWN so the existing _tap_with_vibration uses our calibrated depth
-    stylus_arm.Z_DOWN = z_tap
 
     successes = 0
     attempts = 0
@@ -292,8 +289,8 @@ def phase4_long_press(stylus_arm: StylusArm, cam: Camera, z_tap: float) -> None:
 
 # ─── Phase 5: Swipe ─────────────────────────────────────────────
 
-def phase5_swipe(stylus_arm: StylusArm, cam: Camera, z_tap: float, right_result: tuple[int, int, float], down_result: tuple[int, int, float]) -> None:
-    """Swipe in 4 directions from center (up / down / right / left)."""
+def phase5_swipe(stylus_arm: StylusArm, cam: Camera) -> None:
+    """Swipe in 4 directions from center using the public swipe() API."""
     print("\n" + "=" * 50)
     print("PHASE 5: Swipe  (up → down → right → left)")
     print("=" * 50)
@@ -301,38 +298,17 @@ def phase5_swipe(stylus_arm: StylusArm, cam: Camera, z_tap: float, right_result:
     cam.wait_for_white()
     time.sleep(0.5)
 
-    rax, ray, r_dist = right_result
-    dax, day, d_dist = down_result
-    swipe_speed = 4000
-    # Swipe distance: generous margin over 60 px threshold
-    sr = round(r_dist * 2.0, 2)
-    sd = round(d_dist * 1.2, 2)
-
-    # Map phone directions to arm (dx, dy)
-    directions = [
-        ("UP",    -dax * sd, -day * sd),  # opposite of down
-        ("DOWN",   dax * sd,  day * sd),
-        ("RIGHT",  rax * sr,  ray * sr),
-        ("LEFT",  -rax * sr, -ray * sr),  # opposite of right
-    ]
-
-    for name, dx, dy in directions:
+    for direction in ['up', 'down', 'right', 'left']:
         cam.wait_for_white()
         time.sleep(0.3)
         move_xy(stylus_arm, 0, 0)
 
         success = False
         for _ in range(MAX_RETRIES):
-            print(f"  Swipe {name} …", end=" ", flush=True)
+            print(f"  Swipe {direction} …", end=" ", flush=True)
 
-            stylus_arm._pen_down(z=z_tap)
-            time.sleep(0.1)
-            stylus_arm._linear_move(dx, dy, speed=swipe_speed)
-            dist = (dx ** 2 + dy ** 2) ** 0.5
-            motion_time = (dist / swipe_speed) * 60
-            time.sleep(motion_time + 0.1)
-            stylus_arm._pen_up()
-            time.sleep(0.3)
+            stylus_arm.swipe(direction)
+            time.sleep(0.5)
 
             if cam.wait_for_green(timeout=1.5):
                 print("ok")
@@ -344,7 +320,7 @@ def phase5_swipe(stylus_arm: StylusArm, cam: Camera, z_tap: float, right_result:
                 time.sleep(0.5)
 
         if not success:
-            print(f"  WARNING: Swipe {name} failed after retries")
+            print(f"  WARNING: Swipe {direction} failed after retries")
 
         stylus_arm._pen_up()
         time.sleep(0.1)
@@ -372,6 +348,7 @@ def main():
         z_tap = phase1_z(stylus_arm, cam)
         if z_tap is None:
             sys.exit(1)
+        stylus_arm.Z_DOWN = z_tap
 
         # Phase 2 — find phone-right direction
         right_result = phase2_right(stylus_arm, cam, z_tap)
@@ -385,14 +362,15 @@ def main():
             sys.exit(1)
 
         # Phase 4 — long press verification
-        phase4_long_press(stylus_arm, cam, z_tap)
+        phase4_long_press(stylus_arm, cam)
 
-        # Phase 5 — swipe verification
-        phase5_swipe(stylus_arm, cam, z_tap, right_result, down_result)
-
-        # ── Save results ─────────────────────────────────────
+        # Phase 5 — swipe verification (uses public API)
         rax, ray, r_dist = right_result
         dax, day, d_dist = down_result
+        stylus_arm.set_direction_mapping((rax, ray), (dax, day))
+        phase5_swipe(stylus_arm, cam)
+
+        # ── Save results ─────────────────────────────────────
         result = {
             "z_tap_mm": z_tap,
             "right_vec": [rax, ray],

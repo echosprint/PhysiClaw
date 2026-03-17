@@ -153,18 +153,10 @@ class StylusArm:
 
         print('=== Setup complete ===\n')
 
-    def load_calibration(self, path='calibration.json'):
-        """Load calibration data and build direction mapping.
-        Must be called after setup() and before move()/tap()/swipe().
-        """
-        with open(path) as f:
-            cal = json.load(f)
-
-        self.Z_DOWN = cal['z_tap_mm']
-
-        # Build MOVE_DIRECTIONS from calibrated right/down vectors
-        rx, ry = cal['right_vec']
-        dx, dy = cal['down_vec']
+    def set_direction_mapping(self, right_vec: tuple, down_vec: tuple):
+        """Build MOVE_DIRECTIONS from calibrated right/down vectors."""
+        rx, ry = right_vec
+        dx, dy = down_vec
         self.MOVE_DIRECTIONS = {
             'right':      ( rx,      ry),
             'left':       (-rx,     -ry),
@@ -176,8 +168,18 @@ class StylusArm:
             'down-right': ( rx + dx,  ry + dy),
         }
 
+    def load_calibration(self, path='calibration.json'):
+        """Load calibration data from file.
+        Must be called after setup() and before move()/tap()/swipe().
+        """
+        with open(path) as f:
+            cal = json.load(f)
+
+        self.Z_DOWN = cal['z_tap_mm']
+        self.set_direction_mapping(cal['right_vec'], cal['down_vec'])
+
         print(f'Calibration loaded: Z={self.Z_DOWN} mm, '
-              f'right=({rx},{ry}), down=({dx},{dy})')
+              f'right={cal["right_vec"]}, down={cal["down_vec"]}')
 
     def unlock(self):
         """Clear alarm lock.
