@@ -54,7 +54,7 @@ class StylusArm:
     # Gesture timing (seconds)
     TAP_DURATION = 0.08        # phone threshold ~50ms, 80ms has margin
     DOUBLE_TAP_GAP = 0.1      # gap between two taps, must be < 300ms
-    LONG_PRESS_DURATION = 0.8  # iOS/Android threshold ~500ms, 800ms is safe
+    LONG_PRESS_DURATION = 1.0  # iOS/Android threshold ~500ms, 800~1000ms is safe
     SWIPE_DISTANCE = 15        # mm, default swipe length
     MOVE_DIRECTIONS = None     # set by load_calibration() — maps phone directions to arm (x, y)
     MOVE_DISTANCES = {
