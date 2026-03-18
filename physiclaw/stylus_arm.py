@@ -123,6 +123,16 @@ class StylusArm:
                 return line
         return ''
 
+    def wait_idle(self, timeout=10):
+        """Poll until GRBL reports Idle status."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            status = self._query_status()
+            if 'Idle' in status:
+                return
+            time.sleep(0.1)
+        raise RuntimeError(f'Arm not idle after {timeout}s')
+
     def position(self) -> tuple[float, float]:
         """Return current (x, y) by querying GRBL MPos."""
         import re
@@ -266,6 +276,7 @@ class StylusArm:
         mag = (mx ** 2 + my ** 2) ** 0.5 or 1
         self._send(GCODE_REL_FAST.format(x=mx / mag * d, y=my / mag * d))
         self._send(GCODE_ABSOLUTE)
+        self.wait_idle()
 
     def tap(self):
         """Single tap at current position."""

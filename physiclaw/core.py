@@ -156,9 +156,10 @@ class PhysiClaw:
         arm = self._arm
         saved_x, saved_y = arm.position()
 
-        # Park stylus out of frame
+        # Park stylus out of frame and wait for move to finish
         ux, uy = arm.MOVE_DIRECTIONS['top']
         arm._fast_move(ux * self.PARK_DISTANCE, uy * self.PARK_DISTANCE)
+        arm.wait_idle()
 
         try:
             frame = self.top_cam.snapshot()
@@ -168,6 +169,7 @@ class PhysiClaw:
             return frame
         finally:
             arm._fast_move(saved_x, saved_y)
+            arm.wait_idle()
 
     def snapshot_side(self):
         """Capture a frame from the side camera. Returns BGR numpy array.
@@ -192,6 +194,7 @@ class PhysiClaw:
         if self._arm:
             self._arm._pen_up()
             self._arm._fast_move(0, 0)
+            self._arm.wait_idle()
             self._arm.close()
         if self._top_cam:
             self._top_cam.close()

@@ -40,7 +40,7 @@ def tap_once(arm: StylusArm, z_tap: float, z_speed: int = PROBE_Z_SPEED) -> None
 def move_xy(arm: StylusArm, x: float, y: float) -> None:
     """Rapid move to absolute XY (pen must be up)."""
     arm._fast_move(x, y)
-    time.sleep(0.3)
+    arm.wait_idle()
 
 
 # ─── Phase 1: Z-axis probing ────────────────────────────────────
