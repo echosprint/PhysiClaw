@@ -27,6 +27,7 @@ class PhysiClaw:
         self._arm: StylusArm | None = None
         self._top_cam: Camera | None = None
         self._side_cam: Camera | None = None
+        self._detector: PhoneDetector | None = None
         self._setup()
 
     # ─── Setup ────────────────────────────────────────────────
@@ -42,8 +43,8 @@ class PhysiClaw:
         self._arm = StylusArm()
         self._arm.setup()
 
-        detector = PhoneDetector()
-        cameras = detector.identify_cameras()
+        self._detector = PhoneDetector()
+        cameras = self._detector.identify_cameras()
 
         if 'top' not in cameras:
             raise RuntimeError("Top camera not found — is the phone under the camera?")
@@ -122,12 +123,19 @@ class PhysiClaw:
 
     PARK_DISTANCE = 100  # mm to move stylus out of frame
 
+    def _ensure_phone_presence(self, frame):
+        """Raise if no phone is detected in the frame."""
+        detected, conf, _ = self._detector.detect(frame)
+        if not detected:
+            raise RuntimeError(f"Phone not detected in frame (confidence {conf:.0%}) "
+                               "— is the phone still on the platform?")
+
     def snapshot_top(self):
         """Capture a frame from the top camera. Returns BGR numpy array.
 
         Parks the stylus 100mm in the phone-up direction to avoid
-        occluding the screen, takes the snapshot, then returns it
-        to the previous position.
+        occluding the screen, takes the snapshot, checks that the
+        phone is still visible, then returns the stylus.
         """
         arm = self._arm
         saved_x, saved_y = arm.position()
@@ -140,15 +148,20 @@ class PhysiClaw:
             frame = self.top_cam.snapshot()
             if frame is None:
                 raise RuntimeError("Top camera capture failed")
+            self._ensure_phone_presence(frame)
             return frame
         finally:
             arm._fast_move(saved_x, saved_y)
 
     def snapshot_side(self):
-        """Capture a frame from the side camera. Returns BGR numpy array."""
+        """Capture a frame from the side camera. Returns BGR numpy array.
+
+        Checks that the phone is still visible in the frame.
+        """
         frame = self.side_cam.snapshot()
         if frame is None:
             raise RuntimeError("Side camera capture failed")
+        self._ensure_phone_presence(frame)
         return frame
 
     @staticmethod
