@@ -3,26 +3,17 @@ Vision module — phone detection and camera identification.
 
 Uses YOLOX Nano (COCO class 67 = cell phone) via cv2.dnn to:
   1. Check if a phone is placed on the platform
-  2. Identify which USB camera is top (looking down) vs side (~45°)
-  3. Skip the laptop's built-in camera automatically
+  2. Identify which camera is top (looking down) vs side (~45°)
 
 Camera differentiation strategy:
-  - Built-in laptop cameras (FaceTime, iSight, IR) are identified via
-    macOS system_profiler and excluded from scanning.
-  - Among remaining USB cameras, each frame is checked for phone presence.
-  - Cameras that see a phone are classified by bounding-box aspect ratio:
+  - Scan all cameras, detect phone presence in each frame
+  - Cameras that don't see a phone are skipped (built-in, unplugged, etc.)
+  - Among cameras that see a phone, classify by bounding-box aspect ratio:
       top camera  → sees phone face-on → ratio ~1.5-2.5 (natural phone shape)
       side camera → sees phone at ~45°  → perspective squash → ratio > 2.5 or < 1.5
-
-Usage:
-    uv run python -m physiclaw.vision                  # check camera 0
-    uv run python -m physiclaw.vision --identify       # scan all, identify top/side
-    uv run python -m physiclaw.vision --camera 2       # check specific camera
 """
 
 import logging
-import platform
-import subprocess
 from pathlib import Path
 
 import cv2
@@ -39,10 +30,6 @@ COCO_PHONE_CLASS = 67  # cell phone
 INPUT_SIZE = 416
 MIN_CONFIDENCE = 0.3
 
-# Built-in camera keywords (case-insensitive match against camera name)
-_BUILTIN_KEYWORDS = {'facetime', 'isight', 'infrared', 'ir camera', 'built-in'}
-
-
 def _download_model(path: Path):
     """Download YOLOX Nano model automatically."""
     import urllib.request
@@ -50,53 +37,6 @@ def _download_model(path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
     urllib.request.urlretrieve(MODEL_URL, path)
     log.info("Download complete")
-
-
-def _list_builtin_camera_names() -> set[str]:
-    """Return names of built-in cameras on macOS (via system_profiler).
-    Returns empty set on non-macOS or on failure.
-    """
-    if platform.system() != 'Darwin':
-        return set()
-    try:
-        out = subprocess.run(
-            ['system_profiler', 'SPCameraDataType'],
-            capture_output=True, text=True, timeout=5,
-        )
-        names = set()
-        for line in out.stdout.splitlines():
-            stripped = line.strip()
-            # Camera names appear as top-level entries (not indented key: value)
-            if stripped.endswith(':') and not stripped.startswith(('Unique ID', 'Model ID')):
-                name = stripped.rstrip(':').strip()
-                if any(kw in name.lower() for kw in _BUILTIN_KEYWORDS):
-                    names.add(name)
-        return names
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return set()
-
-
-def _is_builtin_camera(index: int) -> bool:
-    """Heuristic: check if a camera index is likely a built-in laptop camera.
-
-    On macOS, built-in cameras are typically index 0 or 1.
-    We open the camera briefly and check its name via backend properties.
-    Falls back to the conservative assumption that index 0 may be built-in on macOS.
-    """
-    if platform.system() != 'Darwin':
-        return False
-
-    # On macOS, built-in FaceTime camera is almost always index 0.
-    # USB cameras get higher indices. We use a name-based check when possible,
-    # but fall back to index heuristic since OpenCV doesn't always expose names.
-    builtin_names = _list_builtin_camera_names()
-    if builtin_names:
-        # If we found built-in camera names, we know they exist.
-        # On macOS with AVFoundation, index 0 is typically built-in.
-        # We can't directly map names→indices, but index 0 is reliable.
-        if index == 0:
-            return True
-    return False
 
 
 class PhoneDetector:
@@ -241,22 +181,18 @@ class PhoneDetector:
         """Scan cameras, skip built-in laptop camera, identify top vs side.
 
         Strategy:
-          1. Skip built-in cameras (FaceTime/iSight on macOS, typically index 0)
-          2. Find USB cameras that can open successfully (stop after 2 found)
-          3. Among those, detect phone and classify by bbox aspect ratio
-          4. If both cameras get the same classification, force the other role
+          1. Scan all cameras, detect phone in each frame
+          2. Stop after finding 2 cameras that see the phone
+          3. Classify by bbox aspect ratio (top vs side)
+          4. If both get the same classification, force the other role
              on the second one — there are only two cameras, one must be each
 
         Returns {'top': index, 'side': index} — may be partial if a camera is missing.
         """
         log.debug("Identifying cameras...")
-        usb_cameras = []  # (index, frame) for working USB cameras
+        candidates = []  # (index, view) for cameras that detect a phone
 
         for i in range(max_index):
-            if _is_builtin_camera(i):
-                log.debug(f"  Camera {i}: built-in (skipped)")
-                continue
-
             try:
                 cam = Camera(i)
             except RuntimeError:
@@ -264,28 +200,26 @@ class PhoneDetector:
 
             frame = cam.snapshot()
             cam.close()
-            if frame is not None:
-                usb_cameras.append((i, frame))
-                if len(usb_cameras) == 2:
-                    break
+            if frame is None:
+                continue
 
-        if not usb_cameras:
-            log.warning("No USB cameras found")
-            return {}
-
-        # Classify each camera
-        candidates = []  # (index, view)
-        for i, frame in usb_cameras:
             detected, conf, bbox = self.detect(frame)
-            if detected:
-                ratio = self.bbox_aspect_ratio(bbox)
-                view = self.classify_view(ratio)
-                log.debug(f"  Camera {i}: phone detected ({conf:.0%})  "
-                          f"ratio: {ratio:.2f} → {view}")
-                candidates.append((i, view))
-            else:
+            if not detected:
                 log.debug(f"  Camera {i}: no phone detected ({conf:.0%})")
-                candidates.append((i, None))
+                continue
+
+            ratio = self.bbox_aspect_ratio(bbox)
+            view = self.classify_view(ratio)
+            log.debug(f"  Camera {i}: phone detected ({conf:.0%})  "
+                      f"ratio: {ratio:.2f} → {view}")
+            candidates.append((i, view))
+
+            if len(candidates) == 2:
+                break
+
+        if not candidates:
+            log.warning("No phone detected on any camera — is the phone on the platform?")
+            return {}
 
         # Build result — if one is classified, the other gets the remaining role
         result = {}
