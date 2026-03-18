@@ -96,7 +96,7 @@ class PhoneDetector:
 
         return True, best, [x1, y1, x2, y2]
 
-    def check_camera(self, camera_index: int = 0) -> bool:
+    def check_camera(self, camera_index: int = 0, save_crop: bool = False) -> bool:
         """Grab a frame from the camera, save snapshot, and check for phone."""
         from datetime import datetime
         from camera import Camera
@@ -123,16 +123,16 @@ class PhoneDetector:
             view = self.classify_view(ratio)
             print(f"Phone detected ({conf:.0%})  bbox: {[round(v) for v in bbox]}  "
                   f"ratio: {ratio:.2f}  view: {view}")
-            # Save cropped phone region
-            h, w = frame.shape[:2]
-            x1 = max(0, int(bbox[0]))
-            y1 = max(0, int(bbox[1]))
-            x2 = min(w, int(bbox[2]))
-            y2 = min(h, int(bbox[3]))
-            crop = frame[y1:y2, x1:x2]
-            crop_path = snapshot_dir / f'cam{camera_index}_{timestamp}_crop.jpg'
-            cv2.imwrite(str(crop_path), crop)
-            print(f"Cropped saved: {crop_path}")
+            if save_crop:
+                h, w = frame.shape[:2]
+                x1 = max(0, int(bbox[0]))
+                y1 = max(0, int(bbox[1]))
+                x2 = min(w, int(bbox[2]))
+                y2 = min(h, int(bbox[3]))
+                crop = frame[y1:y2, x1:x2]
+                crop_path = snapshot_dir / f'cam{camera_index}_{timestamp}_crop.jpg'
+                cv2.imwrite(str(crop_path), crop)
+                print(f"Cropped saved: {crop_path}")
         else:
             print(f"No phone detected (best: {conf:.0%})")
         return detected
