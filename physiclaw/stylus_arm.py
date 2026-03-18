@@ -15,10 +15,13 @@ After calibration, phone directions (right/left/up/down) are mapped
 to arm axes automatically. Z = Z_DOWN touches screen, Z = 0 lifts off.
 """
 
+import logging
 import serial
 import time
 
 from physiclaw.serial_probe import detect_grbl
+
+log = logging.getLogger(__name__)
 
 
 # ─── G-code templates ────────────────────────────────────────
@@ -79,13 +82,13 @@ class StylusArm:
         self.port = port
         time.sleep(2)
         self.ser.reset_input_buffer()
-        print(f'Connected: {port}')
+        log.info(f'Arm connected: {port}')
 
     # ─── Low-level communication ─────────────────────────────
 
     def _send(self, cmd, wait_ok=True):
         """Send a single command."""
-        print(f'>>> {cmd}')
+        log.debug(f'>>> {cmd}')
         self.ser.write((cmd + '\r\n').encode())
 
         if not wait_ok:
@@ -96,7 +99,7 @@ class StylusArm:
             line = self.ser.readline().decode('utf-8', errors='ignore').strip()
             if line:
                 retries = 0
-                print(f'<<< {line}')
+                log.debug(f'<<< {line}')
             else:
                 retries += 1
                 if retries > 3:
@@ -116,7 +119,7 @@ class StylusArm:
         resp = self.ser.read(self.ser.in_waiting or 64).decode('utf-8', errors='ignore')
         for line in resp.splitlines():
             if line.startswith('<'):
-                print(f'<<< {line}')
+                log.debug(f'<<< {line}')
                 return line
         return ''
 
@@ -128,19 +131,17 @@ class StylusArm:
         2. Query version to confirm connection
         3. Set origin, units, coordinate mode
         """
-        print('\n=== Setup ===')
-
         # Wait and read startup message
         time.sleep(0.5)
         startup = self.ser.read(self.ser.in_waiting or 256).decode('utf-8', errors='ignore')
         if startup.strip():
-            print(f'<<< {startup.strip()}')
+            log.debug(f'<<< {startup.strip()}')
 
         self._send(GCODE_VERSION)
 
         status = self._query_status()
         if 'Alarm' in status:
-            print('Alarm detected, unlocking...')
+            log.debug('Alarm detected, unlocking...')
             self.unlock()
 
         self._send(GCODE_SET_ORIGIN)
@@ -151,7 +152,7 @@ class StylusArm:
                                           # 80ms tap is well within range
                                           # auto power-off after 250ms idle, safer than $1=255
 
-        print('=== Setup complete ===\n')
+        log.info('Arm setup complete')
 
     def set_direction_mapping(self, right_vec: tuple, down_vec: tuple):
         """Build MOVE_DIRECTIONS from calibrated right/down vectors."""
@@ -180,7 +181,7 @@ class StylusArm:
     def set_origin(self):
         """Set current position as coordinate origin (move stylus to target first)."""
         self._send(GCODE_SET_ORIGIN)
-        print('Origin set to current position')
+        log.debug('Origin set to current position')
 
     # ─── Basic motions ──
 
@@ -293,4 +294,4 @@ class StylusArm:
     def close(self):
         """Close serial port."""
         self.ser.close()
-        print('Serial port closed')
+        log.debug('Serial port closed')

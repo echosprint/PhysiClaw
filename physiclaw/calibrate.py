@@ -13,11 +13,13 @@ Phases (green flash = 1 success, each flash lasts 1 s):
   5. Verify swipe                        (4 greens: up / down / right / left)
 """
 
+import logging
 import time
 
 from physiclaw.camera import Camera
 from physiclaw.stylus_arm import StylusArm
 
+log = logging.getLogger(__name__)
 
 MAX_RETRIES = 20  # max attempts per phase before giving up
 
@@ -45,9 +47,7 @@ def move_xy(arm: StylusArm, x: float, y: float) -> None:
 
 def phase1_z(stylus_arm: StylusArm, cam: Camera) -> float | None:
     """Probe Z depth for tap registration, then complete 10 center taps."""
-    print("\n" + "=" * 50)
-    print("PHASE 1: Z-axis calibration  (tap center x10)")
-    print("=" * 50)
+    log.info("Phase 1: Z-axis calibration  (tap center x10)")
 
     z_contact = None
 
@@ -55,19 +55,19 @@ def phase1_z(stylus_arm: StylusArm, cam: Camera) -> float | None:
     # F3000 (50 mm/s) — extra slow during probing to protect the screen.
     for z_raw in [0.5 + i * 0.3 for i in range(16)]:
         z = round(float(z_raw), 2)
-        print(f"  Probe Z={z:.2f} mm …", end=" ", flush=True)
+        log.debug(f"  Probe Z={z:.2f} mm …")
         tap_once(stylus_arm, z, z_speed=SLOW_Z_SPEED)
         time.sleep(0.3)
 
         if cam.wait_for_green(timeout=1.0):
             z_contact = z
-            print(f"CONTACT at Z={z_contact:.2f} mm")
+            log.debug(f"  CONTACT at Z={z_contact:.2f} mm")
             break
         else:
-            print("no tap")
+            log.debug(f"  no tap")
 
     if z_contact is None:
-        print("\n  FAILED — no contact up to 5 mm. Check stylus alignment.")
+        log.warning("Phase 1 FAILED — no contact up to 5 mm. Check stylus alignment.")
         return None
 
     # Find the contact boundary by zigzagging:
@@ -95,7 +95,7 @@ def phase1_z(stylus_arm: StylusArm, cam: Camera) -> float | None:
             step = RETREAT_STEP
             z_try = round(z_now + step, 2)
 
-        print(f"  Tap {successes + 1}/10 (Z={z_try:.2f}) …", end=" ", flush=True)
+        log.debug(f"  Tap {successes + 1}/10 (Z={z_try:.2f}) …")
         tap_once(stylus_arm, z_try, z_speed=SLOW_Z_SPEED)
         time.sleep(0.3)
 
@@ -104,11 +104,11 @@ def phase1_z(stylus_arm: StylusArm, cam: Camera) -> float | None:
             z_hits.append(z_try)
             z_now = z_try
             step = RETREAT_STEP   # hit → retreat next
-            print("ok")
+            log.debug(f"  ok")
         else:
             z_now = z_try
             step = ADVANCE_STEP  # miss → advance next
-            print("miss")
+            log.debug(f"  miss")
 
         attempts += 1
 
@@ -117,8 +117,8 @@ def phase1_z(stylus_arm: StylusArm, cam: Camera) -> float | None:
     z_avg = sum(z_hits) / len(z_hits)
     z_max = max(z_hits)
     z_tap = round((z_avg + z_max) / 2, 2)  # midpoint between avg and deepest hit
-    print(f"\n  Phase 1 done — z_tap = {z_tap} mm  "
-          f"(hits: {len(z_hits)}, range {min(z_hits):.2f}-{z_max:.2f}, avg {z_avg:.2f})")
+    log.info(f"Phase 1 done — z_tap = {z_tap} mm  "
+             f"(hits: {len(z_hits)}, range {min(z_hits):.2f}-{z_max:.2f})")
     return z_tap
 
 
@@ -143,16 +143,16 @@ def _probe_direction(stylus_arm: StylusArm, cam: Camera, z_tap: float, direction
         for dist in SCAN_DISTANCES:
             x = round(ax * dist, 2)
             y = round(ay * dist, 2)
-            print(f"  {dir_name} {dist:.1f} mm …", end=" ", flush=True)
+            log.debug(f"  {dir_name} {dist:.1f} mm …")
             move_xy(stylus_arm, x, y)
             tap_once(stylus_arm, z_tap)
             time.sleep(0.3)
 
             if cam.wait_for_green(timeout=1.0):
-                print("HIT!")
+                log.debug(f"  HIT!")
                 return (ax, ay, dist)
             else:
-                print("miss")
+                log.debug(f"  miss")
 
         # Return to center before trying next direction
         move_xy(stylus_arm, 0, 0)
@@ -173,14 +173,14 @@ def _repeat_taps(stylus_arm: StylusArm, cam: Camera, z_tap: float, ax: int, ay: 
         x = round(ax * (dist + noise), 2)
         y = round(ay * (dist + noise), 2)
         move_xy(stylus_arm, x, y)
-        print(f"  Confirm {successes + 1}/{count} …", end=" ", flush=True)
+        log.debug(f"  Confirm {successes + 1}/{count} …")
         tap_once(stylus_arm, z_tap)
         time.sleep(0.3)
         if cam.wait_for_green(timeout=1.0):
             successes += 1
-            print("ok")
+            log.debug(f"  ok")
         else:
-            print("miss")
+            log.debug(f"  miss")
         attempts += 1
     return successes
 
@@ -189,20 +189,19 @@ def _repeat_taps(stylus_arm: StylusArm, cam: Camera, z_tap: float, ax: int, ay: 
 
 def phase2_right(stylus_arm: StylusArm, cam: Camera, z_tap: float) -> tuple[int, int, float] | None:
     """Probe all 4 arm directions to find which one is phone-right."""
-    print("\n" + "=" * 50)
-    print("PHASE 2: Find phone-right direction  (tap right x3)")
-    print("=" * 50)
+    log.info("Phase 2: Find phone-right direction  (tap right x3)")
 
     cam.wait_for_white()
     time.sleep(0.5)
 
     result = _probe_direction(stylus_arm, cam, z_tap, SCAN_DIRS)
     if result is None:
-        print("\n  FAILED — could not hit right circle in any direction.")
+        log.warning("Phase 2 FAILED — could not hit right circle in any direction.")
         return None
 
     ax, ay, dist = result
-    print(f"  Phone-right = arm ({'X+' if ax > 0 else 'X-' if ax < 0 else 'Y+' if ay > 0 else 'Y-'})")
+    dir_name = 'X+' if ax > 0 else 'X-' if ax < 0 else 'Y+' if ay > 0 else 'Y-'
+    log.debug(f"  Phone-right = arm {dir_name}")
 
     # Confirm with 2 more taps
     _repeat_taps(stylus_arm, cam, z_tap, ax, ay, dist, 2)
@@ -210,7 +209,7 @@ def phase2_right(stylus_arm: StylusArm, cam: Camera, z_tap: float) -> tuple[int,
     # Return to center
     move_xy(stylus_arm, 0, 0)
 
-    print(f"\n  Phase 2 done — right = ({ax}, {ay}) × {dist} mm")
+    log.info(f"Phase 2 done — right = ({ax}, {ay}) × {dist} mm")
     return (ax, ay, dist)
 
 
@@ -218,9 +217,7 @@ def phase2_right(stylus_arm: StylusArm, cam: Camera, z_tap: float) -> tuple[int,
 
 def phase3_down(stylus_arm: StylusArm, cam: Camera, z_tap: float, right_vec: tuple[int, int]) -> tuple[int, int, float] | None:
     """Probe the 2 perpendicular directions to find phone-down."""
-    print("\n" + "=" * 50)
-    print("PHASE 3: Find phone-down direction  (tap down x3)")
-    print("=" * 50)
+    log.info("Phase 3: Find phone-down direction  (tap down x3)")
 
     cam.wait_for_white()
     time.sleep(0.5)
@@ -237,11 +234,12 @@ def phase3_down(stylus_arm: StylusArm, cam: Camera, z_tap: float, right_vec: tup
 
     result = _probe_direction(stylus_arm, cam, z_tap, perp_dirs)
     if result is None:
-        print("\n  FAILED — could not hit down circle.")
+        log.warning("Phase 3 FAILED — could not hit down circle.")
         return None
 
     ax, ay, dist = result
-    print(f"  Phone-down = arm ({'X+' if ax > 0 else 'X-' if ax < 0 else 'Y+' if ay > 0 else 'Y-'})")
+    dir_name = 'X+' if ax > 0 else 'X-' if ax < 0 else 'Y+' if ay > 0 else 'Y-'
+    log.debug(f"  Phone-down = arm {dir_name}")
 
     # Confirm with 2 more taps
     _repeat_taps(stylus_arm, cam, z_tap, ax, ay, dist, 2)
@@ -249,7 +247,7 @@ def phase3_down(stylus_arm: StylusArm, cam: Camera, z_tap: float, right_vec: tup
     # Return to center
     move_xy(stylus_arm, 0, 0)
 
-    print(f"\n  Phase 3 done — down = ({ax}, {ay}) x {dist} mm")
+    log.info(f"Phase 3 done — down = ({ax}, {ay}) × {dist} mm")
     return (ax, ay, dist)
 
 
@@ -257,9 +255,7 @@ def phase3_down(stylus_arm: StylusArm, cam: Camera, z_tap: float, right_vec: tup
 
 def phase4_long_press(stylus_arm: StylusArm, cam: Camera) -> None:
     """Long press center x3  (must hold > 800 ms)."""
-    print("\n" + "=" * 50)
-    print("PHASE 4: Long press center  (x3, 800 ms hold)")
-    print("=" * 50)
+    log.info("Phase 4: Long press center  (x3, 800 ms hold)")
 
     cam.wait_for_white()
     time.sleep(0.5)
@@ -271,26 +267,24 @@ def phase4_long_press(stylus_arm: StylusArm, cam: Camera) -> None:
         if successes > 0:
             cam.wait_for_white()
             time.sleep(0.3)
-        print(f"  Long press {successes + 1}/3 …", end=" ", flush=True)
+        log.debug(f"  Long press {successes + 1}/3 …")
         stylus_arm.long_press()
         time.sleep(0.3)
         if cam.wait_for_green(timeout=1.5):
             successes += 1
-            print("ok")
+            log.debug(f"  ok")
         else:
-            print("miss")
+            log.debug(f"  miss")
         attempts += 1
 
-    print(f"\n  Phase 4 done  ({successes}/3)")
+    log.info(f"Phase 4 done  ({successes}/3)")
 
 
 # ─── Phase 5: Swipe ─────────────────────────────────────────────
 
 def phase5_swipe(stylus_arm: StylusArm, cam: Camera) -> None:
     """Swipe in 4 directions from center using the public swipe() API."""
-    print("\n" + "=" * 50)
-    print("PHASE 5: Swipe  (up → down → right → left)")
-    print("=" * 50)
+    log.info("Phase 5: Swipe  (up / down / right / left)")
 
     cam.wait_for_white()
     time.sleep(0.5)
@@ -302,25 +296,25 @@ def phase5_swipe(stylus_arm: StylusArm, cam: Camera) -> None:
 
         success = False
         for _ in range(MAX_RETRIES):
-            print(f"  Swipe {direction} …", end=" ", flush=True)
+            log.debug(f"  Swipe {direction} …")
 
             stylus_arm.swipe(direction)
             time.sleep(0.5)
 
             if cam.wait_for_green(timeout=1.5):
-                print("ok")
+                log.debug(f"  ok")
                 success = True
                 break
             else:
-                print("miss")
+                log.debug(f"  miss")
                 move_xy(stylus_arm, 0, 0)
                 time.sleep(0.5)
 
         if not success:
-            print(f"  WARNING: Swipe {direction} failed after retries")
+            log.warning(f"  Swipe {direction} failed after retries")
 
         stylus_arm._pen_up()
         time.sleep(0.1)
         move_xy(stylus_arm, 0, 0)
 
-    print("\n  Phase 5 done")
+    log.info("Phase 5 done")

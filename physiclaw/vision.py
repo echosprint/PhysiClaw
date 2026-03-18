@@ -20,16 +20,17 @@ Usage:
     uv run python -m physiclaw.vision --camera 2       # check specific camera
 """
 
-import argparse
+import logging
 import platform
 import subprocess
-import sys
 from pathlib import Path
 
 import cv2
 import numpy as np
 
 from physiclaw.camera import Camera
+
+log = logging.getLogger(__name__)
 
 MODEL_PATH = Path(__file__).parent.parent / 'data' / 'model' / 'yolox_nano' / 'yolox_nano.onnx'
 MODEL_URL = 'https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_nano.onnx'
@@ -45,10 +46,10 @@ _BUILTIN_KEYWORDS = {'facetime', 'isight', 'infrared', 'ir camera', 'built-in'}
 def _download_model(path: Path):
     """Download YOLOX Nano model automatically."""
     import urllib.request
-    print(f"Downloading YOLOX Nano to {path} ...")
+    log.info(f"Downloading YOLOX Nano to {path} ...")
     path.parent.mkdir(parents=True, exist_ok=True)
     urllib.request.urlretrieve(MODEL_URL, path)
-    print("Download complete")
+    log.info("Download complete")
 
 
 def _list_builtin_camera_names() -> set[str]:
@@ -186,7 +187,7 @@ class PhoneDetector:
         cam.close()
 
         if frame is None:
-            print("Failed to capture frame")
+            log.warning("Failed to capture frame")
             return False
 
         # Save snapshot for debugging
@@ -195,14 +196,14 @@ class PhoneDetector:
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
         snapshot_path = snapshot_dir / f'cam{camera_index}_{timestamp}.jpg'
         cv2.imwrite(str(snapshot_path), frame)
-        print(f"Snapshot saved: {snapshot_path}")
+        log.debug(f"Snapshot saved: {snapshot_path}")
 
         detected, conf, bbox = self.detect(frame)
         if detected:
             ratio = self.bbox_aspect_ratio(bbox)
             view = self.classify_view(ratio)
-            print(f"Phone detected ({conf:.0%})  bbox: {[round(v) for v in bbox]}  "
-                  f"ratio: {ratio:.2f}  view: {view}")
+            log.debug(f"Phone detected ({conf:.0%})  bbox: {[round(v) for v in bbox]}  "
+                      f"ratio: {ratio:.2f}  view: {view}")
             if save_crop:
                 h, w = frame.shape[:2]
                 x1 = max(0, int(bbox[0]))
@@ -212,9 +213,9 @@ class PhoneDetector:
                 crop = frame[y1:y2, x1:x2]
                 crop_path = snapshot_dir / f'cam{camera_index}_{timestamp}_crop.jpg'
                 cv2.imwrite(str(crop_path), crop)
-                print(f"Cropped saved: {crop_path}")
+                log.debug(f"Cropped saved: {crop_path}")
         else:
-            print(f"No phone detected (best: {conf:.0%})")
+            log.debug(f"No phone detected (best: {conf:.0%})")
         return detected
 
     @staticmethod
@@ -249,13 +250,13 @@ class PhoneDetector:
 
         Returns {'top': index, 'side': index} — may be partial if a camera is missing.
         """
-        print("Identifying cameras...")
+        log.debug("Identifying cameras...")
         result = {}
 
         for i in range(max_index):
             # Skip built-in laptop camera
             if _is_builtin_camera(i):
-                print(f"  Camera {i}: built-in (skipped)")
+                log.debug(f"  Camera {i}: built-in (skipped)")
                 continue
 
             try:
@@ -270,54 +271,21 @@ class PhoneDetector:
 
             detected, conf, bbox = self.detect(frame)
             if not detected:
-                print(f"  Camera {i}: no phone detected ({conf:.0%})")
+                log.debug(f"  Camera {i}: no phone detected ({conf:.0%})")
                 continue
 
             ratio = self.bbox_aspect_ratio(bbox)
             view = self.classify_view(ratio)
-            print(f"  Camera {i}: phone detected ({conf:.0%})  "
-                  f"ratio: {ratio:.2f} → {view}")
+            log.debug(f"  Camera {i}: phone detected ({conf:.0%})  "
+                      f"ratio: {ratio:.2f} → {view}")
 
             if view not in result:
                 result[view] = i
 
         if not result:
-            print("\n  No phone detected on any camera — is the phone on the platform?")
+            log.warning("No phone detected on any camera — is the phone on the platform?")
         else:
             summary = ', '.join(f'{v}=camera {i}' for v, i in sorted(result.items()))
-            print(f"\n  Identified: {summary}")
+            log.info(f"Cameras identified: {summary}")
 
         return result
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Phone detection and camera identification")
-    parser.add_argument("--camera", type=int, default=None,
-                        help="Check a specific camera index")
-    parser.add_argument("--identify", action="store_true",
-                        help="Scan all cameras and identify top vs side")
-    parser.add_argument("--check", action="store_true",
-                        help="Quick check if phone is placed on platform")
-    args = parser.parse_args()
-
-    detector = PhoneDetector()
-
-    if args.check:
-        index = args.camera or 0
-        placed = detector.is_phone_placed(index)
-        print(f"Phone placed: {placed}")
-        sys.exit(0 if placed else 1)
-    elif args.identify:
-        cameras = detector.identify_cameras()
-        print(f"\nResult: {cameras}")
-        if 'top' in cameras:
-            print(f"  Top camera:  index {cameras['top']}")
-        if 'side' in cameras:
-            print(f"  Side camera: index {cameras['side']}")
-    else:
-        found = detector.detect_from_camera(args.camera or 0)
-        sys.exit(0 if found else 1)
-
-
-if __name__ == "__main__":
-    main()

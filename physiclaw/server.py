@@ -2,7 +2,7 @@
 PhysiClaw MCP Server — gives AI agents a physical finger to operate any phone.
 
 Launch:
-    uv run python -m physiclaw.server [--port 8048]
+    uv run python -m physiclaw.server [--port 8048] [--verbose]
 
 Connect (Claude Desktop / Claude Code / OpenClaw):
     {
@@ -17,11 +17,15 @@ Connect (Claude Desktop / Claude Code / OpenClaw):
 Hardware connects and calibrates on startup.
 """
 
+import argparse
 import atexit
+import logging
 
 from mcp.server.fastmcp import FastMCP, Image
 
 from physiclaw.core import PhysiClaw
+
+# ─── MCP server ─────────────────────────────────────────────
 
 mcp = FastMCP(
     "physiclaw",
@@ -48,12 +52,6 @@ You control a real phone sitting on a desk — a top camera sees the screen, a s
 - After any tap/swipe, take screenshot_top() to confirm the expected screen change happened before proceeding.
 """,
 )
-
-# ─── Hardware singleton (connects + calibrates on startup) ──
-
-physiclaw = PhysiClaw()
-atexit.register(physiclaw.shutdown)
-
 
 # ─── Tools ──────────────────────────────────────────────────
 
@@ -163,14 +161,23 @@ def swipe(direction: str, speed: str = "medium") -> str:
     return f"Swiped {direction} {speed}"
 
 
-# ─── Entry point ─────────────────────────────────────────────
+# ─── Start ───────────────────────────────────────────────────
 
-if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser(description="PhysiClaw MCP Server")
-    parser.add_argument("--port", type=int, default=8048)
-    parser.add_argument("--host", type=str, default="127.0.0.1")
-    args = parser.parse_args()
+parser = argparse.ArgumentParser(description="PhysiClaw MCP Server")
+parser.add_argument("--port", type=int, default=8048)
+parser.add_argument("--host", type=str, default="127.0.0.1")
+parser.add_argument("--verbose", "-v", action="store_true",
+                    help="Show detailed debug output")
+args = parser.parse_args()
 
-    print(f"PhysiClaw MCP server on http://{args.host}:{args.port}/mcp")
-    mcp.run(transport="streamable-http", host=args.host, port=args.port)
+logging.basicConfig(
+    level=logging.DEBUG if args.verbose else logging.INFO,
+    format="%(message)s",
+)
+
+physiclaw = PhysiClaw()
+atexit.register(physiclaw.shutdown)
+
+log = logging.getLogger(__name__)
+log.info(f"PhysiClaw MCP server on http://{args.host}:{args.port}/mcp")
+mcp.run(transport="streamable-http", host=args.host, port=args.port)

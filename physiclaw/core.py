@@ -5,11 +5,15 @@ Owns the stylus arm, cameras, and calibration state.
 Creating an instance connects hardware, identifies cameras, and runs calibration.
 """
 
+import logging
+
 import cv2
 
 from physiclaw.camera import Camera
 from physiclaw.stylus_arm import StylusArm
 from physiclaw.vision import PhoneDetector
+
+log = logging.getLogger(__name__)
 
 
 class PhysiClaw:
@@ -95,12 +99,8 @@ class PhysiClaw:
         arm.set_direction_mapping((rax, ray), (dax, day))
         phase5_swipe(arm, cam)
 
-        print("\n" + "=" * 50)
-        print("CALIBRATION COMPLETE")
-        print("=" * 50)
-        print(f"  Z tap depth:    {z_tap} mm")
-        print(f"  Phone right:    arm ({rax}, {ray}) × {r_dist} mm")
-        print(f"  Phone down:     arm ({dax}, {day}) × {d_dist} mm")
+        log.info(f"Calibration complete — Z={z_tap}mm, "
+                 f"right=({rax},{ray}), down=({dax},{day})")
 
     # ─── Properties ────────────────────────────────────────────
 

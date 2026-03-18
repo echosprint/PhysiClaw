@@ -18,13 +18,14 @@ If the camera returns blank frames, run `imagesnap` once first to
 grant camera access to your terminal app, then retry.
 """
 
-import argparse
+import logging
 import subprocess
-import sys
 import time
 
 import cv2
 import numpy as np
+
+log = logging.getLogger(__name__)
 
 
 def _ensure_camera_permission():
@@ -71,7 +72,7 @@ class Camera:
             frame = self._read()
 
         h, w = frame.shape[:2]
-        print(f"Camera {index} ready  ({w}x{h})")
+        log.info(f"Camera {index} ready  ({w}x{h})")
 
     def _read(self):
         """Read a single frame, raise on failure."""
@@ -127,95 +128,3 @@ class Camera:
 
     def close(self):
         self.cap.release()
-
-
-# ─── CLI utilities ───────────────────────────────────────────────
-
-def scan_cameras(max_index=10):
-    """Try opening camera indices 0..max_index, report what works."""
-    print(f"Scanning camera indices 0-{max_index - 1} ...\n")
-    found = []
-    for i in range(max_index):
-        cap = cv2.VideoCapture(i)
-        if not cap.isOpened():
-            continue
-        ret, frame = cap.read()
-        if ret and frame is not None:
-            h, w = frame.shape[:2]
-            backend = cap.getBackendName()
-            print(f"  [{i}]  {w}x{h}  backend={backend}")
-            found.append(i)
-        else:
-            print(f"  [{i}]  opened but read() failed (permission?)")
-        cap.release()
-
-    if not found:
-        print("\nNo working cameras found.")
-    else:
-        print(f"\nWorking indices: {found}")
-    return found
-
-
-def live_preview(index):
-    """Open a live preview window. Press 'q' to quit, 's' to save a frame."""
-    cap = cv2.VideoCapture(index)
-    if not cap.isOpened():
-        print(f"Cannot open camera {index}")
-        sys.exit(1)
-
-    ret, frame = cap.read()
-    if not ret:
-        print(f"Camera {index} opened but cannot read frames.")
-        cap.release()
-        sys.exit(1)
-
-    h, w = frame.shape[:2]
-    print(f"Camera {index}: {w}x{h}  backend={cap.getBackendName()}")
-    print("Live preview — press 'q' to quit, 's' to save a snapshot\n")
-
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        cv2.imshow(f"Camera {index}", frame)
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord("q"):
-            break
-        if key == ord("s"):
-            path = f"camera_{index}_snap.jpg"
-            cv2.imwrite(path, frame)
-            print(f"  Saved {path}")
-
-    cap.release()
-    cv2.destroyAllWindows()
-
-
-def save_snapshot(index):
-    """Grab a single frame and save it."""
-    cam = Camera(index)
-    path = f"camera_{index}_snap.jpg"
-    cam.snapshot(path)
-    cam.close()
-    print(f"Saved {path}")
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Camera test utility")
-    parser.add_argument("--index", type=int, default=None,
-                        help="Open live preview for this camera index")
-    parser.add_argument("--snap", type=int, default=None,
-                        help="Save one frame from this camera index")
-    args = parser.parse_args()
-
-    print(f"OpenCV {cv2.__version__}\n")
-
-    if args.snap is not None:
-        save_snapshot(args.snap)
-    elif args.index is not None:
-        live_preview(args.index)
-    else:
-        scan_cameras()
-
-
-if __name__ == "__main__":
-    main()

@@ -1,11 +1,12 @@
 """Auto-detect GRBL devices on serial ports."""
 
-import sys
+import logging
 import time
 
 import serial
 import serial.tools.list_ports
 
+log = logging.getLogger(__name__)
 
 GRBL_BAUDRATE = 115200
 
@@ -63,37 +64,23 @@ def detect_grbl() -> str | None:
     skipped = len(all_ports) - len(ports)
 
     if not ports:
-        print("No candidate serial ports found.")
+        log.warning("No candidate serial ports found.")
         return None
 
     msg = f"Scanning {len(ports)} serial port(s) for GRBL"
     if skipped:
         msg += f" (skipped {skipped} Bluetooth/debug)"
-    print(msg + "...\n")
+    log.debug(msg)
 
     for port_info in ports:
         desc = port_info.description or ""
-        print(f"  Probing {port_info.device}  ({desc})  ...", end=" ", flush=True)
+        log.debug(f"  Probing {port_info.device}  ({desc})")
 
         version = _probe_port(port_info.device)
         if version:
-            print(f"GRBL detected!  [{version}]")
+            log.info(f"GRBL found: {port_info.device}  [{version}]")
             return port_info.device
         else:
-            print("not GRBL")
+            log.debug(f"  {port_info.device}: not GRBL")
 
     return None
-
-
-def main() -> None:
-    port = detect_grbl()
-    print()
-    if port:
-        print(f"GRBL port: {port}")
-    else:
-        print("No GRBL device found.")
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()
