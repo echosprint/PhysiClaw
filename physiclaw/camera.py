@@ -21,9 +21,13 @@ grant camera access to your terminal app, then retry.
 import logging
 import subprocess
 import time
+from datetime import datetime
+from pathlib import Path
 
 import cv2
 import numpy as np
+
+SNAPSHOT_DIR = Path(__file__).parent.parent / 'data' / 'snapshot'
 
 log = logging.getLogger(__name__)
 
@@ -47,6 +51,7 @@ class Camera:
 
     def __init__(self, index=0):
         self.index = index
+        self.tag = None  # set after camera identification ('top' or 'side')
         self.cap = cv2.VideoCapture(index)
 
         # If cv2 fails, try triggering macOS permission via imagesnap
@@ -89,10 +94,19 @@ class Camera:
         return frame if ret else None
 
     def snapshot(self, path=None):
-        """Return a fresh BGR frame. Optionally save to path."""
+        """Return a fresh BGR frame. Optionally save to path.
+
+        When tag is set, also saves to data/snapshot/ with timestamp.
+        """
         frame = self._fresh_frame()
-        if frame is not None and path:
-            cv2.imwrite(path, frame)
+        if frame is not None:
+            if path:
+                cv2.imwrite(path, frame)
+            SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+            ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
+            label = self.tag[0] if self.tag else str(self.index)
+            save_path = SNAPSHOT_DIR / f'{ts}_{label}.jpg'
+            cv2.imwrite(str(save_path), frame)
         return frame
 
     def is_green(self):
@@ -106,7 +120,7 @@ class Camera:
         upper = np.array([90, 255, 255])
         mask = cv2.inRange(hsv, lower, upper)
         ratio = np.count_nonzero(mask) / mask.size
-        return ratio > 0.15
+        return ratio > 0.05
 
     def wait_for_green(self, timeout=1.5):
         """Poll for green screen within timeout."""

@@ -238,23 +238,21 @@ class PhoneDetector:
         return 'side'
 
     def identify_cameras(self, max_index: int = 8) -> dict[str, int]:
-        """Scan cameras, skip built-in laptop camera, identify top vs side by phone detection.
+        """Scan cameras, skip built-in laptop camera, identify top vs side.
 
         Strategy:
           1. Skip built-in cameras (FaceTime/iSight on macOS, typically index 0)
-          2. For each remaining camera, try to detect a phone in the frame
-          3. Cameras where no phone is detected are skipped (e.g. unplugged, facing wrong way)
-          4. Among cameras that see a phone, classify by bounding-box aspect ratio:
-               top  → face-on view, ratio ~1.5–2.5
-               side → angled view,  ratio outside that range
+          2. Find USB cameras that can open successfully (stop after 2 found)
+          3. Among those, detect phone and classify by bbox aspect ratio
+          4. If both cameras get the same classification, force the other role
+             on the second one — there are only two cameras, one must be each
 
         Returns {'top': index, 'side': index} — may be partial if a camera is missing.
         """
         log.debug("Identifying cameras...")
-        result = {}
+        usb_cameras = []  # (index, frame) for working USB cameras
 
         for i in range(max_index):
-            # Skip built-in laptop camera
             if _is_builtin_camera(i):
                 log.debug(f"  Camera {i}: built-in (skipped)")
                 continue
@@ -266,21 +264,59 @@ class PhoneDetector:
 
             frame = cam.snapshot()
             cam.close()
-            if frame is None:
-                continue
+            if frame is not None:
+                usb_cameras.append((i, frame))
+                if len(usb_cameras) == 2:
+                    break
 
+        if not usb_cameras:
+            log.warning("No USB cameras found")
+            return {}
+
+        # Classify each camera
+        candidates = []  # (index, view)
+        for i, frame in usb_cameras:
             detected, conf, bbox = self.detect(frame)
-            if not detected:
+            if detected:
+                ratio = self.bbox_aspect_ratio(bbox)
+                view = self.classify_view(ratio)
+                log.debug(f"  Camera {i}: phone detected ({conf:.0%})  "
+                          f"ratio: {ratio:.2f} → {view}")
+                candidates.append((i, view))
+            else:
                 log.debug(f"  Camera {i}: no phone detected ({conf:.0%})")
-                continue
+                candidates.append((i, None))
 
-            ratio = self.bbox_aspect_ratio(bbox)
-            view = self.classify_view(ratio)
-            log.debug(f"  Camera {i}: phone detected ({conf:.0%})  "
-                      f"ratio: {ratio:.2f} → {view}")
+        # Build result — if one is classified, the other gets the remaining role
+        result = {}
+        if len(candidates) == 2:
+            i0, v0 = candidates[0]
+            i1, v1 = candidates[1]
 
-            if view not in result:
-                result[view] = i
+            if v0 and v1 and v0 != v1:
+                # Both detected, different views — ideal
+                result[v0] = i0
+                result[v1] = i1
+            elif v0 and v1:
+                # Both detected, same view — force the other role on second
+                other = 'side' if v0 == 'top' else 'top'
+                result[v0] = i0
+                result[other] = i1
+                log.debug(f"  Camera {i1}: reassigned to {other}")
+            elif v0:
+                # Only first detected
+                other = 'side' if v0 == 'top' else 'top'
+                result[v0] = i0
+                result[other] = i1
+            elif v1:
+                # Only second detected
+                other = 'side' if v1 == 'top' else 'top'
+                result[v1] = i1
+                result[other] = i0
+        elif len(candidates) == 1:
+            i0, v0 = candidates[0]
+            if v0:
+                result[v0] = i0
 
         if not result:
             log.warning("No phone detected on any camera — is the phone on the platform?")

@@ -61,9 +61,14 @@ class PhysiClaw:
             raise RuntimeError("Top camera not found — is the phone under the camera?")
 
         self._top_cam = Camera(cameras['top'])
+        self._top_cam.tag = 'top'
         if 'side' in cameras:
             self._side_cam = Camera(cameras['side'])
+            self._side_cam.tag = 'side'
 
+        input("\nOpen https://www.physiclaw.ai/pen-calib on the phone, "
+              "position the stylus above the center orange circle, "
+              "then press Enter...")
         self.calibrate()
 
     # ─── Calibration ───────────────────────────────────────────
