@@ -53,7 +53,7 @@ You control a real phone sitting on a desk — a top camera sees the screen, a s
 
 # ─── Lazy hardware singleton ────────────────────────────────
 
-class Hardware:
+class PhysiClaw:
     """Lazy-initialized hardware. First access triggers full setup."""
 
     def __init__(self):
@@ -116,7 +116,7 @@ class Hardware:
             self._side_cam.close()
 
 
-hw = Hardware()
+physiclaw = PhysiClaw()
 
 
 # ─── Helper ─────────────────────────────────────────────────
@@ -143,7 +143,7 @@ def screenshot_top() -> Image:
     Typical usage: call this at the start of each action cycle to understand what's on
     screen, and again after tap/swipe to verify the result.
     """
-    return _camera_to_image(hw.top_cam)
+    return _camera_to_image(physiclaw.top_cam)
 
 
 @mcp.tool()
@@ -156,7 +156,7 @@ def screenshot_side() -> Image:
     If the stylus is not over the right spot, call move() to adjust, then screenshot_side() again.
     Only proceed with tap/swipe once alignment is confirmed.
     """
-    return _camera_to_image(hw.side_cam)
+    return _camera_to_image(physiclaw.side_cam)
 
 
 @mcp.tool()
@@ -177,7 +177,7 @@ def move(direction: str, distance: str = "medium") -> str:
                   'small' (~3mm, one icon),
                   'nudge' (~1mm, fine-tune)
     """
-    hw.arm.move(direction, distance)
+    physiclaw.arm.move(direction, distance)
     return f"Moved {direction} {distance}"
 
 
@@ -191,7 +191,7 @@ def tap() -> str:
     Always confirm alignment with screenshot_side() before tapping.
     After tapping, use screenshot_top() to verify the expected screen change.
     """
-    hw.arm.tap()
+    physiclaw.arm.tap()
     return "Tapped"
 
 
@@ -202,7 +202,7 @@ def double_tap() -> str:
     Use for: zooming in (maps, photos, web pages), selecting a word in text, or any
     UI element that responds to double-tap.
     """
-    hw.arm.double_tap()
+    physiclaw.arm.double_tap()
     return "Double tapped"
 
 
@@ -213,7 +213,7 @@ def long_press() -> str:
     Use for: opening context menus, entering edit/selection mode, triggering drag-and-drop,
     selecting text, rearranging home screen icons, or any action that requires a sustained press.
     """
-    hw.arm.long_press()
+    physiclaw.arm.long_press()
     return "Long pressed"
 
 
@@ -232,14 +232,14 @@ def swipe(direction: str, speed: str = "medium") -> str:
                'medium' (normal swipe, ~100mm/s),
                'fast' (fling, page switch, quick dismiss)
     """
-    hw.arm.swipe(direction, speed)
+    physiclaw.arm.swipe(direction, speed)
     return f"Swiped {direction} {speed}"
 
 
 # ─── Lifecycle ──────────────────────────────────────────────
 
 import atexit
-atexit.register(hw.shutdown)
+atexit.register(physiclaw.shutdown)
 
 
 if __name__ == "__main__":
