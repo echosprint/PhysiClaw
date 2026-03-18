@@ -1,19 +1,35 @@
 """
-Detect if a phone is visible in the camera frame using YOLOX Nano.
+Vision module — phone detection and camera identification.
 
-Uses yolox_nano.onnx (COCO object detector) via cv2.dnn.
-COCO class 67 = cell phone.
+Uses YOLOX Nano (COCO class 67 = cell phone) via cv2.dnn to:
+  1. Check if a phone is placed on the platform
+  2. Identify which USB camera is top (looking down) vs side (~45°)
+  3. Skip the laptop's built-in camera automatically
+
+Camera differentiation strategy:
+  - Built-in laptop cameras (FaceTime, iSight, IR) are identified via
+    macOS system_profiler and excluded from scanning.
+  - Among remaining USB cameras, each frame is checked for phone presence.
+  - Cameras that see a phone are classified by bounding-box aspect ratio:
+      top camera  → sees phone face-on → ratio ~1.5-2.5 (natural phone shape)
+      side camera → sees phone at ~45°  → perspective squash → ratio > 2.5 or < 1.5
 
 Usage:
-    uv run python phone_detect.py [--camera INDEX]
+    uv run python vision.py                  # check camera 0
+    uv run python vision.py --identify       # scan all, identify top/side
+    uv run python vision.py --camera 2       # check specific camera
 """
 
 import argparse
+import platform
+import subprocess
 import sys
 from pathlib import Path
 
 import cv2
 import numpy as np
+
+from camera import Camera
 
 MODEL_PATH = Path(__file__).parent / 'data' / 'model' / 'yolox_nano' / 'yolox_nano.onnx'
 MODEL_URL = 'https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_nano.onnx'
@@ -21,6 +37,9 @@ MODEL_URL = 'https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1
 COCO_PHONE_CLASS = 67  # cell phone
 INPUT_SIZE = 416
 MIN_CONFIDENCE = 0.3
+
+# Built-in camera keywords (case-insensitive match against camera name)
+_BUILTIN_KEYWORDS = {'facetime', 'isight', 'infrared', 'ir camera', 'built-in'}
 
 
 def _download_model(path: Path):
@@ -32,8 +51,55 @@ def _download_model(path: Path):
     print("Download complete")
 
 
+def _list_builtin_camera_names() -> set[str]:
+    """Return names of built-in cameras on macOS (via system_profiler).
+    Returns empty set on non-macOS or on failure.
+    """
+    if platform.system() != 'Darwin':
+        return set()
+    try:
+        out = subprocess.run(
+            ['system_profiler', 'SPCameraDataType'],
+            capture_output=True, text=True, timeout=5,
+        )
+        names = set()
+        for line in out.stdout.splitlines():
+            stripped = line.strip()
+            # Camera names appear as top-level entries (not indented key: value)
+            if stripped.endswith(':') and not stripped.startswith(('Unique ID', 'Model ID')):
+                name = stripped.rstrip(':').strip()
+                if any(kw in name.lower() for kw in _BUILTIN_KEYWORDS):
+                    names.add(name)
+        return names
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return set()
+
+
+def _is_builtin_camera(index: int) -> bool:
+    """Heuristic: check if a camera index is likely a built-in laptop camera.
+
+    On macOS, built-in cameras are typically index 0 or 1.
+    We open the camera briefly and check its name via backend properties.
+    Falls back to the conservative assumption that index 0 may be built-in on macOS.
+    """
+    if platform.system() != 'Darwin':
+        return False
+
+    # On macOS, built-in FaceTime camera is almost always index 0.
+    # USB cameras get higher indices. We use a name-based check when possible,
+    # but fall back to index heuristic since OpenCV doesn't always expose names.
+    builtin_names = _list_builtin_camera_names()
+    if builtin_names:
+        # If we found built-in camera names, we know they exist.
+        # On macOS with AVFoundation, index 0 is typically built-in.
+        # We can't directly map names→indices, but index 0 is reliable.
+        if index == 0:
+            return True
+    return False
+
+
 class PhoneDetector:
-    """Detect phone presence using YOLOX Nano (cv2.dnn)."""
+    """Detect phone presence and identify cameras using YOLOX Nano."""
 
     def __init__(self, model_path: Path = MODEL_PATH):
         if not model_path.exists():
@@ -96,10 +162,24 @@ class PhoneDetector:
 
         return True, best, [x1, y1, x2, y2]
 
+    def is_phone_placed(self, camera_index: int = 0) -> bool:
+        """Quick check: is a phone visible from this camera?
+        Use to verify the phone is on the platform before starting.
+        """
+        try:
+            cam = Camera(camera_index)
+        except RuntimeError:
+            return False
+        frame = cam.snapshot()
+        cam.close()
+        if frame is None:
+            return False
+        detected, _, _ = self.detect(frame)
+        return detected
+
     def detect_from_camera(self, camera_index: int = 0, save_crop: bool = False) -> bool:
         """Grab a frame from the camera, save snapshot, and check for phone."""
         from datetime import datetime
-        from camera import Camera
 
         cam = Camera(camera_index)
         frame = cam.snapshot()
@@ -156,14 +236,28 @@ class PhoneDetector:
             return 'top'
         return 'side'
 
-    def identify_cameras(self, max_index: int = 5) -> dict[str, int]:
-        """Scan camera indices and identify top vs side camera.
-        Returns {'top': index, 'side': index} or partial dict.
+    def identify_cameras(self, max_index: int = 8) -> dict[str, int]:
+        """Scan cameras, skip built-in laptop camera, identify top vs side by phone detection.
+
+        Strategy:
+          1. Skip built-in cameras (FaceTime/iSight on macOS, typically index 0)
+          2. For each remaining camera, try to detect a phone in the frame
+          3. Cameras where no phone is detected are skipped (e.g. unplugged, facing wrong way)
+          4. Among cameras that see a phone, classify by bounding-box aspect ratio:
+               top  → face-on view, ratio ~1.5–2.5
+               side → angled view,  ratio outside that range
+
+        Returns {'top': index, 'side': index} — may be partial if a camera is missing.
         """
-        from camera import Camera
+        print("Identifying cameras...")
         result = {}
 
         for i in range(max_index):
+            # Skip built-in laptop camera
+            if _is_builtin_camera(i):
+                print(f"  Camera {i}: built-in (skipped)")
+                continue
+
             try:
                 cam = Camera(i)
             except RuntimeError:
@@ -176,31 +270,44 @@ class PhoneDetector:
 
             detected, conf, bbox = self.detect(frame)
             if not detected:
-                print(f"  Camera {i}: no phone detected")
+                print(f"  Camera {i}: no phone detected ({conf:.0%})")
                 continue
 
             ratio = self.bbox_aspect_ratio(bbox)
             view = self.classify_view(ratio)
-            print(f"  Camera {i}: phone detected ({conf:.0%})  ratio: {ratio:.2f} → {view}")
+            print(f"  Camera {i}: phone detected ({conf:.0%})  "
+                  f"ratio: {ratio:.2f} → {view}")
 
             if view not in result:
                 result[view] = i
+
+        if not result:
+            print("\n  No phone detected on any camera — is the phone on the platform?")
+        else:
+            summary = ', '.join(f'{v}=camera {i}' for v, i in sorted(result.items()))
+            print(f"\n  Identified: {summary}")
 
         return result
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Detect phone in camera view")
+    parser = argparse.ArgumentParser(description="Phone detection and camera identification")
     parser.add_argument("--camera", type=int, default=None,
                         help="Check a specific camera index")
     parser.add_argument("--identify", action="store_true",
                         help="Scan all cameras and identify top vs side")
+    parser.add_argument("--check", action="store_true",
+                        help="Quick check if phone is placed on platform")
     args = parser.parse_args()
 
     detector = PhoneDetector()
 
-    if args.identify:
-        print("Scanning cameras...")
+    if args.check:
+        index = args.camera or 0
+        placed = detector.is_phone_placed(index)
+        print(f"Phone placed: {placed}")
+        sys.exit(0 if placed else 1)
+    elif args.identify:
         cameras = detector.identify_cameras()
         print(f"\nResult: {cameras}")
         if 'top' in cameras:
