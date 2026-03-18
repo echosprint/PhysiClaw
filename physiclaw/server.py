@@ -14,7 +14,7 @@ Connect (Claude Desktop / Claude Code / OpenClaw):
       }
     }
 
-Hardware is initialized lazily on first tool call.
+Hardware connects and calibrates on startup.
 """
 
 import atexit
@@ -49,7 +49,7 @@ You control a real phone sitting on a desk — a top camera sees the screen, a s
 """,
 )
 
-# ─── Lazy hardware singleton ────────────────────────────────
+# ─── Hardware singleton (connects + calibrates on startup) ──
 
 physiclaw = PhysiClaw()
 atexit.register(physiclaw.shutdown)
@@ -172,6 +172,5 @@ if __name__ == "__main__":
     parser.add_argument("--host", type=str, default="127.0.0.1")
     args = parser.parse_args()
 
-    print(f"PhysiClaw MCP server starting on http://{args.host}:{args.port}/mcp")
-    print("Hardware will initialize on first tool call.")
+    print(f"PhysiClaw MCP server on http://{args.host}:{args.port}/mcp")
     mcp.run(transport="streamable-http", host=args.host, port=args.port)

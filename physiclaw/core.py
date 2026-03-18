@@ -2,8 +2,7 @@
 PhysiClaw orchestrator — central hardware lifecycle manager.
 
 Owns the stylus arm, cameras, and calibration state.
-Hardware is initialized lazily on first property access.
-Every instance must calibrate before use.
+Creating an instance connects hardware, identifies cameras, and runs calibration.
 """
 
 import cv2
@@ -16,29 +15,26 @@ from physiclaw.vision import PhoneDetector
 class PhysiClaw:
     """Central orchestrator — owns all hardware lifecycle.
 
-    Every new instance must run calibrate() before the arm can
-    move/tap/swipe, since calibration determines Z depth and
-    axis mapping for the current physical setup.
+    Construction connects the arm, identifies cameras, and runs
+    the full calibration workflow. Ready to use immediately after.
     """
 
     def __init__(self):
         self._arm: StylusArm | None = None
         self._top_cam: Camera | None = None
         self._side_cam: Camera | None = None
-        self._ready = False
+        self._setup()
 
-    # ─── Init ─────────────────────────────────────────────────
+    # ─── Setup ────────────────────────────────────────────────
 
-    def _init(self):
-        """Lazy init — connect arm, identify cameras.
+    def _setup(self):
+        """Connect arm, identify cameras, calibrate.
 
         1. Connect GRBL arm (auto-detect port)
         2. Identify top vs side cameras via PhoneDetector
         3. Open cameras
+        4. Run calibration
         """
-        if self._ready:
-            return
-
         self._arm = StylusArm()
         self._arm.setup()
 
@@ -52,23 +48,20 @@ class PhysiClaw:
         if 'side' in cameras:
             self._side_cam = Camera(cameras['side'])
 
-        self._ready = True
+        self.calibrate()
 
     # ─── Calibration ───────────────────────────────────────────
 
     def calibrate(self):
         """Run the full 5-phase calibration workflow.
 
-        Initializes hardware if needed, then uses the side camera to
-        detect green flashes during probing. Sets Z depth and axis
-        mapping directly on the arm instance.
+        Uses the side camera to detect green flashes during probing.
+        Sets Z depth and axis mapping directly on the arm instance.
         """
         from physiclaw.calibrate import (
             phase1_z, phase2_right, phase3_down,
             phase4_long_press, phase5_swipe,
         )
-
-        self._init()
 
         if self._side_cam is None:
             raise RuntimeError("Side camera not found — needed for calibration")
@@ -113,19 +106,14 @@ class PhysiClaw:
 
     @property
     def arm(self) -> StylusArm:
-        self._init()
-        assert self._arm is not None
         return self._arm
 
     @property
     def top_cam(self) -> Camera:
-        self._init()
-        assert self._top_cam is not None
         return self._top_cam
 
     @property
     def side_cam(self) -> Camera:
-        self._init()
         if self._side_cam is None:
             raise RuntimeError("Side camera not available")
         return self._side_cam
