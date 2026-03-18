@@ -123,6 +123,15 @@ class StylusArm:
                 return line
         return ''
 
+    def position(self) -> tuple[float, float]:
+        """Return current (x, y) by querying GRBL MPos."""
+        import re
+        status = self._query_status()
+        m = re.search(r'MPos:([-\d.]+),([-\d.]+)', status)
+        if not m:
+            raise RuntimeError(f'Cannot parse position from: {status}')
+        return float(m.group(1)), float(m.group(2))
+
     # ─── Initialization ──────────────────────────────────────
 
     def setup(self):

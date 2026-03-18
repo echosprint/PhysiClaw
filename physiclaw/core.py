@@ -94,8 +94,8 @@ class PhysiClaw:
         phase4_long_press(arm, cam)
 
         # Phase 5 — swipe verification
-        rax, ray, r_dist = right_result
-        dax, day, d_dist = down_result
+        rax, ray, _ = right_result
+        dax, day, _ = down_result
         arm.set_direction_mapping((rax, ray), (dax, day))
         phase5_swipe(arm, cam)
 
@@ -120,12 +120,29 @@ class PhysiClaw:
 
     # ─── Snapshot helpers ──────────────────────────────────────
 
+    PARK_DISTANCE = 100  # mm to move stylus out of frame
+
     def snapshot_top(self):
-        """Capture a frame from the top camera. Returns BGR numpy array."""
-        frame = self.top_cam.snapshot()
-        if frame is None:
-            raise RuntimeError("Top camera capture failed")
-        return frame
+        """Capture a frame from the top camera. Returns BGR numpy array.
+
+        Parks the stylus 100mm in the phone-up direction to avoid
+        occluding the screen, takes the snapshot, then returns it
+        to the previous position.
+        """
+        arm = self._arm
+        saved_x, saved_y = arm.position()
+
+        # Park stylus out of frame
+        ux, uy = arm.MOVE_DIRECTIONS['up']
+        arm._fast_move(ux * self.PARK_DISTANCE, uy * self.PARK_DISTANCE)
+
+        try:
+            frame = self.top_cam.snapshot()
+            if frame is None:
+                raise RuntimeError("Top camera capture failed")
+            return frame
+        finally:
+            arm._fast_move(saved_x, saved_y)
 
     def snapshot_side(self):
         """Capture a frame from the side camera. Returns BGR numpy array."""
