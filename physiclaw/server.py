@@ -2,7 +2,7 @@
 PhysiClaw MCP Server — gives AI agents a physical finger to operate any phone.
 
 Launch:
-    uv run python physiclaw_server.py [--port 8048]
+    uv run python -m physiclaw.server [--port 8048]
 
 Connect (Claude Desktop / Claude Code / OpenClaw):
     {
@@ -20,9 +20,9 @@ Hardware is initialized lazily on first tool call.
 import cv2
 from mcp.server.fastmcp import FastMCP, Image
 
-from camera import Camera
-from vision import PhoneDetector
-from stylus_arm import StylusArm
+from physiclaw.camera import Camera
+from physiclaw.vision import PhoneDetector
+from physiclaw.stylus_arm import StylusArm
 
 mcp = FastMCP(
     "physiclaw",

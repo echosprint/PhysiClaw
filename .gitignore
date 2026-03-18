@@ -9,6 +9,9 @@ wheels/
 # Virtual environments
 .venv
 
+# macOS
+.DS_Store
+
 # Captured photos
 *.jpg
 

@@ -19,7 +19,7 @@ import json
 import serial
 import time
 
-from serial_probe import detect_grbl
+from physiclaw.serial_probe import detect_grbl
 
 
 # ─── G-code templates ────────────────────────────────────────

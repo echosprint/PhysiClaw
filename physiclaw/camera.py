@@ -2,16 +2,16 @@
 Camera module — reusable Camera class and CLI test utilities.
 
 Usage as library:
-    from camera import Camera
+    from physiclaw.camera import Camera
     cam = Camera(index=0)
     frame = cam.snapshot()
     green = cam.is_green()
     cam.close()
 
 Usage as CLI:
-    uv run python camera.py              # scan all cameras
-    uv run python camera.py --index 0    # live preview (q=quit, s=save)
-    uv run python camera.py --snap 0     # save one frame
+    uv run python -m physiclaw.camera              # scan all cameras
+    uv run python -m physiclaw.camera --index 0    # live preview (q=quit, s=save)
+    uv run python -m physiclaw.camera --snap 0     # save one frame
 
 Note: On macOS, OpenCV won't trigger the camera permission dialog.
 If the camera returns blank frames, run `imagesnap` once first to

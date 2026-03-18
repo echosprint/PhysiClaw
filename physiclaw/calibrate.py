@@ -4,7 +4,7 @@ PhysiClaw stylus calibration.
 Open /pen-calib on the phone, position the stylus just above the center
 orange circle, then run:
 
-    uv run python calibrate.py [--camera INDEX]
+    uv run python -m physiclaw.calibrate [--camera INDEX]
 
 Note: On macOS, OpenCV won't trigger the camera permission dialog.
 If the camera returns blank frames, run `imagesnap` once first to
@@ -25,8 +25,8 @@ import json
 import sys
 import time
 
-from camera import Camera
-from stylus_arm import StylusArm
+from physiclaw.camera import Camera
+from physiclaw.stylus_arm import StylusArm
 
 
 MAX_RETRIES = 20  # max attempts per phase before giving up

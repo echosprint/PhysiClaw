@@ -2,12 +2,12 @@
 Demo: simulate how an AI agent uses the stylus arm after calibration.
 
 Run after calibrate.py has completed successfully:
-    uv run python demo_agent.py
+    uv run python scripts/demo_agent.py
 """
 
 import time
 
-from stylus_arm import StylusArm
+from physiclaw.stylus_arm import StylusArm
 
 
 def main():

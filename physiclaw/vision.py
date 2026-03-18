@@ -15,9 +15,9 @@ Camera differentiation strategy:
       side camera → sees phone at ~45°  → perspective squash → ratio > 2.5 or < 1.5
 
 Usage:
-    uv run python vision.py                  # check camera 0
-    uv run python vision.py --identify       # scan all, identify top/side
-    uv run python vision.py --camera 2       # check specific camera
+    uv run python -m physiclaw.vision                  # check camera 0
+    uv run python -m physiclaw.vision --identify       # scan all, identify top/side
+    uv run python -m physiclaw.vision --camera 2       # check specific camera
 """
 
 import argparse
@@ -29,9 +29,9 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from camera import Camera
+from physiclaw.camera import Camera
 
-MODEL_PATH = Path(__file__).parent / 'data' / 'model' / 'yolox_nano' / 'yolox_nano.onnx'
+MODEL_PATH = Path(__file__).parent.parent / 'data' / 'model' / 'yolox_nano' / 'yolox_nano.onnx'
 MODEL_URL = 'https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_nano.onnx'
 
 COCO_PHONE_CLASS = 67  # cell phone
@@ -190,7 +190,7 @@ class PhoneDetector:
             return False
 
         # Save snapshot for debugging
-        snapshot_dir = Path(__file__).parent / 'data' / 'snapshot'
+        snapshot_dir = Path(__file__).parent.parent / 'data' / 'snapshot'
         snapshot_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
         snapshot_path = snapshot_dir / f'cam{camera_index}_{timestamp}.jpg'
