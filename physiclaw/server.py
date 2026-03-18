@@ -95,8 +95,8 @@ def move(direction: str, distance: str = "medium") -> str:
     Diagonal directions are supported for efficient movement.
 
     Args:
-        direction: 'up', 'down', 'left', 'right',
-                   'up-left', 'up-right', 'down-left', 'down-right'
+        direction: 'top', 'bottom', 'left', 'right',
+                   'top-left', 'top-right', 'bottom-left', 'bottom-right'
         distance: 'large' (~20mm, half the screen),
                   'medium' (~8mm, a few icons),
                   'small' (~3mm, one icon),
@@ -147,12 +147,12 @@ def swipe(direction: str, speed: str = "medium") -> str:
     """Swipe from current position in a cardinal direction — the stylus touches down, slides, and lifts.
 
     Use for: scrolling content, switching pages, pulling down notifications, dismissing items,
-    unlocking the phone (swipe up), navigating between screens.
+    unlocking the phone (swipe top), navigating between screens.
 
     The swipe travels ~15mm in the given direction. The stylus position will change after swiping.
 
     Args:
-        direction: 'up', 'down', 'left', 'right'
+        direction: 'top', 'bottom', 'left', 'right'
         speed: 'slow' (gentle scroll, careful drag),
                'medium' (normal swipe, ~100mm/s),
                'fast' (fling, page switch, quick dismiss)

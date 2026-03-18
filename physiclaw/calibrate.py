@@ -289,7 +289,7 @@ def phase5_swipe(stylus_arm: StylusArm, cam: Camera) -> None:
     cam.wait_for_white()
     time.sleep(0.5)
 
-    for direction in ['up', 'down', 'right', 'left']:
+    for direction in ['top', 'bottom', 'right', 'left']:
         cam.wait_for_white()
         time.sleep(0.3)
         move_xy(stylus_arm, 0, 0)

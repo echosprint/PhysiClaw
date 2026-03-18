@@ -170,12 +170,12 @@ class StylusArm:
         self.MOVE_DIRECTIONS = {
             'right':      ( rx,      ry),
             'left':       (-rx,     -ry),
-            'down':       ( dx,      dy),
-            'up':         (-dx,     -dy),
-            'up-left':    (-rx - dx, -ry - dy),
-            'up-right':   ( rx - dx,  ry - dy),
-            'down-left':  (-rx + dx, -ry + dy),
-            'down-right': ( rx + dx,  ry + dy),
+            'bottom':     ( dx,      dy),
+            'top':        (-dx,     -dy),
+            'top-left':    (-rx - dx, -ry - dy),
+            'top-right':   ( rx - dx,  ry - dy),
+            'bottom-left':  (-rx + dx, -ry + dy),
+            'bottom-right': ( rx + dx,  ry + dy),
         }
 
     def unlock(self):
@@ -254,8 +254,8 @@ class StylusArm:
 
     def move(self, direction, distance='medium'):
         """Move stylus relative to current position.
-        direction: 'up', 'down', 'left', 'right',
-                   'up-left', 'up-right', 'down-left', 'down-right'
+        direction: 'top', 'bottom', 'left', 'right',
+                   'top-left', 'top-right', 'bottom-left', 'bottom-right'
         distance: 'large', 'medium', 'small', 'nudge'
         """
         if self.MOVE_DIRECTIONS is None:
@@ -283,13 +283,13 @@ class StylusArm:
 
     def swipe(self, direction, speed='medium'):
         """Swipe from current position in a cardinal direction.
-        direction: 'up', 'down', 'left', 'right'
+        direction: 'top', 'bottom', 'left', 'right'
         speed: 'slow', 'medium', 'fast'
         """
         d = self.SWIPE_DISTANCE
         offsets = {
-            'up':    (0, -d),
-            'down':  (0,  d),
+            'top':    (0, -d),
+            'bottom': (0,  d),
             'left':  (-d, 0),
             'right': ( d, 0),
         }

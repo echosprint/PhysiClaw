@@ -141,7 +141,7 @@ class PhysiClaw:
         saved_x, saved_y = arm.position()
 
         # Park stylus out of frame
-        ux, uy = arm.MOVE_DIRECTIONS['up']
+        ux, uy = arm.MOVE_DIRECTIONS['top']
         arm._fast_move(ux * self.PARK_DISTANCE, uy * self.PARK_DISTANCE)
 
         try:
