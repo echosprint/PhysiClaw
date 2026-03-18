@@ -7,15 +7,16 @@ Run after calibrate.py has completed successfully:
 
 import time
 
-from physiclaw.stylus_arm import StylusArm
+from physiclaw import PhysiClaw
 
 
 def main():
-    arm = StylusArm()
-    arm.setup()
-    arm.load_calibration()  # reads calibration.json
+    hw = PhysiClaw()
 
     try:
+        # hw.arm triggers lazy init (connects arm, identifies cameras, loads calibration)
+        arm = hw.arm
+
         # --- Example: unlock phone and open an app ---
 
         # 1. Tap center of screen to wake
@@ -65,9 +66,7 @@ def main():
         print("\n--- Demo complete ---")
 
     finally:
-        arm._pen_up()
-        arm._fast_move(0, 0)
-        arm.close()
+        hw.shutdown()
 
 
 if __name__ == "__main__":

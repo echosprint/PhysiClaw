@@ -17,12 +17,11 @@ Connect (Claude Desktop / Claude Code / OpenClaw):
 Hardware is initialized lazily on first tool call.
 """
 
-import cv2
+import atexit
+
 from mcp.server.fastmcp import FastMCP, Image
 
-from physiclaw.camera import Camera
-from physiclaw.vision import PhoneDetector
-from physiclaw.stylus_arm import StylusArm
+from physiclaw.core import PhysiClaw
 
 mcp = FastMCP(
     "physiclaw",
@@ -50,84 +49,10 @@ You control a real phone sitting on a desk — a top camera sees the screen, a s
 """,
 )
 
-
 # ─── Lazy hardware singleton ────────────────────────────────
 
-class PhysiClaw:
-    """Lazy-initialized hardware. First access triggers full setup."""
-
-    def __init__(self):
-        self._arm: StylusArm | None = None
-        self._top_cam: Camera | None = None
-        self._side_cam: Camera | None = None
-        self._ready = False
-
-    def _init(self):
-        if self._ready:
-            return
-
-        # 1. Connect GRBL arm
-        self._arm = StylusArm()
-        self._arm.setup()
-
-        # 2. Open cameras and identify top vs side
-        detector = PhoneDetector()
-        cameras = detector.identify_cameras()
-
-        if 'top' not in cameras:
-            raise RuntimeError("Top camera not found — is the phone under the camera?")
-
-        self._top_cam = Camera(cameras['top'])
-        if 'side' in cameras:
-            self._side_cam = Camera(cameras['side'])
-
-        # 3. Load calibration
-        self._arm.load_calibration()
-
-        self._ready = True
-
-    @property
-    def arm(self) -> StylusArm:
-        self._init()
-        assert self._arm is not None
-        return self._arm
-
-    @property
-    def top_cam(self) -> Camera:
-        self._init()
-        assert self._top_cam is not None
-        return self._top_cam
-
-    @property
-    def side_cam(self) -> Camera:
-        self._init()
-        if self._side_cam is None:
-            raise RuntimeError("Side camera not available")
-        return self._side_cam
-
-    def shutdown(self):
-        if self._arm:
-            self._arm._pen_up()
-            self._arm._fast_move(0, 0)
-            self._arm.close()
-        if self._top_cam:
-            self._top_cam.close()
-        if self._side_cam:
-            self._side_cam.close()
-
-
 physiclaw = PhysiClaw()
-
-
-# ─── Helper ─────────────────────────────────────────────────
-
-def _camera_to_image(cam: Camera) -> Image:
-    """Capture a frame and return as MCP Image."""
-    frame = cam.snapshot()
-    if frame is None:
-        raise RuntimeError("Camera capture failed")
-    _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-    return Image(data=jpeg.tobytes(), format="jpeg")
+atexit.register(physiclaw.shutdown)
 
 
 # ─── Tools ──────────────────────────────────────────────────
@@ -143,7 +68,8 @@ def screenshot_top() -> Image:
     Typical usage: call this at the start of each action cycle to understand what's on
     screen, and again after tap/swipe to verify the result.
     """
-    return _camera_to_image(physiclaw.top_cam)
+    frame = physiclaw.snapshot_top()
+    return Image(data=physiclaw.frame_to_jpeg(frame), format="jpeg")
 
 
 @mcp.tool()
@@ -156,7 +82,8 @@ def screenshot_side() -> Image:
     If the stylus is not over the right spot, call move() to adjust, then screenshot_side() again.
     Only proceed with tap/swipe once alignment is confirmed.
     """
-    return _camera_to_image(physiclaw.side_cam)
+    frame = physiclaw.snapshot_side()
+    return Image(data=physiclaw.frame_to_jpeg(frame), format="jpeg")
 
 
 @mcp.tool()
@@ -236,11 +163,7 @@ def swipe(direction: str, speed: str = "medium") -> str:
     return f"Swiped {direction} {speed}"
 
 
-# ─── Lifecycle ──────────────────────────────────────────────
-
-import atexit
-atexit.register(physiclaw.shutdown)
-
+# ─── Entry point ─────────────────────────────────────────────
 
 if __name__ == "__main__":
     import argparse

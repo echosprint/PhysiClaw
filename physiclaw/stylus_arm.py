@@ -15,14 +15,10 @@ After calibration, phone directions (right/left/up/down) are mapped
 to arm axes automatically. Z = Z_DOWN touches screen, Z = 0 lifts off.
 """
 
-import json
 import serial
 import time
-from pathlib import Path
 
 from physiclaw.serial_probe import detect_grbl
-
-CALIBRATION_PATH = Path(__file__).parent.parent / 'data' / 'calibration' / 'calibration.json'
 
 
 # ─── G-code templates ────────────────────────────────────────
@@ -60,7 +56,7 @@ class StylusArm:
     LONG_PRESS_DURATION = 1.2  # iOS/Android threshold ~500ms, 800~1000ms is safe
     LONG_PRESS_ADVANCE = 0.25  # mm extra Z to travel during long press hold
     SWIPE_DISTANCE = 15        # mm, default swipe length
-    MOVE_DIRECTIONS = None     # set by load_calibration() — maps phone directions to arm (x, y)
+    MOVE_DIRECTIONS = None     # set by set_direction_mapping() — maps phone directions to arm (x, y)
     MOVE_DISTANCES = {
         'large':  20,           # half the screen away
         'medium': 8,            # a few icons away
@@ -172,19 +168,6 @@ class StylusArm:
             'down-right': ( rx + dx,  ry + dy),
         }
 
-    def load_calibration(self, path=CALIBRATION_PATH):
-        """Load calibration data from file.
-        Must be called after setup() and before move()/tap()/swipe().
-        """
-        with open(path) as f:
-            cal = json.load(f)
-
-        self.Z_DOWN = cal['z_tap_mm']
-        self.set_direction_mapping(cal['right_vec'], cal['down_vec'])
-
-        print(f'Calibration loaded: Z={self.Z_DOWN} mm, '
-              f'right={cal["right_vec"]}, down={cal["down_vec"]}')
-
     def unlock(self):
         """Clear alarm lock.
 
@@ -266,7 +249,7 @@ class StylusArm:
         distance: 'large', 'medium', 'small', 'nudge'
         """
         if self.MOVE_DIRECTIONS is None:
-            raise RuntimeError('MOVE_DIRECTIONS not set — run load_calibration() first')
+            raise RuntimeError('MOVE_DIRECTIONS not set — run calibration first')
         mx, my = self.MOVE_DIRECTIONS[direction]
         d = self.MOVE_DISTANCES[distance]
         # Normalize diagonal vectors so actual distance matches intended distance

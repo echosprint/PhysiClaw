@@ -1,14 +1,9 @@
 """
-PhysiClaw stylus calibration.
+Calibration phase functions for PhysiClaw stylus arm.
 
-Open /pen-calib on the phone, position the stylus just above the center
-orange circle, then run:
-
-    uv run python -m physiclaw.calibrate [--camera INDEX]
-
-Note: On macOS, OpenCV won't trigger the camera permission dialog.
-If the camera returns blank frames, run `imagesnap` once first to
-grant camera access to your terminal app, then re-run this script.
+These are called by PhysiClaw.calibrate() in core.py.
+Each phase takes a StylusArm and Camera, runs probing/verification,
+and returns results. No orchestration or file I/O here.
 
 Phases (green flash = 1 success, each flash lasts 1 s):
   1. Probe Z depth for tap contact       (10 greens on center)
@@ -16,17 +11,12 @@ Phases (green flash = 1 success, each flash lasts 1 s):
   3. Probe 2 directions for phone-down   (3 greens on down circle)
   4. Verify long press                   (3 greens, hold 800 ms)
   5. Verify swipe                        (4 greens: up / down / right / left)
-
-Results are saved to data/calibration/calibration.json.
 """
 
-import argparse
-import json
-import sys
 import time
 
 from physiclaw.camera import Camera
-from physiclaw.stylus_arm import CALIBRATION_PATH, StylusArm
+from physiclaw.stylus_arm import StylusArm
 
 
 MAX_RETRIES = 20  # max attempts per phase before giving up
@@ -236,8 +226,8 @@ def phase3_down(stylus_arm: StylusArm, cam: Camera, z_tap: float, right_vec: tup
     time.sleep(0.5)
     move_xy(stylus_arm, 0, 0)
 
-    # Perpendicular to right_vec
-    rax, ray = right_vec
+    # Perpendicular to right_vec — only need to check which axis, not the sign
+    rax = right_vec[0]
     if rax != 0:
         # Right is along X axis → down must be along Y
         perp_dirs = [('Y+', 0, 1), ('Y-', 0, -1)]
@@ -334,79 +324,3 @@ def phase5_swipe(stylus_arm: StylusArm, cam: Camera) -> None:
         move_xy(stylus_arm, 0, 0)
 
     print("\n  Phase 5 done")
-
-
-# ─── Main ───────────────────────────────────────────────────────
-
-def main():
-    parser = argparse.ArgumentParser(description="PhysiClaw stylus calibration")
-    parser.add_argument("--camera", type=int, default=0,
-                        help="Top-camera device index (default: 0)")
-    parser.add_argument("--port", type=str, default=None,
-                        help="GRBL serial port (auto-detect if omitted)")
-    args = parser.parse_args()
-
-    cam = Camera(args.camera)
-    stylus_arm = StylusArm(args.port)
-    stylus_arm.setup()
-
-    try:
-        # Phase 1 — Z depth
-        z_tap = phase1_z(stylus_arm, cam)
-        if z_tap is None:
-            sys.exit(1)
-        stylus_arm.Z_DOWN = z_tap
-
-        # Phase 2 — find phone-right direction
-        right_result = phase2_right(stylus_arm, cam, z_tap)
-        if right_result is None:
-            sys.exit(1)
-
-        # Phase 3 — find phone-down direction
-        right_vec = (right_result[0], right_result[1])
-        down_result = phase3_down(stylus_arm, cam, z_tap, right_vec)
-        if down_result is None:
-            sys.exit(1)
-
-        # Phase 4 — long press verification
-        phase4_long_press(stylus_arm, cam)
-
-        # Phase 5 — swipe verification (uses public API)
-        rax, ray, r_dist = right_result
-        dax, day, d_dist = down_result
-        stylus_arm.set_direction_mapping((rax, ray), (dax, day))
-        phase5_swipe(stylus_arm, cam)
-
-        # ── Save results ─────────────────────────────────────
-        result = {
-            "z_tap_mm": z_tap,
-            "right_vec": [rax, ray],
-            "right_dist_mm": r_dist,
-            "down_vec": [dax, day],
-            "down_dist_mm": d_dist,
-            "screen_w_mm": round(r_dist / 0.12, 1),
-            "screen_h_mm": round(d_dist / 0.12, 1),
-        }
-        CALIBRATION_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with open(CALIBRATION_PATH, "w") as f:
-            json.dump(result, f, indent=2)
-
-        print("\n" + "=" * 50)
-        print("CALIBRATION COMPLETE")
-        print("=" * 50)
-        print(f"  Z tap depth:    {z_tap} mm")
-        print(f"  Phone right:    arm ({rax}, {ray}) × {r_dist} mm")
-        print(f"  Phone down:     arm ({dax}, {day}) × {d_dist} mm")
-        print(f"  Screen width:   ~{result['screen_w_mm']} mm")
-        print(f"  Screen height:  ~{result['screen_h_mm']} mm")
-        print(f"  Saved to {CALIBRATION_PATH}")
-
-    finally:
-        stylus_arm._pen_up()
-        stylus_arm._fast_move(0, 0)
-        stylus_arm.close()
-        cam.close()
-
-
-if __name__ == "__main__":
-    main()
