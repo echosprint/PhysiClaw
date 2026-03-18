@@ -96,7 +96,7 @@ class PhoneDetector:
 
         return True, best, [x1, y1, x2, y2]
 
-    def check_camera(self, camera_index: int = 0, save_crop: bool = False) -> bool:
+    def detect_from_camera(self, camera_index: int = 0, save_crop: bool = False) -> bool:
         """Grab a frame from the camera, save snapshot, and check for phone."""
         from datetime import datetime
         from camera import Camera
@@ -208,7 +208,7 @@ def main():
         if 'side' in cameras:
             print(f"  Side camera: index {cameras['side']}")
     else:
-        found = detector.check_camera(args.camera or 0)
+        found = detector.detect_from_camera(args.camera or 0)
         sys.exit(0 if found else 1)
 
 
