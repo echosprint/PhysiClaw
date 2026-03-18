@@ -87,26 +87,26 @@ class Camera:
         return frame
 
     def _fresh_frame(self):
-        """Flush buffered frames and return the latest one."""
+        """Flush buffered frames and return the latest one.
+
+        Auto-saves every frame to data/snapshot/ with timestamp.
+        """
         for _ in range(4):
             self.cap.grab()
         ret, frame = self.cap.read()
-        return frame if ret else None
+        if not ret or frame is None:
+            return None
+        SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
+        label = self.tag[0] if self.tag else str(self.index)
+        cv2.imwrite(str(SNAPSHOT_DIR / f'{ts}_{label}.jpg'), frame)
+        return frame
 
     def snapshot(self, path=None):
-        """Return a fresh BGR frame. Optionally save to path.
-
-        When tag is set, also saves to data/snapshot/ with timestamp.
-        """
+        """Return a fresh BGR frame. Optionally save to path."""
         frame = self._fresh_frame()
-        if frame is not None:
-            if path:
-                cv2.imwrite(path, frame)
-            SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
-            ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
-            label = self.tag[0] if self.tag else str(self.index)
-            save_path = SNAPSHOT_DIR / f'{ts}_{label}.jpg'
-            cv2.imwrite(str(save_path), frame)
+        if frame is not None and path:
+            cv2.imwrite(path, frame)
         return frame
 
     def is_green(self):
