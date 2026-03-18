@@ -6,6 +6,7 @@ Creating an instance connects hardware, identifies cameras, and runs calibration
 """
 
 import logging
+import threading
 
 import cv2
 
@@ -28,7 +29,17 @@ class PhysiClaw:
         self._top_cam: Camera | None = None
         self._side_cam: Camera | None = None
         self._detector: PhoneDetector | None = None
+        self._lock = threading.Lock()
         self._setup()
+
+    def acquire(self):
+        """Mark hardware as busy. Raises immediately if already busy."""
+        if not self._lock.acquire(blocking=False):
+            raise RuntimeError("PhysiClaw is busy — wait for the current operation to finish, then retry.")
+
+    def release(self):
+        """Mark hardware as idle."""
+        self._lock.release()
 
     # ─── Setup ────────────────────────────────────────────────
 

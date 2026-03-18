@@ -66,8 +66,12 @@ def screenshot_top() -> Image:
     Typical usage: call this at the start of each action cycle to understand what's on
     screen, and again after tap/swipe to verify the result.
     """
-    frame = physiclaw.snapshot_top()
-    return Image(data=physiclaw.frame_to_jpeg(frame), format="jpeg")
+    physiclaw.acquire()
+    try:
+        frame = physiclaw.snapshot_top()
+        return Image(data=physiclaw.frame_to_jpeg(frame), format="jpeg")
+    finally:
+        physiclaw.release()
 
 
 @mcp.tool()
@@ -80,8 +84,12 @@ def screenshot_side() -> Image:
     If the stylus is not over the right spot, call move() to adjust, then screenshot_side() again.
     Only proceed with tap/swipe once alignment is confirmed.
     """
-    frame = physiclaw.snapshot_side()
-    return Image(data=physiclaw.frame_to_jpeg(frame), format="jpeg")
+    physiclaw.acquire()
+    try:
+        frame = physiclaw.snapshot_side()
+        return Image(data=physiclaw.frame_to_jpeg(frame), format="jpeg")
+    finally:
+        physiclaw.release()
 
 
 @mcp.tool()
@@ -102,8 +110,12 @@ def move(direction: str, distance: str = "medium") -> str:
                   'small' (~3mm, one icon),
                   'nudge' (~1mm, fine-tune)
     """
-    physiclaw.arm.move(direction, distance)
-    return f"Moved {direction} {distance}"
+    physiclaw.acquire()
+    try:
+        physiclaw.arm.move(direction, distance)
+        return f"Moved {direction} {distance}"
+    finally:
+        physiclaw.release()
 
 
 @mcp.tool()
@@ -116,8 +128,12 @@ def tap() -> str:
     Always confirm alignment with screenshot_side() before tapping.
     After tapping, use screenshot_top() to verify the expected screen change.
     """
-    physiclaw.arm.tap()
-    return "Tapped"
+    physiclaw.acquire()
+    try:
+        physiclaw.arm.tap()
+        return "Tapped"
+    finally:
+        physiclaw.release()
 
 
 @mcp.tool()
@@ -127,8 +143,12 @@ def double_tap() -> str:
     Use for: zooming in (maps, photos, web pages), selecting a word in text, or any
     UI element that responds to double-tap.
     """
-    physiclaw.arm.double_tap()
-    return "Double tapped"
+    physiclaw.acquire()
+    try:
+        physiclaw.arm.double_tap()
+        return "Double tapped"
+    finally:
+        physiclaw.release()
 
 
 @mcp.tool()
@@ -138,8 +158,12 @@ def long_press() -> str:
     Use for: opening context menus, entering edit/selection mode, triggering drag-and-drop,
     selecting text, rearranging home screen icons, or any action that requires a sustained press.
     """
-    physiclaw.arm.long_press()
-    return "Long pressed"
+    physiclaw.acquire()
+    try:
+        physiclaw.arm.long_press()
+        return "Long pressed"
+    finally:
+        physiclaw.release()
 
 
 @mcp.tool()
@@ -157,8 +181,12 @@ def swipe(direction: str, speed: str = "medium") -> str:
                'medium' (normal swipe, ~100mm/s),
                'fast' (fling, page switch, quick dismiss)
     """
-    physiclaw.arm.swipe(direction, speed)
-    return f"Swiped {direction} {speed}"
+    physiclaw.acquire()
+    try:
+        physiclaw.arm.swipe(direction, speed)
+        return f"Swiped {direction} {speed}"
+    finally:
+        physiclaw.release()
 
 
 # ─── Start ───────────────────────────────────────────────────
