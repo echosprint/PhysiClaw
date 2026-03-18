@@ -14,3 +14,6 @@ wheels/
 
 # Machine-specific calibration
 calibration.json
+
+# Data (models, captures, etc.)
+data/
