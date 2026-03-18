@@ -18,8 +18,11 @@ to arm axes automatically. Z = Z_DOWN touches screen, Z = 0 lifts off.
 import json
 import serial
 import time
+from pathlib import Path
 
 from physiclaw.serial_probe import detect_grbl
+
+CALIBRATION_PATH = Path(__file__).parent.parent / 'data' / 'calibration' / 'calibration.json'
 
 
 # ─── G-code templates ────────────────────────────────────────
@@ -169,7 +172,7 @@ class StylusArm:
             'down-right': ( rx + dx,  ry + dy),
         }
 
-    def load_calibration(self, path='calibration.json'):
+    def load_calibration(self, path=CALIBRATION_PATH):
         """Load calibration data from file.
         Must be called after setup() and before move()/tap()/swipe().
         """

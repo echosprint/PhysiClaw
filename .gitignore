@@ -15,8 +15,5 @@ wheels/
 # Captured photos
 *.jpg
 
-# Machine-specific calibration
-calibration.json
-
-# Data (models, captures, etc.)
+# Data (models, calibration, captures — all machine-specific)
 data/

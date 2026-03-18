@@ -17,7 +17,7 @@ Phases (green flash = 1 success, each flash lasts 1 s):
   4. Verify long press                   (3 greens, hold 800 ms)
   5. Verify swipe                        (4 greens: up / down / right / left)
 
-Results are saved to calibration.json.
+Results are saved to data/calibration/calibration.json.
 """
 
 import argparse
@@ -26,7 +26,7 @@ import sys
 import time
 
 from physiclaw.camera import Camera
-from physiclaw.stylus_arm import StylusArm
+from physiclaw.stylus_arm import CALIBRATION_PATH, StylusArm
 
 
 MAX_RETRIES = 20  # max attempts per phase before giving up
@@ -387,7 +387,8 @@ def main():
             "screen_w_mm": round(r_dist / 0.12, 1),
             "screen_h_mm": round(d_dist / 0.12, 1),
         }
-        with open("calibration.json", "w") as f:
+        CALIBRATION_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(CALIBRATION_PATH, "w") as f:
             json.dump(result, f, indent=2)
 
         print("\n" + "=" * 50)
@@ -398,7 +399,7 @@ def main():
         print(f"  Phone down:     arm ({dax}, {day}) × {d_dist} mm")
         print(f"  Screen width:   ~{result['screen_w_mm']} mm")
         print(f"  Screen height:  ~{result['screen_h_mm']} mm")
-        print(f"  Saved to calibration.json")
+        print(f"  Saved to {CALIBRATION_PATH}")
 
     finally:
         stylus_arm._pen_up()
