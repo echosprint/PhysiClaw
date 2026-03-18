@@ -206,6 +206,9 @@ logging.basicConfig(
 physiclaw = PhysiClaw()
 atexit.register(physiclaw.shutdown)
 
+mcp.settings.host = args.host
+mcp.settings.port = args.port
+
 log = logging.getLogger(__name__)
 log.info(f"PhysiClaw MCP server on http://{args.host}:{args.port}/mcp")
-mcp.run(transport="streamable-http", host=args.host, port=args.port)
+mcp.run(transport="streamable-http")
