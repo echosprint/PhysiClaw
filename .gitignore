@@ -11,3 +11,6 @@ wheels/
 
 # Captured photos
 *.jpg
+
+# Machine-specific calibration
+calibration.json
