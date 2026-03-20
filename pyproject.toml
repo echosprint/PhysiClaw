@@ -7,5 +7,5 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = ["pyserial>=3.5", "opencv-python>=4.8", "numpy>=1.26", "mcp[cli]>=1.2"]
 
-[project.optional-dependencies]
-dev = ["trimesh>=4.0"]
+[dependency-groups]
+stylus = ["manifold3d>=3.4.0", "trimesh>=4.11.4"]
