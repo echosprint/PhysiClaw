@@ -265,6 +265,29 @@ wheels = [
 ]
 
 [[package]]
+name = "manifold3d"
+version = "3.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/8e/9e/9702035bf5bfcd16933b4ab1cbd7a56750c13e22a06a96e83139ad2b3cf9/manifold3d-3.4.0.tar.gz", hash = "sha256:4e082bdac4b842ec8c009adac38f502f2a8e1527643b239a725987fcf595b3c2", size = 271054, upload-time = "2026-02-27T10:40:58.262Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6b/17/4d1456524c0ebb703a10724f1335445695b7cd4ab8e5acb95d33bc951040/manifold3d-3.4.0-cp312-cp312-macosx_10_14_universal2.whl", hash = "sha256:fbcc41355303da4d03492f70cc99b0fad14cfed1872fed9dfd0c798450181278", size = 1780103, upload-time = "2026-02-27T10:40:20.901Z" },
+    { url = "https://files.pythonhosted.org/packages/53/af/194fbaaa648a8747ac0d44715d073124a2e45b330e4d52abf4f8e7b37b5e/manifold3d-3.4.0-cp312-cp312-macosx_10_14_x86_64.whl", hash = "sha256:beefe63c3ad0ff8f818a5668a70e8b8f193d3c21c2b22fab0cd44e24ac834207", size = 973977, upload-time = "2026-02-27T10:40:22.267Z" },
+    { url = "https://files.pythonhosted.org/packages/6d/de/ffb52145c114abeafdd1e9556b901a2875357fc6690e63209b5bb245e716/manifold3d-3.4.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:89d64cc7941a9cce683ccf045b5d213a383e8787797d00f32acaff8754c04249", size = 854220, upload-time = "2026-02-27T10:40:23.584Z" },
+    { url = "https://files.pythonhosted.org/packages/ec/71/c07f536b8052f39d861256e11e865c11896df1e11876b96b92a344fea88e/manifold3d-3.4.0-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:28981d5894f19c8133bfe937fab29a61f1fc3ef23c3937f564f09dde8f71f796", size = 1221780, upload-time = "2026-02-27T10:40:25.012Z" },
+    { url = "https://files.pythonhosted.org/packages/77/6a/8905bd7309943cb038e0ebd82b5ee63e9729cded5fa86981d5b3179c953b/manifold3d-3.4.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:09e2ef5f7025e0435ac1a4a3e5f27401d40ccdca8e9cd15f3777c22579600746", size = 1393359, upload-time = "2026-02-27T10:40:26.373Z" },
+    { url = "https://files.pythonhosted.org/packages/80/56/b0e8310e777f615d1f1a1d688dbbb70d820738b0d9bc73377422c2c3701d/manifold3d-3.4.0-cp312-cp312-win_amd64.whl", hash = "sha256:8005dee023bf5022fc22bae8ec6c9e32692124c83f3b6acb95cf6a707d0999cc", size = 992756, upload-time = "2026-02-27T10:40:28.06Z" },
+    { url = "https://files.pythonhosted.org/packages/e9/12/0a188a94834bf381992432f0d731f36490a7934a7e1d06c3361f9b382c2d/manifold3d-3.4.0-cp313-cp313-macosx_10_14_universal2.whl", hash = "sha256:9914a35ffb5c86c0b5ea763e29129d6ab3786c7fda578bbde71052fbc1c819d9", size = 1779739, upload-time = "2026-02-27T10:40:29.783Z" },
+    { url = "https://files.pythonhosted.org/packages/68/d0/b1b5a1dc4db9e4ce844d025a72777a5a2251a33c5a84cff7e64ed9425373/manifold3d-3.4.0-cp313-cp313-macosx_10_14_x86_64.whl", hash = "sha256:f2e122d5b19f206c53f867c859889a028c5158c17e8ebbb84b0894fd796ea4c6", size = 973958, upload-time = "2026-02-27T10:40:32.663Z" },
+    { url = "https://files.pythonhosted.org/packages/f2/b3/47473d3f3bda127569e9615416ff24b1049b74cc08540572a9747e00bbe0/manifold3d-3.4.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:aec501843d32c3d752d0f6cb46957ce034099dcf91a112d6fed6328536d30a48", size = 854064, upload-time = "2026-02-27T10:40:34.31Z" },
+    { url = "https://files.pythonhosted.org/packages/cc/ba/54b4270d0b3deefaca0d04842e50a0fc567643f0b91a0dde4f18beab9ab9/manifold3d-3.4.0-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:358ff55c81bd1e0b01d8ec72c4912f362273ada10432b7329e823b1b63a008e1", size = 1221675, upload-time = "2026-02-27T10:40:35.656Z" },
+    { url = "https://files.pythonhosted.org/packages/44/29/c89ab58a20965d630df347999b55306b146473cadd0fb8b7879c85ca7a54/manifold3d-3.4.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:ecedb5cba8a604869451730ea9c4f933d477a3deaed8267093bd3294fc320772", size = 1393418, upload-time = "2026-02-27T10:40:37.133Z" },
+    { url = "https://files.pythonhosted.org/packages/7f/8e/13e4564898f15d16a4081aba6397597de319f993ed43181aa5e324bf05db/manifold3d-3.4.0-cp313-cp313-win_amd64.whl", hash = "sha256:fb530756a54a0a19ff732f35df130ec304db233dbc8d2fcef5a4818fa657b0a6", size = 992597, upload-time = "2026-02-27T10:40:38.507Z" },
+]
+
+[[package]]
 name = "markdown-it-py"
 version = "4.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -406,12 +429,24 @@ dependencies = [
     { name = "pyserial" },
 ]
 
+[package.dev-dependencies]
+stylus = [
+    { name = "manifold3d" },
+    { name = "trimesh" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "mcp", extras = ["cli"], specifier = ">=1.2" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "opencv-python", specifier = ">=4.8" },
     { name = "pyserial", specifier = ">=3.5" },
+]
+
+[package.metadata.requires-dev]
+stylus = [
+    { name = "manifold3d", specifier = ">=3.4.0" },
+    { name = "trimesh", specifier = ">=4.11.4" },
 ]
 
 [[package]]
@@ -730,6 +765,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c4/68/79977123bb7be889ad680d79a40f339082c1978b5cfcf62c2d8d196873ac/starlette-0.52.1.tar.gz", hash = "sha256:834edd1b0a23167694292e94f597773bc3f89f362be6effee198165a35d62933", size = 2653702, upload-time = "2026-01-18T13:34:11.062Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/81/0d/13d1d239a25cbfb19e740db83143e95c772a1fe10202dda4b76792b114dd/starlette-0.52.1-py3-none-any.whl", hash = "sha256:0029d43eb3d273bc4f83a08720b4912ea4b071087a3b48db01b7c839f7954d74", size = 74272, upload-time = "2026-01-18T13:34:09.188Z" },
+]
+
+[[package]]
+name = "trimesh"
+version = "4.11.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/1c/6c/57a77091f42c4fe3246810c8878b1f08c65944432bb856e1b797e960c822/trimesh-4.11.4.tar.gz", hash = "sha256:9c3bf253f8b21978e905c2f2fa361621415a6dfaac6b7fdaa54ef3f7f66b8c79", size = 836069, upload-time = "2026-03-18T22:59:11.357Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/74/3a/0b9fb22a6c34cff36d70d1eb83bf61540aa2d7ced0f5ee023eb2123c3aa2/trimesh-4.11.4-py3-none-any.whl", hash = "sha256:7606a3be929ced36a3bbda8044d675510c46f83fe675fd9a354b5cf13f7db7ae", size = 740767, upload-time = "2026-03-18T22:59:09.45Z" },
 ]
 
 [[package]]
