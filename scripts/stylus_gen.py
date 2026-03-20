@@ -1,6 +1,6 @@
 """Generate a 3D-printable stylus holder with cap, handle, cone, and clamp.
 
-Dependencies: trimesh, manifold3d (boolean engine for trimesh)
+Usage: uv run --group stylus scripts/stylus_gen.py
 
 To fit a different stylus tip, change TIP_OD, TIP_ID, and TIP_H below:
   TIP_OD — outer diameter of the stylus tip (the cap grips around this)
@@ -16,7 +16,7 @@ try:
     import trimesh
 except ImportError:
     raise SystemExit(
-        "Missing dependencies. Install with:\n  uv sync --group stylus"
+        "Missing dependencies. Run with:\n  uv run --group stylus scripts/stylus_gen.py"
     )
 
 SEGMENTS = 64  # mesh resolution (number of circular sections)
