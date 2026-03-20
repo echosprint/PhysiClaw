@@ -12,7 +12,12 @@ import math
 import os
 from functools import reduce
 
-import trimesh
+try:
+    import trimesh
+except ImportError:
+    raise SystemExit(
+        "Missing dependencies. Install with:\n  uv sync --group stylus"
+    )
 
 SEGMENTS = 64  # mesh resolution (number of circular sections)
 
