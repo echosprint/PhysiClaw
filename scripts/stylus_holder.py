@@ -1,6 +1,6 @@
 """
-Stylus Holder Assembly v4:
-- Steel rod φ2.5mm, 70mm long (horizontal)
+Stylus Holder Assembly:
+- Steel rod φ2.5mm, 75mm long (horizontal)
 - Left end: threaded M3 section (φ3mm, 5mm long, going UP) — no head
 - Right end: inserts into tube (OD 9mm, ID 7mm, 100mm, open both ends)
 """
