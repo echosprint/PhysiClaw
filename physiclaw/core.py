@@ -11,6 +11,7 @@ import threading
 import cv2
 
 from physiclaw.camera import Camera
+from physiclaw.grid_calibrate import GridCalibration
 from physiclaw.stylus_arm import StylusArm
 from physiclaw.vision import PhoneDetector
 
@@ -28,6 +29,9 @@ class PhysiClaw:
         self._arm: StylusArm | None = None
         self._cam: Camera | None = None
         self._detector: PhoneDetector | None = None
+        self._grid_cal: GridCalibration | None = None
+        self._pending_bbox: dict | None = None
+        self._confirmed_bbox: dict | None = None
         self._lock = threading.Lock()
         self._setup()
 
@@ -67,15 +71,16 @@ class PhysiClaw:
     # ─── Calibration ───────────────────────────────────────────
 
     def calibrate(self):
-        """Run the full 5-phase calibration workflow.
+        """Run the full 6-phase calibration workflow.
 
-        Uses the camera to detect green flashes during probing.
-        Sets Z depth and axis mapping directly on the arm instance.
+        Phases 1-5: Z depth, direction mapping, gesture verification.
+        Phase 6: Grid calibration for coordinate-based tapping.
         """
         from physiclaw.calibrate import (
             phase1_z, phase2_right, phase3_down,
             phase4_long_press, phase5_swipe,
         )
+        from physiclaw.grid_calibrate import phase6_grid
 
         arm = self._arm
         cam = self._cam
@@ -103,6 +108,12 @@ class PhysiClaw:
         log.info(f"Calibration complete — Z={z_tap}mm, "
                  f"right=({rax},{ray}), down=({dax},{day})")
 
+        # Phase 6 — grid calibration for coordinate-based tapping
+        # The pen-calib page shows the red dot grid after phases 1-5
+        arm._fast_move(0, 0)
+        arm.wait_idle()
+        self._grid_cal = phase6_grid(arm, cam, (rax, ray), (dax, day))
+
     # ─── Properties ────────────────────────────────────────────
 
     @property
@@ -112,6 +123,39 @@ class PhysiClaw:
     @property
     def cam(self) -> Camera:
         return self._cam
+
+    # ─── Bbox state management ────────────────────────────────
+
+    def set_pending_bbox(self, left: float, right: float,
+                         top: float, bottom: float):
+        """Store a pending bbox from bbox_target. Clears any confirmed bbox."""
+        self._pending_bbox = {
+            'left': left, 'right': right, 'top': top, 'bottom': bottom,
+        }
+        self._confirmed_bbox = None
+
+    def confirm_bbox(self):
+        """Lock in the pending bbox for the next gesture."""
+        if self._pending_bbox is None:
+            raise RuntimeError("No pending bbox — call bbox_target first")
+        self._confirmed_bbox = self._pending_bbox
+        self._pending_bbox = None
+
+    def consume_confirmed_bbox(self) -> dict | None:
+        """Return and clear the confirmed bbox. Returns None if none."""
+        bbox = self._confirmed_bbox
+        self._confirmed_bbox = None
+        return bbox
+
+    def move_to_bbox_center(self, bbox: dict):
+        """Move arm to the center of a bbox using grid calibration."""
+        if self._grid_cal is None:
+            raise RuntimeError("Grid calibration not done")
+        cx, cy = self._grid_cal.bbox_center_pct(
+            bbox['left'], bbox['right'], bbox['top'], bbox['bottom'])
+        gx, gy = self._grid_cal.pct_to_grbl_mm(cx, cy)
+        self._arm._fast_move(gx, gy)
+        self._arm.wait_idle()
 
     # ─── Snapshot helpers ──────────────────────────────────────
 
@@ -127,6 +171,16 @@ class PhysiClaw:
         frame = self.cam.snapshot()
         if frame is None:
             raise RuntimeError("Camera capture failed")
+        return frame
+
+    def screenshot_with_bbox(self, left: float, right: float,
+                             top: float, bottom: float):
+        """Take a fresh screenshot and draw a green bbox rectangle on it."""
+        frame = self.screenshot()
+        if self._grid_cal is None:
+            raise RuntimeError("Grid calibration not done")
+        tl, br = self._grid_cal.bbox_to_pixel_rect(left, right, top, bottom)
+        cv2.rectangle(frame, tl, br, (0, 255, 0), 2)
         return frame
 
     def park(self):

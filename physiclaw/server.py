@@ -59,6 +59,20 @@ You control a real phone sitting on a desk — a camera sees the screen from dir
 - If you can still clearly see the target icon/button, the tip is NOT aligned — keep moving. The tip is aligned only when it hides the target from view.
 - Use move() to incrementally approach the target — start with 'large' or 'medium', refine with 'small' and 'nudge'.
 - After any tap/swipe, park() + screenshot() to confirm the expected screen change happened.
+
+## Coordinate-based targeting (preferred — faster)
+
+Instead of iterative move+check, you can target screen elements by bounding box:
+
+1. park() + screenshot() — see the full screen
+2. Identify the target's position as screen percentages (0=left/top edge, 100=right/bottom edge)
+3. bbox_target(left, right, top, bottom) — draws a green rectangle on a fresh photo, saves the bbox
+4. Verify the green rectangle covers the intended element. If not, call bbox_target() again with corrected percentages.
+5. confirm_bbox() — lock in the target
+6. tap() / double_tap() / long_press() / swipe() — the gesture auto-moves to the bbox center first
+7. park() + screenshot() — verify the result
+
+This is much faster than the move+check workflow since the arm moves directly to the target.
 """,
 )
 
@@ -94,6 +108,56 @@ def park() -> str:
         return "Stylus parked out of frame"
     finally:
         physiclaw.release()
+
+
+@mcp.tool()
+def bbox_target(left: int, right: int, top: int, bottom: int) -> Image:
+    """Target a screen region by bounding box using screen percentages (0-100).
+
+    Takes a fresh screenshot and draws a green rectangle at the specified position.
+    Use this to verify your target estimate before tapping.
+
+    Call bbox_target() again with corrected values if the rectangle is off.
+    When the rectangle covers the target, call confirm_bbox() to lock it in,
+    then tap() / swipe() / etc. will auto-move to the bbox center.
+
+    Args:
+        left: left edge (0=left edge of screen, 100=right edge)
+        right: right edge
+        top: top edge (0=top of screen, 100=bottom)
+        bottom: bottom edge
+    """
+    physiclaw.acquire()
+    try:
+        physiclaw.park()
+        frame = physiclaw.screenshot_with_bbox(left, right, top, bottom)
+        physiclaw.set_pending_bbox(left, right, top, bottom)
+        return Image(data=physiclaw.frame_to_jpeg(frame), format="jpeg")
+    finally:
+        physiclaw.release()
+
+
+@mcp.tool()
+def confirm_bbox() -> str:
+    """Confirm the bounding box from the last bbox_target() call.
+
+    After confirmation, the next gesture call (tap, double_tap, long_press, swipe)
+    will automatically move the stylus to the bbox center before executing.
+    The bbox is cleared after the gesture executes.
+    """
+    physiclaw.acquire()
+    try:
+        physiclaw.confirm_bbox()
+        return "Bbox confirmed — next gesture will target this location"
+    finally:
+        physiclaw.release()
+
+
+def _maybe_move_to_bbox():
+    """If a bbox is confirmed, move arm to its center and clear it."""
+    bbox = physiclaw.consume_confirmed_bbox()
+    if bbox is not None:
+        physiclaw.move_to_bbox_center(bbox)
 
 
 @mcp.tool()
@@ -133,6 +197,7 @@ def tap() -> str:
     """
     physiclaw.acquire()
     try:
+        _maybe_move_to_bbox()
         physiclaw.arm.tap()
         return "Tapped"
     finally:
@@ -148,6 +213,7 @@ def double_tap() -> str:
     """
     physiclaw.acquire()
     try:
+        _maybe_move_to_bbox()
         physiclaw.arm.double_tap()
         return "Double tapped"
     finally:
@@ -163,6 +229,7 @@ def long_press() -> str:
     """
     physiclaw.acquire()
     try:
+        _maybe_move_to_bbox()
         physiclaw.arm.long_press()
         return "Long pressed"
     finally:
@@ -186,6 +253,7 @@ def swipe(direction: str, speed: str = "medium") -> str:
     """
     physiclaw.acquire()
     try:
+        _maybe_move_to_bbox()
         physiclaw.arm.swipe(direction, speed)
         return f"Swiped {direction} {speed}"
     finally:
