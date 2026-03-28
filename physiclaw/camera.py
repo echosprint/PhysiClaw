@@ -97,8 +97,7 @@ class Camera:
             return None
         SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
         ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
-        label = str(self.index)
-        cv2.imwrite(str(SNAPSHOT_DIR / f'{ts}_{label}.jpg'), frame)
+        cv2.imwrite(str(SNAPSHOT_DIR / f'{ts}.jpg'), frame)
         return frame
 
     def snapshot(self, path=None):
