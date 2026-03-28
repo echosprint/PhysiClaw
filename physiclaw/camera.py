@@ -51,7 +51,6 @@ class Camera:
 
     def __init__(self, index=0):
         self.index = index
-        self.tag = None  # set after camera identification ('top' or 'side')
         self.cap = cv2.VideoCapture(index)
 
         # If cv2 fails, try triggering macOS permission via imagesnap
@@ -98,7 +97,7 @@ class Camera:
             return None
         SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
         ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
-        label = self.tag[0] if self.tag else str(self.index)
+        label = str(self.index)
         cv2.imwrite(str(SNAPSHOT_DIR / f'{ts}_{label}.jpg'), frame)
         return frame
 

@@ -1,16 +1,9 @@
 """
-Vision module — phone detection and camera identification.
+Vision module — phone detection and camera discovery.
 
 Uses YOLOX Nano (COCO class 67 = cell phone) via cv2.dnn to:
   1. Check if a phone is placed on the platform
-  2. Identify which camera is top (looking down) vs side (~45°)
-
-Camera differentiation strategy:
-  - Scan all cameras, detect phone presence in each frame
-  - Cameras that don't see a phone are skipped (built-in, unplugged, etc.)
-  - Among cameras that see a phone, classify by bounding-box aspect ratio:
-      top camera  → sees phone face-on → ratio ~1.5-2.5 (natural phone shape)
-      side camera → sees phone at ~45°  → perspective squash → ratio > 2.5 or < 1.5
+  2. Find the camera that can see the phone
 """
 
 import logging
@@ -40,7 +33,7 @@ def _download_model(path: Path):
 
 
 class PhoneDetector:
-    """Detect phone presence and identify cameras using YOLOX Nano."""
+    """Detect phone presence and find camera using YOLOX Nano."""
 
     def __init__(self, model_path: Path = MODEL_PATH):
         if not model_path.exists():
@@ -140,10 +133,7 @@ class PhoneDetector:
 
         detected, conf, bbox = self.detect(frame)
         if detected:
-            ratio = self.bbox_aspect_ratio(bbox)
-            view = self.classify_view(ratio)
-            log.debug(f"Phone detected ({conf:.0%})  bbox: {[round(v) for v in bbox]}  "
-                      f"ratio: {ratio:.2f}  view: {view}")
+            log.debug(f"Phone detected ({conf:.0%})  bbox: {[round(v) for v in bbox]}")
             if save_crop:
                 h, w = frame.shape[:2]
                 x1 = max(0, int(bbox[0]))
@@ -158,39 +148,13 @@ class PhoneDetector:
             log.debug(f"No phone detected (best: {conf:.0%})")
         return detected
 
-    @staticmethod
-    def bbox_aspect_ratio(bbox: list) -> float:
-        """max(w, h) / min(w, h) — always >= 1, orientation-independent."""
-        w = bbox[2] - bbox[0]
-        h = bbox[3] - bbox[1]
-        if w <= 0 or h <= 0:
-            return 0
-        return max(w, h) / min(w, h)
+    def find_camera(self, max_index: int = 8) -> int | None:
+        """Scan cameras and return the index of the first one that sees a phone.
 
-    @staticmethod
-    def classify_view(ratio: float) -> str:
-        """Classify camera view based on phone bbox aspect ratio.
-        Top camera:  sees phone face-on → ratio ~1.5-2.5 (natural phone shape)
-        Side camera: sees phone at 45° → perspective distortion → ratio > 2.5 or < 1.5
+        Skips cameras that fail to open or don't detect a phone (e.g. laptop webcam).
+        Returns None if no camera sees a phone.
         """
-        if 1.5 <= ratio <= 2.5:
-            return 'top'
-        return 'side'
-
-    def identify_cameras(self, max_index: int = 8) -> dict[str, int]:
-        """Scan cameras, skip built-in laptop camera, identify top vs side.
-
-        Strategy:
-          1. Scan all cameras, detect phone in each frame
-          2. Stop after finding 2 cameras that see the phone
-          3. Classify by bbox aspect ratio (top vs side)
-          4. If both get the same classification, force the other role
-             on the second one — there are only two cameras, one must be each
-
-        Returns {'top': index, 'side': index} — may be partial if a camera is missing.
-        """
-        log.debug("Identifying cameras...")
-        candidates = []  # (index, view) for cameras that detect a phone
+        log.debug("Scanning for camera that sees the phone...")
 
         for i in range(max_index):
             try:
@@ -203,59 +167,12 @@ class PhoneDetector:
             if frame is None:
                 continue
 
-            detected, conf, bbox = self.detect(frame)
-            if not detected:
-                log.debug(f"  Camera {i}: no phone detected ({conf:.0%})")
-                continue
+            detected, conf, _ = self.detect(frame)
+            if detected:
+                log.info(f"Camera {i}: phone detected ({conf:.0%})")
+                return i
+            else:
+                log.debug(f"Camera {i}: no phone detected ({conf:.0%})")
 
-            ratio = self.bbox_aspect_ratio(bbox)
-            view = self.classify_view(ratio)
-            log.debug(f"  Camera {i}: phone detected ({conf:.0%})  "
-                      f"ratio: {ratio:.2f} → {view}")
-            candidates.append((i, view))
-
-            if len(candidates) == 2:
-                break
-
-        if not candidates:
-            log.warning("No phone detected on any camera — is the phone on the platform?")
-            return {}
-
-        # Build result — if one is classified, the other gets the remaining role
-        result = {}
-        if len(candidates) == 2:
-            i0, v0 = candidates[0]
-            i1, v1 = candidates[1]
-
-            if v0 and v1 and v0 != v1:
-                # Both detected, different views — ideal
-                result[v0] = i0
-                result[v1] = i1
-            elif v0 and v1:
-                # Both detected, same view — force the other role on second
-                other = 'side' if v0 == 'top' else 'top'
-                result[v0] = i0
-                result[other] = i1
-                log.debug(f"  Camera {i1}: reassigned to {other}")
-            elif v0:
-                # Only first detected
-                other = 'side' if v0 == 'top' else 'top'
-                result[v0] = i0
-                result[other] = i1
-            elif v1:
-                # Only second detected
-                other = 'side' if v1 == 'top' else 'top'
-                result[v1] = i1
-                result[other] = i0
-        elif len(candidates) == 1:
-            i0, v0 = candidates[0]
-            if v0:
-                result[v0] = i0
-
-        if not result:
-            log.warning("No phone detected on any camera — is the phone on the platform?")
-        else:
-            summary = ', '.join(f'{v}=camera {i}' for v, i in sorted(result.items()))
-            log.info(f"Cameras identified: {summary}")
-
-        return result
+        log.warning("No phone detected on any camera — is the phone on the platform?")
+        return None

@@ -2,31 +2,31 @@
 
 **What if an AI agent could use your phone — just like you do?**
 
-PhysiClaw gives AI agents a pair of eyes (camera) and a finger (robotic arm) to physically operate any phone. It looks at the screen, decides what to do, and taps.
+PhysiClaw gives AI agents an eye (camera) and a finger (robotic arm) to physically operate any phone. It looks at the screen, decides what to do, and taps.
 
 Order food delivery. Check your email. Shop for groceries. Book a hotel. Any app, any phone, iOS or Android.
 
 No OAuth tokens. No ADB cables. No APIs. No app to install. No developer setup.
 Just unlock your phone, put it on the desk, and let the agent work.
 
-The tradeoff? PhysiClaw needs hardware: an embedded system running GRBL/grblHAL firmware to control a gantry (X/Y) and stylus (Z), plus two USB cameras. A compact desktop rig that gives your AI agent physical presence.
+The tradeoff? PhysiClaw needs hardware: an embedded system running GRBL/grblHAL firmware to control a gantry (X/Y) and stylus (Z), plus a USB camera. A compact desktop rig that gives your AI agent physical presence.
 
 ## How It Works
 
 ```text
- Top Camera ──→ AI Agent ──→ 3-Axis Arm ──→ Side Camera ──→ Aligned?
- (read screen)  (decide)     (move stylus)   (check pos)     │
-      ▲                                                  Yes │ No
-      │                                                   │  │
-      │         Touch Phone ◄─────────────────────────────┘  │
-      │              │                                       │
-      └──────────────┘ (next action)         adjust & retry ◄┘
+ Camera ──→ AI Agent ──→ 3-Axis Arm ──→ Camera ──→ Aligned?
+ (read screen) (decide)   (move stylus)  (check pos)   │
+      ▲                                            Yes │ No
+      │                                             │  │
+      │       Touch Phone ◄─────────────────────────┘  │
+      │            │                                    │
+      └────────────┘ (next action)       adjust & retry ◄┘
 ```
 
-Two cameras, two perspectives:
+One camera, two modes:
 
-- **Top camera** looks straight down at the screen — reads what's on it
-- **Side camera** views from ~45° — checks where the stylus tip is relative to the screen before tapping
+- **Park + screenshot** — stylus parked away, clear view of the full screen to read content
+- **Screenshot** — stylus visible in frame, check its position relative to the target
 - **Stylus** moves on X/Y to reach any point, up/down (Z) to touch or release
 
 The loop is simple: **look → think → move → confirm → touch → repeat**.
@@ -58,23 +58,22 @@ One setup. Every app. Just put an unlocked phone on the desk.
 │     PhysiClaw MCP Server (Python)     │
 │                                       │
 │  Tools:                               │
-│   · screenshot_top   (top camera)     │
-│   · screenshot_side  (side camera)    │
+│   · screenshot       (camera)         │
+│   · park             (retract)        │
 │   · move             (X/Y plane)      │
 │   · tap / swipe      (Z down + move)  │
-│   · park             (retract)        │
 └──────────┬────────────────┬───────────┘
            │                │
-     USB Cameras      USB Serial (GRBL)
+       USB Camera     USB Serial (GRBL)
            │                │
            ▼                ▼
     ┌────────────┐   ┌───────────────┐
-    │ Top Camera │   │ GRBL Board    │
-    │ (screen)   │   │ (embedded)    │
-    ├────────────┤   │ X/Y gantry    │
-    │ Side Camera│   │ Z stylus      │
-    │ (stylus)   │   └──────┬────────┘
-    └────────────┘          │ touch
+    │   Camera   │   │ GRBL Board    │
+    │  (above)   │   │ (embedded)    │
+    │            │   │ X/Y gantry    │
+    │            │   │ Z stylus      │
+    └────────────┘   └──────┬────────┘
+                            │ touch
                             ▼
                    ┌─────────────────┐
                    │  Phone          │
@@ -89,18 +88,16 @@ One setup. Every app. Just put an unlocked phone on the desk.
 | Component | Item | Qty | Est. Price |
 | --------- | ---- | --- | ---------- |
 | **GRBL Arm** | [Paixi Kuaichaobao pen plotter P25](https://e.tb.cn/h.ifgckUqg9Zmph9n?tk=cxpFUxr6Z5C) (X/Y gantry + Z servo) | 1 | ~$80 |
-| **Top Camera** | UGREEN 1080P USB camera, fixed focus | 1 | ~$14 |
-| **Side Camera** | UGREEN 1080P USB camera (same) | 1 | ~$14 |
+| **Camera** | UGREEN 1080P USB camera, fixed focus | 1 | ~$14 |
 | **Stylus** | Capacitive stylus, conductive fiber tip 8-10mm | 1 | ~$1.5 |
-| Camera mount | Gooseneck desk clamp, metal, 50cm | 2 | ~$4 |
+| Camera mount | Gooseneck desk clamp, metal, 50cm | 1 | ~$2 |
 | Phone mount | Anti-slip pad + L-shaped blocks | 1 set | ~$1.2 |
 | USB Hub | USB 3.0 Hub (extend Mac USB ports) | 1 | ~$13 |
-| **Total (excluding computer)** | | | **~$127** |
+| **Total (excluding computer)** | | | **~$112** |
 
 ### Camera Setup
 
-- **Top camera:** straight above the screen center, ~25cm distance, reads screen content
-- **Side camera:** ~45° angle, like a human sitting at the desk looking at the phone — easily checks where the stylus tip is relative to the screen
+- **Camera:** straight above the screen center, ~25cm distance, reads screen content and checks stylus position
 
 ### Phone Mounting
 
@@ -167,10 +164,13 @@ Mac / Windows / Linux (Raspberry Pi) all supported. The only platform difference
 
 ```text
 physiclaw/
-├── physiclaw_server.py   # MCP Server entry point, exposes tools
-├── hand.py               # Serial G-code control for motors and servo
-├── eyes.py               # Two USB cameras for photo capture
-└── config.py             # Serial port, servo angles, distance mapping constants
+├── server.py         # MCP Server entry point, exposes tools
+├── core.py           # Central orchestrator (arm + camera + calibration)
+├── stylus_arm.py     # GRBL G-code controller (tap, swipe, move)
+├── camera.py         # USB camera capture and green flash detection
+├── vision.py         # YOLOX phone detection and camera discovery
+├── calibrate.py      # 5-phase calibration workflow
+└── serial_probe.py   # Auto-detect GRBL serial port
 ```
 
 ## Operation
@@ -192,15 +192,15 @@ The AI agent does not output coordinates — only direction and distance level. 
 
 ```text
 1. park()              → Retract stylus out of frame
-2. screenshot_top()    → Clean screenshot, AI sees screen content
+2. screenshot()        → Clean screenshot, AI sees screen content
 3. AI decides          → e.g. "move down-right, large"
 4. move(dir, dist)     → Stylus moves toward target
-5. screenshot_side()   → AI checks stylus position
+5. screenshot()        → AI checks stylus position (stylus visible)
 6. Aligned?
    → No:  back to step 3 (AI re-evaluates and adjusts)
    → Yes: tap()  → Stylus touches screen
 7. park()              → Retract stylus out of frame
-8. screenshot_top()    → Verify result, continue next action
+8. screenshot()        → Verify result, continue next action
 ```
 
 ### Gesture Implementation

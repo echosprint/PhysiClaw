@@ -297,14 +297,13 @@ class StylusArm:
         direction: 'top', 'bottom', 'left', 'right'
         speed: 'slow', 'medium', 'fast'
         """
+        if self.MOVE_DIRECTIONS is None:
+            raise RuntimeError('MOVE_DIRECTIONS not set — run calibration first')
+        mx, my = self.MOVE_DIRECTIONS[direction]
         d = self.SWIPE_DISTANCE
-        offsets = {
-            'top':    (0, -d),
-            'bottom': (0,  d),
-            'left':  (-d, 0),
-            'right': ( d, 0),
-        }
-        dx, dy = offsets[direction]
+        mag = (mx ** 2 + my ** 2) ** 0.5 or 1
+        dx = mx / mag * d
+        dy = my / mag * d
         f = self.SWIPE_SPEEDS[speed]
         self._pen_down()
         self._send(GCODE_REL_LINEAR.format(x=dx, y=dy, f=f))

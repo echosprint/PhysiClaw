@@ -29,65 +29,60 @@ from physiclaw.core import PhysiClaw
 
 mcp = FastMCP(
     "physiclaw",
-    instructions="""PhysiClaw gives you a physical finger (robotic stylus arm) and eyes (cameras) to operate any phone.
+    instructions="""PhysiClaw gives you a physical finger (robotic stylus arm) and an eye (camera) to operate any phone.
 
-You control a real phone sitting on a desk — a top camera sees the screen, a side camera checks stylus alignment, and a 3-axis arm moves and taps a capacitive stylus.
+You control a real phone sitting on a desk — a camera sees the screen from above, and a 3-axis arm moves and taps a capacitive stylus.
 
 ## Operation cycle
 
-1. screenshot_top() — see what's on the phone screen (stylus must be parked/out of frame)
+1. park() + screenshot() — park the stylus away, then see the full phone screen
 2. Decide what to tap/interact with
 3. move(direction, distance) — position the stylus over the target
-4. screenshot_side() — verify the stylus tip is aligned with your target
-5. If misaligned → move() again to adjust, then screenshot_side() again
+4. screenshot() — verify stylus is aligned with the target (stylus visible in frame)
+5. If misaligned → move() to adjust, screenshot() again
 6. If aligned → tap() / double_tap() / long_press() / swipe()
-7. screenshot_top() — verify the result, then continue
+7. park() + screenshot() — verify the result, then continue
 
 ## Key principles
 
 - You never specify pixel coordinates. Use direction + distance level to navigate.
-- Always verify alignment with screenshot_side() before tapping.
-- Always park the stylus out of frame before using screenshot_top() so it doesn't occlude the screen.
+- Use park() before screenshot() when you need a clear, unobstructed view of the screen.
+- Use screenshot() without park() when you need to see the stylus position for alignment.
 - Use move() to incrementally approach the target — start with 'large' or 'medium', refine with 'small' and 'nudge'.
-- After any tap/swipe, take screenshot_top() to confirm the expected screen change happened before proceeding.
+- After any tap/swipe, park() + screenshot() to confirm the expected screen change happened.
 """,
 )
 
 # ─── Tools ──────────────────────────────────────────────────
 
 @mcp.tool()
-def screenshot_top() -> Image:
-    """Take a screenshot from the top camera looking straight down at the phone screen.
+def screenshot() -> Image:
+    """Take a screenshot of the phone screen.
 
-    Use this to read screen content — text, icons, buttons, app UI, notifications, etc.
-    The stylus should be out of frame (call move() away or ensure it's parked) before
-    taking this screenshot, otherwise the stylus will occlude part of the screen.
-
-    Typical usage: call this at the start of each action cycle to understand what's on
-    screen, and again after tap/swipe to verify the result.
+    Use this to read screen content, check stylus position, or verify results.
+    The stylus may be visible in the frame — call park() first if you need
+    an unobstructed view of the screen.
     """
     physiclaw.acquire()
     try:
-        frame = physiclaw.snapshot_top()
+        frame = physiclaw.screenshot()
         return Image(data=physiclaw.frame_to_jpeg(frame), format="jpeg")
     finally:
         physiclaw.release()
 
 
 @mcp.tool()
-def screenshot_side() -> Image:
-    """Take a screenshot from the side camera at ~45° angle, showing the stylus tip and the phone screen.
+def park() -> str:
+    """Park the stylus out of the camera frame so it doesn't occlude the screen.
 
-    Use this to check whether the stylus is aligned with the intended target before tapping.
-    You can see the stylus tip position relative to screen elements from this perspective.
-
-    If the stylus is not over the right spot, call move() to adjust, then screenshot_side() again.
-    Only proceed with tap/swipe once alignment is confirmed.
+    Call this before screenshot() when you need a clear view of the full screen
+    (e.g. to read text or identify UI elements). The stylus moves 100mm away
+    and will need to be repositioned with move() afterward.
     """
     physiclaw.acquire()
     try:
-        frame = physiclaw.snapshot_side()
-        return Image(data=physiclaw.frame_to_jpeg(frame), format="jpeg")
+        physiclaw.park()
+        return "Stylus parked out of frame"
     finally:
         physiclaw.release()
 
@@ -97,7 +92,7 @@ def move(direction: str, distance: str = "medium") -> str:
     """Move the stylus relative to its current position without touching the screen.
 
     The stylus hovers above the phone — this only changes the XY position, it does NOT tap.
-    Use screenshot_side() after moving to verify alignment before tapping.
+    Use screenshot() after moving to verify position before tapping.
 
     Strategy: start with 'large' or 'medium' to get close, then refine with 'small' or 'nudge'.
     Diagonal directions are supported for efficient movement.
@@ -125,8 +120,7 @@ def tap() -> str:
     Use for: pressing buttons, selecting items, opening apps, following links, dismissing dialogs.
     The stylus descends, touches the screen briefly (~80ms), and lifts back up.
 
-    Always confirm alignment with screenshot_side() before tapping.
-    After tapping, use screenshot_top() to verify the expected screen change.
+    After tapping, use screenshot() to verify the expected screen change.
     """
     physiclaw.acquire()
     try:

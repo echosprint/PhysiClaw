@@ -1,8 +1,8 @@
 """
 PhysiClaw orchestrator — central hardware lifecycle manager.
 
-Owns the stylus arm, cameras, and calibration state.
-Creating an instance connects hardware, identifies cameras, and runs calibration.
+Owns the stylus arm, camera, and calibration state.
+Creating an instance connects hardware, finds the camera, and runs calibration.
 """
 
 import logging
@@ -20,14 +20,13 @@ log = logging.getLogger(__name__)
 class PhysiClaw:
     """Central orchestrator — owns all hardware lifecycle.
 
-    Construction connects the arm, identifies cameras, and runs
+    Construction connects the arm, finds the camera, and runs
     the full calibration workflow. Ready to use immediately after.
     """
 
     def __init__(self):
         self._arm: StylusArm | None = None
-        self._top_cam: Camera | None = None
-        self._side_cam: Camera | None = None
+        self._cam: Camera | None = None
         self._detector: PhoneDetector | None = None
         self._lock = threading.Lock()
         self._setup()
@@ -44,27 +43,23 @@ class PhysiClaw:
     # ─── Setup ────────────────────────────────────────────────
 
     def _setup(self):
-        """Connect arm, identify cameras, calibrate.
+        """Connect arm, find camera, calibrate.
 
         1. Connect GRBL arm (auto-detect port)
-        2. Identify top vs side cameras via PhoneDetector
-        3. Open cameras
+        2. Find the camera that sees the phone
+        3. Open camera
         4. Run calibration
         """
         self._arm = StylusArm()
         self._arm.setup()
 
         self._detector = PhoneDetector()
-        cameras = self._detector.identify_cameras()
+        cam_index = self._detector.find_camera()
 
-        if 'top' not in cameras:
-            raise RuntimeError("Top camera not found — is the phone under the camera?")
+        if cam_index is None:
+            raise RuntimeError("Camera not found — is the phone under the camera?")
 
-        self._top_cam = Camera(cameras['top'])
-        self._top_cam.tag = 'top'
-        if 'side' in cameras:
-            self._side_cam = Camera(cameras['side'])
-            self._side_cam.tag = 'side'
+        self._cam = Camera(cam_index)
 
         input("\nOpen https://www.physiclaw.ai/pen-calib on the phone, "
               "position the stylus above the center orange circle, "
@@ -76,7 +71,7 @@ class PhysiClaw:
     def calibrate(self):
         """Run the full 5-phase calibration workflow.
 
-        Uses the side camera to detect green flashes during probing.
+        Uses the camera to detect green flashes during probing.
         Sets Z depth and axis mapping directly on the arm instance.
         """
         from physiclaw.calibrate import (
@@ -84,28 +79,19 @@ class PhysiClaw:
             phase4_long_press, phase5_swipe,
         )
 
-        if self._side_cam is None:
-            raise RuntimeError("Side camera not found — needed for calibration")
-
         arm = self._arm
-        cam = self._side_cam
+        cam = self._cam
 
-        # Phase 1 — Z depth
+        # Phase 1 — Z depth (raises on failure)
         z_tap = phase1_z(arm, cam)
-        if z_tap is None:
-            raise RuntimeError("Phase 1 failed — no Z contact detected")
         arm.Z_DOWN = z_tap
 
-        # Phase 2 — find phone-right direction
+        # Phase 2 — find phone-right direction (raises on failure)
         right_result = phase2_right(arm, cam, z_tap)
-        if right_result is None:
-            raise RuntimeError("Phase 2 failed — could not find phone-right")
 
-        # Phase 3 — find phone-down direction
+        # Phase 3 — find phone-down direction (raises on failure)
         right_vec = (right_result[0], right_result[1])
         down_result = phase3_down(arm, cam, z_tap, right_vec)
-        if down_result is None:
-            raise RuntimeError("Phase 3 failed — could not find phone-down")
 
         # Phase 4 — long press verification
         phase4_long_press(arm, cam)
@@ -126,14 +112,8 @@ class PhysiClaw:
         return self._arm
 
     @property
-    def top_cam(self) -> Camera:
-        return self._top_cam
-
-    @property
-    def side_cam(self) -> Camera:
-        if self._side_cam is None:
-            raise RuntimeError("Side camera not available")
-        return self._side_cam
+    def cam(self) -> Camera:
+        return self._cam
 
     # ─── Snapshot helpers ──────────────────────────────────────
 
@@ -146,41 +126,26 @@ class PhysiClaw:
             raise RuntimeError(f"Phone not detected in frame (confidence {conf:.0%}) "
                                "— is the phone still on the platform?")
 
-    def snapshot_top(self):
-        """Capture a frame from the top camera. Returns BGR numpy array.
+    def screenshot(self):
+        """Capture a frame from the camera. Returns BGR numpy array.
 
-        Parks the stylus 100mm in the phone-up direction to avoid
-        occluding the screen, takes the snapshot, checks that the
-        phone is still visible, then returns the stylus.
+        Takes the frame as-is — the stylus may be visible.
+        Call park() first if an unobstructed view is needed.
         """
-        arm = self._arm
-        saved_x, saved_y = arm.position()
+        frame = self.cam.snapshot()
+        if frame is None:
+            raise RuntimeError("Camera capture failed")
+        self._ensure_phone_presence(frame)
+        return frame
 
-        # Park stylus out of frame and wait for move to finish
+    def park(self):
+        """Move the stylus 100mm out of the camera frame."""
+        arm = self._arm
+        if arm.MOVE_DIRECTIONS is None:
+            raise RuntimeError("Cannot park — calibration has not been run yet")
         ux, uy = arm.MOVE_DIRECTIONS['top']
         arm._fast_move(ux * self.PARK_DISTANCE, uy * self.PARK_DISTANCE)
         arm.wait_idle()
-
-        try:
-            frame = self.top_cam.snapshot()
-            if frame is None:
-                raise RuntimeError("Top camera capture failed")
-            self._ensure_phone_presence(frame)
-            return frame
-        finally:
-            arm._fast_move(saved_x, saved_y)
-            arm.wait_idle()
-
-    def snapshot_side(self):
-        """Capture a frame from the side camera. Returns BGR numpy array.
-
-        Checks that the phone is still visible in the frame.
-        """
-        frame = self.side_cam.snapshot()
-        if frame is None:
-            raise RuntimeError("Side camera capture failed")
-        self._ensure_phone_presence(frame)
-        return frame
 
     @staticmethod
     def frame_to_jpeg(frame, quality=85) -> bytes:
@@ -196,7 +161,5 @@ class PhysiClaw:
             self._arm._fast_move(0, 0)
             self._arm.wait_idle()
             self._arm.close()
-        if self._top_cam:
-            self._top_cam.close()
-        if self._side_cam:
-            self._side_cam.close()
+        if self._cam:
+            self._cam.close()

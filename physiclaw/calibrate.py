@@ -67,8 +67,7 @@ def phase1_z(stylus_arm: StylusArm, cam: Camera) -> float | None:
             log.debug(f"  no tap")
 
     if z_contact is None:
-        log.warning("Phase 1 FAILED — no contact up to 5 mm. Check stylus alignment.")
-        return None
+        raise RuntimeError("Phase 1 FAILED — no contact up to 5 mm. Check stylus alignment.")
 
     # Find the contact boundary by zigzagging:
     #   hit → retreat (smaller Z) until miss → advance (larger Z) until hit → ...
@@ -196,15 +195,17 @@ def phase2_right(stylus_arm: StylusArm, cam: Camera, z_tap: float) -> tuple[int,
 
     result = _probe_direction(stylus_arm, cam, z_tap, SCAN_DIRS)
     if result is None:
-        log.warning("Phase 2 FAILED — could not hit right circle in any direction.")
-        return None
+        raise RuntimeError("Phase 2 FAILED — could not hit right circle in any direction")
 
     ax, ay, dist = result
     dir_name = 'X+' if ax > 0 else 'X-' if ax < 0 else 'Y+' if ay > 0 else 'Y-'
     log.debug(f"  Phone-right = arm {dir_name}")
 
     # Confirm with 2 more taps
-    _repeat_taps(stylus_arm, cam, z_tap, ax, ay, dist, 2)
+    confirmed = _repeat_taps(stylus_arm, cam, z_tap, ax, ay, dist, 2)
+    if confirmed < 2:
+        raise RuntimeError(f"Phase 2 FAILED — phone-right direction found but confirmation "
+                           f"only registered {confirmed}/2 taps")
 
     # Return to center
     move_xy(stylus_arm, 0, 0)
@@ -234,15 +235,17 @@ def phase3_down(stylus_arm: StylusArm, cam: Camera, z_tap: float, right_vec: tup
 
     result = _probe_direction(stylus_arm, cam, z_tap, perp_dirs)
     if result is None:
-        log.warning("Phase 3 FAILED — could not hit down circle.")
-        return None
+        raise RuntimeError("Phase 3 FAILED — could not hit down circle in any direction")
 
     ax, ay, dist = result
     dir_name = 'X+' if ax > 0 else 'X-' if ax < 0 else 'Y+' if ay > 0 else 'Y-'
     log.debug(f"  Phone-down = arm {dir_name}")
 
     # Confirm with 2 more taps
-    _repeat_taps(stylus_arm, cam, z_tap, ax, ay, dist, 2)
+    confirmed = _repeat_taps(stylus_arm, cam, z_tap, ax, ay, dist, 2)
+    if confirmed < 2:
+        raise RuntimeError(f"Phase 3 FAILED — phone-down direction found but confirmation "
+                           f"only registered {confirmed}/2 taps")
 
     # Return to center
     move_xy(stylus_arm, 0, 0)
@@ -277,6 +280,8 @@ def phase4_long_press(stylus_arm: StylusArm, cam: Camera) -> None:
             log.debug(f"  miss")
         attempts += 1
 
+    if successes < 3:
+        raise RuntimeError(f"Phase 4 FAILED — long press only registered {successes}/3 times")
     log.info(f"Phase 4 done  ({successes}/3)")
 
 
@@ -311,7 +316,7 @@ def phase5_swipe(stylus_arm: StylusArm, cam: Camera) -> None:
                 time.sleep(0.5)
 
         if not success:
-            log.warning(f"  Swipe {direction} failed after retries")
+            raise RuntimeError(f"Phase 5 FAILED — swipe {direction} not registered after {MAX_RETRIES} retries")
 
         stylus_arm._pen_up()
         time.sleep(0.1)
