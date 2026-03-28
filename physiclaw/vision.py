@@ -148,10 +148,11 @@ class PhoneDetector:
             log.debug(f"No phone detected (best: {conf:.0%})")
         return detected
 
-    def find_camera(self, max_index: int = 8) -> int | None:
-        """Scan cameras and return the index of the first one that sees a phone.
+    def find_camera(self, max_index: int = 8) -> Camera | None:
+        """Scan cameras and return the first one that sees a phone.
 
         Skips cameras that fail to open or don't detect a phone (e.g. laptop webcam).
+        The returned Camera is kept open and ready for use.
         Returns None if no camera sees a phone.
         """
         log.debug("Scanning for camera that sees the phone...")
@@ -163,16 +164,17 @@ class PhoneDetector:
                 continue
 
             frame = cam.snapshot()
-            cam.close()
             if frame is None:
+                cam.close()
                 continue
 
             detected, conf, _ = self.detect(frame)
             if detected:
                 log.info(f"Camera {i}: phone detected ({conf:.0%})")
-                return i
+                return cam
             else:
                 log.debug(f"Camera {i}: no phone detected ({conf:.0%})")
+                cam.close()
 
         log.warning("No phone detected on any camera — is the phone on the platform?")
         return None

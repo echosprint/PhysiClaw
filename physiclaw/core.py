@@ -54,12 +54,10 @@ class PhysiClaw:
         self._arm.setup()
 
         self._detector = PhoneDetector()
-        cam_index = self._detector.find_camera()
+        self._cam = self._detector.find_camera()
 
-        if cam_index is None:
+        if self._cam is None:
             raise RuntimeError("Camera not found — is the phone under the camera?")
-
-        self._cam = Camera(cam_index)
 
         input("\nOpen https://www.physiclaw.ai/pen-calib on the phone, "
               "position the stylus above the center orange circle, "
