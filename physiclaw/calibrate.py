@@ -123,10 +123,10 @@ def phase1_z(stylus_arm: StylusArm, cam: Camera) -> float | None:
 
 # All four arm directions to probe
 SCAN_DIRS = [
-    ('X+', 1, 0),
-    ('X-', -1, 0),
     ('Y+', 0, 1),
     ('Y-', 0, -1),
+    ('X-', -1, 0),
+    ('X+', 1, 0),
 ]
 
 # Distance candidates (mm) — 12 % of typical phone screen
@@ -231,7 +231,7 @@ def phase3_down(stylus_arm: StylusArm, cam: Camera, z_tap: float, right_vec: tup
         perp_dirs = [('Y+', 0, 1), ('Y-', 0, -1)]
     else:
         # Right is along Y axis → down must be along X
-        perp_dirs = [('X+', 1, 0), ('X-', -1, 0)]
+        perp_dirs = [('X-', -1, 0), ('X+', 1, 0)]
 
     result = _probe_direction(stylus_arm, cam, z_tap, perp_dirs)
     if result is None:
