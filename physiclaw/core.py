@@ -117,35 +117,16 @@ class PhysiClaw:
 
     PARK_DISTANCE = 100  # mm to move stylus out of frame
 
-    def _detect_phone(self, frame):
-        """Detect phone in frame. Returns bbox [x1,y1,x2,y2] or raises."""
-        detected, conf, bbox = self._detector.detect(frame)
-        if not detected:
-            raise RuntimeError(f"Phone not detected in frame (confidence {conf:.0%}) "
-                               "— is the phone still on the platform?")
-        return bbox
-
-    @staticmethod
-    def _is_landscape(bbox):
-        """Check if the phone bbox is wider than tall (landscape orientation)."""
-        w = bbox[2] - bbox[0]
-        h = bbox[3] - bbox[1]
-        return w > h
-
     def screenshot(self):
         """Capture a frame from the camera. Returns BGR numpy array.
 
         Takes the frame as-is — the stylus may be visible.
         Call park() first if an unobstructed view is needed.
-        If the phone is in landscape orientation, rotates the image
-        so the AI agent always sees a portrait screen (up is up).
+        Frame is already rotated to portrait by the camera.
         """
         frame = self.cam.snapshot()
         if frame is None:
             raise RuntimeError("Camera capture failed")
-        bbox = self._detect_phone(frame)
-        if self._is_landscape(bbox):
-            frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
         return frame
 
     def park(self):

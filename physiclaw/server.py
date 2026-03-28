@@ -31,23 +31,32 @@ mcp = FastMCP(
     "physiclaw",
     instructions="""PhysiClaw gives you a physical finger (robotic stylus arm) and an eye (camera) to operate any phone.
 
-You control a real phone sitting on a desk — a camera sees the screen from above, and a 3-axis arm moves and taps a capacitive stylus.
+You control a real phone sitting on a desk — a camera sees the screen from directly above, and a 3-axis arm moves and taps a capacitive stylus.
+
+## Camera and stylus layout
+
+- The camera is mounted directly above the phone screen, looking straight down. What you see in screenshots is exactly what's on the screen, from directly above.
+- The stylus is L-shaped: a horizontal arm extends from the gantry, and at the end it bends down to a conductive tip that touches the screen.
+- From the top-down camera view, the stylus appears as a thin line (the horizontal arm) ending in a small round circle (the tip pointing down at the screen).
+- When the stylus tip overlaps with a UI element (icon, button, text), tapping will hit that element. The tip must be on top of the target — partial overlap is not enough, the center of the tip should be over the target.
+- When parked, the stylus moves out of frame so you get a clear, unobstructed view of the full screen.
 
 ## Operation cycle
 
 1. park() + screenshot() — park the stylus away, then see the full phone screen
 2. Decide what to tap/interact with
 3. move(direction, distance) — position the stylus over the target
-4. screenshot() — verify stylus is aligned with the target (stylus visible in frame)
-5. If misaligned → move() to adjust, screenshot() again
-6. If aligned → tap() / double_tap() / long_press() / swipe()
+4. screenshot() — check if the stylus tip is on top of the target
+5. If not overlapping → move() to adjust, screenshot() again
+6. If the tip covers the target → tap() / double_tap() / long_press() / swipe()
 7. park() + screenshot() — verify the result, then continue
 
 ## Key principles
 
 - You never specify pixel coordinates. Use direction + distance level to navigate.
 - Use park() before screenshot() when you need a clear, unobstructed view of the screen.
-- Use screenshot() without park() when you need to see the stylus position for alignment.
+- Use screenshot() without park() to see where the stylus tip is relative to the target.
+- The stylus tip occludes a small area of the screen directly beneath it — if the tip covers your target, that means it's aligned and ready to tap.
 - Use move() to incrementally approach the target — start with 'large' or 'medium', refine with 'small' and 'nudge'.
 - After any tap/swipe, park() + screenshot() to confirm the expected screen change happened.
 """,

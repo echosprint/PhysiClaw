@@ -94,16 +94,18 @@ class Camera:
             return None
         return frame
 
-    def snapshot(self, path=None):
-        """Return a fresh BGR frame. Auto-saves to data/snapshot/ with timestamp."""
+    def snapshot(self):
+        """Return a fresh BGR frame, rotated to portrait orientation.
+
+        Auto-saves to data/snapshot/ with timestamp.
+        """
         frame = self._fresh_frame()
         if frame is None:
             return None
+        frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
         SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
         ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
         cv2.imwrite(str(SNAPSHOT_DIR / f'{ts}.jpg'), frame)
-        if path:
-            cv2.imwrite(path, frame)
         return frame
 
     def is_green(self):
