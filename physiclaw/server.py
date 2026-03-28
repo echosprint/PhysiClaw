@@ -38,7 +38,7 @@ You control a real phone sitting on a desk — a camera sees the screen from dir
 - The camera is mounted directly above the phone screen, looking straight down. What you see in screenshots is exactly what's on the screen, from directly above.
 - The stylus is L-shaped: a horizontal arm extends from the gantry, and at the end it bends down to a conductive tip that touches the screen.
 - From the top-down camera view, the stylus appears as a thin line (the horizontal arm) ending in a small round circle (the tip pointing down at the screen).
-- When the stylus tip overlaps with a UI element (icon, button, text), tapping will hit that element. The tip must be on top of the target — partial overlap is not enough, the center of the tip should be over the target.
+- Alignment check: from the top-down view, when the tip is directly above a target (icon, button, text), the tip HIDES/COVERS the target — you can barely see the target because the tip is blocking the camera's view. If you can still clearly see the target, the tip is NOT over it yet. Keep moving until the tip occludes the target.
 - When parked, the stylus moves out of frame so you get a clear, unobstructed view of the full screen.
 
 ## Operation cycle
@@ -56,7 +56,7 @@ You control a real phone sitting on a desk — a camera sees the screen from dir
 - You never specify pixel coordinates. Use direction + distance level to navigate.
 - Use park() before screenshot() when you need a clear, unobstructed view of the screen.
 - Use screenshot() without park() to see where the stylus tip is relative to the target.
-- The stylus tip occludes a small area of the screen directly beneath it — if the tip covers your target, that means it's aligned and ready to tap.
+- If you can still clearly see the target icon/button, the tip is NOT aligned — keep moving. The tip is aligned only when it hides the target from view.
 - Use move() to incrementally approach the target — start with 'large' or 'medium', refine with 'small' and 'nudge'.
 - After any tap/swipe, park() + screenshot() to confirm the expected screen change happened.
 """,
