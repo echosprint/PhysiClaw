@@ -14,6 +14,7 @@ wheels/
 
 # Captured photos
 *.jpg
+*.png
 
 # Data (models, calibration, captures — all machine-specific)
 data/

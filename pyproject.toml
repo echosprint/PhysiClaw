@@ -10,3 +10,4 @@ dependencies = ["pyserial>=3.5", "opencv-python>=4.8", "numpy>=1.26", "mcp[cli]>
 [dependency-groups]
 stylus = ["manifold3d>=3.4.0", "trimesh>=4.11.4"]
 drawing = ["reportlab>=4.4.10"]
+omniparser = ["ultralytics>=8.0", "onnx>=1.12.0,<2.0.0", "onnxslim>=0.1.71", "onnxruntime"]
