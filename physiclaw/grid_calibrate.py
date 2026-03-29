@@ -432,9 +432,11 @@ def phase6_grid(arm: StylusArm, cam: Camera,
         x_pct, y_pct = GRID_SCREEN_PCT[i]
         px = cal.pct_to_cam_pixel(x_pct, y_pct)
         cv2.circle(debug, px, 5, (255, 0, 0), -1)
+    from datetime import datetime
     from physiclaw.camera import SNAPSHOT_DIR
     SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
-    debug_path = SNAPSHOT_DIR / 'grid_calibration.jpg'
+    ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
+    debug_path = SNAPSHOT_DIR / f'{ts}_grid.jpg'
     cv2.imwrite(str(debug_path), debug)
     log.info(f"Phase 6 done — debug image saved to {debug_path}")
 

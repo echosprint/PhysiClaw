@@ -33,46 +33,29 @@ mcp = FastMCP(
 
 You control a real phone sitting on a desk — a camera sees the screen from directly above, and a 3-axis arm moves and taps a capacitive stylus.
 
-## Camera and stylus layout
+## How it works
 
-- The camera is mounted directly above the phone screen, looking straight down. What you see in screenshots is exactly what's on the screen, from directly above.
-- The stylus is L-shaped: a horizontal arm extends from the gantry, and at the end it bends down to a conductive tip that touches the screen.
-- From the top-down camera view, the stylus appears as a thin line (the horizontal arm) ending in a small round circle (the tip pointing down at the screen).
-- Alignment check: from the top-down view, when the tip is directly above a target (icon, button, text), the tip HIDES/COVERS the target — you can barely see the target because the tip is blocking the camera's view. If you can still clearly see the target, the tip is NOT over it yet. Keep moving until the tip occludes the target.
-- When parked, the stylus moves out of frame so you get a clear, unobstructed view of the full screen.
+A camera is mounted directly above the phone, looking straight down. You see the screen from above. The stylus taps the screen at coordinates you specify as screen percentages.
 
 ## Operation cycle
 
-1. park() + screenshot() — park the stylus away, then see the full phone screen
-2. Decide what to tap/interact with
-3. move(direction, distance) — position the stylus over the target
-4. screenshot() — check if the stylus tip is on top of the target
-5. If not overlapping → move() to adjust, screenshot() again
-6. If the tip covers the target → tap() / double_tap() / long_press() / swipe()
-7. park() + screenshot() — verify the result, then continue
-
-## Key principles
-
-- You never specify pixel coordinates. Use direction + distance level to navigate.
-- Use park() before screenshot() when you need a clear, unobstructed view of the screen.
-- Use screenshot() without park() to see where the stylus tip is relative to the target.
-- If you can still clearly see the target icon/button, the tip is NOT aligned — keep moving. The tip is aligned only when it hides the target from view.
-- Use move() to incrementally approach the target — start with 'large' or 'medium', refine with 'small' and 'nudge'.
-- After any tap/swipe, park() + screenshot() to confirm the expected screen change happened.
-
-## Coordinate-based targeting (preferred — faster)
-
-Instead of iterative move+check, you can target screen elements by bounding box:
-
-1. park() + screenshot() — see the full screen
+1. park() + screenshot() — see the full phone screen (stylus parked out of frame)
 2. Identify the target's position as screen percentages (0=left/top edge, 100=right/bottom edge)
-3. bbox_target(left, right, top, bottom) — draws a green rectangle on a fresh photo, saves the bbox
-4. Verify the green rectangle covers the intended element. If not, call bbox_target() again with corrected percentages.
-5. confirm_bbox() — lock in the target
-6. tap() / double_tap() / long_press() / swipe() — the gesture auto-moves to the bbox center first
+3. bbox_target(left, right, top, bottom) — draws colored rectangles on a fresh photo
+4. For large targets: one green rectangle. Verify it covers the target.
+   For small targets (like keyboard keys): multiple colored rectangles appear,
+   shifted along the small dimension(s). Pick the one that best covers the target.
+   If none fit well, call bbox_target() again with corrected percentages.
+5. confirm_bbox(shift) — lock in the chosen rectangle ("center", "top", "bottom", "left", "right")
+6. tap() / double_tap() / long_press() / swipe() — executes at the bbox center
 7. park() + screenshot() — verify the result
 
-This is much faster than the move+check workflow since the arm moves directly to the target.
+## CRITICAL
+
+bbox_target() is cheap — it just takes a photo and draws rectangles on it. But tap() is expensive — it moves the mechanical arm physically, which is slow. A wrong
+tap can send a wrong message, transfer the wrong amount, or trigger an irreversible action.
+Always iterate bbox_target() until a rectangle precisely covers the target before confirming.
+Never rush to confirm an imprecise bbox.
 """,
 )
 
@@ -114,12 +97,19 @@ def park() -> str:
 def bbox_target(left: int, right: int, top: int, bottom: int) -> Image:
     """Target a screen region by bounding box using screen percentages (0-100).
 
-    Takes a fresh screenshot and draws a green rectangle at the specified position.
-    Use this to verify your target estimate before tapping.
+    Takes a fresh screenshot and draws colored rectangles at the specified position.
 
-    Call bbox_target() again with corrected values if the rectangle is off.
-    When the rectangle covers the target, call confirm_bbox() to lock it in,
-    then tap() / swipe() / etc. will auto-move to the bbox center.
+    For large targets: one green rectangle labeled "center".
+    For small targets (< 15% in either dimension): multiple colored rectangles
+    shifted along the small dimension(s), each labeled with its shift direction.
+    Pick the rectangle that best covers the target.
+
+    IMPORTANT: Do NOT confirm until a rectangle precisely covers the target.
+    bbox_target() is cheap — it just takes a photo and draws rectangles on it. But tap() is expensive —
+    a wrong tap is hard to undo and wastes time. So iterate bbox_target() as
+    many times as needed until a rectangle matches, then confirm and tap.
+    Confirming an imprecise bbox risks tapping the wrong button — sending a wrong
+    message, transferring the wrong amount, or triggering an irreversible action.
 
     Args:
         left: left edge (0=left edge of screen, 100=right edge)
@@ -127,28 +117,44 @@ def bbox_target(left: int, right: int, top: int, bottom: int) -> Image:
         top: top edge (0=top of screen, 100=bottom)
         bottom: bottom edge
     """
+    import time
     physiclaw.acquire()
     try:
         physiclaw.park()
-        frame = physiclaw.screenshot_with_bbox(left, right, top, bottom)
+        time.sleep(1.5)  # let arm settle after parking
         physiclaw.set_pending_bbox(left, right, top, bottom)
+        frame = physiclaw.screenshot_with_bboxes()
         return Image(data=physiclaw.frame_to_jpeg(frame), format="jpeg")
     finally:
         physiclaw.release()
 
 
 @mcp.tool()
-def confirm_bbox() -> str:
-    """Confirm the bounding box from the last bbox_target() call.
+def confirm_bbox(shift: str = "center") -> str:
+    """Confirm a bounding box from the last bbox_target() call.
 
-    After confirmation, the next gesture call (tap, double_tap, long_press, swipe)
-    will automatically move the stylus to the bbox center before executing.
-    The bbox is cleared after the gesture executes.
+    For large targets, just call confirm_bbox() or confirm_bbox("center").
+    For small targets, pick the shifted variant that best covers the target:
+      "center" — the original bbox (green)
+      "top"    — shifted up (red)
+      "bottom" — shifted down (blue)
+      "left"   — shifted left (yellow)
+      "right"  — shifted right (magenta)
+
+    IMPORTANT: Only confirm when a rectangle precisely covers the target.
+    If none fit, call bbox_target() again with corrected percentages instead.
+    Confirming an imprecise bbox wastes time — the tap will miss.
+
+    After confirmation, the next gesture (tap, double_tap, long_press, swipe)
+    will auto-move to the bbox center before executing.
+
+    Args:
+        shift: "center", "top", "bottom", "left", or "right"
     """
     physiclaw.acquire()
     try:
-        physiclaw.confirm_bbox()
-        return "Bbox confirmed — next gesture will target this location"
+        physiclaw.confirm_bbox(shift)
+        return f"Bbox '{shift}' confirmed — next gesture will target this location"
     finally:
         physiclaw.release()
 
@@ -161,39 +167,12 @@ def _maybe_move_to_bbox():
 
 
 @mcp.tool()
-def move(direction: str, distance: str = "medium") -> str:
-    """Move the stylus relative to its current position without touching the screen.
-
-    The stylus hovers above the phone — this only changes the XY position, it does NOT tap.
-    Use screenshot() after moving to verify position before tapping.
-
-    Strategy: start with 'large' or 'medium' to get close, then refine with 'small' or 'nudge'.
-    Diagonal directions are supported for efficient movement.
-
-    Args:
-        direction: 'top', 'bottom', 'left', 'right',
-                   'top-left', 'top-right', 'bottom-left', 'bottom-right'
-        distance: 'large' (~20mm, half the screen),
-                  'medium' (~8mm, a few icons),
-                  'small' (~3mm, one icon),
-                  'nudge' (~1mm, fine-tune)
-    """
-    physiclaw.acquire()
-    try:
-        physiclaw.arm.move(direction, distance)
-        return f"Moved {direction} {distance}"
-    finally:
-        physiclaw.release()
-
-
-@mcp.tool()
 def tap() -> str:
-    """Single tap at current stylus position — like a finger tap on the screen.
+    """Single tap — like a finger tap on the screen.
 
     Use for: pressing buttons, selecting items, opening apps, following links, dismissing dialogs.
-    The stylus descends, touches the screen briefly (~80ms), and lifts back up.
-
-    After tapping, use screenshot() to verify the expected screen change.
+    Call bbox_target() + confirm_bbox() first to set the target location.
+    After tapping, use park() + screenshot() to verify the result.
     """
     physiclaw.acquire()
     try:
@@ -206,10 +185,10 @@ def tap() -> str:
 
 @mcp.tool()
 def double_tap() -> str:
-    """Double tap at current stylus position — two quick taps in succession.
+    """Double tap — two quick taps in succession.
 
-    Use for: zooming in (maps, photos, web pages), selecting a word in text, or any
-    UI element that responds to double-tap.
+    Use for: zooming in (maps, photos, web pages), selecting a word in text.
+    Call bbox_target() + confirm_bbox() first to set the target location.
     """
     physiclaw.acquire()
     try:
@@ -222,10 +201,11 @@ def double_tap() -> str:
 
 @mcp.tool()
 def long_press() -> str:
-    """Long press at current stylus position — holds contact for ~1.2 seconds.
+    """Long press — holds contact for ~1.2 seconds.
 
-    Use for: opening context menus, entering edit/selection mode, triggering drag-and-drop,
-    selecting text, rearranging home screen icons, or any action that requires a sustained press.
+    Use for: opening context menus, entering edit/selection mode, selecting text,
+    rearranging home screen icons, or any action that requires a sustained press.
+    Call bbox_target() + confirm_bbox() first to set the target location.
     """
     physiclaw.acquire()
     try:
@@ -238,18 +218,15 @@ def long_press() -> str:
 
 @mcp.tool()
 def swipe(direction: str, speed: str = "medium") -> str:
-    """Swipe from current position in a cardinal direction — the stylus touches down, slides, and lifts.
+    """Swipe in a cardinal direction — the stylus touches down, slides, and lifts.
 
-    Use for: scrolling content, switching pages, pulling down notifications, dismissing items,
-    unlocking the phone (swipe top), navigating between screens.
-
-    The swipe travels ~15mm in the given direction. The stylus position will change after swiping.
+    Use for: scrolling content, switching pages, pulling down notifications,
+    unlocking the phone, navigating between screens.
+    Call bbox_target() + confirm_bbox() first to set the starting position.
 
     Args:
         direction: 'top', 'bottom', 'left', 'right'
-        speed: 'slow' (gentle scroll, careful drag),
-               'medium' (normal swipe, ~100mm/s),
-               'fast' (fling, page switch, quick dismiss)
+        speed: 'slow' (gentle scroll), 'medium' (normal), 'fast' (fling)
     """
     physiclaw.acquire()
     try:

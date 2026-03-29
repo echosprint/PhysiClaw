@@ -30,7 +30,7 @@ class PhysiClaw:
         self._cam: Camera | None = None
         self._detector: PhoneDetector | None = None
         self._grid_cal: GridCalibration | None = None
-        self._pending_bbox: dict | None = None
+        self._pending_bboxes: dict[str, dict] = {}
         self._confirmed_bbox: dict | None = None
         self._lock = threading.Lock()
         self._setup()
@@ -126,20 +126,80 @@ class PhysiClaw:
 
     # ─── Bbox state management ────────────────────────────────
 
+    SMALL_BBOX_THRESHOLD = 15  # % — bbox smaller than this gets candidates
+
+    # Colors for bbox candidates: BGR format. Assigned in order as candidates are added.
+    BBOX_COLORS = [
+        (0, 255, 0),     # green
+        (0, 0, 255),     # red
+        (255, 0, 0),     # blue
+        (0, 255, 255),   # yellow
+        (255, 0, 255),   # magenta
+    ]
+
     def set_pending_bbox(self, left: float, right: float,
                          top: float, bottom: float):
-        """Store a pending bbox from bbox_target. Clears any confirmed bbox."""
-        self._pending_bbox = {
-            'left': left, 'right': right, 'top': top, 'bottom': bottom,
-        }
+        """Store pending bbox candidates keyed by shift name. Clears any confirmed bbox.
+
+        For small targets, generates shifted candidates along the small
+        dimension(s) so the AI agent can pick the best one.
+        - Both dimensions small: center + top/bottom/left/right
+        - Only width small: center + left/right
+        - Only height small: center + top/bottom
+        - Both dimensions large: center only
+        """
+        original = {'left': left, 'right': right, 'top': top, 'bottom': bottom}
+        w = right - left
+        h = bottom - top
+        small_h = w < self.SMALL_BBOX_THRESHOLD
+        small_v = h < self.SMALL_BBOX_THRESHOLD
+
+        self._pending_bboxes = {'center': original}
+
+        # Shifted bboxes: 80% size of original, shifted by 70% of that dimension
+        scale = 0.8
+        shift_ratio = 0.7
+        sw = w * scale  # shifted bbox width
+        sh = h * scale  # shifted bbox height
+        cx = (left + right) / 2
+        cy = (top + bottom) / 2
+
+        if small_v:
+            sv = h * shift_ratio
+            self._pending_bboxes['top'] = {
+                'left': max(0, cx - sw / 2), 'right': min(100, cx + sw / 2),
+                'top': max(0, cy - sv - sh / 2), 'bottom': max(0, cy - sv + sh / 2),
+            }
+            self._pending_bboxes['bottom'] = {
+                'left': max(0, cx - sw / 2), 'right': min(100, cx + sw / 2),
+                'top': min(100, cy + sv - sh / 2), 'bottom': min(100, cy + sv + sh / 2),
+            }
+        if small_h:
+            shh = w * shift_ratio
+            self._pending_bboxes['left'] = {
+                'left': max(0, cx - shh - sw / 2), 'right': max(0, cx - shh + sw / 2),
+                'top': max(0, cy - sh / 2), 'bottom': min(100, cy + sh / 2),
+            }
+            self._pending_bboxes['right'] = {
+                'left': min(100, cx + shh - sw / 2), 'right': min(100, cx + shh + sw / 2),
+                'top': max(0, cy - sh / 2), 'bottom': min(100, cy + sh / 2),
+            }
+
         self._confirmed_bbox = None
 
-    def confirm_bbox(self):
-        """Lock in the pending bbox for the next gesture."""
-        if self._pending_bbox is None:
+    def confirm_bbox(self, shift: str = 'center'):
+        """Lock in a pending bbox by shift name for the next gesture.
+
+        Valid shift values: "center", "top", "bottom", "left", "right"
+        (only those present in the current candidates).
+        """
+        if not self._pending_bboxes:
             raise RuntimeError("No pending bbox — call bbox_target first")
-        self._confirmed_bbox = self._pending_bbox
-        self._pending_bbox = None
+        if shift not in self._pending_bboxes:
+            valid = ', '.join(self._pending_bboxes.keys())
+            raise RuntimeError(f"Invalid shift '{shift}' — available: {valid}")
+        self._confirmed_bbox = self._pending_bboxes[shift]
+        self._pending_bboxes = {}
 
     def consume_confirmed_bbox(self) -> dict | None:
         """Return and clear the confirmed bbox. Returns None if none."""
@@ -173,15 +233,50 @@ class PhysiClaw:
             raise RuntimeError("Camera capture failed")
         return frame
 
-    def screenshot_with_bbox(self, left: float, right: float,
-                             top: float, bottom: float):
-        """Take a fresh screenshot with a green bbox rectangle drawn on it."""
+    def screenshot_with_bboxes(self):
+        """Take a fresh screenshot with all pending bbox candidates drawn.
+
+        For large targets: one green rectangle labeled "center".
+        For small targets: multiple colored rectangles with shift labels.
+        Must call set_pending_bbox() first to populate candidates.
+        """
         if self._grid_cal is None:
             raise RuntimeError("Grid calibration not done")
-        bbox = self._grid_cal.bbox_to_pixel_rect(left, right, top, bottom)
-        frame = self.cam.snapshot(bbox=bbox)
+        if not self._pending_bboxes:
+            raise RuntimeError("No pending bboxes — call set_pending_bbox first")
+
+        # Build list of (tl, br, color, label) for all candidates
+        rects = []
+        for j, (name, bbox) in enumerate(self._pending_bboxes.items()):
+            tl, br = self._grid_cal.bbox_to_pixel_rect(
+                bbox['left'], bbox['right'], bbox['top'], bbox['bottom'])
+            color = self.BBOX_COLORS[j % len(self.BBOX_COLORS)]
+            rects.append((tl, br, color, name))
+
+        frame = self.cam.snapshot()
         if frame is None:
             raise RuntimeError("Camera capture failed")
+
+        for tl, br, color, name in rects:
+            cv2.rectangle(frame, tl, br, color, 2)
+            # Position label based on shift direction
+            if name == 'bottom':
+                label_pos = (tl[0] + 2, br[1] + 15)   # below bbox
+            elif name == 'right':
+                label_pos = (br[0] + 4, (tl[1] + br[1]) // 2)  # right of bbox
+            elif name == 'left':
+                label_pos = (tl[0] - 30, (tl[1] + br[1]) // 2)  # left of bbox
+            else:
+                label_pos = (tl[0] + 2, tl[1] - 5)    # above bbox (center, top)
+            cv2.putText(frame, name, label_pos,
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
+
+        # Save annotated frame
+        from datetime import datetime
+        from physiclaw.camera import SNAPSHOT_DIR
+        SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
+        cv2.imwrite(str(SNAPSHOT_DIR / f'{ts}_bbox.jpg'), frame)
         return frame
 
     def park(self):
