@@ -134,13 +134,36 @@ class StylusArm:
         raise RuntimeError(f'Arm not idle after {timeout}s')
 
     def position(self) -> tuple[float, float]:
-        """Return current (x, y) by querying GRBL MPos."""
+        """Return current (x, y) in work coordinates (WPos).
+
+        GRBL reports MPos (machine position) and/or WPos (work position).
+        All G-code moves use WPos (set by G92), so we must return WPos.
+        If GRBL reports WPos directly, use it. Otherwise compute from
+        MPos - WCO (work coordinate offset).
+        """
         import re
         status = self._query_status()
-        m = re.search(r'MPos:([-\d.]+),([-\d.]+)', status)
-        if not m:
-            raise RuntimeError(f'Cannot parse position from: {status}')
-        return float(m.group(1)), float(m.group(2))
+
+        # Try WPos first (GRBL $10=0)
+        m = re.search(r'WPos:([-\d.]+),([-\d.]+)', status)
+        if m:
+            return float(m.group(1)), float(m.group(2))
+
+        # Fall back to MPos - WCO
+        m_mpos = re.search(r'MPos:([-\d.]+),([-\d.]+)', status)
+        m_wco = re.search(r'WCO:([-\d.]+),([-\d.]+)', status)
+        if m_mpos and m_wco:
+            mx, my = float(m_mpos.group(1)), float(m_mpos.group(2))
+            wx, wy = float(m_wco.group(1)), float(m_wco.group(2))
+            return mx - wx, my - wy
+
+        if m_mpos:
+            # No WCO available — configure GRBL to report WPos with $10=0
+            log.warning("GRBL not reporting WPos or WCO — position may be wrong. "
+                        "Set $10=0 for WPos reporting.")
+            return float(m_mpos.group(1)), float(m_mpos.group(2))
+
+        raise RuntimeError(f'Cannot parse position from: {status}')
 
     # ─── Initialization ──────────────────────────────────────
 
@@ -168,6 +191,7 @@ class StylusArm:
         self._send(GCODE_ABSOLUTE)
         self._send(GCODE_DEFAULT_F)
         self._send(GCODE_IDLE_DELAY)      # 250ms motor idle delay
+        self._send('$10=0')               # report WPos in status (not MPos)
                                           # 80ms tap is well within range
                                           # auto power-off after 250ms idle, safer than $1=255
 

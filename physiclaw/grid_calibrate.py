@@ -199,7 +199,9 @@ class GridCalibration:
 
 
 PROBE_DISTANCES_MM = [3.0 + i * 1.5 for i in range(16)]  # same as phase 2-3
-EXPLORE_OFFSETS_MM = [1.0, -1.0, 2.0, -2.0, 3.0, -3.0]  # spiral out ±3mm (skip 0 — already tried)
+# Star pattern (✱): two diagonals + two axes, covering ±3mm with 24 taps
+# Covers all 4 directions so no blind spots at edges
+EXPLORE_STEPS_MM = [1.0, -1.0, 2.0, -2.0, 3.0, -3.0]  # no 0 — caller already tried exact position
 
 
 def _tap_at(arm: StylusArm, cam: Camera, x: float, y: float,
@@ -220,17 +222,27 @@ def _explore_dot(arm: StylusArm, cam: Camera,
                  cx: float, cy: float, z_tap: float,
                  right_vec: tuple[int, int],
                  down_vec: tuple[int, int]) -> tuple[float, float] | None:
-    """Explore around (cx, cy) to find a dot. Dots are ≥5mm apart,
-    so any green within ±3mm must be the target dot.
+    """Explore around (cx, cy) in a star pattern (✱) to find a dot.
+    Dots are ≥5mm apart, so any green within ±3mm must be the target.
+
+    Star = two diagonals + two axes (4 lines through center).
+    24 taps covers all directions with no blind spots.
 
     Returns the GRBL (x, y) that triggered the green, or None.
     """
     rx, ry = right_vec
     dx, dy = down_vec
-    for dr in EXPLORE_OFFSETS_MM:
-        for dd in EXPLORE_OFFSETS_MM:
-            x = cx + dr * rx + dd * dx
-            y = cy + dr * ry + dd * dy
+    # 4 directions: right only, down only, diagonal right+down, diagonal right-down
+    directions = [
+        (rx, ry, 0, 0),       # → right axis
+        (0, 0, dx, dy),       # ↓ down axis
+        (rx, ry, dx, dy),     # ↘ diagonal
+        (rx, ry, -dx, -dy),   # ↗ diagonal
+    ]
+    for r_mul_x, r_mul_y, d_mul_x, d_mul_y in directions:
+        for s in EXPLORE_STEPS_MM:
+            x = cx + s * r_mul_x + s * d_mul_x
+            y = cy + s * r_mul_y + s * d_mul_y
             if _tap_at(arm, cam, x, y, z_tap):
                 return arm.position()
     return None
@@ -346,26 +358,41 @@ def phase6_grid(arm: StylusArm, cam: Camera,
 
     _go_center(arm)
 
-    # 5. Visit remaining 12 dots: center ring → bottom → top
+    # 5. Visit remaining 12 dots. After each verified dot, refit the affine
+    #    from ALL verified dots so far → better predictions for the next dot.
+    verified_indices = [CENTER_INDEX, 8, 10]  # center, right, down
+
     for i in VISIT_REMAINING:
         x_pct, y_pct = GRID_SCREEN_PCT[i]
-        h_offset = (x_pct - 50) * mm_per_pct_h
-        v_offset = (y_pct - 50) * mm_per_pct_v
-        target_x = h_offset * rx + v_offset * dx
-        target_y = h_offset * ry + v_offset * dy
+
+        # Predict position using affine from all verified dots so far
+        if len(verified_indices) >= 3:
+            v_idx = np.array(verified_indices)
+            affine, _ = cv2.estimateAffine2D(
+                GRID_SCREEN_PCT[v_idx], grbl_positions[v_idx])
+            if affine is not None:
+                pt = affine @ np.array([x_pct, y_pct, 1.0])
+                target_x, target_y = float(pt[0]), float(pt[1])
+            else:
+                # Fallback to linear scale
+                target_x = (x_pct - 50) * mm_per_pct_h * rx + (y_pct - 50) * mm_per_pct_v * dx
+                target_y = (x_pct - 50) * mm_per_pct_h * ry + (y_pct - 50) * mm_per_pct_v * dy
+        else:
+            target_x = (x_pct - 50) * mm_per_pct_h * rx + (y_pct - 50) * mm_per_pct_v * dx
+            target_y = (x_pct - 50) * mm_per_pct_h * ry + (y_pct - 50) * mm_per_pct_v * dy
 
         if _tap_at(arm, cam, target_x, target_y, z_tap):
-            # Direct hit
             grbl_positions[i] = list(arm.position())
+            verified_indices.append(i)
             verified += 1
             log.debug(f"  Dot {i} ({x_pct}%, {y_pct}%) ✓ "
                       f"GRBL ({grbl_positions[i][0]:.2f}, {grbl_positions[i][1]:.2f})")
         else:
-            # Miss — explore ±3mm around target
             pos = _explore_dot(arm, cam, target_x, target_y, z_tap,
                                right_vec, down_vec)
             if pos is not None:
                 grbl_positions[i] = [pos[0], pos[1]]
+                verified_indices.append(i)
                 verified += 1
                 log.debug(f"  Dot {i} ({x_pct}%, {y_pct}%) ✓ (explored) "
                           f"GRBL ({pos[0]:.2f}, {pos[1]:.2f})")

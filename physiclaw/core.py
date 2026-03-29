@@ -175,12 +175,13 @@ class PhysiClaw:
 
     def screenshot_with_bbox(self, left: float, right: float,
                              top: float, bottom: float):
-        """Take a fresh screenshot and draw a green bbox rectangle on it."""
-        frame = self.screenshot()
+        """Take a fresh screenshot with a green bbox rectangle drawn on it."""
         if self._grid_cal is None:
             raise RuntimeError("Grid calibration not done")
-        tl, br = self._grid_cal.bbox_to_pixel_rect(left, right, top, bottom)
-        cv2.rectangle(frame, tl, br, (0, 255, 0), 2)
+        bbox = self._grid_cal.bbox_to_pixel_rect(left, right, top, bottom)
+        frame = self.cam.snapshot(bbox=bbox)
+        if frame is None:
+            raise RuntimeError("Camera capture failed")
         return frame
 
     def park(self):

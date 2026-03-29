@@ -16,8 +16,8 @@ from physiclaw.camera import Camera
 
 log = logging.getLogger(__name__)
 
-MODEL_PATH = Path(__file__).parent.parent / 'data' / 'model' / 'yolox_nano' / 'yolox_nano.onnx'
-MODEL_URL = 'https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_nano.onnx'
+MODEL_PATH = Path(__file__).parent.parent / 'data' / 'model' / 'yolox_tiny' / 'yolox_tiny.onnx'
+MODEL_URL = 'https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_tiny.onnx'
 
 COCO_PHONE_CLASS = 67  # cell phone
 INPUT_SIZE = 416
@@ -149,13 +149,33 @@ class PhoneDetector:
         return detected
 
     def find_camera(self, max_index: int = 8) -> Camera | None:
-        """Scan cameras and return the first one that sees a phone.
+        """Scan cameras and return the one with highest phone detection confidence.
 
-        Skips cameras that fail to open or don't detect a phone (e.g. laptop webcam).
+        The top-down USB camera sees the phone large in frame (high confidence).
+        A laptop webcam might barely see it from a distance (low confidence).
+        Picking highest confidence selects the right camera regardless of index order.
+
         The returned Camera is kept open and ready for use.
         Returns None if no camera sees a phone.
         """
         log.debug("Scanning for camera that sees the phone...")
+
+        # Detect how many cameras are available
+        import subprocess
+        try:
+            result = subprocess.run(
+                ['system_profiler', 'SPCameraDataType'],
+                capture_output=True, text=True, timeout=5,
+            )
+            # Count camera entries (each starts with a name line indented by 4 spaces)
+            cam_count = result.stdout.count('Model ID:')
+            max_index = min(max_index, max(cam_count, 1))
+            log.info(f"System reports {cam_count} cameras, scanning indices 0-{max_index - 1}")
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass  # not macOS or timeout — fall back to max_index
+
+        best_cam = None
+        best_conf = 0.0
 
         for i in range(max_index):
             try:
@@ -171,10 +191,19 @@ class PhoneDetector:
             detected, conf, _ = self.detect(frame)
             if detected:
                 log.info(f"Camera {i}: phone detected ({conf:.0%})")
-                return cam
+                if conf > best_conf:
+                    if best_cam is not None:
+                        best_cam.close()
+                    best_cam = cam
+                    best_conf = conf
+                else:
+                    cam.close()
             else:
                 log.debug(f"Camera {i}: no phone detected ({conf:.0%})")
                 cam.close()
 
-        log.warning("No phone detected on any camera — is the phone on the platform?")
-        return None
+        if best_cam is not None:
+            log.info(f"Selected camera {best_cam.index} ({best_conf:.0%} confidence)")
+        else:
+            log.warning("No phone detected on any camera — is the phone on the platform?")
+        return best_cam

@@ -94,15 +94,19 @@ class Camera:
             return None
         return frame
 
-    def snapshot(self):
+    def snapshot(self, bbox=None):
         """Return a fresh BGR frame, rotated to portrait orientation.
 
         Auto-saves to data/snapshot/ with timestamp.
+        If bbox is provided as ((x1,y1), (x2,y2)), draws a green rectangle
+        on the frame before saving.
         """
         frame = self._fresh_frame()
         if frame is None:
             return None
         frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        if bbox is not None:
+            cv2.rectangle(frame, bbox[0], bbox[1], (0, 255, 0), 2)
         SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
         ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
         cv2.imwrite(str(SNAPSHOT_DIR / f'{ts}.jpg'), frame)
