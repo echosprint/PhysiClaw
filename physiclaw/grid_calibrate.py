@@ -39,6 +39,21 @@ GRID_SCREEN_PCT = np.array(
 
 CENTER_INDEX = 7  # (50%, 50%)
 
+# Visit order: center ring first, then bottom row, then top row.
+# Index map (row-major):
+#   Row 20%: 0=(25,20)  1=(50,20)  2=(75,20)
+#   Row 40%: 3=(25,40)  4=(50,40)  5=(75,40)
+#   Row 50%: 6=(25,50)  7=(50,50)  8=(75,50)
+#   Row 60%: 9=(25,60) 10=(50,60) 11=(75,60)
+#   Row 80%:12=(25,80) 13=(50,80) 14=(75,80)
+#
+# Phase 6 handles center(7), right(8), down(10) separately via probing.
+# Then visits the rest in this order:
+VISIT_RING = [6, 4, 5, 3, 9, 11]     # remaining 6 dots around center
+VISIT_BOTTOM = [13, 12, 14]           # 80% row (center first)
+VISIT_TOP = [1, 0, 2]                 # 20% row (center first)
+VISIT_REMAINING = VISIT_RING + VISIT_BOTTOM + VISIT_TOP
+
 # ─── Red dot detection ────────────────────────────────────────
 
 
@@ -183,8 +198,42 @@ class GridCalibration:
 # ─── Phase 6: grid calibration ────────────────────────────────
 
 
-MAX_RETRIES = 10
 PROBE_DISTANCES_MM = [3.0 + i * 1.5 for i in range(16)]  # same as phase 2-3
+EXPLORE_OFFSETS_MM = [1.0, -1.0, 2.0, -2.0, 3.0, -3.0]  # spiral out ±3mm (skip 0 — already tried)
+
+
+def _tap_at(arm: StylusArm, cam: Camera, x: float, y: float,
+            z_tap: float) -> bool:
+    """Move to absolute position, tap, return True if green flash."""
+    cam.wait_for_white()
+    time.sleep(0.2)
+    arm._fast_move(x, y)
+    arm.wait_idle()
+    arm._pen_down(z=z_tap)
+    time.sleep(0.15)
+    arm._pen_up()
+    time.sleep(0.3)
+    return cam.wait_for_green(timeout=1.0)
+
+
+def _explore_dot(arm: StylusArm, cam: Camera,
+                 cx: float, cy: float, z_tap: float,
+                 right_vec: tuple[int, int],
+                 down_vec: tuple[int, int]) -> tuple[float, float] | None:
+    """Explore around (cx, cy) to find a dot. Dots are ≥5mm apart,
+    so any green within ±3mm must be the target dot.
+
+    Returns the GRBL (x, y) that triggered the green, or None.
+    """
+    rx, ry = right_vec
+    dx, dy = down_vec
+    for dr in EXPLORE_OFFSETS_MM:
+        for dd in EXPLORE_OFFSETS_MM:
+            x = cx + dr * rx + dd * dx
+            y = cy + dr * ry + dd * dy
+            if _tap_at(arm, cam, x, y, z_tap):
+                return arm.position()
+    return None
 
 
 def _probe_dot(arm: StylusArm, cam: Camera, direction: tuple[int, int],
@@ -192,39 +241,20 @@ def _probe_dot(arm: StylusArm, cam: Camera, direction: tuple[int, int],
     """Probe outward from origin in a direction until green flash.
 
     Returns the mm distance that triggered the green flash, or None.
-    Used to find the scale factor for the first adjacent dot.
     """
     ax, ay = direction
-    cam.wait_for_white()
     for dist in PROBE_DISTANCES_MM:
         x = round(ax * dist, 2)
         y = round(ay * dist, 2)
-        arm._fast_move(x, y)
-        arm.wait_idle()
-        arm._pen_down(z=z_tap)
-        time.sleep(0.15)
-        arm._pen_up()
-        time.sleep(0.3)
-        if cam.wait_for_green(timeout=1.0):
+        if _tap_at(arm, cam, x, y, z_tap):
             log.debug(f"  Probe hit at {dist:.1f}mm")
-            cam.wait_for_white()
             return dist
     return None
 
 
-def _tap_and_verify(arm: StylusArm, cam: Camera, x: float, y: float,
-                    z_tap: float) -> bool:
-    """Move to position, tap, return True if green flash detected."""
-    arm._fast_move(x, y)
+def _go_center(arm: StylusArm):
+    arm._fast_move(0, 0)
     arm.wait_idle()
-    arm._pen_down(z=z_tap)
-    time.sleep(0.15)
-    arm._pen_up()
-    time.sleep(0.3)
-    hit = cam.wait_for_green(timeout=1.0)
-    if hit:
-        cam.wait_for_white()
-    return hit
 
 
 def phase6_grid(arm: StylusArm, cam: Camera,
@@ -232,106 +262,177 @@ def phase6_grid(arm: StylusArm, cam: Camera,
                 down_vec: tuple[int, int]) -> GridCalibration:
     """Phase 6: grid calibration using red dot page.
 
-    Each red dot shows a green flash when tapped, allowing verified
-    measurement of GRBL positions. The algorithm:
-    1. Detect 15 dots in camera image (pixel positions)
-    2. Probe rightward from center to find mm-per-25%-horizontal scale
-    3. Probe downward from center to find mm-per-10%-vertical scale
-    4. Visit all 15 dots, tap each, verify green flash, record GRBL position
-    5. Compute affine transforms from verified (screen%, GRBL mm) pairs
-
-    Prerequisites:
-        - Phases 1-5 complete (Z-depth and direction mapping set)
-        - Pen-calib page showing the red dot grid on the phone
-        - Arm at GRBL (0, 0) = center of the grid
+    Strategy — probe outward from center, no ambiguity at each step:
+    1. Park, detect 15 red dots in camera (pixel positions)
+    2. Verify center dot (50%,50%) — explore ±3mm if miss, reset origin
+    3. Probe right with small steps → must hit (75%,50%), the only dot
+       to the right in center row → mm_per_pct_h = dist / 25
+    4. Probe down with small steps → must hit (50%,60%), the nearest dot
+       below center in center column → mm_per_pct_v = dist / 10
+    5. Visit remaining 12 dots: center ring, then bottom row, then top row
+    6. Compute affine transforms from all 15 verified positions
     """
     log.info("Phase 6: Grid calibration  (15 red dots)")
 
     z_tap = arm.Z_DOWN
+    rx, ry = right_vec
+    dx, dy = down_vec
 
-    # 1. Park arm out of the way, take photo and detect dots
+    grbl_positions = np.zeros((len(GRID_SCREEN_PCT), 2), dtype=np.float64)
+    verified = 0
+
+    # 1. Park arm, wait for grid page, detect dots
     park_vec = arm.MOVE_DIRECTIONS['top']
     arm._fast_move(park_vec[0] * 100, park_vec[1] * 100)
     arm.wait_idle()
 
-    frame = cam.snapshot()
-    if frame is None:
-        raise RuntimeError("Phase 6 FAILED — camera capture failed")
-
-    dots = detect_red_dots(frame)
-    grid_px = sort_dots_to_grid(dots)
-    log.info(f"  Detected {len(dots)} dots, sorted into {GRID_ROWS}×{GRID_COLS} grid")
-
-    # Return to center
-    arm._fast_move(0, 0)
-    arm.wait_idle()
-
-    # 2. Probe right to find mm distance for 25% horizontal offset
-    #    Center (50%) → right neighbor (75%) = 25% apart
-    log.info("  Probing right for scale...")
-    right_dist = _probe_dot(arm, cam, right_vec, z_tap)
-    if right_dist is None:
-        raise RuntimeError("Phase 6 FAILED — could not hit right dot from center")
-    mm_per_pct_h = right_dist / 25.0
-    log.info(f"  Horizontal scale: {mm_per_pct_h:.3f} mm/pct ({right_dist:.1f}mm for 25%)")
-
-    # Return to center
-    arm._fast_move(0, 0)
-    arm.wait_idle()
-    time.sleep(0.3)
-
-    # 3. Probe down to find mm distance for 10% vertical offset
-    #    Center (50%) → down neighbor (60%) = 10% apart
-    log.info("  Probing down for scale...")
-    down_dist = _probe_dot(arm, cam, down_vec, z_tap)
-    if down_dist is None:
-        raise RuntimeError("Phase 6 FAILED — could not hit down dot from center")
-    mm_per_pct_v = down_dist / 10.0
-    log.info(f"  Vertical scale: {mm_per_pct_v:.3f} mm/pct ({down_dist:.1f}mm for 10%)")
-
-    # Return to center
-    arm._fast_move(0, 0)
-    arm.wait_idle()
-    time.sleep(0.3)
-
-    # 4. Visit all 15 dots, tap each, verify green flash
-    rx, ry = right_vec
-    dx, dy = down_vec
-    grbl_positions = np.zeros((len(GRID_SCREEN_PCT), 2), dtype=np.float64)
-    verified = 0
-
-    for i, (x_pct, y_pct) in enumerate(GRID_SCREEN_PCT):
-        cam.wait_for_white()
+    grid_px = None
+    deadline = time.time() + 3.0
+    while time.time() < deadline:
+        frame = cam.snapshot()
+        if frame is None:
+            raise RuntimeError("Phase 6 FAILED — camera capture failed")
+        dots = detect_red_dots(frame)
+        if len(dots) == GRID_ROWS * GRID_COLS:
+            grid_px = sort_dots_to_grid(dots)
+            break
         time.sleep(0.3)
 
+    if grid_px is None:
+        raise RuntimeError(
+            f"Phase 6 FAILED — expected {GRID_ROWS * GRID_COLS} red dots "
+            f"but detected {len(dots)}. Is the grid page displayed?")
+    log.info(f"  Detected {len(dots)} dots, sorted into {GRID_ROWS}×{GRID_COLS} grid")
+
+    # 2. Verify center dot (index 7: 50%, 50%)
+    _go_center(arm)
+    log.info("  Verifying center dot...")
+    if _tap_at(arm, cam, 0, 0, z_tap):
+        log.info("  Center confirmed at origin")
+    else:
+        log.info("  Center missed — exploring ±3mm...")
+        center_pos = _explore_dot(arm, cam, 0, 0, z_tap, right_vec, down_vec)
+        if center_pos is None:
+            raise RuntimeError("Phase 6 FAILED — could not find center dot")
+        arm._fast_move(center_pos[0], center_pos[1])
+        arm.wait_idle()
+        arm.set_origin()
+        log.info(f"  Origin reset — was off by "
+                 f"({center_pos[0]:.2f}, {center_pos[1]:.2f})mm")
+    grbl_positions[CENTER_INDEX] = [0.0, 0.0]
+    verified += 1
+
+    # 3. Probe right → hit (75%, 50%) — only dot right of center in row 50%
+    _go_center(arm)
+    log.info("  Probing right → (75%, 50%)...")
+    right_dist = _probe_dot(arm, cam, right_vec, z_tap)
+    if right_dist is None:
+        raise RuntimeError("Phase 6 FAILED — could not hit (75%, 50%)")
+    mm_per_pct_h = right_dist / 25.0
+    grbl_positions[8] = list(arm.position())  # index 8 = (75%, 50%)
+    verified += 1
+    log.info(f"  Horizontal: {right_dist:.1f}mm / 25% = {mm_per_pct_h:.3f} mm/pct")
+
+    # 4. Probe down → hit (50%, 60%) — nearest dot below center in column 50%
+    _go_center(arm)
+    log.info("  Probing down → (50%, 60%)...")
+    down_dist = _probe_dot(arm, cam, down_vec, z_tap)
+    if down_dist is None:
+        raise RuntimeError("Phase 6 FAILED — could not hit (50%, 60%)")
+    mm_per_pct_v = down_dist / 10.0
+    grbl_positions[10] = list(arm.position())  # index 10 = (50%, 60%)
+    verified += 1
+    log.info(f"  Vertical: {down_dist:.1f}mm / 10% = {mm_per_pct_v:.3f} mm/pct")
+
+    _go_center(arm)
+
+    # 5. Visit remaining 12 dots: center ring → bottom → top
+    for i in VISIT_REMAINING:
+        x_pct, y_pct = GRID_SCREEN_PCT[i]
         h_offset = (x_pct - 50) * mm_per_pct_h
         v_offset = (y_pct - 50) * mm_per_pct_v
-        grbl_x = h_offset * rx + v_offset * dx
-        grbl_y = h_offset * ry + v_offset * dy
+        target_x = h_offset * rx + v_offset * dx
+        target_y = h_offset * ry + v_offset * dy
 
-        hit = _tap_and_verify(arm, cam, grbl_x, grbl_y, z_tap)
-        if hit:
-            actual_x, actual_y = arm.position()
-            grbl_positions[i] = [actual_x, actual_y]
+        if _tap_at(arm, cam, target_x, target_y, z_tap):
+            # Direct hit
+            grbl_positions[i] = list(arm.position())
             verified += 1
-            log.debug(f"  Dot {i} ({x_pct}%, {y_pct}%) ✓ GRBL ({actual_x:.2f}, {actual_y:.2f})")
+            log.debug(f"  Dot {i} ({x_pct}%, {y_pct}%) ✓ "
+                      f"GRBL ({grbl_positions[i][0]:.2f}, {grbl_positions[i][1]:.2f})")
         else:
-            # Use computed position as fallback
-            grbl_positions[i] = [grbl_x, grbl_y]
-            log.debug(f"  Dot {i} ({x_pct}%, {y_pct}%) ✗ using estimate ({grbl_x:.2f}, {grbl_y:.2f})")
+            # Miss — explore ±3mm around target
+            pos = _explore_dot(arm, cam, target_x, target_y, z_tap,
+                               right_vec, down_vec)
+            if pos is not None:
+                grbl_positions[i] = [pos[0], pos[1]]
+                verified += 1
+                log.debug(f"  Dot {i} ({x_pct}%, {y_pct}%) ✓ (explored) "
+                          f"GRBL ({pos[0]:.2f}, {pos[1]:.2f})")
+            else:
+                grbl_positions[i] = [target_x, target_y]
+                log.debug(f"  Dot {i} ({x_pct}%, {y_pct}%) ✗ "
+                          f"estimate ({target_x:.2f}, {target_y:.2f})")
 
     log.info(f"  Verified {verified}/{len(GRID_SCREEN_PCT)} dots")
-
     if verified < 3:
-        raise RuntimeError(f"Phase 6 FAILED — only {verified}/15 dots verified, need at least 3")
+        raise RuntimeError(
+            f"Phase 6 FAILED — only {verified}/15 dots verified, need at least 3")
 
-    # Return to center
-    arm._fast_move(0, 0)
-    arm.wait_idle()
+    _go_center(arm)
 
-    # 5. Compute affine transforms with RANSAC
+    # 6. Compute affine transforms with RANSAC
     pct_to_grbl, pct_to_pixel = compute_affine_transforms(
         GRID_SCREEN_PCT, grbl_positions, grid_px)
 
-    log.info("Phase 6 done — affine transforms computed")
-    return GridCalibration(pct_to_grbl=pct_to_grbl, pct_to_pixel=pct_to_pixel)
+    cal = GridCalibration(pct_to_grbl=pct_to_grbl, pct_to_pixel=pct_to_pixel)
+
+    # 7. Save debug image: draw phone screen boundary and grid on camera frame
+    debug = frame.copy()
+    # Green rectangle: phone screen edges
+    corners_pct = [(0, 0), (100, 0), (100, 100), (0, 100)]
+    corners_px = [cal.pct_to_cam_pixel(x, y) for x, y in corners_pct]
+    for j in range(4):
+        cv2.line(debug, corners_px[j], corners_px[(j + 1) % 4], (0, 255, 0), 2)
+    # Green edge lines along the clockwise check path
+    edge_pcts = [(50, 0), (100, 0), (100, 50), (100, 100),
+                 (50, 100), (0, 100), (0, 50), (0, 0), (50, 0)]
+    edge_px = [cal.pct_to_cam_pixel(x, y) for x, y in edge_pcts]
+    for j in range(len(edge_px) - 1):
+        cv2.line(debug, edge_px[j], edge_px[j + 1], (0, 255, 255), 1)
+    # Blue circles: 15 calibrated dot positions
+    for i in range(len(GRID_SCREEN_PCT)):
+        x_pct, y_pct = GRID_SCREEN_PCT[i]
+        px = cal.pct_to_cam_pixel(x_pct, y_pct)
+        cv2.circle(debug, px, 5, (255, 0, 0), -1)
+    from physiclaw.camera import SNAPSHOT_DIR
+    SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    debug_path = SNAPSHOT_DIR / 'grid_calibration.jpg'
+    cv2.imwrite(str(debug_path), debug)
+    log.info(f"Phase 6 done — debug image saved to {debug_path}")
+
+    # 8. Visual verification: move arm to 4 screen edges for dev to check
+    check_points = [
+        (50, 0, "top center"),
+        (100, 0, "top right"),
+        (100, 50, "right center"),
+        (100, 100, "bottom right"),
+        (50, 100, "bottom center"),
+        (0, 100, "bottom left"),
+        (0, 50, "left center"),
+        (0, 0, "top left"),
+        (50, 0, "top center"),  # close the loop
+    ]
+    _go_center(arm)
+    log.info("  Visual check — tracing phone edge clockwise...")
+    for x_pct, y_pct, label in check_points:
+        gx, gy = cal.pct_to_grbl_mm(x_pct, y_pct)
+        log.info(f"    → {label} ({x_pct}%, {y_pct}%) = GRBL ({gx:.2f}, {gy:.2f})")
+        arm._fast_move(gx, gy)
+        arm.wait_idle()
+        time.sleep(2)
+
+    _go_center(arm)
+    log.info("  Visual check done")
+
+    return cal
