@@ -5,12 +5,22 @@ Uses the OmniParser V2 icon detection model (YOLO11m, finetuned by Microsoft)
 via OpenCV DNN from an ONNX export. No torch dependency at runtime.
 
 Usage:
-    from physiclaw.omniparser import IconDetector
+    from physiclaw.icon_detect import IconDetector, annotate
 
     detector = IconDetector()
     elements = detector.detect(screen_image)
     for e in elements:
         print(f"{e.bbox}  conf={e.confidence:.2f}")
+
+Best practices:
+    - Crop the phone screen before detection. Raw camera frames contain desk,
+      cables, etc. that waste resolution. The model was trained on clean phone
+      screenshots. Cropping gives each UI element 2-3x more pixels and
+      significantly improves recall. Use GridCalibration transforms to crop.
+    - Lower the confidence threshold for camera frames. Dark icons (TikTok,
+      Spotify) on dark backgrounds score 0.2-0.3 in camera frames but 0.6+
+      in clean screenshots. A threshold of 0.2 recovers these without adding
+      much noise.
 """
 
 import dataclasses
