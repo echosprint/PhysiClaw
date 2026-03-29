@@ -1,65 +1,57 @@
 # PhysiClaw
 
-A robotic system that physically operates smartphones using a capacitive stylus arm and camera — no ADB, no app installation.
+You control a real phone with a robotic stylus arm and a camera. No ADB, no app installation.
 
-## Architecture
+## How it works
 
-- **MCP Server**: FastMCP over streamable-http, default port 8048
-- **Core**: `PhysiClaw` class wraps hardware; all tools acquire/release a lock
-- **Coordinate system**: Screen percentages 0–100 (0=left/top edge, 100=right/bottom edge)
-- **Calibration**: 6 phases on startup — Z-depth, direction mapping, gesture verification, grid calibration (15 red dots → affine transforms for screen% ↔ GRBL mm ↔ camera pixels)
+A camera looks straight down at a phone on a desk. You see the screen from above. A 3-axis arm taps a capacitive stylus at coordinates you specify as screen percentages (0=left/top, 100=right/bottom).
 
 ## Tools
 
-| Tool | Cost | Returns |
-| ------ | ------ | --------- |
-| `park()` | cheap | str — moves stylus out of camera frame |
-| `screenshot()` | cheap | Image — current screen (stylus may be visible) |
-| `bbox_target(left, right, top, bottom)` | cheap | Image — parks, waits 1.5s, draws colored rectangles |
-| `confirm_bbox(shift)` | cheap but **cautious** | str — locks target. shift: "center" / "top" / "bottom" / "left" / "right". Only confirm when rectangle precisely covers the target. |
-| `tap()` / `double_tap()` / `long_press()` / `swipe(direction, speed)` | **expensive** | str — physically moves arm, potentially irreversible |
+**Free (call as many times as needed):**
 
-Gestures auto-move to confirmed bbox center via `_maybe_move_to_bbox()` → `consume_confirmed_bbox()`.
+- `park()` — move stylus out of camera frame
+- `screenshot()` — see the screen (call park() first for clear view)
+- `bbox_target(left, right, top, bottom)` — draw colored rectangles on a fresh photo
 
-Small targets (< 15% in either dimension) get shifted candidates along the small axis. Large targets get one "center" bbox only.
+**Decision gate (think before calling):**
 
-## Key Rules
+- `confirm_bbox(shift)` — locks a rectangle as the tap target (center/top/bottom/left/right). No hardware moves yet, but the next gesture goes exactly here. Only call when the rectangle **fully** covers the target.
 
-- **Tapping is expensive, bbox is cheap** — always verify before tapping. A wrong tap can dismiss a dialog, navigate away, or send a message.
-- **Always park() before screenshot()** — otherwise the stylus blocks the view.
-- **Coordinates are screen percentages (0–100), not pixels** — 0 is left/top edge, 100 is right/bottom edge.
-- **Small targets get shifted candidates** — for tiny buttons (< 15% in either dimension), the system offers multiple candidate rectangles shifted along the small axis. Still must verify each one.
+**Irreversible (no undo):**
 
-## The bbox Verification Pattern
+- `tap()` / `double_tap()` / `long_press()` / `swipe(direction, speed)`
+- Moves the physical arm. A wrong tap can send a message, dismiss a dialog, or navigate away.
 
-This is the most critical interaction pattern in the codebase.
+After confirm_bbox(), the next gesture auto-moves to the rectangle's center.
 
-### The problem
+## DO: bbox verification (follow this every time)
 
-AI agents treat bbox selection as a **forced choice** — "pick the best rectangle" — even when NO rectangle covers the target. They rank bad options instead of rejecting them.
+1. Call `bbox_target()` with your best guess percentages
+2. Look at each colored rectangle. Ask: **"What UI element is inside this rectangle?"**
+3. If the target is **fully** inside a rectangle → `confirm_bbox(shift)` → gesture
+4. If not → adjust percentages and call `bbox_target()` again
+5. Repeat until one rectangle fully covers the target. 2–3 attempts is normal.
 
-### The fix
+## DON'T: common mistakes
 
-Frame it as **verification, not selection**:
+- ❌ Picking the "closest" or "least-bad" rectangle — that means all missed, re-bbox
+- ❌ Confirming partial coverage (rectangle clips the target or spans two elements) — re-bbox
+- ❌ Picking "right" because the target is on the right side of the screen — look at what's INSIDE the rectangle, not its label
+- ❌ Calling confirm_bbox() when unsure — bbox_target() is free, use it again
 
-1. Agent must name the UI element INSIDE each rectangle
-2. Only confirm if a rectangle actually contains the target
-3. If none contain the target → call `bbox_target()` again with adjusted percentages
-4. Never pick the "least-bad" option — that means all missed
-5. Self-check: "Am I choosing because it COVERS the target, or because it's the closest option?"
+## Examples
 
-### Canonical failure example
+**All miss:** You want ⌫ (backspace). Rectangles cover the "m" key.
+→ Don't pick "right". Call bbox_target() shifted ~5% rightward.
 
-Target: backspace (⌫). All rectangles cover the "m" key area.
-WRONG: picking "right" because it's the rightmost rectangle.
-RIGHT: calling bbox_target() again with percentages shifted ~5% rightward.
+**Partial:** You want "Send". Rectangle covers half of Send and half of the next icon.
+→ Don't confirm. Call bbox_target() shifted ~2% to center on Send.
 
-## When Editing MCP Tool Docstrings
+## For developers editing this codebase
 
-Tool docstrings are prompts — they directly control agent behavior. Rules:
+Tool docstrings and the FastMCP `instructions` field are prompts that control agent behavior.
 
-- Never use "pick the best" language — it creates forced-choice bias
-- Use verification framing: "name what's inside", "does it cover the target?"
-- Include concrete failure examples
-- Keep them concise — agents process long docstrings poorly
-- The `instructions` field on the FastMCP constructor is the system prompt — same rules apply
+- Never write "pick the best" — it causes forced-choice bias
+- Write "name what's inside", "fully covers"
+- Add failure examples — agents learn more from examples than rules
