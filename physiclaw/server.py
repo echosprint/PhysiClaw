@@ -40,7 +40,9 @@ A camera is mounted directly above the phone, looking straight down. You see the
 ## Operation cycle
 
 1. park() + screenshot() — see the full phone screen (stylus parked out of frame)
-2. Identify the target's position as screen percentages (0=left/top edge, 100=right/bottom edge)
+2. grid_overlay() — shows the screen with numbered percentage grid lines.
+   Use the grid to estimate your target's screen percentages by seeing
+   which lines it falls between. Use density="dense" for 5% precision.
 3. bbox_target(left, right, top, bottom) — draws colored rectangles on a fresh photo
 4. **Verify: name the element INSIDE each rectangle.**
    - If a rectangle covers the target → confirm_bbox(shift)
@@ -94,6 +96,43 @@ def park() -> str:
     try:
         physiclaw.park()
         return "Stylus parked out of frame"
+    finally:
+        physiclaw.release()
+
+
+@mcp.tool()
+def grid_overlay(density: str = "normal", color: str = "green") -> Image:
+    """Show the phone screen with a percentage reference grid.
+
+    Draws numbered grid lines on a fresh screenshot so you can estimate
+    screen percentages for any target element. Call this before bbox_target()
+    to get your bearings.
+
+    To find a target: look at which grid lines it falls between, then
+    estimate the percentage. For example, if a button is halfway between
+    the 40% and 60% vertical lines, its x-coordinate is ~50%.
+
+    If the target falls between lines and you need more precision,
+    call again with density="dense".
+
+    Args:
+        density: "sparse" (2x4 lines, coarse), "normal" (4x9 lines, default),
+                 or "dense" (9x19 lines, 5% spacing for precise targeting)
+        color: line color — "green", "red", or "yellow"
+    """
+    import time
+    density_map = {
+        "sparse": (4, 2),    # rows, cols — lines at 20/40/60/80% x 25/50/75%
+        "normal": (9, 4),    # lines at 10..90% x 20/40/60/80%
+        "dense": (19, 9),    # lines at 5..95% x 10..90%
+    }
+    rows, cols = density_map.get(density, density_map["normal"])
+    physiclaw.acquire()
+    try:
+        physiclaw.park()
+        time.sleep(1.5)
+        frame = physiclaw.screenshot_with_grid(color, rows, cols)
+        return Image(data=physiclaw.frame_to_jpeg(frame), format="jpeg")
     finally:
         physiclaw.release()
 

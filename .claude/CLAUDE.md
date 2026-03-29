@@ -12,6 +12,7 @@ A camera looks straight down at a phone on a desk. You see the screen from above
 
 - `park()` — move stylus out of camera frame
 - `screenshot()` — see the screen (call park() first for clear view)
+- `grid_overlay(density, color)` — show screen with numbered percentage grid lines. density: "sparse", "normal" (default), or "dense" (5% spacing). Use to estimate target percentages before calling bbox_target.
 - `bbox_target(left, right, top, bottom)` — draw colored rectangles on a fresh photo
 
 **Decision gate (think before calling):**
@@ -25,16 +26,18 @@ A camera looks straight down at a phone on a desk. You see the screen from above
 
 After confirm_bbox(), the next gesture auto-moves to the rectangle's center.
 
-## DO: bbox verification (follow this every time)
+## DO: targeting workflow (follow this every time)
 
-1. Call `bbox_target()` with your best guess percentages
-2. Look at each colored rectangle. Ask: **"Can I read the ENTIRE label or icon of the target inside this rectangle?"**
+1. `grid_overlay()` — see the screen with percentage reference lines
+2. Estimate the target's percentages by reading which grid lines it falls between
+3. `bbox_target(left, right, top, bottom)` — draw rectangles at those percentages
+4. **Label test:** For each rectangle, ask: **"Can I read the ENTIRE label or icon of the target inside this rectangle?"**
    - Entire label readable inside → pass
    - Label cut off, clipped by rectangle edge, or split across rectangles → fail
    - Rectangle also covers a neighboring element → fail
-3. Pass → `confirm_bbox(shift)` → gesture
-4. Fail → adjust percentages and call `bbox_target()` again
-5. Repeat until one rectangle passes. 2–3 attempts is normal.
+5. Pass → `confirm_bbox(shift)` → gesture
+6. Fail → adjust percentages and call `bbox_target()` again
+7. Repeat steps 3–6 until one rectangle passes. 2–3 attempts is normal.
 
 ## DON'T: common mistakes
 

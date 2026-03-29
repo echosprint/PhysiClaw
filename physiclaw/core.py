@@ -258,19 +258,23 @@ class PhysiClaw:
         if frame is None:
             raise RuntimeError("Camera capture failed")
 
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        pad = 4
         for tl, br, color, name in rects:
             cv2.rectangle(frame, tl, br, color, 2)
             # Position label based on shift direction
             if name == 'bottom':
-                label_pos = (tl[0] + 2, br[1] + 15)   # below bbox
+                lx, ly = tl[0] + 2, br[1] + 15
             elif name == 'right':
-                label_pos = (br[0] + 4, (tl[1] + br[1]) // 2)  # right of bbox
+                lx, ly = br[0] + 4, (tl[1] + br[1]) // 2
             elif name == 'left':
-                label_pos = (tl[0] - 30, (tl[1] + br[1]) // 2)  # left of bbox
+                lx, ly = tl[0] - 30, (tl[1] + br[1]) // 2
             else:
-                label_pos = (tl[0] + 2, tl[1] - 5)    # above bbox (center, top)
-            cv2.putText(frame, name, label_pos,
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
+                lx, ly = tl[0] + 2, tl[1] - 5
+            (tw, th), _ = cv2.getTextSize(name, font, 0.8, 2)
+            cv2.rectangle(frame, (lx - pad, ly - th - pad),
+                          (lx + tw + pad, ly + pad), color, -1)
+            cv2.putText(frame, name, (lx, ly), font, 0.8, (255, 255, 255), 2)
 
         # Save annotated frame
         from datetime import datetime
@@ -294,6 +298,76 @@ class PhysiClaw:
         """Encode a BGR frame to JPEG bytes."""
         _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
         return jpeg.tobytes()
+
+    # ─── Grid overlay ─────────────────────────────────────────
+
+    def screenshot_with_grid(self, color: str = "green",
+                             rows: int = 9, cols: int = 4):
+        """Take a screenshot with percentage reference grid lines drawn.
+
+        Draws vertical lines at evenly spaced x-percentages and horizontal
+        lines at evenly spaced y-percentages. Labels are drawn outside the
+        phone screen area.
+
+        Args:
+            color: line color — "green", "red", or "yellow".
+            rows: number of horizontal lines (e.g. 9 → lines at 10,20,...,90%).
+            cols: number of vertical lines (e.g. 4 → lines at 20,40,60,80%).
+        """
+        if self._grid_cal is None:
+            raise RuntimeError("Grid calibration not done")
+
+        frame = self.cam.snapshot()
+        if frame is None:
+            raise RuntimeError("Camera capture failed")
+
+        color_map = {
+            "green": (0, 255, 0),
+            "red": (0, 0, 255),
+            "yellow": (0, 255, 255),
+        }
+        bgr = color_map.get(color, (0, 255, 0))
+        cal = self._grid_cal
+        font = cv2.FONT_HERSHEY_SIMPLEX
+
+        pad = 4  # padding around label text
+
+        def _draw_label(frame, label, cx, cy):
+            """Draw a white-on-color label centered at (cx, cy)."""
+            (tw, th), _ = cv2.getTextSize(label, font, 0.8, 2)
+            lx, ly = cx - tw // 2, cy + th // 2
+            cv2.rectangle(frame, (lx - pad, ly - th - pad),
+                          (lx + tw + pad, ly + pad), bgr, -1)
+            cv2.putText(frame, label, (lx, ly), font, 0.8, (255, 255, 255), 2)
+
+        # Vertical lines — labels at top and bottom
+        for i in range(1, cols + 1):
+            x_pct = round(100 * i / (cols + 1))
+            pt_top = cal.pct_to_cam_pixel(x_pct, 0)
+            pt_bot = cal.pct_to_cam_pixel(x_pct, 100)
+            cv2.line(frame, pt_top, pt_bot, bgr, 1)
+            label = str(x_pct)
+            _draw_label(frame, label, pt_top[0], pt_top[1] - 15)
+            _draw_label(frame, label, pt_bot[0], pt_bot[1] + 15)
+
+        # Horizontal lines — labels at left and right
+        for i in range(1, rows + 1):
+            y_pct = round(100 * i / (rows + 1))
+            pt_left = cal.pct_to_cam_pixel(0, y_pct)
+            pt_right = cal.pct_to_cam_pixel(100, y_pct)
+            cv2.line(frame, pt_left, pt_right, bgr, 1)
+            label = str(y_pct)
+            (tw, _), _ = cv2.getTextSize(label, font, 0.8, 2)
+            _draw_label(frame, label, pt_left[0] - tw // 2 - 10, pt_left[1])
+            _draw_label(frame, label, pt_right[0] + tw // 2 + 10, pt_right[1])
+
+        # Save
+        from datetime import datetime
+        from physiclaw.camera import SNAPSHOT_DIR
+        SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
+        cv2.imwrite(str(SNAPSHOT_DIR / f'{ts}_overlay.jpg'), frame)
+        return frame
 
     # ─── Lifecycle ─────────────────────────────────────────────
 

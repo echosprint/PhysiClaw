@@ -167,7 +167,6 @@ class PhoneDetector:
                 ['system_profiler', 'SPCameraDataType'],
                 capture_output=True, text=True, timeout=5,
             )
-            # Count camera entries (each starts with a name line indented by 4 spaces)
             cam_count = result.stdout.count('Model ID:')
             max_index = min(max_index, max(cam_count, 1))
             log.info(f"System reports {cam_count} cameras, scanning indices 0-{max_index - 1}")
