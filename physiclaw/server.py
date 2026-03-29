@@ -42,20 +42,25 @@ A camera is mounted directly above the phone, looking straight down. You see the
 1. park() + screenshot() — see the full phone screen (stylus parked out of frame)
 2. Identify the target's position as screen percentages (0=left/top edge, 100=right/bottom edge)
 3. bbox_target(left, right, top, bottom) — draws colored rectangles on a fresh photo
-4. For large targets: one green rectangle. Verify it covers the target.
-   For small targets (like keyboard keys): multiple colored rectangles appear,
-   shifted along the small dimension(s). Pick the one that best covers the target.
-   If none fit well, call bbox_target() again with corrected percentages.
-5. confirm_bbox(shift) — lock in the chosen rectangle ("center", "top", "bottom", "left", "right")
-6. tap() / double_tap() / long_press() / swipe() — executes at the bbox center
-7. park() + screenshot() — verify the result
+4. **Verify: name the element INSIDE each rectangle.**
+   - If a rectangle covers the target → confirm_bbox(shift)
+   - If NO rectangle covers the target → call bbox_target() with corrected percentages
+   - Shift percentages toward the target by the gap you observe
+   - 2-3 attempts is normal. Never pick the "least-bad" rectangle.
+5. tap() / double_tap() / long_press() / swipe() — executes at the bbox center
+6. park() + screenshot() — verify the result
+
+## Example
+
+Target: backspace (⌫). bbox_target() returns rectangles covering the "m" key area.
+WRONG: picking "right" because it's the rightmost rectangle.
+RIGHT: calling bbox_target() again with percentages shifted ~5% rightward.
 
 ## CRITICAL
 
-bbox_target() is cheap — it just takes a photo and draws rectangles on it. But tap() is expensive — it moves the mechanical arm physically, which is slow. A wrong
-tap can send a wrong message, transfer the wrong amount, or trigger an irreversible action.
-Always iterate bbox_target() until a rectangle precisely covers the target before confirming.
-Never rush to confirm an imprecise bbox.
+- bbox_target() is cheap (just a photo). tap() is expensive (physical arm, irreversible).
+- Before confirming, ask: "Am I choosing this because it COVERS the target, or because it's the closest option?" If closest → reject, re-bbox.
+- Never confirm a bbox you're not confident about.
 """,
 )
 
@@ -102,14 +107,16 @@ def bbox_target(left: int, right: int, top: int, bottom: int) -> Image:
     For large targets: one green rectangle labeled "center".
     For small targets (< 15% in either dimension): multiple colored rectangles
     shifted along the small dimension(s), each labeled with its shift direction.
-    Pick the rectangle that best covers the target.
 
-    IMPORTANT: Do NOT confirm until a rectangle precisely covers the target.
-    bbox_target() is cheap — it just takes a photo and draws rectangles on it. But tap() is expensive —
-    a wrong tap is hard to undo and wastes time. So iterate bbox_target() as
-    many times as needed until a rectangle matches, then confirm and tap.
-    Confirming an imprecise bbox risks tapping the wrong button — sending a wrong
-    message, transferring the wrong amount, or triggering an irreversible action.
+    VERIFICATION REQUIRED: For each rectangle, name the UI element INSIDE it.
+    - If a rectangle contains your target element → confirm it.
+    - If NO rectangle contains your target → call bbox_target() again with
+      corrected percentages. Shift toward the target by the gap you observe.
+    - Never pick the "least-bad" rectangle. That means all missed — re-bbox.
+
+    2-3 attempts is normal. bbox_target() is cheap (just a photo).
+    tap() is expensive — a wrong tap can send a wrong message, transfer the
+    wrong amount, or trigger an irreversible action.
 
     Args:
         left: left edge (0=left edge of screen, 100=right edge)
@@ -134,16 +141,17 @@ def confirm_bbox(shift: str = "center") -> str:
     """Confirm a bounding box from the last bbox_target() call.
 
     For large targets, just call confirm_bbox() or confirm_bbox("center").
-    For small targets, pick the shifted variant that best covers the target:
+    For small targets, pick the shifted variant that covers the target:
       "center" — the original bbox (green)
       "top"    — shifted up (red)
       "bottom" — shifted down (blue)
       "left"   — shifted left (yellow)
       "right"  — shifted right (magenta)
 
-    IMPORTANT: Only confirm when a rectangle precisely covers the target.
-    If none fit, call bbox_target() again with corrected percentages instead.
-    Confirming an imprecise bbox wastes time — the tap will miss.
+    BEFORE CONFIRMING, ask yourself:
+    "Am I choosing this because it COVERS the target,
+     or because it's the closest option?"
+    If closest → do NOT confirm. Call bbox_target() with corrected percentages.
 
     After confirmation, the next gesture (tap, double_tap, long_press, swipe)
     will auto-move to the bbox center before executing.
