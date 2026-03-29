@@ -100,8 +100,8 @@ class PhysiClaw:
         phase4_long_press(arm, cam)
 
         # Phase 5 — swipe verification
-        rax, ray, _ = right_result
-        dax, day, _ = down_result
+        rax, ray, right_dist = right_result
+        dax, day, down_dist = down_result
         arm.set_direction_mapping((rax, ray), (dax, day))
         phase5_swipe(arm, cam)
 
@@ -112,7 +112,8 @@ class PhysiClaw:
         # The pen-calib page shows the red dot grid after phases 1-5
         arm._fast_move(0, 0)
         arm.wait_idle()
-        self._grid_cal = phase6_grid(arm, cam, (rax, ray), (dax, day))
+        self._grid_cal = phase6_grid(arm, cam, (rax, ray), (dax, day),
+                                     right_dist, down_dist)
 
     # ─── Properties ────────────────────────────────────────────
 

@@ -204,6 +204,7 @@ PROBE_DISTANCES_MM = [3.0 + i * 1.5 for i in range(16)]  # same as phase 2-3
 EXPLORE_STEPS_MM = [1.0, -1.0, 2.0, -2.0, 3.0, -3.0]  # no 0 — caller already tried exact position
 
 
+
 def _tap_at(arm: StylusArm, cam: Camera, x: float, y: float,
             z_tap: float) -> bool:
     """Move to absolute position, tap, return True if green flash."""
@@ -249,13 +250,22 @@ def _explore_dot(arm: StylusArm, cam: Camera,
 
 
 def _probe_dot(arm: StylusArm, cam: Camera, direction: tuple[int, int],
-               z_tap: float) -> float | None:
+               z_tap: float, start_dist: float = 0.0,
+               max_dist: float = 25.5) -> float | None:
     """Probe outward from origin in a direction until green flash.
+
+    Args:
+        start_dist: skip distances before this value (jump ahead).
+        max_dist: stop probing beyond this distance.
 
     Returns the mm distance that triggered the green flash, or None.
     """
     ax, ay = direction
     for dist in PROBE_DISTANCES_MM:
+        if dist < start_dist:
+            continue
+        if dist > max_dist:
+            break
         x = round(ax * dist, 2)
         y = round(ay * dist, 2)
         if _tap_at(arm, cam, x, y, z_tap):
@@ -271,18 +281,24 @@ def _go_center(arm: StylusArm):
 
 def phase6_grid(arm: StylusArm, cam: Camera,
                 right_vec: tuple[int, int],
-                down_vec: tuple[int, int]) -> GridCalibration:
+                down_vec: tuple[int, int],
+                right_dist: float,
+                down_dist: float) -> GridCalibration:
     """Phase 6: grid calibration using red dot page.
 
-    Strategy — probe outward from center, no ambiguity at each step:
+    Uses phase 2-3 distances as starting points — the right/down calibration
+    circles are near the grid dots, so we jump there and explore ±3mm.
+
     1. Park, detect 15 red dots in camera (pixel positions)
     2. Verify center dot (50%,50%) — explore ±3mm if miss, reset origin
-    3. Probe right with small steps → must hit (75%,50%), the only dot
-       to the right in center row → mm_per_pct_h = dist / 25
-    4. Probe down with small steps → must hit (50%,60%), the nearest dot
-       below center in center column → mm_per_pct_v = dist / 10
+    3. Move right by phase-2 distance, explore → find (75%,50%) dot
+    4. Move down by phase-3 distance, explore → find (50%,60%) dot
     5. Visit remaining 12 dots: center ring, then bottom row, then top row
     6. Compute affine transforms from all 15 verified positions
+
+    Args:
+        right_dist: mm distance from phase 2 (center to right circle)
+        down_dist: mm distance from phase 3 (center to down circle)
     """
     log.info("Phase 6: Grid calibration  (15 red dots)")
 
@@ -334,27 +350,29 @@ def phase6_grid(arm: StylusArm, cam: Camera,
     grbl_positions[CENTER_INDEX] = [0.0, 0.0]
     verified += 1
 
-    # 3. Probe right → hit (75%, 50%) — only dot right of center in row 50%
+    # 3. Find (75%, 50%) — probe right, jumping to phase-2 distance
     _go_center(arm)
-    log.info("  Probing right → (75%, 50%)...")
-    right_dist = _probe_dot(arm, cam, right_vec, z_tap)
-    if right_dist is None:
-        raise RuntimeError("Phase 6 FAILED — could not hit (75%, 50%)")
-    mm_per_pct_h = right_dist / 25.0
-    grbl_positions[8] = list(arm.position())  # index 8 = (75%, 50%)
+    log.info(f"  Probing right → (75%, 50%), starting at {right_dist:.1f}mm...")
+    grid_right_dist = _probe_dot(arm, cam, right_vec, z_tap,
+                                 start_dist=right_dist, max_dist=right_dist + 10)
+    if grid_right_dist is None:
+        raise RuntimeError("Phase 6 FAILED — could not find (75%, 50%)")
+    grbl_positions[8] = list(arm.position())
     verified += 1
-    log.info(f"  Horizontal: {right_dist:.1f}mm / 25% = {mm_per_pct_h:.3f} mm/pct")
+    mm_per_pct_h = grid_right_dist / 25.0
+    log.info(f"  Horizontal: {grid_right_dist:.1f}mm / 25% = {mm_per_pct_h:.3f} mm/pct")
 
-    # 4. Probe down → hit (50%, 60%) — nearest dot below center in column 50%
+    # 4. Find (50%, 60%) — probe down, jumping to phase-3 distance
     _go_center(arm)
-    log.info("  Probing down → (50%, 60%)...")
-    down_dist = _probe_dot(arm, cam, down_vec, z_tap)
-    if down_dist is None:
-        raise RuntimeError("Phase 6 FAILED — could not hit (50%, 60%)")
-    mm_per_pct_v = down_dist / 10.0
-    grbl_positions[10] = list(arm.position())  # index 10 = (50%, 60%)
+    log.info(f"  Probing down → (50%, 60%), starting at {down_dist:.1f}mm...")
+    grid_down_dist = _probe_dot(arm, cam, down_vec, z_tap,
+                                start_dist=down_dist, max_dist=down_dist + 10)
+    if grid_down_dist is None:
+        raise RuntimeError("Phase 6 FAILED — could not find (50%, 60%)")
+    grbl_positions[10] = list(arm.position())
     verified += 1
-    log.info(f"  Vertical: {down_dist:.1f}mm / 10% = {mm_per_pct_v:.3f} mm/pct")
+    mm_per_pct_v = grid_down_dist / 10.0
+    log.info(f"  Vertical: {grid_down_dist:.1f}mm / 10% = {mm_per_pct_v:.3f} mm/pct")
 
     _go_center(arm)
 
