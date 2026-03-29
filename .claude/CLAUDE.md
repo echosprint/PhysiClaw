@@ -23,6 +23,13 @@ Gestures auto-move to confirmed bbox center via `_maybe_move_to_bbox()` → `con
 
 Small targets (< 15% in either dimension) get shifted candidates along the small axis. Large targets get one "center" bbox only.
 
+## Key Rules
+
+- **Tapping is expensive, bbox is cheap** — always verify before tapping. A wrong tap can dismiss a dialog, navigate away, or send a message.
+- **Always park() before screenshot()** — otherwise the stylus blocks the view.
+- **Coordinates are screen percentages (0–100), not pixels** — 0 is left/top edge, 100 is right/bottom edge.
+- **Small targets get shifted candidates** — for tiny buttons (< 15% in either dimension), the system offers multiple candidate rectangles shifted along the small axis. Still must verify each one.
+
 ## The bbox Verification Pattern
 
 This is the most critical interaction pattern in the codebase.
