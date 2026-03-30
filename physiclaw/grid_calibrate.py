@@ -187,6 +187,14 @@ class GridCalibration:
         result = self.pct_to_pixel @ pt
         return (int(result[0]), int(result[1]))
 
+    def pixel_to_pct(self, px_x: int, px_y: int) -> tuple[float, float]:
+        """Convert camera pixel coordinates to screen percentages."""
+        M = self.pct_to_pixel
+        A = M[:, :2]  # 2x2
+        b = M[:, 2]   # translation
+        pct = np.linalg.solve(A, np.array([px_x, px_y]) - b)
+        return (float(pct[0]), float(pct[1]))
+
     def bbox_to_pixel_rect(self, left: float, right: float,
                            top: float, bottom: float) -> tuple[tuple[int, int], tuple[int, int]]:
         """Convert bbox screen% to camera pixel rectangle (top-left, bottom-right)."""

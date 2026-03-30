@@ -12,7 +12,8 @@ A camera looks straight down at a phone on a desk. You see the screen from above
 
 - `park()` — move stylus out of camera frame
 - `screenshot()` — see the screen (call park() first for clear view)
-- `grid_overlay(density, color)` — show screen with numbered percentage grid lines. density: "sparse", "normal" (default), or "dense" (5% spacing). Use to estimate target percentages before calling bbox_target.
+- `detect_elements()` — detect all icons and text on screen. Returns two annotated images (icon boxes + OCR boxes) and a text listing with bounding boxes in screen percentages. Use the percentages for bbox_target.
+- `grid_overlay(density, color)` — show screen with numbered percentage grid lines. density: "sparse", "normal" (default), or "dense" (5% spacing). Fallback when detect_elements() misses the target.
 - `bbox_target(left, right, top, bottom)` — draw colored rectangles on a fresh photo
 
 **Decision gate (think before calling):**
@@ -28,8 +29,9 @@ After confirm_bbox(), the next gesture auto-moves to the rectangle's center.
 
 ## DO: targeting workflow (follow this every time)
 
-1. `grid_overlay()` — see the screen with percentage reference lines
-2. Estimate the target's percentages by reading which grid lines it falls between
+1. `detect_elements()` — detect icons and text, get bounding boxes in screen %
+2. If the target is in the list, use its percentages for step 3.
+   If not, use `grid_overlay()` to estimate percentages manually.
 3. `bbox_target(left, right, top, bottom)` — draw rectangles at those percentages
 4. **Label test:** For each rectangle, ask: **"Can I read the ENTIRE label or icon of the target inside this rectangle?"**
    - Entire label readable inside → pass
