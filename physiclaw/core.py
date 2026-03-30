@@ -470,8 +470,10 @@ class PhysiClaw:
 
     # Hex color → BGR tuple for OpenCV drawing
     _COLOR_NAMES = {
-        '#42a5f5': 'blue', '#66bb6a': 'green',
-        '#ffa726': 'orange', '#ef5350': 'red',
+        '#ff5252': 'red', '#448aff': 'blue',
+        '#69f0ae': 'green', '#ffd740': 'yellow',
+        '#e040fb': 'purple', '#00e5ff': 'cyan',
+        '#e0e0e0': 'white', '#b2ff59': 'lime',
     }
 
     @staticmethod

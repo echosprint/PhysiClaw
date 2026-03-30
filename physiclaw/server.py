@@ -369,19 +369,14 @@ def get_user_annotations() -> list:
 
     The user draws boxes on the live camera feed at /annotate in their browser.
     Call this tool when the user says they've finished drawing boxes.
-    Annotations are cleared automatically after retrieval.
+    Annotations persist until the user takes a new snapshot in the browser.
+    Safe to call multiple times — returns the same data until reset.
     """
     frozen_frame, annotations = _ann.get_all()
     if frozen_frame is None or not annotations:
-        import numpy as np
         return ["No pending annotations. "
-                "Ask the user to draw boxes at /annotate first.",
-                Image(data=physiclaw.frame_to_jpeg(
-                    physiclaw.cam.snapshot()
-                    or np.zeros((100, 100, 3), dtype=np.uint8)
-                ), format="jpeg")]
+                "Ask the user to draw boxes at /annotate first."]
     result = physiclaw.process_annotations(frozen_frame, annotations)
-    _ann.clear()
     text, frame = result
     return [text, Image(data=physiclaw.frame_to_jpeg(frame), format="jpeg")]
 

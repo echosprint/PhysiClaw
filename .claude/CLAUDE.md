@@ -15,6 +15,7 @@ A camera looks straight down at a phone on a desk. You see the screen from above
 - `detect_elements()` — detect all icons and text on screen. Returns two annotated images (icon boxes + OCR boxes) and a text listing with bounding boxes as 0-1 decimals. Use the coordinates for bbox_target.
 - `grid_overlay(density, color)` — show screen with numbered grid lines (0-1 scale). density: "sparse", "normal" (default), or "dense" (0.05 spacing). Fallback when detect_elements() misses the target.
 - `bbox_target(left, top, right, bottom)` — draw colored rectangles on a fresh photo
+- `get_user_annotations()` — get bounding boxes drawn by the user in the annotation web UI
 
 **Decision gate (think before calling):**
 
@@ -69,21 +70,48 @@ Before starting the bbox_target() targeting workflow, check if the target elemen
 
 1. Read the relevant app's preset file (e.g., `.claude/ui-presets/wechat.md`)
 2. Match the current page by its fingerprint description
-3. If the target element is listed, use its 位置 coordinates directly with bbox_target()
+3. If the target element is listed, use its position coordinates directly with bbox_target()
 4. If not found, fall back to the normal detect_elements() → bbox_target() workflow
 
 Preset coordinates are 0-1 decimals in [left, top, right, bottom] order, same format as bbox_target().
+
+### Preset file format
+
+One file per app or system context, saved as `.claude/ui-presets/{slug}.md` (lowercase kebab-case, e.g. `wechat.md`, `home-screen.md`).
+
+Each page section has a fingerprint for visual matching, an optional entry path for navigation, and a table of interactive elements.
+
+- **`#` heading** — app name (e.g. `# WeChat`) or system context (e.g. `# Home Screen`, `# Lock Screen`)
+- **Fingerprint** — one-line visual description for identifying the current page
+- **Entry** — how to reach this page: `{Source Page}` → `{element to tap}`. Omit for home/default screens.
+- **Position** — `[left, top, right, bottom]` as 0-1 decimals, up to 3 decimal places
+- **Action** column — what tapping does. Use `→ {Page Name}` for navigation (must match a `##` heading in any preset file), or a short verb phrase for non-navigation actions.
+
+```markdown
+# {App or Context Name}
+
+## {Page Name}
+
+Fingerprint: {one-line visual description}
+Entry: {Source Page} → {element tapped to get here}
+
+| Element      | Position                         | Action               |
+|--------------|----------------------------------|----------------------|
+| Settings     | [0.750, 0.931, 1.000, 1.000]     | → Settings           |
+| Search bar   | [0.045, 0.083, 0.850, 0.133]     | Opens search overlay |
+```
 
 ### Annotation workflow
 
 When the user asks to annotate UI elements:
 
-1. Ensure the user has drawn boxes at [annotate](http://localhost:8048/annotate)
-2. Call `get_user_annotations()` to get the screenshot with drawn boxes and coordinates
-3. Look at the image and identify: what app, what page, and what each boxed element is
-4. List your findings and ask the user to confirm
-5. On confirmation, write the preset markdown file to `.claude/ui-presets/{app_slug}.md`
-6. Annotations are cleared automatically after `get_user_annotations()` returns
+1. Ask the user to open [annotate](http://localhost:8048/annotate) and draw bounding boxes on the UI elements
+2. Wait for the user to confirm they are done drawing
+3. Call `get_user_annotations()` to get the screenshot with drawn boxes and coordinates
+4. Look at the image and identify: what app, what page, and what each boxed element is
+5. List your findings and ask the user to confirm
+6. On confirmation, write the preset markdown file to `.claude/ui-presets/{app_slug}.md`
+7. Annotations persist until the user takes a new snapshot — safe to call `get_user_annotations()` again if needed
 
 ## For developers editing this codebase
 

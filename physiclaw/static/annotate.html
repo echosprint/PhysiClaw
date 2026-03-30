@@ -29,7 +29,7 @@ body { background: #1a1a1a; color: #e0e0e0; font-family: -apple-system, sans-ser
 .controls button.primary { background: #2563eb; border-color: #2563eb; color: #fff; }
 .controls button.primary:hover { background: #1d4ed8; }
 .color-picker {
-  display: flex; gap: 8px;
+  display: grid; grid-template-columns: repeat(4, 28px); gap: 8px;
 }
 .color-dot {
   width: 28px; height: 28px; border-radius: 50%; cursor: pointer;
@@ -60,14 +60,14 @@ body { background: #1a1a1a; color: #e0e0e0; font-family: -apple-system, sans-ser
 
 /* Right column — annotations list */
 .sidebar {
-  width: 260px; min-width: 260px;
+  width: 340px; min-width: 340px;
   background: #222; border-left: 1px solid #333;
   overflow-y: auto; padding: 16px; margin-left: 32px;
 }
 .sidebar h2 { font-size: 14px; color: #888; margin-bottom: 10px; }
 .box-item {
-  padding: 8px 10px; margin-bottom: 6px; border-radius: 6px;
-  background: #2a2a2a; border-left: 3px solid #42a5f5;
+  padding: 10px 12px; margin-bottom: 12px; border-radius: 6px;
+  background: #2a2a2a; border-left: 3px solid #ff5252;
 }
 .box-item .box-header {
   display: flex; align-items: center; justify-content: space-between;
@@ -82,11 +82,11 @@ body { background: #1a1a1a; color: #e0e0e0; font-family: -apple-system, sans-ser
 }
 .box-item .del:hover { color: #ef5350; }
 .box-item .coords {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 2px 12px;
+  display: flex; gap: 26px; margin-top: 10px;
   font-size: 11px; font-family: monospace; color: #999;
 }
-.box-item .coords .label { color: #666; font-size: 10px; }
-.box-item .coords .val { color: #ccc; }
+.box-item .coords .label { color: #666; font-size: 10px; display: block; margin-bottom: 2px; }
+.box-item .coords .val { color: #ccc; font-size: 13px; }
 .empty-msg { color: #555; font-size: 12px; font-style: italic; }
 
 </style>
@@ -95,17 +95,20 @@ body { background: #1a1a1a; color: #e0e0e0; font-family: -apple-system, sans-ser
 
 <div class="layout">
   <div class="controls">
-    <h2>Controls</h2>
-    <button class="primary" id="btnSnapshot">New Snapshot</button>
-    <h2 style="margin-top: 16px">Pen Color</h2>
-    <div class="color-picker" id="colorPicker">
-      <div class="color-dot active" data-color="#42a5f5" style="background:#42a5f5"></div>
-      <div class="color-dot" data-color="#66bb6a" style="background:#66bb6a"></div>
-      <div class="color-dot" data-color="#ffa726" style="background:#ffa726"></div>
-      <div class="color-dot" data-color="#ef5350" style="background:#ef5350"></div>
+    <div style="flex: 0 0 30vh"></div>
+    <button class="primary" id="btnSnapshot">Snapshot</button>
+    <div class="color-picker" id="colorPicker" style="margin-top: 20px">
+      <div class="color-dot active" data-color="#ff5252" data-key="1" style="background:#ff5252" title="Press 1"></div>
+      <div class="color-dot" data-color="#448aff" data-key="2" style="background:#448aff" title="Press 2"></div>
+      <div class="color-dot" data-color="#69f0ae" data-key="3" style="background:#69f0ae" title="Press 3"></div>
+      <div class="color-dot" data-color="#ffd740" data-key="4" style="background:#ffd740" title="Press 4"></div>
+      <div class="color-dot" data-color="#e040fb" data-key="5" style="background:#e040fb" title="Press 5"></div>
+      <div class="color-dot" data-color="#00e5ff" data-key="6" style="background:#00e5ff" title="Press 6"></div>
+      <div class="color-dot" data-color="#e0e0e0" data-key="7" style="background:#e0e0e0" title="Press 7"></div>
+      <div class="color-dot" data-color="#b2ff59" data-key="8" style="background:#b2ff59" title="Press 8"></div>
     </div>
     <div class="hint">
-      Click <b>New Snapshot</b> to capture.<br>
+      Click <b>Snapshot</b> to capture.<br>
       Drag empty area to draw a box.<br>
       Drag inside a box to move it.<br>
       Drag corners to resize.<br>
@@ -122,7 +125,7 @@ body { background: #1a1a1a; color: #e0e0e0; font-family: -apple-system, sans-ser
   </div>
 
   <div class="sidebar">
-    <h2>Annotations</h2>
+    <h2>Bounding Box</h2>
     <div id="boxList"><span class="empty-msg">No boxes drawn yet</span></div>
   </div>
 </div>
@@ -145,7 +148,7 @@ const viewer = document.getElementById('viewer');
 const boxList = document.getElementById('boxList');
 const btnSnapshot = document.getElementById('btnSnapshot');
 const colorPicker = document.getElementById('colorPicker');
-let penColor = '#42a5f5';
+let penColor = '#ff5252';
 
 let frozen = false;
 let boxes = []; // {left, top, right, bottom, color} in natural image pixels
@@ -224,6 +227,13 @@ function updateCursor(mx, my) {
   canvas.style.cursor = isInsidePhone(mx, my) ? 'crosshair' : 'default';
 }
 
+function isLightColor(hex) {
+  const r = parseInt(hex.slice(1,3), 16);
+  const g = parseInt(hex.slice(3,5), 16);
+  const b = parseInt(hex.slice(5,7), 16);
+  return (r * 0.299 + g * 0.587 + b * 0.114) > 160;
+}
+
 // ─── Drawing ───────────────────────────────────────────────
 function drawPhoneBounds() {
   if (!phoneBounds) return;
@@ -289,7 +299,7 @@ function redrawCanvas() {
     const [x2, y2] = n2d(b.right, b.bottom);
     const w = x2 - x, h = y2 - y;
     const isActive = (mode === 'move' || mode === 'resize') && i === activeBox;
-    const color = b.color || '#42a5f5';
+    const color = b.color || '#ff5252';
     ctx.globalAlpha = isActive ? Math.max(0.05, 1 - deleteFade * 0.95) : 1;
 
     // Solid border
@@ -308,7 +318,7 @@ function redrawCanvas() {
     if (lx < 0) lx = 0;
     ctx.fillStyle = color;
     ctx.fillRect(lx, ly, lw, lh);
-    ctx.fillStyle = '#fff';
+    ctx.fillStyle = isLightColor(color) ? '#000' : '#fff';
     ctx.fillText(label, lx + 4, ly + 13);
 
 
@@ -322,7 +332,7 @@ function renderBoxList() {
   } else {
     boxList.innerHTML = '';
     boxes.forEach((b, i) => {
-      const c = b.color || '#42a5f5';
+      const c = b.color || '#ff5252';
       const [px1, py1] = pixelToPhone(b.left, b.top);
       const [px2, py2] = pixelToPhone(b.right, b.bottom);
       const x1 = px1.toFixed(2), y1 = py1.toFixed(2);
@@ -332,7 +342,7 @@ function renderBoxList() {
       item.style.borderLeftColor = c;
       item.innerHTML =
         '<div class="box-header">' +
-          '<span class="num" style="color:' + c + '">#' + (i + 1) + '</span>' +
+          '<span class="num" style="color:' + c + '">Box ' + (i + 1) + '</span>' +
           '<span class="del" data-i="' + i + '">&times;</span>' +
         '</div>' +
         '<div class="coords">' +
@@ -618,6 +628,19 @@ colorPicker.addEventListener('click', (e) => {
   penColor = dot.dataset.color;
   colorPicker.querySelectorAll('.color-dot').forEach(d => d.classList.remove('active'));
   dot.classList.add('active');
+});
+
+// ─── Keyboard shortcuts (1-8 for colors) ───────────────────
+document.addEventListener('keydown', (e) => {
+  const key = e.key;
+  if (key >= '1' && key <= '8') {
+    const dot = colorPicker.querySelector('[data-key="' + key + '"]');
+    if (dot) {
+      penColor = dot.dataset.color;
+      colorPicker.querySelectorAll('.color-dot').forEach(d => d.classList.remove('active'));
+      dot.classList.add('active');
+    }
+  }
 });
 
 // ─── Button + initial load ─────────────────────────────────
