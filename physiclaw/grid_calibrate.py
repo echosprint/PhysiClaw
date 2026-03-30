@@ -234,17 +234,18 @@ def _explore_dot(arm: StylusArm, cam: Camera,
                  cx: float, cy: float, z_tap: float,
                  right_vec: tuple[int, int],
                  down_vec: tuple[int, int]) -> tuple[float, float] | None:
-    """Explore around (cx, cy) in a star pattern (✱) to find a dot.
-    Dots are ≥5mm apart, so any green within ±3mm must be the target.
+    """Explore around (cx, cy) to find a dot. Two strategies:
 
-    Star = two diagonals + two axes (4 lines through center).
-    24 taps covers all directions with no blind spots.
+    1. Star pattern (✱): fast, covers ±3mm along 4 axes (24 taps).
+    2. Row-by-row grid: thorough fallback, covers ±4mm in 1mm steps (81 taps).
 
+    Dots are ≥5mm apart, so any green within range must be the target.
     Returns the GRBL (x, y) that triggered the green, or None.
     """
     rx, ry = right_vec
     dx, dy = down_vec
-    # 4 directions: right only, down only, diagonal right+down, diagonal right-down
+
+    # Strategy 1: Star pattern (fast)
     directions = [
         (rx, ry, 0, 0),       # → right axis
         (0, 0, dx, dy),       # ↓ down axis
@@ -257,6 +258,19 @@ def _explore_dot(arm: StylusArm, cam: Camera,
             y = cy + s * r_mul_y + s * d_mul_y
             if _tap_at(arm, cam, x, y, z_tap):
                 return arm.position()
+
+    # Strategy 2: Row-by-row grid (thorough fallback)
+    log.debug(f"  Star pattern missed, trying grid search ±4mm...")
+    grid_steps = [-4, -3, -2, -1, 0, 1, 2, 3, 4]
+    for row_s in grid_steps:
+        for col_s in grid_steps:
+            if row_s == 0 and col_s == 0:
+                continue  # already tried center
+            x = cx + col_s * rx + row_s * dx
+            y = cy + col_s * ry + row_s * dy
+            if _tap_at(arm, cam, x, y, z_tap):
+                return arm.position()
+
     return None
 
 
@@ -426,14 +440,12 @@ def phase6_grid(arm: StylusArm, cam: Camera,
                 log.debug(f"  Dot {i} ({x_pct}, {y_pct}) ✓ (explored) "
                           f"GRBL ({pos[0]:.2f}, {pos[1]:.2f})")
             else:
-                grbl_positions[i] = [target_x, target_y]
-                log.debug(f"  Dot {i} ({x_pct}, {y_pct}) ✗ "
-                          f"estimate ({target_x:.2f}, {target_y:.2f})")
+                raise RuntimeError(
+                    f"Phase 6 FAILED — dot {i} ({x_pct}, {y_pct}) not found. "
+                    f"Tried position ({target_x:.2f}, {target_y:.2f}) and "
+                    f"explored ±3mm. Check phone screen and lighting.")
 
-    log.info(f"  Verified {verified}/{len(GRID_SCREEN_PCT)} dots")
-    if verified < 3:
-        raise RuntimeError(
-            f"Phase 6 FAILED — only {verified}/15 dots verified, need at least 3")
+    log.info(f"  Verified all {verified}/{len(GRID_SCREEN_PCT)} dots")
 
     _go_center(arm)
 
