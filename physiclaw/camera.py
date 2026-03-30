@@ -143,5 +143,23 @@ class Camera:
             time.sleep(0.1)
         return False
 
+    def mjpeg_generator(self, stop_event=None):
+        """Yield MJPEG multipart frames for HTTP streaming.
+
+        Args:
+            stop_event: optional threading.Event to signal shutdown.
+        """
+        while stop_event is None or not stop_event.is_set():
+            frame = self._fresh_frame()
+            if frame is None:
+                time.sleep(0.1)
+                continue
+            frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            _, jpeg = cv2.imencode('.jpg', frame,
+                                   [cv2.IMWRITE_JPEG_QUALITY, 70])
+            yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n'
+                   + jpeg.tobytes() + b'\r\n')
+            time.sleep(0.1)
+
     def close(self):
         self.cap.release()

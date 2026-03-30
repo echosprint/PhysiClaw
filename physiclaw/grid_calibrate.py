@@ -2,12 +2,12 @@
 Grid calibration — red dot detection, affine transforms, coordinate mapping.
 
 Phase 6 of calibration: after phases 1-5 complete, the pen-calib page shows
-a 3×5 grid of red dots at known screen percentages. This module detects
+a 3×5 grid of red dots at known screen positions. This module detects
 those dots, visits each with the arm, and computes affine transforms that
-map screen percentages to GRBL mm coordinates and camera pixel coordinates.
+map screen coordinates (0-1 decimals) to GRBL mm and camera pixels.
 
 The transforms enable coordinate-based tapping: the AI agent specifies a
-target as a bounding box in screen percentages, and the arm moves directly
+target as a bounding box in 0-1 decimals, and the arm moves directly
 to the center without iterative move+check.
 """
 
@@ -26,9 +26,9 @@ log = logging.getLogger(__name__)
 # ─── Grid layout (must match pen-calib page) ──────────────────
 
 # 3 columns × 5 rows = 15 dots
-# Each entry is (x_percent, y_percent) of the phone screen
-GRID_COLS_PCT = [25.0, 50.0, 75.0]
-GRID_ROWS_PCT = [20.0, 40.0, 50.0, 60.0, 80.0]
+# Each entry is (x, y) as 0-1 decimals of the phone screen
+GRID_COLS_PCT = [0.25, 0.50, 0.75]
+GRID_ROWS_PCT = [0.20, 0.40, 0.50, 0.60, 0.80]
 GRID_ROWS = len(GRID_ROWS_PCT)
 GRID_COLS = len(GRID_COLS_PCT)
 
@@ -37,21 +37,21 @@ GRID_SCREEN_PCT = np.array(
     dtype=np.float64,
 )  # shape (15, 2) — row-major order
 
-CENTER_INDEX = 7  # (50%, 50%)
+CENTER_INDEX = 7  # (0.50, 0.50)
 
 # Visit order: center ring first, then bottom row, then top row.
 # Index map (row-major):
-#   Row 20%: 0=(25,20)  1=(50,20)  2=(75,20)
-#   Row 40%: 3=(25,40)  4=(50,40)  5=(75,40)
-#   Row 50%: 6=(25,50)  7=(50,50)  8=(75,50)
-#   Row 60%: 9=(25,60) 10=(50,60) 11=(75,60)
-#   Row 80%:12=(25,80) 13=(50,80) 14=(75,80)
+#   Row 0.20: 0=(0.25,0.20)  1=(0.50,0.20)  2=(0.75,0.20)
+#   Row 0.40: 3=(0.25,0.40)  4=(0.50,0.40)  5=(0.75,0.40)
+#   Row 0.50: 6=(0.25,0.50)  7=(0.50,0.50)  8=(0.75,0.50)
+#   Row 0.60: 9=(0.25,0.60) 10=(0.50,0.60) 11=(0.75,0.60)
+#   Row 0.80:12=(0.25,0.80) 13=(0.50,0.80) 14=(0.75,0.80)
 #
 # Phase 6 handles center(7), right(8), down(10) separately via probing.
 # Then visits the rest in this order:
 VISIT_RING = [6, 4, 5, 3, 9, 11]     # remaining 6 dots around center
-VISIT_BOTTOM = [13, 12, 14]           # 80% row (center first)
-VISIT_TOP = [1, 0, 2]                 # 20% row (center first)
+VISIT_BOTTOM = [13, 12, 14]           # 0.80 row (center first)
+VISIT_TOP = [1, 0, 2]                 # 0.20 row (center first)
 VISIT_REMAINING = VISIT_RING + VISIT_BOTTOM + VISIT_TOP
 
 # ─── Red dot detection ────────────────────────────────────────
@@ -142,7 +142,7 @@ def compute_affine_transforms(
     """Compute affine transforms using RANSAC for robustness.
 
     Args:
-        screen_pcts: (N, 2) screen percentages (x%, y%)
+        screen_pcts: (N, 2) screen coordinates as 0-1 decimals (x, y)
         grbl_positions: (N, 2) GRBL mm positions
         camera_pixels: (N, 2) camera pixel positions
 
@@ -165,39 +165,42 @@ def compute_affine_transforms(
 
 @dataclasses.dataclass
 class GridCalibration:
-    """Stores and applies grid calibration affine transforms."""
+    """Stores and applies grid calibration affine transforms.
 
-    pct_to_grbl: np.ndarray    # (2, 3) screen% → GRBL mm
-    pct_to_pixel: np.ndarray   # (2, 3) screen% → camera pixels
+    All screen coordinates use 0-1 decimals (0=left/top, 1=right/bottom).
+    """
 
-    def bbox_center_pct(self, left: float, right: float,
-                        top: float, bottom: float) -> tuple[float, float]:
-        """Compute center of a bounding box in screen percentages."""
+    pct_to_grbl: np.ndarray    # (2, 3) screen 0-1 → GRBL mm
+    pct_to_pixel: np.ndarray   # (2, 3) screen 0-1 → camera pixels
+
+    def bbox_center_pct(self, left: float, top: float,
+                        right: float, bottom: float) -> tuple[float, float]:
+        """Compute center of a bounding box in screen coordinates (0-1)."""
         return ((left + right) / 2, (top + bottom) / 2)
 
-    def pct_to_grbl_mm(self, x_pct: float, y_pct: float) -> tuple[float, float]:
-        """Convert screen percentage to GRBL mm coordinates."""
-        pt = np.array([x_pct, y_pct, 1.0])
+    def pct_to_grbl_mm(self, x: float, y: float) -> tuple[float, float]:
+        """Convert screen coordinate (0-1) to GRBL mm."""
+        pt = np.array([x, y, 1.0])
         result = self.pct_to_grbl @ pt
         return (float(result[0]), float(result[1]))
 
-    def pct_to_cam_pixel(self, x_pct: float, y_pct: float) -> tuple[int, int]:
-        """Convert screen percentage to camera pixel coordinates."""
-        pt = np.array([x_pct, y_pct, 1.0])
+    def pct_to_cam_pixel(self, x: float, y: float) -> tuple[int, int]:
+        """Convert screen coordinate (0-1) to camera pixel."""
+        pt = np.array([x, y, 1.0])
         result = self.pct_to_pixel @ pt
         return (int(result[0]), int(result[1]))
 
     def pixel_to_pct(self, px_x: int, px_y: int) -> tuple[float, float]:
-        """Convert camera pixel coordinates to screen percentages."""
+        """Convert camera pixel to screen coordinate (0-1)."""
         M = self.pct_to_pixel
         A = M[:, :2]  # 2x2
         b = M[:, 2]   # translation
         pct = np.linalg.solve(A, np.array([px_x, px_y]) - b)
         return (float(pct[0]), float(pct[1]))
 
-    def bbox_to_pixel_rect(self, left: float, right: float,
-                           top: float, bottom: float) -> tuple[tuple[int, int], tuple[int, int]]:
-        """Convert bbox screen% to camera pixel rectangle (top-left, bottom-right)."""
+    def bbox_to_pixel_rect(self, left: float, top: float,
+                           right: float, bottom: float) -> tuple[tuple[int, int], tuple[int, int]]:
+        """Convert bbox (0-1) to camera pixel rectangle (top-left, bottom-right)."""
         tl = self.pct_to_cam_pixel(left, top)
         br = self.pct_to_cam_pixel(right, bottom)
         return (tl, br)
@@ -298,9 +301,9 @@ def phase6_grid(arm: StylusArm, cam: Camera,
     circles are near the grid dots, so we jump there and explore ±3mm.
 
     1. Park, detect 15 red dots in camera (pixel positions)
-    2. Verify center dot (50%,50%) — explore ±3mm if miss, reset origin
-    3. Move right by phase-2 distance, explore → find (75%,50%) dot
-    4. Move down by phase-3 distance, explore → find (50%,60%) dot
+    2. Verify center dot (0.50, 0.50) — explore ±3mm if miss, reset origin
+    3. Move right by phase-2 distance, explore → find (0.75, 0.50) dot
+    4. Move down by phase-3 distance, explore → find (0.50, 0.60) dot
     5. Visit remaining 12 dots: center ring, then bottom row, then top row
     6. Compute affine transforms from all 15 verified positions
 
@@ -340,7 +343,7 @@ def phase6_grid(arm: StylusArm, cam: Camera,
             f"but detected {len(dots)}. Is the grid page displayed?")
     log.info(f"  Detected {len(dots)} dots, sorted into {GRID_ROWS}×{GRID_COLS} grid")
 
-    # 2. Verify center dot (index 7: 50%, 50%)
+    # 2. Verify center dot (index 7: 0.50, 0.50)
     _go_center(arm)
     log.info("  Verifying center dot...")
     if _tap_at(arm, cam, 0, 0, z_tap):
@@ -358,29 +361,29 @@ def phase6_grid(arm: StylusArm, cam: Camera,
     grbl_positions[CENTER_INDEX] = [0.0, 0.0]
     verified += 1
 
-    # 3. Find (75%, 50%) — probe right, jumping to phase-2 distance
+    # 3. Find (0.75, 0.50) — probe right, jumping to phase-2 distance
     _go_center(arm)
-    log.info(f"  Probing right → (75%, 50%), starting at {right_dist:.1f}mm...")
+    log.info(f"  Probing right → (0.75, 0.50), starting at {right_dist:.1f}mm...")
     grid_right_dist = _probe_dot(arm, cam, right_vec, z_tap,
                                  start_dist=right_dist, max_dist=right_dist + 10)
     if grid_right_dist is None:
-        raise RuntimeError("Phase 6 FAILED — could not find (75%, 50%)")
+        raise RuntimeError("Phase 6 FAILED — could not find (0.75, 0.50)")
     grbl_positions[8] = list(arm.position())
     verified += 1
-    mm_per_pct_h = grid_right_dist / 25.0
-    log.info(f"  Horizontal: {grid_right_dist:.1f}mm / 25% = {mm_per_pct_h:.3f} mm/pct")
+    mm_per_pct_h = grid_right_dist / 0.25
+    log.info(f"  Horizontal: {grid_right_dist:.1f}mm / 0.25 = {mm_per_pct_h:.3f} mm/unit")
 
-    # 4. Find (50%, 60%) — probe down, jumping to phase-3 distance
+    # 4. Find (0.50, 0.60) — probe down, jumping to phase-3 distance
     _go_center(arm)
-    log.info(f"  Probing down → (50%, 60%), starting at {down_dist:.1f}mm...")
+    log.info(f"  Probing down → (0.50, 0.60), starting at {down_dist:.1f}mm...")
     grid_down_dist = _probe_dot(arm, cam, down_vec, z_tap,
                                 start_dist=down_dist, max_dist=down_dist + 10)
     if grid_down_dist is None:
-        raise RuntimeError("Phase 6 FAILED — could not find (50%, 60%)")
+        raise RuntimeError("Phase 6 FAILED — could not find (0.50, 0.60)")
     grbl_positions[10] = list(arm.position())
     verified += 1
-    mm_per_pct_v = grid_down_dist / 10.0
-    log.info(f"  Vertical: {grid_down_dist:.1f}mm / 10% = {mm_per_pct_v:.3f} mm/pct")
+    mm_per_pct_v = grid_down_dist / 0.10
+    log.info(f"  Vertical: {grid_down_dist:.1f}mm / 0.10 = {mm_per_pct_v:.3f} mm/unit")
 
     _go_center(arm)
 
@@ -401,17 +404,17 @@ def phase6_grid(arm: StylusArm, cam: Camera,
                 target_x, target_y = float(pt[0]), float(pt[1])
             else:
                 # Fallback to linear scale
-                target_x = (x_pct - 50) * mm_per_pct_h * rx + (y_pct - 50) * mm_per_pct_v * dx
-                target_y = (x_pct - 50) * mm_per_pct_h * ry + (y_pct - 50) * mm_per_pct_v * dy
+                target_x = (x_pct - 0.50) * mm_per_pct_h * rx + (y_pct - 0.50) * mm_per_pct_v * dx
+                target_y = (x_pct - 0.50) * mm_per_pct_h * ry + (y_pct - 0.50) * mm_per_pct_v * dy
         else:
-            target_x = (x_pct - 50) * mm_per_pct_h * rx + (y_pct - 50) * mm_per_pct_v * dx
-            target_y = (x_pct - 50) * mm_per_pct_h * ry + (y_pct - 50) * mm_per_pct_v * dy
+            target_x = (x_pct - 0.50) * mm_per_pct_h * rx + (y_pct - 0.50) * mm_per_pct_v * dx
+            target_y = (x_pct - 0.50) * mm_per_pct_h * ry + (y_pct - 0.50) * mm_per_pct_v * dy
 
         if _tap_at(arm, cam, target_x, target_y, z_tap):
             grbl_positions[i] = list(arm.position())
             verified_indices.append(i)
             verified += 1
-            log.debug(f"  Dot {i} ({x_pct}%, {y_pct}%) ✓ "
+            log.debug(f"  Dot {i} ({x_pct}, {y_pct}) ✓ "
                       f"GRBL ({grbl_positions[i][0]:.2f}, {grbl_positions[i][1]:.2f})")
         else:
             pos = _explore_dot(arm, cam, target_x, target_y, z_tap,
@@ -420,11 +423,11 @@ def phase6_grid(arm: StylusArm, cam: Camera,
                 grbl_positions[i] = [pos[0], pos[1]]
                 verified_indices.append(i)
                 verified += 1
-                log.debug(f"  Dot {i} ({x_pct}%, {y_pct}%) ✓ (explored) "
+                log.debug(f"  Dot {i} ({x_pct}, {y_pct}) ✓ (explored) "
                           f"GRBL ({pos[0]:.2f}, {pos[1]:.2f})")
             else:
                 grbl_positions[i] = [target_x, target_y]
-                log.debug(f"  Dot {i} ({x_pct}%, {y_pct}%) ✗ "
+                log.debug(f"  Dot {i} ({x_pct}, {y_pct}) ✗ "
                           f"estimate ({target_x:.2f}, {target_y:.2f})")
 
     log.info(f"  Verified {verified}/{len(GRID_SCREEN_PCT)} dots")
@@ -443,13 +446,13 @@ def phase6_grid(arm: StylusArm, cam: Camera,
     # 7. Save debug image: draw phone screen boundary and grid on camera frame
     debug = frame.copy()
     # Green rectangle: phone screen edges
-    corners_pct = [(0, 0), (100, 0), (100, 100), (0, 100)]
+    corners_pct = [(0, 0), (1, 0), (1, 1), (0, 1)]
     corners_px = [cal.pct_to_cam_pixel(x, y) for x, y in corners_pct]
     for j in range(4):
         cv2.line(debug, corners_px[j], corners_px[(j + 1) % 4], (0, 255, 0), 2)
     # Green edge lines along the clockwise check path
-    edge_pcts = [(50, 0), (100, 0), (100, 50), (100, 100),
-                 (50, 100), (0, 100), (0, 50), (0, 0), (50, 0)]
+    edge_pcts = [(0.5, 0), (1, 0), (1, 0.5), (1, 1),
+                 (0.5, 1), (0, 1), (0, 0.5), (0, 0), (0.5, 0)]
     edge_px = [cal.pct_to_cam_pixel(x, y) for x, y in edge_pcts]
     for j in range(len(edge_px) - 1):
         cv2.line(debug, edge_px[j], edge_px[j + 1], (0, 255, 255), 1)
@@ -468,21 +471,21 @@ def phase6_grid(arm: StylusArm, cam: Camera,
 
     # 8. Visual verification: move arm to 4 screen edges for dev to check
     check_points = [
-        (50, 0, "top center"),
-        (100, 0, "top right"),
-        (100, 50, "right center"),
-        (100, 100, "bottom right"),
-        (50, 100, "bottom center"),
-        (0, 100, "bottom left"),
-        (0, 50, "left center"),
+        (0.50, 0, "top center"),
+        (1, 0, "top right"),
+        (1, 0.50, "right center"),
+        (1, 1, "bottom right"),
+        (0.50, 1, "bottom center"),
+        (0, 1, "bottom left"),
+        (0, 0.50, "left center"),
         (0, 0, "top left"),
-        (50, 0, "top center"),  # close the loop
+        (0.50, 0, "top center"),  # close the loop
     ]
     _go_center(arm)
     log.info("  Visual check — tracing phone edge clockwise...")
     for x_pct, y_pct, label in check_points:
         gx, gy = cal.pct_to_grbl_mm(x_pct, y_pct)
-        log.info(f"    → {label} ({x_pct}%, {y_pct}%) = GRBL ({gx:.2f}, {gy:.2f})")
+        log.info(f"    → {label} ({x_pct}, {y_pct}) = GRBL ({gx:.2f}, {gy:.2f})")
         arm._fast_move(gx, gy)
         arm.wait_idle()
         time.sleep(2)

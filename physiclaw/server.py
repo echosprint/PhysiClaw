@@ -35,21 +35,21 @@ You control a real phone sitting on a desk — a camera sees the screen from dir
 
 ## How it works
 
-A camera is mounted directly above the phone, looking straight down. You see the screen from above. The stylus taps the screen at coordinates you specify as screen percentages.
+A camera is mounted directly above the phone, looking straight down. You see the screen from above. The stylus taps the screen at coordinates you specify as 0-1 decimals (0=left/top edge, 1=right/bottom edge).
 
 ## Operation cycle
 
 1. park() + screenshot() — see the full phone screen (stylus parked out of frame)
 2. detect_elements() — detects all icons and text on screen, returns two annotated
-   images plus a text listing with bounding boxes in screen percentages.
+   images plus a text listing with bounding boxes as 0-1 decimals.
    Use this to find your target's coordinates directly.
-3. If detect_elements() found the target, use its percentages for bbox_target().
-   If not, use grid_overlay() to estimate percentages manually.
-4. bbox_target(left, right, top, bottom) — draws colored rectangles on a fresh photo
+3. If detect_elements() found the target, use its coordinates for bbox_target().
+   If not, use grid_overlay() to estimate coordinates manually.
+4. bbox_target(left, top, right, bottom) — draws colored rectangles on a fresh photo
 5. **Verify: name the element INSIDE each rectangle.**
    - If a rectangle covers the target → confirm_bbox(shift)
-   - If NO rectangle covers the target → call bbox_target() with corrected percentages
-   - Shift percentages toward the target by the gap you observe
+   - If NO rectangle covers the target → call bbox_target() with corrected coordinates
+   - Shift values toward the target by the gap you observe
    - 2-3 attempts is normal. Never pick the "least-bad" rectangle.
 6. tap() / double_tap() / long_press() / swipe() — executes at the bbox center
 7. park() + screenshot() — verify the result
@@ -58,7 +58,7 @@ A camera is mounted directly above the phone, looking straight down. You see the
 
 Target: backspace (⌫). bbox_target() returns rectangles covering the "m" key area.
 WRONG: picking "right" because it's the rightmost rectangle.
-RIGHT: calling bbox_target() again with percentages shifted ~5% rightward.
+RIGHT: calling bbox_target() again with coordinates shifted ~0.05 rightward.
 
 ## CRITICAL
 
@@ -110,9 +110,9 @@ def detect_elements() -> tuple[str, Image, Image]:
     - Icon detection: finds buttons, icons, and interactive elements
     - OCR: reads all visible text (labels, keys, prices, etc.)
 
-    Returns a text listing of all elements with bounding boxes in screen
-    percentages (left, top, right, bottom), plus two annotated images
-    (icon boxes + OCR boxes). Use the percentages to call bbox_target().
+    Returns a text listing of all elements with bounding boxes as 0-1
+    decimals [left, top, right, bottom], plus two annotated images
+    (icon boxes + OCR boxes). Use the coordinates to call bbox_target().
 
     The detection models are lightweight (<100MB) so bounding boxes may not
     be pixel-perfect. Use them as estimates to narrow down your target's
@@ -135,29 +135,29 @@ def detect_elements() -> tuple[str, Image, Image]:
 
 @mcp.tool()
 def grid_overlay(density: str = "normal", color: str = "green") -> Image:
-    """Show the phone screen with a percentage reference grid.
+    """Show the phone screen with a coordinate reference grid (0-1 scale).
 
     Draws numbered grid lines on a fresh screenshot so you can estimate
-    screen percentages for any target element. Call this before bbox_target()
+    coordinates for any target element. Call this before bbox_target()
     to get your bearings.
 
     To find a target: look at which grid lines it falls between, then
-    estimate the percentage. For example, if a button is halfway between
-    the 40% and 60% vertical lines, its x-coordinate is ~50%.
+    estimate the value. For example, if a button is halfway between
+    the 0.40 and 0.60 vertical lines, its x-coordinate is ~0.50.
 
     If the target falls between lines and you need more precision,
     call again with density="dense".
 
     Args:
         density: "sparse" (2x4 lines, coarse), "normal" (4x9 lines, default),
-                 or "dense" (9x19 lines, 5% spacing for precise targeting)
+                 or "dense" (9x19 lines, 0.05 spacing for precise targeting)
         color: line color — "green", "red", or "yellow"
     """
     import time
     density_map = {
-        "sparse": (4, 2),    # rows, cols — lines at 20/40/60/80% x 25/50/75%
-        "normal": (9, 4),    # lines at 10..90% x 20/40/60/80%
-        "dense": (19, 9),    # lines at 5..95% x 10..90%
+        "sparse": (4, 2),    # rows, cols — lines at 0.20/0.40/0.60/0.80 x 0.25/0.50/0.75
+        "normal": (9, 4),    # lines at 0.10..0.90 x 0.20/0.40/0.60/0.80
+        "dense": (19, 9),    # lines at 0.05..0.95 x 0.10..0.90
     }
     rows, cols = density_map.get(density, density_map["normal"])
     physiclaw.acquire()
@@ -171,19 +171,19 @@ def grid_overlay(density: str = "normal", color: str = "green") -> Image:
 
 
 @mcp.tool()
-def bbox_target(left: int, right: int, top: int, bottom: int) -> Image:
-    """Target a screen region by bounding box using screen percentages (0-100).
+def bbox_target(left: float, top: float, right: float, bottom: float) -> Image:
+    """Target a screen region by bounding box using 0-1 decimals.
 
     Takes a fresh screenshot and draws colored rectangles at the specified position.
 
     For large targets: one green rectangle labeled "center".
-    For small targets (< 15% in either dimension): multiple colored rectangles
+    For small targets (< 0.15 in either dimension): multiple colored rectangles
     shifted along the small dimension(s), each labeled with its shift direction.
 
     VERIFICATION REQUIRED: For each rectangle, name the UI element INSIDE it.
     - If a rectangle contains your target element → confirm it.
     - If NO rectangle contains your target → call bbox_target() again with
-      corrected percentages. Shift toward the target by the gap you observe.
+      corrected coordinates. Shift toward the target by the gap you observe.
     - Never pick the "least-bad" rectangle. That means all missed — re-bbox.
 
     2-3 attempts is normal. bbox_target() is cheap (just a photo).
@@ -191,9 +191,9 @@ def bbox_target(left: int, right: int, top: int, bottom: int) -> Image:
     wrong amount, or trigger an irreversible action.
 
     Args:
-        left: left edge (0=left edge of screen, 100=right edge)
+        left: left edge (0=left edge of screen, 1=right edge)
+        top: top edge (0=top of screen, 1=bottom)
         right: right edge
-        top: top edge (0=top of screen, 100=bottom)
         bottom: bottom edge
     """
     import time
@@ -201,7 +201,7 @@ def bbox_target(left: int, right: int, top: int, bottom: int) -> Image:
     try:
         physiclaw.park()
         time.sleep(1.5)  # let arm settle after parking
-        physiclaw.set_pending_bbox(left, right, top, bottom)
+        physiclaw.set_pending_bbox(left, top, right, bottom)
         frame = physiclaw.screenshot_with_bboxes()
         return Image(data=physiclaw.frame_to_jpeg(frame), format="jpeg")
     finally:
@@ -223,7 +223,7 @@ def confirm_bbox(shift: str = "center") -> str:
     BEFORE CONFIRMING, ask yourself:
     "Am I choosing this because it COVERS the target,
      or because it's the closest option?"
-    If closest → do NOT confirm. Call bbox_target() with corrected percentages.
+    If closest → do NOT confirm. Call bbox_target() with corrected coordinates.
 
     After confirmation, the next gesture (tap, double_tap, long_press, swipe)
     will auto-move to the bbox center before executing.
@@ -334,9 +334,63 @@ logging.basicConfig(
 physiclaw = PhysiClaw()
 atexit.register(physiclaw.shutdown)
 
+# ─── Annotation routes + tool ──────────────────────────────────
+
+from physiclaw.annotation import (
+    AnnotationState, freeze_snapshot,
+    handle_annotations, mjpeg_stream, serve_annotate_page,
+)
+
+_ann = AnnotationState()
+
+@mcp.custom_route("/stream", methods=["GET"])
+async def _stream(request):
+    return await mjpeg_stream(request, physiclaw)
+
+@mcp.custom_route("/annotate", methods=["GET"])
+async def _annotate(request):
+    return await serve_annotate_page(request)
+
+@mcp.custom_route("/api/snapshot", methods=["POST"])
+async def _snapshot(request):
+    return await freeze_snapshot(request, physiclaw, _ann)
+
+@mcp.custom_route("/api/annotations", methods=["GET", "POST", "DELETE"])
+async def _annotations(request):
+    return await handle_annotations(request, _ann)
+
+@mcp.tool()
+def get_pending_annotations() -> tuple[str, Image]:
+    """Get user-drawn UI element annotations from the web annotation tool.
+
+    Returns the frozen screenshot with red numbered boxes drawn at
+    user-marked positions, plus a text listing of box coordinates
+    as 0-1 decimals [left, top, right, bottom].
+
+    The user draws boxes on the live camera feed at /annotate in their browser.
+    Call this tool when the user says they've finished drawing boxes.
+    Annotations are cleared automatically after retrieval.
+    """
+    frozen_frame, annotations = _ann.get_all()
+    if frozen_frame is None or not annotations:
+        import numpy as np
+        return ("No pending annotations. "
+                "Ask the user to draw boxes at /annotate first.",
+                Image(data=physiclaw.frame_to_jpeg(
+                    physiclaw.cam.snapshot()
+                    or np.zeros((100, 100, 3), dtype=np.uint8)
+                ), format="jpeg"))
+    result = physiclaw.process_annotations(frozen_frame, annotations)
+    _ann.clear()
+    text, frame = result
+    return (text, Image(data=physiclaw.frame_to_jpeg(frame), format="jpeg"))
+
+# ────────────────────────────────────────────────────────────────
+
 mcp.settings.host = args.host
 mcp.settings.port = args.port
 
 log = logging.getLogger(__name__)
 log.info(f"PhysiClaw MCP server on http://{args.host}:{args.port}/mcp")
+log.info(f"Annotation UI at http://{args.host}:{args.port}/annotate")
 mcp.run(transport="streamable-http")

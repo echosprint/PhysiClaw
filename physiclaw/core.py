@@ -127,7 +127,7 @@ class PhysiClaw:
 
     # ─── Bbox state management ────────────────────────────────
 
-    SMALL_BBOX_THRESHOLD = 15  # % — bbox smaller than this gets candidates
+    SMALL_BBOX_THRESHOLD = 0.15  # bbox smaller than this gets candidates (0-1 scale)
 
     # Colors for bbox candidates: BGR format. Assigned in order as candidates are added.
     BBOX_COLORS = [
@@ -138,9 +138,11 @@ class PhysiClaw:
         (255, 0, 255),   # magenta
     ]
 
-    def set_pending_bbox(self, left: float, right: float,
-                         top: float, bottom: float):
+    def set_pending_bbox(self, left: float, top: float,
+                         right: float, bottom: float):
         """Store pending bbox candidates keyed by shift name. Clears any confirmed bbox.
+
+        All coordinates are 0-1 decimals (0=left/top, 1=right/bottom).
 
         For small targets, generates shifted candidates along the small
         dimension(s) so the AI agent can pick the best one.
@@ -149,7 +151,7 @@ class PhysiClaw:
         - Only height small: center + top/bottom
         - Both dimensions large: center only
         """
-        original = {'left': left, 'right': right, 'top': top, 'bottom': bottom}
+        original = {'left': left, 'top': top, 'right': right, 'bottom': bottom}
         w = right - left
         h = bottom - top
         small_h = w < self.SMALL_BBOX_THRESHOLD
@@ -157,7 +159,7 @@ class PhysiClaw:
 
         self._pending_bboxes = {'center': original}
 
-        # Shifted bboxes: 80% size of original, shifted by 70% of that dimension
+        # Shifted bboxes: 0.8x size of original, shifted by 0.7x of that dimension
         scale = 0.8
         shift_ratio = 0.7
         sw = w * scale  # shifted bbox width
@@ -168,22 +170,22 @@ class PhysiClaw:
         if small_v:
             sv = h * shift_ratio
             self._pending_bboxes['top'] = {
-                'left': max(0, cx - sw / 2), 'right': min(100, cx + sw / 2),
-                'top': max(0, cy - sv - sh / 2), 'bottom': max(0, cy - sv + sh / 2),
+                'left': max(0, cx - sw / 2), 'top': max(0, cy - sv - sh / 2),
+                'right': min(1, cx + sw / 2), 'bottom': max(0, cy - sv + sh / 2),
             }
             self._pending_bboxes['bottom'] = {
-                'left': max(0, cx - sw / 2), 'right': min(100, cx + sw / 2),
-                'top': min(100, cy + sv - sh / 2), 'bottom': min(100, cy + sv + sh / 2),
+                'left': max(0, cx - sw / 2), 'top': min(1, cy + sv - sh / 2),
+                'right': min(1, cx + sw / 2), 'bottom': min(1, cy + sv + sh / 2),
             }
         if small_h:
             shh = w * shift_ratio
             self._pending_bboxes['left'] = {
-                'left': max(0, cx - shh - sw / 2), 'right': max(0, cx - shh + sw / 2),
-                'top': max(0, cy - sh / 2), 'bottom': min(100, cy + sh / 2),
+                'left': max(0, cx - shh - sw / 2), 'top': max(0, cy - sh / 2),
+                'right': max(0, cx - shh + sw / 2), 'bottom': min(1, cy + sh / 2),
             }
             self._pending_bboxes['right'] = {
-                'left': min(100, cx + shh - sw / 2), 'right': min(100, cx + shh + sw / 2),
-                'top': max(0, cy - sh / 2), 'bottom': min(100, cy + sh / 2),
+                'left': min(1, cx + shh - sw / 2), 'top': max(0, cy - sh / 2),
+                'right': min(1, cx + shh + sw / 2), 'bottom': min(1, cy + sh / 2),
             }
 
         self._confirmed_bbox = None
@@ -213,7 +215,7 @@ class PhysiClaw:
         if self._grid_cal is None:
             raise RuntimeError("Grid calibration not done")
         cx, cy = self._grid_cal.bbox_center_pct(
-            bbox['left'], bbox['right'], bbox['top'], bbox['bottom'])
+            bbox['left'], bbox['top'], bbox['right'], bbox['bottom'])
         gx, gy = self._grid_cal.pct_to_grbl_mm(cx, cy)
         self._arm._fast_move(gx, gy)
         self._arm.wait_idle()
@@ -250,7 +252,7 @@ class PhysiClaw:
         rects = []
         for j, (name, bbox) in enumerate(self._pending_bboxes.items()):
             tl, br = self._grid_cal.bbox_to_pixel_rect(
-                bbox['left'], bbox['right'], bbox['top'], bbox['bottom'])
+                bbox['left'], bbox['top'], bbox['right'], bbox['bottom'])
             color = self.BBOX_COLORS[j % len(self.BBOX_COLORS)]
             rects.append((tl, br, color, name))
 
@@ -305,7 +307,7 @@ class PhysiClaw:
         """Detect UI elements using icon detection + OCR.
 
         Returns (elements_text, icon_frame, ocr_frame) where:
-        - elements_text: formatted text listing all elements with screen %
+        - elements_text: formatted text listing all elements with 0-1 coords
         - icon_frame: screenshot annotated with numbered icon detection boxes
         - ocr_frame: screenshot annotated with OCR text boxes
         """
@@ -321,11 +323,11 @@ class PhysiClaw:
         cal = self._grid_cal
         h, w = frame.shape[:2]
         icon_table_header = (
-            "| id | bbox (left, right, top, bottom %) | conf |\n"
+            "| id | bbox [left, top, right, bottom] | conf |\n"
             "|----|------|------|"
         )
         text_table_header = (
-            "| id | label | bbox (left, right, top, bottom %) | conf |\n"
+            "| id | label | bbox [left, top, right, bottom] | conf |\n"
             "|----|-------|------|------|"
         )
         element_id = 0
@@ -346,7 +348,7 @@ class PhysiClaw:
                 r, b = cal.pixel_to_pct(x2, y2)
                 icon_rows.append(
                     f"| {element_id} "
-                    f"| [{l:.0f}, {r:.0f}, {t:.0f}, {b:.0f}] "
+                    f"| [{l:.2f}, {t:.2f}, {r:.2f}, {b:.2f}] "
                     f"| {e.confidence:.2f} |"
                 )
         except (ImportError, FileNotFoundError) as ex:
@@ -368,7 +370,7 @@ class PhysiClaw:
                 r, b = cal.pixel_to_pct(x2, y2)
                 ocr_rows.append(
                     f"| {element_id} | \"{t.text}\" "
-                    f"| [{l:.0f}, {r:.0f}, {tp:.0f}, {b:.0f}] "
+                    f"| [{l:.2f}, {tp:.2f}, {r:.2f}, {b:.2f}] "
                     f"| {t.confidence:.2f} |"
                 )
         except ImportError as ex:
@@ -406,8 +408,8 @@ class PhysiClaw:
 
         Args:
             color: line color — "green", "red", or "yellow".
-            rows: number of horizontal lines (e.g. 9 → lines at 10,20,...,90%).
-            cols: number of vertical lines (e.g. 4 → lines at 20,40,60,80%).
+            rows: number of horizontal lines (e.g. 9 → lines at 0.10, 0.20, ..., 0.90).
+            cols: number of vertical lines (e.g. 4 → lines at 0.20, 0.40, 0.60, 0.80).
         """
         if self._grid_cal is None:
             raise RuntimeError("Grid calibration not done")
@@ -437,21 +439,21 @@ class PhysiClaw:
 
         # Vertical lines — labels at top and bottom
         for i in range(1, cols + 1):
-            x_pct = round(100 * i / (cols + 1))
-            pt_top = cal.pct_to_cam_pixel(x_pct, 0)
-            pt_bot = cal.pct_to_cam_pixel(x_pct, 100)
+            x_val = round(i / (cols + 1), 2)
+            pt_top = cal.pct_to_cam_pixel(x_val, 0)
+            pt_bot = cal.pct_to_cam_pixel(x_val, 1)
             cv2.line(frame, pt_top, pt_bot, bgr, 1)
-            label = str(x_pct)
+            label = f"{x_val:.2f}"
             _draw_label(frame, label, pt_top[0], pt_top[1] - 15)
             _draw_label(frame, label, pt_bot[0], pt_bot[1] + 15)
 
         # Horizontal lines — labels at left and right
         for i in range(1, rows + 1):
-            y_pct = round(100 * i / (rows + 1))
-            pt_left = cal.pct_to_cam_pixel(0, y_pct)
-            pt_right = cal.pct_to_cam_pixel(100, y_pct)
+            y_val = round(i / (rows + 1), 2)
+            pt_left = cal.pct_to_cam_pixel(0, y_val)
+            pt_right = cal.pct_to_cam_pixel(1, y_val)
             cv2.line(frame, pt_left, pt_right, bgr, 1)
-            label = str(y_pct)
+            label = f"{y_val:.2f}"
             (tw, _), _ = cv2.getTextSize(label, font, 0.8, 2)
             _draw_label(frame, label, pt_left[0] - tw // 2 - 10, pt_left[1])
             _draw_label(frame, label, pt_right[0] + tw // 2 + 10, pt_right[1])
@@ -463,6 +465,67 @@ class PhysiClaw:
         ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
         cv2.imwrite(str(SNAPSHOT_DIR / f'{ts}_overlay.jpg'), frame)
         return frame
+
+    # ─── Annotation support ──────────────────────────────────────
+
+    # Hex color → BGR tuple for OpenCV drawing
+    _COLOR_NAMES = {
+        '#42a5f5': 'blue', '#66bb6a': 'green',
+        '#ffa726': 'orange', '#ef5350': 'red',
+    }
+
+    @staticmethod
+    def _hex_to_bgr(hex_color: str) -> tuple[int, int, int]:
+        h = hex_color.lstrip('#')
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        return (b, g, r)
+
+    def process_annotations(self, frame, annotations: list[dict]):
+        """Convert pixel-coordinate annotations to 0-1 screen coords.
+
+        Draws colored numbered boxes on the frame and returns a text listing
+        with coordinates as 0-1 decimals [left, top, right, bottom] and color.
+
+        Args:
+            frame: BGR numpy array (the frozen snapshot)
+            annotations: list of {left, top, right, bottom, color?} in image pixels
+
+        Returns:
+            (text_listing, annotated_frame) or None if annotations is empty.
+        """
+        if not annotations:
+            return None
+        if self._grid_cal is None:
+            raise RuntimeError("Grid calibration not done")
+
+        cal = self._grid_cal
+        out = frame.copy()
+        elements = []
+        for i, ann in enumerate(annotations):
+            l, t = cal.pixel_to_pct(int(ann['left']), int(ann['top']))
+            r, b = cal.pixel_to_pct(int(ann['right']), int(ann['bottom']))
+            l = max(0.0, min(1.0, round(l, 3)))
+            t = max(0.0, min(1.0, round(t, 3)))
+            r = max(0.0, min(1.0, round(r, 3)))
+            b = max(0.0, min(1.0, round(b, 3)))
+            color = ann.get('color', '#42a5f5')
+            elements.append({'id': i + 1, 'left': l, 'top': t,
+                             'right': r, 'bottom': b, 'color': color})
+            bgr = self._hex_to_bgr(color)
+            cv2.rectangle(out,
+                          (int(ann['left']), int(ann['top'])),
+                          (int(ann['right']), int(ann['bottom'])),
+                          bgr, 2)
+            cv2.putText(out, str(i + 1),
+                        (int(ann['left']) + 4, int(ann['top']) + 20),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, bgr, 2)
+
+        lines = [f"# Pending Annotations ({len(elements)} boxes)\n"]
+        for e in elements:
+            name = self._COLOR_NAMES.get(e['color'], e['color'])
+            lines.append(f"- Box {e['id']} ({name}): [{e['left']}, {e['top']}, "
+                         f"{e['right']}, {e['bottom']}]")
+        return "\n".join(lines), out
 
     # ─── Lifecycle ─────────────────────────────────────────────
 

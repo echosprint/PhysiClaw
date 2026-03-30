@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PhysiClaw Annotate</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #1a1a1a; color: #e0e0e0; font-family: -apple-system, sans-serif; height: 100vh; overflow: hidden; }
+
+.layout {
+  display: flex; height: 100vh; justify-content: center;
+  background: #111;
+}
+
+/* Left column — controls */
+.controls {
+  width: 180px; min-width: 180px;
+  background: #222; border-right: 1px solid #333;
+  padding: 16px; margin-right: 32px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.controls h2 { font-size: 14px; color: #888; margin-bottom: 4px; }
+.controls button {
+  width: 100%; padding: 10px 0; border: 1px solid #555; border-radius: 4px;
+  background: #333; color: #e0e0e0; cursor: pointer; font-size: 13px;
+}
+.controls button:hover { background: #444; }
+.controls button.primary { background: #2563eb; border-color: #2563eb; color: #fff; }
+.controls button.primary:hover { background: #1d4ed8; }
+.color-picker {
+  display: flex; gap: 8px;
+}
+.color-dot {
+  width: 28px; height: 28px; border-radius: 50%; cursor: pointer;
+  border: 2px solid transparent; transition: border-color 0.15s;
+}
+.color-dot:hover { border-color: rgba(255,255,255,0.4); }
+.color-dot.active { border-color: #fff; }
+.controls .hint {
+  color: #555; font-size: 11px; line-height: 1.5; margin-top: auto;
+}
+
+/* Center column — phone feed (portrait, adapts to any camera resolution) */
+.viewer {
+  flex: 0 1 auto;
+  display: flex; align-items: center; justify-content: center;
+  position: relative; overflow: visible;
+  height: 100vh;
+}
+#liveImg {
+  height: 100%; width: auto; display: block;
+}
+#frozenImg {
+  height: 100%; width: auto; display: none;
+}
+#drawCanvas {
+  position: absolute; display: none;
+}
+
+/* Right column — annotations list */
+.sidebar {
+  width: 260px; min-width: 260px;
+  background: #222; border-left: 1px solid #333;
+  overflow-y: auto; padding: 16px; margin-left: 32px;
+}
+.sidebar h2 { font-size: 14px; color: #888; margin-bottom: 10px; }
+.box-item {
+  padding: 8px 10px; margin-bottom: 6px; border-radius: 6px;
+  background: #2a2a2a; border-left: 3px solid #42a5f5;
+}
+.box-item .box-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 4px;
+}
+.box-item .num {
+  color: #fff; font-weight: 700; font-size: 13px;
+}
+.box-item .del {
+  cursor: pointer; color: #555; font-size: 14px; padding: 0 2px;
+  transition: color 0.15s;
+}
+.box-item .del:hover { color: #ef5350; }
+.box-item .coords {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 2px 12px;
+  font-size: 11px; font-family: monospace; color: #999;
+}
+.box-item .coords .label { color: #666; font-size: 10px; }
+.box-item .coords .val { color: #ccc; }
+.empty-msg { color: #555; font-size: 12px; font-style: italic; }
+
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <div class="controls">
+    <h2>Controls</h2>
+    <button class="primary" id="btnSnapshot">New Snapshot</button>
+    <h2 style="margin-top: 16px">Pen Color</h2>
+    <div class="color-picker" id="colorPicker">
+      <div class="color-dot active" data-color="#42a5f5" style="background:#42a5f5"></div>
+      <div class="color-dot" data-color="#66bb6a" style="background:#66bb6a"></div>
+      <div class="color-dot" data-color="#ffa726" style="background:#ffa726"></div>
+      <div class="color-dot" data-color="#ef5350" style="background:#ef5350"></div>
+    </div>
+    <div class="hint">
+      Click <b>New Snapshot</b> to capture.<br>
+      Drag empty area to draw a box.<br>
+      Drag inside a box to move it.<br>
+      Drag corners to resize.<br>
+      Drag far outside to delete.<br><br>
+      Then ask Claude:<br>
+      <code>get_pending_annotations()</code>
+    </div>
+  </div>
+
+  <div class="viewer" id="viewer">
+    <img id="liveImg" alt="Live feed">
+    <img id="frozenImg" alt="Frozen snapshot">
+    <canvas id="drawCanvas"></canvas>
+  </div>
+
+  <div class="sidebar">
+    <h2>Annotations</h2>
+    <div id="boxList"><span class="empty-msg">No boxes drawn yet</span></div>
+  </div>
+</div>
+
+
+<script>
+const PLACEHOLDER = 'data:image/svg+xml,' + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="540" height="960" fill="#222">' +
+  '<rect width="540" height="960"/>' +
+  '<text x="270" y="460" text-anchor="middle" fill="#555" font-family="sans-serif" font-size="20">No camera feed</text>' +
+  '<text x="270" y="490" text-anchor="middle" fill="#444" font-family="sans-serif" font-size="14">Start the server to connect</text>' +
+  '</svg>'
+);
+
+const liveImg = document.getElementById('liveImg');
+const frozenImg = document.getElementById('frozenImg');
+const canvas = document.getElementById('drawCanvas');
+const ctx = canvas.getContext('2d');
+const viewer = document.getElementById('viewer');
+const boxList = document.getElementById('boxList');
+const btnSnapshot = document.getElementById('btnSnapshot');
+const colorPicker = document.getElementById('colorPicker');
+let penColor = '#42a5f5';
+
+let frozen = false;
+let boxes = []; // {left, top, right, bottom, color} in natural image pixels
+let naturalW = 0, naturalH = 0;
+let phoneBounds = null; // [[x,y], ...] 4 corners in natural image pixels, or null
+
+// ─── Interaction state ─────────────────────────────────────
+const CORNER_R = 8;           // corner hit radius (display px)
+
+let mode = null;              // null | 'draw' | 'move' | 'resize'
+let activeBox = -1;           // index of box being moved/resized
+let activeCorner = -1;        // 0=TL 1=TR 2=BR 3=BL
+let dragStartX = 0, dragStartY = 0;
+let dragOrigBox = null;       // snapshot of box at drag start
+let pendingDelete = false;
+let deleteFade = 0;          // 0 = inside, 1 = fully outside (DELETE_MARGIN)
+
+// ─── Coordinate helpers ────────────────────────────────────
+let cssW = 0, cssH = 0;
+function d2n(dx, dy) {
+  // display (CSS) px → natural image px
+  return [dx * naturalW / cssW, dy * naturalH / cssH];
+}
+function n2d(nx, ny) {
+  // natural px → display (CSS) px
+  return [nx * cssW / naturalW, ny * cssH / naturalH];
+}
+
+// ─── Hit testing ───────────────────────────────────────────
+function hitCorner(mx, my, box) {
+  // Returns corner index (0-3) or -1
+  const [l, t] = n2d(box.left, box.top);
+  const [r, b] = n2d(box.right, box.bottom);
+  const corners = [[l,t],[r,t],[r,b],[l,b]];
+  for (let i = 0; i < 4; i++) {
+    if (Math.abs(mx - corners[i][0]) < CORNER_R && Math.abs(my - corners[i][1]) < CORNER_R)
+      return i;
+  }
+  return -1;
+}
+
+function hitBox(mx, my) {
+  // Returns box index or -1. Check top-most (last) first.
+  for (let i = boxes.length - 1; i >= 0; i--) {
+    const [l, t] = n2d(boxes[i].left, boxes[i].top);
+    const [r, b] = n2d(boxes[i].right, boxes[i].bottom);
+    if (mx >= l && mx <= r && my >= t && my <= b) return i;
+  }
+  return -1;
+}
+
+function boxOutsidePhoneRatio(box) {
+  // What fraction of the box area is outside the phone screen (0-1).
+  const [l, t] = n2d(box.left, box.top);
+  const [r, b] = n2d(box.right, box.bottom);
+  const [pMinX, pMinY, pMaxX, pMaxY] = phoneDisplayRect();
+  const bw = Math.abs(r - l), bh = Math.abs(b - t);
+  if (bw < 1 || bh < 1) return 0;
+  const cl = Math.max(pMinX, Math.min(pMaxX, Math.min(l, r)));
+  const cr = Math.max(pMinX, Math.min(pMaxX, Math.max(l, r)));
+  const ct = Math.max(pMinY, Math.min(pMaxY, Math.min(t, b)));
+  const cb = Math.max(pMinY, Math.min(pMaxY, Math.max(t, b)));
+  const insideArea = Math.max(0, cr - cl) * Math.max(0, cb - ct);
+  return 1 - insideArea / (bw * bh);
+}
+
+// ─── Canvas cursor ─────────────────────────────────────────
+function updateCursor(mx, my) {
+  if (mode) return; // don't change during drag
+  for (let i = boxes.length - 1; i >= 0; i--) {
+    const c = hitCorner(mx, my, boxes[i]);
+    if (c === 0 || c === 2) { canvas.style.cursor = 'nwse-resize'; return; }
+    if (c === 1 || c === 3) { canvas.style.cursor = 'nesw-resize'; return; }
+  }
+  if (hitBox(mx, my) >= 0) { canvas.style.cursor = 'move'; return; }
+  canvas.style.cursor = isInsidePhone(mx, my) ? 'crosshair' : 'default';
+}
+
+// ─── Drawing ───────────────────────────────────────────────
+function drawPhoneBounds() {
+  if (!phoneBounds) return;
+  // Dim area outside phone screen
+  const pts = phoneBounds.map(([px, py]) => n2d(px, py));
+  ctx.save();
+  // Fill entire canvas with dim overlay
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+  ctx.fillRect(0, 0, cssW, cssH);
+  // Cut out phone region (clear it)
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+  // Draw phone border
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+  ctx.closePath();
+  ctx.stroke();
+}
+
+function isInsidePhone(dx, dy) {
+  // Point-in-polygon (ray casting) for display coords
+  if (!phoneBounds) return true; // no bounds = allow anywhere
+  const pts = phoneBounds.map(([px, py]) => n2d(px, py));
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [xi, yi] = pts[i], [xj, yj] = pts[j];
+    if ((yi > dy) !== (yj > dy) && dx < (xj - xi) * (dy - yi) / (yj - yi) + xi)
+      inside = !inside;
+  }
+  return inside;
+}
+
+function pixelToPhone(px, py) {
+  // Convert natural image pixel to phone screen 0-1 coords
+  if (!phoneBounds) return [px / naturalW, py / naturalH];
+  const xs = phoneBounds.map(p => p[0]), ys = phoneBounds.map(p => p[1]);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  return [(px - minX) / (maxX - minX), (py - minY) / (maxY - minY)];
+}
+
+function phoneDisplayRect() {
+  // Axis-aligned bounding rect of phone screen in display (CSS) coords
+  if (!phoneBounds) return [0, 0, cssW, cssH];
+  const pts = phoneBounds.map(([px, py]) => n2d(px, py));
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+}
+
+function redrawCanvas() {
+  ctx.clearRect(0, 0, cssW, cssH);
+  drawPhoneBounds();
+  boxes.forEach((b, i) => {
+    const [x, y] = n2d(b.left, b.top);
+    const [x2, y2] = n2d(b.right, b.bottom);
+    const w = x2 - x, h = y2 - y;
+    const isActive = (mode === 'move' || mode === 'resize') && i === activeBox;
+    const color = b.color || '#42a5f5';
+    ctx.globalAlpha = isActive ? Math.max(0.05, 1 - deleteFade * 0.95) : 1;
+
+    // Solid border
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x, y, w, h);
+
+    // Label — prefer outside top-left, reposition if clipped
+    const label = String(i + 1);
+    ctx.font = 'bold 12px sans-serif';
+    const tw = ctx.measureText(label).width;
+    const lw = tw + 8, lh = 18;
+    let lx = x, ly = y - lh;
+    if (ly < 0) ly = y2;               // no room above → below bottom edge
+    if (lx + lw > cssW) lx = x2 - lw;  // no room right → align to right edge
+    if (lx < 0) lx = 0;
+    ctx.fillStyle = color;
+    ctx.fillRect(lx, ly, lw, lh);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(label, lx + 4, ly + 13);
+
+
+    ctx.globalAlpha = 1;
+  });
+}
+
+function renderBoxList() {
+  if (boxes.length === 0) {
+    boxList.innerHTML = '<span class="empty-msg">No boxes drawn yet</span>';
+  } else {
+    boxList.innerHTML = '';
+    boxes.forEach((b, i) => {
+      const c = b.color || '#42a5f5';
+      const [px1, py1] = pixelToPhone(b.left, b.top);
+      const [px2, py2] = pixelToPhone(b.right, b.bottom);
+      const x1 = px1.toFixed(2), y1 = py1.toFixed(2);
+      const x2 = px2.toFixed(2), y2 = py2.toFixed(2);
+      const item = document.createElement('div');
+      item.className = 'box-item';
+      item.style.borderLeftColor = c;
+      item.innerHTML =
+        '<div class="box-header">' +
+          '<span class="num" style="color:' + c + '">#' + (i + 1) + '</span>' +
+          '<span class="del" data-i="' + i + '">&times;</span>' +
+        '</div>' +
+        '<div class="coords">' +
+          '<span><span class="label">left </span><span class="val">' + x1 + '</span></span>' +
+          '<span><span class="label">top </span><span class="val">' + y1 + '</span></span>' +
+          '<span><span class="label">right </span><span class="val">' + x2 + '</span></span>' +
+          '<span><span class="label">bottom </span><span class="val">' + y2 + '</span></span>' +
+        '</div>';
+      boxList.appendChild(item);
+    });
+  }
+}
+
+function syncToServer() {
+  fetch('/api/annotations', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({annotations: boxes}),
+  });
+}
+
+function commit() {
+  syncToServer();
+  renderBoxList();
+  redrawCanvas();
+}
+
+// ─── Snapshot ──────────────────────────────────────────────
+async function freezeSnapshot() {
+  const resp = await fetch('/api/snapshot', {method: 'POST'});
+  const data = await resp.json();
+  if (data.error) return;
+  naturalW = data.width;
+  naturalH = data.height;
+  phoneBounds = data.phone_bounds; // [[x,y],...] or null
+  frozenImg.src = 'data:image/jpeg;base64,' + data.image;
+  frozenImg.style.display = 'block';
+  liveImg.style.display = 'none';
+  frozen = true;
+  boxes = [];
+  commit();
+  frozenImg.onload = positionCanvas;
+}
+
+function positionCanvas() {
+  const rect = frozenImg.getBoundingClientRect();
+  const viewerRect = viewer.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  cssW = rect.width;
+  cssH = rect.height;
+  canvas.style.width = cssW + 'px';
+  canvas.style.height = cssH + 'px';
+  canvas.style.left = (rect.left - viewerRect.left) + 'px';
+  canvas.style.top = (rect.top - viewerRect.top) + 'px';
+  // Drawing buffer at native resolution — setting .width resets transform
+  canvas.width = cssW * dpr;
+  canvas.height = cssH * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  canvas.style.display = 'block';
+  redrawCanvas();
+}
+
+// ─── Mouse events ──────────────────────────────────────────
+canvas.addEventListener('mousedown', (e) => {
+  if (!frozen) return;
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  dragStartX = mx;
+  dragStartY = my;
+  pendingDelete = false;
+
+  // Check corners first (resize)
+  for (let i = boxes.length - 1; i >= 0; i--) {
+    const c = hitCorner(mx, my, boxes[i]);
+    if (c >= 0) {
+      mode = 'resize';
+      activeBox = i;
+      activeCorner = c;
+      dragOrigBox = {...boxes[i]};
+      return;
+    }
+  }
+
+  // Check box interior (move)
+  const bi = hitBox(mx, my);
+  if (bi >= 0) {
+    mode = 'move';
+    activeBox = bi;
+    dragOrigBox = {...boxes[bi]};
+    return;
+  }
+
+  // Empty area — only draw inside phone screen
+  if (!isInsidePhone(mx, my)) return;
+  mode = 'draw';
+});
+
+function onMouseMove(e) {
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+
+  if (!mode) { updateCursor(mx, my); return; }
+
+  const dx = mx - dragStartX;
+  const dy = my - dragStartY;
+  const [ndx, ndy] = d2n(dx, dy);
+
+  if (mode === 'draw') {
+    const [minX, minY, maxX, maxY] = phoneDisplayRect();
+    const cx = Math.max(minX, Math.min(maxX, mx));
+    const cy = Math.max(minY, Math.min(maxY, my));
+    redrawCanvas();
+    ctx.strokeStyle = '#f59e0b';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 3]);
+    ctx.strokeRect(dragStartX, dragStartY, cx - dragStartX, cy - dragStartY);
+    ctx.setLineDash([]);
+    return;
+  }
+
+  if (mode === 'move') {
+    const b = boxes[activeBox];
+    const o = dragOrigBox;
+    b.left = o.left + ndx;
+    b.top = o.top + ndy;
+    b.right = o.right + ndx;
+    b.bottom = o.bottom + ndy;
+
+    deleteFade = boxOutsidePhoneRatio(boxes[activeBox]);
+    pendingDelete = deleteFade > 0.6;
+    redrawCanvas();
+    return;
+  }
+
+  if (mode === 'resize') {
+    const b = boxes[activeBox];
+    const [nmx, nmy] = d2n(mx, my);
+    if (activeCorner === 0) { b.left = nmx; b.top = nmy; }
+    if (activeCorner === 1) { b.right = nmx; b.top = nmy; }
+    if (activeCorner === 2) { b.right = nmx; b.bottom = nmy; }
+    if (activeCorner === 3) { b.left = nmx; b.bottom = nmy; }
+
+    deleteFade = boxOutsidePhoneRatio(boxes[activeBox]);
+    pendingDelete = deleteFade > 0.6;
+    redrawCanvas();
+    return;
+  }
+}
+
+function onMouseUp(e) {
+  if (!mode) return;
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+
+  if (mode === 'draw') {
+    const [minX, minY, maxX, maxY] = phoneDisplayRect();
+    const clampX = v => Math.max(minX, Math.min(maxX, v));
+    const clampY = v => Math.max(minY, Math.min(maxY, v));
+    const [nl, nt] = d2n(clampX(Math.min(dragStartX, mx)), clampY(Math.min(dragStartY, my)));
+    const [nr, nb] = d2n(clampX(Math.max(dragStartX, mx)), clampY(Math.max(dragStartY, my)));
+    if (nr - nl > 3 && nb - nt > 3) {
+      boxes.push({left: nl, top: nt, right: nr, bottom: nb, color: penColor});
+    }
+  }
+
+  if ((mode === 'move' || mode === 'resize') && pendingDelete) {
+    boxes.splice(activeBox, 1);
+  }
+
+  if ((mode === 'move' || mode === 'resize') && !pendingDelete) {
+    const b = boxes[activeBox];
+    const [pMinX, pMinY, pMaxX, pMaxY] = phoneDisplayRect();
+    const [nMinX, nMinY] = d2n(pMinX, pMinY);
+    const [nMaxX, nMaxY] = d2n(pMaxX, pMaxY);
+    // Normalize
+    const l = Math.min(b.left, b.right), r = Math.max(b.left, b.right);
+    const t = Math.min(b.top, b.bottom), bt = Math.max(b.top, b.bottom);
+    if (mode === 'move') {
+      // Bounce back: shift entire box to stay inside phone screen
+      const bw = r - l, bh = bt - t;
+      b.left = Math.max(nMinX, Math.min(nMaxX - bw, l));
+      b.top = Math.max(nMinY, Math.min(nMaxY - bh, t));
+      b.right = b.left + bw;
+      b.bottom = b.top + bh;
+    } else {
+      // Resize: clamp each edge to phone bounds
+      b.left = Math.max(nMinX, Math.min(nMaxX, l));
+      b.top = Math.max(nMinY, Math.min(nMaxY, t));
+      b.right = Math.max(nMinX, Math.min(nMaxX, r));
+      b.bottom = Math.max(nMinY, Math.min(nMaxY, bt));
+    }
+  }
+
+  mode = null;
+  activeBox = -1;
+  activeCorner = -1;
+  dragOrigBox = null;
+  pendingDelete = false;
+  deleteFade = 0;
+  commit();
+}
+
+// Canvas handles hover cursor + mousedown; document handles move/up globally
+canvas.addEventListener('mousemove', onMouseMove);
+document.addEventListener('mousemove', (e) => { if (mode) onMouseMove(e); });
+document.addEventListener('mouseup', (e) => { if (mode) onMouseUp(e); });
+
+// ─── Sidebar delete ────────────────────────────────────────
+boxList.addEventListener('click', (e) => {
+  if (e.target.classList.contains('del')) {
+    boxes.splice(parseInt(e.target.dataset.i), 1);
+    commit();
+  }
+});
+
+// ─── Resize handling ───────────────────────────────────────
+window.addEventListener('resize', () => {
+  if (frozen) positionCanvas();
+});
+
+// ─── Mock mode (no server needed) ──────────────────────────
+const MOCK = true;
+
+function mockSnapshot() {
+  // Generate a fake phone screenshot (portrait 540x960)
+  const c = document.createElement('canvas');
+  c.width = 540; c.height = 960;
+  const g = c.getContext('2d');
+  // Dark background
+  g.fillStyle = '#1c1c1e'; g.fillRect(0, 0, 540, 960);
+  // Status bar
+  g.fillStyle = '#2c2c2e'; g.fillRect(0, 0, 540, 44);
+  g.fillStyle = '#888'; g.font = '14px sans-serif';
+  g.fillText('9:41', 24, 30); g.fillText('100%', 470, 30);
+  // Nav bar
+  g.fillStyle = '#2c2c2e'; g.fillRect(0, 900, 540, 60);
+  // Fake app icons (3x2 grid)
+  const icons = ['Messages', 'Photos', 'Camera', 'Settings', 'Music', 'Maps'];
+  const colors = ['#34c759','#ff9500','#5856d6','#8e8e93','#ff2d55','#007aff'];
+  for (let r = 0; r < 2; r++) {
+    for (let c = 0; c < 3; c++) {
+      const x = 60 + c * 160, y = 300 + r * 200;
+      g.fillStyle = colors[r * 3 + c];
+      g.beginPath(); g.roundRect(x, y, 80, 80, 16); g.fill();
+      g.fillStyle = '#fff'; g.font = '11px sans-serif';
+      g.fillText(icons[r * 3 + c], x + 5, y + 100);
+    }
+  }
+  // Title
+  g.fillStyle = '#fff'; g.font = 'bold 24px sans-serif';
+  g.fillText('Home Screen', 160, 120);
+  // Bottom tabs
+  g.fillStyle = '#666'; g.font = '11px sans-serif';
+  const tabs = ['Phone','Mail','Safari','Music'];
+  tabs.forEach((t, i) => g.fillText(t, 30 + i * 135, 935));
+  return c.toDataURL('image/jpeg').split(',')[1];
+}
+
+if (MOCK) {
+  const _origFetch = window.fetch;
+  window.fetch = async (url, opts) => {
+    if (url === '/api/snapshot') {
+      const b64 = mockSnapshot();
+      return { json: async () => ({
+        image: b64, width: 540, height: 960,
+        phone_bounds: [[40,30],[500,30],[500,930],[40,930]],
+      }) };
+    }
+    if (url === '/api/annotations') {
+      return { json: async () => ({ ok: true, annotations: [], count: 0 }) };
+    }
+    return _origFetch(url, opts);
+  };
+}
+
+// ─── Color picker ──────────────────────────────────────────
+colorPicker.addEventListener('click', (e) => {
+  const dot = e.target.closest('.color-dot');
+  if (!dot) return;
+  penColor = dot.dataset.color;
+  colorPicker.querySelectorAll('.color-dot').forEach(d => d.classList.remove('active'));
+  dot.classList.add('active');
+});
+
+// ─── Button + initial load ─────────────────────────────────
+btnSnapshot.addEventListener('click', freezeSnapshot);
+liveImg.onerror = () => { liveImg.src = PLACEHOLDER; };
+if (MOCK) {
+  liveImg.src = PLACEHOLDER;
+} else {
+  liveImg.src = '/stream';
+}
+</script>
+</body>
+</html>
