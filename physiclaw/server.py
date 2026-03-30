@@ -103,7 +103,7 @@ def park() -> str:
 
 
 @mcp.tool()
-def detect_elements() -> tuple[str, Image, Image]:
+def detect_elements():
     """Detect all interactable UI elements on the phone screen.
 
     Parks the stylus, takes a clean screenshot, and runs two detectors:
@@ -360,7 +360,7 @@ async def _annotations(request):
     return await handle_annotations(request, _ann)
 
 @mcp.tool()
-def get_pending_annotations() -> tuple[str, Image]:
+def get_pending_annotations():
     """Get user-drawn UI element annotations from the web annotation tool.
 
     Returns the frozen screenshot with red numbered boxes drawn at
