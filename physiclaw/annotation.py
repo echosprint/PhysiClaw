@@ -48,27 +48,6 @@ class AnnotationState:
 # ─── Route handlers ────────────────────────────────────────────
 
 
-async def mjpeg_stream(request, physiclaw: PhysiClaw):
-    """MJPEG video stream from the camera."""
-    from starlette.responses import StreamingResponse
-
-    async def generate():
-        loop = asyncio.get_event_loop()
-        gen = physiclaw.cam.mjpeg_generator()
-        try:
-            while True:
-                chunk = await loop.run_in_executor(None, next, gen)
-                yield chunk
-        except StopIteration:
-            pass
-
-    return StreamingResponse(
-        generate(),
-        media_type="multipart/x-mixed-replace; boundary=frame",
-        headers={"Cache-Control": "no-cache"},
-    )
-
-
 async def serve_annotate_page(request):
     """Serve the annotation web UI."""
     from starlette.responses import HTMLResponse

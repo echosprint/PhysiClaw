@@ -338,14 +338,10 @@ atexit.register(physiclaw.shutdown)
 
 from physiclaw.annotation import (
     AnnotationState, freeze_snapshot,
-    handle_annotations, mjpeg_stream, serve_annotate_page,
+    handle_annotations, serve_annotate_page,
 )
 
 _ann = AnnotationState()
-
-@mcp.custom_route("/stream", methods=["GET"])
-async def _stream(request):
-    return await mjpeg_stream(request, physiclaw)
 
 @mcp.custom_route("/annotate", methods=["GET"])
 async def _annotate(request):
@@ -353,14 +349,18 @@ async def _annotate(request):
 
 @mcp.custom_route("/api/snapshot", methods=["POST"])
 async def _snapshot(request):
-    return await freeze_snapshot(request, physiclaw, _ann)
+    physiclaw.acquire()
+    try:
+        return await freeze_snapshot(request, physiclaw, _ann)
+    finally:
+        physiclaw.release()
 
 @mcp.custom_route("/api/annotations", methods=["GET", "POST", "DELETE"])
 async def _annotations(request):
     return await handle_annotations(request, _ann)
 
 @mcp.tool()
-def get_pending_annotations() -> list:
+def get_user_annotations() -> list:
     """Get user-drawn UI element annotations from the web annotation tool.
 
     Returns the frozen screenshot with red numbered boxes drawn at

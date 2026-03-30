@@ -66,6 +66,7 @@ Phone UI element annotations are stored in `.claude/ui-presets/` directory as ma
 ### Using presets during operation
 
 Before starting the bbox_target() targeting workflow, check if the target element exists in a preset file:
+
 1. Read the relevant app's preset file (e.g., `.claude/ui-presets/wechat.md`)
 2. Match the current page by its fingerprint description
 3. If the target element is listed, use its 位置 coordinates directly with bbox_target()
@@ -76,12 +77,13 @@ Preset coordinates are 0-1 decimals in [left, top, right, bottom] order, same fo
 ### Annotation workflow
 
 When the user asks to annotate UI elements:
-1. Ensure the user has drawn boxes at http://localhost:8048/annotate
-2. Call `get_pending_annotations()` to get the screenshot with drawn boxes and coordinates
+
+1. Ensure the user has drawn boxes at [annotate](http://localhost:8048/annotate)
+2. Call `get_user_annotations()` to get the screenshot with drawn boxes and coordinates
 3. Look at the image and identify: what app, what page, and what each boxed element is
 4. List your findings and ask the user to confirm
 5. On confirmation, write the preset markdown file to `.claude/ui-presets/{app_slug}.md`
-6. Annotations are cleared automatically after `get_pending_annotations()` returns
+6. Annotations are cleared automatically after `get_user_annotations()` returns
 
 ## For developers editing this codebase
 

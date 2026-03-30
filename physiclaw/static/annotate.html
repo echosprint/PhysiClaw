@@ -111,7 +111,7 @@ body { background: #1a1a1a; color: #e0e0e0; font-family: -apple-system, sans-ser
       Drag corners to resize.<br>
       Drag far outside to delete.<br><br>
       Then ask Claude:<br>
-      <code>get_pending_annotations()</code>
+      <code>get_user_annotations()</code>
     </div>
   </div>
 
@@ -622,12 +622,9 @@ colorPicker.addEventListener('click', (e) => {
 
 // ─── Button + initial load ─────────────────────────────────
 btnSnapshot.addEventListener('click', freezeSnapshot);
-liveImg.onerror = () => { liveImg.src = PLACEHOLDER; };
-if (MOCK) {
-  liveImg.src = PLACEHOLDER;
-} else {
-  liveImg.src = '/stream';
-}
+liveImg.src = PLACEHOLDER;
+// Auto-capture on page load
+freezeSnapshot();
 </script>
 </body>
 </html>
