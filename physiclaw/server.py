@@ -103,7 +103,7 @@ def park() -> str:
 
 
 @mcp.tool()
-def detect_elements():
+def detect_elements() -> list:
     """Detect all interactable UI elements on the phone screen.
 
     Parks the stylus, takes a clean screenshot, and runs two detectors:
@@ -124,11 +124,11 @@ def detect_elements():
         physiclaw.park()
         time.sleep(1.5)
         elements_text, icon_frame, ocr_frame = physiclaw.detect_elements()
-        return (
+        return [
             elements_text,
             Image(data=physiclaw.frame_to_jpeg(icon_frame), format="jpeg"),
             Image(data=physiclaw.frame_to_jpeg(ocr_frame), format="jpeg"),
-        )
+        ]
     finally:
         physiclaw.release()
 
@@ -360,7 +360,7 @@ async def _annotations(request):
     return await handle_annotations(request, _ann)
 
 @mcp.tool()
-def get_pending_annotations():
+def get_pending_annotations() -> list:
     """Get user-drawn UI element annotations from the web annotation tool.
 
     Returns the frozen screenshot with red numbered boxes drawn at
@@ -374,16 +374,16 @@ def get_pending_annotations():
     frozen_frame, annotations = _ann.get_all()
     if frozen_frame is None or not annotations:
         import numpy as np
-        return ("No pending annotations. "
+        return ["No pending annotations. "
                 "Ask the user to draw boxes at /annotate first.",
                 Image(data=physiclaw.frame_to_jpeg(
                     physiclaw.cam.snapshot()
                     or np.zeros((100, 100, 3), dtype=np.uint8)
-                ), format="jpeg"))
+                ), format="jpeg")]
     result = physiclaw.process_annotations(frozen_frame, annotations)
     _ann.clear()
     text, frame = result
-    return (text, Image(data=physiclaw.frame_to_jpeg(frame), format="jpeg"))
+    return [text, Image(data=physiclaw.frame_to_jpeg(frame), format="jpeg")]
 
 # ────────────────────────────────────────────────────────────────
 
