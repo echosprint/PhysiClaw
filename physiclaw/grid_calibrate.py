@@ -210,9 +210,11 @@ class GridCalibration:
 
 
 PROBE_DISTANCES_MM = [3.0 + i * 1.5 for i in range(16)]  # same as phase 2-3
-# Star pattern (✱): two diagonals + two axes, covering ±3mm with 24 taps
-# Covers all 4 directions so no blind spots at edges
-EXPLORE_STEPS_MM = [1.0, -1.0, 2.0, -2.0, 3.0, -3.0]  # no 0 — caller already tried exact position
+
+# Square-in-square search: concentric squares expanding from center.
+# Each square has 0.5mm step along edges. Max half-edge = 2mm.
+EXPLORE_MAX_R = 2.0    # mm — max half-edge of outermost square
+EXPLORE_STEP = 0.5     # mm — spacing along each edge and between squares
 
 
 
@@ -230,47 +232,57 @@ def _tap_at(arm: StylusArm, cam: Camera, x: float, y: float,
     return cam.wait_for_green(timeout=1.0)
 
 
+def _square_points(right_vec, down_vec):
+    """Generate concentric square offsets in GRBL mm.
+
+    Expands from inner square to outer: ±0.5mm, ±1.0mm, ±1.5mm, ±2.0mm.
+    Each square walks its perimeter in 0.5mm steps.
+    Tests nearby positions first, dense coverage, no gaps.
+    """
+    rx, ry = right_vec
+    dx, dy = down_vec
+    s = EXPLORE_STEP
+    r = s
+    while r <= EXPLORE_MAX_R + 0.01:
+        # Walk perimeter of square with half-edge = r
+        # Top edge: left to right
+        col = -r
+        while col <= r:
+            yield (col * rx + (-r) * dx, col * ry + (-r) * dy)
+            col += s
+        # Right edge: top to bottom (skip top-right corner)
+        row = -r + s
+        while row <= r:
+            yield (r * rx + row * dx, r * ry + row * dy)
+            row += s
+        # Bottom edge: right to left (skip bottom-right corner)
+        col = r - s
+        while col >= -r:
+            yield (col * rx + r * dx, col * ry + r * dy)
+            col -= s
+        # Left edge: bottom to top (skip both corners)
+        row = r - s
+        while row > -r:
+            yield ((-r) * rx + row * dx, (-r) * ry + row * dy)
+            row -= s
+        r += s
+
+
 def _explore_dot(arm: StylusArm, cam: Camera,
                  cx: float, cy: float, z_tap: float,
                  right_vec: tuple[int, int],
                  down_vec: tuple[int, int]) -> tuple[float, float] | None:
-    """Explore around (cx, cy) to find a dot. Two strategies:
+    """Explore around (cx, cy) using concentric squares.
 
-    1. Star pattern (✱): fast, covers ±3mm along 4 axes (24 taps).
-    2. Row-by-row grid: thorough fallback, covers ±4mm in 1mm steps (81 taps).
-
+    Squares expand outward from ±0.5mm to ±2mm in 0.5mm steps.
+    Each square's perimeter is walked in 0.5mm increments.
     Dots are ≥5mm apart, so any green within range must be the target.
+
     Returns the GRBL (x, y) that triggered the green, or None.
     """
-    rx, ry = right_vec
-    dx, dy = down_vec
-
-    # Strategy 1: Star pattern (fast)
-    directions = [
-        (rx, ry, 0, 0),       # → right axis
-        (0, 0, dx, dy),       # ↓ down axis
-        (rx, ry, dx, dy),     # ↘ diagonal
-        (rx, ry, -dx, -dy),   # ↗ diagonal
-    ]
-    for r_mul_x, r_mul_y, d_mul_x, d_mul_y in directions:
-        for s in EXPLORE_STEPS_MM:
-            x = cx + s * r_mul_x + s * d_mul_x
-            y = cy + s * r_mul_y + s * d_mul_y
-            if _tap_at(arm, cam, x, y, z_tap):
-                return arm.position()
-
-    # Strategy 2: Row-by-row grid (thorough fallback)
-    log.debug(f"  Star pattern missed, trying grid search ±4mm...")
-    grid_steps = [-4, -3, -2, -1, 0, 1, 2, 3, 4]
-    for row_s in grid_steps:
-        for col_s in grid_steps:
-            if row_s == 0 and col_s == 0:
-                continue  # already tried center
-            x = cx + col_s * rx + row_s * dx
-            y = cy + col_s * ry + row_s * dy
-            if _tap_at(arm, cam, x, y, z_tap):
-                return arm.position()
-
+    for ox, oy in _square_points(right_vec, down_vec):
+        if _tap_at(arm, cam, cx + ox, cy + oy, z_tap):
+            return arm.position()
     return None
 
 
@@ -443,7 +455,7 @@ def phase6_grid(arm: StylusArm, cam: Camera,
                 raise RuntimeError(
                     f"Phase 6 FAILED — dot {i} ({x_pct}, {y_pct}) not found. "
                     f"Tried position ({target_x:.2f}, {target_y:.2f}) and "
-                    f"explored ±3mm. Check phone screen and lighting.")
+                    f"explored ±{EXPLORE_MAX_R:.0f}mm squares. Check phone screen and lighting.")
 
     log.info(f"  Verified all {verified}/{len(GRID_SCREEN_PCT)} dots")
 
