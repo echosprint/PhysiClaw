@@ -220,6 +220,15 @@ class PhysiClaw:
         self._arm._fast_move(gx, gy)
         self._arm.wait_idle()
 
+    def tap_at_pct(self, x: float, y: float):
+        """Move arm to screen coordinate (0-1) and tap. Bypasses bbox workflow."""
+        if self._grid_cal is None:
+            raise RuntimeError("Grid calibration not done")
+        gx, gy = self._grid_cal.pct_to_grbl_mm(x, y)
+        self._arm._fast_move(gx, gy)
+        self._arm.wait_idle()
+        self._arm.tap()
+
     # ─── Snapshot helpers ──────────────────────────────────────
 
     PARK_DISTANCE = 100  # mm to move stylus out of frame
