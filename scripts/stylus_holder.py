@@ -23,22 +23,32 @@ import os
 
 
 _FONT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "fonts")
-_FONT_PATH = os.path.join(_FONT_DIR, "NotoSansSC.ttf")
-_FONT_URL = "https://github.com/google/fonts/raw/main/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf"
+_FONT_PATH = os.path.join(_FONT_DIR, "NotoSansSC-Regular.ttf")
+_FONT_VAR_URL = "https://github.com/google/fonts/raw/main/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf"
 
 
 HAS_CJK = False
 
 def _try_load_cjk_font():
-    """Try to download and register Noto Sans SC. Sets HAS_CJK flag."""
+    """Try to download and register Noto Sans SC Regular. Sets HAS_CJK flag."""
     global HAS_CJK
     try:
         if not os.path.exists(_FONT_PATH):
             os.makedirs(_FONT_DIR, exist_ok=True)
-            print("Downloading Noto Sans SC font...")
-            import urllib.request
-            urllib.request.urlretrieve(_FONT_URL, _FONT_PATH)
-            print(f"Saved to {_FONT_PATH}")
+            var_path = os.path.join(_FONT_DIR, "NotoSansSC-Variable.ttf")
+            if not os.path.exists(var_path):
+                print("Downloading Noto Sans SC font...")
+                import urllib.request
+                urllib.request.urlretrieve(_FONT_VAR_URL, var_path)
+            # Instantiate variable font at Regular weight (400)
+            from fontTools import ttLib as ftLib  # pyright: ignore[reportMissingImports]
+            from fontTools.varLib import instancer  # pyright: ignore[reportMissingImports]
+            ft = ftLib.TTFont(var_path)
+            ft = instancer.instantiateVariableFont(ft, {"wght": 400})
+            ft.save(_FONT_PATH)
+            ft.close()
+            os.remove(var_path)
+            print(f"Saved Regular weight to {_FONT_PATH}")
         pdfmetrics.registerFont(TTFont('CJK', _FONT_PATH))
         HAS_CJK = True
     except Exception as e:
