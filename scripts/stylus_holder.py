@@ -20,49 +20,29 @@ from reportlab.pdfbase import pdfmetrics  # pyright: ignore[reportMissingImports
 from reportlab.pdfbase.ttfonts import TTFont  # pyright: ignore[reportMissingImports, reportMissingModuleSource]
 import math
 import os
-import platform
 
 
-def _register_chinese_font():
-    """Register a Chinese system font. Works on macOS, Windows, and Linux."""
-    system = platform.system()
-    if system == 'Darwin':
-        candidates = [
-            ('/System/Library/Fonts/STHeiti Light.ttc', 0),
-            ('/System/Library/Fonts/PingFang.ttc', 0),
-            ('/Library/Fonts/Songti.ttc', 0),
-        ]
-    elif system == 'Windows':
-        fonts_dir = os.path.join(os.environ.get('WINDIR', r'C:\Windows'), 'Fonts')
-        candidates = [
-            (os.path.join(fonts_dir, 'msyh.ttc'), 0),     # Microsoft YaHei
-            (os.path.join(fonts_dir, 'simsun.ttc'), 0),    # SimSun
-            (os.path.join(fonts_dir, 'simhei.ttf'), None),  # SimHei
-        ]
-    else:  # Linux
-        candidates = [
-            ('/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc', 0),
-            ('/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc', 0),
-            ('/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc', 0),
-        ]
-
-    for path, subfont_index in candidates:
-        if os.path.exists(path):
-            if subfont_index is not None:
-                pdfmetrics.registerFont(TTFont('CJK', path, subfontIndex=subfont_index))
-            else:
-                pdfmetrics.registerFont(TTFont('CJK', path))
-            return
-
-    raise OSError(
-        'No Chinese font found. Please install one of:\n'
-        '  macOS  — built-in PingFang / STHeiti should work\n'
-        '  Windows — built-in Microsoft YaHei / SimSun should work\n'
-        '  Linux  — sudo apt install fonts-wqy-zenhei'
-    )
+_FONT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "fonts")
+_NOTO_PATH = os.path.join(_FONT_DIR, "NotoSansSC.ttf")
+_NOTO_URL = "https://github.com/google/fonts/raw/main/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf"
 
 
-_register_chinese_font()
+def _ensure_cjk_font():
+    """Download Noto Sans SC if missing, then register as 'CJK'.
+
+    Uses a standalone .otf file that embeds properly in PDFs,
+    so the output prints correctly on any computer.
+    """
+    if not os.path.exists(_NOTO_PATH):
+        os.makedirs(_FONT_DIR, exist_ok=True)
+        print(f"Downloading Noto Sans SC font...")
+        import urllib.request
+        urllib.request.urlretrieve(_NOTO_URL, _NOTO_PATH)
+        print(f"Saved to {_NOTO_PATH}")
+    pdfmetrics.registerFont(TTFont('CJK', _NOTO_PATH))
+
+
+_ensure_cjk_font()
 
 _project_root = os.path.dirname(os.path.dirname(__file__))
 _out_dir = os.path.join(_project_root, "data", "stylus")
