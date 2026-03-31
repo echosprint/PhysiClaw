@@ -43,10 +43,12 @@ def _try_load_cjk_font():
             # Instantiate variable font at Regular weight (400)
             from fontTools import ttLib as ftLib  # pyright: ignore[reportMissingImports]
             from fontTools.varLib import instancer  # pyright: ignore[reportMissingImports]
-            ft = ftLib.TTFont(var_path)
-            ft = instancer.instantiateVariableFont(ft, {"wght": 400})
-            ft.save(_FONT_PATH)
-            ft.close()
+            vf = ftLib.TTFont(var_path)
+            static = instancer.instantiateVariableFont(
+                vf, {"wght": 400}, updateFontNames=True)
+            static.save(_FONT_PATH)
+            static.close()
+            vf.close()
             os.remove(var_path)
             print(f"Saved Regular weight to {_FONT_PATH}")
         pdfmetrics.registerFont(TTFont('CJK', _FONT_PATH))
