@@ -39,20 +39,17 @@ A camera is mounted directly above the phone, looking straight down. You see the
 
 ## Operation cycle
 
-1. park() + screenshot() — see the full phone screen (stylus parked out of frame)
-2. detect_elements() — detects all icons and text on screen, returns two annotated
-   images plus a text listing with bounding boxes as 0-1 decimals.
-   Use this to find your target's coordinates directly.
-3. If detect_elements() found the target, use its coordinates for bbox_target().
-   If not, use grid_overlay() to estimate coordinates manually.
-4. bbox_target(left, top, right, bottom) — draws colored rectangles on a fresh photo
+1. Check UI presets (.claude/ui-presets/) — if the target element has known coordinates, use them directly for bbox_target().
+2. If no preset, park() + screenshot() — see the full phone screen.
+3. grid_overlay() — estimate target coordinates using the reference grid.
+4. bbox_target(left, top, right, bottom) — draws colored rectangles on a fresh photo.
 5. **Verify: name the element INSIDE each rectangle.**
    - If a rectangle covers the target → confirm_bbox(shift)
    - If NO rectangle covers the target → call bbox_target() with corrected coordinates
    - Shift values toward the target by the gap you observe
    - 2-3 attempts is normal. Never pick the "least-bad" rectangle.
-6. tap() / double_tap() / long_press() / swipe() — executes at the bbox center
-7. park() + screenshot() — verify the result
+6. tap() / double_tap() / long_press() / swipe() — executes at the bbox center.
+7. park() + screenshot() — verify the result.
 
 ## Example
 
@@ -98,37 +95,6 @@ def park() -> str:
     try:
         physiclaw.park()
         return "Stylus parked out of frame"
-    finally:
-        physiclaw.release()
-
-
-@mcp.tool()
-def detect_elements() -> list:
-    """Detect all interactable UI elements on the phone screen.
-
-    Parks the stylus, takes a clean screenshot, and runs two detectors:
-    - Icon detection: finds buttons, icons, and interactive elements
-    - OCR: reads all visible text (labels, keys, prices, etc.)
-
-    Returns a text listing of all elements with bounding boxes as 0-1
-    decimals [left, top, right, bottom], plus two annotated images
-    (icon boxes + OCR boxes). Use the coordinates to call bbox_target().
-
-    The detection models are lightweight (<100MB) so bounding boxes may not
-    be pixel-perfect. Use them as estimates to narrow down your target's
-    position, then refine with bbox_target() for precise targeting.
-    """
-    import time
-    physiclaw.acquire()
-    try:
-        physiclaw.park()
-        time.sleep(1.5)
-        elements_text, icon_frame, ocr_frame = physiclaw.detect_elements()
-        return [
-            elements_text,
-            Image(data=physiclaw.frame_to_jpeg(icon_frame), format="jpeg"),
-            Image(data=physiclaw.frame_to_jpeg(ocr_frame), format="jpeg"),
-        ]
     finally:
         physiclaw.release()
 
