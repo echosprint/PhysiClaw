@@ -23,26 +23,28 @@ import os
 
 
 _FONT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "fonts")
-_NOTO_PATH = os.path.join(_FONT_DIR, "NotoSansSC.ttf")
-_NOTO_URL = "https://github.com/google/fonts/raw/main/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf"
+_FONT_PATH = os.path.join(_FONT_DIR, "NotoSansSC.ttf")
+_FONT_URL = "https://github.com/google/fonts/raw/main/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf"
 
 
-def _ensure_cjk_font():
-    """Download Noto Sans SC if missing, then register as 'CJK'.
+HAS_CJK = False
 
-    Uses a standalone .otf file that embeds properly in PDFs,
-    so the output prints correctly on any computer.
-    """
-    if not os.path.exists(_NOTO_PATH):
-        os.makedirs(_FONT_DIR, exist_ok=True)
-        print(f"Downloading Noto Sans SC font...")
-        import urllib.request
-        urllib.request.urlretrieve(_NOTO_URL, _NOTO_PATH)
-        print(f"Saved to {_NOTO_PATH}")
-    pdfmetrics.registerFont(TTFont('CJK', _NOTO_PATH))
+def _try_load_cjk_font():
+    """Try to download and register Noto Sans SC. Sets HAS_CJK flag."""
+    global HAS_CJK
+    try:
+        if not os.path.exists(_FONT_PATH):
+            os.makedirs(_FONT_DIR, exist_ok=True)
+            print("Downloading Noto Sans SC font...")
+            import urllib.request
+            urllib.request.urlretrieve(_FONT_URL, _FONT_PATH)
+            print(f"Saved to {_FONT_PATH}")
+        pdfmetrics.registerFont(TTFont('CJK', _FONT_PATH))
+        HAS_CJK = True
+    except Exception as e:
+        print(f"CJK font unavailable ({e}), Chinese text will be omitted")
 
-
-_ensure_cjk_font()
+_try_load_cjk_font()
 
 _project_root = os.path.dirname(os.path.dirname(__file__))
 _out_dir = os.path.join(_project_root, "data", "stylus")
@@ -187,30 +189,33 @@ screw_top = rod_top + s(SCREW_LEN)
 # ═══════════════════════════════════════
 c.setFont("Helvetica-Bold", 16)
 c.drawCentredString(W/2, H - MARGIN - 18, "PhysiClaw Stylus Rod")
-c.setFont("CJK", 12)
-c.drawCentredString(W/2, H - MARGIN - 36, "触控笔杆设计图")
+if HAS_CJK:
+    c.setFont("CJK", 12)
+    c.drawCentredString(W/2, H - MARGIN - 36, "触控笔杆设计图")
 c.setFont("Helvetica", 10)
 c.drawCentredString(W/2, H - MARGIN - 52, "Front View  |  Dimensions in mm  |  Stainless Steel")
-c.setFont("CJK", 9)
-c.drawCentredString(W/2, H - MARGIN - 66, "正视图  |  单位 mm  |  不锈钢")
+if HAS_CJK:
+    c.setFont("CJK", 9)
+    c.drawCentredString(W/2, H - MARGIN - 66, "正视图  |  单位 mm  |  不锈钢")
 
 c.setFont("Helvetica", 9); c.setFillColor(HexColor("#444444"))
 c.drawString(MARGIN + 4, H - MARGIN - 84, "M3 external thread φ 3 × 5  —  Rod φ 2.5 × 75  —  Knurled Tube φ 9 / φ 7 × 100")
-# Chinese line: mix CJK for Chinese chars, Helvetica for φ and numbers
-y_cn = H - MARGIN - 98
-x = MARGIN + 4
-c.setFont("CJK", 9)
-c.drawString(x, y_cn, "M3 外螺纹"); x += c.stringWidth("M3 外螺纹", "CJK", 9)
-c.setFont("Helvetica", 9)
-c.drawString(x, y_cn, " φ 3 × 5  —  "); x += c.stringWidth(" φ 3 × 5  —  ", "Helvetica", 9)
-c.setFont("CJK", 9)
-c.drawString(x, y_cn, "钢棒"); x += c.stringWidth("钢棒", "CJK", 9)
-c.setFont("Helvetica", 9)
-c.drawString(x, y_cn, " φ 2.5 × 75  —  "); x += c.stringWidth(" φ 2.5 × 75  —  ", "Helvetica", 9)
-c.setFont("CJK", 9)
-c.drawString(x, y_cn, "滚花管材"); x += c.stringWidth("滚花管材", "CJK", 9)
-c.setFont("Helvetica", 9)
-c.drawString(x, y_cn, " φ 9 / φ 7 × 100")
+if HAS_CJK:
+    # Chinese line: mix CJK for Chinese chars, Helvetica for φ and numbers
+    y_cn = H - MARGIN - 98
+    x = MARGIN + 4
+    c.setFont("CJK", 9)
+    c.drawString(x, y_cn, "M3 外螺纹"); x += c.stringWidth("M3 外螺纹", "CJK", 9)
+    c.setFont("Helvetica", 9)
+    c.drawString(x, y_cn, " φ 3 × 5  —  "); x += c.stringWidth(" φ 3 × 5  —  ", "Helvetica", 9)
+    c.setFont("CJK", 9)
+    c.drawString(x, y_cn, "钢棒"); x += c.stringWidth("钢棒", "CJK", 9)
+    c.setFont("Helvetica", 9)
+    c.drawString(x, y_cn, " φ 2.5 × 75  —  "); x += c.stringWidth(" φ 2.5 × 75  —  ", "Helvetica", 9)
+    c.setFont("CJK", 9)
+    c.drawString(x, y_cn, "滚花管材"); x += c.stringWidth("滚花管材", "CJK", 9)
+    c.setFont("Helvetica", 9)
+    c.drawString(x, y_cn, " φ 9 / φ 7 × 100")
 c.setFillColor(black)
 
 
@@ -466,8 +471,9 @@ dim_v(m3_bot, m3_top, m3_left, "5", side='left', offset=10*mm)
 # Side view labels — positioned above M3
 c.setFont("Helvetica-Bold", 11)
 c.drawCentredString(SVX, m3_top + 22, "Left Side View")
-c.setFont("CJK", 9)
-c.drawCentredString(SVX, m3_top + 10, "左视图")
+if HAS_CJK:
+    c.setFont("CJK", 9)
+    c.drawCentredString(SVX, m3_top + 10, "左视图")
 
 # Center lines — full span of rectangle, proving hole is centered
 c.setLineWidth(THIN); c.setStrokeColor(GRAY)
@@ -527,50 +533,59 @@ c.line(tb_x + lc, tb_y, tb_x + lc, tb_y + tb_h)
 lx = tb_x + 3
 c.setFont("Helvetica", 7)
 c.drawString(lx, tb_y + 73, "Part")
-c.setFont("CJK", 7)
-c.drawString(lx + 22, tb_y + 73, "零件")
+if HAS_CJK:
+    c.setFont("CJK", 7)
+    c.drawString(lx + 22, tb_y + 73, "零件")
 
 c.setFont("Helvetica", 7)
 c.drawString(lx, tb_y + 56, "Tip")
-c.setFont("CJK", 7)
-c.drawString(lx + 16, tb_y + 56, "笔头")
+if HAS_CJK:
+    c.setFont("CJK", 7)
+    c.drawString(lx + 16, tb_y + 56, "笔头")
 
 c.setFont("Helvetica", 7)
 c.drawString(lx, tb_y + 39, "Material")
-c.setFont("CJK", 7)
-c.drawString(lx + 34, tb_y + 39, "材料")
+if HAS_CJK:
+    c.setFont("CJK", 7)
+    c.drawString(lx + 34, tb_y + 39, "材料")
 
 c.setFont("Helvetica", 7)
 c.drawString(lx, tb_y + 22, "Note")
-c.setFont("CJK", 7)
-c.drawString(lx + 22, tb_y + 22, "说明")
+if HAS_CJK:
+    c.setFont("CJK", 7)
+    c.drawString(lx + 22, tb_y + 22, "说明")
 
 c.setFont("Helvetica", 7)
 c.drawString(lx, tb_y + 5, "Date")
-c.setFont("CJK", 7)
-c.drawString(lx + 22, tb_y + 5, "日期")
+if HAS_CJK:
+    c.setFont("CJK", 7)
+    c.drawString(lx + 22, tb_y + 5, "日期")
 
 # Row values
 vx = tb_x + lc + 4
 c.setFont("Helvetica-Bold", 8)
 c.drawString(vx, tb_y + 73, "Stylus Rod")
-c.setFont("CJK", 7)
-c.drawString(vx + 52, tb_y + 73, "触控笔杆")
+if HAS_CJK:
+    c.setFont("CJK", 7)
+    c.drawString(vx + 52, tb_y + 73, "触控笔杆")
 
 c.setFont("Helvetica", 8)
 c.drawString(vx, tb_y + 56, "M3 threaded stylus fabric tip (7mm)")
-c.setFont("CJK", 8)
-c.drawString(vx + 128, tb_y + 56, "M3内牙7.0布头")
+if HAS_CJK:
+    c.setFont("CJK", 8)
+    c.drawString(vx + 128, tb_y + 56, "M3内牙7.0布头")
 
 c.setFont("Helvetica", 8)
 c.drawString(vx, tb_y + 39, "Stainless Steel")
-c.setFont("CJK", 8)
-c.drawString(vx + 72, tb_y + 39, "不锈钢")
+if HAS_CJK:
+    c.setFont("CJK", 8)
+    c.drawString(vx + 72, tb_y + 39, "不锈钢")
 
 c.setFont("Helvetica", 8)
 c.drawString(vx, tb_y + 22, "Knurled for grip")
-c.setFont("CJK", 8)
-c.drawString(vx + 72, tb_y + 22, "管材滚花便于夹持")
+if HAS_CJK:
+    c.setFont("CJK", 8)
+    c.drawString(vx + 72, tb_y + 22, "管材滚花便于夹持")
 
 c.setFont("Helvetica", 8)
 from datetime import date
