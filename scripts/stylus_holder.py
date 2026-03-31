@@ -1,16 +1,23 @@
 """
-Stylus Holder Assembly:
+Stylus Holder Assembly — generates a PDF bracket drawing.
+
+Usage:
+    uv run --group drawing python scripts/stylus_holder.py
+
+Output:
+    data/stylus/bracket_drawing.pdf — A4 dimensioned drawing for fabrication
+
 - Steel rod φ2.5mm, 75mm long (horizontal)
 - Left end: threaded M3 section (φ3mm, 5mm long, going UP) — no head
-- Right end: inserts into tube (OD 9mm, ID 7mm, 100mm, open both ends)
+- Right end: inserts into knurled tube (OD 9mm, ID 7mm, 100mm, open both ends)
 """
 
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import mm
-from reportlab.pdfgen import canvas
-from reportlab.lib.colors import black, white, HexColor
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.lib.pagesizes import A4  # pyright: ignore[reportMissingImports, reportMissingModuleSource]
+from reportlab.lib.units import mm  # pyright: ignore[reportMissingImports, reportMissingModuleSource]
+from reportlab.pdfgen import canvas  # pyright: ignore[reportMissingImports, reportMissingModuleSource]
+from reportlab.lib.colors import black, white, HexColor  # pyright: ignore[reportMissingImports, reportMissingModuleSource]
+from reportlab.pdfbase import pdfmetrics  # pyright: ignore[reportMissingImports, reportMissingModuleSource]
+from reportlab.pdfbase.ttfonts import TTFont  # pyright: ignore[reportMissingImports, reportMissingModuleSource]
 import math
 import os
 import platform
@@ -205,7 +212,7 @@ c.setFont("CJK", 9)
 c.drawCentredString(W/2, H - 76, "正视图  |  单位 mm  |  不锈钢")
 
 c.setFont("Helvetica", 9); c.setFillColor(HexColor("#444444"))
-c.drawString(40, H - 94, "M3 thread φ 3 × 5  —  Rod φ 2.5 × 75  —  Tube φ 9 / φ 7 × 100")
+c.drawString(40, H - 94, "M3 thread φ 3 × 5  —  Rod φ 2.5 × 75  —  Knurled Tube φ 9 / φ 7 × 100")
 # Chinese line: mix CJK for Chinese chars, Helvetica for φ and numbers
 y_cn = H - 108
 x = 40
@@ -218,7 +225,7 @@ c.drawString(x, y_cn, "钢棒"); x += c.stringWidth("钢棒", "CJK", 9)
 c.setFont("Helvetica", 9)
 c.drawString(x, y_cn, " φ 2.5 × 75  —  "); x += c.stringWidth(" φ 2.5 × 75  —  ", "Helvetica", 9)
 c.setFont("CJK", 9)
-c.drawString(x, y_cn, "管材"); x += c.stringWidth("管材", "CJK", 9)
+c.drawString(x, y_cn, "滚花管材"); x += c.stringWidth("滚花管材", "CJK", 9)
 c.setFont("Helvetica", 9)
 c.drawString(x, y_cn, " φ 9 / φ 7 × 100")
 c.setFillColor(black)
@@ -288,7 +295,7 @@ center_v(rod_bot - s(3), screw_top + s(5), screw_cx)
 
 
 # ═══════════════════════════════════════
-#  DRAW: Tube (right, going DOWN, open-ended)
+#  DRAW: Knurled Tube (right, going DOWN, open-ended)
 #  Rod penetrates both walls 2mm below top
 # ═══════════════════════════════════════
 c.setLineWidth(THICK)
@@ -342,11 +349,11 @@ dim_v(screw_bot, screw_top, screw_r, "5", side='right', offset=25*mm)
 # Screw: φ3 (M3)
 dim_h(screw_l, screw_r, screw_top, "φ 3 (M3)", side='above', offset=8*mm)
 
-# Tube: 100mm
+# Knurled Tube: 100mm
 dim_v(tube_bot, tube_top, tube_or, "100", side='right', offset=18*mm)
 
-# Tube OD: φ9
-# Tube OD: φ 9 — leader line to right (span too narrow for inline dim)
+# Knurled Tube OD: φ9
+# Knurled Tube OD: φ 9 — leader line to right (span too narrow for inline dim)
 c.setLineWidth(THIN); c.setStrokeColor(BLUE); c.setFillColor(BLUE)
 od_y = tube_bot - s(15)
 c.setDash([], 0)
@@ -362,7 +369,7 @@ c.setFont("Helvetica", DIM_FONT)
 c.drawString(ldr_od_x + 2, od_y - 3, "φ 9 (OD)")
 c.setStrokeColor(black); c.setFillColor(black)
 
-# Tube ID: φ 7 — leader line to left
+# Knurled Tube ID: φ 7 — leader line to left
 c.setLineWidth(THIN); c.setStrokeColor(BLUE); c.setFillColor(BLUE)
 id_y = tube_top - s(35)
 c.setDash([], 0)
@@ -405,7 +412,7 @@ SVY = 110    # center Y of side view (below front view)
 
 # Labels added after M3 drawing below
 
-# Tube end face = circle seen from side = rectangle OD × OD
+# Knurled Tube end face = circle seen from side = rectangle OD × OD
 # Actually tube cross-section from left is a circle, but user wants rectangle
 # This is the tube WALL face: a square showing OD
 sv_left   = SVX - sv(TUBE_OD/2)
@@ -530,35 +537,46 @@ c.setStrokeColor(black); c.setFillColor(black)
 # ═══════════════════════════════════════
 #  TITLE BLOCK
 # ═══════════════════════════════════════
-tb_x = W - 230; tb_y = 35; tb_w = 210; tb_h = 34
+tb_x = W - 230; tb_y = 35; tb_w = 210; tb_h = 51
 c.setLineWidth(MED)
 c.rect(tb_x, tb_y, tb_w, tb_h, fill=0, stroke=1)
+c.line(tb_x, tb_y + 34, tb_x + tb_w, tb_y + 34)
 c.line(tb_x, tb_y + 17, tb_x + tb_w, tb_y + 17)
 c.line(tb_x + 62, tb_y, tb_x + 62, tb_y + tb_h)
 
 # Row labels: English + Chinese on same line
 lx = tb_x + 3
 c.setFont("Helvetica", 7)
-c.drawString(lx, tb_y + 22, "Part")
+c.drawString(lx, tb_y + 39, "Part")
 c.setFont("CJK", 7)
-c.drawString(lx + 22, tb_y + 22, "零件")
+c.drawString(lx + 22, tb_y + 39, "零件")
 
 c.setFont("Helvetica", 7)
-c.drawString(lx, tb_y + 5, "Material")
+c.drawString(lx, tb_y + 22, "Material")
 c.setFont("CJK", 7)
-c.drawString(lx + 34, tb_y + 5, "材料")
+c.drawString(lx + 34, tb_y + 22, "材料")
+
+c.setFont("Helvetica", 7)
+c.drawString(lx, tb_y + 5, "Note")
+c.setFont("CJK", 7)
+c.drawString(lx + 22, tb_y + 5, "说明")
 
 # Row values: English + Chinese on same line
 vx = tb_x + 66
-c.setFont("Helvetica-Bold", 9)
-c.drawString(vx, tb_y + 23, "Stylus Holder")
+c.setFont("Helvetica-Bold", 8)
+c.drawString(vx, tb_y + 40, "Stylus Holder")
 c.setFont("CJK", 8)
-c.drawString(vx + 70, tb_y + 23, "触控笔固定座")
+c.drawString(vx + 70, tb_y + 40, "触控笔固定座")
 
-c.setFont("Helvetica", 9)
-c.drawString(vx, tb_y + 5, "Stainless Steel")
+c.setFont("Helvetica", 8)
+c.drawString(vx, tb_y + 22, "Stainless Steel")
 c.setFont("CJK", 8)
-c.drawString(vx + 72, tb_y + 5, "不锈钢")
+c.drawString(vx + 72, tb_y + 22, "不锈钢")
+
+c.setFont("Helvetica", 8)
+c.drawString(vx, tb_y + 5, "Knurled for grip")
+c.setFont("CJK", 8)
+c.drawString(vx + 72, tb_y + 5, "管材滚花便于夹持")
 
 c.save()
 print(f"PDF saved to {OUTPUT}")

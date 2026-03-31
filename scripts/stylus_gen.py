@@ -1,6 +1,10 @@
 """Generate a 3D-printable stylus holder with cap, handle, cone, and clamp.
 
-Usage: uv run --group stylus scripts/stylus_gen.py
+Usage:
+    uv run --group stylus python scripts/stylus_gen.py
+
+Output:
+    data/stylus/stylus.stl — 3D model for slicing and printing
 
 To fit a different stylus tip, change TIP_OD, TIP_ID, and TIP_H below:
   TIP_OD — outer diameter of the stylus tip (the cap grips around this)
@@ -13,7 +17,7 @@ import os
 from functools import reduce
 
 try:
-    import trimesh
+    import trimesh  # pyright: ignore[reportMissingImports]
 except ImportError:
     raise SystemExit(
         "Missing dependencies. Run with:\n  uv run --group stylus scripts/stylus_gen.py"
