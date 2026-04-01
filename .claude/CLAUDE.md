@@ -11,6 +11,7 @@ A camera looks straight down at a phone on a desk. You see the screen from above
 You are a powerful reasoning agent, but you are bad at estimating precise pixel locations of buttons and labels on a phone screen. You think you are good at it — you are not. On a real phone, tapping the wrong position can transfer the wrong amount of money, order the wrong item, send a message to the wrong person, type a wrong phone number or bank account number.
 
 Two reasons this matters:
+
 1. **You can't aim.** Your coordinate estimates are unreliable — even when they look reasonable.
 2. **The consequences are real.** Wrong taps are often irreversible — sending messages, making payments, deleting data, navigating away from unsaved state.
 
@@ -34,6 +35,8 @@ Items in a scrollable list or grid — product cards, chat threads, menu entries
 
 ## Tools
 
+Run `/setup` first to connect hardware and calibrate. All tools below require hardware to be ready.
+
 **Free (call as many times as needed):**
 
 - `park()` — move stylus out of camera frame
@@ -50,7 +53,7 @@ Items in a scrollable list or grid — product cards, chat threads, menu entries
 
 **Decision gate (think before calling):**
 
-- `confirm_bbox(shift)` — locks a rectangle as the tap target (center/top/bottom/left/right). No hardware moves yet, but the next gesture goes exactly here.
+- `confirm_bbox()` — locks the green rectangle as the tap target. No hardware moves yet, but the next gesture goes exactly here.
 
 **Irreversible (no undo):**
 
@@ -72,10 +75,12 @@ Is this a **fixed UI element** (button, icon, text field, nav control — same p
 Two paths depending on classification:
 
 **Path A — Fixed UI with preset:**
+
 1. Look up coordinates in `.claude/ui-presets/`.
 2. `bbox_target(bbox)` → label test (see below) → `confirm_bbox()` → gesture.
 
 **Path B — Fixed UI without preset (propose-confirm):**
+
 1. `propose_bboxes()` with your best guesses.
 2. Tell the user: "Please review my proposals at /annotate and confirm."
 3. `wait_for_confirmation()` — blocks until user confirms.
@@ -85,12 +90,14 @@ Two paths depending on classification:
 The user already verified the coordinates in the annotation UI, so the `bbox_target()` call in step 4 is just to position the arm — no need to re-verify with the label test.
 
 **Path C — Dynamic content (visual targeting):**
+
 1. `park()` + `screenshot()` + `grid_overlay()` to estimate coordinates.
 2. `bbox_target(bbox)` → label test (see below) → `confirm_bbox()` → gesture.
 
 ### Label test (Path A and C only)
 
 After `bbox_target()`, for each rectangle ask: **"Can I read the ENTIRE label or icon of the target inside this rectangle?"**
+
 - Entire label readable inside → pass → `confirm_bbox()`
 - Label cut off, clipped by edge, or split across rectangles → fail
 - Rectangle also covers a neighboring element → fail
@@ -126,7 +133,7 @@ Before calling bbox_target(), check if the target element exists in a preset fil
 Preset coordinates are 0-1 decimals. Three types, classified by aspect ratio:
 
 | Type | Position | Meaning |
-|------|----------|---------|
+| ------ | ---------- | --------- |
 | **box** | `[left, top, right, bottom]` | Normal bounding box |
 | **column** | `[left, right]` | X interval (tall thin box in annotation UI, aspect ratio > 10) |
 | **row** | `[top, bottom]` | Y interval (wide thin box in annotation UI, aspect ratio > 10) |
@@ -134,6 +141,7 @@ Preset coordinates are 0-1 decimals. Three types, classified by aspect ratio:
 In the annotation UI, the user always draws boxes. The backend automatically classifies by aspect ratio and strips the irrelevant axis. Columns/rows render as open-ended lines in the UI.
 
 For scrollable layouts (e.g. cart items), controls are at fixed X positions across all rows. These become **column** presets. At runtime, combine the column's X with the visually-detected row's Y:
+
 - Column preset gives `[left, right]`
 - Visual targeting gives row Y as `[top, bottom]`
 - Compose: `bbox_target([left, top, right, bottom])`
@@ -190,6 +198,7 @@ When a fixed UI element is not in any preset:
 7. Save confirmed boxes to the preset file for future autonomous use
 
 In the annotation UI at /annotate:
+
 - Agent-proposed boxes appear as **orange rectangles** with an "AI" badge inside
 - User-drawn boxes appear as **solid colored rectangles**
 - The user can move, resize, delete, or relabel any box
@@ -211,13 +220,9 @@ When the user wants to annotate UI elements manually:
 
 Keyboard key positions are stored in `.claude/ui-presets/system-keyboard.md`. To type text, look up each character's Position in the preset and tap it — no need for the visual bbox_target() workflow.
 
-If the preset file doesn't exist or needs recalibration:
+The phone uses a Chinese Pinyin keyboard. After typing letters, a suggestion bar appears above the keyboard. Tap the **space key** to select the first suggestion and commit it to the text field. This works for both Chinese (type pinyin, space selects the character) and English (type the full word, space selects it). Do not try to tap suggestions directly — they are small and change dynamically.
 
-1. Ask the user to take two phone screenshots with the keyboard open — one showing the alpha keyboard (default), one showing the numeric keyboard (tap 123 key first)
-2. Save 2 screenshots in `data/image/keyboard/`
-3. Run `uv run python scripts/calibrate_keyboard.py`
-4. The script detects key bounding boxes and writes `system-keyboard.md` with positions filled in
-5. Keys marked ??? in the preset need to be identified from the bounding box images in `data/image/keyboard/bbox/`
+If the preset file doesn't exist or needs recalibration, run `/calibrate-keyboard`.
 
 ## For developers editing this codebase
 

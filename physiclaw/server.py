@@ -1,26 +1,13 @@
 """
-PhysiClaw MCP Server — gives AI agents a physical finger to operate any phone.
+PhysiClaw MCP Server — tool definitions, routes, and setup endpoints.
 
-Launch:
-    uv run python -m physiclaw.server [--port 8048] [--verbose]
-
-Connect (Claude Desktop / Claude Code / OpenClaw):
-    {
-      "mcpServers": {
-        "physiclaw": {
-          "type": "streamable-http",
-          "url": "http://localhost:8048/mcp"
-        }
-      }
-    }
-
-Hardware connects and calibrates on startup.
+Started by physiclaw.main. Server starts instantly without hardware.
+Run /setup to connect and calibrate.
 """
 
-import argparse
-import atexit
 import logging
 
+import cv2
 from mcp.server.fastmcp import FastMCP, Image
 
 from physiclaw.core import PhysiClaw
@@ -49,8 +36,8 @@ You control a real phone sitting on a desk — a camera sees the screen from dir
 2. If no preset: park() + screenshot(). Optionally detect_elements() to find icons + text with coordinates. Or grid_overlay() to estimate manually.
 3. bbox_target(bbox) — bbox = [left, top, right, bottom] as 0-1 decimals.
 4. **Label test:** name the element INSIDE each rectangle.
-   - Covers the target → confirm_bbox(shift)
-   - All miss → call bbox_target() with corrected coordinates. 2-3 attempts is normal.
+   - Covers the target → confirm_bbox()
+   - Misses → call bbox_target() with corrected coordinates. 2-3 attempts is normal.
 5. tap() / double_tap() / long_press() / swipe() — executes at the bbox center.
 6. park() + screenshot() — verify the result.
 
@@ -62,6 +49,11 @@ You control a real phone sitting on a desk — a camera sees the screen from dir
 4. wait_for_confirmation() — blocks until user confirms.
 5. Use confirmed coordinates: bbox_target(bbox) → confirm_bbox() → gesture.
 6. Save to preset for future autonomous use.
+
+## Setup
+
+All tools require hardware to be set up first. If you get "Hardware not set up",
+tell the user to run /setup. Do not attempt to call setup endpoints yourself.
 
 ## CRITICAL
 
@@ -81,6 +73,7 @@ def screenshot() -> Image:
     The stylus may be visible in the frame — call park() first if you need
     an unobstructed view of the screen.
     """
+    physiclaw.require_hardware()
     physiclaw.acquire()
     try:
         frame = physiclaw.screenshot()
@@ -97,6 +90,7 @@ def park() -> str:
     (e.g. to read text or identify UI elements). The stylus moves 100mm away
     and will need to be repositioned with move() afterward.
     """
+    physiclaw.require_hardware()
     physiclaw.acquire()
     try:
         physiclaw.park()
@@ -125,6 +119,7 @@ def detect_elements() -> list:
     If a model isn't installed, its section shows "unavailable" instead of results.
     """
     import time
+    physiclaw.require_hardware()
     physiclaw.acquire()
     try:
         physiclaw.park()
@@ -166,6 +161,7 @@ def grid_overlay(density: str = "normal", color: str = "green") -> Image:
         "dense": (19, 9),    # lines at 0.05..0.95 x 0.10..0.90
     }
     rows, cols = density_map.get(density, density_map["normal"])
+    physiclaw.require_hardware()
     physiclaw.acquire()
     try:
         physiclaw.park()
@@ -180,17 +176,12 @@ def grid_overlay(density: str = "normal", color: str = "green") -> Image:
 def bbox_target(bbox: list[float]) -> Image:
     """Target a screen region by bounding box using 0-1 decimals.
 
-    Takes a fresh screenshot and draws colored rectangles at the specified position.
+    Takes a fresh screenshot and draws a green rectangle at the specified position.
 
-    For large targets: one green rectangle labeled "center".
-    For small targets (< 0.15 in either dimension): multiple colored rectangles
-    shifted along the small dimension(s), each labeled with its shift direction.
-
-    VERIFICATION REQUIRED: For each rectangle, name the UI element INSIDE it.
-    - If a rectangle contains your target element → confirm it.
-    - If NO rectangle contains your target → call bbox_target() again with
+    VERIFICATION REQUIRED: Name the UI element INSIDE the rectangle.
+    - If the rectangle covers your target → confirm_bbox() → gesture.
+    - If it does NOT cover your target → call bbox_target() again with
       corrected coordinates. Shift toward the target by the gap you observe.
-    - Never pick the "least-bad" rectangle. That means all missed — re-bbox.
 
     2-3 attempts is normal. bbox_target() is cheap (just a photo).
     tap() is expensive — a wrong tap can send a wrong message, transfer the
@@ -201,6 +192,7 @@ def bbox_target(bbox: list[float]) -> Image:
               (0=left/top edge, 1=right/bottom edge)
     """
     import time
+    physiclaw.require_hardware()
     physiclaw.acquire()
     try:
         physiclaw.park()
@@ -213,32 +205,21 @@ def bbox_target(bbox: list[float]) -> Image:
 
 
 @mcp.tool()
-def confirm_bbox(shift: str = "center") -> str:
-    """Confirm a bounding box from the last bbox_target() call.
-
-    For large targets, just call confirm_bbox() or confirm_bbox("center").
-    For small targets, pick the shifted variant that covers the target:
-      "center" — the original bbox (green)
-      "top"    — shifted up (red)
-      "bottom" — shifted down (blue)
-      "left"   — shifted left (yellow)
-      "right"  — shifted right (magenta)
+def confirm_bbox() -> str:
+    """Confirm the bounding box from the last bbox_target() call.
 
     BEFORE CONFIRMING, ask yourself:
-    "Am I choosing this because it COVERS the target,
-     or because it's the closest option?"
-    If closest → do NOT confirm. Call bbox_target() with corrected coordinates.
+    "Does the green rectangle COVER the target element?"
+    If not → do NOT confirm. Call bbox_target() with corrected coordinates.
 
     After confirmation, the next gesture (tap, double_tap, long_press, swipe)
     will auto-move to the bbox center before executing.
-
-    Args:
-        shift: "center", "top", "bottom", "left", or "right"
     """
+    physiclaw.require_hardware()
     physiclaw.acquire()
     try:
-        physiclaw.confirm_bbox(shift)
-        return f"Bbox '{shift}' confirmed — next gesture will target this location"
+        physiclaw.confirm_bbox()
+        return "Bbox confirmed — next gesture will target this location"
     finally:
         physiclaw.release()
 
@@ -258,6 +239,7 @@ def tap() -> str:
     Call bbox_target() + confirm_bbox() first to set the target location.
     After tapping, use park() + screenshot() to verify the result.
     """
+    physiclaw.require_hardware()
     physiclaw.acquire()
     try:
         _maybe_move_to_bbox()
@@ -274,6 +256,7 @@ def double_tap() -> str:
     Use for: zooming in (maps, photos, web pages), selecting a word in text.
     Call bbox_target() + confirm_bbox() first to set the target location.
     """
+    physiclaw.require_hardware()
     physiclaw.acquire()
     try:
         _maybe_move_to_bbox()
@@ -291,6 +274,7 @@ def long_press() -> str:
     rearranging home screen icons, or any action that requires a sustained press.
     Call bbox_target() + confirm_bbox() first to set the target location.
     """
+    physiclaw.require_hardware()
     physiclaw.acquire()
     try:
         _maybe_move_to_bbox()
@@ -312,6 +296,7 @@ def swipe(direction: str, speed: str = "medium") -> str:
         direction: 'top', 'bottom', 'left', 'right'
         speed: 'slow' (gentle scroll), 'medium' (normal), 'fast' (fling)
     """
+    physiclaw.require_hardware()
     physiclaw.acquire()
     try:
         _maybe_move_to_bbox()
@@ -321,22 +306,14 @@ def swipe(direction: str, speed: str = "medium") -> str:
         physiclaw.release()
 
 
-# ─── Start ───────────────────────────────────────────────────
-
-parser = argparse.ArgumentParser(description="PhysiClaw MCP Server")
-parser.add_argument("--port", type=int, default=8048)
-parser.add_argument("--host", type=str, default="127.0.0.1")
-parser.add_argument("--verbose", "-v", action="store_true",
-                    help="Show detailed debug output")
-args = parser.parse_args()
-
-logging.basicConfig(
-    level=logging.DEBUG if args.verbose else logging.INFO,
-    format="%(message)s",
-)
+# ─── Module-level state ───────────────────────────────────────
 
 physiclaw = PhysiClaw()
-atexit.register(physiclaw.shutdown)
+
+
+def shutdown():
+    """Clean up hardware resources."""
+    physiclaw.shutdown()
 
 # ─── Annotation routes + tool ──────────────────────────────────
 
@@ -386,7 +363,7 @@ def get_user_annotations() -> list:
     frozen_frame = _ann.get_frozen_frame()
     if not confirmed:
         return ["No confirmed annotations. "
-                f"Ask the user to draw boxes at http://{args.host}:{args.port}/annotate and click Confirm."]
+                f"Ask the user to draw boxes at http://{mcp.settings.host}:{mcp.settings.port}/annotate and click Confirm."]
 
     lines = [f"# Confirmed Annotations ({len(confirmed)} items)\n"]
     for i, box in enumerate(confirmed):
@@ -422,6 +399,7 @@ def propose_bboxes(proposals: list[dict]) -> str:
                    Coordinates are 0-1 decimals (phone screen).
     """
     import time
+    physiclaw.require_hardware()
     physiclaw.acquire()
     try:
         physiclaw.park()
@@ -441,7 +419,7 @@ def propose_bboxes(proposals: list[dict]) -> str:
         # Push proposals to staging area for UI to pick up
         _ann.push_agent_proposals(proposals)
 
-        url = f"http://{args.host}:{args.port}/annotate"
+        url = f"http://{mcp.settings.host}:{mcp.settings.port}/annotate"
         return (f"{len(proposals)} proposals sent to annotation UI. "
                 f"Ask the user to review and confirm at {url}")
     finally:
@@ -463,7 +441,7 @@ def wait_for_confirmation(timeout: int = 120) -> list:
     result = _ann.wait_confirmed(timeout=float(timeout))
     if result is None:
         return ["Timeout — the user hasn't confirmed yet. "
-                f"Ask them if they need help at http://{args.host}:{args.port}/annotate"]
+                f"Ask them if they need help at http://{mcp.settings.host}:{mcp.settings.port}/annotate"]
 
     frozen_frame = _ann.get_frozen_frame()
     _ann.clear_confirmation()
@@ -486,12 +464,125 @@ def wait_for_confirmation(timeout: int = 120) -> list:
                             format="jpeg")]
     return [text]
 
-# ────────────────────────────────────────────────────────────────
+# ─── Setup endpoints (called by /setup skill) ────────────────────
 
-mcp.settings.host = args.host
-mcp.settings.port = args.port
+@mcp.custom_route("/api/status", methods=["GET"])
+async def _status(request):
+    from starlette.responses import JSONResponse
+    return JSONResponse(physiclaw.status())
 
-log = logging.getLogger(__name__)
-log.info(f"PhysiClaw MCP server on http://{args.host}:{args.port}/mcp")
-log.info(f"Annotation UI at http://{args.host}:{args.port}/annotate")
-mcp.run(transport="streamable-http")
+
+@mcp.custom_route("/api/connect-arm", methods=["POST"])
+async def _connect_arm(request):
+    import asyncio
+    from starlette.responses import JSONResponse
+
+    def _do():
+        physiclaw.acquire()
+        try:
+            physiclaw.connect_arm()
+        finally:
+            physiclaw.release()
+
+    try:
+        await asyncio.get_event_loop().run_in_executor(None, _do)
+        return JSONResponse({"status": "ok", "message": "Arm connected"})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)},
+                            status_code=500)
+
+
+@mcp.custom_route("/api/connect-camera", methods=["POST"])
+async def _connect_camera(request):
+    import asyncio
+    from starlette.responses import JSONResponse
+    body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    index = body.get("index")  # None = auto-detect
+
+    def _do():
+        physiclaw.acquire()
+        try:
+            physiclaw.connect_camera(index)
+        finally:
+            physiclaw.release()
+
+    try:
+        await asyncio.get_event_loop().run_in_executor(None, _do)
+        return JSONResponse({"status": "ok",
+                             "message": f"Camera {physiclaw._cam.index} connected",
+                             "index": physiclaw._cam.index})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)},
+                            status_code=500)
+
+
+@mcp.custom_route("/api/camera-preview/{index}", methods=["GET"])
+async def _camera_preview(request):
+    import asyncio
+    import base64
+    from starlette.responses import JSONResponse
+    index = int(request.path_params["index"])
+    try:
+        jpeg = await asyncio.get_event_loop().run_in_executor(
+            None, PhysiClaw.camera_preview, index)
+        return JSONResponse({"status": "ok", "index": index,
+                             "image": base64.b64encode(jpeg).decode()})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)},
+                            status_code=404)
+
+
+_CALIBRATE_STEPS = [
+    ("z-depth", "calibrate_z_depth"),
+    ("find-right", "calibrate_find_right"),
+    ("find-down", "calibrate_find_down"),
+    ("long-press", "calibrate_long_press"),
+    ("swipe", "calibrate_swipe"),
+    ("grid", "calibrate_grid"),
+]
+
+for _slug, _method_name in _CALIBRATE_STEPS:
+    def _make_handler(method_name):
+        async def _handler(request):
+            import asyncio
+            from starlette.responses import JSONResponse
+
+            def _do():
+                physiclaw.acquire()
+                try:
+                    return getattr(physiclaw, method_name)()
+                finally:
+                    physiclaw.release()
+
+            try:
+                result = await asyncio.get_event_loop().run_in_executor(None, _do)
+                return JSONResponse({"status": "ok", **result})
+            except Exception as e:
+                return JSONResponse({"status": "error", "message": str(e)},
+                                    status_code=500)
+        return _handler
+
+    mcp.custom_route(f"/api/calibrate/{_slug}", methods=["POST"])(
+        _make_handler(_method_name))
+
+
+@mcp.custom_route("/api/calibrate/verify-edge", methods=["POST"])
+async def _verify_edge(request):
+    import asyncio
+    from starlette.responses import JSONResponse
+
+    def _do():
+        physiclaw.acquire()
+        try:
+            return physiclaw.verify_edge_trace()
+        finally:
+            physiclaw.release()
+
+    try:
+        result = await asyncio.get_event_loop().run_in_executor(None, _do)
+        return JSONResponse({"status": "ok", **result})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)},
+                            status_code=500)
+
+

@@ -2,7 +2,8 @@
 PhysiClaw orchestrator — central hardware lifecycle manager.
 
 Owns the stylus arm, camera, and calibration state.
-Creating an instance connects hardware, finds the camera, and runs calibration.
+Construction is instant — call connect_arm(), connect_camera(), and
+calibrate_z_depth() through calibrate_grid() to set up hardware.
 """
 
 import logging
@@ -21,8 +22,9 @@ log = logging.getLogger(__name__)
 class PhysiClaw:
     """Central orchestrator — owns all hardware lifecycle.
 
-    Construction connects the arm, finds the camera, and runs
-    the full calibration workflow. Ready to use immediately after.
+    Construction is instant (no hardware). Call connect_arm(),
+    connect_camera(), then calibrate_z_depth() through calibrate_grid()
+    to set up hardware incrementally.
     """
 
     def __init__(self):
@@ -33,7 +35,36 @@ class PhysiClaw:
         self._pending_bboxes: dict[str, list[float]] = {}
         self._confirmed_bbox: list[float] | None = None
         self._lock = threading.Lock()
-        self._setup()
+        self._cal: dict = {}  # intermediate calibration state between phases
+
+    @property
+    def hardware_ready(self) -> bool:
+        """True when arm, camera, and grid calibration are all set."""
+        return (self._arm is not None
+                and self._cam is not None
+                and self._grid_cal is not None)
+
+    def status(self) -> dict:
+        """Return current hardware and calibration state."""
+        return {
+            "arm": self._arm is not None,
+            "camera": self._cam is not None,
+            "completed_steps": [name for name, check in [
+                ("z-depth", 'z_tap' in self._cal),
+                ("find-right", 'right_result' in self._cal),
+                ("find-down", 'down_result' in self._cal),
+                ("long-press", self._cal.get('phase4_done', False)),
+                ("swipe", bool(self._arm and self._arm.MOVE_DIRECTIONS)),
+                ("grid", self._grid_cal is not None),
+            ] if check],
+            "calibrated": self.hardware_ready,
+        }
+
+    def require_hardware(self):
+        """Raise if hardware is not fully set up."""
+        if not self.hardware_ready:
+            raise RuntimeError(
+                "Hardware not set up. Run /setup to connect and calibrate.")
 
     def acquire(self):
         """Mark hardware as busy. Raises immediately if already busy."""
@@ -44,76 +75,201 @@ class PhysiClaw:
         """Mark hardware as idle."""
         self._lock.release()
 
-    # ─── Setup ────────────────────────────────────────────────
+    # ─── Camera preview ────────────────────────────────────────
 
-    def _setup(self):
-        """Connect arm, find camera, calibrate.
+    @staticmethod
+    def camera_preview(index: int) -> bytes:
+        """Capture one frame from a camera, watermark the index, return JPEG bytes.
 
-        1. Connect GRBL arm (auto-detect port)
-        2. Find the camera that sees the phone
-        3. Open camera
-        4. Run calibration
+        Opens the camera, grabs a frame, draws a semi-transparent index
+        watermark in the center, closes the camera, and returns JPEG bytes.
+        Raises RuntimeError if camera can't be opened or returns no frame.
         """
+        cam = Camera(index)
+        frame = cam.snapshot()
+        cam.close()
+        if frame is None:
+            raise RuntimeError(f"Camera {index} returned no frame")
+
+        # Watermark the camera index
+        h, w = frame.shape[:2]
+        label = str(index)
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        scale = h / 150
+        thickness = max(2, int(scale * 2))
+        (tw, th), _ = cv2.getTextSize(label, font, scale, thickness)
+        cx, cy = w // 2, h // 2
+        overlay = frame.copy()
+        pad = int(scale * 20)
+        cv2.rectangle(overlay,
+                      (cx - tw // 2 - pad, cy - th // 2 - pad),
+                      (cx + tw // 2 + pad, cy + th // 2 + pad),
+                      (0, 0, 0), -1)
+        cv2.addWeighted(overlay, 0.5, frame, 0.5, 0, frame)
+        cv2.putText(frame, label,
+                    (cx - tw // 2, cy + th // 2),
+                    font, scale, (255, 255, 255), thickness)
+
+        _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        return jpeg.tobytes()
+
+    # ─── Hardware connection ──────────────────────────────────
+
+    def connect_arm(self):
+        """Connect to the GRBL stylus arm (auto-detect USB port).
+
+        Closes any previously connected arm first.
+        """
+        if self._arm is not None:
+            self._arm.close()
+            self._arm = None
+        self._cal = {}  # reset calibration state
+        self._grid_cal = None
         self._arm = StylusArm()
         self._arm.setup()
+        log.info("Arm connected")
 
-        self._detector = PhoneDetector()
-        self._cam = self._detector.find_camera()
+    def connect_camera(self, index: int | None = None):
+        """Open a camera by index, or auto-detect the one seeing the phone.
 
-        if self._cam is None:
-            raise RuntimeError("Camera not found — is the phone under the camera?")
+        Closes any previously connected camera first.
 
-        input("\nOpen https://www.physiclaw.ai/pen-calib on the phone, "
-              "position the stylus above the center orange circle, "
-              "then press Enter...")
-        self.calibrate()
-
-    # ─── Calibration ───────────────────────────────────────────
-
-    def calibrate(self):
-        """Run the full 6-phase calibration workflow.
-
-        Phases 1-5: Z depth, direction mapping, gesture verification.
-        Phase 6: Grid calibration for coordinate-based tapping.
+        Args:
+            index: specific camera index to use. If None, scans all cameras
+                   and picks the one with highest phone detection confidence.
         """
-        from physiclaw.calibrate import (
-            phase1_z, phase2_right, phase3_down,
-            phase4_long_press, phase5_swipe,
-        )
-        from physiclaw.grid_calibrate import phase6_grid
+        if self._cam is not None:
+            self._cam.close()
+            self._cam = None
+        if index is not None:
+            self._cam = Camera(index)
+            log.info(f"Camera {index} connected")
+        else:
+            self._detector = PhoneDetector()
+            self._cam = self._detector.find_camera()
+            if self._cam is None:
+                raise RuntimeError("Camera not found — is the phone under the camera?")
+            log.info(f"Camera {self._cam.index} connected (auto-detected)")
 
-        arm = self._arm
-        cam = self._cam
+    # ─── Calibration (per-phase) ──────────────────────────────
 
-        # Phase 1 — Z depth (raises on failure)
-        z_tap = phase1_z(arm, cam)
-        arm.Z_DOWN = z_tap
+    def calibrate_z_depth(self) -> dict:
+        """Phase 1: Probe Z depth for tap contact (10 greens on center).
 
-        # Phase 2 — find phone-right direction (raises on failure)
-        right_result = phase2_right(arm, cam, z_tap)
+        Returns {"z_tap": float}.
+        """
+        from physiclaw.calibrate import phase1_z
+        if self._arm is None or self._cam is None:
+            raise RuntimeError("Arm and camera must be connected first")
+        z_tap = phase1_z(self._arm, self._cam)
+        self._arm.Z_DOWN = z_tap
+        self._cal['z_tap'] = z_tap
+        return {"z_tap": z_tap}
 
-        # Phase 3 — find phone-down direction (raises on failure)
+    def calibrate_find_right(self) -> dict:
+        """Phase 2: Probe 4 directions to find phone-right (3 greens).
+
+        Returns {"right_vec": [ax, ay], "right_dist": float}.
+        Requires: phase 1 done.
+        """
+        from physiclaw.calibrate import phase2_right
+        z_tap = self._cal.get('z_tap')
+        if z_tap is None:
+            raise RuntimeError("Phase 1 not done — run calibrate_z_depth() first")
+        result = phase2_right(self._arm, self._cam, z_tap)
+        self._cal['right_result'] = result
+        return {"right_vec": [result[0], result[1]], "right_dist": result[2]}
+
+    def calibrate_find_down(self) -> dict:
+        """Phase 3: Probe 2 perpendicular directions for phone-down (3 greens).
+
+        Returns {"down_vec": [ax, ay], "down_dist": float}.
+        Requires: phase 2 done.
+        """
+        from physiclaw.calibrate import phase3_down
+        right_result = self._cal.get('right_result')
+        if right_result is None:
+            raise RuntimeError("Phase 2 not done — run calibrate_find_right() first")
+        z_tap = self._cal['z_tap']
         right_vec = (right_result[0], right_result[1])
-        down_result = phase3_down(arm, cam, z_tap, right_vec)
+        result = phase3_down(self._arm, self._cam, z_tap, right_vec)
+        self._cal['down_result'] = result
+        return {"down_vec": [result[0], result[1]], "down_dist": result[2]}
 
-        # Phase 4 — long press verification
-        phase4_long_press(arm, cam)
+    def calibrate_long_press(self) -> dict:
+        """Phase 4: Verify long press (3 greens, hold 800ms).
 
-        # Phase 5 — swipe verification
+        Requires: phase 3 done.
+        """
+        from physiclaw.calibrate import phase4_long_press
+        if 'down_result' not in self._cal:
+            raise RuntimeError("Phase 3 not done — run calibrate_find_down() first")
+        phase4_long_press(self._arm, self._cam)
+        self._cal['phase4_done'] = True
+        return {"ok": True}
+
+    def calibrate_swipe(self) -> dict:
+        """Phase 5: Verify swipe in 4 directions.
+
+        Sets direction mapping on the arm.
+        Requires: phase 4 done.
+        """
+        from physiclaw.calibrate import phase5_swipe
+        if not self._cal.get('phase4_done'):
+            raise RuntimeError("Phase 4 not done — run calibrate_long_press() first")
+        right_result = self._cal['right_result']
+        down_result = self._cal['down_result']
+        rax, ray, _ = right_result
+        dax, day, _ = down_result
+        self._arm.set_direction_mapping((rax, ray), (dax, day))
+        phase5_swipe(self._arm, self._cam)
+        log.info(f"Calibration phases 1-5 complete — Z={self._cal['z_tap']}mm, "
+                 f"right=({rax},{ray}), down=({dax},{day})")
+        return {"ok": True}
+
+    def calibrate_grid(self) -> dict:
+        """Phase 6: Grid calibration using 15 red dots.
+
+        Computes affine transforms for coordinate-based tapping.
+        Requires: phase 5 done.
+        """
+        from physiclaw.grid_calibrate import phase6_grid
+        if not (self._arm and self._arm.MOVE_DIRECTIONS):
+            raise RuntimeError("Phase 5 not done — run earlier phases first")
+        right_result = self._cal['right_result']
+        down_result = self._cal['down_result']
         rax, ray, right_dist = right_result
         dax, day, down_dist = down_result
-        arm.set_direction_mapping((rax, ray), (dax, day))
-        phase5_swipe(arm, cam)
+        self._arm._fast_move(0, 0)
+        self._arm.wait_idle()
+        self._grid_cal = phase6_grid(
+            self._arm, self._cam,
+            (rax, ray), (dax, day),
+            right_dist, down_dist)
+        return {"ok": True}
 
-        log.info(f"Calibration complete — Z={z_tap}mm, "
-                 f"right=({rax},{ray}), down=({dax},{day})")
+    def verify_edge_trace(self) -> dict:
+        """Trace the phone screen border clockwise for visual verification.
 
-        # Phase 6 — grid calibration for coordinate-based tapping
-        # The pen-calib page shows the red dot grid after phases 1-5
-        arm._fast_move(0, 0)
-        arm.wait_idle()
-        self._grid_cal = phase6_grid(arm, cam, (rax, ray), (dax, day),
-                                     right_dist, down_dist)
+        The arm moves to 8 edge points, pausing 2s at each, then returns
+        to center. The user should watch and confirm the arm follows the
+        screen edges.
+        Requires: phase 6 done.
+        """
+        from physiclaw.grid_calibrate import trace_screen_edge
+        if self._grid_cal is None:
+            raise RuntimeError("Phase 6 not done — run calibrate_grid() first")
+        trace_screen_edge(self._arm, self._grid_cal)
+        return {"ok": True}
+
+    def calibrate(self):
+        """Run the full 6-phase calibration workflow (convenience method)."""
+        self.calibrate_z_depth()
+        self.calibrate_find_right()
+        self.calibrate_find_down()
+        self.calibrate_long_press()
+        self.calibrate_swipe()
+        self.calibrate_grid()
 
     # ─── Properties ────────────────────────────────────────────
 
@@ -127,77 +283,22 @@ class PhysiClaw:
 
     # ─── Bbox state management ────────────────────────────────
 
-    SMALL_BBOX_THRESHOLD = 0.15  # bbox smaller than this gets candidates (0-1 scale)
-
-    # Colors for bbox candidates: BGR format. Assigned in order as candidates are added.
-    BBOX_COLORS = [
-        (0, 255, 0),     # green
-        (0, 0, 255),     # red
-        (255, 0, 0),     # blue
-        (0, 255, 255),   # yellow
-        (255, 0, 255),   # magenta
-    ]
+    BBOX_COLOR = (0, 255, 0)  # green, BGR
 
     def set_pending_bbox(self, bbox: list[float]):
-        """Store pending bbox candidates keyed by shift name. Clears any confirmed bbox.
+        """Store a pending bbox. Clears any confirmed bbox.
 
         Args:
             bbox: [left, top, right, bottom] as 0-1 decimals.
-
-        For small targets, generates shifted candidates along the small
-        dimension(s) so the AI agent can pick the best one.
         """
-        left, top, right, bottom = bbox
-        w = right - left
-        h = bottom - top
-        small_h = w < self.SMALL_BBOX_THRESHOLD
-        small_v = h < self.SMALL_BBOX_THRESHOLD
-
         self._pending_bboxes = {'center': list(bbox)}
-
-        # Shifted bboxes: 0.8x size of original, shifted by 0.7x of that dimension
-        scale = 0.8
-        shift_ratio = 0.7
-        sw = w * scale  # shifted bbox width
-        sh = h * scale  # shifted bbox height
-        cx = (left + right) / 2
-        cy = (top + bottom) / 2
-
-        if small_v:
-            sv = h * shift_ratio
-            self._pending_bboxes['top'] = [
-                max(0, cx - sw / 2), max(0, cy - sv - sh / 2),
-                min(1, cx + sw / 2), max(0, cy - sv + sh / 2),
-            ]
-            self._pending_bboxes['bottom'] = [
-                max(0, cx - sw / 2), min(1, cy + sv - sh / 2),
-                min(1, cx + sw / 2), min(1, cy + sv + sh / 2),
-            ]
-        if small_h:
-            shh = w * shift_ratio
-            self._pending_bboxes['left'] = [
-                max(0, cx - shh - sw / 2), max(0, cy - sh / 2),
-                max(0, cx - shh + sw / 2), min(1, cy + sh / 2),
-            ]
-            self._pending_bboxes['right'] = [
-                min(1, cx + shh - sw / 2), max(0, cy - sh / 2),
-                min(1, cx + shh + sw / 2), min(1, cy + sh / 2),
-            ]
-
         self._confirmed_bbox = None
 
-    def confirm_bbox(self, shift: str = 'center'):
-        """Lock in a pending bbox by shift name for the next gesture.
-
-        Valid shift values: "center", "top", "bottom", "left", "right"
-        (only those present in the current candidates).
-        """
+    def confirm_bbox(self):
+        """Lock in the pending bbox for the next gesture."""
         if not self._pending_bboxes:
             raise RuntimeError("No pending bbox — call bbox_target first")
-        if shift not in self._pending_bboxes:
-            valid = ', '.join(self._pending_bboxes.keys())
-            raise RuntimeError(f"Invalid shift '{shift}' — available: {valid}")
-        self._confirmed_bbox = self._pending_bboxes[shift]
+        self._confirmed_bbox = self._pending_bboxes['center']
         self._pending_bboxes = {}
 
     def consume_confirmed_bbox(self) -> list[float] | None:
@@ -241,45 +342,23 @@ class PhysiClaw:
         return frame
 
     def screenshot_with_bboxes(self):
-        """Take a fresh screenshot with all pending bbox candidates drawn.
+        """Take a fresh screenshot with the pending bbox drawn as a green rectangle.
 
-        For large targets: one green rectangle labeled "center".
-        For small targets: multiple colored rectangles with shift labels.
-        Must call set_pending_bbox() first to populate candidates.
+        Must call set_pending_bbox() first.
         """
         if self._grid_cal is None:
             raise RuntimeError("Grid calibration not done")
         if not self._pending_bboxes:
             raise RuntimeError("No pending bboxes — call set_pending_bbox first")
 
-        # Build list of (tl, br, color, label) for all candidates
-        rects = []
-        for j, (name, bbox) in enumerate(self._pending_bboxes.items()):
-            tl, br = self._grid_cal.bbox_to_pixel_rect(bbox)
-            color = self.BBOX_COLORS[j % len(self.BBOX_COLORS)]
-            rects.append((tl, br, color, name))
+        bbox = self._pending_bboxes['center']
+        tl, br = self._grid_cal.bbox_to_pixel_rect(bbox)
 
         frame = self.cam.snapshot()
         if frame is None:
             raise RuntimeError("Camera capture failed")
 
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        pad = 4
-        for tl, br, color, name in rects:
-            cv2.rectangle(frame, tl, br, color, 2)
-            # Position label based on shift direction
-            if name == 'bottom':
-                lx, ly = tl[0] + 2, br[1] + 15
-            elif name == 'right':
-                lx, ly = br[0] + 4, (tl[1] + br[1]) // 2
-            elif name == 'left':
-                lx, ly = tl[0] - 30, (tl[1] + br[1]) // 2
-            else:
-                lx, ly = tl[0] + 2, tl[1] - 5
-            (tw, th), _ = cv2.getTextSize(name, font, 0.8, 2)
-            cv2.rectangle(frame, (lx - pad, ly - th - pad),
-                          (lx + tw + pad, ly + pad), color, -1)
-            cv2.putText(frame, name, (lx, ly), font, 0.8, (255, 255, 255), 2)
+        cv2.rectangle(frame, tl, br, self.BBOX_COLOR, 2)
 
         # Save annotated frame
         from datetime import datetime

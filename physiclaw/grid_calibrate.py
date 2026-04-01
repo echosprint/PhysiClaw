@@ -495,7 +495,16 @@ def phase6_grid(arm: StylusArm, cam: Camera,
     cv2.imwrite(str(debug_path), debug)
     log.info(f"Phase 6 done — debug image saved to {debug_path}")
 
-    # 8. Visual verification: move arm to 4 screen edges for dev to check
+    return cal
+
+
+def trace_screen_edge(arm: StylusArm, cal: GridCalibration):
+    """Trace the phone screen border clockwise for visual verification.
+
+    Moves the arm to 8 edge points (top-center → top-right → right-center
+    → bottom-right → bottom-center → bottom-left → left-center → top-left
+    → back to top-center), pausing 2s at each. Then returns to center.
+    """
     check_points = [
         (0.50, 0, "top center"),
         (1, 0, "top right"),
@@ -508,15 +517,13 @@ def phase6_grid(arm: StylusArm, cam: Camera,
         (0.50, 0, "top center"),  # close the loop
     ]
     _go_center(arm)
-    log.info("  Visual check — tracing phone edge clockwise...")
+    log.info("Tracing phone edge clockwise...")
     for x_pct, y_pct, label in check_points:
         gx, gy = cal.pct_to_grbl_mm(x_pct, y_pct)
-        log.info(f"    → {label} ({x_pct}, {y_pct}) = GRBL ({gx:.2f}, {gy:.2f})")
+        log.info(f"  → {label} ({x_pct}, {y_pct}) = GRBL ({gx:.2f}, {gy:.2f})")
         arm._fast_move(gx, gy)
         arm.wait_idle()
         time.sleep(2)
 
     _go_center(arm)
-    log.info("  Visual check done")
-
-    return cal
+    log.info("Edge trace done")
