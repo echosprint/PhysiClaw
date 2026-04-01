@@ -1,16 +1,16 @@
 """
-Keyboard calibration script — detect key bounding boxes from screenshots.
+Keyboard calibration script — detect keys and generate UI preset template.
 
 Usage:
     uv run python scripts/calibrate_keyboard.py                          # all images in data/image/keyboard/
     uv run python scripts/calibrate_keyboard.py data/image/keyboard/foo.png  # single image
 
-Outputs per image:
-    data/keyboard/debug_<name>.png   — screenshot with numbered key boxes
-    data/keyboard/boxes_<name>.txt   — box coordinates as text
+Outputs:
+    data/image/keyboard/bbox/bbox_<name>.png — screenshot with numbered key boxes
+    .claude/ui-presets/system-keyboard.md     — preset template with positions filled in
 
-Show debug images to Claude to label each numbered box and write
-.claude/ui-presets/system-keyboard.md for the AI agent to use.
+QWERTY letters, digits, shift, delete, space are auto-labeled.
+Keys marked ??? need to be filled in by looking at the bounding box images.
 """
 
 import argparse
@@ -22,15 +22,18 @@ import cv2
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from physiclaw.keyboard import detect_key_boxes, draw_detected_keys, boxes_to_text
+from physiclaw.keyboard import (
+    detect_key_boxes, draw_detected_keys,
+    label_keyboard, generate_preset,
+)
 
 logging.basicConfig(level=logging.DEBUG, format="%(message)s")
 
-parser = argparse.ArgumentParser(description="Detect keyboard key bounding boxes")
+parser = argparse.ArgumentParser(description="Detect keyboard keys and generate preset")
 parser.add_argument("images", nargs="*",
                     help="Image paths (default: all in data/image/keyboard/)")
-parser.add_argument("--output", default="data/keyboard",
-                    help="Output directory (default: data/keyboard/)")
+parser.add_argument("--output", default="data/image/keyboard/bbox",
+                    help="Bounding box image output directory (default: data/image/keyboard/bbox/)")
 args = parser.parse_args()
 
 # Collect images
@@ -51,6 +54,9 @@ if not image_paths:
 out_dir = Path(args.output)
 out_dir.mkdir(parents=True, exist_ok=True)
 
+pages = {}
+bbox_images = {}
+
 for img_path in image_paths:
     print(f"\n{'='*60}")
     frame = cv2.imread(str(img_path))
@@ -61,23 +67,47 @@ for img_path in image_paths:
     h, w = frame.shape[:2]
     print(f"Image: {img_path.name} ({w}x{h})")
 
-    boxes = detect_key_boxes(frame)
-    if not boxes:
+    # Detect and label
+    rows = label_keyboard(frame)
+    if rows is None:
         print("No keys detected")
         continue
 
-    # Save debug image
-    debug = draw_detected_keys(frame, boxes)
-    debug_path = out_dir / f"debug_{img_path.stem}.png"
-    cv2.imwrite(str(debug_path), debug)
-    print(f"Debug image: {debug_path}")
+    # Count keys and determine page type
+    row_counts = [len(row) for row in rows]
+    total = sum(row_counts)
+    is_numeric = len(row_counts) >= 2 and row_counts[0] == 10 and row_counts[1] == 10
+    page_name = "Numeric Keyboard" if is_numeric else "Alpha Keyboard"
+    print(f"Page: {page_name} ({total} keys, rows: {row_counts})")
 
-    # Save box coordinates
-    text = boxes_to_text(boxes)
-    txt_path = out_dir / f"boxes_{img_path.stem}.txt"
-    txt_path.write_text(text)
-    print(f"Box listing: {txt_path}")
-    print(text)
+    # Save bounding box image
+    boxes, bg = detect_key_boxes(frame)
+    bbox_img = draw_detected_keys(frame, boxes, bg)
+    bbox_path = out_dir / f"bbox_{img_path.stem}.png"
+    cv2.imwrite(str(bbox_path), bbox_img)
+    print(f"Bounding box image: {bbox_path}")
 
-print(f"\n{'='*60}")
-print(f"Done. {len(image_paths)} images processed → {out_dir}/")
+    # Keep first detection per page type (skip duplicates)
+    if page_name not in pages:
+        pages[page_name] = rows
+        bbox_images[page_name] = str(bbox_path)
+    else:
+        print(f"  (skipped — {page_name} already captured)")
+
+    # Print summary
+    for i, row in enumerate(rows):
+        labels = [k["element"] for k in row]
+        print(f"  Row {i+1}: {' '.join(labels)}")
+
+# Generate preset
+if pages:
+    preset = generate_preset(pages, bbox_images)
+    preset_dir = Path(".claude/ui-presets")
+    preset_dir.mkdir(parents=True, exist_ok=True)
+    preset_path = preset_dir / "system-keyboard.md"
+    preset_path.write_text(preset)
+    print(f"\n{'='*60}")
+    print(f"Preset written to {preset_path}")
+    print(f"Keys marked ??? need to be filled in from the bounding box images.")
+    print()
+    print(preset)

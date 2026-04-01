@@ -111,6 +111,18 @@ When the user asks to annotate UI elements:
 6. On confirmation, write the preset markdown file to `.claude/ui-presets/{app_slug}.md`
 7. Annotations persist until the user takes a new snapshot — safe to call `get_user_annotations()` again if needed
 
+### Keyboard typing
+
+Keyboard key positions are stored in `.claude/ui-presets/system-keyboard.md`. To type text, look up each character's Position in the preset and tap it — no need for the visual bbox_target() workflow.
+
+If the preset file doesn't exist or needs recalibration:
+
+1. Ask the user to take two phone screenshots with the keyboard open — one showing the alpha keyboard (default), one showing the numeric keyboard (tap 123 key first)
+2. Save 2 screenshots in `data/image/keyboard/`
+3. Run `uv run python scripts/calibrate_keyboard.py`
+4. The script detects key bounding boxes and writes `system-keyboard.md` with positions filled in
+5. Keys marked ??? in the preset need to be identified from the bounding box images in `data/image/keyboard/bbox/`
+
 ## For developers editing this codebase
 
 Tool docstrings and the FastMCP `instructions` field are prompts that control agent behavior.
