@@ -173,10 +173,13 @@ class GridCalibration:
     pct_to_grbl: np.ndarray    # (2, 3) screen 0-1 → GRBL mm
     pct_to_pixel: np.ndarray   # (2, 3) screen 0-1 → camera pixels
 
-    def bbox_center_pct(self, left: float, top: float,
-                        right: float, bottom: float) -> tuple[float, float]:
-        """Compute center of a bounding box in screen coordinates (0-1)."""
-        return ((left + right) / 2, (top + bottom) / 2)
+    def bbox_center_pct(self, bbox: list[float]) -> tuple[float, float]:
+        """Compute center of a bounding box in screen coordinates (0-1).
+
+        Args:
+            bbox: [left, top, right, bottom] as 0-1 decimals
+        """
+        return ((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2)
 
     def pct_to_grbl_mm(self, x: float, y: float) -> tuple[float, float]:
         """Convert screen coordinate (0-1) to GRBL mm."""
@@ -198,11 +201,10 @@ class GridCalibration:
         pct = np.linalg.solve(A, np.array([px_x, px_y]) - b)
         return (float(pct[0]), float(pct[1]))
 
-    def bbox_to_pixel_rect(self, left: float, top: float,
-                           right: float, bottom: float) -> tuple[tuple[int, int], tuple[int, int]]:
-        """Convert bbox (0-1) to camera pixel rectangle (top-left, bottom-right)."""
-        tl = self.pct_to_cam_pixel(left, top)
-        br = self.pct_to_cam_pixel(right, bottom)
+    def bbox_to_pixel_rect(self, bbox: list[float]) -> tuple[tuple[int, int], tuple[int, int]]:
+        """Convert bbox [left, top, right, bottom] (0-1) to camera pixel rectangle."""
+        tl = self.pct_to_cam_pixel(bbox[0], bbox[1])
+        br = self.pct_to_cam_pixel(bbox[2], bbox[3])
         return (tl, br)
 
 

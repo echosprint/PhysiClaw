@@ -129,12 +129,12 @@ def detect_keys_in_row(gray: np.ndarray, top: int, bottom: int,
 
 def detect_key_boxes(frame: np.ndarray,
                      num_rows: int = 4,
-                     ) -> tuple[list[tuple[float, float, float, float]], int | None]:
+                     ) -> tuple[list[list[float]], int | None]:
     """Detect all key bounding boxes from a phone screenshot.
 
     Returns:
         (boxes, bg_value) where:
-        - boxes: list of (left, top, right, bottom) as 0-1 decimals,
+        - boxes: list of [left, top, right, bottom] as 0-1 decimals,
           sorted top-to-bottom then left-to-right. Empty if detection fails.
         - bg_value: keyboard background pixel value (for contrast-aware drawing)
     """
@@ -158,10 +158,10 @@ def detect_key_boxes(frame: np.ndarray,
     for top, bot in reversed(rows):
         keys = detect_keys_in_row(gray, top, bot, bg)
         for kl, kr in keys:
-            boxes.append((
+            boxes.append([
                 round(kl / w, 3), round(top / h, 3),
                 round(kr / w, 3), round(bot / h, 3),
-            ))
+            ])
 
     log.info(f"Detected {len(boxes)} key boxes")
     return boxes, bg
@@ -170,7 +170,7 @@ def detect_key_boxes(frame: np.ndarray,
 # ─── Debug visualization ──────────────────────────────────────
 
 def draw_detected_keys(frame: np.ndarray,
-                       boxes: list[tuple],
+                       boxes: list[list[float]],
                        bg_value: int | None = None,
                        ) -> np.ndarray:
     """Draw numbered bounding boxes on the screenshot.
@@ -190,9 +190,9 @@ def draw_detected_keys(frame: np.ndarray,
     color = (0, 255, 0) if is_dark else (0, 0, 255)  # green or red
 
     font = cv2.FONT_HERSHEY_SIMPLEX
-    for i, (left, top, right, bottom) in enumerate(boxes):
-        x1, y1 = int(left * w), int(top * h)
-        x2, y2 = int(right * w), int(bottom * h)
+    for i, bbox in enumerate(boxes):
+        x1, y1 = int(bbox[0] * w), int(bbox[1] * h)
+        x2, y2 = int(bbox[2] * w), int(bbox[3] * h)
         cv2.rectangle(out, (x1, y1), (x2, y2), color, 2)
         cv2.putText(out, str(i + 1), (x1 + 4, y1 + 28),
                     font, 0.9, color, 2)
@@ -200,11 +200,11 @@ def draw_detected_keys(frame: np.ndarray,
     return out
 
 
-def boxes_to_text(boxes: list[tuple]) -> str:
+def boxes_to_text(boxes: list[list[float]]) -> str:
     """Format detected boxes as a numbered text listing."""
     lines = [f"Detected {len(boxes)} key boxes:\n"]
-    for i, (left, top, right, bottom) in enumerate(boxes):
-        lines.append(f"  {i+1:3d}. [{left:.3f}, {top:.3f}, {right:.3f}, {bottom:.3f}]")
+    for i, bbox in enumerate(boxes):
+        lines.append(f"  {i+1:3d}. [{bbox[0]:.3f}, {bbox[1]:.3f}, {bbox[2]:.3f}, {bbox[3]:.3f}]")
     return "\n".join(lines)
 
 

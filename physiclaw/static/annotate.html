@@ -28,6 +28,9 @@ body { background: #1a1a1a; color: #e0e0e0; font-family: -apple-system, sans-ser
 .controls button:hover { background: #444; }
 .controls button.primary { background: #2563eb; border-color: #2563eb; color: #fff; }
 .controls button.primary:hover { background: #1d4ed8; }
+.controls button.confirm { background: #16a34a; border-color: #16a34a; color: #fff; font-weight: 600; }
+.controls button.confirm:hover { background: #15803d; }
+.controls button.confirm:disabled { background: #555; border-color: #555; cursor: not-allowed; opacity: 0.5; }
 .color-picker {
   display: grid; grid-template-columns: repeat(4, 28px); gap: 8px;
 }
@@ -41,22 +44,32 @@ body { background: #1a1a1a; color: #e0e0e0; font-family: -apple-system, sans-ser
   color: #555; font-size: 11px; line-height: 1.5; margin-top: auto;
 }
 
-/* Center column — phone feed (portrait, adapts to any camera resolution) */
+/* Center column — phone feed */
 .viewer {
   flex: 0 1 auto;
   display: flex; align-items: center; justify-content: center;
   position: relative; overflow: visible;
   height: 100vh;
 }
-#liveImg {
-  height: 100%; width: auto; display: block;
+#liveImg { height: 100%; width: auto; display: block; }
+#frozenImg { height: 100%; width: auto; display: none; }
+#drawCanvas { position: absolute; display: none; }
+
+/* Waiting overlay */
+.waiting-overlay {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.6); display: none;
+  align-items: center; justify-content: center;
+  z-index: 10; flex-direction: column; gap: 12px;
 }
-#frozenImg {
-  height: 100%; width: auto; display: none;
+.waiting-overlay.active { display: flex; }
+.waiting-overlay .spinner {
+  width: 32px; height: 32px; border: 3px solid #555;
+  border-top-color: #00e5ff; border-radius: 50%;
+  animation: spin 0.8s linear infinite;
 }
-#drawCanvas {
-  position: absolute; display: none;
-}
+@keyframes spin { to { transform: rotate(360deg); } }
+.waiting-overlay .msg { color: #aaa; font-size: 14px; }
 
 /* Right column — annotations list */
 .sidebar {
@@ -73,14 +86,22 @@ body { background: #1a1a1a; color: #e0e0e0; font-family: -apple-system, sans-ser
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: 4px;
 }
-.box-item .num {
-  color: #fff; font-weight: 700; font-size: 13px;
+.box-item .num { color: #fff; font-weight: 700; font-size: 13px; }
+.box-item .ai-badge {
+  background: #00e5ff; color: #000; font-size: 10px; font-weight: 700;
+  padding: 1px 5px; border-radius: 3px; margin-left: 6px;
 }
 .box-item .del {
   cursor: pointer; color: #555; font-size: 14px; padding: 0 2px;
   transition: color 0.15s;
 }
 .box-item .del:hover { color: #ef5350; }
+.box-item .label-input {
+  width: 100%; margin-top: 6px; padding: 4px 6px;
+  background: #333; border: 1px solid #444; border-radius: 3px;
+  color: #e0e0e0; font-size: 12px; outline: none;
+}
+.box-item .label-input:focus { border-color: #2563eb; }
 .box-item .coords {
   display: flex; gap: 26px; margin-top: 10px;
   font-size: 11px; font-family: monospace; color: #999;
@@ -95,8 +116,8 @@ body { background: #1a1a1a; color: #e0e0e0; font-family: -apple-system, sans-ser
 
 <div class="layout">
   <div class="controls">
-    <div style="flex: 0 0 30vh"></div>
-    <button class="primary" id="btnSnapshot">Snapshot</button>
+    <div style="flex: 0 0 20vh"></div>
+    <button class="confirm" id="btnConfirm" disabled>Confirm</button>
     <div class="color-picker" id="colorPicker" style="margin-top: 20px">
       <div class="color-dot active" data-color="#ff5252" data-key="1" style="background:#ff5252" title="Press 1"></div>
       <div class="color-dot" data-color="#448aff" data-key="2" style="background:#448aff" title="Press 2"></div>
@@ -108,13 +129,13 @@ body { background: #1a1a1a; color: #e0e0e0; font-family: -apple-system, sans-ser
       <div class="color-dot" data-color="#b2ff59" data-key="8" style="background:#b2ff59" title="Press 8"></div>
     </div>
     <div class="hint">
-      Click <b>Snapshot</b> to capture.<br>
       Drag empty area to draw a box.<br>
       Drag inside a box to move it.<br>
       Drag corners to resize.<br>
       Drag far outside to delete.<br><br>
-      Then ask Claude:<br>
-      <code>get_user_annotations()</code>
+      <b>Confirm</b> sends boxes to agent.<br>
+      Agent proposals appear as orange boxes with an <b>AI</b> badge.<br><br>
+      Stretch a box tall &amp; thin to mark a <b>column</b> (X interval for scrollable lists).
     </div>
   </div>
 
@@ -122,6 +143,10 @@ body { background: #1a1a1a; color: #e0e0e0; font-family: -apple-system, sans-ser
     <img id="liveImg" alt="Live feed">
     <img id="frozenImg" alt="Frozen snapshot">
     <canvas id="drawCanvas"></canvas>
+    <div class="waiting-overlay" id="waitingOverlay">
+      <div class="spinner"></div>
+      <div class="msg">Waiting for agent...</div>
+    </div>
   </div>
 
   <div class="sidebar">
@@ -146,40 +171,56 @@ const canvas = document.getElementById('drawCanvas');
 const ctx = canvas.getContext('2d');
 const viewer = document.getElementById('viewer');
 const boxList = document.getElementById('boxList');
-const btnSnapshot = document.getElementById('btnSnapshot');
+const btnConfirm = document.getElementById('btnConfirm');
 const colorPicker = document.getElementById('colorPicker');
+const waitingOverlay = document.getElementById('waitingOverlay');
 let penColor = '#ff5252';
 
 let frozen = false;
-let boxes = []; // {left, top, right, bottom, color} in natural image pixels
+let waiting = false; // true after user clicks Confirm, until new proposals arrive
+// Box: {left, top, right, bottom, color, label, source, id} in natural image pixels
+let boxes = [];
 let naturalW = 0, naturalH = 0;
-let phoneBounds = null; // [[x,y], ...] 4 corners in natural image pixels, or null
+let phoneBounds = null;
+let snapshotId = '';
+let nextBoxId = 1;
+
+function genId() { return 'u' + (nextBoxId++); }
 
 // ─── Interaction state ─────────────────────────────────────
-const CORNER_R = 8;           // corner hit radius (display px)
+const CORNER_R = 8;
 
-let mode = null;              // null | 'draw' | 'move' | 'resize'
-let activeBox = -1;           // index of box being moved/resized
-let activeCorner = -1;        // 0=TL 1=TR 2=BR 3=BL
+let mode = null;
+let activeBox = -1;
+let activeCorner = -1;
 let dragStartX = 0, dragStartY = 0;
-let dragOrigBox = null;       // snapshot of box at drag start
+let dragOrigBox = null;
 let pendingDelete = false;
-let deleteFade = 0;          // 0 = inside, 1 = fully outside (DELETE_MARGIN)
+let deleteFade = 0;
 
 // ─── Coordinate helpers ────────────────────────────────────
 let cssW = 0, cssH = 0;
-function d2n(dx, dy) {
-  // display (CSS) px → natural image px
-  return [dx * naturalW / cssW, dy * naturalH / cssH];
+function d2n(dx, dy) { return [dx * naturalW / cssW, dy * naturalH / cssH]; }
+function n2d(nx, ny) { return [nx * cssW / naturalW, ny * cssH / naturalH]; }
+
+function pixelToPhone(px, py) {
+  if (!phoneBounds) return [px / naturalW, py / naturalH];
+  const xs = phoneBounds.map(p => p[0]), ys = phoneBounds.map(p => p[1]);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  return [(px - minX) / (maxX - minX), (py - minY) / (maxY - minY)];
 }
-function n2d(nx, ny) {
-  // natural px → display (CSS) px
-  return [nx * cssW / naturalW, ny * cssH / naturalH];
+
+function phoneToPixel(px, py) {
+  if (!phoneBounds) return [px * naturalW, py * naturalH];
+  const xs = phoneBounds.map(p => p[0]), ys = phoneBounds.map(p => p[1]);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  return [px * (maxX - minX) + minX, py * (maxY - minY) + minY];
 }
 
 // ─── Hit testing ───────────────────────────────────────────
 function hitCorner(mx, my, box) {
-  // Returns corner index (0-3) or -1
   const [l, t] = n2d(box.left, box.top);
   const [r, b] = n2d(box.right, box.bottom);
   const corners = [[l,t],[r,t],[r,b],[l,b]];
@@ -191,7 +232,6 @@ function hitCorner(mx, my, box) {
 }
 
 function hitBox(mx, my) {
-  // Returns box index or -1. Check top-most (last) first.
   for (let i = boxes.length - 1; i >= 0; i--) {
     const [l, t] = n2d(boxes[i].left, boxes[i].top);
     const [r, b] = n2d(boxes[i].right, boxes[i].bottom);
@@ -201,7 +241,6 @@ function hitBox(mx, my) {
 }
 
 function boxOutsidePhoneRatio(box) {
-  // What fraction of the box area is outside the phone screen (0-1).
   const [l, t] = n2d(box.left, box.top);
   const [r, b] = n2d(box.right, box.bottom);
   const [pMinX, pMinY, pMaxX, pMaxY] = phoneDisplayRect();
@@ -217,7 +256,7 @@ function boxOutsidePhoneRatio(box) {
 
 // ─── Canvas cursor ─────────────────────────────────────────
 function updateCursor(mx, my) {
-  if (mode) return; // don't change during drag
+  if (mode) return;
   for (let i = boxes.length - 1; i >= 0; i--) {
     const c = hitCorner(mx, my, boxes[i]);
     if (c === 0 || c === 2) { canvas.style.cursor = 'nwse-resize'; return; }
@@ -234,16 +273,26 @@ function isLightColor(hex) {
   return (r * 0.299 + g * 0.587 + b * 0.114) > 160;
 }
 
+// ─── Box type classification ──────────────────────────────
+const LINE_ASPECT_RATIO = 10;
+
+function getBoxType(box) {
+  // Classify by aspect ratio: column (tall thin), row (wide thin), or box
+  const w = Math.abs(box.right - box.left);
+  const h = Math.abs(box.bottom - box.top);
+  if (w < 1 || h < 1) return 'box';
+  if (h / w > LINE_ASPECT_RATIO) return 'column'; // X interval
+  if (w / h > LINE_ASPECT_RATIO) return 'row';    // Y interval
+  return 'box';
+}
+
 // ─── Drawing ───────────────────────────────────────────────
 function drawPhoneBounds() {
   if (!phoneBounds) return;
-  // Dim area outside phone screen
   const pts = phoneBounds.map(([px, py]) => n2d(px, py));
   ctx.save();
-  // Fill entire canvas with dim overlay
   ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
   ctx.fillRect(0, 0, cssW, cssH);
-  // Cut out phone region (clear it)
   ctx.globalCompositeOperation = 'destination-out';
   ctx.beginPath();
   ctx.moveTo(pts[0][0], pts[0][1]);
@@ -251,7 +300,6 @@ function drawPhoneBounds() {
   ctx.closePath();
   ctx.fill();
   ctx.restore();
-  // Draw phone border
   ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
   ctx.lineWidth = 1;
   ctx.beginPath();
@@ -262,8 +310,7 @@ function drawPhoneBounds() {
 }
 
 function isInsidePhone(dx, dy) {
-  // Point-in-polygon (ray casting) for display coords
-  if (!phoneBounds) return true; // no bounds = allow anywhere
+  if (!phoneBounds) return true;
   const pts = phoneBounds.map(([px, py]) => n2d(px, py));
   let inside = false;
   for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
@@ -274,17 +321,7 @@ function isInsidePhone(dx, dy) {
   return inside;
 }
 
-function pixelToPhone(px, py) {
-  // Convert natural image pixel to phone screen 0-1 coords
-  if (!phoneBounds) return [px / naturalW, py / naturalH];
-  const xs = phoneBounds.map(p => p[0]), ys = phoneBounds.map(p => p[1]);
-  const minX = Math.min(...xs), maxX = Math.max(...xs);
-  const minY = Math.min(...ys), maxY = Math.max(...ys);
-  return [(px - minX) / (maxX - minX), (py - minY) / (maxY - minY)];
-}
-
 function phoneDisplayRect() {
-  // Axis-aligned bounding rect of phone screen in display (CSS) coords
   if (!phoneBounds) return [0, 0, cssW, cssH];
   const pts = phoneBounds.map(([px, py]) => n2d(px, py));
   const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
@@ -294,33 +331,85 @@ function phoneDisplayRect() {
 function redrawCanvas() {
   ctx.clearRect(0, 0, cssW, cssH);
   drawPhoneBounds();
+  const [pMinX, pMinY, pMaxX, pMaxY] = phoneDisplayRect();
   boxes.forEach((b, i) => {
     const [x, y] = n2d(b.left, b.top);
     const [x2, y2] = n2d(b.right, b.bottom);
     const w = x2 - x, h = y2 - y;
     const isActive = (mode === 'move' || mode === 'resize') && i === activeBox;
     const color = b.color || '#ff5252';
+    const isAgent = b.source === 'agent';
+    const boxType = getBoxType(b);
     ctx.globalAlpha = isActive ? Math.max(0.05, 1 - deleteFade * 0.95) : 1;
 
-    // Solid border
     ctx.strokeStyle = color;
     ctx.lineWidth = 2;
-    ctx.strokeRect(x, y, w, h);
 
-    // Label — prefer outside top-left, reposition if clipped
-    const label = String(i + 1);
+    if (boxType === 'column') {
+      // Two vertical lines with open ends (extend a bit beyond the box)
+      const ext = 20; // px extension beyond box edges
+      ctx.beginPath();
+      ctx.moveTo(x, y - ext); ctx.lineTo(x, y2 + ext);   // left line
+      ctx.moveTo(x2, y - ext); ctx.lineTo(x2, y2 + ext);  // right line
+      ctx.stroke();
+      // Light fill between lines
+      ctx.fillStyle = color;
+      ctx.globalAlpha *= 0.08;
+      ctx.fillRect(x, y - ext, w, h + ext * 2);
+      ctx.globalAlpha = isActive ? Math.max(0.05, 1 - deleteFade * 0.95) : 1;
+    } else if (boxType === 'row') {
+      // Two horizontal lines with open ends (extend a bit beyond the box)
+      const ext = 20;
+      ctx.beginPath();
+      ctx.moveTo(x - ext, y); ctx.lineTo(x2 + ext, y);    // top line
+      ctx.moveTo(x - ext, y2); ctx.lineTo(x2 + ext, y2);   // bottom line
+      ctx.stroke();
+      // Light fill between lines
+      ctx.fillStyle = color;
+      ctx.globalAlpha *= 0.08;
+      ctx.fillRect(x - ext, y, w + ext * 2, h);
+      ctx.globalAlpha = isActive ? Math.max(0.05, 1 - deleteFade * 0.95) : 1;
+    } else {
+      // Normal box
+      ctx.strokeRect(x, y, w, h);
+    }
+
+
+    // Label badge (top-left, outside box)
+    const typeTag = boxType !== 'box' ? (boxType === 'column' ? '| ' : '— ') : '';
+    const labelText = typeTag + (b.label || String(i + 1));
     ctx.font = 'bold 12px sans-serif';
-    const tw = ctx.measureText(label).width;
+    const tw = ctx.measureText(labelText).width;
     const lw = tw + 8, lh = 18;
-    let lx = x, ly = y - lh;
-    if (ly < 0) ly = y2;               // no room above → below bottom edge
-    if (lx + lw > cssW) lx = x2 - lw;  // no room right → align to right edge
+    let lx, ly;
+    if (boxType === 'column') {
+      lx = x; ly = pMinY + 4;
+    } else if (boxType === 'row') {
+      lx = pMinX + 4; ly = y - lh;
+      if (ly < pMinY) ly = y2 + 2;
+    } else {
+      lx = x; ly = y - lh;
+      if (ly < 0) ly = y2;
+    }
+    if (lx + lw > cssW) lx = x2 - lw;
     if (lx < 0) lx = 0;
     ctx.fillStyle = color;
     ctx.fillRect(lx, ly, lw, lh);
     ctx.fillStyle = isLightColor(color) ? '#000' : '#fff';
-    ctx.fillText(label, lx + 4, ly + 13);
+    ctx.fillText(labelText, lx + 4, ly + 13);
 
+    // "AI" tag inside box at bottom-right (agent boxes only)
+    if (isAgent) {
+      const aiText = 'AI';
+      ctx.font = 'bold 10px sans-serif';
+      const aiTw = ctx.measureText(aiText).width;
+      const aiLw = aiTw + 6, aiLh = 14;
+      const aiX = x2 - aiLw - 2, aiY = y2 - aiLh - 2;
+      ctx.fillStyle = color;
+      ctx.fillRect(aiX, aiY, aiLw, aiLh);
+      ctx.fillStyle = isLightColor(color) ? '#000' : '#fff';
+      ctx.fillText(aiText, aiX + 3, aiY + 11);
+    }
 
     ctx.globalAlpha = 1;
   });
@@ -337,54 +426,72 @@ function renderBoxList() {
       const [px2, py2] = pixelToPhone(b.right, b.bottom);
       const x1 = px1.toFixed(2), y1 = py1.toFixed(2);
       const x2 = px2.toFixed(2), y2 = py2.toFixed(2);
+      const isAgent = b.source === 'agent';
+      const boxType = getBoxType(b);
       const item = document.createElement('div');
       item.className = 'box-item';
       item.style.borderLeftColor = c;
-      item.innerHTML =
-        '<div class="box-header">' +
-          '<span class="num" style="color:' + c + '">Box ' + (i + 1) + '</span>' +
-          '<span class="del" data-i="' + i + '">&times;</span>' +
-        '</div>' +
-        '<div class="coords">' +
+      const badge = isAgent ? '<span class="ai-badge">AI</span>' : '';
+      const typeLabel = boxType === 'column' ? ' <span style="color:#888;font-size:10px">COLUMN</span>'
+                       : boxType === 'row' ? ' <span style="color:#888;font-size:10px">ROW</span>' : '';
+
+      // Show only relevant coordinates for line types
+      let coordsHtml;
+      if (boxType === 'column') {
+        coordsHtml =
+          '<span><span class="label">left </span><span class="val">' + x1 + '</span></span>' +
+          '<span><span class="label">right </span><span class="val">' + x2 + '</span></span>';
+      } else if (boxType === 'row') {
+        coordsHtml =
+          '<span><span class="label">top </span><span class="val">' + y1 + '</span></span>' +
+          '<span><span class="label">bottom </span><span class="val">' + y2 + '</span></span>';
+      } else {
+        coordsHtml =
           '<span><span class="label">left </span><span class="val">' + x1 + '</span></span>' +
           '<span><span class="label">top </span><span class="val">' + y1 + '</span></span>' +
           '<span><span class="label">right </span><span class="val">' + x2 + '</span></span>' +
-          '<span><span class="label">bottom </span><span class="val">' + y2 + '</span></span>' +
-        '</div>';
+          '<span><span class="label">bottom </span><span class="val">' + y2 + '</span></span>';
+      }
+
+      item.innerHTML =
+        '<div class="box-header">' +
+          '<span class="num" style="color:' + c + '">Box ' + (i + 1) + badge + typeLabel + '</span>' +
+          '<span class="del" data-i="' + i + '">&times;</span>' +
+        '</div>' +
+        '<input class="label-input" data-i="' + i + '" placeholder="Label..." value="' +
+          (b.label || '').replace(/"/g, '&quot;') + '">' +
+        '<div class="coords">' + coordsHtml + '</div>';
       boxList.appendChild(item);
     });
   }
-}
-
-function syncToServer() {
-  fetch('/api/annotations', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({annotations: boxes}),
-  });
+  btnConfirm.disabled = !frozen || waiting;
 }
 
 function commit() {
-  syncToServer();
   renderBoxList();
   redrawCanvas();
 }
 
 // ─── Snapshot ──────────────────────────────────────────────
-async function freezeSnapshot() {
-  const resp = await fetch('/api/snapshot', {method: 'POST'});
+async function loadSnapshot() {
+  // Fetch the existing frozen snapshot (agent controls when screenshots are taken)
+  const resp = await fetch('/api/snapshot');
   const data = await resp.json();
-  if (data.error) return;
+  if (data.error) return false;
   naturalW = data.width;
   naturalH = data.height;
-  phoneBounds = data.phone_bounds; // [[x,y],...] or null
+  phoneBounds = data.phone_bounds;
+  snapshotId = data.snapshot_id || '';
   frozenImg.src = 'data:image/jpeg;base64,' + data.image;
   frozenImg.style.display = 'block';
   liveImg.style.display = 'none';
   frozen = true;
+  waiting = false;
+  waitingOverlay.classList.remove('active');
   boxes = [];
   commit();
   frozenImg.onload = positionCanvas;
+  return true;
 }
 
 function positionCanvas() {
@@ -397,7 +504,6 @@ function positionCanvas() {
   canvas.style.height = cssH + 'px';
   canvas.style.left = (rect.left - viewerRect.left) + 'px';
   canvas.style.top = (rect.top - viewerRect.top) + 'px';
-  // Drawing buffer at native resolution — setting .width resets transform
   canvas.width = cssW * dpr;
   canvas.height = cssH * dpr;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -405,9 +511,54 @@ function positionCanvas() {
   redrawCanvas();
 }
 
+// ─── Confirm ──────────────────────────────────────────────
+async function confirmBoxes() {
+  if (boxes.length === 0) return;
+  await fetch('/api/confirm', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({annotations: boxes}),
+  });
+  waiting = true;
+  waitingOverlay.classList.add('active');
+  btnConfirm.disabled = true;
+}
+
+// ─── Poll for agent proposals ─────────────────────────────
+async function pollProposals() {
+  if (!frozen) return;
+  try {
+    const resp = await fetch('/api/annotations');
+    const data = await resp.json();
+    if (data.agent_proposals && data.agent_proposals.length > 0) {
+      // Agent sent new proposals — merge them in
+      // If we were waiting, take a new snapshot first
+      if (waiting || data.snapshot_id !== snapshotId) {
+        await loadSnapshot();
+      }
+
+      // Convert agent proposals from 0-1 phone coords to image pixels
+      for (const p of data.agent_proposals) {
+        const [l, t] = phoneToPixel(p.bbox[0], p.bbox[1]);
+        const [r, b] = phoneToPixel(p.bbox[2], p.bbox[3]);
+        boxes.push({
+          left: l, top: t, right: r, bottom: b,
+          color: p.color || '#00e5ff',
+          label: p.label || '',
+          source: 'agent',
+          id: p.id || genId(),
+        });
+      }
+      commit();
+    }
+  } catch (e) { /* server not running */ }
+}
+
+setInterval(pollProposals, 1500);
+
 // ─── Mouse events ──────────────────────────────────────────
 canvas.addEventListener('mousedown', (e) => {
-  if (!frozen) return;
+  if (!frozen || waiting) return;
   const rect = canvas.getBoundingClientRect();
   const mx = e.clientX - rect.left;
   const my = e.clientY - rect.top;
@@ -415,28 +566,22 @@ canvas.addEventListener('mousedown', (e) => {
   dragStartY = my;
   pendingDelete = false;
 
-  // Check corners first (resize)
   for (let i = boxes.length - 1; i >= 0; i--) {
     const c = hitCorner(mx, my, boxes[i]);
     if (c >= 0) {
-      mode = 'resize';
-      activeBox = i;
-      activeCorner = c;
+      mode = 'resize'; activeBox = i; activeCorner = c;
       dragOrigBox = {...boxes[i]};
       return;
     }
   }
 
-  // Check box interior (move)
   const bi = hitBox(mx, my);
   if (bi >= 0) {
-    mode = 'move';
-    activeBox = bi;
+    mode = 'move'; activeBox = bi;
     dragOrigBox = {...boxes[bi]};
     return;
   }
 
-  // Empty area — only draw inside phone screen
   if (!isInsidePhone(mx, my)) return;
   mode = 'draw';
 });
@@ -468,11 +613,8 @@ function onMouseMove(e) {
   if (mode === 'move') {
     const b = boxes[activeBox];
     const o = dragOrigBox;
-    b.left = o.left + ndx;
-    b.top = o.top + ndy;
-    b.right = o.right + ndx;
-    b.bottom = o.bottom + ndy;
-
+    b.left = o.left + ndx; b.top = o.top + ndy;
+    b.right = o.right + ndx; b.bottom = o.bottom + ndy;
     deleteFade = boxOutsidePhoneRatio(boxes[activeBox]);
     pendingDelete = deleteFade > 0.6;
     redrawCanvas();
@@ -486,7 +628,6 @@ function onMouseMove(e) {
     if (activeCorner === 1) { b.right = nmx; b.top = nmy; }
     if (activeCorner === 2) { b.right = nmx; b.bottom = nmy; }
     if (activeCorner === 3) { b.left = nmx; b.bottom = nmy; }
-
     deleteFade = boxOutsidePhoneRatio(boxes[activeBox]);
     pendingDelete = deleteFade > 0.6;
     redrawCanvas();
@@ -507,7 +648,10 @@ function onMouseUp(e) {
     const [nl, nt] = d2n(clampX(Math.min(dragStartX, mx)), clampY(Math.min(dragStartY, my)));
     const [nr, nb] = d2n(clampX(Math.max(dragStartX, mx)), clampY(Math.max(dragStartY, my)));
     if (nr - nl > 3 && nb - nt > 3) {
-      boxes.push({left: nl, top: nt, right: nr, bottom: nb, color: penColor});
+      boxes.push({
+        left: nl, top: nt, right: nr, bottom: nb,
+        color: penColor, label: '', source: 'user', id: genId(),
+      });
     }
   }
 
@@ -520,18 +664,15 @@ function onMouseUp(e) {
     const [pMinX, pMinY, pMaxX, pMaxY] = phoneDisplayRect();
     const [nMinX, nMinY] = d2n(pMinX, pMinY);
     const [nMaxX, nMaxY] = d2n(pMaxX, pMaxY);
-    // Normalize
     const l = Math.min(b.left, b.right), r = Math.max(b.left, b.right);
     const t = Math.min(b.top, b.bottom), bt = Math.max(b.top, b.bottom);
     if (mode === 'move') {
-      // Bounce back: shift entire box to stay inside phone screen
       const bw = r - l, bh = bt - t;
       b.left = Math.max(nMinX, Math.min(nMaxX - bw, l));
       b.top = Math.max(nMinY, Math.min(nMaxY - bh, t));
       b.right = b.left + bw;
       b.bottom = b.top + bh;
     } else {
-      // Resize: clamp each edge to phone bounds
       b.left = Math.max(nMinX, Math.min(nMaxX, l));
       b.top = Math.max(nMinY, Math.min(nMaxY, t));
       b.right = Math.max(nMinX, Math.min(nMaxX, r));
@@ -539,21 +680,16 @@ function onMouseUp(e) {
     }
   }
 
-  mode = null;
-  activeBox = -1;
-  activeCorner = -1;
-  dragOrigBox = null;
-  pendingDelete = false;
-  deleteFade = 0;
+  mode = null; activeBox = -1; activeCorner = -1;
+  dragOrigBox = null; pendingDelete = false; deleteFade = 0;
   commit();
 }
 
-// Canvas handles hover cursor + mousedown; document handles move/up globally
 canvas.addEventListener('mousemove', onMouseMove);
 document.addEventListener('mousemove', (e) => { if (mode) onMouseMove(e); });
 document.addEventListener('mouseup', (e) => { if (mode) onMouseUp(e); });
 
-// ─── Sidebar delete ────────────────────────────────────────
+// ─── Sidebar interactions ──────────────────────────────────
 boxList.addEventListener('click', (e) => {
   if (e.target.classList.contains('del')) {
     boxes.splice(parseInt(e.target.dataset.i), 1);
@@ -561,28 +697,31 @@ boxList.addEventListener('click', (e) => {
   }
 });
 
-// ─── Resize handling ───────────────────────────────────────
-window.addEventListener('resize', () => {
-  if (frozen) positionCanvas();
+boxList.addEventListener('change', (e) => {
+  if (e.target.classList.contains('label-input')) {
+    const i = parseInt(e.target.dataset.i);
+    if (i >= 0 && i < boxes.length) {
+      boxes[i].label = e.target.value;
+      redrawCanvas();
+    }
+  }
 });
 
-// ─── Mock mode (no server needed) ──────────────────────────
+// ─── Resize handling ───────────────────────────────────────
+window.addEventListener('resize', () => { if (frozen) positionCanvas(); });
+
+// ─── Mock mode ─────────────────────────────────────────────
 const MOCK = false;
 
 function mockSnapshot() {
-  // Generate a fake phone screenshot (portrait 540x960)
   const c = document.createElement('canvas');
   c.width = 540; c.height = 960;
   const g = c.getContext('2d');
-  // Dark background
   g.fillStyle = '#1c1c1e'; g.fillRect(0, 0, 540, 960);
-  // Status bar
   g.fillStyle = '#2c2c2e'; g.fillRect(0, 0, 540, 44);
   g.fillStyle = '#888'; g.font = '14px sans-serif';
   g.fillText('9:41', 24, 30); g.fillText('100%', 470, 30);
-  // Nav bar
   g.fillStyle = '#2c2c2e'; g.fillRect(0, 900, 540, 60);
-  // Fake app icons (3x2 grid)
   const icons = ['Messages', 'Photos', 'Camera', 'Settings', 'Music', 'Maps'];
   const colors = ['#34c759','#ff9500','#5856d6','#8e8e93','#ff2d55','#007aff'];
   for (let r = 0; r < 2; r++) {
@@ -594,28 +733,29 @@ function mockSnapshot() {
       g.fillText(icons[r * 3 + c], x + 5, y + 100);
     }
   }
-  // Title
   g.fillStyle = '#fff'; g.font = 'bold 24px sans-serif';
   g.fillText('Home Screen', 160, 120);
-  // Bottom tabs
   g.fillStyle = '#666'; g.font = '11px sans-serif';
-  const tabs = ['Phone','Mail','Safari','Music'];
-  tabs.forEach((t, i) => g.fillText(t, 30 + i * 135, 935));
+  ['Phone','Mail','Safari','Music'].forEach((t, i) => g.fillText(t, 30 + i * 135, 935));
   return c.toDataURL('image/jpeg').split(',')[1];
 }
 
 if (MOCK) {
   const _origFetch = window.fetch;
   window.fetch = async (url, opts) => {
-    if (url === '/api/snapshot') {
+    if (url === '/api/snapshot' && (!opts || opts.method !== 'POST')) {
       const b64 = mockSnapshot();
       return { json: async () => ({
         image: b64, width: 540, height: 960,
         phone_bounds: [[40,30],[500,30],[500,930],[40,930]],
+        snapshot_id: 'mock_001',
       }) };
     }
     if (url === '/api/annotations') {
-      return { json: async () => ({ ok: true, annotations: [], count: 0 }) };
+      return { json: async () => ({ agent_proposals: [], snapshot_id: 'mock_001' }) };
+    }
+    if (url === '/api/confirm') {
+      return { json: async () => ({ ok: true, count: 0 }) };
     }
     return _origFetch(url, opts);
   };
@@ -630,7 +770,6 @@ colorPicker.addEventListener('click', (e) => {
   dot.classList.add('active');
 });
 
-// ─── Keyboard shortcuts (1-8 for colors) ───────────────────
 document.addEventListener('keydown', (e) => {
   const key = e.key;
   if (key >= '1' && key <= '8') {
@@ -643,11 +782,11 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// ─── Button + initial load ─────────────────────────────────
-btnSnapshot.addEventListener('click', freezeSnapshot);
+// ─── Button handlers + initial load ───────────────────────
+btnConfirm.addEventListener('click', confirmBoxes);
 liveImg.src = PLACEHOLDER;
-// Auto-capture on page load
-freezeSnapshot();
+// Try to load an existing snapshot (agent may have already frozen one)
+loadSnapshot();
 </script>
 </body>
 </html>

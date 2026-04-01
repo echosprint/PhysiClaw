@@ -30,8 +30,8 @@ class PhysiClaw:
         self._cam: Camera | None = None
         self._detector: PhoneDetector | None = None
         self._grid_cal: GridCalibration | None = None
-        self._pending_bboxes: dict[str, dict] = {}
-        self._confirmed_bbox: dict | None = None
+        self._pending_bboxes: dict[str, list[float]] = {}
+        self._confirmed_bbox: list[float] | None = None
         self._lock = threading.Lock()
         self._setup()
 
@@ -138,26 +138,22 @@ class PhysiClaw:
         (255, 0, 255),   # magenta
     ]
 
-    def set_pending_bbox(self, left: float, top: float,
-                         right: float, bottom: float):
+    def set_pending_bbox(self, bbox: list[float]):
         """Store pending bbox candidates keyed by shift name. Clears any confirmed bbox.
 
-        All coordinates are 0-1 decimals (0=left/top, 1=right/bottom).
+        Args:
+            bbox: [left, top, right, bottom] as 0-1 decimals.
 
         For small targets, generates shifted candidates along the small
         dimension(s) so the AI agent can pick the best one.
-        - Both dimensions small: center + top/bottom/left/right
-        - Only width small: center + left/right
-        - Only height small: center + top/bottom
-        - Both dimensions large: center only
         """
-        original = {'left': left, 'top': top, 'right': right, 'bottom': bottom}
+        left, top, right, bottom = bbox
         w = right - left
         h = bottom - top
         small_h = w < self.SMALL_BBOX_THRESHOLD
         small_v = h < self.SMALL_BBOX_THRESHOLD
 
-        self._pending_bboxes = {'center': original}
+        self._pending_bboxes = {'center': list(bbox)}
 
         # Shifted bboxes: 0.8x size of original, shifted by 0.7x of that dimension
         scale = 0.8
@@ -169,24 +165,24 @@ class PhysiClaw:
 
         if small_v:
             sv = h * shift_ratio
-            self._pending_bboxes['top'] = {
-                'left': max(0, cx - sw / 2), 'top': max(0, cy - sv - sh / 2),
-                'right': min(1, cx + sw / 2), 'bottom': max(0, cy - sv + sh / 2),
-            }
-            self._pending_bboxes['bottom'] = {
-                'left': max(0, cx - sw / 2), 'top': min(1, cy + sv - sh / 2),
-                'right': min(1, cx + sw / 2), 'bottom': min(1, cy + sv + sh / 2),
-            }
+            self._pending_bboxes['top'] = [
+                max(0, cx - sw / 2), max(0, cy - sv - sh / 2),
+                min(1, cx + sw / 2), max(0, cy - sv + sh / 2),
+            ]
+            self._pending_bboxes['bottom'] = [
+                max(0, cx - sw / 2), min(1, cy + sv - sh / 2),
+                min(1, cx + sw / 2), min(1, cy + sv + sh / 2),
+            ]
         if small_h:
             shh = w * shift_ratio
-            self._pending_bboxes['left'] = {
-                'left': max(0, cx - shh - sw / 2), 'top': max(0, cy - sh / 2),
-                'right': max(0, cx - shh + sw / 2), 'bottom': min(1, cy + sh / 2),
-            }
-            self._pending_bboxes['right'] = {
-                'left': min(1, cx + shh - sw / 2), 'top': max(0, cy - sh / 2),
-                'right': min(1, cx + shh + sw / 2), 'bottom': min(1, cy + sh / 2),
-            }
+            self._pending_bboxes['left'] = [
+                max(0, cx - shh - sw / 2), max(0, cy - sh / 2),
+                max(0, cx - shh + sw / 2), min(1, cy + sh / 2),
+            ]
+            self._pending_bboxes['right'] = [
+                min(1, cx + shh - sw / 2), max(0, cy - sh / 2),
+                min(1, cx + shh + sw / 2), min(1, cy + sh / 2),
+            ]
 
         self._confirmed_bbox = None
 
@@ -204,18 +200,17 @@ class PhysiClaw:
         self._confirmed_bbox = self._pending_bboxes[shift]
         self._pending_bboxes = {}
 
-    def consume_confirmed_bbox(self) -> dict | None:
+    def consume_confirmed_bbox(self) -> list[float] | None:
         """Return and clear the confirmed bbox. Returns None if none."""
         bbox = self._confirmed_bbox
         self._confirmed_bbox = None
         return bbox
 
-    def move_to_bbox_center(self, bbox: dict):
-        """Move arm to the center of a bbox using grid calibration."""
+    def move_to_bbox_center(self, bbox: list[float]):
+        """Move arm to the center of a bbox [left, top, right, bottom] (0-1)."""
         if self._grid_cal is None:
             raise RuntimeError("Grid calibration not done")
-        cx, cy = self._grid_cal.bbox_center_pct(
-            bbox['left'], bbox['top'], bbox['right'], bbox['bottom'])
+        cx, cy = self._grid_cal.bbox_center_pct(bbox)
         gx, gy = self._grid_cal.pct_to_grbl_mm(cx, cy)
         self._arm._fast_move(gx, gy)
         self._arm.wait_idle()
@@ -260,8 +255,7 @@ class PhysiClaw:
         # Build list of (tl, br, color, label) for all candidates
         rects = []
         for j, (name, bbox) in enumerate(self._pending_bboxes.items()):
-            tl, br = self._grid_cal.bbox_to_pixel_rect(
-                bbox['left'], bbox['top'], bbox['right'], bbox['bottom'])
+            tl, br = self._grid_cal.bbox_to_pixel_rect(bbox)
             color = self.BBOX_COLORS[j % len(self.BBOX_COLORS)]
             rects.append((tl, br, color, name))
 
@@ -404,7 +398,8 @@ class PhysiClaw:
 
         Args:
             frame: BGR numpy array (the frozen snapshot)
-            annotations: list of {left, top, right, bottom, color?} in image pixels
+            annotations: list of {left, top, right, bottom, color?, label?, source?}
+                         in image pixels
 
         Returns:
             (text_listing, annotated_frame) or None if annotations is empty.
@@ -420,13 +415,19 @@ class PhysiClaw:
         for i, ann in enumerate(annotations):
             l, t = cal.pixel_to_pct(int(ann['left']), int(ann['top']))
             r, b = cal.pixel_to_pct(int(ann['right']), int(ann['bottom']))
-            l = max(0.0, min(1.0, round(l, 3)))
-            t = max(0.0, min(1.0, round(t, 3)))
-            r = max(0.0, min(1.0, round(r, 3)))
-            b = max(0.0, min(1.0, round(b, 3)))
+            bbox = [
+                max(0.0, min(1.0, round(l, 3))),
+                max(0.0, min(1.0, round(t, 3))),
+                max(0.0, min(1.0, round(r, 3))),
+                max(0.0, min(1.0, round(b, 3))),
+            ]
+            from physiclaw.annotation import classify_bbox
+            box_type, coords = classify_bbox(bbox)
             color = ann.get('color', '#42a5f5')
-            elements.append({'id': i + 1, 'left': l, 'top': t,
-                             'right': r, 'bottom': b, 'color': color})
+            label = ann.get('label', '')
+            source = ann.get('source', 'user')
+            elements.append({'id': i + 1, 'type': box_type, 'bbox': coords,
+                             'color': color, 'label': label, 'source': source})
             bgr = self._hex_to_bgr(color)
             cv2.rectangle(out,
                           (int(ann['left']), int(ann['top'])),
@@ -436,11 +437,15 @@ class PhysiClaw:
                         (int(ann['left']) + 4, int(ann['top']) + 20),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, bgr, 2)
 
-        lines = [f"# Pending Annotations ({len(elements)} boxes)\n"]
+        lines = [f"# Pending Annotations ({len(elements)} items)\n"]
         for e in elements:
             name = self._COLOR_NAMES.get(e['color'], e['color'])
-            lines.append(f"- Box {e['id']} ({name}): [{e['left']}, {e['top']}, "
-                         f"{e['right']}, {e['bottom']}]")
+            b = e['bbox']
+            desc = f" — {e['label']}" if e['label'] else ""
+            src = f" [{e['source']}]" if e['source'] != 'user' else ""
+            coords = ", ".join(str(v) for v in b)
+            type_tag = f" ({e['type']})" if e['type'] != 'box' else ""
+            lines.append(f"- {e['id']}{type_tag} ({name}){src}: [{coords}]{desc}")
         return "\n".join(lines), out
 
     # ─── Lifecycle ─────────────────────────────────────────────

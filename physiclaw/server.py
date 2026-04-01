@@ -33,35 +33,41 @@ mcp = FastMCP(
 
 You control a real phone sitting on a desk — a camera sees the screen from directly above, and a 3-axis arm moves and taps a capacitive stylus.
 
-## How it works
+## Before every tap, classify the target
 
-A camera is mounted directly above the phone, looking straight down. You see the screen from above. The stylus taps the screen at coordinates you specify as 0-1 decimals (0=left/top edge, 1=right/bottom edge).
+**Fixed UI element** (button, icon, nav control, text field, keyboard key — same position every visit):
+- In preset (.claude/ui-presets/) → use preset coordinates with bbox_target(bbox).
+- Not in preset → propose_bboxes() → wait_for_confirmation() → save to preset.
+- You CANNOT guess coordinates for fixed UI. Your estimates are unreliable.
 
-## Operation cycle
+**Dynamic content** (list item, menu entry, product card — large, changes every visit):
+- Visual targeting OK: grid_overlay() → bbox_target(bbox) → label test → confirm_bbox() → tap.
 
-1. Check UI presets (.claude/ui-presets/) — if the target element has known coordinates, use them directly for bbox_target().
-2. If no preset, park() + screenshot() — see the full phone screen.
-3. grid_overlay() — estimate target coordinates using the reference grid.
-4. bbox_target(left, top, right, bottom) — draws colored rectangles on a fresh photo.
-5. **Verify: name the element INSIDE each rectangle.**
-   - If a rectangle covers the target → confirm_bbox(shift)
-   - If NO rectangle covers the target → call bbox_target() with corrected coordinates
-   - Shift values toward the target by the gap you observe
-   - 2-3 attempts is normal. Never pick the "least-bad" rectangle.
-6. tap() / double_tap() / long_press() / swipe() — executes at the bbox center.
-7. park() + screenshot() — verify the result.
+## Operation cycle (dynamic content / preset path)
 
-## Example
+1. Check UI presets — if the target has known coordinates, use them directly.
+2. If no preset (dynamic content only): park() + screenshot() + grid_overlay().
+3. bbox_target(bbox) — bbox = [left, top, right, bottom] as 0-1 decimals.
+4. **Label test:** name the element INSIDE each rectangle.
+   - Covers the target → confirm_bbox(shift)
+   - All miss → call bbox_target() with corrected coordinates. 2-3 attempts is normal.
+5. tap() / double_tap() / long_press() / swipe() — executes at the bbox center.
+6. park() + screenshot() — verify the result.
 
-Target: backspace (⌫). bbox_target() returns rectangles covering the "m" key area.
-WRONG: picking "right" because it's the rightmost rectangle.
-RIGHT: calling bbox_target() again with coordinates shifted ~0.05 rightward.
+## Propose-confirm cycle (fixed UI without preset)
+
+1. park() + screenshot() — reason about visible elements.
+2. propose_bboxes([{"bbox": [l,t,r,b], "label": "..."}]) — sends guesses to /annotate.
+3. Tell user to review and confirm at /annotate.
+4. wait_for_confirmation() — blocks until user confirms.
+5. Use confirmed coordinates: bbox_target(bbox) → confirm_bbox() → gesture.
+6. Save to preset for future autonomous use.
 
 ## CRITICAL
 
 - bbox_target() is cheap (just a photo). tap() is expensive (physical arm, irreversible).
+- Never guess coordinates for fixed UI elements — propose and let the user confirm.
 - Before confirming, ask: "Am I choosing this because it COVERS the target, or because it's the closest option?" If closest → reject, re-bbox.
-- Never confirm a bbox you're not confident about.
 """,
 )
 
@@ -137,7 +143,7 @@ def grid_overlay(density: str = "normal", color: str = "green") -> Image:
 
 
 @mcp.tool()
-def bbox_target(left: float, top: float, right: float, bottom: float) -> Image:
+def bbox_target(bbox: list[float]) -> Image:
     """Target a screen region by bounding box using 0-1 decimals.
 
     Takes a fresh screenshot and draws colored rectangles at the specified position.
@@ -157,17 +163,15 @@ def bbox_target(left: float, top: float, right: float, bottom: float) -> Image:
     wrong amount, or trigger an irreversible action.
 
     Args:
-        left: left edge (0=left edge of screen, 1=right edge)
-        top: top edge (0=top of screen, 1=bottom)
-        right: right edge
-        bottom: bottom edge
+        bbox: [left, top, right, bottom] as 0-1 decimals
+              (0=left/top edge, 1=right/bottom edge)
     """
     import time
     physiclaw.acquire()
     try:
         physiclaw.park()
         time.sleep(1.5)  # let arm settle after parking
-        physiclaw.set_pending_bbox(left, top, right, bottom)
+        physiclaw.set_pending_bbox(bbox)
         frame = physiclaw.screenshot_with_bboxes()
         return Image(data=physiclaw.frame_to_jpeg(frame), format="jpeg")
     finally:
@@ -303,8 +307,8 @@ atexit.register(physiclaw.shutdown)
 # ─── Annotation routes + tool ──────────────────────────────────
 
 from physiclaw.annotation import (
-    AnnotationState, freeze_snapshot,
-    handle_annotations, serve_annotate_page,
+    AnnotationState, freeze_snapshot, get_frozen_snapshot,
+    handle_annotations, handle_confirm, serve_annotate_page,
 )
 
 _ann = AnnotationState()
@@ -313,38 +317,140 @@ _ann = AnnotationState()
 async def _annotate(request):
     return await serve_annotate_page(request)
 
-@mcp.custom_route("/api/snapshot", methods=["POST"])
+@mcp.custom_route("/api/snapshot", methods=["GET", "POST"])
 async def _snapshot(request):
+    if request.method == "GET":
+        return await get_frozen_snapshot(request, physiclaw, _ann)
     physiclaw.acquire()
     try:
         return await freeze_snapshot(request, physiclaw, _ann)
     finally:
         physiclaw.release()
 
-@mcp.custom_route("/api/annotations", methods=["GET", "POST", "DELETE"])
+@mcp.custom_route("/api/annotations", methods=["GET", "DELETE"])
 async def _annotations(request):
     return await handle_annotations(request, _ann)
 
+@mcp.custom_route("/api/confirm", methods=["POST"])
+async def _confirm(request):
+    return await handle_confirm(request, _ann, physiclaw)
+
 @mcp.tool()
 def get_user_annotations() -> list:
-    """Get user-drawn UI element annotations from the web annotation tool.
+    """Get confirmed annotations from the annotation UI.
 
-    Returns the frozen screenshot with red numbered boxes drawn at
-    user-marked positions, plus a text listing of box coordinates
-    as 0-1 decimals [left, top, right, bottom].
+    Returns the confirmed boxes with coordinates and labels, plus the
+    frozen screenshot. The user must click Confirm in the annotation UI
+    before this returns data.
 
-    The user draws boxes on the live camera feed at /annotate in their browser.
-    Call this tool when the user says they've finished drawing boxes.
-    Annotations persist until the user takes a new snapshot in the browser.
-    Safe to call multiple times — returns the same data until reset.
+    Use wait_for_confirmation() instead if you want to block until
+    the user confirms. This tool returns immediately — it returns
+    whatever was last confirmed, or "no annotations" if nothing was confirmed.
     """
-    frozen_frame, annotations = _ann.get_all()
-    if frozen_frame is None or not annotations:
-        return ["No pending annotations. "
-                "Ask the user to draw boxes at /annotate first."]
-    result = physiclaw.process_annotations(frozen_frame, annotations)
-    text, frame = result
-    return [text, Image(data=physiclaw.frame_to_jpeg(frame), format="jpeg")]
+    with _ann.lock:
+        confirmed = list(_ann.confirmed_annotations)
+    frozen_frame = _ann.get_frozen_frame()
+    if not confirmed:
+        return ["No confirmed annotations. "
+                f"Ask the user to draw boxes at http://{args.host}:{args.port}/annotate and click Confirm."]
+
+    lines = [f"# Confirmed Annotations ({len(confirmed)} items)\n"]
+    for i, box in enumerate(confirmed):
+        b = box['bbox']
+        box_type = box.get('type', 'box')
+        label = box.get('label', '')
+        source = box.get('source', 'user')
+        src = f" [{source}]" if source != 'user' else ""
+        desc = f" — {label}" if label else ""
+        coords = ", ".join(str(v) for v in b)
+        type_tag = f" ({box_type})" if box_type != 'box' else ""
+        lines.append(f"- {i+1}{type_tag}{src}: [{coords}]{desc}")
+    text = "\n".join(lines)
+
+    if frozen_frame is not None:
+        return [text, Image(data=physiclaw.frame_to_jpeg(frozen_frame),
+                            format="jpeg")]
+    return [text]
+
+
+@mcp.tool()
+def propose_bboxes(proposals: list[dict]) -> str:
+    """Propose bounding boxes for the user to review in the annotation UI.
+
+    Sends your coordinate guesses to the annotation web UI at /annotate.
+    The user can move, resize, delete, relabel, or add new boxes.
+    After the user confirms, call wait_for_confirmation() to get the result.
+
+    Parks the arm and takes a fresh screenshot automatically.
+
+    Args:
+        proposals: list of {"bbox": [left, top, right, bottom], "label": "element name"}
+                   Coordinates are 0-1 decimals (phone screen).
+    """
+    import time
+    physiclaw.acquire()
+    try:
+        physiclaw.park()
+        time.sleep(1.5)
+
+        # Freeze a fresh snapshot for the annotation UI
+        frame = physiclaw.cam._fresh_frame()
+        if frame is None:
+            return "Camera capture failed"
+        import cv2
+        frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+
+        from datetime import datetime
+        snapshot_id = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
+        _ann.freeze(frame, snapshot_id)
+
+        # Push proposals to staging area for UI to pick up
+        _ann.push_agent_proposals(proposals)
+
+        url = f"http://{args.host}:{args.port}/annotate"
+        return (f"{len(proposals)} proposals sent to annotation UI. "
+                f"Ask the user to review and confirm at {url}")
+    finally:
+        physiclaw.release()
+
+
+@mcp.tool()
+def wait_for_confirmation(timeout: int = 120) -> list:
+    """Wait for the user to confirm bounding boxes in the annotation UI.
+
+    Blocks until the user clicks Confirm at /annotate, or until timeout.
+    Returns the confirmed boxes with user-corrected coordinates and labels.
+
+    Call this after propose_bboxes() or after asking the user to draw boxes.
+
+    Args:
+        timeout: seconds to wait before giving up (default 120)
+    """
+    result = _ann.wait_confirmed(timeout=float(timeout))
+    if result is None:
+        return ["Timeout — the user hasn't confirmed yet. "
+                f"Ask them if they need help at http://{args.host}:{args.port}/annotate"]
+
+    frozen_frame = _ann.get_frozen_frame()
+    _ann.clear_confirmation()
+
+    lines = [f"# Confirmed Annotations ({len(result)} items)\n"]
+    for i, box in enumerate(result):
+        b = box['bbox']
+        box_type = box.get('type', 'box')
+        label = box.get('label', '')
+        source = box.get('source', 'user')
+        src = f" [{source}]" if source != 'user' else ""
+        desc = f" — {label}" if label else ""
+        coords = ", ".join(str(v) for v in b)
+        type_tag = f" ({box_type})" if box_type != 'box' else ""
+        lines.append(f"- {i+1}{type_tag}{src}: [{coords}]{desc}")
+    text = "\n".join(lines)
+
+    if frozen_frame is not None:
+        return [text, Image(data=physiclaw.frame_to_jpeg(frozen_frame),
+                            format="jpeg")]
+    return [text]
 
 # ────────────────────────────────────────────────────────────────
 
