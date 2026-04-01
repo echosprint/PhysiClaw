@@ -9,8 +9,8 @@ Outputs:
     data/image/keyboard/bbox/bbox_<name>.png — screenshot with numbered key boxes
     .claude/ui-presets/system-keyboard.md     — preset template with positions filled in
 
-QWERTY letters, digits, shift, delete, space are auto-labeled.
-Keys marked ??? need to be filled in by looking at the bounding box images.
+QWERTY letters (rows 1-3), digits, shift, and delete are auto-labeled.
+Bottom row and numeric symbol keys marked ??? need to be filled in from the bounding box images.
 """
 
 import argparse
@@ -106,8 +106,12 @@ if pages:
     preset_dir.mkdir(parents=True, exist_ok=True)
     preset_path = preset_dir / "system-keyboard.md"
     preset_path.write_text(preset)
+    # Save a reference copy for verifying positions after ??? are filled
+    ref_path = out_dir / "system-keyboard.ref.md"
+    ref_path.write_text(preset)
     print(f"\n{'='*60}")
     print(f"Preset written to {preset_path}")
+    print(f"Reference copy saved to {ref_path}")
     print(f"Keys marked ??? need to be filled in from the bounding box images.")
     print()
     print(preset)
