@@ -46,7 +46,7 @@ You control a real phone sitting on a desk — a camera sees the screen from dir
 ## Operation cycle (dynamic content / preset path)
 
 1. Check UI presets — if the target has known coordinates, use them directly.
-2. If no preset (dynamic content only): park() + screenshot() + grid_overlay().
+2. If no preset: park() + screenshot(). Optionally detect_elements() to find icons + text with coordinates. Or grid_overlay() to estimate manually.
 3. bbox_target(bbox) — bbox = [left, top, right, bottom] as 0-1 decimals.
 4. **Label test:** name the element INSIDE each rectangle.
    - Covers the target → confirm_bbox(shift)
@@ -101,6 +101,40 @@ def park() -> str:
     try:
         physiclaw.park()
         return "Stylus parked out of frame"
+    finally:
+        physiclaw.release()
+
+
+@mcp.tool()
+def detect_elements() -> list:
+    """Detect all interactable UI elements on the phone screen.
+
+    Parks the stylus, takes a clean screenshot, and runs two detectors:
+    - Icon detection: finds buttons, icons, and interactive elements
+    - OCR: reads all visible text (labels, keys, prices, etc.)
+
+    Returns a text listing of all elements with bounding boxes as 0-1
+    decimals [left, top, right, bottom], plus two annotated images
+    (icon boxes + OCR boxes). Use the coordinates to call bbox_target().
+
+    The detection models are lightweight (<100MB) so bounding boxes may not
+    be pixel-perfect. Use them as estimates to narrow down your target's
+    position, then refine with bbox_target() for precise targeting.
+
+    Requires vision models to be set up first (run /setup-vision-models).
+    If a model isn't installed, its section shows "unavailable" instead of results.
+    """
+    import time
+    physiclaw.acquire()
+    try:
+        physiclaw.park()
+        time.sleep(1.5)
+        elements_text, icon_frame, ocr_frame = physiclaw.detect_elements()
+        return [
+            elements_text,
+            Image(data=physiclaw.frame_to_jpeg(icon_frame), format="jpeg"),
+            Image(data=physiclaw.frame_to_jpeg(ocr_frame), format="jpeg"),
+        ]
     finally:
         physiclaw.release()
 

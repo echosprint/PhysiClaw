@@ -41,6 +41,7 @@ Items in a scrollable list or grid — product cards, chat threads, menu entries
 - `grid_overlay(density, color)` — show screen with numbered grid lines (0-1 scale). density: "sparse", "normal" (default), or "dense" (0.05 spacing). Use to estimate target coordinates visually.
 - `bbox_target(bbox)` — draw colored rectangles on a fresh photo. bbox = [left, top, right, bottom] as 0-1 decimals.
 - `get_user_annotations()` — get bounding boxes drawn by the user in the annotation web UI
+- `detect_elements()` — run icon detection + OCR on the screen, returns element list with 0-1 coords plus annotated images. Requires vision models (run `/setup-vision-models` first).
 
 **Propose-confirm (for fixed UI elements without presets):**
 
