@@ -106,6 +106,10 @@ If fail → adjust coordinates and call `bbox_target()` again. 2-3 attempts is n
 
 Then execute: `tap()` / `double_tap()` / `long_press()` / `swipe()`.
 
+### Gesture didn't register? Just retry.
+
+The capacitive stylus occasionally fails to register on the phone — the screen simply doesn't respond. If a gesture (`tap()`, `double_tap()`, `long_press()`, `swipe()`) doesn't change the screen, **just call the same gesture again**. The confirmed bbox is retained, so it targets the same spot. No need to re-confirm or re-run the targeting workflow. The position was correct — the touch just wasn't detected.
+
 ## DON'T: common mistakes
 
 - ❌ Tapping a fixed UI element without a preset or user confirmation — propose first

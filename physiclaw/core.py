@@ -301,12 +301,6 @@ class PhysiClaw:
         self._confirmed_bbox = self._pending_bboxes['center']
         self._pending_bboxes = {}
 
-    def consume_confirmed_bbox(self) -> list[float] | None:
-        """Return and clear the confirmed bbox. Returns None if none."""
-        bbox = self._confirmed_bbox
-        self._confirmed_bbox = None
-        return bbox
-
     def move_to_bbox_center(self, bbox: list[float]):
         """Move arm to the center of a bbox [left, top, right, bottom] (0-1)."""
         if self._grid_cal is None:

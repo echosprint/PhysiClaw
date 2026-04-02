@@ -225,10 +225,12 @@ def confirm_bbox() -> str:
 
 
 def _maybe_move_to_bbox():
-    """If a bbox is confirmed, move arm to its center and clear it."""
-    bbox = physiclaw.consume_confirmed_bbox()
-    if bbox is not None:
-        physiclaw.move_to_bbox_center(bbox)
+    """If a bbox is confirmed, move arm to its center.
+    The bbox is kept for retry — calling tap() again reuses the same target.
+    Cleared automatically on the next bbox_target() call.
+    """
+    if physiclaw._confirmed_bbox is not None:
+        physiclaw.move_to_bbox_center(physiclaw._confirmed_bbox)
 
 
 @mcp.tool()
@@ -238,6 +240,10 @@ def tap() -> str:
     Use for: pressing buttons, selecting items, opening apps, following links, dismissing dialogs.
     Call bbox_target() + confirm_bbox() first to set the target location.
     After tapping, use park() + screenshot() to verify the result.
+
+    If the screen didn't change, the stylus may not have registered.
+    Just call tap() again — the confirmed bbox is retained. No need to
+    re-confirm. This applies to all gestures (tap, double_tap, etc.).
     """
     physiclaw.require_hardware()
     physiclaw.acquire()
