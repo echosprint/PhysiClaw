@@ -228,9 +228,9 @@ def _tap_at(arm: StylusArm, cam: Camera, x: float, y: float,
     arm._fast_move(x, y)
     arm.wait_idle()
     arm._pen_down(z=z_tap)
-    time.sleep(0.15)
+    arm._dwell(0.15)
     arm._pen_up()
-    time.sleep(0.3)
+    arm.wait_idle()
     return cam.wait_for_green(timeout=1.0)
 
 

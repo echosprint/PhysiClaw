@@ -41,6 +41,7 @@ GCODE_LINEAR_MOVE = 'G1 X{x:.3f}Y{y:.3f}F{f}'        # controlled XY (G1)
 GCODE_REL_FAST    = 'G91G0 X{x:.3f}Y{y:.3f}'          # relative rapid
 GCODE_REL_LINEAR  = 'G91G1 X{x:.3f}Y{y:.3f}F{f}'     # relative linear
 GCODE_Z_ADVANCE   = 'G1G90 Z{z:.2f}F{f}'              # slow Z advance for long press
+GCODE_DWELL       = 'G4 P{s}'                          # dwell for s seconds (planner-side)
 
 # ─── Main class ──────────────────────────────────────────────
 
@@ -125,6 +126,7 @@ class StylusArm:
 
     def wait_idle(self, timeout=10):
         """Poll until GRBL reports Idle status."""
+        time.sleep(0.01)  # let GRBL transition from Idle→Run after buffering
         deadline = time.time() + timeout
         while time.time() < deadline:
             status = self._query_status()
@@ -231,6 +233,8 @@ class StylusArm:
     def _pen_down(self, z=None, speed=None):
         """Lower stylus. G1G90: always reassert absolute mode to prevent
         Z-axis crushing the screen due to mode errors.
+        Buffers the command only — caller must use _dwell() or wait_idle()
+        to ensure contact before proceeding.
         z: override Z depth (used by calibration probing). Defaults to Z_DOWN.
         speed: override Z speed. Defaults to Z_SPEED.
         """
@@ -245,6 +249,14 @@ class StylusArm:
         keeps GRBL coordinate tracking in sync.
         """
         self._send(GCODE_PEN_UP.format(z=self.Z_UP, f=self.Z_SPEED))
+
+    def _dwell(self, seconds):
+        """Hold position for duration (GRBL-side timing, 50ms granularity).
+        G4 is a sync barrier: drains the planner first, then dwells.
+        _send() blocks until the dwell completes. The $1 idle timer
+        runs during the dwell — caller must set $1=255 for long holds.
+        """
+        self._send(GCODE_DWELL.format(s=seconds))
 
     def _fast_move(self, x, y, speed=8000):
         """Rapid move without touching screen (G0). Pen must be up first."""
@@ -262,20 +274,34 @@ class StylusArm:
     # ─── Tap mechanics ───────────────────────────────────────
 
     def _hold_contact(self, duration):
-        """Hold stylus on screen for duration seconds.
-        For short taps (< 250ms): just pen_down, motor stays powered within $1 timeout.
-        For long holds: temporarily set $1=255 to keep motor always on.
-        """
-        if duration > 0.25:
-            self._set_idle_delay(255)
-        self._pen_down()
-        time.sleep(duration)
-        self._pen_up()
-        if duration > 0.25:
-            self._set_idle_delay(250)
+        """Hold stylus on screen for duration seconds (GRBL-timed via G4).
 
-    def _set_idle_delay(self, ms):
-        """Set $1 motor idle delay. Retries on failure to prevent stuck state."""
+        G4 is a sync barrier: it drains the planner, then dwells. During
+        the dwell, the $1 idle timer runs. For durations > $1 timeout
+        (250ms), set $1=255 to keep the Z motor powered and prevent
+        spring rebound.
+
+        G4 has 50ms granularity — actual dwell is rounded up to the
+        next multiple of 50ms (e.g. 80ms → 100ms). Acceptable for
+        phone touch thresholds.
+        """
+        needs_hold = duration > 0.2
+        if needs_hold:
+            self._set_motors_always_on(True)
+        try:
+            self._pen_down()
+            self._dwell(duration)
+            self._pen_up()
+            self.wait_idle()
+        finally:
+            if needs_hold:
+                self._set_motors_always_on(False)
+
+    def _set_motors_always_on(self, always_on):
+        """Keep stepper motors powered ($1=255) or restore normal idle timeout ($1=250).
+        Retries on failure to prevent stuck state.
+        """
+        ms = 255 if always_on else 250
         for _ in range(3):
             try:
                 self._send(f'$1={ms}')
@@ -307,10 +333,20 @@ class StylusArm:
         self._hold_contact(self.TAP_DURATION)
 
     def double_tap(self):
-        """Double tap at current position."""
-        self._hold_contact(self.TAP_DURATION)
-        time.sleep(self.DOUBLE_TAP_GAP)
-        self._hold_contact(self.TAP_DURATION)
+        """Double tap at current position.
+        Each G4 dwell blocks until complete (sync barrier). GRBL controls
+        all timing. Gap = dwell(200ms) + pen_down travel(~35ms) ≈ 235ms
+        (< 300ms threshold). Individual tap dwells (80ms) are within $1=250ms
+        timeout so Z motor stays powered without needing $1=255.
+        """
+        self._pen_down()
+        self._dwell(self.TAP_DURATION)
+        self._pen_up()
+        self._dwell(self.DOUBLE_TAP_GAP)
+        self._pen_down()
+        self._dwell(self.TAP_DURATION)
+        self._pen_up()
+        self.wait_idle()
 
     def long_press(self):
         """Long press at current position."""
@@ -329,10 +365,10 @@ class StylusArm:
         dx = mx / mag * d
         dy = my / mag * d
         f = self.SWIPE_SPEEDS[speed]
-        self._pen_down()
-        self._send(GCODE_REL_LINEAR.format(x=dx, y=dy, f=f))
-        self._send(GCODE_ABSOLUTE)
-        self._pen_up()
+        self._pen_down()                                    # Z down (queued)
+        self._send(GCODE_REL_LINEAR.format(x=dx, y=dy, f=f))  # XY slide (queued after Z)
+        self._send(GCODE_ABSOLUTE)                             # restore absolute mode
+        self._pen_up()                                         # Z up (queued after slide)
 
     def close(self):
         """Close serial port."""

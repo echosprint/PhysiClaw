@@ -33,8 +33,9 @@ SLOW_Z_SPEED = 3000   # extra slow for initial Z probing
 def tap_once(arm: StylusArm, z_tap: float, z_speed: int = PROBE_Z_SPEED) -> None:
     """Pen down then up at current XY position."""
     arm._pen_down(z=z_tap, speed=z_speed)
-    time.sleep(0.15)
+    arm._dwell(0.15)
     arm._pen_up()
+    arm.wait_idle()
 
 
 def move_xy(arm: StylusArm, x: float, y: float) -> None:
