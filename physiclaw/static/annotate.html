@@ -58,17 +58,11 @@ body { background: #1a1a1a; color: #e0e0e0; font-family: -apple-system, sans-ser
 /* Waiting overlay */
 .waiting-overlay {
   position: absolute; top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.6); display: none;
+  background: rgba(0,0,0,0.85); display: none;
   align-items: center; justify-content: center;
   z-index: 10; flex-direction: column; gap: 12px;
 }
 .waiting-overlay.active { display: flex; }
-.waiting-overlay .spinner {
-  width: 32px; height: 32px; border: 3px solid #555;
-  border-top-color: #00e5ff; border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
 .waiting-overlay .msg { color: #aaa; font-size: 14px; }
 
 /* Right column — annotations list */
@@ -144,8 +138,8 @@ body { background: #1a1a1a; color: #e0e0e0; font-family: -apple-system, sans-ser
     <img id="frozenImg" alt="Frozen snapshot">
     <canvas id="drawCanvas"></canvas>
     <div class="waiting-overlay" id="waitingOverlay">
-      <div class="spinner"></div>
-      <div class="msg">Waiting for agent...</div>
+      <div class="msg" style="font-size: 28px;">✓</div>
+      <div class="msg">Confirmed — agent will use these boxes.</div>
     </div>
   </div>
 
@@ -376,17 +370,18 @@ function redrawCanvas() {
 
 
     // Label badge (top-left, outside box)
-    const typeTag = boxType !== 'box' ? (boxType === 'column' ? '| ' : '— ') : '';
-    const labelText = typeTag + (b.label || String(i + 1));
+    const labelText = String(i + 1);
     ctx.font = 'bold 12px sans-serif';
     const tw = ctx.measureText(labelText).width;
     const lw = tw + 8, lh = 18;
     let lx, ly;
     if (boxType === 'column') {
-      lx = x; ly = pMinY + 4;
+      lx = x; ly = y - ext - lh;           // above top end of column lines
+      if (ly < 0) ly = y2 + ext + 2;       // flip to below bottom end if clipped
     } else if (boxType === 'row') {
-      lx = pMinX + 4; ly = y - lh;
-      if (ly < pMinY) ly = y2 + 2;
+      lx = x - ext - lw;                   // left of left end of row lines
+      if (lx < 0) lx = x2 + ext + 2;      // flip to right end if clipped
+      ly = y;
     } else {
       lx = x; ly = y - lh;
       if (ly < 0) ly = y2;
@@ -432,8 +427,7 @@ function renderBoxList() {
       item.className = 'box-item';
       item.style.borderLeftColor = c;
       const badge = isAgent ? '<span class="ai-badge">AI</span>' : '';
-      const typeLabel = boxType === 'column' ? ' <span style="color:#888;font-size:10px">COLUMN</span>'
-                       : boxType === 'row' ? ' <span style="color:#888;font-size:10px">ROW</span>' : '';
+      const typeLabel = boxType === 'column' ? 'column' : boxType === 'row' ? 'row' : 'box';
 
       // Show only relevant coordinates for line types
       let coordsHtml;
@@ -455,12 +449,12 @@ function renderBoxList() {
 
       item.innerHTML =
         '<div class="box-header">' +
-          '<span class="num" style="color:' + c + '">Box ' + (i + 1) + badge + typeLabel + '</span>' +
+          '<span class="num" style="color:' + c + '">#' + (i + 1) + ' ' + typeLabel + badge + '</span>' +
           '<span class="del" data-i="' + i + '">&times;</span>' +
         '</div>' +
+        '<div class="coords">' + coordsHtml + '</div>' +
         '<input class="label-input" data-i="' + i + '" placeholder="Label..." value="' +
-          (b.label || '').replace(/"/g, '&quot;') + '">' +
-        '<div class="coords">' + coordsHtml + '</div>';
+          (b.label || '').replace(/"/g, '&quot;') + '">';
       boxList.appendChild(item);
     });
   }
@@ -522,6 +516,7 @@ async function confirmBoxes() {
   waiting = true;
   waitingOverlay.classList.add('active');
   btnConfirm.disabled = true;
+  boxList.innerHTML = '<span class="empty-msg">Boxes sent to agent.</span>';
 }
 
 // ─── Poll for agent proposals ─────────────────────────────
@@ -554,6 +549,7 @@ async function pollProposals() {
   } catch (e) { /* server not running */ }
 }
 
+pollProposals();                   // load immediately on page open
 setInterval(pollProposals, 1500);
 
 // ─── Mouse events ──────────────────────────────────────────
