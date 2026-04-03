@@ -103,20 +103,18 @@ def park() -> str:
 def detect_elements() -> list:
     """Detect all interactable UI elements on the phone screen.
 
-    Parks the stylus, takes a clean screenshot, and runs two detectors:
-    - Icon detection: finds buttons, icons, and interactive elements
-    - OCR: reads all visible text (labels, keys, prices, etc.)
+    Parks the stylus, takes a clean screenshot, and runs three detectors:
+    1. Color segmentation: finds colored buttons, icons, tags, content images
+       (no ML model needed — pure OpenCV HSV pipeline)
+    2. Icon detection: finds all UI elements including gray/colorless ones
+    3. OCR: reads all visible text (labels, keys, prices, etc.)
 
     Returns a text listing of all elements with bounding boxes as 0-1
-    decimals [left, top, right, bottom], plus two annotated images
-    (icon boxes + OCR boxes). Use the coordinates to call bbox_target().
+    decimals [left, top, right, bottom], plus three annotated images
+    (color blocks + icon boxes + OCR boxes).
 
-    The detection models are lightweight (<100MB) so bounding boxes may not
-    be pixel-perfect. Use them as estimates to narrow down your target's
-    position, then refine with bbox_target() for precise targeting.
-
-    Requires vision models to be set up first (run /setup-vision-models).
-    If a model isn't installed, its section shows "unavailable" instead of results.
+    Color segmentation always works. Icon detection and OCR require vision
+    models (run /setup-vision-models). Missing models show "unavailable".
     """
     import time
     physiclaw.require_hardware()
@@ -124,14 +122,90 @@ def detect_elements() -> list:
     try:
         physiclaw.park()
         time.sleep(1.5)
-        elements_text, icon_frame, ocr_frame = physiclaw.detect_elements()
+        elements_text, color_frame, icon_frame, ocr_frame = physiclaw.detect_elements()
         return [
             elements_text,
+            Image(data=physiclaw.frame_to_jpeg(color_frame), format="jpeg"),
             Image(data=physiclaw.frame_to_jpeg(icon_frame), format="jpeg"),
             Image(data=physiclaw.frame_to_jpeg(ocr_frame), format="jpeg"),
         ]
     finally:
         physiclaw.release()
+
+
+@mcp.tool()
+def check_screen(reference_path: str) -> str:
+    """Compare the current phone screen against a reference screenshot.
+
+    Takes a camera screenshot and matches it against the reference image
+    using ORB feature matching. Use this during skill execution to confirm
+    the phone is showing the expected screen before acting.
+
+    Also detects dark overlays (popups/modals) that might need dismissal.
+
+    Args:
+        reference_path: path to the reference screenshot (e.g.,
+            "data/app-skills/meituan/screens/01_home.png")
+    """
+    import time
+    from pathlib import Path
+    from physiclaw.screen_match import match_screen, detect_dark_overlay
+
+    ref_path = Path(reference_path)
+    if not ref_path.exists():
+        return f"Reference image not found: {reference_path}"
+
+    ref = cv2.imread(str(ref_path))
+    if ref is None:
+        return f"Failed to read reference image: {reference_path}"
+
+    physiclaw.require_hardware()
+    physiclaw.acquire()
+    try:
+        physiclaw.park()
+        time.sleep(1.0)
+        frame = physiclaw.screenshot()
+    finally:
+        physiclaw.release()
+
+    result = match_screen(frame, ref)
+    has_overlay = detect_dark_overlay(frame)
+
+    lines = [f"Screen match: {'YES' if result.matched else 'NO'}"]
+    lines.append(f"Confidence: {result.confidence:.1%} "
+                 f"({result.good_matches} matches, {result.inliers} inliers)")
+    if has_overlay:
+        lines.append("WARNING: dark overlay detected — possible popup or modal dialog")
+    lines.append(f"Reference: {reference_path}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def check_screen_changed() -> list:
+    """Take two screenshots 1 second apart and check if the screen changed.
+
+    Use this after a gesture (tap, swipe) to verify the action had an effect.
+    Returns the second screenshot plus a text description of whether the
+    screen changed.
+    """
+    import time
+    from physiclaw.screen_match import frames_differ
+
+    physiclaw.require_hardware()
+    physiclaw.acquire()
+    try:
+        physiclaw.park()
+        time.sleep(0.5)
+        frame_a = physiclaw.screenshot()
+        time.sleep(1.0)
+        frame_b = physiclaw.screenshot()
+    finally:
+        physiclaw.release()
+
+    changed = frames_differ(frame_a, frame_b)
+    status = "Screen CHANGED — the gesture had an effect" if changed \
+        else "Screen UNCHANGED — the gesture may not have registered, try again"
+    return [status, Image(data=physiclaw.frame_to_jpeg(frame_b), format="jpeg")]
 
 
 @mcp.tool()
@@ -320,6 +394,221 @@ physiclaw = PhysiClaw()
 def shutdown():
     """Clean up hardware resources."""
     physiclaw.shutdown()
+
+# ─── LAN Bridge routes + tools ────────────────────────────────
+
+from physiclaw.bridge import (
+    BridgeState, CalibrationState, get_lan_ip,
+    serve_message_page, serve_qr_page, handle_bridge_text,
+    handle_bridge_tapped, handle_device_info,
+    handle_screenshot_upload,
+    serve_calibrate_page, handle_calib_phase,
+    handle_calib_set_phase, handle_calib_touch, handle_calib_touches,
+)
+
+_bridge = BridgeState()
+_calib = CalibrationState()
+
+@mcp.custom_route("/message", methods=["GET"])
+async def _message(request):
+    return await serve_message_page(request)
+
+@mcp.custom_route("/qr", methods=["GET"])
+async def _qr(request):
+    return await serve_qr_page(request)
+
+@mcp.custom_route("/api/bridge/text", methods=["GET"])
+async def _bridge_text(request):
+    return await handle_bridge_text(request, _bridge)
+
+@mcp.custom_route("/api/bridge/tapped", methods=["POST"])
+async def _bridge_tapped(request):
+    return await handle_bridge_tapped(request, _bridge)
+
+@mcp.custom_route("/api/bridge/device-info", methods=["POST"])
+async def _bridge_device_info(request):
+    return await handle_device_info(request, _bridge)
+
+@mcp.custom_route("/api/bridge/screenshot", methods=["POST"])
+async def _bridge_screenshot(request):
+    return await handle_screenshot_upload(request, _bridge)
+
+# ─── Calibration page routes ─────────────────────────────────
+
+@mcp.custom_route("/calibrate", methods=["GET"])
+async def _calibrate_page(request):
+    return await serve_calibrate_page(request)
+
+@mcp.custom_route("/api/calibrate/phase", methods=["GET"])
+async def _calib_phase(request):
+    return await handle_calib_phase(request, _calib)
+
+@mcp.custom_route("/api/calibrate/set-phase", methods=["POST"])
+async def _calib_set(request):
+    return await handle_calib_set_phase(request, _calib)
+
+@mcp.custom_route("/api/calibrate/touch", methods=["POST"])
+async def _calib_touch(request):
+    return await handle_calib_touch(request, _calib)
+
+@mcp.custom_route("/api/calibrate/touches", methods=["GET"])
+async def _calib_touches(request):
+    return await handle_calib_touches(request, _calib)
+
+
+@mcp.tool()
+def bridge_status() -> str:
+    """Check the LAN bridge and get the URL for the phone to open.
+
+    The bridge enables fast text transfer via clipboard. The user opens the
+    URL on the phone in Safari/Chrome. Then the agent can send text and
+    tap the screen to copy it to the phone's clipboard — much faster than
+    typing on the keyboard character by character.
+
+    Returns the URL, connection status, and device info if available.
+    """
+    ip = get_lan_ip()
+    port = mcp.settings.port
+    msg_url = f"http://{ip}:{port}/message"
+    cal_url = f"http://{ip}:{port}/calibrate"
+
+    lines = [f"Bridge URL: {msg_url}", f"Calibration URL: {cal_url}"]
+    if _bridge.connected:
+        lines.append("Status: connected ✓")
+    else:
+        lines.append("Status: not connected — ask the user to open the URL on their phone")
+
+    if _bridge.device_info:
+        d = _bridge.device_info
+        lines.append(f"Screen: {d.get('screen_width')}×{d.get('screen_height')}px "
+                     f"({d.get('css_width')}×{d.get('css_height')}pt, "
+                     f"{d.get('pixel_ratio')}x)")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def bridge_send_text(text: str) -> str:
+    """Send text to the phone's /message page for clipboard transfer.
+
+    The text appears large on the bridge page. Next step: call bridge_tap()
+    to physically tap the screen — this triggers the JavaScript clipboard
+    copy on the phone.
+
+    After bridge_tap() confirms, the text is in the phone's clipboard.
+    Paste it into any app: long_press on a text field → tap "Paste".
+
+    Phone must have the bridge page open (call bridge_status() for URL).
+    """
+    if not _bridge.connected:
+        return ("Phone not connected to bridge. "
+                "Call bridge_status() to get the URL, then ask the user "
+                "to open it on their phone in Safari or Chrome.")
+    _bridge.send_text(text)
+    return f"Text '{text}' sent to phone. Call bridge_tap() to copy to clipboard."
+
+
+@mcp.tool()
+def bridge_tap() -> str:
+    """Tap the phone screen center to copy bridge text to clipboard.
+
+    The /message page fills the screen. Tapping anywhere triggers the
+    JavaScript clipboard copy. This tool taps screen center (0.5, 0.5),
+    then waits up to 5 seconds for the phone to confirm.
+
+    Call bridge_send_text() first to set the text.
+    After this tool returns, the text is in the phone's clipboard.
+    """
+    physiclaw.require_hardware()
+    physiclaw.acquire()
+    try:
+        physiclaw.tap_at_pct(0.5, 0.5)
+    finally:
+        physiclaw.release()
+
+    if _bridge.wait_clipboard(timeout=5.0):
+        return f"Clipboard ready — '{_bridge.text}' copied to phone clipboard"
+    return ("Tap sent but clipboard copy not confirmed. "
+            "Is the /message page open in the foreground on the phone?")
+
+
+@mcp.tool()
+def phone_screenshot(assistive_touch_bbox: list[float] | None = None) -> Image:
+    """Take a pixel-perfect screenshot via AssistiveTouch.
+
+    Taps the AssistiveTouch button on the phone. An iOS Shortcut captures a
+    screenshot and uploads it to the server. Returns the full-resolution PNG.
+
+    Much sharper than camera screenshots — use this for skill building, OCR,
+    and detailed UI analysis.
+
+    Requires setup first (run /setup-screenshot):
+    1. AssistiveTouch enabled with single-tap → Run Shortcut
+    2. Shortcut: Take Screenshot → Get Contents of URL (POST to server)
+
+    Args:
+        assistive_touch_bbox: [left, top, right, bottom] as 0-1 decimals for
+            the AssistiveTouch button. If None, reads from the
+            .claude/ui-presets/system.md preset file.
+    """
+    import json
+    from pathlib import Path
+
+    # Resolve AssistiveTouch button position
+    bbox = assistive_touch_bbox
+    if bbox is None:
+        preset_path = Path(".claude/ui-presets/system.md")
+        if not preset_path.exists():
+            return "AssistiveTouch position unknown. Run /setup-screenshot first, " \
+                   "or pass assistive_touch_bbox=[left, top, right, bottom]."
+        # Parse preset for AssistiveTouch entry
+        content = preset_path.read_text()
+        for line in content.splitlines():
+            if "AssistiveTouch" in line and "|" in line:
+                # Extract position from table row: | Element | Position | Action |
+                parts = [p.strip() for p in line.split("|")]
+                for p in parts:
+                    if p.startswith("[") and p.endswith("]"):
+                        bbox = json.loads(p)
+                        break
+                if bbox:
+                    break
+        if bbox is None:
+            return "AssistiveTouch position not found in system.md preset. " \
+                   "Run /setup-screenshot to configure."
+
+    physiclaw.require_hardware()
+
+    # Clear any pending screenshot
+    _bridge._screenshot_ready.clear()
+
+    # Tap the AssistiveTouch button
+    physiclaw.acquire()
+    try:
+        cx = (bbox[0] + bbox[2]) / 2
+        cy = (bbox[1] + bbox[3]) / 2
+        physiclaw.tap_at_pct(cx, cy)
+    finally:
+        physiclaw.release()
+
+    # Wait for the screenshot to arrive via HTTP POST
+    data = _bridge.wait_screenshot(timeout=10.0)
+    if data is None:
+        return "Timeout — no screenshot received. Check that the iOS Shortcut " \
+               "is configured to POST to this server."
+
+    # Save to data/screenshot/
+    from datetime import datetime
+    from physiclaw.camera import SNAPSHOT_DIR
+    SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
+    ext = "png" if data[:4] == b'\x89PNG' else "jpg"
+    save_path = SNAPSHOT_DIR / f'{ts}_phone.{ext}'
+    save_path.write_bytes(data)
+
+    # Detect format for MCP Image
+    fmt = "png" if ext == "png" else "jpeg"
+    return Image(data=data, format=fmt)
+
 
 # ─── Annotation routes + tool ──────────────────────────────────
 
@@ -538,38 +827,194 @@ async def _camera_preview(request):
                             status_code=404)
 
 
-_CALIBRATE_STEPS = [
-    ("z-depth", "calibrate_z_depth"),
-    ("find-right", "calibrate_find_right"),
-    ("find-down", "calibrate_find_down"),
-    ("long-press", "calibrate_long_press"),
-    ("swipe", "calibrate_swipe"),
-    ("grid", "calibrate_grid"),
-]
+# ─── Plan calibration endpoints (touch + camera) ─────────────
+# Matches architecture plan Steps 0-6. No green flash.
+# Touch coordinates from /calibrate page. Camera for markers/dots.
 
-for _slug, _method_name in _CALIBRATE_STEPS:
-    def _make_handler(method_name):
-        async def _handler(request):
-            import asyncio
-            from starlette.responses import JSONResponse
+from physiclaw.plan_calibrate import (
+    step0_z_depth, step1_alignment, step2_camera_rotation,
+    step3_software_rotation, step4_grbl_screen, step5_camera_screen,
+    step6_validate, post_set_origin,
+)
 
-            def _do():
-                physiclaw.acquire()
-                try:
-                    return getattr(physiclaw, method_name)()
-                finally:
-                    physiclaw.release()
 
-            try:
-                result = await asyncio.get_event_loop().run_in_executor(None, _do)
-                return JSONResponse({"status": "ok", **result})
-            except Exception as e:
-                return JSONResponse({"status": "error", "message": str(e)},
-                                    status_code=500)
-        return _handler
+@mcp.custom_route("/api/calibrate/step0-z-depth", methods=["POST"])
+async def _step0(request):
+    import asyncio
+    from starlette.responses import JSONResponse
+    def _do():
+        if physiclaw._arm is None:
+            raise RuntimeError("Arm not connected")
+        physiclaw.acquire()
+        try:
+            z_tap = step0_z_depth(physiclaw._arm, _calib)
+            physiclaw._arm.Z_DOWN = z_tap
+            physiclaw._cal['z_tap'] = z_tap
+            return {"z_tap": z_tap}
+        finally:
+            physiclaw.release()
+    try:
+        result = await asyncio.get_event_loop().run_in_executor(None, _do)
+        return JSONResponse({"status": "ok", **result})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
-    mcp.custom_route(f"/api/calibrate/{_slug}", methods=["POST"])(
-        _make_handler(_method_name))
+
+@mcp.custom_route("/api/calibrate/step1-alignment", methods=["POST"])
+async def _step1(request):
+    import asyncio
+    from starlette.responses import JSONResponse
+    def _do():
+        if physiclaw._arm is None:
+            raise RuntimeError("Arm not connected")
+        z_tap = physiclaw._cal.get('z_tap')
+        if z_tap is None:
+            raise RuntimeError("Run step0 first")
+        physiclaw.acquire()
+        try:
+            tilt = step1_alignment(physiclaw._arm, _calib, z_tap)
+            return {"tilt_ratio": round(tilt, 4), "aligned": tilt < 0.02}
+        finally:
+            physiclaw.release()
+    try:
+        result = await asyncio.get_event_loop().run_in_executor(None, _do)
+        return JSONResponse({"status": "ok", **result})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+
+@mcp.custom_route("/api/calibrate/step2-camera-rotation", methods=["POST"])
+async def _step2(request):
+    import asyncio
+    from starlette.responses import JSONResponse
+    def _do():
+        if physiclaw._cam is None:
+            raise RuntimeError("Camera not connected")
+        ok = step2_camera_rotation(physiclaw._cam)
+        return {"ok": ok, "message": "Camera aligned" if ok else "Rotate camera 90°"}
+    try:
+        result = await asyncio.get_event_loop().run_in_executor(None, _do)
+        return JSONResponse({"status": "ok", **result})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+
+@mcp.custom_route("/api/calibrate/step3-sw-rotation", methods=["POST"])
+async def _step3(request):
+    import asyncio
+    from starlette.responses import JSONResponse
+    def _do():
+        if physiclaw._cam is None:
+            raise RuntimeError("Camera not connected")
+        rotation = step3_software_rotation(physiclaw._cam, _calib)
+        physiclaw._cal['rotation'] = rotation
+        name = {-1: "none", 0: "90° CW", 1: "180°", 2: "90° CCW"}.get(rotation, str(rotation))
+        return {"rotation": rotation, "rotation_name": name}
+    try:
+        result = await asyncio.get_event_loop().run_in_executor(None, _do)
+        return JSONResponse({"status": "ok", **result})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+
+@mcp.custom_route("/api/calibrate/step4-mapping-a", methods=["POST"])
+async def _step4(request):
+    import asyncio
+    from starlette.responses import JSONResponse
+    def _do():
+        if physiclaw._arm is None:
+            raise RuntimeError("Arm not connected")
+        z_tap = physiclaw._cal.get('z_tap')
+        if z_tap is None:
+            raise RuntimeError("Run step0 first")
+        physiclaw.acquire()
+        try:
+            affine, touches = step4_grbl_screen(physiclaw._arm, _calib, z_tap,
+                                                 _bridge.device_info)
+            physiclaw._cal['screen_to_grbl'] = affine
+            physiclaw._cal['step4_touches'] = touches
+            return {"ok": True, "pairs": len(touches)}
+        finally:
+            physiclaw.release()
+    try:
+        result = await asyncio.get_event_loop().run_in_executor(None, _do)
+        return JSONResponse({"status": "ok", **result})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+
+@mcp.custom_route("/api/calibrate/step5-mapping-b", methods=["POST"])
+async def _step5(request):
+    import asyncio
+    from starlette.responses import JSONResponse
+    def _do():
+        if physiclaw._cam is None:
+            raise RuntimeError("Camera not connected")
+        rotation = physiclaw._cal.get('rotation', cv2.ROTATE_90_COUNTERCLOCKWISE)
+        touches = physiclaw._cal.get('step4_touches', [])
+        vw = touches[0].get('viewport_w', 390) if touches else 390
+        vh = touches[0].get('viewport_h', 844) if touches else 844
+        # Park arm if possible
+        if physiclaw._arm and physiclaw._arm.MOVE_DIRECTIONS:
+            ux, uy = physiclaw._arm.MOVE_DIRECTIONS['top']
+            physiclaw._arm._fast_move(ux * 100, uy * 100)
+            physiclaw._arm.wait_idle()
+        pct_to_pixel = step5_camera_screen(physiclaw._cam, _calib, rotation, vw, vh)
+        physiclaw._cal['pct_to_pixel'] = pct_to_pixel
+        return {"ok": True, "dots": 15}
+    try:
+        result = await asyncio.get_event_loop().run_in_executor(None, _do)
+        return JSONResponse({"status": "ok", **result})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+
+@mcp.custom_route("/api/calibrate/step6-validate", methods=["POST"])
+async def _step6(request):
+    import asyncio
+    from starlette.responses import JSONResponse
+    def _do():
+        if physiclaw._arm is None:
+            raise RuntimeError("Arm not connected")
+        z_tap = physiclaw._cal.get('z_tap')
+        rotation = physiclaw._cal.get('rotation', cv2.ROTATE_90_COUNTERCLOCKWISE)
+        screen_to_grbl = physiclaw._cal.get('screen_to_grbl')
+        pct_to_pixel = physiclaw._cal.get('pct_to_pixel')
+        touches = physiclaw._cal.get('step4_touches', [])
+        if not all([z_tap, screen_to_grbl is not None, pct_to_pixel is not None]):
+            raise RuntimeError("Run steps 0-5 first")
+        # Build pct_to_grbl from screen_to_grbl + viewport dims
+        vw = touches[0].get('viewport_w', 390) if touches else 390
+        vh = touches[0].get('viewport_h', 844) if touches else 844
+        pct_to_grbl = screen_to_grbl.copy()
+        pct_to_grbl[:, 0] *= vw
+        pct_to_grbl[:, 1] *= vh
+        physiclaw.acquire()
+        try:
+            results = step6_validate(physiclaw._arm, physiclaw._cam, _calib,
+                                     z_tap, rotation, pct_to_grbl, pct_to_pixel)
+            passed = sum(1 for r in results if r['passed'])
+            # If passed, build and store GridCalibration
+            if passed >= 2:
+                from physiclaw.grid_calibrate import GridCalibration
+                physiclaw._grid_cal = GridCalibration(
+                    pct_to_grbl=pct_to_grbl, pct_to_pixel=pct_to_pixel)
+                post_set_origin(physiclaw._arm, pct_to_grbl)
+                # Recompute after origin reset
+                origin_gx, origin_gy = physiclaw._grid_cal.pct_to_grbl_mm(0.5, 0.5)
+                pct_to_grbl[0, 2] -= origin_gx
+                pct_to_grbl[1, 2] -= origin_gy
+                physiclaw._grid_cal = GridCalibration(
+                    pct_to_grbl=pct_to_grbl, pct_to_pixel=pct_to_pixel)
+            return {"results": results, "passed": passed, "total": len(results),
+                    "calibrated": passed >= 2}
+        finally:
+            physiclaw.release()
+    try:
+        result = await asyncio.get_event_loop().run_in_executor(None, _do)
+        return JSONResponse({"status": "ok", **result})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 
 @mcp.custom_route("/api/calibrate/verify-edge", methods=["POST"])

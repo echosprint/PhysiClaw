@@ -35,16 +35,32 @@ Items in a scrollable list or grid — product cards, chat threads, menu entries
 
 ## Tools
 
-Run `/setup` first to connect hardware and calibrate. All tools below require hardware to be ready.
+Run `/setup` first to connect hardware and calibrate. All tools below require hardware to be ready (except bridge tools).
+
+**LAN Bridge (clipboard text transfer — no hardware required):**
+
+- `bridge_status()` — check bridge connection and get the URL for the phone
+- `bridge_send_text(text)` — send text to the phone's /message page
+- `bridge_tap()` — tap screen center to copy displayed text to phone clipboard
+
+To paste text into an app: `bridge_send_text("text")` → `bridge_tap()` → navigate to text field → `long_press()` → tap "Paste". This is much faster than typing on the keyboard.
+
+To open any app: use `/open-app AppName` which does the full Spotlight clipboard-paste flow.
+
+**Phone screenshot (requires `/setup-screenshot` first):**
+
+- `phone_screenshot()` — tap AssistiveTouch to get a pixel-perfect screenshot via iOS Shortcut upload. Much cleaner than camera for OCR and UI analysis.
 
 **Free (call as many times as needed):**
 
 - `park()` — move stylus out of camera frame
-- `screenshot()` — see the screen (call park() first for clear view)
+- `screenshot()` — see the screen via camera (call park() first for clear view)
 - `grid_overlay(density, color)` — show screen with numbered grid lines (0-1 scale). density: "sparse", "normal" (default), or "dense" (0.05 spacing). Use to estimate target coordinates visually.
 - `bbox_target(bbox)` — draw colored rectangles on a fresh photo. bbox = [left, top, right, bottom] as 0-1 decimals.
 - `get_user_annotations()` — get bounding boxes drawn by the user in the annotation web UI
-- `detect_elements()` — run icon detection + OCR on the screen, returns element list with 0-1 coords plus annotated images. Requires vision models (run `/setup-vision-models` first).
+- `detect_elements()` — run all 3 CV tools (color segmentation + icon detection + OCR) on the screen, returns element list with 0-1 coords plus three annotated images. Color segmentation always works; icon detection and OCR require vision models (run `/setup-vision-models` first).
+- `check_screen(reference_path)` — compare current screen against a reference screenshot using ORB feature matching. For skill runtime: confirm the phone is on the expected screen.
+- `check_screen_changed()` — take two screenshots 1s apart and report if the screen changed. Use after gestures to verify they registered.
 
 **Propose-confirm (for fixed UI elements without presets):**
 

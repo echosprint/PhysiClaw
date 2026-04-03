@@ -12,7 +12,7 @@ import logging
 def main():
     parser = argparse.ArgumentParser(description="PhysiClaw MCP Server")
     parser.add_argument("--port", type=int, default=8048)
-    parser.add_argument("--host", type=str, default="127.0.0.1")
+    parser.add_argument("--host", type=str, default="0.0.0.0")
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="Show detailed debug output")
     args = parser.parse_args()
@@ -29,9 +29,15 @@ def main():
     mcp.settings.host = args.host
     mcp.settings.port = args.port
 
+    from physiclaw.bridge import get_lan_ip
+
     log = logging.getLogger(__name__)
+    lan_ip = get_lan_ip()
     log.info(f"PhysiClaw MCP server on http://{args.host}:{args.port}/mcp")
-    log.info(f"Annotation UI at http://{args.host}:{args.port}/annotate")
+    log.info(f"Annotation UI at http://localhost:{args.port}/annotate")
+    log.info(f"QR codes (scan with phone): http://localhost:{args.port}/qr")
+    log.info(f"Bridge (open on phone): http://{lan_ip}:{args.port}/message")
+    log.info(f"Calibration (open on phone): http://{lan_ip}:{args.port}/calibrate")
     log.info("Run /setup in Claude Code to connect hardware and calibrate")
     mcp.run(transport="streamable-http")
 

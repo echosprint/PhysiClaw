@@ -380,11 +380,17 @@ class PhysiClaw:
     # ─── Element detection ─────────────────────────────────────
 
     def detect_elements(self):
-        """Detect UI elements using icon detection + OCR.
+        """Detect UI elements using three analysis tools.
 
-        Returns (elements_text, icon_frame, ocr_frame) where:
+        Three complementary detectors run on every frame:
+        1. Color segmentation — finds colored buttons, icons, content images
+        2. Icon detection — finds all UI elements including gray/colorless ones
+        3. OCR — reads all visible text
+
+        Returns (elements_text, color_frame, icon_frame, ocr_frame) where:
         - elements_text: formatted text listing all elements with 0-1 coords
-        - icon_frame: screenshot annotated with numbered icon detection boxes
+        - color_frame: screenshot annotated with color segmentation boxes
+        - icon_frame: screenshot annotated with icon detection boxes
         - ocr_frame: screenshot annotated with OCR text boxes
         """
         if self._grid_cal is None:
@@ -398,17 +404,39 @@ class PhysiClaw:
 
         cal = self._grid_cal
         h, w = frame.shape[:2]
+        element_id = 0
+
+        # ── Tool 1: Color segmentation ─────────────────────────
+        color_table_header = (
+            "| id | color | type | bbox [left, top, right, bottom] | h_std |\n"
+            "|----|-------|------|------|-------|"
+        )
+        color_rows = []
+        color_frame = frame.copy()
+        try:
+            from physiclaw.color_segment import detect_color_blocks
+            from physiclaw.color_segment import annotate as color_annotate
+            blobs = detect_color_blocks(frame)
+            color_frame = color_annotate(frame, blobs)
+            for blob in blobs:
+                element_id += 1
+                x1, y1, x2, y2 = blob.bbox
+                l, t = cal.pixel_to_pct(int(x1), int(y1))
+                r, b = cal.pixel_to_pct(int(x2), int(y2))
+                kind = "image" if blob.is_image else "solid" if blob.is_solid else "mixed"
+                color_rows.append(
+                    f"| {element_id} | {blob.color_name} | {kind} "
+                    f"| [{l:.2f}, {t:.2f}, {r:.2f}, {b:.2f}] "
+                    f"| {blob.h_std:.1f} |"
+                )
+        except Exception as ex:
+            color_rows.append(f"| — | — | error: {ex} | — | — |")
+
+        # ── Tool 2: Icon detection ─────────────────────────────
         icon_table_header = (
             "| id | bbox [left, top, right, bottom] | conf |\n"
             "|----|------|------|"
         )
-        text_table_header = (
-            "| id | label | bbox [left, top, right, bottom] | conf |\n"
-            "|----|-------|------|------|"
-        )
-        element_id = 0
-
-        # Icon detection
         icon_rows = []
         icon_frame = frame.copy()
         try:
@@ -430,7 +458,11 @@ class PhysiClaw:
         except (ImportError, FileNotFoundError) as ex:
             icon_rows.append(f"| — | unavailable: {ex} | — |")
 
-        # OCR
+        # ── Tool 3: OCR ────────────────────────────────────────
+        text_table_header = (
+            "| id | label | bbox [left, top, right, bottom] | conf |\n"
+            "|----|-------|------|------|"
+        )
         ocr_rows = []
         ocr_frame = frame.copy()
         try:
@@ -457,7 +489,9 @@ class PhysiClaw:
             f"# Screen Parse Result\n\n"
             f"- **resolution**: {w}x{h}\n"
             f"- **timestamp**: {ts}\n\n"
-            f"## Icons\n\n{icon_table_header}\n"
+            f"## Color Blocks\n\n{color_table_header}\n"
+            + "\n".join(color_rows)
+            + f"\n\n## Icons\n\n{icon_table_header}\n"
             + "\n".join(icon_rows)
             + f"\n\n## Text\n\n{text_table_header}\n"
             + "\n".join(ocr_rows)
@@ -467,10 +501,11 @@ class PhysiClaw:
         from physiclaw.camera import SNAPSHOT_DIR
         SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
         file_ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
+        cv2.imwrite(str(SNAPSHOT_DIR / f'{file_ts}_colors.jpg'), color_frame)
         cv2.imwrite(str(SNAPSHOT_DIR / f'{file_ts}_icons.jpg'), icon_frame)
         cv2.imwrite(str(SNAPSHOT_DIR / f'{file_ts}_ocr.jpg'), ocr_frame)
 
-        return elements_text, icon_frame, ocr_frame
+        return elements_text, color_frame, icon_frame, ocr_frame
 
     # ─── Grid overlay ─────────────────────────────────────────
 
