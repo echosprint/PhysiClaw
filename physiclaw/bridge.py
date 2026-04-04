@@ -37,23 +37,41 @@ def get_lan_ip() -> str:
 
 
 class BridgeState:
-    """Shared state between the phone's /message page and agent MCP tools.
+    """Shared state for the LAN bridge between server and phone browser.
 
-    Thread-safe: accessed from async route handlers and blocking MCP tool
-    threads concurrently.
+    The phone opens /bridge in Safari and polls GET /api/bridge/state every
+    250ms. The server returns the current state; the phone renders it.
+    The phone is stateless — it always renders from the latest server response.
+
+    Two data flows use this state:
+
+    1. Text → clipboard:
+       - Agent calls send_text("hello") → sets self.text
+       - Phone polls, sees text, displays it large on screen
+       - Agent's arm physically taps the phone screen
+       - Phone JS copies text to clipboard on touch event
+       - Phone POSTs /api/bridge/tapped → mark_clipboard_copied()
+       - Agent's bridge_tap() tool was blocking on wait_clipboard(),
+         now unblocks and returns success
+
+    2. Screenshot upload:
+       - Agent taps AssistiveTouch on phone (via arm)
+       - iOS Shortcut fires: takes screenshot, POSTs image bytes
+         to /api/bridge/screenshot → receive_screenshot()
+       - Agent's phone_screenshot() tool was blocking on
+         wait_screenshot(), now unblocks and returns the image
+
+    Thread-safe: accessed from async Starlette route handlers and
+    blocking MCP tool threads concurrently.
     """
 
     def __init__(self):
-        self.lock = threading.Lock()
-        self.text: str | None = None
-        self.version: int = 0
-        self.device_info: dict | None = None
-        self.last_seen: float = 0
-        self._clipboard_ready = threading.Event()
-        self.screen_center: tuple[float, float] | None = None
-        # Screenshot upload (from iOS Shortcut)
-        self._screenshot_data: bytes | None = None
-        self._screenshot_ready = threading.Event()
+        self.lock = threading.Lock()  # protects shared fields (text, screenshot) across threads
+        self.text: str | None = None  # current text displayed on phone bridge page
+        self.last_seen: float = 0  # timestamp of last phone poll, for connection detection
+        self._clipboard_copied = threading.Event()  # set when phone confirms tap-to-copy
+        self._screenshot_data: bytes | None = None  # PNG/JPEG bytes from iOS Shortcut upload
+        self._screenshot_ready = threading.Event()  # set when screenshot upload arrives
 
     @property
     def connected(self) -> bool:
@@ -64,32 +82,42 @@ class BridgeState:
         """Set text for the phone to display and copy on tap."""
         with self.lock:
             self.text = text
-            self.version += 1
-            self._clipboard_ready.clear()
+            self._clipboard_copied.clear()
 
-    def mark_clipboard_ready(self):
+    def mark_clipboard_copied(self):
         """Phone confirms the tap-to-copy succeeded."""
-        self._clipboard_ready.set()
+        self._clipboard_copied.set()
 
     def wait_clipboard(self, timeout: float = 30.0) -> bool:
         """Block until phone confirms clipboard copy, or timeout."""
-        return self._clipboard_ready.wait(timeout=timeout)
+        return self._clipboard_copied.wait(timeout=timeout)
 
-    def touch(self):
+    def poll(self):
         """Update last-seen timestamp (called on every phone poll)."""
         self.last_seen = time.time()
 
     # ─── Screenshot upload ────────────────────────────────────
 
     def receive_screenshot(self, data: bytes):
-        """Store an uploaded screenshot and signal waiters."""
+        """Store an uploaded screenshot and signal waiters.
+
+        Called from the async route handler when the iOS Shortcut POSTs
+        the image. Writes data under lock first, then signals the event
+        so wait_screenshot() sees consistent data when it wakes up.
+        """
         with self.lock:
             self._screenshot_data = data
         self._screenshot_ready.set()
         log.info(f"Bridge: screenshot received ({len(data)} bytes)")
 
     def wait_screenshot(self, timeout: float = 10.0) -> bytes | None:
-        """Block until a screenshot arrives, or timeout. Returns PNG/JPEG bytes."""
+        """Block until a screenshot arrives, or timeout. Returns PNG/JPEG bytes.
+
+        Called from the blocking MCP tool thread. Waits on the event
+        without holding the lock (otherwise receive_screenshot couldn't
+        acquire it to store data). Once signaled, grabs the lock briefly
+        to read the data safely.
+        """
         if self._screenshot_ready.wait(timeout=timeout):
             self._screenshot_ready.clear()
             with self.lock:
@@ -98,19 +126,6 @@ class BridgeState:
 
 
 # ─── Calibration state ────────────────────────────────────────
-
-# Grid dot positions (must match calibrate.html and grid_calibrate.py)
-GRID_COLS_PCT = [0.25, 0.50, 0.75]
-GRID_ROWS_PCT = [0.20, 0.40, 0.50, 0.60, 0.80]
-
-# Valid calibration phases (server → page display commands)
-CALIB_PHASES = {
-    "idle",         # blank, waiting
-    "center",       # orange circle at center (Steps 0, 1, 4)
-    "markers",      # UP/RIGHT blue markers for camera rotation (Steps 2-3)
-    "grid",         # 15 red dots at known positions (Step 5)
-    "dot",          # single orange dot at custom position (Step 6)
-}
 
 
 class CalibrationState:
@@ -121,40 +136,49 @@ class CalibrationState:
     what interactions trigger a green flash.
     """
 
+    # Grid dot positions (must match bridge.html and grid_calibrate.py)
+    GRID_COLS_PCT = [0.25, 0.50, 0.75]
+    GRID_ROWS_PCT = [0.20, 0.40, 0.50, 0.60, 0.80]
+
+    # Valid calibration phases (server → page display commands)
+    PHASES = {
+        "idle",         # blank, waiting
+        "center",       # orange circle at center (Steps 0, 1, 4)
+        "markers",      # UP/RIGHT blue markers for camera rotation (Steps 2-3)
+        "grid",         # 15 red dots at known positions (Step 5)
+        "dot",          # single orange dot at custom position (Step 6)
+    }
+
     def __init__(self):
-        self.lock = threading.Lock()
-        self.phase: str = "idle"
-        self.phase_version: int = 0
-        self.dot_position: tuple[float, float] | None = None  # for "dot" phase
-        self.swipe_direction: str | None = None  # for "swipe" phase
-        self.touches: list[dict] = []
-        self._touch_event = threading.Event()
+        self.lock = threading.Lock()  # protects shared fields across threads
+        self.phase: str = "idle"  # current display phase (one of PHASES)
+        self.dot_position: tuple[float, float] | None = None  # (x, y) as 0-1 for "dot" phase
+        self.touches: list[dict] = []  # accumulated touch events from the phone
+        self._touch_event = threading.Event()  # set when a new touch event arrives
+        self.screen_center: tuple[int, int] | None = None  # screen center in viewport (x, y)
+        self.screen_dimension: dict | None = None  # {"width": int, "height": int}, used to compute 0-1 touch coords relative to screen
 
     def set_phase(self, phase: str, **kwargs):
         """Set the calibration display phase.
 
         Args:
-            phase: one of CALIB_PHASES
+            phase: one of self.PHASES
             dot_x, dot_y: position for "dot" phase (0-1 decimals)
             direction: expected direction for "swipe" phase
         """
-        if phase not in CALIB_PHASES:
-            raise ValueError(f"Unknown phase: {phase}. Must be one of {CALIB_PHASES}")
+        if phase not in self.PHASES:
+            raise ValueError(f"Unknown phase: {phase}. Must be one of {self.PHASES}")
         with self.lock:
             self.phase = phase
-            self.phase_version += 1
             self.dot_position = None
-            self.swipe_direction = None
             self.touches = []
             self._touch_event.clear()
             if phase == "dot":
                 self.dot_position = (kwargs.get("dot_x", 0.5),
                                      kwargs.get("dot_y", 0.5))
-            if phase == "swipe":
-                self.swipe_direction = kwargs.get("direction", "top")
 
     def report_touch(self, touch: dict):
-        """Page reports a touch event."""
+        """Page reports a touch event. x, y are 0-1 percentages relative to screen."""
         with self.lock:
             self.touches.append(touch)
         self._touch_event.set()
@@ -181,17 +205,17 @@ class CalibrationState:
             self._touch_event.clear()
         return touches
 
-    def get_display(self) -> dict:
+    def get_state(self) -> dict:
         """Get current display command for the page to render."""
         with self.lock:
-            d = {"phase": self.phase, "version": self.phase_version}
+            d = {"phase": self.phase}
             if self.dot_position:
                 d["dot_x"], d["dot_y"] = self.dot_position
-            if self.swipe_direction:
-                d["direction"] = self.swipe_direction
             # Always include grid positions so the page has them
-            d["grid_cols"] = GRID_COLS_PCT
-            d["grid_rows"] = GRID_ROWS_PCT
+            d["grid_cols"] = self.GRID_COLS_PCT
+            d["grid_rows"] = self.GRID_ROWS_PCT
+            d["screen_center"] = self.screen_center
+            d["screen_dimension"] = self.screen_dimension
             return d
 
 
@@ -209,28 +233,26 @@ class PhoneState:
         self.cal = cal
         self.lock = threading.Lock()
         self.mode: str = "bridge"  # "calibrate" or "bridge"
-        self.mode_version: int = 0
 
-    def set_mode(self, mode: str):
+    def set_mode(self, mode: str, phase: str | None = None, **phase_kwargs):
         with self.lock:
             if self.mode != mode:
                 self.mode = mode
-                self.mode_version += 1
                 log.info(f"Phone mode → {mode}")
+            if mode == "calibrate" and phase:
+                self.cal.set_phase(phase, **phase_kwargs)
 
     def get_state(self) -> dict:
         """Unified state for the phone page poll."""
         with self.lock:
             mode = self.mode
-            mv = self.mode_version
 
-        state = {"mode": mode, "mode_version": mv}
+        state = {"mode": mode}
 
         if mode == "calibrate":
-            state.update(self.cal.get_display())
+            state.update(self.cal.get_state())
         else:
             state["text"] = self.bridge.text
-            state["text_version"] = self.bridge.version
 
         return state
 
@@ -238,8 +260,8 @@ class PhoneState:
 # ─── Route handlers ──────────────────────────────────────────
 
 
-async def serve_message_page(request):
-    """Serve the bridge /message page for the phone browser."""
+async def serve_bridge_page(request):
+    """Serve the bridge page for the phone browser."""
     from pathlib import Path
     from starlette.responses import HTMLResponse
     html_path = Path(__file__).parent / "static" / "bridge.html"
@@ -249,48 +271,41 @@ async def serve_message_page(request):
 async def handle_phone_state(request, phone: PhoneState):
     """GET /api/bridge/state — unified poll endpoint for the phone page."""
     from starlette.responses import JSONResponse
-    phone.bridge.touch()  # keep connected status alive in both modes
+    phone.bridge.poll()  # keep connected status alive in both modes
     return JSONResponse(phone.get_state())
 
 
-async def handle_bridge_text(request, bridge: BridgeState):
-    """GET /api/bridge/text — phone polls for pending text to display."""
-    from starlette.responses import JSONResponse
-    bridge.touch()
-    return JSONResponse({
-        "text": bridge.text,
-        "version": bridge.version,
-    })
 
-
-async def handle_bridge_tapped(request, bridge: BridgeState):
+async def handle_clipboard_copied(request, bridge: BridgeState):
     """POST /api/bridge/tapped — phone confirms text was copied to clipboard."""
     from starlette.responses import JSONResponse
-    bridge.mark_clipboard_ready()
-    log.info(f"Bridge: clipboard ready — '{bridge.text}'")
+    bridge.mark_clipboard_copied()
+    log.info(f"Bridge: clipboard copied — '{bridge.text}'")
     return JSONResponse({"ok": True})
 
 
-async def handle_device_info(request, bridge: BridgeState):
-    """POST /api/bridge/device-info — phone sends screen/device info on load."""
+async def handle_screen_dimension(request, cal: CalibrationState):
+    """POST /api/bridge/screen-dimension — phone sends screen dimensions on load."""
     from starlette.responses import JSONResponse
     body = await request.json()
-    with bridge.lock:
-        bridge.device_info = body
-    log.info(f"Bridge device: {body.get('css_width')}×{body.get('css_height')}pt, "
-             f"{body.get('pixel_ratio')}x")
+    with cal.lock:
+        cal.screen_dimension = {
+            "width": int(body.get('screen_width', 0)),
+            "height": int(body.get('screen_height', 0)),
+        }
+    log.info(f"Bridge device: {cal.screen_dimension['width']}×{cal.screen_dimension['height']}pt")
     return JSONResponse({"ok": True})
 
 
 async def handle_screen_center(request, bridge: BridgeState):
-    """POST /api/bridge/screen-center — phone reports viewport center {x, y}."""
+    """POST /api/bridge/screen-center — phone reports screen center at viewport (x, y)."""
     from starlette.responses import JSONResponse
     body = await request.json()
     x, y = body.get("x"), body.get("y")
     if x is None or y is None:
         return JSONResponse({"error": "x and y required"}, status_code=400)
     with bridge.lock:
-        bridge.screen_center = (float(x), float(y))
+        bridge.screen_center = (int(x), int(y))
     log.info(f"Bridge: screen center at viewport ({x}, {y})")
     return JSONResponse({"ok": True})
 
@@ -346,37 +361,13 @@ drawQR('qr1','{phone_url}');
     return HTMLResponse(html)
 
 
-async def serve_calibrate_page(request):
-    """Serve the unified phone page (same as /message and /bridge)."""
-    return await serve_message_page(request)
 
-
-async def handle_calib_phase(request, cal: CalibrationState):
-    """GET /api/calibrate/phase — page polls for current display command."""
-    from starlette.responses import JSONResponse
-    return JSONResponse(cal.get_display())
-
-
-async def handle_calib_set_phase(request, cal: CalibrationState):
-    """POST /api/calibrate/set-phase — server sets calibration display.
-
-    Body: {"phase": "center"} or {"phase": "dot", "dot_x": 0.3, "dot_y": 0.7}
-    """
-    from starlette.responses import JSONResponse
-    body = await request.json()
-    phase = body.get("phase", "idle")
-    try:
-        cal.set_phase(phase, **{k: v for k, v in body.items() if k != "phase"})
-    except ValueError as e:
-        return JSONResponse({"error": str(e)}, status_code=400)
-    return JSONResponse({"ok": True, "phase": phase})
 
 
 async def handle_calib_touch(request, cal: CalibrationState):
-    """POST /api/calibrate/touch — page reports a touch event.
+    """POST /api/bridge/touch — page reports a touch event.
 
-    Body: {"x": css_x, "y": css_y, "type": "tap"|"long-press"|"swipe",
-           "direction": "top"|...}
+    Body: {"x": 0-1, "y": 0-1}
     """
     from starlette.responses import JSONResponse
     body = await request.json()
