@@ -349,6 +349,7 @@ body.mode-bridge #bridge-layer{
     if(state.mode === 'calibrate'){
       if(state.phase === 'idle'){
         sendScreenCenter(t);
+        flashTouch(t.clientX, t.clientY);
         return;
       }
       sendTouch({

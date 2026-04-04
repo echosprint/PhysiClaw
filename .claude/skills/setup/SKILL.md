@@ -84,7 +84,7 @@ uv run python -c "from physiclaw.bridge import get_lan_ip; print(f'Phone URL: ht
 ```
 
 ```bash
-open http://localhost:8048/qr
+open http://localhost:8048/api/bridge/qr
 ```
 
 Tell the user:
@@ -94,16 +94,27 @@ Wait for confirmation that the page is open on the phone (shows "PhysiClaw" on b
 
 ### 1.6 Position stylus
 
-Tell the user:
-> The calibration page now shows an orange circle at the center of the screen. Position the stylus tip directly above the orange circle, about 3mm above the screen surface. Don't touch the screen yet.
-
-Now set the calibration page to "center":
+First, switch the phone to calibrate idle phase so it can register a tap and report screen center:
 
 ```bash
-curl -s -X POST http://localhost:8048/api/calibrate/set-phase \
+curl -s -X POST http://localhost:8048/api/bridge/switch \
   -H 'Content-Type: application/json' \
-  -d '{"phase": "center"}' | python3 -m json.tool
+  -d '{"mode": "calibrate", "phase": "idle"}' | python3 -m json.tool
 ```
+
+Tell the user:
+> Tap anywhere on the phone screen to register the screen center.
+
+Wait for user confirmation. Then switch to center phase:
+
+```bash
+curl -s -X POST http://localhost:8048/api/bridge/switch \
+  -H 'Content-Type: application/json' \
+  -d '{"mode": "calibrate", "phase": "center"}' | python3 -m json.tool
+```
+
+Tell the user:
+> The calibration page now shows an orange circle at the center of the screen. Position the stylus tip directly above the orange circle, about 3mm above the screen surface. Don't touch the screen yet.
 
 Wait for user confirmation.
 
