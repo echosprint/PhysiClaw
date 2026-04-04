@@ -343,14 +343,29 @@ def step3_software_rotation(cam: Camera, cal: CalibrationState) -> int:
 
 # ─── Step 4: GRBL ↔ Screen mapping (Mapping A) ──────────────
 
-def step4_grbl_screen(arm: StylusArm, cal: CalibrationState,
-                      z_tap: float,
-                      screen_dimension: dict | None = None
-                      ) -> tuple[np.ndarray, list[dict]]:
-    """Distributed taps with touch coords → affine transform. Plan Step 4.
+def _tap_and_read(arm: StylusArm, cal: CalibrationState,
+                  gx: float, gy: float, z_tap: float) -> dict | None:
+    """Move to (gx, gy), tap, return touch dict or None on miss."""
+    arm._fast_move(gx, gy)
+    arm.wait_idle()
+    cal.flush_touches()
+    _tap_once(arm, z_tap)
+    time.sleep(0.3)
+    got = cal.flush_touches()
+    if not got:
+        log.warning(f"  Miss at GRBL ({gx:.1f}, {gy:.1f})")
+        return None
+    return got[-1]
 
-    Expands outward from center. Uses device info for expansion distances
-    when available. Verifies with 3 additional taps.
+
+def step4_grbl_screen(arm: StylusArm, cal: CalibrationState,
+                      z_tap: float
+                      ) -> tuple[np.ndarray, list[dict]]:
+    """Probe scale, tap grid points across the screen, compute affine. Plan Step 4.
+
+    Phase 1: Tap center, +10mm X, +10mm Y to discover mm-per-screen-unit scale.
+    Phase 2: Use scale + grid_cols/rows to tap 15 points spanning the full screen.
+    Phase 3: Verify with 3 additional taps at offset positions.
 
     Touch x,y are 0-1 screen percentages.
     Returns (pct_to_grbl affine (2,3), list of touch events).
@@ -359,84 +374,108 @@ def step4_grbl_screen(arm: StylusArm, cal: CalibrationState,
     cal.set_phase("center")
     time.sleep(0.3)
 
-    # Expansion distance in mm
-    # Plan: "half_width ≈ 390/2 × 0.8 = 156pt outward"
-    # We don't know pt→mm yet, but typical phones: ~65mm wide, ~140mm tall
-    # Default: 8mm covers ~25% of half-width, reasonable for affine
-    # With device info: scale based on viewport aspect ratio
-    d = 8.0
-    d_v = 8.0  # vertical expansion (may differ from horizontal)
-    if screen_dimension:
-        vw = screen_dimension.get('width', 390)
-        vh = screen_dimension.get('height', 844)
-        # Scale vertical expansion by aspect ratio so points span proportionally
-        d_v = d * (vh / vw) if vw > 0 else d
+    PROBE_D = 10.0  # mm offset for scale probes
 
-    # Sampling pattern from plan: center + 4 cardinal + 4 diagonal + redundancy
-    grid_mm = [
-        (0, 0),                                  # center
-        (d, 0), (-d, 0),                         # left/right
-        (0, d_v), (0, -d_v),                     # up/down
-        (d, d_v), (d, -d_v),                     # diagonals
-        (-d, d_v), (-d, -d_v),
-        (d * 0.5, d_v * 0.5), (-d * 0.5, -d_v * 0.5),  # inner (redundancy)
-    ]
+    # ── Phase 1: Probe to find scale ──
+    log.info("  Phase 1: Probing scale (center, +X, +Y)")
+    t_center = _tap_and_read(arm, cal, 0, 0, z_tap)
+    if not t_center:
+        raise RuntimeError("Step 4 FAILED — no touch at center")
+
+    t_x = _tap_and_read(arm, cal, PROBE_D, 0, z_tap)
+    if not t_x:
+        raise RuntimeError("Step 4 FAILED — no touch at +X probe")
+
+    t_y = _tap_and_read(arm, cal, 0, PROBE_D, z_tap)
+    if not t_y:
+        raise RuntimeError("Step 4 FAILED — no touch at +Y probe")
+
+    # Screen displacement per mm in each arm direction
+    # dx_screen / dx_grbl and dy_screen / dy_grbl
+    sx_per_mm_x = (t_x['x'] - t_center['x']) / PROBE_D
+    sy_per_mm_x = (t_x['y'] - t_center['y']) / PROBE_D
+    sx_per_mm_y = (t_y['x'] - t_center['x']) / PROBE_D
+    sy_per_mm_y = (t_y['y'] - t_center['y']) / PROBE_D
+    log.info(f"  Scale: arm +X → screen ({sx_per_mm_x:.4f}, {sy_per_mm_x:.4f})/mm")
+    log.info(f"  Scale: arm +Y → screen ({sx_per_mm_y:.4f}, {sy_per_mm_y:.4f})/mm")
+
+    # Build screen→grbl affine from the 3 probe points
+    probe_screen = np.array([
+        [t_center['x'], t_center['y']],
+        [t_x['x'], t_x['y']],
+        [t_y['x'], t_y['y']],
+    ], dtype=np.float64)
+    probe_grbl = np.array([
+        [0, 0], [PROBE_D, 0], [0, PROBE_D],
+    ], dtype=np.float64)
+    probe_affine, _ = cv2.estimateAffine2D(probe_screen, probe_grbl)
+
+    # ── Phase 2: Tap grid points across full screen ──
+    cols = cal.GRID_COLS_PCT  # [0.25, 0.50, 0.75]
+    rows = cal.GRID_ROWS_PCT  # [0.20, 0.40, 0.50, 0.60, 0.80]
+    log.info(f"  Phase 2: Tapping {len(cols)}×{len(rows)} grid points")
 
     grbl_pts = []
     screen_pts = []
     all_touches = []
 
-    for gx, gy in grid_mm:
-        arm._fast_move(gx, gy)
-        arm.wait_idle()
-        cal.flush_touches()
-        _tap_once(arm, z_tap)
-        time.sleep(0.3)
-        got = cal.flush_touches()
-        if not got:
-            log.warning(f"  Miss at GRBL ({gx:.1f}, {gy:.1f}) — skipping")
-            continue
-        touch = got[-1]
-        grbl_pts.append([gx, gy])
-        screen_pts.append([touch['x'], touch['y']])
-        all_touches.append(touch)
+    # Include probe points
+    for sp, gp in zip(probe_screen, probe_grbl):
+        screen_pts.append(sp.tolist())
+        grbl_pts.append(gp.tolist())
+
+    for row in rows:
+        for col in cols:
+            # Predict GRBL position from probe affine
+            predicted = probe_affine @ np.array([col, row, 1.0])
+            gx, gy = predicted[0], predicted[1]
+            touch = _tap_and_read(arm, cal, gx, gy, z_tap)
+            if not touch:
+                continue
+            grbl_pts.append([gx, gy])
+            screen_pts.append([touch['x'], touch['y']])
+            all_touches.append(touch)
 
     arm._fast_move(0, 0)
     arm.wait_idle()
 
-    if len(grbl_pts) < 4:
-        raise RuntimeError(f"Step 4 FAILED — only {len(grbl_pts)} valid taps (need ≥4)")
+    if len(grbl_pts) < 6:
+        raise RuntimeError(f"Step 4 FAILED — only {len(grbl_pts)} valid taps (need ≥6)")
 
-    # Compute affine: screen CSS pixels → GRBL mm
+    # Compute final affine from all points
     screen_to_grbl, _ = cv2.estimateAffine2D(
         np.array(screen_pts, dtype=np.float64),
         np.array(grbl_pts, dtype=np.float64))
     if screen_to_grbl is None:
         raise RuntimeError("Step 4 FAILED — affine computation failed")
 
-    # Verify: 3 additional taps at new positions
-    # Plan: "predicted vs actual error < 2px"
-    log.info(f"  Mapping A from {len(grbl_pts)} pairs. Verifying...")
-    verify_offsets = [(d * 0.7, 0), (0, d_v * 0.7), (-d * 0.7, d_v * 0.7)]
+    # ── Phase 3: Verify with 3 taps at non-grid positions ──
+    log.info(f"  Phase 3: Verifying ({len(grbl_pts)} pairs mapped)...")
+    verify_pcts = [(0.15, 0.30), (0.85, 0.70), (0.50, 0.90)]
     max_error = 0
-    for vgx, vgy in verify_offsets:
-        arm._fast_move(vgx, vgy)
-        arm.wait_idle()
-        cal.flush_touches()
-        _tap_once(arm, z_tap)
-        time.sleep(0.3)
-        got = cal.flush_touches()
-        if not got:
+    for vsx, vsy in verify_pcts:
+        predicted = screen_to_grbl @ np.array([vsx, vsy, 1.0])
+        vgx, vgy = predicted[0], predicted[1]
+        touch = _tap_and_read(arm, cal, vgx, vgy, z_tap)
+        if not touch:
             continue
-        touch = got[-1]
-        # Predict GRBL from touch using the affine
-        predicted = screen_to_grbl @ np.array([touch['x'], touch['y'], 1.0])
-        error = ((predicted[0] - vgx)**2 + (predicted[1] - vgy)**2)**0.5
+        actual_grbl = screen_to_grbl @ np.array([touch['x'], touch['y'], 1.0])
+        error = ((actual_grbl[0] - vgx)**2 + (actual_grbl[1] - vgy)**2)**0.5
         max_error = max(max_error, error)
-        log.debug(f"  Verify ({vgx:.1f},{vgy:.1f}): error={error:.2f}mm")
+        log.info(f"  Verify ({vsx},{vsy}): error={error:.2f}mm")
 
-    arm._fast_move(0, 0)
+    # ── Re-origin: move arm to screen center and set as new origin ──
+    center_grbl = screen_to_grbl @ np.array([0.5, 0.5, 1.0])
+    log.info(f"  Moving to screen center: GRBL ({center_grbl[0]:.2f}, {center_grbl[1]:.2f})")
+    arm._fast_move(center_grbl[0], center_grbl[1])
     arm.wait_idle()
+    arm.set_origin()
+    log.info("  Screen center set as arm origin (0, 0)")
+
+    # Update affine to reflect new origin: subtract center offset from translation
+    screen_to_grbl[0, 2] -= center_grbl[0]
+    screen_to_grbl[1, 2] -= center_grbl[1]
+
     log.info(f"  Verification max error: {max_error:.2f}mm")
 
     return screen_to_grbl, all_touches
@@ -640,22 +679,10 @@ def step6_validate(arm: StylusArm, cam: Camera, cal: CalibrationState,
 
 # ─── Post: Set origin at screen center ───────────────────────
 
-def post_set_origin(arm: StylusArm, pct_to_grbl: np.ndarray):
-    """Move to screen center (0.5, 0.5) and set GRBL origin. Plan post-cal."""
-    log.info("Post: Setting origin at screen center")
-    grbl_pos = pct_to_grbl @ np.array([0.5, 0.5, 1.0])
-    arm._fast_move(float(grbl_pos[0]), float(grbl_pos[1]))
-    arm.wait_idle()
-    arm.set_origin()
-    log.info("  Origin set at screen center (G92 X0 Y0)")
-
-
 # ─── Full calibration orchestrator ───────────────────────────
 
 def full_calibration(arm: StylusArm, cam: Camera,
-                     cal: CalibrationState,
-                     screen_dimension: dict | None = None
-                     ) -> GridCalibration:
+                     cal: CalibrationState) -> GridCalibration:
     """Run all plan calibration steps. Returns GridCalibration.
 
     Expects: phone with /calibrate page open, stylus above screen center.
@@ -679,7 +706,7 @@ def full_calibration(arm: StylusArm, cam: Camera,
 
     # Step 4: Mapping A (screen 0-1 → GRBL mm)
     # Touch coords are already 0-1, so affine maps pct directly to GRBL mm
-    pct_to_grbl, _ = step4_grbl_screen(arm, cal, z_tap, screen_dimension)
+    pct_to_grbl, _ = step4_grbl_screen(arm, cal, z_tap)
 
     # Park arm for camera step
     if arm.MOVE_DIRECTIONS:
@@ -707,14 +734,7 @@ def full_calibration(arm: StylusArm, cam: Camera,
     if passed < len(results):
         log.warning(f"Validation: {passed}/{len(results)} tests passed")
 
-    # Post: Set origin at screen center
-    post_set_origin(arm, pct_to_grbl)
-
-    # Recompute affine relative to new origin
-    origin_gx, origin_gy = grid_cal.pct_to_grbl_mm(0.5, 0.5)
-    pct_to_grbl[0, 2] -= origin_gx
-    pct_to_grbl[1, 2] -= origin_gy
-    grid_cal = GridCalibration(pct_to_grbl=pct_to_grbl, pct_to_pixel=pct_to_pixel)
+    # Step 4 already set origin at screen center and adjusted affine
 
     cal.set_phase("idle")
     log.info("Calibration complete")

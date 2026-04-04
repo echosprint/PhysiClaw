@@ -846,7 +846,7 @@ async def _camera_preview(request):
 from physiclaw.plan_calibrate import (
     step0_z_depth, step1_alignment, step2_camera_rotation,
     step3_software_rotation, step4_grbl_screen, step5_camera_screen,
-    step6_validate, post_set_origin,
+    step6_validate,
 )
 
 
@@ -942,8 +942,7 @@ async def _step4(request):
             raise RuntimeError("Run step0 first")
         physiclaw.acquire()
         try:
-            pct_to_grbl, touches = step4_grbl_screen(physiclaw._arm, _calib, z_tap,
-                                                      _calib.screen_dimension)
+            pct_to_grbl, touches = step4_grbl_screen(physiclaw._arm, _calib, z_tap)
             physiclaw._cal['screen_to_grbl'] = pct_to_grbl
             return {"ok": True, "pairs": len(touches)}
         finally:
@@ -999,13 +998,7 @@ async def _step6(request):
             # If passed, build and store GridCalibration
             if passed >= 2:
                 from physiclaw.grid_calibrate import GridCalibration
-                physiclaw._grid_cal = GridCalibration(
-                    pct_to_grbl=pct_to_grbl, pct_to_pixel=pct_to_pixel)
-                post_set_origin(physiclaw._arm, pct_to_grbl)
-                # Recompute after origin reset
-                origin_gx, origin_gy = physiclaw._grid_cal.pct_to_grbl_mm(0.5, 0.5)
-                pct_to_grbl[0, 2] -= origin_gx
-                pct_to_grbl[1, 2] -= origin_gy
+                # Step 4 already set origin at screen center and adjusted affine
                 physiclaw._grid_cal = GridCalibration(
                     pct_to_grbl=pct_to_grbl, pct_to_pixel=pct_to_pixel)
             if passed >= 2:
