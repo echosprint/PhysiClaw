@@ -439,19 +439,6 @@ async def _bridge_screen_dimension(request):
 async def _bridge_screenshot(request):
     return await handle_screenshot_upload(request, _bridge)
 
-# Phone reports physical screen center in viewport coords (sent on idle phase tap)
-@mcp.custom_route("/api/bridge/screen-center", methods=["POST"])
-async def _bridge_screen_center(request):
-    from starlette.responses import JSONResponse
-    body = await request.json()
-    x, y = body.get("x"), body.get("y")
-    if x is None or y is None:
-        return JSONResponse({"error": "x and y required"}, status_code=400)
-    with _calib.lock:
-        _calib.screen_center = (int(x), int(y))
-    import logging
-    logging.getLogger(__name__).info(f"Bridge: screen center at viewport ({x}, {y})")
-    return JSONResponse({"ok": True})
 
 # ─── Calibration routes ──────────────────────────────────────
 

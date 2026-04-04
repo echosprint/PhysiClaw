@@ -222,9 +222,7 @@ body.mode-bridge #bridge-layer{
         text(W/2, H/2+30, 'Waiting for calibration...', 14, '#ccc');
         break;
       case 'center':
-        var cx = data.screen_center ? data.screen_center[0] : W*0.5;
-        var cy = data.screen_center ? data.screen_center[1] : H*0.5;
-        circle(cx, cy, r, '#f97316');
+        circle(W*0.5, H*0.5, r, '#f97316');
         break;
       case 'markers':
         var mSize = Math.min(W, H) * 0.12;
@@ -309,32 +307,19 @@ body.mode-bridge #bridge-layer{
   // ════════════════════════════════════════════════════════
   // Updated every 250ms from GET /api/bridge/state. Touch handlers read this.
   // Bridge mode:    {mode, text}
-  // Calibrate mode: {mode, phase, dot_x?, dot_y?, grid_cols, grid_rows, screen_center, screen_dimension}
+  // Calibrate mode: {mode, phase, dot_x?, dot_y?, grid_cols, grid_rows, screen_dimension}
   var state = {
     mode: 'bridge',
     text: null,
     phase: 'idle',
     grid_cols: [0.25, 0.50, 0.75],
     grid_rows: [0.20, 0.40, 0.50, 0.60, 0.80],
-    screen_center: null,
     screen_dimension: null
   };
 
   // ════════════════════════════════════════════════════════
   // TOUCH HANDLING
   // ════════════════════════════════════════════════════════
-  function sendScreenCenter(t){
-    var offsetX = t.screenX - t.clientX;
-    var offsetY = t.screenY - t.clientY;
-    var xhr = new XMLHttpRequest();
-    xhr.open('POST', '/api/bridge/screen-center', true);
-    xhr.setRequestHeader('Content-Type', 'application/json');
-    xhr.send(JSON.stringify({
-      x: Math.round(screen.width / 2 - offsetX),
-      y: Math.round(screen.height / 2 - offsetY)
-    }));
-  }
-
   function sendTouch(payload){
     var xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/bridge/touch', true);
@@ -348,7 +333,6 @@ body.mode-bridge #bridge-layer{
 
     if(state.mode === 'calibrate'){
       if(state.phase === 'idle'){
-        sendScreenCenter(t);
         flashTouch(t.clientX, t.clientY);
         return;
       }

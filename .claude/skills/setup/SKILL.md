@@ -94,18 +94,7 @@ Wait for confirmation that the page is open on the phone (shows "PhysiClaw" on b
 
 ### 1.6 Position stylus
 
-First, switch the phone to calibrate idle phase so it can register a tap and report screen center:
-
-```bash
-curl -s -X POST http://localhost:8048/api/bridge/switch \
-  -H 'Content-Type: application/json' \
-  -d '{"mode": "calibrate", "phase": "idle"}' | python3 -m json.tool
-```
-
-Tell the user:
-> Tap anywhere on the phone screen to register the screen center.
-
-Wait for user confirmation. Then switch to center phase:
+Switch the phone to calibrate center phase:
 
 ```bash
 curl -s -X POST http://localhost:8048/api/bridge/switch \

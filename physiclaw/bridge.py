@@ -155,7 +155,6 @@ class CalibrationState:
         self.dot_position: tuple[float, float] | None = None  # (x, y) as 0-1 for "dot" phase
         self.touches: list[dict] = []  # accumulated touch events from the phone
         self._touch_event = threading.Event()  # set when a new touch event arrives
-        self.screen_center: tuple[int, int] | None = None  # screen center in viewport (x, y)
         self.screen_dimension: dict | None = None  # {"width": int, "height": int}, used to compute 0-1 touch coords relative to screen
 
     def set_phase(self, phase: str, **kwargs):
@@ -169,8 +168,6 @@ class CalibrationState:
         if phase not in self.PHASES:
             raise ValueError(f"Unknown phase: {phase}. Must be one of {self.PHASES}")
         with self.lock:
-            if phase != "idle" and self.screen_center is None:
-                raise ValueError("screen_center not set — tap the phone in idle phase first")
             self.phase = phase
             self.dot_position = None
             self.touches = []
@@ -216,7 +213,6 @@ class CalibrationState:
             # Always include grid positions so the page has them
             d["grid_cols"] = self.GRID_COLS_PCT
             d["grid_rows"] = self.GRID_ROWS_PCT
-            d["screen_center"] = self.screen_center
             d["screen_dimension"] = self.screen_dimension
             return d
 
@@ -296,19 +292,6 @@ async def handle_screen_dimension(request, cal: CalibrationState):
             "height": int(body.get('screen_height', 0)),
         }
     log.info(f"Bridge device: {cal.screen_dimension['width']}×{cal.screen_dimension['height']}pt")
-    return JSONResponse({"ok": True})
-
-
-async def handle_screen_center(request, bridge: BridgeState):
-    """POST /api/bridge/screen-center — phone reports screen center at viewport (x, y)."""
-    from starlette.responses import JSONResponse
-    body = await request.json()
-    x, y = body.get("x"), body.get("y")
-    if x is None or y is None:
-        return JSONResponse({"error": "x and y required"}, status_code=400)
-    with bridge.lock:
-        bridge.screen_center = (int(x), int(y))
-    log.info(f"Bridge: screen center at viewport ({x}, {y})")
     return JSONResponse({"ok": True})
 
 
