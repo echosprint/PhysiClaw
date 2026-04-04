@@ -30,7 +30,7 @@ from physiclaw.stylus_arm import StylusArm
 
 log = logging.getLogger(__name__)
 
-SLOW_Z_SPEED = 3000
+SLOW_Z_SPEED = 5000
 PROBE_Z_SPEED = 5000
 
 
@@ -45,14 +45,11 @@ def _tap_once(arm: StylusArm, z: float, z_speed: int = PROBE_Z_SPEED):
 # ─── Step 0: Z-axis surface detection ────────────────────────
 
 def step0_z_depth(arm: StylusArm, cal: CalibrationState) -> float:
-    """Descend incrementally without lifting. Touch event = contact. Plan Step 0.
+    """Probe Z depth with tap-and-release at each level. Plan Step 0.
 
-    The stylus descends in 0.25mm steps and STAYS at each level (no lifting).
-    At each level it pauses 100ms. If the phone reports a touch during the
-    pause, contact is found. Then the stylus lifts.
-
-    Plan: "Stationary detection at each step — more reliable than continuous
-    descent. Stylus is still when the touchscreen senses it."
+    Full tap cycle at each Z: pen down, dwell 150ms, pen up.
+    After each tap, check if the phone reported a touch event.
+    Spring-loaded stylus bounces back on pen-up, so no motor hold needed.
 
     Returns z_tap (contact depth + 0.5mm margin).
     """
@@ -63,40 +60,66 @@ def step0_z_depth(arm: StylusArm, cal: CalibrationState) -> float:
     # Clear any stale touches
     cal.get_touches()
 
+    # Phase A: find first contact by descending in 0.3mm steps
     z_contact = None
-    z_steps = [round(0.25 + i * 0.25, 2) for i in range(20)]  # 0.25 to 5.25mm
+    z_steps = [round(0.5 + i * 0.3, 2) for i in range(32)]  # 0.5 to 9.8mm
 
     for z in z_steps:
-        # Descend to this Z level and STAY (no pen_up between steps)
-        # G1 G90 Z{z} moves to absolute Z position
-        arm._send(f'G1 G90 Z{z:.2f} F{SLOW_Z_SPEED}')
-        # G4 dwell is a sync barrier — blocks until Z move completes, then holds 100ms
-        arm._dwell(0.1)
-        # After dwell, check if a touch event arrived
-        touch = cal.wait_touch(timeout=0.3)
-        if touch is not None:
-            z_contact = z
-            log.info(f"  Contact at Z={z:.2f}mm "
-                     f"(touch at screen {touch.get('x')}, {touch.get('y')})")
-            break
+        log.info(f"  Probing Z={z:.2f}mm ...")
+        _tap_once(arm, z, z_speed=SLOW_Z_SPEED)
+        time.sleep(0.3)
 
-    # Lift stylus back up regardless of result
-    arm._pen_up()
-    arm.wait_idle()
+        touches = cal.get_touches()
+        if touches:
+            z_contact = z
+            log.info(f"  First contact at Z={z:.2f}mm")
+            break
+        else:
+            log.info(f"  No contact")
 
     if z_contact is None:
-        raise RuntimeError("Step 0 FAILED — no touch detected up to 5.25mm. "
+        raise RuntimeError("Step 0 FAILED — no touch detected up to 9.8mm. "
                            "Check stylus alignment and phone placement.")
 
-    z_tap = round(z_contact + 0.5, 2)
-    log.info(f"  z_tap = {z_tap}mm (contact + 0.5mm margin)")
+    # Phase B: find a Z depth where 10/10 taps succeed.
+    # Start at z_contact + 0.25mm. Tap 10 times. If any fails, add 0.25mm and retry.
+    z_try = round(z_contact + 0.25, 2)
+    z_tap = None
+
+    for _ in range(10):  # max 10 rounds of 0.25mm increases
+        log.info(f"  Testing Z={z_try:.2f}mm (10 taps) ...")
+        all_ok = True
+        for i in range(10):
+            cal.get_touches()
+            _tap_once(arm, z_try, z_speed=SLOW_Z_SPEED)
+            time.sleep(0.3)
+            touches = cal.get_touches()
+            if touches:
+                log.info(f"    Tap {i+1}/10 hit")
+            else:
+                log.info(f"    Tap {i+1}/10 miss — increasing Z")
+                all_ok = False
+                break
+
+        if all_ok:
+            z_tap = z_try
+            log.info(f"  10/10 taps succeeded at Z={z_tap:.2f}mm")
+            break
+        else:
+            z_try = round(z_try + 0.25, 2)
+
+    if z_tap is None:
+        raise RuntimeError("Step 0 FAILED — could not find reliable Z depth. "
+                           "Check stylus and phone placement.")
+
+    log.info(f"  z_tap = {z_tap}mm")
     return z_tap
 
 
 # ─── Step 1: Arm-phone alignment check ───────────────────────
 
 def step1_alignment(arm: StylusArm, cal: CalibrationState,
-                    z_tap: float, separation_mm: float = 10.0
+                    z_tap: float, separation_mm: float = 25.0
                     ) -> float:
     """Two taps along arm X-axis, compare touch Y coords. Plan Step 1.
 
@@ -111,37 +134,51 @@ def step1_alignment(arm: StylusArm, cal: CalibrationState,
     for x in [-half, half]:
         arm._fast_move(x, 0)
         arm.wait_idle()
-        cal.get_touches()
+        cal.get_touches()  # clear stale
         _tap_once(arm, z_tap)
-        time.sleep(0.2)
-        touch = cal.wait_touch(timeout=2.0)
-        if touch is None:
+        time.sleep(0.3)
+        got = cal.get_touches()
+        if not got:
             raise RuntimeError(f"Step 1 FAILED — no touch at arm X={x:.1f}mm")
-        touches.append(touch)
+        touches.append(got[-1])
 
     arm._fast_move(0, 0)
     arm.wait_idle()
 
     sx1, sy1 = touches[0]['x'], touches[0]['y']
     sx2, sy2 = touches[1]['x'], touches[1]['y']
+    log.info(f"  Tap A: arm X={-half:.1f}mm → screen ({sx1}, {sy1})")
+    log.info(f"  Tap B: arm X={half:.1f}mm → screen ({sx2}, {sy2})")
     dx = abs(sx2 - sx1)
     dy = abs(sy2 - sy1)
-    if dx < 1:
-        raise RuntimeError("Step 1 FAILED — both taps at same screen X. "
-                           "Check that arm X-axis moves across the phone width.")
+    log.info(f"  dx={dx:.1f}, dy={dy:.1f}")
 
-    tilt = dy / dx
-    log.info(f"  tilt_ratio = {tilt:.4f} "
-             f"({'OK (< 0.02)' if tilt < 0.02 else 'TILTED — adjust phone'})")
+    # Arm X may map to phone X or phone Y (90° rotation is fine).
+    # Check that the movement is straight: minor axis / major axis < 0.02.
+    major = max(dx, dy)
+    minor = min(dx, dy)
+    if major < 1:
+        raise RuntimeError("Step 1 FAILED — both taps at same position. "
+                           "Check arm movement and phone placement.")
+
+    tilt = minor / major
+    log.info(f"  tilt_ratio = {tilt:.4f} (minor/major), "
+             f"arm X → phone {'Y' if dy > dx else 'X'}, "
+             f"{'OK (< 0.02)' if tilt < 0.02 else 'TILTED — adjust phone'}")
     return tilt
 
 
 # ─── Step 2: Camera physical rotation check ──────────────────
 
-def step2_camera_rotation(cam: Camera) -> bool:
-    """Check if camera long axis matches phone long axis. Plan Step 2.
+def step2_camera_rotation(cam: Camera, device_info: dict | None = None) -> dict:
+    """Check camera orientation, tilt, and coverage. Plan Step 2.
 
-    Returns True if phone appears taller than wide in raw camera frame.
+    Checks:
+    1. Long axes aligned: phone long axis matches image long axis
+    2. No tilt: phone aspect ratio in image ≈ actual screen aspect ratio
+    3. Coverage: phone area ≥ 70% of image area
+
+    Returns dict with ok, messages, and measurements.
     """
     log.info("Step 2: Camera physical rotation check")
     frame = cam._fresh_frame()
@@ -155,12 +192,86 @@ def step2_camera_rotation(cam: Camera) -> bool:
         raise RuntimeError("Step 2 FAILED — no bright region in camera frame")
 
     largest = max(contours, key=cv2.contourArea)
-    _, _, bw, bh = cv2.boundingRect(largest)
+    # Use minAreaRect for orientation and area (handles rotated phones)
+    rect = cv2.minAreaRect(largest)
+    rect_w, rect_h = rect[1]
+    phone_area_px = rect_w * rect_h
+    img_h, img_w = frame.shape[:2]
+    image_area = img_w * img_h
+    issues = []
 
-    ok = bh > bw
-    log.info(f"  Phone region: {bw}×{bh}px → "
-             f"{'OK (portrait)' if ok else 'ROTATED — rotate camera 90°'}")
-    return ok
+    # Save annotated image with actual contour + min-area rect
+    annotated = frame.copy()
+    cv2.drawContours(annotated, [largest], -1, (0, 255, 0), 3)
+    box = cv2.boxPoints(rect)
+    box = np.int32(box)
+    cv2.drawContours(annotated, [box], -1, (0, 200, 255), 2)
+    coverage = phone_area_px / image_area
+    label = f"area {coverage:.0%}"
+    bx, by, _, _ = cv2.boundingRect(largest)
+    cv2.putText(annotated, label, (bx + 5, by + 30),
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+    cv2.imwrite("/tmp/physiclaw_step2.jpg", annotated)
+
+    # 1. Camera rotation — phone edges should be parallel to image edges.
+    # Compute angle from the longest edge of the min-area rect.
+    phone_long = max(rect_w, rect_h)
+    phone_short = min(rect_w, rect_h)
+    pts = cv2.boxPoints(rect)
+    # Find the longest edge and compute its angle to horizontal
+    edges = [(pts[i], pts[(i+1) % 4]) for i in range(4)]
+    longest_edge = max(edges, key=lambda e: np.linalg.norm(e[1] - e[0]))
+    dx = longest_edge[1][0] - longest_edge[0][0]
+    dy = longest_edge[1][1] - longest_edge[0][1]
+    # Angle of longest edge relative to horizontal (or vertical)
+    angle_deg = abs(np.degrees(np.arctan2(dy, dx)))
+    # Normalize to deviation from nearest axis (0°, 90°, 180°)
+    rotation_dev = min(angle_deg % 90, 90 - angle_deg % 90)
+    rotation_ok = rotation_dev < 3.0  # < 3° deviation
+    if not rotation_ok:
+        issues.append(f"Straighten camera — phone edges rotated {rotation_dev:.1f}° from image edges")
+    log.info(f"  Camera {img_w}×{img_h}, phone region {rect_w:.0f}×{rect_h:.0f}px "
+             f"(area {phone_area_px:.0f}px²)")
+    log.info(f"  Rotation: {rotation_dev:.1f}° from axis → "
+             f"{'OK' if rotation_ok else 'ROTATED — straighten camera'}")
+
+    # 2. Long axes aligned
+    image_long_horizontal = img_w > img_h
+    bx, by, bw, bh = cv2.boundingRect(largest)
+    bbox_long_horizontal = bw > bh
+    axes_ok = bbox_long_horizontal == image_long_horizontal
+    if not axes_ok:
+        issues.append("Rotate camera 90° — long axes not aligned")
+    log.info(f"  Long axes: {'aligned' if axes_ok else 'NOT aligned — rotate camera 90°'}")
+
+    # 2. Aspect ratio check (tilt detection)
+    phone_ratio = phone_long / max(phone_short, 1)
+    if device_info:
+        screen_w = device_info.get('viewport_width', 430)
+        screen_h = device_info.get('viewport_height', 932)
+        expected_ratio = max(screen_w, screen_h) / max(min(screen_w, screen_h), 1)
+    else:
+        expected_ratio = 2.0  # typical phone ~19.5:9 ≈ 2.17
+    ratio_diff = abs(phone_ratio - expected_ratio) / expected_ratio
+    tilt_ok = ratio_diff < 0.15
+    if not tilt_ok:
+        issues.append(f"Camera may be tilted — aspect ratio {phone_ratio:.2f} "
+                      f"vs expected {expected_ratio:.2f} (diff {ratio_diff:.0%})")
+    log.info(f"  Aspect ratio: {phone_ratio:.2f} (expected {expected_ratio:.2f}, "
+             f"diff {ratio_diff:.0%}) → {'OK' if tilt_ok else 'TILTED'}")
+
+    # 3. Coverage check (min-area rect ≥ 30% of image area)
+    coverage_ok = coverage >= 0.30
+    if not coverage_ok:
+        issues.append(f"Move camera closer — phone covers only {coverage:.0%} of image (need ≥30%)")
+    log.info(f"  Coverage: {coverage:.0%} → {'OK' if coverage_ok else 'TOO FAR'}")
+
+    ok = axes_ok and tilt_ok and coverage_ok
+    return {"ok": ok, "issues": issues,
+            "phone_region": [round(rect_w), round(rect_h)],
+            "image_size": [img_w, img_h],
+            "aspect_ratio": round(phone_ratio, 2),
+            "coverage": round(coverage, 2)}
 
 
 # ─── Step 3: Software rotation via UP/RIGHT markers ──────────
@@ -178,30 +289,37 @@ def step3_software_rotation(cam: Camera, cal: CalibrationState) -> int:
     if frame is None:
         raise RuntimeError("Step 3 FAILED — camera read failed")
 
-    # Detect blue blobs (#2563eb → HSV H≈110)
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, np.array([100, 80, 80]), np.array([130, 255, 255]))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE,
-                            cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15)))
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
 
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    blobs = []
-    for cnt in contours:
-        area = cv2.contourArea(cnt)
-        if area < 500:
-            continue
-        m = cv2.moments(cnt)
-        if m['m00'] == 0:
-            continue
-        blobs.append((m['m10'] / m['m00'], m['m01'] / m['m00'], area))
+    def _find_blob(lower, upper, label):
+        mask = cv2.inRange(hsv, np.array(lower), np.array(upper))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        best = None
+        for cnt in contours:
+            area = cv2.contourArea(cnt)
+            if area < 500:
+                continue
+            m = cv2.moments(cnt)
+            if m['m00'] == 0:
+                continue
+            if best is None or area > best[2]:
+                best = (m['m10'] / m['m00'], m['m01'] / m['m00'], area)
+        if best is None:
+            raise RuntimeError(f"Step 3 FAILED — {label} marker not found")
+        return best[0], best[1]
 
-    if len(blobs) < 2:
-        raise RuntimeError(f"Step 3 FAILED — found {len(blobs)} blue markers, need 2")
-
-    blobs.sort(key=lambda b: b[2], reverse=True)
-    # RIGHT has more area (wider text), UP has less
-    right_x, right_y = blobs[0][0], blobs[0][1]
-    up_x, up_y = blobs[1][0], blobs[1][1]
+    # UP = blue (#2563eb → HSV H≈110), RIGHT = red (#ef4444 → HSV H≈0/180)
+    up_x, up_y = _find_blob([100, 80, 80], [130, 255, 255], "UP (blue)")
+    right_x, right_y = _find_blob([0, 80, 80], [10, 255, 255], "RIGHT (red)")
+    # Also check wrapped red hue (170-180)
+    try:
+        rx2, ry2 = _find_blob([170, 80, 80], [180, 255, 255], "RIGHT (red high)")
+        # Pick whichever red blob is larger / was found
+        right_x, right_y = rx2, ry2
+    except RuntimeError:
+        pass  # first range was enough
 
     log.info(f"  UP at camera ({up_x:.0f}, {up_y:.0f})")
     log.info(f"  RIGHT at camera ({right_x:.0f}, {right_y:.0f})")
@@ -272,11 +390,12 @@ def step4_grbl_screen(arm: StylusArm, cal: CalibrationState,
         arm.wait_idle()
         cal.get_touches()
         _tap_once(arm, z_tap)
-        time.sleep(0.2)
-        touch = cal.wait_touch(timeout=2.0)
-        if touch is None:
+        time.sleep(0.3)
+        got = cal.get_touches()
+        if not got:
             log.warning(f"  Miss at GRBL ({gx:.1f}, {gy:.1f}) — skipping")
             continue
+        touch = got[-1]
         grbl_pts.append([gx, gy])
         screen_pts.append([touch['x'], touch['y']])
         all_touches.append(touch)
@@ -304,10 +423,11 @@ def step4_grbl_screen(arm: StylusArm, cal: CalibrationState,
         arm.wait_idle()
         cal.get_touches()
         _tap_once(arm, z_tap)
-        time.sleep(0.2)
-        touch = cal.wait_touch(timeout=2.0)
-        if touch is None:
+        time.sleep(0.3)
+        got = cal.get_touches()
+        if not got:
             continue
+        touch = got[-1]
         # Predict GRBL from touch using the affine
         predicted = screen_to_grbl @ np.array([touch['x'], touch['y'], 1.0])
         error = ((predicted[0] - vgx)**2 + (predicted[1] - vgy)**2)**0.5
@@ -448,8 +568,9 @@ def step6_validate(arm: StylusArm, cam: Camera, cal: CalibrationState,
     arm.wait_idle()
     cal.get_touches()
     _tap_once(arm, z_tap)
-    time.sleep(0.2)
-    probe = cal.wait_touch(timeout=2.0)
+    time.sleep(0.3)
+    got = cal.get_touches()
+    probe = got[-1] if got else None
     vw = probe.get('viewport_w', 390) if probe else 390
     vh = probe.get('viewport_h', 844) if probe else 844
 
@@ -496,10 +617,11 @@ def step6_validate(arm: StylusArm, cam: Camera, cal: CalibrationState,
         arm.wait_idle()
         cal.get_touches()
         _tap_once(arm, z_tap)
-        time.sleep(0.2)
+        time.sleep(0.3)
 
         # 6. Phone reports touch
-        touch = cal.wait_touch(timeout=2.0)
+        got = cal.get_touches()
+        touch = got[-1] if got else None
         if touch is None:
             results.append({"expected_css": (round(dot_pct_x * vw, 1), round(dot_pct_y * vh, 1)),
                             "error_px": float('inf'), "passed": False})
@@ -568,8 +690,9 @@ def full_calibration(arm: StylusArm, cam: Camera,
         raise RuntimeError(f"Phone tilted (ratio={tilt:.3f}). Adjust and retry.")
 
     # Step 2: Camera physical rotation
-    if not step2_camera_rotation(cam):
-        raise RuntimeError("Camera long axis doesn't match phone. Rotate camera 90°.")
+    step2_result = step2_camera_rotation(cam)
+    if not step2_result["ok"]:
+        raise RuntimeError(f"Camera check failed: {'; '.join(step2_result['issues'])}")
 
     # Step 3: Software rotation
     rotation = step3_software_rotation(cam, cal)

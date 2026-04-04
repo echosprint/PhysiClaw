@@ -371,6 +371,10 @@ class StylusArm:
         self._pen_up()                                         # Z up (queued after slide)
 
     def close(self):
-        """Close serial port."""
+        """Restore safe defaults and close serial port."""
+        try:
+            self._set_motors_always_on(False)
+        except Exception:
+            pass
         self.ser.close()
         log.debug('Serial port closed')

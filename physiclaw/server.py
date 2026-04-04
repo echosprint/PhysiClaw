@@ -398,20 +398,29 @@ def shutdown():
 # ─── LAN Bridge routes + tools ────────────────────────────────
 
 from physiclaw.bridge import (
-    BridgeState, CalibrationState, get_lan_ip,
+    BridgeState, CalibrationState, PhoneState, get_lan_ip,
     serve_message_page, serve_qr_page, handle_bridge_text,
     handle_bridge_tapped, handle_device_info,
-    handle_screenshot_upload,
+    handle_screenshot_upload, handle_phone_state,
     serve_calibrate_page, handle_calib_phase,
     handle_calib_set_phase, handle_calib_touch, handle_calib_touches,
 )
 
 _bridge = BridgeState()
 _calib = CalibrationState()
+_phone = PhoneState(_bridge, _calib)
+
+@mcp.custom_route("/bridge", methods=["GET"])
+async def _phone_page(request):
+    return await serve_message_page(request)
 
 @mcp.custom_route("/message", methods=["GET"])
 async def _message(request):
     return await serve_message_page(request)
+
+@mcp.custom_route("/api/bridge/state", methods=["GET"])
+async def _phone_state(request):
+    return await handle_phone_state(request, _phone)
 
 @mcp.custom_route("/qr", methods=["GET"])
 async def _qr(request):
@@ -469,10 +478,9 @@ def bridge_status() -> str:
     """
     ip = get_lan_ip()
     port = mcp.settings.port
-    msg_url = f"http://{ip}:{port}/message"
-    cal_url = f"http://{ip}:{port}/calibrate"
+    phone_url = f"http://{ip}:{port}/bridge"
 
-    lines = [f"Bridge URL: {msg_url}", f"Calibration URL: {cal_url}"]
+    lines = [f"Phone URL: {phone_url}"]
     if _bridge.connected:
         lines.append("Status: connected ✓")
     else:
@@ -488,7 +496,7 @@ def bridge_status() -> str:
 
 @mcp.tool()
 def bridge_send_text(text: str) -> str:
-    """Send text to the phone's /message page for clipboard transfer.
+    """Send text to the phone page for clipboard transfer.
 
     The text appears large on the bridge page. Next step: call bridge_tap()
     to physically tap the screen — this triggers the JavaScript clipboard
@@ -497,7 +505,7 @@ def bridge_send_text(text: str) -> str:
     After bridge_tap() confirms, the text is in the phone's clipboard.
     Paste it into any app: long_press on a text field → tap "Paste".
 
-    Phone must have the bridge page open (call bridge_status() for URL).
+    Phone must have the phone page open (call bridge_status() for URL).
     """
     if not _bridge.connected:
         return ("Phone not connected to bridge. "
@@ -511,7 +519,7 @@ def bridge_send_text(text: str) -> str:
 def bridge_tap() -> str:
     """Tap the phone screen center to copy bridge text to clipboard.
 
-    The /message page fills the screen. Tapping anywhere triggers the
+    The phone page fills the screen. Tapping anywhere triggers the
     JavaScript clipboard copy. This tool taps screen center (0.5, 0.5),
     then waits up to 5 seconds for the phone to confirm.
 
@@ -528,7 +536,7 @@ def bridge_tap() -> str:
     if _bridge.wait_clipboard(timeout=5.0):
         return f"Clipboard ready — '{_bridge.text}' copied to phone clipboard"
     return ("Tap sent but clipboard copy not confirmed. "
-            "Is the /message page open in the foreground on the phone?")
+            "Is the phone page open in the foreground on the phone?")
 
 
 @mcp.tool()
@@ -817,9 +825,10 @@ async def _camera_preview(request):
     import base64
     from starlette.responses import JSONResponse
     index = int(request.path_params["index"])
+    watermark = request.query_params.get("watermark", "0") == "1"
     try:
         jpeg = await asyncio.get_event_loop().run_in_executor(
-            None, PhysiClaw.camera_preview, index)
+            None, PhysiClaw.camera_preview, index, watermark)
         return JSONResponse({"status": "ok", "index": index,
                              "image": base64.b64encode(jpeg).decode()})
     except Exception as e:
@@ -845,6 +854,7 @@ async def _step0(request):
     def _do():
         if physiclaw._arm is None:
             raise RuntimeError("Arm not connected")
+        _phone.set_mode("calibrate")
         physiclaw.acquire()
         try:
             z_tap = step0_z_depth(physiclaw._arm, _calib)
@@ -890,8 +900,8 @@ async def _step2(request):
     def _do():
         if physiclaw._cam is None:
             raise RuntimeError("Camera not connected")
-        ok = step2_camera_rotation(physiclaw._cam)
-        return {"ok": ok, "message": "Camera aligned" if ok else "Rotate camera 90°"}
+        result = step2_camera_rotation(physiclaw._cam)
+        return result
     try:
         result = await asyncio.get_event_loop().run_in_executor(None, _do)
         return JSONResponse({"status": "ok", **result})
@@ -1006,6 +1016,8 @@ async def _step6(request):
                 pct_to_grbl[1, 2] -= origin_gy
                 physiclaw._grid_cal = GridCalibration(
                     pct_to_grbl=pct_to_grbl, pct_to_pixel=pct_to_pixel)
+            if passed >= 2:
+                _phone.set_mode("bridge")
             return {"results": results, "passed": passed, "total": len(results),
                     "calibrated": passed >= 2}
         finally:
@@ -1025,7 +1037,9 @@ async def _verify_edge(request):
     def _do():
         physiclaw.acquire()
         try:
-            return physiclaw.verify_edge_trace()
+            result = physiclaw.verify_edge_trace()
+            _phone.set_mode("bridge")
+            return result
         finally:
             physiclaw.release()
 

@@ -194,6 +194,46 @@ class CalibrationState:
             return d
 
 
+# ─── Phone state (unified page controller) ──────────────────
+
+class PhoneState:
+    """Coordinates mode switching between calibration and bridge on one page.
+
+    The phone runs a single page that can display calibration UI or bridge UI.
+    The server controls which mode is active.
+    """
+
+    def __init__(self, bridge: BridgeState, cal: CalibrationState):
+        self.bridge = bridge
+        self.cal = cal
+        self.lock = threading.Lock()
+        self.mode: str = "bridge"  # "calibrate" or "bridge"
+        self.mode_version: int = 0
+
+    def set_mode(self, mode: str):
+        with self.lock:
+            if self.mode != mode:
+                self.mode = mode
+                self.mode_version += 1
+                log.info(f"Phone mode → {mode}")
+
+    def get_state(self) -> dict:
+        """Unified state for the phone page poll."""
+        with self.lock:
+            mode = self.mode
+            mv = self.mode_version
+
+        state = {"mode": mode, "mode_version": mv}
+
+        if mode == "calibrate":
+            state.update(self.cal.get_display())
+        else:
+            state["text"] = self.bridge.text
+            state["text_version"] = self.bridge.version
+
+        return state
+
+
 # ─── Route handlers ──────────────────────────────────────────
 
 
@@ -201,8 +241,15 @@ async def serve_message_page(request):
     """Serve the bridge /message page for the phone browser."""
     from pathlib import Path
     from starlette.responses import HTMLResponse
-    html_path = Path(__file__).parent / "static" / "message.html"
+    html_path = Path(__file__).parent / "static" / "bridge.html"
     return HTMLResponse(html_path.read_text())
+
+
+async def handle_phone_state(request, phone: PhoneState):
+    """GET /api/bridge/state — unified poll endpoint for the phone page."""
+    from starlette.responses import JSONResponse
+    phone.bridge.touch()  # keep connected status alive in both modes
+    return JSONResponse(phone.get_state())
 
 
 async def handle_bridge_text(request, bridge: BridgeState):
@@ -252,53 +299,42 @@ async def handle_screenshot_upload(request, bridge: BridgeState):
 
 
 async def serve_qr_page(request):
-    """Serve a page with QR codes for the phone to scan.
-
-    Shows QR codes for both /message and /calibrate URLs so the user
-    can point their phone camera and open the page without typing.
-    Uses client-side QR generation (no server dependency).
-    """
+    """Serve a page with a single QR code for the unified phone page."""
     from starlette.responses import HTMLResponse
     ip = get_lan_ip()
-    # Get port from the actual request URL (the server we're running on)
     port = request.url.port or 8048
-    msg_url = f"http://{ip}:{port}/message"
-    cal_url = f"http://{ip}:{port}/calibrate"
+    phone_url = f"http://{ip}:{port}/bridge"
     html = f"""<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>PhysiClaw QR</title>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 <style>
 body{{font-family:system-ui;text-align:center;padding:40px;background:#f9fafb}}
-.qr{{display:inline-block;margin:20px;padding:20px;background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.1)}}
+.qr{{display:inline-block;margin:40px;padding:30px;background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.1)}}
 .qr h3{{margin:0 0 10px;color:#374151}}
-.qr p{{font-size:13px;color:#6b7280;word-break:break-all;max-width:300px}}
+.qr p{{font-size:14px;color:#6b7280;word-break:break-all;max-width:300px}}
 canvas{{display:block;margin:10px auto}}
 </style></head><body>
 <h2>PhysiClaw — Scan with Phone</h2>
-<div class="qr"><h3>Bridge (/message)</h3><canvas id="qr1"></canvas><p>{msg_url}</p></div>
-<div class="qr"><h3>Calibration (/calibrate)</h3><canvas id="qr2"></canvas><p>{cal_url}</p></div>
+<div class="qr"><h3>Open on Phone</h3><canvas id="qr1"></canvas><p>{phone_url}</p></div>
 <script>
 function drawQR(id, text){{
   var qr=qrcode(0,'M');qr.addData(text);qr.make();
   var canvas=document.getElementById(id);var ctx=canvas.getContext('2d');
-  var size=200;var cells=qr.getModuleCount();var cell=size/cells;
+  var size=240;var cells=qr.getModuleCount();var cell=size/cells;
   canvas.width=canvas.height=size;
   ctx.fillStyle='#fff';ctx.fillRect(0,0,size,size);
   ctx.fillStyle='#000';
   for(var r=0;r<cells;r++)for(var c=0;c<cells;c++)
     if(qr.isDark(r,c))ctx.fillRect(c*cell,r*cell,cell,cell);
 }}
-drawQR('qr1','{msg_url}');drawQR('qr2','{cal_url}');
+drawQR('qr1','{phone_url}');
 </script></body></html>"""
     return HTMLResponse(html)
 
 
 async def serve_calibrate_page(request):
-    """Serve the self-hosted /calibrate page for the phone."""
-    from pathlib import Path
-    from starlette.responses import HTMLResponse
-    html_path = Path(__file__).parent / "static" / "calibrate.html"
-    return HTMLResponse(html_path.read_text())
+    """Serve the unified phone page (same as /message and /bridge)."""
+    return await serve_message_page(request)
 
 
 async def handle_calib_phase(request, cal: CalibrationState):

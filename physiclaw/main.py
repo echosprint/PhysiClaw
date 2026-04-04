@@ -21,13 +21,13 @@ def main():
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(message)s",
     )
-
     from physiclaw.server import mcp, shutdown
 
     atexit.register(shutdown)
 
     mcp.settings.host = args.host
     mcp.settings.port = args.port
+    mcp.settings.log_level = "WARNING"
 
     from physiclaw.bridge import get_lan_ip
 
@@ -35,9 +35,8 @@ def main():
     lan_ip = get_lan_ip()
     log.info(f"PhysiClaw MCP server on http://{args.host}:{args.port}/mcp")
     log.info(f"Annotation UI at http://localhost:{args.port}/annotate")
-    log.info(f"QR codes (scan with phone): http://localhost:{args.port}/qr")
-    log.info(f"Bridge (open on phone): http://{lan_ip}:{args.port}/message")
-    log.info(f"Calibration (open on phone): http://{lan_ip}:{args.port}/calibrate")
+    log.info(f"QR code (scan with phone): http://localhost:{args.port}/qr")
+    log.info(f"Phone page: http://{lan_ip}:{args.port}/bridge")
     log.info("Run /setup in Claude Code to connect hardware and calibrate")
     mcp.run(transport="streamable-http")
 

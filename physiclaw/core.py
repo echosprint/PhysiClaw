@@ -78,11 +78,11 @@ class PhysiClaw:
     # ─── Camera preview ────────────────────────────────────────
 
     @staticmethod
-    def camera_preview(index: int) -> bytes:
-        """Capture one frame from a camera, watermark the index, return JPEG bytes.
+    def camera_preview(index: int, watermark: bool = False) -> bytes:
+        """Capture one frame from a camera, optionally watermark the index.
 
-        Opens the camera, grabs a frame, draws a semi-transparent index
-        watermark in the center, closes the camera, and returns JPEG bytes.
+        Opens the camera, grabs a frame, closes the camera, returns JPEG bytes.
+        watermark: if True, draws camera index overlay in the center.
         Raises RuntimeError if camera can't be opened or returns no frame.
         """
         cam = Camera(index)
@@ -90,6 +90,10 @@ class PhysiClaw:
         cam.close()
         if frame is None:
             raise RuntimeError(f"Camera {index} returned no frame")
+
+        if not watermark:
+            _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            return jpeg.tobytes()
 
         # Watermark the camera index
         h, w = frame.shape[:2]

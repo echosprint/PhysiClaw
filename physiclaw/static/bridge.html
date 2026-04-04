@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>PhysiClaw</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{
+  width:100%;height:100%;
+  overflow:hidden;
+  -webkit-touch-callout:none;
+  -webkit-user-select:none;
+  user-select:none;
+}
+body{position:relative}
+
+/* ── Calibration mode ─────────────────────────────── */
+body.mode-calibrate{background:#fff;touch-action:none}
+body.mode-calibrate #bridge-layer{display:none}
+body.mode-calibrate #calib-layer{display:block}
+
+/* ── Bridge mode ──────────────────────────────────── */
+body.mode-bridge{
+  background:#000;color:#fff;
+  font-family:-apple-system,system-ui,"Helvetica Neue",sans-serif;
+  touch-action:manipulation;
+}
+body.mode-bridge #calib-layer{display:none}
+body.mode-bridge #bridge-layer{
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  position:fixed;top:0;left:0;right:0;bottom:0;
+  padding:env(safe-area-inset-top,20px) 20px env(safe-area-inset-bottom,20px);
+}
+
+/* ── Calibration elements ─────────────────────────── */
+#calib-layer{position:fixed;top:0;left:0;width:100%;height:100%}
+#phase-label{
+  position:fixed;
+  top:env(safe-area-inset-top,4px);
+  right:4px;
+  font:10px monospace;color:#ccc;z-index:1;
+}
+
+/* ── Bridge elements ──────────────────────────────── */
+#msg-text{
+  font-size:min(14vw,100px);
+  font-weight:600;
+  text-align:center;
+  word-break:break-all;
+  line-height:1.4;
+  padding:20px;
+  max-width:100%;
+  transition:opacity 0.15s;
+}
+#msg-text.waiting{opacity:0.15;font-size:min(6vw,40px);font-weight:400}
+#msg-status{
+  position:fixed;
+  top:calc(env(safe-area-inset-top,10px) + 6px);
+  right:10px;
+  font-size:11px;opacity:0.4;
+  padding:4px 8px;
+}
+#msg-feedback{
+  position:fixed;
+  top:0;left:0;right:0;bottom:0;
+  background:rgba(34,197,94,0.15);
+  pointer-events:none;
+  opacity:0;
+  transition:opacity 0.15s;
+  z-index:20;
+}
+#msg-feedback.show{opacity:1}
+#msg-hint{
+  position:fixed;
+  bottom:calc(env(safe-area-inset-bottom,20px) + 16px);
+  font-size:13px;opacity:0.25;
+  letter-spacing:0.5px;
+}
+</style>
+</head>
+<body class="mode-bridge">
+
+<!-- Calibration layer -->
+<div id="calib-layer">
+  <div id="phase-label">idle</div>
+  <svg id="canvas" xmlns="http://www.w3.org/2000/svg"></svg>
+</div>
+
+<!-- Bridge layer -->
+<div id="bridge-layer">
+  <div id="msg-status">●</div>
+  <div id="msg-feedback"></div>
+  <div id="msg-text" class="waiting">PhysiClaw</div>
+  <div id="msg-hint">tap anywhere to copy</div>
+</div>
+
+<script>
+(function(){
+  var W = window.innerWidth;
+  var H = window.innerHeight;
+  var currentMode = 'bridge';
+
+  // ════════════════════════════════════════════════════════
+  // CALIBRATION STATE & SVG
+  // ════════════════════════════════════════════════════════
+  var svg = document.getElementById('canvas');
+  var phaseLabel = document.getElementById('phase-label');
+  var calibPhase = 'idle';
+  var calibVersion = 0;
+  var phaseData = {};
+
+  function updateSize(){
+    W = window.innerWidth;
+    H = window.innerHeight;
+    svg.setAttribute('viewBox', '0 0 '+W+' '+H);
+  }
+  updateSize();
+  window.addEventListener('resize', function(){ updateSize(); if(currentMode==='calibrate') renderPhase(); });
+
+  // SVG helpers
+  function clearSvg(){ svg.innerHTML = ''; }
+
+  function circle(cx, cy, r, fill){
+    var el = document.createElementNS('http://www.w3.org/2000/svg','circle');
+    el.setAttribute('cx', cx); el.setAttribute('cy', cy);
+    el.setAttribute('r', r); el.setAttribute('fill', fill);
+    svg.appendChild(el);
+  }
+
+  function rect(x, y, w, h, fill, rx){
+    var el = document.createElementNS('http://www.w3.org/2000/svg','rect');
+    el.setAttribute('x', x); el.setAttribute('y', y);
+    el.setAttribute('width', w); el.setAttribute('height', h);
+    el.setAttribute('fill', fill);
+    if(rx) el.setAttribute('rx', rx);
+    svg.appendChild(el);
+  }
+
+  function text(x, y, str, size, fill){
+    var el = document.createElementNS('http://www.w3.org/2000/svg','text');
+    el.setAttribute('x', x); el.setAttribute('y', y);
+    el.setAttribute('font-size', size); el.setAttribute('fill', fill);
+    el.setAttribute('text-anchor', 'middle');
+    el.setAttribute('dominant-baseline', 'middle');
+    el.setAttribute('font-family', 'system-ui, sans-serif');
+    el.setAttribute('font-weight', 'bold');
+    el.textContent = str;
+    svg.appendChild(el);
+  }
+
+  function flashTouch(cx, cy){
+    var rings = [
+      {delay: 0,   dur: 700, maxR: 50,  sw: 6},
+      {delay: 120, dur: 700, maxR: 90,  sw: 5},
+      {delay: 240, dur: 700, maxR: 130, sw: 4}
+    ];
+    rings.forEach(function(cfg){
+      setTimeout(function(){
+        var el = document.createElementNS('http://www.w3.org/2000/svg','circle');
+        el.setAttribute('cx', cx); el.setAttribute('cy', cy);
+        el.setAttribute('r', 8);
+        el.setAttribute('fill', 'none');
+        el.setAttribute('stroke', '#f97316');
+        el.setAttribute('stroke-width', cfg.sw);
+        el.setAttribute('opacity', '1');
+        svg.appendChild(el);
+        var start = performance.now();
+        function animate(now){
+          var t = Math.min((now - start) / cfg.dur, 1);
+          var ease = 1 - (1 - t) * (1 - t);
+          el.setAttribute('r', 8 + (cfg.maxR - 8) * ease);
+          el.setAttribute('opacity', String(1 - ease));
+          el.setAttribute('stroke-width', String(cfg.sw * (1 - ease * 0.5)));
+          if(t < 1) requestAnimationFrame(animate);
+          else if(el.parentNode) el.parentNode.removeChild(el);
+        }
+        requestAnimationFrame(animate);
+      }, cfg.delay);
+    });
+    var dot = document.createElementNS('http://www.w3.org/2000/svg','circle');
+    dot.setAttribute('cx', cx); dot.setAttribute('cy', cy);
+    dot.setAttribute('r', 12); dot.setAttribute('fill', '#f97316');
+    dot.setAttribute('opacity', '1');
+    svg.appendChild(dot);
+    setTimeout(function(){ if(dot.parentNode) dot.parentNode.removeChild(dot); }, 800);
+  }
+
+  // Phase renderers
+  function renderPhase(){
+    clearSvg();
+    var r = Math.min(W, H) * 0.08;
+    switch(calibPhase){
+      case 'idle':
+        text(W/2, H/2, 'PhysiClaw', 24, '#ddd');
+        text(W/2, H/2+30, 'Waiting for calibration...', 14, '#ccc');
+        break;
+      case 'center':
+        circle(W*0.5, H*0.5, r, '#f97316');
+        break;
+      case 'markers':
+        var mSize = Math.min(W, H) * 0.12;
+        rect(W*0.5-mSize*1.2, H*0.12-mSize*0.6, mSize*2.4, mSize*1.2, '#2563eb', 8);
+        text(W*0.5, H*0.12, 'UP', mSize, '#ffffff');
+        rect(W*0.82-mSize*1.8, H*0.5-mSize*0.6, mSize*3.6, mSize*1.2, '#ef4444', 8);
+        text(W*0.82, H*0.5, 'RIGHT', mSize*0.8, '#ffffff');
+        break;
+      case 'grid':
+        var cols = phaseData.grid_cols || [0.25, 0.50, 0.75];
+        var rows = phaseData.grid_rows || [0.20, 0.40, 0.50, 0.60, 0.80];
+        var dotR = Math.min(W, H) * 0.015;
+        for(var ri=0; ri<rows.length; ri++)
+          for(var ci=0; ci<cols.length; ci++)
+            circle(W*cols[ci], H*rows[ri], dotR, '#ef4444');
+        break;
+      case 'dot':
+        var dx = (phaseData.dot_x || 0.5) * W;
+        var dy = (phaseData.dot_y || 0.5) * H;
+        circle(dx, dy, r*0.6, '#f97316');
+        break;
+    }
+    phaseLabel.textContent = calibPhase;
+  }
+
+  // ════════════════════════════════════════════════════════
+  // BRIDGE STATE
+  // ════════════════════════════════════════════════════════
+  var msgTextEl = document.getElementById('msg-text');
+  var msgStatusEl = document.getElementById('msg-status');
+  var msgFeedbackEl = document.getElementById('msg-feedback');
+  var msgHintEl = document.getElementById('msg-hint');
+  var bridgeVersion = 0;
+  var currentText = null;
+  var pollErrors = 0;
+
+  // Clipboard copy (iOS Safari compatible)
+  function copyToClipboard(txt){
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      return navigator.clipboard.writeText(txt).then(function(){return true})
+        .catch(function(){return fallbackCopy(txt)});
+    }
+    return Promise.resolve(fallbackCopy(txt));
+  }
+
+  function fallbackCopy(txt){
+    var ta = document.createElement('textarea');
+    ta.value = txt;
+    ta.setAttribute('readonly','');
+    ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0';
+    document.body.appendChild(ta);
+    ta.contentEditable = true;
+    ta.readOnly = false;
+    var range = document.createRange();
+    range.selectNodeContents(ta);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    ta.setSelectionRange(0, txt.length);
+    var ok = false;
+    try{ ok = document.execCommand('copy'); }catch(e){}
+    document.body.removeChild(ta);
+    return ok;
+  }
+
+  function bridgeFlash(){
+    msgFeedbackEl.className = 'show';
+    setTimeout(function(){ msgFeedbackEl.className = ''; }, 300);
+  }
+
+  function notifyBridgeTap(){
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/bridge/tapped', true);
+    xhr.send();
+  }
+
+  // ════════════════════════════════════════════════════════
+  // TOUCH HANDLING (mode-aware)
+  // ════════════════════════════════════════════════════════
+  var touchStartTime = 0;
+  var touchStartX = 0;
+  var touchStartY = 0;
+
+  document.body.addEventListener('touchstart', function(e){
+    e.preventDefault();
+    var t = e.touches[0];
+    touchStartTime = Date.now();
+    touchStartX = t.pageX;
+    touchStartY = t.pageY;
+
+    if(currentMode === 'calibrate'){
+      // Report touchstart immediately for Z-probing
+      var payload = {
+        x: Math.round(t.pageX), y: Math.round(t.pageY),
+        type: 'touchstart', phase: calibPhase, duration: 0,
+        viewport_w: W, viewport_h: H,
+        pixel_ratio: window.devicePixelRatio || 1,
+        timestamp: Date.now()
+      };
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/calibrate/touch', true);
+      xhr.setRequestHeader('Content-Type', 'application/json');
+      xhr.send(JSON.stringify(payload));
+      flashTouch(t.pageX, t.pageY);
+    }
+  }, {passive:false});
+
+  document.body.addEventListener('touchend', function(e){
+    e.preventDefault();
+    var t = e.changedTouches[0];
+    var endX = t.pageX;
+    var endY = t.pageY;
+    var duration = Date.now() - touchStartTime;
+
+    if(currentMode === 'calibrate'){
+      var dx = endX - touchStartX;
+      var dy = endY - touchStartY;
+      var dist = Math.sqrt(dx*dx + dy*dy);
+      var type, direction = null;
+      if(dist > 30){
+        type = 'swipe';
+        direction = Math.abs(dx) > Math.abs(dy)
+          ? (dx > 0 ? 'right' : 'left')
+          : (dy > 0 ? 'bottom' : 'top');
+      } else if(duration > 500){
+        type = 'long-press';
+      } else {
+        type = 'tap';
+      }
+      var payload = {
+        x: Math.round(endX), y: Math.round(endY),
+        type: type, phase: calibPhase, duration: duration,
+        viewport_w: W, viewport_h: H,
+        pixel_ratio: window.devicePixelRatio || 1,
+        timestamp: Date.now()
+      };
+      if(direction) payload.direction = direction;
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/calibrate/touch', true);
+      xhr.setRequestHeader('Content-Type', 'application/json');
+      xhr.send(JSON.stringify(payload));
+    } else {
+      // Bridge mode: tap to copy
+      if(!currentText) return;
+      copyToClipboard(currentText).then(function(ok){
+        if(ok !== false){ bridgeFlash(); notifyBridgeTap(); }
+      });
+    }
+  }, {passive: false});
+
+  // Desktop click fallback
+  document.body.addEventListener('click', function(e){
+    if(currentMode === 'calibrate'){
+      var payload = {
+        x: Math.round(e.pageX), y: Math.round(e.pageY),
+        type: 'tap', phase: calibPhase, duration: 0,
+        viewport_w: W, viewport_h: H,
+        pixel_ratio: window.devicePixelRatio || 1,
+        timestamp: Date.now()
+      };
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/calibrate/touch', true);
+      xhr.setRequestHeader('Content-Type', 'application/json');
+      xhr.send(JSON.stringify(payload));
+    } else {
+      if(!currentText) return;
+      copyToClipboard(currentText).then(function(ok){
+        if(ok !== false){ bridgeFlash(); notifyBridgeTap(); }
+      });
+    }
+  });
+
+  // ════════════════════════════════════════════════════════
+  // UNIFIED POLL LOOP
+  // ════════════════════════════════════════════════════════
+  var modeVersion = 0;
+
+  function poll(){
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/bridge/state', true);
+    xhr.timeout = 3000;
+    xhr.onload = function(){
+      if(xhr.status === 200){
+        pollErrors = 0;
+        msgStatusEl.textContent = '●';
+        msgStatusEl.style.color = '#4ade80';
+        var data = JSON.parse(xhr.responseText);
+
+        // Mode switch
+        if(data.mode_version !== modeVersion){
+          modeVersion = data.mode_version;
+          if(data.mode !== currentMode){
+            currentMode = data.mode;
+            document.body.className = 'mode-' + currentMode;
+          }
+        }
+
+        if(currentMode === 'calibrate'){
+          if(data.version !== calibVersion){
+            calibVersion = data.version;
+            calibPhase = data.phase;
+            phaseData = data;
+            renderPhase();
+          }
+        } else {
+          if(data.text_version > bridgeVersion && data.text !== null){
+            bridgeVersion = data.text_version;
+            currentText = data.text;
+            msgTextEl.textContent = currentText;
+            msgTextEl.className = '';
+            msgHintEl.style.opacity = '0.4';
+          }
+        }
+      } else {
+        onPollError();
+      }
+    };
+    xhr.onerror = onPollError;
+    xhr.ontimeout = onPollError;
+    xhr.send();
+  }
+
+  function onPollError(){
+    pollErrors++;
+    if(pollErrors > 3){
+      msgStatusEl.textContent = '●';
+      msgStatusEl.style.color = '#ef4444';
+    }
+  }
+
+  setInterval(poll, 250);
+  poll();
+
+  // ════════════════════════════════════════════════════════
+  // DEVICE INFO (sent once on load)
+  // ════════════════════════════════════════════════════════
+  (function(){
+    var safeTop = parseInt(getComputedStyle(document.documentElement)
+      .getPropertyValue('env(safe-area-inset-top)')) || 0;
+    var safeBottom = parseInt(getComputedStyle(document.documentElement)
+      .getPropertyValue('env(safe-area-inset-bottom)')) || 0;
+    var info = {
+      screen_width: Math.round(screen.width * devicePixelRatio),
+      screen_height: Math.round(screen.height * devicePixelRatio),
+      css_width: screen.width,
+      css_height: screen.height,
+      pixel_ratio: devicePixelRatio,
+      viewport_width: window.innerWidth,
+      viewport_height: window.innerHeight,
+      safe_area_top: safeTop,
+      safe_area_bottom: safeBottom,
+      user_agent: navigator.userAgent
+    };
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/bridge/device-info', true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.send(JSON.stringify(info));
+  })();
+
+  renderPhase();
+})();
+</script>
+</body>
+</html>

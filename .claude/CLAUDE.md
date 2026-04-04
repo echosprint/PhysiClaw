@@ -40,7 +40,7 @@ Run `/setup` first to connect hardware and calibrate. All tools below require ha
 **LAN Bridge (clipboard text transfer — no hardware required):**
 
 - `bridge_status()` — check bridge connection and get the URL for the phone
-- `bridge_send_text(text)` — send text to the phone's /message page
+- `bridge_send_text(text)` — send text to the phone page for clipboard transfer
 - `bridge_tap()` — tap screen center to copy displayed text to phone clipboard
 
 To paste text into an app: `bridge_send_text("text")` → `bridge_tap()` → navigate to text field → `long_press()` → tap "Paste". This is much faster than typing on the keyboard.
