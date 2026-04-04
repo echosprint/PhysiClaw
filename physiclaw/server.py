@@ -400,7 +400,7 @@ def shutdown():
 from physiclaw.bridge import (
     BridgeState, CalibrationState, PhoneState, get_lan_ip,
     serve_message_page, serve_qr_page, handle_bridge_text,
-    handle_bridge_tapped, handle_device_info,
+    handle_bridge_tapped, handle_device_info, handle_screen_center,
     handle_screenshot_upload, handle_phone_state,
     serve_calibrate_page, handle_calib_phase,
     handle_calib_set_phase, handle_calib_touch, handle_calib_touches,
@@ -437,6 +437,10 @@ async def _bridge_tapped(request):
 @mcp.custom_route("/api/bridge/device-info", methods=["POST"])
 async def _bridge_device_info(request):
     return await handle_device_info(request, _bridge)
+
+@mcp.custom_route("/api/bridge/screen-center", methods=["POST"])
+async def _bridge_screen_center(request):
+    return await handle_screen_center(request, _bridge)
 
 @mcp.custom_route("/api/bridge/screenshot", methods=["POST"])
 async def _bridge_screenshot(request):

@@ -50,6 +50,7 @@ class BridgeState:
         self.device_info: dict | None = None
         self.last_seen: float = 0
         self._clipboard_ready = threading.Event()
+        self.screen_center: tuple[float, float] | None = None
         # Screenshot upload (from iOS Shortcut)
         self._screenshot_data: bytes | None = None
         self._screenshot_ready = threading.Event()
@@ -278,6 +279,19 @@ async def handle_device_info(request, bridge: BridgeState):
         bridge.device_info = body
     log.info(f"Bridge device: {body.get('css_width')}×{body.get('css_height')}pt, "
              f"{body.get('pixel_ratio')}x")
+    return JSONResponse({"ok": True})
+
+
+async def handle_screen_center(request, bridge: BridgeState):
+    """POST /api/bridge/screen-center — phone reports viewport center {x, y}."""
+    from starlette.responses import JSONResponse
+    body = await request.json()
+    x, y = body.get("x"), body.get("y")
+    if x is None or y is None:
+        return JSONResponse({"error": "x and y required"}, status_code=400)
+    with bridge.lock:
+        bridge.screen_center = (float(x), float(y))
+    log.info(f"Bridge: screen center at viewport ({x}, {y})")
     return JSONResponse({"ok": True})
 
 

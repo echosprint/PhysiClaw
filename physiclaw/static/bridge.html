@@ -63,6 +63,19 @@ body.mode-bridge #bridge-layer{
   padding:4px 8px;
 }
 #msg-conn-label{color:#999;}
+#center-circle{
+  position:fixed;
+  width:40px;height:40px;
+  border-radius:50%;
+  border:3px solid #4ade80;
+  top:50%;left:50%;
+  transform:translate(-50%,-50%);
+  opacity:0;
+  transition:opacity 0.3s;
+  pointer-events:none;
+  z-index:10;
+}
+#center-circle.show{opacity:1;}
 #msg-feedback{
   position:fixed;
   top:0;left:0;right:0;bottom:0;
@@ -95,6 +108,7 @@ body.mode-bridge #bridge-layer{
   <div id="msg-feedback"></div>
   <div id="msg-text" class="waiting">PhysiClaw</div>
   <div id="msg-hint">tap anywhere to copy</div>
+  <div id="center-circle"></div>
 </div>
 
 <script>
@@ -269,6 +283,21 @@ body.mode-bridge #bridge-layer{
     setTimeout(function(){ msgFeedbackEl.className = ''; }, 300);
   }
 
+  var centerCircleEl = document.getElementById('center-circle');
+  var centerCircleTimer = null;
+  function showCenterCircle(e){
+    centerCircleEl.className = 'show';
+    clearTimeout(centerCircleTimer);
+    centerCircleTimer = setTimeout(function(){ centerCircleEl.className = ''; }, 2000);
+    // Send viewport center to server
+    var cx = screen.width / 2 - (e.screenX - e.clientX);
+    var cy = screen.height / 2 - (e.screenY - e.clientY);
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/bridge/screen-center', true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.send(JSON.stringify({x: Math.round(cx), y: Math.round(cy)}));
+  }
+
   function notifyBridgeTap(){
     var xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/bridge/tapped', true);
@@ -281,6 +310,10 @@ body.mode-bridge #bridge-layer{
   var touchStartTime = 0;
   var touchStartX = 0;
   var touchStartY = 0;
+  var touchStartScreenX = 0;
+  var touchStartScreenY = 0;
+  var touchStartClientX = 0;
+  var touchStartClientY = 0;
 
   document.body.addEventListener('touchstart', function(e){
     e.preventDefault();
@@ -288,6 +321,10 @@ body.mode-bridge #bridge-layer{
     touchStartTime = Date.now();
     touchStartX = t.pageX;
     touchStartY = t.pageY;
+    touchStartScreenX = t.screenX;
+    touchStartScreenY = t.screenY;
+    touchStartClientX = t.clientX;
+    touchStartClientY = t.clientY;
 
     if(currentMode === 'calibrate'){
       // Report touchstart immediately for Z-probing
@@ -342,6 +379,8 @@ body.mode-bridge #bridge-layer{
       xhr.send(JSON.stringify(payload));
     } else {
       // Bridge mode: tap to copy
+      showCenterCircle({screenX: touchStartScreenX, clientX: touchStartClientX,
+                        screenY: touchStartScreenY, clientY: touchStartClientY});
       if(!currentText) return;
       copyToClipboard(currentText).then(function(ok){
         if(ok !== false){ bridgeFlash(); notifyBridgeTap(); }
@@ -364,6 +403,7 @@ body.mode-bridge #bridge-layer{
       xhr.setRequestHeader('Content-Type', 'application/json');
       xhr.send(JSON.stringify(payload));
     } else {
+      showCenterCircle();
       if(!currentText) return;
       copyToClipboard(currentText).then(function(ok){
         if(ok !== false){ bridgeFlash(); notifyBridgeTap(); }
