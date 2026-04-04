@@ -22,7 +22,7 @@ body.mode-calibrate #calib-layer{display:block}
 
 /* ── Bridge mode ──────────────────────────────────── */
 body.mode-bridge{
-  background:#000;color:#fff;
+  background:#e5e5e5;color:#333;
   font-family:-apple-system,system-ui,"Helvetica Neue",sans-serif;
   touch-action:manipulation;
 }
@@ -59,9 +59,10 @@ body.mode-bridge #bridge-layer{
   position:fixed;
   top:calc(env(safe-area-inset-top,10px) + 6px);
   right:10px;
-  font-size:11px;opacity:0.4;
+  font-size:11px;opacity:0.8;
   padding:4px 8px;
 }
+#msg-conn-label{color:#999;}
 #msg-feedback{
   position:fixed;
   top:0;left:0;right:0;bottom:0;
@@ -90,7 +91,7 @@ body.mode-bridge #bridge-layer{
 
 <!-- Bridge layer -->
 <div id="bridge-layer">
-  <div id="msg-status">●</div>
+  <div id="msg-status">● <span id="msg-conn-label">connecting…</span></div>
   <div id="msg-feedback"></div>
   <div id="msg-text" class="waiting">PhysiClaw</div>
   <div id="msg-hint">tap anywhere to copy</div>
@@ -382,7 +383,7 @@ body.mode-bridge #bridge-layer{
     xhr.onload = function(){
       if(xhr.status === 200){
         pollErrors = 0;
-        msgStatusEl.textContent = '●';
+        msgStatusEl.innerHTML = '● <span id="msg-conn-label">connected</span>';
         msgStatusEl.style.color = '#4ade80';
         var data = JSON.parse(xhr.responseText);
 
@@ -423,7 +424,7 @@ body.mode-bridge #bridge-layer{
   function onPollError(){
     pollErrors++;
     if(pollErrors > 3){
-      msgStatusEl.textContent = '●';
+      msgStatusEl.innerHTML = '● <span id="msg-conn-label">disconnected</span>';
       msgStatusEl.style.color = '#ef4444';
     }
   }
