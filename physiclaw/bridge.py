@@ -186,7 +186,7 @@ class CalibrationState:
     def wait_touch(self, timeout: float = 10.0) -> dict | None:
         """Block until a touch event arrives. Returns the touch or None.
 
-        Caller must call get_touches() first to clear stale events.
+        Caller must call flush_touches() first to clear stale events.
         This method waits for the NEXT report_touch() call.
         """
         if self._touch_event.wait(timeout=timeout):
@@ -196,8 +196,8 @@ class CalibrationState:
                     return self.touches[-1]
         return None
 
-    def get_touches(self) -> list[dict]:
-        """Get and clear all accumulated touch events."""
+    def flush_touches(self) -> list[dict]:
+        """Drain and return all accumulated touch events, clearing the queue."""
         with self.lock:
             touches = list(self.touches)
             self.touches = []
@@ -363,5 +363,5 @@ async def handle_calib_touch(request, cal: CalibrationState):
 async def handle_calib_touches(request, cal: CalibrationState):
     """GET /api/calibrate/touches — server reads accumulated touch events."""
     from starlette.responses import JSONResponse
-    touches = cal.get_touches()
+    touches = cal.flush_touches()
     return JSONResponse({"touches": touches})

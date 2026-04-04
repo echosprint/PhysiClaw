@@ -58,7 +58,7 @@ def step0_z_depth(arm: StylusArm, cal: CalibrationState) -> float:
     time.sleep(0.5)
 
     # Clear any stale touches
-    cal.get_touches()
+    cal.flush_touches()
 
     # Phase A: find first contact by descending in 0.3mm steps
     z_contact = None
@@ -69,7 +69,7 @@ def step0_z_depth(arm: StylusArm, cal: CalibrationState) -> float:
         _tap_once(arm, z, z_speed=SLOW_Z_SPEED)
         time.sleep(0.3)
 
-        touches = cal.get_touches()
+        touches = cal.flush_touches()
         if touches:
             z_contact = z
             log.info(f"  First contact at Z={z:.2f}mm")
@@ -90,10 +90,10 @@ def step0_z_depth(arm: StylusArm, cal: CalibrationState) -> float:
         log.info(f"  Testing Z={z_try:.2f}mm (10 taps) ...")
         all_ok = True
         for i in range(10):
-            cal.get_touches()
+            cal.flush_touches()
             _tap_once(arm, z_try, z_speed=SLOW_Z_SPEED)
             time.sleep(0.3)
-            touches = cal.get_touches()
+            touches = cal.flush_touches()
             if touches:
                 log.info(f"    Tap {i+1}/10 hit")
             else:
@@ -134,10 +134,10 @@ def step1_alignment(arm: StylusArm, cal: CalibrationState,
     for x in [-half, half]:
         arm._fast_move(x, 0)
         arm.wait_idle()
-        cal.get_touches()  # clear stale
+        cal.flush_touches()  # clear stale
         _tap_once(arm, z_tap)
         time.sleep(0.3)
-        got = cal.get_touches()
+        got = cal.flush_touches()
         if not got:
             raise RuntimeError(f"Step 1 FAILED — no touch at arm X={x:.1f}mm")
         touches.append(got[-1])
@@ -389,10 +389,10 @@ def step4_grbl_screen(arm: StylusArm, cal: CalibrationState,
     for gx, gy in grid_mm:
         arm._fast_move(gx, gy)
         arm.wait_idle()
-        cal.get_touches()
+        cal.flush_touches()
         _tap_once(arm, z_tap)
         time.sleep(0.3)
-        got = cal.get_touches()
+        got = cal.flush_touches()
         if not got:
             log.warning(f"  Miss at GRBL ({gx:.1f}, {gy:.1f}) — skipping")
             continue
@@ -422,10 +422,10 @@ def step4_grbl_screen(arm: StylusArm, cal: CalibrationState,
     for vgx, vgy in verify_offsets:
         arm._fast_move(vgx, vgy)
         arm.wait_idle()
-        cal.get_touches()
+        cal.flush_touches()
         _tap_once(arm, z_tap)
         time.sleep(0.3)
-        got = cal.get_touches()
+        got = cal.flush_touches()
         if not got:
             continue
         touch = got[-1]
@@ -603,12 +603,12 @@ def step6_validate(arm: StylusArm, cam: Camera, cal: CalibrationState,
         # 5. Arm taps
         arm._fast_move(gx, gy)
         arm.wait_idle()
-        cal.get_touches()
+        cal.flush_touches()
         _tap_once(arm, z_tap)
         time.sleep(0.3)
 
         # 6. Phone reports touch (0-1 pct)
-        got = cal.get_touches()
+        got = cal.flush_touches()
         touch = got[-1] if got else None
         if touch is None:
             results.append({"expected": (dot_pct_x, dot_pct_y),
