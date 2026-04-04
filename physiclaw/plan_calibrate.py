@@ -23,7 +23,7 @@ import time
 import cv2
 import numpy as np
 
-from physiclaw.bridge import CalibrationState, GRID_COLS_PCT, GRID_ROWS_PCT
+from physiclaw.bridge import CalibrationState
 from physiclaw.camera import Camera
 from physiclaw.grid_calibrate import GridCalibration, detect_red_dots, sort_dots_to_grid
 from physiclaw.stylus_arm import StylusArm
@@ -147,17 +147,17 @@ def step1_alignment(arm: StylusArm, cal: CalibrationState,
 
     sx1, sy1 = touches[0]['x'], touches[0]['y']
     sx2, sy2 = touches[1]['x'], touches[1]['y']
-    log.info(f"  Tap A: arm X={-half:.1f}mm → screen ({sx1}, {sy1})")
-    log.info(f"  Tap B: arm X={half:.1f}mm → screen ({sx2}, {sy2})")
+    log.info(f"  Tap A: arm X={-half:.1f}mm → screen ({sx1:.3f}, {sy1:.3f})")
+    log.info(f"  Tap B: arm X={half:.1f}mm → screen ({sx2:.3f}, {sy2:.3f})")
     dx = abs(sx2 - sx1)
     dy = abs(sy2 - sy1)
-    log.info(f"  dx={dx:.1f}, dy={dy:.1f}")
+    log.info(f"  dx={dx:.3f}, dy={dy:.3f}")
 
     # Arm X may map to phone X or phone Y (90° rotation is fine).
     # Check that the movement is straight: minor axis / major axis < 0.02.
     major = max(dx, dy)
     minor = min(dx, dy)
-    if major < 1:
+    if major < 0.01:
         raise RuntimeError("Step 1 FAILED — both taps at same position. "
                            "Check arm movement and phone placement.")
 
@@ -170,7 +170,7 @@ def step1_alignment(arm: StylusArm, cal: CalibrationState,
 
 # ─── Step 2: Camera physical rotation check ──────────────────
 
-def step2_camera_rotation(cam: Camera, device_info: dict | None = None) -> dict:
+def step2_camera_rotation(cam: Camera, screen_dimension: dict | None = None) -> dict:
     """Check camera orientation, tilt, and coverage. Plan Step 2.
 
     Checks:
@@ -246,9 +246,9 @@ def step2_camera_rotation(cam: Camera, device_info: dict | None = None) -> dict:
 
     # 2. Aspect ratio check (tilt detection)
     phone_ratio = phone_long / max(phone_short, 1)
-    if device_info:
-        screen_w = device_info.get('viewport_width', 430)
-        screen_h = device_info.get('viewport_height', 932)
+    if screen_dimension:
+        screen_w = screen_dimension.get('width', 430)
+        screen_h = screen_dimension.get('height', 932)
         expected_ratio = max(screen_w, screen_h) / max(min(screen_w, screen_h), 1)
     else:
         expected_ratio = 2.0  # typical phone ~19.5:9 ≈ 2.17
@@ -345,14 +345,15 @@ def step3_software_rotation(cam: Camera, cal: CalibrationState) -> int:
 
 def step4_grbl_screen(arm: StylusArm, cal: CalibrationState,
                       z_tap: float,
-                      device_info: dict | None = None
+                      screen_dimension: dict | None = None
                       ) -> tuple[np.ndarray, list[dict]]:
     """Distributed taps with touch coords → affine transform. Plan Step 4.
 
     Expands outward from center. Uses device info for expansion distances
     when available. Verifies with 3 additional taps.
 
-    Returns (screen_to_grbl affine (2,3), list of touch events).
+    Touch x,y are 0-1 screen percentages.
+    Returns (pct_to_grbl affine (2,3), list of touch events).
     """
     log.info("Step 4: GRBL ↔ Screen mapping (Mapping A)")
     cal.set_phase("center")
@@ -365,9 +366,9 @@ def step4_grbl_screen(arm: StylusArm, cal: CalibrationState,
     # With device info: scale based on viewport aspect ratio
     d = 8.0
     d_v = 8.0  # vertical expansion (may differ from horizontal)
-    if device_info:
-        vw = device_info.get('viewport_width', 390)
-        vh = device_info.get('viewport_height', 844)
+    if screen_dimension:
+        vw = screen_dimension.get('width', 390)
+        vh = screen_dimension.get('height', 844)
         # Scale vertical expansion by aspect ratio so points span proportionally
         d_v = d * (vh / vw) if vw > 0 else d
 
@@ -444,9 +445,7 @@ def step4_grbl_screen(arm: StylusArm, cal: CalibrationState,
 # ─── Step 5: Camera ↔ Screen mapping (Mapping B) ────────────
 
 def step5_camera_screen(cam: Camera, cal: CalibrationState,
-                        rotation: int,
-                        viewport_w: int, viewport_h: int
-                        ) -> np.ndarray:
+                        rotation: int) -> np.ndarray:
     """Detect 15 red dots, compute 0-1 pct → camera pixels affine. Plan Step 5.
 
     Returns pct_to_pixel affine (2,3): screen 0-1 → camera pixels.
@@ -462,7 +461,7 @@ def step5_camera_screen(cam: Camera, cal: CalibrationState,
         frame = cv2.rotate(frame, rotation)
 
     dots = detect_red_dots(frame)
-    expected = len(GRID_COLS_PCT) * len(GRID_ROWS_PCT)
+    expected = len(cal.GRID_COLS_PCT) * len(cal.GRID_ROWS_PCT)
 
     # Retry once if detection fails
     if len(dots) != expected:
@@ -479,7 +478,7 @@ def step5_camera_screen(cam: Camera, cal: CalibrationState,
 
     camera_pixels = sort_dots_to_grid(dots)
     screen_pcts = np.array(
-        [[x, y] for y in GRID_ROWS_PCT for x in GRID_COLS_PCT],
+        [[x, y] for y in cal.GRID_ROWS_PCT for x in cal.GRID_COLS_PCT],
         dtype=np.float64)
 
     # Plan: "15 pairs → compute homography matrix (camera pixels → screen pixels)."
@@ -537,7 +536,7 @@ def step6_validate(arm: StylusArm, cam: Camera, cal: CalibrationState,
                    pct_to_grbl: np.ndarray,
                    pct_to_pixel: np.ndarray,
                    num_tests: int = 3,
-                   max_error_px: float = 5.0
+                   max_error: float = 0.015
                    ) -> list[dict]:
     """Full chain: dot → camera detect → Mapping B → Mapping A → tap → touch.
 
@@ -547,8 +546,10 @@ def step6_validate(arm: StylusArm, cam: Camera, cal: CalibrationState,
     3. Mapping B⁻¹: camera pixels → screen 0-1 pct
     4. Mapping A: screen 0-1 pct → GRBL mm
     5. Arm taps
-    6. Phone reports touch coordinate
-    7. Compare touch vs expected position
+    6. Phone reports touch coordinate (0-1 pct)
+    7. Compare touch vs expected position (in 0-1 space)
+
+    max_error: threshold in 0-1 units (0.015 ≈ 5px on a 390px screen).
     """
     log.info("Step 6: Full-chain validation")
 
@@ -560,19 +561,6 @@ def step6_validate(arm: StylusArm, cam: Camera, cal: CalibrationState,
     A_inv = np.linalg.inv(A)
     # pixel → pct: A_inv @ (pixel - b) = A_inv @ pixel - A_inv @ b
     pixel_to_pct = np.hstack([A_inv, (-A_inv @ b).reshape(2, 1)])
-
-    # Get viewport dimensions from a probe tap
-    cal.set_phase("center")
-    time.sleep(0.3)
-    arm._fast_move(0, 0)
-    arm.wait_idle()
-    cal.get_touches()
-    _tap_once(arm, z_tap)
-    time.sleep(0.3)
-    got = cal.get_touches()
-    probe = got[-1] if got else None
-    vw = probe.get('viewport_w', 390) if probe else 390
-    vh = probe.get('viewport_h', 844) if probe else 844
 
     results = []
     for i in range(num_tests):
@@ -619,37 +607,29 @@ def step6_validate(arm: StylusArm, cam: Camera, cal: CalibrationState,
         _tap_once(arm, z_tap)
         time.sleep(0.3)
 
-        # 6. Phone reports touch
+        # 6. Phone reports touch (0-1 pct)
         got = cal.get_touches()
         touch = got[-1] if got else None
         if touch is None:
-            results.append({"expected_css": (round(dot_pct_x * vw, 1), round(dot_pct_y * vh, 1)),
-                            "error_px": float('inf'), "passed": False})
+            results.append({"expected": (dot_pct_x, dot_pct_y),
+                            "error": float('inf'), "passed": False})
             log.warning(f"  Test {i+1}: MISS — no touch")
             continue
 
-        if 'viewport_w' in touch:
-            vw, vh = touch['viewport_w'], touch['viewport_h']
-
-        # 7. Compare: touch coordinate vs dot's actual screen coordinate
-        # Plan: "All 3 within 5px → calibration passed"
-        # Compare in CSS pixel space (same units as touch coordinates)
-        expected_css_x = dot_pct_x * vw
-        expected_css_y = dot_pct_y * vh
-        actual_css_x = touch['x']
-        actual_css_y = touch['y']
-        error_px = ((actual_css_x - expected_css_x)**2 +
-                    (actual_css_y - expected_css_y)**2)**0.5
-        passed = error_px < max_error_px
+        # 7. Compare in 0-1 space
+        actual_x, actual_y = touch['x'], touch['y']
+        error = ((actual_x - dot_pct_x)**2 +
+                 (actual_y - dot_pct_y)**2)**0.5
+        passed = error < max_error
 
         results.append({
-            "expected_css": (round(expected_css_x, 1), round(expected_css_y, 1)),
-            "actual_css": (actual_css_x, actual_css_y),
+            "expected": (dot_pct_x, dot_pct_y),
+            "actual": (round(actual_x, 3), round(actual_y, 3)),
             "camera_pct": (round(cam_pct_x, 3), round(cam_pct_y, 3)),
-            "error_px": round(error_px, 1),
+            "error": round(error, 4),
             "passed": passed,
         })
-        log.info(f"  Test {i+1}: error={error_px:.1f}px {'✓' if passed else '✗'}")
+        log.info(f"  Test {i+1}: error={error:.4f} {'✓' if passed else '✗'}")
 
     arm._fast_move(0, 0)
     arm.wait_idle()
@@ -674,7 +654,7 @@ def post_set_origin(arm: StylusArm, pct_to_grbl: np.ndarray):
 
 def full_calibration(arm: StylusArm, cam: Camera,
                      cal: CalibrationState,
-                     device_info: dict | None = None
+                     screen_dimension: dict | None = None
                      ) -> GridCalibration:
     """Run all plan calibration steps. Returns GridCalibration.
 
@@ -697,17 +677,9 @@ def full_calibration(arm: StylusArm, cam: Camera,
     # Step 3: Software rotation
     rotation = step3_software_rotation(cam, cal)
 
-    # Step 4: Mapping A (screen CSS → GRBL mm)
-    screen_to_grbl, all_touches = step4_grbl_screen(arm, cal, z_tap, device_info)
-
-    # Get viewport dimensions
-    vw = all_touches[0].get('viewport_w', 390)
-    vh = all_touches[0].get('viewport_h', 844)
-
-    # Convert screen_to_grbl (CSS pixels) → pct_to_grbl (0-1 → GRBL mm)
-    pct_to_grbl = screen_to_grbl.copy()
-    pct_to_grbl[:, 0] *= vw
-    pct_to_grbl[:, 1] *= vh
+    # Step 4: Mapping A (screen 0-1 → GRBL mm)
+    # Touch coords are already 0-1, so affine maps pct directly to GRBL mm
+    pct_to_grbl, _ = step4_grbl_screen(arm, cal, z_tap, screen_dimension)
 
     # Park arm for camera step
     if arm.MOVE_DIRECTIONS:
@@ -718,7 +690,7 @@ def full_calibration(arm: StylusArm, cam: Camera,
     arm.wait_idle()
 
     # Step 5: Mapping B (0-1 pct → camera pixels)
-    pct_to_pixel = step5_camera_screen(cam, cal, rotation, vw, vh)
+    pct_to_pixel = step5_camera_screen(cam, cal, rotation)
 
     # Build GridCalibration
     grid_cal = GridCalibration(pct_to_grbl=pct_to_grbl, pct_to_pixel=pct_to_pixel)

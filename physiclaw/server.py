@@ -399,74 +399,88 @@ def shutdown():
 
 from physiclaw.bridge import (
     BridgeState, CalibrationState, PhoneState, get_lan_ip,
-    serve_message_page, serve_qr_page, handle_bridge_text,
-    handle_bridge_tapped, handle_device_info, handle_screen_center,
+    serve_bridge_page, serve_qr_page,
+    handle_clipboard_copied, handle_screen_dimension,
     handle_screenshot_upload, handle_phone_state,
-    serve_calibrate_page, handle_calib_phase,
-    handle_calib_set_phase, handle_calib_touch, handle_calib_touches,
+    handle_calib_touch,
 )
 
 _bridge = BridgeState()
 _calib = CalibrationState()
 _phone = PhoneState(_bridge, _calib)
 
+# Phone opens this page — shows bridge UI (text clipboard) or calibration UI
 @mcp.custom_route("/bridge", methods=["GET"])
 async def _phone_page(request):
-    return await serve_message_page(request)
+    return await serve_bridge_page(request)
 
-@mcp.custom_route("/message", methods=["GET"])
-async def _message(request):
-    return await serve_message_page(request)
-
+# Phone polls every 250ms — returns current mode (bridge/calibrate) and mode-specific data
 @mcp.custom_route("/api/bridge/state", methods=["GET"])
 async def _phone_state(request):
     return await handle_phone_state(request, _phone)
 
-@mcp.custom_route("/qr", methods=["GET"])
+# Displays a QR code linking to /bridge for easy phone scanning
+@mcp.custom_route("/api/bridge/qr", methods=["GET"])
 async def _qr(request):
     return await serve_qr_page(request)
 
-@mcp.custom_route("/api/bridge/text", methods=["GET"])
-async def _bridge_text(request):
-    return await handle_bridge_text(request, _bridge)
-
+# Phone confirms tap-to-copy succeeded — unblocks bridge_tap() tool
 @mcp.custom_route("/api/bridge/tapped", methods=["POST"])
 async def _bridge_tapped(request):
-    return await handle_bridge_tapped(request, _bridge)
+    return await handle_clipboard_copied(request, _bridge)
 
-@mcp.custom_route("/api/bridge/device-info", methods=["POST"])
-async def _bridge_device_info(request):
-    return await handle_device_info(request, _bridge)
+# Phone sends screen dimensions, pixel ratio, safe area on page load
+@mcp.custom_route("/api/bridge/screen-dimension", methods=["POST"])
+async def _bridge_screen_dimension(request):
+    return await handle_screen_dimension(request, _calib)
 
-@mcp.custom_route("/api/bridge/screen-center", methods=["POST"])
-async def _bridge_screen_center(request):
-    return await handle_screen_center(request, _bridge)
-
+# iOS Shortcut uploads a screenshot (raw PNG/JPEG body)
 @mcp.custom_route("/api/bridge/screenshot", methods=["POST"])
 async def _bridge_screenshot(request):
     return await handle_screenshot_upload(request, _bridge)
 
-# ─── Calibration page routes ─────────────────────────────────
+# Phone reports physical screen center in viewport coords (sent on idle phase tap)
+@mcp.custom_route("/api/bridge/screen-center", methods=["POST"])
+async def _bridge_screen_center(request):
+    from starlette.responses import JSONResponse
+    body = await request.json()
+    x, y = body.get("x"), body.get("y")
+    if x is None or y is None:
+        return JSONResponse({"error": "x and y required"}, status_code=400)
+    with _calib.lock:
+        _calib.screen_center = (int(x), int(y))
+    import logging
+    logging.getLogger(__name__).info(f"Bridge: screen center at viewport ({x}, {y})")
+    return JSONResponse({"ok": True})
 
-@mcp.custom_route("/calibrate", methods=["GET"])
-async def _calibrate_page(request):
-    return await serve_calibrate_page(request)
+# ─── Calibration routes ──────────────────────────────────────
 
-@mcp.custom_route("/api/calibrate/phase", methods=["GET"])
-async def _calib_phase(request):
-    return await handle_calib_phase(request, _calib)
+# Switch phone page between "bridge" and "calibrate" mode
+@mcp.custom_route("/api/bridge/switch", methods=["POST"])
+async def _bridge_switch(request):
+    from starlette.responses import JSONResponse
+    body = await request.json()
+    mode = body.get("mode")
+    if mode not in ("bridge", "calibrate"):
+        return JSONResponse({"error": "mode must be 'bridge' or 'calibrate'"}, status_code=400)
+    if mode == "calibrate":
+        phase = body.get("phase")
+        if not phase:
+            return JSONResponse({"error": "phase required for calibrate mode"}, status_code=400)
+        kwargs = {k: v for k, v in body.items() if k not in ("mode", "phase")}
+        try:
+            _phone.set_mode(mode, phase, **kwargs)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return JSONResponse({"ok": True, "mode": mode, "phase": phase})
+    _phone.set_mode(mode)
+    return JSONResponse({"ok": True, "mode": mode})
 
-@mcp.custom_route("/api/calibrate/set-phase", methods=["POST"])
-async def _calib_set(request):
-    return await handle_calib_set_phase(request, _calib)
-
-@mcp.custom_route("/api/calibrate/touch", methods=["POST"])
+# Phone reports a touch event during calibration (tap/long-press/swipe with coords)
+@mcp.custom_route("/api/bridge/touch", methods=["POST"])
 async def _calib_touch(request):
     return await handle_calib_touch(request, _calib)
 
-@mcp.custom_route("/api/calibrate/touches", methods=["GET"])
-async def _calib_touches(request):
-    return await handle_calib_touches(request, _calib)
 
 
 @mcp.tool()
@@ -490,11 +504,9 @@ def bridge_status() -> str:
     else:
         lines.append("Status: not connected — ask the user to open the URL on their phone")
 
-    if _bridge.device_info:
-        d = _bridge.device_info
-        lines.append(f"Screen: {d.get('screen_width')}×{d.get('screen_height')}px "
-                     f"({d.get('css_width')}×{d.get('css_height')}pt, "
-                     f"{d.get('pixel_ratio')}x)")
+    if _calib.screen_dimension:
+        d = _calib.screen_dimension
+        lines.append(f"Screen: {d['width']}×{d['height']}pt")
     return "\n".join(lines)
 
 
@@ -943,10 +955,9 @@ async def _step4(request):
             raise RuntimeError("Run step0 first")
         physiclaw.acquire()
         try:
-            affine, touches = step4_grbl_screen(physiclaw._arm, _calib, z_tap,
-                                                 _bridge.device_info)
-            physiclaw._cal['screen_to_grbl'] = affine
-            physiclaw._cal['step4_touches'] = touches
+            pct_to_grbl, touches = step4_grbl_screen(physiclaw._arm, _calib, z_tap,
+                                                      _calib.screen_dimension)
+            physiclaw._cal['screen_to_grbl'] = pct_to_grbl
             return {"ok": True, "pairs": len(touches)}
         finally:
             physiclaw.release()
@@ -965,15 +976,12 @@ async def _step5(request):
         if physiclaw._cam is None:
             raise RuntimeError("Camera not connected")
         rotation = physiclaw._cal.get('rotation', cv2.ROTATE_90_COUNTERCLOCKWISE)
-        touches = physiclaw._cal.get('step4_touches', [])
-        vw = touches[0].get('viewport_w', 390) if touches else 390
-        vh = touches[0].get('viewport_h', 844) if touches else 844
         # Park arm if possible
         if physiclaw._arm and physiclaw._arm.MOVE_DIRECTIONS:
             ux, uy = physiclaw._arm.MOVE_DIRECTIONS['top']
             physiclaw._arm._fast_move(ux * 100, uy * 100)
             physiclaw._arm.wait_idle()
-        pct_to_pixel = step5_camera_screen(physiclaw._cam, _calib, rotation, vw, vh)
+        pct_to_pixel = step5_camera_screen(physiclaw._cam, _calib, rotation)
         physiclaw._cal['pct_to_pixel'] = pct_to_pixel
         return {"ok": True, "dots": 15}
     try:
@@ -992,17 +1000,10 @@ async def _step6(request):
             raise RuntimeError("Arm not connected")
         z_tap = physiclaw._cal.get('z_tap')
         rotation = physiclaw._cal.get('rotation', cv2.ROTATE_90_COUNTERCLOCKWISE)
-        screen_to_grbl = physiclaw._cal.get('screen_to_grbl')
+        pct_to_grbl = physiclaw._cal.get('screen_to_grbl')
         pct_to_pixel = physiclaw._cal.get('pct_to_pixel')
-        touches = physiclaw._cal.get('step4_touches', [])
-        if not all([z_tap, screen_to_grbl is not None, pct_to_pixel is not None]):
+        if not all([z_tap, pct_to_grbl is not None, pct_to_pixel is not None]):
             raise RuntimeError("Run steps 0-5 first")
-        # Build pct_to_grbl from screen_to_grbl + viewport dims
-        vw = touches[0].get('viewport_w', 390) if touches else 390
-        vh = touches[0].get('viewport_h', 844) if touches else 844
-        pct_to_grbl = screen_to_grbl.copy()
-        pct_to_grbl[:, 0] *= vw
-        pct_to_grbl[:, 1] *= vh
         physiclaw.acquire()
         try:
             results = step6_validate(physiclaw._arm, physiclaw._cam, _calib,

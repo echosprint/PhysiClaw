@@ -169,6 +169,8 @@ class CalibrationState:
         if phase not in self.PHASES:
             raise ValueError(f"Unknown phase: {phase}. Must be one of {self.PHASES}")
         with self.lock:
+            if phase != "idle" and self.screen_center is None:
+                raise ValueError("screen_center not set — tap the phone in idle phase first")
             self.phase = phase
             self.dot_position = None
             self.touches = []
