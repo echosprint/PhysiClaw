@@ -152,11 +152,12 @@ class CalibrationState:
 
     # Valid calibration phases (server → page display commands)
     PHASES = {
-        "idle",         # blank, waiting
-        "center",       # orange circle at center (Steps 0, 1, 4)
-        "markers",      # UP/RIGHT blue markers for camera rotation (Steps 2-3)
-        "grid",         # 15 red dots at known positions (Step 5)
-        "dot",          # single orange dot at custom position (Step 6)
+        "idle",            # blank, waiting
+        "screenshot_cal",  # orange square at viewport center (pre-cal screenshot mapping)
+        "center",          # orange circle at center (Steps 0, 1, 4)
+        "markers",         # UP/RIGHT blue markers for camera rotation (Steps 2-3)
+        "grid",            # 15 red dots at known positions (Step 5)
+        "dot",             # single orange dot at custom position (Step 6)
     }
 
     def __init__(self):
@@ -165,7 +166,8 @@ class CalibrationState:
         self.dot_position: tuple[float, float] | None = None  # (x, y) as 0-1 for "dot" phase
         self.touches: list[dict] = []  # accumulated touch events from the phone
         self._touch_event = threading.Event()  # set when a new touch event arrives
-        self.screen_dimension: dict | None = None  # {"width": int, "height": int}, used to compute 0-1 touch coords relative to screen
+        self.screen_dimension: dict | None = None  # {"width", "height", "dpr", "viewport_width", "viewport_height"}
+        self.screenshot_transform: dict | None = None  # viewport→screenshot mapping from pre-cal step
 
     def set_phase(self, phase: str, **kwargs):
         """Set the calibration display phase.
@@ -214,6 +216,30 @@ class CalibrationState:
             self._touch_event.clear()
         return touches
 
+    def viewport_to_screenshot_pct(self, client_x: float, client_y: float) -> tuple[float, float]:
+        """Convert viewport CSS coords (clientX/clientY) to screenshot 0-1.
+
+        Requires screenshot_transform to be set via the pre-calibration step.
+        """
+        t = self.screenshot_transform
+        if t is None:
+            raise RuntimeError("Screenshot calibration not done — run step-screenshot-cal first")
+        sx = (client_x * t['dpr'] + t['offset_x']) / t['screenshot_width']
+        sy = (client_y * t['dpr'] + t['offset_y']) / t['screenshot_height']
+        return (sx, sy)
+
+    def viewport_pct_to_screenshot_pct(self, vx: float, vy: float) -> tuple[float, float]:
+        """Convert viewport 0-1 percentages to screenshot 0-1.
+
+        Used for converting grid dot positions (GRID_COLS_PCT/GRID_ROWS_PCT)
+        from viewport space to screenshot space.
+        """
+        dim = self.screen_dimension
+        if dim is None:
+            raise RuntimeError("Screen dimension not set")
+        return self.viewport_to_screenshot_pct(
+            vx * dim['viewport_width'], vy * dim['viewport_height'])
+
     def get_state(self) -> dict:
         """Get current display command for the page to render."""
         with self.lock:
@@ -256,6 +282,7 @@ class PhoneState:
             mode = self.mode
 
         state = {"mode": mode}
+        state["has_device_info"] = self.cal.screen_dimension is not None
 
         if mode == "calibrate":
             state.update(self.cal.get_state())
@@ -300,8 +327,12 @@ async def handle_screen_dimension(request, cal: CalibrationState):
         cal.screen_dimension = {
             "width": int(body.get('screen_width', 0)),
             "height": int(body.get('screen_height', 0)),
+            "viewport_width": int(body.get('viewport_width', 0)),
+            "viewport_height": int(body.get('viewport_height', 0)),
         }
-    log.info(f"Bridge device: {cal.screen_dimension['width']}×{cal.screen_dimension['height']}pt")
+    dim = cal.screen_dimension
+    log.info(f"Bridge device: {dim['width']}×{dim['height']}pt, "
+             f"viewport {dim['viewport_width']}×{dim['viewport_height']}pt")
     return JSONResponse({"ok": True})
 
 
@@ -362,10 +393,24 @@ drawQR('qr1','{phone_url}');
 async def handle_calib_touch(request, cal: CalibrationState):
     """POST /api/bridge/touch — page reports a touch event.
 
-    Body: {"x": 0-1, "y": 0-1}
+    Body: {"clientX": float, "clientY": float} (viewport CSS coords).
+    If screenshot_transform is set, converts to screenshot 0-1 as x, y.
     """
     from starlette.responses import JSONResponse
     body = await request.json()
+    if 'clientX' in body:
+        if cal.screenshot_transform:
+            # Convert viewport CSS coords → screenshot 0-1
+            sx, sy = cal.viewport_to_screenshot_pct(body['clientX'], body['clientY'])
+        else:
+            # Fallback: normalize to viewport 0-1 (less accurate but won't crash)
+            dim = cal.screen_dimension
+            vw = dim['viewport_width'] if dim and dim.get('viewport_width') else 1
+            vh = dim['viewport_height'] if dim and dim.get('viewport_height') else 1
+            sx = body['clientX'] / vw
+            sy = body['clientY'] / vh
+        body['x'] = sx
+        body['y'] = sy
     cal.report_touch(body)
     return JSONResponse({"ok": True})
 

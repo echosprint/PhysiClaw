@@ -844,10 +844,28 @@ async def _camera_preview(request):
 # Touch coordinates from /calibrate page. Camera for markers/dots.
 
 from physiclaw.plan_calibrate import (
+    step_screenshot_cal,
     step0_z_depth, step1_alignment, step2_camera_rotation,
     step3_software_rotation, step4_grbl_screen, step5_camera_screen,
     step6_validate,
 )
+
+
+@mcp.custom_route("/api/calibrate/step-screenshot-cal", methods=["POST"])
+async def _step_screenshot_cal(request):
+    """Pre-calibration: compute viewport→screenshot coordinate transform."""
+    import asyncio
+    from starlette.responses import JSONResponse
+    def _do():
+        _phone.set_mode("calibrate", phase="screenshot_cal")
+        result = step_screenshot_cal(_calib, _bridge)
+        physiclaw._cal['screenshot_transform'] = result
+        return result
+    try:
+        result = await asyncio.get_event_loop().run_in_executor(None, _do)
+        return JSONResponse({"status": "ok", **result})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 
 @mcp.custom_route("/api/calibrate/step0-z-depth", methods=["POST"])

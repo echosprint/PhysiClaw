@@ -23,15 +23,15 @@ import time
 import cv2
 import numpy as np
 
-from physiclaw.bridge import CalibrationState
+from physiclaw.bridge import BridgeState, CalibrationState
 from physiclaw.camera import Camera
 from physiclaw.grid_calibrate import GridCalibration, detect_red_dots, sort_dots_to_grid
 from physiclaw.stylus_arm import StylusArm
 
 log = logging.getLogger(__name__)
 
-SLOW_Z_SPEED = 5000
-PROBE_Z_SPEED = 5000
+SLOW_Z_SPEED = 6000
+PROBE_Z_SPEED = 6000
 
 
 def _tap_once(arm: StylusArm, z: float, z_speed: int = PROBE_Z_SPEED):
@@ -40,6 +40,91 @@ def _tap_once(arm: StylusArm, z: float, z_speed: int = PROBE_Z_SPEED):
     arm._dwell(0.15)
     arm._pen_up()
     arm.wait_idle()
+
+
+# ─── Pre-cal: Screenshot coordinate mapping ──────────────────
+
+def step_screenshot_cal(cal: CalibrationState, bridge: BridgeState) -> dict:
+    """Compute viewport→screenshot coordinate transform from a phone screenshot.
+
+    Shows an orange square at viewport center. User takes a phone screenshot
+    (double-tap AssistiveTouch). Server detects the square in the screenshot
+    and computes the offset between viewport CSS coords and screenshot pixels.
+
+    This must run before Step 0 so that all subsequent touch coordinates
+    are correctly converted from viewport space to screenshot 0-1 space.
+
+    Returns transform dict stored in cal.screenshot_transform.
+    """
+    log.info("Screenshot calibration: computing viewport→screenshot transform")
+
+    dim = cal.screen_dimension
+    if dim is None or dim.get('viewport_width', 0) == 0:
+        raise RuntimeError("Screen dimension not received from phone page. "
+                           "Make sure the phone has /bridge open.")
+
+    # Show orange square at viewport center
+    cal.set_phase("screenshot_cal")
+    time.sleep(0.5)
+
+    log.info("  Waiting for phone screenshot (double-tap AssistiveTouch)...")
+    data = bridge.wait_screenshot(timeout=30.0)
+    if data is None:
+        raise RuntimeError("Timeout — no screenshot received. "
+                           "Double-tap AssistiveTouch to upload.")
+
+    # Decode screenshot
+    arr = np.frombuffer(data, dtype=np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if img is None:
+        raise RuntimeError("Failed to decode screenshot image")
+
+    sh, sw = img.shape[:2]
+    log.info(f"  Screenshot: {sw}×{sh}px")
+
+    # Detect orange square (same HSV range as _detect_orange_dot)
+    # Known CSS position: top-left (100, 200), size 50px → center (125, 225)
+    SQUARE_CSS_X, SQUARE_CSS_Y, SQUARE_CSS_SIZE = 100, 200, 50
+
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, np.array([5, 100, 100]), np.array([25, 255, 255]))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN,
+                            cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)))
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        raise RuntimeError("Could not detect orange square in screenshot. "
+                           "Make sure the phone shows the orange square.")
+
+    largest = max(contours, key=cv2.contourArea)
+    x, y, w, h = cv2.boundingRect(largest)
+    detected_cx = x + w / 2
+    detected_cy = y + h / 2
+    log.info(f"  Orange square detected at screenshot pixel ({detected_cx:.1f}, {detected_cy:.1f}), "
+             f"size {w}×{h}px")
+
+    # Derive dpr from detected square size vs known CSS size
+    dpr = w / SQUARE_CSS_SIZE
+    log.info(f"  Derived dpr = {dpr:.2f} (from {w}px / {SQUARE_CSS_SIZE}css)")
+
+    # Compute offset between expected and actual position
+    expected_cx = (SQUARE_CSS_X + SQUARE_CSS_SIZE / 2) * dpr
+    expected_cy = (SQUARE_CSS_Y + SQUARE_CSS_SIZE / 2) * dpr
+    offset_x = detected_cx - expected_cx
+    offset_y = detected_cy - expected_cy
+    log.info(f"  Viewport center expected at ({expected_cx:.1f}, {expected_cy:.1f}), "
+             f"offset=({offset_x:.1f}, {offset_y:.1f})")
+
+    transform = {
+        'offset_x': offset_x,
+        'offset_y': offset_y,
+        'dpr': dpr,
+        'screenshot_width': sw,
+        'screenshot_height': sh,
+    }
+    cal.screenshot_transform = transform
+    log.info(f"  Transform: dpr={dpr}, offset=({offset_x:.1f}, {offset_y:.1f}), "
+             f"screenshot={sw}×{sh}")
+    return transform
 
 
 # ─── Step 0: Z-axis surface detection ────────────────────────
@@ -134,10 +219,20 @@ def step1_alignment(arm: StylusArm, cal: CalibrationState,
     for x in [-half, half]:
         arm._fast_move(x, 0)
         arm.wait_idle()
-        cal.flush_touches()  # clear stale
-        _tap_once(arm, z_tap)
-        time.sleep(0.3)
-        got = cal.flush_touches()
+        got = None
+        z = z_tap
+        for attempt in range(4):
+            cal.flush_touches()
+            _tap_once(arm, z)
+            time.sleep(0.3)
+            got = cal.flush_touches()
+            if got:
+                if z > z_tap:
+                    z_tap = z  # propagate deeper z
+                    log.info(f"  Hit at arm X={x:.1f}mm after z_tap bump to {z:.2f}mm")
+                break
+            z = round(z + 0.25, 2)
+            log.warning(f"  Miss at arm X={x:.1f}mm, retrying with z_tap={z:.2f}mm")
         if not got:
             raise RuntimeError(f"Step 1 FAILED — no touch at arm X={x:.1f}mm")
         touches.append(got[-1])
@@ -344,18 +439,30 @@ def step3_software_rotation(cam: Camera, cal: CalibrationState) -> int:
 # ─── Step 4: GRBL ↔ Screen mapping (Mapping A) ──────────────
 
 def _tap_and_read(arm: StylusArm, cal: CalibrationState,
-                  gx: float, gy: float, z_tap: float) -> dict | None:
-    """Move to (gx, gy), tap, return touch dict or None on miss."""
+                  gx: float, gy: float, z_tap: float,
+                  max_retries: int = 3) -> tuple[dict | None, float]:
+    """Move to (gx, gy), tap, return (touch dict, z_tap used).
+
+    On miss, retries with z_tap += 0.25mm up to max_retries times.
+    Returns updated z_tap so caller can use the deeper value going forward.
+    """
     arm._fast_move(gx, gy)
     arm.wait_idle()
-    cal.flush_touches()
-    _tap_once(arm, z_tap)
-    time.sleep(0.3)
-    got = cal.flush_touches()
-    if not got:
-        log.warning(f"  Miss at GRBL ({gx:.1f}, {gy:.1f})")
-        return None
-    return got[-1]
+    z = z_tap
+    for attempt in range(max_retries + 1):
+        cal.flush_touches()
+        _tap_once(arm, z)
+        time.sleep(0.3)
+        got = cal.flush_touches()
+        if got:
+            if z > z_tap:
+                log.info(f"  Hit at GRBL ({gx:.1f}, {gy:.1f}) after z_tap bump to {z:.2f}mm")
+            return got[-1], z
+        if attempt < max_retries:
+            z = round(z + 0.25, 2)
+            log.warning(f"  Miss at GRBL ({gx:.1f}, {gy:.1f}), retrying with z_tap={z:.2f}mm")
+    log.warning(f"  Miss at GRBL ({gx:.1f}, {gy:.1f}) after {max_retries} retries")
+    return None, z
 
 
 def step4_grbl_screen(arm: StylusArm, cal: CalibrationState,
@@ -378,15 +485,15 @@ def step4_grbl_screen(arm: StylusArm, cal: CalibrationState,
 
     # ── Phase 1: Probe to find scale ──
     log.info("  Phase 1: Probing scale (center, +X, +Y)")
-    t_center = _tap_and_read(arm, cal, 0, 0, z_tap)
+    t_center, z_tap = _tap_and_read(arm, cal, 0, 0, z_tap)
     if not t_center:
         raise RuntimeError("Step 4 FAILED — no touch at center")
 
-    t_x = _tap_and_read(arm, cal, PROBE_D, 0, z_tap)
+    t_x, z_tap = _tap_and_read(arm, cal, PROBE_D, 0, z_tap)
     if not t_x:
         raise RuntimeError("Step 4 FAILED — no touch at +X probe")
 
-    t_y = _tap_and_read(arm, cal, 0, PROBE_D, z_tap)
+    t_y, z_tap = _tap_and_read(arm, cal, 0, PROBE_D, z_tap)
     if not t_y:
         raise RuntimeError("Step 4 FAILED — no touch at +Y probe")
 
@@ -426,10 +533,15 @@ def step4_grbl_screen(arm: StylusArm, cal: CalibrationState,
 
     for row in rows:
         for col in cols:
-            # Predict GRBL position from probe affine
-            predicted = probe_affine @ np.array([col, row, 1.0])
+            # Convert viewport 0-1 to screenshot 0-1 for probe affine
+            # (probe_affine maps screenshot 0-1 → GRBL mm)
+            if cal.screenshot_transform:
+                scr_col, scr_row = cal.viewport_pct_to_screenshot_pct(col, row)
+            else:
+                scr_col, scr_row = col, row
+            predicted = probe_affine @ np.array([scr_col, scr_row, 1.0])
             gx, gy = predicted[0], predicted[1]
-            touch = _tap_and_read(arm, cal, gx, gy, z_tap)
+            touch, z_tap = _tap_and_read(arm, cal, gx, gy, z_tap)
             if not touch:
                 continue
             grbl_pts.append([gx, gy])
@@ -451,12 +563,12 @@ def step4_grbl_screen(arm: StylusArm, cal: CalibrationState,
 
     # ── Phase 3: Verify with 3 taps at non-grid positions ──
     log.info(f"  Phase 3: Verifying ({len(grbl_pts)} pairs mapped)...")
-    verify_pcts = [(0.15, 0.30), (0.85, 0.70), (0.50, 0.90)]
+    verify_pcts = [(0.20, 0.35), (0.80, 0.65), (0.50, 0.50)]
     max_error = 0
     for vsx, vsy in verify_pcts:
         predicted = screen_to_grbl @ np.array([vsx, vsy, 1.0])
         vgx, vgy = predicted[0], predicted[1]
-        touch = _tap_and_read(arm, cal, vgx, vgy, z_tap)
+        touch, z_tap = _tap_and_read(arm, cal, vgx, vgy, z_tap)
         if not touch:
             continue
         actual_grbl = screen_to_grbl @ np.array([touch['x'], touch['y'], 1.0])
@@ -516,9 +628,19 @@ def step5_camera_screen(cam: Camera, cal: CalibrationState,
             f"Step 5 FAILED — detected {len(dots)} dots, expected {expected}")
 
     camera_pixels = sort_dots_to_grid(dots)
-    screen_pcts = np.array(
-        [[x, y] for y in cal.GRID_ROWS_PCT for x in cal.GRID_COLS_PCT],
-        dtype=np.float64)
+
+    # Grid positions: dots are rendered at viewport percentages.
+    # Convert to screenshot 0-1 if screenshot transform is available,
+    # so Mapping B uses the same coordinate space as Mapping A.
+    if cal.screenshot_transform:
+        screen_pcts = np.array(
+            [list(cal.viewport_pct_to_screenshot_pct(x, y))
+             for y in cal.GRID_ROWS_PCT for x in cal.GRID_COLS_PCT],
+            dtype=np.float64)
+    else:
+        screen_pcts = np.array(
+            [[x, y] for y in cal.GRID_ROWS_PCT for x in cal.GRID_COLS_PCT],
+            dtype=np.float64)
 
     # Plan: "15 pairs → compute homography matrix (camera pixels → screen pixels)."
     cam_to_pct, mask = cv2.findHomography(camera_pixels, screen_pcts, cv2.RANSAC, 3.0)
@@ -603,11 +725,18 @@ def step6_validate(arm: StylusArm, cam: Camera, cal: CalibrationState,
 
     results = []
     for i in range(num_tests):
-        dot_pct_x = round(0.2 + random.random() * 0.6, 3)
-        dot_pct_y = round(0.2 + random.random() * 0.6, 3)
+        # Random viewport 0-1 position for rendering the dot
+        vp_x = round(0.2 + random.random() * 0.6, 3)
+        vp_y = round(0.2 + random.random() * 0.6, 3)
 
-        # 1. Show orange dot
-        cal.set_phase("dot", dot_x=dot_pct_x, dot_y=dot_pct_y)
+        # Expected position in screenshot 0-1 (for comparison with touch results)
+        if cal.screenshot_transform:
+            expected_x, expected_y = cal.viewport_pct_to_screenshot_pct(vp_x, vp_y)
+        else:
+            expected_x, expected_y = vp_x, vp_y
+
+        # 1. Show orange dot (bridge.html renders in viewport space)
+        cal.set_phase("dot", dot_x=vp_x, dot_y=vp_y)
         time.sleep(0.5)
 
         # 2. Camera detects orange dot
@@ -626,9 +755,9 @@ def step6_validate(arm: StylusArm, cam: Camera, cal: CalibrationState,
         if detected is None:
             log.warning(f"  Test {i+1}: camera could not detect orange dot")
             # Fall back to known position
-            cam_pct_x, cam_pct_y = dot_pct_x, dot_pct_y
+            cam_pct_x, cam_pct_y = expected_x, expected_y
         else:
-            # 3. Mapping B⁻¹: camera pixels → screen pct
+            # 3. Mapping B⁻¹: camera pixels → screen pct (screenshot 0-1)
             cam_pt = np.array([detected[0], detected[1], 1.0])
             cam_pct = pixel_to_pct @ cam_pt
             cam_pct_x, cam_pct_y = float(cam_pct[0]), float(cam_pct[1])
@@ -639,30 +768,38 @@ def step6_validate(arm: StylusArm, cam: Camera, cal: CalibrationState,
         grbl_pos = pct_to_grbl @ np.array([cam_pct_x, cam_pct_y, 1.0])
         gx, gy = float(grbl_pos[0]), float(grbl_pos[1])
 
-        # 5. Arm taps
+        # 5. Arm taps (retry with deeper z on miss)
         arm._fast_move(gx, gy)
         arm.wait_idle()
-        cal.flush_touches()
-        _tap_once(arm, z_tap)
-        time.sleep(0.3)
+        touch = None
+        z = z_tap
+        for attempt in range(4):
+            cal.flush_touches()
+            _tap_once(arm, z)
+            time.sleep(0.3)
+            got = cal.flush_touches()
+            if got:
+                touch = got[-1]
+                if z > z_tap:
+                    z_tap = z
+                break
+            z = round(z + 0.25, 2)
 
-        # 6. Phone reports touch (0-1 pct)
-        got = cal.flush_touches()
-        touch = got[-1] if got else None
+        # 6. Phone reports touch (screenshot 0-1 via handle_calib_touch conversion)
         if touch is None:
-            results.append({"expected": (dot_pct_x, dot_pct_y),
-                            "error": float('inf'), "passed": False})
-            log.warning(f"  Test {i+1}: MISS — no touch")
+            results.append({"expected": (expected_x, expected_y),
+                            "error": 999.0, "passed": False})
+            log.warning(f"  Test {i+1}: MISS — no touch after retries")
             continue
 
-        # 7. Compare in 0-1 space
+        # 7. Compare in screenshot 0-1 space
         actual_x, actual_y = touch['x'], touch['y']
-        error = ((actual_x - dot_pct_x)**2 +
-                 (actual_y - dot_pct_y)**2)**0.5
+        error = ((actual_x - expected_x)**2 +
+                 (actual_y - expected_y)**2)**0.5
         passed = error < max_error
 
         results.append({
-            "expected": (dot_pct_x, dot_pct_y),
+            "expected": (round(expected_x, 3), round(expected_y, 3)),
             "actual": (round(actual_x, 3), round(actual_y, 3)),
             "camera_pct": (round(cam_pct_x, 3), round(cam_pct_y, 3)),
             "error": round(error, 4),

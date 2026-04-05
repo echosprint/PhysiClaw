@@ -221,6 +221,10 @@ body.mode-bridge #bridge-layer{
         text(W/2, H/2, 'PhysiClaw', 24, '#ddd');
         text(W/2, H/2+30, 'Waiting for calibration...', 14, '#ccc');
         break;
+      case 'screenshot_cal':
+        var sqSize = 50;
+        rect(100, 200, sqSize, sqSize, '#f97316', 0);
+        break;
       case 'center':
         circle(W*0.5, H*0.5, r, '#f97316');
         break;
@@ -337,7 +341,7 @@ body.mode-bridge #bridge-layer{
         return;
       }
       sendTouch({
-        x: t.screenX / screen.width, y: t.screenY / screen.height
+        clientX: t.clientX, clientY: t.clientY
       });
       flashTouch(t.clientX, t.clientY);
     } else {
@@ -365,6 +369,9 @@ body.mode-bridge #bridge-layer{
 
         var data = JSON.parse(xhr.responseText);
         Object.assign(state, data);
+
+        // Re-send device info if server lost it (e.g. after restart)
+        if(!data.has_device_info) sendDeviceInfo();
 
         // Always set mode from server
         document.body.className = 'mode-' + data.mode;
@@ -395,17 +402,20 @@ body.mode-bridge #bridge-layer{
   poll();
 
   // ════════════════════════════════════════════════════════
-  // DEVICE INFO (sent once on load)
+  // DEVICE INFO (sent on load + re-sent if server lost it)
   // ════════════════════════════════════════════════════════
-  (function(){
+  function sendDeviceInfo(){
     var xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/bridge/screen-dimension', true);
     xhr.setRequestHeader('Content-Type', 'application/json');
     xhr.send(JSON.stringify({
       screen_width: screen.width,
-      screen_height: screen.height
+      screen_height: screen.height,
+      viewport_width: window.innerWidth,
+      viewport_height: window.innerHeight
     }));
-  })();
+  }
+  sendDeviceInfo();
 })();
 </script>
 </body>
