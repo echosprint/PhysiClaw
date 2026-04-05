@@ -99,16 +99,26 @@ class BridgeState:
     # ─── Screenshot upload ────────────────────────────────────
 
     def receive_screenshot(self, data: bytes):
-        """Store an uploaded screenshot and signal waiters.
+        """Store an uploaded screenshot, save to disk, and signal waiters.
 
         Called from the async route handler when the iOS Shortcut POSTs
-        the image. Writes data under lock first, then signals the event
-        so wait_screenshot() sees consistent data when it wakes up.
+        the image. Saves to data/phone/screenshot/, writes data under lock,
+        then signals the event so wait_screenshot() sees consistent data.
         """
+        from datetime import datetime
+        from pathlib import Path
+
+        save_dir = Path("data/phone/screenshot")
+        save_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+        ext = "png" if data[:4] == b"\x89PNG" else "jpg"
+        save_path = save_dir / f"{ts}.{ext}"
+        save_path.write_bytes(data)
+        log.info(f"Bridge: screenshot saved to {save_path} ({len(data)} bytes)")
+
         with self.lock:
             self._screenshot_data = data
         self._screenshot_ready.set()
-        log.info(f"Bridge: screenshot received ({len(data)} bytes)")
 
     def wait_screenshot(self, timeout: float = 10.0) -> bytes | None:
         """Block until a screenshot arrives, or timeout. Returns PNG/JPEG bytes.

@@ -1,152 +1,187 @@
 ---
 name: setup-screenshot
-description: Set up pixel-perfect phone screenshots via AssistiveTouch + iOS Shortcuts. One-time setup — enables phone_screenshot() tool for skill building.
+description: Set up pixel-perfect phone screenshots via AssistiveTouch + iOS Shortcuts. Single tap = screenshot, double tap = screenshot + upload to PhysiClaw. One-time setup.
 allowed-tools: Bash, Read, Write, Edit, mcp__physiclaw__park, mcp__physiclaw__screenshot, mcp__physiclaw__propose_bboxes, mcp__physiclaw__wait_for_confirmation, mcp__physiclaw__bbox_target, mcp__physiclaw__confirm_bbox, mcp__physiclaw__tap, mcp__physiclaw__bridge_status, mcp__physiclaw__phone_screenshot
 ---
 
-# Screenshot Skill Setup
+# Screenshot Setup — AssistiveTouch + iOS Shortcuts
 
-Set up the phone to take pixel-perfect screenshots and upload them to the server. This is a one-time setup. After this, the agent can call `phone_screenshot()` to get clean screenshots for skill building and UI analysis.
+Guide the user step-by-step to set up their iPhone so that:
 
-**Prerequisites:** Hardware must be calibrated (`/setup` done), and the bridge must be accessible from the phone (same WiFi).
+- **Single tap** AssistiveTouch → takes a screenshot (saved on phone)
+- **Double tap** AssistiveTouch → takes a screenshot AND uploads it to PhysiClaw
 
-## Step 1: Get bridge URL
+This is a one-time setup. After this, the agent can call `phone_screenshot()` to get pixel-perfect screenshots.
+
+## Step 1: Get the server URL
+
+Get the LAN IP — both devices must be on the same WiFi:
 
 ```bash
-curl -s http://localhost:8048/api/status | python3 -m json.tool
+uv run python -c "from physiclaw.bridge import get_lan_ip; print(f'http://{get_lan_ip()}:8048')"
 ```
 
-Confirm hardware is calibrated. Then get the bridge URL:
+Save this URL for the Shortcut. Tell the user:
 
-Tell the user the server's LAN IP by running:
-```bash
-python3 -c "from physiclaw.bridge import get_lan_ip; print(f'http://{get_lan_ip()}:8048')"
-```
+> First, make sure your iPhone is on the **same WiFi** as this computer.
 
-The user's phone must be on the same WiFi network as this computer.
-
-## Step 2: Guide AssistiveTouch setup
-
-Walk the user through these steps via chat. Be patient and clear — this is a manual process on the phone.
+## Step 2: Enable AssistiveTouch
 
 Tell the user:
 
-> We need to set up screenshot capability. I'll walk you through each step.
+> **On your iPhone:**
 >
-> **Step A:** Open **Settings** on your phone. Go to **Accessibility → Touch → AssistiveTouch**. Turn it **ON**. You'll see a floating circle button appear on screen.
+> 1. Open **Settings**
+> 2. Go to **Accessibility** → **Touch** → **AssistiveTouch**
+> 3. Turn **AssistiveTouch ON**
 >
-> **Step B:** Still in AssistiveTouch settings, tap **Custom Actions**. Set **Single-Tap** to **"Run Shortcut"** (we'll create the shortcut next).
+> You should see a floating semi-transparent circle button appear on screen.
 
-Wait for user confirmation before proceeding to the Shortcut step.
+Wait for user confirmation before proceeding.
 
-## Step 3: Guide Shortcut creation
+## Step 3: Create the iOS Shortcut
 
-Tell the user:
+Tell the user (replace `SERVER_IP` with the actual IP from Step 1):
 
-> **Step C:** Open the **Shortcuts** app. Tap **+** to create a new shortcut. Add these two actions in order:
+> **Open the Shortcuts app** on your iPhone and create a new shortcut:
 >
-> 1. **Take Screenshot** — search for it in the actions list
-> 2. **Get Contents of URL** — set it up as:
->    - URL: `http://SERVER_IP:8048/api/bridge/screenshot`
->    - Method: **POST**
->    - Request Body: **File**
->    - File: select the **Screenshot** variable from step 1
->
-> Name the shortcut **"PhysiClaw Screenshot"** and save it.
-
-Replace `SERVER_IP` with the actual LAN IP from Step 1.
+> 1. Tap **+** (top right) to create a new shortcut
+> 2. Tap **Add Action**
+> 3. Search for **"Take Screenshot"** and add it
+> 4. Tap **+** again to add a second action
+> 5. Search for **"Get Contents of URL"** and add it
+> 6. Configure "Get Contents of URL":
+>    - **URL**: `http://SERVER_IP:8048/api/bridge/screenshot`
+>    - Tap **Show More** (or the arrow)
+>    - **Method**: change to **POST**
+>    - **Request Body**: change to **File**
+>    - **File**: tap and select the **Screenshot** variable from the previous step
+> 7. Tap the shortcut name at the top and rename it to **"PhysiClaw Screenshot"**
+> 8. Tap **Done** to save
 
 Wait for user confirmation.
 
-## Step 4: Link AssistiveTouch to the Shortcut
+## Step 4: Configure AssistiveTouch actions
 
 Tell the user:
 
-> **Step D:** Go back to **Settings → Accessibility → Touch → AssistiveTouch → Custom Actions → Single-Tap**. Select your **"PhysiClaw Screenshot"** shortcut.
+> **Go back to Settings → Accessibility → Touch → AssistiveTouch**
 >
-> **Step E:** Drag the AssistiveTouch button to the **right edge of the screen**, roughly **vertically centered**. This keeps it out of the way of most app UIs.
+> Under **Custom Actions**, set:
+>
+> - **Single-Tap** → **Screenshot** (built-in, just takes a screenshot)
+> - **Double-Tap** → **Shortcut** → select **"PhysiClaw Screenshot"**
+>
+> This way:
+> - One tap = quick screenshot saved on your phone
+> - Two taps = screenshot + upload to PhysiClaw server
 
 Wait for user confirmation.
 
-## Step 5: Test manual trigger
+## Step 5: Position the AssistiveTouch button
 
 Tell the user:
 
-> Tap the AssistiveTouch button once. You should see a brief screenshot flash. I'll check if the screenshot arrived on my end.
+> **Drag the AssistiveTouch button** to the **right edge of the screen**, roughly **vertically centered**. This keeps it out of the way of most app UIs.
+
+Wait for user confirmation.
+
+## Step 6: Test the double-tap upload
+
+Tell the user:
+
+> **Double-tap the AssistiveTouch button** now. You should see a brief screenshot flash. I'll check if it arrived on my end.
 
 Wait a few seconds, then check:
 
 ```bash
-curl -s http://localhost:8048/api/status | python3 -m json.tool
+ls -lt data/phone/screenshot/ 2>/dev/null | head -5
 ```
 
-Also check if screenshot data arrived by looking at recent files:
+If a file appears, read it to verify it's a valid screenshot image:
+
 ```bash
-ls -la data/snapshot/ | tail -5
+uv run python -c "
+from pathlib import Path
+files = sorted(Path('data/phone/screenshot').glob('*'), key=lambda f: f.stat().st_mtime, reverse=True)
+if files:
+    f = files[0]
+    print(f'Latest: {f.name} ({f.stat().st_size:,} bytes)')
+else:
+    print('No screenshots found')
+"
 ```
 
 If no screenshot arrived, troubleshoot:
-- Check the Shortcut: open it and tap the play button manually. Does it show errors?
-- Check the URL in the Shortcut matches the server IP
-- Check both devices are on the same WiFi
-- Try the URL in the phone's browser: `http://SERVER_IP:8048/message` — if this loads, the network connection works
+
+- Open the Shortcuts app → tap the "PhysiClaw Screenshot" shortcut → tap the **play ▶** button to run it manually. Does it show any errors?
+- Check the URL in the shortcut matches `http://SERVER_IP:8048/api/bridge/screenshot`
+- Verify both devices are on the same WiFi
+- Try opening `http://SERVER_IP:8048/bridge` in Safari on the phone — if it loads, the network works
 
 Repeat until a screenshot arrives successfully.
 
-## Step 6: Find AssistiveTouch button position
+## Step 7: Find AssistiveTouch button position (for agent use)
 
-Now use the propose-confirm workflow to find the exact position of the AssistiveTouch button on screen. The button is visible in camera screenshots.
+The agent needs to know where the AssistiveTouch button is so it can double-tap it with the stylus arm.
 
-Take a camera screenshot first to see the current screen state:
-
-Use the MCP tools: `park()` then `screenshot()` to see the phone.
+Use MCP tools: `park()` then `screenshot()` to see the phone.
 
 The AssistiveTouch button is a semi-transparent circle, typically on the right edge. Propose its position:
 
-Use `propose_bboxes([{"bbox": [estimated_l, estimated_t, estimated_r, estimated_b], "label": "AssistiveTouch"}])`
+```
+propose_bboxes([{"bbox": [estimated_l, estimated_t, estimated_r, estimated_b], "label": "AssistiveTouch"}])
+```
 
 Tell the user: "I've proposed the AssistiveTouch button position. Please review and correct at /annotate."
 
 Call `wait_for_confirmation()` to get the confirmed position.
 
-## Step 7: Save to preset
+## Step 8: Save to preset
 
 Save the confirmed AssistiveTouch position to the system preset file.
 
-Read the existing preset (if any):
+Read the existing preset:
 ```bash
 cat .claude/ui-presets/system.md 2>/dev/null || echo "not found"
 ```
 
-Create or update `.claude/ui-presets/system.md` with the AssistiveTouch position. Use this format:
+Create or update `.claude/ui-presets/system.md`:
 
 ```markdown
 # System
 
-## Main Screen
+## Any Screen
 
-Fingerprint: Any screen with AssistiveTouch button visible
+Fingerprint: Any screen with AssistiveTouch button visible (semi-transparent circle on right edge)
 
 | Element | Position | Action |
 |---------|----------|--------|
-| AssistiveTouch | [left, top, right, bottom] | Takes screenshot (via Shortcut) |
+| AssistiveTouch | [left, top, right, bottom] | Single tap: screenshot; Double tap: screenshot + upload |
 ```
 
-Use the confirmed coordinates from Step 6.
+Use the confirmed coordinates from Step 7.
 
-## Step 8: Verify autonomous screenshot
+## Step 9: Verify autonomous double-tap
 
-Test that the agent can take a screenshot by tapping AssistiveTouch with the stylus:
+Test that the agent can trigger a screenshot upload by double-tapping AssistiveTouch:
 
-Use the `phone_screenshot()` MCP tool. If it returns a screenshot image, the setup is complete.
+Use the `phone_screenshot()` MCP tool. It will double-tap AssistiveTouch and wait for the upload.
+
+If it returns a screenshot image, setup is complete.
 
 If it fails:
-- The button position might be slightly off — redo Step 6
-- The Shortcut might not be linked — check AssistiveTouch settings
-- There might be a timeout — the Shortcut takes a moment to run
+- The button position might be slightly off — redo Step 7
+- The Shortcut might not be linked to double-tap — check AssistiveTouch settings
+- Timeout — the Shortcut takes a moment; try increasing timeout
 
 ## Done
 
 Tell the user:
 
-> Screenshot setup complete. The agent can now take pixel-perfect screenshots of your phone using `phone_screenshot()`. This enables accurate UI analysis for building automation skills.
+> Screenshot setup complete!
+>
+> - **Single tap** the AssistiveTouch button → screenshot saved on phone
+> - **Double tap** the AssistiveTouch button → screenshot uploaded to PhysiClaw
+>
+> The agent can now call `phone_screenshot()` to get pixel-perfect screenshots for UI analysis and skill building.
