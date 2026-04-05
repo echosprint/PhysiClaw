@@ -33,6 +33,31 @@ log = logging.getLogger(__name__)
 SLOW_Z_SPEED = 6000
 PROBE_Z_SPEED = 6000
 
+PEN_DEPTH_FILE = "data/pen/z-tap"
+
+
+def load_pen_depth() -> float | None:
+    """Load cached z-tap from data/pen/z-tap, or None if missing/unreadable."""
+    from pathlib import Path
+    p = Path(PEN_DEPTH_FILE)
+    if not p.exists():
+        return None
+    try:
+        val = float(p.read_text().strip())
+    except (ValueError, OSError):
+        return None
+    if not (1 < val < 10):
+        raise ValueError(f"{PEN_DEPTH_FILE}: z-tap={val}mm out of range (1, 10)")
+    return val
+
+
+def save_pen_depth(z_tap: float):
+    """Save z-tap to data/pen/z-tap."""
+    from pathlib import Path
+    p = Path(PEN_DEPTH_FILE)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(f"{z_tap}\n")
+
 
 def _tap_once(arm: StylusArm, z: float, z_speed: int = PROBE_Z_SPEED):
     """Single tap: pen down, dwell 150ms, pen up."""
@@ -824,8 +849,15 @@ def full_calibration(arm: StylusArm, cam: Camera,
 
     Expects: phone with /calibrate page open, stylus above screen center.
     """
-    # Step 0: Z-depth
-    z_tap = step0_z_depth(arm, cal)
+    # Step 0: Z-depth (use cached pen depth if available)
+    cached = load_pen_depth()
+    if cached is not None:
+        z_tap = cached
+        log.info(f"Using cached pen depth: {z_tap}mm (from {PEN_DEPTH_FILE})")
+    else:
+        z_tap = step0_z_depth(arm, cal)
+        save_pen_depth(z_tap)
+        log.info(f"Pen depth saved to {PEN_DEPTH_FILE}")
     arm.Z_DOWN = z_tap
 
     # Step 1: Alignment
