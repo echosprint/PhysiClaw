@@ -167,7 +167,7 @@ def step0_z_depth(arm: StylusArm, cal: CalibrationState) -> float:
     After each tap, check if the phone reported a touch event.
     Spring-loaded stylus bounces back on pen-up, so no motor hold needed.
 
-    Returns z_tap (contact depth + 0.5mm margin).
+    Returns z_tap (contact depth + margin, validated at ±10mm offsets).
     """
     log.info("═══ Step 0: Z-axis surface detection ═══")
     log.info("  Goal: find the Z depth where stylus reliably registers on touchscreen")
@@ -200,32 +200,53 @@ def step0_z_depth(arm: StylusArm, cal: CalibrationState) -> float:
         raise RuntimeError("Step 0 FAILED — no touch detected up to 9.8mm. "
                            "Check stylus alignment and phone placement.")
 
-    # Phase B: find a Z depth where 10/10 taps succeed.
-    # Start at z_contact + 0.25mm. Tap 10 times. If any fails, add 0.25mm and retry.
+    # Phase B: find a Z depth that works at center AND ±10mm in each direction.
+    # Taps: center, +X, center, -X, center, +Y, center, -Y (8 taps per round).
+    # This catches surface unevenness that center-only testing would miss.
+    PROBE_OFFSETS = [
+        ("center",  0,  0),
+        ("+X",     10,  0),
+        ("center",  0,  0),
+        ("-X",    -10,  0),
+        ("center",  0,  0),
+        ("+Y",      0, 10),
+        ("center",  0,  0),
+        ("-Y",      0,-10),
+    ]
     z_try = round(z_contact + 0.25, 2)
     z_tap = None
     log.info(f"  Phase B: reliability test starting at Z={z_try:.2f}mm "
              f"(first contact {z_contact:.2f}mm + 0.25mm margin)")
-    log.info(f"  Phase B: need 10/10 consecutive taps to register")
+    log.info(f"  Phase B: tapping center and ±10mm in X/Y — "
+             f"{len(PROBE_OFFSETS)} taps per round must all register")
 
     for _ in range(10):  # max 10 rounds of 0.25mm increases
         log.info(f"  Phase B: testing Z={z_try:.2f}mm ...")
         all_ok = True
-        for i in range(10):
+        for i, (label, ox, oy) in enumerate(PROBE_OFFSETS):
+            arm._fast_move(ox, oy)
+            arm.wait_idle()
             cal.flush_touches()
             _tap_once(arm, z_try, z_speed=SLOW_Z_SPEED)
             time.sleep(0.3)
             touches = cal.flush_touches()
             if touches:
-                log.debug(f"    tap {i+1}/10 — registered")
+                log.debug(f"    tap {i+1}/{len(PROBE_OFFSETS)} {label} "
+                          f"at ({ox}, {oy})mm — registered")
             else:
-                log.info(f"    tap {i+1}/10 — missed, Z={z_try:.2f}mm not deep enough")
+                log.info(f"    tap {i+1}/{len(PROBE_OFFSETS)} {label} "
+                         f"at ({ox}, {oy})mm — missed")
                 all_ok = False
                 break
 
+        # Return to center after each round
+        arm._fast_move(0, 0)
+        arm.wait_idle()
+
         if all_ok:
             z_tap = z_try
-            log.info(f"  Phase B: 10/10 taps registered at Z={z_tap:.2f}mm")
+            log.info(f"  Phase B: {len(PROBE_OFFSETS)}/{len(PROBE_OFFSETS)} taps "
+                     f"registered at Z={z_tap:.2f}mm")
             break
         else:
             z_try = round(z_try + 0.25, 2)

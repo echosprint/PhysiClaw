@@ -64,6 +64,9 @@ for i in range(4):
     except Exception:
         print(f'Camera {i}: not available')
 "
+```
+
+```bash
 open /tmp/physiclaw_cam*.jpg
 ```
 
@@ -186,6 +189,11 @@ Tell the user:
 ```bash
 curl -s -X POST http://localhost:8048/api/calibrate/step4-mapping-a --max-time 60 | python3 -m json.tool
 ```
+
+If step 4 fails with "no touch at +X/+Y probe", the probe taps landed outside the screen. Possible fixes:
+- Reposition the phone so the stylus is more centered over the screen
+- The z_tap may be too shallow — delete `data/pen/z-tap` and rerun step 2.0 to re-probe
+- Then retry step 4
 
 ### 2.5 Camera↔Screen mapping (~5s)
 
