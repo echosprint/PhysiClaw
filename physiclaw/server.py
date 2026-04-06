@@ -441,6 +441,17 @@ async def _bridge_screen_dimension(request):
 async def _bridge_screenshot(request):
     return await handle_screenshot_upload(request, _bridge)
 
+# iOS Shortcut fetches clipboard text — GET returns plain text, marks as copied
+@mcp.custom_route("/api/bridge/clipboard", methods=["GET"])
+async def _bridge_clipboard(request):
+    from starlette.responses import PlainTextResponse
+    text = _bridge.text
+    if text is None:
+        return PlainTextResponse("", status_code=204)
+    _bridge.mark_clipboard_copied()
+    log.info(f"Bridge: clipboard fetched — '{text}'")
+    return PlainTextResponse(text)
+
 
 # ─── Calibration routes ──────────────────────────────────────
 
@@ -501,23 +512,18 @@ def bridge_status() -> str:
 
 @mcp.tool()
 def bridge_send_text(text: str) -> str:
-    """Send text to the phone page for clipboard transfer.
+    """Send text to the phone clipboard.
 
-    The text appears large on the bridge page. Next step: call bridge_tap()
-    to physically tap the screen — this triggers the JavaScript clipboard
-    copy on the phone.
+    Two ways to copy:
+    1. Phone has /bridge page open → call bridge_tap() to tap and copy
+    2. Phone runs "PhysiClaw Clipboard" shortcut (long-press AssistiveTouch)
+       → shortcut GETs /api/bridge/clipboard → text copied directly
 
-    After bridge_tap() confirms, the text is in the phone's clipboard.
-    Paste it into any app: long_press on a text field → tap "Paste".
-
-    Phone must have the phone page open (call bridge_status() for URL).
+    Either way, the text ends up in the phone's clipboard.
+    Paste into any app: long_press on a text field → tap "Paste".
     """
-    if not _bridge.connected:
-        return ("Phone not connected to bridge. "
-                "Call bridge_status() to get the URL, then ask the user "
-                "to open it on their phone in Safari or Chrome.")
     _bridge.send_text(text)
-    return f"Text '{text}' sent to phone. Call bridge_tap() to copy to clipboard."
+    return f"Text '{text}' ready. Copy via bridge_tap() or AT long-press shortcut."
 
 
 @mcp.tool()
