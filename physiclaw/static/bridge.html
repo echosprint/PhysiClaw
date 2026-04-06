@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#e5e5e5">
 <title>PhysiClaw</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -45,13 +46,13 @@ body.mode-bridge #bridge-layer{
 
 /* ── Bridge elements ──────────────────────────────── */
 #msg-text{
-  font-size:min(14vw,100px);
   font-weight:600;
   text-align:center;
   word-break:break-all;
   line-height:1.4;
   padding:20px;
   max-width:100%;
+  overflow:hidden;
   transition:opacity 0.15s;
 }
 #msg-text.waiting{opacity:0.15;font-size:min(6vw,40px);font-weight:400}
@@ -76,16 +77,7 @@ body.mode-bridge #bridge-layer{
   z-index:10;
 }
 #center-circle.show{opacity:1;}
-#msg-feedback{
-  position:fixed;
-  top:0;left:0;right:0;bottom:0;
-  background:rgba(34,197,94,0.15);
-  pointer-events:none;
-  opacity:0;
-  transition:opacity 0.15s;
-  z-index:20;
-}
-#msg-feedback.show{opacity:1}
+#msg-feedback{display:none}
 #msg-hint{
   position:fixed;
   bottom:calc(env(safe-area-inset-bottom,20px) + 16px);
@@ -268,14 +260,27 @@ body.mode-bridge #bridge-layer{
     phaseLabel.textContent = phase;
   }
 
+  function fitTextSize(){
+    // Shrink font until text fits the viewport without scrolling
+    var maxH = window.innerHeight * 0.7;
+    var size = Math.min(window.innerWidth * 0.14, 100);
+    msgTextEl.style.fontSize = size + 'px';
+    while(size > 12 && msgTextEl.scrollHeight > maxH){
+      size -= 2;
+      msgTextEl.style.fontSize = size + 'px';
+    }
+  }
+
   function renderBridge(data){
     if(data.text !== null){
       msgTextEl.textContent = data.text;
       msgTextEl.className = '';
       msgHintEl.style.opacity = '0.4';
+      fitTextSize();
     } else {
       msgTextEl.textContent = 'PhysiClaw';
       msgTextEl.className = 'waiting';
+      msgTextEl.style.fontSize = Math.min(window.innerWidth * 0.06, 40) + 'px';
       msgHintEl.style.opacity = '0.25';
     }
   }
@@ -284,36 +289,23 @@ body.mode-bridge #bridge-layer{
   // CLIPBOARD (iOS Safari compatible)
   // ════════════════════════════════════════════════════════
   function copyToClipboard(txt){
-    if(navigator.clipboard && navigator.clipboard.writeText){
-      return navigator.clipboard.writeText(txt).then(function(){return true})
-        .catch(function(){return fallbackCopy(txt)});
-    }
-    return Promise.resolve(fallbackCopy(txt));
-  }
-
-  function fallbackCopy(txt){
+    // iOS Safari over HTTP: navigator.clipboard is unavailable.
+    // Use execCommand('copy') with a focused textarea.
+    // Must be synchronous within the user gesture handler.
     var ta = document.createElement('textarea');
     ta.value = txt;
-    ta.setAttribute('readonly','');
-    ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0';
+    ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0;font-size:16px';
     document.body.appendChild(ta);
-    ta.contentEditable = true;
-    ta.readOnly = false;
-    var range = document.createRange();
-    range.selectNodeContents(ta);
-    var sel = window.getSelection();
-    sel.removeAllRanges();
-    sel.addRange(range);
-    ta.setSelectionRange(0, txt.length);
-    var ok = false;
-    try{ ok = document.execCommand('copy'); }catch(e){}
+    ta.focus();
+    ta.setSelectionRange(0, ta.value.length);
+    var ok = document.execCommand('copy');
     document.body.removeChild(ta);
     return ok;
   }
 
   function bridgeFlash(){
-    msgFeedbackEl.className = 'show';
-    setTimeout(function(){ msgFeedbackEl.className = ''; }, 300);
+    msgTextEl.style.opacity = '0.3';
+    setTimeout(function(){ msgTextEl.style.opacity = '1'; }, 200);
   }
 
   function notifyBridgeTap(){
@@ -347,26 +339,28 @@ body.mode-bridge #bridge-layer{
     xhr.send(JSON.stringify(payload));
   }
 
+  // Calibrate mode: touchstart for immediate touch coordinate reporting
   document.body.addEventListener('touchstart', function(e){
+    if(state.mode !== 'calibrate') return;
     e.preventDefault();
     var t = e.touches[0];
-
-    if(state.mode === 'calibrate'){
-      if(state.phase === 'idle'){
-        flashTouch(t.clientX, t.clientY);
-        return;
-      }
-      sendTouch({
-        clientX: t.clientX, clientY: t.clientY
-      });
+    if(state.phase === 'idle'){
       flashTouch(t.clientX, t.clientY);
-    } else {
-      if(state.text === null) return;
-      copyToClipboard(state.text).then(function(ok){
-        if(ok !== false){ bridgeFlash(); notifyBridgeTap(); }
-      });
+      return;
     }
+    sendTouch({ clientX: t.clientX, clientY: t.clientY });
+    flashTouch(t.clientX, t.clientY);
   }, {passive:false});
+
+  // Bridge mode: click for clipboard copy (iOS Safari needs click
+  // for reliable transient activation — execCommand('copy') fails
+  // in touchstart async callbacks)
+  document.body.addEventListener('click', function(){
+    if(state.mode !== 'bridge' || state.text === null) return;
+    var ok = copyToClipboard(state.text);
+    bridgeFlash();
+    notifyBridgeTap();
+  });
 
   // ════════════════════════════════════════════════════════
   // POLL LOOP — single source of truth from server
