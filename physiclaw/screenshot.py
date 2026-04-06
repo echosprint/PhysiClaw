@@ -236,8 +236,6 @@ class PhoneScreenshot:
             return {"passed": False, "matched": 0, "total": NONCE_COUNT}
 
         log.info(f"  Screenshot received: {img.shape[1]}×{img.shape[0]}px")
-        cv2.imwrite("/tmp/physiclaw_step7.jpg", img)
-        log.info("  Saved to /tmp/physiclaw_step7.jpg for inspection")
 
         t = cal_state.screenshot_transform
         if t is None:

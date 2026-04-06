@@ -13,6 +13,7 @@ import cv2
 
 from physiclaw.camera import Camera
 from physiclaw.grid_calibrate import GridCalibration
+from physiclaw.screenshot import PhoneScreenshot
 from physiclaw.stylus_arm import StylusArm
 from physiclaw.vision import PhoneDetector
 
@@ -36,6 +37,7 @@ class PhysiClaw:
         self._confirmed_bbox: list[float] | None = None
         self._lock = threading.Lock()
         self._cal: dict = {}  # intermediate calibration state between phases
+        self._screenshot = PhoneScreenshot()
 
     @property
     def hardware_ready(self) -> bool:
@@ -46,17 +48,31 @@ class PhysiClaw:
 
     def status(self) -> dict:
         """Return current hardware and calibration state."""
+        steps = {}
+        z_tap = self._cal.get('z_tap')
+        if z_tap is not None:
+            steps["z_tap"] = f"{z_tap}mm"
+        if 'screenshot_transform' in self._cal:
+            t = self._cal['screenshot_transform']
+            steps["screenshot_cal"] = f"dpr={t['dpr']}, offset=({t['offset_x']}, {t['offset_y']})"
+        if self._arm and self._arm.MOVE_DIRECTIONS:
+            steps["alignment"] = "OK"
+        if 'rotation' in self._cal:
+            names = {-1: "none", 0: "90° CW", 1: "180°", 2: "90° CCW"}
+            steps["rotation"] = names.get(self._cal['rotation'], str(self._cal['rotation']))
+        if 'screen_to_grbl' in self._cal:
+            steps["mapping_a"] = "OK"
+        if 'pct_to_cam' in self._cal:
+            steps["mapping_b"] = "OK"
+        if self._grid_cal is not None:
+            steps["validated"] = True
+        if self._screenshot.ready:
+            sx, sy = self._screenshot.at_screen
+            steps["assistive_touch"] = f"({sx:.3f}, {sy:.3f})"
         return {
             "arm": self._arm is not None,
             "camera": self._cam is not None,
-            "completed_steps": [name for name, check in [
-                ("z-depth", 'z_tap' in self._cal),
-                ("find-right", 'right_result' in self._cal),
-                ("find-down", 'down_result' in self._cal),
-                ("long-press", self._cal.get('phase4_done', False)),
-                ("swipe", bool(self._arm and self._arm.MOVE_DIRECTIONS)),
-                ("grid", self._grid_cal is not None),
-            ] if check],
+            "steps": steps,
             "calibrated": self.hardware_ready,
         }
 

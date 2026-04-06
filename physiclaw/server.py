@@ -545,81 +545,37 @@ def bridge_tap() -> str:
 
 
 @mcp.tool()
-def phone_screenshot(assistive_touch_bbox: list[float] | None = None) -> Image:
+def phone_screenshot() -> Image:
     """Take a pixel-perfect screenshot via AssistiveTouch.
 
-    Taps the AssistiveTouch button on the phone. An iOS Shortcut captures a
-    screenshot and uploads it to the server. Returns the full-resolution PNG.
+    Single-tap AT takes a screenshot (saved to Photos), then double-tap AT
+    triggers the iOS Shortcut to get the latest screenshot and upload it.
 
-    Much sharper than camera screenshots — use this for skill building, OCR,
+    Much sharper than camera screenshots — use for skill building, OCR,
     and detailed UI analysis.
 
-    Requires setup first (run /setup-screenshot):
-    1. AssistiveTouch enabled with single-tap → Run Shortcut
-    2. Shortcut: Take Screenshot → Get Contents of URL (POST to server)
-
-    Args:
-        assistive_touch_bbox: [left, top, right, bottom] as 0-1 decimals for
-            the AssistiveTouch button. If None, reads from the
-            .claude/ui-presets/system.md preset file.
+    Requires: /setup completed (step 7 verifies AT position).
     """
-    import json
-    from pathlib import Path
-
-    # Resolve AssistiveTouch button position
-    bbox = assistive_touch_bbox
-    if bbox is None:
-        preset_path = Path(".claude/ui-presets/system.md")
-        if not preset_path.exists():
-            return "AssistiveTouch position unknown. Run /setup-screenshot first, " \
-                   "or pass assistive_touch_bbox=[left, top, right, bottom]."
-        # Parse preset for AssistiveTouch entry
-        content = preset_path.read_text()
-        for line in content.splitlines():
-            if "AssistiveTouch" in line and "|" in line:
-                # Extract position from table row: | Element | Position | Action |
-                parts = [p.strip() for p in line.split("|")]
-                for p in parts:
-                    if p.startswith("[") and p.endswith("]"):
-                        bbox = json.loads(p)
-                        break
-                if bbox:
-                    break
-        if bbox is None:
-            return "AssistiveTouch position not found in system.md preset. " \
-                   "Run /setup-screenshot to configure."
-
     physiclaw.require_hardware()
+    if not physiclaw._screenshot.ready:
+        raise RuntimeError("AssistiveTouch not set up — run /setup first (step 7)")
 
-    # Clear any pending screenshot
-    _bridge._screenshot_ready.clear()
+    pct_to_grbl = physiclaw._cal.get('screen_to_grbl')
+    if pct_to_grbl is None:
+        raise RuntimeError("Calibration incomplete — run /setup first")
 
-    # Tap the AssistiveTouch button
     physiclaw.acquire()
     try:
-        cx = (bbox[0] + bbox[2]) / 2
-        cy = (bbox[1] + bbox[3]) / 2
-        physiclaw.tap_at_pct(cx, cy)
+        data = physiclaw._screenshot.take_screenshot(
+            physiclaw._arm, _bridge, pct_to_grbl)
     finally:
         physiclaw.release()
 
-    # Wait for the screenshot to arrive via HTTP POST
-    data = _bridge.wait_screenshot(timeout=10.0)
     if data is None:
-        return "Timeout — no screenshot received. Check that the iOS Shortcut " \
-               "is configured to POST to this server."
+        raise RuntimeError("Timeout — no screenshot received. "
+                           "Check iOS Shortcut is configured.")
 
-    # Save to data/screenshot/
-    from datetime import datetime
-    from physiclaw.camera import SNAPSHOT_DIR
-    SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
-    ext = "png" if data[:4] == b'\x89PNG' else "jpg"
-    save_path = SNAPSHOT_DIR / f'{ts}_phone.{ext}'
-    save_path.write_bytes(data)
-
-    # Detect format for MCP Image
-    fmt = "png" if ext == "png" else "jpeg"
+    fmt = "png" if data[:4] == b'\x89PNG' else "jpeg"
     return Image(data=data, format=fmt)
 
 
@@ -852,9 +808,6 @@ from physiclaw.plan_calibrate import (
     step6_validate,
     load_pen_depth, save_pen_depth,
 )
-from physiclaw.screenshot import PhoneScreenshot
-
-_screenshot = PhoneScreenshot()
 
 
 @mcp.custom_route("/api/calibrate/step-screenshot-cal", methods=["POST"])
@@ -1087,11 +1040,11 @@ async def _step7_show(request):
         return JSONResponse({"status": "error",
                              "message": "Run pre-cal (step-screenshot-cal) first"},
                             status_code=400)
-    nonce = _screenshot.generate_nonce()
-    _screenshot.compute_at_screen_pos(_calib.screenshot_transform)
+    nonce = physiclaw._screenshot.generate_nonce()
+    physiclaw._screenshot.compute_at_screen_pos(_calib.screenshot_transform)
     _phone.set_mode("calibrate", phase="assistive_touch", nonce_colors=nonce)
     return JSONResponse({"status": "ok",
-                         "at_screen": list(_screenshot.at_screen),
+                         "at_screen": list(physiclaw._screenshot.at_screen),
                          "nonce_count": len(nonce)})
 
 
@@ -1106,11 +1059,11 @@ async def _step7_tap(request):
         pct_to_grbl = physiclaw._cal.get('screen_to_grbl')
         if pct_to_grbl is None:
             raise RuntimeError("Run steps 0-4 first")
-        if not _screenshot.at_screen:
+        if not physiclaw._screenshot.at_screen:
             raise RuntimeError("Run step7-show first")
         physiclaw.acquire()
         try:
-            return _screenshot.setup(
+            return physiclaw._screenshot.setup(
                 physiclaw._arm, _bridge, _calib,
                 pct_to_grbl)
         finally:
