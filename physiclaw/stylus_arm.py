@@ -56,7 +56,7 @@ class StylusArm:
 
     # Gesture timing (seconds)
     TAP_DURATION = 0.08        # phone threshold ~50ms, 80ms has margin
-    DOUBLE_TAP_GAP = 0.2      # gap between two taps, must be < 300ms
+    DOUBLE_TAP_GAP = 0.1      # dwell gap between taps; total gap includes pen travel (~100ms)
     LONG_PRESS_DURATION = 1.2  # iOS/Android threshold ~500ms, 800~1000ms is safe
     LONG_PRESS_ADVANCE = 0.25  # mm extra Z to travel during long press hold
     SWIPE_DISTANCE = 15        # mm, default swipe length
@@ -335,9 +335,8 @@ class StylusArm:
     def double_tap(self):
         """Double tap at current position.
         Each G4 dwell blocks until complete (sync barrier). GRBL controls
-        all timing. Gap = dwell(200ms) + pen_down travel(~35ms) ≈ 235ms
-        (< 300ms threshold). Individual tap dwells (80ms) are within $1=250ms
-        timeout so Z motor stays powered without needing $1=255.
+        all timing. Total gap = pen_up travel + dwell(100ms) + pen_down travel
+        ≈ 200ms (< 300ms iOS double-tap threshold).
         """
         self._pen_down()
         self._dwell(self.TAP_DURATION)
