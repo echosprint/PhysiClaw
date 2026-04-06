@@ -221,6 +221,28 @@ curl -s -X POST http://localhost:8048/api/calibrate/step6-validate --max-time 60
 
 Check `calibrated` in the response. If true, calibration succeeded.
 
+### 2.7 AssistiveTouch screenshot verification (~5s)
+
+Show the AT positioning screen:
+
+```bash
+curl -s -X POST http://localhost:8048/api/calibrate/step7-show | python3 -m json.tool
+```
+
+Tell the user:
+> The phone shows an orange circle on the left edge. Drag the AssistiveTouch button to overlap the orange circle. Confirm when done.
+
+Wait for user confirmation, then trigger the tap sequence:
+
+```bash
+curl -s -X POST http://localhost:8048/api/calibrate/step7-tap --max-time 20 | python3 -m json.tool
+```
+
+The arm will single-tap (iOS screenshot), wait 2s, then double-tap (screenshot + upload). The server verifies the uploaded screenshot contains the color nonce.
+
+If `passed` is true → AT position is verified, screenshot pipeline works.
+If failed → check AT is positioned on the orange circle, and the iOS Shortcut is configured (run `/phone-setup` if needed).
+
 ## Step 3: Verification
 
 ### 3.1 Edge trace verification (~20s)

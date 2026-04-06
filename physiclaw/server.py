@@ -852,6 +852,9 @@ from physiclaw.plan_calibrate import (
     step6_validate,
     load_pen_depth, save_pen_depth,
 )
+from physiclaw.screenshot import PhoneScreenshot
+
+_screenshot = PhoneScreenshot()
 
 
 @mcp.custom_route("/api/calibrate/step-screenshot-cal", methods=["POST"])
@@ -1062,6 +1065,50 @@ async def _verify_edge(request):
         finally:
             physiclaw.release()
 
+    try:
+        result = await asyncio.get_event_loop().run_in_executor(None, _do)
+        return JSONResponse({"status": "ok", **result})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)},
+                            status_code=500)
+
+
+@mcp.custom_route("/api/calibrate/step7-show", methods=["POST"])
+async def _step7_show(request):
+    """Show AT positioning circle + color nonce barcode on phone."""
+    from starlette.responses import JSONResponse
+    if _calib.screenshot_transform is None:
+        return JSONResponse({"status": "error",
+                             "message": "Run pre-cal (step-screenshot-cal) first"},
+                            status_code=400)
+    nonce = _screenshot.generate_nonce()
+    _screenshot.compute_at_screen_pos(_calib.screenshot_transform)
+    _phone.set_mode("calibrate", phase="assistive_touch", nonce_colors=nonce)
+    return JSONResponse({"status": "ok",
+                         "at_screen": list(_screenshot.at_screen),
+                         "nonce_count": len(nonce)})
+
+
+@mcp.custom_route("/api/calibrate/step7-tap", methods=["POST"])
+async def _step7_tap(request):
+    """Tap + double-tap AT, verify screenshot upload via color nonce."""
+    import asyncio
+    from starlette.responses import JSONResponse
+    def _do():
+        if physiclaw._arm is None:
+            raise RuntimeError("Arm not connected")
+        pct_to_grbl = physiclaw._cal.get('screen_to_grbl')
+        if pct_to_grbl is None:
+            raise RuntimeError("Run steps 0-4 first")
+        if not _screenshot.at_screen:
+            raise RuntimeError("Run step7-show first")
+        physiclaw.acquire()
+        try:
+            return _screenshot.setup(
+                physiclaw._arm, _bridge, _calib,
+                pct_to_grbl)
+        finally:
+            physiclaw.release()
     try:
         result = await asyncio.get_event_loop().run_in_executor(None, _do)
         return JSONResponse({"status": "ok", **result})

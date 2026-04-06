@@ -152,12 +152,13 @@ class CalibrationState:
 
     # Valid calibration phases (server → page display commands)
     PHASES = {
-        "idle",            # blank, waiting
-        "screenshot_cal",  # orange square at viewport center (pre-cal screenshot mapping)
-        "center",          # orange circle at center (Steps 0, 1, 4)
-        "markers",         # UP/RIGHT blue markers for camera rotation (Steps 2-3)
-        "grid",            # 15 red dots at known positions (Step 5)
-        "dot",             # single orange dot at custom position (Step 6)
+        "idle",              # blank, waiting
+        "screenshot_cal",    # orange square at viewport center (pre-cal screenshot mapping)
+        "center",            # orange circle at center (Steps 0, 1, 4)
+        "markers",           # UP/RIGHT blue markers for camera rotation (Steps 2-3)
+        "grid",              # 15 red dots at known positions (Step 5)
+        "dot",               # single orange dot at custom position (Step 6)
+        "assistive_touch",   # AT circle + color nonce barcode (Step 7)
     }
 
     def __init__(self):
@@ -168,6 +169,7 @@ class CalibrationState:
         self._touch_event = threading.Event()  # set when a new touch event arrives
         self.screen_dimension: dict | None = None  # {"width", "height", "dpr", "viewport_width", "viewport_height"}
         self.screenshot_transform: dict | None = None  # viewport→screenshot mapping from pre-cal step
+        self._screenshot_nonce: list[list[int]] | None = None  # 20 RGB colors for Step 7
 
     def set_phase(self, phase: str, **kwargs):
         """Set the calibration display phase.
@@ -187,6 +189,8 @@ class CalibrationState:
             if phase == "dot":
                 self.dot_position = (kwargs.get("dot_x", 0.5),
                                      kwargs.get("dot_y", 0.5))
+            if phase == "assistive_touch":
+                self._screenshot_nonce = kwargs.get("nonce_colors")
 
     def report_touch(self, touch: dict):
         """Page reports a touch event. x, y are 0-1 percentages relative to screen."""
@@ -250,6 +254,19 @@ class CalibrationState:
             d["grid_cols"] = self.GRID_COLS_PCT
             d["grid_rows"] = self.GRID_ROWS_PCT
             d["screen_dimension"] = self.screen_dimension
+            # AssistiveTouch phase: AT position + color nonce
+            if self.phase == "assistive_touch" and self._screenshot_nonce is not None:
+                from physiclaw.screenshot import (
+                    AT_CSS_X, AT_CSS_Y, AT_RADIUS,
+                    NONCE_CSS_X, NONCE_CSS_Y, NONCE_SQUARE_SIZE,
+                )
+                d["at_x"] = AT_CSS_X
+                d["at_y"] = AT_CSS_Y
+                d["at_r"] = AT_RADIUS
+                d["nonce_colors"] = self._screenshot_nonce
+                d["nonce_x"] = NONCE_CSS_X
+                d["nonce_y"] = NONCE_CSS_Y
+                d["nonce_size"] = NONCE_SQUARE_SIZE
             return d
 
 

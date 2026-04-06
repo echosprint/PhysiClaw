@@ -248,6 +248,22 @@ body.mode-bridge #bridge-layer{
         var dy = (data.dot_y || 0.5) * H;
         circle(dx, dy, r*0.6, '#f97316');
         break;
+      case 'assistive_touch':
+        // Orange circle showing where to place AT button
+        var ax = data.at_x || 36;
+        var ay = data.at_y || 200;
+        var ar = data.at_r || 28;
+        circle(ax, ay, ar, '#f97316');
+        // Color nonce barcode — 20 colored squares in a vertical column
+        var colors = data.nonce_colors || [];
+        var nx = data.nonce_x || 180;
+        var ny = data.nonce_y || 300;
+        var ns = data.nonce_size || 3;
+        for(var ni=0; ni<colors.length; ni++){
+          var c = colors[ni];
+          rect(nx, ny + ni * ns, ns, ns, 'rgb('+c[0]+','+c[1]+','+c[2]+')', 0);
+        }
+        break;
     }
     phaseLabel.textContent = phase;
   }
