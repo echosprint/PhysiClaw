@@ -120,6 +120,12 @@ class BridgeState:
             self._screenshot_data = data
         self._screenshot_ready.set()
 
+    def clear_screenshot(self):
+        """Clear any pending screenshot so wait_screenshot blocks for a fresh one."""
+        self._screenshot_ready.clear()
+        with self.lock:
+            self._screenshot_data = None
+
     def wait_screenshot(self, timeout: float = 10.0) -> bytes | None:
         """Block until a screenshot arrives, or timeout. Returns PNG/JPEG bytes.
 

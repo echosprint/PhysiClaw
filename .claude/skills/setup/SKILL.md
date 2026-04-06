@@ -98,7 +98,7 @@ Wait for confirmation that the page is open on the phone (shows "PhysiClaw" on b
 ### 1.6 Screenshot coordinate calibration
 
 Tell the user:
-> The phone will show an orange square at the center of the screen. **Double-tap AssistiveTouch** to upload a screenshot. This lets me figure out the exact mapping between the phone page and the physical screen.
+> The phone will show an orange square. **Tap AssistiveTouch once** (takes a screenshot), then **double-tap AssistiveTouch** (gets the latest screenshot and uploads it to the server). This lets me figure out the exact mapping between the phone page and the physical screen.
 
 Note: This requires `/phone-setup` to be done first (AssistiveTouch + iOS Shortcut configured).
 
@@ -106,7 +106,7 @@ Note: This requires `/phone-setup` to be done first (AssistiveTouch + iOS Shortc
 curl -s -X POST http://localhost:8048/api/calibrate/step-screenshot-cal --max-time 35 | python3 -m json.tool
 ```
 
-If it fails with "no screenshot received", remind the user to double-tap AssistiveTouch and retry.
+If it fails with "no screenshot received", remind the user to tap once then double-tap AssistiveTouch, and retry.
 
 ### 1.7 Position stylus
 

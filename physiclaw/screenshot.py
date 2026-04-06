@@ -15,7 +15,7 @@ import numpy as np
 log = logging.getLogger(__name__)
 
 # AssistiveTouch button position (CSS viewport pixels, iPhone left edge snap)
-AT_CSS_X = 36       # 8pt edge margin + 28pt button radius
+AT_CSS_X = 38       # 10pt edge margin + 28pt button radius
 AT_CSS_Y = 200      # hardcoded vertical position
 AT_RADIUS = 28      # matches AT button (56pt diameter)
 
@@ -33,7 +33,8 @@ class PhoneScreenshot:
     """AssistiveTouch screenshot manager.
 
     Knows where the AT button is in screen 0-1 coordinates.
-    Can single-tap (iOS screenshot) and double-tap (screenshot + upload).
+    Single-tap: iOS takes a screenshot (saved to Photos).
+    Double-tap: iOS Shortcut gets the latest screenshot from Photos and uploads it.
     Verifies uploaded screenshots via a color nonce barcode.
 
     Usage:
@@ -99,10 +100,7 @@ class PhoneScreenshot:
         arm.wait_idle()
 
     def tap(self, arm, pct_to_grbl: np.ndarray):
-        """Single-tap AT button (triggers iOS screenshot).
-
-        Uses arm.Z_DOWN (set during step 0) for tap depth.
-        """
+        """Single-tap AT — iOS takes a screenshot (saved to Photos)."""
         if self.at_screen is None:
             raise RuntimeError("AT position not set — call compute_at_screen_pos first")
         self._move_to_at(arm, pct_to_grbl)
@@ -110,10 +108,7 @@ class PhoneScreenshot:
         log.info(f"AT single-tap at screen ({self.at_screen[0]:.3f}, {self.at_screen[1]:.3f})")
 
     def double_tap(self, arm, pct_to_grbl: np.ndarray):
-        """Double-tap AT button (triggers iOS Shortcut: screenshot + upload).
-
-        Uses arm.Z_DOWN (set during step 0) for tap depth.
-        """
+        """Double-tap AT — iOS Shortcut gets latest screenshot and uploads it."""
         if self.at_screen is None:
             raise RuntimeError("AT position not set — call compute_at_screen_pos first")
         self._move_to_at(arm, pct_to_grbl)
@@ -122,7 +117,10 @@ class PhoneScreenshot:
 
     def take_screenshot(self, arm, bridge, pct_to_grbl: np.ndarray,
                         timeout: float = 10.0) -> bytes | None:
-        """Double-tap AT, wait for upload, return image bytes or None on timeout."""
+        """Single-tap (take screenshot) + double-tap (upload latest), return image bytes."""
+        bridge.clear_screenshot()
+        self.tap(arm, pct_to_grbl)
+        time.sleep(5.0)
         self.double_tap(arm, pct_to_grbl)
         data = bridge.wait_screenshot(timeout=timeout)
         if data is None:
@@ -187,7 +185,7 @@ class PhoneScreenshot:
     # ─── Step 7 setup flow ────────────────────────────────────
 
     def setup(self, arm, bridge, cal_state, pct_to_grbl: np.ndarray) -> dict:
-        """Full step 7: single-tap, wait 2s, double-tap, verify nonce.
+        """Full step 7: single-tap, wait 5s, double-tap, verify nonce.
 
         Requires:
         - Phase "assistive_touch" already set on phone with nonce colors
@@ -208,13 +206,16 @@ class PhoneScreenshot:
         if nonce is None:
             raise RuntimeError("No nonce set — call step7_show first")
 
+        # Clear any stale screenshot from previous steps
+        bridge.clear_screenshot()
+
         # 1. Single-tap AT → iOS takes screenshot
         log.info("  Single-tap AT (iOS screenshot)...")
         self.tap(arm, pct_to_grbl)
 
         # 2. Wait for screenshot animation to complete
-        log.info("  Waiting 2s for screenshot animation...")
-        time.sleep(2.0)
+        log.info("  Waiting 5s for screenshot animation...")
+        time.sleep(5.0)
 
         # 3. Double-tap AT → iOS Shortcut: screenshot + upload
         log.info("  Double-tap AT (screenshot + upload)...")
@@ -235,6 +236,8 @@ class PhoneScreenshot:
             return {"passed": False, "matched": 0, "total": NONCE_COUNT}
 
         log.info(f"  Screenshot received: {img.shape[1]}×{img.shape[0]}px")
+        cv2.imwrite("/tmp/physiclaw_step7.jpg", img)
+        log.info("  Saved to /tmp/physiclaw_step7.jpg for inspection")
 
         t = cal_state.screenshot_transform
         if t is None:
