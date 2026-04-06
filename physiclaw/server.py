@@ -996,9 +996,10 @@ async def _step5(request):
                 ux, uy = physiclaw._arm.MOVE_DIRECTIONS['top']
                 physiclaw._arm._fast_move(ux * 100, uy * 100)
                 physiclaw._arm.wait_idle()
-            pct_to_pixel = step5_camera_screen(physiclaw._cam, _calib, rotation)
-            physiclaw._cal['pct_to_pixel'] = pct_to_pixel
-            return {"ok": True, "dots": 15}
+            pct_to_cam, cam_size = step5_camera_screen(physiclaw._cam, _calib, rotation)
+            physiclaw._cal['pct_to_cam'] = pct_to_cam
+            physiclaw._cal['cam_size'] = cam_size
+            return {"ok": True, "dots": 15, "cam_size": list(cam_size)}
         finally:
             physiclaw.release()
     try:
@@ -1018,20 +1019,23 @@ async def _step6(request):
         z_tap = physiclaw._cal.get('z_tap')
         rotation = physiclaw._cal.get('rotation', cv2.ROTATE_90_COUNTERCLOCKWISE)
         pct_to_grbl = physiclaw._cal.get('screen_to_grbl')
-        pct_to_pixel = physiclaw._cal.get('pct_to_pixel')
-        if not all([z_tap, pct_to_grbl is not None, pct_to_pixel is not None]):
+        pct_to_cam = physiclaw._cal.get('pct_to_cam')
+        cam_size = physiclaw._cal.get('cam_size', (1920, 1080))
+        if not all([z_tap, pct_to_grbl is not None, pct_to_cam is not None]):
             raise RuntimeError("Run steps 0-5 first")
         physiclaw.acquire()
         try:
             results = step6_validate(physiclaw._arm, physiclaw._cam, _calib,
-                                     z_tap, rotation, pct_to_grbl, pct_to_pixel)
+                                     z_tap, rotation, pct_to_grbl, pct_to_cam,
+                                     cam_size=cam_size)
             passed = sum(1 for r in results if r['passed'])
             # If passed, build and store GridCalibration
             if passed >= 2:
                 from physiclaw.grid_calibrate import GridCalibration
                 # Step 4 already set origin at screen center and adjusted affine
                 physiclaw._grid_cal = GridCalibration(
-                    pct_to_grbl=pct_to_grbl, pct_to_pixel=pct_to_pixel)
+                    pct_to_grbl=pct_to_grbl, pct_to_cam=pct_to_cam,
+                    cam_size=cam_size)
                 _phone.set_mode("bridge")
             return {"results": results, "passed": passed, "total": len(results),
                     "calibrated": passed >= 2}

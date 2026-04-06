@@ -709,13 +709,14 @@ def step4_grbl_screen(arm: StylusArm, cal: CalibrationState,
 # ─── Step 5: Camera ↔ Screen mapping (Mapping B) ────────────
 
 def step5_camera_screen(cam: Camera, cal: CalibrationState,
-                        rotation: int) -> np.ndarray:
-    """Detect 15 red dots, compute 0-1 pct → camera pixels affine. Plan Step 5.
+                        rotation: int) -> tuple[np.ndarray, tuple[int, int]]:
+    """Detect 15 red dots, compute screen 0-1 → camera 0-1 affine. Plan Step 5.
 
-    Returns pct_to_pixel affine (2,3): screen 0-1 → camera pixels.
+    Returns (pct_to_cam affine (2,3), cam_size (w, h)).
+    Both sides are 0-1 normalized.
     """
     log.info("═══ Step 5: Camera ↔ Screen mapping (Mapping B) ═══")
-    log.info("  Goal: compute affine transform from screen 0-1 → camera pixels")
+    log.info("  Goal: compute affine transform from screen 0-1 → camera 0-1")
     cal.set_phase("grid")
     time.sleep(1.0)
     expected = len(cal.GRID_COLS_PCT) * len(cal.GRID_ROWS_PCT)
@@ -726,9 +727,11 @@ def step5_camera_screen(cam: Camera, cal: CalibrationState,
         raise RuntimeError("Step 5 FAILED — camera read failed")
     if rotation >= 0:
         frame = cv2.rotate(frame, rotation)
+    frame_h, frame_w = frame.shape[:2]
+    cam_size = (frame_w, frame_h)
     rot_names = {-1: "none", cv2.ROTATE_90_CLOCKWISE: "90° CW",
                  cv2.ROTATE_180: "180°", cv2.ROTATE_90_COUNTERCLOCKWISE: "90° CCW"}
-    log.info(f"  Camera frame captured: {frame.shape[1]}×{frame.shape[0]}px "
+    log.info(f"  Camera frame captured: {frame_w}×{frame_h}px "
              f"(rotation={rot_names.get(rotation, str(rotation))})")
 
     dots = detect_red_dots(frame)
@@ -752,6 +755,11 @@ def step5_camera_screen(cam: Camera, cal: CalibrationState,
     camera_pixels = sort_dots_to_grid(dots)
     log.info(f"  Dots sorted into {len(cal.GRID_COLS_PCT)}×{len(cal.GRID_ROWS_PCT)} grid")
 
+    # Normalize camera pixels to 0-1
+    camera_01 = camera_pixels.astype(np.float64)
+    camera_01[:, 0] /= frame_w
+    camera_01[:, 1] /= frame_h
+
     # Grid positions: dots are rendered at viewport percentages.
     # Convert to screenshot 0-1 if screenshot transform is available,
     # so Mapping B uses the same coordinate space as Mapping A.
@@ -765,23 +773,23 @@ def step5_camera_screen(cam: Camera, cal: CalibrationState,
         screen_pcts = np.array(
             [[x, y] for y in cal.GRID_ROWS_PCT for x in cal.GRID_COLS_PCT],
             dtype=np.float64)
-    log.info(f"  Mapping {expected} dots: {coord_space} ↔ camera pixels")
+    log.info(f"  Mapping {expected} dots: {coord_space} ↔ camera 0-1")
 
-    # Plan: "15 pairs → compute homography matrix (camera pixels → screen pixels)."
-    cam_to_pct, mask = cv2.findHomography(camera_pixels, screen_pcts, cv2.RANSAC, 3.0)
+    # Homography for inlier check
+    cam_to_pct, mask = cv2.findHomography(camera_01, screen_pcts, cv2.RANSAC, 0.01)
     if cam_to_pct is None:
         raise RuntimeError("Step 5 FAILED — homography computation failed")
     inliers = int(mask.sum()) if mask is not None else 0
-    log.info(f"  Homography (camera px → screen pct): {inliers}/{len(dots)} inliers")
+    log.info(f"  Homography (camera 0-1 → screen 0-1): {inliers}/{len(dots)} inliers")
 
-    # GridCalibration needs pct_to_pixel (2×3 affine: 0-1 pct → camera pixels).
-    pct_to_pixel, _ = cv2.estimateAffine2D(screen_pcts, camera_pixels)
-    if pct_to_pixel is None:
+    # Affine: screen 0-1 → camera 0-1
+    pct_to_cam, _ = cv2.estimateAffine2D(screen_pcts, camera_01)
+    if pct_to_cam is None:
         raise RuntimeError("Step 5 FAILED — affine computation failed")
 
-    log.info(f"  ✓ Step 5 done: Mapping B ready (screen pct → camera pixels) "
-             f"from {len(dots)} dot pairs")
-    return pct_to_pixel
+    log.info(f"  ✓ Step 5 done: Mapping B ready (screen 0-1 → camera 0-1) "
+             f"from {len(dots)} dot pairs, frame {frame_w}×{frame_h}px")
+    return pct_to_cam, cam_size
 
 
 # ─── Orange dot detection (for Step 6 validation) ────────────
@@ -818,7 +826,8 @@ def _detect_orange_dot(frame: np.ndarray) -> tuple[float, float] | None:
 def step6_validate(arm: StylusArm, cam: Camera, cal: CalibrationState,
                    z_tap: float, rotation: int,
                    pct_to_grbl: np.ndarray,
-                   pct_to_pixel: np.ndarray,
+                   pct_to_cam: np.ndarray,
+                   cam_size: tuple[int, int] = (1920, 1080),
                    num_tests: int = 3,
                    max_error: float = 0.015
                    ) -> list[dict]:
@@ -826,8 +835,8 @@ def step6_validate(arm: StylusArm, cam: Camera, cal: CalibrationState,
 
     Plan Step 6. Tests BOTH mappings end-to-end:
     1. Page shows orange dot at random position
-    2. Camera detects orange dot in frame (camera pixels)
-    3. Mapping B⁻¹: camera pixels → screen 0-1 pct
+    2. Camera detects orange dot in frame (camera pixels → normalize to 0-1)
+    3. Mapping B⁻¹: camera 0-1 → screen 0-1 pct
     4. Mapping A: screen 0-1 pct → GRBL mm
     5. Arm taps
     6. Phone reports touch coordinate (0-1 pct)
@@ -841,11 +850,12 @@ def step6_validate(arm: StylusArm, cam: Camera, cal: CalibrationState,
     log.info(f"  Pass threshold: error < {max_error} in screen 0-1 space "
              f"(≈{max_error * 390:.0f}px on a 390px-wide screen)")
 
-    # Compute inverse of pct_to_pixel for camera pixels → screen pct
-    A = pct_to_pixel[:, :2]  # 2×2
-    b = pct_to_pixel[:, 2]   # translation
+    # Compute inverse of pct_to_cam for camera 0-1 → screen pct
+    A = pct_to_cam[:, :2]  # 2×2
+    b = pct_to_cam[:, 2]   # translation
     A_inv = np.linalg.inv(A)
-    pixel_to_pct = np.hstack([A_inv, (-A_inv @ b).reshape(2, 1)])
+    cam_to_pct = np.hstack([A_inv, (-A_inv @ b).reshape(2, 1)])
+    cam_w, cam_h = cam_size
 
     results = []
     for i in range(num_tests):
@@ -885,12 +895,15 @@ def step6_validate(arm: StylusArm, cam: Camera, cal: CalibrationState,
                         f"falling back to known position")
             cam_pct_x, cam_pct_y = expected_x, expected_y
         else:
-            # 3. Mapping B⁻¹: camera pixels → screen pct (screenshot 0-1)
-            cam_pt = np.array([detected[0], detected[1], 1.0])
-            cam_pct = pixel_to_pct @ cam_pt
-            cam_pct_x, cam_pct_y = float(cam_pct[0]), float(cam_pct[1])
-            log.info(f"    2. Camera: detected dot at pixel ({detected[0]:.0f}, {detected[1]:.0f})")
-            log.info(f"    3. Mapping B⁻¹: camera pixel → screen ({cam_pct_x:.3f}, {cam_pct_y:.3f})")
+            # 3. Mapping B⁻¹: camera 0-1 → screen pct (screenshot 0-1)
+            cam_01_x = detected[0] / cam_w
+            cam_01_y = detected[1] / cam_h
+            cam_pt = np.array([cam_01_x, cam_01_y, 1.0])
+            screen_pct = cam_to_pct @ cam_pt
+            cam_pct_x, cam_pct_y = float(screen_pct[0]), float(screen_pct[1])
+            log.info(f"    2. Camera: detected dot at pixel ({detected[0]:.0f}, {detected[1]:.0f}) "
+                     f"→ camera 0-1 ({cam_01_x:.3f}, {cam_01_y:.3f})")
+            log.info(f"    3. Mapping B⁻¹: camera 0-1 → screen ({cam_pct_x:.3f}, {cam_pct_y:.3f})")
 
         # 4. Mapping A: screen pct → GRBL mm
         grbl_pos = pct_to_grbl @ np.array([cam_pct_x, cam_pct_y, 1.0])

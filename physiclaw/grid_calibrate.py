@@ -167,11 +167,33 @@ def compute_affine_transforms(
 class GridCalibration:
     """Stores and applies grid calibration affine transforms.
 
-    All screen coordinates use 0-1 decimals (0=left/top, 1=right/bottom).
+    All coordinates use 0-1 decimals (0=left/top, 1=right/bottom).
+    Both mappings work in normalized space:
+      - pct_to_grbl:  screen 0-1 → GRBL mm
+      - pct_to_cam:   screen 0-1 → camera 0-1
+    Camera pixel conversion happens at the boundary via cam_size.
     """
 
     pct_to_grbl: np.ndarray    # (2, 3) screen 0-1 → GRBL mm
-    pct_to_pixel: np.ndarray   # (2, 3) screen 0-1 → camera pixels
+    pct_to_cam: np.ndarray     # (2, 3) screen 0-1 → camera 0-1
+    cam_size: tuple[int, int]  # (width, height) of camera frame in pixels
+
+    # Backward compat: accept old kwarg name
+    def __init__(self, pct_to_grbl: np.ndarray,
+                 pct_to_cam: np.ndarray | None = None,
+                 cam_size: tuple[int, int] = (1920, 1080),
+                 pct_to_pixel: np.ndarray | None = None):
+        self.pct_to_grbl = pct_to_grbl
+        self.cam_size = cam_size
+        if pct_to_cam is not None:
+            self.pct_to_cam = pct_to_cam
+        elif pct_to_pixel is not None:
+            # Legacy: convert pixel affine to 0-1 affine
+            w, h = cam_size
+            scale = np.array([[1/w, 0, 0], [0, 1/h, 0]], dtype=np.float64)
+            self.pct_to_cam = scale @ np.vstack([pct_to_pixel, [0, 0, 1]])
+        else:
+            raise ValueError("pct_to_cam or pct_to_pixel required")
 
     def bbox_center_pct(self, bbox: list[float]) -> tuple[float, float]:
         """Compute center of a bounding box in screen coordinates (0-1).
@@ -190,15 +212,17 @@ class GridCalibration:
     def pct_to_cam_pixel(self, x: float, y: float) -> tuple[int, int]:
         """Convert screen coordinate (0-1) to camera pixel."""
         pt = np.array([x, y, 1.0])
-        result = self.pct_to_pixel @ pt
-        return (int(result[0]), int(result[1]))
+        cam_01 = self.pct_to_cam @ pt
+        w, h = self.cam_size
+        return (int(cam_01[0] * w), int(cam_01[1] * h))
 
     def pixel_to_pct(self, px_x: int, px_y: int) -> tuple[float, float]:
         """Convert camera pixel to screen coordinate (0-1)."""
-        M = self.pct_to_pixel
-        A = M[:, :2]  # 2x2
-        b = M[:, 2]   # translation
-        pct = np.linalg.solve(A, np.array([px_x, px_y]) - b)
+        w, h = self.cam_size
+        cam_01 = np.array([px_x / w, px_y / h])
+        A = self.pct_to_cam[:, :2]  # 2x2
+        b = self.pct_to_cam[:, 2]   # translation
+        pct = np.linalg.solve(A, cam_01 - b)
         return (float(pct[0]), float(pct[1]))
 
     def bbox_to_pixel_rect(self, bbox: list[float]) -> tuple[tuple[int, int], tuple[int, int]]:
