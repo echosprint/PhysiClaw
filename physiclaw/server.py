@@ -974,6 +974,11 @@ async def _step4(request):
         try:
             pct_to_grbl, touches = step4_grbl_screen(physiclaw._arm, _calib, z_tap)
             physiclaw._cal['screen_to_grbl'] = pct_to_grbl
+            # Set MOVE_DIRECTIONS from the affine columns:
+            # column 0 = screen +X (right) in GRBL, column 1 = screen +Y (down) in GRBL
+            right_vec = (float(pct_to_grbl[0, 0]), float(pct_to_grbl[1, 0]))
+            down_vec = (float(pct_to_grbl[0, 1]), float(pct_to_grbl[1, 1]))
+            physiclaw._arm.set_direction_mapping(right_vec, down_vec)
             return {"ok": True, "pairs": len(touches)}
         finally:
             physiclaw.release()
@@ -994,10 +999,11 @@ async def _step5(request):
         rotation = physiclaw._cal.get('rotation', cv2.ROTATE_90_COUNTERCLOCKWISE)
         physiclaw.acquire()
         try:
-            # Park arm if possible
+            # Park arm off-screen (toward top edge, 80mm)
             if physiclaw._arm and physiclaw._arm.MOVE_DIRECTIONS:
                 ux, uy = physiclaw._arm.MOVE_DIRECTIONS['top']
-                physiclaw._arm._fast_move(ux * 100, uy * 100)
+                mag = (ux**2 + uy**2)**0.5 or 1
+                physiclaw._arm._fast_move(ux / mag * 80, uy / mag * 80)
                 physiclaw._arm.wait_idle()
             pct_to_cam, cam_size = step5_camera_screen(physiclaw._cam, _calib, rotation)
             physiclaw._cal['pct_to_cam'] = pct_to_cam

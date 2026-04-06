@@ -2,8 +2,8 @@
 PhysiClaw orchestrator — central hardware lifecycle manager.
 
 Owns the stylus arm, camera, and calibration state.
-Construction is instant — call connect_arm(), connect_camera(), and
-calibrate_z_depth() through calibrate_grid() to set up hardware.
+Construction is instant — call connect_arm() and connect_camera()
+to set up hardware. Calibration is done via /setup skill endpoints.
 """
 
 import logging
@@ -22,9 +22,9 @@ log = logging.getLogger(__name__)
 class PhysiClaw:
     """Central orchestrator — owns all hardware lifecycle.
 
-    Construction is instant (no hardware). Call connect_arm(),
-    connect_camera(), then calibrate_z_depth() through calibrate_grid()
-    to set up hardware incrementally.
+    Construction is instant (no hardware). Call connect_arm() and
+    connect_camera() to connect hardware. Calibration is handled
+    by the /setup skill via HTTP endpoints.
     """
 
     def __init__(self):
@@ -155,102 +155,7 @@ class PhysiClaw:
                 raise RuntimeError("Camera not found — is the phone under the camera?")
             log.info(f"Camera {self._cam.index} connected (auto-detected)")
 
-    # ─── Calibration (per-phase) ──────────────────────────────
-
-    def calibrate_z_depth(self) -> dict:
-        """Phase 1: Probe Z depth for tap contact (10 greens on center).
-
-        Returns {"z_tap": float}.
-        """
-        from physiclaw.calibrate import phase1_z
-        if self._arm is None or self._cam is None:
-            raise RuntimeError("Arm and camera must be connected first")
-        z_tap = phase1_z(self._arm, self._cam)
-        self._arm.Z_DOWN = z_tap
-        self._cal['z_tap'] = z_tap
-        return {"z_tap": z_tap}
-
-    def calibrate_find_right(self) -> dict:
-        """Phase 2: Probe 4 directions to find phone-right (3 greens).
-
-        Returns {"right_vec": [ax, ay], "right_dist": float}.
-        Requires: phase 1 done.
-        """
-        from physiclaw.calibrate import phase2_right
-        z_tap = self._cal.get('z_tap')
-        if z_tap is None:
-            raise RuntimeError("Phase 1 not done — run calibrate_z_depth() first")
-        result = phase2_right(self._arm, self._cam, z_tap)
-        self._cal['right_result'] = result
-        return {"right_vec": [result[0], result[1]], "right_dist": result[2]}
-
-    def calibrate_find_down(self) -> dict:
-        """Phase 3: Probe 2 perpendicular directions for phone-down (3 greens).
-
-        Returns {"down_vec": [ax, ay], "down_dist": float}.
-        Requires: phase 2 done.
-        """
-        from physiclaw.calibrate import phase3_down
-        right_result = self._cal.get('right_result')
-        if right_result is None:
-            raise RuntimeError("Phase 2 not done — run calibrate_find_right() first")
-        z_tap = self._cal['z_tap']
-        right_vec = (right_result[0], right_result[1])
-        result = phase3_down(self._arm, self._cam, z_tap, right_vec)
-        self._cal['down_result'] = result
-        return {"down_vec": [result[0], result[1]], "down_dist": result[2]}
-
-    def calibrate_long_press(self) -> dict:
-        """Phase 4: Verify long press (3 greens, hold 800ms).
-
-        Requires: phase 3 done.
-        """
-        from physiclaw.calibrate import phase4_long_press
-        if 'down_result' not in self._cal:
-            raise RuntimeError("Phase 3 not done — run calibrate_find_down() first")
-        phase4_long_press(self._arm, self._cam)
-        self._cal['phase4_done'] = True
-        return {"ok": True}
-
-    def calibrate_swipe(self) -> dict:
-        """Phase 5: Verify swipe in 4 directions.
-
-        Sets direction mapping on the arm.
-        Requires: phase 4 done.
-        """
-        from physiclaw.calibrate import phase5_swipe
-        if not self._cal.get('phase4_done'):
-            raise RuntimeError("Phase 4 not done — run calibrate_long_press() first")
-        right_result = self._cal['right_result']
-        down_result = self._cal['down_result']
-        rax, ray, _ = right_result
-        dax, day, _ = down_result
-        self._arm.set_direction_mapping((rax, ray), (dax, day))
-        phase5_swipe(self._arm, self._cam)
-        log.info(f"Calibration phases 1-5 complete — Z={self._cal['z_tap']}mm, "
-                 f"right=({rax},{ray}), down=({dax},{day})")
-        return {"ok": True}
-
-    def calibrate_grid(self) -> dict:
-        """Phase 6: Grid calibration using 15 red dots.
-
-        Computes affine transforms for coordinate-based tapping.
-        Requires: phase 5 done.
-        """
-        from physiclaw.grid_calibrate import phase6_grid
-        if not (self._arm and self._arm.MOVE_DIRECTIONS):
-            raise RuntimeError("Phase 5 not done — run earlier phases first")
-        right_result = self._cal['right_result']
-        down_result = self._cal['down_result']
-        rax, ray, right_dist = right_result
-        dax, day, down_dist = down_result
-        self._arm._fast_move(0, 0)
-        self._arm.wait_idle()
-        self._grid_cal = phase6_grid(
-            self._arm, self._cam,
-            (rax, ray), (dax, day),
-            right_dist, down_dist)
-        return {"ok": True}
+    # ─── Verification ────────────────────────────────���─────────
 
     def verify_edge_trace(self) -> dict:
         """Trace the phone screen border clockwise for visual verification.
@@ -258,22 +163,13 @@ class PhysiClaw:
         The arm moves to 8 edge points, pausing 2s at each, then returns
         to center. The user should watch and confirm the arm follows the
         screen edges.
-        Requires: phase 6 done.
+        Requires: calibration complete (GridCalibration set).
         """
         from physiclaw.grid_calibrate import trace_screen_edge
         if self._grid_cal is None:
-            raise RuntimeError("Phase 6 not done — run calibrate_grid() first")
+            raise RuntimeError("Not calibrated — run /setup first")
         trace_screen_edge(self._arm, self._grid_cal)
         return {"ok": True}
-
-    def calibrate(self):
-        """Run the full 6-phase calibration workflow (convenience method)."""
-        self.calibrate_z_depth()
-        self.calibrate_find_right()
-        self.calibrate_find_down()
-        self.calibrate_long_press()
-        self.calibrate_swipe()
-        self.calibrate_grid()
 
     # ─── Properties ────────────────────────────────────────────
 
