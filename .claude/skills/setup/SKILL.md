@@ -122,7 +122,7 @@ Wait for user confirmation.
 
 ## Step 2: Calibration
 
-### 2.0 Z-depth (~5s)
+### 2.0 Z-depth (~5s, or instant if cached)
 
 Tell the user:
 > The arm will probe downward in small steps to find the screen surface. A touch event tells us when it makes contact. Don't touch anything.
@@ -130,6 +130,8 @@ Tell the user:
 ```bash
 curl -s -X POST http://localhost:8048/api/calibrate/step0-z-depth --max-time 30 | python3 -m json.tool
 ```
+
+If the response has `"cached": true`, the pen depth was loaded from a previous run — no probing needed. Tell the user it was instant. If the cached value seems wrong (taps miss in later steps), delete `data/pen/z-tap` and rerun this step.
 
 ### 2.1 Alignment check (~3s)
 

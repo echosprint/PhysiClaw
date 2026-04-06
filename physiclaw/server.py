@@ -989,14 +989,18 @@ async def _step5(request):
         if physiclaw._cam is None:
             raise RuntimeError("Camera not connected")
         rotation = physiclaw._cal.get('rotation', cv2.ROTATE_90_COUNTERCLOCKWISE)
-        # Park arm if possible
-        if physiclaw._arm and physiclaw._arm.MOVE_DIRECTIONS:
-            ux, uy = physiclaw._arm.MOVE_DIRECTIONS['top']
-            physiclaw._arm._fast_move(ux * 100, uy * 100)
-            physiclaw._arm.wait_idle()
-        pct_to_pixel = step5_camera_screen(physiclaw._cam, _calib, rotation)
-        physiclaw._cal['pct_to_pixel'] = pct_to_pixel
-        return {"ok": True, "dots": 15}
+        physiclaw.acquire()
+        try:
+            # Park arm if possible
+            if physiclaw._arm and physiclaw._arm.MOVE_DIRECTIONS:
+                ux, uy = physiclaw._arm.MOVE_DIRECTIONS['top']
+                physiclaw._arm._fast_move(ux * 100, uy * 100)
+                physiclaw._arm.wait_idle()
+            pct_to_pixel = step5_camera_screen(physiclaw._cam, _calib, rotation)
+            physiclaw._cal['pct_to_pixel'] = pct_to_pixel
+            return {"ok": True, "dots": 15}
+        finally:
+            physiclaw.release()
     try:
         result = await asyncio.get_event_loop().run_in_executor(None, _do)
         return JSONResponse({"status": "ok", **result})
@@ -1028,7 +1032,6 @@ async def _step6(request):
                 # Step 4 already set origin at screen center and adjusted affine
                 physiclaw._grid_cal = GridCalibration(
                     pct_to_grbl=pct_to_grbl, pct_to_pixel=pct_to_pixel)
-            if passed >= 2:
                 _phone.set_mode("bridge")
             return {"results": results, "passed": passed, "total": len(results),
                     "calibrated": passed >= 2}
