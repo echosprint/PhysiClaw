@@ -7,10 +7,9 @@ Implements the architecture plan's calibration exactly:
   Step 1: Arm-phone alignment via touch coordinates
   Step 2: Camera physical rotation check (phone shape in frame)
   Step 3: Software rotation via UP/RIGHT markers
-  Step 4: GRBL ↔ Screen mapping via touch coordinates (Mapping A)
+  Step 4: GRBL ↔ Screen mapping via touch coordinates (Mapping A), sets screen center as arm origin
   Step 5: Camera ↔ Screen mapping via red dot detection (Mapping B)
   Step 6: Full-chain validation (camera → Mapping B → Mapping A → tap → touch)
-  Post:   Set screen center as GRBL origin
 
 No green flash. Touch events for contact detection and coordinate mapping.
 Camera for marker/dot visual detection only.
@@ -25,7 +24,7 @@ import numpy as np
 
 from physiclaw.bridge import BridgeState, CalibrationState
 from physiclaw.camera import Camera
-from physiclaw.grid_calibrate import GridCalibration, detect_red_dots, sort_dots_to_grid
+from physiclaw.grid_calibrate import detect_red_dots, sort_dots_to_grid
 from physiclaw.stylus_arm import StylusArm
 
 log = logging.getLogger(__name__)
@@ -927,82 +926,3 @@ def step6_validate(arm: StylusArm, cam: Camera, cal: CalibrationState,
     passed_count = sum(1 for r in results if r['passed'])
     log.info(f"  ✓ Step 6 done: {passed_count}/{num_tests} tests passed")
     return results
-
-
-# ─── Post: Set origin at screen center ───────────────────────
-
-# ─── Full calibration orchestrator ───────────────────────────
-
-def full_calibration(arm: StylusArm, cam: Camera,
-                     cal: CalibrationState) -> GridCalibration:
-    """Run all plan calibration steps. Returns GridCalibration.
-
-    Expects: phone with /calibrate page open, stylus above screen center.
-    """
-    log.info("╔══════════════════════════════════════════╗")
-    log.info("║   PhysiClaw Full Calibration Starting    ║")
-    log.info("╚══════════════════════════════════════════╝")
-
-    # Step 0: Z-depth (use cached pen depth if available)
-    cached = load_pen_depth()
-    if cached is not None:
-        z_tap = cached
-        log.info(f"Step 0: SKIPPED — using cached pen depth {z_tap}mm "
-                 f"(from {PEN_DEPTH_FILE})")
-    else:
-        z_tap = step0_z_depth(arm, cal)
-        save_pen_depth(z_tap)
-        log.info(f"Step 0: pen depth {z_tap}mm saved to {PEN_DEPTH_FILE}")
-    arm.Z_DOWN = z_tap
-
-    # Step 1: Alignment
-    tilt = step1_alignment(arm, cal, z_tap)
-    if tilt > 0.05:
-        raise RuntimeError(f"Phone tilted (ratio={tilt:.3f}). Adjust and retry.")
-
-    # Step 2: Camera physical rotation
-    step2_result = step2_camera_rotation(cam)
-    if not step2_result["ok"]:
-        raise RuntimeError(f"Camera check failed: {'; '.join(step2_result['issues'])}")
-
-    # Step 3: Software rotation
-    rotation = step3_software_rotation(cam, cal)
-
-    # Step 4: Mapping A (screen 0-1 → GRBL mm)
-    pct_to_grbl, _ = step4_grbl_screen(arm, cal, z_tap)
-
-    # Park arm for camera step
-    log.info("Parking arm out of camera view for Step 5...")
-    if arm.MOVE_DIRECTIONS:
-        ux, uy = arm.MOVE_DIRECTIONS['top']
-        arm._fast_move(ux * 100, uy * 100)
-    else:
-        arm._fast_move(0, -80)
-    arm.wait_idle()
-
-    # Step 5: Mapping B (0-1 pct → camera pixels)
-    pct_to_pixel = step5_camera_screen(cam, cal, rotation)
-
-    # Build GridCalibration
-    grid_cal = GridCalibration(pct_to_grbl=pct_to_grbl, pct_to_pixel=pct_to_pixel)
-    log.info("GridCalibration object built from Mapping A + Mapping B")
-
-    # Move to center for validation
-    gx, gy = grid_cal.pct_to_grbl_mm(0.5, 0.5)
-    log.info(f"Moving arm to screen center ({gx:.1f}, {gy:.1f})mm for validation...")
-    arm._fast_move(gx, gy)
-    arm.wait_idle()
-
-    # Step 6: Full-chain validation
-    results = step6_validate(arm, cam, cal, z_tap, rotation,
-                             pct_to_grbl, pct_to_pixel)
-    passed = sum(1 for r in results if r['passed'])
-    if passed < len(results):
-        log.warning(f"Validation: {passed}/{len(results)} tests passed — "
-                    f"calibration may be inaccurate")
-
-    cal.set_phase("idle")
-    log.info("╔══════════════════════════════════════════╗")
-    log.info(f"║   Calibration complete: {passed}/{len(results)} validated    ║")
-    log.info("╚══════════════════════════════════════════╝")
-    return grid_cal

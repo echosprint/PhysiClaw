@@ -12,6 +12,8 @@ from mcp.server.fastmcp import FastMCP, Image
 
 from physiclaw.core import PhysiClaw
 
+log = logging.getLogger(__name__)
+
 # ─── MCP server ─────────────────────────────────────────────
 
 mcp = FastMCP(
@@ -848,6 +850,7 @@ from physiclaw.plan_calibrate import (
     step0_z_depth, step1_alignment, step2_camera_rotation,
     step3_software_rotation, step4_grbl_screen, step5_camera_screen,
     step6_validate,
+    load_pen_depth, save_pen_depth,
 )
 
 
@@ -875,15 +878,21 @@ async def _step0(request):
     def _do():
         if physiclaw._arm is None:
             raise RuntimeError("Arm not connected")
-        _phone.set_mode("calibrate")
-        physiclaw.acquire()
-        try:
-            z_tap = step0_z_depth(physiclaw._arm, _calib)
-            physiclaw._arm.Z_DOWN = z_tap
-            physiclaw._cal['z_tap'] = z_tap
-            return {"z_tap": z_tap}
-        finally:
-            physiclaw.release()
+        cached = load_pen_depth()
+        if cached is not None:
+            z_tap = cached
+            log.info(f"Step 0: using cached pen depth {z_tap}mm")
+        else:
+            _phone.set_mode("calibrate")
+            physiclaw.acquire()
+            try:
+                z_tap = step0_z_depth(physiclaw._arm, _calib)
+                save_pen_depth(z_tap)
+            finally:
+                physiclaw.release()
+        physiclaw._arm.Z_DOWN = z_tap
+        physiclaw._cal['z_tap'] = z_tap
+        return {"z_tap": z_tap, "cached": cached is not None}
     try:
         result = await asyncio.get_event_loop().run_in_executor(None, _do)
         return JSONResponse({"status": "ok", **result})

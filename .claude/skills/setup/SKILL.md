@@ -179,7 +179,7 @@ curl -s -X POST http://localhost:8048/api/calibrate/step3-sw-rotation --max-time
 ### 2.4 GRBL↔Screen mapping (~15s)
 
 Tell the user:
-> The arm will tap 11 distributed points across the screen. Each tap reports its touch coordinate for precise mapping. This builds Mapping A (screen → arm position).
+> The arm will tap up to 18 points across the screen (3 scale probes + 15 grid points). Each tap reports its touch coordinate for precise mapping. This builds Mapping A (screen → arm position).
 
 ```bash
 curl -s -X POST http://localhost:8048/api/calibrate/step4-mapping-a --max-time 60 | python3 -m json.tool
