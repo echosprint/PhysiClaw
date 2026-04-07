@@ -327,7 +327,7 @@ async def handle_show_assistive_touch(
         return _err("Run screenshot-transform first", status_code=400)
     nonce = physiclaw.assistive_touch.generate_nonce()
     physiclaw.assistive_touch.compute_at_screen_pos(calib.screenshot_transform)
-    phone.set_mode("calibrate", phase="assistive_touch", nonce_colors=nonce)
+    phone.set_mode("calibrate", phase="assistive_touch", nonce_bits=nonce)
     return JSONResponse(
         {
             "status": "ok",

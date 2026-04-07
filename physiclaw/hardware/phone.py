@@ -26,10 +26,12 @@ from physiclaw.bridge.protocol import (
 
 log = logging.getLogger(__name__)
 
-# Verification thresholds (hardware-only, not part of the page protocol)
-NONCE_COLOR_MIN = 50  # avoid near-black
-NONCE_COLOR_MAX = 230  # avoid near-white
-NONCE_MAX_DIST = 40  # max Euclidean RGB distance for a match
+# Binary nonce — each square is either dark grey or light grey, encoding 1 bit.
+# Greys lie on the achromatic axis where Display P3 and sRGB agree exactly,
+# so the iOS screenshot color profile shift can't trip the verifier.
+NONCE_DARK = 40  # 0
+NONCE_LIGHT = 220  # 1
+NONCE_THRESHOLD = 130  # luminance midpoint dark↔light
 
 
 class AssistiveTouch:
@@ -141,29 +143,31 @@ class AssistiveTouch:
     # ─── Color nonce ──────────────────────────────────────────
 
     @staticmethod
-    def generate_nonce() -> list[list[int]]:
-        """Generate 20 random RGB colors for screenshot verification."""
-        return [
-            [random.randint(NONCE_COLOR_MIN, NONCE_COLOR_MAX) for _ in range(3)]
-            for _ in range(NONCE_COUNT)
-        ]
+    def generate_nonce() -> list[int]:
+        """Generate a random binary sequence (NONCE_COUNT bits) for verification."""
+        return [random.randint(0, 1) for _ in range(NONCE_COUNT)]
+
+    @staticmethod
+    def bits_to_colors(bits: list[int]) -> list[list[int]]:
+        """Map each bit to a grey RGB triplet for the page to render."""
+        return [[NONCE_LIGHT] * 3 if b else [NONCE_DARK] * 3 for b in bits]
 
     @staticmethod
     def verify_nonce(
-        img: np.ndarray, screenshot_transform: dict, expected_colors: list[list[int]]
+        img: np.ndarray, screenshot_transform: dict, expected_bits: list[int]
     ) -> tuple[bool, int]:
-        """Verify color nonce barcode in a screenshot.
+        """Verify the binary nonce barcode in a screenshot.
 
-        Samples the center pixel of each 3×3 CSS square (scaled by DPR)
-        and compares to expected RGB values.
+        Samples the center pixel of each square (scaled by DPR), thresholds
+        its luminance to a bit, and compares to the expected sequence.
 
         Args:
             img: decoded screenshot (BGR, from cv2.imdecode)
             screenshot_transform: pre-cal transform with dpr, offset_x/y
-            expected_colors: list of [r, g, b] values (20 entries)
+            expected_bits: list of 0/1 values (NONCE_COUNT entries)
 
         Returns:
-            (all_matched, match_count) — all_matched is True only if 20/20.
+            (all_matched, match_count) — all_matched is True only if all bits match.
         """
         t = screenshot_transform
         dpr = t["dpr"]
@@ -172,8 +176,7 @@ class AssistiveTouch:
         base_y = int(NONCE_CSS_Y * dpr + t["offset_y"])
 
         matched = 0
-        for i, expected in enumerate(expected_colors):
-            # Center of each square
+        for i, expected in enumerate(expected_bits):
             cx = base_x + step // 2
             cy = base_y + i * step + step // 2
             if not (0 <= cy < img.shape[0] and 0 <= cx < img.shape[1]):
@@ -182,22 +185,21 @@ class AssistiveTouch:
                     f"({img.shape[1]}×{img.shape[0]})"
                 )
                 continue
-            # OpenCV is BGR
+            # OpenCV is BGR; mean of channels is fine since the square is grey.
             b, g, r = int(img[cy, cx, 0]), int(img[cy, cx, 1]), int(img[cy, cx, 2])
-            dist = (
-                (r - expected[0]) ** 2 + (g - expected[1]) ** 2 + (b - expected[2]) ** 2
-            ) ** 0.5
-            if dist < NONCE_MAX_DIST:
+            luminance = (r + g + b) / 3
+            actual = 1 if luminance >= NONCE_THRESHOLD else 0
+            if actual == expected:
                 matched += 1
             else:
                 log.info(
-                    f"  Nonce square {i}: expected RGB({expected[0]}, {expected[1]}, {expected[2]}), "
-                    f"got RGB({r}, {g}, {b}), dist={dist:.1f} — MISMATCH"
+                    f"  Nonce square {i}: expected bit {expected}, "
+                    f"got bit {actual} (luminance {luminance:.0f}) — MISMATCH"
                 )
 
-        all_matched = matched == len(expected_colors)
+        all_matched = matched == len(expected_bits)
         log.info(
-            f"  Nonce verification: {matched}/{len(expected_colors)} matched"
+            f"  Nonce verification: {matched}/{len(expected_bits)} bits matched"
             f" — {'PASS' if all_matched else 'FAIL'}"
         )
         return all_matched, matched

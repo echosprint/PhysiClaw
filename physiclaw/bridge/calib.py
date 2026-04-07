@@ -57,8 +57,8 @@ class CalibrationState:
         self.screenshot_transform: dict | None = (
             None  # viewport→screenshot mapping from pre-cal step
         )
-        self._screenshot_nonce: list[list[int]] | None = (
-            None  # 20 RGB colors for Step 7
+        self._screenshot_nonce: list[int] | None = (
+            None  # NONCE_COUNT bits for Step 7
         )
 
     def set_phase(self, phase: str, **kwargs):
@@ -79,7 +79,7 @@ class CalibrationState:
             if phase == "dot":
                 self.dot_position = (kwargs.get("dot_x", 0.5), kwargs.get("dot_y", 0.5))
             if phase == "assistive_touch":
-                self._screenshot_nonce = kwargs.get("nonce_colors")
+                self._screenshot_nonce = kwargs.get("nonce_bits")
 
     def report_touch(self, touch: dict):
         """Page reports a touch event. x, y are 0-1 percentages relative to screen."""
@@ -165,9 +165,11 @@ class CalibrationState:
             if self.dot_position:
                 d["dot"] = {"x": self.dot_position[0], "y": self.dot_position[1]}
             if self.phase == "assistive_touch" and self._screenshot_nonce is not None:
+                from physiclaw.hardware.phone import AssistiveTouch
+
                 d["at"] = {"x": AT_CSS_X, "y": AT_CSS_Y, "r": AT_RADIUS}
                 d["nonce"] = {
-                    "colors": self._screenshot_nonce,
+                    "colors": AssistiveTouch.bits_to_colors(self._screenshot_nonce),
                     "x": NONCE_CSS_X,
                     "y": NONCE_CSS_Y,
                     "size": NONCE_SQUARE_SIZE,
