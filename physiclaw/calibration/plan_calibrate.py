@@ -72,7 +72,7 @@ def _tap_once(arm: StylusArm, z: float, z_speed: int = PROBE_Z_SPEED):
 
 # ─── Pre-cal: Screenshot coordinate mapping ──────────────────
 
-def step_screenshot_cal(cal: CalibrationState, bridge: BridgeState) -> dict:
+def screenshot_transform(cal: CalibrationState, bridge: BridgeState) -> dict:
     """Compute viewport→screenshot coordinate transform from a phone screenshot.
 
     Shows an orange square at viewport center. User takes a phone screenshot
@@ -164,7 +164,7 @@ def step_screenshot_cal(cal: CalibrationState, bridge: BridgeState) -> dict:
 
 # ─── Step 0: Z-axis surface detection ────────────────────────
 
-def step0_z_depth(arm: StylusArm, cal: CalibrationState) -> float:
+def find_pen_depth(arm: StylusArm, cal: CalibrationState) -> float:
     """Probe Z depth with tap-and-release at each level. Plan Step 0.
 
     Full tap cycle at each Z: pen down, dwell 150ms, pen up.
@@ -266,7 +266,7 @@ def step0_z_depth(arm: StylusArm, cal: CalibrationState) -> float:
 
 # ─── Step 1: Arm-phone alignment check ───────────────────────
 
-def step1_alignment(arm: StylusArm, cal: CalibrationState,
+def check_arm_tilt(arm: StylusArm, cal: CalibrationState,
                     z_tap: float, separation_mm: float = 25.0
                     ) -> float:
     """Two taps along arm X-axis, compare touch Y coords. Plan Step 1.
@@ -338,7 +338,7 @@ def step1_alignment(arm: StylusArm, cal: CalibrationState,
 
 # ─── Step 2: Camera physical rotation check ──────────────────
 
-def step2_camera_rotation(cam: Camera, screen_dimension: dict | None = None) -> dict:
+def detect_camera_rotation(cam: Camera, screen_dimension: dict | None = None) -> dict:
     """Check camera orientation, tilt, and coverage. Plan Step 2.
 
     Checks:
@@ -380,7 +380,7 @@ def step2_camera_rotation(cam: Camera, screen_dimension: dict | None = None) -> 
     bx, by, _, _ = cv2.boundingRect(largest)
     cv2.putText(annotated, label, (bx + 5, by + 30),
                 cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-    cv2.imwrite("/tmp/physiclaw_step2.jpg", annotated)
+    cv2.imwrite("/tmp/physiclaw_camera_rotation.jpg", annotated)
 
     # 1. Camera rotation — phone edges should be parallel to image edges.
     # Compute angle from the longest edge of the min-area rect.
@@ -454,7 +454,7 @@ def step2_camera_rotation(cam: Camera, screen_dimension: dict | None = None) -> 
 
 # ─── Step 3: Software rotation via UP/RIGHT markers ──────────
 
-def step3_software_rotation(cam: Camera, cal: CalibrationState) -> int:
+def pick_frame_rotation(cam: Camera, cal: CalibrationState) -> int:
     """Detect blue UP/RIGHT markers, determine software rotation. Plan Step 3.
 
     Returns cv2 rotation code (cv2.ROTATE_* or -1 for no rotation).
@@ -555,7 +555,7 @@ def _tap_and_read(arm: StylusArm, cal: CalibrationState,
     return None, z
 
 
-def step4_grbl_screen(arm: StylusArm, cal: CalibrationState,
+def compute_grbl_mapping(arm: StylusArm, cal: CalibrationState,
                       z_tap: float
                       ) -> tuple[np.ndarray, list[dict]]:
     """Probe scale, tap grid points across the screen, compute affine. Plan Step 4.
@@ -712,7 +712,7 @@ def step4_grbl_screen(arm: StylusArm, cal: CalibrationState,
 
 # ─── Step 5: Camera ↔ Screen mapping (Mapping B) ────────────
 
-def step5_camera_screen(cam: Camera, cal: CalibrationState,
+def compute_camera_mapping(cam: Camera, cal: CalibrationState,
                         rotation: int) -> tuple[np.ndarray, tuple[int, int]]:
     """Detect 15 red dots, compute screen 0-1 → camera 0-1 affine. Plan Step 5.
 
@@ -799,7 +799,7 @@ def step5_camera_screen(cam: Camera, cal: CalibrationState,
 
 # ─── Step 6: Full-chain validation ───────────────────────────
 
-def step6_validate(arm: StylusArm, cam: Camera, cal: CalibrationState,
+def validate_calibration(arm: StylusArm, cam: Camera, cal: CalibrationState,
                    z_tap: float, rotation: int,
                    pct_to_grbl: np.ndarray,
                    pct_to_cam: np.ndarray,

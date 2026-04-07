@@ -103,7 +103,7 @@ Tell the user:
 Note: This requires `/phone-setup` to be done first (AssistiveTouch + iOS Shortcut configured).
 
 ```bash
-curl -s -X POST http://localhost:8048/api/calibrate/step-screenshot-cal --max-time 35 | python3 -m json.tool
+curl -s -X POST http://localhost:8048/api/calibrate/screenshot-transform --max-time 35 | python3 -m json.tool
 ```
 
 If it fails with "no screenshot received", remind the user to tap once then double-tap AssistiveTouch, and retry.
@@ -137,7 +137,7 @@ Tell the user:
 > The arm will probe downward in small steps to find the screen surface. A touch event tells us when it makes contact. Don't touch anything.
 
 ```bash
-curl -s -X POST http://localhost:8048/api/calibrate/step0-z-depth --max-time 30 | python3 -m json.tool
+curl -s -X POST http://localhost:8048/api/calibrate/pen-depth --max-time 30 | python3 -m json.tool
 ```
 
 If the response has `"cached": true`, the pen depth was loaded from a previous run — no probing needed. Tell the user it was instant.
@@ -148,7 +148,7 @@ Tell the user:
 > The arm will tap two points to check if the phone is aligned with the arm.
 
 ```bash
-curl -s -X POST http://localhost:8048/api/calibrate/step1-alignment --max-time 30 | python3 -m json.tool
+curl -s -X POST http://localhost:8048/api/calibrate/arm-tilt --max-time 30 | python3 -m json.tool
 ```
 
 If `aligned` is false, tell the user to adjust the phone rotation slightly and retry this step.
@@ -173,7 +173,7 @@ curl -s -X POST http://localhost:8048/api/connect-camera -H 'Content-Type: appli
 Then run the check:
 
 ```bash
-rm -f /tmp/physiclaw*.jpg && curl -s -X POST http://localhost:8048/api/calibrate/step2-camera-rotation --max-time 10 | python3 -m json.tool && open /tmp/physiclaw_step2.jpg
+rm -f /tmp/physiclaw*.jpg && curl -s -X POST http://localhost:8048/api/calibrate/camera-rotation --max-time 10 | python3 -m json.tool && open /tmp/physiclaw_camera_rotation.jpg
 ```
 
 If `ok` is false, tell the user what to fix based on the `issues` list and retry.
@@ -184,7 +184,7 @@ Tell the user:
 > The calibration page will now show blue UP and RIGHT markers. The camera detects these to determine the correct image rotation.
 
 ```bash
-curl -s -X POST http://localhost:8048/api/calibrate/step3-sw-rotation --max-time 15 | python3 -m json.tool
+curl -s -X POST http://localhost:8048/api/calibrate/frame-rotation --max-time 15 | python3 -m json.tool
 ```
 
 ### 2.4 GRBL↔Screen mapping (~15s)
@@ -193,7 +193,7 @@ Tell the user:
 > The arm will tap up to 18 points across the screen (3 scale probes + 15 grid points). Each tap reports its touch coordinate for precise mapping. This builds Mapping A (screen → arm position).
 
 ```bash
-curl -s -X POST http://localhost:8048/api/calibrate/step4-mapping-a --max-time 60 | python3 -m json.tool
+curl -s -X POST http://localhost:8048/api/calibrate/grbl-mapping --max-time 60 | python3 -m json.tool
 ```
 
 If step 4 fails with "no touch at +X/+Y probe", the probe taps landed outside the screen. Possible fixes:
@@ -208,7 +208,7 @@ Tell the user:
 > The calibration page will show 15 red dots. The camera detects their positions to build Mapping B (camera pixels → screen coordinates). The arm will park out of the way.
 
 ```bash
-curl -s -X POST http://localhost:8048/api/calibrate/step5-mapping-b --max-time 30 | python3 -m json.tool
+curl -s -X POST http://localhost:8048/api/calibrate/camera-mapping --max-time 30 | python3 -m json.tool
 ```
 
 ### 2.6 Full-chain validation (~10s)
@@ -217,7 +217,7 @@ Tell the user:
 > Final validation: I'll show orange dots at random positions, tap them, and compare the touch coordinates against the expected position. This tests the entire pipeline.
 
 ```bash
-curl -s -X POST http://localhost:8048/api/calibrate/step6-validate --max-time 60 | python3 -m json.tool
+curl -s -X POST http://localhost:8048/api/calibrate/validate --max-time 60 | python3 -m json.tool
 ```
 
 Check `calibrated` in the response. If true, calibration succeeded.
@@ -227,7 +227,7 @@ Check `calibrated` in the response. If true, calibration succeeded.
 Show the AT positioning screen:
 
 ```bash
-curl -s -X POST http://localhost:8048/api/calibrate/step7-show | python3 -m json.tool
+curl -s -X POST http://localhost:8048/api/calibrate/assistive-touch/show | python3 -m json.tool
 ```
 
 Tell the user:
@@ -236,7 +236,7 @@ Tell the user:
 Wait for user confirmation, then trigger the tap sequence:
 
 ```bash
-curl -s -X POST http://localhost:8048/api/calibrate/step7-tap --max-time 20 | python3 -m json.tool
+curl -s -X POST http://localhost:8048/api/calibrate/assistive-touch/verify --max-time 20 | python3 -m json.tool
 ```
 
 The arm will single-tap (iOS screenshot), wait 2s, then double-tap (screenshot + upload). The server verifies the uploaded screenshot contains the color nonce.
@@ -252,7 +252,7 @@ Tell the user:
 > The arm will trace the phone screen border clockwise — moving to 8 edge points and pausing at each. Watch and confirm it follows the screen edges accurately.
 
 ```bash
-curl -s -X POST http://localhost:8048/api/calibrate/verify-edge --max-time 60 | python3 -m json.tool
+curl -s -X POST http://localhost:8048/api/calibrate/trace-edge --max-time 60 | python3 -m json.tool
 ```
 
 ### 3.2 Final status check

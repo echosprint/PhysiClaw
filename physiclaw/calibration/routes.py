@@ -17,14 +17,14 @@ from starlette.responses import JSONResponse
 
 from physiclaw.bridge import BridgeState, CalibrationState, PhoneState
 from physiclaw.calibration.plan_calibrate import (
-    step_screenshot_cal,
-    step0_z_depth,
-    step1_alignment,
-    step2_camera_rotation,
-    step3_software_rotation,
-    step4_grbl_screen,
-    step5_camera_screen,
-    step6_validate,
+    screenshot_transform,
+    find_pen_depth,
+    check_arm_tilt,
+    detect_camera_rotation,
+    pick_frame_rotation,
+    compute_grbl_mapping,
+    compute_camera_mapping,
+    validate_calibration,
     load_pen_depth,
     save_pen_depth,
 )
@@ -52,15 +52,15 @@ def _err(message, status_code=500):
 # ─── Pre-cal: viewport → screenshot transform ───────────────
 
 
-async def handle_step_screenshot_cal(request, physiclaw,
-                                     calib: CalibrationState,
-                                     bridge: BridgeState,
-                                     phone: PhoneState):
-    """POST /api/calibrate/step-screenshot-cal — pre-calibration coordinate transform."""
+async def handle_screenshot_transform(request, physiclaw,
+                                      calib: CalibrationState,
+                                      bridge: BridgeState,
+                                      phone: PhoneState):
+    """POST /api/calibrate/screenshot-transform — compute viewport→screenshot pixel mapping."""
 
     def _do():
         phone.set_mode("calibrate", phase="screenshot_cal")
-        result = step_screenshot_cal(calib, bridge)
+        result = screenshot_transform(calib, bridge)
         physiclaw._cal['screenshot_transform'] = result
         return result
 
@@ -74,10 +74,10 @@ async def handle_step_screenshot_cal(request, physiclaw,
 # ─── Step 0: pen depth ──────────────────────────────────────
 
 
-async def handle_step0(request, physiclaw,
-                       calib: CalibrationState,
-                       phone: PhoneState):
-    """POST /api/calibrate/step0-z-depth — discover Z depth that just touches the screen."""
+async def handle_find_pen_depth(request, physiclaw,
+                                calib: CalibrationState,
+                                phone: PhoneState):
+    """POST /api/calibrate/pen-depth — discover Z depth that just touches the screen."""
 
     def _do():
         if physiclaw._arm is None:
@@ -85,12 +85,12 @@ async def handle_step0(request, physiclaw,
         cached = load_pen_depth()
         if cached is not None:
             z_tap = cached
-            log.info(f"Step 0: using cached pen depth {z_tap}mm")
+            log.info(f"Pen depth: using cached value {z_tap}mm")
         else:
             phone.set_mode("calibrate")
             physiclaw.acquire()
             try:
-                z_tap = step0_z_depth(physiclaw._arm, calib)
+                z_tap = find_pen_depth(physiclaw._arm, calib)
                 save_pen_depth(z_tap)
             finally:
                 physiclaw.release()
@@ -108,18 +108,18 @@ async def handle_step0(request, physiclaw,
 # ─── Step 1: arm tilt check ─────────────────────────────────
 
 
-async def handle_step1(request, physiclaw, calib: CalibrationState):
-    """POST /api/calibrate/step1-alignment — measure arm tilt vs screen plane."""
+async def handle_check_arm_tilt(request, physiclaw, calib: CalibrationState):
+    """POST /api/calibrate/arm-tilt — measure arm tilt vs screen plane."""
 
     def _do():
         if physiclaw._arm is None:
             raise RuntimeError("Arm not connected")
         z_tap = physiclaw._cal.get('z_tap')
         if z_tap is None:
-            raise RuntimeError("Run step0 first")
+            raise RuntimeError("Run pen-depth first")
         physiclaw.acquire()
         try:
-            tilt = step1_alignment(physiclaw._arm, calib, z_tap)
+            tilt = check_arm_tilt(physiclaw._arm, calib, z_tap)
             return {"tilt_ratio": round(tilt, 4), "aligned": tilt < 0.02}
         finally:
             physiclaw.release()
@@ -134,13 +134,13 @@ async def handle_step1(request, physiclaw, calib: CalibrationState):
 # ─── Step 2: camera rotation detection ──────────────────────
 
 
-async def handle_step2(request, physiclaw):
-    """POST /api/calibrate/step2-camera-rotation — detect physical camera rotation."""
+async def handle_detect_camera_rotation(request, physiclaw):
+    """POST /api/calibrate/camera-rotation — detect physical camera rotation from a frame."""
 
     def _do():
         if physiclaw._cam is None:
             raise RuntimeError("Camera not connected")
-        return step2_camera_rotation(physiclaw._cam)
+        return detect_camera_rotation(physiclaw._cam)
 
     try:
         result = await _run_blocking(_do)
@@ -152,13 +152,13 @@ async def handle_step2(request, physiclaw):
 # ─── Step 3: software rotation correction ───────────────────
 
 
-async def handle_step3(request, physiclaw, calib: CalibrationState):
-    """POST /api/calibrate/step3-sw-rotation — choose cv2 rotation to apply to frames."""
+async def handle_pick_frame_rotation(request, physiclaw, calib: CalibrationState):
+    """POST /api/calibrate/frame-rotation — choose cv2 rotation to apply to camera frames."""
 
     def _do():
         if physiclaw._cam is None:
             raise RuntimeError("Camera not connected")
-        rotation = step3_software_rotation(physiclaw._cam, calib)
+        rotation = pick_frame_rotation(physiclaw._cam, calib)
         physiclaw._cal['rotation'] = rotation
         name = {-1: "none", 0: "90° CW", 1: "180°", 2: "90° CCW"}.get(rotation, str(rotation))
         return {"rotation": rotation, "rotation_name": name}
@@ -173,18 +173,18 @@ async def handle_step3(request, physiclaw, calib: CalibrationState):
 # ─── Step 4: screen → GRBL affine (Mapping A) ───────────────
 
 
-async def handle_step4(request, physiclaw, calib: CalibrationState):
-    """POST /api/calibrate/step4-mapping-a — compute screen 0-1 → GRBL mm affine."""
+async def handle_compute_grbl_mapping(request, physiclaw, calib: CalibrationState):
+    """POST /api/calibrate/grbl-mapping — compute screen 0-1 → GRBL mm affine."""
 
     def _do():
         if physiclaw._arm is None:
             raise RuntimeError("Arm not connected")
         z_tap = physiclaw._cal.get('z_tap')
         if z_tap is None:
-            raise RuntimeError("Run step0 first")
+            raise RuntimeError("Run pen-depth first")
         physiclaw.acquire()
         try:
-            pct_to_grbl, touches = step4_grbl_screen(physiclaw._arm, calib, z_tap)
+            pct_to_grbl, touches = compute_grbl_mapping(physiclaw._arm, calib, z_tap)
             physiclaw._cal['screen_to_grbl'] = pct_to_grbl
             right_vec = (float(pct_to_grbl[0, 0]), float(pct_to_grbl[1, 0]))
             down_vec = (float(pct_to_grbl[0, 1]), float(pct_to_grbl[1, 1]))
@@ -203,8 +203,8 @@ async def handle_step4(request, physiclaw, calib: CalibrationState):
 # ─── Step 5: screen → camera affine (Mapping B) ─────────────
 
 
-async def handle_step5(request, physiclaw, calib: CalibrationState):
-    """POST /api/calibrate/step5-mapping-b — compute screen 0-1 → camera 0-1 affine."""
+async def handle_compute_camera_mapping(request, physiclaw, calib: CalibrationState):
+    """POST /api/calibrate/camera-mapping — compute screen 0-1 → camera 0-1 affine."""
 
     def _do():
         if physiclaw._cam is None:
@@ -218,7 +218,7 @@ async def handle_step5(request, physiclaw, calib: CalibrationState):
                 mag = (ux ** 2 + uy ** 2) ** 0.5 or 1
                 physiclaw._arm._fast_move(ux / mag * 80, uy / mag * 80)
                 physiclaw._arm.wait_idle()
-            pct_to_cam, cam_size = step5_camera_screen(physiclaw._cam, calib, rotation)
+            pct_to_cam, cam_size = compute_camera_mapping(physiclaw._cam, calib, rotation)
             physiclaw._cal['pct_to_cam'] = pct_to_cam
             physiclaw._cal['cam_size'] = cam_size
             return {"ok": True, "dots": 15, "cam_size": list(cam_size)}
@@ -235,10 +235,10 @@ async def handle_step5(request, physiclaw, calib: CalibrationState):
 # ─── Step 6: full-chain validation ──────────────────────────
 
 
-async def handle_step6(request, physiclaw,
-                       calib: CalibrationState,
-                       phone: PhoneState):
-    """POST /api/calibrate/step6-validate — round-trip validate the calibration chain."""
+async def handle_validate_calibration(request, physiclaw,
+                                      calib: CalibrationState,
+                                      phone: PhoneState):
+    """POST /api/calibrate/validate — round-trip validate the calibration chain."""
 
     def _do():
         if physiclaw._arm is None:
@@ -249,12 +249,12 @@ async def handle_step6(request, physiclaw,
         pct_to_cam = physiclaw._cal.get('pct_to_cam')
         cam_size = physiclaw._cal.get('cam_size', (1920, 1080))
         if not all([z_tap, pct_to_grbl is not None, pct_to_cam is not None]):
-            raise RuntimeError("Run steps 0-5 first")
+            raise RuntimeError("Run pen-depth, grbl-mapping, and camera-mapping first")
         physiclaw.acquire()
         try:
-            results = step6_validate(physiclaw._arm, physiclaw._cam, calib,
-                                     z_tap, rotation, pct_to_grbl, pct_to_cam,
-                                     cam_size=cam_size)
+            results = validate_calibration(physiclaw._arm, physiclaw._cam, calib,
+                                           z_tap, rotation, pct_to_grbl, pct_to_cam,
+                                           cam_size=cam_size)
             passed = sum(1 for r in results if r['passed'])
             if passed >= 2:
                 from physiclaw.calibration import GridCalibration
@@ -277,8 +277,8 @@ async def handle_step6(request, physiclaw,
 # ─── Edge-trace verification ────────────────────────────────
 
 
-async def handle_verify_edge(request, physiclaw, phone: PhoneState):
-    """POST /api/calibrate/verify-edge — arm traces phone screen border for visual check."""
+async def handle_trace_edge(request, physiclaw, phone: PhoneState):
+    """POST /api/calibrate/trace-edge — arm traces phone screen border for visual check."""
 
     def _do():
         physiclaw.acquire()
@@ -299,13 +299,13 @@ async def handle_verify_edge(request, physiclaw, phone: PhoneState):
 # ─── Step 7: AssistiveTouch screenshot verification ─────────
 
 
-async def handle_step7_show(request, physiclaw,
-                            calib: CalibrationState,
-                            phone: PhoneState):
-    """POST /api/calibrate/step7-show — display AT positioning circle + color nonce."""
+async def handle_show_assistive_touch(request, physiclaw,
+                                      calib: CalibrationState,
+                                      phone: PhoneState):
+    """POST /api/calibrate/assistive-touch/show — display AT positioning circle + color nonce."""
 
     if calib.screenshot_transform is None:
-        return _err("Run pre-cal (step-screenshot-cal) first", status_code=400)
+        return _err("Run screenshot-transform first", status_code=400)
     nonce = physiclaw._screenshot.generate_nonce()
     physiclaw._screenshot.compute_at_screen_pos(calib.screenshot_transform)
     phone.set_mode("calibrate", phase="assistive_touch", nonce_colors=nonce)
@@ -314,19 +314,19 @@ async def handle_step7_show(request, physiclaw,
                          "nonce_count": len(nonce)})
 
 
-async def handle_step7_tap(request, physiclaw,
-                           calib: CalibrationState,
-                           bridge: BridgeState):
-    """POST /api/calibrate/step7-tap — tap AT, verify screenshot upload via color nonce."""
+async def handle_verify_assistive_touch(request, physiclaw,
+                                        calib: CalibrationState,
+                                        bridge: BridgeState):
+    """POST /api/calibrate/assistive-touch/verify — tap AT, verify screenshot upload via color nonce."""
 
     def _do():
         if physiclaw._arm is None:
             raise RuntimeError("Arm not connected")
         pct_to_grbl = physiclaw._cal.get('screen_to_grbl')
         if pct_to_grbl is None:
-            raise RuntimeError("Run steps 0-4 first")
+            raise RuntimeError("Run grbl-mapping first")
         if not physiclaw._screenshot.at_screen:
-            raise RuntimeError("Run step7-show first")
+            raise RuntimeError("Run assistive-touch/show first")
         physiclaw.acquire()
         try:
             return physiclaw._screenshot.setup(

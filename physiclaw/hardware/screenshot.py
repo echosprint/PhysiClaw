@@ -71,7 +71,8 @@ class PhoneScreenshot:
     def compute_at_screen_pos(self, screenshot_transform: dict) -> tuple[float, float]:
         """Convert AT CSS position to screenshot 0-1 using pre-cal transform.
 
-        Must be called after step_screenshot_cal sets screenshot_transform.
+        Must be called after the screenshot_transform calibration step has set
+        the viewport→screenshot transform on CalibrationState.
         Stores the result in self.at_screen.
         """
         t = screenshot_transform
@@ -205,7 +206,7 @@ class PhoneScreenshot:
         # Generate nonce (caller should have already set it on the phone)
         nonce = cal_state._screenshot_nonce
         if nonce is None:
-            raise RuntimeError("No nonce set — call step7_show first")
+            raise RuntimeError("No nonce set — call assistive-touch/show first")
 
         # Clear any stale screenshot from previous steps
         bridge.clear_screenshot()

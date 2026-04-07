@@ -109,7 +109,7 @@ class CalibrationState:
         """
         t = self.screenshot_transform
         if t is None:
-            raise RuntimeError("Screenshot calibration not done — run step-screenshot-cal first")
+            raise RuntimeError("Screenshot calibration not done — run screenshot-transform first")
         sx = (client_x * t['dpr'] + t['offset_x']) / t['screenshot_width']
         sy = (client_y * t['dpr'] + t['offset_y']) / t['screenshot_height']
         return (sx, sy)
