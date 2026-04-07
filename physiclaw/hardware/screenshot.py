@@ -12,18 +12,19 @@ import time
 import cv2
 import numpy as np
 
+from physiclaw.bridge.protocol import (
+    AT_CSS_X,
+    AT_CSS_Y,
+    AT_RADIUS,
+    NONCE_CSS_X,
+    NONCE_CSS_Y,
+    NONCE_COUNT,
+    NONCE_SQUARE_SIZE,
+)
+
 log = logging.getLogger(__name__)
 
-# AssistiveTouch button position (CSS viewport pixels, iPhone left edge snap)
-AT_CSS_X = 38       # 10pt edge margin + 28pt button radius
-AT_CSS_Y = 200      # hardcoded vertical position
-AT_RADIUS = 28      # matches AT button (56pt diameter)
-
-# Color nonce barcode position and size
-NONCE_CSS_X = 180
-NONCE_CSS_Y = 300
-NONCE_COUNT = 20
-NONCE_SQUARE_SIZE = 15  # CSS pixels per square
+# Verification thresholds (hardware-only, not part of the page protocol)
 NONCE_COLOR_MIN = 50    # avoid near-black
 NONCE_COLOR_MAX = 230   # avoid near-white
 NONCE_MAX_DIST = 40     # max Euclidean RGB distance for a match

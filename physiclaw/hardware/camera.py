@@ -20,12 +20,10 @@ grant camera access to your terminal app, then retry.
 
 import logging
 import subprocess
-import time
 from datetime import datetime
 from pathlib import Path
 
 import cv2
-import numpy as np
 
 SNAPSHOT_DIR = Path(__file__).parent.parent.parent / 'data' / 'snapshot'
 
@@ -111,37 +109,6 @@ class Camera:
         ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
         cv2.imwrite(str(SNAPSHOT_DIR / f'{ts}.jpg'), frame)
         return frame
-
-    def is_green(self):
-        """Check if the phone screen is showing a green flash (#22c55e)."""
-        frame = self._fresh_frame()
-        if frame is None:
-            return False
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        # #22c55e ≈ HSV(145°, 83%, 77%) → OpenCV scale H=72, S=212, V=196
-        lower = np.array([35, 50, 50])
-        upper = np.array([90, 255, 255])
-        mask = cv2.inRange(hsv, lower, upper)
-        ratio = np.count_nonzero(mask) / mask.size
-        return ratio > 0.05
-
-    def wait_for_green(self, timeout=1.5):
-        """Poll for green screen within timeout."""
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            if self.is_green():
-                return True
-            time.sleep(0.05)
-        return False
-
-    def wait_for_white(self, timeout=3.0):
-        """Wait until the green flash clears."""
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            if not self.is_green():
-                return True
-            time.sleep(0.1)
-        return False
 
     def close(self):
         self.cap.release()

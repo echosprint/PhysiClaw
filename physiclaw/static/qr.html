@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>PhysiClaw QR</title>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+  <style>
+    body { font-family: system-ui; text-align: center; padding: 40px; background: #f9fafb; }
+    .qr { display: inline-block; margin: 40px; padding: 30px; background: #fff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1); }
+    .qr h3 { margin: 0 0 10px; color: #374151; }
+    .qr p { font-size: 14px; color: #6b7280; word-break: break-all; max-width: 300px; }
+    canvas { display: block; margin: 10px auto; }
+  </style>
+</head>
+<body>
+  <h2>PhysiClaw — Scan with Phone</h2>
+  <div class="qr">
+    <h3>Open on Phone</h3>
+    <canvas id="qr1"></canvas>
+    <p>__PHONE_URL__</p>
+  </div>
+  <script>
+    function drawQR(id, text) {
+      var qr = qrcode(0, 'M');
+      qr.addData(text);
+      qr.make();
+      var canvas = document.getElementById(id);
+      var ctx = canvas.getContext('2d');
+      var size = 240;
+      var cells = qr.getModuleCount();
+      var cell = size / cells;
+      canvas.width = canvas.height = size;
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, size, size);
+      ctx.fillStyle = '#000';
+      for (var r = 0; r < cells; r++)
+        for (var c = 0; c < cells; c++)
+          if (qr.isDark(r, c)) ctx.fillRect(c * cell, r * cell, cell, cell);
+    }
+    drawQR('qr1', '__PHONE_URL__');
+  </script>
+</body>
+</html>

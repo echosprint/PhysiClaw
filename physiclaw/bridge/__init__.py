@@ -8,7 +8,7 @@ Three data flows:
 
 from physiclaw.bridge.lan import get_lan_ip
 from physiclaw.bridge.state import BridgeState
-from physiclaw.bridge.phase import CalibrationState
+from physiclaw.bridge.calib import CalibrationState
 from physiclaw.bridge.phone import PhoneState
 
 __all__ = [

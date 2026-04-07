@@ -8,6 +8,15 @@ what interactions trigger a green flash.
 import logging
 import threading
 
+from physiclaw.bridge.protocol import (
+    AT_CSS_X,
+    AT_CSS_Y,
+    AT_RADIUS,
+    NONCE_CSS_X,
+    NONCE_CSS_Y,
+    NONCE_SQUARE_SIZE,
+)
+
 log = logging.getLogger(__name__)
 
 
@@ -129,10 +138,6 @@ class CalibrationState:
             d["screen_dimension"] = self.screen_dimension
             # AssistiveTouch phase: AT position + color nonce
             if self.phase == "assistive_touch" and self._screenshot_nonce is not None:
-                from physiclaw.hardware.screenshot import (
-                    AT_CSS_X, AT_CSS_Y, AT_RADIUS,
-                    NONCE_CSS_X, NONCE_CSS_Y, NONCE_SQUARE_SIZE,
-                )
                 d["at_x"] = AT_CSS_X
                 d["at_y"] = AT_CSS_Y
                 d["at_r"] = AT_RADIUS
