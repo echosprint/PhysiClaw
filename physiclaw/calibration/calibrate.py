@@ -25,7 +25,7 @@ import numpy as np
 from physiclaw.bridge import BridgeState, CalibrationState
 from physiclaw.calibration.transforms import ScreenTransforms
 from physiclaw.hardware.camera import Camera
-from physiclaw.hardware.stylus_arm import StylusArm
+from physiclaw.hardware.arm import StylusArm
 from physiclaw.vision.grid_detect import (
     detect_red_dots,
     sort_dots_to_grid,

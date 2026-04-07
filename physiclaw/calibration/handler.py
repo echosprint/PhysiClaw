@@ -1,6 +1,6 @@
 """HTTP route handlers for the 7-step calibration plan.
 
-Each handler runs the corresponding `plan_calibrate` step in a thread
+Each handler runs the corresponding `calibrate` step in a thread
 executor, mutates the orchestrator's intermediate calibration state, and
 returns a JSON response. The Starlette event loop stays responsive
 because the blocking step functions run off-thread.
@@ -16,7 +16,7 @@ import cv2
 from starlette.responses import JSONResponse
 
 from physiclaw.bridge import BridgeState, CalibrationState, PageState
-from physiclaw.calibration.plan_calibrate import (
+from physiclaw.calibration.calibrate import (
     screenshot_transform,
     find_pen_depth,
     check_arm_tilt,
@@ -279,7 +279,7 @@ async def handle_validate_calibration(request, physiclaw,
 
 async def handle_trace_edge(request, physiclaw, phone: PageState):
     """POST /api/calibrate/trace-edge — arm traces phone screen border for visual check."""
-    from physiclaw.calibration.plan_calibrate import trace_screen_edge
+    from physiclaw.calibration.calibrate import trace_screen_edge
 
     def _do():
         if physiclaw.transforms is None:

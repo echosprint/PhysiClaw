@@ -2,7 +2,7 @@
 Calibration result — the `ScreenTransforms` dataclass.
 
 `ScreenTransforms` holds the affine transforms produced by the calibration
-plan in `plan_calibrate.py`:
+plan in `calibrate.py`:
   - pct_to_grbl: screen 0-1 → GRBL mm
   - pct_to_cam:  screen 0-1 → camera 0-1
 
@@ -11,7 +11,7 @@ target as a 0-1 bounding box and the arm moves directly to its center.
 
 This file is pure data + coordinate math. Hardware-orchestration helpers
 that *use* a ScreenTransforms (like edge-trace verification) live in
-`plan_calibrate.py`.
+`calibrate.py`.
 """
 
 import dataclasses

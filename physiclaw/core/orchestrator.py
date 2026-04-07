@@ -18,7 +18,7 @@ import threading
 from physiclaw.calibration import ScreenTransforms
 from physiclaw.hardware.camera import Camera
 from physiclaw.hardware.phone import AssistiveTouch
-from physiclaw.hardware.stylus_arm import StylusArm
+from physiclaw.hardware.arm import StylusArm
 
 log = logging.getLogger(__name__)
 

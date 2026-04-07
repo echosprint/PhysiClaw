@@ -166,11 +166,11 @@ Mac / Windows / Linux (Raspberry Pi) all supported. The only platform difference
 physiclaw/
 ├── server.py         # MCP Server entry point, exposes tools
 ├── core.py           # Central orchestrator (arm + camera + calibration)
-├── stylus_arm.py     # GRBL G-code controller (tap, swipe, move)
+├── arm.py            # GRBL G-code controller (tap, swipe, move)
 ├── camera.py         # USB camera capture and green flash detection
 ├── vision.py         # YOLOX phone detection and camera discovery
 ├── calibrate.py      # 5-phase calibration workflow
-└── serial_probe.py   # Auto-detect GRBL serial port
+└── grbl.py           # Auto-detect GRBL serial port
 ```
 
 ## Operation

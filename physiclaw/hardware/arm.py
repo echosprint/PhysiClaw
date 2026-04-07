@@ -19,7 +19,7 @@ import logging
 import serial
 import time
 
-from physiclaw.hardware.serial_probe import detect_grbl
+from physiclaw.hardware.grbl import detect_grbl
 
 log = logging.getLogger(__name__)
 
