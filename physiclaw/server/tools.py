@@ -21,8 +21,27 @@ from mcp.server.fastmcp import FastMCP, Image
 from physiclaw.annotation import AnnotationState
 from physiclaw.bridge import BridgeState, CalibrationState, get_lan_ip
 from physiclaw.core import PhysiClaw
+from physiclaw.hardware.camera import SNAPSHOT_DIR
+from physiclaw.vision.render import (
+    draw_bbox,
+    draw_grid_overlay,
+    encode_jpeg,
+)
 
 log = logging.getLogger(__name__)
+
+
+# Lazy-cached vision detectors. Created on first detect_elements() call,
+# kept for the process lifetime so subsequent calls don't re-load the
+# (slow-to-init) ONNX/Paddle models.
+_detector_cache: dict = {"icon": None, "ocr": None}
+
+
+def _save_frame(frame, suffix: str) -> None:
+    """Write a BGR frame into data/snapshot/ with a timestamp + suffix."""
+    SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
+    cv2.imwrite(str(SNAPSHOT_DIR / f'{ts}_{suffix}.jpg'), frame)
 
 
 def register(mcp: FastMCP,
@@ -55,7 +74,7 @@ def register(mcp: FastMCP,
         physiclaw.acquire()
         try:
             frame = physiclaw.camera_view()
-            return Image(data=physiclaw.frame_to_jpeg(frame), format="jpeg")
+            return Image(data=encode_jpeg(frame), format="jpeg")
         finally:
             physiclaw.release()
 
@@ -92,17 +111,44 @@ def register(mcp: FastMCP,
         Color segmentation always works. Icon detection and OCR require vision
         models (run /setup-vision-models). Missing models show "unavailable".
         """
+        from physiclaw.vision.detect import detect_all_elements
+
         physiclaw.require_hardware()
         physiclaw.acquire()
         try:
             physiclaw.park()
             time.sleep(1.5)
-            elements_text, color_frame, icon_frame, ocr_frame = physiclaw.detect_elements()
+            frame = physiclaw.camera_view()
+
+            # Lazy-create cached detectors on first use
+            if _detector_cache["icon"] is None:
+                try:
+                    from physiclaw.vision.icon_detect import IconDetector
+                    _detector_cache["icon"] = IconDetector()
+                except (ImportError, FileNotFoundError):
+                    pass  # detect_all_elements handles missing detector
+            if _detector_cache["ocr"] is None:
+                try:
+                    from physiclaw.vision.ocr import OCRReader
+                    _detector_cache["ocr"] = OCRReader()
+                except ImportError:
+                    pass
+
+            elements_text, color_frame, icon_frame, ocr_frame = detect_all_elements(
+                frame, physiclaw.grid_cal,
+                icon_detector=_detector_cache["icon"],
+                ocr_reader=_detector_cache["ocr"],
+            )
+
+            _save_frame(color_frame, 'colors')
+            _save_frame(icon_frame, 'icons')
+            _save_frame(ocr_frame, 'ocr')
+
             return [
                 elements_text,
-                Image(data=physiclaw.frame_to_jpeg(color_frame), format="jpeg"),
-                Image(data=physiclaw.frame_to_jpeg(icon_frame), format="jpeg"),
-                Image(data=physiclaw.frame_to_jpeg(ocr_frame), format="jpeg"),
+                Image(data=encode_jpeg(color_frame), format="jpeg"),
+                Image(data=encode_jpeg(icon_frame), format="jpeg"),
+                Image(data=encode_jpeg(ocr_frame), format="jpeg"),
             ]
         finally:
             physiclaw.release()
@@ -176,7 +222,7 @@ def register(mcp: FastMCP,
         changed = frames_differ(frame_a, frame_b)
         status = "Screen CHANGED — the gesture had an effect" if changed \
             else "Screen UNCHANGED — the gesture may not have registered, try again"
-        return [status, Image(data=physiclaw.frame_to_jpeg(frame_b), format="jpeg")]
+        return [status, Image(data=encode_jpeg(frame_b), format="jpeg")]
 
     @mcp.tool()
     def grid_overlay(density: str = "normal", color: str = "green") -> Image:
@@ -209,8 +255,10 @@ def register(mcp: FastMCP,
         try:
             physiclaw.park()
             time.sleep(1.5)
-            frame = physiclaw.screenshot_with_grid(color, rows, cols)
-            return Image(data=physiclaw.frame_to_jpeg(frame), format="jpeg")
+            frame = physiclaw.camera_view()
+            out = draw_grid_overlay(frame, physiclaw.grid_cal, color, rows, cols)
+            _save_frame(out, 'overlay')
+            return Image(data=encode_jpeg(out), format="jpeg")
         finally:
             physiclaw.release()
 
@@ -239,8 +287,10 @@ def register(mcp: FastMCP,
             physiclaw.park()
             time.sleep(1.5)
             physiclaw.set_pending_bbox(bbox)
-            frame = physiclaw.screenshot_with_bboxes()
-            return Image(data=physiclaw.frame_to_jpeg(frame), format="jpeg")
+            frame = physiclaw.camera_view()
+            out = draw_bbox(frame, bbox, physiclaw.grid_cal)
+            _save_frame(out, 'bbox')
+            return Image(data=encode_jpeg(out), format="jpeg")
         finally:
             physiclaw.release()
 
@@ -265,8 +315,9 @@ def register(mcp: FastMCP,
 
     def _maybe_move_to_bbox():
         """If a bbox is confirmed, move arm to its center."""
-        if physiclaw._confirmed_bbox is not None:
-            physiclaw.move_to_bbox_center(physiclaw._confirmed_bbox)
+        bbox = physiclaw.confirmed_bbox
+        if bbox is not None:
+            physiclaw.move_to_bbox_center(bbox)
 
     @mcp.tool()
     def tap() -> str:
@@ -481,7 +532,7 @@ def register(mcp: FastMCP,
 
         text = _format_confirmed(confirmed, "Confirmed Annotations")
         if frozen_frame is not None:
-            return [text, Image(data=physiclaw.frame_to_jpeg(frozen_frame),
+            return [text, Image(data=encode_jpeg(frozen_frame),
                                 format="jpeg")]
         return [text]
 
@@ -542,6 +593,6 @@ def register(mcp: FastMCP,
 
         text = _format_confirmed(result, "Confirmed Annotations")
         if frozen_frame is not None:
-            return [text, Image(data=physiclaw.frame_to_jpeg(frozen_frame),
+            return [text, Image(data=encode_jpeg(frozen_frame),
                                 format="jpeg")]
         return [text]

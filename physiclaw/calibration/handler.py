@@ -279,13 +279,16 @@ async def handle_validate_calibration(request, physiclaw,
 
 async def handle_trace_edge(request, physiclaw, phone: PhoneState):
     """POST /api/calibrate/trace-edge — arm traces phone screen border for visual check."""
+    from physiclaw.calibration.grid_calibrate import trace_screen_edge
 
     def _do():
+        if physiclaw.grid_cal is None:
+            raise RuntimeError("Not calibrated — run /setup first")
         physiclaw.acquire()
         try:
-            result = physiclaw.verify_edge_trace()
+            trace_screen_edge(physiclaw.arm, physiclaw.grid_cal)
             phone.set_mode("bridge")
-            return result
+            return {"ok": True}
         finally:
             physiclaw.release()
 

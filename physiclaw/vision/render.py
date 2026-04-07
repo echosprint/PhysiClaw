@@ -1,8 +1,10 @@
 """
-Rendering helpers — draw bboxes, grid overlays, and annotation listings.
+Rendering helpers — draw bboxes, grid overlays, watermarks, annotation
+listings, and JPEG encode.
 
-Pure functions: take a frame and grid calibration, return an annotated
-frame and/or a text listing. No hardware dependency.
+All image-output operations the project performs live here. Pure
+functions: take a frame (and optionally a GridCalibration), return an
+annotated frame, text listing, or JPEG bytes. No hardware dependency.
 """
 
 import cv2
@@ -153,3 +155,35 @@ def encode_jpeg(frame: np.ndarray, quality: int = 85) -> bytes:
     """Encode a BGR frame to JPEG bytes."""
     _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
     return jpeg.tobytes()
+
+
+def watermark_index(frame: np.ndarray, index: int) -> np.ndarray:
+    """Draw a large semi-transparent index label in the center of the frame.
+
+    Used by /api/camera-preview/{index} so the user can tell which camera
+    a preview JPEG belongs to when several previews are open at once.
+    Returns a copy of the frame with the watermark applied.
+    """
+    out = frame.copy()
+    h, w = out.shape[:2]
+    label = str(index)
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    scale = h / 150
+    thickness = max(2, int(scale * 2))
+    (tw, th), _ = cv2.getTextSize(label, font, scale, thickness)
+    cx, cy = w // 2, h // 2
+
+    # 50% opacity black background plate
+    overlay = out.copy()
+    pad = int(scale * 20)
+    cv2.rectangle(overlay,
+                  (cx - tw // 2 - pad, cy - th // 2 - pad),
+                  (cx + tw // 2 + pad, cy + th // 2 + pad),
+                  (0, 0, 0), -1)
+    cv2.addWeighted(overlay, 0.5, out, 0.5, 0, out)
+
+    # White label on top
+    cv2.putText(out, label,
+                (cx - tw // 2, cy + th // 2),
+                font, scale, (255, 255, 255), thickness)
+    return out

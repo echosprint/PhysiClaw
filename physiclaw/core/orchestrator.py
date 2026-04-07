@@ -1,35 +1,31 @@
 """
 PhysiClaw orchestrator — central hardware lifecycle manager.
 
-Owns the stylus arm, camera, and calibration state.
-Construction is instant — call connect_arm() and connect_camera()
-to set up hardware. Calibration is done via /setup skill endpoints.
+Owns the stylus arm, camera, calibration state, and the bbox workflow
+state used by the propose-confirm tap flow. Construction is instant —
+call connect_arm() and connect_camera() to set up hardware. Calibration
+is done via /setup skill endpoints.
+
+The class deliberately stays narrow: lifecycle, concurrency, hardware
+access, primitive movements, and bbox state. All image processing
+(rendering, drawing, encoding, vision pipelines) lives in physiclaw.vision.
+One-shot utilities live near their callers (e.g. hardware/handler.py).
 """
 
 import logging
 import threading
-from datetime import datetime
-
-import cv2
 
 from physiclaw.calibration import GridCalibration
-from physiclaw.hardware.camera import Camera, SNAPSHOT_DIR
+from physiclaw.hardware.camera import Camera
 from physiclaw.hardware.screenshot import PhoneScreenshot
 from physiclaw.hardware.stylus_arm import StylusArm
-from physiclaw.vision.phone_detect import PhoneDetector
-
-from physiclaw.core.rendering import (
-    draw_bbox,
-    draw_grid_overlay,
-    process_annotations as _process_annotations,
-    encode_jpeg,
-)
 
 log = logging.getLogger(__name__)
 
 
 class PhysiClaw:
-    """Central orchestrator — owns all hardware lifecycle.
+    """Central orchestrator — owns hardware lifecycle, the busy lock,
+    and the bbox workflow state.
 
     Construction is instant (no hardware). Call connect_arm() and
     connect_camera() to connect hardware. Calibration is handled
@@ -41,15 +37,14 @@ class PhysiClaw:
     def __init__(self):
         self._arm: StylusArm | None = None
         self._cam: Camera | None = None
-        self._detector: PhoneDetector | None = None
         self._grid_cal: GridCalibration | None = None
         self._pending_bboxes: dict[str, list[float]] = {}
         self._confirmed_bbox: list[float] | None = None
         self._lock = threading.Lock()
         self._cal: dict = {}  # intermediate calibration state between phases
         self._screenshot = PhoneScreenshot()
-        self._icon_detector = None  # cached, lazy
-        self._ocr_reader = None     # cached, lazy
+
+    # ─── State queries ────────────────────────────────────────
 
     @property
     def hardware_ready(self) -> bool:
@@ -94,6 +89,8 @@ class PhysiClaw:
             raise RuntimeError(
                 "Hardware not set up. Run /setup to connect and calibrate.")
 
+    # ─── Concurrency ──────────────────────────────────────────
+
     def acquire(self):
         """Mark hardware as busy. Raises immediately if already busy."""
         if not self._lock.acquire(blocking=False):
@@ -102,46 +99,6 @@ class PhysiClaw:
     def release(self):
         """Mark hardware as idle."""
         self._lock.release()
-
-    # ─── Camera preview ────────────────────────────────────────
-
-    @staticmethod
-    def camera_preview(index: int, watermark: bool = False) -> bytes:
-        """Capture one frame from a camera, optionally watermark the index.
-
-        Opens the camera, grabs a frame, closes the camera, returns JPEG bytes.
-        watermark: if True, draws camera index overlay in the center.
-        Raises RuntimeError if camera can't be opened or returns no frame.
-        """
-        cam = Camera(index)
-        frame = cam.snapshot()
-        cam.close()
-        if frame is None:
-            raise RuntimeError(f"Camera {index} returned no frame")
-
-        if not watermark:
-            return encode_jpeg(frame, quality=80)
-
-        # Watermark the camera index
-        h, w = frame.shape[:2]
-        label = str(index)
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        scale = h / 150
-        thickness = max(2, int(scale * 2))
-        (tw, th), _ = cv2.getTextSize(label, font, scale, thickness)
-        cx, cy = w // 2, h // 2
-        overlay = frame.copy()
-        pad = int(scale * 20)
-        cv2.rectangle(overlay,
-                      (cx - tw // 2 - pad, cy - th // 2 - pad),
-                      (cx + tw // 2 + pad, cy + th // 2 + pad),
-                      (0, 0, 0), -1)
-        cv2.addWeighted(overlay, 0.5, frame, 0.5, 0, frame)
-        cv2.putText(frame, label,
-                    (cx - tw // 2, cy + th // 2),
-                    font, scale, (255, 255, 255), thickness)
-
-        return encode_jpeg(frame, quality=80)
 
     # ─── Hardware connection ──────────────────────────────────
 
@@ -159,45 +116,20 @@ class PhysiClaw:
         self._arm.setup()
         log.info("Arm connected")
 
-    def connect_camera(self, index: int | None = None):
-        """Open a camera by index, or auto-detect the one seeing the phone.
+    def connect_camera(self, index: int):
+        """Open a camera by index.
 
-        Closes any previously connected camera first.
-
-        Args:
-            index: specific camera index to use. If None, scans all cameras
-                   and picks the one with highest phone detection confidence.
+        Closes any previously connected camera first. The user picks the
+        index after previewing each one via /api/camera-preview/{index}
+        during /setup, so we don't try to auto-detect.
         """
         if self._cam is not None:
             self._cam.close()
             self._cam = None
-        if index is not None:
-            self._cam = Camera(index)
-            log.info(f"Camera {index} connected")
-        else:
-            self._detector = PhoneDetector()
-            self._cam = self._detector.find_camera()
-            if self._cam is None:
-                raise RuntimeError("Camera not found — is the phone under the camera?")
-            log.info(f"Camera {self._cam.index} connected (auto-detected)")
+        self._cam = Camera(index)
+        log.info(f"Camera {index} connected")
 
-    # ─── Verification ─────────────────────────────────────────
-
-    def verify_edge_trace(self) -> dict:
-        """Trace the phone screen border clockwise for visual verification.
-
-        The arm moves to 8 edge points, pausing 2s at each, then returns
-        to center. The user should watch and confirm the arm follows the
-        screen edges.
-        Requires: calibration complete (GridCalibration set).
-        """
-        from physiclaw.calibration.grid_calibrate import trace_screen_edge
-        if self._grid_cal is None:
-            raise RuntimeError("Not calibrated — run /setup first")
-        trace_screen_edge(self._arm, self._grid_cal)
-        return {"ok": True}
-
-    # ─── Properties ────────────────────────────────────────────
+    # ─── Hardware accessors ───────────────────────────────────
 
     @property
     def arm(self) -> StylusArm:
@@ -207,7 +139,11 @@ class PhysiClaw:
     def cam(self) -> Camera:
         return self._cam
 
-    # ─── Bbox state management ────────────────────────────────
+    @property
+    def grid_cal(self) -> GridCalibration | None:
+        return self._grid_cal
+
+    # ─── Bbox workflow state ─────────────────────────────────
 
     def set_pending_bbox(self, bbox: list[float]):
         """Store a pending bbox. Clears any confirmed bbox.
@@ -218,12 +154,44 @@ class PhysiClaw:
         self._pending_bboxes = {'center': list(bbox)}
         self._confirmed_bbox = None
 
+    def pending_bbox(self) -> list[float] | None:
+        """Read the bbox staged by set_pending_bbox(), or None."""
+        return self._pending_bboxes.get('center')
+
     def confirm_bbox(self):
         """Lock in the pending bbox for the next gesture."""
         if not self._pending_bboxes:
             raise RuntimeError("No pending bbox — call bbox_target first")
         self._confirmed_bbox = self._pending_bboxes['center']
         self._pending_bboxes = {}
+
+    @property
+    def confirmed_bbox(self) -> list[float] | None:
+        """The bbox locked in for the next gesture, or None."""
+        return self._confirmed_bbox
+
+    # ─── Primitive movements ─────────────────────────────────
+
+    def park(self):
+        """Move the stylus 100mm out of the camera frame."""
+        arm = self._arm
+        if arm.MOVE_DIRECTIONS is None:
+            raise RuntimeError("Cannot park — calibration has not been run yet")
+        ux, uy = arm.MOVE_DIRECTIONS['top']
+        arm._fast_move(ux * self.PARK_DISTANCE, uy * self.PARK_DISTANCE)
+        arm.wait_idle()
+
+    def camera_view(self):
+        """Capture a frame from the overhead camera. Returns BGR numpy array.
+
+        Takes the frame as-is — the stylus may be visible.
+        Call park() first if an unobstructed view is needed.
+        Frame is already rotated to portrait by the camera.
+        """
+        frame = self.cam.snapshot()
+        if frame is None:
+            raise RuntimeError("Camera capture failed")
+        return frame
 
     def move_to_bbox_center(self, bbox: list[float]):
         """Move arm to the center of a bbox [left, top, right, bottom] (0-1)."""
@@ -242,139 +210,6 @@ class PhysiClaw:
         self._arm._fast_move(gx, gy)
         self._arm.wait_idle()
         self._arm.tap()
-
-    # ─── Snapshot helpers ──────────────────────────────────────
-
-    def camera_view(self):
-        """Capture a frame from the overhead camera. Returns BGR numpy array.
-
-        Takes the frame as-is — the stylus may be visible.
-        Call park() first if an unobstructed view is needed.
-        Frame is already rotated to portrait by the camera.
-        """
-        frame = self.cam.snapshot()
-        if frame is None:
-            raise RuntimeError("Camera capture failed")
-        return frame
-
-    def park(self):
-        """Move the stylus 100mm out of the camera frame."""
-        arm = self._arm
-        if arm.MOVE_DIRECTIONS is None:
-            raise RuntimeError("Cannot park — calibration has not been run yet")
-        ux, uy = arm.MOVE_DIRECTIONS['top']
-        arm._fast_move(ux * self.PARK_DISTANCE, uy * self.PARK_DISTANCE)
-        arm.wait_idle()
-
-    @staticmethod
-    def frame_to_jpeg(frame, quality: int = 85) -> bytes:
-        """Encode a BGR frame to JPEG bytes."""
-        return encode_jpeg(frame, quality)
-
-    # ─── Rendering wrappers ───────────────────────────────────
-    #
-    # These methods fetch a fresh frame, delegate to pure rendering
-    # functions in core.rendering / vision.detect, and save the result.
-
-    def _save_snapshot(self, frame, suffix: str):
-        SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
-        ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
-        cv2.imwrite(str(SNAPSHOT_DIR / f'{ts}_{suffix}.jpg'), frame)
-
-    def screenshot_with_bboxes(self):
-        """Take a fresh screenshot with the pending bbox drawn as a green rectangle.
-
-        Must call set_pending_bbox() first.
-        """
-        if self._grid_cal is None:
-            raise RuntimeError("Grid calibration not done")
-        if not self._pending_bboxes:
-            raise RuntimeError("No pending bboxes — call set_pending_bbox first")
-
-        bbox = self._pending_bboxes['center']
-        frame = self.cam.snapshot()
-        if frame is None:
-            raise RuntimeError("Camera capture failed")
-
-        out = draw_bbox(frame, bbox, self._grid_cal)
-        self._save_snapshot(out, 'bbox')
-        return out
-
-    def screenshot_with_grid(self, color: str = "green",
-                             rows: int = 9, cols: int = 4):
-        """Take a screenshot with percentage reference grid lines drawn.
-
-        Args:
-            color: line color — "green", "red", or "yellow".
-            rows: number of horizontal lines.
-            cols: number of vertical lines.
-        """
-        if self._grid_cal is None:
-            raise RuntimeError("Grid calibration not done")
-
-        frame = self.cam.snapshot()
-        if frame is None:
-            raise RuntimeError("Camera capture failed")
-
-        out = draw_grid_overlay(frame, self._grid_cal, color, rows, cols)
-        self._save_snapshot(out, 'overlay')
-        return out
-
-    def detect_elements(self):
-        """Detect UI elements using three analysis tools.
-
-        Three complementary detectors run on every frame:
-        1. Color segmentation — finds colored buttons, icons, content images
-        2. Icon detection — finds all UI elements including gray/colorless ones
-        3. OCR — reads all visible text
-
-        Returns (elements_text, color_frame, icon_frame, ocr_frame).
-        """
-        if self._grid_cal is None:
-            raise RuntimeError("Grid calibration not done")
-
-        frame = self.cam.snapshot()
-        if frame is None:
-            raise RuntimeError("Camera capture failed")
-
-        # Lazy-create cached detectors on first use
-        try:
-            from physiclaw.vision.icon_detect import IconDetector
-            if self._icon_detector is None:
-                self._icon_detector = IconDetector()
-        except (ImportError, FileNotFoundError):
-            pass  # detect_all_elements handles missing detector gracefully
-
-        try:
-            from physiclaw.vision.ocr import OCRReader
-            if self._ocr_reader is None:
-                self._ocr_reader = OCRReader()
-        except ImportError:
-            pass
-
-        from physiclaw.vision.detect import detect_all_elements
-        elements_text, color_frame, icon_frame, ocr_frame = detect_all_elements(
-            frame, self._grid_cal,
-            icon_detector=self._icon_detector,
-            ocr_reader=self._ocr_reader,
-        )
-
-        SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
-        file_ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
-        cv2.imwrite(str(SNAPSHOT_DIR / f'{file_ts}_colors.jpg'), color_frame)
-        cv2.imwrite(str(SNAPSHOT_DIR / f'{file_ts}_icons.jpg'), icon_frame)
-        cv2.imwrite(str(SNAPSHOT_DIR / f'{file_ts}_ocr.jpg'), ocr_frame)
-
-        return elements_text, color_frame, icon_frame, ocr_frame
-
-    def process_annotations(self, frame, annotations: list[dict]):
-        """Convert pixel-coordinate annotations to 0-1 screen coords.
-
-        Thin wrapper around core.rendering.process_annotations.
-        """
-        if self._grid_cal is None:
-            raise RuntimeError("Grid calibration not done")
-        return _process_annotations(frame, annotations, self._grid_cal)
 
     # ─── Lifecycle ─────────────────────────────────────────────
 

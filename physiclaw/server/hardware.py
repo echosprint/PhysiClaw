@@ -1,9 +1,8 @@
-"""Hardware setup HTTP routes — register thin wrappers around hardware/routes.py."""
+"""Hardware setup HTTP routes — register thin wrappers around hardware/handler.py."""
 
 import logging
 
-from physiclaw.core import PhysiClaw
-from physiclaw.hardware.routes import (
+from physiclaw.hardware.handler import (
     handle_status,
     handle_connect_arm,
     handle_connect_camera,
@@ -30,4 +29,4 @@ def register(mcp, physiclaw):
 
     @mcp.custom_route("/api/camera-preview/{index}", methods=["GET"])
     async def _camera_preview(request):
-        return await handle_camera_preview(request, PhysiClaw)
+        return await handle_camera_preview(request)

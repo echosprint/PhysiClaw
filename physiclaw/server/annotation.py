@@ -1,4 +1,4 @@
-"""Annotation HTTP routes — register thin wrappers around annotation/routes.py.
+"""Annotation HTTP routes — register thin wrappers around annotation/handler.py.
 
 The MCP tools for the propose/confirm bbox workflow live in server/tools.py —
 every tool in the project is registered there. This module only wires up

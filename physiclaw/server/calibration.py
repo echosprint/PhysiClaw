@@ -1,9 +1,9 @@
-"""Calibration HTTP routes — register thin wrappers around calibration/routes.py."""
+"""Calibration HTTP routes — register thin wrappers around calibration/handler.py."""
 
 import logging
 
 from physiclaw.bridge import BridgeState, CalibrationState, PhoneState
-from physiclaw.calibration.routes import (
+from physiclaw.calibration.handler import (
     handle_screenshot_transform,
     handle_find_pen_depth,
     handle_check_arm_tilt,

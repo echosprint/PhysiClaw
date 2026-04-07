@@ -11,7 +11,7 @@ from physiclaw.annotation.bbox import (
     classify_bbox,
 )
 from physiclaw.annotation.state import AnnotationState
-from physiclaw.annotation.routes import (
+from physiclaw.annotation.handler import (
     serve_annotate_page,
     freeze_snapshot,
     get_frozen_snapshot,

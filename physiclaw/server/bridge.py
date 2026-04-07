@@ -1,4 +1,4 @@
-"""LAN bridge HTTP routes — register thin wrappers around bridge/routes.py.
+"""LAN bridge HTTP routes — register thin wrappers around bridge/handler.py.
 
 The MCP tools that talk to the bridge live in server/tools.py — every
 tool in the project is registered there. This module only wires up the
@@ -8,7 +8,7 @@ HTTP routes used by the phone bridge page and the iOS Shortcut.
 import logging
 
 from physiclaw.bridge import BridgeState, CalibrationState, PhoneState
-from physiclaw.bridge.routes import (
+from physiclaw.bridge.handler import (
     serve_bridge_page,
     serve_qr_page,
     handle_clipboard_copied,

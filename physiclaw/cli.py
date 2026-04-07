@@ -110,8 +110,7 @@ def cmd_connect_arm(args) -> int:
 
 
 def cmd_connect_camera(args) -> int:
-    body = {"index": args.index} if args.index is not None else None
-    return _call(args, "POST", "/api/connect-camera", body)
+    return _call(args, "POST", "/api/connect-camera", {"index": args.index})
 
 
 def cmd_camera_preview(args) -> int:
@@ -198,9 +197,9 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("connect-arm", help="Connect the GRBL stylus arm (auto-detect USB)")
 
     p_cam = sub.add_parser("connect-camera",
-                           help="Connect a camera by index, or auto-detect")
-    p_cam.add_argument("--index", type=int, default=None,
-                       help="Camera index (omit to auto-detect)")
+                           help="Connect a camera by index (preview each one first)")
+    p_cam.add_argument("--index", type=int, required=True,
+                       help="Camera index to connect")
 
     p_prev = sub.add_parser("camera-preview",
                             help="Capture one frame from a camera index, save to /tmp")
