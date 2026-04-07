@@ -9,6 +9,8 @@ from physiclaw.bridge.routes import (
     serve_bridge_page,
     serve_qr_page,
     handle_clipboard_copied,
+    handle_clipboard_fetch,
+    handle_mode_switch,
     handle_screen_dimension,
     handle_screenshot_upload,
     handle_phone_state,
@@ -49,33 +51,11 @@ def register(mcp, physiclaw, bridge: BridgeState, calib: CalibrationState, phone
 
     @mcp.custom_route("/api/bridge/clipboard", methods=["GET"])
     async def _bridge_clipboard(request):
-        from starlette.responses import PlainTextResponse
-        text = bridge.text
-        if text is None:
-            return PlainTextResponse("", status_code=204)
-        bridge.mark_clipboard_copied()
-        log.info(f"Bridge: clipboard fetched — '{text}'")
-        return PlainTextResponse(text)
+        return await handle_clipboard_fetch(request, bridge)
 
     @mcp.custom_route("/api/bridge/switch", methods=["POST"])
     async def _bridge_switch(request):
-        from starlette.responses import JSONResponse
-        body = await request.json()
-        mode = body.get("mode")
-        if mode not in ("bridge", "calibrate"):
-            return JSONResponse({"error": "mode must be 'bridge' or 'calibrate'"}, status_code=400)
-        if mode == "calibrate":
-            phase_name = body.get("phase")
-            if not phase_name:
-                return JSONResponse({"error": "phase required for calibrate mode"}, status_code=400)
-            kwargs = {k: v for k, v in body.items() if k not in ("mode", "phase")}
-            try:
-                phone.set_mode(mode, phase_name, **kwargs)
-            except ValueError as e:
-                return JSONResponse({"error": str(e)}, status_code=400)
-            return JSONResponse({"ok": True, "mode": mode, "phase": phase_name})
-        phone.set_mode(mode)
-        return JSONResponse({"ok": True, "mode": mode})
+        return await handle_mode_switch(request, phone)
 
     @mcp.custom_route("/api/bridge/touch", methods=["POST"])
     async def _calib_touch(request):

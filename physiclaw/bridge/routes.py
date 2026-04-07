@@ -8,7 +8,7 @@ and report calibration touch events.
 import logging
 from pathlib import Path
 
-from starlette.responses import HTMLResponse, JSONResponse
+from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
 from physiclaw.bridge.lan import get_lan_ip
 from physiclaw.bridge.state import BridgeState
@@ -65,6 +65,44 @@ async def handle_screenshot_upload(request, bridge: BridgeState):
         return JSONResponse({"error": "empty body"}, status_code=400)
     bridge.receive_screenshot(data)
     return JSONResponse({"ok": True, "size": len(data)})
+
+
+async def handle_clipboard_fetch(request, bridge: BridgeState):
+    """GET /api/bridge/clipboard — iOS Shortcut fetches the current bridge text.
+
+    Returns the text as plain text (so the Shortcut can write it directly to
+    the clipboard) and marks the bridge as copied so bridge_tap() unblocks.
+    Returns 204 if no text is queued.
+    """
+    text = bridge.text
+    if text is None:
+        return PlainTextResponse("", status_code=204)
+    bridge.mark_clipboard_copied()
+    log.info(f"Bridge: clipboard fetched — '{text}'")
+    return PlainTextResponse(text)
+
+
+async def handle_mode_switch(request, phone: PhoneState):
+    """POST /api/bridge/switch — switch the phone page between bridge and calibrate modes.
+
+    Body: {"mode": "bridge"} or {"mode": "calibrate", "phase": "<phase>", ...phase_kwargs}
+    """
+    body = await request.json()
+    mode = body.get("mode")
+    if mode not in ("bridge", "calibrate"):
+        return JSONResponse({"error": "mode must be 'bridge' or 'calibrate'"}, status_code=400)
+    if mode == "calibrate":
+        phase_name = body.get("phase")
+        if not phase_name:
+            return JSONResponse({"error": "phase required for calibrate mode"}, status_code=400)
+        kwargs = {k: v for k, v in body.items() if k not in ("mode", "phase")}
+        try:
+            phone.set_mode(mode, phase_name, **kwargs)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return JSONResponse({"ok": True, "mode": mode, "phase": phase_name})
+    phone.set_mode(mode)
+    return JSONResponse({"ok": True, "mode": mode})
 
 
 async def serve_qr_page(request):

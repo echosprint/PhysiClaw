@@ -18,9 +18,9 @@ class BridgeState:
     250ms. The server returns the current state; the phone renders it.
     The phone is stateless — it always renders from the latest server response.
 
-    Two data flows use this state:
+    Three data flows use this state:
 
-    1. Text → clipboard:
+    1. Text → clipboard via tap (page must be open):
        - Agent calls send_text("hello") → sets self.text
        - Phone polls, sees text, displays it large on screen
        - Agent's arm physically taps the phone screen
@@ -29,7 +29,16 @@ class BridgeState:
        - Agent's bridge_tap() tool was blocking on wait_clipboard(),
          now unblocks and returns success
 
-    2. Screenshot upload:
+    2. Text → clipboard via iOS Shortcut (no page needed):
+       - Agent calls send_text("hello") → sets self.text
+       - User long-presses AssistiveTouch (or any trigger) to run the
+         "PhysiClaw Clipboard" Shortcut
+       - Shortcut GETs /api/bridge/clipboard → server returns the text
+         and calls mark_clipboard_copied()
+       - Shortcut writes the response into the iOS clipboard directly
+       - This path bypasses the bridge page and the physical tap entirely.
+
+    3. Screenshot upload:
        - Agent taps AssistiveTouch on phone (via arm)
        - iOS Shortcut fires: takes screenshot, POSTs image bytes
          to /api/bridge/screenshot → receive_screenshot()

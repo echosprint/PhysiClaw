@@ -86,11 +86,13 @@ def shutdown():
 from physiclaw.server.tools import register as _register_tools
 from physiclaw.server.bridge import register as _register_bridge
 from physiclaw.server.annotation import register as _register_annotation
+from physiclaw.server.hardware import register as _register_hardware
 from physiclaw.server.calibration import register as _register_calibration
 
 _register_tools(mcp, physiclaw)
 _register_bridge(mcp, physiclaw, _bridge, _calib, _phone)
 _register_annotation(mcp, physiclaw, _ann)
+_register_hardware(mcp, physiclaw)
 _register_calibration(mcp, physiclaw, _bridge, _calib, _phone)
 
 
