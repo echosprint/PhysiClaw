@@ -23,9 +23,17 @@ import cv2
 import numpy as np
 
 from physiclaw.bridge import BridgeState, CalibrationState
+from physiclaw.bridge.calib import (
+    NONCE_COUNT,
+    NONCE_CSS_X,
+    NONCE_CSS_Y,
+    NONCE_SQUARE_SIZE,
+    NONCE_THRESHOLD,
+)
 from physiclaw.calibration.transforms import ScreenTransforms
 from physiclaw.hardware.camera import Camera
 from physiclaw.hardware.arm import StylusArm
+from physiclaw.hardware.phone import AssistiveTouch
 from physiclaw.vision.grid_detect import (
     detect_red_dots,
     sort_dots_to_grid,
@@ -1131,3 +1139,125 @@ def trace_screen_edge(arm: StylusArm, cal: ScreenTransforms):
     arm._fast_move(0, 0)
     arm.wait_idle()
     log.info("Edge trace done")
+
+
+# ─── Step 7: AssistiveTouch screenshot verification ─────────
+
+
+def generate_nonce() -> list[int]:
+    """Generate a random binary sequence (NONCE_COUNT bits) for verification."""
+    return [random.randint(0, 1) for _ in range(NONCE_COUNT)]
+
+
+def verify_nonce(
+    img: np.ndarray, screenshot_transform: dict, expected_bits: list[int]
+) -> tuple[bool, int]:
+    """Verify the binary nonce barcode in a screenshot.
+
+    Samples the center pixel of each square (scaled by DPR), thresholds its
+    luminance to a bit, and compares to the expected sequence.
+
+    Returns (all_matched, match_count).
+    """
+    t = screenshot_transform
+    dpr = t["dpr"]
+    step = int(NONCE_SQUARE_SIZE * dpr)
+    base_x = int(NONCE_CSS_X * dpr + t["offset_x"])
+    base_y = int(NONCE_CSS_Y * dpr + t["offset_y"])
+
+    matched = 0
+    for i, expected in enumerate(expected_bits):
+        cx = base_x + step // 2
+        cy = base_y + i * step + step // 2
+        if not (0 <= cy < img.shape[0] and 0 <= cx < img.shape[1]):
+            log.warning(
+                f"  Nonce square {i}: pixel ({cx}, {cy}) out of bounds "
+                f"({img.shape[1]}×{img.shape[0]})"
+            )
+            continue
+        # OpenCV is BGR; mean of channels is fine since the square is grey.
+        b, g, r = int(img[cy, cx, 0]), int(img[cy, cx, 1]), int(img[cy, cx, 2])
+        luminance = (r + g + b) / 3
+        actual = 1 if luminance >= NONCE_THRESHOLD else 0
+        if actual == expected:
+            matched += 1
+        else:
+            log.info(
+                f"  Nonce square {i}: expected bit {expected}, "
+                f"got bit {actual} (luminance {luminance:.0f}) — MISMATCH"
+            )
+
+    all_matched = matched == len(expected_bits)
+    log.info(
+        f"  Nonce verification: {matched}/{len(expected_bits)} bits matched"
+        f" — {'PASS' if all_matched else 'FAIL'}"
+    )
+    return all_matched, matched
+
+
+def verify_assistive_touch(
+    arm: StylusArm,
+    at: AssistiveTouch,
+    bridge: BridgeState,
+    cal: CalibrationState,
+    pct_to_grbl: np.ndarray,
+) -> dict:
+    """Step 7: single-tap, wait 5s, double-tap, verify nonce.
+
+    Requires:
+    - Phase "assistive_touch" already set on phone with nonce bits
+    - User has positioned AT at the orange circle
+    - cal.screenshot_transform is set (from pre-cal)
+    - arm.Z_DOWN is set (from step 0)
+
+    Returns dict with passed, matched, total.
+    """
+    if at.at_screen is None:
+        raise RuntimeError("AT position not set — call compute_at_screen_pos first")
+
+    log.info("═══ Step 7: AssistiveTouch screenshot verification ═══")
+    log.info(
+        f"  AT position: screen 0-1 ({at.at_screen[0]:.3f}, {at.at_screen[1]:.3f})"
+    )
+
+    nonce = cal._screenshot_nonce
+    if nonce is None:
+        raise RuntimeError("No nonce set — call assistive-touch/show first")
+
+    bridge.clear_screenshot()
+
+    log.info("  Single-tap AT (iOS screenshot)...")
+    at.tap(arm, pct_to_grbl)
+
+    log.info("  Waiting 5s for screenshot animation...")
+    time.sleep(5.0)
+
+    log.info("  Double-tap AT (screenshot + upload)...")
+    at.double_tap(arm, pct_to_grbl)
+
+    log.info("  Waiting for screenshot upload...")
+    data = bridge.wait_screenshot(timeout=10.0)
+    if data is None:
+        log.warning("  Screenshot upload timed out")
+        return {"passed": False, "matched": 0, "total": NONCE_COUNT}
+
+    arr = np.frombuffer(data, dtype=np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if img is None:
+        log.warning("  Failed to decode screenshot")
+        return {"passed": False, "matched": 0, "total": NONCE_COUNT}
+
+    log.info(f"  Screenshot received: {img.shape[1]}×{img.shape[0]}px")
+
+    t = cal.screenshot_transform
+    if t is None:
+        raise RuntimeError("screenshot_transform not set — run pre-cal first")
+
+    passed, matched = verify_nonce(img, t, nonce)
+
+    if passed:
+        log.info("  ✓ Step 7 done: AT verified, screenshot pipeline working")
+    else:
+        log.warning(f"  ✗ Step 7 failed: {matched}/{NONCE_COUNT} bits matched")
+
+    return {"passed": passed, "matched": matched, "total": NONCE_COUNT}

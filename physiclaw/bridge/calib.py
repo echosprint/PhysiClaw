@@ -8,16 +8,21 @@ what interactions trigger a green flash.
 import logging
 import threading
 
-from physiclaw.bridge.protocol import (
-    AT_CSS_X,
-    AT_CSS_Y,
-    AT_RADIUS,
-    NONCE_CSS_X,
-    NONCE_CSS_Y,
-    NONCE_SQUARE_SIZE,
-)
+from physiclaw.hardware.phone import AssistiveTouch
 
 log = logging.getLogger(__name__)
+
+# Binary nonce layout — page renders NONCE_COUNT grey squares (1 bit each)
+# of NONCE_SQUARE_SIZE CSS px, starting at (NONCE_CSS_X, NONCE_CSS_Y).
+# Greys lie on the achromatic axis where Display P3 and sRGB agree, so the
+# iOS screenshot ICC profile shift can't fool the verifier.
+NONCE_CSS_X = 180
+NONCE_CSS_Y = 300
+NONCE_COUNT = 20
+NONCE_SQUARE_SIZE = 15  # CSS pixels per square
+NONCE_DARK = 40  # bit 0 — dark grey
+NONCE_LIGHT = 220  # bit 1 — light grey
+NONCE_THRESHOLD = 130  # luminance midpoint between dark and light
 
 
 class CalibrationState:
@@ -165,11 +170,16 @@ class CalibrationState:
             if self.dot_position:
                 d["dot"] = {"x": self.dot_position[0], "y": self.dot_position[1]}
             if self.phase == "assistive_touch" and self._screenshot_nonce is not None:
-                from physiclaw.hardware.phone import AssistiveTouch
-
-                d["at"] = {"x": AT_CSS_X, "y": AT_CSS_Y, "r": AT_RADIUS}
+                d["at"] = {
+                    "x": AssistiveTouch.AT_CSS_X,
+                    "y": AssistiveTouch.AT_CSS_Y,
+                    "r": AssistiveTouch.AT_RADIUS,
+                }
                 d["nonce"] = {
-                    "colors": AssistiveTouch.bits_to_colors(self._screenshot_nonce),
+                    "colors": [
+                        [NONCE_LIGHT] * 3 if b else [NONCE_DARK] * 3
+                        for b in self._screenshot_nonce
+                    ],
                     "x": NONCE_CSS_X,
                     "y": NONCE_CSS_Y,
                     "size": NONCE_SQUARE_SIZE,

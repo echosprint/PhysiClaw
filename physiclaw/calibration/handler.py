@@ -25,6 +25,8 @@ from physiclaw.calibration.calibrate import (
     compute_grbl_mapping,
     compute_camera_mapping,
     validate_calibration,
+    generate_nonce,
+    verify_assistive_touch,
     load_pen_depth,
     save_pen_depth,
 )
@@ -325,7 +327,7 @@ async def handle_show_assistive_touch(
 
     if calib.screenshot_transform is None:
         return _err("Run screenshot-transform first", status_code=400)
-    nonce = physiclaw.assistive_touch.generate_nonce()
+    nonce = generate_nonce()
     physiclaw.assistive_touch.compute_at_screen_pos(calib.screenshot_transform)
     phone.set_mode("calibrate", phase="assistive_touch", nonce_bits=nonce)
     return JSONResponse(
@@ -352,8 +354,12 @@ async def handle_verify_assistive_touch(
             raise RuntimeError("Run assistive-touch/show first")
         physiclaw.acquire()
         try:
-            return physiclaw.assistive_touch.setup(
-                physiclaw._arm, bridge, calib, pct_to_grbl
+            return verify_assistive_touch(
+                physiclaw._arm,
+                physiclaw.assistive_touch,
+                bridge,
+                calib,
+                pct_to_grbl,
             )
         finally:
             physiclaw.release()

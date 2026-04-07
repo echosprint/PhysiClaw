@@ -1,37 +1,18 @@
 """
 AssistiveTouch driver — control the iOS AssistiveTouch floating button.
 
-Knows where the AT button sits on the phone screen, taps it via the arm
+Knows where the AT button sits on the phone screen and taps it via the arm
 (single-tap → iOS screenshot, double-tap → iOS Shortcut runs and uploads
-the latest screenshot to the server), and verifies the upload via a color
-nonce barcode rendered on the bridge page.
+the latest screenshot to the server). Pure driver — calibration and
+screenshot-pipeline verification logic live in `physiclaw.calibration`.
 """
 
 import logging
-import random
 import time
 
-import cv2
 import numpy as np
 
-from physiclaw.bridge.protocol import (
-    AT_CSS_X,
-    AT_CSS_Y,
-    AT_RADIUS,
-    NONCE_CSS_X,
-    NONCE_CSS_Y,
-    NONCE_COUNT,
-    NONCE_SQUARE_SIZE,
-)
-
 log = logging.getLogger(__name__)
-
-# Binary nonce — each square is either dark grey or light grey, encoding 1 bit.
-# Greys lie on the achromatic axis where Display P3 and sRGB agree exactly,
-# so the iOS screenshot color profile shift can't trip the verifier.
-NONCE_DARK = 40  # 0
-NONCE_LIGHT = 220  # 1
-NONCE_THRESHOLD = 130  # luminance midpoint dark↔light
 
 
 class AssistiveTouch:
@@ -40,7 +21,6 @@ class AssistiveTouch:
     Knows where the AT button is in screen 0-1 coordinates.
     Single-tap: iOS takes a screenshot (saved to Photos).
     Double-tap: iOS Shortcut gets the latest screenshot from Photos and uploads it.
-    Verifies uploaded screenshots via a color nonce barcode.
 
     Usage:
         at = AssistiveTouch()
@@ -49,6 +29,11 @@ class AssistiveTouch:
         at.double_tap(arm, pct_to_grbl)       # screenshot + upload
         img_bytes = at.take_screenshot(arm, bridge, pct_to_grbl)
     """
+
+    # AT button position in CSS viewport pixels (iPhone left edge snap).
+    AT_CSS_X = 38  # 10pt edge margin + 28pt button radius
+    AT_CSS_Y = 200  # hardcoded vertical position
+    AT_RADIUS = 28  # 56pt diameter
 
     def __init__(self):
         self.at_screen: tuple[float, float] | None = None  # screenshot 0-1
@@ -81,18 +66,18 @@ class AssistiveTouch:
         """
         t = screenshot_transform
         # CSS viewport → screenshot pixel
-        px_x = AT_CSS_X * t["dpr"] + t["offset_x"]
-        px_y = AT_CSS_Y * t["dpr"] + t["offset_y"]
+        px_x = self.AT_CSS_X * t["dpr"] + t["offset_x"]
+        px_y = self.AT_CSS_Y * t["dpr"] + t["offset_y"]
         # Screenshot pixel → screenshot 0-1
         sx = px_x / t["screenshot_width"]
         sy = px_y / t["screenshot_height"]
         self.at_screen = (sx, sy)
         # AT button radius in screenshot 0-1 (different for x/y due to aspect ratio)
-        rx = AT_RADIUS * t["dpr"] / t["screenshot_width"]
-        ry = AT_RADIUS * t["dpr"] / t["screenshot_height"]
+        rx = self.AT_RADIUS * t["dpr"] / t["screenshot_width"]
+        ry = self.AT_RADIUS * t["dpr"] / t["screenshot_height"]
         self.at_radius_screen = (rx, ry)
         log.info(
-            f"AT screen position: CSS ({AT_CSS_X}, {AT_CSS_Y}) → "
+            f"AT screen position: CSS ({self.AT_CSS_X}, {self.AT_CSS_Y}) → "
             f"screenshot 0-1 ({sx:.3f}, {sy:.3f}), "
             f"radius ({rx:.3f}, {ry:.3f})"
         )
@@ -140,136 +125,4 @@ class AssistiveTouch:
             log.warning("Screenshot upload timed out")
         return data
 
-    # ─── Color nonce ──────────────────────────────────────────
 
-    @staticmethod
-    def generate_nonce() -> list[int]:
-        """Generate a random binary sequence (NONCE_COUNT bits) for verification."""
-        return [random.randint(0, 1) for _ in range(NONCE_COUNT)]
-
-    @staticmethod
-    def bits_to_colors(bits: list[int]) -> list[list[int]]:
-        """Map each bit to a grey RGB triplet for the page to render."""
-        return [[NONCE_LIGHT] * 3 if b else [NONCE_DARK] * 3 for b in bits]
-
-    @staticmethod
-    def verify_nonce(
-        img: np.ndarray, screenshot_transform: dict, expected_bits: list[int]
-    ) -> tuple[bool, int]:
-        """Verify the binary nonce barcode in a screenshot.
-
-        Samples the center pixel of each square (scaled by DPR), thresholds
-        its luminance to a bit, and compares to the expected sequence.
-
-        Args:
-            img: decoded screenshot (BGR, from cv2.imdecode)
-            screenshot_transform: pre-cal transform with dpr, offset_x/y
-            expected_bits: list of 0/1 values (NONCE_COUNT entries)
-
-        Returns:
-            (all_matched, match_count) — all_matched is True only if all bits match.
-        """
-        t = screenshot_transform
-        dpr = t["dpr"]
-        step = int(NONCE_SQUARE_SIZE * dpr)  # pixel spacing between squares
-        base_x = int(NONCE_CSS_X * dpr + t["offset_x"])
-        base_y = int(NONCE_CSS_Y * dpr + t["offset_y"])
-
-        matched = 0
-        for i, expected in enumerate(expected_bits):
-            cx = base_x + step // 2
-            cy = base_y + i * step + step // 2
-            if not (0 <= cy < img.shape[0] and 0 <= cx < img.shape[1]):
-                log.warning(
-                    f"  Nonce square {i}: pixel ({cx}, {cy}) out of bounds "
-                    f"({img.shape[1]}×{img.shape[0]})"
-                )
-                continue
-            # OpenCV is BGR; mean of channels is fine since the square is grey.
-            b, g, r = int(img[cy, cx, 0]), int(img[cy, cx, 1]), int(img[cy, cx, 2])
-            luminance = (r + g + b) / 3
-            actual = 1 if luminance >= NONCE_THRESHOLD else 0
-            if actual == expected:
-                matched += 1
-            else:
-                log.info(
-                    f"  Nonce square {i}: expected bit {expected}, "
-                    f"got bit {actual} (luminance {luminance:.0f}) — MISMATCH"
-                )
-
-        all_matched = matched == len(expected_bits)
-        log.info(
-            f"  Nonce verification: {matched}/{len(expected_bits)} bits matched"
-            f" — {'PASS' if all_matched else 'FAIL'}"
-        )
-        return all_matched, matched
-
-    # ─── Step 7 setup flow ────────────────────────────────────
-
-    def setup(self, arm, bridge, cal_state, pct_to_grbl: np.ndarray) -> dict:
-        """Full step 7: single-tap, wait 5s, double-tap, verify nonce.
-
-        Requires:
-        - Phase "assistive_touch" already set on phone with nonce colors
-        - User has positioned AT at the orange circle
-        - cal_state.screenshot_transform is set (from pre-cal)
-        - arm.Z_DOWN is set (from step 0)
-
-        Returns dict with passed, matched, total.
-        """
-        if self.at_screen is None:
-            raise RuntimeError("AT position not set — call compute_at_screen_pos first")
-
-        log.info("═══ Step 7: AssistiveTouch screenshot verification ═══")
-        log.info(
-            f"  AT position: screen 0-1 ({self.at_screen[0]:.3f}, {self.at_screen[1]:.3f})"
-        )
-
-        # Generate nonce (caller should have already set it on the phone)
-        nonce = cal_state._screenshot_nonce
-        if nonce is None:
-            raise RuntimeError("No nonce set — call assistive-touch/show first")
-
-        # Clear any stale screenshot from previous steps
-        bridge.clear_screenshot()
-
-        # 1. Single-tap AT → iOS takes screenshot
-        log.info("  Single-tap AT (iOS screenshot)...")
-        self.tap(arm, pct_to_grbl)
-
-        # 2. Wait for screenshot animation to complete
-        log.info("  Waiting 5s for screenshot animation...")
-        time.sleep(5.0)
-
-        # 3. Double-tap AT → iOS Shortcut: screenshot + upload
-        log.info("  Double-tap AT (screenshot + upload)...")
-        self.double_tap(arm, pct_to_grbl)
-
-        # 4. Wait for screenshot upload
-        log.info("  Waiting for screenshot upload...")
-        data = bridge.wait_screenshot(timeout=10.0)
-        if data is None:
-            log.warning("  Screenshot upload timed out")
-            return {"passed": False, "matched": 0, "total": NONCE_COUNT}
-
-        # 5. Decode and verify
-        arr = np.frombuffer(data, dtype=np.uint8)
-        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-        if img is None:
-            log.warning("  Failed to decode screenshot")
-            return {"passed": False, "matched": 0, "total": NONCE_COUNT}
-
-        log.info(f"  Screenshot received: {img.shape[1]}×{img.shape[0]}px")
-
-        t = cal_state.screenshot_transform
-        if t is None:
-            raise RuntimeError("screenshot_transform not set — run pre-cal first")
-
-        passed, matched = self.verify_nonce(img, t, nonce)
-
-        if passed:
-            log.info(f"  ✓ Step 7 done: AT verified, screenshot pipeline working")
-        else:
-            log.warning(f"  ✗ Step 7 failed: {matched}/{NONCE_COUNT} colors matched")
-
-        return {"passed": passed, "matched": matched, "total": NONCE_COUNT}
