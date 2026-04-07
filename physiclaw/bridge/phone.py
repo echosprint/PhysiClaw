@@ -4,7 +4,7 @@ import logging
 import threading
 
 from physiclaw.bridge.state import BridgeState
-from physiclaw.bridge.calibration_state import CalibrationState
+from physiclaw.bridge.phase import CalibrationState
 
 log = logging.getLogger(__name__)
 
