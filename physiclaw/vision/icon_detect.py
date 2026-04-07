@@ -16,7 +16,7 @@ Best practices:
     - Crop the phone screen before detection. Raw camera frames contain desk,
       cables, etc. that waste resolution. The model was trained on clean phone
       screenshots. Cropping gives each UI element 2-3x more pixels and
-      significantly improves recall. Use GridCalibration transforms to crop.
+      significantly improves recall. Use ScreenTransforms transforms to crop.
     - Lower the confidence threshold for camera frames. Dark icons (TikTok,
       Spotify) on dark backgrounds score 0.2-0.3 in camera frames but 0.6+
       in clean screenshots. A threshold of 0.2 recovers these without adding

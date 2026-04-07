@@ -3,7 +3,7 @@ Rendering helpers — draw bboxes, grid overlays, watermarks, annotation
 listings, and JPEG encode.
 
 All image-output operations the project performs live here. Pure
-functions: take a frame (and optionally a GridCalibration), return an
+functions: take a frame (and optionally a ScreenTransforms), return an
 annotated frame, text listing, or JPEG bytes. No hardware dependency.
 """
 
@@ -36,15 +36,15 @@ def _hex_to_bgr(hex_color: str) -> tuple[int, int, int]:
     return (b, g, r)
 
 
-def draw_bbox(frame: np.ndarray, bbox: list[float], grid_cal) -> np.ndarray:
+def draw_bbox(frame: np.ndarray, bbox: list[float], transforms) -> np.ndarray:
     """Draw a green rectangle for a 0-1 bbox onto a copy of the frame."""
-    tl, br = grid_cal.bbox_to_pixel_rect(bbox)
+    tl, br = transforms.bbox_to_pixel_rect(bbox)
     out = frame.copy()
     cv2.rectangle(out, tl, br, BBOX_COLOR, 2)
     return out
 
 
-def draw_grid_overlay(frame: np.ndarray, grid_cal,
+def draw_grid_overlay(frame: np.ndarray, transforms,
                       color: str = "green",
                       rows: int = 9, cols: int = 4) -> np.ndarray:
     """Draw evenly-spaced reference grid lines on a copy of the frame.
@@ -56,7 +56,7 @@ def draw_grid_overlay(frame: np.ndarray, grid_cal,
     """
     bgr = GRID_COLOR_MAP.get(color, (0, 255, 0))
     out = frame.copy()
-    cal = grid_cal
+    cal = transforms
     font = cv2.FONT_HERSHEY_SIMPLEX
 
     pad = 4
@@ -94,7 +94,7 @@ def draw_grid_overlay(frame: np.ndarray, grid_cal,
 
 def process_annotations(frame: np.ndarray,
                         annotations: list[dict],
-                        grid_cal) -> tuple[str, np.ndarray] | None:
+                        transforms) -> tuple[str, np.ndarray] | None:
     """Convert pixel-coordinate annotations to 0-1 screen coords.
 
     Draws colored numbered boxes on a copy of the frame and returns a text
@@ -104,7 +104,7 @@ def process_annotations(frame: np.ndarray,
         frame: BGR numpy array (the frozen snapshot)
         annotations: list of {left, top, right, bottom, color?, label?, source?}
                      in image pixels
-        grid_cal: GridCalibration for pixel → 0-1 conversion
+        transforms: ScreenTransforms for pixel → 0-1 conversion
 
     Returns:
         (text_listing, annotated_frame) or None if annotations is empty.
@@ -112,7 +112,7 @@ def process_annotations(frame: np.ndarray,
     if not annotations:
         return None
 
-    cal = grid_cal
+    cal = transforms
     out = frame.copy()
     elements = []
     for i, ann in enumerate(annotations):

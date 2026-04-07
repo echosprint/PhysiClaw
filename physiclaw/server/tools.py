@@ -135,7 +135,7 @@ def register(mcp: FastMCP,
                     pass
 
             elements_text, color_frame, icon_frame, ocr_frame = detect_all_elements(
-                frame, physiclaw.grid_cal,
+                frame, physiclaw.transforms,
                 icon_detector=_detector_cache["icon"],
                 ocr_reader=_detector_cache["ocr"],
             )
@@ -256,7 +256,7 @@ def register(mcp: FastMCP,
             physiclaw.park()
             time.sleep(1.5)
             frame = physiclaw.camera_view()
-            out = draw_grid_overlay(frame, physiclaw.grid_cal, color, rows, cols)
+            out = draw_grid_overlay(frame, physiclaw.transforms, color, rows, cols)
             _save_frame(out, 'overlay')
             return Image(data=encode_jpeg(out), format="jpeg")
         finally:
@@ -288,7 +288,7 @@ def register(mcp: FastMCP,
             time.sleep(1.5)
             physiclaw.set_pending_bbox(bbox)
             frame = physiclaw.camera_view()
-            out = draw_bbox(frame, bbox, physiclaw.grid_cal)
+            out = draw_bbox(frame, bbox, physiclaw.transforms)
             _save_frame(out, 'bbox')
             return Image(data=encode_jpeg(out), format="jpeg")
         finally:

@@ -13,7 +13,7 @@ from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from physiclaw.bridge.lan import get_lan_ip
 from physiclaw.bridge.state import BridgeState
 from physiclaw.bridge.calib import CalibrationState
-from physiclaw.bridge.phone import PhoneState
+from physiclaw.bridge.page import PageState
 
 log = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ async def serve_bridge_page(request):
     return HTMLResponse((STATIC_DIR / "bridge.html").read_text())
 
 
-async def handle_phone_state(request, phone: PhoneState):
+async def handle_phone_state(request, phone: PageState):
     """GET /api/bridge/state — unified poll endpoint for the phone page."""
     phone.bridge.poll()  # keep connected status alive in both modes
     return JSONResponse(phone.get_state())
@@ -81,7 +81,7 @@ async def handle_clipboard_fetch(request, bridge: BridgeState):
     return PlainTextResponse(text)
 
 
-async def handle_mode_switch(request, phone: PhoneState):
+async def handle_mode_switch(request, phone: PageState):
     """POST /api/bridge/switch — switch the phone page between bridge and calibrate modes.
 
     Body: {"mode": "bridge"} or {"mode": "calibrate", "phase": "<phase>", ...phase_kwargs}

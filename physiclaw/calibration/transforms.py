@@ -1,28 +1,26 @@
 """
-Grid calibration — `GridCalibration` dataclass and edge-trace verification.
+Calibration result — the `ScreenTransforms` dataclass.
 
-`GridCalibration` stores the affine transforms produced by the calibration
+`ScreenTransforms` holds the affine transforms produced by the calibration
 plan in `plan_calibrate.py`:
   - pct_to_grbl: screen 0-1 → GRBL mm
   - pct_to_cam:  screen 0-1 → camera 0-1
 
-The transforms enable coordinate-based tapping: the agent specifies a target
-as a 0-1 bounding box and the arm moves directly to its center.
+These transforms enable coordinate-based tapping: the agent specifies a
+target as a 0-1 bounding box and the arm moves directly to its center.
+
+This file is pure data + coordinate math. Hardware-orchestration helpers
+that *use* a ScreenTransforms (like edge-trace verification) live in
+`plan_calibrate.py`.
 """
 
 import dataclasses
-import logging
-import time
 
 import numpy as np
 
-from physiclaw.hardware.stylus_arm import StylusArm
-
-log = logging.getLogger(__name__)
-
 
 @dataclasses.dataclass
-class GridCalibration:
+class ScreenTransforms:
     """Stores and applies grid calibration affine transforms.
 
     All coordinates use 0-1 decimals (0=left/top, 1=right/bottom).
@@ -76,37 +74,3 @@ class GridCalibration:
         return (tl, br)
 
 
-# ─── Edge-trace verification ──────────────────────────────────
-
-
-def trace_screen_edge(arm: StylusArm, cal: GridCalibration):
-    """Trace the phone screen border clockwise for visual verification.
-
-    Moves the arm to 8 edge points (top-center → top-right → right-center
-    → bottom-right → bottom-center → bottom-left → left-center → top-left
-    → back to top-center), pausing 2s at each. Then returns to center.
-    """
-    check_points = [
-        (0.50, 0, "top center"),
-        (1, 0, "top right"),
-        (1, 0.50, "right center"),
-        (1, 1, "bottom right"),
-        (0.50, 1, "bottom center"),
-        (0, 1, "bottom left"),
-        (0, 0.50, "left center"),
-        (0, 0, "top left"),
-        (0.50, 0, "top center"),  # close the loop
-    ]
-    arm._fast_move(0, 0)
-    arm.wait_idle()
-    log.info("Tracing phone edge clockwise...")
-    for x_pct, y_pct, label in check_points:
-        gx, gy = cal.pct_to_grbl_mm(x_pct, y_pct)
-        log.info(f"  → {label} ({x_pct}, {y_pct}) = GRBL ({gx:.2f}, {gy:.2f})")
-        arm._fast_move(gx, gy)
-        arm.wait_idle()
-        time.sleep(2)
-
-    arm._fast_move(0, 0)
-    arm.wait_idle()
-    log.info("Edge trace done")

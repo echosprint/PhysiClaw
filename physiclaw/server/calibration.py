@@ -2,7 +2,7 @@
 
 import logging
 
-from physiclaw.bridge import BridgeState, CalibrationState, PhoneState
+from physiclaw.bridge import BridgeState, CalibrationState, PageState
 from physiclaw.calibration.handler import (
     handle_screenshot_transform,
     handle_find_pen_depth,
@@ -23,7 +23,7 @@ log = logging.getLogger(__name__)
 def register(mcp, physiclaw,
              bridge: BridgeState,
              calib: CalibrationState,
-             phone: PhoneState):
+             phone: PageState):
     """Register the calibration routes."""
 
     @mcp.custom_route("/api/calibrate/screenshot-transform", methods=["POST"])

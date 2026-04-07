@@ -9,11 +9,11 @@ Three data flows:
 from physiclaw.bridge.lan import get_lan_ip
 from physiclaw.bridge.state import BridgeState
 from physiclaw.bridge.calib import CalibrationState
-from physiclaw.bridge.phone import PhoneState
+from physiclaw.bridge.page import PageState
 
 __all__ = [
     "get_lan_ip",
     "BridgeState",
     "CalibrationState",
-    "PhoneState",
+    "PageState",
 ]

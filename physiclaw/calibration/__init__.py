@@ -5,6 +5,6 @@ GRBL mm and camera pixels. Uses hardware (arm + camera) and vision
 (red/orange dot detection) to compute affine transforms.
 """
 
-from physiclaw.calibration.grid_calibrate import GridCalibration
+from physiclaw.calibration.transforms import ScreenTransforms
 
-__all__ = ["GridCalibration"]
+__all__ = ["ScreenTransforms"]

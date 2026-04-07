@@ -11,7 +11,7 @@ import logging
 from mcp.server.fastmcp import FastMCP
 
 from physiclaw.annotation import AnnotationState
-from physiclaw.bridge import BridgeState, CalibrationState, PhoneState
+from physiclaw.bridge import BridgeState, CalibrationState, PageState
 from physiclaw.core import PhysiClaw
 
 log = logging.getLogger(__name__)
@@ -72,7 +72,7 @@ tell the user to run /setup. Do not attempt to call setup endpoints yourself.
 physiclaw = PhysiClaw()
 _bridge = BridgeState()
 _calib = CalibrationState()
-_phone = PhoneState(_bridge, _calib)
+_phone = PageState(_bridge, _calib)
 _ann = AnnotationState()
 
 

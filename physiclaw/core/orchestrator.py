@@ -15,7 +15,7 @@ One-shot utilities live near their callers (e.g. hardware/handler.py).
 import logging
 import threading
 
-from physiclaw.calibration import GridCalibration
+from physiclaw.calibration import ScreenTransforms
 from physiclaw.hardware.camera import Camera
 from physiclaw.hardware.screenshot import PhoneScreenshot
 from physiclaw.hardware.stylus_arm import StylusArm
@@ -37,7 +37,7 @@ class PhysiClaw:
     def __init__(self):
         self._arm: StylusArm | None = None
         self._cam: Camera | None = None
-        self._grid_cal: GridCalibration | None = None
+        self._transforms: ScreenTransforms | None = None
         self._pending_bboxes: dict[str, list[float]] = {}
         self._confirmed_bbox: list[float] | None = None
         self._lock = threading.Lock()
@@ -51,7 +51,7 @@ class PhysiClaw:
         """True when arm, camera, and grid calibration are all set."""
         return (self._arm is not None
                 and self._cam is not None
-                and self._grid_cal is not None)
+                and self._transforms is not None)
 
     def status(self) -> dict:
         """Return current hardware and calibration state."""
@@ -71,7 +71,7 @@ class PhysiClaw:
             steps["mapping_a"] = "OK"
         if 'pct_to_cam' in self._cal:
             steps["mapping_b"] = "OK"
-        if self._grid_cal is not None:
+        if self._transforms is not None:
             steps["validated"] = True
         if self._screenshot.ready:
             sx, sy = self._screenshot.at_screen
@@ -111,7 +111,7 @@ class PhysiClaw:
             self._arm.close()
             self._arm = None
         self._cal = {}  # reset calibration state
-        self._grid_cal = None
+        self._transforms = None
         self._arm = StylusArm()
         self._arm.setup()
         log.info("Arm connected")
@@ -140,8 +140,8 @@ class PhysiClaw:
         return self._cam
 
     @property
-    def grid_cal(self) -> GridCalibration | None:
-        return self._grid_cal
+    def transforms(self) -> ScreenTransforms | None:
+        return self._transforms
 
     # ─── Bbox workflow state ─────────────────────────────────
 
@@ -195,18 +195,18 @@ class PhysiClaw:
 
     def move_to_bbox_center(self, bbox: list[float]):
         """Move arm to the center of a bbox [left, top, right, bottom] (0-1)."""
-        if self._grid_cal is None:
-            raise RuntimeError("Grid calibration not done")
-        cx, cy = self._grid_cal.bbox_center_pct(bbox)
-        gx, gy = self._grid_cal.pct_to_grbl_mm(cx, cy)
+        if self._transforms is None:
+            raise RuntimeError("Screen calibration not done")
+        cx, cy = self._transforms.bbox_center_pct(bbox)
+        gx, gy = self._transforms.pct_to_grbl_mm(cx, cy)
         self._arm._fast_move(gx, gy)
         self._arm.wait_idle()
 
     def tap_at_pct(self, x: float, y: float):
         """Move arm to screen coordinate (0-1) and tap. Bypasses bbox workflow."""
-        if self._grid_cal is None:
-            raise RuntimeError("Grid calibration not done")
-        gx, gy = self._grid_cal.pct_to_grbl_mm(x, y)
+        if self._transforms is None:
+            raise RuntimeError("Screen calibration not done")
+        gx, gy = self._transforms.pct_to_grbl_mm(x, y)
         self._arm._fast_move(gx, gy)
         self._arm.wait_idle()
         self._arm.tap()

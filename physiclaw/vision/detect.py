@@ -22,7 +22,7 @@ log = logging.getLogger(__name__)
 
 def detect_all_elements(
     frame: np.ndarray,
-    grid_cal,
+    transforms,
     icon_detector=None,
     ocr_reader=None,
 ) -> tuple[str, np.ndarray, np.ndarray, np.ndarray]:
@@ -30,7 +30,7 @@ def detect_all_elements(
 
     Args:
         frame: BGR camera frame.
-        grid_cal: GridCalibration for converting pixel → 0-1 screen coords.
+        transforms: ScreenTransforms for converting pixel → 0-1 screen coords.
         icon_detector: optional cached IconDetector. If None, one is created
                        on demand (slower for repeated calls).
         ocr_reader: optional cached OCRReader. If None, one is created on demand.
@@ -40,7 +40,7 @@ def detect_all_elements(
         - elements_text: markdown listing all detected elements with 0-1 coords
         - color_frame, icon_frame, ocr_frame: annotated copies of the input
     """
-    cal = grid_cal
+    cal = transforms
     h, w = frame.shape[:2]
     element_id = 0
 

@@ -7,7 +7,7 @@ HTTP routes used by the phone bridge page and the iOS Shortcut.
 
 import logging
 
-from physiclaw.bridge import BridgeState, CalibrationState, PhoneState
+from physiclaw.bridge import BridgeState, CalibrationState, PageState
 from physiclaw.bridge.handler import (
     serve_bridge_page,
     serve_qr_page,
@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 def register(mcp, physiclaw,
              bridge: BridgeState,
              calib: CalibrationState,
-             phone: PhoneState):
+             phone: PageState):
     """Register bridge HTTP routes."""
 
     @mcp.custom_route("/bridge", methods=["GET"])

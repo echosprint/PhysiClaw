@@ -1,4 +1,4 @@
-"""PhoneState — coordinates mode switching between bridge and calibration."""
+"""PageState — coordinates mode switching between bridge and calibration."""
 
 import logging
 import threading
@@ -9,7 +9,7 @@ from physiclaw.bridge.calib import CalibrationState
 log = logging.getLogger(__name__)
 
 
-class PhoneState:
+class PageState:
     """Coordinates mode switching between calibration and bridge on one page.
 
     The phone runs a single page that can display calibration UI or bridge UI.

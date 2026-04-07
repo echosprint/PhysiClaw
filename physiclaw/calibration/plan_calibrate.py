@@ -23,6 +23,7 @@ import cv2
 import numpy as np
 
 from physiclaw.bridge import BridgeState, CalibrationState
+from physiclaw.calibration.transforms import ScreenTransforms
 from physiclaw.hardware.camera import Camera
 from physiclaw.hardware.stylus_arm import StylusArm
 from physiclaw.vision.grid_detect import (
@@ -936,3 +937,41 @@ def validate_calibration(arm: StylusArm, cam: Camera, cal: CalibrationState,
     passed_count = sum(1 for r in results if r['passed'])
     log.info(f"  ✓ Step 6 done: {passed_count}/{num_tests} tests passed")
     return results
+
+
+# ─── Edge-trace verification ──────────────────────────────────
+
+
+def trace_screen_edge(arm: StylusArm, cal: ScreenTransforms):
+    """Trace the phone screen border clockwise for visual verification.
+
+    Moves the arm to 8 edge points (top-center → top-right → right-center
+    → bottom-right → bottom-center → bottom-left → left-center → top-left
+    → back to top-center), pausing 2s at each. Then returns to center.
+    Used after `validate_calibration` so the user can visually confirm the
+    arm follows the actual screen edges.
+    """
+    check_points = [
+        (0.50, 0, "top center"),
+        (1, 0, "top right"),
+        (1, 0.50, "right center"),
+        (1, 1, "bottom right"),
+        (0.50, 1, "bottom center"),
+        (0, 1, "bottom left"),
+        (0, 0.50, "left center"),
+        (0, 0, "top left"),
+        (0.50, 0, "top center"),  # close the loop
+    ]
+    arm._fast_move(0, 0)
+    arm.wait_idle()
+    log.info("Tracing phone edge clockwise...")
+    for x_pct, y_pct, label in check_points:
+        gx, gy = cal.pct_to_grbl_mm(x_pct, y_pct)
+        log.info(f"  → {label} ({x_pct}, {y_pct}) = GRBL ({gx:.2f}, {gy:.2f})")
+        arm._fast_move(gx, gy)
+        arm.wait_idle()
+        time.sleep(2)
+
+    arm._fast_move(0, 0)
+    arm.wait_idle()
+    log.info("Edge trace done")

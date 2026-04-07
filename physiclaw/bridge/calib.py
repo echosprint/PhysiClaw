@@ -28,7 +28,7 @@ class CalibrationState:
     what interactions trigger a green flash.
     """
 
-    # Grid dot positions (must match bridge.html and grid_calibrate.py)
+    # Grid dot positions (must match bridge.html and the calibration plan)
     GRID_COLS_PCT = [0.25, 0.50, 0.75]
     GRID_ROWS_PCT = [0.20, 0.40, 0.50, 0.60, 0.80]
 

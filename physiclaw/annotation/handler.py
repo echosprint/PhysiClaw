@@ -51,7 +51,7 @@ async def freeze_snapshot(request, physiclaw: "PhysiClaw",
 
     # Phone screen corners in image pixels (for drawing boundary)
     phone_bounds = None
-    cal = physiclaw._grid_cal
+    cal = physiclaw.transforms
     if cal is not None:
         phone_bounds = [
             list(cal.pct_to_cam_pixel(0, 0)),  # top-left
@@ -82,7 +82,7 @@ async def get_frozen_snapshot(request, physiclaw: "PhysiClaw",
     b64 = base64.b64encode(jpeg.tobytes()).decode()
 
     phone_bounds = None
-    cal = physiclaw._grid_cal
+    cal = physiclaw.transforms
     if cal is not None:
         phone_bounds = [
             list(cal.pct_to_cam_pixel(0, 0)),
@@ -127,7 +127,7 @@ async def handle_confirm(request, state: AnnotationState,
     body = await request.json()
     raw_boxes = body.get("annotations", [])
 
-    cal = physiclaw._grid_cal
+    cal = physiclaw.transforms
     confirmed = []
     for box in raw_boxes:
         if cal is not None:

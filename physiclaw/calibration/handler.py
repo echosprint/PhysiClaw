@@ -15,7 +15,7 @@ import logging
 import cv2
 from starlette.responses import JSONResponse
 
-from physiclaw.bridge import BridgeState, CalibrationState, PhoneState
+from physiclaw.bridge import BridgeState, CalibrationState, PageState
 from physiclaw.calibration.plan_calibrate import (
     screenshot_transform,
     find_pen_depth,
@@ -55,7 +55,7 @@ def _err(message, status_code=500):
 async def handle_screenshot_transform(request, physiclaw,
                                       calib: CalibrationState,
                                       bridge: BridgeState,
-                                      phone: PhoneState):
+                                      phone: PageState):
     """POST /api/calibrate/screenshot-transform — compute viewport→screenshot pixel mapping."""
 
     def _do():
@@ -76,7 +76,7 @@ async def handle_screenshot_transform(request, physiclaw,
 
 async def handle_find_pen_depth(request, physiclaw,
                                 calib: CalibrationState,
-                                phone: PhoneState):
+                                phone: PageState):
     """POST /api/calibrate/pen-depth — discover Z depth that just touches the screen."""
 
     def _do():
@@ -237,7 +237,7 @@ async def handle_compute_camera_mapping(request, physiclaw, calib: CalibrationSt
 
 async def handle_validate_calibration(request, physiclaw,
                                       calib: CalibrationState,
-                                      phone: PhoneState):
+                                      phone: PageState):
     """POST /api/calibrate/validate — round-trip validate the calibration chain."""
 
     def _do():
@@ -257,8 +257,8 @@ async def handle_validate_calibration(request, physiclaw,
                                            cam_size=cam_size)
             passed = sum(1 for r in results if r['passed'])
             if passed >= 2:
-                from physiclaw.calibration import GridCalibration
-                physiclaw._grid_cal = GridCalibration(
+                from physiclaw.calibration import ScreenTransforms
+                physiclaw._transforms = ScreenTransforms(
                     pct_to_grbl=pct_to_grbl, pct_to_cam=pct_to_cam,
                     cam_size=cam_size)
                 phone.set_mode("bridge")
@@ -277,16 +277,16 @@ async def handle_validate_calibration(request, physiclaw,
 # ─── Edge-trace verification ────────────────────────────────
 
 
-async def handle_trace_edge(request, physiclaw, phone: PhoneState):
+async def handle_trace_edge(request, physiclaw, phone: PageState):
     """POST /api/calibrate/trace-edge — arm traces phone screen border for visual check."""
-    from physiclaw.calibration.grid_calibrate import trace_screen_edge
+    from physiclaw.calibration.plan_calibrate import trace_screen_edge
 
     def _do():
-        if physiclaw.grid_cal is None:
+        if physiclaw.transforms is None:
             raise RuntimeError("Not calibrated — run /setup first")
         physiclaw.acquire()
         try:
-            trace_screen_edge(physiclaw.arm, physiclaw.grid_cal)
+            trace_screen_edge(physiclaw.arm, physiclaw.transforms)
             phone.set_mode("bridge")
             return {"ok": True}
         finally:
@@ -304,7 +304,7 @@ async def handle_trace_edge(request, physiclaw, phone: PhoneState):
 
 async def handle_show_assistive_touch(request, physiclaw,
                                       calib: CalibrationState,
-                                      phone: PhoneState):
+                                      phone: PageState):
     """POST /api/calibrate/assistive-touch/show — display AT positioning circle + color nonce."""
 
     if calib.screenshot_transform is None:
