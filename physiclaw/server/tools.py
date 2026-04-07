@@ -473,7 +473,7 @@ def register(mcp: FastMCP,
         Requires: /setup completed (step 7 verifies AT position).
         """
         physiclaw.require_hardware()
-        if not physiclaw._screenshot.ready:
+        if not physiclaw.assistive_touch.ready:
             raise RuntimeError("AssistiveTouch not set up — run /setup first (step 7)")
 
         pct_to_grbl = physiclaw._cal.get('screen_to_grbl')
@@ -482,7 +482,7 @@ def register(mcp: FastMCP,
 
         physiclaw.acquire()
         try:
-            data = physiclaw._screenshot.take_screenshot(
+            data = physiclaw.assistive_touch.take_screenshot(
                 physiclaw._arm, bridge, pct_to_grbl)
         finally:
             physiclaw.release()

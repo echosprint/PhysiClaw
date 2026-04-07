@@ -1,8 +1,10 @@
 """
-Phone screenshot via AssistiveTouch — tap to screenshot, double-tap to upload.
+AssistiveTouch driver — control the iOS AssistiveTouch floating button.
 
-Manages the AT button position, tapping, and screenshot verification
-via a color nonce barcode.
+Knows where the AT button sits on the phone screen, taps it via the arm
+(single-tap → iOS screenshot, double-tap → iOS Shortcut runs and uploads
+the latest screenshot to the server), and verifies the upload via a color
+nonce barcode rendered on the bridge page.
 """
 
 import logging
@@ -30,8 +32,8 @@ NONCE_COLOR_MAX = 230   # avoid near-white
 NONCE_MAX_DIST = 40     # max Euclidean RGB distance for a match
 
 
-class PhoneScreenshot:
-    """AssistiveTouch screenshot manager.
+class AssistiveTouch:
+    """AssistiveTouch button driver.
 
     Knows where the AT button is in screen 0-1 coordinates.
     Single-tap: iOS takes a screenshot (saved to Photos).
@@ -39,11 +41,11 @@ class PhoneScreenshot:
     Verifies uploaded screenshots via a color nonce barcode.
 
     Usage:
-        ps = PhoneScreenshot()
-        ps.compute_at_screen_pos(cal.screenshot_transform)  # after pre-cal
-        ps.tap(arm, pct_to_grbl)              # iOS screenshot
-        ps.double_tap(arm, pct_to_grbl)       # screenshot + upload
-        img_bytes = ps.take_screenshot(arm, bridge, pct_to_grbl)
+        at = AssistiveTouch()
+        at.compute_at_screen_pos(cal.screenshot_transform)  # after pre-cal
+        at.tap(arm, pct_to_grbl)              # iOS screenshot
+        at.double_tap(arm, pct_to_grbl)       # screenshot + upload
+        img_bytes = at.take_screenshot(arm, bridge, pct_to_grbl)
     """
 
     def __init__(self):

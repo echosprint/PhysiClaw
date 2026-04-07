@@ -17,7 +17,7 @@ import threading
 
 from physiclaw.calibration import ScreenTransforms
 from physiclaw.hardware.camera import Camera
-from physiclaw.hardware.screenshot import PhoneScreenshot
+from physiclaw.hardware.phone import AssistiveTouch
 from physiclaw.hardware.stylus_arm import StylusArm
 
 log = logging.getLogger(__name__)
@@ -42,7 +42,7 @@ class PhysiClaw:
         self._confirmed_bbox: list[float] | None = None
         self._lock = threading.Lock()
         self._cal: dict = {}  # intermediate calibration state between phases
-        self._screenshot = PhoneScreenshot()
+        self._assistive_touch = AssistiveTouch()
 
     # ─── State queries ────────────────────────────────────────
 
@@ -73,8 +73,8 @@ class PhysiClaw:
             steps["mapping_b"] = "OK"
         if self._transforms is not None:
             steps["validated"] = True
-        if self._screenshot.ready:
-            sx, sy = self._screenshot.at_screen
+        if self._assistive_touch.ready:
+            sx, sy = self._assistive_touch.at_screen
             steps["assistive_touch"] = f"({sx:.3f}, {sy:.3f})"
         return {
             "arm": self._arm is not None,
@@ -142,6 +142,10 @@ class PhysiClaw:
     @property
     def transforms(self) -> ScreenTransforms | None:
         return self._transforms
+
+    @property
+    def assistive_touch(self) -> AssistiveTouch:
+        return self._assistive_touch
 
     # ─── Bbox workflow state ─────────────────────────────────
 

@@ -309,11 +309,11 @@ async def handle_show_assistive_touch(request, physiclaw,
 
     if calib.screenshot_transform is None:
         return _err("Run screenshot-transform first", status_code=400)
-    nonce = physiclaw._screenshot.generate_nonce()
-    physiclaw._screenshot.compute_at_screen_pos(calib.screenshot_transform)
+    nonce = physiclaw.assistive_touch.generate_nonce()
+    physiclaw.assistive_touch.compute_at_screen_pos(calib.screenshot_transform)
     phone.set_mode("calibrate", phase="assistive_touch", nonce_colors=nonce)
     return JSONResponse({"status": "ok",
-                         "at_screen": list(physiclaw._screenshot.at_screen),
+                         "at_screen": list(physiclaw.assistive_touch.at_screen),
                          "nonce_count": len(nonce)})
 
 
@@ -328,11 +328,11 @@ async def handle_verify_assistive_touch(request, physiclaw,
         pct_to_grbl = physiclaw._cal.get('screen_to_grbl')
         if pct_to_grbl is None:
             raise RuntimeError("Run grbl-mapping first")
-        if not physiclaw._screenshot.at_screen:
+        if not physiclaw.assistive_touch.at_screen:
             raise RuntimeError("Run assistive-touch/show first")
         physiclaw.acquire()
         try:
-            return physiclaw._screenshot.setup(
+            return physiclaw.assistive_touch.setup(
                 physiclaw._arm, bridge, calib, pct_to_grbl)
         finally:
             physiclaw.release()
