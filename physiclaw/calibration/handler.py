@@ -16,6 +16,7 @@ import cv2
 from starlette.responses import JSONResponse
 
 from physiclaw.bridge import BridgeState, CalibrationState, PageState
+from physiclaw.bridge.nonce import generate_nonce
 from physiclaw.calibration.calibrate import (
     screenshot_transform,
     find_pen_depth,
@@ -25,7 +26,6 @@ from physiclaw.calibration.calibrate import (
     compute_grbl_mapping,
     compute_camera_mapping,
     validate_calibration,
-    generate_nonce,
     verify_assistive_touch,
     load_pen_depth,
     save_pen_depth,

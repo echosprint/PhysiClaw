@@ -8,21 +8,16 @@ what interactions trigger a green flash.
 import logging
 import threading
 
+from physiclaw.bridge.nonce import (
+    NONCE_CSS_X,
+    NONCE_CSS_Y,
+    NONCE_DARK,
+    NONCE_LIGHT,
+    NONCE_SQUARE_SIZE,
+)
 from physiclaw.hardware.phone import AssistiveTouch
 
 log = logging.getLogger(__name__)
-
-# Binary nonce layout — page renders NONCE_COUNT grey squares (1 bit each)
-# of NONCE_SQUARE_SIZE CSS px, starting at (NONCE_CSS_X, NONCE_CSS_Y).
-# Greys lie on the achromatic axis where Display P3 and sRGB agree, so the
-# iOS screenshot ICC profile shift can't fool the verifier.
-NONCE_CSS_X = 180
-NONCE_CSS_Y = 300
-NONCE_COUNT = 20
-NONCE_SQUARE_SIZE = 15  # CSS pixels per square
-NONCE_DARK = 40  # bit 0 — dark grey
-NONCE_LIGHT = 220  # bit 1 — light grey
-NONCE_THRESHOLD = 130  # luminance midpoint between dark and light
 
 
 class CalibrationState:

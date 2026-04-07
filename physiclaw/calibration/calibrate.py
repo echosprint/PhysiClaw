@@ -23,13 +23,7 @@ import cv2
 import numpy as np
 
 from physiclaw.bridge import BridgeState, CalibrationState
-from physiclaw.bridge.calib import (
-    NONCE_COUNT,
-    NONCE_CSS_X,
-    NONCE_CSS_Y,
-    NONCE_SQUARE_SIZE,
-    NONCE_THRESHOLD,
-)
+from physiclaw.bridge.nonce import NONCE_COUNT, verify_nonce
 from physiclaw.calibration.transforms import ScreenTransforms
 from physiclaw.hardware.camera import Camera
 from physiclaw.hardware.arm import StylusArm
@@ -1142,57 +1136,6 @@ def trace_screen_edge(arm: StylusArm, cal: ScreenTransforms):
 
 
 # ─── Step 7: AssistiveTouch screenshot verification ─────────
-
-
-def generate_nonce() -> list[int]:
-    """Generate a random binary sequence (NONCE_COUNT bits) for verification."""
-    return [random.randint(0, 1) for _ in range(NONCE_COUNT)]
-
-
-def verify_nonce(
-    img: np.ndarray, screenshot_transform: dict, expected_bits: list[int]
-) -> tuple[bool, int]:
-    """Verify the binary nonce barcode in a screenshot.
-
-    Samples the center pixel of each square (scaled by DPR), thresholds its
-    luminance to a bit, and compares to the expected sequence.
-
-    Returns (all_matched, match_count).
-    """
-    t = screenshot_transform
-    dpr = t["dpr"]
-    step = int(NONCE_SQUARE_SIZE * dpr)
-    base_x = int(NONCE_CSS_X * dpr + t["offset_x"])
-    base_y = int(NONCE_CSS_Y * dpr + t["offset_y"])
-
-    matched = 0
-    for i, expected in enumerate(expected_bits):
-        cx = base_x + step // 2
-        cy = base_y + i * step + step // 2
-        if not (0 <= cy < img.shape[0] and 0 <= cx < img.shape[1]):
-            log.warning(
-                f"  Nonce square {i}: pixel ({cx}, {cy}) out of bounds "
-                f"({img.shape[1]}×{img.shape[0]})"
-            )
-            continue
-        # OpenCV is BGR; mean of channels is fine since the square is grey.
-        b, g, r = int(img[cy, cx, 0]), int(img[cy, cx, 1]), int(img[cy, cx, 2])
-        luminance = (r + g + b) / 3
-        actual = 1 if luminance >= NONCE_THRESHOLD else 0
-        if actual == expected:
-            matched += 1
-        else:
-            log.info(
-                f"  Nonce square {i}: expected bit {expected}, "
-                f"got bit {actual} (luminance {luminance:.0f}) — MISMATCH"
-            )
-
-    all_matched = matched == len(expected_bits)
-    log.info(
-        f"  Nonce verification: {matched}/{len(expected_bits)} bits matched"
-        f" — {'PASS' if all_matched else 'FAIL'}"
-    )
-    return all_matched, matched
 
 
 def verify_assistive_touch(
