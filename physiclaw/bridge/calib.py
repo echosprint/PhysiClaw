@@ -127,22 +127,36 @@ class CalibrationState:
             vx * dim['viewport_width'], vy * dim['viewport_height'])
 
     def get_state(self) -> dict:
-        """Get current display command for the page to render."""
+        """Get current display command for the page to render.
+
+        Returns a nested dict — fields are grouped by feature so the schema
+        is self-documenting:
+            {
+              phase, screen_dimension,
+              grid:  {cols, rows},
+              dot:   {x, y},                       # only when phase=="dot"
+              at:    {x, y, r},                    # only when phase=="assistive_touch"
+              nonce: {colors, x, y, size},         # only when phase=="assistive_touch"
+            }
+        """
         with self.lock:
-            d = {"phase": self.phase}
+            d = {
+                "phase": self.phase,
+                "screen_dimension": self.screen_dimension,
+                "grid": {
+                    "cols": self.GRID_COLS_PCT,
+                    "rows": self.GRID_ROWS_PCT,
+                },
+            }
             if self.dot_position:
-                d["dot_x"], d["dot_y"] = self.dot_position
-            # Always include grid positions so the page has them
-            d["grid_cols"] = self.GRID_COLS_PCT
-            d["grid_rows"] = self.GRID_ROWS_PCT
-            d["screen_dimension"] = self.screen_dimension
-            # AssistiveTouch phase: AT position + color nonce
+                d["dot"] = {"x": self.dot_position[0],
+                            "y": self.dot_position[1]}
             if self.phase == "assistive_touch" and self._screenshot_nonce is not None:
-                d["at_x"] = AT_CSS_X
-                d["at_y"] = AT_CSS_Y
-                d["at_r"] = AT_RADIUS
-                d["nonce_colors"] = self._screenshot_nonce
-                d["nonce_x"] = NONCE_CSS_X
-                d["nonce_y"] = NONCE_CSS_Y
-                d["nonce_size"] = NONCE_SQUARE_SIZE
+                d["at"] = {"x": AT_CSS_X, "y": AT_CSS_Y, "r": AT_RADIUS}
+                d["nonce"] = {
+                    "colors": self._screenshot_nonce,
+                    "x": NONCE_CSS_X,
+                    "y": NONCE_CSS_Y,
+                    "size": NONCE_SQUARE_SIZE,
+                }
             return d

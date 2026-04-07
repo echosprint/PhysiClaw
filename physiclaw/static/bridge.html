@@ -228,32 +228,26 @@ body.mode-bridge #bridge-layer{
         text(W*0.82, H*0.5, 'RIGHT', mSize*0.8, '#ffffff');
         break;
       case 'grid':
-        var cols = data.grid_cols || [0.25, 0.50, 0.75];
-        var rows = data.grid_rows || [0.20, 0.40, 0.50, 0.60, 0.80];
+        var grid = data.grid || {cols: [0.25, 0.50, 0.75], rows: [0.20, 0.40, 0.50, 0.60, 0.80]};
         var dotR = Math.min(W, H) * 0.015;
-        for(var ri=0; ri<rows.length; ri++)
-          for(var ci=0; ci<cols.length; ci++)
-            circle(W*cols[ci], H*rows[ri], dotR, '#ef4444');
+        for(var ri=0; ri<grid.rows.length; ri++)
+          for(var ci=0; ci<grid.cols.length; ci++)
+            circle(W*grid.cols[ci], H*grid.rows[ri], dotR, '#ef4444');
         break;
       case 'dot':
-        var dx = (data.dot_x || 0.5) * W;
-        var dy = (data.dot_y || 0.5) * H;
-        circle(dx, dy, r*0.6, '#f97316');
+        var dot = data.dot || {x: 0.5, y: 0.5};
+        circle(dot.x * W, dot.y * H, r*0.6, '#f97316');
         break;
       case 'assistive_touch':
         // Orange circle showing where to place AT button
-        var ax = data.at_x || 36;
-        var ay = data.at_y || 200;
-        var ar = data.at_r || 28;
-        circle(ax, ay, ar, '#f97316');
+        var at = data.at || {x: 36, y: 200, r: 28};
+        circle(at.x, at.y, at.r, '#f97316');
         // Color nonce barcode — 20 colored squares in a vertical column
-        var colors = data.nonce_colors || [];
-        var nx = data.nonce_x || 180;
-        var ny = data.nonce_y || 300;
-        var ns = data.nonce_size || 3;
-        for(var ni=0; ni<colors.length; ni++){
-          var c = colors[ni];
-          rect(nx, ny + ni * ns, ns, ns, 'rgb('+c[0]+','+c[1]+','+c[2]+')', 0);
+        var nonce = data.nonce || {colors: [], x: 180, y: 300, size: 3};
+        for(var ni=0; ni<nonce.colors.length; ni++){
+          var c = nonce.colors[ni];
+          rect(nonce.x, nonce.y + ni * nonce.size, nonce.size, nonce.size,
+               'rgb('+c[0]+','+c[1]+','+c[2]+')', 0);
         }
         break;
     }
@@ -319,13 +313,13 @@ body.mode-bridge #bridge-layer{
   // ════════════════════════════════════════════════════════
   // Updated every 250ms from GET /api/bridge/state. Touch handlers read this.
   // Bridge mode:    {mode, text}
-  // Calibrate mode: {mode, phase, dot_x?, dot_y?, grid_cols, grid_rows, screen_dimension}
+  // Calibrate mode: {mode, phase, screen_dimension, grid:{cols,rows},
+  //                   dot?:{x,y}, at?:{x,y,r}, nonce?:{colors,x,y,size}}
   var state = {
     mode: 'bridge',
     text: null,
     phase: 'idle',
-    grid_cols: [0.25, 0.50, 0.75],
-    grid_rows: [0.20, 0.40, 0.50, 0.60, 0.80],
+    grid: {cols: [0.25, 0.50, 0.75], rows: [0.20, 0.40, 0.50, 0.60, 0.80]},
     screen_dimension: null
   };
 
