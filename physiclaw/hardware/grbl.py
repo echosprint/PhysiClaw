@@ -27,15 +27,15 @@ def _probe_port(port: str, baudrate: int = GRBL_BAUDRATE) -> str | None:
         with serial.Serial(port, baudrate, timeout=2) as ser:
             time.sleep(2)
             ser.reset_input_buffer()
-            ser.write(b'$I\r\n')
+            ser.write(b"$I\r\n")
             time.sleep(0.5)
-            resp = ser.read(ser.in_waiting or 256).decode('utf-8', errors='ignore')
-            if 'grbl' in resp.lower() or '[VER:' in resp:
+            resp = ser.read(ser.in_waiting or 256).decode("utf-8", errors="ignore")
+            if "grbl" in resp.lower() or "[VER:" in resp:
                 # Extract version line
                 for line in resp.splitlines():
-                    if 'grbl' in line.lower() or '[VER:' in line:
+                    if "grbl" in line.lower() or "[VER:" in line:
                         return line.strip()
-                return 'GRBL'
+                return "GRBL"
     except (serial.SerialException, OSError):
         pass
     return None
@@ -47,8 +47,8 @@ def _port_priority(port_info) -> int:
     if any(kw in name for kw in _SKIP_KEYWORDS):
         return 99  # skip these entirely
     if any(kw in name for kw in _LIKELY_KEYWORDS):
-        return 0   # most likely GRBL
-    return 50      # unknown, probe after likely ones
+        return 0  # most likely GRBL
+    return 50  # unknown, probe after likely ones
 
 
 def detect_grbl() -> str | None:

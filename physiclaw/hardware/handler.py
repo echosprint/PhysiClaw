@@ -47,8 +47,7 @@ async def handle_connect_arm(request, physiclaw):
         await asyncio.get_event_loop().run_in_executor(None, _do)
         return JSONResponse({"status": "ok", "message": "Arm connected"})
     except Exception as e:
-        return JSONResponse({"status": "error", "message": str(e)},
-                            status_code=500)
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 
 # ─── Camera ─────────────────────────────────────────────────
@@ -85,9 +84,12 @@ async def handle_connect_camera(request, physiclaw):
     index = body.get("index")
     if index is None:
         return JSONResponse(
-            {"status": "error",
-             "message": "index is required (preview each camera first to choose)"},
-            status_code=400)
+            {
+                "status": "error",
+                "message": "index is required (preview each camera first to choose)",
+            },
+            status_code=400,
+        )
 
     def _do():
         physiclaw.acquire()
@@ -98,12 +100,15 @@ async def handle_connect_camera(request, physiclaw):
 
     try:
         await asyncio.get_event_loop().run_in_executor(None, _do)
-        return JSONResponse({"status": "ok",
-                             "message": f"Camera {physiclaw.cam.index} connected",
-                             "index": physiclaw.cam.index})
+        return JSONResponse(
+            {
+                "status": "ok",
+                "message": f"Camera {physiclaw.cam.index} connected",
+                "index": physiclaw.cam.index,
+            }
+        )
     except Exception as e:
-        return JSONResponse({"status": "error", "message": str(e)},
-                            status_code=500)
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 
 async def handle_camera_preview(request):
@@ -112,9 +117,10 @@ async def handle_camera_preview(request):
     watermark = request.query_params.get("watermark", "0") == "1"
     try:
         jpeg = await asyncio.get_event_loop().run_in_executor(
-            None, camera_preview, index, watermark)
-        return JSONResponse({"status": "ok", "index": index,
-                             "image": base64.b64encode(jpeg).decode()})
+            None, camera_preview, index, watermark
+        )
+        return JSONResponse(
+            {"status": "ok", "index": index, "image": base64.b64encode(jpeg).decode()}
+        )
     except Exception as e:
-        return JSONResponse({"status": "error", "message": str(e)},
-                            status_code=404)
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=404)

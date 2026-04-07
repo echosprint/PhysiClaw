@@ -26,12 +26,12 @@ def main():
 
         # 2. Swipe up to unlock
         print("\n--- Swipe up to unlock ---")
-        arm.swipe('top')
+        arm.swipe("top")
         time.sleep(2)
 
         # 3. Move to where an app icon might be (top-left area)
         print("\n--- Move to app icon ---")
-        arm.move('top-left', 'large')
+        arm.move("top-left", "large")
         time.sleep(1)
 
         # 4. Tap to open the app
@@ -41,26 +41,26 @@ def main():
 
         # 5. Scroll down to read content
         print("\n--- Scroll down ---")
-        arm.swipe('bottom', 'slow')
+        arm.swipe("bottom", "slow")
         time.sleep(1)
-        arm.swipe('bottom', 'slow')
+        arm.swipe("bottom", "slow")
         time.sleep(2)
 
         # 6. Long press on an item
         print("\n--- Long press ---")
-        arm.move('bottom', 'medium')
+        arm.move("bottom", "medium")
         arm.long_press()
         time.sleep(2)
 
         # 7. Double tap to zoom
         print("\n--- Double tap to zoom ---")
-        arm.move('top', 'small')
+        arm.move("top", "small")
         arm.double_tap()
         time.sleep(2)
 
         # 8. Swipe right to go back
         print("\n--- Swipe right to go back ---")
-        arm.swipe('right')
+        arm.swipe("right")
         time.sleep(1)
 
         print("\n--- Demo complete ---")

@@ -23,17 +23,23 @@ import cv2
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from physiclaw.vision.keyboard import (
-    detect_key_boxes, draw_detected_keys,
-    label_keyboard, generate_preset,
+    detect_key_boxes,
+    draw_detected_keys,
+    label_keyboard,
+    generate_preset,
 )
 
 logging.basicConfig(level=logging.DEBUG, format="%(message)s")
 
 parser = argparse.ArgumentParser(description="Detect keyboard keys and generate preset")
-parser.add_argument("images", nargs="*",
-                    help="Image paths (default: all in data/image/keyboard/)")
-parser.add_argument("--output", default="data/image/keyboard/bbox",
-                    help="Bounding box image output directory (default: data/image/keyboard/bbox/)")
+parser.add_argument(
+    "images", nargs="*", help="Image paths (default: all in data/image/keyboard/)"
+)
+parser.add_argument(
+    "--output",
+    default="data/image/keyboard/bbox",
+    help="Bounding box image output directory (default: data/image/keyboard/bbox/)",
+)
 args = parser.parse_args()
 
 # Collect images
@@ -45,7 +51,9 @@ else:
         print(f"Error: {img_dir} does not exist")
         sys.exit(1)
     image_paths = sorted(img_dir.glob("*.*"))
-    image_paths = [p for p in image_paths if p.suffix.lower() in (".png", ".jpg", ".jpeg")]
+    image_paths = [
+        p for p in image_paths if p.suffix.lower() in (".png", ".jpg", ".jpeg")
+    ]
 
 if not image_paths:
     print("No images found")
@@ -58,7 +66,7 @@ pages = {}
 bbox_images = {}
 
 for img_path in image_paths:
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     frame = cv2.imread(str(img_path))
     if frame is None:
         print(f"Error: cannot read {img_path}")
@@ -97,7 +105,7 @@ for img_path in image_paths:
     # Print summary
     for i, row in enumerate(rows):
         labels = [k["element"] for k in row]
-        print(f"  Row {i+1}: {' '.join(labels)}")
+        print(f"  Row {i + 1}: {' '.join(labels)}")
 
 # Generate preset
 if pages:
@@ -109,7 +117,7 @@ if pages:
     # Save a reference copy for verifying positions after ??? are filled
     ref_path = out_dir / "system-keyboard.ref.md"
     ref_path.write_text(preset)
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Preset written to {preset_path}")
     print(f"Reference copy saved to {ref_path}")
     print(f"Keys marked ??? need to be filled in from the bounding box images.")

@@ -34,16 +34,16 @@ import urllib.request
 # Calibration step name → one-line description.
 # Order matches the canonical /setup flow so `--list` reads top-down.
 CALIBRATION_STEPS: dict[str, str] = {
-    "screenshot-transform":   "compute viewport→screenshot pixel mapping (pre-cal)",
-    "pen-depth":              "discover Z depth that just touches the screen",
-    "arm-tilt":               "measure arm tilt vs screen plane",
-    "camera-rotation":        "detect physical camera rotation from a frame",
-    "frame-rotation":         "choose cv2 rotation to apply to camera frames",
-    "grbl-mapping":           "compute screen 0-1 → GRBL mm affine",
-    "camera-mapping":         "compute screen 0-1 → camera 0-1 affine",
-    "validate":               "round-trip validate the calibration chain",
-    "trace-edge":             "arm traces phone screen border for visual check",
-    "assistive-touch/show":   "display AT positioning circle + color nonce",
+    "screenshot-transform": "compute viewport→screenshot pixel mapping (pre-cal)",
+    "pen-depth": "discover Z depth that just touches the screen",
+    "arm-tilt": "measure arm tilt vs screen plane",
+    "camera-rotation": "detect physical camera rotation from a frame",
+    "frame-rotation": "choose cv2 rotation to apply to camera frames",
+    "grbl-mapping": "compute screen 0-1 → GRBL mm affine",
+    "camera-mapping": "compute screen 0-1 → camera 0-1 affine",
+    "validate": "round-trip validate the calibration chain",
+    "trace-edge": "arm traces phone screen border for visual check",
+    "assistive-touch/show": "display AT positioning circle + color nonce",
     "assistive-touch/verify": "tap AT, verify screenshot upload via color nonce",
 }
 
@@ -72,10 +72,10 @@ def _request(method: str, url: str, body: dict | None, timeout: float):
         return e.code, e.read().decode()
     except (urllib.error.URLError, TimeoutError) as e:
         reason = getattr(e, "reason", e)
-        print(f"error: cannot reach server at {url}\n  {reason}",
-              file=sys.stderr)
-        print("\nIs the server running? Start it with: uv run physiclaw",
-              file=sys.stderr)
+        print(f"error: cannot reach server at {url}\n  {reason}", file=sys.stderr)
+        print(
+            "\nIs the server running? Start it with: uv run physiclaw", file=sys.stderr
+        )
         sys.exit(2)
 
 
@@ -140,8 +140,7 @@ def cmd_switch(args) -> int:
         body["phase"] = args.phase
         for kv in args.extra or []:
             if "=" not in kv:
-                print(f"error: --extra expects key=value, got {kv!r}",
-                      file=sys.stderr)
+                print(f"error: --extra expects key=value, got {kv!r}", file=sys.stderr)
                 return 1
             k, v = kv.split("=", 1)
             # Best-effort numeric parse
@@ -161,8 +160,10 @@ def cmd_calibrate(args) -> int:
         return 1
     if args.step not in CALIBRATION_STEPS:
         print(f"error: unknown calibration step '{args.step}'", file=sys.stderr)
-        print("\nRun `physiclaw-setup calibrate --list` to see all steps.",
-              file=sys.stderr)
+        print(
+            "\nRun `physiclaw-setup calibrate --list` to see all steps.",
+            file=sys.stderr,
+        )
         return 1
     return _call(args, "POST", f"/api/calibrate/{args.step}")
 
@@ -183,12 +184,18 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="physiclaw-setup",
         description="Friendly CLI for PhysiClaw setup + calibration HTTP endpoints.",
     )
-    parser.add_argument("--host", default="localhost",
-                        help="Server host (default: localhost)")
-    parser.add_argument("--port", type=int, default=8048,
-                        help="Server port (default: 8048)")
-    parser.add_argument("--timeout", type=float, default=60.0,
-                        help="Request timeout in seconds (default: 60)")
+    parser.add_argument(
+        "--host", default="localhost", help="Server host (default: localhost)"
+    )
+    parser.add_argument(
+        "--port", type=int, default=8048, help="Server port (default: 8048)"
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=60.0,
+        help="Request timeout in seconds (default: 60)",
+    )
 
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -196,33 +203,51 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("connect-arm", help="Connect the GRBL stylus arm (auto-detect USB)")
 
-    p_cam = sub.add_parser("connect-camera",
-                           help="Connect a camera by index (preview each one first)")
-    p_cam.add_argument("--index", type=int, required=True,
-                       help="Camera index to connect")
+    p_cam = sub.add_parser(
+        "connect-camera", help="Connect a camera by index (preview each one first)"
+    )
+    p_cam.add_argument(
+        "--index", type=int, required=True, help="Camera index to connect"
+    )
 
-    p_prev = sub.add_parser("camera-preview",
-                            help="Capture one frame from a camera index, save to /tmp")
+    p_prev = sub.add_parser(
+        "camera-preview", help="Capture one frame from a camera index, save to /tmp"
+    )
     p_prev.add_argument("index", type=int, help="Camera index to preview")
-    p_prev.add_argument("--watermark", action="store_true",
-                        help="Draw the camera index as a watermark")
+    p_prev.add_argument(
+        "--watermark", action="store_true", help="Draw the camera index as a watermark"
+    )
 
-    p_sw = sub.add_parser("switch",
-                          help="Switch the phone page mode (bridge | calibrate)")
+    p_sw = sub.add_parser(
+        "switch", help="Switch the phone page mode (bridge | calibrate)"
+    )
     p_sw.add_argument("mode", choices=["bridge", "calibrate"])
-    p_sw.add_argument("--phase", default=None,
-                      help="Required when mode=calibrate (e.g. center, dot, markers)")
-    p_sw.add_argument("--extra", action="append", default=None,
-                      metavar="KEY=VALUE",
-                      help="Extra phase kwargs, repeat for multiple "
-                           "(e.g. --extra dot_x=0.5 --extra dot_y=0.5)")
+    p_sw.add_argument(
+        "--phase",
+        default=None,
+        help="Required when mode=calibrate (e.g. center, dot, markers)",
+    )
+    p_sw.add_argument(
+        "--extra",
+        action="append",
+        default=None,
+        metavar="KEY=VALUE",
+        help="Extra phase kwargs, repeat for multiple "
+        "(e.g. --extra dot_x=0.5 --extra dot_y=0.5)",
+    )
 
-    p_cal = sub.add_parser("calibrate",
-                           help="Run a calibration step against the server")
-    p_cal.add_argument("step", nargs="?", default=None,
-                       help="Step name (e.g. pen-depth). Omit and pass --list to see all.")
-    p_cal.add_argument("--list", action="store_true",
-                       help="List all calibration steps and exit")
+    p_cal = sub.add_parser(
+        "calibrate", help="Run a calibration step against the server"
+    )
+    p_cal.add_argument(
+        "step",
+        nargs="?",
+        default=None,
+        help="Step name (e.g. pen-depth). Omit and pass --list to see all.",
+    )
+    p_cal.add_argument(
+        "--list", action="store_true", help="List all calibration steps and exit"
+    )
 
     return parser
 

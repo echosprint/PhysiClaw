@@ -56,19 +56,19 @@ def detect_red_dots(frame: np.ndarray) -> list[tuple[float, float]]:
         if circularity < 0.5:
             continue
         m = cv2.moments(cnt)
-        if m['m00'] == 0:
+        if m["m00"] == 0:
             continue
-        cx = m['m10'] / m['m00']
-        cy = m['m01'] / m['m00']
+        cx = m["m10"] / m["m00"]
+        cy = m["m01"] / m["m00"]
         dots.append((cx, cy))
 
     log.debug(f"Detected {len(dots)} red dots")
     return dots
 
 
-def sort_dots_to_grid(dots: list[tuple[float, float]],
-                      rows: int,
-                      cols: int) -> np.ndarray:
+def sort_dots_to_grid(
+    dots: list[tuple[float, float]], rows: int, cols: int
+) -> np.ndarray:
     """Sort detected dot centroids into row-major grid order.
 
     Returns shape (rows*cols, 2) array.
@@ -78,14 +78,15 @@ def sort_dots_to_grid(dots: list[tuple[float, float]],
     if len(dots) != expected:
         raise RuntimeError(
             f"Expected {expected} red dots but detected {len(dots)}. "
-            f"Check lighting, camera focus, and that the grid page is displayed.")
+            f"Check lighting, camera focus, and that the grid page is displayed."
+        )
 
     # Sort by Y to group into rows
     dots_sorted = sorted(dots, key=lambda d: d[1])
 
     grid = []
     for r in range(rows):
-        row_dots = dots_sorted[r * cols:(r + 1) * cols]
+        row_dots = dots_sorted[r * cols : (r + 1) * cols]
         # Sort by X within each row
         row_dots.sort(key=lambda d: d[0])
         grid.extend(row_dots)
@@ -116,8 +117,9 @@ def compute_affine_transforms(
     pct_to_pixel, _ = cv2.estimateAffine2D(screen_pcts, camera_pixels)
 
     if pct_to_grbl is None or pct_to_pixel is None:
-        raise RuntimeError("Failed to compute affine transforms — "
-                           "not enough valid calibration points")
+        raise RuntimeError(
+            "Failed to compute affine transforms — not enough valid calibration points"
+        )
 
     return pct_to_grbl, pct_to_pixel
 
@@ -134,8 +136,9 @@ def detect_orange_dot(frame: np.ndarray) -> tuple[float, float] | None:
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     # Orange range: H=5-25 (warm orange), high S, high V
     mask = cv2.inRange(hsv, np.array([5, 100, 100]), np.array([25, 255, 255]))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN,
-                            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
+    mask = cv2.morphologyEx(
+        mask, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    )
 
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
@@ -147,6 +150,6 @@ def detect_orange_dot(frame: np.ndarray) -> tuple[float, float] | None:
         return None
 
     m = cv2.moments(largest)
-    if m['m00'] == 0:
+    if m["m00"] == 0:
         return None
-    return (m['m10'] / m['m00'], m['m01'] / m['m00'])
+    return (m["m10"] / m["m00"], m["m01"] / m["m00"])

@@ -32,7 +32,13 @@ import numpy as np
 
 log = logging.getLogger(__name__)
 
-MODEL_PATH = Path(__file__).parent.parent.parent / "data" / "model" / "omniparser_icon_detect" / "model.onnx"
+MODEL_PATH = (
+    Path(__file__).parent.parent.parent
+    / "data"
+    / "model"
+    / "omniparser_icon_detect"
+    / "model.onnx"
+)
 INPUT_SIZE = 1280  # V2 was trained at 1280
 MIN_CONFIDENCE = 0.3
 NMS_THRESHOLD = 0.5
@@ -41,6 +47,7 @@ NMS_THRESHOLD = 0.5
 @dataclasses.dataclass
 class Element:
     """A detected UI element."""
+
     bbox: tuple[int, int, int, int]  # (x1, y1, x2, y2) in original image pixels
     confidence: float
 
@@ -51,13 +58,13 @@ class IconDetector:
     def __init__(self, model_path: Path = MODEL_PATH):
         if not model_path.exists():
             raise FileNotFoundError(
-                f"Model not found at {model_path}\n"
-                "Run: /setup-vision-models"
+                f"Model not found at {model_path}\nRun: /setup-vision-models"
             )
         self.net = cv2.dnn.readNetFromONNX(str(model_path))
 
-    def detect(self, frame: np.ndarray,
-               confidence: float = MIN_CONFIDENCE) -> list[Element]:
+    def detect(
+        self, frame: np.ndarray, confidence: float = MIN_CONFIDENCE
+    ) -> list[Element]:
         """Detect UI elements in a phone screen image.
 
         Args:
@@ -103,8 +110,10 @@ class IconDetector:
 
         # NMS
         indices = cv2.dnn.NMSBoxes(
-            boxes_xywh.tolist(), scores.tolist(),
-            confidence, NMS_THRESHOLD,
+            boxes_xywh.tolist(),
+            scores.tolist(),
+            confidence,
+            NMS_THRESHOLD,
         )
 
         elements = []
@@ -118,10 +127,12 @@ class IconDetector:
             x2 = min(w, (cx + bw / 2) / scale)
             y2 = min(h, (cy + bh / 2) / scale)
 
-            elements.append(Element(
-                bbox=(int(x1), int(y1), int(x2), int(y2)),
-                confidence=conf,
-            ))
+            elements.append(
+                Element(
+                    bbox=(int(x1), int(y1), int(x2), int(y2)),
+                    confidence=conf,
+                )
+            )
 
         # Sort top-to-bottom, then left-to-right
         elements.sort(key=lambda e: (e.bbox[1], e.bbox[0]))
@@ -145,8 +156,9 @@ def annotate(frame: np.ndarray, elements: list[Element]) -> np.ndarray:
 
         # Label background
         cv2.rectangle(out, (x1, y1 - th - 4), (x1 + tw + 4, y1), (0, 255, 0), -1)
-        cv2.putText(out, label, (x1 + 2, y1 - 2), font, font_scale,
-                    (0, 0, 0), thickness)
+        cv2.putText(
+            out, label, (x1 + 2, y1 - 2), font, font_scale, (0, 0, 0), thickness
+        )
 
     return out
 
@@ -154,7 +166,9 @@ def annotate(frame: np.ndarray, elements: list[Element]) -> np.ndarray:
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Detect UI elements in a phone screenshot")
+    parser = argparse.ArgumentParser(
+        description="Detect UI elements in a phone screenshot"
+    )
     parser.add_argument("image", help="Path to phone screen image")
     parser.add_argument("-c", "--confidence", type=float, default=MIN_CONFIDENCE)
     parser.add_argument("-o", "--output", help="Save annotated image to this path")

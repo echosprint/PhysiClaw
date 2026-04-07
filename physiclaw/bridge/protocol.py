@@ -10,9 +10,9 @@ This file is the single source of truth so neither side drifts.
 """
 
 # AssistiveTouch button position (CSS viewport pixels, iPhone left edge snap)
-AT_CSS_X = 38       # 10pt edge margin + 28pt button radius
-AT_CSS_Y = 200      # hardcoded vertical position
-AT_RADIUS = 28      # matches AT button (56pt diameter)
+AT_CSS_X = 38  # 10pt edge margin + 28pt button radius
+AT_CSS_Y = 200  # hardcoded vertical position
+AT_RADIUS = 28  # matches AT button (56pt diameter)
 
 # Color nonce barcode — page renders NONCE_COUNT squares of NONCE_SQUARE_SIZE
 # CSS pixels each, starting at (NONCE_CSS_X, NONCE_CSS_Y).

@@ -25,7 +25,7 @@ from pathlib import Path
 
 import cv2
 
-SNAPSHOT_DIR = Path(__file__).parent.parent.parent / 'data' / 'snapshot'
+SNAPSHOT_DIR = Path(__file__).parent.parent.parent / "data" / "snapshot"
 
 log = logging.getLogger(__name__)
 
@@ -36,13 +36,15 @@ def _ensure_camera_permission():
     try:
         subprocess.run(
             ["imagesnap", "-w", "0", "/dev/null"],
-            capture_output=True, timeout=5,
+            capture_output=True,
+            timeout=5,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         pass  # imagesnap not installed or hung — skip
 
 
 # ─── Reusable Camera class ──────────────────────────────────────
+
 
 class Camera:
     """Persistent camera handle for fast repeated frame grabs."""
@@ -106,8 +108,8 @@ class Camera:
         if bbox is not None:
             cv2.rectangle(frame, bbox[0], bbox[1], (0, 255, 0), 2)
         SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
-        ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
-        cv2.imwrite(str(SNAPSHOT_DIR / f'{ts}.jpg'), frame)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+        cv2.imwrite(str(SNAPSHOT_DIR / f"{ts}.jpg"), frame)
         return frame
 
     def close(self):

@@ -13,8 +13,9 @@ def main():
     parser = argparse.ArgumentParser(description="PhysiClaw MCP Server")
     parser.add_argument("--port", type=int, default=8048)
     parser.add_argument("--host", type=str, default="0.0.0.0")
-    parser.add_argument("--verbose", "-v", action="store_true",
-                        help="Show detailed debug output")
+    parser.add_argument(
+        "--verbose", "-v", action="store_true", help="Show detailed debug output"
+    )
     args = parser.parse_args()
 
     logging.basicConfig(

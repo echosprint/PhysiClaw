@@ -23,10 +23,9 @@ from physiclaw.bridge.handler import (
 log = logging.getLogger(__name__)
 
 
-def register(mcp, physiclaw,
-             bridge: BridgeState,
-             calib: CalibrationState,
-             phone: PageState):
+def register(
+    mcp, physiclaw, bridge: BridgeState, calib: CalibrationState, phone: PageState
+):
     """Register bridge HTTP routes."""
 
     @mcp.custom_route("/bridge", methods=["GET"])

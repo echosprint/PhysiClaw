@@ -49,27 +49,33 @@ class PhysiClaw:
     @property
     def hardware_ready(self) -> bool:
         """True when arm, camera, and grid calibration are all set."""
-        return (self._arm is not None
-                and self._cam is not None
-                and self._transforms is not None)
+        return (
+            self._arm is not None
+            and self._cam is not None
+            and self._transforms is not None
+        )
 
     def status(self) -> dict:
         """Return current hardware and calibration state."""
         steps = {}
-        z_tap = self._cal.get('z_tap')
+        z_tap = self._cal.get("z_tap")
         if z_tap is not None:
             steps["z_tap"] = f"{z_tap}mm"
-        if 'screenshot_transform' in self._cal:
-            t = self._cal['screenshot_transform']
-            steps["screenshot_cal"] = f"dpr={t['dpr']}, offset=({t['offset_x']}, {t['offset_y']})"
+        if "screenshot_transform" in self._cal:
+            t = self._cal["screenshot_transform"]
+            steps["screenshot_cal"] = (
+                f"dpr={t['dpr']}, offset=({t['offset_x']}, {t['offset_y']})"
+            )
         if self._arm and self._arm.MOVE_DIRECTIONS:
             steps["alignment"] = "OK"
-        if 'rotation' in self._cal:
+        if "rotation" in self._cal:
             names = {-1: "none", 0: "90° CW", 1: "180°", 2: "90° CCW"}
-            steps["rotation"] = names.get(self._cal['rotation'], str(self._cal['rotation']))
-        if 'screen_to_grbl' in self._cal:
+            steps["rotation"] = names.get(
+                self._cal["rotation"], str(self._cal["rotation"])
+            )
+        if "screen_to_grbl" in self._cal:
             steps["mapping_a"] = "OK"
-        if 'pct_to_cam' in self._cal:
+        if "pct_to_cam" in self._cal:
             steps["mapping_b"] = "OK"
         if self._transforms is not None:
             steps["validated"] = True
@@ -87,14 +93,17 @@ class PhysiClaw:
         """Raise if hardware is not fully set up."""
         if not self.hardware_ready:
             raise RuntimeError(
-                "Hardware not set up. Run /setup to connect and calibrate.")
+                "Hardware not set up. Run /setup to connect and calibrate."
+            )
 
     # ─── Concurrency ──────────────────────────────────────────
 
     def acquire(self):
         """Mark hardware as busy. Raises immediately if already busy."""
         if not self._lock.acquire(blocking=False):
-            raise RuntimeError("PhysiClaw is busy — wait for the current operation to finish, then retry.")
+            raise RuntimeError(
+                "PhysiClaw is busy — wait for the current operation to finish, then retry."
+            )
 
     def release(self):
         """Mark hardware as idle."""
@@ -155,18 +164,18 @@ class PhysiClaw:
         Args:
             bbox: [left, top, right, bottom] as 0-1 decimals.
         """
-        self._pending_bboxes = {'center': list(bbox)}
+        self._pending_bboxes = {"center": list(bbox)}
         self._confirmed_bbox = None
 
     def pending_bbox(self) -> list[float] | None:
         """Read the bbox staged by set_pending_bbox(), or None."""
-        return self._pending_bboxes.get('center')
+        return self._pending_bboxes.get("center")
 
     def confirm_bbox(self):
         """Lock in the pending bbox for the next gesture."""
         if not self._pending_bboxes:
             raise RuntimeError("No pending bbox — call bbox_target first")
-        self._confirmed_bbox = self._pending_bboxes['center']
+        self._confirmed_bbox = self._pending_bboxes["center"]
         self._pending_bboxes = {}
 
     @property
@@ -181,7 +190,7 @@ class PhysiClaw:
         arm = self._arm
         if arm.MOVE_DIRECTIONS is None:
             raise RuntimeError("Cannot park — calibration has not been run yet")
-        ux, uy = arm.MOVE_DIRECTIONS['top']
+        ux, uy = arm.MOVE_DIRECTIONS["top"]
         arm._fast_move(ux * self.PARK_DISTANCE, uy * self.PARK_DISTANCE)
         arm.wait_idle()
 

@@ -11,8 +11,8 @@ class AnnotationState:
 
     def __init__(self):
         self.lock = threading.Lock()
-        self.frozen_frame = None          # BGR numpy array
-        self.snapshot_id: str = ""        # timestamp of frozen snapshot
+        self.frozen_frame = None  # BGR numpy array
+        self.snapshot_id: str = ""  # timestamp of frozen snapshot
 
         # Agent → UI staging area
         self.agent_proposals: list[dict] = []
@@ -52,13 +52,15 @@ class AnnotationState:
         """
         enriched = []
         for p in proposals:
-            enriched.append({
-                "id": str(uuid.uuid4())[:8],
-                "bbox": p["bbox"],
-                "label": p.get("label", ""),
-                "source": "agent",
-                "color": AGENT_COLOR,
-            })
+            enriched.append(
+                {
+                    "id": str(uuid.uuid4())[:8],
+                    "bbox": p["bbox"],
+                    "label": p.get("label", ""),
+                    "source": "agent",
+                    "color": AGENT_COLOR,
+                }
+            )
         with self.lock:
             self.agent_proposals = enriched
             self._confirmed.clear()

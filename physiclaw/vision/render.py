@@ -23,15 +23,19 @@ GRID_COLOR_MAP = {
 
 # Hex color → human-readable name (for annotation listings)
 _COLOR_NAMES = {
-    '#ff5252': 'red', '#448aff': 'blue',
-    '#69f0ae': 'green', '#ffd740': 'yellow',
-    '#e040fb': 'purple', '#00e5ff': 'cyan',
-    '#e0e0e0': 'white', '#b2ff59': 'lime',
+    "#ff5252": "red",
+    "#448aff": "blue",
+    "#69f0ae": "green",
+    "#ffd740": "yellow",
+    "#e040fb": "purple",
+    "#00e5ff": "cyan",
+    "#e0e0e0": "white",
+    "#b2ff59": "lime",
 }
 
 
 def _hex_to_bgr(hex_color: str) -> tuple[int, int, int]:
-    h = hex_color.lstrip('#')
+    h = hex_color.lstrip("#")
     r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
     return (b, g, r)
 
@@ -44,9 +48,9 @@ def draw_bbox(frame: np.ndarray, bbox: list[float], transforms) -> np.ndarray:
     return out
 
 
-def draw_grid_overlay(frame: np.ndarray, transforms,
-                      color: str = "green",
-                      rows: int = 9, cols: int = 4) -> np.ndarray:
+def draw_grid_overlay(
+    frame: np.ndarray, transforms, color: str = "green", rows: int = 9, cols: int = 4
+) -> np.ndarray:
     """Draw evenly-spaced reference grid lines on a copy of the frame.
 
     Args:
@@ -64,8 +68,9 @@ def draw_grid_overlay(frame: np.ndarray, transforms,
     def _draw_label(canvas, label, cx, cy):
         (tw, th), _ = cv2.getTextSize(label, font, 0.8, 2)
         lx, ly = cx - tw // 2, cy + th // 2
-        cv2.rectangle(canvas, (lx - pad, ly - th - pad),
-                      (lx + tw + pad, ly + pad), bgr, -1)
+        cv2.rectangle(
+            canvas, (lx - pad, ly - th - pad), (lx + tw + pad, ly + pad), bgr, -1
+        )
         cv2.putText(canvas, label, (lx, ly), font, 0.8, (255, 255, 255), 2)
 
     # Vertical lines — labels at top and bottom
@@ -92,9 +97,9 @@ def draw_grid_overlay(frame: np.ndarray, transforms,
     return out
 
 
-def process_annotations(frame: np.ndarray,
-                        annotations: list[dict],
-                        transforms) -> tuple[str, np.ndarray] | None:
+def process_annotations(
+    frame: np.ndarray, annotations: list[dict], transforms
+) -> tuple[str, np.ndarray] | None:
     """Convert pixel-coordinate annotations to 0-1 screen coords.
 
     Draws colored numbered boxes on a copy of the frame and returns a text
@@ -116,8 +121,8 @@ def process_annotations(frame: np.ndarray,
     out = frame.copy()
     elements = []
     for i, ann in enumerate(annotations):
-        l, t = cal.pixel_to_pct(int(ann['left']), int(ann['top']))
-        r, b = cal.pixel_to_pct(int(ann['right']), int(ann['bottom']))
+        l, t = cal.pixel_to_pct(int(ann["left"]), int(ann["top"]))
+        r, b = cal.pixel_to_pct(int(ann["right"]), int(ann["bottom"]))
         bbox = [
             max(0.0, min(1.0, round(l, 3))),
             max(0.0, min(1.0, round(t, 3))),
@@ -125,35 +130,52 @@ def process_annotations(frame: np.ndarray,
             max(0.0, min(1.0, round(b, 3))),
         ]
         box_type, coords = classify_bbox(bbox)
-        color = ann.get('color', '#42a5f5')
-        label = ann.get('label', '')
-        source = ann.get('source', 'user')
-        elements.append({'id': i + 1, 'type': box_type, 'bbox': coords,
-                         'color': color, 'label': label, 'source': source})
+        color = ann.get("color", "#42a5f5")
+        label = ann.get("label", "")
+        source = ann.get("source", "user")
+        elements.append(
+            {
+                "id": i + 1,
+                "type": box_type,
+                "bbox": coords,
+                "color": color,
+                "label": label,
+                "source": source,
+            }
+        )
         bgr = _hex_to_bgr(color)
-        cv2.rectangle(out,
-                      (int(ann['left']), int(ann['top'])),
-                      (int(ann['right']), int(ann['bottom'])),
-                      bgr, 2)
-        cv2.putText(out, str(i + 1),
-                    (int(ann['left']) + 4, int(ann['top']) + 20),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, bgr, 2)
+        cv2.rectangle(
+            out,
+            (int(ann["left"]), int(ann["top"])),
+            (int(ann["right"]), int(ann["bottom"])),
+            bgr,
+            2,
+        )
+        cv2.putText(
+            out,
+            str(i + 1),
+            (int(ann["left"]) + 4, int(ann["top"]) + 20),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            bgr,
+            2,
+        )
 
     lines = [f"# Pending Annotations ({len(elements)} items)\n"]
     for e in elements:
-        name = _COLOR_NAMES.get(e['color'], e['color'])
-        b = e['bbox']
-        desc = f" — {e['label']}" if e['label'] else ""
-        src = f" [{e['source']}]" if e['source'] != 'user' else ""
+        name = _COLOR_NAMES.get(e["color"], e["color"])
+        b = e["bbox"]
+        desc = f" — {e['label']}" if e["label"] else ""
+        src = f" [{e['source']}]" if e["source"] != "user" else ""
         coords = ", ".join(str(v) for v in b)
-        type_tag = f" ({e['type']})" if e['type'] != 'box' else ""
+        type_tag = f" ({e['type']})" if e["type"] != "box" else ""
         lines.append(f"- {e['id']}{type_tag} ({name}){src}: [{coords}]{desc}")
     return "\n".join(lines), out
 
 
 def encode_jpeg(frame: np.ndarray, quality: int = 85) -> bytes:
     """Encode a BGR frame to JPEG bytes."""
-    _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
+    _, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
     return jpeg.tobytes()
 
 
@@ -176,14 +198,23 @@ def watermark_index(frame: np.ndarray, index: int) -> np.ndarray:
     # 50% opacity black background plate
     overlay = out.copy()
     pad = int(scale * 20)
-    cv2.rectangle(overlay,
-                  (cx - tw // 2 - pad, cy - th // 2 - pad),
-                  (cx + tw // 2 + pad, cy + th // 2 + pad),
-                  (0, 0, 0), -1)
+    cv2.rectangle(
+        overlay,
+        (cx - tw // 2 - pad, cy - th // 2 - pad),
+        (cx + tw // 2 + pad, cy + th // 2 + pad),
+        (0, 0, 0),
+        -1,
+    )
     cv2.addWeighted(overlay, 0.5, out, 0.5, 0, out)
 
     # White label on top
-    cv2.putText(out, label,
-                (cx - tw // 2, cy + th // 2),
-                font, scale, (255, 255, 255), thickness)
+    cv2.putText(
+        out,
+        label,
+        (cx - tw // 2, cy + th // 2),
+        font,
+        scale,
+        (255, 255, 255),
+        thickness,
+    )
     return out

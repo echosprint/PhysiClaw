@@ -22,7 +22,9 @@ MODEL_DIR = Path(__file__).parent.parent / "data" / "model" / "omniparser_icon_d
 PT_PATH = MODEL_DIR / "model.pt"
 ONNX_PATH = MODEL_DIR / "model.onnx"
 
-PT_URL = "https://huggingface.co/microsoft/OmniParser-v2.0/resolve/main/icon_detect/model.pt"
+PT_URL = (
+    "https://huggingface.co/microsoft/OmniParser-v2.0/resolve/main/icon_detect/model.pt"
+)
 
 
 def download_pt():

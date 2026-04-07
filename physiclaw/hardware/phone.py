@@ -27,9 +27,9 @@ from physiclaw.bridge.protocol import (
 log = logging.getLogger(__name__)
 
 # Verification thresholds (hardware-only, not part of the page protocol)
-NONCE_COLOR_MIN = 50    # avoid near-black
-NONCE_COLOR_MAX = 230   # avoid near-white
-NONCE_MAX_DIST = 40     # max Euclidean RGB distance for a match
+NONCE_COLOR_MIN = 50  # avoid near-black
+NONCE_COLOR_MAX = 230  # avoid near-white
+NONCE_MAX_DIST = 40  # max Euclidean RGB distance for a match
 
 
 class AssistiveTouch:
@@ -79,19 +79,21 @@ class AssistiveTouch:
         """
         t = screenshot_transform
         # CSS viewport → screenshot pixel
-        px_x = AT_CSS_X * t['dpr'] + t['offset_x']
-        px_y = AT_CSS_Y * t['dpr'] + t['offset_y']
+        px_x = AT_CSS_X * t["dpr"] + t["offset_x"]
+        px_y = AT_CSS_Y * t["dpr"] + t["offset_y"]
         # Screenshot pixel → screenshot 0-1
-        sx = px_x / t['screenshot_width']
-        sy = px_y / t['screenshot_height']
+        sx = px_x / t["screenshot_width"]
+        sy = px_y / t["screenshot_height"]
         self.at_screen = (sx, sy)
         # AT button radius in screenshot 0-1 (different for x/y due to aspect ratio)
-        rx = AT_RADIUS * t['dpr'] / t['screenshot_width']
-        ry = AT_RADIUS * t['dpr'] / t['screenshot_height']
+        rx = AT_RADIUS * t["dpr"] / t["screenshot_width"]
+        ry = AT_RADIUS * t["dpr"] / t["screenshot_height"]
         self.at_radius_screen = (rx, ry)
-        log.info(f"AT screen position: CSS ({AT_CSS_X}, {AT_CSS_Y}) → "
-                 f"screenshot 0-1 ({sx:.3f}, {sy:.3f}), "
-                 f"radius ({rx:.3f}, {ry:.3f})")
+        log.info(
+            f"AT screen position: CSS ({AT_CSS_X}, {AT_CSS_Y}) → "
+            f"screenshot 0-1 ({sx:.3f}, {sy:.3f}), "
+            f"radius ({rx:.3f}, {ry:.3f})"
+        )
         return self.at_screen
 
     def _move_to_at(self, arm, pct_to_grbl: np.ndarray):
@@ -109,7 +111,9 @@ class AssistiveTouch:
             raise RuntimeError("AT position not set — call compute_at_screen_pos first")
         self._move_to_at(arm, pct_to_grbl)
         arm.tap()
-        log.info(f"AT single-tap at screen ({self.at_screen[0]:.3f}, {self.at_screen[1]:.3f})")
+        log.info(
+            f"AT single-tap at screen ({self.at_screen[0]:.3f}, {self.at_screen[1]:.3f})"
+        )
 
     def double_tap(self, arm, pct_to_grbl: np.ndarray):
         """Double-tap AT — iOS Shortcut gets latest screenshot and uploads it."""
@@ -117,10 +121,13 @@ class AssistiveTouch:
             raise RuntimeError("AT position not set — call compute_at_screen_pos first")
         self._move_to_at(arm, pct_to_grbl)
         arm.double_tap()
-        log.info(f"AT double-tap at screen ({self.at_screen[0]:.3f}, {self.at_screen[1]:.3f})")
+        log.info(
+            f"AT double-tap at screen ({self.at_screen[0]:.3f}, {self.at_screen[1]:.3f})"
+        )
 
-    def take_screenshot(self, arm, bridge, pct_to_grbl: np.ndarray,
-                        timeout: float = 10.0) -> bytes | None:
+    def take_screenshot(
+        self, arm, bridge, pct_to_grbl: np.ndarray, timeout: float = 10.0
+    ) -> bytes | None:
         """Single-tap (take screenshot) + double-tap (upload latest), return image bytes."""
         bridge.clear_screenshot()
         self.tap(arm, pct_to_grbl)
@@ -136,13 +143,15 @@ class AssistiveTouch:
     @staticmethod
     def generate_nonce() -> list[list[int]]:
         """Generate 20 random RGB colors for screenshot verification."""
-        return [[random.randint(NONCE_COLOR_MIN, NONCE_COLOR_MAX)
-                 for _ in range(3)]
-                for _ in range(NONCE_COUNT)]
+        return [
+            [random.randint(NONCE_COLOR_MIN, NONCE_COLOR_MAX) for _ in range(3)]
+            for _ in range(NONCE_COUNT)
+        ]
 
     @staticmethod
-    def verify_nonce(img: np.ndarray, screenshot_transform: dict,
-                     expected_colors: list[list[int]]) -> tuple[bool, int]:
+    def verify_nonce(
+        img: np.ndarray, screenshot_transform: dict, expected_colors: list[list[int]]
+    ) -> tuple[bool, int]:
         """Verify color nonce barcode in a screenshot.
 
         Samples the center pixel of each 3×3 CSS square (scaled by DPR)
@@ -157,10 +166,10 @@ class AssistiveTouch:
             (all_matched, match_count) — all_matched is True only if 20/20.
         """
         t = screenshot_transform
-        dpr = t['dpr']
+        dpr = t["dpr"]
         step = int(NONCE_SQUARE_SIZE * dpr)  # pixel spacing between squares
-        base_x = int(NONCE_CSS_X * dpr + t['offset_x'])
-        base_y = int(NONCE_CSS_Y * dpr + t['offset_y'])
+        base_x = int(NONCE_CSS_X * dpr + t["offset_x"])
+        base_y = int(NONCE_CSS_Y * dpr + t["offset_y"])
 
         matched = 0
         for i, expected in enumerate(expected_colors):
@@ -168,22 +177,29 @@ class AssistiveTouch:
             cx = base_x + step // 2
             cy = base_y + i * step + step // 2
             if not (0 <= cy < img.shape[0] and 0 <= cx < img.shape[1]):
-                log.warning(f"  Nonce square {i}: pixel ({cx}, {cy}) out of bounds "
-                            f"({img.shape[1]}×{img.shape[0]})")
+                log.warning(
+                    f"  Nonce square {i}: pixel ({cx}, {cy}) out of bounds "
+                    f"({img.shape[1]}×{img.shape[0]})"
+                )
                 continue
             # OpenCV is BGR
             b, g, r = int(img[cy, cx, 0]), int(img[cy, cx, 1]), int(img[cy, cx, 2])
-            dist = ((r - expected[0])**2 + (g - expected[1])**2 +
-                    (b - expected[2])**2) ** 0.5
+            dist = (
+                (r - expected[0]) ** 2 + (g - expected[1]) ** 2 + (b - expected[2]) ** 2
+            ) ** 0.5
             if dist < NONCE_MAX_DIST:
                 matched += 1
             else:
-                log.info(f"  Nonce square {i}: expected RGB({expected[0]}, {expected[1]}, {expected[2]}), "
-                         f"got RGB({r}, {g}, {b}), dist={dist:.1f} — MISMATCH")
+                log.info(
+                    f"  Nonce square {i}: expected RGB({expected[0]}, {expected[1]}, {expected[2]}), "
+                    f"got RGB({r}, {g}, {b}), dist={dist:.1f} — MISMATCH"
+                )
 
         all_matched = matched == len(expected_colors)
-        log.info(f"  Nonce verification: {matched}/{len(expected_colors)} matched"
-                 f" — {'PASS' if all_matched else 'FAIL'}")
+        log.info(
+            f"  Nonce verification: {matched}/{len(expected_colors)} matched"
+            f" — {'PASS' if all_matched else 'FAIL'}"
+        )
         return all_matched, matched
 
     # ─── Step 7 setup flow ────────────────────────────────────
@@ -203,7 +219,9 @@ class AssistiveTouch:
             raise RuntimeError("AT position not set — call compute_at_screen_pos first")
 
         log.info("═══ Step 7: AssistiveTouch screenshot verification ═══")
-        log.info(f"  AT position: screen 0-1 ({self.at_screen[0]:.3f}, {self.at_screen[1]:.3f})")
+        log.info(
+            f"  AT position: screen 0-1 ({self.at_screen[0]:.3f}, {self.at_screen[1]:.3f})"
+        )
 
         # Generate nonce (caller should have already set it on the phone)
         nonce = cal_state._screenshot_nonce

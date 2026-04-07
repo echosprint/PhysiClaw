@@ -70,13 +70,13 @@ def detect_all_elements(
 
     # ── Tool 2: Icon detection ─────────────────────────────
     icon_table_header = (
-        "| id | bbox [left, top, right, bottom] | conf |\n"
-        "|----|------|------|"
+        "| id | bbox [left, top, right, bottom] | conf |\n|----|------|------|"
     )
     icon_rows = []
     icon_frame = frame.copy()
     try:
         from physiclaw.vision.icon_detect import IconDetector, annotate as icon_annotate
+
         if icon_detector is None:
             icon_detector = IconDetector()
         icons = icon_detector.detect(frame, confidence=0.2)
@@ -103,6 +103,7 @@ def detect_all_elements(
     ocr_frame = frame.copy()
     try:
         from physiclaw.vision.ocr import OCRReader, annotate as ocr_annotate
+
         if ocr_reader is None:
             ocr_reader = OCRReader()
         texts = ocr_reader.read(frame)
@@ -113,14 +114,14 @@ def detect_all_elements(
             l, tp = cal.pixel_to_pct(x1, y1)
             r, b = cal.pixel_to_pct(x2, y2)
             ocr_rows.append(
-                f"| {element_id} | \"{t.text}\" "
+                f'| {element_id} | "{t.text}" '
                 f"| [{l:.2f}, {tp:.2f}, {r:.2f}, {b:.2f}] "
                 f"| {t.confidence:.2f} |"
             )
     except ImportError as ex:
         ocr_rows.append(f"| — | unavailable: {ex} | — | — |")
 
-    ts = datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ')
+    ts = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
     elements_text = (
         f"# Screen Parse Result\n\n"
         f"- **resolution**: {w}x{h}\n"

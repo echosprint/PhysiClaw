@@ -43,14 +43,16 @@ async def handle_screen_dimension(request, cal: CalibrationState):
     body = await request.json()
     with cal.lock:
         cal.screen_dimension = {
-            "width": int(body.get('screen_width', 0)),
-            "height": int(body.get('screen_height', 0)),
-            "viewport_width": int(body.get('viewport_width', 0)),
-            "viewport_height": int(body.get('viewport_height', 0)),
+            "width": int(body.get("screen_width", 0)),
+            "height": int(body.get("screen_height", 0)),
+            "viewport_width": int(body.get("viewport_width", 0)),
+            "viewport_height": int(body.get("viewport_height", 0)),
         }
     dim = cal.screen_dimension
-    log.info(f"Bridge device: {dim['width']}×{dim['height']}pt, "
-             f"viewport {dim['viewport_width']}×{dim['viewport_height']}pt")
+    log.info(
+        f"Bridge device: {dim['width']}×{dim['height']}pt, "
+        f"viewport {dim['viewport_width']}×{dim['viewport_height']}pt"
+    )
     return JSONResponse({"ok": True})
 
 
@@ -89,11 +91,15 @@ async def handle_mode_switch(request, phone: PageState):
     body = await request.json()
     mode = body.get("mode")
     if mode not in ("bridge", "calibrate"):
-        return JSONResponse({"error": "mode must be 'bridge' or 'calibrate'"}, status_code=400)
+        return JSONResponse(
+            {"error": "mode must be 'bridge' or 'calibrate'"}, status_code=400
+        )
     if mode == "calibrate":
         phase_name = body.get("phase")
         if not phase_name:
-            return JSONResponse({"error": "phase required for calibrate mode"}, status_code=400)
+            return JSONResponse(
+                {"error": "phase required for calibrate mode"}, status_code=400
+            )
         kwargs = {k: v for k, v in body.items() if k not in ("mode", "phase")}
         try:
             phone.set_mode(mode, phase_name, **kwargs)
@@ -122,7 +128,8 @@ async def handle_calib_touch(request, cal: CalibrationState):
     screenshot 0-1 coords and attach them as x, y.
     """
     body = await request.json()
-    body['x'], body['y'] = cal.viewport_to_screenshot_pct(
-        body['clientX'], body['clientY'])
+    body["x"], body["y"] = cal.viewport_to_screenshot_pct(
+        body["clientX"], body["clientY"]
+    )
     cal.report_touch(body)
     return JSONResponse({"ok": True})

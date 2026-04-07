@@ -40,15 +40,17 @@ _detector_cache: dict = {"icon": None, "ocr": None}
 def _save_frame(frame, suffix: str) -> None:
     """Write a BGR frame into data/snapshot/ with a timestamp + suffix."""
     SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
-    cv2.imwrite(str(SNAPSHOT_DIR / f'{ts}_{suffix}.jpg'), frame)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+    cv2.imwrite(str(SNAPSHOT_DIR / f"{ts}_{suffix}.jpg"), frame)
 
 
-def register(mcp: FastMCP,
-             physiclaw: PhysiClaw,
-             bridge: BridgeState,
-             calib: CalibrationState,
-             ann: AnnotationState):
+def register(
+    mcp: FastMCP,
+    physiclaw: PhysiClaw,
+    bridge: BridgeState,
+    calib: CalibrationState,
+    ann: AnnotationState,
+):
     """Register every MCP tool on the given FastMCP instance.
 
     Args:
@@ -124,25 +126,28 @@ def register(mcp: FastMCP,
             if _detector_cache["icon"] is None:
                 try:
                     from physiclaw.vision.icon_detect import IconDetector
+
                     _detector_cache["icon"] = IconDetector()
                 except (ImportError, FileNotFoundError):
                     pass  # detect_all_elements handles missing detector
             if _detector_cache["ocr"] is None:
                 try:
                     from physiclaw.vision.ocr import OCRReader
+
                     _detector_cache["ocr"] = OCRReader()
                 except ImportError:
                     pass
 
             elements_text, color_frame, icon_frame, ocr_frame = detect_all_elements(
-                frame, physiclaw.transforms,
+                frame,
+                physiclaw.transforms,
                 icon_detector=_detector_cache["icon"],
                 ocr_reader=_detector_cache["ocr"],
             )
 
-            _save_frame(color_frame, 'colors')
-            _save_frame(icon_frame, 'icons')
-            _save_frame(ocr_frame, 'ocr')
+            _save_frame(color_frame, "colors")
+            _save_frame(icon_frame, "icons")
+            _save_frame(ocr_frame, "ocr")
 
             return [
                 elements_text,
@@ -191,10 +196,14 @@ def register(mcp: FastMCP,
         has_overlay = detect_dark_overlay(frame)
 
         lines = [f"Screen match: {'YES' if result.matched else 'NO'}"]
-        lines.append(f"Confidence: {result.confidence:.1%} "
-                     f"({result.good_matches} matches, {result.inliers} inliers)")
+        lines.append(
+            f"Confidence: {result.confidence:.1%} "
+            f"({result.good_matches} matches, {result.inliers} inliers)"
+        )
         if has_overlay:
-            lines.append("WARNING: dark overlay detected — possible popup or modal dialog")
+            lines.append(
+                "WARNING: dark overlay detected — possible popup or modal dialog"
+            )
         lines.append(f"Reference: {reference_path}")
         return "\n".join(lines)
 
@@ -220,8 +229,11 @@ def register(mcp: FastMCP,
             physiclaw.release()
 
         changed = frames_differ(frame_a, frame_b)
-        status = "Screen CHANGED — the gesture had an effect" if changed \
+        status = (
+            "Screen CHANGED — the gesture had an effect"
+            if changed
             else "Screen UNCHANGED — the gesture may not have registered, try again"
+        )
         return [status, Image(data=encode_jpeg(frame_b), format="jpeg")]
 
     @mcp.tool()
@@ -257,7 +269,7 @@ def register(mcp: FastMCP,
             time.sleep(1.5)
             frame = physiclaw.camera_view()
             out = draw_grid_overlay(frame, physiclaw.transforms, color, rows, cols)
-            _save_frame(out, 'overlay')
+            _save_frame(out, "overlay")
             return Image(data=encode_jpeg(out), format="jpeg")
         finally:
             physiclaw.release()
@@ -289,7 +301,7 @@ def register(mcp: FastMCP,
             physiclaw.set_pending_bbox(bbox)
             frame = physiclaw.camera_view()
             out = draw_bbox(frame, bbox, physiclaw.transforms)
-            _save_frame(out, 'bbox')
+            _save_frame(out, "bbox")
             return Image(data=encode_jpeg(out), format="jpeg")
         finally:
             physiclaw.release()
@@ -415,7 +427,9 @@ def register(mcp: FastMCP,
         if bridge.connected:
             lines.append("Status: connected ✓")
         else:
-            lines.append("Status: not connected — ask the user to open the URL on their phone")
+            lines.append(
+                "Status: not connected — ask the user to open the URL on their phone"
+            )
 
         if calib.screen_dimension:
             d = calib.screen_dimension
@@ -456,9 +470,13 @@ def register(mcp: FastMCP,
             physiclaw.release()
 
         if bridge.wait_clipboard(timeout=5.0):
-            return f"Clipboard ready — '{bridge.current_text()}' copied to phone clipboard"
-        return ("Tap sent but clipboard copy not confirmed. "
-                "Is the phone page open in the foreground on the phone?")
+            return (
+                f"Clipboard ready — '{bridge.current_text()}' copied to phone clipboard"
+            )
+        return (
+            "Tap sent but clipboard copy not confirmed. "
+            "Is the phone page open in the foreground on the phone?"
+        )
 
     @mcp.tool()
     def phone_screenshot() -> Image:
@@ -476,22 +494,24 @@ def register(mcp: FastMCP,
         if not physiclaw.assistive_touch.ready:
             raise RuntimeError("AssistiveTouch not set up — run /setup first (step 7)")
 
-        pct_to_grbl = physiclaw._cal.get('screen_to_grbl')
+        pct_to_grbl = physiclaw._cal.get("screen_to_grbl")
         if pct_to_grbl is None:
             raise RuntimeError("Calibration incomplete — run /setup first")
 
         physiclaw.acquire()
         try:
             data = physiclaw.assistive_touch.take_screenshot(
-                physiclaw._arm, bridge, pct_to_grbl)
+                physiclaw._arm, bridge, pct_to_grbl
+            )
         finally:
             physiclaw.release()
 
         if data is None:
-            raise RuntimeError("Timeout — no screenshot received. "
-                               "Check iOS Shortcut is configured.")
+            raise RuntimeError(
+                "Timeout — no screenshot received. Check iOS Shortcut is configured."
+            )
 
-        fmt = "png" if data[:4] == b'\x89PNG' else "jpeg"
+        fmt = "png" if data[:4] == b"\x89PNG" else "jpeg"
         return Image(data=data, format=fmt)
 
     # ─── Annotation tools ───────────────────────────────────
@@ -500,15 +520,15 @@ def register(mcp: FastMCP,
         """Render a list of confirmed annotations as markdown."""
         lines = [f"# {header} ({len(boxes)} items)\n"]
         for i, box in enumerate(boxes):
-            b = box['bbox']
-            box_type = box.get('type', 'box')
-            label = box.get('label', '')
-            source = box.get('source', 'user')
-            src = f" [{source}]" if source != 'user' else ""
+            b = box["bbox"]
+            box_type = box.get("type", "box")
+            label = box.get("label", "")
+            source = box.get("source", "user")
+            src = f" [{source}]" if source != "user" else ""
             desc = f" — {label}" if label else ""
             coords = ", ".join(str(v) for v in b)
-            type_tag = f" ({box_type})" if box_type != 'box' else ""
-            lines.append(f"- {i+1}{type_tag}{src}: [{coords}]{desc}")
+            type_tag = f" ({box_type})" if box_type != "box" else ""
+            lines.append(f"- {i + 1}{type_tag}{src}: [{coords}]{desc}")
         return "\n".join(lines)
 
     @mcp.tool()
@@ -527,13 +547,14 @@ def register(mcp: FastMCP,
             confirmed = list(ann.confirmed_annotations)
         frozen_frame = ann.get_frozen_frame()
         if not confirmed:
-            return ["No confirmed annotations. "
-                    f"Ask the user to draw boxes at http://{mcp.settings.host}:{mcp.settings.port}/annotate and click Confirm."]
+            return [
+                "No confirmed annotations. "
+                f"Ask the user to draw boxes at http://{mcp.settings.host}:{mcp.settings.port}/annotate and click Confirm."
+            ]
 
         text = _format_confirmed(confirmed, "Confirmed Annotations")
         if frozen_frame is not None:
-            return [text, Image(data=encode_jpeg(frozen_frame),
-                                format="jpeg")]
+            return [text, Image(data=encode_jpeg(frozen_frame), format="jpeg")]
         return [text]
 
     @mcp.tool()
@@ -561,13 +582,15 @@ def register(mcp: FastMCP,
                 return "Camera capture failed"
             frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
 
-            snapshot_id = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
+            snapshot_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
             ann.freeze(frame, snapshot_id)
             ann.push_agent_proposals(proposals)
 
             url = f"http://{mcp.settings.host}:{mcp.settings.port}/annotate"
-            return (f"{len(proposals)} proposals sent to annotation UI. "
-                    f"Ask the user to review and confirm at {url}")
+            return (
+                f"{len(proposals)} proposals sent to annotation UI. "
+                f"Ask the user to review and confirm at {url}"
+            )
         finally:
             physiclaw.release()
 
@@ -585,14 +608,15 @@ def register(mcp: FastMCP,
         """
         result = ann.wait_confirmed(timeout=float(timeout))
         if result is None:
-            return ["Timeout — the user hasn't confirmed yet. "
-                    f"Ask them if they need help at http://{mcp.settings.host}:{mcp.settings.port}/annotate"]
+            return [
+                "Timeout — the user hasn't confirmed yet. "
+                f"Ask them if they need help at http://{mcp.settings.host}:{mcp.settings.port}/annotate"
+            ]
 
         frozen_frame = ann.get_frozen_frame()
         ann.clear_confirmation()
 
         text = _format_confirmed(result, "Confirmed Annotations")
         if frozen_frame is not None:
-            return [text, Image(data=encode_jpeg(frozen_frame),
-                                format="jpeg")]
+            return [text, Image(data=encode_jpeg(frozen_frame), format="jpeg")]
         return [text]

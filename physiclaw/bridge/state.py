@@ -50,11 +50,19 @@ class BridgeState:
     """
 
     def __init__(self):
-        self.lock = threading.Lock()  # protects shared fields (text, screenshot) across threads
+        self.lock = (
+            threading.Lock()
+        )  # protects shared fields (text, screenshot) across threads
         self._text: str | None = None  # current text queued for the phone bridge page
-        self.last_seen: float = 0  # timestamp of last phone poll, for connection detection
-        self._clipboard_copied = threading.Event()  # set when phone confirms tap-to-copy
-        self._screenshot_data: bytes | None = None  # PNG/JPEG bytes from iOS Shortcut upload
+        self.last_seen: float = (
+            0  # timestamp of last phone poll, for connection detection
+        )
+        self._clipboard_copied = (
+            threading.Event()
+        )  # set when phone confirms tap-to-copy
+        self._screenshot_data: bytes | None = (
+            None  # PNG/JPEG bytes from iOS Shortcut upload
+        )
         self._screenshot_ready = threading.Event()  # set when screenshot upload arrives
 
     @property

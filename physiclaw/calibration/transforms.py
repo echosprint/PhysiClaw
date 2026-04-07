@@ -30,13 +30,16 @@ class ScreenTransforms:
     Camera pixel conversion happens at the boundary via cam_size.
     """
 
-    pct_to_grbl: np.ndarray    # (2, 3) screen 0-1 → GRBL mm
-    pct_to_cam: np.ndarray     # (2, 3) screen 0-1 → camera 0-1
+    pct_to_grbl: np.ndarray  # (2, 3) screen 0-1 → GRBL mm
+    pct_to_cam: np.ndarray  # (2, 3) screen 0-1 → camera 0-1
     cam_size: tuple[int, int]  # (width, height) of camera frame in pixels
 
-    def __init__(self, pct_to_grbl: np.ndarray,
-                 pct_to_cam: np.ndarray,
-                 cam_size: tuple[int, int] = (1920, 1080)):
+    def __init__(
+        self,
+        pct_to_grbl: np.ndarray,
+        pct_to_cam: np.ndarray,
+        cam_size: tuple[int, int] = (1920, 1080),
+    ):
         self.pct_to_grbl = pct_to_grbl
         self.pct_to_cam = pct_to_cam
         self.cam_size = cam_size
@@ -63,14 +66,14 @@ class ScreenTransforms:
         w, h = self.cam_size
         cam_01 = np.array([px_x / w, px_y / h])
         A = self.pct_to_cam[:, :2]  # 2x2
-        b = self.pct_to_cam[:, 2]   # translation
+        b = self.pct_to_cam[:, 2]  # translation
         pct = np.linalg.solve(A, cam_01 - b)
         return (float(pct[0]), float(pct[1]))
 
-    def bbox_to_pixel_rect(self, bbox: list[float]) -> tuple[tuple[int, int], tuple[int, int]]:
+    def bbox_to_pixel_rect(
+        self, bbox: list[float]
+    ) -> tuple[tuple[int, int], tuple[int, int]]:
         """Convert bbox [left, top, right, bottom] (0-1) to camera pixel rectangle."""
         tl = self.pct_to_cam_pixel(bbox[0], bbox[1])
         br = self.pct_to_cam_pixel(bbox[2], bbox[3])
         return (tl, br)
-
-

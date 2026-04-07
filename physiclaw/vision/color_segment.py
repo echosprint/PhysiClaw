@@ -33,14 +33,14 @@ log = logging.getLogger(__name__)
 
 # OpenCV H range is 0-179 (half degrees)
 _COLOR_RANGES = [
-    (0,   10,  "red"),
-    (10,  22,  "orange"),
-    (22,  35,  "yellow"),
-    (35,  78,  "green"),
-    (78,  100, "cyan"),
+    (0, 10, "red"),
+    (10, 22, "orange"),
+    (22, 35, "yellow"),
+    (35, 78, "green"),
+    (78, 100, "cyan"),
     (100, 130, "blue"),
     (130, 155, "purple"),
-    (155, 180, "red"),      # red wraps around
+    (155, 180, "red"),  # red wraps around
 ]
 
 
@@ -54,46 +54,45 @@ def hue_to_name(h_mean: float) -> str:
 
 # ─── Data structures ─────────────────────────────────────────
 
+
 @dataclass
 class ColorBlob:
     """A detected colored region in the image."""
-    bbox: tuple[int, int, int, int]     # (x1, y1, x2, y2) in pixels
-    area: int                           # pixel area
-    color_name: str                     # human-readable color
-    h_mean: float                       # mean hue (0-179)
-    h_std: float                        # hue std dev — low=solid, high=image
-    s_mean: float                       # mean saturation
-    is_solid: bool                      # True if H_std < 12 (solid UI element)
-    is_image: bool                      # True if H_std > 25 (content image)
-    aspect_ratio: float                 # width / height
+
+    bbox: tuple[int, int, int, int]  # (x1, y1, x2, y2) in pixels
+    area: int  # pixel area
+    color_name: str  # human-readable color
+    h_mean: float  # mean hue (0-179)
+    h_std: float  # hue std dev — low=solid, high=image
+    s_mean: float  # mean saturation
+    is_solid: bool  # True if H_std < 12 (solid UI element)
+    is_image: bool  # True if H_std > 25 (content image)
+    aspect_ratio: float  # width / height
 
 
 # ─── Core pipeline ───────────────────────────────────────────
+
 
 def segment_saturation(image_bgr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """HSV S-channel Otsu threshold. Returns (binary_mask, hsv_image)."""
     hsv = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2HSV)
     s_channel = hsv[:, :, 1]
-    _, mask = cv2.threshold(s_channel, 0, 255,
-                            cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    _, mask = cv2.threshold(s_channel, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     return mask, hsv
 
 
-def clean_mask(mask: np.ndarray, close_size: int = 7,
-               open_size: int = 5) -> np.ndarray:
+def clean_mask(mask: np.ndarray, close_size: int = 7, open_size: int = 5) -> np.ndarray:
     """Morphological close (fill gaps) then open (remove noise)."""
-    kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT,
-                                             (close_size, close_size))
-    kernel_open = cv2.getStructuringElement(cv2.MORPH_RECT,
-                                            (open_size, open_size))
+    kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (close_size, close_size))
+    kernel_open = cv2.getStructuringElement(cv2.MORPH_RECT, (open_size, open_size))
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel_close)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel_open)
     return mask
 
 
-def extract_blobs(mask: np.ndarray, hsv: np.ndarray,
-                  min_area: int = 200,
-                  max_area_ratio: float = 0.4) -> list[ColorBlob]:
+def extract_blobs(
+    mask: np.ndarray, hsv: np.ndarray, min_area: int = 200, max_area_ratio: float = 0.4
+) -> list[ColorBlob]:
     """Extract and classify colored blobs from the mask.
 
     Args:
@@ -105,7 +104,8 @@ def extract_blobs(mask: np.ndarray, hsv: np.ndarray,
     max_area = int(total_area * max_area_ratio)
 
     num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(
-        mask, connectivity=8)
+        mask, connectivity=8
+    )
 
     blobs = []
     for i in range(1, num_labels):  # skip background (label 0)
@@ -121,7 +121,7 @@ def extract_blobs(mask: np.ndarray, hsv: np.ndarray,
         y2 = y1 + bh
 
         # Extract hue values within this blob's mask
-        blob_mask = (labels == i)
+        blob_mask = labels == i
         hues = hsv[:, :, 0][blob_mask]
         sats = hsv[:, :, 1][blob_mask]
 
@@ -137,30 +137,34 @@ def extract_blobs(mask: np.ndarray, hsv: np.ndarray,
         s_mean = float(np.mean(sats))
         aspect = bw / bh if bh > 0 else 1.0
 
-        blobs.append(ColorBlob(
-            bbox=(x1, y1, x2, y2),
-            area=area,
-            color_name=hue_to_name(h_mean),
-            h_mean=round(h_mean, 1),
-            h_std=round(h_std, 1),
-            s_mean=round(s_mean, 1),
-            is_solid=(h_std < 12),
-            is_image=(h_std > 25),
-            aspect_ratio=round(aspect, 2),
-        ))
+        blobs.append(
+            ColorBlob(
+                bbox=(x1, y1, x2, y2),
+                area=area,
+                color_name=hue_to_name(h_mean),
+                h_mean=round(h_mean, 1),
+                h_std=round(h_std, 1),
+                s_mean=round(s_mean, 1),
+                is_solid=(h_std < 12),
+                is_image=(h_std > 25),
+                aspect_ratio=round(aspect, 2),
+            )
+        )
 
     # Sort by area descending (largest first)
     blobs.sort(key=lambda b: b.area, reverse=True)
-    log.debug(f"Extracted {len(blobs)} color blobs "
-              f"({sum(1 for b in blobs if b.is_solid)} solid, "
-              f"{sum(1 for b in blobs if b.is_image)} image)")
+    log.debug(
+        f"Extracted {len(blobs)} color blobs "
+        f"({sum(1 for b in blobs if b.is_solid)} solid, "
+        f"{sum(1 for b in blobs if b.is_image)} image)"
+    )
     return blobs
 
 
 # ─── Main entry point ────────────────────────────────────────
 
-def detect_color_blocks(image_bgr: np.ndarray,
-                        min_area: int = 200) -> list[ColorBlob]:
+
+def detect_color_blocks(image_bgr: np.ndarray, min_area: int = 200) -> list[ColorBlob]:
     """Detect colored UI elements and content images in a screenshot.
 
     Returns list of ColorBlob sorted by area (largest first).
@@ -172,13 +176,15 @@ def detect_color_blocks(image_bgr: np.ndarray,
 
 # ─── 1D card y-scan (list item detection) ────────────────────
 
-def find_card_y_positions(image_bgr: np.ndarray,
-                          x_col_pct: float,
-                          y_min_pct: float = 0.0,
-                          y_max_pct: float = 1.0,
-                          col_width_pct: float = 0.15,
-                          min_gap_px: int = 10,
-                          ) -> list[tuple[float, float]]:
+
+def find_card_y_positions(
+    image_bgr: np.ndarray,
+    x_col_pct: float,
+    y_min_pct: float = 0.0,
+    y_max_pct: float = 1.0,
+    col_width_pct: float = 0.15,
+    min_gap_px: int = 10,
+) -> list[tuple[float, float]]:
     """Find vertical positions of list cards by scanning for content images.
 
     Many app lists (food delivery, shopping, chat) have content images
@@ -217,8 +223,8 @@ def find_card_y_positions(image_bgr: np.ndarray,
 
     # Threshold: rows with saturation above Otsu threshold are "card content"
     _, thresh = cv2.threshold(
-        row_means.astype(np.uint8), 0, 255,
-        cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        row_means.astype(np.uint8), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
+    )
 
     # Find contiguous high-saturation runs → card boundaries
     cards = []
@@ -256,12 +262,12 @@ def find_card_y_positions(image_bgr: np.ndarray,
 
 # BGR colors for drawing
 _DRAW_COLORS = {
-    "red":    (0, 0, 255),
+    "red": (0, 0, 255),
     "orange": (0, 128, 255),
     "yellow": (0, 255, 255),
-    "green":  (0, 200, 0),
-    "cyan":   (255, 200, 0),
-    "blue":   (255, 100, 0),
+    "green": (0, 200, 0),
+    "cyan": (255, 200, 0),
+    "blue": (255, 100, 0),
     "purple": (200, 0, 200),
 }
 

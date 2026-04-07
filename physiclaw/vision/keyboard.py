@@ -24,6 +24,7 @@ log = logging.getLogger(__name__)
 
 # ─── Space bar detection ──────────────────────────────────────
 
+
 def detect_space_bottom(gray: np.ndarray) -> int | None:
     """Find the bottom edge of the space bar (y pixel).
 
@@ -55,8 +56,8 @@ def detect_space_bottom(gray: np.ndarray) -> int | None:
 
 # ─── Row boundary detection ───────────────────────────────────
 
-def detect_row_boundaries(gray: np.ndarray, space_bottom_y: int,
-                          num_rows: int = 4):
+
+def detect_row_boundaries(gray: np.ndarray, space_bottom_y: int, num_rows: int = 4):
     """Find key row boundaries by scanning up from the space bar.
 
     A separator line = all pixels in the row have the same value.
@@ -93,8 +94,10 @@ def detect_row_boundaries(gray: np.ndarray, space_bottom_y: int,
 
 # ─── Key detection within a row ───────────────────────────────
 
-def detect_keys_in_row(gray: np.ndarray, top: int, bottom: int,
-                       bg_value: int) -> list[tuple[int, int]]:
+
+def detect_keys_in_row(
+    gray: np.ndarray, top: int, bottom: int, bg_value: int
+) -> list[tuple[int, int]]:
     """Find key boundaries within a row.
 
     For each column, if ALL pixels from top to bottom equal the background
@@ -127,9 +130,11 @@ def detect_keys_in_row(gray: np.ndarray, top: int, bottom: int,
 
 # ─── Main detection entry point ───────────────────────────────
 
-def detect_key_boxes(frame: np.ndarray,
-                     num_rows: int = 4,
-                     ) -> tuple[list[list[float]], int | None]:
+
+def detect_key_boxes(
+    frame: np.ndarray,
+    num_rows: int = 4,
+) -> tuple[list[list[float]], int | None]:
     """Detect all key bounding boxes from a phone screenshot.
 
     Returns:
@@ -158,10 +163,14 @@ def detect_key_boxes(frame: np.ndarray,
     for top, bot in reversed(rows):
         keys = detect_keys_in_row(gray, top, bot, bg)
         for kl, kr in keys:
-            boxes.append([
-                round(kl / w, 3), round(top / h, 3),
-                round(kr / w, 3), round(bot / h, 3),
-            ])
+            boxes.append(
+                [
+                    round(kl / w, 3),
+                    round(top / h, 3),
+                    round(kr / w, 3),
+                    round(bot / h, 3),
+                ]
+            )
 
     log.info(f"Detected {len(boxes)} key boxes")
     return boxes, bg
@@ -169,10 +178,12 @@ def detect_key_boxes(frame: np.ndarray,
 
 # ─── Debug visualization ──────────────────────────────────────
 
-def draw_detected_keys(frame: np.ndarray,
-                       boxes: list[list[float]],
-                       bg_value: int | None = None,
-                       ) -> np.ndarray:
+
+def draw_detected_keys(
+    frame: np.ndarray,
+    boxes: list[list[float]],
+    bg_value: int | None = None,
+) -> np.ndarray:
     """Draw numbered bounding boxes on the screenshot.
 
     Color auto-adjusts for contrast: green on dark keyboards, red on light.
@@ -186,7 +197,7 @@ def draw_detected_keys(frame: np.ndarray,
     else:
         # Estimate from the keyboard region (bottom 30% of image)
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        is_dark = np.mean(gray[int(0.7 * h):]) < 128
+        is_dark = np.mean(gray[int(0.7 * h) :]) < 128
     color = (0, 255, 0) if is_dark else (0, 0, 255)  # green or red
 
     font = cv2.FONT_HERSHEY_SIMPLEX
@@ -194,8 +205,7 @@ def draw_detected_keys(frame: np.ndarray,
         x1, y1 = int(bbox[0] * w), int(bbox[1] * h)
         x2, y2 = int(bbox[2] * w), int(bbox[3] * h)
         cv2.rectangle(out, (x1, y1), (x2, y2), color, 2)
-        cv2.putText(out, str(i + 1), (x1 + 4, y1 + 28),
-                    font, 0.9, color, 2)
+        cv2.putText(out, str(i + 1), (x1 + 4, y1 + 28), font, 0.9, color, 2)
 
     return out
 
@@ -204,7 +214,9 @@ def boxes_to_text(boxes: list[list[float]]) -> str:
     """Format detected boxes as a numbered text listing."""
     lines = [f"Detected {len(boxes)} key boxes:\n"]
     for i, bbox in enumerate(boxes):
-        lines.append(f"  {i+1:3d}. [{bbox[0]:.3f}, {bbox[1]:.3f}, {bbox[2]:.3f}, {bbox[3]:.3f}]")
+        lines.append(
+            f"  {i + 1:3d}. [{bbox[0]:.3f}, {bbox[1]:.3f}, {bbox[2]:.3f}, {bbox[3]:.3f}]"
+        )
     return "\n".join(lines)
 
 
@@ -216,8 +228,9 @@ QWERTY_ROW3_LETTERS = list("zxcvbnm")
 DIGIT_ROW = list("1234567890")
 
 
-def _label_row(keys: list[tuple[int, int]], row_type: str,
-               is_numeric: bool = False) -> list[dict]:
+def _label_row(
+    keys: list[tuple[int, int]], row_type: str, is_numeric: bool = False
+) -> list[dict]:
     """Label keys in a single row based on key count and widths.
 
     row_type: "letter" or "bottom"
@@ -238,45 +251,73 @@ def _label_row(keys: list[tuple[int, int]], row_type: str,
             # Check if row 2 also has 10 → numeric keyboard
             # Caller handles this; default to QWERTY row 1
             for i, (kl, kr) in enumerate(keys):
-                labeled.append({"left": kl, "right": kr,
-                                "element": QWERTY_ROW1[i],
-                                "action": f"Types '{QWERTY_ROW1[i]}'"})
+                labeled.append(
+                    {
+                        "left": kl,
+                        "right": kr,
+                        "element": QWERTY_ROW1[i],
+                        "action": f"Types '{QWERTY_ROW1[i]}'",
+                    }
+                )
         elif n == 9:
             # Check if first/last key is wider (shift/delete row)
             if widths[0] > avg_w * 1.2 and widths[-1] > avg_w * 1.2:
                 # Row 3: shift + letters + delete
-                labeled.append({"left": keys[0][0], "right": keys[0][1],
-                                "element": "⇧ Shift", "action": "Toggle uppercase"})
+                labeled.append(
+                    {
+                        "left": keys[0][0],
+                        "right": keys[0][1],
+                        "element": "⇧ Shift",
+                        "action": "Toggle uppercase",
+                    }
+                )
                 for i, (kl, kr) in enumerate(keys[1:-1]):
-                    labeled.append({"left": kl, "right": kr,
-                                    "element": QWERTY_ROW3_LETTERS[i],
-                                    "action": f"Types '{QWERTY_ROW3_LETTERS[i]}'"})
-                labeled.append({"left": keys[-1][0], "right": keys[-1][1],
-                                "element": "⌫ Delete", "action": "Delete character"})
+                    labeled.append(
+                        {
+                            "left": kl,
+                            "right": kr,
+                            "element": QWERTY_ROW3_LETTERS[i],
+                            "action": f"Types '{QWERTY_ROW3_LETTERS[i]}'",
+                        }
+                    )
+                labeled.append(
+                    {
+                        "left": keys[-1][0],
+                        "right": keys[-1][1],
+                        "element": "⌫ Delete",
+                        "action": "Delete character",
+                    }
+                )
             else:
                 # Row 2: ASDFGHJKL
                 for i, (kl, kr) in enumerate(keys):
-                    labeled.append({"left": kl, "right": kr,
-                                    "element": QWERTY_ROW2[i],
-                                    "action": f"Types '{QWERTY_ROW2[i]}'"})
+                    labeled.append(
+                        {
+                            "left": kl,
+                            "right": kr,
+                            "element": QWERTY_ROW2[i],
+                            "action": f"Types '{QWERTY_ROW2[i]}'",
+                        }
+                    )
         else:
             # Unknown row — leave for AI
             for kl, kr in keys:
-                labeled.append({"left": kl, "right": kr,
-                                "element": "???", "action": "???"})
+                labeled.append(
+                    {"left": kl, "right": kr, "element": "???", "action": "???"}
+                )
 
     # ── Bottom row: leave all for AI to label from bbox image ──
     elif row_type == "bottom":
         for kl, kr in keys:
-            labeled.append({"left": kl, "right": kr,
-                            "element": "???", "action": "???"})
+            labeled.append({"left": kl, "right": kr, "element": "???", "action": "???"})
 
     return labeled
 
 
-def label_keyboard(frame: np.ndarray,
-                   num_rows: int = 4,
-                   ) -> list[list[dict]] | None:
+def label_keyboard(
+    frame: np.ndarray,
+    num_rows: int = 4,
+) -> list[list[dict]] | None:
     """Detect and auto-label keyboard keys.
 
     Returns a list of rows, each row is a list of key dicts:
@@ -314,7 +355,7 @@ def label_keyboard(frame: np.ndarray,
 
     result = []
     for i, (top, bot, keys) in enumerate(all_rows):
-        is_last = (i == len(all_rows) - 1)
+        is_last = i == len(all_rows) - 1
 
         if is_last:
             labeled = _label_row(keys, "bottom", is_numeric=is_numeric)
@@ -323,18 +364,25 @@ def label_keyboard(frame: np.ndarray,
             labeled = []
             for j, (kl, kr) in enumerate(keys):
                 if j < len(DIGIT_ROW):
-                    labeled.append({"left": kl, "right": kr,
-                                    "element": DIGIT_ROW[j],
-                                    "action": f"Types '{DIGIT_ROW[j]}'"})
+                    labeled.append(
+                        {
+                            "left": kl,
+                            "right": kr,
+                            "element": DIGIT_ROW[j],
+                            "action": f"Types '{DIGIT_ROW[j]}'",
+                        }
+                    )
                 else:
-                    labeled.append({"left": kl, "right": kr,
-                                    "element": "???", "action": "???"})
+                    labeled.append(
+                        {"left": kl, "right": kr, "element": "???", "action": "???"}
+                    )
         elif is_numeric:
             # Numeric rows 2-3: all symbols — leave for AI
             labeled = []
             for kl, kr in keys:
-                labeled.append({"left": kl, "right": kr,
-                                "element": "???", "action": "???"})
+                labeled.append(
+                    {"left": kl, "right": kr, "element": "???", "action": "???"}
+                )
         else:
             labeled = _label_row(keys, "letter")
 
@@ -354,11 +402,18 @@ def label_keyboard(frame: np.ndarray,
 
 # ─── Preset template generation ───────────────────────────────
 
-TEMPLATE_PATH = Path(__file__).parent.parent.parent / ".claude" / "skills" / "calibrate-keyboard" / "template.md"
+TEMPLATE_PATH = (
+    Path(__file__).parent.parent.parent
+    / ".claude"
+    / "skills"
+    / "calibrate-keyboard"
+    / "template.md"
+)
 
 
-def _render_pages(pages: dict[str, list[list[dict]]],
-                  bbox_images: dict[str, str] | None = None) -> str:
+def _render_pages(
+    pages: dict[str, list[list[dict]]], bbox_images: dict[str, str] | None = None
+) -> str:
     """Render the per-page key tables as markdown."""
     lines = []
     for page_name, rows in pages.items():
@@ -381,7 +436,9 @@ def _render_pages(pages: dict[str, list[list[dict]]],
             for key in row:
                 pos = key["position"]
                 pos_str = f"[{pos[0]:.3f}, {pos[1]:.3f}, {pos[2]:.3f}, {pos[3]:.3f}]"
-                lines.append(f"| {box_idx} | {key['element']} | {pos_str} | {key['action']} |")
+                lines.append(
+                    f"| {box_idx} | {key['element']} | {pos_str} | {key['action']} |"
+                )
                 box_idx += 1
 
         lines.append("")
@@ -389,8 +446,9 @@ def _render_pages(pages: dict[str, list[list[dict]]],
     return "\n".join(lines)
 
 
-def generate_preset(pages: dict[str, list[list[dict]]],
-                    bbox_images: dict[str, str] | None = None) -> str:
+def generate_preset(
+    pages: dict[str, list[list[dict]]], bbox_images: dict[str, str] | None = None
+) -> str:
     """Generate .claude/ui-presets/system-keyboard.md content.
 
     Reads the template from .claude/skills/calibrate-keyboard/template.md

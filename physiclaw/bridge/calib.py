@@ -34,24 +34,32 @@ class CalibrationState:
 
     # Valid calibration phases (server → page display commands)
     PHASES = {
-        "idle",              # blank, waiting
-        "screenshot_cal",    # orange square at viewport center (pre-cal screenshot mapping)
-        "center",            # orange circle at center (Steps 0, 1, 4)
-        "markers",           # UP/RIGHT blue markers for camera rotation (Steps 2-3)
-        "grid",              # 15 red dots at known positions (Step 5)
-        "dot",               # single orange dot at custom position (Step 6)
-        "assistive_touch",   # AT circle + color nonce barcode (Step 7)
+        "idle",  # blank, waiting
+        "screenshot_cal",  # orange square at viewport center (pre-cal screenshot mapping)
+        "center",  # orange circle at center (Steps 0, 1, 4)
+        "markers",  # UP/RIGHT blue markers for camera rotation (Steps 2-3)
+        "grid",  # 15 red dots at known positions (Step 5)
+        "dot",  # single orange dot at custom position (Step 6)
+        "assistive_touch",  # AT circle + color nonce barcode (Step 7)
     }
 
     def __init__(self):
         self.lock = threading.Lock()  # protects shared fields across threads
         self.phase: str = "idle"  # current display phase (one of PHASES)
-        self.dot_position: tuple[float, float] | None = None  # (x, y) as 0-1 for "dot" phase
+        self.dot_position: tuple[float, float] | None = (
+            None  # (x, y) as 0-1 for "dot" phase
+        )
         self.touches: list[dict] = []  # accumulated touch events from the phone
         self._touch_event = threading.Event()  # set when a new touch event arrives
-        self.screen_dimension: dict | None = None  # {"width", "height", "dpr", "viewport_width", "viewport_height"}
-        self.screenshot_transform: dict | None = None  # viewport→screenshot mapping from pre-cal step
-        self._screenshot_nonce: list[list[int]] | None = None  # 20 RGB colors for Step 7
+        self.screen_dimension: dict | None = (
+            None  # {"width", "height", "dpr", "viewport_width", "viewport_height"}
+        )
+        self.screenshot_transform: dict | None = (
+            None  # viewport→screenshot mapping from pre-cal step
+        )
+        self._screenshot_nonce: list[list[int]] | None = (
+            None  # 20 RGB colors for Step 7
+        )
 
     def set_phase(self, phase: str, **kwargs):
         """Set the calibration display phase.
@@ -69,8 +77,7 @@ class CalibrationState:
             self.touches = []
             self._touch_event.clear()
             if phase == "dot":
-                self.dot_position = (kwargs.get("dot_x", 0.5),
-                                     kwargs.get("dot_y", 0.5))
+                self.dot_position = (kwargs.get("dot_x", 0.5), kwargs.get("dot_y", 0.5))
             if phase == "assistive_touch":
                 self._screenshot_nonce = kwargs.get("nonce_colors")
 
@@ -102,19 +109,25 @@ class CalibrationState:
             self._touch_event.clear()
         return touches
 
-    def viewport_to_screenshot_pct(self, client_x: float, client_y: float) -> tuple[float, float]:
+    def viewport_to_screenshot_pct(
+        self, client_x: float, client_y: float
+    ) -> tuple[float, float]:
         """Convert viewport CSS coords (clientX/clientY) to screenshot 0-1.
 
         Requires screenshot_transform to be set via the pre-calibration step.
         """
         t = self.screenshot_transform
         if t is None:
-            raise RuntimeError("Screenshot calibration not done — run screenshot-transform first")
-        sx = (client_x * t['dpr'] + t['offset_x']) / t['screenshot_width']
-        sy = (client_y * t['dpr'] + t['offset_y']) / t['screenshot_height']
+            raise RuntimeError(
+                "Screenshot calibration not done — run screenshot-transform first"
+            )
+        sx = (client_x * t["dpr"] + t["offset_x"]) / t["screenshot_width"]
+        sy = (client_y * t["dpr"] + t["offset_y"]) / t["screenshot_height"]
         return (sx, sy)
 
-    def viewport_pct_to_screenshot_pct(self, vx: float, vy: float) -> tuple[float, float]:
+    def viewport_pct_to_screenshot_pct(
+        self, vx: float, vy: float
+    ) -> tuple[float, float]:
         """Convert viewport 0-1 percentages to screenshot 0-1.
 
         Used for converting grid dot positions (GRID_COLS_PCT/GRID_ROWS_PCT)
@@ -124,7 +137,8 @@ class CalibrationState:
         if dim is None:
             raise RuntimeError("Screen dimension not set")
         return self.viewport_to_screenshot_pct(
-            vx * dim['viewport_width'], vy * dim['viewport_height'])
+            vx * dim["viewport_width"], vy * dim["viewport_height"]
+        )
 
     def get_state(self) -> dict:
         """Get current display command for the page to render.
@@ -149,8 +163,7 @@ class CalibrationState:
                 },
             }
             if self.dot_position:
-                d["dot"] = {"x": self.dot_position[0],
-                            "y": self.dot_position[1]}
+                d["dot"] = {"x": self.dot_position[0], "y": self.dot_position[1]}
             if self.phase == "assistive_touch" and self._screenshot_nonce is not None:
                 d["at"] = {"x": AT_CSS_X, "y": AT_CSS_Y, "r": AT_RADIUS}
                 d["nonce"] = {

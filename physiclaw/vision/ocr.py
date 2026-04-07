@@ -29,6 +29,7 @@ log = logging.getLogger(__name__)
 @dataclasses.dataclass
 class TextResult:
     """A detected text region."""
+
     text: str
     bbox: tuple[int, int, int, int]  # (x1, y1, x2, y2) in original image pixels
     confidence: float
@@ -41,10 +42,7 @@ class OCRReader:
         try:
             from rapidocr import RapidOCR
         except ImportError:
-            raise ImportError(
-                "rapidocr is required.\n"
-                "Run: /setup-vision-models"
-            )
+            raise ImportError("rapidocr is required.\nRun: /setup-vision-models")
         logging.disable(logging.INFO)
         self._ocr = RapidOCR()
         logging.disable(logging.NOTSET)
@@ -71,18 +69,19 @@ class OCRReader:
             x1, y1 = int(min(xs)), int(min(ys))
             x2, y2 = int(max(xs)), int(max(ys))
 
-            texts.append(TextResult(
-                text=text,
-                bbox=(x1, y1, x2, y2),
-                confidence=float(score),
-            ))
+            texts.append(
+                TextResult(
+                    text=text,
+                    bbox=(x1, y1, x2, y2),
+                    confidence=float(score),
+                )
+            )
 
         texts.sort(key=lambda t: (t.bbox[1], t.bbox[0]))
         log.debug(f"OCR found {len(texts)} text regions")
         return texts
 
-    def read_crop(self, frame: np.ndarray,
-                  x1: int, y1: int, x2: int, y2: int) -> str:
+    def read_crop(self, frame: np.ndarray, x1: int, y1: int, x2: int, y2: int) -> str:
         """Read text within a specific bounding box region.
 
         Args:
@@ -120,8 +119,9 @@ def annotate(frame: np.ndarray, results: list[TextResult]) -> np.ndarray:
         (tw, th), _ = cv2.getTextSize(label, font, font_scale, thickness)
 
         cv2.rectangle(out, (x1, y1 - th - 4), (x1 + tw + 4, y1), (0, 0, 255), -1)
-        cv2.putText(out, label, (x1 + 2, y1 - 2), font, font_scale,
-                    (255, 255, 255), thickness)
+        cv2.putText(
+            out, label, (x1 + 2, y1 - 2), font, font_scale, (255, 255, 255), thickness
+        )
 
     return out
 

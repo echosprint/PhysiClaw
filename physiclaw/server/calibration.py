@@ -20,15 +20,16 @@ from physiclaw.calibration.handler import (
 log = logging.getLogger(__name__)
 
 
-def register(mcp, physiclaw,
-             bridge: BridgeState,
-             calib: CalibrationState,
-             phone: PageState):
+def register(
+    mcp, physiclaw, bridge: BridgeState, calib: CalibrationState, phone: PageState
+):
     """Register the calibration routes."""
 
     @mcp.custom_route("/api/calibrate/screenshot-transform", methods=["POST"])
     async def _screenshot_transform(request):
-        return await handle_screenshot_transform(request, physiclaw, calib, bridge, phone)
+        return await handle_screenshot_transform(
+            request, physiclaw, calib, bridge, phone
+        )
 
     @mcp.custom_route("/api/calibrate/pen-depth", methods=["POST"])
     async def _pen_depth(request):
