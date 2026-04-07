@@ -23,9 +23,13 @@ import cv2
 import numpy as np
 
 from physiclaw.bridge import BridgeState, CalibrationState
-from physiclaw.camera import Camera
-from physiclaw.grid_calibrate import detect_red_dots, sort_dots_to_grid
-from physiclaw.stylus_arm import StylusArm
+from physiclaw.hardware.camera import Camera
+from physiclaw.hardware.stylus_arm import StylusArm
+from physiclaw.vision.grid_detect import (
+    detect_red_dots,
+    sort_dots_to_grid,
+    detect_orange_dot as _detect_orange_dot,
+)
 
 log = logging.getLogger(__name__)
 
@@ -752,7 +756,8 @@ def step5_camera_screen(cam: Camera, cal: CalibrationState,
         raise RuntimeError(
             f"Step 5 FAILED — detected {len(dots)} dots, expected {expected}")
 
-    camera_pixels = sort_dots_to_grid(dots)
+    camera_pixels = sort_dots_to_grid(dots, rows=len(cal.GRID_ROWS_PCT),
+                                      cols=len(cal.GRID_COLS_PCT))
     log.info(f"  Dots sorted into {len(cal.GRID_COLS_PCT)}×{len(cal.GRID_ROWS_PCT)} grid")
 
     # Normalize camera pixels to 0-1
@@ -790,35 +795,6 @@ def step5_camera_screen(cam: Camera, cal: CalibrationState,
     log.info(f"  ✓ Step 5 done: Mapping B ready (screen 0-1 → camera 0-1) "
              f"from {len(dots)} dot pairs, frame {frame_w}×{frame_h}px")
     return pct_to_cam, cam_size
-
-
-# ─── Orange dot detection (for Step 6 validation) ────────────
-
-def _detect_orange_dot(frame: np.ndarray) -> tuple[float, float] | None:
-    """Detect a single orange dot in a camera frame.
-
-    Returns (cx, cy) in camera pixels, or None if not found.
-    Orange #f97316 ≈ HSV H=20°, S=90%, V=97% → OpenCV H=10, S=230, V=247
-    """
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    # Orange range: H=5-25 (warm orange), high S, high V
-    mask = cv2.inRange(hsv, np.array([5, 100, 100]), np.array([25, 255, 255]))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN,
-                            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
-
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
-        return None
-
-    # Take the largest orange blob
-    largest = max(contours, key=cv2.contourArea)
-    if cv2.contourArea(largest) < 50:
-        return None
-
-    m = cv2.moments(largest)
-    if m['m00'] == 0:
-        return None
-    return (m['m10'] / m['m00'], m['m01'] / m['m00'])
 
 
 # ─── Step 6: Full-chain validation ───────────────────────────

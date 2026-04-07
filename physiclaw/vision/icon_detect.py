@@ -5,7 +5,7 @@ Uses the OmniParser V2 icon detection model (YOLO11m, finetuned by Microsoft)
 via OpenCV DNN from an ONNX export. No torch dependency at runtime.
 
 Usage:
-    from physiclaw.icon_detect import IconDetector, annotate
+    from physiclaw.vision.icon_detect import IconDetector, annotate
 
     detector = IconDetector()
     elements = detector.detect(screen_image)
@@ -32,7 +32,7 @@ import numpy as np
 
 log = logging.getLogger(__name__)
 
-MODEL_PATH = Path(__file__).parent.parent / "data" / "model" / "omniparser_icon_detect" / "model.onnx"
+MODEL_PATH = Path(__file__).parent.parent.parent / "data" / "model" / "omniparser_icon_detect" / "model.onnx"
 INPUT_SIZE = 1280  # V2 was trained at 1280
 MIN_CONFIDENCE = 0.3
 NMS_THRESHOLD = 0.5

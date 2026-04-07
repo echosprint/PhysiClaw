@@ -12,11 +12,11 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from physiclaw.camera import Camera
+from physiclaw.hardware.camera import Camera
 
 log = logging.getLogger(__name__)
 
-MODEL_PATH = Path(__file__).parent.parent / 'data' / 'model' / 'yolox_tiny' / 'yolox_tiny.onnx'
+MODEL_PATH = Path(__file__).parent.parent.parent / 'data' / 'model' / 'yolox_tiny' / 'yolox_tiny.onnx'
 MODEL_URL = 'https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_tiny.onnx'
 
 COCO_PHONE_CLASS = 67  # cell phone
@@ -124,7 +124,7 @@ class PhoneDetector:
             return False
 
         # Save snapshot for debugging
-        snapshot_dir = Path(__file__).parent.parent / 'data' / 'snapshot'
+        snapshot_dir = Path(__file__).parent.parent.parent / 'data' / 'snapshot'
         snapshot_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
         snapshot_path = snapshot_dir / f'cam{camera_index}_{timestamp}.jpg'

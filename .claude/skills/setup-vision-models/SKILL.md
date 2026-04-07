@@ -80,12 +80,12 @@ if not imgs:
 img = cv2.imread(str(imgs[0]))
 print(f'Testing with {imgs[0].name} ({img.shape[1]}x{img.shape[0]})')
 
-from physiclaw.icon_detect import IconDetector
+from physiclaw.vision.icon_detect import IconDetector
 detector = IconDetector()
 elements = detector.detect(img, confidence=0.2)
 print(f'Icon detection: {len(elements)} elements found')
 
-from physiclaw.ocr import OCRReader
+from physiclaw.vision.ocr import OCRReader
 reader = OCRReader()
 texts = reader.read(img)
 print(f'OCR: {len(texts)} text regions found')

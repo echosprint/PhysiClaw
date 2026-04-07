@@ -354,7 +354,7 @@ def label_keyboard(frame: np.ndarray,
 
 # ─── Preset template generation ───────────────────────────────
 
-TEMPLATE_PATH = Path(__file__).parent.parent / ".claude" / "skills" / "calibrate-keyboard" / "template.md"
+TEMPLATE_PATH = Path(__file__).parent.parent.parent / ".claude" / "skills" / "calibrate-keyboard" / "template.md"
 
 
 def _render_pages(pages: dict[str, list[list[dict]]],

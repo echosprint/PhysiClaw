@@ -22,7 +22,7 @@ import cv2
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from physiclaw.keyboard import (
+from physiclaw.vision.keyboard import (
     detect_key_boxes, draw_detected_keys,
     label_keyboard, generate_preset,
 )

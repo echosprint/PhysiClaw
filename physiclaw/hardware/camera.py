@@ -2,7 +2,7 @@
 Camera module — reusable Camera class and CLI test utilities.
 
 Usage as library:
-    from physiclaw.camera import Camera
+    from physiclaw.hardware.camera import Camera
     cam = Camera(index=0)
     frame = cam.snapshot()
     green = cam.is_green()
@@ -27,7 +27,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-SNAPSHOT_DIR = Path(__file__).parent.parent / 'data' / 'snapshot'
+SNAPSHOT_DIR = Path(__file__).parent.parent.parent / 'data' / 'snapshot'
 
 log = logging.getLogger(__name__)
 

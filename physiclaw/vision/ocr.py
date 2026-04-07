@@ -5,7 +5,7 @@ Uses RapidOCR (PaddleOCR models on ONNX Runtime) for lightweight,
 torch-free text recognition. Supports Chinese + English out of the box.
 
 Usage:
-    from physiclaw.ocr import OCRReader
+    from physiclaw.vision.ocr import OCRReader
 
     reader = OCRReader()
     results = reader.read(screen_image)
