@@ -29,7 +29,7 @@ Wait for confirmation that Photo Booth is closed.
 ### 1.2 Check status
 
 ```bash
-curl -s http://localhost:8048/api/status 2>/dev/null | python3 -m json.tool 2>/dev/null
+uv run physiclaw-setup status 2>/dev/null
 ```
 
 - Server not running → tell user to start with `uv run physiclaw`
@@ -42,7 +42,7 @@ Tell the user:
 > Plug the robotic arm into USB. Make sure the motor power switch is ON. Check stylus is attached.
 
 ```bash
-curl -s -X POST http://localhost:8048/api/connect-arm | python3 -m json.tool
+uv run physiclaw-setup connect-arm
 ```
 
 ### 1.4 Connect camera
@@ -51,31 +51,16 @@ Scan cameras and let user pick:
 
 ```bash
 rm -f /tmp/physiclaw_cam*.jpg
-uv run python -c "
-import json, base64, urllib.request
-for i in range(4):
-    try:
-        resp = urllib.request.urlopen(f'http://localhost:8048/api/camera-preview/{i}?watermark=1')
-        d = json.loads(resp.read())
-        path = f'/tmp/physiclaw_cam{i}.jpg'
-        with open(path, 'wb') as f:
-            f.write(base64.b64decode(d['image']))
-        print(f'Camera {i}: saved to {path}')
-    except Exception:
-        print(f'Camera {i}: not available')
-"
-```
-
-```bash
-open /tmp/physiclaw_cam*.jpg
+for i in 0 1 2 3; do
+  uv run physiclaw-setup camera-preview $i --watermark 2>/dev/null || true
+done
+open /tmp/physiclaw_cam*.jpg 2>/dev/null
 ```
 
 Ask user which camera shows the overhead view of the phone screen, then connect:
 
 ```bash
-curl -s -X POST http://localhost:8048/api/connect-camera \
-  -H 'Content-Type: application/json' \
-  -d '{"index": CHOSEN_INDEX}' | python3 -m json.tool
+uv run physiclaw-setup connect-camera --index CHOSEN_INDEX
 ```
 
 ### 1.5 Open phone page
@@ -103,7 +88,7 @@ Tell the user:
 Note: This requires `/phone-setup` to be done first (AssistiveTouch + iOS Shortcut configured).
 
 ```bash
-curl -s -X POST http://localhost:8048/api/calibrate/screenshot-transform --max-time 35 | python3 -m json.tool
+uv run physiclaw-setup calibrate screenshot-transform --timeout 35
 ```
 
 If it fails with "no screenshot received", remind the user to tap once then double-tap AssistiveTouch, and retry.
@@ -113,9 +98,7 @@ If it fails with "no screenshot received", remind the user to tap once then doub
 Switch the phone to calibrate center phase:
 
 ```bash
-curl -s -X POST http://localhost:8048/api/bridge/switch \
-  -H 'Content-Type: application/json' \
-  -d '{"mode": "calibrate", "phase": "center"}' | python3 -m json.tool
+uv run physiclaw-setup switch calibrate --phase center
 ```
 
 Tell the user:
@@ -137,7 +120,7 @@ Tell the user:
 > The arm will probe downward in small steps to find the screen surface. A touch event tells us when it makes contact. Don't touch anything.
 
 ```bash
-curl -s -X POST http://localhost:8048/api/calibrate/pen-depth --max-time 30 | python3 -m json.tool
+uv run physiclaw-setup calibrate pen-depth --timeout 30
 ```
 
 If the response has `"cached": true`, the pen depth was loaded from a previous run — no probing needed. Tell the user it was instant.
@@ -148,7 +131,7 @@ Tell the user:
 > The arm will tap two points to check if the phone is aligned with the arm.
 
 ```bash
-curl -s -X POST http://localhost:8048/api/calibrate/arm-tilt --max-time 30 | python3 -m json.tool
+uv run physiclaw-setup calibrate arm-tilt --timeout 30
 ```
 
 If `aligned` is false, tell the user to adjust the phone rotation slightly and retry this step.
@@ -167,13 +150,13 @@ Tell the user:
 Wait for confirmation that Photo Booth is closed. Reconnect the camera before running the check:
 
 ```bash
-curl -s -X POST http://localhost:8048/api/connect-camera -H 'Content-Type: application/json' -d '{"index": CHOSEN_INDEX}' | python3 -m json.tool
+uv run physiclaw-setup connect-camera --index CHOSEN_INDEX
 ```
 
 Then run the check:
 
 ```bash
-rm -f /tmp/physiclaw*.jpg && curl -s -X POST http://localhost:8048/api/calibrate/camera-rotation --max-time 10 | python3 -m json.tool && open /tmp/physiclaw_camera_rotation.jpg
+rm -f /tmp/physiclaw*.jpg && uv run physiclaw-setup calibrate camera-rotation --timeout 10 && open /tmp/physiclaw_camera_rotation.jpg
 ```
 
 If `ok` is false, tell the user what to fix based on the `issues` list and retry.
@@ -184,7 +167,7 @@ Tell the user:
 > The calibration page will now show blue UP and RIGHT markers. The camera detects these to determine the correct image rotation.
 
 ```bash
-curl -s -X POST http://localhost:8048/api/calibrate/frame-rotation --max-time 15 | python3 -m json.tool
+uv run physiclaw-setup calibrate frame-rotation --timeout 15
 ```
 
 ### 2.4 GRBL↔Screen mapping (~15s)
@@ -193,7 +176,7 @@ Tell the user:
 > The arm will tap up to 18 points across the screen (3 scale probes + 15 grid points). Each tap reports its touch coordinate for precise mapping. This builds Mapping A (screen → arm position).
 
 ```bash
-curl -s -X POST http://localhost:8048/api/calibrate/grbl-mapping --max-time 60 | python3 -m json.tool
+uv run physiclaw-setup calibrate grbl-mapping --timeout 60
 ```
 
 If step 4 fails with "no touch at +X/+Y probe", the probe taps landed outside the screen. Possible fixes:
@@ -208,7 +191,7 @@ Tell the user:
 > The calibration page will show 15 red dots. The camera detects their positions to build Mapping B (camera pixels → screen coordinates). The arm will park out of the way.
 
 ```bash
-curl -s -X POST http://localhost:8048/api/calibrate/camera-mapping --max-time 30 | python3 -m json.tool
+uv run physiclaw-setup calibrate camera-mapping --timeout 30
 ```
 
 ### 2.6 Full-chain validation (~10s)
@@ -217,7 +200,7 @@ Tell the user:
 > Final validation: I'll show orange dots at random positions, tap them, and compare the touch coordinates against the expected position. This tests the entire pipeline.
 
 ```bash
-curl -s -X POST http://localhost:8048/api/calibrate/validate --max-time 60 | python3 -m json.tool
+uv run physiclaw-setup calibrate validate --timeout 60
 ```
 
 Check `calibrated` in the response. If true, calibration succeeded.
@@ -227,7 +210,7 @@ Check `calibrated` in the response. If true, calibration succeeded.
 Show the AT positioning screen:
 
 ```bash
-curl -s -X POST http://localhost:8048/api/calibrate/assistive-touch/show | python3 -m json.tool
+uv run physiclaw-setup calibrate assistive-touch/show
 ```
 
 Tell the user:
@@ -236,7 +219,7 @@ Tell the user:
 Wait for user confirmation, then trigger the tap sequence:
 
 ```bash
-curl -s -X POST http://localhost:8048/api/calibrate/assistive-touch/verify --max-time 20 | python3 -m json.tool
+uv run physiclaw-setup calibrate assistive-touch/verify --timeout 20
 ```
 
 The arm will single-tap (iOS screenshot), wait 2s, then double-tap (screenshot + upload). The server verifies the uploaded screenshot contains the color nonce.
@@ -252,13 +235,13 @@ Tell the user:
 > The arm will trace the phone screen border clockwise — moving to 8 edge points and pausing at each. Watch and confirm it follows the screen edges accurately.
 
 ```bash
-curl -s -X POST http://localhost:8048/api/calibrate/trace-edge --max-time 60 | python3 -m json.tool
+uv run physiclaw-setup calibrate trace-edge --timeout 60
 ```
 
 ### 3.2 Final status check
 
 ```bash
-curl -s http://localhost:8048/api/status | python3 -m json.tool
+uv run physiclaw-setup status
 ```
 
 Confirm `calibrated` is true. Tell the user:

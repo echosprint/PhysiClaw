@@ -18,3 +18,4 @@ vision = ["rapidocr", "onnxruntime"]
 
 [project.scripts]
 physiclaw = "physiclaw.main:main"
+physiclaw-setup = "physiclaw.cli:main"
