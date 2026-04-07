@@ -1,34 +1,60 @@
 """
-Core MCP tools — screenshot, gestures, targeting, detection.
+All MCP tools — gestures, detection, bridge, and annotation workflows.
 
-Tools that operate on the phone via the stylus arm and camera. Each tool
-acquires the hardware lock, runs its operation, and releases.
+Every @mcp.tool() in the PhysiClaw server lives in this file. The
+server/{bridge,annotation,calibration,hardware}.py modules only register
+HTTP routes. Splitting tools across multiple files would make discovery
+harder; this single file is the canonical agent surface.
+
+Each tool acquires the hardware lock when it touches arm/camera state,
+runs its operation, and releases. Tools that only read or only mutate
+state objects (annotation queue, bridge text) skip the hardware lock.
 """
 
 import logging
 import time
+from datetime import datetime
 
 import cv2
-from mcp.server.fastmcp import Image
+from mcp.server.fastmcp import FastMCP, Image
+
+from physiclaw.annotation import AnnotationState
+from physiclaw.bridge import BridgeState, CalibrationState, get_lan_ip
+from physiclaw.core import PhysiClaw
 
 log = logging.getLogger(__name__)
 
 
-def register(mcp, physiclaw):
-    """Register core MCP tools on the given FastMCP instance."""
+def register(mcp: FastMCP,
+             physiclaw: PhysiClaw,
+             bridge: BridgeState,
+             calib: CalibrationState,
+             ann: AnnotationState):
+    """Register every MCP tool on the given FastMCP instance.
+
+    Args:
+        mcp: FastMCP server instance.
+        physiclaw: PhysiClaw orchestrator (hardware lifecycle + bbox state).
+        bridge: BridgeState for text/clipboard transfer + screenshot upload.
+        calib: CalibrationState for the bridge_status screen-dimension lookup.
+        ann: AnnotationState for the propose/confirm bbox workflow.
+    """
 
     @mcp.tool()
-    def screenshot() -> Image:
-        """Take a screenshot of the phone screen.
+    def camera_view() -> Image:
+        """Capture the overhead camera's view of the phone.
 
-        Use this to read screen content, check stylus position, or verify results.
-        The stylus may be visible in the frame — call park() first if you need
-        an unobstructed view of the screen.
+        Use this to read screen content, check stylus position, or verify
+        results. The stylus may be visible in the frame — call park() first
+        if you need an unobstructed view of the screen.
+
+        This is the camera looking down at the phone. For a pixel-perfect
+        screenshot taken by the phone itself, use phone_screenshot() instead.
         """
         physiclaw.require_hardware()
         physiclaw.acquire()
         try:
-            frame = physiclaw.screenshot()
+            frame = physiclaw.camera_view()
             return Image(data=physiclaw.frame_to_jpeg(frame), format="jpeg")
         finally:
             physiclaw.release()
@@ -37,9 +63,9 @@ def register(mcp, physiclaw):
     def park() -> str:
         """Park the stylus out of the camera frame so it doesn't occlude the screen.
 
-        Call this before screenshot() when you need a clear view of the full screen
-        (e.g. to read text or identify UI elements). The stylus moves 100mm away
-        and will need to be repositioned with move() afterward.
+        Call this before camera_view() when you need a clear view of the full
+        screen (e.g. to read text or identify UI elements). The stylus moves
+        100mm away and will need to be repositioned with move() afterward.
         """
         physiclaw.require_hardware()
         physiclaw.acquire()
@@ -111,7 +137,7 @@ def register(mcp, physiclaw):
         try:
             physiclaw.park()
             time.sleep(1.0)
-            frame = physiclaw.screenshot()
+            frame = physiclaw.camera_view()
         finally:
             physiclaw.release()
 
@@ -141,9 +167,9 @@ def register(mcp, physiclaw):
         try:
             physiclaw.park()
             time.sleep(0.5)
-            frame_a = physiclaw.screenshot()
+            frame_a = physiclaw.camera_view()
             time.sleep(1.0)
-            frame_b = physiclaw.screenshot()
+            frame_b = physiclaw.camera_view()
         finally:
             physiclaw.release()
 
@@ -248,7 +274,7 @@ def register(mcp, physiclaw):
 
         Use for: pressing buttons, selecting items, opening apps, following links, dismissing dialogs.
         Call bbox_target() + confirm_bbox() first to set the target location.
-        After tapping, use park() + screenshot() to verify the result.
+        After tapping, use park() + camera_view() to verify the result.
 
         If the screen didn't change, the stylus may not have registered.
         Just call tap() again — the confirmed bbox is retained. No need to
@@ -316,3 +342,206 @@ def register(mcp, physiclaw):
             return f"Swiped {direction} {speed}"
         finally:
             physiclaw.release()
+
+    # ─── LAN bridge tools ───────────────────────────────────
+
+    @mcp.tool()
+    def bridge_status() -> str:
+        """Check the LAN bridge and get the URL for the phone to open.
+
+        The bridge enables fast text transfer via clipboard. The user opens the
+        URL on the phone in Safari/Chrome. Then the agent can send text and
+        tap the screen to copy it to the phone's clipboard — much faster than
+        typing on the keyboard character by character.
+
+        Returns the URL, connection status, and device info if available.
+        """
+        ip = get_lan_ip()
+        port = mcp.settings.port
+        phone_url = f"http://{ip}:{port}/bridge"
+
+        lines = [f"Phone URL: {phone_url}"]
+        if bridge.connected:
+            lines.append("Status: connected ✓")
+        else:
+            lines.append("Status: not connected — ask the user to open the URL on their phone")
+
+        if calib.screen_dimension:
+            d = calib.screen_dimension
+            lines.append(f"Screen: {d['width']}×{d['height']}pt")
+        return "\n".join(lines)
+
+    @mcp.tool()
+    def bridge_send_text(text: str) -> str:
+        """Send text to the phone clipboard.
+
+        Two ways to copy:
+        1. Phone has /bridge page open → call bridge_tap() to tap and copy
+        2. Phone runs "PhysiClaw Clipboard" shortcut (long-press AssistiveTouch)
+           → shortcut GETs /api/bridge/clipboard → text copied directly
+
+        Either way, the text ends up in the phone's clipboard.
+        Paste into any app: long_press on a text field → tap "Paste".
+        """
+        bridge.send_text(text)
+        return f"Text '{text}' ready. Copy via bridge_tap() or AT long-press shortcut."
+
+    @mcp.tool()
+    def bridge_tap() -> str:
+        """Tap the phone screen center to copy bridge text to clipboard.
+
+        The phone page fills the screen. Tapping anywhere triggers the
+        JavaScript clipboard copy. This tool taps screen center (0.5, 0.5),
+        then waits up to 5 seconds for the phone to confirm.
+
+        Call bridge_send_text() first to set the text.
+        After this tool returns, the text is in the phone's clipboard.
+        """
+        physiclaw.require_hardware()
+        physiclaw.acquire()
+        try:
+            physiclaw.tap_at_pct(0.5, 0.5)
+        finally:
+            physiclaw.release()
+
+        if bridge.wait_clipboard(timeout=5.0):
+            return f"Clipboard ready — '{bridge.current_text()}' copied to phone clipboard"
+        return ("Tap sent but clipboard copy not confirmed. "
+                "Is the phone page open in the foreground on the phone?")
+
+    @mcp.tool()
+    def phone_screenshot() -> Image:
+        """Take a pixel-perfect screenshot via AssistiveTouch.
+
+        Single-tap AT takes a screenshot (saved to Photos), then double-tap AT
+        triggers the iOS Shortcut to get the latest screenshot and upload it.
+
+        Much sharper than camera screenshots — use for skill building, OCR,
+        and detailed UI analysis.
+
+        Requires: /setup completed (step 7 verifies AT position).
+        """
+        physiclaw.require_hardware()
+        if not physiclaw._screenshot.ready:
+            raise RuntimeError("AssistiveTouch not set up — run /setup first (step 7)")
+
+        pct_to_grbl = physiclaw._cal.get('screen_to_grbl')
+        if pct_to_grbl is None:
+            raise RuntimeError("Calibration incomplete — run /setup first")
+
+        physiclaw.acquire()
+        try:
+            data = physiclaw._screenshot.take_screenshot(
+                physiclaw._arm, bridge, pct_to_grbl)
+        finally:
+            physiclaw.release()
+
+        if data is None:
+            raise RuntimeError("Timeout — no screenshot received. "
+                               "Check iOS Shortcut is configured.")
+
+        fmt = "png" if data[:4] == b'\x89PNG' else "jpeg"
+        return Image(data=data, format=fmt)
+
+    # ─── Annotation tools ───────────────────────────────────
+
+    def _format_confirmed(boxes: list[dict], header: str) -> str:
+        """Render a list of confirmed annotations as markdown."""
+        lines = [f"# {header} ({len(boxes)} items)\n"]
+        for i, box in enumerate(boxes):
+            b = box['bbox']
+            box_type = box.get('type', 'box')
+            label = box.get('label', '')
+            source = box.get('source', 'user')
+            src = f" [{source}]" if source != 'user' else ""
+            desc = f" — {label}" if label else ""
+            coords = ", ".join(str(v) for v in b)
+            type_tag = f" ({box_type})" if box_type != 'box' else ""
+            lines.append(f"- {i+1}{type_tag}{src}: [{coords}]{desc}")
+        return "\n".join(lines)
+
+    @mcp.tool()
+    def get_user_annotations() -> list:
+        """Get confirmed annotations from the annotation UI.
+
+        Returns the confirmed boxes with coordinates and labels, plus the
+        frozen screenshot. The user must click Confirm in the annotation UI
+        before this returns data.
+
+        Use wait_for_confirmation() instead if you want to block until
+        the user confirms. This tool returns immediately — it returns
+        whatever was last confirmed, or "no annotations" if nothing was confirmed.
+        """
+        with ann.lock:
+            confirmed = list(ann.confirmed_annotations)
+        frozen_frame = ann.get_frozen_frame()
+        if not confirmed:
+            return ["No confirmed annotations. "
+                    f"Ask the user to draw boxes at http://{mcp.settings.host}:{mcp.settings.port}/annotate and click Confirm."]
+
+        text = _format_confirmed(confirmed, "Confirmed Annotations")
+        if frozen_frame is not None:
+            return [text, Image(data=physiclaw.frame_to_jpeg(frozen_frame),
+                                format="jpeg")]
+        return [text]
+
+    @mcp.tool()
+    def propose_bboxes(proposals: list[dict]) -> str:
+        """Propose bounding boxes for the user to review in the annotation UI.
+
+        Sends your coordinate guesses to the annotation web UI at /annotate.
+        The user can move, resize, delete, relabel, or add new boxes.
+        After the user confirms, call wait_for_confirmation() to get the result.
+
+        Parks the arm and takes a fresh screenshot automatically.
+
+        Args:
+            proposals: list of {"bbox": [left, top, right, bottom], "label": "element name"}
+                       Coordinates are 0-1 decimals (phone screen).
+        """
+        physiclaw.require_hardware()
+        physiclaw.acquire()
+        try:
+            physiclaw.park()
+            time.sleep(1.5)
+
+            frame = physiclaw.cam._fresh_frame()
+            if frame is None:
+                return "Camera capture failed"
+            frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+
+            snapshot_id = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
+            ann.freeze(frame, snapshot_id)
+            ann.push_agent_proposals(proposals)
+
+            url = f"http://{mcp.settings.host}:{mcp.settings.port}/annotate"
+            return (f"{len(proposals)} proposals sent to annotation UI. "
+                    f"Ask the user to review and confirm at {url}")
+        finally:
+            physiclaw.release()
+
+    @mcp.tool()
+    def wait_for_confirmation(timeout: int = 120) -> list:
+        """Wait for the user to confirm bounding boxes in the annotation UI.
+
+        Blocks until the user clicks Confirm at /annotate, or until timeout.
+        Returns the confirmed boxes with user-corrected coordinates and labels.
+
+        Call this after propose_bboxes() or after asking the user to draw boxes.
+
+        Args:
+            timeout: seconds to wait before giving up (default 120)
+        """
+        result = ann.wait_confirmed(timeout=float(timeout))
+        if result is None:
+            return ["Timeout — the user hasn't confirmed yet. "
+                    f"Ask them if they need help at http://{mcp.settings.host}:{mcp.settings.port}/annotate"]
+
+        frozen_frame = ann.get_frozen_frame()
+        ann.clear_confirmation()
+
+        text = _format_confirmed(result, "Confirmed Annotations")
+        if frozen_frame is not None:
+            return [text, Image(data=physiclaw.frame_to_jpeg(frozen_frame),
+                                format="jpeg")]
+        return [text]

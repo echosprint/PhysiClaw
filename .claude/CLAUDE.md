@@ -54,7 +54,7 @@ To open any app: use `/open-app AppName` which does the full Spotlight clipboard
 **Free (call as many times as needed):**
 
 - `park()` — move stylus out of camera frame
-- `screenshot()` — see the screen via camera (call park() first for clear view)
+- `camera_view()` — see the screen via camera (call park() first for clear view)
 - `grid_overlay(density, color)` — show screen with numbered grid lines (0-1 scale). density: "sparse", "normal" (default), or "dense" (0.05 spacing). Use to estimate target coordinates visually.
 - `bbox_target(bbox)` — draw colored rectangles on a fresh photo. bbox = [left, top, right, bottom] as 0-1 decimals.
 - `get_user_annotations()` — get bounding boxes drawn by the user in the annotation web UI
@@ -107,7 +107,7 @@ The user already verified the coordinates in the annotation UI, so the `bbox_tar
 
 **Path C — Dynamic content (visual targeting):**
 
-1. `park()` + `screenshot()` + `grid_overlay()` to estimate coordinates.
+1. `park()` + `camera_view()` + `grid_overlay()` to estimate coordinates.
 2. `bbox_target(bbox)` → label test (see below) → `confirm_bbox()` → gesture.
 
 ### Label test (Path A and C only)
@@ -209,7 +209,7 @@ The cart item positions are **columns** `[left, right]` — drawn as tall thin b
 
 When a fixed UI element is not in any preset:
 
-1. `park()` + `screenshot()` — see the current screen, reason about what UI elements are visible
+1. `park()` + `camera_view()` — see the current screen, reason about what UI elements are visible
 2. Call `propose_bboxes([{"bbox": [l,t,r,b], "label": "element name"}, ...])` — parks arm, takes a fresh screenshot, and sends your guesses to the annotation UI
 3. Tell the user: "I've proposed N bounding boxes on the annotation page. Please review, adjust, and confirm at /annotate"
 4. Call `wait_for_confirmation()` — blocks until the user confirms

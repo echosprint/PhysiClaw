@@ -125,7 +125,7 @@ Repeat until a screenshot arrives successfully.
 
 The agent needs to know where the AssistiveTouch button is so it can double-tap it with the stylus arm.
 
-Use MCP tools: `park()` then `screenshot()` to see the phone.
+Use MCP tools: `park()` then `camera_view()` to see the phone.
 
 The AssistiveTouch button is a semi-transparent circle, typically on the right edge. Propose its position:
 

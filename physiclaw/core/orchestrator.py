@@ -245,8 +245,8 @@ class PhysiClaw:
 
     # ─── Snapshot helpers ──────────────────────────────────────
 
-    def screenshot(self):
-        """Capture a frame from the camera. Returns BGR numpy array.
+    def camera_view(self):
+        """Capture a frame from the overhead camera. Returns BGR numpy array.
 
         Takes the frame as-is — the stylus may be visible.
         Call park() first if an unobstructed view is needed.

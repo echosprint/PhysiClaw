@@ -41,6 +41,6 @@ class PhoneState:
         if mode == "calibrate":
             state.update(self.cal.get_state())
         else:
-            state["text"] = self.bridge.text
+            state["text"] = self.bridge.current_text()
 
         return state

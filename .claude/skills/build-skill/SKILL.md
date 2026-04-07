@@ -35,7 +35,7 @@ The core loop. For each screen the user navigates to:
 
 ### 3a. Capture and analyze
 
-1. `park()` + `screenshot()` to see the current screen
+1. `park()` + `camera_view()` to see the current screen
 2. `detect_elements()` — runs all 3 CV tools (color segmentation + icon detection + OCR)
 3. If `phone_screenshot()` is available (AssistiveTouch set up), take a clean screenshot too and save it as the reference image
 

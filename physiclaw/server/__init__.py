@@ -37,17 +37,17 @@ You control a real phone sitting on a desk — a camera sees the screen from dir
 ## Operation cycle (dynamic content / preset path)
 
 1. Check UI presets — if the target has known coordinates, use them directly.
-2. If no preset: park() + screenshot(). Optionally detect_elements() to find icons + text with coordinates. Or grid_overlay() to estimate manually.
+2. If no preset: park() + camera_view(). Optionally detect_elements() to find icons + text with coordinates. Or grid_overlay() to estimate manually.
 3. bbox_target(bbox) — bbox = [left, top, right, bottom] as 0-1 decimals.
 4. **Label test:** name the element INSIDE each rectangle.
    - Covers the target → confirm_bbox()
    - Misses → call bbox_target() with corrected coordinates. 2-3 attempts is normal.
 5. tap() / double_tap() / long_press() / swipe() — executes at the bbox center.
-6. park() + screenshot() — verify the result.
+6. park() + camera_view() — verify the result.
 
 ## Propose-confirm cycle (fixed UI without preset)
 
-1. park() + screenshot() — reason about visible elements.
+1. park() + camera_view() — reason about visible elements.
 2. propose_bboxes([{"bbox": [l,t,r,b], "label": "..."}]) — sends guesses to /annotate.
 3. Tell user to review and confirm at /annotate.
 4. wait_for_confirmation() — blocks until user confirms.
@@ -89,7 +89,7 @@ from physiclaw.server.annotation import register as _register_annotation
 from physiclaw.server.hardware import register as _register_hardware
 from physiclaw.server.calibration import register as _register_calibration
 
-_register_tools(mcp, physiclaw)
+_register_tools(mcp, physiclaw, _bridge, _calib, _ann)
 _register_bridge(mcp, physiclaw, _bridge, _calib, _phone)
 _register_annotation(mcp, physiclaw, _ann)
 _register_hardware(mcp, physiclaw)

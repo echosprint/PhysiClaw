@@ -43,7 +43,7 @@ Swipe up from the bottom of the screen to go home. This ensures a clean starting
 Target the bottom-center of the screen:
 - `bbox_target([0.3, 0.95, 0.7, 1.0])` → confirm → `swipe(direction="top", speed="medium")`
 
-After swiping, `park()` + `screenshot()` to verify we're on the home screen.
+After swiping, `park()` + `camera_view()` to verify we're on the home screen.
 
 ### Step 4: Open Spotlight
 
@@ -52,7 +52,7 @@ Swipe down from the middle of the home screen to open Spotlight search.
 Target the center of the screen:
 - `bbox_target([0.3, 0.4, 0.7, 0.6])` → confirm → `swipe(direction="bottom", speed="slow")`
 
-After swiping, `park()` + `screenshot()` to verify Spotlight is open (look for the search bar at the top).
+After swiping, `park()` + `camera_view()` to verify Spotlight is open (look for the search bar at the top).
 
 ### Step 5: Paste into Spotlight search
 
@@ -60,10 +60,10 @@ The Spotlight search field should already be focused (cursor blinking). Long pre
 
 1. Target the Spotlight search field (near the top of the screen, roughly [0.1, 0.06, 0.9, 0.10])
 2. `long_press()` — context menu with "Paste" appears
-3. `park()` + `screenshot()` — look for the "Paste" option
+3. `park()` + `camera_view()` — look for the "Paste" option
 4. Target and tap "Paste"
 
-After pasting, `park()` + `screenshot()` to verify the app name appears in the search field and results show the target app.
+After pasting, `park()` + `camera_view()` to verify the app name appears in the search field and results show the target app.
 
 ### Step 6: Tap the first search result
 
@@ -71,7 +71,7 @@ The first search result should be the app. It appears below the search field, ty
 
 Target the first result (roughly [0.1, 0.12, 0.9, 0.22]) and tap it.
 
-After tapping, `park()` + `screenshot()` to verify the app has opened.
+After tapping, `park()` + `camera_view()` to verify the app has opened.
 
 ## Notes
 

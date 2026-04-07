@@ -34,7 +34,7 @@ async def handle_phone_state(request, phone: PhoneState):
 async def handle_clipboard_copied(request, bridge: BridgeState):
     """POST /api/bridge/tapped — phone confirms text was copied to clipboard."""
     bridge.mark_clipboard_copied()
-    log.info(f"Bridge: clipboard copied — '{bridge.text}'")
+    log.info(f"Bridge: clipboard copied — '{bridge.current_text()}'")
     return JSONResponse({"ok": True})
 
 
@@ -74,10 +74,9 @@ async def handle_clipboard_fetch(request, bridge: BridgeState):
     the clipboard) and marks the bridge as copied so bridge_tap() unblocks.
     Returns 204 if no text is queued.
     """
-    text = bridge.text
+    text = bridge.fetch_text()
     if text is None:
         return PlainTextResponse("", status_code=204)
-    bridge.mark_clipboard_copied()
     log.info(f"Bridge: clipboard fetched — '{text}'")
     return PlainTextResponse(text)
 

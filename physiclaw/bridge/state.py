@@ -51,7 +51,7 @@ class BridgeState:
 
     def __init__(self):
         self.lock = threading.Lock()  # protects shared fields (text, screenshot) across threads
-        self.text: str | None = None  # current text displayed on phone bridge page
+        self._text: str | None = None  # current text queued for the phone bridge page
         self.last_seen: float = 0  # timestamp of last phone poll, for connection detection
         self._clipboard_copied = threading.Event()  # set when phone confirms tap-to-copy
         self._screenshot_data: bytes | None = None  # PNG/JPEG bytes from iOS Shortcut upload
@@ -65,8 +65,26 @@ class BridgeState:
     def send_text(self, text: str):
         """Set text for the phone to display and copy on tap."""
         with self.lock:
-            self.text = text
+            self._text = text
             self._clipboard_copied.clear()
+
+    def current_text(self) -> str | None:
+        """Thread-safe read of the queued text. Returns None if empty."""
+        with self.lock:
+            return self._text
+
+    def fetch_text(self) -> str | None:
+        """Atomically read the queued text and mark it as copied.
+
+        Used by /api/bridge/clipboard so the iOS Shortcut can fetch the text
+        in one round trip — no separate confirm-tap is needed. Returns None
+        if no text is queued; in that case the clipboard event is not set.
+        """
+        with self.lock:
+            text = self._text
+        if text is not None:
+            self._clipboard_copied.set()
+        return text
 
     def mark_clipboard_copied(self):
         """Phone confirms the tap-to-copy succeeded."""

@@ -88,7 +88,7 @@ For elements that change (list items, search results):
 ### 5d. Verify screen transition
 
 After each action that should change screens:
-- `park()` + `screenshot()` to see the result
+- `park()` + `camera_view()` to see the result
 - `check_screen(next_reference)` to confirm we reached the next screen
 - If screen didn't change, the gesture may not have registered — retry (just call the gesture again, bbox is retained)
 
