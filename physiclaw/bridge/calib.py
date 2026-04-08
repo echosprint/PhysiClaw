@@ -15,7 +15,7 @@ from physiclaw.bridge.nonce import (
     NONCE_LIGHT,
     NONCE_SQUARE_SIZE,
 )
-from physiclaw.hardware.phone import AssistiveTouch
+from physiclaw.hardware.iphone import AssistiveTouch
 
 log = logging.getLogger(__name__)
 

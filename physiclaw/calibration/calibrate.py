@@ -27,7 +27,7 @@ from physiclaw.bridge.nonce import NONCE_COUNT, verify_nonce
 from physiclaw.calibration.transforms import ScreenTransforms
 from physiclaw.hardware.camera import Camera
 from physiclaw.hardware.arm import StylusArm
-from physiclaw.hardware.phone import AssistiveTouch
+from physiclaw.hardware.iphone import AssistiveTouch
 from physiclaw.vision.grid_detect import (
     detect_red_dots,
     sort_dots_to_grid,
