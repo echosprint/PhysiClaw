@@ -112,6 +112,16 @@ class AssistiveTouch:
             f"AT double-tap at screen ({self.at_screen[0]:.3f}, {self.at_screen[1]:.3f})"
         )
 
+    def long_press(self, arm, pct_to_grbl: np.ndarray):
+        """Long-press AT — iOS Shortcut fetches bridge text to clipboard."""
+        if self.at_screen is None:
+            raise RuntimeError("AT position not set — call compute_at_screen_pos first")
+        self._move_to_at(arm, pct_to_grbl)
+        arm.long_press()
+        log.info(
+            f"AT long-press at screen ({self.at_screen[0]:.3f}, {self.at_screen[1]:.3f})"
+        )
+
     def take_screenshot(
         self, arm, bridge, pct_to_grbl: np.ndarray, timeout: float = 10.0
     ) -> bytes | None:

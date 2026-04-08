@@ -222,10 +222,15 @@ Wait for user confirmation, then trigger the tap sequence:
 uv run physiclaw-setup calibrate assistive-touch/verify --timeout 20
 ```
 
-The arm will single-tap (iOS screenshot), wait 2s, then double-tap (screenshot + upload). The server verifies the uploaded screenshot contains the color nonce.
+The arm will single-tap (iOS screenshot), wait 5s, double-tap (screenshot + upload), then long-press (fetch bridge text to clipboard). The server verifies:
 
-If `passed` is true → AT position is verified, screenshot pipeline works.
-If failed → check AT is positioned on the orange circle, and the iOS Shortcut is configured (run `/phone-setup` if needed).
+1. **Screenshot** — uploaded image contains the color nonce (`screenshot.passed`)
+2. **Clipboard** — iOS Shortcut hit `/api/bridge/clipboard` within the timeout (`clipboard.fetched`)
+
+If `clipboard.fetched` is true, tell the user the exact text from `clipboard.text` (e.g. `PhysiClaw-AB3F12`) and ask them to paste into Notes or any text field to confirm it matches — this verifies the full long-press → Shortcut → clipboard chain end-to-end.
+
+If `passed` is true → AT position + screenshot pipeline + clipboard pipeline all verified.
+If either part failed → check AT is positioned on the orange circle, and the iOS Shortcuts ("PhysiClaw Screenshot" and "PhysiClaw Clipboard") are both configured (run `/phone-setup` if needed).
 
 ## Step 3: Verification
 

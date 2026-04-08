@@ -1145,7 +1145,15 @@ def verify_assistive_touch(
     cal: CalibrationState,
     pct_to_grbl: np.ndarray,
 ) -> dict:
-    """Step 7: single-tap, wait 5s, double-tap, verify nonce.
+    """Step 7: verify all three AT gestures end-to-end.
+
+    1. Single-tap → iOS takes a screenshot (Photos).
+    2. Wait 5s for the screenshot animation to finish.
+    3. Double-tap → "PhysiClaw Screenshot" Shortcut uploads the latest photo.
+       Verify the uploaded image contains the color nonce.
+    4. Long-press → "PhysiClaw Clipboard" Shortcut GETs /api/bridge/clipboard.
+       Verify the server's clipboard-copied event fires within the timeout.
+       Return the queued text so the user can paste-verify downstream.
 
     Requires:
     - Phase "assistive_touch" already set on phone with nonce bits
@@ -1153,7 +1161,12 @@ def verify_assistive_touch(
     - cal.screenshot_transform is set (from pre-cal)
     - arm.Z_DOWN is set (from step 0)
 
-    Returns dict with passed, matched, total.
+    Returns:
+        {
+          "passed": bool,  # True iff both sub-checks passed
+          "screenshot": {"passed": bool, "matched": int, "total": int},
+          "clipboard":  {"fetched": bool, "text": str | None},
+        }
     """
     if at.at_screen is None:
         raise RuntimeError("AT position not set — call compute_at_screen_pos first")
@@ -1182,13 +1195,21 @@ def verify_assistive_touch(
     data = bridge.wait_screenshot(timeout=10.0)
     if data is None:
         log.warning("  Screenshot upload timed out")
-        return {"passed": False, "matched": 0, "total": NONCE_COUNT}
+        return {
+            "passed": False,
+            "screenshot": {"passed": False, "matched": 0, "total": NONCE_COUNT},
+            "clipboard": {"fetched": False, "text": None},
+        }
 
     arr = np.frombuffer(data, dtype=np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     if img is None:
         log.warning("  Failed to decode screenshot")
-        return {"passed": False, "matched": 0, "total": NONCE_COUNT}
+        return {
+            "passed": False,
+            "screenshot": {"passed": False, "matched": 0, "total": NONCE_COUNT},
+            "clipboard": {"fetched": False, "text": None},
+        }
 
     log.info(f"  Screenshot received: {img.shape[1]}×{img.shape[0]}px")
 
@@ -1196,11 +1217,48 @@ def verify_assistive_touch(
     if t is None:
         raise RuntimeError("screenshot_transform not set — run pre-cal first")
 
-    passed, matched = verify_nonce(img, t, nonce)
+    shot_passed, matched = verify_nonce(img, t, nonce)
 
-    if passed:
-        log.info("  ✓ Step 7 done: AT verified, screenshot pipeline working")
+    if shot_passed:
+        log.info(
+            f"  ✓ Screenshot pipeline verified ({matched}/{NONCE_COUNT} bits matched)"
+        )
     else:
-        log.warning(f"  ✗ Step 7 failed: {matched}/{NONCE_COUNT} bits matched")
+        log.warning(
+            f"  ✗ Screenshot verification failed: {matched}/{NONCE_COUNT} bits matched"
+        )
 
-    return {"passed": passed, "matched": matched, "total": NONCE_COUNT}
+    # ─── Long-press: clipboard fetch verification ──────────────
+    clip_text = f"PhysiClaw-{random.randbytes(3).hex().upper()}"
+    log.info(f"  Queuing clipboard text: {clip_text!r}")
+    bridge.send_text(clip_text)
+
+    log.info("  Long-press AT (iOS Shortcut → fetch bridge text)...")
+    at.long_press(arm, pct_to_grbl)
+
+    log.info("  Waiting for iOS Shortcut to fetch clipboard text...")
+    clip_fetched = bridge.wait_clipboard(timeout=10.0)
+    if clip_fetched:
+        log.info(f"  ✓ Clipboard fetched from server — text: {clip_text!r}")
+        log.info("    Paste into Notes / any text field to verify the text matches.")
+    else:
+        log.warning("  ✗ Clipboard fetch timed out — server was not hit")
+
+    passed = shot_passed and clip_fetched
+    if passed:
+        log.info("  ✓ Step 7 done: AT tap + double-tap + long-press all verified")
+    else:
+        log.warning("  ✗ Step 7 failed")
+
+    return {
+        "passed": passed,
+        "screenshot": {
+            "passed": shot_passed,
+            "matched": matched,
+            "total": NONCE_COUNT,
+        },
+        "clipboard": {
+            "fetched": clip_fetched,
+            "text": clip_text,
+        },
+    }
