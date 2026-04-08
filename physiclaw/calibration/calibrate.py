@@ -947,7 +947,7 @@ def validate_calibration(
     pct_to_grbl: np.ndarray,
     pct_to_cam: np.ndarray,
     cam_size: tuple[int, int] = (1920, 1080),
-    num_tests: int = 3,
+    num_tests: int = 5,
     max_error: float = 0.015,
 ) -> list[dict]:
     """Full chain: dot → camera detect → Mapping B → Mapping A → tap → touch.
@@ -1004,7 +1004,7 @@ def validate_calibration(
 
         # 2. Camera detects orange dot
         # Park arm first so it doesn't occlude
-        park_gx, park_gy = pct_to_grbl @ np.array([0.5, -0.5, 1.0])
+        park_gx, park_gy = pct_to_grbl @ np.array([0.5, -0.1, 1.0])
         arm._fast_move(float(park_gx), float(park_gy))
         arm.wait_idle()
         time.sleep(0.3)
