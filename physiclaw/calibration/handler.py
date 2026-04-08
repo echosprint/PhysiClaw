@@ -164,6 +164,7 @@ async def handle_pick_frame_rotation(request, physiclaw, calib: CalibrationState
             raise RuntimeError("Camera not connected")
         rotation = pick_frame_rotation(physiclaw._cam, calib)
         physiclaw._cal["rotation"] = rotation
+        physiclaw._cam.rotation = rotation  # single source of truth for peek/snapshot
         name = {-1: "none", 0: "90° CW", 1: "180°", 2: "90° CCW"}.get(
             rotation, str(rotation)
         )

@@ -577,10 +577,9 @@ def register(
             physiclaw.park()
             time.sleep(1.5)
 
-            frame = physiclaw.cam._fresh_frame()
+            frame = physiclaw.cam.peek()
             if frame is None:
                 return "Camera capture failed"
-            frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
 
             snapshot_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
             ann.freeze(frame, snapshot_id)

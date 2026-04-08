@@ -34,10 +34,7 @@ async def freeze_snapshot(request, physiclaw: "PhysiClaw", state: AnnotationStat
     from starlette.responses import JSONResponse
 
     def _capture():
-        frame = physiclaw.cam._fresh_frame()
-        if frame is None:
-            return None
-        return cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        return physiclaw.cam.peek()
 
     loop = asyncio.get_event_loop()
     frame = await loop.run_in_executor(None, _capture)
