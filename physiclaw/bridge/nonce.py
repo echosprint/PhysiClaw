@@ -11,6 +11,8 @@ import random
 
 import numpy as np
 
+from physiclaw.calibration.transforms import ViewportShift
+
 log = logging.getLogger(__name__)
 
 NONCE_CSS_X = 180
@@ -28,7 +30,7 @@ def generate_nonce() -> list[int]:
 
 
 def verify_nonce(
-    img: np.ndarray, screenshot_transform: dict, expected_bits: list[int]
+    img: np.ndarray, t: ViewportShift, expected_bits: list[int]
 ) -> tuple[bool, int]:
     """Verify the binary nonce barcode in a screenshot.
 
@@ -37,11 +39,10 @@ def verify_nonce(
 
     Returns (all_matched, match_count).
     """
-    t = screenshot_transform
-    dpr = t["dpr"]
+    dpr = t.dpr
     step = int(NONCE_SQUARE_SIZE * dpr)
-    base_x = int(NONCE_CSS_X * dpr + t["offset_x"])
-    base_y = int(NONCE_CSS_Y * dpr + t["offset_y"])
+    base_x = int(NONCE_CSS_X * dpr + t.offset_x)
+    base_y = int(NONCE_CSS_Y * dpr + t.offset_y)
 
     matched = 0
     for i, expected in enumerate(expected_bits):

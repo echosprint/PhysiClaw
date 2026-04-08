@@ -24,7 +24,7 @@ import numpy as np
 
 from physiclaw.bridge import BridgeState, CalibrationState
 from physiclaw.bridge.nonce import NONCE_COUNT, verify_nonce
-from physiclaw.calibration.transforms import ScreenTransforms
+from physiclaw.calibration.transforms import ScreenTransforms, ViewportShift
 from physiclaw.hardware.camera import Camera
 from physiclaw.hardware.arm import StylusArm
 from physiclaw.hardware.iphone import AssistiveTouch
@@ -78,17 +78,21 @@ def _tap_once(arm: StylusArm, z: float, z_speed: int = PROBE_Z_SPEED):
 # ─── Pre-cal: Screenshot coordinate mapping ──────────────────
 
 
-def screenshot_transform(cal: CalibrationState, bridge: BridgeState) -> dict:
-    """Compute viewport→screenshot coordinate transform from a phone screenshot.
+def measure_viewport_shift(
+    cal: CalibrationState, bridge: BridgeState
+) -> ViewportShift:
+    """Measure the viewport→screenshot pixel offset and DPR.
 
-    Shows an orange square at viewport center. User takes a phone screenshot
-    (double-tap AssistiveTouch). Server detects the square in the screenshot
-    and computes the offset between viewport CSS coords and screenshot pixels.
+    Shows an orange square at a known viewport CSS position. User takes a
+    phone screenshot (double-tap AssistiveTouch). Server detects the square
+    in the screenshot and derives:
+      - dpr (device pixel ratio)
+      - offset_x, offset_y (status bar / safe-area shift)
 
     This must run before Step 0 so that all subsequent touch coordinates
     are correctly converted from viewport space to screenshot 0-1 space.
 
-    Returns transform dict stored in cal.screenshot_transform.
+    Returns the ViewportShift and stores it on cal.viewport_shift.
     """
     log.info("═══ Pre-cal: Screenshot coordinate mapping ═══")
     log.info("  Goal: compute viewport CSS → screenshot pixel transform")
@@ -167,14 +171,14 @@ def screenshot_transform(cal: CalibrationState, bridge: BridgeState) -> dict:
         f"(status bar / safe area shift)"
     )
 
-    transform = {
-        "offset_x": offset_x,
-        "offset_y": offset_y,
-        "dpr": dpr,
-        "screenshot_width": sw,
-        "screenshot_height": sh,
-    }
-    cal.screenshot_transform = transform
+    transform = ViewportShift(
+        offset_x=offset_x,
+        offset_y=offset_y,
+        dpr=dpr,
+        screenshot_width=sw,
+        screenshot_height=sh,
+    )
+    cal.viewport_shift = transform
     log.info(
         f"  ✓ Pre-cal done: dpr={dpr:.2f}, offset=({offset_x:.1f}, {offset_y:.1f})px, "
         f"screenshot={sw}×{sh}px"
@@ -328,7 +332,7 @@ def check_arm_tilt(
         arm.wait_idle()
         got = None
         z = z_tap
-        for attempt in range(4):
+        for _ in range(4):
             cal.flush_touches()
             _tap_once(arm, z)
             time.sleep(0.3)
@@ -374,7 +378,7 @@ def check_arm_tilt(
     )
     log.info(f"  Tilt ratio: {tilt:.4f} (cross-axis / main-axis, want < 0.02)")
     if tilt < 0.02:
-        log.info(f"  ✓ Step 1 done: phone is aligned (tilt < 1°)")
+        log.info("  ✓ Step 1 done: phone is aligned (tilt < 1°)")
     else:
         log.warning(
             f"  ✗ Step 1: phone is tilted — ratio {tilt:.4f} exceeds 0.02, adjust phone"
@@ -659,7 +663,7 @@ def compute_grbl_mapping(
 
     # ── Phase 1: Probe to find scale ──
     log.info("  Phase 1: Probing scale — 3 taps to discover mm-per-screen-unit")
-    log.info(f"    Tap 1/3: arm center (0, 0)mm")
+    log.info("    Tap 1/3: arm center (0, 0)mm")
     t_center, z_tap = _tap_and_read(arm, cal, 0, 0, z_tap)
     if not t_center:
         raise RuntimeError("Step 4 FAILED — no touch at center")
@@ -734,7 +738,7 @@ def compute_grbl_mapping(
             grid_idx += 1
             # Convert viewport 0-1 to screenshot 0-1 for probe affine
             # (probe_affine maps screenshot 0-1 → GRBL mm)
-            if cal.screenshot_transform:
+            if cal.viewport_shift:
                 scr_col, scr_row = cal.viewport_pct_to_screenshot_pct(col, row)
             else:
                 scr_col, scr_row = col, row
@@ -866,7 +870,7 @@ def compute_camera_mapping(
 
     # Retry once if detection fails
     if len(dots) != expected:
-        log.info(f"  Retrying dot detection after 1s...")
+        log.info("  Retrying dot detection after 1s...")
         time.sleep(1.0)
         frame = cam._fresh_frame()
         if frame is not None:
@@ -893,10 +897,10 @@ def compute_camera_mapping(
     camera_01[:, 1] /= frame_h
 
     # Grid positions: dots are rendered at viewport percentages.
-    # Convert to screenshot 0-1 if screenshot transform is available,
+    # Convert to screenshot 0-1 if the viewport shift is known,
     # so Mapping B uses the same coordinate space as Mapping A.
-    coord_space = "screenshot 0-1" if cal.screenshot_transform else "viewport 0-1"
-    if cal.screenshot_transform:
+    coord_space = "screenshot 0-1" if cal.viewport_shift else "viewport 0-1"
+    if cal.viewport_shift:
         screen_pcts = np.array(
             [
                 list(cal.viewport_pct_to_screenshot_pct(x, y))
@@ -962,7 +966,7 @@ def validate_calibration(
     log.info("═══ Step 6: Full-chain validation ═══")
     log.info(f"  Goal: end-to-end test of both mappings — {num_tests} random positions")
     log.info(
-        f"  Chain: dot on screen → camera detect → Mapping B⁻¹ → Mapping A → arm tap → touch"
+        "  Chain: dot on screen → camera detect → Mapping B⁻¹ → Mapping A → arm tap → touch"
     )
     log.info(
         f"  Pass threshold: error < {max_error} in screen 0-1 space "
@@ -985,7 +989,7 @@ def validate_calibration(
         vp_y = round(0.2 + random.random() * 0.6, 3)
 
         # Expected position in screenshot 0-1 (for comparison with touch results)
-        if cal.screenshot_transform:
+        if cal.viewport_shift:
             expected_x, expected_y = cal.viewport_pct_to_screenshot_pct(vp_x, vp_y)
         else:
             expected_x, expected_y = vp_x, vp_y
@@ -1013,8 +1017,8 @@ def validate_calibration(
 
         if detected is None:
             log.warning(
-                f"    2. Camera: could not detect orange dot — "
-                f"falling back to known position"
+                "    2. Camera: could not detect orange dot — "
+                "falling back to known position"
             )
             cam_pct_x, cam_pct_y = expected_x, expected_y
         else:
@@ -1066,7 +1070,7 @@ def validate_calibration(
             results.append(
                 {"expected": (expected_x, expected_y), "error": 999.0, "passed": False}
             )
-            log.warning(f"    5. Tap: FAILED — no touch registered after 4 attempts")
+            log.warning("    5. Tap: FAILED — no touch registered after 4 attempts")
             continue
 
         # 7. Compare in screenshot 0-1 space
@@ -1158,7 +1162,7 @@ def verify_assistive_touch(
     Requires:
     - Phase "assistive_touch" already set on phone with nonce bits
     - User has positioned AT at the orange circle
-    - cal.screenshot_transform is set (from pre-cal)
+    - cal.viewport_shift is set (from pre-cal)
     - arm.Z_DOWN is set (from step 0)
 
     Returns:
@@ -1213,9 +1217,9 @@ def verify_assistive_touch(
 
     log.info(f"  Screenshot received: {img.shape[1]}×{img.shape[0]}px")
 
-    t = cal.screenshot_transform
+    t = cal.viewport_shift
     if t is None:
-        raise RuntimeError("screenshot_transform not set — run pre-cal first")
+        raise RuntimeError("viewport_shift not set — run measure-viewport-shift first")
 
     shot_passed, matched = verify_nonce(img, t, nonce)
 

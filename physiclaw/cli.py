@@ -34,7 +34,7 @@ import urllib.request
 # Calibration step name → one-line description.
 # Order matches the canonical /setup flow so `--list` reads top-down.
 CALIBRATION_STEPS: dict[str, str] = {
-    "screenshot-transform": "compute viewport→screenshot pixel mapping (pre-cal)",
+    "viewport-shift": "measure viewport→screenshot offset and DPR (pre-cal)",
     "pen-depth": "discover Z depth that just touches the screen",
     "arm-tilt": "measure arm tilt vs screen plane",
     "camera-rotation": "detect physical camera rotation from a frame",

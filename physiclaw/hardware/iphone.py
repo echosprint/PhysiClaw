@@ -12,6 +12,8 @@ import time
 
 import numpy as np
 
+from physiclaw.calibration.transforms import ViewportShift
+
 log = logging.getLogger(__name__)
 
 
@@ -24,7 +26,7 @@ class AssistiveTouch:
 
     Usage:
         at = AssistiveTouch()
-        at.compute_at_screen_pos(cal.screenshot_transform)  # after pre-cal
+        at.compute_at_screen_pos(cal.viewport_shift)  # after pre-cal
         at.tap(arm, pct_to_grbl)              # iOS screenshot
         at.double_tap(arm, pct_to_grbl)       # screenshot + upload
         img_bytes = at.take_screenshot(arm, bridge, pct_to_grbl)
@@ -57,24 +59,20 @@ class AssistiveTouch:
         # Ellipse test: ((sx-ax)/rx)^2 + ((sy-ay)/ry)^2 < 1
         return ((sx - ax) / rx) ** 2 + ((sy - ay) / ry) ** 2 < 1.0
 
-    def compute_at_screen_pos(self, screenshot_transform: dict) -> tuple[float, float]:
-        """Convert AT CSS position to screenshot 0-1 using pre-cal transform.
+    def compute_at_screen_pos(
+        self, t: ViewportShift
+    ) -> tuple[float, float]:
+        """Convert AT CSS position to screenshot 0-1 using the viewport shift.
 
-        Must be called after the screenshot_transform calibration step has set
-        the viewport→screenshot transform on CalibrationState.
-        Stores the result in self.at_screen.
+        Must be called after the measure-viewport-shift pre-cal step has set
+        cal.viewport_shift. Stores the result in self.at_screen.
         """
-        t = screenshot_transform
-        # CSS viewport → screenshot pixel
-        px_x = self.AT_CSS_X * t["dpr"] + t["offset_x"]
-        px_y = self.AT_CSS_Y * t["dpr"] + t["offset_y"]
-        # Screenshot pixel → screenshot 0-1
-        sx = px_x / t["screenshot_width"]
-        sy = px_y / t["screenshot_height"]
+        # CSS viewport → screenshot 0-1 (center of AT button)
+        sx, sy = t.css_to_pct(self.AT_CSS_X, self.AT_CSS_Y)
         self.at_screen = (sx, sy)
         # AT button radius in screenshot 0-1 (different for x/y due to aspect ratio)
-        rx = self.AT_RADIUS * t["dpr"] / t["screenshot_width"]
-        ry = self.AT_RADIUS * t["dpr"] / t["screenshot_height"]
+        rx = self.AT_RADIUS * t.dpr / t.screenshot_width
+        ry = self.AT_RADIUS * t.dpr / t.screenshot_height
         self.at_radius_screen = (rx, ry)
         log.info(
             f"AT screen position: CSS ({self.AT_CSS_X}, {self.AT_CSS_Y}) → "

@@ -123,7 +123,7 @@ async def handle_calib_touch(request, cal: CalibrationState):
     """POST /api/bridge/touch — page reports a touch event.
 
     Body: {"clientX": float, "clientY": float} viewport CSS coords from
-    bridge.html. The screenshot transform is set during pre-cal (which
+    bridge.html. The viewport shift is measured during pre-cal (which
     always runs before any touch-driven step), so we convert directly to
     screenshot 0-1 coords and attach them as x, y.
     """

@@ -421,7 +421,7 @@ def _render_pages(
         lines.append("")
         lines.append(f"Fingerprint: On-screen keyboard, {page_name.lower()}")
         if page_name != "Alpha Keyboard":
-            lines.append(f"Entry: Alpha Keyboard → ???")
+            lines.append("Entry: Alpha Keyboard → ???")
         lines.append("")
 
         if bbox_images and page_name in bbox_images:

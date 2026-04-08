@@ -4,7 +4,7 @@ import logging
 
 from physiclaw.bridge import BridgeState, CalibrationState, PageState
 from physiclaw.calibration.handler import (
-    handle_screenshot_transform,
+    handle_measure_viewport_shift,
     handle_find_pen_depth,
     handle_check_arm_tilt,
     handle_detect_camera_rotation,
@@ -25,9 +25,9 @@ def register(
 ):
     """Register the calibration routes."""
 
-    @mcp.custom_route("/api/calibrate/screenshot-transform", methods=["POST"])
-    async def _screenshot_transform(request):
-        return await handle_screenshot_transform(
+    @mcp.custom_route("/api/calibrate/viewport-shift", methods=["POST"])
+    async def _viewport_shift(request):
+        return await handle_measure_viewport_shift(
             request, physiclaw, calib, bridge, phone
         )
 

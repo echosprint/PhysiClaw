@@ -15,6 +15,7 @@ from physiclaw.bridge.nonce import (
     NONCE_LIGHT,
     NONCE_SQUARE_SIZE,
 )
+from physiclaw.calibration.transforms import ViewportShift
 from physiclaw.hardware.iphone import AssistiveTouch
 
 log = logging.getLogger(__name__)
@@ -54,8 +55,8 @@ class CalibrationState:
         self.screen_dimension: dict | None = (
             None  # {"width", "height", "dpr", "viewport_width", "viewport_height"}
         )
-        self.screenshot_transform: dict | None = (
-            None  # viewport→screenshot mapping from pre-cal step
+        self.viewport_shift: ViewportShift | None = (
+            None  # viewport→screenshot offset + DPR from pre-cal step
         )
         self._screenshot_nonce: list[int] | None = (
             None  # NONCE_COUNT bits for Step 7
@@ -114,16 +115,14 @@ class CalibrationState:
     ) -> tuple[float, float]:
         """Convert viewport CSS coords (clientX/clientY) to screenshot 0-1.
 
-        Requires screenshot_transform to be set via the pre-calibration step.
+        Requires viewport_shift to be set via the pre-calibration step.
         """
-        t = self.screenshot_transform
+        t = self.viewport_shift
         if t is None:
             raise RuntimeError(
-                "Screenshot calibration not done — run screenshot-transform first"
+                "Viewport shift not measured — run viewport-shift first"
             )
-        sx = (client_x * t["dpr"] + t["offset_x"]) / t["screenshot_width"]
-        sy = (client_y * t["dpr"] + t["offset_y"]) / t["screenshot_height"]
-        return (sx, sy)
+        return t.css_to_pct(client_x, client_y)
 
     def viewport_pct_to_screenshot_pct(
         self, vx: float, vy: float

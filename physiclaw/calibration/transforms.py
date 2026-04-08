@@ -1,22 +1,52 @@
 """
-Calibration result — the `ScreenTransforms` dataclass.
+Calibration results — `ScreenTransforms` and `ViewportShift`.
 
-`ScreenTransforms` holds the affine transforms produced by the calibration
-plan in `calibrate.py`:
-  - pct_to_grbl: screen 0-1 → GRBL mm
-  - pct_to_cam:  screen 0-1 → camera 0-1
+Two dataclasses live here, both pure data + coordinate math:
 
-These transforms enable coordinate-based tapping: the agent specifies a
-target as a 0-1 bounding box and the arm moves directly to its center.
+- `ViewportShift` is produced by the pre-calibration step
+  (`measure_viewport_shift()` in `calibrate.py`). It maps viewport CSS
+  pixels to screenshot 0-1 coordinates, accounting for device pixel
+  ratio and the iOS status-bar / safe-area offset.
 
-This file is pure data + coordinate math. Hardware-orchestration helpers
-that *use* a ScreenTransforms (like edge-trace verification) live in
-`calibrate.py`.
+- `ScreenTransforms` holds the final affine matrices produced by the
+  7-step calibration plan: screen 0-1 → GRBL mm and screen 0-1 →
+  camera 0-1. These enable coordinate-based tapping.
+
+Hardware-orchestration helpers that *use* these transforms (like
+edge-trace verification) live in `calibrate.py`.
 """
 
 import dataclasses
 
 import numpy as np
+
+
+@dataclasses.dataclass(frozen=True)
+class ViewportShift:
+    """Viewport CSS pixels → screenshot 0-1 coordinates.
+
+    Produced by the pre-calibration step: server shows an orange square at
+    a known CSS position, user uploads a screenshot, server detects the
+    square and derives (dpr, offset_x, offset_y) from the mismatch.
+
+    Fields:
+        offset_x, offset_y: screenshot-pixel offset caused by iOS status
+            bar / safe area (viewport origin is not at screenshot origin).
+        dpr: device pixel ratio — CSS px → screenshot px scale factor.
+        screenshot_width, screenshot_height: screenshot image size in px.
+    """
+
+    offset_x: float
+    offset_y: float
+    dpr: float
+    screenshot_width: int
+    screenshot_height: int
+
+    def css_to_pct(self, css_x: float, css_y: float) -> tuple[float, float]:
+        """Convert viewport CSS pixel coords to screenshot 0-1 coords."""
+        sx = (css_x * self.dpr + self.offset_x) / self.screenshot_width
+        sy = (css_y * self.dpr + self.offset_y) / self.screenshot_height
+        return (sx, sy)
 
 
 @dataclasses.dataclass

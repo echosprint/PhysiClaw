@@ -12,13 +12,15 @@ is where the 7-step plan accumulates intermediate results between calls.
 import asyncio
 import logging
 
+import dataclasses
+
 import cv2
 from starlette.responses import JSONResponse
 
 from physiclaw.bridge import BridgeState, CalibrationState, PageState
 from physiclaw.bridge.nonce import generate_nonce
 from physiclaw.calibration.calibrate import (
-    screenshot_transform,
+    measure_viewport_shift,
     find_pen_depth,
     check_arm_tilt,
     detect_camera_rotation,
@@ -52,23 +54,23 @@ def _err(message, status_code=500):
     )
 
 
-# ─── Pre-cal: viewport → screenshot transform ───────────────
+# ─── Pre-cal: measure viewport shift ────────────────────────
 
 
-async def handle_screenshot_transform(
+async def handle_measure_viewport_shift(
     request, physiclaw, calib: CalibrationState, bridge: BridgeState, phone: PageState
 ):
-    """POST /api/calibrate/screenshot-transform — compute viewport→screenshot pixel mapping."""
+    """POST /api/calibrate/viewport-shift — measure viewport→screenshot offset and DPR."""
 
     def _do():
         phone.set_mode("calibrate", phase="screenshot_cal")
-        result = screenshot_transform(calib, bridge)
-        physiclaw._cal["screenshot_transform"] = result
+        result = measure_viewport_shift(calib, bridge)
+        physiclaw._cal["viewport_shift"] = result
         return result
 
     try:
         result = await _run_blocking(_do)
-        return _ok(result)
+        return _ok(dataclasses.asdict(result))
     except Exception as e:
         return _err(str(e))
 
@@ -325,10 +327,10 @@ async def handle_show_assistive_touch(
 ):
     """POST /api/calibrate/assistive-touch/show — display AT positioning circle + color nonce."""
 
-    if calib.screenshot_transform is None:
-        return _err("Run screenshot-transform first", status_code=400)
+    if calib.viewport_shift is None:
+        return _err("Run viewport-shift first", status_code=400)
     nonce = generate_nonce()
-    physiclaw.assistive_touch.compute_at_screen_pos(calib.screenshot_transform)
+    physiclaw.assistive_touch.compute_at_screen_pos(calib.viewport_shift)
     phone.set_mode("calibrate", phase="assistive_touch", nonce_bits=nonce)
     return JSONResponse(
         {

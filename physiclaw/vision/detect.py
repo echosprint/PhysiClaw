@@ -11,7 +11,6 @@ Pure function: frame in → results out. No hardware dependency.
 import logging
 from datetime import datetime
 
-import cv2
 import numpy as np
 
 from physiclaw.vision.color_segment import detect_color_blocks
@@ -57,12 +56,12 @@ def detect_all_elements(
         for blob in blobs:
             element_id += 1
             x1, y1, x2, y2 = blob.bbox
-            l, t = cal.pixel_to_pct(int(x1), int(y1))
-            r, b = cal.pixel_to_pct(int(x2), int(y2))
+            left, top = cal.pixel_to_pct(int(x1), int(y1))
+            right, bottom = cal.pixel_to_pct(int(x2), int(y2))
             kind = "image" if blob.is_image else "solid" if blob.is_solid else "mixed"
             color_rows.append(
                 f"| {element_id} | {blob.color_name} | {kind} "
-                f"| [{l:.2f}, {t:.2f}, {r:.2f}, {b:.2f}] "
+                f"| [{left:.2f}, {top:.2f}, {right:.2f}, {bottom:.2f}] "
                 f"| {blob.h_std:.1f} |"
             )
     except Exception as ex:
@@ -84,11 +83,11 @@ def detect_all_elements(
         for e in icons:
             element_id += 1
             x1, y1, x2, y2 = e.bbox
-            l, t = cal.pixel_to_pct(x1, y1)
-            r, b = cal.pixel_to_pct(x2, y2)
+            left, top = cal.pixel_to_pct(x1, y1)
+            right, bottom = cal.pixel_to_pct(x2, y2)
             icon_rows.append(
                 f"| {element_id} "
-                f"| [{l:.2f}, {t:.2f}, {r:.2f}, {b:.2f}] "
+                f"| [{left:.2f}, {top:.2f}, {right:.2f}, {bottom:.2f}] "
                 f"| {e.confidence:.2f} |"
             )
     except (ImportError, FileNotFoundError) as ex:
@@ -108,15 +107,15 @@ def detect_all_elements(
             ocr_reader = OCRReader()
         texts = ocr_reader.read(frame)
         ocr_frame = ocr_annotate(frame, texts)
-        for t in texts:
+        for txt in texts:
             element_id += 1
-            x1, y1, x2, y2 = t.bbox
-            l, tp = cal.pixel_to_pct(x1, y1)
-            r, b = cal.pixel_to_pct(x2, y2)
+            x1, y1, x2, y2 = txt.bbox
+            left, top = cal.pixel_to_pct(x1, y1)
+            right, bottom = cal.pixel_to_pct(x2, y2)
             ocr_rows.append(
-                f'| {element_id} | "{t.text}" '
-                f"| [{l:.2f}, {tp:.2f}, {r:.2f}, {b:.2f}] "
-                f"| {t.confidence:.2f} |"
+                f'| {element_id} | "{txt.text}" '
+                f"| [{left:.2f}, {top:.2f}, {right:.2f}, {bottom:.2f}] "
+                f"| {txt.confidence:.2f} |"
             )
     except ImportError as ex:
         ocr_rows.append(f"| — | unavailable: {ex} | — | — |")

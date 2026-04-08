@@ -80,15 +80,15 @@ Tell the user:
 
 Wait for confirmation that the page is open on the phone (shows "PhysiClaw" on black background).
 
-### 1.6 Screenshot coordinate calibration
+### 1.6 Measure viewport shift
 
 Tell the user:
-> The phone will show an orange square. **Tap AssistiveTouch once** (takes a screenshot), then **double-tap AssistiveTouch** (gets the latest screenshot and uploads it to the server). This lets me figure out the exact mapping between the phone page and the physical screen.
+> The phone will show an orange square. **Tap AssistiveTouch once** (takes a screenshot), then **double-tap AssistiveTouch** (gets the latest screenshot and uploads it to the server). This lets me measure the DPR and status-bar offset between the phone's CSS viewport and its screenshot pixels.
 
 Note: This requires `/phone-setup` to be done first (AssistiveTouch + iOS Shortcut configured).
 
 ```bash
-uv run physiclaw-setup calibrate screenshot-transform --timeout 35
+uv run physiclaw-setup calibrate viewport-shift --timeout 35
 ```
 
 If it fails with "no screenshot received", remind the user to tap once then double-tap AssistiveTouch, and retry.

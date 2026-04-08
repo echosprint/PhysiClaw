@@ -135,13 +135,13 @@ async def handle_confirm(request, state: AnnotationState, physiclaw: "PhysiClaw"
     confirmed = []
     for box in raw_boxes:
         if cal is not None:
-            l, t = cal.pixel_to_pct(int(box["left"]), int(box["top"]))
-            r, b = cal.pixel_to_pct(int(box["right"]), int(box["bottom"]))
+            left, top = cal.pixel_to_pct(int(box["left"]), int(box["top"]))
+            right, bottom = cal.pixel_to_pct(int(box["right"]), int(box["bottom"]))
             full_bbox = [
-                max(0.0, min(1.0, round(l, 3))),
-                max(0.0, min(1.0, round(t, 3))),
-                max(0.0, min(1.0, round(r, 3))),
-                max(0.0, min(1.0, round(b, 3))),
+                max(0.0, min(1.0, round(left, 3))),
+                max(0.0, min(1.0, round(top, 3))),
+                max(0.0, min(1.0, round(right, 3))),
+                max(0.0, min(1.0, round(bottom, 3))),
             ]
         else:
             # No calibration — normalize by image dimensions

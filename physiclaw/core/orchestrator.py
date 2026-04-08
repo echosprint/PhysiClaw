@@ -61,10 +61,10 @@ class PhysiClaw:
         z_tap = self._cal.get("z_tap")
         if z_tap is not None:
             steps["z_tap"] = f"{z_tap}mm"
-        if "screenshot_transform" in self._cal:
-            t = self._cal["screenshot_transform"]
-            steps["screenshot_cal"] = (
-                f"dpr={t['dpr']}, offset=({t['offset_x']}, {t['offset_y']})"
+        if "viewport_shift" in self._cal:
+            t = self._cal["viewport_shift"]
+            steps["viewport_shift"] = (
+                f"dpr={t.dpr}, offset=({t.offset_x}, {t.offset_y})"
             )
         if self._arm and self._arm.MOVE_DIRECTIONS:
             steps["alignment"] = "OK"

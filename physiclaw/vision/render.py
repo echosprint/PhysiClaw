@@ -121,13 +121,13 @@ def process_annotations(
     out = frame.copy()
     elements = []
     for i, ann in enumerate(annotations):
-        l, t = cal.pixel_to_pct(int(ann["left"]), int(ann["top"]))
-        r, b = cal.pixel_to_pct(int(ann["right"]), int(ann["bottom"]))
+        left, top = cal.pixel_to_pct(int(ann["left"]), int(ann["top"]))
+        right, bottom = cal.pixel_to_pct(int(ann["right"]), int(ann["bottom"]))
         bbox = [
-            max(0.0, min(1.0, round(l, 3))),
-            max(0.0, min(1.0, round(t, 3))),
-            max(0.0, min(1.0, round(r, 3))),
-            max(0.0, min(1.0, round(b, 3))),
+            max(0.0, min(1.0, round(left, 3))),
+            max(0.0, min(1.0, round(top, 3))),
+            max(0.0, min(1.0, round(right, 3))),
+            max(0.0, min(1.0, round(bottom, 3))),
         ]
         box_type, coords = classify_bbox(bbox)
         color = ann.get("color", "#42a5f5")

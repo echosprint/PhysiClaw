@@ -82,12 +82,15 @@ def shutdown():
 
 
 # ─── Register tools and routes ──────────────────────────────
+# Late imports: each submodule imports from this __init__ for the `mcp`
+# singleton and friends, so they must be imported after the singletons
+# above are constructed. The E402 suppression is intentional.
 
-from physiclaw.server.tools import register as _register_tools
-from physiclaw.server.bridge import register as _register_bridge
-from physiclaw.server.annotation import register as _register_annotation
-from physiclaw.server.hardware import register as _register_hardware
-from physiclaw.server.calibration import register as _register_calibration
+from physiclaw.server.tools import register as _register_tools  # noqa: E402
+from physiclaw.server.bridge import register as _register_bridge  # noqa: E402
+from physiclaw.server.annotation import register as _register_annotation  # noqa: E402
+from physiclaw.server.hardware import register as _register_hardware  # noqa: E402
+from physiclaw.server.calibration import register as _register_calibration  # noqa: E402
 
 _register_tools(mcp, physiclaw, _bridge, _calib, _ann)
 _register_bridge(mcp, physiclaw, _bridge, _calib, _phone)
