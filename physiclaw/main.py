@@ -7,6 +7,30 @@ Usage:
 import argparse
 import atexit
 import logging
+import subprocess
+import sys
+
+
+def _spawn_runtime(port: int, verbose: bool) -> subprocess.Popen:
+    """Launch the poll/dispatch loop as a child process.
+
+    Runs out-of-process so long-running hooks (e.g. shelling out to `claude`)
+    don't block the MCP event loop. Terminated via atexit when the server
+    exits.
+    """
+    log = logging.getLogger(__name__)
+    cmd = [
+        sys.executable,
+        "-m",
+        "physiclaw.runtime",
+        "--server",
+        f"http://127.0.0.1:{port}",
+    ]
+    if verbose:
+        cmd.append("--verbose")
+    proc = subprocess.Popen(cmd)
+    log.info(f"Runtime loop started as subprocess (pid={proc.pid})")
+    return proc
 
 
 def main():
@@ -15,6 +39,11 @@ def main():
     parser.add_argument("--host", type=str, default="0.0.0.0")
     parser.add_argument(
         "--verbose", "-v", action="store_true", help="Show detailed debug output"
+    )
+    parser.add_argument(
+        "--no-runtime",
+        action="store_true",
+        help="Don't spawn the runtime loop subprocess",
     )
     args = parser.parse_args()
 
@@ -39,6 +68,20 @@ def main():
     log.info(f"QR code (scan with phone): http://localhost:{args.port}/api/bridge/qr")
     log.info(f"Phone page: http://{lan_ip}:{args.port}/bridge")
     log.info("Run /setup in Claude Code to connect hardware and calibrate")
+
+    if not args.no_runtime:
+        runtime_proc = _spawn_runtime(args.port, args.verbose)
+
+        def _stop_runtime():
+            if runtime_proc.poll() is None:
+                runtime_proc.terminate()
+                try:
+                    runtime_proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    runtime_proc.kill()
+
+        atexit.register(_stop_runtime)
+
     mcp.run(transport="streamable-http")
 
 
