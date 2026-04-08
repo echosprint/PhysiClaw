@@ -1233,6 +1233,9 @@ def verify_assistive_touch(
         )
 
     # ─── Long-press: clipboard fetch verification ──────────────
+    # Give iOS a moment to finish the previous Shortcut run before we
+    # queue new text and trigger another one.
+    time.sleep(5.0)
     clip_text = f"PhysiClaw-{random.randbytes(3).hex().upper()}"
     log.info(f"  Queuing clipboard text: {clip_text!r}")
     bridge.send_text(clip_text)
@@ -1247,6 +1250,10 @@ def verify_assistive_touch(
         log.info("    Paste into Notes / any text field to verify the text matches.")
     else:
         log.warning("  ✗ Clipboard fetch timed out — server was not hit")
+
+    # Clear the queued text so the bridge page doesn't keep displaying the
+    # leftover nonce after the phone switches back to bridge mode.
+    bridge.clear_text()
 
     passed = shot_passed and clip_fetched
     if passed:

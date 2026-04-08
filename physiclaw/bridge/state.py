@@ -76,6 +76,12 @@ class BridgeState:
             self._text = text
             self._clipboard_copied.clear()
 
+    def clear_text(self):
+        """Clear any queued text so the phone bridge page goes blank."""
+        with self.lock:
+            self._text = None
+            self._clipboard_copied.clear()
+
     def current_text(self) -> str | None:
         """Thread-safe read of the queued text. Returns None if empty."""
         with self.lock:

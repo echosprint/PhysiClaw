@@ -33,7 +33,7 @@ class AssistiveTouch:
     """
 
     # AT button position in CSS viewport pixels (iPhone left edge snap).
-    AT_CSS_X = 38  # 10pt edge margin + 28pt button radius
+    AT_CSS_X = 39  # 11pt edge margin + 28pt button radius
     AT_CSS_Y = 200  # hardcoded vertical position
     AT_RADIUS = 28  # 56pt diameter
 
