@@ -155,6 +155,8 @@ def cmd_calibrate(args) -> int:
     if args.list:
         _print_calibration_steps()
         return 0
+    if args.step_timeout is not None:
+        args.timeout = args.step_timeout
     if not args.step:
         print("error: calibrate requires a step name (or --list)", file=sys.stderr)
         return 1
@@ -247,6 +249,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_cal.add_argument(
         "--list", action="store_true", help="List all calibration steps and exit"
+    )
+    p_cal.add_argument(
+        "--timeout",
+        dest="step_timeout",
+        type=float,
+        default=None,
+        help="Override request timeout (seconds) for this step",
     )
 
     return parser
