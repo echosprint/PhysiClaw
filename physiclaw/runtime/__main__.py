@@ -1,38 +1,24 @@
 """Standalone runtime entry point — `python -m physiclaw.runtime`.
 
-Spawned as a subprocess by `physiclaw.main` so the poll/dispatch loop runs
-out-of-process from the MCP server. This isolates long-running hook work
-(e.g. shelling out to `claude`) from the FastMCP event loop.
+Spawned as a subprocess by `physiclaw.main` so the hook loop runs
+out-of-process from the MCP server. This isolates long-running hook
+work (e.g. shelling out to `claude`) from the FastMCP event loop.
 
-Polls the server's /api/phone/watch endpoint and fires registered hooks
-(auto-discovered from `physiclaw.hooks/`) whenever it returns event=True.
+Each tick: run every hook under `physiclaw/hooks/` (auto-discovered via
+`load_hooks`). Each hook returns a `Trigger` if it fired or `None` if
+it didn't. If any hook fired, the collected triggers are passed to
+`spawn_claude`, which launches `claude -p <prompt>` as a subprocess.
 """
 
 import argparse
 import asyncio
 import logging
+import os
 
-import httpx
-
-from physiclaw.runtime import Runtime, dispatch
+from physiclaw.runtime import Runtime
+from physiclaw.runtime.claude import spawn_claude
 
 log = logging.getLogger(__name__)
-
-
-async def _amain(base_url: str, interval: float) -> None:
-    async with httpx.AsyncClient(base_url=base_url, timeout=10.0) as client:
-
-        async def poll() -> bool:
-            try:
-                r = await client.get("/api/phone/watch")
-                if r.status_code != 200:
-                    return False
-                return bool(r.json().get("event"))
-            except Exception:
-                log.debug("watchdog poll failed", exc_info=True)
-                return False
-
-        await Runtime(poll=poll, dispatch=dispatch, interval=interval).start()
 
 
 def main() -> None:
@@ -42,12 +28,18 @@ def main() -> None:
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
 
+    # Hooks read this to know where the MCP server lives. Must be set
+    # before load_hooks() imports them.
+    os.environ.setdefault("PHYSICLAW_SERVER", args.server)
+
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="[runtime] %(message)s",
     )
     try:
-        asyncio.run(_amain(args.server, args.interval))
+        asyncio.run(
+            Runtime(react=spawn_claude, interval=args.interval).start()
+        )
     except KeyboardInterrupt:
         pass
 

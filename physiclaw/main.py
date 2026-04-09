@@ -12,7 +12,7 @@ import sys
 
 
 def _spawn_runtime(port: int, verbose: bool) -> subprocess.Popen:
-    """Launch the poll/dispatch loop as a child process.
+    """Launch the hook loop as a child process.
 
     Runs out-of-process so long-running hooks (e.g. shelling out to `claude`)
     don't block the MCP event loop. Terminated via atexit when the server
