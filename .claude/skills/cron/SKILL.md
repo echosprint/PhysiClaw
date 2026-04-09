@@ -45,13 +45,13 @@ Claude needs: which app to open, what to do, edge cases.
 | description line   | skill    | One line under heading (required)                |
 | `Type:`            | skill    | `periodic` or `one-time` (required)              |
 | `Schedule:`        | skill    | 5-field cron in backticks (required)             |
-| `Context:`         | skill    | Full agent instructions (required)               |
 | `Create time:`     | skill    | ISO timestamp when the job was added             |
 | `Next fire time:`  | skill    | Computed after each fire                         |
 | `Last fire time:`  | hook     | When the hook last fired this job                |
 | `Execution time:`  | agent    | When Claude finished — set via `done`/`fail` CLI |
 | `Execution result:`| agent    | One-line result summary — set via `done`/`fail`  |
 | `Status:`          | mixed    | `pend`, `fired`, `cancel`, `done`, or `fail`     |
+| `Context:`         | skill    | Full agent instructions (required, last field)   |
 
 **Status lifecycle:**
 
@@ -95,13 +95,13 @@ Example: `2026-04-09T09:00`. Unfired fields use `(never)`.
 
    - Type: <periodic|one-time>
    - Schedule: `<cron expression>`
-   - Context: <full instructions for the agent>
    - Create time: <now as ISO>
    - Next fire time: <compute from schedule and current time, fill as ISO>
    - Last fire time: (never)
    - Execution time: (never)
    - Execution result: (never)
    - Status: pend
+   - Context: <full instructions for the agent>
    ```
 
 5. Run verify (this also validates Next fire time matches the schedule)

@@ -493,11 +493,12 @@ def _cli() -> int:
             print(f"  [{j.kind:8s}] [{j.status:6s}] {j.id}")
             print(f"    {j.description}")
             print(f"    schedule: {j.schedule}")
-            print(f"    context: {j.context}")
             print(f"    next: {j.next_fire_time or '(never)'}")
             print(f"    last: {j.last_fire_time or '(never)'}")
             print(f"    exec: {j.execution_time or '(never)'}")
             print(f"    result: {j.execution_result or '(never)'}")
+            print(f"    context: {j.context}")
+            print()
         return 0
 
     if cmd == "jobs-to-do":
