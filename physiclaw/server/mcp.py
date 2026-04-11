@@ -6,9 +6,10 @@ prompt has a single, focused home. The instance is imported and wired up
 
 The `instructions` field is delivered to the client once at the MCP
 initialization handshake. Keep it focused on cross-tool reasoning:
-mental model, operating loop, coordinate conventions, global safety,
-and setup gating. Per-tool mechanics live in `@mcp.tool()` docstrings
-and are auto-delivered as tool schemas — do not duplicate them here.
+mental model, tool-choice trade-offs, operating loop, coordinate
+conventions, global safety, and setup gating. Per-tool mechanics
+live in `@mcp.tool()` docstrings and are auto-delivered as tool
+schemas — do not duplicate them here.
 """
 
 from mcp.server.fastmcp import FastMCP
@@ -19,23 +20,37 @@ mcp = FastMCP(
 
 ## Mental model: See → Act
 
-Every task reduces to: take a photo, pick a target, do something.
+Every task reduces to: see the screen, pick a target, do something.
 
 When a tool takes a `bbox` argument, it's `[left, top, right, bottom]` as 0-1 decimals on the phone screen (0 = left/top edge, 1 = right/bottom edge).
 
+## Seeing the screen
+
+Pick the cheapest tool that answers your question:
+
+| Tool           | Time | Output                                   |
+|----------------|------|------------------------------------------|
+| `scan()`       | ~1s  | OCR'd text from the camera view          |
+| `peek()`       | ~3s  | Raw camera image — rough, may have glare |
+| `screenshot()` | ~12s | Pixel-perfect image + detected UI bboxes |
+
+Time is wall clock: hardware action + your inference on the returned content.
+
+`scan()` and `peek()` are for orientation and verification. `screenshot()` is for planning actions — use its detected bboxes, never eyeball coordinates from a `peek()`.
+
 ## Operating loop
 
-1. **Orient.** Call `peek()` for a cheap, instant look at the screen.
-2. **Plan.** When you need a precise target to act on, call `screenshot()`. It returns a pixel-perfect image PLUS a JSON list of detected UI elements with numbered bboxes — use one of those bboxes instead of estimating coordinates yourself.
+1. **Orient.** `scan()` or `peek()` to see what's on screen.
+2. **Plan.** When you need a target to act on, call `screenshot()` and pick a bbox from its JSON list.
 3. **Act.** Call a gesture tool.
-4. **Verify.** Call `peek()` again to see the result. If the screen did not change, retry the same call a few times — the capacitive stylus occasionally fails to register. If it still does not change, the bbox was likely wrong; re-examine with `screenshot()`.
+4. **Verify.** `scan()` or `peek()` again. If the screen did not change, retry the same call a few times — the capacitive stylus occasionally fails to register. If it still does not change, the bbox was likely wrong; re-examine with `screenshot()`.
 
 ## Safety
 
-Wrong taps on a real phone are irreversible. Don't eyeball small targets from `peek()` — use `screenshot()` to get detected bboxes.
+Wrong taps on a real phone are irreversible — a bad coordinate can send a message, transfer money, or trigger an action you can't undo.
 
 ## Setup
 
-All tools require hardware to be set up first. If a tool returns "Hardware not set up", tell the user to run `/setup`. Do not try to call setup endpoints yourself.
+All tools require hardware to be set up first. If a tool returns "Hardware not set up", tell the user to run `/setup`.
 """,
 )

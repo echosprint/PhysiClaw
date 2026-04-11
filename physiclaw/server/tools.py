@@ -23,6 +23,18 @@ def register(
     # ─── See ─────────────────────────────────────────────────
 
     @mcp.tool()
+    def scan() -> str:
+        """OCR the overhead camera view. Text only, no image.
+
+        Use for: reading notifications, labels, messages, or timestamps
+        when you only need the text content. Much cheaper in tokens
+        than peek() or screenshot().
+        Fails silently on glare or small text — if the output looks
+        empty or garbled, fall back to peek() or screenshot().
+        """
+        ...
+
+    @mcp.tool()
     def peek() -> Image:
         """Quick look via the overhead camera. Cheap, instant.
 
