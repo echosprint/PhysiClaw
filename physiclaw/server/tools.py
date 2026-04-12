@@ -4,6 +4,8 @@ All MCP tools — the agent's surface for controlling the phone.
 Mental model: **See → Act**. Take a photo, pick a bbox, do something there.
 """
 
+from typing import Literal
+
 from mcp.server.fastmcp import FastMCP, Image
 
 from physiclaw.core import PhysiClaw
@@ -80,7 +82,11 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
     # ─── Swipe ───────────────────────────────────────────────
 
     @mcp.tool()
-    def swipe(bbox: list[float], direction: str, size: str = "medium") -> str:
+    def swipe(
+        bbox: list[float],
+        direction: Literal["up", "down", "left", "right"],
+        size: Literal["small", "medium", "large"] = "medium",
+    ) -> str:
         """Stylus slides across a region. The direction is the stylus motion.
 
         Use for: scrolling (swipe up to scroll down), dismissing cards,

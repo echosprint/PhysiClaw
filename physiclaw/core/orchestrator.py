@@ -15,6 +15,7 @@ coordinates sub-modules, it never touches pixels directly.
 import logging
 import threading
 from contextlib import contextmanager
+from typing import Literal
 
 from physiclaw.bridge import BridgeState
 from physiclaw.calibration import ScreenTransforms
@@ -258,7 +259,7 @@ class PhysiClaw:
         with self.locked():
             self._require_at_bridge()
             data = self._assistive_touch.take_screenshot(
-                self._arm, self._bridge, self._transforms.pct_to_grbl, timeout=10.0
+                self._arm, self._bridge, self._transforms.pct_to_grbl, timeout=20.0
             )
             if data is None:
                 raise TimeoutError(
@@ -295,7 +296,10 @@ class PhysiClaw:
             return f"Long pressed at bbox {bbox}"
 
     def swipe(
-        self, bbox: list[float], direction: str, size: str = "medium"
+        self,
+        bbox: list[float],
+        direction: Literal["up", "down", "left", "right"],
+        size: Literal["small", "medium", "large"] = "medium",
     ) -> str:
         """Swipe from the bbox center in `direction` by `size` screen fraction."""
         if size not in self.SWIPE_DISTANCES:
@@ -342,7 +346,7 @@ class PhysiClaw:
         screen width rightward — enough for iOS to register the back
         gesture (~100pt threshold).
         """
-        self.swipe([0.0, 0.4, 0.04, 0.6], "right", "medium")
+        self.swipe([0.0, 0.4, 0.04, 0.6], "right", "large")
         return "Went back"
 
     # ─── Lifecycle ─────────────────────────────────────────────
