@@ -105,6 +105,29 @@ class OCRReader:
         return " ".join(r.text for r in results)
 
 
+def results_to_elements(results: list[TextResult], transforms) -> list[dict]:
+    """Convert OCR results to element dicts with screen 0-1 bboxes.
+
+    Uses transforms.pixel_to_pct() to map camera pixel bboxes to
+    phone screen coordinates. Output matches the screenshot() JSON
+    schema: {id, kind, label, bbox, conf}.
+    """
+    elements = []
+    for i, r in enumerate(results):
+        x1, y1, x2, y2 = r.bbox
+        left, top = transforms.pixel_to_pct(x1, y1)
+        right, bottom = transforms.pixel_to_pct(x2, y2)
+        elements.append({
+            "id": i,
+            "kind": "text",
+            "label": r.text,
+            "bbox": [round(left, 3), round(top, 3),
+                     round(right, 3), round(bottom, 3)],
+            "conf": round(r.confidence, 2),
+        })
+    return elements
+
+
 def annotate(frame: np.ndarray, results: list[TextResult]) -> np.ndarray:
     """Draw text bounding boxes and labels on a frame. Returns a copy."""
     out = frame.copy()

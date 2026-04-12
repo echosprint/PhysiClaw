@@ -16,19 +16,16 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
 
     @mcp.tool()
     def scan() -> str:
-        """OCR the overhead camera view. Text only, no image.
+        """OCR the overhead camera view. Text only, no image. ~1s.
 
-        Use for: reading notifications, labels, messages, or timestamps
-        when you only need the text content. Much cheaper in tokens
-        than peek() or screenshot().
-        Fails silently on glare or small text — if the output looks
-        empty or garbled, fall back to peek() or screenshot().
+        Use for: reading text on screen, checking status, verifying results.
+        Returns JSON in same format as screenshot() but text-only (no icons).
         """
         return physiclaw.scan()
 
     @mcp.tool()
     def peek() -> Image:
-        """Quick look via the overhead camera. Cheap, instant.
+        """Quick look via the overhead camera. ~3s.
 
         Use for: verifying an action landed, checking current status.
         For precise bboxes before acting, use screenshot() instead.
@@ -37,7 +34,7 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
 
     @mcp.tool()
     def screenshot() -> list:
-        """Pixel-perfect screenshot with UI elements detected. ~10s.
+        """Pixel-perfect screenshot with UI elements detected. ~12s.
 
         Use for: planning an action — returns precise bboxes to feed
         straight into tap/swipe/etc.

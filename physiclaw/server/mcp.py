@@ -28,11 +28,11 @@ When a tool takes a `bbox` argument, it's `[left, top, right, bottom]` as 0-1 de
 
 Pick the cheapest tool that answers your question:
 
-| Tool           | Time | Output                                   |
-|----------------|------|------------------------------------------|
-| `scan()`       | ~1s  | OCR'd text from the camera view          |
-| `peek()`       | ~3s  | Raw camera image — rough, may have glare |
-| `screenshot()` | ~12s | Pixel-perfect image + detected UI bboxes |
+| Tool           | Time | Output                                     |
+|----------------|------|------------------------------------------- |
+| `scan()`       | ~1s  | JSON list of text elements of camera image |
+| `peek()`       | ~3s  | Raw camera image — rough, may have glare   |
+| `screenshot()` | ~12s | Pixel-perfect image + detected UI bboxes   |
 
 Time is wall clock: hardware action + your inference on the returned content.
 

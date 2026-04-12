@@ -22,7 +22,7 @@ from physiclaw.hardware.arm import StylusArm
 from physiclaw.hardware.camera import Camera
 from physiclaw.hardware.iphone import AssistiveTouch
 from physiclaw.vision.icon_detect import IconDetector
-from physiclaw.vision.ocr import OCRReader
+from physiclaw.vision.ocr import OCRReader, results_to_elements
 from physiclaw.vision.render import decode_image, encode_jpeg
 from physiclaw.vision.ui_elements import (
     compact_json,
@@ -231,11 +231,17 @@ class PhysiClaw:
         return self._icon_detector
 
     def scan(self) -> str:
-        """OCR the overhead camera view. Returns newline-separated text."""
+        """OCR the overhead camera view. Returns JSON list of text elements.
+
+        Same schema as screenshot() but text-only (no icons), and
+        bboxes are transformed from camera pixels to screen 0-1.
+        """
         with self.locked():
             self.park()
             frame = self.camera_view()
-            return "\n".join(r.text for r in self._get_ocr_reader().read(frame))
+            results = self._get_ocr_reader().read(frame)
+            elements = results_to_elements(results, self._transforms)
+            return compact_json(elements)
 
     def peek(self) -> bytes:
         """Quick camera snapshot. Returns JPEG-encoded bytes."""
