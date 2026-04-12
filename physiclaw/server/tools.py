@@ -2,8 +2,12 @@
 All MCP tools — the agent's surface for controlling the phone.
 
 Mental model: **See → Act**. Take a photo, pick a bbox, do something there.
+
+All tools are async — blocking hardware I/O runs in a thread pool
+via asyncio.to_thread() so the event loop stays free for HTTP routes.
 """
 
+import asyncio
 from typing import Literal
 
 from mcp.server.fastmcp import FastMCP, Image
@@ -17,25 +21,26 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
     # ─── See ─────────────────────────────────────────────────
 
     @mcp.tool()
-    def scan() -> str:
+    async def scan() -> str:
         """OCR the overhead camera view. Text only, no image. ~1s.
 
         Use for: reading text on screen, checking status, verifying results.
         Returns JSON in same format as screenshot() but text-only (no icons).
         """
-        return physiclaw.scan()
+        return await asyncio.to_thread(physiclaw.scan)
 
     @mcp.tool()
-    def peek() -> Image:
+    async def peek() -> Image:
         """Quick look via the overhead camera. ~3s.
 
         Use for: verifying an action landed, checking current status.
         For precise bboxes before acting, use screenshot() instead.
         """
-        return Image(data=physiclaw.peek(), format="jpeg")
+        data = await asyncio.to_thread(physiclaw.peek)
+        return Image(data=data, format="jpeg")
 
     @mcp.tool()
-    def screenshot() -> list:
+    async def screenshot() -> list:
         """Pixel-perfect screenshot with UI elements detected. ~12s.
 
         Use for: planning an action — returns precise bboxes to feed
@@ -47,42 +52,42 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
             bbox:  [left, top, right, bottom] — 0-1 decimals
             conf:  float — detector confidence, 0-1
         """
-        jpeg, elements_json = physiclaw.screenshot()
+        jpeg, elements_json = await asyncio.to_thread(physiclaw.screenshot)
         return [Image(data=jpeg, format="jpeg"), elements_json]
 
     # ─── Act ─────────────────────────────────────────────────
 
     @mcp.tool()
-    def tap(bbox: list[float]) -> str:
+    async def tap(bbox: list[float]) -> str:
         """Single tap at the bbox center.
 
         Use for: buttons, links, selecting items, dismissing dialogs.
         bbox: [left, top, right, bottom] as 0-1 decimals.
         """
-        return physiclaw.tap(bbox)
+        return await asyncio.to_thread(physiclaw.tap, bbox)
 
     @mcp.tool()
-    def double_tap(bbox: list[float]) -> str:
+    async def double_tap(bbox: list[float]) -> str:
         """Double tap at the bbox center.
 
         Use for: zooming maps/photos/web pages, selecting a word.
         bbox: [left, top, right, bottom] as 0-1 decimals.
         """
-        return physiclaw.double_tap(bbox)
+        return await asyncio.to_thread(physiclaw.double_tap, bbox)
 
     @mcp.tool()
-    def long_press(bbox: list[float]) -> str:
+    async def long_press(bbox: list[float]) -> str:
         """Long press at the bbox center. ~1.2s hold.
 
         Use for: context menus, edit mode, paste, rearranging icons.
         bbox: [left, top, right, bottom] as 0-1 decimals.
         """
-        return physiclaw.long_press(bbox)
+        return await asyncio.to_thread(physiclaw.long_press, bbox)
 
     # ─── Swipe ───────────────────────────────────────────────
 
     @mcp.tool()
-    def swipe(
+    async def swipe(
         bbox: list[float],
         direction: Literal["up", "down", "left", "right"],
         size: Literal["s", "m", "l", "xl"] = "m",
@@ -95,34 +100,34 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
         direction: 'up' | 'down' | 'left' | 'right' — stylus motion direction.
         size:      's' | 'm' | 'l' | 'xl'.
         """
-        return physiclaw.swipe(bbox, direction, size)
+        return await asyncio.to_thread(physiclaw.swipe, bbox, direction, size)
 
     # ─── Navigate ────────────────────────────────────────────
 
     @mcp.tool()
-    def home_screen() -> str:
+    async def home_screen() -> str:
         """Go to the home screen. iPhone swipe-up-from-bottom gesture.
 
         Use for: exiting any app, returning to the launcher.
         """
-        return physiclaw.home_screen()
+        return await asyncio.to_thread(physiclaw.home_screen)
 
     @mcp.tool()
-    def go_back() -> str:
+    async def go_back() -> str:
         """Go back one screen. iPhone swipe-from-left-edge gesture.
 
         Use for: navigating back in apps with a nav stack.
         """
-        return physiclaw.go_back()
+        return await asyncio.to_thread(physiclaw.go_back)
 
     # ─── Text ────────────────────────────────────────────────
 
     @mcp.tool()
-    def send_to_clipboard(text: str) -> str:
+    async def send_to_clipboard(text: str) -> str:
         """Copy text into the phone's clipboard.
 
         Use for: entering text into a field — on-screen typing is slow.
         After this returns, paste with: long_press(field_bbox) → tap "Paste".
         text: the string to put on the clipboard.
         """
-        return physiclaw.send_to_clipboard(text)
+        return await asyncio.to_thread(physiclaw.send_to_clipboard, text)
