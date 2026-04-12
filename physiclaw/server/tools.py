@@ -85,7 +85,7 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
     def swipe(
         bbox: list[float],
         direction: Literal["up", "down", "left", "right"],
-        size: Literal["small", "medium", "large"] = "medium",
+        size: Literal["s", "m", "l", "xl"] = "m",
     ) -> str:
         """Stylus slides across a region. The direction is the stylus motion.
 
@@ -93,7 +93,7 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
         changing pages, revealing list-item actions.
         bbox:      [left, top, right, bottom] as 0-1 decimals — region to swipe in.
         direction: 'up' | 'down' | 'left' | 'right' — stylus motion direction.
-        size:      'small' | 'medium' | 'large'.
+        size:      's' | 'm' | 'l' | 'xl'.
         """
         return physiclaw.swipe(bbox, direction, size)
 

@@ -42,7 +42,7 @@ class PhysiClaw:
     by the /setup skill via HTTP endpoints.
     """
 
-    SWIPE_DISTANCES = {"small": 0.1, "medium": 0.3, "large": 0.5}
+    SWIPE_DISTANCES = {"s": 0.1, "m": 0.3, "l": 0.5, "xl": 0.75}
 
     def __init__(self):
         self._arm: StylusArm | None = None
@@ -259,7 +259,7 @@ class PhysiClaw:
         with self.locked():
             self._require_at_bridge()
             data = self._assistive_touch.take_screenshot(
-                self._arm, self._bridge, self._transforms.pct_to_grbl, timeout=20.0
+                self._arm, self._bridge, self._transforms.pct_to_grbl, timeout=60.0
             )
             if data is None:
                 raise TimeoutError(
@@ -299,7 +299,7 @@ class PhysiClaw:
         self,
         bbox: list[float],
         direction: Literal["up", "down", "left", "right"],
-        size: Literal["small", "medium", "large"] = "medium",
+        size: Literal["s", "m", "l", "xl"] = "m",
     ) -> str:
         """Swipe from the bbox center in `direction` by `size` screen fraction."""
         if size not in self.SWIPE_DISTANCES:
@@ -325,7 +325,7 @@ class PhysiClaw:
             self._require_at_bridge()
             self._bridge.send_text(text)
             self._assistive_touch.long_press(self._arm, self._transforms.pct_to_grbl)
-            if self._bridge.wait_clipboard(timeout=5.0):
+            if self._bridge.wait_clipboard(timeout=30.0):
                 return f"Copied '{text}' to phone clipboard"
             return "AT long-pressed but clipboard not confirmed — check the iOS Shortcut"
 
@@ -336,17 +336,17 @@ class PhysiClaw:
         screen) and travels half the screen height upward — a fast,
         decisive gesture that iOS registers as "go home".
         """
-        self.swipe([0.4, 0.96, 0.6, 0.98], "up", "large")
+        self.swipe([0.4, 0.96, 0.6, 0.98], "up", "l")
         return "Went to home screen"
 
     def go_back(self) -> str:
         """Go back one screen via left-edge swipe right.
 
-        Swipe starts at the left edge (x ≈ 0.02) and travels 30% of
-        screen width rightward — enough for iOS to register the back
-        gesture (~100pt threshold).
+        Swipe starts at the left edge (x ≈ 0.02) and travels 75% of
+        screen width rightward — a decisive gesture that iOS reliably
+        registers as back navigation.
         """
-        self.swipe([0.0, 0.4, 0.04, 0.6], "right", "large")
+        self.swipe([0.0, 0.4, 0.04, 0.6], "right", "xl")
         return "Went back"
 
     # ─── Lifecycle ─────────────────────────────────────────────
