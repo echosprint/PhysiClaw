@@ -6,18 +6,10 @@ Mental model: **See → Act**. Take a photo, pick a bbox, do something there.
 
 from mcp.server.fastmcp import FastMCP, Image
 
-from physiclaw.annotation import AnnotationState
-from physiclaw.bridge import BridgeState, CalibrationState
 from physiclaw.core import PhysiClaw
 
 
-def register(
-    mcp: FastMCP,
-    physiclaw: PhysiClaw,
-    bridge: BridgeState,
-    calib: CalibrationState,
-    ann: AnnotationState,
-):
+def register(mcp: FastMCP, physiclaw: PhysiClaw):
     """Register every MCP tool on the given FastMCP instance."""
 
     # ─── See ─────────────────────────────────────────────────
@@ -32,7 +24,7 @@ def register(
         Fails silently on glare or small text — if the output looks
         empty or garbled, fall back to peek() or screenshot().
         """
-        ...
+        return physiclaw.scan()
 
     @mcp.tool()
     def peek() -> Image:
@@ -41,7 +33,7 @@ def register(
         Use for: verifying an action landed, checking current status.
         For precise bboxes before acting, use screenshot() instead.
         """
-        ...
+        return Image(data=physiclaw.peek(), format="jpeg")
 
     @mcp.tool()
     def screenshot() -> list:
@@ -56,7 +48,8 @@ def register(
             bbox:  [left, top, right, bottom] — 0-1 decimals
             conf:  float — detector confidence, 0-1
         """
-        ...
+        jpeg, elements_json = physiclaw.screenshot()
+        return [Image(data=jpeg, format="jpeg"), elements_json]
 
     # ─── Act ─────────────────────────────────────────────────
 
@@ -67,7 +60,7 @@ def register(
         Use for: buttons, links, selecting items, dismissing dialogs.
         bbox: [left, top, right, bottom] as 0-1 decimals.
         """
-        ...
+        return physiclaw.tap(bbox)
 
     @mcp.tool()
     def double_tap(bbox: list[float]) -> str:
@@ -76,7 +69,7 @@ def register(
         Use for: zooming maps/photos/web pages, selecting a word.
         bbox: [left, top, right, bottom] as 0-1 decimals.
         """
-        ...
+        return physiclaw.double_tap(bbox)
 
     @mcp.tool()
     def long_press(bbox: list[float]) -> str:
@@ -85,7 +78,7 @@ def register(
         Use for: context menus, edit mode, paste, rearranging icons.
         bbox: [left, top, right, bottom] as 0-1 decimals.
         """
-        ...
+        return physiclaw.long_press(bbox)
 
     # ─── Swipe ───────────────────────────────────────────────
 
@@ -99,7 +92,7 @@ def register(
         direction: 'up' | 'down' | 'left' | 'right' — stylus motion direction.
         size:      'small' | 'medium' | 'large'.
         """
-        ...
+        return physiclaw.swipe(bbox, direction, size)
 
     # ─── Navigate ────────────────────────────────────────────
 
@@ -109,7 +102,7 @@ def register(
 
         Use for: exiting any app, returning to the launcher.
         """
-        ...
+        return physiclaw.home_screen()
 
     @mcp.tool()
     def go_back() -> str:
@@ -117,7 +110,7 @@ def register(
 
         Use for: navigating back in apps with a nav stack.
         """
-        ...
+        return physiclaw.go_back()
 
     # ─── Text ────────────────────────────────────────────────
 
@@ -129,4 +122,4 @@ def register(
         After this returns, paste with: long_press(field_bbox) → tap "Paste".
         text: the string to put on the clipboard.
         """
-        ...
+        return physiclaw.send_to_clipboard(text)

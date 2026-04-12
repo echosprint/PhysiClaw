@@ -1,48 +1,58 @@
 """
 PhysiClaw orchestrator — central hardware lifecycle manager.
 
-Owns the stylus arm, camera, calibration state, and the bbox workflow
-state used by the propose-confirm tap flow. Construction is instant —
-call connect_arm() and connect_camera() to set up hardware. Calibration
-is done via /setup skill endpoints.
+Owns the stylus arm, camera, and calibration state. Construction is
+instant — call connect_arm() and connect_camera() to set up hardware.
+Calibration is done via /setup skill endpoints.
 
-The class deliberately stays narrow: lifecycle, concurrency, hardware
-access, primitive movements, and bbox state. All image processing
-(rendering, drawing, encoding, vision pipelines) lives in physiclaw.vision.
-One-shot utilities live near their callers (e.g. hardware/handler.py).
+The class stays narrow: lifecycle, concurrency, hardware access,
+primitive movements, and the high-level tool operations invoked by
+MCP tools. Image processing (rendering, drawing, encoding, vision
+pipelines) lives in physiclaw.vision — the orchestrator only
+coordinates sub-modules, it never touches pixels directly.
 """
 
 import logging
 import threading
+from contextlib import contextmanager
 
+from physiclaw.bridge import BridgeState
 from physiclaw.calibration import ScreenTransforms
+from physiclaw.hardware.arm import StylusArm
 from physiclaw.hardware.camera import Camera
 from physiclaw.hardware.iphone import AssistiveTouch
-from physiclaw.hardware.arm import StylusArm
+from physiclaw.vision.icon_detect import IconDetector
+from physiclaw.vision.ocr import OCRReader
+from physiclaw.vision.render import decode_image, encode_jpeg
+from physiclaw.vision.ui_elements import (
+    compact_json,
+    detect_ui_elements,
+    elements_to_json,
+)
 
 log = logging.getLogger(__name__)
 
 
 class PhysiClaw:
-    """Central orchestrator — owns hardware lifecycle, the busy lock,
-    and the bbox workflow state.
+    """Central orchestrator — owns hardware lifecycle and the busy lock.
 
     Construction is instant (no hardware). Call connect_arm() and
     connect_camera() to connect hardware. Calibration is handled
     by the /setup skill via HTTP endpoints.
     """
 
-    PARK_DISTANCE = 100  # mm to move stylus out of frame
+    SWIPE_DISTANCES = {"small": 0.1, "medium": 0.3, "large": 0.5}
 
     def __init__(self):
         self._arm: StylusArm | None = None
         self._cam: Camera | None = None
         self._transforms: ScreenTransforms | None = None
-        self._pending_bboxes: dict[str, list[float]] = {}
-        self._confirmed_bbox: list[float] | None = None
         self._lock = threading.Lock()
         self._cal: dict = {}  # intermediate calibration state between phases
         self._assistive_touch = AssistiveTouch()
+        self._bridge: BridgeState | None = None
+        self._ocr_reader: OCRReader | None = None
+        self._icon_detector: IconDetector | None = None
 
     # ─── State queries ────────────────────────────────────────
 
@@ -109,6 +119,20 @@ class PhysiClaw:
         """Mark hardware as idle."""
         self._lock.release()
 
+    @contextmanager
+    def locked(self):
+        """Check hardware, acquire lock, auto-park on exit, then release."""
+        self.require_hardware()
+        self.acquire()
+        try:
+            yield
+        finally:
+            try:
+                self.park()
+            except Exception:
+                pass
+            self.release()
+
     # ─── Hardware connection ──────────────────────────────────
 
     def connect_arm(self):
@@ -156,43 +180,13 @@ class PhysiClaw:
     def assistive_touch(self) -> AssistiveTouch:
         return self._assistive_touch
 
-    # ─── Bbox workflow state ─────────────────────────────────
-
-    def set_pending_bbox(self, bbox: list[float]):
-        """Store a pending bbox. Clears any confirmed bbox.
-
-        Args:
-            bbox: [left, top, right, bottom] as 0-1 decimals.
-        """
-        self._pending_bboxes = {"center": list(bbox)}
-        self._confirmed_bbox = None
-
-    def pending_bbox(self) -> list[float] | None:
-        """Read the bbox staged by set_pending_bbox(), or None."""
-        return self._pending_bboxes.get("center")
-
-    def confirm_bbox(self):
-        """Lock in the pending bbox for the next gesture."""
-        if not self._pending_bboxes:
-            raise RuntimeError("No pending bbox — call bbox_target first")
-        self._confirmed_bbox = self._pending_bboxes["center"]
-        self._pending_bboxes = {}
-
-    @property
-    def confirmed_bbox(self) -> list[float] | None:
-        """The bbox locked in for the next gesture, or None."""
-        return self._confirmed_bbox
-
     # ─── Primitive movements ─────────────────────────────────
 
     def park(self):
-        """Move the stylus 100mm out of the camera frame."""
-        arm = self._arm
-        if arm.MOVE_DIRECTIONS is None:
-            raise RuntimeError("Cannot park — calibration has not been run yet")
-        ux, uy = arm.MOVE_DIRECTIONS["top"]
-        arm._fast_move(ux * self.PARK_DISTANCE, uy * self.PARK_DISTANCE)
-        arm.wait_idle()
+        """Move stylus off-screen to (-0.1, -0.05) — left of the screen, slightly above top edge."""
+        gx, gy = self._transforms.pct_to_grbl_mm(-0.1, -0.05)
+        self._arm._fast_move(gx, gy)
+        self._arm.wait_idle()
 
     def camera_view(self):
         """Capture a frame from the overhead camera. Returns BGR numpy array.
@@ -215,14 +209,135 @@ class PhysiClaw:
         self._arm._fast_move(gx, gy)
         self._arm.wait_idle()
 
-    def tap_at_pct(self, x: float, y: float):
-        """Move arm to screen coordinate (0-1) and tap. Bypasses bbox workflow."""
-        if self._transforms is None:
-            raise RuntimeError("Screen calibration not done")
-        gx, gy = self._transforms.pct_to_grbl_mm(x, y)
-        self._arm._fast_move(gx, gy)
-        self._arm.wait_idle()
-        self._arm.tap()
+    # ─── Tool operations ───────────────────────────────────────
+
+    def _require_at_bridge(self):
+        """Raise if AT or bridge is not ready."""
+        if not self._assistive_touch.ready:
+            raise RuntimeError("AssistiveTouch not calibrated — run /setup first")
+        if self._bridge is None:
+            raise RuntimeError("Bridge not set up — run /setup (AT verification step)")
+
+    def _get_ocr_reader(self) -> OCRReader:
+        """Lazy-load and cache the OCR reader."""
+        if self._ocr_reader is None:
+            self._ocr_reader = OCRReader()
+        return self._ocr_reader
+
+    def _get_icon_detector(self) -> IconDetector:
+        """Lazy-load and cache the icon detector."""
+        if self._icon_detector is None:
+            self._icon_detector = IconDetector()
+        return self._icon_detector
+
+    def scan(self) -> str:
+        """OCR the overhead camera view. Returns newline-separated text."""
+        with self.locked():
+            self.park()
+            frame = self.camera_view()
+            return "\n".join(r.text for r in self._get_ocr_reader().read(frame))
+
+    def peek(self) -> bytes:
+        """Quick camera snapshot. Returns JPEG-encoded bytes."""
+        with self.locked():
+            self.park()
+            return encode_jpeg(self.camera_view())
+
+    def screenshot(self) -> tuple[bytes, str]:
+        """Pixel-perfect phone screenshot with UI elements detected.
+
+        Returns JPEG bytes of the annotated image (numbered bboxes)
+        and a pretty-printed JSON listing of detected elements.
+        """
+        with self.locked():
+            self._require_at_bridge()
+            data = self._assistive_touch.take_screenshot(
+                self._arm, self._bridge, self._transforms.pct_to_grbl, timeout=10.0
+            )
+            if data is None:
+                raise TimeoutError(
+                    "Screenshot upload timed out — check the iOS Shortcut"
+                )
+
+            frame = decode_image(data)
+            elements, annotated = detect_ui_elements(
+                frame,
+                icon_detector=self._get_icon_detector(),
+                ocr_reader=self._get_ocr_reader(),
+            )
+            return encode_jpeg(annotated), compact_json(elements_to_json(elements))
+
+    def tap(self, bbox: list[float]) -> str:
+        """Single tap at the center of a bbox."""
+        with self.locked():
+            self.move_to_bbox_center(bbox)
+            self._arm.tap()
+            return f"Tapped at bbox {bbox}"
+
+    def double_tap(self, bbox: list[float]) -> str:
+        """Double tap at the center of a bbox."""
+        with self.locked():
+            self.move_to_bbox_center(bbox)
+            self._arm.double_tap()
+            return f"Double tapped at bbox {bbox}"
+
+    def long_press(self, bbox: list[float]) -> str:
+        """Long press (~1.2s) at the center of a bbox."""
+        with self.locked():
+            self.move_to_bbox_center(bbox)
+            self._arm.long_press()
+            return f"Long pressed at bbox {bbox}"
+
+    def swipe(
+        self, bbox: list[float], direction: str, size: str = "medium"
+    ) -> str:
+        """Swipe from the bbox center in `direction` by `size` screen fraction."""
+        if size not in self.SWIPE_DISTANCES:
+            raise ValueError(
+                f"size must be one of {list(self.SWIPE_DISTANCES)}, got {size!r}"
+            )
+        with self.locked():
+            ex, ey = self._transforms.swipe_end_pct(
+                bbox, direction, self.SWIPE_DISTANCES[size]
+            )
+            ex_mm, ey_mm = self._transforms.pct_to_grbl_mm(ex, ey)
+            self.move_to_bbox_center(bbox)
+            arm = self._arm
+            arm._pen_down()
+            arm._linear_move(ex_mm, ey_mm, speed=arm.SWIPE_SPEEDS["medium"])
+            arm._pen_up()
+            arm.wait_idle()
+            return f"Swiped {direction} {size} at bbox {bbox}"
+
+    def send_to_clipboard(self, text: str) -> str:
+        """Copy text to the phone's clipboard via AT long-press."""
+        with self.locked():
+            self._require_at_bridge()
+            self._bridge.send_text(text)
+            self._assistive_touch.long_press(self._arm, self._transforms.pct_to_grbl)
+            if self._bridge.wait_clipboard(timeout=5.0):
+                return f"Copied '{text}' to phone clipboard"
+            return "AT long-pressed but clipboard not confirmed — check the iOS Shortcut"
+
+    def home_screen(self) -> str:
+        """Go to the home screen via bottom-edge swipe up.
+
+        Swipe starts at the home indicator bar (bottom center of the
+        screen) and travels half the screen height upward — a fast,
+        decisive gesture that iOS registers as "go home".
+        """
+        self.swipe([0.4, 0.96, 0.6, 0.98], "up", "large")
+        return "Went to home screen"
+
+    def go_back(self) -> str:
+        """Go back one screen via left-edge swipe right.
+
+        Swipe starts at the left edge (x ≈ 0.02) and travels 30% of
+        screen width rightward — enough for iOS to register the back
+        gesture (~100pt threshold).
+        """
+        self.swipe([0.0, 0.4, 0.04, 0.6], "right", "medium")
+        return "Went back"
 
     # ─── Lifecycle ─────────────────────────────────────────────
 

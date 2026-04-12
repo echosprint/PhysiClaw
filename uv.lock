@@ -652,8 +652,10 @@ dependencies = [
     { name = "croniter" },
     { name = "mcp", extra = ["cli"] },
     { name = "numpy" },
+    { name = "onnxruntime" },
     { name = "opencv-python" },
     { name = "pyserial" },
+    { name = "rapidocr" },
 ]
 
 [package.dev-dependencies]
@@ -668,18 +670,16 @@ stylus = [
     { name = "manifold3d" },
     { name = "trimesh" },
 ]
-vision = [
-    { name = "onnxruntime" },
-    { name = "rapidocr" },
-]
 
 [package.metadata]
 requires-dist = [
     { name = "croniter", specifier = ">=6.2.2" },
     { name = "mcp", extras = ["cli"], specifier = ">=1.2" },
     { name = "numpy", specifier = ">=1.26" },
+    { name = "onnxruntime", specifier = ">=1.24.0" },
     { name = "opencv-python", specifier = ">=4.8" },
     { name = "pyserial", specifier = ">=3.5" },
+    { name = "rapidocr", specifier = ">=3.7.0" },
 ]
 
 [package.metadata.requires-dev]
@@ -691,10 +691,6 @@ drawing = [
 stylus = [
     { name = "manifold3d", specifier = ">=3.4.0" },
     { name = "trimesh", specifier = ">=4.11.4" },
-]
-vision = [
-    { name = "onnxruntime" },
-    { name = "rapidocr" },
 ]
 
 [[package]]

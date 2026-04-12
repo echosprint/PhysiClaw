@@ -41,17 +41,18 @@ class UIElement:
 
 
 def detect_ui_elements(
-    image_path: str | Path,
+    frame: np.ndarray,
     icon_detector=None,
     ocr_reader=None,
     icon_confidence: float = 0.2,
     min_icon_conf: float = 0.3,
     min_text_conf: float = 0.7,
 ) -> tuple[list[UIElement], np.ndarray]:
-    """Run icon detection + OCR → structured elements + annotated image."""
-    frame = cv2.imread(str(image_path))
-    if frame is None:
-        raise FileNotFoundError(f"cannot read image: {image_path}")
+    """Run icon detection + OCR → structured elements + annotated image.
+
+    Args:
+        frame: BGR numpy array. Use `cv2.imread(path)` for a file.
+    """
     h, w = frame.shape[:2]
 
     icons = _detect_icons(frame, w, h, icon_detector, icon_confidence)
@@ -188,7 +189,8 @@ def elements_to_json(elements: list[UIElement]) -> list[dict]:
     return [e.to_dict() for e in elements]
 
 
-def _compact_json(items: list[dict]) -> str:
+def compact_json(items: list[dict]) -> str:
+    """Pretty-print a list of dicts with one item per line."""
     lines = [json.dumps(item, ensure_ascii=False) for item in items]
     return "[\n" + ",\n".join(f"  {line}" for line in lines) + "\n]\n"
 
@@ -209,15 +211,19 @@ if __name__ == "__main__":
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
+    frame = cv2.imread(args.image)
+    if frame is None:
+        raise SystemExit(f"cannot read image: {args.image}")
+
     elements, annotated = detect_ui_elements(
-        args.image,
+        frame,
         icon_confidence=args.confidence,
         min_icon_conf=args.min_icon_conf,
         min_text_conf=args.min_text_conf,
     )
 
     if args.json:
-        print(_compact_json(elements_to_json(elements)))
+        print(compact_json(elements_to_json(elements)))
     else:
         print(f"{len(elements)} elements detected:")
         for e in elements:
@@ -234,7 +240,7 @@ if __name__ == "__main__":
     cv2.imwrite(str(out_path), annotated)
 
     json_path = out_path.with_suffix(".json")
-    json_path.write_text(_compact_json(elements_to_json(elements)))
+    json_path.write_text(compact_json(elements_to_json(elements)))
 
     print(f"image: {out_path}")
     print(f"json:  {json_path}")

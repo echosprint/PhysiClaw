@@ -34,7 +34,7 @@ def shutdown():
 
 # ─── Wire tools and routes ──────────────────────────────────
 
-_register_tools(mcp, physiclaw, _bridge, _calib, _ann)
+_register_tools(mcp, physiclaw)
 _register_bridge(mcp, physiclaw, _bridge, _calib, _phone)
 _register_annotation(mcp, physiclaw, _ann)
 _register_hardware(mcp, physiclaw)

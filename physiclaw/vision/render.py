@@ -179,6 +179,15 @@ def encode_jpeg(frame: np.ndarray, quality: int = 85) -> bytes:
     return jpeg.tobytes()
 
 
+def decode_image(data: bytes) -> np.ndarray:
+    """Decode image bytes (PNG or JPEG) to a BGR frame. Raises on failure."""
+    arr = np.frombuffer(data, dtype=np.uint8)
+    frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if frame is None:
+        raise RuntimeError("Failed to decode image bytes")
+    return frame
+
+
 def watermark_index(frame: np.ndarray, index: int) -> np.ndarray:
     """Draw a large semi-transparent index label in the center of the frame.
 

@@ -78,6 +78,30 @@ class ScreenTransforms:
         """Compute center of a bounding box in screen coordinates (0-1)."""
         return ((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2)
 
+    def swipe_end_pct(
+        self, bbox: list[float], direction: str, dist: float
+    ) -> tuple[float, float]:
+        """Compute swipe end point from bbox center + direction + distance.
+
+        Returns end point in screen 0-1, clamped to stay on screen.
+        direction: 'up' | 'down' | 'left' | 'right' — stylus motion.
+        dist: screen-fraction distance (e.g. 0.1, 0.3, 0.5).
+        """
+        cx, cy = self.bbox_center_pct(bbox)
+        if direction == "up":
+            ex, ey = cx, cy - dist
+        elif direction == "down":
+            ex, ey = cx, cy + dist
+        elif direction == "left":
+            ex, ey = cx - dist, cy
+        elif direction == "right":
+            ex, ey = cx + dist, cy
+        else:
+            raise ValueError(
+                f"direction must be up/down/left/right, got {direction!r}"
+            )
+        return (max(0.0, min(1.0, ex)), max(0.0, min(1.0, ey)))
+
     def pct_to_grbl_mm(self, x: float, y: float) -> tuple[float, float]:
         """Convert screen coordinate (0-1) to GRBL mm."""
         pt = np.array([x, y, 1.0])
