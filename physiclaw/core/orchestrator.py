@@ -42,8 +42,6 @@ class PhysiClaw:
     by the /setup skill via HTTP endpoints.
     """
 
-    SWIPE_DISTANCES = {"s": 0.1, "m": 0.3, "l": 0.5, "xl": 0.75}
-
     def __init__(self):
         self._arm: StylusArm | None = None
         self._cam: Camera | None = None
@@ -212,6 +210,21 @@ class PhysiClaw:
 
     # ─── Tool operations ───────────────────────────────────────
 
+    @staticmethod
+    def _validate_bbox(bbox: list[float]):
+        """Raise ValueError if bbox is malformed."""
+        if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
+            raise ValueError(f"bbox must be [left, top, right, bottom], got {bbox!r}")
+        left, top, right, bottom = bbox
+        if not all(isinstance(v, (int, float)) for v in bbox):
+            raise ValueError(f"bbox values must be numbers, got {bbox!r}")
+        if not all(0 <= v <= 1 for v in bbox):
+            raise ValueError(f"bbox values must be in [0, 1], got {bbox!r}")
+        if left >= right or top >= bottom:
+            raise ValueError(
+                f"bbox must have left < right and top < bottom, got {bbox!r}"
+            )
+
     def _require_at_bridge(self):
         """Raise if AT or bridge is not ready."""
         if not self._assistive_touch.ready:
@@ -276,6 +289,7 @@ class PhysiClaw:
 
     def tap(self, bbox: list[float]) -> str:
         """Single tap at the center of a bbox."""
+        self._validate_bbox(bbox)
         with self.locked():
             self.move_to_bbox_center(bbox)
             self._arm.tap()
@@ -283,6 +297,7 @@ class PhysiClaw:
 
     def double_tap(self, bbox: list[float]) -> str:
         """Double tap at the center of a bbox."""
+        self._validate_bbox(bbox)
         with self.locked():
             self.move_to_bbox_center(bbox)
             self._arm.double_tap()
@@ -290,31 +305,46 @@ class PhysiClaw:
 
     def long_press(self, bbox: list[float]) -> str:
         """Long press (~1.2s) at the center of a bbox."""
+        self._validate_bbox(bbox)
         with self.locked():
             self.move_to_bbox_center(bbox)
             self._arm.long_press()
             return f"Long pressed at bbox {bbox}"
+
+    _SWIPE_DISTANCES = {"s": 0.1, "m": 0.3, "l": 0.5, "xl": 0.75}
+    _SWIPE_DIRS = ("up", "down", "left", "right")
+    _SWIPE_SPEEDS = ("slow", "medium", "fast")
 
     def swipe(
         self,
         bbox: list[float],
         direction: Literal["up", "down", "left", "right"],
         size: Literal["s", "m", "l", "xl"] = "m",
+        speed: Literal["slow", "medium", "fast"] = "medium",
     ) -> str:
         """Swipe from the bbox center in `direction` by `size` screen fraction."""
-        if size not in self.SWIPE_DISTANCES:
+        self._validate_bbox(bbox)
+        if direction not in self._SWIPE_DIRS:
             raise ValueError(
-                f"size must be one of {list(self.SWIPE_DISTANCES)}, got {size!r}"
+                f"direction must be one of {self._SWIPE_DIRS}, got {direction!r}"
+            )
+        if size not in self._SWIPE_DISTANCES:
+            raise ValueError(
+                f"size must be one of {list(self._SWIPE_DISTANCES)}, got {size!r}"
+            )
+        if speed not in self._SWIPE_SPEEDS:
+            raise ValueError(
+                f"speed must be one of {self._SWIPE_SPEEDS}, got {speed!r}"
             )
         with self.locked():
             ex, ey = self._transforms.swipe_end_pct(
-                bbox, direction, self.SWIPE_DISTANCES[size]
+                bbox, direction, self._SWIPE_DISTANCES[size]
             )
             ex_mm, ey_mm = self._transforms.pct_to_grbl_mm(ex, ey)
             self.move_to_bbox_center(bbox)
             arm = self._arm
             arm._pen_down()
-            arm._linear_move(ex_mm, ey_mm, speed=arm.SWIPE_SPEEDS["medium"])
+            arm._linear_move(ex_mm, ey_mm, speed=arm.SWIPE_SPEEDS[speed])
             arm._pen_up()
             arm.wait_idle()
             return f"Swiped {direction} {size} at bbox {bbox}"
@@ -336,7 +366,7 @@ class PhysiClaw:
         screen) and travels half the screen height upward — a fast,
         decisive gesture that iOS registers as "go home".
         """
-        self.swipe([0.4, 0.96, 0.6, 0.98], "up", "l")
+        self.swipe([0.4, 0.96, 0.6, 0.98], "up", "l", speed="fast")
         return "Went to home screen"
 
     def go_back(self) -> str:
@@ -346,7 +376,7 @@ class PhysiClaw:
         screen width rightward — a decisive gesture that iOS reliably
         registers as back navigation.
         """
-        self.swipe([0.0, 0.4, 0.04, 0.6], "right", "xl")
+        self.swipe([0.0, 0.4, 0.04, 0.6], "right", "xl", speed="fast")
         return "Went back"
 
     # ─── Lifecycle ─────────────────────────────────────────────
