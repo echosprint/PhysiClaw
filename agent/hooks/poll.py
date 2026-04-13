@@ -1,6 +1,6 @@
 """Phone watchdog hook — fires when /api/phone/watch reports an event.
 
-Auto-discovered by `physiclaw.runtime.hook.load_hooks()`. Reads the MCP
+Auto-discovered by `agent.runtime.hook.load_hooks()`. Reads the MCP
 server URL from the `PHYSICLAW_SERVER` env var, which `__main__` sets
 from the `--server` flag before hooks are loaded.
 
@@ -14,7 +14,7 @@ import os
 
 import httpx
 
-from physiclaw.runtime.hook import Trigger, register
+from agent.runtime.hook import Trigger, register
 
 log = logging.getLogger(__name__)
 

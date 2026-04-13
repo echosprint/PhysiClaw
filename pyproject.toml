@@ -27,6 +27,9 @@ dev = [
     "ruff>=0.15.9",
 ]
 
+[tool.hatch.build.targets.wheel]
+packages = ["physiclaw", "agent"]
+
 [project.scripts]
 physiclaw = "physiclaw.main:main"
 physiclaw-setup = "physiclaw.cli:main"

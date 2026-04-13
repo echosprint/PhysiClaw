@@ -11,7 +11,7 @@ hook via `check_hooks()` and hand the resulting list of `Trigger`s to
         sleep(interval)
 
 `react` is the only injection point — typically
-`physiclaw.runtime.claude.spawn_claude`, but any
+`agent.runtime.claude.spawn_claude`, but any
 `(list[Trigger]) -> None | Awaitable[None]` callable works, which keeps
 the loop trivially testable. The hook registry itself is not injected:
 Runtime calls `load_hooks()` and `check_hooks()` directly, because
@@ -27,7 +27,7 @@ import inspect
 import logging
 from typing import Awaitable, Callable, Union
 
-from physiclaw.runtime.hook import Trigger, check_hooks, load_hooks
+from agent.runtime.hook import Trigger, check_hooks, load_hooks
 
 log = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ class Runtime:
     Args:
         react: Called with the list of triggers whenever `check_hooks()`
             returns a non-empty list. Sync or async. Typical wiring is
-            `physiclaw.runtime.claude.spawn_claude`, but tests can pass
+            `agent.runtime.claude.spawn_claude`, but tests can pass
             any callable.
         interval: Seconds to sleep between hook checks. Not a rate limit
             while `react` is running — sleep only happens after it

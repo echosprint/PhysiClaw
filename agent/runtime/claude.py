@@ -9,7 +9,7 @@ the triggers that fired so Claude knows what woke it up and from where.
 import asyncio
 import logging
 
-from physiclaw.runtime.hook import Trigger
+from agent.runtime.hook import Trigger
 
 log = logging.getLogger(__name__)
 

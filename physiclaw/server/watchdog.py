@@ -5,7 +5,7 @@ each new frame. The HTTP route is stateless from the client's perspective:
 every GET captures a fresh frame, diffs it against the stored baseline,
 advances the baseline, and returns {"event": bool}.
 
-Designed to be polled by `physiclaw.runtime.Runtime`. See that module for
+Designed to be polled by `agent.runtime.Runtime`. See that module for
 the client-side loop.
 """
 

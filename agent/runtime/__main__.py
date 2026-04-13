@@ -1,10 +1,10 @@
-"""Standalone runtime entry point — `python -m physiclaw.runtime`.
+"""Standalone runtime entry point — `python -m agent.runtime`.
 
 Spawned as a subprocess by `physiclaw.main` so the hook loop runs
 out-of-process from the MCP server. This isolates long-running hook
 work (e.g. shelling out to `claude`) from the FastMCP event loop.
 
-Each tick: run every hook under `physiclaw/hooks/` (auto-discovered via
+Each tick: run every hook under `agent/hooks/` (auto-discovered via
 `load_hooks`). Each hook returns a `Trigger` if it fired or `None` if
 it didn't. If any hook fired, the collected triggers are passed to
 `spawn_claude`, which launches `claude -p <prompt>` as a subprocess.
@@ -15,8 +15,8 @@ import asyncio
 import logging
 import os
 
-from physiclaw.runtime import Runtime
-from physiclaw.runtime.claude import spawn_claude
+from agent.runtime import Runtime
+from agent.runtime.claude import spawn_claude
 
 log = logging.getLogger(__name__)
 

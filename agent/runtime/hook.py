@@ -45,7 +45,7 @@ class Trigger:
 
 
 Hook = Callable[[], Union[Optional[Trigger], Awaitable[Optional[Trigger]]]]
-HOOKS_PACKAGE = "physiclaw.hooks"
+HOOKS_PACKAGE = "agent.hooks"
 
 _hooks: list[Hook] = []
 _hooks_loaded = False
@@ -94,11 +94,11 @@ def clear() -> None:
 
 
 def load_hooks() -> None:
-    """Auto-import every module under the `physiclaw.hooks` package.
+    """Auto-import every module under the `agent.hooks` package.
 
     Each module registers itself at import time via `@register`, so
     simply importing it is enough. Drop a new `.py` file into
-    `physiclaw/hooks/` and it will be picked up on the next
+    `agent/hooks/` and it will be picked up on the next
     `Runtime.start()` — no metadata, no install step, no manual wiring.
     Idempotent: subsequent calls no-op.
     """

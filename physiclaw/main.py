@@ -22,7 +22,7 @@ def _spawn_runtime(port: int, verbose: bool) -> subprocess.Popen:
     cmd = [
         sys.executable,
         "-m",
-        "physiclaw.runtime",
+        "agent.runtime",
         "--server",
         f"http://127.0.0.1:{port}",
     ]

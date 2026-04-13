@@ -18,11 +18,11 @@ runtime spawns Claude Code with the job's context.
 ## CLI tools
 
 ```bash
-uv run python -m physiclaw.hooks.cron verify          # parse + list every job
-uv run python -m physiclaw.hooks.cron jobs-to-do      # list fired jobs awaiting agent execution
-uv run python -m physiclaw.hooks.cron done <id> <result>  # agent: mark complete with result
-uv run python -m physiclaw.hooks.cron fail <id> <reason>  # agent: mark failed with reason
-uv run python -m physiclaw.hooks.cron cancel <id>     # cancel a job
+uv run python -m agent.hooks.cron verify          # parse + list every job
+uv run python -m agent.hooks.cron jobs-to-do      # list fired jobs awaiting agent execution
+uv run python -m agent.hooks.cron done <id> <result>  # agent: mark complete with result
+uv run python -m agent.hooks.cron fail <id> <reason>  # agent: mark failed with reason
+uv run python -m agent.hooks.cron cancel <id>     # cancel a job
 ```
 
 Always run `verify` first, and again after any change.
