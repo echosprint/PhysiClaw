@@ -1,16 +1,13 @@
 """
-Rendering helpers — draw bboxes, grid overlays, watermarks, annotation
-listings, and JPEG encode.
+Rendering helpers — draw bboxes, grid overlays, watermarks, and JPEG encode.
 
 All image-output operations the project performs live here. Pure
 functions: take a frame (and optionally a ScreenTransforms), return an
-annotated frame, text listing, or JPEG bytes. No hardware dependency.
+annotated frame or JPEG bytes. No hardware dependency.
 """
 
 import cv2
 import numpy as np
-
-from physiclaw.annotation import classify_bbox
 
 # Drawing constants
 BBOX_COLOR = (0, 255, 0)  # green BGR
@@ -20,25 +17,6 @@ GRID_COLOR_MAP = {
     "red": (0, 0, 255),
     "yellow": (0, 255, 255),
 }
-
-# Hex color → human-readable name (for annotation listings)
-_COLOR_NAMES = {
-    "#ff5252": "red",
-    "#448aff": "blue",
-    "#69f0ae": "green",
-    "#ffd740": "yellow",
-    "#e040fb": "purple",
-    "#00e5ff": "cyan",
-    "#e0e0e0": "white",
-    "#b2ff59": "lime",
-}
-
-
-def _hex_to_bgr(hex_color: str) -> tuple[int, int, int]:
-    h = hex_color.lstrip("#")
-    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-    return (b, g, r)
-
 
 def draw_bbox(frame: np.ndarray, bbox: list[float], transforms) -> np.ndarray:
     """Draw a green rectangle for a 0-1 bbox onto a copy of the frame."""
@@ -95,82 +73,6 @@ def draw_grid_overlay(
         _draw_label(out, label, pt_right[0] + tw // 2 + 10, pt_right[1])
 
     return out
-
-
-def process_annotations(
-    frame: np.ndarray, annotations: list[dict], transforms
-) -> tuple[str, np.ndarray] | None:
-    """Convert pixel-coordinate annotations to 0-1 screen coords.
-
-    Draws colored numbered boxes on a copy of the frame and returns a text
-    listing with coordinates as 0-1 decimals [left, top, right, bottom].
-
-    Args:
-        frame: BGR numpy array (the frozen snapshot)
-        annotations: list of {left, top, right, bottom, color?, label?, source?}
-                     in image pixels
-        transforms: ScreenTransforms for pixel → 0-1 conversion
-
-    Returns:
-        (text_listing, annotated_frame) or None if annotations is empty.
-    """
-    if not annotations:
-        return None
-
-    cal = transforms
-    out = frame.copy()
-    elements = []
-    for i, ann in enumerate(annotations):
-        left, top = cal.pixel_to_pct(int(ann["left"]), int(ann["top"]))
-        right, bottom = cal.pixel_to_pct(int(ann["right"]), int(ann["bottom"]))
-        bbox = [
-            max(0.0, min(1.0, round(left, 3))),
-            max(0.0, min(1.0, round(top, 3))),
-            max(0.0, min(1.0, round(right, 3))),
-            max(0.0, min(1.0, round(bottom, 3))),
-        ]
-        box_type, coords = classify_bbox(bbox)
-        color = ann.get("color", "#42a5f5")
-        label = ann.get("label", "")
-        source = ann.get("source", "user")
-        elements.append(
-            {
-                "id": i + 1,
-                "type": box_type,
-                "bbox": coords,
-                "color": color,
-                "label": label,
-                "source": source,
-            }
-        )
-        bgr = _hex_to_bgr(color)
-        cv2.rectangle(
-            out,
-            (int(ann["left"]), int(ann["top"])),
-            (int(ann["right"]), int(ann["bottom"])),
-            bgr,
-            2,
-        )
-        cv2.putText(
-            out,
-            str(i + 1),
-            (int(ann["left"]) + 4, int(ann["top"]) + 20),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.7,
-            bgr,
-            2,
-        )
-
-    lines = [f"# Pending Annotations ({len(elements)} items)\n"]
-    for e in elements:
-        name = _COLOR_NAMES.get(e["color"], e["color"])
-        b = e["bbox"]
-        desc = f" — {e['label']}" if e["label"] else ""
-        src = f" [{e['source']}]" if e["source"] != "user" else ""
-        coords = ", ".join(str(v) for v in b)
-        type_tag = f" ({e['type']})" if e["type"] != "box" else ""
-        lines.append(f"- {e['id']}{type_tag} ({name}){src}: [{coords}]{desc}")
-    return "\n".join(lines), out
 
 
 def encode_jpeg(frame: np.ndarray, quality: int = 85) -> bytes:
