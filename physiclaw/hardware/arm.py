@@ -40,7 +40,6 @@ GCODE_FAST_MOVE = "G0 X{x:.3f}Y{y:.3f}F{f}"  # rapid XY (G0)
 GCODE_LINEAR_MOVE = "G1 X{x:.3f}Y{y:.3f}F{f}"  # controlled XY (G1)
 GCODE_REL_FAST = "G91G0 X{x:.3f}Y{y:.3f}"  # relative rapid
 GCODE_REL_LINEAR = "G91G1 X{x:.3f}Y{y:.3f}F{f}"  # relative linear
-GCODE_Z_ADVANCE = "G1G90 Z{z:.2f}F{f}"  # slow Z advance for long press
 GCODE_DWELL = "G4 P{s}"  # dwell for s seconds (planner-side)
 
 # ─── Main class ──────────────────────────────────────────────
