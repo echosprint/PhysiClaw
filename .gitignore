@@ -24,3 +24,6 @@ data/
 
 # Cron jobs (machine-local schedule + last-fired log)
 jobs/
+
+# Agent memory (task logs, machine-local)
+memory/
