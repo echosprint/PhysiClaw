@@ -25,7 +25,10 @@ from physiclaw.hardware.camera import Camera
 from physiclaw.hardware.iphone import AssistiveTouch
 from physiclaw.vision.icon_detect import IconDetector
 from physiclaw.vision.ocr import OCRReader, results_to_elements
-from physiclaw.vision.util import bbox_on_screen, compact_json, decode_image, encode_jpeg, validate_bbox
+from physiclaw.vision.util import (
+    bbox_on_screen, compact_json, decode_image, encode_jpeg,
+    find_numpad_digit, validate_bbox,
+)
 from physiclaw.vision.ui_elements import detect_ui_elements, elements_to_json
 
 log = logging.getLogger(__name__)
@@ -382,7 +385,7 @@ class PhysiClaw:
     def home_screen(self) -> str:
         """Go to the home screen via bottom-edge swipe up."""
         with self.locked():
-            self._swipe([0.4, 0.96, 0.6, 0.98], "up", "l", speed="fast")
+            self._swipe([0.4, 0.96, 0.6, 0.98], "up", "xl", speed="fast")
             return "Went to home screen"
 
     def go_back(self) -> str:
@@ -404,17 +407,12 @@ class PhysiClaw:
             self.park()
             time.sleep(8)  # Face ID attempts → fails → passcode keypad appears
 
-            # OCR the screen to find digit "1" in the keypad area (y ∈ [0.2, 0.8])
+            # OCR the keypad, find digit "1" (direct or inferred from grid)
             elements = self._scan()
-            digit_bbox = None
-            for e in elements:
-                _, y1, _, y2 = e["bbox"]
-                if "1" in e["label"] and 0.2 <= y1 and y2 <= 0.8:
-                    digit_bbox = e["bbox"]
-                    break
+            digit_bbox = find_numpad_digit(elements, "1")
 
             if digit_bbox is None:
-                return "Failed to find digit 1 — phone may already be unlocked"
+                return "Failed to find passcode keypad — phone may already be unlocked"
 
             for _ in range(6):
                 self._tap(digit_bbox)
