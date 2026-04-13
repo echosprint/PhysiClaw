@@ -122,6 +122,20 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
         """
         return await asyncio.to_thread(physiclaw.go_back)
 
+    @mcp.tool()
+    async def unlock_phone() -> str:
+        """Unlock the phone by entering passcode 111111. ~12s.
+
+        Wakes screen, swipes up, waits for Face ID to fail, OCRs the
+        keypad, taps passcode. Hardcoded to 111111 — a throwaway
+        tool-phone code so a real password never leaks via git or logs.
+
+        If unlock fails, tell the user: change phone passcode to 111111,
+        or turn off auto-lock (Settings → Display & Brightness → Auto-Lock
+        → Never), though always-on will wear the display over time.
+        """
+        return await asyncio.to_thread(physiclaw.unlock_phone)
+
     # ─── Text ────────────────────────────────────────────────
 
     @mcp.tool()

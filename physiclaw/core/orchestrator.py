@@ -14,6 +14,7 @@ coordinates sub-modules, it never touches pixels directly.
 
 import logging
 import threading
+import time
 from contextlib import contextmanager
 from typing import Literal
 
@@ -240,6 +241,13 @@ class PhysiClaw:
             self._icon_detector = IconDetector()
         return self._icon_detector
 
+    def _scan(self) -> list[dict]:
+        """OCR the screen → list of element dicts. Caller must hold the lock."""
+        self.park()
+        frame = self.camera_view()
+        results = self._get_ocr_reader().read(frame)
+        return results_to_elements(results, self._transforms)
+
     def scan(self) -> str:
         """OCR the overhead camera view. Returns JSON list of text elements.
 
@@ -247,11 +255,7 @@ class PhysiClaw:
         bboxes are transformed from camera pixels to screen 0-1.
         """
         with self.locked():
-            self.park()
-            frame = self.camera_view()
-            results = self._get_ocr_reader().read(frame)
-            elements = results_to_elements(results, self._transforms)
-            return compact_json(elements)
+            return compact_json(self._scan())
 
     def peek(self) -> bytes:
         """Quick camera snapshot. Returns JPEG-encoded bytes."""
@@ -283,33 +287,71 @@ class PhysiClaw:
             )
             return encode_jpeg(annotated), compact_json(elements_to_json(elements))
 
+    # ─── Gesture primitives (no lock) ──────────────────────────
+
+    def _tap(self, bbox: list[float]):
+        """Tap at bbox center. Caller must hold the lock."""
+        self.move_to_bbox_center(bbox)
+        self._arm.tap()
+        self._arm.wait_idle()
+
+    def _double_tap(self, bbox: list[float]):
+        """Double tap at bbox center. Caller must hold the lock."""
+        self.move_to_bbox_center(bbox)
+        self._arm.double_tap()
+        self._arm.wait_idle()
+
+    def _long_press(self, bbox: list[float]):
+        """Long press at bbox center. Caller must hold the lock."""
+        self.move_to_bbox_center(bbox)
+        self._arm.long_press()
+        self._arm.wait_idle()
+
+    _SWIPE_DISTANCES = {"s": 0.1, "m": 0.3, "l": 0.5, "xl": 0.75}
+    _SWIPE_DIRS = ("up", "down", "left", "right")
+    _SWIPE_SPEEDS = ("slow", "medium", "fast")
+
+    def _swipe(
+        self,
+        bbox: list[float],
+        direction: Literal["up", "down", "left", "right"],
+        size: Literal["s", "m", "l", "xl"] = "m",
+        speed: Literal["slow", "medium", "fast"] = "medium",
+    ):
+        """Swipe from bbox center. Caller must hold the lock."""
+        ex, ey = self._transforms.swipe_end_pct(
+            bbox, direction, self._SWIPE_DISTANCES[size]
+        )
+        ex_mm, ey_mm = self._transforms.pct_to_grbl_mm(ex, ey)
+        self.move_to_bbox_center(bbox)
+        arm = self._arm
+        arm._pen_down()
+        arm._linear_move(ex_mm, ey_mm, speed=arm.SWIPE_SPEEDS[speed])
+        arm._pen_up()
+        arm.wait_idle()
+
+    # ─── Public gestures (with lock) ─────────────────────────
+
     def tap(self, bbox: list[float]) -> str:
         """Single tap at the center of a bbox."""
         self._validate_bbox(bbox)
         with self.locked():
-            self.move_to_bbox_center(bbox)
-            self._arm.tap()
+            self._tap(bbox)
             return f"Tapped at bbox {bbox}"
 
     def double_tap(self, bbox: list[float]) -> str:
         """Double tap at the center of a bbox."""
         self._validate_bbox(bbox)
         with self.locked():
-            self.move_to_bbox_center(bbox)
-            self._arm.double_tap()
+            self._double_tap(bbox)
             return f"Double tapped at bbox {bbox}"
 
     def long_press(self, bbox: list[float]) -> str:
         """Long press (~1.2s) at the center of a bbox."""
         self._validate_bbox(bbox)
         with self.locked():
-            self.move_to_bbox_center(bbox)
-            self._arm.long_press()
+            self._long_press(bbox)
             return f"Long pressed at bbox {bbox}"
-
-    _SWIPE_DISTANCES = {"s": 0.1, "m": 0.3, "l": 0.5, "xl": 0.75}
-    _SWIPE_DIRS = ("up", "down", "left", "right")
-    _SWIPE_SPEEDS = ("slow", "medium", "fast")
 
     def swipe(
         self,
@@ -333,16 +375,7 @@ class PhysiClaw:
                 f"speed must be one of {self._SWIPE_SPEEDS}, got {speed!r}"
             )
         with self.locked():
-            ex, ey = self._transforms.swipe_end_pct(
-                bbox, direction, self._SWIPE_DISTANCES[size]
-            )
-            ex_mm, ey_mm = self._transforms.pct_to_grbl_mm(ex, ey)
-            self.move_to_bbox_center(bbox)
-            arm = self._arm
-            arm._pen_down()
-            arm._linear_move(ex_mm, ey_mm, speed=arm.SWIPE_SPEEDS[speed])
-            arm._pen_up()
-            arm.wait_idle()
+            self._swipe(bbox, direction, size, speed)
             return f"Swiped {direction} {size} at bbox {bbox}"
 
     def send_to_clipboard(self, text: str) -> str:
@@ -356,24 +389,46 @@ class PhysiClaw:
             return "AT long-pressed but clipboard not confirmed — check the iOS Shortcut"
 
     def home_screen(self) -> str:
-        """Go to the home screen via bottom-edge swipe up.
-
-        Swipe starts at the home indicator bar (bottom center of the
-        screen) and travels half the screen height upward — a fast,
-        decisive gesture that iOS registers as "go home".
-        """
-        self.swipe([0.4, 0.96, 0.6, 0.98], "up", "l", speed="fast")
-        return "Went to home screen"
+        """Go to the home screen via bottom-edge swipe up."""
+        with self.locked():
+            self._swipe([0.4, 0.96, 0.6, 0.98], "up", "l", speed="fast")
+            return "Went to home screen"
 
     def go_back(self) -> str:
-        """Go back one screen via left-edge swipe right.
+        """Go back one screen via left-edge swipe right."""
+        with self.locked():
+            self._swipe([0.0, 0.4, 0.04, 0.6], "right", "xl", speed="fast")
+            return "Went back"
 
-        Swipe starts at the left edge (x ≈ 0.02) and travels 75% of
-        screen width rightward — a decisive gesture that iOS reliably
-        registers as back navigation.
+    def unlock_phone(self) -> str:
+        """Unlock the phone: wake → swipe up → wait for Face ID to fail → enter passcode.
+
+        Fully mechanical — no AI. OCR finds digit "1" on the passcode
+        screen, then taps it six times. Passcode is hardcoded to 111111 —
+        a dedicated tool-phone passcode, not the user's real password.
         """
-        self.swipe([0.0, 0.4, 0.04, 0.6], "right", "xl", speed="fast")
-        return "Went back"
+        with self.locked():
+            self._tap([0.4, 0.4, 0.6, 0.6])
+            self._swipe([0.4, 0.96, 0.6, 0.98], "up", "l", speed="fast")
+            self.park()
+            time.sleep(8)  # Face ID attempts → fails → passcode keypad appears
+
+            # OCR the screen to find digit "1" in the keypad area (y ∈ [0.2, 0.8])
+            elements = self._scan()
+            digit_bbox = None
+            for e in elements:
+                _, y1, _, y2 = e["bbox"]
+                if "1" in e["label"] and 0.2 <= y1 and y2 <= 0.8:
+                    digit_bbox = e["bbox"]
+                    break
+
+            if digit_bbox is None:
+                return "Failed to find digit 1 — phone may already be unlocked"
+
+            for _ in range(6):
+                self._tap(digit_bbox)
+
+            return "Passcode entered"
 
     # ─── Lifecycle ─────────────────────────────────────────────
 
