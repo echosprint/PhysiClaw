@@ -25,7 +25,7 @@ from physiclaw.hardware.camera import Camera
 from physiclaw.hardware.iphone import AssistiveTouch
 from physiclaw.vision.icon_detect import IconDetector
 from physiclaw.vision.ocr import OCRReader, results_to_elements
-from physiclaw.vision.util import compact_json, decode_image, encode_jpeg
+from physiclaw.vision.util import bbox_on_screen, compact_json, decode_image, encode_jpeg, validate_bbox
 from physiclaw.vision.ui_elements import detect_ui_elements, elements_to_json
 
 log = logging.getLogger(__name__)
@@ -207,20 +207,6 @@ class PhysiClaw:
 
     # ─── Tool operations ───────────────────────────────────────
 
-    @staticmethod
-    def _validate_bbox(bbox: list[float]):
-        """Raise ValueError if bbox is malformed."""
-        if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
-            raise ValueError(f"bbox must be [left, top, right, bottom], got {bbox!r}")
-        left, top, right, bottom = bbox
-        if not all(isinstance(v, (int, float)) for v in bbox):
-            raise ValueError(f"bbox values must be numbers, got {bbox!r}")
-        if not all(0 <= v <= 1 for v in bbox):
-            raise ValueError(f"bbox values must be in [0, 1], got {bbox!r}")
-        if left >= right or top >= bottom:
-            raise ValueError(
-                f"bbox must have left < right and top < bottom, got {bbox!r}"
-            )
 
     def _require_at_bridge(self):
         """Raise if AT or bridge is not ready."""
@@ -242,11 +228,16 @@ class PhysiClaw:
         return self._icon_detector
 
     def _scan(self) -> list[dict]:
-        """OCR the screen → list of element dicts. Caller must hold the lock."""
+        """OCR the screen → list of element dicts. Caller must hold the lock.
+
+        Filters out elements outside the phone screen — the camera
+        also captures the desk, ruler, etc.
+        """
         self.park()
         frame = self.camera_view()
         results = self._get_ocr_reader().read(frame)
-        return results_to_elements(results, self._transforms)
+        elements = results_to_elements(results, self._transforms)
+        return [e for e in elements if bbox_on_screen(e["bbox"])]
 
     def scan(self) -> str:
         """OCR the overhead camera view. Returns JSON list of text elements.
@@ -334,21 +325,21 @@ class PhysiClaw:
 
     def tap(self, bbox: list[float]) -> str:
         """Single tap at the center of a bbox."""
-        self._validate_bbox(bbox)
+        validate_bbox(bbox)
         with self.locked():
             self._tap(bbox)
             return f"Tapped at bbox {bbox}"
 
     def double_tap(self, bbox: list[float]) -> str:
         """Double tap at the center of a bbox."""
-        self._validate_bbox(bbox)
+        validate_bbox(bbox)
         with self.locked():
             self._double_tap(bbox)
             return f"Double tapped at bbox {bbox}"
 
     def long_press(self, bbox: list[float]) -> str:
         """Long press (~1.2s) at the center of a bbox."""
-        self._validate_bbox(bbox)
+        validate_bbox(bbox)
         with self.locked():
             self._long_press(bbox)
             return f"Long pressed at bbox {bbox}"
@@ -361,7 +352,7 @@ class PhysiClaw:
         speed: Literal["slow", "medium", "fast"] = "medium",
     ) -> str:
         """Swipe from the bbox center in `direction` by `size` screen fraction."""
-        self._validate_bbox(bbox)
+        validate_bbox(bbox)
         if direction not in self._SWIPE_DIRS:
             raise ValueError(
                 f"direction must be one of {self._SWIPE_DIRS}, got {direction!r}"
