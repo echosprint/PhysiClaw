@@ -24,12 +24,8 @@ from physiclaw.hardware.camera import Camera
 from physiclaw.hardware.iphone import AssistiveTouch
 from physiclaw.vision.icon_detect import IconDetector
 from physiclaw.vision.ocr import OCRReader, results_to_elements
-from physiclaw.vision.render import decode_image, encode_jpeg
-from physiclaw.vision.ui_elements import (
-    compact_json,
-    detect_ui_elements,
-    elements_to_json,
-)
+from physiclaw.vision.util import compact_json, decode_image, encode_jpeg
+from physiclaw.vision.ui_elements import detect_ui_elements, elements_to_json
 
 log = logging.getLogger(__name__)
 

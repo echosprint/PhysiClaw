@@ -12,7 +12,8 @@ import logging
 from starlette.responses import JSONResponse
 
 from physiclaw.hardware.camera import Camera
-from physiclaw.vision.render import encode_jpeg, watermark_index
+from physiclaw.vision.render import watermark_index
+from physiclaw.vision.util import encode_jpeg
 
 log = logging.getLogger(__name__)
 

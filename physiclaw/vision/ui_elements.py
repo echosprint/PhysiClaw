@@ -8,13 +8,12 @@ Two element kinds — icon (label="") and text (label=content):
     ]
 """
 
-import json
 import logging
 from dataclasses import dataclass
-from pathlib import Path
 
-import cv2
 import numpy as np
+
+from physiclaw.vision.render import annotate_elements
 
 log = logging.getLogger(__name__)
 
@@ -63,7 +62,7 @@ def detect_ui_elements(
     for i, e in enumerate(elements):
         e.id = i
 
-    annotated = _annotate(frame, elements, w, h)
+    annotated = annotate_elements(frame, elements_to_json(elements), w, h)
     n_ico = sum(1 for e in elements if e.kind == "icon")
     log.info(
         "detected %d UI elements (%d icons, %d text)",
@@ -159,46 +158,20 @@ def _iou(a: list[float], b: list[float]) -> float:
     )
 
 
-# ── Annotation ────────────────────────────────
-
-_GREEN, _RED = (0, 255, 0), (0, 0, 255)
-
-
-def _annotate(
-    frame: np.ndarray, elements: list[UIElement], w: int, h: int
-) -> np.ndarray:
-    out = frame.copy()
-    for e in elements:
-        x1, y1 = int(e.bbox[0] * w), int(e.bbox[1] * h)
-        x2, y2 = int(e.bbox[2] * w), int(e.bbox[3] * h)
-        color = _GREEN if e.kind == "icon" else _RED
-        cv2.rectangle(out, (x1, y1), (x2, y2), color, 2)
-        lbl = str(e.id)
-        (tw, th), _ = cv2.getTextSize(lbl, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
-        cv2.rectangle(out, (x1, y1 - th - 4), (x1 + tw + 4, y1), color, -1)
-        cv2.putText(
-            out, lbl, (x1 + 2, y1 - 2), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2
-        )
-    return out
-
-
-# ── JSON helpers ──────────────────────────────
-
-
 def elements_to_json(elements: list[UIElement]) -> list[dict]:
+    """Convert a list of UIElement objects to dicts."""
     return [e.to_dict() for e in elements]
-
-
-def compact_json(items: list[dict]) -> str:
-    """Pretty-print a list of dicts with one item per line."""
-    lines = [json.dumps(item, ensure_ascii=False) for item in items]
-    return "[\n" + ",\n".join(f"  {line}" for line in lines) + "\n]\n"
 
 
 # ── CLI ───────────────────────────────────────
 
 if __name__ == "__main__":
     import argparse
+    from pathlib import Path
+
+    import cv2
+
+    from physiclaw.vision.util import compact_json
 
     p = argparse.ArgumentParser(description="Detect UI elements (icons + OCR)")
     p.add_argument("image")

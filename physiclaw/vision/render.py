@@ -1,93 +1,7 @@
-"""
-Rendering helpers — draw bboxes, grid overlays, watermarks, and JPEG encode.
-
-All image-output operations the project performs live here. Pure
-functions: take a frame (and optionally a ScreenTransforms), return an
-annotated frame or JPEG bytes. No hardware dependency.
-"""
+"""Rendering helpers — draw overlays on camera/screenshot frames."""
 
 import cv2
 import numpy as np
-
-# Drawing constants
-BBOX_COLOR = (0, 255, 0)  # green BGR
-
-GRID_COLOR_MAP = {
-    "green": (0, 255, 0),
-    "red": (0, 0, 255),
-    "yellow": (0, 255, 255),
-}
-
-def draw_bbox(frame: np.ndarray, bbox: list[float], transforms) -> np.ndarray:
-    """Draw a green rectangle for a 0-1 bbox onto a copy of the frame."""
-    tl, br = transforms.bbox_to_pixel_rect(bbox)
-    out = frame.copy()
-    cv2.rectangle(out, tl, br, BBOX_COLOR, 2)
-    return out
-
-
-def draw_grid_overlay(
-    frame: np.ndarray, transforms, color: str = "green", rows: int = 9, cols: int = 4
-) -> np.ndarray:
-    """Draw evenly-spaced reference grid lines on a copy of the frame.
-
-    Args:
-        color: line color — "green", "red", or "yellow".
-        rows: number of horizontal lines (e.g. 9 → 0.10, 0.20, ..., 0.90).
-        cols: number of vertical lines (e.g. 4 → 0.20, 0.40, 0.60, 0.80).
-    """
-    bgr = GRID_COLOR_MAP.get(color, (0, 255, 0))
-    out = frame.copy()
-    cal = transforms
-    font = cv2.FONT_HERSHEY_SIMPLEX
-
-    pad = 4
-
-    def _draw_label(canvas, label, cx, cy):
-        (tw, th), _ = cv2.getTextSize(label, font, 0.8, 2)
-        lx, ly = cx - tw // 2, cy + th // 2
-        cv2.rectangle(
-            canvas, (lx - pad, ly - th - pad), (lx + tw + pad, ly + pad), bgr, -1
-        )
-        cv2.putText(canvas, label, (lx, ly), font, 0.8, (255, 255, 255), 2)
-
-    # Vertical lines — labels at top and bottom
-    for i in range(1, cols + 1):
-        x_val = round(i / (cols + 1), 2)
-        pt_top = cal.pct_to_cam_pixel(x_val, 0)
-        pt_bot = cal.pct_to_cam_pixel(x_val, 1)
-        cv2.line(out, pt_top, pt_bot, bgr, 1)
-        label = f"{x_val:.2f}"
-        _draw_label(out, label, pt_top[0], pt_top[1] - 15)
-        _draw_label(out, label, pt_bot[0], pt_bot[1] + 15)
-
-    # Horizontal lines — labels at left and right
-    for i in range(1, rows + 1):
-        y_val = round(i / (rows + 1), 2)
-        pt_left = cal.pct_to_cam_pixel(0, y_val)
-        pt_right = cal.pct_to_cam_pixel(1, y_val)
-        cv2.line(out, pt_left, pt_right, bgr, 1)
-        label = f"{y_val:.2f}"
-        (tw, _), _ = cv2.getTextSize(label, font, 0.8, 2)
-        _draw_label(out, label, pt_left[0] - tw // 2 - 10, pt_left[1])
-        _draw_label(out, label, pt_right[0] + tw // 2 + 10, pt_right[1])
-
-    return out
-
-
-def encode_jpeg(frame: np.ndarray, quality: int = 85) -> bytes:
-    """Encode a BGR frame to JPEG bytes."""
-    _, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
-    return jpeg.tobytes()
-
-
-def decode_image(data: bytes) -> np.ndarray:
-    """Decode image bytes (PNG or JPEG) to a BGR frame. Raises on failure."""
-    arr = np.frombuffer(data, dtype=np.uint8)
-    frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-    if frame is None:
-        raise RuntimeError("Failed to decode image bytes")
-    return frame
 
 
 def watermark_index(frame: np.ndarray, index: int) -> np.ndarray:
@@ -128,4 +42,31 @@ def watermark_index(frame: np.ndarray, index: int) -> np.ndarray:
         (255, 255, 255),
         thickness,
     )
+    return out
+
+
+_GREEN, _RED = (0, 255, 0), (0, 0, 255)
+
+
+def annotate_elements(
+    frame: np.ndarray, elements: list[dict], w: int, h: int
+) -> np.ndarray:
+    """Draw numbered bboxes on a frame for detected UI elements.
+
+    Args:
+        elements: list of dicts with "id", "kind", "bbox" keys.
+            bbox is [left, top, right, bottom] as 0-1 decimals.
+    """
+    out = frame.copy()
+    for e in elements:
+        x1, y1 = int(e["bbox"][0] * w), int(e["bbox"][1] * h)
+        x2, y2 = int(e["bbox"][2] * w), int(e["bbox"][3] * h)
+        color = _GREEN if e["kind"] == "icon" else _RED
+        cv2.rectangle(out, (x1, y1), (x2, y2), color, 2)
+        lbl = str(e["id"])
+        (tw, th), _ = cv2.getTextSize(lbl, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
+        cv2.rectangle(out, (x1, y1 - th - 4), (x1 + tw + 4, y1), color, -1)
+        cv2.putText(
+            out, lbl, (x1 + 2, y1 - 2), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2
+        )
     return out
