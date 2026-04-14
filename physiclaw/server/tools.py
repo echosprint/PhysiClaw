@@ -90,7 +90,7 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
     async def swipe(
         bbox: list[float],
         direction: Literal["up", "down", "left", "right"],
-        size: Literal["s", "m", "l", "xl"] = "m",
+        size: Literal["s", "m", "l", "xl", "xxl"] = "m",
         speed: Literal["slow", "medium", "fast"] = "medium",
     ) -> str:
         """Stylus slides across a region. The direction is the stylus motion.
@@ -99,7 +99,7 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
         changing pages, revealing list-item actions.
         bbox:      [left, top, right, bottom] as 0-1 decimals — region to swipe in.
         direction: 'up' | 'down' | 'left' | 'right' — stylus motion direction.
-        size:      's' | 'm' | 'l' | 'xl'.
+        size:      's' | 'm' | 'l' | 'xl' | 'xxl'.
         speed:     'slow' | 'medium' | 'fast'.
         """
         return await asyncio.to_thread(physiclaw.swipe, bbox, direction, size, speed)

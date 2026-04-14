@@ -301,7 +301,7 @@ class PhysiClaw:
         self._arm.long_press()
         self._arm.wait_idle()
 
-    _SWIPE_DISTANCES = {"s": 0.1, "m": 0.3, "l": 0.5, "xl": 0.75}
+    _SWIPE_DISTANCES = {"s": 0.1, "m": 0.3, "l": 0.5, "xl": 0.75, "xxl": 0.90}
     _SWIPE_DIRS = ("up", "down", "left", "right")
     _SWIPE_SPEEDS = ("slow", "medium", "fast")
 
@@ -309,7 +309,7 @@ class PhysiClaw:
         self,
         bbox: list[float],
         direction: Literal["up", "down", "left", "right"],
-        size: Literal["s", "m", "l", "xl"] = "m",
+        size: Literal["s", "m", "l", "xl", "xxl"] = "m",
         speed: Literal["slow", "medium", "fast"] = "medium",
     ):
         """Swipe from bbox center. Caller must hold the lock."""
@@ -351,7 +351,7 @@ class PhysiClaw:
         self,
         bbox: list[float],
         direction: Literal["up", "down", "left", "right"],
-        size: Literal["s", "m", "l", "xl"] = "m",
+        size: Literal["s", "m", "l", "xl", "xxl"] = "m",
         speed: Literal["slow", "medium", "fast"] = "medium",
     ) -> str:
         """Swipe from the bbox center in `direction` by `size` screen fraction."""
@@ -391,7 +391,7 @@ class PhysiClaw:
     def go_back(self) -> str:
         """Go back one screen via left-edge swipe right."""
         with self.locked():
-            self._swipe([0.0, 0.4, 0.04, 0.6], "right", "xl", speed="fast")
+            self._swipe([0.0, 0.4, 0.04, 0.6], "right", "xxl", speed="fast")
             return "Went back"
 
     def unlock_phone(self) -> str:
