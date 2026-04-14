@@ -405,11 +405,16 @@ class PhysiClaw:
             self._tap([0.4, 0.4, 0.6, 0.6])
             self._swipe([0.4, 0.96, 0.6, 0.98], "up", "l", speed="fast")
             self.park()
-            time.sleep(8)  # Face ID attempts → fails → passcode keypad appears
+            time.sleep(4)  # Face ID starts
 
-            # OCR the keypad, find digit "1" (direct or inferred from grid)
-            elements = self._scan()
-            digit_bbox = find_numpad_digit(elements, "1")
+            # Poll for passcode keypad (Face ID fails after a few seconds)
+            digit_bbox = None
+            for _ in range(8):
+                elements = self._scan()
+                digit_bbox = find_numpad_digit(elements, "1")
+                if digit_bbox is not None:
+                    break
+                time.sleep(1)
 
             if digit_bbox is None:
                 return "Failed to find passcode keypad — phone may already be unlocked"
