@@ -113,6 +113,16 @@ def find_numpad_digit(elements: list[dict], digit: str) -> list[float] | None:
 
 
 def compact_json(items: list[dict]) -> str:
-    """Pretty-print a list of dicts with one item per line."""
+    """Pretty-print a list of dicts with one item per line (for file output)."""
     lines = [json.dumps(item, ensure_ascii=False) for item in items]
     return "[\n" + ",\n".join(f"  {line}" for line in lines) + "\n]\n"
+
+
+def format_elements(items: list[dict]) -> str:
+    """Human/agent-friendly element list — one line per element, no JSON noise."""
+    lines = ["id [kind] \"label\" [left,top,right,bottom] conf"]
+    for e in items:
+        bbox = ",".join(f"{v:.3f}" for v in e["bbox"])
+        label = e.get("label") or ""
+        lines.append(f'{e["id"]} [{e["kind"]}] "{label}" [{bbox}] {e["conf"]:.2f}')
+    return "\n".join(lines)

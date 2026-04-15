@@ -26,7 +26,7 @@ from physiclaw.hardware.iphone import AssistiveTouch
 from physiclaw.vision.icon_detect import IconDetector
 from physiclaw.vision.ocr import OCRReader, results_to_elements
 from physiclaw.vision.util import (
-    bbox_on_screen, compact_json, decode_image, encode_jpeg,
+    bbox_on_screen, decode_image, encode_jpeg, format_elements,
     find_numpad_digit, validate_bbox,
 )
 from physiclaw.vision.ui_elements import detect_ui_elements, elements_to_json
@@ -249,7 +249,7 @@ class PhysiClaw:
         bboxes are transformed from camera pixels to screen 0-1.
         """
         with self.locked():
-            return compact_json(self._scan())
+            return format_elements(self._scan())
 
     def peek(self) -> bytes:
         """Quick camera snapshot. Returns JPEG-encoded bytes."""
@@ -279,7 +279,7 @@ class PhysiClaw:
                 icon_detector=self._get_icon_detector(),
                 ocr_reader=self._get_ocr_reader(),
             )
-            return encode_jpeg(annotated), compact_json(elements_to_json(elements))
+            return encode_jpeg(annotated), format_elements(elements_to_json(elements))
 
     # ─── Gesture primitives (no lock) ──────────────────────────
 
