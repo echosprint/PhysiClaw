@@ -127,8 +127,13 @@ def main():
 
     # 5. Position stylus
     print("\n── 5. Position stylus ──")
-    api("POST", "/api/bridge/switch", {"mode": "calibrate", "phase": "center"})
-    print("  Phone shows an orange circle at screen center.")
+    r = api("POST", "/api/bridge/switch", {"mode": "calibrate", "phase": "center"})
+    if not r or not r.get("ok"):
+        fail("Failed to show orange circle on phone — is the bridge page open?")
+        sys.exit(1)
+    time.sleep(0.5)  # let phone poll and render
+    print("  Phone should show an orange circle at screen center.")
+    print("  If screen is off, wake the phone and reopen the bridge page.")
     if not auto:
         wait("Position stylus tip above the orange circle (~3mm above screen)")
     done("Stylus positioned")

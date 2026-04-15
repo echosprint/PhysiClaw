@@ -1,157 +1,160 @@
 """Watchdog — detect new notifications on the phone screen.
 
-Watches three zones, skipping the clock area (y 0.1–0.5):
-  - Banner (y < 0.1): notification banners sliding from top
-  - Bottom (y > 0.5): lock-screen content, app grid changes
-  - Dock   (y > 0.85): red badge detection (HSV)
+Watches three zones (skipping AOD clock at y 0.1–0.5):
+  - Banner (y 0.0–0.1):  notification banners from top
+  - Bottom (y 0.5–1.0):  lock-screen content, app grid
+  - Dock   (y 0.85–1.0): red badge on dock apps
 
-Fires on phash content change (banner + bottom) OR new red badge (dock).
+Uses fast (5s) and slow (20s) EMAs of raw pixels. Fires when the fast
+EMA diverges from the slow: std or mean increase for content zones,
+red pixel increase for dock. Idle fallback wakes every 30 min during
+work hours.
+
+WeChat must stay in the background — never force-close it. Its broken
+APNs stops push notifications once killed.
 """
 
 import datetime as dt
+import math
 import threading
 import time
 
 import cv2
 import numpy as np
 
-BASELINE_TTL = 60.0  # seconds before baseline expires
-IDLE_WAKE_INTERVAL = 1800.0  # fallback: wake every 30 min during work hours
-WORK_HOURS = [(9, 11), (14, 17)]  # 9–11 AM, 2–5 PM
-PHASH_BITS_LOW = 10  # phash threshold: below = no change
-PHASH_BITS_HIGH = 20  # phash threshold: above = definite change (skip std check)
-STD_INCREASE = 5.0  # std increase required for mid-range phash (10–20 bits)
-BADGE_MIN_AREA = 50  # minimum red pixel increase for new badge
+# --- Detection thresholds ---
+STD_INCREASE = 5.0
+MEAN_INCREASE = 5.0
+BADGE_MIN_AREA = 50
+
+# --- EMA parameters ---
+EMA_FAST = 1 - math.exp(-1 / 5)   # ~0.18, 5s memory
+EMA_SLOW = 1 - math.exp(-1 / 20)  # ~0.05, 20s memory
+EMA_STALE = 60.0  # re-init if no poll for this long
+
+# --- Idle fallback ---
+IDLE_INTERVAL = 1800.0  # 30 min
+WORK_HOURS = [(9, 11), (14, 17)]
+
+# --- Screen zones (y0, y1) ---
+ZONES = [(0.0, 0.1), (0.5, 1.0), (0.85, 1.0)]
 
 
-def _phash(frame: np.ndarray, size: int = 16) -> np.ndarray:
-    """16×16 difference hash — bool array of per-row greater-than comparisons."""
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    small = cv2.resize(gray, (size + 1, size), interpolation=cv2.INTER_AREA)
-    return small[:, 1:] > small[:, :-1]
+# --- Helpers ---
+
+def _gray(frame: np.ndarray) -> np.ndarray:
+    return cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
 
-def _red_pixels(frame: np.ndarray) -> int:
-    """Count red pixels in a BGR frame (badge-coloured)."""
-    if frame.size == 0:
-        return 0
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    mask1 = cv2.inRange(hsv, (0, 100, 100), (10, 255, 255))
-    mask2 = cv2.inRange(hsv, (170, 100, 100), (180, 255, 255))
-    return int(np.count_nonzero(mask1 | mask2))
+def _check_content(slow: np.ndarray, fast: np.ndarray) -> dict:
+    """Detect new visual content via std/mean divergence."""
+    sg, fg = _gray(slow), _gray(fast)
+    std_delta = round(float(np.std(fg)) - float(np.std(sg)), 1)
+    mean_delta = round(float(np.mean(fg)) - float(np.mean(sg)), 1)
+    return {
+        "std_delta": std_delta,
+        "mean_delta": mean_delta,
+        "wake": std_delta > STD_INCREASE or mean_delta > MEAN_INCREASE,
+    }
 
 
-def _content_changed(prev: np.ndarray, curr: np.ndarray) -> bool:
-    """True if screen content changed meaningfully.
-
-    - phash > HIGH (20 bits): big visual change, fire immediately.
-    - phash MID (10-20 bits): ambiguous — require std increase to
-      filter out auto-lock, animations, and AOD clock ticks.
-    - phash <= LOW (10 bits): no meaningful change.
-    """
-    diff = int(np.count_nonzero(_phash(prev) ^ _phash(curr)))
-    if diff > PHASH_BITS_HIGH:
-        return True
-    if diff <= PHASH_BITS_LOW:
-        return False
-    prev_std = float(np.std(cv2.cvtColor(prev, cv2.COLOR_BGR2GRAY)))
-    curr_std = float(np.std(cv2.cvtColor(curr, cv2.COLOR_BGR2GRAY)))
-    return curr_std - prev_std > STD_INCREASE
+def _check_badge(slow: np.ndarray, fast: np.ndarray) -> dict:
+    """Detect new red badge via HSV red pixel increase."""
+    def red(f):
+        hsv = cv2.cvtColor(f, cv2.COLOR_BGR2HSV)
+        m1 = cv2.inRange(hsv, (0, 100, 100), (10, 255, 255))
+        m2 = cv2.inRange(hsv, (170, 100, 100), (180, 255, 255))
+        return int(np.count_nonzero(m1 | m2))
+    delta = red(fast) - red(slow)
+    return {"red_delta": delta, "wake": delta > BADGE_MIN_AREA}
 
 
-def _new_badge(prev: np.ndarray, curr: np.ndarray) -> bool:
-    """True if red pixels increased (new badge appeared)."""
-    return _red_pixels(curr) - _red_pixels(prev) > BADGE_MIN_AREA
+def _ema_update(ema: np.ndarray, frame: np.ndarray, alpha: float) -> np.ndarray:
+    return alpha * frame.astype(np.float32) + (1 - alpha) * ema
 
+
+def _crop_zones(frame, transforms) -> list[np.ndarray] | None:
+    """Crop ZONES from camera frame using calibration transforms."""
+    h, w = frame.shape[:2]
+    crops = []
+    for y0, y1 in ZONES:
+        tl = transforms.pct_to_cam_pixel(0.0, y0)
+        br = transforms.pct_to_cam_pixel(1.0, y1)
+        crop = frame[
+            max(0, min(tl[1], h)):max(0, min(br[1], h)),
+            max(0, min(tl[0], w)):max(0, min(br[0], w)),
+        ]
+        if not crop.size:
+            return None
+        crops.append(crop)
+    return crops
+
+
+# --- Watchdog ---
 
 class Watchdog:
-    """Stateful wake detector — tracks frame-to-frame changes.
-
-    Feed raw camera frames via ``poll(frame, transforms)``. The watchdog
-    crops three zones from the phone screen, skipping the clock area.
-    Thread-safe.
-
-    Note: WeChat must stay in the background — never force-close it.
-    WeChat's broken APNs means iOS push notifications stop arriving
-    once the process is killed, and this watchdog depends on those
-    notifications to detect new messages.
-    """
+    """EMA-based wake detector. Thread-safe, 1 Hz polling."""
 
     def __init__(self):
-        self._prev: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None
-        self._prev_time: float = 0.0
-        self._last_wake: float = time.monotonic()
+        self._ema = None          # ((fast, slow), ...) per zone, float32
+        self._poll_time = 0.0
+        self._last_wake = time.monotonic()
         self._lock = threading.Lock()
 
-    @staticmethod
-    def _crop(frame: np.ndarray, transforms,
-              zones: list[tuple[float, float]]) -> list[np.ndarray] | None:
-        """Crop horizontal strips of the phone screen from a camera frame.
-
-        Returns a list of crops (one per zone), or None if any crop fails.
-        """
-        h, w = frame.shape[:2]
-        crops = []
-        for y0, y1 in zones:
-            tl = transforms.pct_to_cam_pixel(0.0, y0)
-            br = transforms.pct_to_cam_pixel(1.0, y1)
-            crop = frame[
-                max(0, min(tl[1], h)):max(0, min(br[1], h)),
-                max(0, min(tl[0], w)):max(0, min(br[0], w)),
-            ]
-            if not crop.size:
-                return None
-            crops.append(crop)
-        return crops
-
-    # (banner, bottom, dock) — skip clock area y 0.1–0.5
-    ZONES = [(0.0, 0.1), (0.5, 1.0), (0.85, 1.0)]
-
     def poll(self, frame: np.ndarray, transforms) -> dict:
-        """Check for wake events. Returns ``{"wake": bool, "reason": str}``.
+        """Feed a camera frame. Returns {wake, reason, banner, bottom, dock}."""
+        NO = {"wake": False, "reason": ""}
 
-        Baseline expires after 60s — if stale, the current frame becomes
-        the new baseline.
-        """
-        NO_WAKE = {"wake": False, "reason": ""}
-
-        crops = self._crop(frame, transforms, self.ZONES)
+        crops = _crop_zones(frame, transforms)
         if crops is None:
-            return NO_WAKE
-        banner, bottom, dock = crops
-
+            return NO
         now = time.monotonic()
+
         with self._lock:
-            prev = self._prev
-            age = now - self._prev_time
-            self._prev = (banner, bottom, dock)
-            self._prev_time = now
+            if self._ema is None or (now - self._poll_time) > EMA_STALE:
+                self._ema = tuple(
+                    (c.astype(np.float32), c.astype(np.float32)) for c in crops
+                )
+                self._poll_time = now
+                self._last_wake = now
+                return {**NO, "reason": "ema initialized"}
 
-        if prev is None or age > BASELINE_TTL:
-            # Baseline stale (first poll, or agent was working).
-            # Reset idle timer so fallback counts from now.
-            self._last_wake = now
-            return NO_WAKE
+            # Update fast and slow EMAs for each zone
+            self._ema = tuple(
+                (_ema_update(f, c, EMA_FAST), _ema_update(s, c, EMA_SLOW))
+                for (f, s), c in zip(self._ema, crops)
+            )
+            self._poll_time = now
+            ema = self._ema
 
-        prev_banner, prev_bottom, prev_dock = prev
+        # Compare fast vs slow EMAs (uint8 for cv2)
+        (bf, bs), (tf, ts), (df, ds) = ema
+        banner_d = _check_content(bs.astype(np.uint8), bf.astype(np.uint8))
+        bottom_d = _check_content(ts.astype(np.uint8), tf.astype(np.uint8))
+        dock_d = _check_badge(ds.astype(np.uint8), df.astype(np.uint8))
 
-        if _content_changed(prev_banner, banner):
-            self._last_wake = now
-            return {"wake": True, "reason": "notification banner appeared at top of screen"}
-        if _content_changed(prev_bottom, bottom):
-            self._last_wake = now
-            return {"wake": True, "reason": "screen content changed in lower half"}
-        if _new_badge(prev_dock, dock):
-            self._last_wake = now
-            return {"wake": True, "reason": "new red badge appeared on dock app"}
-        return self._idle_wake(now)
+        result = {"wake": False, "reason": "",
+                  "banner": banner_d, "bottom": bottom_d, "dock": dock_d}
 
-    def _idle_wake(self, now: float) -> dict:
-        """Fallback: fire every 30 min during work hours (9–11 AM, 2–5 PM)."""
+        if banner_d["wake"]:
+            result.update(wake=True, reason="notification banner appeared at top of screen")
+        elif bottom_d["wake"]:
+            result.update(wake=True, reason="screen content changed in lower half")
+        elif dock_d["wake"]:
+            result.update(wake=True, reason="new red badge appeared on dock app")
+
+        with self._lock:
+            if result["wake"]:
+                self._last_wake = now
+            elif self._is_idle(now):
+                result.update(wake=True, reason="idle check-in (no wake for 30+ min)")
+                self._last_wake = now
+
+        return result
+
+    def _is_idle(self, now: float) -> bool:
+        """Idle fallback. Caller must hold lock."""
         hour = dt.datetime.now().hour
-        if not any(start <= hour < end for start, end in WORK_HOURS):
-            return {"wake": False, "reason": ""}
-        if now - self._last_wake < IDLE_WAKE_INTERVAL:
-            return {"wake": False, "reason": ""}
-        self._last_wake = now
-        return {"wake": True, "reason": "idle check-in (no wake detected for 30+ min)"}
+        if not any(s <= hour < e for s, e in WORK_HOURS):
+            return False
+        return now - self._last_wake >= IDLE_INTERVAL
