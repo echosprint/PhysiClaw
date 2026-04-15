@@ -33,9 +33,10 @@ def _get_client() -> httpx.AsyncClient:
 async def phone_watch() -> Trigger | None:
     try:
         r = await _get_client().get("/api/phone/watch")
-        if r.status_code == 200 and r.json().get("event"):
+        data = r.json() if r.status_code == 200 else {}
+        if data.get("wake"):
             return Trigger(
-                description="phone screen changed since last check",
+                description=data.get("reason", "phone screen changed"),
                 source="phone",
             )
     except Exception:

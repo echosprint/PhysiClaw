@@ -30,6 +30,7 @@ from physiclaw.vision.util import (
     find_numpad_digit, validate_bbox,
 )
 from physiclaw.vision.ui_elements import detect_ui_elements, elements_to_json
+from physiclaw.vision.watchdog import Watchdog
 
 log = logging.getLogger(__name__)
 
@@ -52,6 +53,7 @@ class PhysiClaw:
         self._bridge: BridgeState | None = None
         self._ocr_reader: OCRReader | None = None
         self._icon_detector: IconDetector | None = None
+        self._watchdog = Watchdog()
 
     # ─── State queries ────────────────────────────────────────
 
@@ -131,6 +133,17 @@ class PhysiClaw:
             except Exception:
                 pass
             self.release()
+
+    # ─── Watchdog ────────────────────────────────────────────
+
+    def watch(self) -> dict:
+        """Poll the camera for wake events. Returns ``{"wake": bool, "reason": str}``."""
+        with self.locked():
+            frame = self.cam.peek()
+            if frame is None:
+                return {"wake": False, "reason": ""}
+            return self._watchdog.poll(frame, self._transforms)
+
 
     # ─── Hardware connection ──────────────────────────────────
 

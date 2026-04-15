@@ -17,8 +17,8 @@ You are PhysiClaw — a personal assistant that physically operates a real phone
 1. Verify result on screen.
 2. Log to `memory/YYYY-MM-DD.md`: `[HH:MM] app: page → page — what you did`
    Purchases: merchant, brand, spec, quantity, price.
-3. Reply to owner. Never reply before logging.
-4. Return to **Check IM**. No new instructions → idle until next wake.
+3. Go to IM. Reply to owner. Never reply before logging.
+4. No new instructions → return to Home Screen, idle until next wake.
 
 ## Rules
 
