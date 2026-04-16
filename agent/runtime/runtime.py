@@ -1,31 +1,25 @@
-"""PhysiClaw Runtime — check every hook on a timer, react on any trigger.
-
-Runtime owns one job: every `interval` seconds, run every registered
-hook via `check_hooks()` and hand the resulting list of `Trigger`s to
-`react` if anything fired.
+"""PhysiClaw Runtime — poll hooks on a timer, react on any trigger.
 
     while running:
+        if not ready: sleep; continue
         triggers = await check_hooks()
-        if triggers:
-            await react(triggers)
+        if triggers: await react(triggers)
         sleep(interval)
 
-`react` is the only injection point — typically
-`agent.runtime.claude.spawn_claude`, but any
-`(list[Trigger]) -> None | Awaitable[None]` callable works, which keeps
-the loop trivially testable. The hook registry itself is not injected:
-Runtime calls `load_hooks()` and `check_hooks()` directly, because
-that's the whole point.
-
-Because the loop `await`s `check_hooks()` and `react` in sequence, no
-new tick can start while a reaction is in progress — serialization is
-structural, no busy flag needed.
+Hooks stay idle until `/api/status` reports `calibrated: true`. The
+`react` callable is the only injection point — typically
+`agent.runtime.claude.spawn_claude`. Because `check_hooks()` and
+`react` are awaited in sequence, no new tick starts while a reaction
+is in progress.
 """
 
 import asyncio
 import inspect
 import logging
+import os
 from typing import Awaitable, Callable, Union
+
+import httpx
 
 from agent.runtime.hook import Trigger, check_hooks, load_hooks
 
@@ -38,6 +32,26 @@ async def _maybe_await(value):
     if inspect.isawaitable(value):
         return await value
     return value
+
+
+_client: httpx.AsyncClient | None = None
+
+
+def _get_client() -> httpx.AsyncClient:
+    global _client
+    if _client is None:
+        base_url = os.environ.get("PHYSICLAW_SERVER", "http://127.0.0.1:8048")
+        _client = httpx.AsyncClient(base_url=base_url, timeout=5.0)
+    return _client
+
+
+async def _check_ready() -> bool:
+    """Query /api/status to see if PhysiClaw hardware is set up and calibrated."""
+    try:
+        r = await _get_client().get("/api/status")
+        return r.status_code == 200 and bool(r.json().get("calibrated"))
+    except Exception:
+        return False
 
 
 class Runtime:
@@ -63,9 +77,18 @@ class Runtime:
         load_hooks()
         self._running = True
         log.info("runtime started (interval=%.2fs)", self.interval)
+        last_ready = None
         try:
             while self._running:
                 try:
+                    ready = await _check_ready()
+                    if ready != last_ready:
+                        log.info("physiclaw ready=%s", ready)
+                        last_ready = ready
+                    if not ready:
+                        await asyncio.sleep(self.interval)
+                        continue
+
                     triggers = await check_hooks()
                     if triggers:
                         sources = [t.source or "?" for t in triggers]
