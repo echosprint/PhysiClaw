@@ -74,6 +74,7 @@ def main():
         # Calibration cached but server restarted — just finish the last step.
         print("Already calibrated, finalizing...")
         api("POST", "/api/phone/home")
+        time.sleep(3)  # let home-screen animation settle
         api("POST", "/api/ready")
         done("Phone on Home Screen, PhysiClaw ready")
         return
@@ -240,6 +241,7 @@ def main():
     # 15. Go to Home Screen + mark ready
     print("\n── 15. Home Screen ──")
     api("POST", "/api/phone/home")
+    time.sleep(3)  # let home-screen animation settle
     api("POST", "/api/ready")
     done("Phone on Home Screen, PhysiClaw ready")
 
