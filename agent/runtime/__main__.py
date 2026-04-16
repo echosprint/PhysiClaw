@@ -36,6 +36,9 @@ def main() -> None:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="[runtime] %(message)s",
     )
+    # Silence noisy per-request logs from httpx/httpcore.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     try:
         asyncio.run(
             Runtime(react=spawn_claude, interval=args.interval).start()

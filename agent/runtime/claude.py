@@ -22,6 +22,7 @@ TOOLS_PY = PROJECT_ROOT / "physiclaw" / "server" / "tools.py"
 LOG_DIR = PROJECT_ROOT / "log" / "claude"
 
 TIMEOUT = 180  # 3min, per-line inactivity timeout
+STREAM_BUFFER = 10 * 1024 * 1024  # 10MB readline limit (default 64KB blows up on screenshot base64)
 
 # --- Tool permissions ---
 _ALLOWED = [
@@ -164,6 +165,7 @@ async def spawn_claude(triggers: list[Trigger]) -> None:
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
         cwd=str(PROJECT_ROOT),
+        limit=STREAM_BUFFER,
     )
 
     slog = _SessionLog(sources)
