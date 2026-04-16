@@ -54,6 +54,11 @@ async def _check_ready() -> bool:
         return False
 
 
+# Cooldown after react ends: lets screen animations settle, and exceeds
+# watchdog EMA_STALE so the next poll re-initializes its baseline.
+REACT_COOLDOWN = 6.0
+
+
 class Runtime:
     """Run every registered hook on a fixed interval; react on any trigger.
 
@@ -94,6 +99,7 @@ class Runtime:
                         sources = [t.source or "?" for t in triggers]
                         log.info("triggers fired: %s", sources)
                         await _maybe_await(self.react(triggers))
+                        await asyncio.sleep(REACT_COOLDOWN)
                 except asyncio.CancelledError:
                     raise
                 except Exception:

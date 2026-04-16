@@ -27,7 +27,7 @@ BADGE_MIN_AREA = 50
 # --- EMA parameters ---
 EMA_FAST = 1 - math.exp(-1 / 5)   # ~0.18, 5s memory
 EMA_SLOW = 1 - math.exp(-1 / 20)  # ~0.05, 20s memory
-EMA_STALE = 60.0  # re-init if no poll for this long
+EMA_STALE = 5.0  # re-init if no poll for this long (covers react cooldown)
 
 # --- Idle fallback ---
 IDLE_INTERVAL = 1800.0  # 30 min
@@ -116,7 +116,6 @@ class Watchdog:
                 self._last_wake = now
                 return {**NO, "reason": "ema initialized"}
 
-            # Update fast and slow EMAs for each zone
             self._ema = tuple(
                 (_ema_update(f, c, EMA_FAST), _ema_update(s, c, EMA_SLOW))
                 for (f, s), c in zip(self._ema, crops)
@@ -124,7 +123,6 @@ class Watchdog:
             self._poll_time = now
             ema = self._ema
 
-        # Compare fast vs slow EMAs (uint8 for cv2)
         (bf, bs), (tf, ts), (df, ds) = ema
         banner_d = _check_content(bs.astype(np.uint8), bf.astype(np.uint8))
         bottom_d = _check_content(ts.astype(np.uint8), tf.astype(np.uint8))
