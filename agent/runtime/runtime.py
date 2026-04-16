@@ -6,11 +6,11 @@
         if triggers: await react(triggers)
         sleep(interval)
 
-Hooks stay idle until `/api/status` reports `calibrated: true`. The
-`react` callable is the only injection point — typically
-`agent.runtime.claude.spawn_claude`. Because `check_hooks()` and
-`react` are awaited in sequence, no new tick starts while a reaction
-is in progress.
+Hooks stay idle until `/api/status` reports `ready: true` (flipped by
+`/setup` on its final step). The `react` callable is the only injection
+point — typically `agent.runtime.claude.spawn_claude`. Because
+`check_hooks()` and `react` are awaited in sequence, no new tick starts
+while a reaction is in progress.
 """
 
 import asyncio
@@ -46,10 +46,10 @@ def _get_client() -> httpx.AsyncClient:
 
 
 async def _check_ready() -> bool:
-    """Query /api/status to see if PhysiClaw hardware is set up and calibrated."""
+    """Query /api/status — True only after /setup has fully finished."""
     try:
         r = await _get_client().get("/api/status")
-        return r.status_code == 200 and bool(r.json().get("calibrated"))
+        return r.status_code == 200 and bool(r.json().get("ready"))
     except Exception:
         return False
 

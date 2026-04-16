@@ -54,6 +54,18 @@ class PhysiClaw:
         self._ocr_reader: OCRReader | None = None
         self._icon_detector: IconDetector | None = None
         self._watchdog = Watchdog()
+        self._ready = False  # set True only after /setup finishes its last step
+
+    # ─── Ready state ──────────────────────────────────────────
+
+    @property
+    def ready(self) -> bool:
+        """True only after setup has fully completed AND hardware is still up."""
+        return self._ready and self.hardware_ready
+
+    def mark_ready(self) -> None:
+        """Called by /setup after its final step (phone on Home Screen)."""
+        self._ready = True
 
     # ─── State queries ────────────────────────────────────────
 
@@ -98,10 +110,13 @@ class PhysiClaw:
             "camera": self._cam is not None,
             "steps": steps,
             "calibrated": self.hardware_ready,
+            "ready": self.ready,
         }
 
     def require_hardware(self):
-        """Raise if hardware is not fully set up."""
+        """Raise if hardware isn't connected and calibrated. (Doesn't check
+        the `ready` flag — `home_screen()` in setup's final step needs tools
+        before `ready` is flipped.)"""
         if not self.hardware_ready:
             raise RuntimeError(
                 "Hardware not set up. Run /setup to connect and calibrate."

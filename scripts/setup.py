@@ -67,8 +67,15 @@ def main():
     status = api("GET", "/api/status")
     if not status:
         sys.exit("Server not running. Start: uv run physiclaw")
+    if status.get("ready"):
+        print("Already ready.")
+        return
     if status.get("calibrated"):
-        print("Already calibrated.")
+        # Calibration cached but server restarted — just finish the last step.
+        print("Already calibrated, finalizing...")
+        api("POST", "/api/phone/home")
+        api("POST", "/api/ready")
+        done("Phone on Home Screen, PhysiClaw ready")
         return
 
     # 1a. Scan QR
@@ -230,7 +237,13 @@ def main():
         calibrate("trace-edge", 60)
     done("Edge trace complete")
 
-    # 15. Summary
+    # 15. Go to Home Screen + mark ready
+    print("\n── 15. Home Screen ──")
+    api("POST", "/api/phone/home")
+    api("POST", "/api/ready")
+    done("Phone on Home Screen, PhysiClaw ready")
+
+    # 16. Summary
     elapsed = time.time() - t0
     mins, secs = int(elapsed // 60), int(elapsed % 60)
     print(f"\n{'='*40}")
