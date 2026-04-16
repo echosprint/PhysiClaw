@@ -9,9 +9,6 @@ Uses fast (5s) and slow (20s) EMAs of raw pixels. Fires when the fast
 EMA diverges from the slow: std or mean increase for content zones,
 red pixel increase for dock. Idle fallback wakes every 30 min during
 work hours.
-
-WeChat must stay in the background — never force-close it. Its broken
-APNs stops push notifications once killed.
 """
 
 import datetime as dt
@@ -34,7 +31,7 @@ EMA_STALE = 60.0  # re-init if no poll for this long
 
 # --- Idle fallback ---
 IDLE_INTERVAL = 1800.0  # 30 min
-WORK_HOURS = [(9, 11), (14, 17)]
+WORK_HOURS = [(9, 12), (14, 17)]
 
 # --- Screen zones (y0, y1) ---
 ZONES = [(0.0, 0.1), (0.5, 1.0), (0.85, 1.0)]
