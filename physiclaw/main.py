@@ -63,7 +63,8 @@ def main():
 
     log = logging.getLogger(__name__)
     lan_ip = get_lan_ip()
-    log.info(f"PhysiClaw MCP server on http://{args.host}:{args.port}/mcp")
+    display_host = "localhost" if args.host == "0.0.0.0" else args.host
+    log.info(f"PhysiClaw MCP server on http://{display_host}:{args.port}/mcp")
     log.info(f"QR code (scan with phone): http://localhost:{args.port}/api/bridge/qr")
     log.info(f"Phone page: http://{lan_ip}:{args.port}/bridge")
     log.info("Run /setup in Claude Code to connect hardware and calibrate")
