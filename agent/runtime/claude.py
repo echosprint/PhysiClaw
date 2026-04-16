@@ -1,20 +1,6 @@
-"""Spawn Claude Code when any hook triggers.
+"""Spawn `claude -p` when any hook triggers.
 
-Not a hook itself — this is the default `react` callable passed to
-`Runtime`. The loop calls `spawn_claude(triggers)` whenever
-`check_hooks()` returns a non-empty list, and the prompt is built from
-the triggers that fired so Claude knows what woke it up and from where.
-
-Runs `claude -p <prompt>` with explicit context:
-  --strict-mcp-config          Only use MCP servers we specify (not user config).
-  --mcp-config                 Running PhysiClaw server (streamable-http).
-  --allowedTools               MCP tools (auto-detected) + file tools + Skill.
-  --permission-mode            acceptEdits — no interactive prompts.
-  --append-system-prompt-file  CLAUDE.md workflow (if present).
-  --output-format stream-json  Streams tool calls and responses as they happen.
-  --verbose                    Required for stream-json in print mode.
-
-Logs every step to log/claude/claude-YYYY-MM-DD.log.
+Streams tool calls and responses to log/claude/claude-YYYY-MM-DD.log.
 """
 
 import asyncio
@@ -29,100 +15,40 @@ from agent.runtime.hook import Trigger
 
 log = logging.getLogger(__name__)
 
-CLAUDE_BIN = "claude"
+# --- Paths ---
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 CLAUDE_MD = PROJECT_ROOT / ".claude" / "CLAUDE.md"
 TOOLS_PY = PROJECT_ROOT / "physiclaw" / "server" / "tools.py"
 LOG_DIR = PROJECT_ROOT / "log" / "claude"
-TIMEOUT = 600  # 10 min hard kill
 
-# Built-in tools the agent may use.  Read/Glob/Grep are unrestricted;
-# Write/Edit are scoped to memory/ and jobs/ only.
-_BUILTIN_TOOLS = [
+TIMEOUT = 180  # 3min, per-line inactivity timeout
+
+# --- Tool permissions ---
+_ALLOWED = [
     "Read", "Glob", "Grep", "Skill",
     "Write(memory/*)", "Write(jobs/*)",
     "Edit(memory/*)", "Edit(jobs/*)",
 ]
-
-
-def _open_log() -> tuple[Path, object]:
-    """Open today's log file for appending. Returns (path, file handle)."""
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
-    path = LOG_DIR / f"claude-{dt.datetime.now():%Y-%m-%d}.log"
-    return path, open(path, "a")
-
-
-def _log_line(f, msg: str) -> None:
-    """Write a timestamped line to the log file."""
-    ts = dt.datetime.now().strftime("%H:%M:%S")
-    f.write(f"[{ts}] {msg}\n")
-    f.flush()
-
-
-def _summarize_event(data: dict) -> str | None:
-    """Turn a stream-json event into a short log line, or None to skip."""
-    t = data.get("type", "")
-
-    if t == "assistant":
-        parts = []
-        for block in data.get("message", {}).get("content", []):
-            btype = block.get("type")
-            if btype == "tool_use":
-                inp = str(block.get("input", ""))
-                if len(inp) > 200:
-                    inp = inp[:200] + "..."
-                parts.append(f"tool_use: {block.get('name')} {inp}")
-            elif btype == "text":
-                text = block.get("text", "")
-                if text.strip():
-                    parts.append(f"text: {text[:300]}")
-        return " | ".join(parts) if parts else None
-
-    if t == "user":
-        # tool_result — log tool name and truncated output
-        for block in data.get("message", {}).get("content", []):
-            if block.get("type") == "tool_result":
-                content = str(block.get("content", ""))
-                if len(content) > 200:
-                    content = content[:200] + "..."
-                return f"tool_result: {content}"
-        return None
-
-    if t == "result":
-        result = data.get("result", "")
-        turns = data.get("num_turns", "?")
-        duration = data.get("duration_ms", "?")
-        return f"result: turns={turns} duration={duration}ms {str(result)[:300]}"
-
-    return None
+_DISALLOWED = [
+    "Skill(setup)", "Skill(phone-setup)",
+    "Skill(calibrate-keyboard)", "Skill(setup-vision-models)",
+]
 
 
 def _discover_mcp_tools() -> list[str]:
-    """Parse tool names from tools.py via regex on @mcp.tool decorated fns."""
+    """Auto-detect MCP tool names from @mcp.tool decorators in tools.py."""
     if not TOOLS_PY.exists():
-        log.warning("tools.py not found at %s — no MCP tools allowed", TOOLS_PY)
         return []
-    source = TOOLS_PY.read_text()
-    # Handles @mcp.tool(), @mcp.tool, @mcp.tool(name=..., ...),
-    # with optional blank/comment lines between decorator and def.
     names = re.findall(
         r"@mcp\.tool(?:\([^)]*\))?\s*\n(?:\s*#[^\n]*\n)*\s+(?:async\s+)?def\s+(\w+)\(",
-        source,
+        TOOLS_PY.read_text(),
     )
     return [f"mcp__physiclaw__{n}" for n in names]
 
 
-def _mcp_config_json() -> str:
-    """Build an MCP config JSON string pointing at the running server."""
-    server_url = os.environ.get("PHYSICLAW_SERVER", "http://127.0.0.1:8048")
-    return json.dumps({
-        "mcpServers": {
-            "physiclaw": {
-                "type": "http",
-                "url": f"{server_url}/mcp",
-            }
-        }
-    })
+def _mcp_config() -> str:
+    url = os.environ.get("PHYSICLAW_SERVER", "http://127.0.0.1:8048")
+    return json.dumps({"mcpServers": {"physiclaw": {"type": "http", "url": f"{url}/mcp"}}})
 
 
 def _build_prompt(triggers: list[Trigger]) -> str:
@@ -130,30 +56,109 @@ def _build_prompt(triggers: list[Trigger]) -> str:
     for t in triggers:
         tag = f"[{t.source}] " if t.source else ""
         lines.append(f"- {tag}{t.description}")
-    lines.append("")
-    lines.append("Follow the Loop workflow to decide what to do next.")
+    lines.append("\nFollow the Loop workflow to decide what to do next.")
     return "\n".join(lines)
 
 
-async def spawn_claude(triggers: list[Trigger]) -> None:
-    prompt = _build_prompt(triggers)
-    allowed = _discover_mcp_tools() + _BUILTIN_TOOLS
+# --- Logging ---
 
-    cmd = [
-        CLAUDE_BIN,
-        "-p", prompt,
+class _SessionLog:
+    """Append-only log for a single claude session to a daily file."""
+
+    def __init__(self, sources: list[str]):
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        self._f = open(LOG_DIR / f"claude-{dt.datetime.now():%Y-%m-%d}.log", "a")
+        self._f.write(f"\n{'='*60}\n")
+        self._write(f"SPAWN triggers={sources}")
+
+    def event(self, data: dict) -> dict | None:
+        """Log a stream-json event. Returns the data if it's a result."""
+        summary = self._summarize(data)
+        if summary:
+            self._write(summary)
+        return data if data.get("type") == "result" else None
+
+    def raw(self, text: str) -> None:
+        self._write(f"raw: {text[:500]}")
+
+    def error(self, returncode: int, stderr: str) -> None:
+        self._write(f"ERROR exit={returncode}: {stderr}")
+
+    def done(self, returncode: int | str) -> None:
+        self._write(f"DONE exit={returncode}")
+        self._f.write(f"{'='*60}\n\n")
+
+    def close(self) -> None:
+        self._f.close()
+
+    def _write(self, msg: str) -> None:
+        self._f.write(f"[{dt.datetime.now():%H:%M:%S}] {msg}\n")
+        self._f.flush()
+
+    @staticmethod
+    def _summarize(data: dict) -> str | None:
+        t = data.get("type", "")
+
+        if t == "assistant":
+            parts = []
+            for b in data.get("message", {}).get("content", []):
+                if b.get("type") == "tool_use":
+                    parts.append(f"tool_use: {b['name']} {str(b.get('input', ''))[:200]}")
+                elif b.get("type") == "text" and b.get("text", "").strip():
+                    parts.append(f"text: {b['text'][:300]}")
+            return " | ".join(parts) if parts else None
+
+        if t == "user":
+            for b in data.get("message", {}).get("content", []):
+                if b.get("type") == "tool_result":
+                    return f"tool_result: {str(b.get('content', ''))[:200]}"
+
+        if t == "result":
+            return f"result: turns={data.get('num_turns', '?')} {str(data.get('result', ''))[:300]}"
+
+        return None
+
+
+# --- Main ---
+
+def _build_cmd(triggers: list[Trigger]) -> list[str]:
+    if not CLAUDE_MD.exists():
+        raise FileNotFoundError(f"CLAUDE.md not found: {CLAUDE_MD}")
+    allowed = _discover_mcp_tools() + _ALLOWED
+    return [
+        "claude",
+        "-p", _build_prompt(triggers),
         "--permission-mode", "acceptEdits",
         "--output-format", "stream-json",
         "--verbose",
         "--no-session-persistence",
         "--strict-mcp-config",
-        "--mcp-config", _mcp_config_json(),
+        "--mcp-config", _mcp_config(),
         "--allowedTools", ",".join(allowed),
+        "--disallowedTools", ",".join(_DISALLOWED),
+        "--append-system-prompt-file", str(CLAUDE_MD),
     ]
 
-    if CLAUDE_MD.exists():
-        cmd.extend(["--append-system-prompt-file", str(CLAUDE_MD)])
 
+async def _stream(proc, slog: _SessionLog) -> dict | None:
+    """Read stream-json lines until EOF. Returns the result event or None."""
+    result_data = None
+    while True:
+        line = await asyncio.wait_for(proc.stdout.readline(), timeout=TIMEOUT)
+        if not line:
+            break
+        text = line.decode(errors="replace").strip()
+        if not text:
+            continue
+        try:
+            result_data = slog.event(json.loads(text)) or result_data
+        except json.JSONDecodeError:
+            slog.raw(text)
+    return result_data
+
+
+async def spawn_claude(triggers: list[Trigger]) -> None:
+    cmd = _build_cmd(triggers)
     sources = [t.source or "?" for t in triggers]
     log.info("spawning claude (triggers=%s)", sources)
 
@@ -164,47 +169,25 @@ async def spawn_claude(triggers: list[Trigger]) -> None:
         cwd=str(PROJECT_ROOT),
     )
 
-    _, f = _open_log()
-    _log_line(f, f"--- spawn (triggers={sources}) ---")
-
+    slog = _SessionLog(sources)
     try:
-        result_data = None
-        while True:
-            line = await asyncio.wait_for(
-                proc.stdout.readline(), timeout=TIMEOUT
-            )
-            if not line:
-                break
-            text = line.decode(errors="replace").strip()
-            if not text:
-                continue
-            try:
-                data = json.loads(text)
-                summary = _summarize_event(data)
-                if summary:
-                    _log_line(f, summary)
-                if data.get("type") == "result":
-                    result_data = data
-            except json.JSONDecodeError:
-                _log_line(f, f"raw: {text[:500]}")
-
+        result_data = await _stream(proc, slog)
         await proc.wait()
 
         if proc.returncode != 0:
-            stderr = (await proc.stderr.read()).decode(errors="replace").strip()
-            _log_line(f, f"ERROR exit={proc.returncode}: {stderr}")
-            log.error("claude exited %s: %s", proc.returncode, stderr)
+            err = (await proc.stderr.read()).decode(errors="replace").strip()
+            slog.error(proc.returncode, err)
+            log.error("claude exited %s: %s", proc.returncode, err)
         elif result_data:
-            text = result_data.get("result", "")
-            turns = result_data.get("num_turns", "?")
-            log.info("claude done (turns=%s): %s", turns, text[:200])
-        _log_line(f, f"--- done (exit={proc.returncode}) ---\n")
+            log.info("claude done (turns=%s): %s",
+                     result_data.get("num_turns", "?"),
+                     str(result_data.get("result", ""))[:200])
+        slog.done(proc.returncode)
 
     except asyncio.TimeoutError:
         proc.kill()
         await proc.wait()
-        _log_line(f, f"TIMEOUT after {TIMEOUT}s")
-        _log_line(f, f"--- done (exit=killed) ---\n")
+        slog.done("killed")
         log.error("claude killed after %ds timeout", TIMEOUT)
     finally:
-        f.close()
+        slog.close()
