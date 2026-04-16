@@ -81,9 +81,6 @@ class _SessionLog:
     def raw(self, text: str) -> None:
         self._write(f"raw: {text[:500]}")
 
-    def error(self, returncode: int, stderr: str) -> None:
-        self._write(f"ERROR exit={returncode}: {stderr}")
-
     def done(self, returncode: int | str) -> None:
         self._write(f"DONE exit={returncode}")
         self._f.write(f"{'='*60}\n\n")
@@ -165,7 +162,7 @@ async def spawn_claude(triggers: list[Trigger]) -> None:
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
         cwd=str(PROJECT_ROOT),
     )
 
@@ -175,9 +172,7 @@ async def spawn_claude(triggers: list[Trigger]) -> None:
         await proc.wait()
 
         if proc.returncode != 0:
-            err = (await proc.stderr.read()).decode(errors="replace").strip()
-            slog.error(proc.returncode, err)
-            log.error("claude exited %s: %s", proc.returncode, err)
+            log.error("claude exited %s (see log for details)", proc.returncode)
         elif result_data:
             log.info("claude done (turns=%s): %s",
                      result_data.get("num_turns", "?"),
