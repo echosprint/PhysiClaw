@@ -101,18 +101,18 @@ class _SessionLog:
             parts = []
             for b in data.get("message", {}).get("content", []):
                 if b.get("type") == "tool_use":
-                    parts.append(f"tool_use: {b['name']} {str(b.get('input', ''))[:200]}")
+                    parts.append(f"tool_use: {b['name']} {str(b.get('input', ''))[:1000]}")
                 elif b.get("type") == "text" and b.get("text", "").strip():
-                    parts.append(f"text: {b['text'][:300]}")
+                    parts.append(f"text: {b['text'][:1000]}")
             return " | ".join(parts) if parts else None
 
         if t == "user":
             for b in data.get("message", {}).get("content", []):
                 if b.get("type") == "tool_result":
-                    return f"tool_result: {str(b.get('content', ''))[:200]}"
+                    return f"tool_result: {str(b.get('content', ''))[:1000]}"
 
         if t == "result":
-            return f"result: turns={data.get('num_turns', '?')} {str(data.get('result', ''))[:300]}"
+            return f"result: turns={data.get('num_turns', '?')} {str(data.get('result', ''))[:2000]}"
 
         return None
 
