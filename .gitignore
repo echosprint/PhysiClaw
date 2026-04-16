@@ -27,3 +27,6 @@ jobs/
 
 # Agent memory (task logs, machine-local)
 memory/
+
+# Runtime logs
+log/
