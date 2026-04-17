@@ -187,12 +187,17 @@ def main():
     print("\n── 7. Arm tilt ──")
     print("  Arm taps two points to check alignment with phone.")
     if ask("Ready?", auto):
+        def _tilt_fail(resp):
+            tilt = (resp or {}).get("tilt_ratio")
+            detail = f"tilt {tilt*100:.1f}%" if tilt is not None else "no response"
+            return f"Not aligned — {detail}. Adjust phone rotation"
+
         calibrate_retry(
             "arm-tilt",
-            "Not aligned — adjust phone rotation",
+            _tilt_fail,
             "Retry?",
             auto,
-            predicate=lambda r: r and r.get("aligned"),
+            predicate=lambda resp: resp and resp.get("aligned"),
         )
         done("Arm aligned with phone")
 
