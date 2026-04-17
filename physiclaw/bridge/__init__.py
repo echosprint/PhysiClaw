@@ -6,13 +6,15 @@ Three data flows:
 3. Calibration: Server controls page display, page reports touch events.
 """
 
-from physiclaw.bridge.lan import get_lan_ip
+from physiclaw.bridge.lan import bridge_base_urls, get_lan_ip, get_mdns_host
 from physiclaw.bridge.state import BridgeState
 from physiclaw.bridge.calib import CalibrationState
 from physiclaw.bridge.page import PageState
 
 __all__ = [
+    "bridge_base_urls",
     "get_lan_ip",
+    "get_mdns_host",
     "BridgeState",
     "CalibrationState",
     "PageState",

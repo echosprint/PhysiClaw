@@ -59,14 +59,22 @@ def main():
     mcp.settings.port = args.port
     mcp.settings.log_level = "WARNING"
 
-    from physiclaw.bridge import get_lan_ip
+    from physiclaw.bridge import bridge_base_urls
 
     log = logging.getLogger(__name__)
-    lan_ip = get_lan_ip()
+    primary, fallback = bridge_base_urls(args.port)
     display_host = "localhost" if args.host == "0.0.0.0" else args.host
     log.info(f"PhysiClaw MCP server on http://{display_host}:{args.port}/mcp")
     log.info(f"QR code (scan with phone): http://localhost:{args.port}/api/bridge/qr")
-    log.info(f"Phone page: http://{lan_ip}:{args.port}/bridge")
+    if primary != fallback:
+        log.info(f"Phone page: {primary}/bridge  (recommended — survives IP changes)")
+        log.info(f"Fallback:   {fallback}/bridge  (if mDNS blocked)")
+    else:
+        log.info(f"Phone page: {fallback}/bridge")
+        log.info(
+            "Tip: set a stable LocalHostName for <name>.local URLs — "
+            "see /phone-setup"
+        )
     log.info("Run /setup in Claude Code to connect hardware and calibrate")
 
     if not args.no_runtime:

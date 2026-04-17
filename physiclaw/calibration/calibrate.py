@@ -1151,7 +1151,7 @@ def verify_assistive_touch(
 ) -> dict:
     """Step 7: verify all three AT gestures end-to-end.
 
-    1. Single-tap → iOS takes a screenshot (Photos).
+    1. Single-tap → "PhysiClaw Tap" Shortcut takes a screenshot (saved to Photos).
     2. Wait 5s for the screenshot animation to finish.
     3. Double-tap → "PhysiClaw Screenshot" Shortcut uploads the latest photo.
        Verify the uploaded image contains the color nonce.

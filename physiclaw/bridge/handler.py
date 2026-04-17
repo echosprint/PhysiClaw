@@ -10,7 +10,7 @@ from pathlib import Path
 
 from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
-from physiclaw.bridge.lan import get_lan_ip
+from physiclaw.bridge.lan import bridge_base_urls
 from physiclaw.bridge.state import BridgeState
 from physiclaw.bridge.calib import CalibrationState
 from physiclaw.bridge.page import PageState
@@ -111,11 +111,12 @@ async def handle_mode_switch(request, phone: PageState):
 
 
 async def serve_qr_page(request):
-    """Serve a page with a single QR code for the unified phone page."""
-    ip = get_lan_ip()
-    port = request.url.port or 8048
-    phone_url = f"http://{ip}:{port}/bridge"
-    html = (STATIC_DIR / "qr.html").read_text().replace("__PHONE_URL__", phone_url)
+    """Serve a QR code page for the phone bridge URL."""
+    primary, fallback = bridge_base_urls(request.url.port or 8048)
+    html = (STATIC_DIR / "qr.html").read_text()
+    html = html.replace("__PHONE_URL__", f"{primary}/bridge").replace(
+        "__PHONE_URL_FALLBACK__", f"{fallback}/bridge"
+    )
     return HTMLResponse(html)
 
 

@@ -1,128 +1,121 @@
 ---
 name: phone-setup
-description: Guide user step-by-step to set up their iPhone for PhysiClaw — enable AssistiveTouch, create iOS Shortcuts for screenshot upload and clipboard sync.
+description: Guide user step-by-step to set up their iPhone for PhysiClaw — enable AssistiveTouch, create three iOS Shortcuts (take screenshot, upload latest, clipboard sync).
 allowed-tools: Bash, Read
 ---
 
 # iPhone Setup for PhysiClaw
 
-Walk the user through setting up their iPhone with two iOS Shortcuts (screenshot upload + clipboard sync) and AssistiveTouch. No hardware or calibration needed — just the phone and the running server.
+Set up three iOS Shortcuts (take screenshot · upload latest · clipboard sync) and bind them to AssistiveTouch taps. The server must be running.
 
-## Step 1: Get the server URL
+## Step 1: Stable `<name>.local` hostname
 
-```bash
-uv run python -c "from physiclaw.bridge import get_lan_ip; print(f'http://{get_lan_ip()}:8048')"
-```
+Shortcuts that embed the LAN IP break when DHCP changes it. `<name>.local` survives IP changes on the same Wi-Fi.
 
-Save this IP for later. Tell the user:
-
-> Make sure your iPhone is on the **same WiFi** as this computer.
-
-## Step 2: Create the iOS Shortcut
-
-Tell the user (replace `SERVER_IP:8048` with the actual value from Step 1):
-
-> Open the **Shortcuts** app on your iPhone:
->
-> 1. Tap **+** to create a new shortcut
-> 2. Add action: search **"Get Latest Screenshots"** — add it
-> 3. Add action: search **"Get Contents of URL"** — add it, then configure:
->    - **URL**: `http://SERVER_IP:8048/api/bridge/screenshot`
->    - Tap **Show More**
->    - **Method**: **POST**
->    - **Request Body**: **File**
->    - **File**: tap and select the **Screenshots** variable from the previous step
-> 4. Rename the shortcut to **"PhysiClaw Screenshot"**
-> 5. Tap **Done**
-
-Wait for user confirmation.
-
-## Step 3: Create the Clipboard Shortcut
-
-Tell the user (replace `SERVER_IP:8048` with the actual value from Step 1):
-
-> Create a second shortcut in the **Shortcuts** app:
->
-> 1. Tap **+** to create a new shortcut
-> 2. Add action: search **"Get Contents of URL"** — add it, then configure:
->    - **URL**: `http://SERVER_IP:8048/api/bridge/clipboard`
->    - Method stays **GET** (default)
-> 3. Add action: search **"Copy to Clipboard"** — add it
->    - Input: select the **Contents of URL** variable from the previous step
-> 4. Rename the shortcut to **"PhysiClaw Clipboard"**
-> 5. Tap **Done**
-
-This shortcut lets the server send text directly to the phone's clipboard — no screen tap needed.
-
-Wait for user confirmation.
-
-## Step 4: Enable AssistiveTouch (skip if already configured)
-
-Tell the user:
-
-> On your iPhone:
->
-> 1. Open **Settings**
-> 2. Go to **Accessibility** → **Touch** → **AssistiveTouch**
-> 3. Turn **AssistiveTouch ON** — a floating circle button appears on screen
-> 4. Under **Custom Actions**, set:
->    - **Single-Tap** → **Screenshot**
->    - **Double-Tap** → **Shortcut** → select **"PhysiClaw Screenshot"**
->    - **Long Press** → **Shortcut** → select **"PhysiClaw Clipboard"**
-
-Wait for user confirmation.
-
-## Step 5: Test the upload
-
-Tell the user:
-
-> 1. Tap AssistiveTouch **once** to take a screenshot
-> 2. Tap AssistiveTouch **twice** to upload the latest screenshot to PhysiClaw
->
-> I'll check if it arrived.
-
-Wait a moment, then check:
+Skip if the current name already ends with `-xxx` (3 lowercase letters) and `ping` succeeds:
 
 ```bash
-ls -lt data/phone/screenshot/ 2>/dev/null | head -5
+CUR=$(scutil --get LocalHostName) && echo "$CUR" && ping -c 1 -W 1000 "${CUR}.local"
 ```
 
-If files exist, show the latest:
+Otherwise rename (strips either our old `-xxx` suffix or macOS's numeric collision suffix like `-2`/`-3`; sets `LocalHostName` only — `ComputerName`/`HostName` don't drive mDNS):
+
+```bash
+BASE=$(scutil --get LocalHostName | sed -E 's/-([a-z]{3}|[0-9]+)$//') && \
+NAME="${BASE}-$(LC_ALL=C tr -dc 'a-z' </dev/urandom | head -c 3)" && \
+sudo scutil --set LocalHostName "$NAME" && \
+dscacheutil -flushcache && \
+echo "Set to: $NAME"
+```
+
+Shortcut URLs use the lowercase form (`macair-qqd.local`).
+
+## Step 2: Server URLs
 
 ```bash
 uv run python -c "
-from pathlib import Path
-files = sorted(Path('data/phone/screenshot').glob('*'), key=lambda f: f.stat().st_mtime, reverse=True)
-if files:
-    f = files[0]
-    print(f'Screenshot received: {f.name} ({f.stat().st_size:,} bytes)')
-    print(f'Path: {f}')
-else:
-    print('No screenshots found in data/phone/screenshot/')
+from physiclaw.bridge import bridge_base_urls
+p, f = bridge_base_urls(8048)
+if p != f: print(f'Recommended: {p}')
+print(f'Fallback (IP): {f}')
 "
 ```
 
-Open the image to show the user:
+Use `Recommended` in the Shortcuts. Fallback to the IP only if the network blocks mDNS.
 
-```bash
-open data/phone/screenshot/LATEST_FILENAME
-```
-
-If no screenshot arrived, troubleshoot:
-
-- Open Shortcuts → tap "PhysiClaw Screenshot" → tap ▶ to run manually. Any errors?
-- Check the URL matches `http://SERVER_IP:8048/api/bridge/screenshot`
-- Try opening `http://SERVER_IP:8048/bridge` in Safari — if it loads, the network works
-- Make sure there is at least one screenshot in the Photos app
-
-Retry until a screenshot arrives and is displayed.
-
-## Done
+## Step 3: "PhysiClaw Tap" Shortcut (take screenshot)
 
 Tell the user:
 
-> iPhone setup complete! AssistiveTouch actions:
+> Shortcuts app → **+**:
 >
-> - **Single tap** → takes a screenshot (saved to Photos)
-> - **Double tap** → uploads the latest screenshot to the server
-> - **Long press** → fetches text from server to clipboard (for pasting into apps)
+> 1. Add **"Take Screenshot"**
+> 2. Rename to **"PhysiClaw Tap"** → Done
+
+Wait for confirmation.
+
+## Step 4: "PhysiClaw Screenshot" Shortcut (upload latest)
+
+Tell the user (replace `HOST` with the URL from Step 2):
+
+> Shortcuts app → **+**:
+>
+> 1. Add **"Get Latest Screenshots"**
+> 2. Add **"Get Contents of URL"**:
+>    - URL: `http://HOST/api/bridge/screenshot`
+>    - Show More → Method **POST**, Request Body **File**, File → **Screenshots** variable
+> 3. Rename to **"PhysiClaw Screenshot"** → Done
+
+Wait for confirmation.
+
+## Step 5: "PhysiClaw Clipboard" Shortcut (sync clipboard)
+
+Tell the user (same `HOST`):
+
+> Shortcuts app → **+**:
+>
+> 1. Add **"Get Contents of URL"** → URL `http://HOST/api/bridge/clipboard` (GET)
+> 2. Add **"Copy to Clipboard"** → input = **Contents of URL**
+> 3. Rename to **"PhysiClaw Clipboard"** → Done
+
+Wait for confirmation.
+
+## Step 6: AssistiveTouch (skip if configured)
+
+Tell the user:
+
+> Settings → Accessibility → Touch → **AssistiveTouch ON**. Custom Actions:
+>
+> - **Single-Tap** → Shortcut → PhysiClaw Tap
+> - **Double-Tap** → Shortcut → PhysiClaw Screenshot
+> - **Long Press** → Shortcut → PhysiClaw Clipboard
+
+Wait for confirmation.
+
+## Step 7: Test
+
+Tell the user:
+
+> Tap AssistiveTouch **once** (take screenshot), then **twice** (upload latest).
+
+Record the baseline, then poll for a new file:
+
+```bash
+baseline=$(ls -t data/phone/screenshot/ 2>/dev/null | head -1)
+for i in $(seq 1 25); do
+  newest=$(ls -t data/phone/screenshot/ 2>/dev/null | head -1)
+  [ -n "$newest" ] && [ "$newest" != "$baseline" ] && { echo "✓ $newest"; open "data/phone/screenshot/$newest"; exit 0; }
+  sleep 1
+done
+echo "✗ no upload in 25s"
+```
+
+If nothing arrives:
+
+- Run the Shortcut manually (Shortcuts app → ▶) — check for errors.
+- From the Mac, `ping "$(scutil --get LocalHostName).local"` — if it fails from the phone's network, mDNS is blocked; swap both Shortcut URLs to the IP fallback from Step 2.
+- Ensure at least one screenshot exists in Photos.
+
+## Done
+
+> AssistiveTouch: single tap = take screenshot, double tap = upload latest, long press = clipboard fetch. If a Shortcut breaks after a network change, rerun this setup to get the new URL and paste it into each Shortcut's "Get Contents of URL" step.
