@@ -6,6 +6,7 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 import webbrowser
 
@@ -19,6 +20,11 @@ def api(method, path, body=None, timeout=60):
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        try:
+            return json.loads(e.read())
+        except Exception:
+            return None
     except Exception:
         return None
 
@@ -49,6 +55,25 @@ def ask(msg, auto):
 
 def calibrate(step, timeout=60):
     return api("POST", f"/api/calibrate/{step}", timeout=timeout)
+
+
+def calibrate_retry(step, fail_msg, retry_prompt, auto, predicate=None, timeout=30):
+    """Run a calibration step in a retry loop until ``predicate(r)`` passes.
+
+    ``fail_msg`` may be a string or a callable taking the response.
+    Exits on user 'q' (manual) or immediately (auto) without retry.
+    """
+    if predicate is None:
+        predicate = ok
+    while True:
+        r = calibrate(step, timeout)
+        if predicate(r):
+            return r
+        msg = fail_msg(r) if callable(fail_msg) else fail_msg
+        fail(msg)
+        # In auto mode there's no human to fix the physical setup, so just exit.
+        if auto or not ask(retry_prompt, auto=False):
+            sys.exit(1)
 
 
 def done(msg="OK"):
@@ -162,11 +187,14 @@ def main():
     print("\n── 7. Arm tilt ──")
     print("  Arm taps two points to check alignment with phone.")
     if ask("Ready?", auto):
-        r = calibrate("arm-tilt", 30)
-        if r and not r.get("aligned"):
-            fail("Not aligned — adjust phone rotation and rerun")
-        else:
-            done("Arm aligned with phone")
+        calibrate_retry(
+            "arm-tilt",
+            "Not aligned — adjust phone rotation",
+            "Retry?",
+            auto,
+            predicate=lambda r: r and r.get("aligned"),
+        )
+        done("Arm aligned with phone")
 
     # 8. Camera rotation
     print("\n── 8. Camera rotation ──")
@@ -201,8 +229,12 @@ def main():
     print("\n── 11. Camera mapping ──")
     print("  Camera detects 15 red dots on phone screen.")
     if ask("Ready?", auto):
-        if not ok(calibrate("camera-mapping", 30)):
-            fail("Camera mapping failed"); sys.exit(1)
+        calibrate_retry(
+            "camera-mapping",
+            lambda r: f"Camera mapping failed: {(r or {}).get('message', 'no response')}",
+            "Adjust lighting/glare. Retry?",
+            auto,
+        )
     done("Screen→camera mapping computed")
 
     # 12. Validate

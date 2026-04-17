@@ -5,7 +5,6 @@ Usage as library:
     from physiclaw.hardware.camera import Camera
     cam = Camera(index=0)
     frame = cam.snapshot()
-    green = cam.is_green()
     cam.close()
 
 Usage as CLI:
@@ -20,6 +19,8 @@ grant camera access to your terminal app, then retry.
 
 import logging
 import subprocess
+import threading
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -49,59 +50,150 @@ def _ensure_camera_permission():
 class Camera:
     """Persistent camera handle for fast repeated frame grabs.
 
-    Holds the software rotation code to apply to raw frames. Default is
+    A background daemon thread continuously calls ``cap.read()`` so the
+    macOS AVFoundation pipeline never goes idle (cv2 stalls indefinitely
+    on the next read after tens of seconds of inactivity — see opencv
+    issue #24393). Callers get the latest frame via ``peek()`` /
+    ``snapshot()`` / ``_fresh_frame()`` without blocking on cv2.
+
+    Holds the software rotation code applied to raw frames. Default is
     ``-1`` (no rotation) — calibration step 3 (`pick_frame_rotation`)
-    writes the detected ``cv2.ROTATE_*`` code via ``cam.rotation = code``
-    once the phone's orientation is known. Callers that need a rotated
-    frame should always use ``peek()``/``snapshot()`` rather than calling
-    ``cv2.rotate`` themselves.
+    writes the detected ``cv2.ROTATE_*`` code via ``cam.rotation = code``.
+    Callers that need a rotated frame should always use
+    ``peek()``/``snapshot()`` rather than calling ``cv2.rotate`` themselves.
     """
+
+    # If the reader gets no frame for this long, force close+reopen of
+    # cv2.VideoCapture. Recovers from real disconnects.
+    STALE_RECONNECT_SECONDS = 5.0
+
+    # Max time _fresh_frame() waits for the reader to produce a frame
+    # before returning whatever it last had (or None).
+    FRAME_WAIT_SECONDS = 2.0
+
+    # A frame older than this is treated as "not yet fresh" by
+    # _fresh_frame() — it'll wait for the reader to publish a newer one.
+    FRESH_MAX_AGE_SECONDS = 1.0
+
+    # Backoff after a failed read or reconnect, so a permanently broken
+    # camera doesn't spin-loop the reader thread.
+    READER_BACKOFF_SECONDS = 0.5
 
     def __init__(self, index=0):
         self.index = index
         self.rotation: int = -1  # no rotation until calibration step 3 sets it
-        self.cap = cv2.VideoCapture(index)
+        self._frame = None
+        self._frame_time = 0.0
+        self._cond = threading.Condition()
+        self._stopped = threading.Event()
 
-        # If cv2 fails, try triggering macOS permission via imagesnap
+        self._open()
+        self._warmup()
+
+        self._thread = threading.Thread(
+            target=self._reader_loop,
+            name=f"Camera-{index}-reader",
+            daemon=True,
+        )
+        self._thread.start()
+
+    # ─── cv2 lifecycle ──────────────────────────────────────────
+
+    def _open(self):
+        """Open the underlying ``cv2.VideoCapture``. Retries with macOS perm prompt."""
+        self.cap = cv2.VideoCapture(self.index)
         if not self.cap.isOpened():
             _ensure_camera_permission()
-            self.cap = cv2.VideoCapture(index)
-
+            self.cap = cv2.VideoCapture(self.index)
         if not self.cap.isOpened():
-            raise RuntimeError(f"Cannot open camera index {index}")
+            raise RuntimeError(f"Cannot open camera index {self.index}")
+        # AVFoundation (macOS) ignores this; V4L (Linux) honors it.
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
-        # Warmup: discard initial auto-exposure frames
-        for _ in range(15):
-            ret, _ = self.cap.read()
-
-        # Verify we can actually read frames (permission may be denied silently)
-        ret, frame = self.cap.read()
-        if not ret or frame is None:
-            self.cap.release()
-            _ensure_camera_permission()
-            self.cap = cv2.VideoCapture(index)
+    def _warmup(self):
+        """Discard initial auto-exposure frames and verify reads work."""
+        for _ in range(2):
             for _ in range(15):
                 self.cap.read()
-            frame = self._read()
+            ret, frame = self.cap.read()
+            if ret and frame is not None:
+                h, w = frame.shape[:2]
+                log.info(f"Camera {self.index} ready  ({w}x{h})")
+                with self._cond:
+                    self._frame = frame
+                    self._frame_time = time.monotonic()
+                return
+            # Read returned no frame — likely macOS perm denied silently.
+            self.cap.release()
+            _ensure_camera_permission()
+            self._open()
+        raise RuntimeError(f"Camera {self.index}: read failed")
 
-        h, w = frame.shape[:2]
-        log.info(f"Camera {index} ready  ({w}x{h})")
+    def _reopen(self):
+        """Close and reopen the cap. Called by the reader on stale frames."""
+        log.warning(f"Camera {self.index}: reconnecting cv2.VideoCapture")
+        try:
+            self.cap.release()
+        except Exception:
+            pass
+        try:
+            self._open()
+            with self._cond:
+                self._frame_time = time.monotonic()  # reset stale clock
+        except Exception as e:
+            log.error(f"Camera {self.index}: reopen failed: {e!r}")
 
-    def _read(self):
-        """Read a single frame, raise on failure."""
-        ret, frame = self.cap.read()
-        if not ret or frame is None:
-            raise RuntimeError(f"Camera {self.index}: read failed")
-        return frame
+    # ─── Background reader ──────────────────────────────────────
+
+    def _reader_loop(self):
+        """Pull frames continuously so AVFoundation never goes idle.
+
+        ``cap.read()`` blocks for the next native-FPS frame, so the loop
+        self-paces — no explicit sleep needed in the steady state.
+        """
+        while not self._stopped.is_set():
+            try:
+                ok, frame = self.cap.read()
+            except Exception as e:
+                log.warning(f"Camera {self.index}: cap.read() raised {e!r}")
+                self._reopen()
+                self._stopped.wait(self.READER_BACKOFF_SECONDS)
+                continue
+            now = time.monotonic()
+            if ok and frame is not None:
+                with self._cond:
+                    self._frame = frame
+                    self._frame_time = now
+                    self._cond.notify_all()
+            else:
+                with self._cond:
+                    stale = now - self._frame_time
+                if stale > self.STALE_RECONNECT_SECONDS:
+                    self._reopen()
+                    self._stopped.wait(self.READER_BACKOFF_SECONDS)
+
+    # ─── Frame accessors ────────────────────────────────────────
 
     def _fresh_frame(self):
-        """Flush buffered frames and return the latest one (raw, unrotated)."""
-        for _ in range(4):
-            self.cap.grab()
-        ret, frame = self.cap.read()
-        if not ret or frame is None:
-            return None
-        return frame
+        """Return the latest raw (unrotated) BGR frame, or ``None``.
+
+        Waits up to ``FRAME_WAIT_SECONDS`` for the reader to publish a
+        frame fresher than ``FRESH_MAX_AGE_SECONDS``; otherwise returns
+        whatever the reader last had.
+        """
+        with self._cond:
+            self._cond.wait_for(
+                lambda: (
+                    self._frame is not None
+                    and time.monotonic() - self._frame_time
+                    < self.FRESH_MAX_AGE_SECONDS
+                ),
+                timeout=self.FRAME_WAIT_SECONDS,
+            )
+            frame = self._frame
+        # Copy outside the lock — a 1080p numpy copy is ~1 ms and would
+        # otherwise stall the reader's next publish for that long.
+        return frame.copy() if frame is not None else None
 
     def _rotate(self, frame):
         """Apply ``self.rotation`` to a raw frame. No-op when rotation is -1."""
@@ -138,4 +230,7 @@ class Camera:
         return frame
 
     def close(self):
+        self._stopped.set()
+        if self._thread.is_alive():
+            self._thread.join(timeout=3.0)
         self.cap.release()
