@@ -253,15 +253,27 @@ def main():
     calibrate("assistive-touch/show")
     if not auto:
         wait("Drag AssistiveTouch button to overlap the orange circle")
-    r = calibrate("assistive-touch/verify", 20)
-    if r and r.get("clipboard", {}).get("fetched"):
+
+    def _at_fail(resp):
+        msg = "AT verification failed — check AT position and iOS Shortcuts"
+        clip = (resp or {}).get("clipboard") or {}
+        if clip.get("fetched"):
+            msg += f" (clipboard fetched: {clip.get('text')!r})"
+        return msg
+
+    r = calibrate_retry(
+        "assistive-touch/verify",
+        _at_fail,
+        "Adjust AT position. Retry?",
+        auto,
+        predicate=lambda resp: resp and resp.get("passed"),
+        timeout=20,
+    )
+    if r.get("clipboard", {}).get("fetched"):
         print(f"  Clipboard text: {r['clipboard'].get('text')}")
         if not auto:
             wait("Paste in Notes to verify it matches")
-    if r and r.get("passed"):
-        done("Screenshot + clipboard pipeline verified")
-    else:
-        fail("AT verification failed — check AT position and iOS Shortcuts")
+    done("Screenshot + clipboard pipeline verified")
 
     # 14. Edge trace
     print("\n── 14. Edge trace ──")
