@@ -18,4 +18,4 @@ Use **京东七鲜** (JD 7Fresh) for groceries. Other JD categories need explici
 
 ## Gotcha — screenshot triggers share popup
 
-Taking a `screenshot()` of a shop item page may overlay a 分享截屏 (Share screenshot) menu. If `scan()` after a screenshot doesn't confirm the item UI, a popup is covering it. Dismiss by tapping the dimmed top/left/right edge — see `memory/memory.md` → UI patterns. Reference: `screens/share_popup_example.png`.
+Taking a `screenshot()` of a shop item page may overlay a 分享截屏 (Share screenshot) menu with targets 朋友圈 / QQ / 微信好友 / 保存图片 / 搜问题. If `scan()` after a screenshot doesn't confirm the item UI, a popup is covering it. Dismiss by tapping the dimmed top/left/right edge — see `memory/memory.md` → UI patterns.
