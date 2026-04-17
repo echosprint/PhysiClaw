@@ -58,6 +58,11 @@ def _build_prompt(triggers: list[Trigger]) -> str:
         tag = f"[{t.source}] " if t.source else ""
         lines.append(f"- {tag}{t.description}")
     lines.append("\nFollow the Loop workflow to decide what to do next.")
+    # Claude Code interprets "think" / "think hard" / "ultrathink" in the
+    # prompt as thinking-budget triggers. Keep it to "think" — tasks here
+    # are observe→decide→tap loops, not deep reasoning. Bump for harder
+    # tasks per-trigger if needed.
+    lines.append("think")
     return "\n".join(lines)
 
 
@@ -104,6 +109,8 @@ class _SessionLog:
                     parts.append(f"tool_use: {b['name']} {str(b.get('input', ''))[:1000]}")
                 elif b.get("type") == "text" and b.get("text", "").strip():
                     parts.append(f"text: {b['text'][:1000]}")
+                elif b.get("type") == "thinking" and b.get("thinking", "").strip():
+                    parts.append(f"thinking: {b['thinking'][:2000]}")
             return " | ".join(parts) if parts else None
 
         if t == "user":
