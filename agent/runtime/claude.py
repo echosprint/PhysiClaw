@@ -68,7 +68,22 @@ def _build_prompt(triggers: list[Trigger]) -> str:
 
 # --- Logging ---
 
-SENTINEL = re.compile(r">>> (DONE|STUCK|IDLE) - (.+?) <<<")
+SENTINEL = re.compile(r">+ (DONE|STUCK|IDLE) - (.+?) <+")
+
+
+def _redact_images(content):
+    """Replace base64 image data with a length placeholder so logs stay readable."""
+    if not isinstance(content, list):
+        return content
+    out = []
+    for item in content:
+        if isinstance(item, dict) and item.get("type") == "image":
+            src = item.get("source") or {}
+            data = src.get("data", "")
+            out.append({**item, "source": {**src, "data": f"<{len(data)}b elided>"}})
+        else:
+            out.append(item)
+    return out
 
 
 class _SessionLog:
@@ -148,7 +163,7 @@ class _SessionLog:
         if t == "user":
             for b in data.get("message", {}).get("content", []):
                 if b.get("type") == "tool_result":
-                    return f"tool_result: {str(b.get('content', ''))[:1000]}"
+                    return f"tool_result: {str(_redact_images(b.get('content', '')))[:1000]}"
 
         if t == "result":
             return f"result: turns={data.get('num_turns', '?')} {str(data.get('result', ''))[:2000]}"
