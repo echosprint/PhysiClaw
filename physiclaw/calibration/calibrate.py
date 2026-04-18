@@ -20,6 +20,7 @@ mapping. Camera for marker/dot visual detection only.
 import logging
 import random
 import time
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -42,7 +43,7 @@ log = logging.getLogger(__name__)
 SLOW_Z_SPEED = 6000
 PROBE_Z_SPEED = 6000
 
-CACHE_DIR = "data/calibration/cache"
+VIEWPORT_CACHE_STEM = Path("data/calibration/cache/viewport")
 
 
 def grid_positions(cal: "CalibrationState"):
@@ -54,12 +55,10 @@ def grid_positions(cal: "CalibrationState"):
             yield col, row
 
 
-def _find_viewport_cache():
+def _find_viewport_cache() -> Path | None:
     """Return the first existing cached viewport screenshot, or None."""
-    from pathlib import Path
-
     for ext in ("png", "jpg"):
-        p = Path(f"{CACHE_DIR}/viewport.{ext}")
+        p = VIEWPORT_CACHE_STEM.with_suffix(f".{ext}")
         if p.exists():
             return p
     return None
@@ -189,10 +188,8 @@ def measure_viewport_shift(
     )
 
     if cached is None:
-        from pathlib import Path
-
         ext = "png" if data[:4] == b"\x89PNG" else "jpg"
-        out = Path(f"{CACHE_DIR}/viewport.{ext}")
+        out = VIEWPORT_CACHE_STEM.with_suffix(f".{ext}")
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_bytes(data)
         log.info(f"  Cached screenshot: {out}")
