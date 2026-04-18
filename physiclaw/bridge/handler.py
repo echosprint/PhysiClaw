@@ -21,8 +21,16 @@ STATIC_DIR = Path(__file__).parent.parent / "static"
 
 
 async def serve_bridge_page(request):
-    """Serve the bridge page for the phone browser."""
-    return HTMLResponse((STATIC_DIR / "bridge.html").read_text())
+    """Serve the bridge page for the phone browser.
+
+    ``Cache-Control: no-store`` so Safari always pulls the latest JS —
+    otherwise a stale cached copy can silently miss newly-added phases
+    and the phone renders nothing.
+    """
+    return HTMLResponse(
+        (STATIC_DIR / "bridge.html").read_text(),
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 async def handle_phone_state(request, phone: PageState):

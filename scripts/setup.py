@@ -144,7 +144,9 @@ def main():
 
     # 3. Connect camera
     print("\n── 3. Connect camera ──")
-    print("  Auto-picking the camera whose frame shows a phone-shaped bright region.")
+    print("  Auto-picking by the RGBY corner markers on /bridge.")
+    print("  If this fails, refresh /bridge in Safari (pull-to-refresh)")
+    print("  so it picks up the latest page, then retry.")
     r = api("POST", "/api/connect-camera", {"index": "auto"}, timeout=30)
     if ok(r):
         cam = r.get("index", 0)
