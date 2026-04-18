@@ -77,5 +77,6 @@ Each wake you start fresh — these files are how you persist. Update `memory/me
 App-specific skills encode flow + known gotchas so you don't re-discover them.
 
 - `/open-app AppName` — launch any app via Spotlight
+- `/wechat` — operate WeChat (read messages, send via paste→Send)
 - `/jd` — grocery shopping via 京东七鲜
 - `/cron` — manage scheduled jobs
