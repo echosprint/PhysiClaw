@@ -55,6 +55,14 @@ class PhysiClaw:
         self._watchdog = Watchdog()
         self._ready = False  # set True only after /setup finishes its last step
 
+    # ─── Wiring ──────────────────────────────────────────────
+
+    def attach_bridge(self, bridge: BridgeState) -> None:
+        """Attach the server-side bridge. Called once from
+        ``physiclaw.server.app`` at assembly time; screenshot and
+        send_to_clipboard rely on it."""
+        self._bridge = bridge
+
     # ─── Ready state ──────────────────────────────────────────
 
     @property
@@ -240,12 +248,11 @@ class PhysiClaw:
     # ─── Tool operations ───────────────────────────────────────
 
 
-    def _require_at_bridge(self):
-        """Raise if AT or bridge is not ready."""
+    def _require_assistive_touch(self):
+        """Raise if AssistiveTouch isn't calibrated. ``_bridge`` is wired
+        into the constructor at server startup, so it's always present."""
         if not self._assistive_touch.ready:
             raise RuntimeError("AssistiveTouch not calibrated — run /setup first")
-        if self._bridge is None:
-            raise RuntimeError("Bridge not set up — run /setup (AT verification step)")
 
     def _get_ocr_reader(self) -> OCRReader:
         """Lazy-load and cache the OCR reader."""
@@ -293,7 +300,7 @@ class PhysiClaw:
         and a pretty-printed JSON listing of detected elements.
         """
         with self.locked():
-            self._require_at_bridge()
+            self._require_assistive_touch()
             data = self._assistive_touch.take_screenshot(
                 self._arm, self._bridge, self.transforms.pct_to_grbl, timeout=60.0
             )
@@ -403,7 +410,7 @@ class PhysiClaw:
     def send_to_clipboard(self, text: str) -> str:
         """Copy text to the phone's clipboard via AT long-press."""
         with self.locked():
-            self._require_at_bridge()
+            self._require_assistive_touch()
             self._bridge.send_text(text)
             self._assistive_touch.long_press(self._arm, self.transforms.pct_to_grbl)
             if self._bridge.wait_clipboard(timeout=30.0):

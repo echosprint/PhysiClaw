@@ -26,6 +26,7 @@ physiclaw = PhysiClaw()
 _bridge = BridgeState()
 _calib = CalibrationState()
 _phone = PageState(_bridge, _calib)
+physiclaw.attach_bridge(_bridge)
 
 # ─── Warm restart ───────────────────────────────────────────
 

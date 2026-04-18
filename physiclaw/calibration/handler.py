@@ -297,15 +297,13 @@ async def handle_verify_assistive_touch(
             raise RuntimeError("Run assistive-touch/show first")
         physiclaw.acquire()
         try:
-            result = verify_assistive_touch(
+            return verify_assistive_touch(
                 physiclaw._arm,
                 physiclaw.assistive_touch,
                 bridge,
                 calib,
                 pct_to_grbl,
             )
-            physiclaw._bridge = bridge
-            return result
         finally:
             physiclaw.release()
 
