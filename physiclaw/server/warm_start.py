@@ -16,8 +16,34 @@ invariant (crash, power cut, arm bumped).
 
 import logging
 import sys
+import time
 
 log = logging.getLogger(__name__)
+
+# How long to wait for the phone to (re)load /bridge, in seconds.
+BRIDGE_WAIT_TIMEOUT = 120
+# After a /bridge load is detected, let the page finish rendering before
+# we start tapping dots at it.
+BRIDGE_SETTLE_SECONDS = 2.0
+
+
+def _wait_for_bridge(calib) -> bool:
+    """Block until the phone POSTs screen-dimension (``/bridge`` loaded or
+    reloaded). We don't clear the event first — if the POST arrived before
+    we got here (e.g. while connecting the arm), we want to use it, not
+    wipe it and wait for a second one that may never come. Bundle load
+    uses direct attribute assignment and doesn't touch the event, so the
+    only thing that can set it is a real phone POST. Sleeps
+    BRIDGE_SETTLE_SECONDS after the signal so the page finishes rendering.
+    """
+    if not calib.screen_dimension_updated.wait(timeout=BRIDGE_WAIT_TIMEOUT):
+        log.error(
+            f"--warm-start: no /bridge load within {BRIDGE_WAIT_TIMEOUT}s — "
+            "open the bridge page and retry."
+        )
+        return False
+    time.sleep(BRIDGE_SETTLE_SECONDS)
+    return True
 
 
 def _sanity(physiclaw, calib, phone) -> bool:
@@ -102,10 +128,11 @@ def try_resume(cam_index_override: int | None) -> bool:
         print()
         print("━" * 60)
         print("Warm-start")
-        print("  Open the phone's /bridge page (keep it foregrounded).")
-        print("  The arm will tap 2 random dots to verify the calibration.")
+        print("  Open or refresh the phone's /bridge page.")
+        print("  Warm-start will proceed automatically once it loads.")
         print("━" * 60)
-        input("Press Enter when ready... ")
+        if not _wait_for_bridge(_calib):
+            return False
     else:
         log.info("--warm-start: non-interactive; running sanity immediately")
 

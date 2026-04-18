@@ -56,6 +56,7 @@ async def handle_screen_dimension(request, cal: CalibrationState):
             "viewport_width": int(body.get("viewport_width", 0)),
             "viewport_height": int(body.get("viewport_height", 0)),
         }
+    cal.screen_dimension_updated.set()
     dim = cal.screen_dimension
     log.info(
         f"Bridge device: {dim['width']}×{dim['height']}pt, "

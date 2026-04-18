@@ -58,6 +58,9 @@ class CalibrationState:
         self.screen_dimension: dict | None = (
             None  # {"width", "height", "dpr", "viewport_width", "viewport_height"}
         )
+        # Set by handle_screen_dimension on every /bridge page load so
+        # warm-start can proceed automatically when the user refreshes.
+        self.screen_dimension_updated = threading.Event()
         self.viewport_shift: ViewportShift | None = (
             None  # viewport→screenshot offset + DPR from pre-cal step
         )
