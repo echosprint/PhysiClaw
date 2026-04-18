@@ -9,8 +9,14 @@ import time
 import urllib.error
 import urllib.request
 import webbrowser
+from pathlib import Path
 
 BASE = "http://localhost:8048"
+PEN_CACHE = Path("data/calibration/cache/z-tap")
+VIEWPORT_CACHE_CANDIDATES = [
+    Path("data/calibration/cache/viewport.png"),
+    Path("data/calibration/cache/viewport.jpg"),
+]
 
 
 def api(method, path, body=None, timeout=60):
@@ -150,8 +156,12 @@ def main():
 
     # 4. Viewport shift
     print("\n── 4. Viewport shift ──")
-    print("  Phone shows an orange square.")
-    print("  Tap AssistiveTouch once (screenshot), then double-tap (upload).")
+    vp_cache = next((p for p in VIEWPORT_CACHE_CANDIDATES if p.exists()), None)
+    if vp_cache is not None:
+        print(f"  Using cached screenshot: {vp_cache} (delete to re-measure)")
+    else:
+        print("  Phone shows an orange square.")
+        print("  Tap AssistiveTouch once (screenshot), then double-tap (upload).")
     while True:
         if ok(calibrate("viewport-shift", 35)):
             break
@@ -179,7 +189,7 @@ def main():
         if not ok(r):
             fail("Pen depth probe failed"); sys.exit(1)
         if r.get("cached"):
-            done("Pen depth loaded from cache")
+            done(f"Pen depth loaded from cache: {PEN_CACHE} (delete to re-measure)")
         else:
             done("Pen depth measured")
 

@@ -39,7 +39,19 @@ log = logging.getLogger(__name__)
 SLOW_Z_SPEED = 6000
 PROBE_Z_SPEED = 6000
 
-PEN_DEPTH_FILE = "data/pen/z-tap"
+CACHE_DIR = "data/calibration/cache"
+PEN_DEPTH_FILE = f"{CACHE_DIR}/z-tap"
+
+
+def _find_viewport_cache():
+    """Return the first existing cached viewport screenshot, or None."""
+    from pathlib import Path
+
+    for ext in ("png", "jpg"):
+        p = Path(f"{CACHE_DIR}/viewport.{ext}")
+        if p.exists():
+            return p
+    return None
 
 
 def load_pen_depth() -> float | None:
@@ -110,13 +122,18 @@ def measure_viewport_shift(
     time.sleep(0.5)
     log.info("  Phase: screenshot_cal — showing orange square at CSS (100, 200)")
 
-    log.info("  Waiting for phone screenshot (double-tap AssistiveTouch)...")
-    data = bridge.wait_screenshot(timeout=30.0)
-    if data is None:
-        raise RuntimeError(
-            "Timeout — no screenshot received. Double-tap AssistiveTouch to upload."
-        )
-    log.info(f"  Screenshot received: {len(data)} bytes")
+    cached = _find_viewport_cache()
+    if cached is not None:
+        data = cached.read_bytes()
+        log.info(f"  Using cached screenshot: {cached} ({len(data)} bytes)")
+    else:
+        log.info("  Waiting for phone screenshot (double-tap AssistiveTouch)...")
+        data = bridge.wait_screenshot(timeout=30.0)
+        if data is None:
+            raise RuntimeError(
+                "Timeout — no screenshot received. Double-tap AssistiveTouch to upload."
+            )
+        log.info(f"  Screenshot received: {len(data)} bytes")
 
     # Decode screenshot
     arr = np.frombuffer(data, dtype=np.uint8)
@@ -183,6 +200,15 @@ def measure_viewport_shift(
         f"  ✓ Pre-cal done: dpr={dpr:.2f}, offset=({offset_x:.1f}, {offset_y:.1f})px, "
         f"screenshot={sw}×{sh}px"
     )
+
+    if cached is None:
+        from pathlib import Path
+
+        ext = "png" if data[:4] == b"\x89PNG" else "jpg"
+        out = Path(f"{CACHE_DIR}/viewport.{ext}")
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(data)
+        log.info(f"  Cached screenshot: {out}")
     return transform
 
 
