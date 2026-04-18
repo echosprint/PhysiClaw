@@ -43,6 +43,9 @@ PROBE_Z_SPEED = 6000
 
 CACHE_DIR = "data/calibration/cache"
 PEN_DEPTH_FILE = f"{CACHE_DIR}/z-tap"
+CAMERA_REF_FILE = f"{CACHE_DIR}/camera_ref.jpg"
+
+FRAME_SIMILARITY_SIZE = (320, 240)
 
 
 def grid_positions(cal: "CalibrationState"):
@@ -259,7 +262,7 @@ def _descend_to_contact(
 # ─── Camera frame calibration ───────────────────────────────
 
 
-def _check_phone_in_frame(frame: np.ndarray) -> dict:
+def check_phone_in_frame(frame: np.ndarray) -> dict:
     """Shape/coverage/straightness diagnostic from one overhead frame.
 
     Returns ``{ok, issues, coverage, aspect_ratio, image_size, phone_region}``.
@@ -390,6 +393,30 @@ def _pick_rotation_from_markers(frame: np.ndarray) -> tuple[int, str]:
     return cv2.ROTATE_90_COUNTERCLOCKWISE, "90° counter-clockwise"
 
 
+def _save_camera_reference(raw_frame: np.ndarray) -> None:
+    """Persist the camera's raw (unrotated) frame as the reference for
+    future warm-restart auto-pick. One camera is identified by what it
+    sees; we save its view so later sessions can pick the same USB
+    index by scene similarity rather than a shape heuristic.
+    """
+    from pathlib import Path
+
+    Path(CACHE_DIR).mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(CAMERA_REF_FILE, raw_frame)
+    log.info(f"  Saved camera reference → {CAMERA_REF_FILE}")
+
+
+def frame_similarity(a: np.ndarray, b: np.ndarray) -> float:
+    """Normalized cross-correlation of two frames in [-1, 1].
+
+    Downsample to a common grayscale size and let cv2.matchTemplate
+    compute Pearson's r. ~1 means same scene, ~0 uncorrelated.
+    """
+    ga = cv2.resize(cv2.cvtColor(a, cv2.COLOR_BGR2GRAY), FRAME_SIMILARITY_SIZE)
+    gb = cv2.resize(cv2.cvtColor(b, cv2.COLOR_BGR2GRAY), FRAME_SIMILARITY_SIZE)
+    return float(cv2.matchTemplate(ga, gb, cv2.TM_CCOEFF_NORMED)[0, 0])
+
+
 def calibrate_camera_frame(cam: Camera, cal: CalibrationState) -> dict:
     """Camera frame calibration — physical setup check + rotation code.
 
@@ -408,8 +435,9 @@ def calibrate_camera_frame(cam: Camera, cal: CalibrationState) -> dict:
     if frame is None:
         raise RuntimeError("Camera read failed — is the camera connected?")
 
-    checks = _check_phone_in_frame(frame)
+    checks = check_phone_in_frame(frame)
     rotation, rot_label = _pick_rotation_from_markers(frame)
+    _save_camera_reference(frame)
     log.info(f"  ✓ Camera frame: rotation={rot_label}, setup_ok={checks['ok']}")
     return {
         "rotation": rotation,

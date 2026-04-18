@@ -11,10 +11,20 @@ import logging
 
 from starlette.responses import JSONResponse
 
-from physiclaw.calibration.calibrate import _check_phone_in_frame
+from pathlib import Path
+
+import cv2
+
+from physiclaw.calibration.calibrate import (
+    CAMERA_REF_FILE,
+    check_phone_in_frame,
+    frame_similarity,
+)
 from physiclaw.hardware.camera import Camera
 from physiclaw.vision.render import watermark_index
 from physiclaw.vision.util import encode_jpeg
+
+SIMILARITY_MIN = 0.3  # floor for "this is the same camera we calibrated"
 
 log = logging.getLogger(__name__)
 
@@ -76,32 +86,87 @@ def camera_preview(index: int, watermark: bool = False) -> bytes:
     return encode_jpeg(frame, quality=80)
 
 
-def _auto_pick_camera_index() -> int | None:
-    """Return the index of the first camera whose frame looks like a phone.
+def _capture_raw(idx: int):
+    """Open camera ``idx``, return one raw unrotated frame or None.
 
-    Iterates 0..3, captures one frame from each, runs the phone-in-frame
-    diagnostic (aspect ≈ 2:1, coverage ≥ 30%). Returns the first passing
-    index, or None if no camera looked right. The caller falls back to
-    asking the user to pick manually.
+    Logs the reason on failure so a silent None doesn't mask a real issue.
     """
+    cam = Camera(idx)
+    try:
+        return cam.raw_frame()
+    except (OSError, RuntimeError) as e:
+        log.warning(f"  cam {idx}: capture failed — {e}")
+        return None
+    finally:
+        cam.close()
+
+
+def _pick_by_similarity(ref_path: Path) -> int | None:
+    """Iterate cameras, return the index whose frame best matches the
+    saved reference (if any score clears SIMILARITY_MIN). Identifies the
+    overhead camera by scene rather than by shape heuristic."""
+    ref = cv2.imread(str(ref_path))
+    if ref is None:
+        return None
+    best_idx, best_score = None, -1.0
     for idx in range(4):
-        cam = Camera(idx)
-        try:
-            frame = cam.snapshot()
-        except Exception:
-            frame = None
-        finally:
-            cam.close()
+        frame = _capture_raw(idx)
+        if frame is None:
+            continue
+        score = frame_similarity(ref, frame)
+        log.info(f"  cam {idx}: similarity to reference = {score:.3f}")
+        if score > best_score:
+            best_idx, best_score = idx, score
+    if best_idx is not None and best_score >= SIMILARITY_MIN:
+        log.info(
+            f"Auto-picked camera {best_idx} by similarity (score {best_score:.3f})"
+        )
+        return best_idx
+    return None
+
+
+def _pick_by_shape() -> int | None:
+    """Fallback when no reference exists: return the first camera whose
+    frame shows a phone-shaped bright region (aspect ≈ 2, coverage ≥ 30%)."""
+    for idx in range(4):
+        frame = _capture_raw(idx)
         if frame is None:
             continue
         try:
-            result = _check_phone_in_frame(frame)
-        except Exception:
+            result = check_phone_in_frame(frame)
+        except RuntimeError:
+            # no bright region — not this camera
             continue
         if result["ok"]:
-            log.info(f"Auto-picked camera {idx} (coverage {result['coverage']:.0%})")
+            log.info(
+                f"Auto-picked camera {idx} by shape "
+                f"(coverage {result['coverage']:.0%})"
+            )
             return idx
     return None
+
+
+def _auto_pick_camera_index() -> int | None:
+    """Identify the overhead camera automatically.
+
+    Prefers reference-similarity matching — ``data/calibration/cache/
+    camera_ref.jpg`` is saved during calibrate_camera_frame, so after
+    a successful setup we can always pick the same USB index on warm
+    restart even if other cameras (room, webcam, etc.) are attached.
+
+    Falls back to the phone-shape heuristic on first-ever setup when
+    no reference exists yet.
+    """
+    ref_path = Path(CAMERA_REF_FILE)
+    if ref_path.exists():
+        picked = _pick_by_similarity(ref_path)
+        if picked is not None:
+            return picked
+        log.warning(
+            f"No camera matched {ref_path} (all below {SIMILARITY_MIN}); "
+            f"falling back to shape heuristic"
+        )
+    return _pick_by_shape()
 
 
 async def handle_connect_camera(request, physiclaw):

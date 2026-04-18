@@ -195,6 +195,15 @@ class Camera:
         # otherwise stall the reader's next publish for that long.
         return frame.copy() if frame is not None else None
 
+    def raw_frame(self):
+        """Return a fresh BGR frame without applying calibration rotation.
+
+        Used during camera identification (warm-start auto-pick) where
+        rotation isn't known yet. For normal use see ``peek`` and
+        ``snapshot`` which apply ``self.rotation`` before returning.
+        """
+        return self._fresh_frame()
+
     def _rotate(self, frame):
         """Apply ``self.rotation`` to a raw frame. No-op when rotation is -1."""
         if self.rotation == -1:
