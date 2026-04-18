@@ -13,8 +13,11 @@ boot if the bundle is missing or hardware reconnect fails.
 import argparse
 import atexit
 import logging
+import os
+import signal
 import subprocess
 import sys
+import threading
 
 
 def _spawn_runtime(port: int, verbose: bool) -> subprocess.Popen:
@@ -96,14 +99,23 @@ def main():
             "see /phone-setup"
         )
     if args.warm_start:
+        # Run warm-start in a background thread so mcp.run() below can start
+        # serving HTTP first — the phone needs the server listening to load
+        # /bridge and POST screen_dimension / touches. On failure, send
+        # SIGINT to the main thread so mcp.run exits and atexit handlers
+        # (shutdown, arm return-to-origin) still fire cleanly.
         from physiclaw.server import warm_start
 
-        if not warm_start.try_resume(args.cam_index):
-            log.error(
-                "Exiting. Re-run without --warm-start and then setup.py to "
-                "recalibrate: `uv run physiclaw` then `uv run python scripts/setup.py`."
-            )
-            sys.exit(1)
+        def _warm_start_thread():
+            if not warm_start.try_resume(args.cam_index):
+                log.error(
+                    "Exiting. Re-run without --warm-start and then setup.py to "
+                    "recalibrate: `uv run physiclaw` then "
+                    "`uv run python scripts/setup.py`."
+                )
+                os.kill(os.getpid(), signal.SIGINT)
+
+        threading.Thread(target=_warm_start_thread, daemon=True).start()
     else:
         log.info(
             "Run /setup in Claude Code (or: uv run python scripts/setup.py) "
