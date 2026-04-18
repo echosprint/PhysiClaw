@@ -2,6 +2,12 @@
 
 Usage:
     uv run physiclaw [--port 8048] [--host 127.0.0.1] [--verbose]
+    uv run physiclaw --warm-start [--cam-index 0]
+
+``--warm-start`` resumes from the last saved calibration: if
+``data/calibration/bundle.json`` is complete, connect arm + camera and
+mark the server ready without running setup.py. Falls back to normal
+boot if the bundle is missing or hardware reconnect fails.
 """
 
 import argparse
@@ -9,6 +15,40 @@ import atexit
 import logging
 import subprocess
 import sys
+
+
+def _try_warm_start(cam_index: int) -> bool:
+    """Resume from the saved Calibration bundle.
+
+    The bundle is already loaded into ``physiclaw.calibration`` at
+    ``physiclaw.server.app`` import time; this just connects hardware
+    and flips the ready flag. Returns True on success, False with a
+    warning on any failure — the caller then falls through to normal
+    setup so setup.py still works.
+    """
+    from physiclaw.server.app import physiclaw
+
+    log = logging.getLogger(__name__)
+    if not physiclaw.calibration.complete:
+        log.warning(
+            "--warm-start: no complete calibration on disk; run setup.py first"
+        )
+        return False
+    try:
+        physiclaw.connect_arm()
+        physiclaw.connect_camera(cam_index)
+    except Exception as e:
+        log.warning(
+            f"--warm-start: hardware reconnect failed ({e}); run setup.py"
+        )
+        return False
+    physiclaw.mark_ready()
+    log.info(
+        f"--warm-start: resumed from bundle "
+        f"(z_tap={physiclaw.calibration.z_tap}mm, cam={cam_index}) — "
+        f"MCP tools ready"
+    )
+    return True
 
 
 def _spawn_runtime(port: int, verbose: bool) -> subprocess.Popen:
@@ -45,6 +85,19 @@ def main():
         action="store_true",
         help="Don't spawn the runtime loop subprocess",
     )
+    parser.add_argument(
+        "--warm-start",
+        action="store_true",
+        help="Auto-connect hardware from the saved calibration bundle and "
+        "mark ready, skipping setup.py. Falls through if the bundle is "
+        "incomplete or hardware connect fails.",
+    )
+    parser.add_argument(
+        "--cam-index",
+        type=int,
+        default=0,
+        help="Camera index for --warm-start (default: 0)",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -75,7 +128,13 @@ def main():
             "Tip: set a stable LocalHostName for <name>.local URLs — "
             "see /phone-setup"
         )
-    log.info("Run /setup in Claude Code to connect hardware and calibrate")
+    if not (args.warm_start and _try_warm_start(args.cam_index)):
+        if args.warm_start:
+            log.warning("--warm-start failed — falling back to normal boot")
+        log.info(
+            "Run /setup in Claude Code (or: uv run python scripts/setup.py) "
+            "to connect hardware and calibrate — server is waiting."
+        )
 
     if not args.no_runtime:
         runtime_proc = _spawn_runtime(args.port, args.verbose)
