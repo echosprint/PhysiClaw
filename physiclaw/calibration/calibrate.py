@@ -42,7 +42,6 @@ SLOW_Z_SPEED = 6000
 PROBE_Z_SPEED = 6000
 
 CACHE_DIR = "data/calibration/cache"
-PEN_DEPTH_FILE = f"{CACHE_DIR}/z-tap"
 CAMERA_REF_FILE = f"{CACHE_DIR}/camera_ref.jpg"
 
 FRAME_SIMILARITY_SIZE = (320, 240)
@@ -66,31 +65,6 @@ def _find_viewport_cache():
         if p.exists():
             return p
     return None
-
-
-def load_pen_depth() -> float | None:
-    """Load cached z-tap from data/pen/z-tap, or None if missing/unreadable."""
-    from pathlib import Path
-
-    p = Path(PEN_DEPTH_FILE)
-    if not p.exists():
-        return None
-    try:
-        val = float(p.read_text().strip())
-    except (ValueError, OSError):
-        return None
-    if not (1 < val < 10):
-        raise ValueError(f"{PEN_DEPTH_FILE}: z-tap={val}mm out of range (1, 10)")
-    return val
-
-
-def save_pen_depth(z_tap: float):
-    """Save z-tap to data/pen/z-tap."""
-    from pathlib import Path
-
-    p = Path(PEN_DEPTH_FILE)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(f"{z_tap}\n")
 
 
 def _tap_once(arm: StylusArm, z: float, z_speed: int = PROBE_Z_SPEED):

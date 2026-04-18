@@ -16,7 +16,6 @@ import webbrowser
 from pathlib import Path
 
 BASE = "http://localhost:8048"
-PEN_CACHE = Path("data/calibration/cache/z-tap")
 VIEWPORT_CACHE_CANDIDATES = [
     Path("data/calibration/cache/viewport.png"),
     Path("data/calibration/cache/viewport.jpg"),

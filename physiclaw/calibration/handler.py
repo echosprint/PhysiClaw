@@ -23,8 +23,6 @@ from physiclaw.calibration.calibrate import (
     compute_camera_mapping,
     validate_calibration,
     verify_assistive_touch,
-    load_pen_depth,
-    save_pen_depth,
     TILT_ALIGNED_THRESHOLD,
 )
 
@@ -78,24 +76,24 @@ async def handle_calibrate_arm(
 ):
     """POST /api/calibrate/arm — unified Z depth + screen↔arm mapping.
 
-    Loads the cached ``z_tap`` if present (skipping the Phase A descent),
-    runs the probe triangle + 15-point grid taps with z-bump-on-miss, and
-    fits the screen↔arm affine. Writes ``z_tap``, ``pct_to_grbl``, and
-    the arm direction mapping into the Calibration bundle.
+    Uses ``physiclaw.calibration.z_tap`` as the Phase A descent hint if
+    already known (from a loaded bundle or an earlier in-session run),
+    then runs the probe triangle + 15-point grid taps with z-bump-on-miss
+    and fits the screen↔arm affine. Writes ``z_tap``, ``pct_to_grbl``,
+    and the arm direction mapping into the in-memory bundle. Bundle is
+    only persisted to disk on full setup success (validate).
     """
 
     def _do():
         if physiclaw._arm is None:
             raise RuntimeError("Arm not connected")
         phone.set_mode("calibrate", phase="center")
-        cached = load_pen_depth()
+        hint = physiclaw.calibration.z_tap
         physiclaw.acquire()
         try:
             z_tap, pct_to_grbl, tilt, touches = calibrate_arm(
-                physiclaw._arm, calib, z_tap_hint=cached
+                physiclaw._arm, calib, z_tap_hint=hint
             )
-            if cached is None:
-                save_pen_depth(z_tap)
             physiclaw._arm.Z_DOWN = z_tap
             physiclaw.calibration.z_tap = z_tap
             physiclaw.calibration.pct_to_grbl = pct_to_grbl
@@ -107,7 +105,7 @@ async def handle_calibrate_arm(
                 "pairs": len(touches) + 3,
                 "tilt_ratio": round(tilt, 4),
                 "aligned": tilt < TILT_ALIGNED_THRESHOLD,
-                "z_cached": cached is not None,
+                "z_cached": hint is not None,
             }
         finally:
             physiclaw.release()
