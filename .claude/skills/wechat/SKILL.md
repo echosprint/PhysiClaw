@@ -31,6 +31,7 @@ Two states: **keyboard hidden** (input bar at bottom) and **keyboard visible** (
 6. Tap the keyboard's **send** key — **not** the (+) on the input bar.
 7. Hide the keyboard (see Hide keyboard below).
 8. Confirm the bubble appeared in the chat.
+9. Tap the back arrow `<` (top-left) to return to the Chats list — leaves WeChat in its main state for the next wake.
 
 ## Fixed elements
 
