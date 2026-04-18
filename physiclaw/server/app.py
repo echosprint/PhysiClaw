@@ -52,6 +52,6 @@ def shutdown():
 
 _register_tools(mcp, physiclaw)
 _register_bridge(mcp, physiclaw, _bridge, _calib, _phone)
-_register_hardware(mcp, physiclaw)
+_register_hardware(mcp, physiclaw, _phone)
 _register_calibration(mcp, physiclaw, _bridge, _calib, _phone)
 _register_watch(mcp, physiclaw)

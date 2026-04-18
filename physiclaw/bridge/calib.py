@@ -41,6 +41,7 @@ class CalibrationState:
         "screenshot_cal",    # orange square at viewport (100, 200) for pre-cal
         "center",            # orange circle at screen center
         "markers",           # blue UP + red RIGHT labels for camera orientation
+        "corners",           # RGBY squares at phone-screen corners (auto-pick)
         "grid",              # 15 red dots at known viewport positions
         "dot",               # single orange dot at a given (x, y) in 0-1
         "assistive_touch",   # AT circle + color nonce barcode

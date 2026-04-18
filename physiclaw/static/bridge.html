@@ -227,6 +227,27 @@ body.mode-bridge #bridge-layer{
         rect(W*0.82-mSize*1.8, H*0.5-mSize*0.6, mSize*3.6, mSize*1.2, '#ef4444', 8);
         text(W*0.82, H*0.5, 'RIGHT', mSize*0.8, '#ffffff');
         break;
+      case 'corners':
+        // 2×2 RGBY cluster at every screen corner. Any single cluster
+        // is enough to identify the camera and orientation, so a stylus
+        // or arm occluding 1–3 corners still leaves auto-pick working.
+        // Each cluster is clockwise R→G→B→Y from its own top-left:
+        //   R G
+        //   Y B
+        (function drawCornerClusters(){
+          var bs = Math.min(W, H) * 0.06;  // block size (one RGBY quadrant)
+          function cluster(x, y){
+            rect(x,      y,      bs, bs, '#ff0000', 0);  // R
+            rect(x+bs,   y,      bs, bs, '#00ff00', 0);  // G
+            rect(x+bs,   y+bs,   bs, bs, '#0000ff', 0);  // B
+            rect(x,      y+bs,   bs, bs, '#ffff00', 0);  // Y
+          }
+          cluster(0,        0);          // top-left corner
+          cluster(W-2*bs,   0);          // top-right
+          cluster(W-2*bs,   H-2*bs);     // bottom-right
+          cluster(0,        H-2*bs);     // bottom-left
+        })();
+        break;
       case 'grid':
         var grid = data.grid || {cols: [0.25, 0.50, 0.75], rows: [0.20, 0.40, 0.50, 0.60, 0.80]};
         var dotR = Math.min(W, H) * 0.015;

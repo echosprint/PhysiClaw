@@ -26,6 +26,54 @@ def decode_image(data: bytes) -> np.ndarray:
     return frame
 
 
+def _hsv_blob_centroids(
+    hsv: np.ndarray,
+    lower,
+    upper,
+    *,
+    min_area: int,
+    morph_op: int,
+    morph_kernel: tuple[int, int],
+) -> list[tuple[float, float]]:
+    """Core of the HSV-blob pipeline, reusable when the caller already
+    has an HSV frame. Returns every centroid with area ≥ ``min_area``.
+    """
+    mask = cv2.inRange(hsv, np.array(lower), np.array(upper))
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, morph_kernel)
+    mask = cv2.morphologyEx(mask, morph_op, kernel)
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    out: list[tuple[float, float]] = []
+    for cnt in contours:
+        if cv2.contourArea(cnt) < min_area:
+            continue
+        m = cv2.moments(cnt)
+        if m["m00"] == 0:
+            continue
+        out.append((m["m10"] / m["m00"], m["m01"] / m["m00"]))
+    return out
+
+
+def find_all_hsv_blobs(
+    frame: np.ndarray,
+    lower,
+    upper,
+    *,
+    min_area: int = 50,
+    morph_op: int = cv2.MORPH_OPEN,
+    morph_kernel: tuple[int, int] = (5, 5),
+) -> list[tuple[float, float]]:
+    """Return centroids of every HSV-matched blob above ``min_area``.
+
+    Same pipeline as :func:`find_largest_hsv_blob` but keeps every
+    qualifying contour. Order is undefined; callers cluster by position.
+    """
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    return _hsv_blob_centroids(
+        hsv, lower, upper,
+        min_area=min_area, morph_op=morph_op, morph_kernel=morph_kernel,
+    )
+
+
 def find_largest_hsv_blob(
     frame: np.ndarray,
     lower,
@@ -57,6 +105,80 @@ def find_largest_hsv_blob(
     if m["m00"] == 0:
         return None
     return (m["m10"] / m["m00"], m["m01"] / m["m00"])
+
+
+CORNER_HSV_RANGES = {
+    "R": [([0, 100, 100], [10, 255, 255]),
+          ([170, 100, 100], [180, 255, 255])],
+    "G": [([40, 100, 100], [80, 255, 255])],
+    "B": [([100, 100, 100], [130, 255, 255])],
+    "Y": [([20, 100, 100], [35, 255, 255])],
+}
+
+
+def _is_clockwise_rgby_cluster(
+    cluster: dict[str, tuple[float, float]], max_span: float
+) -> bool:
+    """Four RGBY centroids must be tightly grouped and traverse R→G→B→Y
+    clockwise around their centroid (any cyclic rotation, so any of the
+    four camera rotations passes)."""
+    from math import atan2
+
+    xs = [p[0] for p in cluster.values()]
+    ys = [p[1] for p in cluster.values()]
+    if max(xs) - min(xs) > max_span or max(ys) - min(ys) > max_span:
+        return False
+    cx = sum(xs) / 4
+    cy = sum(ys) / 4
+    ordered = sorted(
+        cluster.items(), key=lambda kv: atan2(kv[1][1] - cy, kv[1][0] - cx)
+    )
+    return "".join(name for name, _ in ordered) in "RGBYRGBY"
+
+
+def detect_bridge_corners(
+    frame: np.ndarray, max_cluster_span: float | None = None
+) -> dict | None:
+    """Find one intact RGBY cluster rendered by bridge.html's ``corners``
+    phase. bridge.html draws the same 2×2 RGBY cluster at all four
+    screen corners, so a stylus occluding up to three of them still
+    leaves enough to identify the camera.
+
+    Returns the four centroids of the first intact cluster, or ``None``
+    if no combination of detected blobs forms a tight-enough group
+    whose clockwise order is a cyclic rotation of RGBY.
+
+    ``max_cluster_span`` defaults to 25% of the frame's shorter side —
+    each on-phone cluster is ~12% of the phone's shorter side, and the
+    phone always spans a big fraction of the frame during setup, so 25%
+    is comfortable margin without admitting cross-cluster pairings.
+    """
+    if max_cluster_span is None:
+        max_cluster_span = min(frame.shape[:2]) * 0.25
+
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    blobs: dict[str, list[tuple[float, float]]] = {k: [] for k in "RGBY"}
+    for name, hsv_ranges in CORNER_HSV_RANGES.items():
+        for lo, hi in hsv_ranges:
+            blobs[name].extend(_hsv_blob_centroids(
+                hsv, lo, hi,
+                min_area=50, morph_op=cv2.MORPH_OPEN, morph_kernel=(5, 5),
+            ))
+
+    if not all(blobs[k] for k in "RGBY"):
+        return None
+
+    # Brute force — at most 4 clusters × 1 blob per color per cluster =
+    # 4⁴ = 256 candidates. The span filter rejects cross-cluster pairings
+    # almost immediately, so this stays cheap in practice.
+    for r in blobs["R"]:
+        for g in blobs["G"]:
+            for b in blobs["B"]:
+                for y in blobs["Y"]:
+                    candidate = {"R": r, "G": g, "B": b, "Y": y}
+                    if _is_clockwise_rgby_cluster(candidate, max_cluster_span):
+                        return candidate
+    return None
 
 
 def frame_similarity(a: np.ndarray, b: np.ndarray) -> float:

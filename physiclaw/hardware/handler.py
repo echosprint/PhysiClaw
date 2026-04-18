@@ -8,19 +8,13 @@ a thread executor so the Starlette event loop stays responsive.
 import asyncio
 import base64
 import logging
+import time
 
 from starlette.responses import JSONResponse
 
-from pathlib import Path
-
-import cv2
-
-from physiclaw.calibration.calibrate import CAMERA_REF_FILE
 from physiclaw.hardware.camera import Camera
 from physiclaw.vision.render import watermark_index
-from physiclaw.vision.util import check_phone_in_frame, encode_jpeg, frame_similarity
-
-SIMILARITY_MIN = 0.3  # floor for "this is the same camera we calibrated"
+from physiclaw.vision.util import detect_bridge_corners, encode_jpeg
 
 log = logging.getLogger(__name__)
 
@@ -97,80 +91,36 @@ def _capture_raw(idx: int):
         cam.close()
 
 
-def _pick_by_similarity(ref_path: Path) -> int | None:
-    """Iterate cameras, return the index whose frame best matches the
-    saved reference (if any score clears SIMILARITY_MIN). Identifies the
-    overhead camera by scene rather than by shape heuristic."""
-    ref = cv2.imread(str(ref_path))
-    if ref is None:
-        return None
-    best_idx, best_score = None, -1.0
-    for idx in range(4):
-        frame = _capture_raw(idx)
-        if frame is None:
-            continue
-        score = frame_similarity(ref, frame)
-        log.info(f"  cam {idx}: similarity to reference = {score:.3f}")
-        if score > best_score:
-            best_idx, best_score = idx, score
-    if best_idx is not None and best_score >= SIMILARITY_MIN:
-        log.info(
-            f"Auto-picked camera {best_idx} by similarity (score {best_score:.3f})"
-        )
-        return best_idx
-    return None
-
-
-def _pick_by_shape() -> int | None:
-    """Fallback when no reference exists: return the first camera whose
-    frame shows a phone-shaped bright region (aspect ≈ 2, coverage ≥ 30%)."""
-    for idx in range(4):
-        frame = _capture_raw(idx)
-        if frame is None:
-            continue
-        try:
-            result = check_phone_in_frame(frame)
-        except RuntimeError:
-            # no bright region — not this camera
-            continue
-        if result["ok"]:
-            log.info(
-                f"Auto-picked camera {idx} by shape "
-                f"(coverage {result['coverage']:.0%})"
-            )
-            return idx
-    return None
-
-
 def _auto_pick_camera_index() -> int | None:
-    """Identify the overhead camera automatically.
+    """Identify the overhead camera by the RGBY corner markers on /bridge.
 
-    Prefers reference-similarity matching — ``data/calibration/cache/
-    camera_ref.jpg`` is saved during calibrate_camera_frame, so after
-    a successful setup we can always pick the same USB index on warm
-    restart even if other cameras (room, webcam, etc.) are attached.
-
-    Falls back to the phone-shape heuristic on first-ever setup when
-    no reference exists yet.
+    Caller must first put the phone page into the ``corners`` phase so
+    bridge.html draws the four colored squares. We then iterate USB
+    indices 0..3 and pick the camera whose frame contains all four
+    markers arranged clockwise — only the camera actually pointing at
+    the phone can possibly see them, so the match is unambiguous.
     """
-    ref_path = Path(CAMERA_REF_FILE)
-    if ref_path.exists():
-        picked = _pick_by_similarity(ref_path)
-        if picked is not None:
-            return picked
-        log.warning(
-            f"No camera matched {ref_path} (all below {SIMILARITY_MIN}); "
-            f"falling back to shape heuristic"
-        )
-    return _pick_by_shape()
+    for idx in range(4):
+        frame = _capture_raw(idx)
+        if frame is None:
+            continue
+        corners = detect_bridge_corners(frame)
+        if corners is None:
+            log.info(f"  cam {idx}: corners not detected")
+            continue
+        log.info(f"Auto-picked camera {idx} — all four RGBY corners detected")
+        return idx
+    return None
 
 
-async def handle_connect_camera(request, physiclaw):
+async def handle_connect_camera(request, physiclaw, phone):
     """POST /api/connect-camera — open a camera by index.
 
-    Body: ``{"index": int}`` — connect that camera.
-    Body: ``{"index": "auto"}`` (or body omitted) — iterate 0..3 and pick
-    the one whose frame matches a phone shape. Returns the chosen index.
+    Body: ``{"index": int}`` — connect that camera directly.
+    Body: ``{"index": "auto"}`` (or body omitted) — set the phone page
+    to the ``corners`` phase and iterate 0..3 to find the camera that
+    sees all four RGBY corner markers. The phone is restored to bridge
+    mode before returning.
     """
     try:
         body = await request.json()
@@ -181,11 +131,16 @@ async def handle_connect_camera(request, physiclaw):
     def _do():
         nonlocal index
         if index is None or index == "auto":
-            picked = _auto_pick_camera_index()
+            phone.set_mode("calibrate", phase="corners")
+            time.sleep(0.5)  # give bridge.html time to render the corners
+            try:
+                picked = _auto_pick_camera_index()
+            finally:
+                phone.set_mode("bridge")
             if picked is None:
                 raise RuntimeError(
-                    "auto-pick found no camera with a phone-shaped bright region; "
-                    "pass an explicit index"
+                    "auto-pick found no camera with all four RGBY corners; "
+                    "is /bridge open on the phone? Pass an explicit index to fall back."
                 )
             index = picked
         physiclaw.acquire()

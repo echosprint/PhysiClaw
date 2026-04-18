@@ -12,7 +12,7 @@ from physiclaw.hardware.handler import (
 log = logging.getLogger(__name__)
 
 
-def register(mcp, physiclaw):
+def register(mcp, physiclaw, phone):
     """Register hardware setup routes."""
 
     @mcp.custom_route("/api/status", methods=["GET"])
@@ -25,7 +25,7 @@ def register(mcp, physiclaw):
 
     @mcp.custom_route("/api/connect-camera", methods=["POST"])
     async def _connect_camera(request):
-        return await handle_connect_camera(request, physiclaw)
+        return await handle_connect_camera(request, physiclaw, phone)
 
     @mcp.custom_route("/api/camera-preview/{index}", methods=["GET"])
     async def _camera_preview(request):
