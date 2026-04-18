@@ -113,6 +113,10 @@ def try_resume(cam_index_override: int | None) -> bool:
         # _sanity logged the specific diagnosis.
         return False
 
+    # Match setup.py's final step: send the phone home (swipe from bottom),
+    # then flip ready. home_screen's locked() context auto-parks the arm
+    # off-screen on exit, so nothing is hovering over the glass afterward.
+    physiclaw.home_screen()
     physiclaw.mark_ready()
     log.info(
         f"--warm-start: resumed from bundle "
