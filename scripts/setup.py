@@ -118,16 +118,16 @@ def main():
         done("Phone on Home Screen, PhysiClaw ready")
         return
 
-    # 1a. Scan QR
-    print("\n── 1a. Scan QR code ──")
+    # 1. Scan QR
+    print("\n── 1. Scan QR code ──")
     print(f"  Phone URL: http://{lan_ip()}:8048/bridge")
     if not auto:
         webbrowser.open(f"{BASE}/api/bridge/qr")
         wait("Scan QR on phone, confirm page shows 'PhysiClaw'")
     done("Phone page ready")
 
-    # 1b. Position phone
-    print("\n── 1b. Position phone ──")
+    # 2. Position phone
+    print("\n── 2. Position phone ──")
     if not auto:
         subprocess.run(["open", "-a", "Photo Booth"])
         wait("Place phone under camera, adjust in Photo Booth, then close Photo Booth")
@@ -135,15 +135,15 @@ def main():
     else:
         done("Skipped (auto)")
 
-    # 2. Connect arm
-    print("\n── 2. Connect arm ──")
+    # 3. Connect arm
+    print("\n── 3. Connect arm ──")
     if ask("USB plugged, power ON, stylus on?", auto):
         if not ok(api("POST", "/api/connect-arm")):
             fail("Arm connection failed"); sys.exit(1)
     done("Arm connected")
 
-    # 3. Connect camera
-    print("\n── 3. Connect camera ──")
+    # 4. Connect camera
+    print("\n── 4. Connect camera ──")
     print("  Auto-picking by the RGBY corner markers on /bridge.")
     print("  If this fails, refresh /bridge in Safari (pull-to-refresh)")
     print("  so it picks up the latest page, then retry.")
@@ -171,8 +171,8 @@ def main():
             fail("Camera connection failed"); sys.exit(1)
         done(f"Camera {cam} connected")
 
-    # 4. Viewport shift
-    print("\n── 4. Viewport shift ──")
+    # 5. Viewport shift
+    print("\n── 5. Viewport shift ──")
     vp_cache = next((p for p in VIEWPORT_CACHE_CANDIDATES if p.exists()), None)
     if vp_cache is not None:
         print(f"  Using cached screenshot: {vp_cache} (delete to re-measure)")
@@ -185,8 +185,8 @@ def main():
         wait("Failed. Tap AT once, then double-tap. Ready to retry?")
     done("Viewport shift measured")
 
-    # 5. Position stylus
-    print("\n── 5. Position stylus ──")
+    # 6. Position stylus
+    print("\n── 6. Position stylus ──")
     r = api("POST", "/api/bridge/switch", {"mode": "calibrate", "phase": "center"})
     if not r or not r.get("ok"):
         fail("Failed to show orange circle on phone — is the bridge page open?")
@@ -198,8 +198,8 @@ def main():
         wait("Position stylus tip above the orange circle (~3mm above screen)")
     done("Stylus positioned")
 
-    # 6. Arm calibration
-    print("\n── 6. Arm calibration ──")
+    # 7. Arm calibration
+    print("\n── 7. Arm calibration ──")
     print("  One pass: find Z depth, tap 18 points, fit screen→arm mapping.")
     if ask("Don't touch anything. Ready?", auto):
         def _arm_fail(resp):
@@ -212,8 +212,8 @@ def main():
             fail(f"Phone/arm axes skewed (tilt {tilt*100:.1f}%) — straighten phone and rerun if this persists")
         done(f"Arm ready: z_tap={r.get('z_tap')}mm{z_note}, {r.get('pairs')} tap pairs, tilt={tilt:.3f}")
 
-    # 7. Camera calibration
-    print("\n── 7. Camera calibration ──")
+    # 8. Camera calibration
+    print("\n── 8. Camera calibration ──")
     print("  Adjust camera, then detect rotation + check phone fills the frame.")
     if not auto:
         subprocess.run(["open", "-a", "Photo Booth"])
@@ -226,8 +226,8 @@ def main():
         warn(issue)
     done(f"Camera ready: {r.get('rotation_name')}, coverage {r.get('coverage'):.0%}")
 
-    # 8. Camera mapping
-    print("\n── 8. Camera mapping ──")
+    # 9. Camera mapping
+    print("\n── 9. Camera mapping ──")
     print("  Camera detects 15 red dots on phone screen.")
     if ask("Ready?", auto):
         calibrate_retry(
@@ -238,8 +238,8 @@ def main():
         )
     done("Screen→camera mapping computed")
 
-    # 9. Validate
-    print("\n── 9. Validate ──")
+    # 10. Validate
+    print("\n── 10. Validate ──")
     print("  Arm taps random dots and compares touch vs expected position.")
     if ask("Ready?", auto):
         r = calibrate("validate", 60)
@@ -248,8 +248,8 @@ def main():
             fail("Validation failed"); sys.exit(1)
     done("Calibration validated")
 
-    # 10. AssistiveTouch
-    print("\n── 10. AssistiveTouch ──")
+    # 11. AssistiveTouch
+    print("\n── 11. AssistiveTouch ──")
     print("  Verifying screenshot + clipboard pipeline.")
     calibrate("assistive-touch/show")
     if not auto:
@@ -277,8 +277,8 @@ def main():
     done("Screenshot + clipboard pipeline verified")
 
     if trace:
-        # 11. Edge trace (opt-in via --trace)
-        print("\n── 11. Edge trace ──")
+        # 12. Edge trace (opt-in via --trace)
+        print("\n── 12. Edge trace ──")
         print("  Arm traces phone screen border clockwise, pausing at 8 points.")
         if ask("Watch for accuracy. Ready?", auto):
             calibrate("trace-edge", 60)
