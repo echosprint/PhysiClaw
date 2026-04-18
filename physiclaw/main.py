@@ -135,7 +135,13 @@ def main():
 
         atexit.register(_stop_runtime)
 
-    mcp.run(transport="streamable-http")
+    try:
+        mcp.run(transport="streamable-http")
+    except KeyboardInterrupt:
+        # Normal Ctrl-C OR our warm-start-fail SIGINT. atexit handlers
+        # (shutdown → arm return-to-origin, camera close) still fire on
+        # the way out; just swallow the traceback.
+        pass
 
 
 if __name__ == "__main__":
