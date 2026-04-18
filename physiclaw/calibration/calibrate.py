@@ -585,8 +585,7 @@ def calibrate_arm(
         screen_pts.append([touch["x"], touch["y"]])
         grid_touches.append(touch)
 
-    arm._fast_move(0, 0)
-    arm.wait_idle()
+    arm.return_to_origin()
 
     log.info(
         f"  Collected {len(grbl_pts)} point pairs "
@@ -900,10 +899,9 @@ def validate_calibration(
             f"{'PASS' if passed else 'FAIL'}"
         )
 
-    arm._fast_move(0, 0)
-    arm.wait_idle()
+    arm.return_to_origin()
     passed_count = sum(1 for r in results if r["passed"])
-    log.info(f"  ✓ Step 6 done: {passed_count}/{num_tests} tests passed")
+    log.info(f"  ✓ Validation done: {passed_count}/{num_tests} tests passed")
     return results
 
 
@@ -930,8 +928,7 @@ def trace_screen_edge(arm: StylusArm, cal: ScreenTransforms):
         (0, 0, "top left"),
         (0.50, 0, "top center"),  # close the loop
     ]
-    arm._fast_move(0, 0)
-    arm.wait_idle()
+    arm.return_to_origin()
     log.info("Tracing phone edge clockwise...")
     for x_pct, y_pct, label in check_points:
         gx, gy = cal.pct_to_grbl_mm(x_pct, y_pct)
@@ -940,8 +937,7 @@ def trace_screen_edge(arm: StylusArm, cal: ScreenTransforms):
         arm.wait_idle()
         time.sleep(2)
 
-    arm._fast_move(0, 0)
-    arm.wait_idle()
+    arm.return_to_origin()
     log.info("Edge trace done")
 
 

@@ -437,8 +437,7 @@ class PhysiClaw:
     def shutdown(self):
         if self._arm:
             self._arm._pen_up()
-            self._arm._fast_move(0, 0)
-            self._arm.wait_idle()
+            self._arm.return_to_origin()
             self._arm.close()
         if self._cam:
             self._cam.close()

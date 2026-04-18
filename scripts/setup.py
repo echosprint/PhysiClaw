@@ -1,4 +1,8 @@
-"""PhysiClaw setup. Usage: uv run python scripts/setup.py [-y]"""
+"""PhysiClaw setup. Usage: uv run python scripts/setup.py [-y] [--trace]
+
+  -y       auto mode: skip all manual confirmation prompts.
+  --trace  run the optional edge-trace step at the end for visual verification.
+"""
 
 import base64
 import json
@@ -96,6 +100,7 @@ def warn(msg):
 
 def main():
     auto = "-y" in sys.argv
+    trace = "--trace" in sys.argv
     t0 = time.time()
 
     # Pre-check
@@ -263,15 +268,16 @@ def main():
             wait("Paste in Notes to verify it matches")
     done("Screenshot + clipboard pipeline verified")
 
-    # 11. Edge trace
-    print("\n── 11. Edge trace ──")
-    print("  Arm traces phone screen border clockwise, pausing at 8 points.")
-    if ask("Watch for accuracy. Ready?", auto):
-        calibrate("trace-edge", 60)
-    done("Edge trace complete")
+    if trace:
+        # 11. Edge trace (opt-in via --trace)
+        print("\n── 11. Edge trace ──")
+        print("  Arm traces phone screen border clockwise, pausing at 8 points.")
+        if ask("Watch for accuracy. Ready?", auto):
+            calibrate("trace-edge", 60)
+        done("Edge trace complete")
 
-    # 12. Go to Home Screen + mark ready
-    print("\n── 12. Home Screen ──")
+    # Go to Home Screen + mark ready
+    print("\n── Home Screen ──")
     api("POST", "/api/phone/home")
     time.sleep(3)  # let home-screen animation settle
     api("POST", "/api/ready")

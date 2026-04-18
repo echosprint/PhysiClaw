@@ -234,6 +234,11 @@ class StylusArm:
         self._send(GCODE_SET_ORIGIN)
         log.debug("Origin set to current position")
 
+    def return_to_origin(self):
+        """Fast-move back to (0, 0) and wait for motion to settle."""
+        self._fast_move(0, 0)
+        self.wait_idle()
+
     # ─── Basic motions ──
 
     def _pen_down(self, z=None, speed=None):
