@@ -44,6 +44,7 @@ class Calibration:
     pct_to_grbl: np.ndarray | None = None         # 2×3 affine: screen 0-1 → arm mm
     pct_to_cam: np.ndarray | None = None          # 2×3 affine: screen 0-1 → camera 0-1
     cam_size: tuple[int, int] | None = None       # (width, height) in camera pixels
+    cam_index: int | None = None                  # USB camera index (for warm-restart)
 
     @property
     def transforms_ready(self) -> bool:
@@ -116,6 +117,7 @@ class Calibration:
                 self.pct_to_cam.tolist() if self.pct_to_cam is not None else None
             ),
             "cam_size": list(self.cam_size) if self.cam_size is not None else None,
+            "cam_index": self.cam_index,
         }
 
     @classmethod
@@ -132,6 +134,7 @@ class Calibration:
             pct_to_grbl=np.array(pg, dtype=np.float64) if pg is not None else None,
             pct_to_cam=np.array(pc, dtype=np.float64) if pc is not None else None,
             cam_size=tuple(cs) if cs is not None else None,
+            cam_index=payload.get("cam_index"),
         )
 
     def save(self, path: Path = BUNDLE_PATH) -> None:

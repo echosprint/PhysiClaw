@@ -17,23 +17,28 @@ import subprocess
 import sys
 
 
-def _try_warm_start(cam_index: int) -> bool:
+def _try_warm_start(cam_index_override: int | None) -> bool:
     """Resume from the saved Calibration bundle.
 
     The bundle is already loaded into ``physiclaw.calibration`` at
     ``physiclaw.server.app`` import time; this just connects hardware
-    and flips the ready flag. Returns True on success, False with a
-    warning on any failure — the caller then falls through to normal
-    setup so setup.py still works.
+    and flips the ready flag. Camera index comes from ``--cam-index`` if
+    provided, else from ``bundle.cam_index`` (remembered from the last
+    successful setup), else 0. Returns True on success, False with a
+    warning on any failure — the caller falls through to normal setup.
     """
     from physiclaw.server.app import physiclaw
 
     log = logging.getLogger(__name__)
-    if not physiclaw.calibration.complete:
+    cal = physiclaw.calibration
+    if not cal.complete:
         log.warning(
             "--warm-start: no complete calibration on disk; run setup.py first"
         )
         return False
+    cam_index = cam_index_override if cam_index_override is not None else (
+        cal.cam_index if cal.cam_index is not None else 0
+    )
     try:
         physiclaw.connect_arm()
         physiclaw.connect_camera(cam_index)
@@ -45,8 +50,7 @@ def _try_warm_start(cam_index: int) -> bool:
     physiclaw.mark_ready()
     log.info(
         f"--warm-start: resumed from bundle "
-        f"(z_tap={physiclaw.calibration.z_tap}mm, cam={cam_index}) — "
-        f"MCP tools ready"
+        f"(z_tap={cal.z_tap}mm, cam={cam_index}) — MCP tools ready"
     )
     return True
 
@@ -95,8 +99,9 @@ def main():
     parser.add_argument(
         "--cam-index",
         type=int,
-        default=0,
-        help="Camera index for --warm-start (default: 0)",
+        default=None,
+        help="Camera index override for --warm-start (default: value "
+        "stored in the bundle, falling back to 0)",
     )
     args = parser.parse_args()
 

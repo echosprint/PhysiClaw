@@ -145,23 +145,30 @@ def main():
 
     # 3. Connect camera
     print("\n── 3. Connect camera ──")
-    subprocess.run("rm -f /tmp/physiclaw_cam*.jpg", shell=True)
-    for i in range(4):
-        r = api("GET", f"/api/camera-preview/{i}?watermark=1", timeout=10)
-        if r and r.get("image"):
-            with open(f"/tmp/physiclaw_cam{i}.jpg", "wb") as f:
-                f.write(base64.b64decode(r["image"]))
-    if auto:
-        cam = 0
+    print("  Auto-picking the camera whose frame shows a phone-shaped bright region.")
+    r = api("POST", "/api/connect-camera", {"index": "auto"}, timeout=30)
+    if ok(r):
+        cam = r.get("index", 0)
+        done(f"Camera {cam} auto-picked")
     else:
-        subprocess.run("open /tmp/physiclaw_cam*.jpg", shell=True)
-        try:
-            cam = int(input("  Which camera? [0-3, default=0]: ").strip())
-        except ValueError:
+        # Auto-pick failed — show previews and let the user pick.
+        subprocess.run("rm -f /tmp/physiclaw_cam*.jpg", shell=True)
+        for i in range(4):
+            rr = api("GET", f"/api/camera-preview/{i}?watermark=1", timeout=10)
+            if rr and rr.get("image"):
+                with open(f"/tmp/physiclaw_cam{i}.jpg", "wb") as f:
+                    f.write(base64.b64decode(rr["image"]))
+        if auto:
             cam = 0
-    if not ok(api("POST", "/api/connect-camera", {"index": cam})):
-        fail("Camera connection failed"); sys.exit(1)
-    done(f"Camera {cam} connected")
+        else:
+            subprocess.run("open /tmp/physiclaw_cam*.jpg", shell=True)
+            try:
+                cam = int(input("  Auto-pick failed. Which camera? [0-3, default=0]: ").strip())
+            except ValueError:
+                cam = 0
+        if not ok(api("POST", "/api/connect-camera", {"index": cam})):
+            fail("Camera connection failed"); sys.exit(1)
+        done(f"Camera {cam} connected")
 
     # 4. Viewport shift
     print("\n── 4. Viewport shift ──")
