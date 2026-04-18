@@ -1,18 +1,20 @@
-"""
-Plan-based calibration — touch coordinates + camera detection.
+"""Calibration pipeline — touch coordinates + camera detection.
 
-Implements the architecture plan's calibration exactly:
+Pre-cal: viewport shift — map viewport CSS coords to screenshot 0-1
+         using a detected orange square in a phone screenshot.
 
-  Step 0: Z-depth via touch event detection (stationary descent)
-  Step 1: Arm-phone alignment via touch coordinates
-  Step 2: Camera physical rotation check (phone shape in frame)
-  Step 3: Software rotation via UP/RIGHT markers
-  Step 4: GRBL ↔ Screen mapping via touch coordinates (Mapping A), sets screen center as arm origin
-  Step 5: Camera ↔ Screen mapping via red dot detection (Mapping B)
-  Step 6: Full-chain validation (camera → Mapping B → Mapping A → tap → touch)
+Arm side (``calibrate_arm``): find Z depth, tap probe triangle + 15-point
+         grid, fit screen→arm affine, derive tilt diagnostic, re-origin
+         at screen center.
 
-No green flash. Touch events for contact detection and coordinate mapping.
-Camera for marker/dot visual detection only.
+Camera side: camera-rotation check, software frame-rotation from UP/RIGHT
+         markers, 15-red-dot grid → screen→camera affine (``compute_camera_mapping``).
+
+Validation: full chain — camera detects orange dot → screen pct → arm
+         mm → tap → touch event → compare.
+
+No green flash. Touch events for contact detection and coordinate
+mapping. Camera for marker/dot visual detection only.
 """
 
 import logging
@@ -41,6 +43,15 @@ PROBE_Z_SPEED = 6000
 
 CACHE_DIR = "data/calibration/cache"
 PEN_DEPTH_FILE = f"{CACHE_DIR}/z-tap"
+
+
+def grid_positions(cal: "CalibrationState"):
+    """Yield (col_pct, row_pct) for each of the 15 grid positions in
+    canonical outer-rows / inner-cols order. Used by arm calibration,
+    camera mapping, and any downstream code that rebuilds the same grid."""
+    for row in cal.GRID_ROWS_PCT:
+        for col in cal.GRID_COLS_PCT:
+            yield col, row
 
 
 def _find_viewport_cache():
@@ -101,8 +112,9 @@ def measure_viewport_shift(
       - dpr (device pixel ratio)
       - offset_x, offset_y (status bar / safe-area shift)
 
-    This must run before Step 0 so that all subsequent touch coordinates
-    are correctly converted from viewport space to screenshot 0-1 space.
+    This must run before arm calibration so that all subsequent touch
+    coordinates are correctly converted from viewport space to
+    screenshot 0-1 space.
 
     Returns the ViewportShift and stores it on cal.viewport_shift.
     """
@@ -212,204 +224,36 @@ def measure_viewport_shift(
     return transform
 
 
-# ─── Step 0: Z-axis surface detection ────────────────────────
+# ─── Arm-side unified calibration ────────────────────────────
 
 
-def find_pen_depth(arm: StylusArm, cal: CalibrationState) -> float:
-    """Probe Z depth with tap-and-release at each level. Plan Step 0.
-
-    Full tap cycle at each Z: pen down, dwell 150ms, pen up.
-    After each tap, check if the phone reported a touch event.
-    Spring-loaded stylus bounces back on pen-up, so no motor hold needed.
-
-    Returns z_tap (contact depth + margin, validated at ±10mm offsets).
-    """
-    log.info("═══ Step 0: Z-axis surface detection ═══")
-    log.info("  Goal: find the Z depth where stylus reliably registers on touchscreen")
-    cal.set_phase("center")
-    time.sleep(0.5)
-    log.info("  Phase: center — orange circle at screen center as touch target")
-
-    # Clear any stale touches
-    cal.flush_touches()
-
-    # Phase A: find first contact by descending in 0.3mm steps
-    z_contact = None
-    z_steps = [round(0.5 + i * 0.3, 2) for i in range(32)]  # 0.5 to 9.8mm
-    log.info(
-        f"  Phase A: descending from {z_steps[0]}mm to {z_steps[-1]}mm "
-        f"in 0.3mm steps to find first contact"
-    )
-
-    for z in z_steps:
-        _tap_once(arm, z, z_speed=SLOW_Z_SPEED)
-        time.sleep(0.3)
-
-        touches = cal.flush_touches()
-        if touches:
-            z_contact = z
-            log.info(f"  Phase A: first contact at Z={z:.2f}mm — stylus touched screen")
-            break
-        else:
-            log.debug(f"  Phase A: Z={z:.2f}mm — no contact")
-
-    if z_contact is None:
-        raise RuntimeError(
-            "Step 0 FAILED — no touch detected up to 9.8mm. "
-            "Check stylus alignment and phone placement."
-        )
-
-    # Phase B: find a Z depth that works at center AND ±10mm in each direction.
-    # Taps: center, +X, center, -X, center, +Y, center, -Y (8 taps per round).
-    # This catches surface unevenness that center-only testing would miss.
-    PROBE_OFFSETS = [
-        ("center", 0, 0),
-        ("+X", 10, 0),
-        ("center", 0, 0),
-        ("-X", -10, 0),
-        ("center", 0, 0),
-        ("+Y", 0, 10),
-        ("center", 0, 0),
-        ("-Y", 0, -10),
-    ]
-    z_try = round(z_contact + 0.25, 2)
-    z_tap = None
-    log.info(
-        f"  Phase B: reliability test starting at Z={z_try:.2f}mm "
-        f"(first contact {z_contact:.2f}mm + 0.25mm margin)"
-    )
-    log.info(
-        f"  Phase B: tapping center and ±10mm in X/Y — "
-        f"{len(PROBE_OFFSETS)} taps per round must all register"
-    )
-
-    for _ in range(10):  # max 10 rounds of 0.25mm increases
-        log.info(f"  Phase B: testing Z={z_try:.2f}mm ...")
-        all_ok = True
-        for i, (label, ox, oy) in enumerate(PROBE_OFFSETS):
-            arm._fast_move(ox, oy)
-            arm.wait_idle()
-            cal.flush_touches()
-            _tap_once(arm, z_try, z_speed=SLOW_Z_SPEED)
-            time.sleep(0.3)
-            touches = cal.flush_touches()
-            if touches:
-                log.debug(
-                    f"    tap {i + 1}/{len(PROBE_OFFSETS)} {label} "
-                    f"at ({ox}, {oy})mm — registered"
-                )
-            else:
-                log.info(
-                    f"    tap {i + 1}/{len(PROBE_OFFSETS)} {label} "
-                    f"at ({ox}, {oy})mm — missed"
-                )
-                all_ok = False
-                break
-
-        # Return to center after each round
-        arm._fast_move(0, 0)
-        arm.wait_idle()
-
-        if all_ok:
-            z_tap = z_try
-            log.info(
-                f"  Phase B: {len(PROBE_OFFSETS)}/{len(PROBE_OFFSETS)} taps "
-                f"registered at Z={z_tap:.2f}mm"
-            )
-            break
-        else:
-            z_try = round(z_try + 0.25, 2)
-            log.info(f"  Phase B: increasing to Z={z_try:.2f}mm")
-
-    if z_tap is None:
-        raise RuntimeError(
-            "Step 0 FAILED — could not find reliable Z depth. "
-            "Check stylus and phone placement."
-        )
-
-    log.info(f"  ✓ Step 0 done: z_tap={z_tap}mm (reliable contact depth)")
-    return z_tap
-
-
-# ─── Step 1: Arm-phone alignment check ───────────────────────
-
-
-def check_arm_tilt(
-    arm: StylusArm, cal: CalibrationState, z_tap: float, separation_mm: float = 25.0
+def _descend_to_contact(
+    arm: StylusArm,
+    cal: CalibrationState,
+    z_start: float = 0.5,
+    z_max: float = 9.8,
+    step: float = 0.3,
 ) -> float:
-    """Two taps along arm X-axis, compare touch Y coords. Plan Step 1.
+    """Descend Z at the arm's current XY until a touch event registers.
 
-    Returns tilt_ratio. < 0.02 means aligned (< ~1 degree).
+    Returns the first-contact Z in mm. Raises if nothing contacts by z_max —
+    usually means the stylus is off-screen or the phone isn't responsive.
     """
-    log.info("═══ Step 1: Arm-phone alignment check ═══")
-    log.info(
-        f"  Goal: verify arm X-axis is parallel to phone axis "
-        f"(2 taps {separation_mm:.0f}mm apart)"
+    log.info("  Z descent — finding first contact")
+    cal.flush_touches()
+    z = z_start
+    while z <= z_max:
+        z_rounded = round(z, 2)
+        _tap_once(arm, z_rounded, z_speed=SLOW_Z_SPEED)
+        time.sleep(0.3)
+        if cal.flush_touches():
+            log.info(f"    first contact at Z={z_rounded:.2f}mm")
+            return z_rounded
+        log.debug(f"    Z={z_rounded:.2f}mm — no contact")
+        z += step
+    raise RuntimeError(
+        f"No touch detected up to {z_max}mm — check stylus and phone placement."
     )
-    cal.set_phase("center")
-    time.sleep(0.3)
-
-    half = separation_mm / 2
-    touches = []
-    labels = ["A (left)", "B (right)"]
-    for idx, x in enumerate([-half, half]):
-        log.info(f"  Tap {labels[idx]}: moving arm to X={x:.1f}mm, Y=0mm")
-        arm._fast_move(x, 0)
-        arm.wait_idle()
-        got = None
-        z = z_tap
-        for _ in range(4):
-            cal.flush_touches()
-            _tap_once(arm, z)
-            time.sleep(0.3)
-            got = cal.flush_touches()
-            if got:
-                if z > z_tap:
-                    z_tap = z  # propagate deeper z
-                    log.info(f"  Tap {labels[idx]}: hit after z bump to {z:.2f}mm")
-                else:
-                    log.info(f"  Tap {labels[idx]}: registered at Z={z:.2f}mm")
-                break
-            z = round(z + 0.25, 2)
-            log.warning(f"  Tap {labels[idx]}: missed, increasing Z to {z:.2f}mm")
-        if not got:
-            raise RuntimeError(f"Step 1 FAILED — no touch at arm X={x:.1f}mm")
-        touches.append(got[-1])
-
-    arm._fast_move(0, 0)
-    arm.wait_idle()
-
-    sx1, sy1 = touches[0]["x"], touches[0]["y"]
-    sx2, sy2 = touches[1]["x"], touches[1]["y"]
-    log.info(f"  Tap A: arm X={-half:.1f}mm → screen pos ({sx1:.3f}, {sy1:.3f})")
-    log.info(f"  Tap B: arm X={+half:.1f}mm → screen pos ({sx2:.3f}, {sy2:.3f})")
-    dx = abs(sx2 - sx1)
-    dy = abs(sy2 - sy1)
-
-    # Arm X may map to phone X or phone Y (90° rotation is fine).
-    # Check that the movement is straight: minor axis / major axis < 0.02.
-    major = max(dx, dy)
-    minor = min(dx, dy)
-    if major < 0.01:
-        raise RuntimeError(
-            "Step 1 FAILED — both taps at same position. "
-            "Check arm movement and phone placement."
-        )
-
-    tilt = minor / major
-    axis_name = "Y" if dy > dx else "X"
-    log.info(
-        f"  Screen displacement: Δx={dx:.3f}, Δy={dy:.3f} → "
-        f"arm X-axis maps to phone {axis_name}-axis"
-    )
-    log.info(f"  Tilt ratio: {tilt:.4f} (cross-axis / main-axis, want < 0.02)")
-    if tilt < 0.02:
-        log.info("  ✓ Step 1 done: phone is aligned (tilt < 1°)")
-    else:
-        log.warning(
-            f"  ✗ Step 1: phone is tilted — ratio {tilt:.4f} exceeds 0.02, adjust phone"
-        )
-    return tilt
 
 
 # ─── Step 2: Camera physical rotation check ──────────────────
@@ -625,7 +469,7 @@ def pick_frame_rotation(cam: Camera, cal: CalibrationState) -> int:
     return rotation
 
 
-# ─── Step 4: GRBL ↔ Screen mapping (Mapping A) ──────────────
+# ─── Screen ↔ arm affine (Mapping A) ────────────────────────
 
 
 def _tap_and_read(
@@ -668,60 +512,77 @@ def _tap_and_read(
     return None, z
 
 
-def compute_grbl_mapping(
-    arm: StylusArm, cal: CalibrationState, z_tap: float
-) -> tuple[np.ndarray, list[dict]]:
-    """Probe scale, tap grid points across the screen, compute affine. Plan Step 4.
+PROBE_D = 10.0  # mm offset for the probe triangle
+TILT_ALIGNED_THRESHOLD = 0.02  # arm/phone axis mismatch below this is "aligned"
 
-    Phase 1: Tap center, +10mm X, +10mm Y to discover mm-per-screen-unit scale.
-    Phase 2: Use scale + grid_cols/rows to tap 15 points spanning the full screen.
-    Phase 3: Verify with 3 additional taps at offset positions.
 
-    Touch x,y are 0-1 screen percentages.
-    Returns (pct_to_grbl affine (2,3), list of touch events).
+def _tilt_from_affine(pct_to_grbl: np.ndarray) -> float:
+    """Derive the arm–phone axis mismatch ratio from the fitted affine.
+
+    Invert the 2×2 linear part so each column is an arm-axis basis vector
+    expressed in screen 0-1 units; the minor-axis / major-axis ratio of
+    arm-X's screen vector tells us how misaligned arm-X is with a phone
+    screen axis. 0 → perfectly aligned; 1 → diagonal.
     """
-    log.info("═══ Step 4: GRBL ↔ Screen mapping (Mapping A) ═══")
-    log.info("  Goal: compute affine transform from screen 0-1 → arm GRBL mm")
+    A = pct_to_grbl[:, :2]
+    try:
+        A_inv = np.linalg.inv(A)
+    except np.linalg.LinAlgError:
+        return 1.0
+    arm_x_in_screen = A_inv[:, 0]
+    dx = abs(float(arm_x_in_screen[0]))
+    dy = abs(float(arm_x_in_screen[1]))
+    major = max(dx, dy)
+    if major < 1e-6:
+        return 1.0
+    return min(dx, dy) / major
+
+
+def calibrate_arm(
+    arm: StylusArm,
+    cal: CalibrationState,
+    z_tap_hint: float | None = None,
+) -> tuple[float, np.ndarray, float, list[dict]]:
+    """Arm calibration — Z depth, screen↔arm affine, tilt diagnostic.
+
+    1. Find first-contact Z (skipped if ``z_tap_hint`` is provided — e.g.
+       from the cached value on disk).
+    2. Probe triangle: 3 taps at arm (0,0), (+10,0), (0,+10) with
+       z-bump-on-miss. Yields a bootstrap screen→arm affine.
+    3. Grid: for each of the 15 viewport grid positions predicted via
+       the bootstrap affine, tap with z-bump-on-miss. ``z_tap`` grows
+       to whatever depth the farthest grid point needs.
+    4. Fit the final affine from all 18 (arm mm, screen 0-1) pairs,
+       derive the tilt ratio, re-origin the arm at screen center.
+
+    Returns ``(z_tap, pct_to_grbl, tilt_ratio, grid_touches)``. Tilt
+    ``< TILT_ALIGNED_THRESHOLD`` means arm and phone axes are aligned;
+    higher means the phone is rotated relative to arm travel.
+    """
+    log.info("═══ Arm calibration — Z depth + screen↔arm mapping ═══")
     cal.set_phase("center")
-    time.sleep(0.3)
+    time.sleep(0.5)
 
-    PROBE_D = 10.0  # mm offset for scale probes
+    if z_tap_hint is not None:
+        z_tap = round(z_tap_hint, 2)
+        log.info(f"  Z depth: using cached {z_tap}mm — skipping descent")
+    else:
+        z_contact = _descend_to_contact(arm, cal)
+        z_tap = round(z_contact + 0.25, 2)
+        log.info(f"  Z depth: starting at {z_tap}mm (first contact + 0.25mm margin)")
 
-    # ── Phase 1: Probe to find scale ──
-    log.info("  Phase 1: Probing scale — 3 taps to discover mm-per-screen-unit")
-    log.info("    Tap 1/3: arm center (0, 0)mm")
+    # Probe triangle — bootstrap the screen→arm mapping.
+    log.info(f"  Probe triangle: 3 taps at (0,0), (+{PROBE_D:.0f},0), (0,+{PROBE_D:.0f})")
     t_center, z_tap = _tap_and_read(arm, cal, 0, 0, z_tap)
     if not t_center:
-        raise RuntimeError("Step 4 FAILED — no touch at center")
-    log.info(f"    Tap 1/3: screen pos ({t_center['x']:.3f}, {t_center['y']:.3f})")
-
-    log.info(f"    Tap 2/3: arm +X ({PROBE_D:.0f}, 0)mm")
+        raise RuntimeError("Arm calibration FAILED — no touch at center")
     t_x, z_tap = _tap_and_read(arm, cal, PROBE_D, 0, z_tap)
     if not t_x:
-        raise RuntimeError("Step 4 FAILED — no touch at +X probe")
-    log.info(f"    Tap 2/3: screen pos ({t_x['x']:.3f}, {t_x['y']:.3f})")
-
-    log.info(f"    Tap 3/3: arm +Y (0, {PROBE_D:.0f})mm")
+        raise RuntimeError(f"Arm calibration FAILED — no touch at +{PROBE_D:.0f}mm X")
     t_y, z_tap = _tap_and_read(arm, cal, 0, PROBE_D, z_tap)
     if not t_y:
-        raise RuntimeError("Step 4 FAILED — no touch at +Y probe")
-    log.info(f"    Tap 3/3: screen pos ({t_y['x']:.3f}, {t_y['y']:.3f})")
+        raise RuntimeError(f"Arm calibration FAILED — no touch at +{PROBE_D:.0f}mm Y")
 
-    # Screen displacement per mm in each arm direction
-    sx_per_mm_x = (t_x["x"] - t_center["x"]) / PROBE_D
-    sy_per_mm_x = (t_x["y"] - t_center["y"]) / PROBE_D
-    sx_per_mm_y = (t_y["x"] - t_center["x"]) / PROBE_D
-    sy_per_mm_y = (t_y["y"] - t_center["y"]) / PROBE_D
-    log.info(
-        f"  Phase 1 result: arm +{PROBE_D:.0f}mm X → "
-        f"screen Δ({sx_per_mm_x:.4f}, {sy_per_mm_x:.4f}) per mm"
-    )
-    log.info(
-        f"  Phase 1 result: arm +{PROBE_D:.0f}mm Y → "
-        f"screen Δ({sx_per_mm_y:.4f}, {sy_per_mm_y:.4f}) per mm"
-    )
-
-    # Build screen→grbl affine from the 3 probe points
     probe_screen = np.array(
         [
             [t_center["x"], t_center["y"]],
@@ -731,126 +592,94 @@ def compute_grbl_mapping(
         dtype=np.float64,
     )
     probe_grbl = np.array(
-        [
-            [0, 0],
-            [PROBE_D, 0],
-            [0, PROBE_D],
-        ],
-        dtype=np.float64,
+        [[0, 0], [PROBE_D, 0], [0, PROBE_D]], dtype=np.float64
     )
     probe_affine, _ = cv2.estimateAffine2D(probe_screen, probe_grbl)
+    if probe_affine is None:
+        raise RuntimeError("Arm calibration FAILED — probe affine fit failed")
 
-    # ── Phase 2: Tap grid points across full screen ──
-    cols = cal.GRID_COLS_PCT  # [0.25, 0.50, 0.75]
-    rows = cal.GRID_ROWS_PCT  # [0.20, 0.40, 0.50, 0.60, 0.80]
-    log.info(
-        f"  Phase 2: Tapping {len(cols)}×{len(rows)}={len(cols) * len(rows)} grid points "
-        f"across full screen using probe affine to predict arm positions"
-    )
+    # Grid — 15 viewport positions predicted via the bootstrap affine.
+    cal.set_phase("grid")
+    time.sleep(0.3)
+    grid = list(grid_positions(cal))
+    log.info(f"  Grid: {len(grid)} taps across full screen (phase=grid)")
 
-    grbl_pts = []
-    screen_pts = []
-    all_touches = []
+    grbl_pts: list = [probe_grbl[i].tolist() for i in range(3)]
+    screen_pts: list = [probe_screen[i].tolist() for i in range(3)]
+    grid_touches: list = []
 
-    # Include probe points
-    for sp, gp in zip(probe_screen, probe_grbl):
-        screen_pts.append(sp.tolist())
-        grbl_pts.append(gp.tolist())
-
-    grid_idx = 0
-    grid_total = len(cols) * len(rows)
-    for row in rows:
-        for col in cols:
-            grid_idx += 1
-            # Convert viewport 0-1 to screenshot 0-1 for probe affine
-            # (probe_affine maps screenshot 0-1 → GRBL mm)
-            if cal.viewport_shift:
-                scr_col, scr_row = cal.viewport_pct_to_screenshot_pct(col, row)
-            else:
-                scr_col, scr_row = col, row
-            predicted = probe_affine @ np.array([scr_col, scr_row, 1.0])
-            gx, gy = predicted[0], predicted[1]
-            log.info(
-                f"    Grid {grid_idx}/{grid_total}: "
-                f"viewport ({col:.2f}, {row:.2f}) → "
-                f"predicted arm ({gx:.1f}, {gy:.1f})mm"
-            )
-            touch, z_tap = _tap_and_read(arm, cal, gx, gy, z_tap)
-            if not touch:
-                log.warning(f"    Grid {grid_idx}/{grid_total}: NO TOUCH — skipped")
-                continue
-            log.info(
-                f"    Grid {grid_idx}/{grid_total}: "
-                f"touch registered at screen ({touch['x']:.3f}, {touch['y']:.3f})"
-            )
-            grbl_pts.append([gx, gy])
-            screen_pts.append([touch["x"], touch["y"]])
-            all_touches.append(touch)
+    for idx, (col, row) in enumerate(grid, start=1):
+        if cal.viewport_shift:
+            scr_col, scr_row = cal.viewport_pct_to_screenshot_pct(col, row)
+        else:
+            scr_col, scr_row = col, row
+        predicted = probe_affine @ np.array([scr_col, scr_row, 1.0])
+        gx, gy = float(predicted[0]), float(predicted[1])
+        log.info(
+            f"    Grid {idx}/{len(grid)}: viewport ({col:.2f}, {row:.2f}) → "
+            f"arm ({gx:.1f}, {gy:.1f})mm"
+        )
+        touch, z_tap = _tap_and_read(arm, cal, gx, gy, z_tap)
+        if not touch:
+            log.warning(f"    Grid {idx}/{len(grid)}: NO TOUCH — skipped")
+            continue
+        log.info(
+            f"    Grid {idx}/{len(grid)}: touch at "
+            f"screen ({touch['x']:.3f}, {touch['y']:.3f})"
+        )
+        grbl_pts.append([gx, gy])
+        screen_pts.append([touch["x"], touch["y"]])
+        grid_touches.append(touch)
 
     arm._fast_move(0, 0)
     arm.wait_idle()
 
     log.info(
-        f"  Phase 2 result: {len(grbl_pts)} point pairs collected "
+        f"  Collected {len(grbl_pts)} point pairs "
         f"(3 probes + {len(grbl_pts) - 3} grid hits)"
     )
     if len(grbl_pts) < 6:
-        raise RuntimeError(f"Step 4 FAILED — only {len(grbl_pts)} valid taps (need ≥6)")
-
-    # Compute final affine from all points
-    screen_to_grbl, _ = cv2.estimateAffine2D(
-        np.array(screen_pts, dtype=np.float64), np.array(grbl_pts, dtype=np.float64)
-    )
-    if screen_to_grbl is None:
-        raise RuntimeError("Step 4 FAILED — affine computation failed")
-    log.info(f"  Affine computed from {len(grbl_pts)} point pairs")
-
-    # ── Phase 3: Verify with 3 taps at non-grid positions ──
-    verify_pcts = [(0.20, 0.35), (0.80, 0.65), (0.50, 0.50)]
-    log.info(
-        f"  Phase 3: Verifying accuracy with {len(verify_pcts)} taps at non-grid positions"
-    )
-    max_error = 0
-    for vi, (vsx, vsy) in enumerate(verify_pcts, 1):
-        predicted = screen_to_grbl @ np.array([vsx, vsy, 1.0])
-        vgx, vgy = predicted[0], predicted[1]
-        log.info(
-            f"    Verify {vi}/{len(verify_pcts)}: "
-            f"screen ({vsx}, {vsy}) → predicted arm ({vgx:.1f}, {vgy:.1f})mm"
-        )
-        touch, z_tap = _tap_and_read(arm, cal, vgx, vgy, z_tap)
-        if not touch:
-            log.warning(f"    Verify {vi}/{len(verify_pcts)}: NO TOUCH — skipped")
-            continue
-        actual_grbl = screen_to_grbl @ np.array([touch["x"], touch["y"], 1.0])
-        error = ((actual_grbl[0] - vgx) ** 2 + (actual_grbl[1] - vgy) ** 2) ** 0.5
-        max_error = max(max_error, error)
-        log.info(
-            f"    Verify {vi}/{len(verify_pcts)}: "
-            f"touch at screen ({touch['x']:.3f}, {touch['y']:.3f}), "
-            f"position error={error:.2f}mm"
+        raise RuntimeError(
+            f"Arm calibration FAILED — only {len(grbl_pts)} valid taps (need ≥6)"
         )
 
-    # ── Re-origin: move arm to screen center and set as new origin ──
-    center_grbl = screen_to_grbl @ np.array([0.5, 0.5, 1.0])
+    pct_to_grbl, _ = cv2.estimateAffine2D(
+        np.array(screen_pts, dtype=np.float64),
+        np.array(grbl_pts, dtype=np.float64),
+    )
+    if pct_to_grbl is None:
+        raise RuntimeError("Arm calibration FAILED — final affine fit failed")
+
+    tilt = _tilt_from_affine(pct_to_grbl)
+    aligned = tilt < TILT_ALIGNED_THRESHOLD
     log.info(
-        f"  Re-origin: screen center (0.5, 0.5) is at arm ({center_grbl[0]:.2f}, {center_grbl[1]:.2f})mm"
+        f"  Tilt ratio: {tilt:.4f} "
+        f"(want < {TILT_ALIGNED_THRESHOLD}; aligned={aligned})"
+    )
+    if not aligned:
+        log.warning(
+            "  Phone/arm axes are skewed — consider straightening phone "
+            "orientation if tilt stays high across reruns."
+        )
+
+    # Re-origin at screen center.
+    center_grbl = pct_to_grbl @ np.array([0.5, 0.5, 1.0])
+    log.info(
+        f"  Re-origin: screen center is at arm "
+        f"({center_grbl[0]:.2f}, {center_grbl[1]:.2f})mm → setting as (0, 0)"
     )
     arm._fast_move(center_grbl[0], center_grbl[1])
     arm.wait_idle()
     arm.set_origin()
-    log.info("  Re-origin: arm position reset to (0, 0) at screen center")
-
-    # Update affine to reflect new origin: subtract center offset from translation
-    screen_to_grbl[0, 2] -= center_grbl[0]
-    screen_to_grbl[1, 2] -= center_grbl[1]
+    pct_to_grbl[0, 2] -= center_grbl[0]
+    pct_to_grbl[1, 2] -= center_grbl[1]
+    cal.set_phase("center")
 
     log.info(
-        f"  ✓ Step 4 done: Mapping A ready, "
-        f"verification max error={max_error:.2f}mm, "
-        f"origin set at screen center"
+        f"  ✓ Arm calibration done: z_tap={z_tap}mm, "
+        f"{len(grbl_pts)} pairs, tilt={tilt:.4f}"
     )
-    return screen_to_grbl, all_touches
+    return z_tap, pct_to_grbl, tilt, grid_touches
 
 
 # ─── Step 5: Camera ↔ Screen mapping (Mapping B) ────────────
@@ -928,16 +757,13 @@ def compute_camera_mapping(
     coord_space = "screenshot 0-1" if cal.viewport_shift else "viewport 0-1"
     if cal.viewport_shift:
         screen_pcts = np.array(
-            [
-                list(cal.viewport_pct_to_screenshot_pct(x, y))
-                for y in cal.GRID_ROWS_PCT
-                for x in cal.GRID_COLS_PCT
-            ],
+            [list(cal.viewport_pct_to_screenshot_pct(col, row))
+             for col, row in grid_positions(cal)],
             dtype=np.float64,
         )
     else:
         screen_pcts = np.array(
-            [[x, y] for y in cal.GRID_ROWS_PCT for x in cal.GRID_COLS_PCT],
+            [[col, row] for col, row in grid_positions(cal)],
             dtype=np.float64,
         )
     log.info(f"  Mapping {expected} dots: {coord_space} ↔ camera 0-1")

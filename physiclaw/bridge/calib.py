@@ -33,15 +33,17 @@ class CalibrationState:
     GRID_COLS_PCT = [0.25, 0.50, 0.75]
     GRID_ROWS_PCT = [0.20, 0.40, 0.50, 0.60, 0.80]
 
-    # Valid calibration phases (server → page display commands)
+    # Valid calibration phases (server → page display commands).
+    # Phases are visual primitives — each renders one thing on the
+    # page; they're reused across different calibration steps.
     PHASES = {
-        "idle",  # blank, waiting
-        "screenshot_cal",  # orange square at viewport center (pre-cal screenshot mapping)
-        "center",  # orange circle at center (Steps 0, 1, 4)
-        "markers",  # UP/RIGHT blue markers for camera rotation (Steps 2-3)
-        "grid",  # 15 red dots at known positions (Step 5)
-        "dot",  # single orange dot at custom position (Step 6)
-        "assistive_touch",  # AT circle + color nonce barcode (Step 7)
+        "idle",              # blank — waiting
+        "screenshot_cal",    # orange square at viewport (100, 200) for pre-cal
+        "center",            # orange circle at screen center
+        "markers",           # blue UP + red RIGHT labels for camera orientation
+        "grid",              # 15 red dots at known viewport positions
+        "dot",               # single orange dot at a given (x, y) in 0-1
+        "assistive_touch",   # AT circle + color nonce barcode
     }
 
     def __init__(self):

@@ -181,38 +181,22 @@ def main():
         wait("Position stylus tip above the orange circle (~3mm above screen)")
     done("Stylus positioned")
 
-    # 6. Pen depth
-    print("\n── 6. Pen depth ──")
-    print("  Arm probes downward to find screen surface.")
+    # 6. Arm calibration
+    print("\n── 6. Arm calibration ──")
+    print("  One pass: find Z depth, tap 18 points, fit screen→arm mapping.")
     if ask("Don't touch anything. Ready?", auto):
-        r = calibrate("pen-depth", 30)
-        if not ok(r):
-            fail("Pen depth probe failed"); sys.exit(1)
-        if r.get("cached"):
-            done(f"Pen depth loaded from cache: {PEN_CACHE} (delete to re-measure)")
-        else:
-            done("Pen depth measured")
+        def _arm_fail(resp):
+            return f"Arm calibration failed: {(resp or {}).get('message', 'no response')}"
 
-    # 7. Arm tilt
-    print("\n── 7. Arm tilt ──")
-    print("  Arm taps two points to check alignment with phone.")
-    if ask("Ready?", auto):
-        def _tilt_fail(resp):
-            tilt = (resp or {}).get("tilt_ratio")
-            detail = f"tilt {tilt*100:.1f}%" if tilt is not None else "no response"
-            return f"Not aligned — {detail}. Adjust phone rotation"
+        r = calibrate_retry("arm", _arm_fail, "Retry?", auto, timeout=120)
+        z_note = " (cached)" if r.get("z_cached") else ""
+        tilt = r.get("tilt_ratio", 0)
+        if not r.get("aligned"):
+            fail(f"Phone/arm axes skewed (tilt {tilt*100:.1f}%) — straighten phone and rerun if this persists")
+        done(f"Arm ready: z_tap={r.get('z_tap')}mm{z_note}, {r.get('pairs')} tap pairs, tilt={tilt:.3f}")
 
-        calibrate_retry(
-            "arm-tilt",
-            _tilt_fail,
-            "Retry?",
-            auto,
-            predicate=lambda resp: resp and resp.get("aligned"),
-        )
-        done("Arm aligned with phone")
-
-    # 8. Camera rotation
-    print("\n── 8. Camera rotation ──")
+    # 7. Camera rotation
+    print("\n── 7. Camera rotation ──")
     print("  Check camera angle: phone edges should be parallel to image edges.")
     if not auto:
         subprocess.run(["open", "-a", "Photo Booth"])
@@ -224,24 +208,16 @@ def main():
     else:
         done("Camera rotation OK")
 
-    # 9. Frame rotation
-    print("\n── 9. Frame rotation ──")
+    # 8. Frame rotation
+    print("\n── 8. Frame rotation ──")
     print("  Detecting UP/RIGHT markers for software rotation.")
     if ask("Ready?", auto):
         if not ok(calibrate("frame-rotation", 15)):
             fail("Frame rotation failed"); sys.exit(1)
     done("Frame rotation set")
 
-    # 10. GRBL mapping
-    print("\n── 10. GRBL mapping ──")
-    print("  Arm taps up to 18 points across the screen for precise mapping.")
-    if ask("Don't touch anything. Ready?", auto):
-        if not ok(calibrate("grbl-mapping", 60)):
-            fail("GRBL mapping failed"); sys.exit(1)
-    done("Screen→arm mapping computed")
-
-    # 11. Camera mapping
-    print("\n── 11. Camera mapping ──")
+    # 9. Camera mapping
+    print("\n── 9. Camera mapping ──")
     print("  Camera detects 15 red dots on phone screen.")
     if ask("Ready?", auto):
         calibrate_retry(
@@ -252,8 +228,8 @@ def main():
         )
     done("Screen→camera mapping computed")
 
-    # 12. Validate
-    print("\n── 12. Validate ──")
+    # 10. Validate
+    print("\n── 10. Validate ──")
     print("  Arm taps random dots and compares touch vs expected position.")
     if ask("Ready?", auto):
         r = calibrate("validate", 60)
@@ -262,8 +238,8 @@ def main():
             fail("Validation failed"); sys.exit(1)
     done("Calibration validated")
 
-    # 13. AssistiveTouch
-    print("\n── 13. AssistiveTouch ──")
+    # 11. AssistiveTouch
+    print("\n── 11. AssistiveTouch ──")
     print("  Verifying screenshot + clipboard pipeline.")
     calibrate("assistive-touch/show")
     if not auto:
@@ -290,21 +266,21 @@ def main():
             wait("Paste in Notes to verify it matches")
     done("Screenshot + clipboard pipeline verified")
 
-    # 14. Edge trace
-    print("\n── 14. Edge trace ──")
+    # 12. Edge trace
+    print("\n── 12. Edge trace ──")
     print("  Arm traces phone screen border clockwise, pausing at 8 points.")
     if ask("Watch for accuracy. Ready?", auto):
         calibrate("trace-edge", 60)
     done("Edge trace complete")
 
-    # 15. Go to Home Screen + mark ready
-    print("\n── 15. Home Screen ──")
+    # 13. Go to Home Screen + mark ready
+    print("\n── 13. Home Screen ──")
     api("POST", "/api/phone/home")
     time.sleep(3)  # let home-screen animation settle
     api("POST", "/api/ready")
     done("Phone on Home Screen, PhysiClaw ready")
 
-    # 16. Summary
+    # Summary
     elapsed = time.time() - t0
     mins, secs = int(elapsed // 60), int(elapsed % 60)
     print(f"\n{'='*40}")

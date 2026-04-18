@@ -5,11 +5,9 @@ import logging
 from physiclaw.bridge import BridgeState, CalibrationState, PageState
 from physiclaw.calibration.handler import (
     handle_measure_viewport_shift,
-    handle_find_pen_depth,
-    handle_check_arm_tilt,
+    handle_calibrate_arm,
     handle_detect_camera_rotation,
     handle_pick_frame_rotation,
-    handle_compute_grbl_mapping,
     handle_compute_camera_mapping,
     handle_validate_calibration,
     handle_trace_edge,
@@ -31,13 +29,9 @@ def register(
             request, physiclaw, calib, bridge, phone
         )
 
-    @mcp.custom_route("/api/calibrate/pen-depth", methods=["POST"])
-    async def _pen_depth(request):
-        return await handle_find_pen_depth(request, physiclaw, calib, phone)
-
-    @mcp.custom_route("/api/calibrate/arm-tilt", methods=["POST"])
-    async def _arm_tilt(request):
-        return await handle_check_arm_tilt(request, physiclaw, calib)
+    @mcp.custom_route("/api/calibrate/arm", methods=["POST"])
+    async def _arm(request):
+        return await handle_calibrate_arm(request, physiclaw, calib, phone)
 
     @mcp.custom_route("/api/calibrate/camera-rotation", methods=["POST"])
     async def _camera_rotation(request):
@@ -46,10 +40,6 @@ def register(
     @mcp.custom_route("/api/calibrate/frame-rotation", methods=["POST"])
     async def _frame_rotation(request):
         return await handle_pick_frame_rotation(request, physiclaw, calib)
-
-    @mcp.custom_route("/api/calibrate/grbl-mapping", methods=["POST"])
-    async def _grbl_mapping(request):
-        return await handle_compute_grbl_mapping(request, physiclaw, calib)
 
     @mcp.custom_route("/api/calibrate/camera-mapping", methods=["POST"])
     async def _camera_mapping(request):
