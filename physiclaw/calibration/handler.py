@@ -217,6 +217,7 @@ async def handle_validate_calibration(
             passed = sum(1 for r in results if r["passed"])
             if passed >= 2:
                 phone.set_mode("bridge")
+                physiclaw.calibration.save()
             return {
                 "results": results,
                 "passed": passed,

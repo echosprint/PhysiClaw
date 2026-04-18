@@ -12,11 +12,16 @@ of truth lives here.
 from __future__ import annotations
 
 import dataclasses
+import json
+import logging
+from pathlib import Path
 
 import cv2
 import numpy as np
 
 from physiclaw.calibration.transforms import ScreenTransforms, ViewportShift
+
+log = logging.getLogger(__name__)
 
 
 ROTATION_NAMES: dict[int, str] = {
@@ -27,6 +32,8 @@ ROTATION_NAMES: dict[int, str] = {
 }
 
 DEFAULT_ROTATION: int = cv2.ROTATE_90_COUNTERCLOCKWISE
+
+BUNDLE_PATH = Path("data/calibration/bundle.json")
 
 
 @dataclasses.dataclass
@@ -90,3 +97,56 @@ class Calibration:
     def effective_rotation(self) -> int:
         """Rotation code for camera frame processing; falls back to DEFAULT_ROTATION."""
         return self.cam_rotation if self.cam_rotation is not None else DEFAULT_ROTATION
+
+    # ─── Persistence ────────────────────────────────────────
+
+    def to_dict(self) -> dict:
+        """JSON-safe snapshot of this bundle. numpy arrays become nested lists."""
+        return {
+            "viewport_shift": (
+                dataclasses.asdict(self.viewport_shift)
+                if self.viewport_shift is not None else None
+            ),
+            "z_tap": self.z_tap,
+            "cam_rotation": self.cam_rotation,
+            "pct_to_grbl": (
+                self.pct_to_grbl.tolist() if self.pct_to_grbl is not None else None
+            ),
+            "pct_to_cam": (
+                self.pct_to_cam.tolist() if self.pct_to_cam is not None else None
+            ),
+            "cam_size": list(self.cam_size) if self.cam_size is not None else None,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict) -> "Calibration":
+        """Reconstruct from the output of to_dict()."""
+        vs = payload.get("viewport_shift")
+        pg = payload.get("pct_to_grbl")
+        pc = payload.get("pct_to_cam")
+        cs = payload.get("cam_size")
+        return cls(
+            viewport_shift=ViewportShift(**vs) if vs is not None else None,
+            z_tap=payload.get("z_tap"),
+            cam_rotation=payload.get("cam_rotation"),
+            pct_to_grbl=np.array(pg, dtype=np.float64) if pg is not None else None,
+            pct_to_cam=np.array(pc, dtype=np.float64) if pc is not None else None,
+            cam_size=tuple(cs) if cs is not None else None,
+        )
+
+    def save(self, path: Path = BUNDLE_PATH) -> None:
+        """Write this bundle to disk as JSON."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(self.to_dict(), indent=2))
+        log.info(f"Saved calibration bundle → {path}")
+
+    @classmethod
+    def load(cls, path: Path = BUNDLE_PATH) -> "Calibration | None":
+        """Return the bundle at ``path``, or None if missing/unreadable."""
+        if not path.exists():
+            return None
+        try:
+            return cls.from_dict(json.loads(path.read_text()))
+        except (json.JSONDecodeError, TypeError, ValueError, KeyError) as e:
+            log.warning(f"Failed to load calibration bundle from {path}: {e}")
+            return None

@@ -6,7 +6,10 @@ instance. Importing this module has the side effect of fully wiring the
 server — `physiclaw.server.__init__` re-exports the public surface.
 """
 
+import logging
+
 from physiclaw.bridge import BridgeState, CalibrationState, PageState
+from physiclaw.calibration.state import Calibration
 from physiclaw.core import PhysiClaw
 from physiclaw.server.bridge import register as _register_bridge
 from physiclaw.server.calibration import register as _register_calibration
@@ -15,12 +18,29 @@ from physiclaw.server.mcp import mcp
 from physiclaw.server.tools import register as _register_tools
 from physiclaw.server.watch import register as _register_watch
 
+log = logging.getLogger(__name__)
+
 # ─── Singletons ─────────────────────────────────────────────
 
 physiclaw = PhysiClaw()
 _bridge = BridgeState()
 _calib = CalibrationState()
 _phone = PageState(_bridge, _calib)
+
+# ─── Warm restart ───────────────────────────────────────────
+
+_loaded = Calibration.load()
+if _loaded is not None:
+    physiclaw.calibration = _loaded
+    if _loaded.viewport_shift is not None:
+        # Mirror into the bridge-side state so calibration handlers that read
+        # calib.viewport_shift (e.g. show_assistive_touch) see it too.
+        _calib.viewport_shift = _loaded.viewport_shift
+        physiclaw.assistive_touch.compute_at_screen_pos(_loaded.viewport_shift)
+    log.info(
+        f"Restored calibration from disk: complete={_loaded.complete}, "
+        f"z_tap={_loaded.z_tap}mm, rotation={_loaded.cam_rotation}"
+    )
 
 
 def shutdown():

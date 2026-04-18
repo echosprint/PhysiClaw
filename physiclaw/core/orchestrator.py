@@ -145,15 +145,19 @@ class PhysiClaw:
     def connect_arm(self):
         """Connect to the GRBL stylus arm (auto-detect USB port).
 
-        Closes any previously connected arm first. Resets calibration
-        because a new arm invalidates all learned mappings.
+        Closes any previously connected arm first. Keeps the current
+        Calibration bundle — on a warm restart we propagate its z_tap
+        and direction mapping to the freshly-constructed arm so we can
+        fast-path through setup. If the bundle is stale (arm swapped,
+        phone moved), the user can delete data/calibration/bundle.json
+        to force a fresh calibration.
         """
         if self._arm is not None:
             self._arm.close()
             self._arm = None
-        self.calibration = Calibration()
         self._arm = StylusArm()
         self._arm.setup()
+        self._apply_bundle_to_arm()
         log.info("Arm connected")
 
     def connect_camera(self, index: int):
@@ -161,13 +165,29 @@ class PhysiClaw:
 
         Closes any previously connected camera first. The user picks the
         index after previewing each one via /api/camera-preview/{index}
-        during /setup, so we don't try to auto-detect.
+        during /setup, so we don't try to auto-detect. Propagates the
+        cached rotation from the Calibration bundle if one is loaded.
         """
         if self._cam is not None:
             self._cam.close()
             self._cam = None
         self._cam = Camera(index)
+        if self.calibration.cam_rotation is not None:
+            self._cam.rotation = self.calibration.cam_rotation
         log.info(f"Camera {index} connected")
+
+    def _apply_bundle_to_arm(self):
+        """Propagate cached calibration into the newly-connected arm."""
+        if self._arm is None:
+            return
+        cal = self.calibration
+        if cal.z_tap is not None:
+            self._arm.Z_DOWN = cal.z_tap
+        if cal.pct_to_grbl is not None:
+            p = cal.pct_to_grbl
+            right_vec = (float(p[0, 0]), float(p[1, 0]))
+            down_vec = (float(p[0, 1]), float(p[1, 1]))
+            self._arm.set_direction_mapping(right_vec, down_vec)
 
     # ─── Hardware accessors ───────────────────────────────────
 
