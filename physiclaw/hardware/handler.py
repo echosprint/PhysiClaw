@@ -15,14 +15,10 @@ from pathlib import Path
 
 import cv2
 
-from physiclaw.calibration.calibrate import (
-    CAMERA_REF_FILE,
-    check_phone_in_frame,
-    frame_similarity,
-)
+from physiclaw.calibration.calibrate import CAMERA_REF_FILE
 from physiclaw.hardware.camera import Camera
 from physiclaw.vision.render import watermark_index
-from physiclaw.vision.util import encode_jpeg
+from physiclaw.vision.util import check_phone_in_frame, encode_jpeg, frame_similarity
 
 SIMILARITY_MIN = 0.3  # floor for "this is the same camera we calibrated"
 

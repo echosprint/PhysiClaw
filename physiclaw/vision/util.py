@@ -1,9 +1,14 @@
-"""Image codec and serialization utilities."""
+"""Image codec, similarity, and shape-analysis utilities."""
 
 import json
+import logging
 
 import cv2
 import numpy as np
+
+log = logging.getLogger(__name__)
+
+FRAME_SIMILARITY_SIZE = (320, 240)
 
 
 def encode_jpeg(frame: np.ndarray, quality: int = 85) -> bytes:
@@ -19,6 +24,99 @@ def decode_image(data: bytes) -> np.ndarray:
     if frame is None:
         raise RuntimeError("Failed to decode image bytes")
     return frame
+
+
+def frame_similarity(a: np.ndarray, b: np.ndarray) -> float:
+    """Normalized cross-correlation of two frames in [-1, 1].
+
+    Downsample to a common grayscale size and let cv2.matchTemplate
+    compute Pearson's r. ~1 means same scene, ~0 uncorrelated.
+    """
+    ga = cv2.resize(cv2.cvtColor(a, cv2.COLOR_BGR2GRAY), FRAME_SIMILARITY_SIZE)
+    gb = cv2.resize(cv2.cvtColor(b, cv2.COLOR_BGR2GRAY), FRAME_SIMILARITY_SIZE)
+    return float(cv2.matchTemplate(ga, gb, cv2.TM_CCOEFF_NORMED)[0, 0])
+
+
+def check_phone_in_frame(frame: np.ndarray) -> dict:
+    """Shape/coverage/straightness diagnostic from one overhead frame.
+
+    Returns ``{ok, issues, coverage, aspect_ratio, image_size, phone_region}``.
+    Saves an annotated frame to /tmp/physiclaw_camera_rotation.jpg.
+    Raises if no bright region is detected (camera read failed or phone off).
+    """
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    _, mask = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        raise RuntimeError("No bright region in camera frame — is the phone on?")
+
+    largest = max(contours, key=cv2.contourArea)
+    rect = cv2.minAreaRect(largest)
+    rect_w, rect_h = rect[1]
+    phone_area_px = rect_w * rect_h
+    img_h, img_w = frame.shape[:2]
+    coverage = phone_area_px / (img_w * img_h)
+    bx, by, bw, bh = cv2.boundingRect(largest)
+    issues: list[str] = []
+
+    annotated = frame.copy()
+    cv2.drawContours(annotated, [largest], -1, (0, 255, 0), 3)
+    cv2.drawContours(annotated, [np.int32(cv2.boxPoints(rect))], -1, (0, 200, 255), 2)
+    cv2.putText(
+        annotated, f"area {coverage:.0%}", (bx + 5, by + 30),
+        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2,
+    )
+    cv2.imwrite("/tmp/physiclaw_camera_rotation.jpg", annotated)
+
+    # Phone edges should be parallel to image edges (< 3° deviation).
+    pts = cv2.boxPoints(rect)
+    edges = [(pts[i], pts[(i + 1) % 4]) for i in range(4)]
+    longest_edge = max(edges, key=lambda e: np.linalg.norm(e[1] - e[0]))
+    angle_deg = abs(np.degrees(np.arctan2(
+        longest_edge[1][1] - longest_edge[0][1],
+        longest_edge[1][0] - longest_edge[0][0],
+    )))
+    rotation_dev = min(angle_deg % 90, 90 - angle_deg % 90)
+    if rotation_dev >= 3.0:
+        issues.append(
+            f"Straighten camera — phone edges rotated {rotation_dev:.1f}° from image"
+        )
+
+    # Long axes aligned (phone long axis parallel to image long axis).
+    if (bw > bh) != (img_w > img_h):
+        issues.append("Rotate camera 90° — long axes not aligned")
+
+    # Aspect ratio sanity check (camera tilt).
+    phone_long = max(rect_w, rect_h)
+    phone_short = min(rect_w, rect_h)
+    phone_ratio = phone_long / max(phone_short, 1)
+    ratio_diff = abs(phone_ratio - 2.0) / 2.0
+    if ratio_diff >= 0.15:
+        issues.append(
+            f"Camera may be tilted — phone aspect {phone_ratio:.2f} (diff {ratio_diff:.0%})"
+        )
+
+    # Coverage: phone should fill ≥ 30% of frame.
+    if coverage < 0.30:
+        issues.append(
+            f"Move camera closer — phone covers only {coverage:.0%} of image (need ≥30%)"
+        )
+
+    log.info(
+        f"  Phone in frame: {rect_w:.0f}×{rect_h:.0f}px, "
+        f"edge dev {rotation_dev:.1f}°, aspect {phone_ratio:.2f}, coverage {coverage:.0%}"
+    )
+    if issues:
+        log.warning(f"  Camera setup issues: {'; '.join(issues)}")
+
+    return {
+        "ok": not issues,
+        "issues": issues,
+        "phone_region": [round(rect_w), round(rect_h)],
+        "image_size": [img_w, img_h],
+        "aspect_ratio": round(phone_ratio, 2),
+        "coverage": round(coverage, 2),
+    }
 
 
 def validate_bbox(bbox: list[float]):
