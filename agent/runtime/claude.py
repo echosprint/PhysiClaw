@@ -68,7 +68,7 @@ def _build_prompt(triggers: list[Trigger]) -> str:
 
 # --- Logging ---
 
-SENTINEL = re.compile(r">+ (DONE|STUCK|IDLE) - (.+?) <+")
+SENTINEL = re.compile(r">+ (DONE|STUCK|IDLE) - (.+)")
 
 
 def _redact_images(content):
