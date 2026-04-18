@@ -242,36 +242,27 @@ def _pick_rotation_from_markers(frame: np.ndarray) -> tuple[int, str]:
     cv2.ROTATE_{90_CLOCKWISE, 180, 90_COUNTERCLOCKWISE}. Raises if either
     marker is missing.
     """
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
+    from physiclaw.vision.util import find_largest_hsv_blob
 
-    def _find_blob(lower, upper, label):
-        mask = cv2.inRange(hsv, np.array(lower), np.array(upper))
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        best = None
-        for cnt in contours:
-            area = cv2.contourArea(cnt)
-            if area < 500:
-                continue
-            m = cv2.moments(cnt)
-            if m["m00"] == 0:
-                continue
-            if best is None or area > best[2]:
-                best = (m["m10"] / m["m00"], m["m01"] / m["m00"], area)
-        if best is None:
+    def _find_marker(lower, upper, label):
+        c = find_largest_hsv_blob(
+            frame, lower, upper, min_area=500,
+            morph_op=cv2.MORPH_CLOSE, morph_kernel=(15, 15),
+        )
+        if c is None:
             raise RuntimeError(f"{label} marker not found")
-        return best[0], best[1]
+        return c
 
     # UP = blue (#2563eb → HSV H≈110), RIGHT = red (#ef4444 → HSV H≈0/180).
-    up_x, up_y = _find_blob([100, 80, 80], [130, 255, 255], "UP (blue)")
-    right_x, right_y = _find_blob([0, 80, 80], [10, 255, 255], "RIGHT (red)")
-    try:
-        right_x, right_y = _find_blob(
-            [170, 80, 80], [180, 255, 255], "RIGHT (red high)"
-        )
-    except RuntimeError:
-        pass
+    up_x, up_y = _find_marker([100, 80, 80], [130, 255, 255], "UP (blue)")
+    right_x, right_y = _find_marker([0, 80, 80], [10, 255, 255], "RIGHT (red)")
+    # Red hue wraps past 180 too; if a larger match exists at the high end, prefer it.
+    wrapped = find_largest_hsv_blob(
+        frame, [170, 80, 80], [180, 255, 255], min_area=500,
+        morph_op=cv2.MORPH_CLOSE, morph_kernel=(15, 15),
+    )
+    if wrapped is not None:
+        right_x, right_y = wrapped
 
     log.info(f"  Blue UP at ({up_x:.0f}, {up_y:.0f}), red RIGHT at ({right_x:.0f}, {right_y:.0f})")
 

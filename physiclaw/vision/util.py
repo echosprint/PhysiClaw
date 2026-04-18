@@ -26,6 +26,39 @@ def decode_image(data: bytes) -> np.ndarray:
     return frame
 
 
+def find_largest_hsv_blob(
+    frame: np.ndarray,
+    lower,
+    upper,
+    *,
+    min_area: int = 50,
+    morph_op: int = cv2.MORPH_OPEN,
+    morph_kernel: tuple[int, int] = (5, 5),
+) -> tuple[float, float] | None:
+    """Centroid (cx, cy) of the largest HSV-matched blob, or None.
+
+    Converts to HSV, thresholds by the given range, applies one
+    morphology pass (``open`` by default to kill salt-and-pepper, or
+    ``close`` to seal gaps), and returns the centroid of the biggest
+    contour whose area is at least ``min_area``. Returns ``None`` when
+    no blob passes the filter.
+    """
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, np.array(lower), np.array(upper))
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, morph_kernel)
+    mask = cv2.morphologyEx(mask, morph_op, kernel)
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return None
+    largest = max(contours, key=cv2.contourArea)
+    if cv2.contourArea(largest) < min_area:
+        return None
+    m = cv2.moments(largest)
+    if m["m00"] == 0:
+        return None
+    return (m["m10"] / m["m00"], m["m01"] / m["m00"])
+
+
 def frame_similarity(a: np.ndarray, b: np.ndarray) -> float:
     """Normalized cross-correlation of two frames in [-1, 1].
 

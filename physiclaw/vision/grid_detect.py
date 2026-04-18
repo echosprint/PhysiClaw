@@ -131,25 +131,10 @@ def detect_orange_dot(frame: np.ndarray) -> tuple[float, float] | None:
     """Detect a single orange dot in a camera frame.
 
     Returns (cx, cy) in camera pixels, or None if not found.
-    Orange #f97316 ≈ HSV H=20°, S=90%, V=97% → OpenCV H=10, S=230, V=247
+    Orange #f97316 ≈ HSV H=20°, S=90%, V=97% → OpenCV H=10, S=230, V=247.
     """
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    # Orange range: H=5-25 (warm orange), high S, high V
-    mask = cv2.inRange(hsv, np.array([5, 100, 100]), np.array([25, 255, 255]))
-    mask = cv2.morphologyEx(
-        mask, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    from physiclaw.vision.util import find_largest_hsv_blob
+
+    return find_largest_hsv_blob(
+        frame, [5, 100, 100], [25, 255, 255], min_area=50
     )
-
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
-        return None
-
-    # Take the largest orange blob
-    largest = max(contours, key=cv2.contourArea)
-    if cv2.contourArea(largest) < 50:
-        return None
-
-    m = cv2.moments(largest)
-    if m["m00"] == 0:
-        return None
-    return (m["m10"] / m["m00"], m["m01"] / m["m00"])
