@@ -67,8 +67,13 @@ class BridgeState:
 
     @property
     def connected(self) -> bool:
-        """True if phone polled within the last 5 seconds."""
-        return time.time() - self.last_seen < 5.0
+        """True if phone polled within the last 0.5 seconds.
+
+        bridge.html polls every 250ms, so 0.5s = 2× the interval — tight
+        enough to detect a tab going to sleep almost immediately, loose
+        enough to ride through one dropped poll.
+        """
+        return time.time() - self.last_seen < 0.5
 
     def send_text(self, text: str):
         """Set text for the phone to display and copy on tap."""

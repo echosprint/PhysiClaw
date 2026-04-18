@@ -27,23 +27,27 @@ BRIDGE_WAIT_TIMEOUT = 120
 BRIDGE_SETTLE_SECONDS = 2.0
 
 
-def _wait_for_bridge(calib) -> bool:
-    """Block until the phone POSTs screen-dimension (``/bridge`` loaded or
-    reloaded). We don't clear the event first — if the POST arrived before
-    we got here (e.g. while connecting the arm), we want to use it, not
-    wipe it and wait for a second one that may never come. Bundle load
-    uses direct attribute assignment and doesn't touch the event, so the
-    only thing that can set it is a real phone POST. Sleeps
-    BRIDGE_SETTLE_SECONDS after the signal so the page finishes rendering.
-    """
-    if not calib.screen_dimension_updated.wait(timeout=BRIDGE_WAIT_TIMEOUT):
-        log.error(
-            f"--warm-start: no /bridge load within {BRIDGE_WAIT_TIMEOUT}s — "
-            "open the bridge page and retry."
-        )
-        return False
-    time.sleep(BRIDGE_SETTLE_SECONDS)
-    return True
+def _wait_for_bridge(bridge) -> bool:
+    """Block until the phone's /bridge tab has been actively polling for
+    at least BRIDGE_SETTLE_SECONDS continuously. One-shot ``connected``
+    could be a tab that briefly opened and got backgrounded — requiring
+    a sustained heartbeat catches that. Any dropout resets the clock."""
+    deadline = time.monotonic() + BRIDGE_WAIT_TIMEOUT
+    stable_since: float | None = None
+    while time.monotonic() < deadline:
+        if bridge.connected:
+            if stable_since is None:
+                stable_since = time.monotonic()
+            elif time.monotonic() - stable_since >= BRIDGE_SETTLE_SECONDS:
+                return True
+        else:
+            stable_since = None
+        time.sleep(0.2)
+    log.error(
+        f"--warm-start: /bridge page not polling steadily within "
+        f"{BRIDGE_WAIT_TIMEOUT}s — open or refresh /bridge on the phone."
+    )
+    return False
 
 
 def _sanity(physiclaw, calib, phone) -> bool:
@@ -131,7 +135,7 @@ def try_resume(cam_index_override: int | None) -> bool:
         print("  Open or refresh the phone's /bridge page.")
         print("  Warm-start will proceed automatically once it loads.")
         print("━" * 60)
-        if not _wait_for_bridge(_calib):
+        if not _wait_for_bridge(physiclaw._bridge):
             return False
     else:
         log.info("--warm-start: non-interactive; running sanity immediately")
