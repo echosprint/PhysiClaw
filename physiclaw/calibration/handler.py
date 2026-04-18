@@ -215,6 +215,9 @@ async def handle_validate_calibration(
             passed = sum(1 for r in results if r["passed"])
             if passed >= 2:
                 phone.set_mode("bridge")
+                # Capture the phone's current screen_dimension so warm-start
+                # doesn't have to wait for a fresh /bridge page load.
+                physiclaw.calibration.screen_dimension = calib.screen_dimension
                 physiclaw.calibration.save()
             return {
                 "results": results,

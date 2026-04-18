@@ -45,6 +45,7 @@ class Calibration:
     pct_to_cam: np.ndarray | None = None          # 2×3 affine: screen 0-1 → camera 0-1
     cam_size: tuple[int, int] | None = None       # (width, height) in camera pixels
     cam_index: int | None = None                  # USB camera index (for warm-restart)
+    screen_dimension: dict | None = None          # width, height, viewport_w/h in CSS pt
 
     @property
     def transforms_ready(self) -> bool:
@@ -62,6 +63,7 @@ class Calibration:
             self.viewport_shift is not None
             and self.z_tap is not None
             and self.cam_rotation is not None
+            and self.screen_dimension is not None
             and self.transforms_ready
         )
 
@@ -118,6 +120,7 @@ class Calibration:
             ),
             "cam_size": list(self.cam_size) if self.cam_size is not None else None,
             "cam_index": self.cam_index,
+            "screen_dimension": self.screen_dimension,
         }
 
     @classmethod
@@ -135,6 +138,7 @@ class Calibration:
             pct_to_cam=np.array(pc, dtype=np.float64) if pc is not None else None,
             cam_size=tuple(cs) if cs is not None else None,
             cam_index=payload.get("cam_index"),
+            screen_dimension=payload.get("screen_dimension"),
         )
 
     def save(self, path: Path = BUNDLE_PATH) -> None:

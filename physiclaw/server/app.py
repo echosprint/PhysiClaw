@@ -37,6 +37,11 @@ if _loaded is not None:
         # calib.viewport_shift (e.g. show_assistive_touch) see it too.
         _calib.viewport_shift = _loaded.viewport_shift
         physiclaw.assistive_touch.compute_at_screen_pos(_loaded.viewport_shift)
+    if _loaded.screen_dimension is not None:
+        # Restore the CSS-pt dimensions so warm-start's validate can run
+        # without waiting for the phone's /bridge page to reload and POST
+        # them again.
+        _calib.screen_dimension = _loaded.screen_dimension
     log.info(
         f"Restored calibration from disk: complete={_loaded.complete}, "
         f"z_tap={_loaded.z_tap}mm, rotation={_loaded.cam_rotation}"
