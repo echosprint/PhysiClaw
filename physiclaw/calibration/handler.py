@@ -15,13 +15,11 @@ import dataclasses
 from starlette.responses import JSONResponse
 
 from physiclaw.bridge import BridgeState, CalibrationState, PageState
-from physiclaw.calibration.state import ROTATION_NAMES
 from physiclaw.bridge.nonce import generate_nonce
 from physiclaw.calibration.calibrate import (
     measure_viewport_shift,
     calibrate_arm,
-    detect_camera_rotation,
-    pick_frame_rotation,
+    calibrate_camera_frame,
     compute_camera_mapping,
     validate_calibration,
     verify_assistive_touch,
@@ -121,40 +119,28 @@ async def handle_calibrate_arm(
         return _err(str(e))
 
 
-# ─── Camera rotation diagnostic ─────────────────────────────
+# ─── Camera frame calibration — setup check + rotation ──────
 
 
-async def handle_detect_camera_rotation(request, physiclaw):
-    """POST /api/calibrate/camera-rotation — detect physical camera rotation from a frame."""
+async def handle_calibrate_camera_frame(
+    request, physiclaw, calib: CalibrationState
+):
+    """POST /api/calibrate/camera — one-frame camera setup + rotation.
 
-    def _do():
-        if physiclaw._cam is None:
-            raise RuntimeError("Camera not connected")
-        return detect_camera_rotation(physiclaw._cam)
-
-    try:
-        result = await _run_blocking(_do)
-        return _ok(result)
-    except Exception as e:
-        return _err(str(e))
-
-
-# ─── Step 3: software rotation correction ───────────────────
-
-
-async def handle_pick_frame_rotation(request, physiclaw, calib: CalibrationState):
-    """POST /api/calibrate/frame-rotation — choose cv2 rotation to apply to camera frames."""
+    Runs the physical-setup diagnostic (shape, coverage, edge straightness)
+    and picks the cv2 rotation code from UP/RIGHT markers off the same
+    overhead frame. Writes ``cam_rotation`` into the calibration bundle;
+    diagnostic ``issues`` and measurements are returned for the caller
+    to surface to the user.
+    """
 
     def _do():
         if physiclaw._cam is None:
             raise RuntimeError("Camera not connected")
-        rotation = pick_frame_rotation(physiclaw._cam, calib)
-        physiclaw.calibration.cam_rotation = rotation
-        physiclaw._cam.rotation = rotation  # camera consumer reads from here
-        return {
-            "rotation": rotation,
-            "rotation_name": ROTATION_NAMES.get(rotation, str(rotation)),
-        }
+        result = calibrate_camera_frame(physiclaw._cam, calib)
+        physiclaw.calibration.cam_rotation = result["rotation"]
+        physiclaw._cam.rotation = result["rotation"]
+        return result
 
     try:
         result = await _run_blocking(_do)

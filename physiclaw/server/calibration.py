@@ -6,8 +6,7 @@ from physiclaw.bridge import BridgeState, CalibrationState, PageState
 from physiclaw.calibration.handler import (
     handle_measure_viewport_shift,
     handle_calibrate_arm,
-    handle_detect_camera_rotation,
-    handle_pick_frame_rotation,
+    handle_calibrate_camera_frame,
     handle_compute_camera_mapping,
     handle_validate_calibration,
     handle_trace_edge,
@@ -33,13 +32,9 @@ def register(
     async def _arm(request):
         return await handle_calibrate_arm(request, physiclaw, calib, phone)
 
-    @mcp.custom_route("/api/calibrate/camera-rotation", methods=["POST"])
-    async def _camera_rotation(request):
-        return await handle_detect_camera_rotation(request, physiclaw)
-
-    @mcp.custom_route("/api/calibrate/frame-rotation", methods=["POST"])
-    async def _frame_rotation(request):
-        return await handle_pick_frame_rotation(request, physiclaw, calib)
+    @mcp.custom_route("/api/calibrate/camera", methods=["POST"])
+    async def _camera(request):
+        return await handle_calibrate_camera_frame(request, physiclaw, calib)
 
     @mcp.custom_route("/api/calibrate/camera-mapping", methods=["POST"])
     async def _camera_mapping(request):

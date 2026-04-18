@@ -90,6 +90,10 @@ def fail(msg):
     print(f"  \033[31m✗ {msg}\033[0m")
 
 
+def warn(msg):
+    print(f"  \033[33m⚠ {msg}\033[0m")
+
+
 def main():
     auto = "-y" in sys.argv
     t0 = time.time()
@@ -195,29 +199,22 @@ def main():
             fail(f"Phone/arm axes skewed (tilt {tilt*100:.1f}%) — straighten phone and rerun if this persists")
         done(f"Arm ready: z_tap={r.get('z_tap')}mm{z_note}, {r.get('pairs')} tap pairs, tilt={tilt:.3f}")
 
-    # 7. Camera rotation
-    print("\n── 7. Camera rotation ──")
-    print("  Check camera angle: phone edges should be parallel to image edges.")
+    # 7. Camera calibration
+    print("\n── 7. Camera calibration ──")
+    print("  Adjust camera, then detect rotation + check phone fills the frame.")
     if not auto:
         subprocess.run(["open", "-a", "Photo Booth"])
-        wait("Adjust camera if needed, then close Photo Booth")
+        wait("Adjust camera angle/distance if needed, then close Photo Booth")
     api("POST", "/api/connect-camera", {"index": cam})
-    r = calibrate("camera-rotation", 10)
-    if r and r.get("ok") is False:
-        fail(f"Issues: {r.get('issues', [])}")
-    else:
-        done("Camera rotation OK")
+    r = calibrate("camera", 15)
+    if not ok(r):
+        fail(f"Camera calibration failed: {r}"); sys.exit(1)
+    for issue in r.get("issues") or []:
+        warn(issue)
+    done(f"Camera ready: {r.get('rotation_name')}, coverage {r.get('coverage'):.0%}")
 
-    # 8. Frame rotation
-    print("\n── 8. Frame rotation ──")
-    print("  Detecting UP/RIGHT markers for software rotation.")
-    if ask("Ready?", auto):
-        if not ok(calibrate("frame-rotation", 15)):
-            fail("Frame rotation failed"); sys.exit(1)
-    done("Frame rotation set")
-
-    # 9. Camera mapping
-    print("\n── 9. Camera mapping ──")
+    # 8. Camera mapping
+    print("\n── 8. Camera mapping ──")
     print("  Camera detects 15 red dots on phone screen.")
     if ask("Ready?", auto):
         calibrate_retry(
@@ -228,8 +225,8 @@ def main():
         )
     done("Screen→camera mapping computed")
 
-    # 10. Validate
-    print("\n── 10. Validate ──")
+    # 9. Validate
+    print("\n── 9. Validate ──")
     print("  Arm taps random dots and compares touch vs expected position.")
     if ask("Ready?", auto):
         r = calibrate("validate", 60)
@@ -238,8 +235,8 @@ def main():
             fail("Validation failed"); sys.exit(1)
     done("Calibration validated")
 
-    # 11. AssistiveTouch
-    print("\n── 11. AssistiveTouch ──")
+    # 10. AssistiveTouch
+    print("\n── 10. AssistiveTouch ──")
     print("  Verifying screenshot + clipboard pipeline.")
     calibrate("assistive-touch/show")
     if not auto:
@@ -266,15 +263,15 @@ def main():
             wait("Paste in Notes to verify it matches")
     done("Screenshot + clipboard pipeline verified")
 
-    # 12. Edge trace
-    print("\n── 12. Edge trace ──")
+    # 11. Edge trace
+    print("\n── 11. Edge trace ──")
     print("  Arm traces phone screen border clockwise, pausing at 8 points.")
     if ask("Watch for accuracy. Ready?", auto):
         calibrate("trace-edge", 60)
     done("Edge trace complete")
 
-    # 13. Go to Home Screen + mark ready
-    print("\n── 13. Home Screen ──")
+    # 12. Go to Home Screen + mark ready
+    print("\n── 12. Home Screen ──")
     api("POST", "/api/phone/home")
     time.sleep(3)  # let home-screen animation settle
     api("POST", "/api/ready")

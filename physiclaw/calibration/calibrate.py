@@ -256,134 +256,83 @@ def _descend_to_contact(
     )
 
 
-# ─── Step 2: Camera physical rotation check ──────────────────
+# ─── Camera frame calibration ───────────────────────────────
 
 
-def detect_camera_rotation(cam: Camera, screen_dimension: dict | None = None) -> dict:
-    """Check camera orientation, tilt, and coverage. Plan Step 2.
+def _check_phone_in_frame(frame: np.ndarray) -> dict:
+    """Shape/coverage/straightness diagnostic from one overhead frame.
 
-    Checks:
-    1. Long axes aligned: phone long axis matches image long axis
-    2. No tilt: phone aspect ratio in image ≈ actual screen aspect ratio
-    3. Coverage: phone area ≥ 70% of image area
-
-    Returns dict with ok, messages, and measurements.
+    Returns ``{ok, issues, coverage, aspect_ratio, image_size, phone_region}``.
+    Saves an annotated frame to /tmp/physiclaw_camera_rotation.jpg.
+    Raises if no bright region is detected (camera read failed or phone off).
     """
-    log.info("═══ Step 2: Camera physical rotation check ═══")
-    log.info("  Goal: verify camera is straight, aligned, and close enough to phone")
-    frame = cam._fresh_frame()
-    if frame is None:
-        raise RuntimeError("Step 2 FAILED — camera read failed")
-
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     _, mask = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
-        raise RuntimeError("Step 2 FAILED — no bright region in camera frame")
+        raise RuntimeError("No bright region in camera frame — is the phone on?")
 
     largest = max(contours, key=cv2.contourArea)
-    # Use minAreaRect for orientation and area (handles rotated phones)
     rect = cv2.minAreaRect(largest)
     rect_w, rect_h = rect[1]
     phone_area_px = rect_w * rect_h
     img_h, img_w = frame.shape[:2]
-    image_area = img_w * img_h
-    issues = []
+    coverage = phone_area_px / (img_w * img_h)
+    bx, by, bw, bh = cv2.boundingRect(largest)
+    issues: list[str] = []
 
-    # Save annotated image with actual contour + min-area rect
     annotated = frame.copy()
     cv2.drawContours(annotated, [largest], -1, (0, 255, 0), 3)
-    box = cv2.boxPoints(rect)
-    box = np.int32(box)
-    cv2.drawContours(annotated, [box], -1, (0, 200, 255), 2)
-    coverage = phone_area_px / image_area
-    label = f"area {coverage:.0%}"
-    bx, by, _, _ = cv2.boundingRect(largest)
+    cv2.drawContours(annotated, [np.int32(cv2.boxPoints(rect))], -1, (0, 200, 255), 2)
     cv2.putText(
-        annotated, label, (bx + 5, by + 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2
+        annotated, f"area {coverage:.0%}", (bx + 5, by + 30),
+        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2,
     )
     cv2.imwrite("/tmp/physiclaw_camera_rotation.jpg", annotated)
 
-    # 1. Camera rotation — phone edges should be parallel to image edges.
-    # Compute angle from the longest edge of the min-area rect.
-    phone_long = max(rect_w, rect_h)
-    phone_short = min(rect_w, rect_h)
+    # Phone edges should be parallel to image edges (< 3° deviation).
     pts = cv2.boxPoints(rect)
-    # Find the longest edge and compute its angle to horizontal
     edges = [(pts[i], pts[(i + 1) % 4]) for i in range(4)]
     longest_edge = max(edges, key=lambda e: np.linalg.norm(e[1] - e[0]))
-    dx = longest_edge[1][0] - longest_edge[0][0]
-    dy = longest_edge[1][1] - longest_edge[0][1]
-    # Angle of longest edge relative to horizontal (or vertical)
-    angle_deg = abs(np.degrees(np.arctan2(dy, dx)))
-    # Normalize to deviation from nearest axis (0°, 90°, 180°)
+    angle_deg = abs(np.degrees(np.arctan2(
+        longest_edge[1][1] - longest_edge[0][1],
+        longest_edge[1][0] - longest_edge[0][0],
+    )))
     rotation_dev = min(angle_deg % 90, 90 - angle_deg % 90)
-    rotation_ok = rotation_dev < 3.0  # < 3° deviation
-    if not rotation_ok:
+    if rotation_dev >= 3.0:
         issues.append(
-            f"Straighten camera — phone edges rotated {rotation_dev:.1f}° from image edges"
+            f"Straighten camera — phone edges rotated {rotation_dev:.1f}° from image"
         )
-    log.info(
-        f"  Camera frame: {img_w}×{img_h}px, phone region: {rect_w:.0f}×{rect_h:.0f}px"
-    )
-    log.info(
-        f"  Check 1 — Edge straightness: {rotation_dev:.1f}° deviation from image axis "
-        f"(threshold < 3°) → {'OK' if rotation_ok else 'FAIL — straighten camera'}"
-    )
 
-    # 2. Long axes aligned
-    image_long_horizontal = img_w > img_h
-    bx, by, bw, bh = cv2.boundingRect(largest)
-    bbox_long_horizontal = bw > bh
-    axes_ok = bbox_long_horizontal == image_long_horizontal
-    if not axes_ok:
+    # Long axes aligned (phone long axis parallel to image long axis).
+    if (bw > bh) != (img_w > img_h):
         issues.append("Rotate camera 90° — long axes not aligned")
-    log.info(
-        f"  Check 2 — Long axis alignment: image long axis is "
-        f"{'horizontal' if image_long_horizontal else 'vertical'}, "
-        f"phone long axis is {'horizontal' if bbox_long_horizontal else 'vertical'} → "
-        f"{'OK' if axes_ok else 'FAIL — rotate camera 90°'}"
-    )
 
-    # 3. Aspect ratio check (tilt detection)
+    # Aspect ratio sanity check (camera tilt).
+    phone_long = max(rect_w, rect_h)
+    phone_short = min(rect_w, rect_h)
     phone_ratio = phone_long / max(phone_short, 1)
-    if screen_dimension:
-        screen_w = screen_dimension.get("width", 430)
-        screen_h = screen_dimension.get("height", 932)
-        expected_ratio = max(screen_w, screen_h) / max(min(screen_w, screen_h), 1)
-    else:
-        expected_ratio = 2.0  # typical phone ~19.5:9 ≈ 2.17
-    ratio_diff = abs(phone_ratio - expected_ratio) / expected_ratio
-    tilt_ok = ratio_diff < 0.15
-    if not tilt_ok:
+    ratio_diff = abs(phone_ratio - 2.0) / 2.0
+    if ratio_diff >= 0.15:
         issues.append(
-            f"Camera may be tilted — aspect ratio {phone_ratio:.2f} "
-            f"vs expected {expected_ratio:.2f} (diff {ratio_diff:.0%})"
+            f"Camera may be tilted — phone aspect {phone_ratio:.2f} (diff {ratio_diff:.0%})"
         )
-    log.info(
-        f"  Check 3 — Aspect ratio (tilt detection): phone={phone_ratio:.2f}, "
-        f"expected={expected_ratio:.2f}, diff={ratio_diff:.0%} "
-        f"(threshold < 15%) → {'OK' if tilt_ok else 'FAIL — camera may be tilted'}"
-    )
 
-    # 4. Coverage check (min-area rect ≥ 30% of image area)
-    coverage_ok = coverage >= 0.30
-    if not coverage_ok:
+    # Coverage: phone should fill ≥ 30% of frame.
+    if coverage < 0.30:
         issues.append(
             f"Move camera closer — phone covers only {coverage:.0%} of image (need ≥30%)"
         )
-    log.info(
-        f"  Check 4 — Coverage: phone occupies {coverage:.0%} of camera frame "
-        f"(threshold ≥ 30%) → {'OK' if coverage_ok else 'FAIL — move camera closer'}"
-    )
 
-    ok = axes_ok and tilt_ok and coverage_ok
-    if ok:
-        log.info("  ✓ Step 2 done: camera position is good")
-    else:
-        log.warning(f"  ✗ Step 2: {len(issues)} issue(s) — {'; '.join(issues)}")
+    log.info(
+        f"  Phone in frame: {rect_w:.0f}×{rect_h:.0f}px, "
+        f"edge dev {rotation_dev:.1f}°, aspect {phone_ratio:.2f}, coverage {coverage:.0%}"
+    )
+    if issues:
+        log.warning(f"  Camera setup issues: {'; '.join(issues)}")
+
     return {
-        "ok": ok,
+        "ok": not issues,
         "issues": issues,
         "phone_region": [round(rect_w), round(rect_h)],
         "image_size": [img_w, img_h],
@@ -392,26 +341,13 @@ def detect_camera_rotation(cam: Camera, screen_dimension: dict | None = None) ->
     }
 
 
-# ─── Step 3: Software rotation via UP/RIGHT markers ──────────
+def _pick_rotation_from_markers(frame: np.ndarray) -> tuple[int, str]:
+    """Locate blue UP and red RIGHT markers, derive the cv2 rotation code.
 
-
-def pick_frame_rotation(cam: Camera, cal: CalibrationState) -> int:
-    """Detect blue UP/RIGHT markers, determine software rotation. Plan Step 3.
-
-    Returns cv2 rotation code (cv2.ROTATE_* or -1 for no rotation).
+    Returns (rotation_code, human_label). Rotation is -1 (none) or one of
+    cv2.ROTATE_{90_CLOCKWISE, 180, 90_COUNTERCLOCKWISE}. Raises if either
+    marker is missing.
     """
-    log.info("═══ Step 3: Software rotation via UP/RIGHT markers ═══")
-    log.info("  Goal: detect how camera image is rotated relative to phone orientation")
-    cal.set_phase("markers")
-    time.sleep(1.0)
-    log.info(
-        "  Phase: markers — phone shows blue UP label (top) and red RIGHT label (right)"
-    )
-
-    frame = cam._fresh_frame()
-    if frame is None:
-        raise RuntimeError("Step 3 FAILED — camera read failed")
-
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
 
@@ -430,43 +366,61 @@ def pick_frame_rotation(cam: Camera, cal: CalibrationState) -> int:
             if best is None or area > best[2]:
                 best = (m["m10"] / m["m00"], m["m01"] / m["m00"], area)
         if best is None:
-            raise RuntimeError(f"Step 3 FAILED — {label} marker not found")
+            raise RuntimeError(f"{label} marker not found")
         return best[0], best[1]
 
-    # UP = blue (#2563eb → HSV H≈110), RIGHT = red (#ef4444 → HSV H≈0/180)
+    # UP = blue (#2563eb → HSV H≈110), RIGHT = red (#ef4444 → HSV H≈0/180).
     up_x, up_y = _find_blob([100, 80, 80], [130, 255, 255], "UP (blue)")
     right_x, right_y = _find_blob([0, 80, 80], [10, 255, 255], "RIGHT (red)")
-    # Also check wrapped red hue (170-180)
     try:
-        rx2, ry2 = _find_blob([170, 80, 80], [180, 255, 255], "RIGHT (red high)")
-        # Pick whichever red blob is larger / was found
-        right_x, right_y = rx2, ry2
+        right_x, right_y = _find_blob(
+            [170, 80, 80], [180, 255, 255], "RIGHT (red high)"
+        )
     except RuntimeError:
-        pass  # first range was enough
+        pass
 
-    log.info(f"  Blue UP marker: camera pixel ({up_x:.0f}, {up_y:.0f})")
-    log.info(f"  Red RIGHT marker: camera pixel ({right_x:.0f}, {right_y:.0f})")
+    log.info(f"  Blue UP at ({up_x:.0f}, {up_y:.0f}), red RIGHT at ({right_x:.0f}, {right_y:.0f})")
 
-    # Determine rotation by relative position of UP vs RIGHT
     if up_y < right_y and abs(up_x - right_x) < abs(up_y - right_y):
-        rotation = -1  # no rotation
-        rot_label = "0° — no rotation needed"
-    elif up_x < right_x and abs(up_y - right_y) < abs(up_x - right_x):
-        rotation = cv2.ROTATE_90_CLOCKWISE
-        rot_label = "90° clockwise"
-    elif up_y > right_y and abs(up_x - right_x) < abs(up_y - right_y):
-        rotation = cv2.ROTATE_180
-        rot_label = "180°"
-    else:
-        rotation = cv2.ROTATE_90_COUNTERCLOCKWISE
-        rot_label = "90° counter-clockwise"
+        return -1, "0° — no rotation needed"
+    if up_x < right_x and abs(up_y - right_y) < abs(up_x - right_x):
+        return cv2.ROTATE_90_CLOCKWISE, "90° clockwise"
+    if up_y > right_y and abs(up_x - right_x) < abs(up_y - right_y):
+        return cv2.ROTATE_180, "180°"
+    return cv2.ROTATE_90_COUNTERCLOCKWISE, "90° counter-clockwise"
 
-    log.info(
-        f"  UP is {'above' if up_y < right_y else 'below'} RIGHT, "
-        f"{'left of' if up_x < right_x else 'right of'} RIGHT"
-    )
-    log.info(f"  ✓ Step 3 done: camera needs {rot_label} to match phone orientation")
-    return rotation
+
+def calibrate_camera_frame(cam: Camera, cal: CalibrationState) -> dict:
+    """Camera frame calibration — physical setup check + rotation code.
+
+    One overhead frame drives both:
+      - physical camera-setup diagnostic (shape, coverage, edge straightness),
+      - software rotation code picked from the UP/RIGHT markers.
+
+    Returns ``{"rotation", "rotation_name", "setup_ok", "issues",
+              "coverage", "aspect_ratio", "image_size", "phone_region"}``.
+    """
+    log.info("═══ Camera frame calibration ═══")
+    cal.set_phase("markers")
+    time.sleep(1.0)
+
+    frame = cam._fresh_frame()
+    if frame is None:
+        raise RuntimeError("Camera read failed — is the camera connected?")
+
+    checks = _check_phone_in_frame(frame)
+    rotation, rot_label = _pick_rotation_from_markers(frame)
+    log.info(f"  ✓ Camera frame: rotation={rot_label}, setup_ok={checks['ok']}")
+    return {
+        "rotation": rotation,
+        "rotation_name": rot_label,
+        "setup_ok": checks["ok"],
+        "issues": checks["issues"],
+        "coverage": checks["coverage"],
+        "aspect_ratio": checks["aspect_ratio"],
+        "image_size": checks["image_size"],
+        "phone_region": checks["phone_region"],
+    }
 
 
 # ─── Screen ↔ arm affine (Mapping A) ────────────────────────
