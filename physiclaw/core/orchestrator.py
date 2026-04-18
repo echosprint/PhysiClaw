@@ -19,7 +19,7 @@ from contextlib import contextmanager
 from typing import Literal
 
 from physiclaw.bridge import BridgeState
-from physiclaw.calibration import ScreenTransforms
+from physiclaw.calibration import Calibration, ScreenTransforms
 from physiclaw.hardware.arm import StylusArm
 from physiclaw.hardware.camera import Camera
 from physiclaw.hardware.iphone import AssistiveTouch
@@ -46,9 +46,8 @@ class PhysiClaw:
     def __init__(self):
         self._arm: StylusArm | None = None
         self._cam: Camera | None = None
-        self._transforms: ScreenTransforms | None = None
+        self.calibration: Calibration = Calibration()
         self._lock = threading.Lock()
-        self._cal: dict = {}  # intermediate calibration state between phases
         self._assistive_touch = AssistiveTouch()
         self._bridge: BridgeState | None = None
         self._ocr_reader: OCRReader | None = None
@@ -75,33 +74,14 @@ class PhysiClaw:
         return (
             self._arm is not None
             and self._cam is not None
-            and self._transforms is not None
+            and self.calibration.transforms_ready
         )
 
     def status(self) -> dict:
         """Return current hardware and calibration state."""
-        steps = {}
-        z_tap = self._cal.get("z_tap")
-        if z_tap is not None:
-            steps["z_tap"] = f"{z_tap}mm"
-        if "viewport_shift" in self._cal:
-            t = self._cal["viewport_shift"]
-            steps["viewport_shift"] = (
-                f"dpr={t.dpr}, offset=({t.offset_x}, {t.offset_y})"
-            )
+        steps = self.calibration.summary()
         if self._arm and self._arm.MOVE_DIRECTIONS:
             steps["alignment"] = "OK"
-        if "rotation" in self._cal:
-            names = {-1: "none", 0: "90° CW", 1: "180°", 2: "90° CCW"}
-            steps["rotation"] = names.get(
-                self._cal["rotation"], str(self._cal["rotation"])
-            )
-        if "screen_to_grbl" in self._cal:
-            steps["mapping_a"] = "OK"
-        if "pct_to_cam" in self._cal:
-            steps["mapping_b"] = "OK"
-        if self._transforms is not None:
-            steps["validated"] = True
         if self._assistive_touch.ready:
             sx, sy = self._assistive_touch.at_screen
             steps["assistive_touch"] = f"({sx:.3f}, {sy:.3f})"
@@ -157,7 +137,7 @@ class PhysiClaw:
             frame = self.cam.peek()
             if frame is None:
                 return {"wake": False, "reason": ""}
-            return self._watchdog.poll(frame, self._transforms)
+            return self._watchdog.poll(frame, self.transforms)
 
 
     # ─── Hardware connection ──────────────────────────────────
@@ -165,13 +145,13 @@ class PhysiClaw:
     def connect_arm(self):
         """Connect to the GRBL stylus arm (auto-detect USB port).
 
-        Closes any previously connected arm first.
+        Closes any previously connected arm first. Resets calibration
+        because a new arm invalidates all learned mappings.
         """
         if self._arm is not None:
             self._arm.close()
             self._arm = None
-        self._cal = {}  # reset calibration state
-        self._transforms = None
+        self.calibration = Calibration()
         self._arm = StylusArm()
         self._arm.setup()
         log.info("Arm connected")
@@ -201,7 +181,7 @@ class PhysiClaw:
 
     @property
     def transforms(self) -> ScreenTransforms | None:
-        return self._transforms
+        return self.calibration.transforms()
 
     @property
     def assistive_touch(self) -> AssistiveTouch:
@@ -211,7 +191,7 @@ class PhysiClaw:
 
     def park(self):
         """Move stylus off-screen to (-0.1, -0.05) — left of the screen, slightly above top edge."""
-        gx, gy = self._transforms.pct_to_grbl_mm(-0.1, -0.05)
+        gx, gy = self.transforms.pct_to_grbl_mm(-0.1, -0.05)
         self._arm._fast_move(gx, gy)
         self._arm.wait_idle()
 
@@ -229,10 +209,11 @@ class PhysiClaw:
 
     def move_to_bbox_center(self, bbox: list[float]):
         """Move arm to the center of a bbox [left, top, right, bottom] (0-1)."""
-        if self._transforms is None:
+        t = self.transforms
+        if t is None:
             raise RuntimeError("Screen calibration not done")
-        cx, cy = self._transforms.bbox_center_pct(bbox)
-        gx, gy = self._transforms.pct_to_grbl_mm(cx, cy)
+        cx, cy = t.bbox_center_pct(bbox)
+        gx, gy = t.pct_to_grbl_mm(cx, cy)
         self._arm._fast_move(gx, gy)
         self._arm.wait_idle()
 
@@ -267,7 +248,7 @@ class PhysiClaw:
         self.park()
         frame = self.camera_view()
         results = self._get_ocr_reader().read(frame)
-        elements = results_to_elements(results, self._transforms)
+        elements = results_to_elements(results, self.transforms)
         return [e for e in elements if bbox_on_screen(e["bbox"])]
 
     def scan(self) -> str:
@@ -294,7 +275,7 @@ class PhysiClaw:
         with self.locked():
             self._require_at_bridge()
             data = self._assistive_touch.take_screenshot(
-                self._arm, self._bridge, self._transforms.pct_to_grbl, timeout=60.0
+                self._arm, self._bridge, self.transforms.pct_to_grbl, timeout=60.0
             )
             if data is None:
                 raise TimeoutError(
@@ -341,10 +322,9 @@ class PhysiClaw:
         speed: Literal["slow", "medium", "fast"] = "medium",
     ):
         """Swipe from bbox center. Caller must hold the lock."""
-        ex, ey = self._transforms.swipe_end_pct(
-            bbox, direction, self._SWIPE_DISTANCES[size]
-        )
-        ex_mm, ey_mm = self._transforms.pct_to_grbl_mm(ex, ey)
+        t = self.transforms
+        ex, ey = t.swipe_end_pct(bbox, direction, self._SWIPE_DISTANCES[size])
+        ex_mm, ey_mm = t.pct_to_grbl_mm(ex, ey)
         self.move_to_bbox_center(bbox)
         arm = self._arm
         arm._pen_down()
@@ -405,7 +385,7 @@ class PhysiClaw:
         with self.locked():
             self._require_at_bridge()
             self._bridge.send_text(text)
-            self._assistive_touch.long_press(self._arm, self._transforms.pct_to_grbl)
+            self._assistive_touch.long_press(self._arm, self.transforms.pct_to_grbl)
             if self._bridge.wait_clipboard(timeout=30.0):
                 return f"Copied '{text}' to phone clipboard"
             return "AT long-pressed but clipboard not confirmed — check the iOS Shortcut"

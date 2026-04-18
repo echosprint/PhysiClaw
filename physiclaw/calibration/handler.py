@@ -1,12 +1,10 @@
 """HTTP route handlers for the 7-step calibration plan.
 
 Each handler runs the corresponding `calibrate` step in a thread
-executor, mutates the orchestrator's intermediate calibration state, and
+executor, writes the result into ``physiclaw.calibration`` (a typed
+:class:`Calibration` dataclass — the single source of truth), and
 returns a JSON response. The Starlette event loop stays responsive
 because the blocking step functions run off-thread.
-
-The handlers reach into `physiclaw._cal[...]` and friends because that
-is where the 7-step plan accumulates intermediate results between calls.
 """
 
 import asyncio
@@ -14,10 +12,10 @@ import logging
 
 import dataclasses
 
-import cv2
 from starlette.responses import JSONResponse
 
 from physiclaw.bridge import BridgeState, CalibrationState, PageState
+from physiclaw.calibration.state import ROTATION_NAMES
 from physiclaw.bridge.nonce import generate_nonce
 from physiclaw.calibration.calibrate import (
     measure_viewport_shift,
@@ -65,7 +63,7 @@ async def handle_measure_viewport_shift(
     def _do():
         phone.set_mode("calibrate", phase="screenshot_cal")
         result = measure_viewport_shift(calib, bridge)
-        physiclaw._cal["viewport_shift"] = result
+        physiclaw.calibration.viewport_shift = result
         return result
 
     try:
@@ -99,7 +97,7 @@ async def handle_find_pen_depth(
             finally:
                 physiclaw.release()
         physiclaw._arm.Z_DOWN = z_tap
-        physiclaw._cal["z_tap"] = z_tap
+        physiclaw.calibration.z_tap = z_tap
         return {"z_tap": z_tap, "cached": cached is not None}
 
     try:
@@ -118,7 +116,7 @@ async def handle_check_arm_tilt(request, physiclaw, calib: CalibrationState):
     def _do():
         if physiclaw._arm is None:
             raise RuntimeError("Arm not connected")
-        z_tap = physiclaw._cal.get("z_tap")
+        z_tap = physiclaw.calibration.z_tap
         if z_tap is None:
             raise RuntimeError("Run pen-depth first")
         physiclaw.acquire()
@@ -163,12 +161,12 @@ async def handle_pick_frame_rotation(request, physiclaw, calib: CalibrationState
         if physiclaw._cam is None:
             raise RuntimeError("Camera not connected")
         rotation = pick_frame_rotation(physiclaw._cam, calib)
-        physiclaw._cal["rotation"] = rotation
-        physiclaw._cam.rotation = rotation  # single source of truth for peek/snapshot
-        name = {-1: "none", 0: "90° CW", 1: "180°", 2: "90° CCW"}.get(
-            rotation, str(rotation)
-        )
-        return {"rotation": rotation, "rotation_name": name}
+        physiclaw.calibration.cam_rotation = rotation
+        physiclaw._cam.rotation = rotation  # camera consumer reads from here
+        return {
+            "rotation": rotation,
+            "rotation_name": ROTATION_NAMES.get(rotation, str(rotation)),
+        }
 
     try:
         result = await _run_blocking(_do)
@@ -186,13 +184,13 @@ async def handle_compute_grbl_mapping(request, physiclaw, calib: CalibrationStat
     def _do():
         if physiclaw._arm is None:
             raise RuntimeError("Arm not connected")
-        z_tap = physiclaw._cal.get("z_tap")
+        z_tap = physiclaw.calibration.z_tap
         if z_tap is None:
             raise RuntimeError("Run pen-depth first")
         physiclaw.acquire()
         try:
             pct_to_grbl, touches = compute_grbl_mapping(physiclaw._arm, calib, z_tap)
-            physiclaw._cal["screen_to_grbl"] = pct_to_grbl
+            physiclaw.calibration.pct_to_grbl = pct_to_grbl
             right_vec = (float(pct_to_grbl[0, 0]), float(pct_to_grbl[1, 0]))
             down_vec = (float(pct_to_grbl[0, 1]), float(pct_to_grbl[1, 1]))
             physiclaw._arm.set_direction_mapping(right_vec, down_vec)
@@ -216,7 +214,7 @@ async def handle_compute_camera_mapping(request, physiclaw, calib: CalibrationSt
     def _do():
         if physiclaw._cam is None:
             raise RuntimeError("Camera not connected")
-        rotation = physiclaw._cal.get("rotation", cv2.ROTATE_90_COUNTERCLOCKWISE)
+        rotation = physiclaw.calibration.effective_rotation()
         physiclaw.acquire()
         try:
             # Park the arm 80mm off the top edge so it doesn't occlude the dots
@@ -228,8 +226,8 @@ async def handle_compute_camera_mapping(request, physiclaw, calib: CalibrationSt
             pct_to_cam, cam_size = compute_camera_mapping(
                 physiclaw._cam, calib, rotation
             )
-            physiclaw._cal["pct_to_cam"] = pct_to_cam
-            physiclaw._cal["cam_size"] = cam_size
+            physiclaw.calibration.pct_to_cam = pct_to_cam
+            physiclaw.calibration.cam_size = cam_size
             return {"ok": True, "dots": 15, "cam_size": list(cam_size)}
         finally:
             physiclaw.release()
@@ -252,13 +250,14 @@ async def handle_validate_calibration(
     def _do():
         if physiclaw._arm is None:
             raise RuntimeError("Arm not connected")
-        z_tap = physiclaw._cal.get("z_tap")
-        rotation = physiclaw._cal.get("rotation", cv2.ROTATE_90_COUNTERCLOCKWISE)
-        pct_to_grbl = physiclaw._cal.get("screen_to_grbl")
-        pct_to_cam = physiclaw._cal.get("pct_to_cam")
-        cam_size = physiclaw._cal.get("cam_size", (1920, 1080))
-        if not all([z_tap, pct_to_grbl is not None, pct_to_cam is not None]):
+        cal_state = physiclaw.calibration
+        if not cal_state.transforms_ready or cal_state.z_tap is None:
             raise RuntimeError("Run pen-depth, grbl-mapping, and camera-mapping first")
+        z_tap = cal_state.z_tap
+        pct_to_grbl = cal_state.pct_to_grbl
+        pct_to_cam = cal_state.pct_to_cam
+        cam_size = cal_state.cam_size
+        rotation = cal_state.effective_rotation()
         physiclaw.acquire()
         try:
             results = validate_calibration(
@@ -273,11 +272,6 @@ async def handle_validate_calibration(
             )
             passed = sum(1 for r in results if r["passed"])
             if passed >= 2:
-                from physiclaw.calibration import ScreenTransforms
-
-                physiclaw._transforms = ScreenTransforms(
-                    pct_to_grbl=pct_to_grbl, pct_to_cam=pct_to_cam, cam_size=cam_size
-                )
                 phone.set_mode("bridge")
             return {
                 "results": results,
@@ -350,7 +344,7 @@ async def handle_verify_assistive_touch(
     def _do():
         if physiclaw._arm is None:
             raise RuntimeError("Arm not connected")
-        pct_to_grbl = physiclaw._cal.get("screen_to_grbl")
+        pct_to_grbl = physiclaw.calibration.pct_to_grbl
         if pct_to_grbl is None:
             raise RuntimeError("Run grbl-mapping first")
         if not physiclaw.assistive_touch.at_screen:
