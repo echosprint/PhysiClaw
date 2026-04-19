@@ -48,16 +48,28 @@ class OCRReader:
         logging.disable(logging.NOTSET)
         logging.getLogger("RapidOCR").setLevel(logging.WARNING)
 
-    def read(self, frame: np.ndarray) -> list[TextResult]:
+    def read(
+        self,
+        frame: np.ndarray,
+        crop_box: tuple[int, int, int, int] | None = None,
+    ) -> list[TextResult]:
         """Detect and read all text in an image.
 
-        Args:
-            frame: BGR image (numpy array).
+        When ``crop_box`` is given, OCR only inside that rectangle but
+        report bboxes in the original frame's coordinate space — lets
+        callers skip off-screen pixels without rewriting coordinates.
 
-        Returns:
-            List of TextResult sorted top-to-bottom, left-to-right.
+        Returns TextResults sorted top-to-bottom, left-to-right.
         """
-        result = self._ocr(frame)
+        if crop_box is None:
+            image = frame
+            dx, dy = 0, 0
+        else:
+            left, top, right, bottom = crop_box
+            image = frame[top:bottom, left:right]
+            dx, dy = left, top
+
+        result = self._ocr(image)
 
         if result.boxes is None or result.txts is None:
             return []
@@ -66,8 +78,8 @@ class OCRReader:
         for points, text, score in zip(result.boxes, result.txts, result.scores):
             xs = [p[0] for p in points]
             ys = [p[1] for p in points]
-            x1, y1 = int(min(xs)), int(min(ys))
-            x2, y2 = int(max(xs)), int(max(ys))
+            x1, y1 = int(min(xs)) + dx, int(min(ys)) + dy
+            x2, y2 = int(max(xs)) + dx, int(max(ys)) + dy
 
             texts.append(
                 TextResult(

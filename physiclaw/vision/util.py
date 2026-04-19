@@ -17,6 +17,45 @@ def encode_jpeg(frame: np.ndarray, quality: int = 85) -> bytes:
     return jpeg.tobytes()
 
 
+def phone_screen_crop_box(
+    frame: np.ndarray, transforms
+) -> tuple[int, int, int, int] | None:
+    """Camera pixel rectangle (left, top, right, bottom) enclosing the phone screen.
+
+    Returns None if calibration is missing or the rectangle degenerates
+    after clamping to frame bounds.
+    """
+    if transforms is None:
+        return None
+    (x0, y0), (x1, y1) = transforms.bbox_to_pixel_rect([0.0, 0.0, 1.0, 1.0])
+    h, w = frame.shape[:2]
+    left, right = max(0, min(x0, x1)), min(w, max(x0, x1))
+    top, bottom = max(0, min(y0, y1)), min(h, max(y0, y1))
+    if right <= left or bottom <= top:
+        return None
+    return (left, top, right, bottom)
+
+
+def crop_to_phone_screen(
+    frame: np.ndarray, transforms, max_long_edge: int = 1024
+) -> np.ndarray:
+    """Crop to the phone-screen region and downscale to cap vision tokens.
+
+    Returns the frame untouched if calibration is missing.
+    """
+    box = phone_screen_crop_box(frame, transforms)
+    if box is None:
+        return frame
+    left, top, right, bottom = box
+    cropped = frame[top:bottom, left:right]
+    long_edge = max(cropped.shape[:2])
+    if long_edge > max_long_edge:
+        scale = max_long_edge / long_edge
+        new_size = (int(cropped.shape[1] * scale), int(cropped.shape[0] * scale))
+        cropped = cv2.resize(cropped, new_size, interpolation=cv2.INTER_AREA)
+    return cropped
+
+
 def decode_image(data: bytes) -> np.ndarray:
     """Decode image bytes (PNG or JPEG) to a BGR frame. Raises on failure."""
     arr = np.frombuffer(data, dtype=np.uint8)

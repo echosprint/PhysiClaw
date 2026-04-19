@@ -26,8 +26,9 @@ from physiclaw.hardware.iphone import AssistiveTouch
 from physiclaw.vision.icon_detect import IconDetector
 from physiclaw.vision.ocr import OCRReader, results_to_elements
 from physiclaw.vision.util import (
-    bbox_on_screen, decode_image, encode_jpeg, format_elements,
-    find_numpad_digit, validate_bbox,
+    bbox_on_screen, crop_to_phone_screen, decode_image, encode_jpeg,
+    format_elements, find_numpad_digit, phone_screen_crop_box,
+    validate_bbox,
 )
 from physiclaw.vision.ui_elements import detect_ui_elements, elements_to_json
 from physiclaw.vision.watchdog import Watchdog
@@ -269,12 +270,14 @@ class PhysiClaw:
     def _scan(self) -> list[dict]:
         """OCR the screen → list of element dicts. Caller must hold the lock.
 
-        Filters out elements outside the phone screen — the camera
-        also captures the desk, ruler, etc.
+        OCRs only the calibrated phone-screen region — the camera also sees
+        desk, ruler, etc.
         """
         self.park()
         frame = self.camera_view()
-        results = self._get_ocr_reader().read(frame)
+        results = self._get_ocr_reader().read(
+            frame, crop_box=phone_screen_crop_box(frame, self.transforms)
+        )
         elements = results_to_elements(results, self.transforms)
         return [e for e in elements if bbox_on_screen(e["bbox"])]
 
@@ -288,10 +291,10 @@ class PhysiClaw:
             return format_elements(self._scan())
 
     def peek(self) -> bytes:
-        """Quick camera snapshot. Returns JPEG-encoded bytes."""
+        """Camera snapshot cropped+downscaled to the phone screen. Returns JPEG bytes."""
         with self.locked():
             self.park()
-            return encode_jpeg(self.camera_view())
+            return encode_jpeg(crop_to_phone_screen(self.camera_view(), self.transforms))
 
     def screenshot(self) -> tuple[bytes, str]:
         """Pixel-perfect phone screenshot with UI elements detected.
