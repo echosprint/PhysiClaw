@@ -19,6 +19,8 @@ import subprocess
 import sys
 import threading
 
+from physiclaw.logger import setup_logging
+
 
 def _spawn_runtime(port: int, verbose: bool) -> subprocess.Popen:
     """Launch the hook loop as a child process.
@@ -70,10 +72,7 @@ def main():
     )
     args = parser.parse_args()
 
-    logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
-        format="[physiclaw] %(message)s",
-    )
+    setup_logging("physiclaw", logging.DEBUG if args.verbose else logging.INFO)
     # mcp.server.lowlevel logs "Processing request of type X" at INFO on
     # every tool call — one line per call is just noise at our layer.
     logging.getLogger("mcp").setLevel(logging.WARNING)

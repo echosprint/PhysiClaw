@@ -17,6 +17,7 @@ import os
 
 from agent.runtime import Runtime
 from agent.runtime.claude import spawn_claude
+from physiclaw.logger import setup_logging
 
 log = logging.getLogger(__name__)
 
@@ -32,10 +33,7 @@ def main() -> None:
     # before load_hooks() imports them.
     os.environ.setdefault("PHYSICLAW_SERVER", args.server)
 
-    logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
-        format="[runtime] %(message)s",
-    )
+    setup_logging("runtime", logging.DEBUG if args.verbose else logging.INFO)
     # Silence noisy per-request logs from httpx/httpcore.
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
