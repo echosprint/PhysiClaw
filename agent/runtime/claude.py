@@ -68,7 +68,7 @@ def _build_prompt(triggers: list[Trigger]) -> str:
 
 # --- Logging ---
 
-SENTINEL = re.compile(r">+ (DONE|STUCK|IDLE) - (.+)")
+SENTINEL = re.compile(r">+ (DONE|STUCK|IDLE|WAIT) - (.+)")
 
 
 def _redact_images(content):
@@ -252,6 +252,6 @@ async def spawn_claude(triggers: list[Trigger]) -> None:
             slog.close()
 
         if status != "UNDONE":
-            return  # DONE, STUCK, or IDLE — agent finished cleanly, no retry
+            return  # DONE, STUCK, IDLE, or WAIT — agent finished cleanly, no retry
 
     log.error("giving up after %d UNDONE attempts", MAX_ATTEMPTS)

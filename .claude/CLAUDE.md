@@ -27,8 +27,9 @@ End every turn with a final line in this exact format (single spaces, ASCII hyph
 - `>> DONE - RECAP` after completing a task (RECAP = one-line summary)
 - `>> STUCK - BLOCKER` when you can't proceed (BLOCKER = what's in the way)
 - `>> IDLE - REASON` when the wake needed no action (REASON = why)
+- `>> WAIT - REASON` when paused waiting for an owner reply (REASON = what you're waiting on)
 
-If the last non-empty line of your turn doesn't start with `>> DONE`, `>> STUCK`, or `>> IDLE`, the turn is logged as **UNDONE**.
+Before a `>> WAIT` exit, schedule a `/cron` check to come back and read the reply — a bare WAIT hangs forever.
 
 ## Boundaries
 
