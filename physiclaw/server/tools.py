@@ -147,3 +147,31 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
         text: the string to put on the clipboard.
         """
         return await asyncio.to_thread(physiclaw.send_to_clipboard, text)
+
+    # ─── Sequence ────────────────────────────────────────────
+
+    @mcp.tool()
+    async def sequence(
+        step1: dict,
+        step2: dict | None = None,
+        step3: dict | None = None,
+        step4: dict | None = None,
+        step5: dict | None = None,
+    ) -> str:
+        """Run up to 5 actions sequentially in one call.
+
+        Best for high-frequency deterministic flows — opening an app,
+        navigating to a chat, pasting and sending an IM message, etc.
+        Use when you already know each action and the screen it lands on,
+        so observing between steps would add nothing. Stops at the first
+        failure; earlier steps are not rolled back, so `scan()` before
+        retrying if a step fails.
+
+        Each step has two fields:
+            tool_name: the tool to run — MUST be one of:
+                       tap, double_tap, long_press, swipe, send_to_clipboard.
+                       No other tools are accepted.
+            arg:       the argument that tool accepts (see its own docstring).
+        """
+        steps = [s for s in (step1, step2, step3, step4, step5) if s is not None]
+        return await asyncio.to_thread(physiclaw.sequence, steps)

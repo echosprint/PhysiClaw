@@ -108,8 +108,12 @@ def find_all_hsv_blobs(
     """
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     return _hsv_blob_centroids(
-        hsv, lower, upper,
-        min_area=min_area, morph_op=morph_op, morph_kernel=morph_kernel,
+        hsv,
+        lower,
+        upper,
+        min_area=min_area,
+        morph_op=morph_op,
+        morph_kernel=morph_kernel,
     )
 
 
@@ -147,8 +151,7 @@ def find_largest_hsv_blob(
 
 
 CORNER_HSV_RANGES = {
-    "R": [([0, 100, 100], [10, 255, 255]),
-          ([170, 100, 100], [180, 255, 255])],
+    "R": [([0, 100, 100], [10, 255, 255]), ([170, 100, 100], [180, 255, 255])],
     "G": [([40, 100, 100], [80, 255, 255])],
     "B": [([100, 100, 100], [130, 255, 255])],
     "Y": [([20, 100, 100], [35, 255, 255])],
@@ -199,10 +202,16 @@ def detect_bridge_corners(
     blobs: dict[str, list[tuple[float, float]]] = {k: [] for k in "RGBY"}
     for name, hsv_ranges in CORNER_HSV_RANGES.items():
         for lo, hi in hsv_ranges:
-            blobs[name].extend(_hsv_blob_centroids(
-                hsv, lo, hi,
-                min_area=50, morph_op=cv2.MORPH_OPEN, morph_kernel=(5, 5),
-            ))
+            blobs[name].extend(
+                _hsv_blob_centroids(
+                    hsv,
+                    lo,
+                    hi,
+                    min_area=50,
+                    morph_op=cv2.MORPH_OPEN,
+                    morph_kernel=(5, 5),
+                )
+            )
 
     if not all(blobs[k] for k in "RGBY"):
         return None
@@ -257,8 +266,13 @@ def check_phone_in_frame(frame: np.ndarray) -> dict:
     cv2.drawContours(annotated, [largest], -1, (0, 255, 0), 3)
     cv2.drawContours(annotated, [np.int32(cv2.boxPoints(rect))], -1, (0, 200, 255), 2)
     cv2.putText(
-        annotated, f"area {coverage:.0%}", (bx + 5, by + 30),
-        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2,
+        annotated,
+        f"area {coverage:.0%}",
+        (bx + 5, by + 30),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1,
+        (0, 255, 0),
+        2,
     )
     cv2.imwrite("/tmp/physiclaw_camera_rotation.jpg", annotated)
 
@@ -266,10 +280,14 @@ def check_phone_in_frame(frame: np.ndarray) -> dict:
     pts = cv2.boxPoints(rect)
     edges = [(pts[i], pts[(i + 1) % 4]) for i in range(4)]
     longest_edge = max(edges, key=lambda e: np.linalg.norm(e[1] - e[0]))
-    angle_deg = abs(np.degrees(np.arctan2(
-        longest_edge[1][1] - longest_edge[0][1],
-        longest_edge[1][0] - longest_edge[0][0],
-    )))
+    angle_deg = abs(
+        np.degrees(
+            np.arctan2(
+                longest_edge[1][1] - longest_edge[0][1],
+                longest_edge[1][0] - longest_edge[0][0],
+            )
+        )
+    )
     rotation_dev = min(angle_deg % 90, 90 - angle_deg % 90)
     if rotation_dev >= 3.0:
         issues.append(
@@ -323,9 +341,7 @@ def validate_bbox(bbox: list[float]):
     if not all(0 <= v <= 1 for v in bbox):
         raise ValueError(f"bbox values must be in [0, 1], got {bbox!r}")
     if left >= right or top >= bottom:
-        raise ValueError(
-            f"bbox must have left < right and top < bottom, got {bbox!r}"
-        )
+        raise ValueError(f"bbox must have left < right and top < bottom, got {bbox!r}")
 
 
 def bbox_on_screen(bbox: list[float]) -> bool:
@@ -339,9 +355,15 @@ def bbox_on_screen(bbox: list[float]) -> bool:
 
 # iPhone passcode numpad grid (row, col), 0-based
 _NUMPAD_GRID = {
-    "1": (0, 0), "2": (0, 1), "3": (0, 2),
-    "4": (1, 0), "5": (1, 1), "6": (1, 2),
-    "7": (2, 0), "8": (2, 1), "9": (2, 2),
+    "1": (0, 0),
+    "2": (0, 1),
+    "3": (0, 2),
+    "4": (1, 0),
+    "5": (1, 1),
+    "6": (1, 2),
+    "7": (2, 0),
+    "8": (2, 1),
+    "9": (2, 2),
     "0": (3, 1),
 }
 
@@ -389,7 +411,7 @@ def find_numpad_digit(elements: list[dict], digit: str) -> list[float] | None:
     keys = list(detected.keys())
     for i, ka in enumerate(keys):
         ra, ca = _NUMPAD_GRID[ka]
-        for kb in keys[i + 1:]:
+        for kb in keys[i + 1 :]:
             rb, cb = _NUMPAD_GRID[kb]
             if ra == rb or ca == cb:
                 continue
@@ -412,7 +434,7 @@ def compact_json(items: list[dict]) -> str:
 
 def format_elements(items: list[dict]) -> str:
     """Human/agent-friendly element list — one line per element, no JSON noise."""
-    lines = ["id [kind] \"label\" [left,top,right,bottom] conf"]
+    lines = ['id [kind] "label" [left,top,right,bottom] conf']
     for e in items:
         bbox = ",".join(f"{v:.3f}" for v in e["bbox"])
         label = e.get("label") or ""

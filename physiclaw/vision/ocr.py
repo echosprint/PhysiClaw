@@ -129,14 +129,20 @@ def results_to_elements(results: list[TextResult], transforms) -> list[dict]:
         x1, y1, x2, y2 = r.bbox
         left, top = transforms.pixel_to_pct(x1, y1)
         right, bottom = transforms.pixel_to_pct(x2, y2)
-        elements.append({
-            "id": i,
-            "kind": "text",
-            "label": r.text,
-            "bbox": [round(left, 3), round(top, 3),
-                     round(right, 3), round(bottom, 3)],
-            "conf": round(r.confidence, 2),
-        })
+        elements.append(
+            {
+                "id": i,
+                "kind": "text",
+                "label": r.text,
+                "bbox": [
+                    round(left, 3),
+                    round(top, 3),
+                    round(right, 3),
+                    round(bottom, 3),
+                ],
+                "conf": round(r.confidence, 2),
+            }
+        )
     return elements
 
 

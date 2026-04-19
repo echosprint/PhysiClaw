@@ -26,8 +26,13 @@ from physiclaw.hardware.iphone import AssistiveTouch
 from physiclaw.vision.icon_detect import IconDetector
 from physiclaw.vision.ocr import OCRReader, results_to_elements
 from physiclaw.vision.util import (
-    bbox_on_screen, crop_to_phone_screen, decode_image, encode_jpeg,
-    format_elements, find_numpad_digit, phone_screen_crop_box,
+    bbox_on_screen,
+    crop_to_phone_screen,
+    decode_image,
+    encode_jpeg,
+    format_elements,
+    find_numpad_digit,
+    phone_screen_crop_box,
     validate_bbox,
 )
 from physiclaw.vision.ui_elements import detect_ui_elements, elements_to_json
@@ -148,7 +153,6 @@ class PhysiClaw:
                 return {"wake": False, "reason": ""}
             return self._watchdog.poll(frame, self.transforms)
 
-
     # ─── Hardware connection ──────────────────────────────────
 
     def connect_arm(self):
@@ -248,7 +252,6 @@ class PhysiClaw:
 
     # ─── Tool operations ───────────────────────────────────────
 
-
     def _require_assistive_touch(self):
         """Raise if AssistiveTouch isn't calibrated. ``_bridge`` is wired
         into the constructor at server startup, so it's always present."""
@@ -294,7 +297,9 @@ class PhysiClaw:
         """Camera snapshot cropped+downscaled to the phone screen. Returns JPEG bytes."""
         with self.locked():
             self.park()
-            return encode_jpeg(crop_to_phone_screen(self.camera_view(), self.transforms))
+            return encode_jpeg(
+                crop_to_phone_screen(self.camera_view(), self.transforms)
+            )
 
     def screenshot(self) -> tuple[bytes, str]:
         """Pixel-perfect phone screenshot with UI elements detected.
@@ -385,14 +390,8 @@ class PhysiClaw:
             self._long_press(bbox)
             return f"Long pressed at bbox {bbox}"
 
-    def swipe(
-        self,
-        bbox: list[float],
-        direction: Literal["up", "down", "left", "right"],
-        size: Literal["s", "m", "l", "xl", "xxl"] = "m",
-        speed: Literal["slow", "medium", "fast"] = "medium",
-    ) -> str:
-        """Swipe from the bbox center in `direction` by `size` screen fraction."""
+    def _validate_swipe(self, bbox, direction, size, speed):
+        """Raises ValueError if any swipe arg is out of range."""
         validate_bbox(bbox)
         if direction not in self._SWIPE_DIRS:
             raise ValueError(
@@ -406,19 +405,81 @@ class PhysiClaw:
             raise ValueError(
                 f"speed must be one of {self._SWIPE_SPEEDS}, got {speed!r}"
             )
+
+    def swipe(
+        self,
+        bbox: list[float],
+        direction: Literal["up", "down", "left", "right"],
+        size: Literal["s", "m", "l", "xl", "xxl"] = "m",
+        speed: Literal["slow", "medium", "fast"] = "medium",
+    ) -> str:
+        """Swipe from the bbox center in `direction` by `size` screen fraction."""
+        self._validate_swipe(bbox, direction, size, speed)
         with self.locked():
             self._swipe(bbox, direction, size, speed)
             return f"Swiped {direction} {size} at bbox {bbox}"
 
+    def _send_to_clipboard(self, text: str) -> str:
+        """Copy text via AT long-press. Caller must hold the lock."""
+        self._require_assistive_touch()
+        self._bridge.send_text(text)
+        self._assistive_touch.long_press(self._arm, self.transforms.pct_to_grbl)
+        if self._bridge.wait_clipboard(timeout=30.0):
+            return f"Copied '{text}' to phone clipboard"
+        return "AT long-pressed but clipboard not confirmed — check the iOS Shortcut"
+
     def send_to_clipboard(self, text: str) -> str:
         """Copy text to the phone's clipboard via AT long-press."""
         with self.locked():
-            self._require_assistive_touch()
-            self._bridge.send_text(text)
-            self._assistive_touch.long_press(self._arm, self.transforms.pct_to_grbl)
-            if self._bridge.wait_clipboard(timeout=30.0):
-                return f"Copied '{text}' to phone clipboard"
-            return "AT long-pressed but clipboard not confirmed — check the iOS Shortcut"
+            return self._send_to_clipboard(text)
+
+    def _run_step(self, tool: str, arg) -> str:
+        """Dispatch one sequence step. Caller must hold the lock.
+
+        Used only by `sequence` — public gesture methods call their `_tap`/
+        `_swipe`/etc. directly.
+        """
+        if tool == "tap":
+            validate_bbox(arg)
+            self._tap(arg)
+            return f"Tapped at bbox {arg}"
+        if tool == "double_tap":
+            validate_bbox(arg)
+            self._double_tap(arg)
+            return f"Double tapped at bbox {arg}"
+        if tool == "long_press":
+            validate_bbox(arg)
+            self._long_press(arg)
+            return f"Long pressed at bbox {arg}"
+        if tool == "swipe":
+            if not isinstance(arg, dict) or "bbox" not in arg or "direction" not in arg:
+                raise ValueError(f"swipe arg needs bbox + direction, got {arg!r}")
+            bbox, direction = arg["bbox"], arg["direction"]
+            size, speed = arg.get("size", "m"), arg.get("speed", "medium")
+            self._validate_swipe(bbox, direction, size, speed)
+            self._swipe(bbox, direction, size, speed)
+            return f"Swiped {direction} {size} at bbox {bbox}"
+        if tool == "send_to_clipboard":
+            return self._send_to_clipboard(arg)
+        raise ValueError(f"tool {tool!r} not allowed in sequence")
+
+    def sequence(self, steps: list[dict]) -> str:
+        """Run multiple gestures atomically — one lock held across all steps.
+
+        Each step: {"tool_name": str, "arg": ...}. Stops on first failure.
+        Lock is acquired once; no park between steps.
+        """
+        lines = []
+        with self.locked():
+            for i, s in enumerate(steps, 1):
+                tool = s["tool_name"]
+                try:
+                    result = self._run_step(tool, s.get("arg"))
+                    lines.append(f"{i} {tool} ok — {result}")
+                except Exception as e:
+                    lines.append(f"{i} {tool} FAIL ({e})")
+                    break
+        return "\n".join(lines)
 
     def home_screen(self) -> str:
         """Go to the home screen via bottom-edge swipe up."""
