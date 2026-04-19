@@ -39,6 +39,22 @@ Two states: **keyboard hidden** (input bar at bottom) and **keyboard visible** (
 8. Confirm the bubble appeared in the chat.
 9. Tap the back arrow `<` (top-left) to return to the Chats list — leaves WeChat in its main state for the next wake.
 
+### Fast path — `sequence` (5 steps)
+
+When you're already on the right 1:1 chat, the input is clean, and the keyboard is hidden, collapse steps 2–6 into one `sequence` call:
+
+```python
+sequence(
+    step1 = {"tool_name": "tap",               "arg": [0.100, 0.910, 0.700, 0.960]},
+    step2 = {"tool_name": "send_to_clipboard", "arg": "<your text>"},
+    step3 = {"tool_name": "long_press",        "arg": [0.100, 0.575, 0.700, 0.625]},
+    step4 = {"tool_name": "tap",               "arg": [0.050, 0.530, 0.220, 0.570]},
+    step5 = {"tool_name": "tap",               "arg": [0.752, 0.864, 0.992, 0.917]},
+)
+```
+
+After the sequence: hide keyboard, confirm bubble, tap back arrow (steps 7–9 above).
+
 ## Fixed elements
 
 Bboxes `[left, top, right, bottom]` in 0-1 screen coords. Rescan if a row looks off — banners shift the layout.
