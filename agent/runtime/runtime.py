@@ -46,12 +46,12 @@ def _get_client() -> httpx.AsyncClient:
 
 
 async def _check_ready() -> bool:
-    """Query /api/status — True only after /setup has fully finished."""
-    try:
-        r = await _get_client().get("/api/status")
-        return r.status_code == 200 and bool(r.json().get("ready"))
-    except Exception:
-        return False
+    """Query /api/status — True once /setup has finished. Raises on
+    error; the server is this process's parent, so any failure is a
+    client-side blip and callers should hold last-known."""
+    r = await _get_client().get("/api/status")
+    r.raise_for_status()
+    return bool(r.json().get("ready"))
 
 
 # Cooldown after react ends: lets screen animations settle, and exceeds
@@ -82,15 +82,23 @@ class Runtime:
         load_hooks()
         self._running = True
         log.info("runtime started (interval=%.2fs)", self.interval)
-        last_ready = None
+        last_ready: bool | None = None
+        in_blip = False
         try:
             while self._running:
                 try:
-                    ready = await _check_ready()
+                    ready = last_ready
+                    try:
+                        ready = await _check_ready()
+                        in_blip = False
+                    except Exception as e:
+                        if not in_blip:
+                            log.warning("status poll failed: %s", e)
+                        in_blip = True
                     if ready != last_ready:
                         log.info("physiclaw ready=%s", ready)
                         last_ready = ready
-                    if not ready:
+                    if not ready or in_blip:
                         await asyncio.sleep(self.interval)
                         continue
 
