@@ -72,8 +72,11 @@ def main():
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
-        format="%(message)s",
+        format="[physiclaw] %(message)s",
     )
+    # mcp.server.lowlevel logs "Processing request of type X" at INFO on
+    # every tool call — one line per call is just noise at our layer.
+    logging.getLogger("mcp").setLevel(logging.WARNING)
     from physiclaw.server import mcp, shutdown
 
     atexit.register(shutdown)

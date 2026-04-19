@@ -3,6 +3,7 @@
 Streams tool calls and responses to log/claude/claude-YYYY-MM-DD.log.
 """
 
+import ast
 import asyncio
 import datetime as dt
 import json
@@ -36,14 +37,30 @@ _DISALLOWED = [
 ]
 
 
+def _is_mcp_tool_decorator(dec: ast.expr) -> bool:
+    """True for `@mcp.tool` or `@mcp.tool(...)`."""
+    call = dec.func if isinstance(dec, ast.Call) else dec
+    return (
+        isinstance(call, ast.Attribute)
+        and call.attr == "tool"
+        and isinstance(call.value, ast.Name)
+        and call.value.id == "mcp"
+    )
+
+
 def _discover_mcp_tools() -> list[str]:
     """Auto-detect MCP tool names from @mcp.tool decorators in tools.py."""
-    if not TOOLS_PY.exists():
+    try:
+        tree = ast.parse(TOOLS_PY.read_text())
+    except FileNotFoundError:
         return []
-    names = re.findall(
-        r"@mcp\.tool(?:\([^)]*\))?\s*\n(?:\s*#[^\n]*\n)*\s+(?:async\s+)?def\s+(\w+)\(",
-        TOOLS_PY.read_text(),
-    )
+    # ast.walk (not tree.body) because tools are nested inside register().
+    names = [
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and any(_is_mcp_tool_decorator(d) for d in node.decorator_list)
+    ]
     return [f"mcp__physiclaw__{n}" for n in names]
 
 

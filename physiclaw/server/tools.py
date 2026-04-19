@@ -8,11 +8,59 @@ via asyncio.to_thread() so the event loop stays free for HTTP routes.
 """
 
 import asyncio
-from typing import Literal
+import logging
+import time
+from functools import wraps
+from typing import Callable, Literal, TypeVar, cast
 
 from mcp.server.fastmcp import FastMCP, Image
 
 from physiclaw.core import PhysiClaw
+
+log = logging.getLogger(__name__)
+
+F = TypeVar("F", bound=Callable)
+
+# Max length of the arg repr in a tool-call log line. Protects the log
+# from dumping large text/dicts (e.g. 100KB clipboard bodies).
+_MAX_ARG_LOG_LEN = 80
+
+
+def _format_args(fn_name: str, kwargs: dict) -> str:
+    """Build a safe arg string for the tool-call log line.
+
+    Redacts clipboard text (user-visible content — IM bodies, search
+    queries, anything pasted) and summarizes sequence steps to tool
+    names only, since a step may itself be a send_to_clipboard.
+    """
+    if fn_name == "send_to_clipboard":
+        return f"text=<{len(kwargs.get('text', ''))} chars>"
+    if fn_name == "sequence":
+        steps = [v for v in kwargs.values() if isinstance(v, dict)]
+        names = [s.get("tool_name", "?") for s in steps]
+        return f"{len(steps)} steps: {', '.join(names)}"
+    arg_str = ", ".join(f"{k}={v!r}" for k, v in kwargs.items())
+    if len(arg_str) > _MAX_ARG_LOG_LEN:
+        arg_str = arg_str[: _MAX_ARG_LOG_LEN - 3] + "..."
+    return arg_str
+
+
+def _logged(fn: F) -> F:
+    # FastMCP dispatches tool calls with keyword args only (positional
+    # args land in `args` but never in practice); the log reads kwargs.
+    @wraps(fn)
+    async def wrapper(*args, **kwargs):
+        info = log.isEnabledFor(logging.INFO)
+        arg_str = _format_args(fn.__name__, kwargs) if info else ""
+        if info:
+            log.info("tool %s(%s) start", fn.__name__, arg_str)
+        t0 = time.monotonic()
+        try:
+            return await fn(*args, **kwargs)
+        finally:
+            if info:
+                log.info("tool %s done — %.1fs", fn.__name__, time.monotonic() - t0)
+    return cast(F, wrapper)
 
 
 def register(mcp: FastMCP, physiclaw: PhysiClaw):
@@ -21,6 +69,7 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
     # ─── See ─────────────────────────────────────────────────
 
     @mcp.tool()
+    @_logged
     async def scan() -> str:
         """OCR the overhead camera view. Text only, no image. ~1s.
 
@@ -30,6 +79,7 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
         return await asyncio.to_thread(physiclaw.scan)
 
     @mcp.tool()
+    @_logged
     async def peek() -> Image:
         """Quick look via the overhead camera. ~3s.
 
@@ -40,6 +90,7 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
         return Image(data=data, format="jpeg")
 
     @mcp.tool()
+    @_logged
     async def screenshot() -> list:
         """Pixel-perfect screenshot with UI elements detected. ~12s.
 
@@ -58,6 +109,7 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
     # ─── Act ─────────────────────────────────────────────────
 
     @mcp.tool()
+    @_logged
     async def tap(bbox: list[float]) -> str:
         """Single tap at the bbox center.
 
@@ -67,6 +119,7 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
         return await asyncio.to_thread(physiclaw.tap, bbox)
 
     @mcp.tool()
+    @_logged
     async def double_tap(bbox: list[float]) -> str:
         """Double tap at the bbox center.
 
@@ -76,6 +129,7 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
         return await asyncio.to_thread(physiclaw.double_tap, bbox)
 
     @mcp.tool()
+    @_logged
     async def long_press(bbox: list[float]) -> str:
         """Long press at the bbox center. ~1.2s hold.
 
@@ -87,6 +141,7 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
     # ─── Swipe ───────────────────────────────────────────────
 
     @mcp.tool()
+    @_logged
     async def swipe(
         bbox: list[float],
         direction: Literal["up", "down", "left", "right"],
@@ -107,6 +162,7 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
     # ─── Navigate ────────────────────────────────────────────
 
     @mcp.tool()
+    @_logged
     async def home_screen() -> str:
         """Go to the home screen. iPhone swipe-up-from-bottom gesture.
 
@@ -115,6 +171,7 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
         return await asyncio.to_thread(physiclaw.home_screen)
 
     @mcp.tool()
+    @_logged
     async def go_back() -> str:
         """Go back one screen. iPhone swipe-from-left-edge gesture.
 
@@ -123,6 +180,7 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
         return await asyncio.to_thread(physiclaw.go_back)
 
     @mcp.tool()
+    @_logged
     async def unlock_phone() -> str:
         """Unlock the phone by entering passcode 111111. ~12s.
 
@@ -139,6 +197,7 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
     # ─── Text ────────────────────────────────────────────────
 
     @mcp.tool()
+    @_logged
     async def send_to_clipboard(text: str) -> str:
         """Copy text into the phone's clipboard.
 
@@ -151,6 +210,7 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
     # ─── Sequence ────────────────────────────────────────────
 
     @mcp.tool()
+    @_logged
     async def sequence(
         step1: dict,
         step2: dict | None = None,
