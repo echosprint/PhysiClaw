@@ -8,6 +8,8 @@ import logging
 import threading
 import time
 
+from physiclaw.logger import save_screenshot
+
 log = logging.getLogger(__name__)
 
 
@@ -120,23 +122,15 @@ class BridgeState:
     # ─── Screenshot upload ────────────────────────────────────
 
     def receive_screenshot(self, data: bytes):
-        """Store an uploaded screenshot, save to disk, and signal waiters.
+        """Store an uploaded screenshot and signal waiters.
 
         Called from the async route handler when the iOS Shortcut POSTs
-        the image. Saves to data/phone/screenshot/, writes data under lock,
-        then signals the event so wait_screenshot() sees consistent data.
+        the image. Writes data under lock, then signals the event so
+        ``wait_screenshot()`` sees consistent data. When
+        ``PHYSICLAW_SAVE_SCREENSHOTS`` is set, also dumps the raw bytes
+        to ``data/screenshots/``.
         """
-        from datetime import datetime
-        from pathlib import Path
-
-        save_dir = Path("data/phone/screenshot")
-        save_dir.mkdir(parents=True, exist_ok=True)
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
-        ext = "png" if data[:4] == b"\x89PNG" else "jpg"
-        save_path = save_dir / f"{ts}.{ext}"
-        save_path.write_bytes(data)
-        log.info(f"Bridge: screenshot saved to {save_path} ({len(data)} bytes)")
-
+        save_screenshot(data)
         with self.lock:
             self._screenshot_data = data
         self._screenshot_ready.set()

@@ -70,7 +70,30 @@ def main():
         help="Camera index override for --warm-start (default: value "
         "stored in the bundle, falling back to 0)",
     )
+    parser.add_argument(
+        "--save-tool-calls",
+        action="store_true",
+        help="Write every scan/peek/screenshot output to data/tool_calls/.",
+    )
+    parser.add_argument(
+        "--save-snapshots",
+        action="store_true",
+        help="Write every raw camera frame to data/snapshots/.",
+    )
+    parser.add_argument(
+        "--save-screenshots",
+        action="store_true",
+        help="Write every raw phone-own screenshot to data/screenshots/.",
+    )
     args = parser.parse_args()
+
+    for flag, env in (
+        ("save_tool_calls", "PHYSICLAW_SAVE_TOOL_CALLS"),
+        ("save_snapshots", "PHYSICLAW_SAVE_SNAPSHOTS"),
+        ("save_screenshots", "PHYSICLAW_SAVE_SCREENSHOTS"),
+    ):
+        if getattr(args, flag):
+            os.environ[env] = "1"
 
     setup_logging("physiclaw", logging.DEBUG if args.verbose else logging.INFO)
     # mcp.server.lowlevel logs "Processing request of type X" at INFO on

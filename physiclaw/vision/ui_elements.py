@@ -207,7 +207,7 @@ if __name__ == "__main__":
     out_path = (
         Path(args.output)
         if args.output
-        else Path("data/snapshot") / (Path(args.image).stem + "_ui_elements.jpg")
+        else Path("data/snapshots") / (Path(args.image).stem + "_ui_elements.jpg")
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     cv2.imwrite(str(out_path), annotated)

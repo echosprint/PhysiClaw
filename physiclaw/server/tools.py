@@ -13,7 +13,7 @@ from typing import Literal
 from mcp.server.fastmcp import FastMCP, Image
 
 from physiclaw.core import PhysiClaw
-from physiclaw.logger import logged
+from physiclaw.logger import logged, save_tool_call
 
 
 def register(mcp: FastMCP, physiclaw: PhysiClaw):
@@ -26,7 +26,9 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
     async def scan() -> str:
         """Icon detection + OCR on the overhead camera view. Returns the
         element listing only (no image)."""
-        return await asyncio.to_thread(physiclaw.scan)
+        listing = await asyncio.to_thread(physiclaw.scan)
+        save_tool_call("scan", listing)
+        return listing
 
     @mcp.tool()
     @logged
@@ -35,6 +37,7 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
         [Image, listing] — JPEG with numbered bboxes drawn over the
         cropped camera view, plus the element listing."""
         jpeg, listing = await asyncio.to_thread(physiclaw.peek)
+        save_tool_call("peek", listing, jpeg)
         return [Image(data=jpeg, format="jpeg"), listing]
 
     @mcp.tool()
@@ -44,6 +47,7 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
         [Image, listing] — JPEG with numbered bboxes drawn, plus the
         element listing."""
         jpeg, listing = await asyncio.to_thread(physiclaw.screenshot)
+        save_tool_call("screenshot", listing, jpeg)
         return [Image(data=jpeg, format="jpeg"), listing]
 
     # ─── Act ─────────────────────────────────────────────────
@@ -152,18 +156,14 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
     ) -> str:
         """Run up to 5 actions sequentially in one call.
 
-        Best for high-frequency deterministic flows — opening an app,
-        navigating to a chat, pasting and sending an IM message, etc.
-        Use when you already know each action and the screen it lands on,
-        so observing between steps would add nothing. Stops at the first
-        failure; earlier steps are not rolled back, so `scan()` before
-        retrying if a step fails.
+        Use for: deterministic flows where observing between steps
+        would add nothing (opening an app, pasting + sending an IM).
+        Stops at the first failure; earlier steps are not rolled back
+        — `scan` after a failure before retrying.
 
-        Each step has two fields:
-            tool_name: the tool to run — MUST be one of:
-                       tap, double_tap, long_press, swipe, send_to_clipboard.
-                       No other tools are accepted.
-            arg:       the argument that tool accepts (see its own docstring).
+        Each step is a dict with two fields:
+            tool_name: one of tap, double_tap, long_press, swipe, send_to_clipboard.
+            arg:       that tool's argument (see its docstring).
         """
         steps = [s for s in (step1, step2, step3, step4, step5) if s is not None]
         return await asyncio.to_thread(physiclaw.sequence, steps)

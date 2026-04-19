@@ -21,12 +21,10 @@ import logging
 import subprocess
 import threading
 import time
-from datetime import datetime
-from pathlib import Path
 
 import cv2
 
-SNAPSHOT_DIR = Path(__file__).parent.parent.parent / "data" / "snapshot"
+from physiclaw.logger import save_snapshot
 
 log = logging.getLogger(__name__)
 
@@ -222,20 +220,18 @@ class Camera:
         return self._rotate(frame)
 
     def snapshot(self, bbox=None):
-        """Return a fresh BGR frame with the calibrated rotation applied,
-        and save it to ``data/snapshot/`` with a timestamp.
+        """Return a fresh BGR frame with the calibrated rotation applied.
 
         If ``bbox`` is provided as ``((x1,y1), (x2,y2))``, a green rectangle
-        is drawn on the saved frame.
+        is drawn on the returned frame. When ``PHYSICLAW_SAVE_SNAPSHOTS``
+        is set, every frame is also written to ``data/snapshots/``.
         """
         frame = self.peek()
         if frame is None:
             return None
         if bbox is not None:
             cv2.rectangle(frame, bbox[0], bbox[1], (0, 255, 0), 2)
-        SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
-        cv2.imwrite(str(SNAPSHOT_DIR / f"{ts}.jpg"), frame)
+        save_snapshot(frame)
         return frame
 
     def close(self):
