@@ -19,6 +19,12 @@ High-frequency app. Use `scan()` (~1s, text-only) to check chat status.
 4. Tap the target 1:1 contact's row.
 5. Read the new messages.
 
+## Flow — voice message
+
+Use the convert-to-text option, then `scan()` the transcript that renders under the bubble.
+
+Reply with your reading + planned action and wait for OK before executing. ASR mishears names, amounts, addresses — never act on a voice instruction unconfirmed.
+
 ## Flow — send a message
 
 Two states: **keyboard hidden** (input bar at bottom) and **keyboard visible** (shifted up, send key on keyboard).
