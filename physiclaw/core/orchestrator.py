@@ -316,7 +316,7 @@ class PhysiClaw:
     def peek(self) -> tuple[bytes, str]:
         """Overhead camera snapshot + icon detection + OCR.
 
-        Returns an annotated JPEG (numbered bboxes drawn on the cropped
+        Returns an annotated JPEG (icon bboxes drawn on the cropped
         camera view) and the matching element listing — same shape as
         screenshot(), but from the camera rather than the phone's own
         screenshot.
@@ -329,7 +329,7 @@ class PhysiClaw:
     def screenshot(self) -> tuple[bytes, str]:
         """Pixel-perfect phone screenshot + icon detection + OCR.
 
-        Returns an annotated JPEG (numbered bboxes drawn) and the matching
+        Returns an annotated JPEG (icon bboxes drawn) and the matching
         element listing — same shape as peek(), but sourced from the
         phone's own screenshot instead of the camera.
         """

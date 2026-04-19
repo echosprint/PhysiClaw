@@ -12,7 +12,7 @@ See the screen, pick a target, do something. All `bbox` arguments are `[left, to
 
     id [kind] "label" [left,top,right,bottom] conf
 
-- `id` — bbox index; matches the number drawn on `peek` / `screenshot` images.
+- `id` — bbox index. Icons get a numbered green box drawn on `peek` / `screenshot` images; text is identified visually by its label (no box, to keep the screen readable).
 - `kind` — `icon` or `text`.
 - `label` — OCR text for `text` elements, empty for `icon`.
 - `bbox` — screen 0-1 decimals.

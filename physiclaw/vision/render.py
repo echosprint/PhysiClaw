@@ -49,16 +49,28 @@ _GREEN, _RED = (0, 255, 0), (0, 0, 255)
 
 
 def annotate_elements(
-    frame: np.ndarray, elements: list[dict], w: int, h: int
+    frame: np.ndarray,
+    elements: list[dict],
+    w: int,
+    h: int,
+    *,
+    include_text: bool = False,
 ) -> np.ndarray:
     """Draw numbered bboxes on a frame for detected UI elements.
 
     Args:
         elements: list of dicts with "id", "kind", "bbox" keys.
             bbox is [left, top, right, bottom] as 0-1 decimals.
+        include_text: when False (default), skip `text` elements —
+            their label is in the listing already, and the numbered
+            tag tends to cover the first few characters of the text
+            it annotates, making the image misleading. Icons have no
+            label, so their numbered box is always drawn.
     """
     out = frame.copy()
     for e in elements:
+        if not include_text and e["kind"] != "icon":
+            continue
         x1, y1 = int(e["bbox"][0] * w), int(e["bbox"][1] * h)
         x2, y2 = int(e["bbox"][2] * w), int(e["bbox"][3] * h)
         color = _GREEN if e["kind"] == "icon" else _RED

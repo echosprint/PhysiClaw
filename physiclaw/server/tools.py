@@ -34,8 +34,8 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
     @logged
     async def peek() -> list:
         """Overhead camera snapshot + icon detection + OCR. Returns
-        [Image, listing] — JPEG with numbered bboxes drawn over the
-        cropped camera view, plus the element listing."""
+        [Image, listing] — JPEG of the cropped camera view with icon
+        bboxes drawn, plus the element listing."""
         jpeg, listing = await asyncio.to_thread(physiclaw.peek)
         save_tool_call("peek", listing, jpeg)
         return [Image(data=jpeg, format="jpeg"), listing]
@@ -44,7 +44,7 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
     @logged
     async def screenshot() -> list:
         """Pixel-perfect phone screenshot + icon detection + OCR. Returns
-        [Image, listing] — JPEG with numbered bboxes drawn, plus the
+        [Image, listing] — JPEG with icon bboxes drawn, plus the
         element listing."""
         jpeg, listing = await asyncio.to_thread(physiclaw.screenshot)
         save_tool_call("screenshot", listing, jpeg)
