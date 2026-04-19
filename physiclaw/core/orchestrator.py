@@ -325,22 +325,43 @@ class PhysiClaw:
             )
             return encode_jpeg(annotated), format_elements(elements_to_json(elements))
 
-    # ─── Gesture primitives (no lock) ──────────────────────────
+    # ─── AssistiveTouch guards ─────────────────────────────────
+
+    def _require_no_at_overlap(self, bbox: list[float], gesture: str):
+        """Raise if the bbox center would hit the AssistiveTouch button."""
+        cx, cy = self.transforms.bbox_center_pct(bbox)
+        if self._assistive_touch.overlaps_at(cx, cy):
+            raise ValueError(
+                f"{gesture} target {bbox} overlaps AssistiveTouch button — aim aside"
+            )
+
+    def _require_no_at_crossing(self, bbox: list[float], direction: str):
+        """Raise if a swipe from bbox center in `direction` would cross AssistiveTouch."""
+        cx, cy = self.transforms.bbox_center_pct(bbox)
+        if self._assistive_touch.swipe_crosses_at(cx, cy, direction):
+            raise ValueError(
+                f"swipe {direction} at {bbox} crosses AssistiveTouch button — aim aside"
+            )
+
+    # ─── Gesture primitives ────────────────────────────────────
 
     def _tap(self, bbox: list[float]):
         """Tap at bbox center. Caller must hold the lock."""
+        self._require_no_at_overlap(bbox, "tap")
         self.move_to_bbox_center(bbox)
         self._arm.tap()
         self._arm.wait_idle()
 
     def _double_tap(self, bbox: list[float]):
         """Double tap at bbox center. Caller must hold the lock."""
+        self._require_no_at_overlap(bbox, "double_tap")
         self.move_to_bbox_center(bbox)
         self._arm.double_tap()
         self._arm.wait_idle()
 
     def _long_press(self, bbox: list[float]):
         """Long press at bbox center. Caller must hold the lock."""
+        self._require_no_at_overlap(bbox, "long_press")
         self.move_to_bbox_center(bbox)
         self._arm.long_press()
         self._arm.wait_idle()
@@ -357,6 +378,7 @@ class PhysiClaw:
         speed: Literal["slow", "medium", "fast"] = "medium",
     ):
         """Swipe from bbox center. Caller must hold the lock."""
+        self._require_no_at_crossing(bbox, direction)
         t = self.transforms
         ex, ey = t.swipe_end_pct(bbox, direction, self._SWIPE_DISTANCES[size])
         ex_mm, ey_mm = t.pct_to_grbl_mm(ex, ey)
@@ -420,16 +442,19 @@ class PhysiClaw:
             return f"Swiped {direction} {size} at bbox {bbox}"
 
     def _send_to_clipboard(self, text: str) -> str:
-        """Copy text via AT long-press. Caller must hold the lock."""
+        """Copy text via AssistiveTouch long-press. Caller must hold the lock."""
         self._require_assistive_touch()
         self._bridge.send_text(text)
         self._assistive_touch.long_press(self._arm, self.transforms.pct_to_grbl)
         if self._bridge.wait_clipboard(timeout=30.0):
             return f"Copied '{text}' to phone clipboard"
-        return "AT long-pressed but clipboard not confirmed — check the iOS Shortcut"
+        return (
+            "AssistiveTouch long-pressed but clipboard not confirmed "
+            "— check the iOS Shortcut"
+        )
 
     def send_to_clipboard(self, text: str) -> str:
-        """Copy text to the phone's clipboard via AT long-press."""
+        """Copy text to the phone's clipboard via AssistiveTouch long-press."""
         with self.locked():
             return self._send_to_clipboard(text)
 

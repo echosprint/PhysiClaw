@@ -59,6 +59,18 @@ class AssistiveTouch:
         # Ellipse test: ((sx-ax)/rx)^2 + ((sy-ay)/ry)^2 < 1
         return ((sx - ax) / rx) ** 2 + ((sy - ay) / ry) ** 2 < 1.0
 
+    def swipe_crosses_at(self, cx: float, cy: float, direction: str) -> bool:
+        """True if a swipe from (cx, cy) in `direction` would cross AT."""
+        if self.at_screen is None or self.at_radius_screen is None:
+            return False
+        ax, ay = self.at_screen
+        rx, ry = self.at_radius_screen
+        if direction in ("up", "down"):
+            return abs(cx - ax) < rx
+        if direction in ("left", "right"):
+            return abs(cy - ay) < ry
+        return False
+
     def compute_at_screen_pos(
         self, t: ViewportShift
     ) -> tuple[float, float]:
