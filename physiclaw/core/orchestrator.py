@@ -16,7 +16,7 @@ import logging
 import threading
 import time
 from contextlib import contextmanager
-from typing import Literal
+from typing import Any, Literal
 
 from physiclaw.bridge import BridgeState
 from physiclaw.calibration import Calibration, ScreenTransforms
@@ -270,11 +270,12 @@ class PhysiClaw:
             self._icon_detector = IconDetector()
         return self._icon_detector
 
-    def _scan(self) -> list[dict]:
-        """OCR the screen → list of element dicts. Caller must hold the lock.
+    def _scan_text(self) -> list[dict]:
+        """OCR-only pass on the phone-screen region. Caller must hold the lock.
 
-        OCRs only the calibrated phone-screen region — the camera also sees
-        desk, ruler, etc.
+        Fast path for internal polling (e.g. unlock_phone's keypad loop).
+        The agent-facing tools go through ``_detect`` instead, which also
+        runs icon detection.
         """
         self.park()
         frame = self.camera_view()
@@ -284,28 +285,53 @@ class PhysiClaw:
         elements = results_to_elements(results, self.transforms)
         return [e for e in elements if bbox_on_screen(e["bbox"])]
 
-    def scan(self) -> str:
-        """OCR the overhead camera view. Returns JSON list of text elements.
+    def _detect(self, frame, crop: bool = False) -> tuple[str, Any]:
+        """Icon detection + OCR on a frame. Caller holds the lock.
 
-        Same schema as screenshot() but text-only (no icons), and
-        bboxes are transformed from camera pixels to screen 0-1.
+        Set ``crop=True`` when ``frame`` is a raw camera view — it'll be
+        cropped to the phone-screen region first so detection runs on
+        screen pixels only (the camera also sees desk, ruler, etc).
+        Phone-own screenshots already span 0-1 of the screen, so pass
+        them with ``crop=False``.
+        Returns (formatted element listing, annotated frame).
         """
-        with self.locked():
-            return format_elements(self._scan())
+        if crop:
+            frame = crop_to_phone_screen(frame, self.transforms)
+        elements, annotated = detect_ui_elements(
+            frame,
+            icon_detector=self._get_icon_detector(),
+            ocr_reader=self._get_ocr_reader(),
+        )
+        return format_elements(elements_to_json(elements)), annotated
 
-    def peek(self) -> bytes:
-        """Camera snapshot cropped+downscaled to the phone screen. Returns JPEG bytes."""
+    def scan(self) -> str:
+        """Icon detection + OCR on the overhead camera view. Returns the
+        element listing only (no image), same line format as peek() and
+        screenshot()."""
         with self.locked():
             self.park()
-            return encode_jpeg(
-                crop_to_phone_screen(self.camera_view(), self.transforms)
-            )
+            listing, _ = self._detect(self.camera_view(), crop=True)
+            return listing
+
+    def peek(self) -> tuple[bytes, str]:
+        """Overhead camera snapshot + icon detection + OCR.
+
+        Returns an annotated JPEG (numbered bboxes drawn on the cropped
+        camera view) and the matching element listing — same shape as
+        screenshot(), but from the camera rather than the phone's own
+        screenshot.
+        """
+        with self.locked():
+            self.park()
+            listing, annotated = self._detect(self.camera_view(), crop=True)
+            return encode_jpeg(annotated), listing
 
     def screenshot(self) -> tuple[bytes, str]:
-        """Pixel-perfect phone screenshot with UI elements detected.
+        """Pixel-perfect phone screenshot + icon detection + OCR.
 
-        Returns JPEG bytes of the annotated image (numbered bboxes)
-        and a pretty-printed JSON listing of detected elements.
+        Returns an annotated JPEG (numbered bboxes drawn) and the matching
+        element listing — same shape as peek(), but sourced from the
+        phone's own screenshot instead of the camera.
         """
         with self.locked():
             self._require_assistive_touch()
@@ -318,12 +344,8 @@ class PhysiClaw:
                 )
 
             frame = decode_image(data)
-            elements, annotated = detect_ui_elements(
-                frame,
-                icon_detector=self._get_icon_detector(),
-                ocr_reader=self._get_ocr_reader(),
-            )
-            return encode_jpeg(annotated), format_elements(elements_to_json(elements))
+            listing, annotated = self._detect(frame)
+            return encode_jpeg(annotated), listing
 
     # ─── AssistiveTouch guards ─────────────────────────────────
 
@@ -534,7 +556,7 @@ class PhysiClaw:
             # Poll for passcode keypad (Face ID fails after a few seconds)
             digit_bbox = None
             for _ in range(8):
-                elements = self._scan()
+                elements = self._scan_text()
                 digit_bbox = find_numpad_digit(elements, "1")
                 if digit_bbox is not None:
                     break

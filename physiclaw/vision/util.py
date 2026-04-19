@@ -433,7 +433,11 @@ def compact_json(items: list[dict]) -> str:
 
 
 def format_elements(items: list[dict]) -> str:
-    """Human/agent-friendly element list — one line per element, no JSON noise."""
+    """Human/agent-friendly element list — one line per element, no JSON noise.
+
+    The header line is also documented for the agent in
+    ``physiclaw/server/instructions.md`` — keep the two in sync.
+    """
     lines = ['id [kind] "label" [left,top,right,bottom] conf']
     for e in items:
         bbox = ",".join(f"{v:.3f}" for v in e["bbox"])

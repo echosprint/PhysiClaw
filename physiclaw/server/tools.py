@@ -24,40 +24,27 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
     @mcp.tool()
     @logged
     async def scan() -> str:
-        """OCR the overhead camera view. Text only, no image. ~1s.
-
-        Use for: reading text on screen, checking status, verifying results.
-        Returns JSON in same format as screenshot() but text-only (no icons).
-        """
+        """Icon detection + OCR on the overhead camera view. Returns the
+        element listing only (no image)."""
         return await asyncio.to_thread(physiclaw.scan)
 
     @mcp.tool()
     @logged
-    async def peek() -> Image:
-        """Quick look via the overhead camera. ~3s.
-
-        Use for: verifying an action landed, checking current status.
-        For precise bboxes before acting, use screenshot() instead.
-        """
-        data = await asyncio.to_thread(physiclaw.peek)
-        return Image(data=data, format="jpeg")
+    async def peek() -> list:
+        """Overhead camera snapshot + icon detection + OCR. Returns
+        [Image, listing] — JPEG with numbered bboxes drawn over the
+        cropped camera view, plus the element listing."""
+        jpeg, listing = await asyncio.to_thread(physiclaw.peek)
+        return [Image(data=jpeg, format="jpeg"), listing]
 
     @mcp.tool()
     @logged
     async def screenshot() -> list:
-        """Pixel-perfect screenshot with UI elements detected. ~12s.
-
-        Use for: planning an action — returns precise bboxes to feed
-        straight into tap/swipe/etc.
-        Returns Image (numbered bboxes drawn) + JSON list, each entry:
-            id:    int — index of the bbox, same number drawn on the image
-            kind:  "icon" | "text"
-            label: str — OCR text for "text", "" for "icon"
-            bbox:  [left, top, right, bottom] — 0-1 decimals
-            conf:  float — detector confidence, 0-1
-        """
-        jpeg, elements_json = await asyncio.to_thread(physiclaw.screenshot)
-        return [Image(data=jpeg, format="jpeg"), elements_json]
+        """Pixel-perfect phone screenshot + icon detection + OCR. Returns
+        [Image, listing] — JPEG with numbered bboxes drawn, plus the
+        element listing."""
+        jpeg, listing = await asyncio.to_thread(physiclaw.screenshot)
+        return [Image(data=jpeg, format="jpeg"), listing]
 
     # ─── Act ─────────────────────────────────────────────────
 
@@ -67,7 +54,6 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
         """Single tap at the bbox center.
 
         Use for: buttons, links, selecting items, dismissing dialogs.
-        bbox: [left, top, right, bottom] as 0-1 decimals.
         """
         return await asyncio.to_thread(physiclaw.tap, bbox)
 
@@ -77,7 +63,6 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
         """Double tap at the bbox center.
 
         Use for: zooming maps/photos/web pages, selecting a word.
-        bbox: [left, top, right, bottom] as 0-1 decimals.
         """
         return await asyncio.to_thread(physiclaw.double_tap, bbox)
 
@@ -87,7 +72,6 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
         """Long press at the bbox center. ~1.2s hold.
 
         Use for: context menus, edit mode, paste, rearranging icons.
-        bbox: [left, top, right, bottom] as 0-1 decimals.
         """
         return await asyncio.to_thread(physiclaw.long_press, bbox)
 
@@ -101,14 +85,10 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
         size: Literal["s", "m", "l", "xl", "xxl"] = "m",
         speed: Literal["slow", "medium", "fast"] = "medium",
     ) -> str:
-        """Stylus slides across a region. The direction is the stylus motion.
+        """Stylus slides across ``bbox`` in ``direction`` (the stylus motion).
 
         Use for: scrolling (swipe up to scroll down), dismissing cards,
         changing pages, revealing list-item actions.
-        bbox:      [left, top, right, bottom] as 0-1 decimals — region to swipe in.
-        direction: 'up' | 'down' | 'left' | 'right' — stylus motion direction.
-        size:      's' | 'm' | 'l' | 'xl' | 'xxl'.
-        speed:     'slow' | 'medium' | 'fast'.
         """
         return await asyncio.to_thread(physiclaw.swipe, bbox, direction, size, speed)
 
@@ -156,7 +136,6 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
 
         Use for: entering text into a field — on-screen typing is slow.
         After this returns, paste with: long_press(field_bbox) → tap "Paste".
-        text: the string to put on the clipboard.
         """
         return await asyncio.to_thread(physiclaw.send_to_clipboard, text)
 
