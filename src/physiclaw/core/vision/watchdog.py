@@ -3,7 +3,10 @@
 Watches three zones (skipping AOD clock at y 0.1–0.5):
   - Banner (y 0.0–0.1):  notification banners from top
   - Bottom (y 0.5–1.0):  lock-screen content, app grid
-  - Dock   (y 0.85–1.0): red badge on dock apps
+  - Dock   (y 0.80–1.0): red badge on any dock app — FULL WIDTH, so a badge in
+                         any of the 4 dock slots counts; the top starts at 0.80
+                         (not the ~0.88 a badge sits at) for margin across
+                         iPhone models, where the dock's screen fraction varies.
 
 Uses fast (5s) and slow (20s) EMAs of raw pixels. Fires when the fast
 EMA diverges from the slow: std or mean increase for content zones,
@@ -27,7 +30,13 @@ log = logging.getLogger(__name__)
 # --- Detection thresholds ---
 STD_INCREASE = 4.0
 MEAN_INCREASE = 4.0
-BADGE_MIN_AREA = 50
+# Min new warm-pixels for a badge wake. A well-lit badge at a normal camera
+# distance is ~1000+ px, but a farther camera shrinks it (area ~ 1/distance²)
+# and dim light + MJPEG chroma-subsampling desaturate the edges, dropping the
+# count. Kept low (biased to sensitivity): a spurious wake is cheap, a missed
+# message is not. Detection is delta-based (raw vs slow baseline), so static
+# warm content — red icons, pink wallpaper — cancels and doesn't eat the budget.
+BADGE_MIN_AREA = 30
 # The dock badge is red on the phone, but a camera under warm/yellow room light
 # renders it orange/pink, and in the dark it desaturates and dims. So match a
 # widened WARM hue band (covers the white-balance cast both ways across the
@@ -64,8 +73,12 @@ EMA_STALE = 5.0  # re-init if no poll for this long (covers react cooldown)
 IDLE_INTERVAL = 1800.0  # 30 min
 WORK_HOURS = [(9, 12), (14, 17)]
 
-# --- Screen zones (y0, y1) ---
-ZONES = [(0.0, 0.1), (0.5, 1.0), (0.85, 1.0)]
+# --- Screen zones (y0, y1); cropped full-width (x 0→1) ---
+# Dock is 0.80–1.0: a real badge sits ~0.88, but the dock's screen fraction
+# shifts across iPhone models (home-indicator vs home-button), so start higher
+# for margin. Full width covers a badge in any of the 4 dock slots. The extra
+# top strip adds no cost — detection is delta-based, so static content cancels.
+ZONES = [(0.0, 0.1), (0.5, 1.0), (0.80, 1.0)]
 
 
 # --- Helpers ---
@@ -166,17 +179,17 @@ class Watchdog:
             self._poll_time = now
             ema = self._ema
 
-        (bf, bs), (tf, ts), (df, ds) = ema
+        (bf, bs), (tf, ts), (_, ds) = ema
         banner_d = _check_content(bs.astype(np.uint8), bf.astype(np.uint8))
         bottom_d = _check_content(ts.astype(np.uint8), tf.astype(np.uint8))
-        # Badge uses fast-EMA vs slow-EMA like the content zones, but pays for
-        # it: a just-appeared badge is only ~EMA_FAST (~18%) blended into the
-        # fast EMA, so it comes out desaturated below BADGE_S_MIN and misses
-        # until a few more polls saturate it. A badge arriving WITH a banner
-        # never gets them (the banner wakes first, then the EMA re-inits), so the
-        # dock path really only catches a persistent badge; the banner is the
-        # primary fresh-message signal. Raw-crop-vs-slow would catch it sooner.
-        dock_d = _check_badge(ds.astype(np.uint8), df.astype(np.uint8))
+        # Badge: RAW dock crop vs the slow-EMA baseline (not fast-vs-slow like
+        # the content zones). A badge appears discretely; in the fast EMA it's
+        # only ~EMA_FAST (~18%) blended on the poll it appears -> desaturated
+        # below BADGE_S_MIN -> missed, and one arriving with a banner never gets
+        # the follow-up polls to saturate (banner wakes first, then the EMA
+        # re-inits). The raw crop is full-saturation, caught at once; keyed
+        # against the slow baseline it stays specific to a newly appeared mark.
+        dock_d = _check_badge(ds.astype(np.uint8), crops[2])
 
         result = {"wake": False, "reason": "",
                   "banner": banner_d, "bottom": bottom_d, "dock": dock_d}

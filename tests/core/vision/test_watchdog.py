@@ -5,6 +5,7 @@ import time
 from unittest.mock import MagicMock
 
 import numpy as np
+import pytest
 from freezegun import freeze_time
 
 from physiclaw.core.vision import watchdog
@@ -303,22 +304,37 @@ def test_watchdog_bottom_change_wakes() -> None:
     assert "lower half" in out["reason"]
 
 
-def test_watchdog_dock_red_badge_wakes() -> None:
+def test_watchdog_dock_red_badge_wakes_on_first_poll() -> None:
+    # Badge is checked on the RAW dock crop vs the slow baseline, so a newly
+    # appeared badge wakes on the very first poll — no waiting for the fast EMA
+    # to saturate (that was the miss: a badge arriving with a banner never got
+    # the follow-up polls). See the raw-vs-slow note in watchdog.poll.
     w = Watchdog()
     t = _fake_transforms()
     base = np.full((200, 100, 3), 100, dtype=np.uint8)
-    w.poll(base, t)
+    w.poll(base, t)  # init EMA, no badge
     badged = base.copy()
-    # Dock zone is y 0.85-1.0 → rows 170-199. Paint a large red area
-    # and poll several times so fast EMA converges enough for the
-    # HSV saturation threshold to register the red pixels.
-    badged[170:200, :] = (0, 0, 255)
+    badged[170:200, :] = (0, 0, 255)  # inside dock zone y 0.80-1.0 (rows 160-199)
 
-    out = None
-    for _ in range(15):
-        out = w.poll(badged, t)
-        if out["wake"]:
-            break
+    out = w.poll(badged, t)
+
+    assert out["wake"] is True
+    assert "red badge" in out["reason"]
+    assert out["dock"]["warm_delta"] > BADGE_MIN_AREA
+
+
+@pytest.mark.parametrize("x0", [5, 30, 55, 80])  # 4 dock-slot x positions
+def test_watchdog_badge_wakes_in_any_dock_slot(x0: int) -> None:
+    # The dock zone is full-width, so a badge in any of the 4 dock slots counts
+    # — the IM app can be pinned to any slot, on any iPhone model.
+    w = Watchdog()
+    t = _fake_transforms()
+    base = np.full((200, 100, 3), 100, dtype=np.uint8)
+    w.poll(base, t)  # init, no badge
+    badged = base.copy()
+    badged[165:185, x0:x0 + 15] = (0, 0, 255)  # small badge in one slot (dock rows 160-199)
+
+    out = w.poll(badged, t)
 
     assert out["wake"] is True
     assert "red badge" in out["reason"]
@@ -370,12 +386,12 @@ def test_watchdog_constants_unchanged() -> None:
     assert STD_INCREASE == 4.0
     assert MEAN_INCREASE == 4.0
     assert MEAN_DROP_GUARD == 15.0
-    assert BADGE_MIN_AREA == 50
+    assert BADGE_MIN_AREA == 30
     assert BADGE_HUE_RANGES == [(0, 25), (155, 180)]
     assert BADGE_S_MIN == 70
     assert BADGE_V_MIN == 70
     assert IDLE_INTERVAL == 1800.0
     assert WORK_HOURS == [(9, 12), (14, 17)]
-    assert ZONES == [(0.0, 0.1), (0.5, 1.0), (0.85, 1.0)]
+    assert ZONES == [(0.0, 0.1), (0.5, 1.0), (0.80, 1.0)]
     assert 0 < EMA_FAST < 1
     assert 0 < EMA_SLOW < EMA_FAST
