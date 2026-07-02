@@ -143,6 +143,31 @@ def test_prepare_plugin_dir_links_user_skills(
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_prepare_plugin_dir_materializes_flat_builtin_skill(
+    tmp_path: Path, _isolate_claude_only: Path,
+) -> None:
+    # A built-in flat skill has dir = the shared root (no per-skill SKILL.md);
+    # the plugin must write skills/<name>/SKILL.md from the snapshot.
+    builtin_root = tmp_path / "built-in"
+    builtin_root.mkdir()
+    sk = Skill(
+        name="im", description="messaging", body="im steps",
+        dir=builtin_root, flat=True,
+    )
+
+    root = prepare_plugin_dir("sflat", skills={"im": sk})
+
+    try:
+        md = root / "skills" / "im" / "SKILL.md"
+        assert md.exists()
+        text = md.read_text()
+        assert "name: im" in text
+        assert "description: messaging" in text
+        assert "im steps" in text
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def test_prepare_plugin_dir_links_claude_only_skills(
     _isolate_claude_only: Path,
 ) -> None:

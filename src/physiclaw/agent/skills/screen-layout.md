@@ -9,7 +9,7 @@ Opening apps (Spotlight) and messaging the user (IM) both need exact input-box p
 
 Read coordinates from `screenshot` (pixel-perfect), never camera `peek` — but DO `peek` to confirm what a tap did (keyboard up, chat open). Copy each element's `bbox` **verbatim** into `report_screen_layout` — the exact `[left, top, right, bottom]` (0–1, 3 decimals) the screenshot returned; never eyeball, re-estimate, or re-round. The keyboard must be the system default (no third-party keyboard).
 
-The tool sanity-checks each box and saves it to `~/.physiclaw/screen-layout/`; each call returns what's still to capture. A box rejected as out-of-region means you picked a neighbouring element — re-read and call again.
+The tool sanity-checks each box and saves it to `~/.physiclaw/screen-layout/`; each call confirms the save and how many boxes remain (the first-run notice lists which). A box rejected as out-of-region means you picked a neighbouring element — re-read and call again.
 
 ## How to report
 

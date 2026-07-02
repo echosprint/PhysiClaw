@@ -16,7 +16,7 @@ import datetime as dt
 import logging
 import time
 
-from physiclaw.agent.engine import builtin_tool, compact, jobs, memory, plan, prompt, scratchpad, skill
+from physiclaw.agent.engine import builtin_tool, compact, jobs, memory, plan, prompt, scratchpad, screen_layout, skill
 from physiclaw.agent.engine.builtin_tool import LocalTool, Session
 from physiclaw.agent.engine.mcp_tool import McpClient, get_mcp, list_tools_cached
 from physiclaw.agent.engine.dto import (
@@ -61,14 +61,29 @@ async def run(
     MAX_ATTEMPTS fresh attempts run before we accept the STUCK outcome.
     DONE / FAIL / IDLE / WAIT are final on first occurrence — no retry.
 
+    One extra restart is allowed when a session completes first-run
+    screen-layout setup (`session.restart_for_setup`): the layout only
+    reaches the SYSTEM prompt on a fresh render, so we re-run the same
+    triggers once with the layout loaded to handle the original request.
+    It doesn't consume a STUCK attempt, and fires at most once (the layout
+    is complete from then on).
+
     `model_ref` is a `provider/model` string (e.g. `"qwen/qwen3.6-plus"`).
     Parsed inside `_run_session`; the provider is instantiated via
     `provider.make_provider(provider_id, model_id)`. Required — every
     caller goes through the launcher, which resolves `PHYSICLAW_MODEL`.
     """
-    for attempt in range(1, MAX_ATTEMPTS + 1):
+    setup_restart_used = False
+    attempt = 0
+    while attempt < MAX_ATTEMPTS:
+        attempt += 1
         session = Session()
         await _run_session(triggers, model_ref=model_ref, session=session)
+        if session.restart_for_setup and not setup_restart_used:
+            setup_restart_used = True
+            attempt -= 1  # a setup restart isn't a STUCK retry
+            log.info("screen layout learned during setup — restarting to load it")
+            continue
         if session.sentinel_status != STUCK:
             break
         if attempt < MAX_ATTEMPTS:
@@ -110,8 +125,16 @@ async def _run_session(
         )
         mcp = await get_mcp()
         mcp_tools = await list_tools_cached()
-        skill_registry = skill.discover()
-        local_registry = builtin_tool.build_registry(skill_registry)
+        # Built-in skills are inlined full-text into SYSTEM; user skills are
+        # indexed and loaded on demand via the Skill tool — so only user
+        # skills go into the local registry. The first-run screen-layout skill
+        # is dropped once the layout is learned (dead weight after setup).
+        layout_incomplete = not screen_layout.is_learned()
+        builtin_skills = screen_layout.prune_builtin_skills(
+            skill.discover_builtin_skills()
+        )
+        user_skills = skill.discover_user_skills()
+        local_registry = builtin_tool.build_registry(user_skills)
         local_schemas = builtin_tool.schemas(local_registry)
         # Full merged list goes to provider.chat(tools=) for invocation;
         # the inline `## Tooling` card pulls MCP names from AST so it
@@ -124,14 +147,16 @@ async def _run_session(
             "local": sorted(local_registry.keys()),
         })
         log.info(
-            "tools loaded: %d MCP + %d local + %d skills",
-            len(mcp_tools), len(local_registry), len(skill_registry),
+            "tools loaded: %d MCP + %d local + %d built-in + %d user skills",
+            len(mcp_tools), len(local_registry),
+            len(builtin_skills), len(user_skills),
         )
 
-        system_prompt = prompt.render_system(
+        system_prompt = prompt.render_system_prompts(
             local_tool_schemas=local_schemas,
             memory_ctx=memory.load_persistent(),
-            skills_ctx=skill.render_section(skill_registry),
+            builtin_skills_ctx=skill.render_builtin(builtin_skills),
+            user_skills_ctx=skill.render_section(user_skills),
             provider_id=provider_id,
         )
         messages: list[Message] = [
@@ -163,6 +188,7 @@ async def _run_session(
             prompt_hash=prompt_hash,
             tr=tr,
             rlog=rlog,
+            layout_incomplete=layout_incomplete,
         )
 
         log.info(
@@ -211,16 +237,24 @@ async def _loop(
     prompt_hash: str,
     tr: Trace,
     rlog: RawLog,
+    layout_incomplete: bool = False,
 ) -> None:
     tr.write({"event": "prefix_pinned", "hash": prompt_hash})
 
     for turn in range(MAX_TURNS):
         # Plan + scratchpad are just-in-time tails — keeps `messages[]`
         # cache-stable across writes. Plan goes last so the model reads
-        # "what to do next" last.
+        # "what to do next" last — except during first-run screen-layout
+        # setup, when the setup reminder rides one step further out so the
+        # blocker is the very last thing the model sees (absent once learned).
         session.plan.tick_turn()
         request_messages = scratchpad.inject_tail(messages, session.scratchpad)
         request_messages = plan.inject_tail(request_messages, session.plan)
+        # First-run only: the reminder is empty once the layout is learned, and
+        # a session that started learned stays learned — so skip the per-turn
+        # disk read entirely unless setup was still pending at session start.
+        if layout_incomplete:
+            request_messages = screen_layout.inject_tail(request_messages)
         # Cache markers + the actual wire format are the provider's
         # business now; engine logs the wire form for debugging by asking
         # the provider to serialize once.

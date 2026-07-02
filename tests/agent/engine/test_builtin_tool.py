@@ -433,6 +433,73 @@ async def test_skill_handler_dispatches_via_skill_module(mocker) -> None:
     fake_dispatch.assert_called_once_with({}, {"name": "wechat"})
 
 
+async def test_report_screen_layout_handler_delegates(mocker) -> None:
+    from physiclaw.agent.engine.builtin_tool import (
+        _handle_report_screen_layout,
+    )
+
+    rec = mocker.patch(
+        "physiclaw.agent.engine.screen_layout.record",
+        return_value="LAYOUT SAVED",
+    )
+    # Not the completing call → no session-ending / restart side effect.
+    mocker.patch("physiclaw.agent.engine.screen_layout.is_learned", return_value=False)
+
+    session = Session()
+    bbox = [0.03, 0.08, 0.88, 0.13]
+    out = await _handle_report_screen_layout(
+        session, {"page": "spotlight", "field": "spotlight_input", "bbox": bbox}
+    )
+
+    assert out == "LAYOUT SAVED"
+    rec.assert_called_once_with("spotlight", "spotlight_input", bbox, None)
+    assert session.restart_for_setup is False
+    assert session.sentinel_status is None
+
+
+async def test_report_screen_layout_handler_restarts_on_completion(mocker) -> None:
+    from physiclaw.agent.runtime.sentinel import IDLE
+    from physiclaw.agent.engine.builtin_tool import (
+        _handle_report_screen_layout,
+    )
+
+    mocker.patch(
+        "physiclaw.agent.engine.screen_layout.record", return_value="done",
+    )
+    # is_learned: False before the call, True after → this call completed setup.
+    mocker.patch(
+        "physiclaw.agent.engine.screen_layout.is_learned", side_effect=[False, True],
+    )
+
+    session = Session()
+    await _handle_report_screen_layout(
+        session,
+        {"page": "chat-keyboard", "app": "wechat", "field": "send", "bbox": [0.75, 0.87, 0.99, 0.92]},
+    )
+
+    assert session.restart_for_setup is True
+    assert session.sentinel_status == IDLE
+
+
+async def test_report_screen_layout_handler_no_restart_when_already_complete(mocker) -> None:
+    from physiclaw.agent.engine.builtin_tool import (
+        _handle_report_screen_layout,
+    )
+
+    mocker.patch("physiclaw.agent.engine.screen_layout.record", return_value="updated")
+    # Already complete before AND after → a correction, not a completing call.
+    mocker.patch("physiclaw.agent.engine.screen_layout.is_learned", return_value=True)
+
+    session = Session()
+    await _handle_report_screen_layout(
+        session,
+        {"page": "chat-keyboard", "app": "wechat", "field": "send", "bbox": [0.76, 0.87, 0.99, 0.92]},
+    )
+
+    assert session.restart_for_setup is False
+    assert session.sentinel_status is None
+
+
 # ---------- schemas ----------
 
 
@@ -481,12 +548,22 @@ def test_build_registry_returns_local_tool_instances() -> None:
     assert all(isinstance(t, LocalTool) for t in reg.values())
 
 
-def test_build_registry_includes_all_tool_categories() -> None:
+def test_build_registry_includes_all_tool_categories(mocker) -> None:
+    # First run (layout not learned): the setup tool is present.
+    mocker.patch("physiclaw.agent.engine.screen_layout.is_learned", return_value=False)
     keys = set(build_registry({}).keys())
 
     assert keys == {
         "note", "update_progress", "append_log", "save_memory",
         "read_memory", "read_logs", "update_memory",
         "create_job", "get_job", "list_jobs", "finish_job",
-        "wait", "end_session",
+        "wait", "report_screen_layout", "end_session",
     }
+
+
+def test_build_registry_drops_report_screen_layout_once_learned(mocker) -> None:
+    mocker.patch("physiclaw.agent.engine.screen_layout.is_learned", return_value=True)
+    keys = set(build_registry({}).keys())
+
+    assert "report_screen_layout" not in keys
+    assert "note" in keys and "end_session" in keys  # everything else intact

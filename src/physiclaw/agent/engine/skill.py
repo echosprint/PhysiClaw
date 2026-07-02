@@ -1,23 +1,41 @@
 """Skill discovery and tiered dispatch.
 
-A skill is a folder containing:
-  SKILL.md             frontmatter (name, description) + body (the workflow)
-  references/          detail files — loaded on demand (tier 3)
-  assets/              freeform resources a reference may point at
+A skill comes in one of two shapes:
 
-Two roots are scanned, in order. The primary root is
-``~/.physiclaw/skills/<name>/`` so a ``uv tool install``-ed server finds
-skills without a repo cwd. The fallback is ``./skills/<name>/`` relative
-to the current working directory — convenient when iterating on skills
-from inside the repo. Primary wins on name collision.
+  Built-in (flat file):  ``<pkg>/agent/skills/<name>.md``
+      frontmatter (name, description) + body. Ships in the wheel, so every
+      install has the core skills out of the box — no repo, no download.
+      References (tier 3) aren't supported here; built-in skills are
+      self-contained.
 
-Tiers (progressive disclosure):
-  1. Metadata (name + description) is injected into the SYSTEM prompt by
-     `render_section`. This is the ONLY signal the model has to decide
-     whether the skill is relevant — descriptions must name triggers.
-  2. `Skill(name=...)` returns the SKILL.md body as a tool_result.
-  3. `Skill(name=..., reference=<path>)` loads `<skill>/references/<path>`
-     as text, resolved under the winning skill's dir only.
+  User (folder):  ``~/.physiclaw/skills/<name>/SKILL.md`` (+ optional
+      ``references/``, ``assets/``). The user's own skills — added or
+      overriding a built-in one.
+
+Exactly two roots are scanned, in ascending precedence:
+
+  1. built-in ``<pkg>/agent/skills/*.md`` — the shipped baseline, resolved
+     from the installed ``physiclaw`` package (never the cwd).
+  2. ``~/.physiclaw/skills/<name>/SKILL.md`` (home) — the ONLY place a
+     user's custom skills come from, so a ``uv tool install``-ed server
+     finds them without a repo cwd.
+
+Home wins on name collision (scanned last → ``out[name] =`` replaces),
+so a user skill of the same name overrides the built-in one. The cwd is
+deliberately not a root — discovery must not depend on where the server
+was launched.
+
+Loading differs by kind — the two render into SEPARATE prompt sections, so
+they never merge or override each other:
+  * Built-in — the full body is always inlined by `render_builtin` under
+    `## Built-in Skills`. No Skill() call; the model always has the steps.
+  * User — only name+description go in, via `render_section` under
+    `## Available skills`. The description is the ONLY relevance signal, so it
+    must name triggers. The model then loads the body on demand:
+      - `Skill(name=...)` returns the SKILL.md body as a tool_result.
+      - `Skill(name=..., reference=<path>)` loads `<skill>/references/<path>`
+        as text, resolved under that skill's dir only (built-in skills, being
+        self-contained, have no references).
 
 Discovery is realpath-scoped within each root: a symlink that escapes
 its root is rejected so third-party skill installs can't path-traverse.
@@ -31,8 +49,8 @@ from physiclaw.text import read_text
 
 log = logging.getLogger(__name__)
 
+BUILTIN_SKILLS_DIR = paths.builtin_skills_dir()
 HOME_SKILLS_DIR = paths.skills_dir()
-CWD_SKILLS_DIR = Path("skills")
 
 
 @dataclass
@@ -44,17 +62,57 @@ class Skill:
     description: str
     body: str
     dir: Path   # realpath; used to resolve references/ safely
+    flat: bool = False  # built-in flat-.md skill: body is authoritative, no references/
+
+
+def discover_builtin_skills() -> dict[str, Skill]:
+    """Built-in flat-`.md` skills shipped in the package. Their full body is
+    always inlined into the SYSTEM prompt, so they need no Skill() call."""
+    out: dict[str, Skill] = {}
+    _scan_flat_root(BUILTIN_SKILLS_DIR, out)
+    return out
+
+
+def discover_user_skills() -> dict[str, Skill]:
+    """The user's own folder skills from ~/.physiclaw/skills/. Only their
+    name+description go in the SYSTEM prompt; the body loads on demand via
+    the Skill() tool."""
+    out: dict[str, Skill] = {}
+    _scan_root(HOME_SKILLS_DIR, out)
+    return out
 
 
 def discover() -> dict[str, Skill]:
-    """Scan cwd then home skill roots. Home wins on name collision
-    (scanned last so `out[name] =` replaces). Missing SKILL.md skips
-    silently — a broken skill shouldn't take down the session.
+    """Merged view — built-in first, then user (user wins on name collision).
+    Used by the Claude-provider plugin dir, which materializes every skill as
+    a Claude Code skill; the engine keeps the two kinds separate instead. One
+    bad skill skips silently rather than taking down the session.
     """
-    out: dict[str, Skill] = {}
-    _scan_root(CWD_SKILLS_DIR, out)
+    out = discover_builtin_skills()
     _scan_root(HOME_SKILLS_DIR, out)
     return out
+
+
+def _scan_flat_root(root: Path, out: dict[str, Skill]) -> None:
+    """Scan a built-in root of flat ``<name>.md`` files. The frontmatter
+    `name` wins; otherwise the filename stem is the skill name. `dir` is
+    the root itself — built-in skills have no `references/`, so any tier-3
+    load resolves under (and fails inside) this shared dir, which is fine.
+    """
+    if not root.exists():
+        return
+    for md in sorted(root.glob("*.md")):
+        if md.name.startswith("_") or not md.is_file():
+            continue
+        fm, body = _split_frontmatter(read_text(md))
+        name = fm.get("name") or md.stem
+        out[name] = Skill(
+            name=name,
+            description=(fm.get("description") or "").strip(),
+            body=body.strip(),
+            dir=root.resolve(),
+            flat=True,
+        )
 
 
 def _scan_root(root: Path, out: dict[str, Skill]) -> None:
@@ -103,6 +161,11 @@ def dispatch(skills: dict[str, Skill], args: dict) -> str:
 
 
 def _load_reference(skill: Skill, ref_path: str) -> str:
+    if skill.flat:
+        raise ValueError(
+            f"skill {skill.name!r} is built-in and self-contained — it has no "
+            "references"
+        )
     # skill.dir is already a realpath from discover(); no need to resolve it
     # again. Only the target needs resolving to collapse any `..` segments
     # in `ref_path` before the scope check.
@@ -137,21 +200,45 @@ def _split_frontmatter(text: str) -> tuple[dict[str, str], str]:
     return fm, body
 
 
+def _skill_bullets(skills: dict[str, Skill]) -> list[str]:
+    """One `- **name** — description` index line per skill."""
+    return [
+        f"- **{s.name}** — {s.description or '(no description)'}"
+        for s in skills.values()
+    ]
+
+
 def render_section(skills: dict[str, Skill]) -> str:
-    """Markdown section listing available skills for the SYSTEM prompt.
-
-    Tier-1 loading: description is the ONLY signal the model sees before
-    invoking, so a skill with a weak description sits idle even when
-    relevant. Authors: write descriptions as "use when X, Y, Z; NOT for
-    A, B" — concrete triggers, not abstract capability blurbs.
-
-    Invocation syntax is documented in the Skill tool's description (via
-    the provider's tools= API); don't duplicate it here.
-    """
+    """`## Available skills` + one `- **name** — description` line per skill;
+    empty string if none. A pure index — the body loads on demand via the
+    Skill tool, whose schema already documents invocation. Serves both the
+    Claude path's plugin skills and the engine's user skills. Built-in skills
+    use `render_builtin` instead (full bodies, not an index)."""
     if not skills:
         return ""
-    lines = ["## Available skills\n"]
-    for s in skills.values():
-        desc = s.description or "(no description)"
-        lines.append(f"- **{s.name}** — {desc}")
-    return "\n".join(lines)
+    return "\n".join(["## Available skills\n", *_skill_bullets(skills)])
+
+
+def render_builtin(builtin: dict[str, Skill]) -> str:
+    """The built-in skills' FULL bodies, inlined under `## Built-in Skills`. Always
+    present in the SYSTEM prompt, so the model never calls Skill() for these
+    — the steps and bboxes are already in front of it. Own section, so a
+    user skill can never shadow or collide with a built-in workflow."""
+    if not builtin:
+        return ""
+    lines = [
+        "## Built-in Skills",
+        "",
+        "Always available — no loading. Before acting, check for a match: if "
+        "one fits, follow its steps in order; else proceed normally.",
+        "",
+    ]
+    for s in builtin.values():
+        lines.append(f"### {s.name}")
+        lines.append("")
+        if s.body:
+            lines.append(s.body)
+            lines.append("")
+    return "\n".join(lines).rstrip()
+
+

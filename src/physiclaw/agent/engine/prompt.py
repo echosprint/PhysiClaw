@@ -19,7 +19,7 @@ import hashlib
 import logging
 from pathlib import Path
 
-from physiclaw.agent.engine import memory, mcp_inventory
+from physiclaw.agent.engine import memory, mcp_inventory, screen_layout
 from physiclaw.text import read_text
 
 log = logging.getLogger(__name__)
@@ -33,7 +33,7 @@ CONTEXT_DIR = Path(__file__).resolve().parent.parent / "context"
 DOCTRINE_FILE_ORDER = (
     "IDENTITY.md",    # who PhysiClaw is — short, one-paragraph card
     "USER.md",        # who PhysiClaw serves — read from memory/USER.md
-    "SOUL.md",        # personality / tone / voice — gets embody-note prepended
+    "SOUL.md",        # personality / tone / voice
     "AGENT.md",       # operational rules: Loop / Boundaries / Rules / Continuity
     "PHYSICLAW.md",   # tool-surface mechanics — also shipped via MCP initialize
     "TOOLS.md",       # extra user-authored tool guidance
@@ -43,11 +43,12 @@ DOCTRINE_FILE_ORDER = (
 )
 
 
-def render_system(
+def render_system_prompts(
     *,
     local_tool_schemas: list[dict] | None = None,
     memory_ctx: str = "",
-    skills_ctx: str = "",
+    builtin_skills_ctx: str = "",
+    user_skills_ctx: str = "",
     provider_id: str = "",
 ) -> str:
     """Compose the full SYSTEM for one session — entirely session-stable.
@@ -55,10 +56,13 @@ def render_system(
     Order (above → below):
       # Doctrine           file-loop over DOCTRINE_FILE_ORDER. Slots:
                            IDENTITY, USER, SOUL, AGENT, PHYSICLAW, TOOLS,
-                           CONVENTION — each rendered as `## <name>` block;
-                           missing = skipped. USER reads from memory/.
+                           PERSISTENCE, JOBS, CONVENTION — each rendered as a
+                           `## <name>` block; missing = skipped. USER reads
+                           from memory/.
       ## Tooling           inline tool index card (Qwen reliability)
-      ## Skill selection   decision-tree wrapper around `skills_ctx`
+      ## Built-in Skills   built-in skills, FULL bodies (always active)
+      ## Screen layout     learned input/keyboard bboxes the skills above use
+      ## Available skills  user skills, name+description index (load on demand)
       ## Examples          ❌/✅ for the most common per-turn failures
       ## Reasoning Format  provider-specific reasoning wrapper (e.g. Qwen
                            `<think>...</think>`); pulled from
@@ -66,15 +70,18 @@ def render_system(
       ## memory.md         session-stable persistent facts — live file
                            dump (the spec lives in the PERSISTENCE.md slot)
 
-    Wake-volatile content (fired-jobs block, trigger stamps) lives in
-    the user message the engine appends right after — keeping the
-    system message byte-stable across wakes for cross-session cache
-    hits.
+    Built-in and user skills render into separate sections (both already
+    carry their own `##` header + framing) so they never collide. Wake-
+    volatile content (fired-jobs block, trigger stamps) lives in the user
+    message the engine appends right after — keeping the system message
+    byte-stable across wakes for cross-session cache hits.
     """
     lines: list[str] = [
         *_render_doctrine(),
         *_render_tooling(local_tool_schemas or []),
-        *_render_skills(skills_ctx),
+        *_render_section(builtin_skills_ctx),
+        *_render_screen_layout(),
+        *_render_section(user_skills_ctx),
         *_render_examples(),
         *_render_reasoning_format(provider_id),
         *_render_memory(memory_ctx),
@@ -152,23 +159,28 @@ def _render_tooling(local_tool_schemas: list[dict]) -> list[str]:
     return out
 
 
-def _render_skills(skills_ctx: str) -> list[str]:
-    """Wrap `skills_ctx` (which already includes its own `## Available
-    skills` header + bullets) with an explicit decision tree.
+def _render_section(ctx: str) -> list[str]:
+    """Include a pre-rendered skill section (built-in bodies or user index).
+    Each already carries its own `##` header + framing from the skill
+    module, so this just drops it in with a trailing blank line."""
+    return [ctx, ""] if ctx else []
 
-    OpenClaw's pattern: tell the model exactly when to read a skill and
-    when not to. Vague guidance ("invoke if it fits") leaves Qwen-class
-    models stuck — either they invoke nothing, or they over-invoke and
-    burn turns reading every SKILL.md."""
-    if not skills_ctx:
+
+def _render_screen_layout() -> list[str]:
+    """Inject the learned screen layout (Spotlight + chat input boxes +
+    keyboard) once ALL three pages are captured. Read from
+    ``~/.physiclaw/screen-layout/`` at session start — cache-stable.
+
+    Nothing here until setup is complete: while pages are still missing the
+    turn-volatile tail reminder (`screen_layout.inject_tail`) lists the fields
+    left to capture, and each `report_screen_layout` result confirms the save
+    and how many remain. Once the last box lands, this loads the full layout on
+    the next wake.
+    """
+    if not screen_layout.is_learned():
         return []
-    return [
-        "## Skill selection",
-        "**App-specific skills are mandatory.** Before acting in any app listed below, invoke `Skill(name=...)` first and read the workflow — skills encode app-specific traps you can't see on the screen. Invoke at most one skill up-front; apps not listed, proceed without a skill.",
-        "",
-        skills_ctx,
-        "",
-    ]
+    md = screen_layout.load_layout_md() or "not set yet"
+    return ["## Screen layout", "", md, ""]
 
 
 def _render_examples() -> list[str]:
@@ -182,32 +194,29 @@ def _render_examples() -> list[str]:
     return [
         "## Examples",
         "",
-        "**Every turn is exactly `[note, one-other]`.** No more, no less. Splits clearly across turns — one action per turn.",
-        "❌ Wrong: `[peek]` alone (missing note), or `[note, append_log, end_session]` (too many).",
-        "✅ Right: `[note(summary=\"peek to find the Send button in the WeChat chat with Alice\"), peek()]`.",
+        "**Turn shape** — exactly `[note, one-other]`.",
+        "❌ `[peek]` alone · `[note, append_log, end_session]`.",
+        "✅ `[note(summary=\"peek to find Send in Alice's WeChat chat\"), peek()]`.",
         "",
-        "**Draft the plan and tick it step-by-step.** (Rationale in CONVENTION.md § The plan.)",
-        "❌ Wrong: complete step 1, never call `update_progress` again, lose track at step 3. Or: tick after every tap (a step spans many taps; tick on intent-achieved, not per action).",
-        "✅ Right: after reading the IM, `[note(summary=\"draft plan from Alice's request\"), update_progress(user_said=..., understanding=..., steps=[...])]` with every step statused (first step `in_progress`, rest `pending`). When the screen confirms a step's intent (add-to-cart toast appears, search results load, etc.): `[note(summary=\"step 1 done, advancing\"), update_progress(steps=[...])]` flipping that step to `completed` and the next to `in_progress`.",
+        "**Bbox transcription** — verbatim from the listing's bracket contents.",
+        "❌ Listing: `45 [icon] \"\" [0.520,0.662,0.717,0.775] 0.56` → you emit `tap(bbox=[0.518, 0.662, 0.717, 0.775])`. `0.518` is a regeneration; 0.002 of drift lands on the neighbor.",
+        "✅ Transcribe the four numbers exactly — `0.520` stays `0.520`. Target not in any grounded source → `screenshot`, never fabricate.",
         "",
-        "**Only the latest screen survives.** Earlier peek/screenshot results get dropped from history.",
-        "❌ Wrong: rely on a `peek` from three turns ago to plan the current tap.",
-        "✅ Right: if you need to re-check, re-observe — `peek` is cheap. Your `note.summary` from past turns carries the context you need.",
+        "**Screenshot escalation** — when `peek` misses a target, re-peeking returns the same gap.",
+        "❌ `peek` home, no JD icon → `peek` again → tap a Safari link labeled \"JD\" → wrong page, STUCK loop.",
+        "✅ `peek` home, no JD icon → `screenshot` next turn, scratchpad the icon's bbox, `peek`, tap the copy. The icon was always there; the camera couldn't resolve it.",
         "",
-        "**Gather as you go.** Append plan-relevant info to scratchpad as you see it; reissue the full text to extend.",
-        "❌ Wrong (over-scratchpad): on the home screen, `note(summary=\"on home screen\", scratchpad=\"home screen shows WeChat, JD, Meituan icons\")`. Navigation isn't part of the answer.",
-        "❌ Wrong (waits till the end): scroll through 2 orders across 4 pages, never scratchpad → by the time you reach WeChat, peek-results have been stubbed, items lost, you re-open and re-scrape.",
-        "✅ Right (accumulates): order #1 detail visible → `[note(summary=\"capture order 1\", scratchpad=\"order 1: cable ¥45 (delivered), clips ¥17 (shipped)\"), swipe()]`. Scroll reveals more → `[note(summary=\"order 1 cont.\", scratchpad=\"order 1: cable ¥45, clips ¥17, tape ¥22\"), go_back()]`. Order #2 detail → `[note(summary=\"capture order 2\", scratchpad=\"order 1: cable ¥45, clips ¥17, tape ¥22\\norder 2: case ¥56, charger ¥38\"), home_screen()]`. By the time you switch to WeChat the scratchpad is the full answer; the reply pastes from it.",
+        "**Add to cart** — success shows only in the small top-right cart badge; the page stays put.",
+        "❌ Screen unchanged → tap again → duplicates. Or `screenshot` → shopping apps pop share panels.",
+        "✅ Tap once → `peek` the badge (2 → 3 = landed); unreadable → open the cart and check.",
         "",
-        "**Bboxes come from the listing, character-for-character.** Every bbox you pass to tap/swipe/sequence must be transcribed from a listing row's bracket contents — same digits, same order, no retyping from memory, no rounding, no digit drift.",
-        "❌ Wrong (eyeballing): `tap(bbox=[0.47, 0.82, 0.51, 0.88])` where those numbers came from looking at the image.",
-        "❌ Wrong (digit drift): listing row is `45 [icon] \"\" [0.520,0.662,0.717,0.775] 0.56`, you emit `tap(bbox=[0.518, 0.662, 0.717, 0.775])`. The `0.518` is a regeneration, not a copy — on small targets a 0.002 drift lands on the neighboring icon.",
-        "✅ Right: find the target row in the listing, read the four numbers between its second pair of brackets, transcribe them exactly (`0.520` stays `0.520`, not `0.52` and not `0.518`) into `tap(bbox=...)`. If the target isn't in the current listing or a surviving text row from an earlier stub, re-peek or escalate to `screenshot` — don't fabricate coords.",
+        "**Scratchpad accumulates** — plan-relevant payloads go in as you see them; navigation doesn't.",
+        "❌ Scroll 2 orders across 4 pages, scratchpad nothing → peeks stubbed by compaction, items lost, re-scrape.",
+        "✅ Order 1 visible → `note(..., scratchpad=\"order 1: cable ¥45, clips ¥17\")` → scroll → `note(..., scratchpad=\"order 1: cable ¥45, clips ¥17, tape ¥22\")` → order 2 → append its lines. Reaching WeChat, the scratchpad is the full answer.",
         "",
-        "**When `peek` doesn't list your target, `screenshot` — don't peek again.** Camera glare and small icons (especially app icons in a 6×4 home grid) make the camera-based `peek` lose elements. Re-peeking gives you the same gap. `screenshot` uses the phone's own pixel-perfect capture and catches what the camera misses. The ~12s cost beats burning 10 turns on a hidden target.",
-        "❌ Wrong: `peek` home screen, no JD icon listed → `peek` again, still no JD → tap a Safari link labeled \"JD\" because it's the only `JD`-string match. Land on the wrong page, loop until STUCK.",
-        "✅ Right: `peek` home screen, no JD icon → next turn `screenshot` for pixel-perfect bboxes. The JD icon was always there; the camera just couldn't resolve it.",
-        "",
+        "**Plan ticking** — tick on intent-confirmed, not per tap.",
+        "❌ Complete step 1, never `update_progress` again · tick after every tap.",
+        "✅ After reading the IM, one `update_progress` with the full step list (first `in_progress`, rest `pending`); flip on each screen-confirmed intent (cart toast, results loaded).",
     ]
 
 
@@ -277,15 +286,17 @@ def dump(
     *,
     local_tool_schemas: list[dict] | None = None,
     memory_ctx: str = "",
-    skills_ctx: str = "",
+    builtin_skills_ctx: str = "",
+    user_skills_ctx: str = "",
     provider_id: str = "",
 ) -> str:
     """Render the SYSTEM prompt the same way the engine does, with all
     inputs optional so callers can dump the static skeleton without
     spinning up MCP or loading memory."""
-    return render_system(
+    return render_system_prompts(
         local_tool_schemas=local_tool_schemas,
         memory_ctx=memory_ctx,
-        skills_ctx=skills_ctx,
+        builtin_skills_ctx=builtin_skills_ctx,
+        user_skills_ctx=user_skills_ctx,
         provider_id=provider_id,
     )

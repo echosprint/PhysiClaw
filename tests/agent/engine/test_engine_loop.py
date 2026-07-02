@@ -290,6 +290,8 @@ def patched_loop_deps(mocker):
                         side_effect=lambda msgs, _sp: msgs)
     mocker.patch.object(engine_mod.plan, "inject_tail",
                         side_effect=lambda msgs, _p: msgs)
+    mocker.patch.object(engine_mod.screen_layout, "inject_tail",
+                        side_effect=lambda msgs: msgs)
     mocker.patch.object(engine_mod.compact, "drop_stale_screens")
     mocker.patch.object(engine_mod.compact, "collapse_old_turns")
 
@@ -329,6 +331,48 @@ async def test_loop_closes_cleanly_on_end_session(patched_loop_deps) -> None:
     assert isinstance(messages[-3], AssistantMessage)
     assert isinstance(messages[-2], ToolResultMessage)
     assert isinstance(messages[-1], ToolResultMessage)
+
+
+@pytest.mark.asyncio
+async def test_loop_skips_layout_reminder_when_complete(mocker) -> None:
+    # Default (layout_incomplete=False) must NOT call screen_layout.inject_tail
+    # — that avoids a per-turn disk read once setup is done.
+    mocker.patch.object(engine_mod.scratchpad, "inject_tail",
+                        side_effect=lambda msgs, _sp: msgs)
+    mocker.patch.object(engine_mod.plan, "inject_tail",
+                        side_effect=lambda msgs, _p: msgs)
+    mocker.patch.object(engine_mod.compact, "drop_stale_screens")
+    mocker.patch.object(engine_mod.compact, "collapse_old_turns")
+    spy = mocker.patch.object(engine_mod.screen_layout, "inject_tail",
+                              side_effect=lambda msgs: msgs)
+
+    registry = _registry()
+    schemas = _schemas(registry)
+    asst = _asst(tool_calls=[
+        _tc("note", {"summary": "x"}),
+        _tc("end_session", {"status": DONE, "recap": "done"}),
+    ])
+    session = Session()
+
+    await engine_mod._loop(
+        mcp=FakeMcpClient(), provider=FakeProvider([asst]),
+        messages=[SystemMessage(content="s")], tool_schemas=schemas,
+        schema_by_name={s["name"]: s for s in schemas},
+        local_registry=registry, session=session, prompt_hash="h",
+        tr=MagicMock(), rlog=MagicMock(),  # layout_incomplete defaults False
+    )
+    spy.assert_not_called()
+
+    # With layout_incomplete=True it IS injected each turn.
+    session2 = Session()
+    await engine_mod._loop(
+        mcp=FakeMcpClient(), provider=FakeProvider([asst]),
+        messages=[SystemMessage(content="s")], tool_schemas=schemas,
+        schema_by_name={s["name"]: s for s in schemas},
+        local_registry=registry, session=session2, prompt_hash="h",
+        tr=MagicMock(), rlog=MagicMock(), layout_incomplete=True,
+    )
+    spy.assert_called()
 
 
 @pytest.mark.asyncio
@@ -494,7 +538,8 @@ def _patch_session_deps(mocker):
                         side_effect=_async_returning(FakeMcpClient()))
     mocker.patch.object(engine_mod, "list_tools_cached",
                         side_effect=_async_returning([]))
-    mocker.patch.object(engine_mod.skill, "discover", return_value={})
+    mocker.patch.object(engine_mod.skill, "discover_builtin_skills", return_value={})
+    mocker.patch.object(engine_mod.skill, "discover_user_skills", return_value={})
     mocker.patch.object(
         engine_mod.builtin_tool, "build_registry", return_value=_registry(),
     )
@@ -502,8 +547,9 @@ def _patch_session_deps(mocker):
         engine_mod.builtin_tool, "schemas", return_value=_schemas(_registry()),
     )
     mocker.patch.object(engine_mod.memory, "load_persistent", return_value="")
+    mocker.patch.object(engine_mod.skill, "render_builtin", return_value="")
     mocker.patch.object(engine_mod.skill, "render_section", return_value="")
-    mocker.patch.object(engine_mod.prompt, "render_system", return_value="SYSTEM")
+    mocker.patch.object(engine_mod.prompt, "render_system_prompts", return_value="SYSTEM")
     mocker.patch.object(engine_mod.prompt, "prefix_hash", return_value="hashX")
     mocker.patch.object(engine_mod.compact, "new_summary_placeholder",
                         return_value=UserMessage(content="<sum>"))
@@ -515,6 +561,8 @@ def _patch_session_deps(mocker):
                         side_effect=lambda msgs, _sp: msgs)
     mocker.patch.object(engine_mod.plan, "inject_tail",
                         side_effect=lambda msgs, _p: msgs)
+    mocker.patch.object(engine_mod.screen_layout, "inject_tail",
+                        side_effect=lambda msgs: msgs)
     mocker.patch.object(engine_mod.compact, "drop_stale_screens")
     mocker.patch.object(engine_mod.compact, "collapse_old_turns")
     mocker.patch.object(engine_mod.jobs, "format_fired", return_value="")
@@ -690,5 +738,60 @@ async def test_run_gives_up_after_max_stucks(mocker) -> None:
     )
 
     await engine_mod.run([Trigger(description="t")], model_ref="x/y")
+
+    assert spy.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_run_restarts_once_after_setup_completes(mocker) -> None:
+    # Session 1 finishes first-run setup → restart; session 2 does the task.
+    outcomes = iter([("setup", True), (DONE, False)])
+
+    async def fake_session(triggers, *, model_ref, session: Session):
+        status, restart = next(outcomes)
+        session.sentinel_status = None if restart else status
+        session.restart_for_setup = restart
+
+    spy = mocker.patch.object(engine_mod, "_run_session", side_effect=fake_session)
+
+    await engine_mod.run([Trigger(description="t")], model_ref="x/y")
+
+    assert spy.call_count == 2  # setup session + task session
+
+
+@pytest.mark.asyncio
+async def test_run_setup_restart_does_not_consume_stuck_attempt(mocker) -> None:
+    # Even with MAX_ATTEMPTS=1, the setup restart still allows the task session.
+    mocker.patch.object(engine_mod, "MAX_ATTEMPTS", 1)
+    outcomes = iter([("setup", True), (DONE, False)])
+
+    async def fake_session(triggers, *, model_ref, session: Session):
+        status, restart = next(outcomes)
+        session.sentinel_status = None if restart else status
+        session.restart_for_setup = restart
+
+    spy = mocker.patch.object(engine_mod, "_run_session", side_effect=fake_session)
+
+    await engine_mod.run([Trigger(description="t")], model_ref="x/y")
+
+    assert spy.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_run_setup_restart_fires_at_most_once(mocker) -> None:
+    # A pathological session that keeps flagging restart must not loop forever.
+    mocker.patch.object(engine_mod, "MAX_ATTEMPTS", 3)
+
+    async def fake_session(triggers, *, model_ref, session: Session):
+        session.sentinel_status = DONE
+        session.restart_for_setup = True  # always flags
+
+    spy = mocker.patch.object(engine_mod, "_run_session", side_effect=fake_session)
+
+    await engine_mod.run([Trigger(description="t")], model_ref="x/y")
+
+    # 1 setup restart (uncounted) + then the guard blocks further restarts and
+    # the DONE session ends the loop → 2 total.
+    assert spy.call_count == 2
 
     assert spy.call_count == 2

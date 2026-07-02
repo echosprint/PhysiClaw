@@ -1,9 +1,11 @@
 """Tests for `physiclaw.agent.engine.skill` — discovery + dispatch.
 
-Module-level `HOME_SKILLS_DIR` (paths.skills_dir()) is captured at
-import. The autouse `_skill_roots` fixture re-points it to a per-test
-tmp dir, plus changes cwd so `CWD_SKILLS_DIR = Path("skills")`
-resolves under tmp_path too.
+Discovery scans exactly two roots: the built-in package root
+(`BUILTIN_SKILLS_DIR`, flat `.md`) and the user home root
+(`HOME_SKILLS_DIR` = paths.skills_dir(), folder `SKILL.md`). The autouse
+`_skill_roots` fixture re-points both at per-test tmp dirs. The cwd is
+NOT a discovery root; the fixture still chdirs to an empty tmp for
+hygiene.
 """
 from __future__ import annotations
 
@@ -17,7 +19,10 @@ from physiclaw.agent.engine.skill import (
     _load_reference,
     _split_frontmatter,
     discover,
+    discover_builtin_skills,
+    discover_user_skills,
     dispatch,
+    render_builtin,
     render_section,
 )
 
@@ -26,10 +31,17 @@ from physiclaw.agent.engine.skill import (
 def _skill_roots(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[Path, Path]:
-    """Per-test home + cwd skill roots."""
+    """Per-test home + cwd skill roots.
+
+    Also re-points the built-in root at an empty tmp dir so the real
+    shipped flat-.md skills don't leak into discovery assertions.
+    """
     home = tmp_path / "home_skills"
     cwd = tmp_path / "cwd_root"
     cwd.mkdir()
+    builtin = tmp_path / "builtin_skills"
+    builtin.mkdir()
+    monkeypatch.setattr(skill_mod, "BUILTIN_SKILLS_DIR", builtin)
     monkeypatch.setattr(skill_mod, "HOME_SKILLS_DIR", home)
     monkeypatch.chdir(cwd)
     # CWD_SKILLS_DIR is `Path("skills")` — relative to cwd.
@@ -61,15 +73,12 @@ def test_discover_empty_when_no_roots_exist() -> None:
     assert discover() == {}
 
 
-def test_discover_finds_skill_in_cwd_skills_root(_skill_roots) -> None:
+def test_discover_ignores_cwd_skills_dir(_skill_roots) -> None:
+    # The cwd is not a discovery root — a ./skills there must be ignored.
     home, cwd = _skill_roots
     _write_skill(cwd / "skills", "foo")
 
-    out = discover()
-
-    assert "foo" in out
-    assert out["foo"].name == "foo"
-    assert out["foo"].description == "do something"
+    assert discover() == {}
 
 
 def test_discover_finds_skill_in_home_skills_root(_skill_roots) -> None:
@@ -79,18 +88,6 @@ def test_discover_finds_skill_in_home_skills_root(_skill_roots) -> None:
     out = discover()
 
     assert "bar" in out
-
-
-def test_discover_home_wins_on_name_collision(_skill_roots) -> None:
-    # Same name in both roots; HOME_SKILLS_DIR is scanned last → wins.
-    home, cwd = _skill_roots
-    _write_skill(cwd / "skills", "shared", description="from cwd", body="cwd-body")
-    _write_skill(home, "shared", description="from home", body="home-body")
-
-    out = discover()
-
-    assert out["shared"].description == "from home"
-    assert out["shared"].body == "home-body"
 
 
 def test_discover_skips_directories_starting_with_underscore(
@@ -164,6 +161,107 @@ def test_discover_strips_frontmatter_whitespace_from_description_and_body(
 
     assert out["trimmed"].description == "padded around"
     assert out["trimmed"].body == "body"
+
+
+# ---------- built-in flat-.md discovery ----------
+
+
+def _write_flat(name: str, *, description: str = "flat desc", body: str = "flat body") -> None:
+    """Write a built-in-style flat `<name>.md` into the (monkeypatched) root."""
+    root = skill_mod.BUILTIN_SKILLS_DIR
+    root.mkdir(parents=True, exist_ok=True)
+    (root / f"{name}.md").write_text(
+        f"---\nname: {name}\ndescription: {description}\n---\n{body}\n"
+    )
+
+
+def test_discover_finds_builtin_flat_md_skill() -> None:
+    _write_flat("im", description="messaging", body="im workflow")
+
+    out = discover()
+
+    assert out["im"].description == "messaging"
+    assert out["im"].body == "im workflow"
+    assert out["im"].flat is True
+
+
+def test_load_reference_rejects_flat_skill() -> None:
+    sk = Skill(name="im", description="d", body="b", dir=Path("/tmp"), flat=True)
+
+    with pytest.raises(ValueError, match=r"built-in and self-contained"):
+        _load_reference(sk, "spec.md")
+
+
+def test_discover_flat_uses_filename_stem_when_name_missing() -> None:
+    (skill_mod.BUILTIN_SKILLS_DIR / "open-app.md").write_text(
+        "---\ndescription: launch apps\n---\nbody\n"
+    )
+
+    assert "open-app" in discover()
+
+
+def test_discover_flat_skips_underscore_prefixed_files() -> None:
+    (skill_mod.BUILTIN_SKILLS_DIR / "_draft.md").write_text(
+        "---\nname: _draft\ndescription: wip\n---\nbody\n"
+    )
+
+    assert discover() == {}
+
+
+def test_discover_home_skill_overrides_builtin(_skill_roots) -> None:
+    # Built-in is the lowest-precedence root; a home skill of the same name wins.
+    home, _ = _skill_roots
+    _write_flat("im", description="built-in", body="built-in-body")
+    _write_skill(home, "im", description="user", body="user-body")
+
+    out = discover()
+
+    assert out["im"].description == "user"
+    assert out["im"].body == "user-body"
+
+
+# ---------- discover_builtin_skills / discover_user_skills ----------
+
+
+def test_discover_builtin_only_scans_builtin_root(_skill_roots) -> None:
+    home, _ = _skill_roots
+    _write_flat("im", description="messaging")
+    _write_skill(home, "taobao")
+
+    out = discover_builtin_skills()
+
+    assert set(out) == {"im"}
+    assert out["im"].flat is True
+
+
+def test_discover_user_only_scans_home_root(_skill_roots) -> None:
+    home, _ = _skill_roots
+    _write_flat("im")
+    _write_skill(home, "taobao")
+
+    out = discover_user_skills()
+
+    assert set(out) == {"taobao"}
+    assert out["taobao"].flat is False
+
+
+# ---------- render_builtin ----------
+
+
+def test_render_builtin_empty_when_no_skills() -> None:
+    assert render_builtin({}) == ""
+
+
+def test_render_builtin_inlines_full_bodies() -> None:
+    skills = {
+        "im": Skill(name="im", description="d", body="IM WORKFLOW", dir=Path("/"), flat=True),
+    }
+
+    out = render_builtin(skills)
+
+    assert out.startswith("## Built-in Skills")
+    assert "### im" in out
+    assert "IM WORKFLOW" in out  # full body, not just metadata
 
 
 # ---------- Skill dataclass ----------
@@ -331,7 +429,7 @@ def test_render_section_empty_when_no_skills() -> None:
 
 def test_render_section_lists_each_skill_as_bullet() -> None:
     skills = {
-        "foo": Skill(name="foo", description="do foo", body="", dir=Path("/")),
+        "foo": Skill(name="foo", description="do foo", body="SECRET STEPS", dir=Path("/")),
         "bar": Skill(name="bar", description="do bar", body="", dir=Path("/")),
     }
 
@@ -340,6 +438,7 @@ def test_render_section_lists_each_skill_as_bullet() -> None:
     assert out.startswith("## Available skills\n")
     assert "- **foo** — do foo" in out
     assert "- **bar** — do bar" in out
+    assert "SECRET STEPS" not in out  # index only — body loads on demand
 
 
 def test_render_section_uses_no_description_placeholder_when_empty() -> None:

@@ -10,10 +10,10 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
-from physiclaw.agent.engine import jobs, memory, scratchpad, skill
+from physiclaw.agent.engine import jobs, memory, scratchpad, screen_layout, skill
 from physiclaw.agent.engine.plan import Plan
 from physiclaw.agent.engine.job_store import KIND_ONE_TIME, KIND_PERIODIC, NEVER, load_jobs
-from physiclaw.agent.runtime.sentinel import STATUSES
+from physiclaw.agent.runtime.sentinel import IDLE, STATUSES
 
 
 @dataclass
@@ -22,6 +22,10 @@ class Session:
     sentinel_status: str | None = None
     sentinel_recap: str = ""
     sentinel_turn_created_job: bool = False
+    # Set by report_screen_layout when it completes first-run setup: the
+    # engine ends this session and re-runs the same triggers from scratch so
+    # the fresh SYSTEM prompt carries the learned layout for the real task.
+    restart_for_setup: bool = False
     plan: Plan = field(default_factory=Plan)
     scratchpad: str = ""
 
@@ -154,6 +158,22 @@ async def _handle_end_session(session: Session, args: dict) -> str:
     session.sentinel_status = status
     session.sentinel_recap = args.get("recap", "").strip()
     return f"session closing: {status}"
+
+
+async def _handle_report_screen_layout(session: Session, args: dict) -> str:
+    was_complete = screen_layout.is_learned()
+    result = screen_layout.record(
+        args.get("page", ""), args.get("field", ""),
+        args.get("bbox") or [], args.get("app"),
+    )
+    # If THIS call finished first-run setup, close the session cleanly and ask
+    # the engine to restart — the fresh SYSTEM prompt then carries the layout
+    # so the agent handles the original request with it loaded.
+    if not was_complete and screen_layout.is_learned():
+        session.sentinel_status = IDLE
+        session.sentinel_recap = "first-run screen layout captured — restarting to load it"
+        session.restart_for_setup = True
+    return result
 
 
 def _handle_skill_factory(skill_registry: dict[str, skill.Skill]) -> Handler:
@@ -484,6 +504,51 @@ _END_SESSION = LocalTool(
 )
 
 
+_REPORT_SCREEN_LAYOUT = LocalTool(
+    name="report_screen_layout",
+    description=(
+        "First-run setup: save ONE input / keyboard / Paste / Send box you read "
+        "off a screenshot — one call per box. Follow the `screen-layout` skill "
+        "for which pages and fields to capture; it returns the layout so far "
+        "plus what's left. `app` is required for the chat pages (labels the "
+        "chat boxes). Once all fields are in they load into your context next "
+        "wake."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "page": {
+                "type": "string",
+                "enum": ["spotlight", "chat-no-keyboard", "chat-keyboard"],
+                "description": "Which page the latest screenshot shows.",
+            },
+            "field": {
+                "type": "string",
+                "enum": list(screen_layout.ALL_FIELDS),
+                "description": "Which box this bbox is — must be a field valid "
+                "for `page` (see the `screen-layout` skill).",
+            },
+            "bbox": {
+                "type": "array",
+                "items": {"type": "number"},
+                "minItems": 4,
+                "maxItems": 4,
+                "description": "[left, top, right, bottom] in 0–1 coords, copied "
+                "verbatim from the screenshot element.",
+            },
+            "app": {
+                "type": "string",
+                "description": "The chat app you opened (any app, e.g. 'wechat', "
+                "'whatsapp', 'telegram', 'signal', 'messenger'). Required for "
+                "the chat pages; ignored for spotlight.",
+            },
+        },
+        "required": ["page", "field", "bbox"],
+    },
+    handler=_handle_report_screen_layout,
+)
+
+
 _SKILL_SCHEMA = {
     "type": "object",
     "properties": {
@@ -544,8 +609,15 @@ def build_registry(
         _LIST_JOBS.name: _LIST_JOBS,
         _FINISH_JOB.name: _FINISH_JOB,
         _WAIT.name: _WAIT,
+        _REPORT_SCREEN_LAYOUT.name: _REPORT_SCREEN_LAYOUT,
         _END_SESSION.name: _END_SESSION,
     }
+    # First-run only: once the layout is learned, drop the setup tool — the
+    # `screen-layout` skill it points to is pruned too, so keeping the tool
+    # would dangle and clutter the tool surface every wake. Resetting the
+    # layout brings both back.
+    if screen_layout.is_learned():
+        tools.pop(_REPORT_SCREEN_LAYOUT.name, None)
     if skill_registry:
         tools["Skill"] = LocalTool(
             name="Skill",

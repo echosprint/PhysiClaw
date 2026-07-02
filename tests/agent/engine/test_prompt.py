@@ -37,6 +37,16 @@ def _stub_mcp_inventory(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(mcp_inventory, "discover_mcp_tools", list)
 
 
+@pytest.fixture(autouse=True)
+def _stub_screen_layout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default: setup incomplete → screen-layout section absent, so unrelated
+    prompt tests stay hermetic. Tests exercising the section override this."""
+    from physiclaw.agent.engine import screen_layout
+
+    monkeypatch.setattr(screen_layout, "is_learned", lambda: False)
+    monkeypatch.setattr(screen_layout, "load_layout_md", lambda: "")
+
+
 # ---------- DOCTRINE_FILE_ORDER ----------
 
 
@@ -155,22 +165,64 @@ def test_render_tooling_includes_mcp_inventory_tools(
     assert "- **tap** — Tap." in out
 
 
-# ---------- _render_skills ----------
+# ---------- _render_section ----------
 
 
-def test_render_skills_empty_when_no_context() -> None:
-    assert prompt._render_skills("") == []
+def test_render_section_empty_when_no_context() -> None:
+    assert prompt._render_section("") == []
 
 
-def test_render_skills_wraps_context_with_header_and_decision_text() -> None:
-    out = "\n".join(prompt._render_skills("## Available skills\n- foo"))
-
-    assert out.startswith("## Skill selection")
-    assert "App-specific skills are mandatory" in out
-    assert "## Available skills" in out
+def test_render_section_passes_prerendered_block_through() -> None:
+    # The skill module already emits the `##` header + framing; the prompt
+    # just drops it in with a trailing blank line.
+    assert prompt._render_section("## Skills\n\nbody") == ["## Skills\n\nbody", ""]
 
 
 # ---------- _render_examples ----------
+
+
+# ---------- _render_screen_layout ----------
+# The first-run nudge is a tail message (screen_layout.inject_tail), not this
+# section — here we only cover loading the layout once all pages are captured.
+
+
+def test_render_screen_layout_loads_md_when_complete(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from physiclaw.agent.engine import screen_layout
+
+    monkeypatch.setattr(screen_layout, "is_learned", lambda: True)
+    monkeypatch.setattr(screen_layout, "load_layout_md", lambda: "LAYOUT TABLE")
+    out = "\n".join(prompt._render_screen_layout())
+
+    assert "## Screen layout" in out
+    assert "LAYOUT TABLE" in out
+
+
+def test_render_screen_layout_empty_while_incomplete(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from physiclaw.agent.engine import screen_layout
+
+    # Even with a partial layout on disk, nothing shows until complete.
+    monkeypatch.setattr(screen_layout, "is_learned", lambda: False)
+    monkeypatch.setattr(screen_layout, "load_layout_md", lambda: "PARTIAL")
+    assert prompt._render_screen_layout() == []
+
+
+def test_render_screen_layout_says_not_set_when_learned_but_md_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from physiclaw.agent.engine import screen_layout
+
+    # Edge case: complete per json but the md file is gone — still show the
+    # section, with a placeholder rather than hiding it.
+    monkeypatch.setattr(screen_layout, "is_learned", lambda: True)
+    monkeypatch.setattr(screen_layout, "load_layout_md", lambda: "")
+    out = "\n".join(prompt._render_screen_layout())
+
+    assert "## Screen layout" in out
+    assert "not set yet" in out
 
 
 def test_render_examples_returns_non_empty_block() -> None:
@@ -178,8 +230,8 @@ def test_render_examples_returns_non_empty_block() -> None:
 
     text = "\n".join(out)
     assert text.startswith("## Examples")
-    assert "❌ Wrong" in text
-    assert "✅ Right" in text
+    assert "❌" in text
+    assert "✅" in text
 
 
 # ---------- _render_reasoning_format ----------
@@ -282,7 +334,7 @@ def test_prefix_hash_raises_on_non_string_input() -> None:
         prompt.prefix_hash(42)  # type: ignore[arg-type]
 
 
-# ---------- render_system / dump (integration) ----------
+# ---------- render_system_prompts / dump (integration) ----------
 
 
 def test_render_system_assembles_all_present_sections(
@@ -291,10 +343,11 @@ def test_render_system_assembles_all_present_sections(
     (_isolate_context_dir / "IDENTITY.md").write_text("ID body")
     monkeypatch.setattr(memory, "load_user", lambda: "user profile")
 
-    out = prompt.render_system(
+    out = prompt.render_system_prompts(
         local_tool_schemas=[{"name": "tap", "description": "Tap."}],
         memory_ctx="recent fact",
-        skills_ctx="## Available skills\n- foo",
+        builtin_skills_ctx="## Built-in Skills\n\n### im\n\nim body",
+        user_skills_ctx="## Available skills\n\n- **taobao** — shop",
         provider_id="",
     )
 
@@ -303,7 +356,10 @@ def test_render_system_assembles_all_present_sections(
     assert "## USER.md" in out
     assert "user profile" in out
     assert "## Tooling" in out
-    assert "## Skill selection" in out
+    assert "## Built-in Skills" in out
+    assert "im body" in out          # built-in body inlined
+    assert "## Available skills" in out
+    assert "**taobao** — shop" in out  # user index entry
     assert "## Examples" in out
     assert "## memory.md" in out
     assert "recent fact" in out
@@ -312,14 +368,15 @@ def test_render_system_assembles_all_present_sections(
 def test_render_system_returns_empty_when_all_sections_disabled(
     _isolate_context_dir,
 ) -> None:
-    out = prompt.render_system()
+    out = prompt.render_system_prompts()
 
     # Examples is the only section that always emits.
     assert "## Examples" in out
     # No doctrine, no tooling, no skills, no memory.
     assert "# Doctrine" not in out
     assert "## Tooling" not in out
-    assert "## Skill selection" not in out
+    assert "## Built-in Skills" not in out
+    assert "## Available skills" not in out
     assert "## memory.md" not in out
 
 
@@ -327,6 +384,6 @@ def test_dump_delegates_to_render_system_with_same_args(
     _isolate_context_dir: Path,
 ) -> None:
     a = prompt.dump(memory_ctx="x")
-    b = prompt.render_system(memory_ctx="x")
+    b = prompt.render_system_prompts(memory_ctx="x")
 
     assert a == b

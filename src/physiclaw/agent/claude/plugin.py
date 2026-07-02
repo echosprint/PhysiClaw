@@ -3,8 +3,12 @@
 Merges two skill sources into one ./skills subdir:
   1. agent/claude/skills/*   — claude-only skills (jobs, …) that shell
                                 out to engine-module scripts
-  2. skill.discover()         — shared user skills (wechat, jd, …) from
-                                ~/.physiclaw/skills/ and ./skills/
+  2. skill.discover()         — the shared skills: built-in flat-`.md`
+                                files from the package, plus the user's
+                                own folder skills from ~/.physiclaw/skills/.
+                                Folder skills are symlinked (to keep any
+                                references/ live); built-in flat skills are
+                                materialized as skills/<name>/SKILL.md.
 
 Name collisions: claude-only wins. Those skills are curated next to
 CLAUDE.md; a user skill accidentally shadowing one would defeat the
@@ -48,7 +52,7 @@ from physiclaw.text import write_text
 
 log = logging.getLogger(__name__)
 
-# ./skills relative to this file — claude-only bundled skills.
+# ./skills relative to this file — claude-only built-in skills.
 _CLAUDE_ONLY_SKILLS_DIR = Path(__file__).resolve().parent / "skills"
 # Plugin name prefix. The per-session sid is appended so two concurrent
 # spawns don't collide on Claude Code's plugin registry, and so a
@@ -71,7 +75,9 @@ def prepare_plugin_dir(
     Layout:
         <tmp>/physiclaw-plugin-<sid>-XXXX/
           .claude-plugin/plugin.json   {"name": "physiclaw-agent-<sid>", ...}
-          skills/<name>                symlink to the skill's real dir
+          skills/<name>                symlink to a folder skill's real dir,
+                                       or a dir with a written SKILL.md for a
+                                       built-in flat skill
     """
     if skills is None:
         skills = skill.discover()
@@ -107,10 +113,19 @@ def prepare_plugin_dir(
     for name, sk in skills.items():
         if name in already:
             continue
-        if _has_context_pollution(sk.dir):
-            skipped.append((name, "contains stray CLAUDE.md or .claude/"))
-            continue
-        _link_or_copy(sk.dir, skills_dir / name)
+        dest = skills_dir / name
+        if sk.flat:
+            # Built-in flat skill (<pkg>/agent/skills/<name>.md) — no per-skill
+            # dir to link; materialize the SKILL.md Claude Code expects.
+            dest.mkdir()
+            write_text(dest / "SKILL.md", _reconstruct_skill_md(sk))
+        else:
+            # Folder skill (user's ~/.physiclaw/skills/<name>/) — forward the
+            # dir itself so any references/ ride along, live via symlink.
+            if _has_context_pollution(sk.dir):
+                skipped.append((name, "contains stray CLAUDE.md or .claude/"))
+                continue
+            _link_or_copy(sk.dir, dest)
         linked.append(name)
 
     if skipped:
@@ -118,6 +133,15 @@ def prepare_plugin_dir(
             log.warning("skill %s skipped: %s — clean it up or delete it", name, why)
     log.info("claude plugin dir: %s skills=%s", root, sorted(linked))
     return root
+
+
+def _reconstruct_skill_md(sk: Skill) -> str:
+    """Rebuild a `SKILL.md` from a flat built-in skill's snapshot so Claude
+    Code's plugin loader (which wants skills/<name>/SKILL.md) can read it."""
+    return (
+        f"---\nname: {sk.name}\ndescription: {sk.description}\n---\n\n"
+        f"{sk.body}\n"
+    )
 
 
 def _has_context_pollution(skill_dir: Path) -> bool:
