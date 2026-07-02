@@ -11,6 +11,7 @@ from physiclaw.cli.doctor import doctor
 from physiclaw.cli.flash import flash
 from physiclaw.cli.models import models_app
 from physiclaw.cli.prompt import prompt_app
+from physiclaw.cli.reset import reset
 from physiclaw.cli.server import server
 from physiclaw.cli.setup import setup_app
 from physiclaw.cli.skills import skills_app
@@ -29,6 +30,7 @@ app.command()(server)
 app.command()(status)
 app.command()(flash)
 app.command()(clear)
+app.command()(reset)
 app.command()(uninstall)
 
 app.add_typer(
