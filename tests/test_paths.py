@@ -98,6 +98,7 @@ def test_ensure_dirs_creates_intermediate_parents_for_LOG_DIR(
     "func_name, suffix",
     [
         ("model_cache", "models"),
+        ("calibration_dir", "calibration"),
         ("calibration_cache_dir", "calibration/cache"),
         ("snapshots_dir", "snapshots"),
         ("screenshots_dir", "screenshots"),

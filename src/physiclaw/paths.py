@@ -43,8 +43,14 @@ def omniparser_onnx() -> Path:
     return model_cache() / "omniparser_icon_detect" / "model.onnx"
 
 
+def calibration_dir() -> Path:
+    """Arm/camera/screen calibration state — ``bundle.json`` + ``cache/``.
+    Cleared by ``physiclaw reset`` so a new phone gets re-calibrated."""
+    return HOME / "calibration"
+
+
 def calibration_bundle() -> Path:
-    return HOME / "calibration" / "bundle.json"
+    return calibration_dir() / "bundle.json"
 
 
 def load_calibration_bundle() -> dict | None:
@@ -60,7 +66,7 @@ def load_calibration_bundle() -> dict | None:
 
 
 def calibration_cache_dir() -> Path:
-    return HOME / "calibration" / "cache"
+    return calibration_dir() / "cache"
 
 
 def snapshots_dir() -> Path:
