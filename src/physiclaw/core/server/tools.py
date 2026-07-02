@@ -44,7 +44,11 @@ HINT_PEEK_AFTER_LONG_PRESS = (
     "(Paste / Copy / etc.)"
 )
 HINT_PEEK_AFTER_SWIPE = "— `peek` to verify the page scrolled and plan the next move"
-HINT_PEEK_AFTER_HOME = "— `peek` to plan your next tap on the home-screen icons"
+HINT_PEEK_AFTER_HOME = (
+    "— `peek` to plan your next tap on the home-screen icons. If you see the "
+    "App Switcher (you were already home), tap an empty area "
+    "(bbox=[0.4, 0.9, 0.6, 0.95]) to reach home — don't call `home_screen` again"
+)
 HINT_PEEK_AFTER_BACK = "— `peek` to verify navigation landed and plan the next move"
 HINT_AFTER_FORCE_QUIT = "— now on home screen; reopen the app fresh"
 HINT_PEEK_AFTER_UNLOCK = (
@@ -181,7 +185,8 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw):
         """Return to the iPhone home screen — exit any app to a known launch pad.
 
         Issues the iPhone swipe-up-from-bottom gesture. Use to start a
-        fresh task or recover from getting lost in app navigation.
+        fresh task or recover from getting lost in app navigation. If
+        ALREADY on the home screen, this opens the App Switcher instead.
         """
         result = await asyncio.to_thread(physiclaw.home_screen)
         return f"{result} {HINT_PEEK_AFTER_HOME}"
