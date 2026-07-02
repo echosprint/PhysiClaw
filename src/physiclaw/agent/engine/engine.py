@@ -15,6 +15,7 @@ import asyncio
 import datetime as dt
 import logging
 import time
+from dataclasses import dataclass
 
 from physiclaw.agent.engine import builtin_tool, compact, jobs, memory, plan, prompt, scratchpad, screen_layout, skill
 from physiclaw.agent.engine.builtin_tool import LocalTool, Session
@@ -93,6 +94,75 @@ async def run(
             )
 
 
+@dataclass(slots=True)
+class PromptBundle:
+    """The turn-0 request pieces assembled offline — no MCP or provider needed.
+    Shared by `_run_session` and the `physiclaw prompt` dump so the dump matches
+    the real request. `local_registry`/`local_schemas` are the engine's local
+    tools; `layout_incomplete` gates the first-run reminder; the skill counts
+    are for the session's tools-loaded log line."""
+    system_prompt: str
+    local_registry: dict[str, LocalTool]
+    local_schemas: list[dict]
+    layout_incomplete: bool
+    builtin_skill_count: int
+    user_skill_count: int
+
+
+def build_prompt_bundle(provider_id: str) -> PromptBundle:
+    """Discover skills, build the local tool registry, and render the SYSTEM
+    prompt for a session — the offline half of `_run_session`'s setup."""
+    layout_incomplete = not screen_layout.is_learned()
+    builtin_skills = screen_layout.prune_builtin_skills(skill.discover_builtin_skills())
+    user_skills = skill.discover_user_skills()
+    local_registry = builtin_tool.build_registry(user_skills)
+    local_schemas = builtin_tool.schemas(local_registry)
+    system_prompt = prompt.render_system_prompts(
+        local_tool_schemas=local_schemas,
+        memory_ctx=memory.load_persistent(),
+        builtin_skills_ctx=skill.render_builtin(builtin_skills),
+        user_skills_ctx=skill.render_section(user_skills),
+        provider_id=provider_id,
+    )
+    return PromptBundle(
+        system_prompt=system_prompt,
+        local_registry=local_registry,
+        local_schemas=local_schemas,
+        layout_incomplete=layout_incomplete,
+        builtin_skill_count=len(builtin_skills),
+        user_skill_count=len(user_skills),
+    )
+
+
+def build_initial_messages(triggers: list[Trigger], system_prompt: str) -> list[Message]:
+    """The message array a session starts with: cached SYSTEM prompt, the
+    wake-trigger user message (date anchor + fired-job context), and the three
+    pre-allocated compaction slots (summary / memory / skills)."""
+    return [
+        SystemMessage(content=system_prompt),
+        UserMessage(content=_format_triggers(
+            triggers, cron_ctx=jobs.format_fired(triggers),
+        )),
+        compact.new_summary_placeholder(),
+        compact.new_memory_placeholder(),
+        compact.new_skills_placeholder(),
+    ]
+
+
+def apply_request_tails(
+    messages: list[Message], session: Session, *, layout_incomplete: bool
+) -> list[Message]:
+    """Pin the per-turn tail slots to the request — scratchpad, plan, and
+    (while first-run setup is pending) the layout reminder — the LAST things the
+    model sees. Shared by `_loop` and the `prompt` dump so a turn-0 dump matches
+    the wire the engine sends. Does not mutate `messages`."""
+    out = scratchpad.inject_tail(messages, session.scratchpad)
+    out = plan.inject_tail(out, session.plan)
+    if layout_incomplete:
+        out = screen_layout.inject_tail(out)
+    return out
+
+
 async def _run_session(
     triggers: list[Trigger],
     *,
@@ -129,13 +199,12 @@ async def _run_session(
         # indexed and loaded on demand via the Skill tool — so only user
         # skills go into the local registry. The first-run screen-layout skill
         # is dropped once the layout is learned (dead weight after setup).
-        layout_incomplete = not screen_layout.is_learned()
-        builtin_skills = screen_layout.prune_builtin_skills(
-            skill.discover_builtin_skills()
-        )
-        user_skills = skill.discover_user_skills()
-        local_registry = builtin_tool.build_registry(user_skills)
-        local_schemas = builtin_tool.schemas(local_registry)
+        # `build_prompt_bundle` is the offline half, shared with the CLI dump.
+        bundle = build_prompt_bundle(provider_id)
+        local_registry = bundle.local_registry
+        local_schemas = bundle.local_schemas
+        layout_incomplete = bundle.layout_incomplete
+        system_prompt = bundle.system_prompt
         # Full merged list goes to provider.chat(tools=) for invocation;
         # the inline `## Tooling` card pulls MCP names from AST so it
         # stays complete even offline. Each source has one consumer.
@@ -149,25 +218,10 @@ async def _run_session(
         log.info(
             "tools loaded: %d MCP + %d local + %d built-in + %d user skills",
             len(mcp_tools), len(local_registry),
-            len(builtin_skills), len(user_skills),
+            bundle.builtin_skill_count, bundle.user_skill_count,
         )
 
-        system_prompt = prompt.render_system_prompts(
-            local_tool_schemas=local_schemas,
-            memory_ctx=memory.load_persistent(),
-            builtin_skills_ctx=skill.render_builtin(builtin_skills),
-            user_skills_ctx=skill.render_section(user_skills),
-            provider_id=provider_id,
-        )
-        messages: list[Message] = [
-            SystemMessage(content=system_prompt),
-            UserMessage(content=_format_triggers(
-                triggers, cron_ctx=jobs.format_fired(triggers),
-            )),
-            compact.new_summary_placeholder(),
-            compact.new_memory_placeholder(),
-            compact.new_skills_placeholder(),
-        ]
+        messages: list[Message] = build_initial_messages(triggers, system_prompt)
 
         provider = make_provider(provider_id, model_id)
         prompt_hash = prompt.prefix_hash(system_prompt)
@@ -248,13 +302,12 @@ async def _loop(
         # setup, when the setup reminder rides one step further out so the
         # blocker is the very last thing the model sees (absent once learned).
         session.plan.tick_turn()
-        request_messages = scratchpad.inject_tail(messages, session.scratchpad)
-        request_messages = plan.inject_tail(request_messages, session.plan)
-        # First-run only: the reminder is empty once the layout is learned, and
-        # a session that started learned stays learned — so skip the per-turn
-        # disk read entirely unless setup was still pending at session start.
-        if layout_incomplete:
-            request_messages = screen_layout.inject_tail(request_messages)
+        # First-run reminder is empty once learned, and a session that started
+        # learned stays learned — so skip the per-turn disk read entirely unless
+        # setup was still pending at session start.
+        request_messages = apply_request_tails(
+            messages, session, layout_incomplete=layout_incomplete,
+        )
         # Cache markers + the actual wire format are the provider's
         # business now; engine logs the wire form for debugging by asking
         # the provider to serialize once.

@@ -10,6 +10,7 @@ from physiclaw.cli.config import config_app
 from physiclaw.cli.doctor import doctor
 from physiclaw.cli.flash import flash
 from physiclaw.cli.models import models_app
+from physiclaw.cli.prompt import prompt_app
 from physiclaw.cli.server import server
 from physiclaw.cli.setup import setup_app
 from physiclaw.cli.skills import skills_app
@@ -49,6 +50,11 @@ app.add_typer(
     skills_app,
     name="skills",
     help="Install, list, and remove skills from a git-repo source.",
+)
+app.add_typer(
+    prompt_app,
+    name="prompt",
+    help="Dump the SYSTEM prompt / full LLM request for inspection.",
 )
 
 
