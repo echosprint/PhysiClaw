@@ -62,8 +62,3 @@ physiclaw           # start the server — opens the hardware-setup wizard, then
 ## License
 
 [MIT](LICENSE) — both the CAD-as-code hardware and the agent software.
-
-PhysiClaw redistributes and uses third-party components under their own terms —
-**FluidNC** firmware (GPL-3.0) and the **OmniParser `icon_detect`** model
-(AGPL-3.0). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for attribution
-and source links; full license texts are in [`licenses/`](licenses/).
