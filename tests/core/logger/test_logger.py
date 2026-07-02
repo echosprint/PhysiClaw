@@ -201,7 +201,7 @@ async def test_logged_skips_logging_when_info_disabled(
 
 
 @pytest.mark.asyncio
-async def test_logged_logs_even_when_function_raises(
+async def test_logged_marks_failure_when_function_raises(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     @logged
@@ -212,5 +212,24 @@ async def test_logged_logs_even_when_function_raises(
         with pytest.raises(RuntimeError, match="boom"):
             await my_tool()
 
-    # `logged` wraps in try/finally; the log line still fires.
-    assert any("my_tool" in r.getMessage() for r in caplog.records)
+    # A raise logs a distinct FAILED line carrying the error, so a fast
+    # failure isn't mistaken for a fast success in the server stream.
+    msgs = [r.getMessage() for r in caplog.records if "my_tool" in r.getMessage()]
+    assert msgs
+    assert any("FAILED: boom" in m for m in msgs)
+
+
+@pytest.mark.asyncio
+async def test_logged_success_line_has_no_failed_marker(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    @logged
+    async def my_tool():
+        return "ok"
+
+    with caplog.at_level(logging.INFO, logger="physiclaw.tools"):
+        await my_tool()
+
+    msgs = [r.getMessage() for r in caplog.records if "my_tool" in r.getMessage()]
+    assert msgs
+    assert not any("FAILED" in m for m in msgs)

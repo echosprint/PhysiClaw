@@ -99,7 +99,12 @@ def _format_args(fn_name: str, kwargs: dict) -> str:
 
 
 def logged(fn: AsyncFn) -> AsyncFn:
-    """Log the wrapped MCP tool's completion with args and duration."""
+    """Log the wrapped MCP tool's completion with args and duration.
+
+    A failing tool logs `… — 0.0s FAILED: <err>` instead of a bare duration, so
+    the server stream tells a fast failure apart from a fast success (both would
+    otherwise read as an identical `tool X(…) — 0.0s`). Cancellation
+    (BaseException) propagates unlogged — it isn't a tool completion."""
     # FastMCP dispatches tool calls with keyword args only (positional
     # args land in `args` but never in practice); the log reads kwargs.
     @wraps(fn)
@@ -108,12 +113,21 @@ def logged(fn: AsyncFn) -> AsyncFn:
             return await fn(*args, **kwargs)
         t0 = time.monotonic()
         try:
-            return await fn(*args, **kwargs)
-        finally:
+            result = await fn(*args, **kwargs)
+        except Exception as e:
             log.info(
-                "tool %s(%s) — %.1fs",
+                "tool %s(%s) — %.1fs FAILED: %s",
                 fn.__name__,
                 _format_args(fn.__name__, kwargs),
                 time.monotonic() - t0,
+                e,
             )
+            raise
+        log.info(
+            "tool %s(%s) — %.1fs",
+            fn.__name__,
+            _format_args(fn.__name__, kwargs),
+            time.monotonic() - t0,
+        )
+        return result
     return cast(AsyncFn, wrapper)
