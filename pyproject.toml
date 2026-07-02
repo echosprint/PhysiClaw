@@ -39,8 +39,6 @@ Repository = "https://github.com/physiclaw/PhysiClaw"
 Issues = "https://github.com/physiclaw/PhysiClaw/issues"
 
 [dependency-groups]
-stylus = ["manifold3d>=3.4.0", "trimesh>=4.11.4"]
-drawing = ["reportlab>=4.4.10", "fonttools>=4.62"]
 cad = ["build123d>=0.7"]
 dev = [
     "ruff>=0.15.9",
