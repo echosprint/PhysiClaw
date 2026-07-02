@@ -349,10 +349,14 @@ async def _loop(
         })
         cache_summary = _log_usage(turn, asst, tr)
         called = asst.tool_names()
+        # Provider round-trip time first, then token/cache — all provider-call
+        # metrics grouped in the trailing segment.
+        metrics = f"{elapsed_ms / 1000:.1f}s"
+        if cache_summary:
+            metrics += f", {cache_summary}"
         log.info(
-            "turn %d: finish=%s calls=%s%s",
-            turn + 1, asst.finish_reason, called or None,
-            f", {cache_summary}" if cache_summary else "",
+            "turn %d: finish=%s calls=%s — %s",
+            turn + 1, asst.finish_reason, called or None, metrics,
         )
 
         # Principle 2: AssistantMessage already has provider-specific
