@@ -321,8 +321,9 @@ def record(page: str, field: str, bbox, app: str | None = None) -> str:
         note = f"{len(still)} box(es) still to capture — see the first-run notice."
     elif not was_complete:
         note = (
-            "All boxes captured — setup is done. The session will now restart "
-            "with the layout loaded so you can handle the request."
+            "All boxes captured — setup is done. If you woke for a task, the "
+            "session restarts with the layout loaded to finish it; otherwise it "
+            "just ends (the layout is saved and loads on the next wake)."
         )
     else:
         note = (

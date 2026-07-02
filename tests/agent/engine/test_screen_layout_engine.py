@@ -310,7 +310,10 @@ def test_record_same_field_twice_overwrites() -> None:
 def test_record_completing_call_announces_restart() -> None:
     _write_layout(_ALL_BUT_SEND)
     out = sl.record("chat-keyboard", "send", [0.752, 0.868, 0.990, 0.918], "wechat")
-    assert "will now restart" in out
+    # The completing call tells the agent setup is done and the layout is now
+    # loaded (restart if there's a task to finish, else the session just ends).
+    assert "setup is done" in out
+    assert "restarts with the layout loaded" in out
 
 
 def test_record_after_complete_says_no_restart() -> None:

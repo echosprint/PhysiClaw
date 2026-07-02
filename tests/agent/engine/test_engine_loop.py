@@ -760,6 +760,50 @@ async def test_run_restarts_once_after_setup_completes(mocker) -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_no_restart_when_only_first_run_trigger(mocker) -> None:
+    # A synthetic first-run wake has no request to resume: after setup
+    # completes the layout is saved and loads on the next wake, so the loop
+    # must NOT restart (which would replay the stale "learn the layout"
+    # trigger and re-enter first-run setup).
+    async def fake_session(triggers, *, model_ref, session: Session):
+        session.sentinel_status = IDLE
+        session.restart_for_setup = True
+
+    spy = mocker.patch.object(engine_mod, "_run_session", side_effect=fake_session)
+
+    await engine_mod.run(
+        [Trigger(description="learn the layout", source="first-run")],
+        model_ref="x/y",
+    )
+
+    assert spy.call_count == 1  # no restart — nothing real to resume
+
+
+@pytest.mark.asyncio
+async def test_run_restarts_when_real_trigger_accompanies_first_run(mocker) -> None:
+    # first-run + a real request in the same wake → restart so the real
+    # request is handled with the layout loaded.
+    outcomes = iter([(None, True), (DONE, False)])
+
+    async def fake_session(triggers, *, model_ref, session: Session):
+        status, restart = next(outcomes)
+        session.sentinel_status = status
+        session.restart_for_setup = restart
+
+    spy = mocker.patch.object(engine_mod, "_run_session", side_effect=fake_session)
+
+    await engine_mod.run(
+        [
+            Trigger(description="phone IM arrived", source="phone"),
+            Trigger(description="learn the layout", source="first-run"),
+        ],
+        model_ref="x/y",
+    )
+
+    assert spy.call_count == 2  # restarted to handle the phone request
+
+
+@pytest.mark.asyncio
 async def test_run_setup_restart_does_not_consume_stuck_attempt(mocker) -> None:
     # Even with MAX_ATTEMPTS=1, the setup restart still allows the task session.
     mocker.patch.object(engine_mod, "MAX_ATTEMPTS", 1)

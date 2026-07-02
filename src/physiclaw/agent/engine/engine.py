@@ -67,7 +67,9 @@ async def run(
     reaches the SYSTEM prompt on a fresh render, so we re-run the same
     triggers once with the layout loaded to handle the original request.
     It doesn't consume a STUCK attempt, and fires at most once (the layout
-    is complete from then on).
+    is complete from then on). This restart only helps when there's a real
+    request to resume — a synthetic first-run wake (source="first-run") has
+    none, so it ends instead and the layout loads on the next wake.
 
     `model_ref` is a `provider/model` string (e.g. `"qwen/qwen3.6-plus"`).
     Parsed inside `_run_session`; the provider is instantiated via
@@ -82,9 +84,16 @@ async def run(
         await _run_session(triggers, model_ref=model_ref, session=session)
         if session.restart_for_setup and not setup_restart_used:
             setup_restart_used = True
-            attempt -= 1  # a setup restart isn't a STUCK retry
-            log.info("screen layout learned during setup — restarting to load it")
-            continue
+            # Re-running is only useful when there's a real request to resume
+            # with the layout now loaded. A synthetic first-run wake
+            # (source="first-run") has no request, and the layout loads on the
+            # next wake anyway — restarting would just replay the stale "learn
+            # the layout" trigger and send the agent back into first-run setup.
+            if any(t.source != "first-run" for t in triggers):
+                attempt -= 1  # a setup restart isn't a STUCK retry
+                log.info("screen layout learned during setup — restarting to load it")
+                continue
+            log.info("screen layout learned on first-run wake — no request to resume")
         if session.sentinel_status != STUCK:
             break
         if attempt < MAX_ATTEMPTS:

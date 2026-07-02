@@ -8,9 +8,10 @@ never get learned. On the first ready tick with no learned layout, fire one
 wake to kick off learning.
 
 Fires at most once per process: a single wake runs the whole `screen-layout`
-capture (the engine restarts itself once the layout lands). If that wake fails,
-the phone watchdog plus the SYSTEM first-run notice retry it on the next screen
-change. Auto-discovered by `physiclaw.agent.runtime.hook.load_hooks()`.
+capture, then the session ends — this wake carries no request to resume, so the
+engine does NOT restart it; the captured layout loads on the next wake. If the
+wake fails, the phone watchdog plus the SYSTEM first-run notice retry it on the
+next screen change. Auto-discovered by `physiclaw.agent.runtime.hook.load_hooks()`.
 """
 import logging
 
