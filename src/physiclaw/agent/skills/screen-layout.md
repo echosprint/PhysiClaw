@@ -30,7 +30,7 @@ report_screen_layout(
 
 Fields: `spotlight_input`, `space`, `backspace`, `return`, `spotlight_paste`.
 
-1. `home_screen` → `swipe` down from mid-screen → Spotlight opens.
+1. `home_screen` (skip if already on home — it opens the App Switcher there) → `swipe` down from mid-screen → Spotlight opens.
 2. `tap` the search field; `peek` — keyboard up.
 3. `screenshot`; read the search field (`spotlight_input`) and the keyboard's `space`, `backspace`, and `return` keys.
 4. `spotlight_paste`: put any text on the clipboard, **long-press** the search field, `screenshot`, read the **Paste** button.
