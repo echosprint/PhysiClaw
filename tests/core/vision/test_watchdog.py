@@ -9,11 +9,15 @@ from freezegun import freeze_time
 
 from physiclaw.core.vision import watchdog
 from physiclaw.core.vision.watchdog import (
+    BADGE_HUE_RANGES,
     BADGE_MIN_AREA,
+    BADGE_S_MIN,
+    BADGE_V_MIN,
     EMA_FAST,
     EMA_SLOW,
     EMA_STALE,
     IDLE_INTERVAL,
+    MEAN_DROP_GUARD,
     MEAN_INCREASE,
     STD_INCREASE,
     Watchdog,
@@ -74,6 +78,50 @@ def test_check_content_wake_on_std_increase() -> None:
     assert out["std_delta"] > STD_INCREASE
 
 
+def test_check_content_wake_on_dim_scene_below_absolute_threshold() -> None:
+    # Dim room (baseline mean ~5): a screen lighting up adds only ~3 gray
+    # levels — under the absolute MEAN_INCREASE, but a big *relative* rise, so
+    # the adaptive threshold still wakes. This is the dark-room miss we fix.
+    slow = np.full((20, 20, 3), 5, dtype=np.uint8)
+    fast = np.full((20, 20, 3), 8, dtype=np.uint8)
+
+    out = _check_content(slow, fast)
+
+    assert out["mean_delta"] == 3.0
+    assert out["mean_delta"] < MEAN_INCREASE  # would miss the fixed threshold
+    assert out["mean_thr"] < MEAN_INCREASE    # adaptive threshold dropped
+    assert out["wake"] is True
+
+
+def test_check_content_no_wake_on_small_shift_in_bright_scene() -> None:
+    # Bright baseline (mean 150): a tiny +3 shift stays under both the absolute
+    # floor and the proportional threshold (which equals the floor when bright).
+    slow = np.full((20, 20, 3), 150, dtype=np.uint8)
+    fast = np.full((20, 20, 3), 153, dtype=np.uint8)
+
+    out = _check_content(slow, fast)
+
+    assert out["mean_thr"] == MEAN_INCREASE  # proportional ≥ floor → floor wins
+    assert out["wake"] is False
+
+
+def test_check_content_no_wake_on_brightness_collapse_despite_std_jump() -> None:
+    # Screen dimming / app closing: the lower half goes much darker (big mean
+    # DROP) and the transition also spikes the std past its threshold. Without
+    # the guard this false-wakes (the real-log case: std +4.1, mean -49.5). The
+    # brightness-collapse guard suppresses the std wake.
+    slow = np.full((20, 20, 3), 100, dtype=np.uint8)  # bright, uniform
+    fast = slow.copy()
+    fast[::2] = 0
+    fast[1::2] = 60  # darker overall (mean ~30) but more structure (std up)
+
+    out = _check_content(slow, fast)
+
+    assert out["std_delta"] > STD_INCREASE            # std alone would fire
+    assert out["mean_delta"] < -MEAN_DROP_GUARD       # but the scene collapsed
+    assert out["wake"] is False                       # so no wake
+
+
 # ---------- _check_badge ----------
 
 
@@ -86,7 +134,32 @@ def test_check_badge_wake_on_red_pixel_increase() -> None:
     out = _check_badge(slow, fast)
 
     assert out["wake"] is True
-    assert out["red_delta"] > BADGE_MIN_AREA
+    assert out["warm_delta"] > BADGE_MIN_AREA
+
+
+def test_check_badge_wake_on_warm_cast_orange() -> None:
+    # Warm room light shifts the camera's red toward orange (HSV hue ~15) —
+    # outside the old strict red band (0–10), caught by the widened warm band.
+    slow = np.zeros((20, 20, 3), dtype=np.uint8)
+    fast = slow.copy()
+    fast[:8, :8] = (0, 128, 255)  # BGR orange → hue ~15
+
+    out = _check_badge(slow, fast)
+
+    assert out["wake"] is True
+    assert out["warm_delta"] > BADGE_MIN_AREA
+
+
+def test_check_badge_wake_on_dim_desaturated_red() -> None:
+    # A dark room desaturates and dims the badge (S≈94, V≈95) — under the old
+    # S/V≥100 floors, caught by the relaxed BADGE_S_MIN / BADGE_V_MIN.
+    slow = np.zeros((20, 20, 3), dtype=np.uint8)
+    fast = slow.copy()
+    fast[:8, :8] = (60, 60, 95)  # dim, low-saturation red
+
+    out = _check_badge(slow, fast)
+
+    assert out["wake"] is True
 
 
 def test_check_badge_no_change() -> None:
@@ -95,7 +168,7 @@ def test_check_badge_no_change() -> None:
     out = _check_badge(a, a)
 
     assert out["wake"] is False
-    assert out["red_delta"] == 0
+    assert out["warm_delta"] == 0
 
 
 # ---------- _ema_update ----------
@@ -294,9 +367,13 @@ def test_watchdog_resets_last_wake_on_real_wake() -> None:
 
 def test_watchdog_constants_unchanged() -> None:
     # Defensive guard: changing thresholds is a behavior change.
-    assert STD_INCREASE == 5.0
-    assert MEAN_INCREASE == 5.0
+    assert STD_INCREASE == 4.0
+    assert MEAN_INCREASE == 4.0
+    assert MEAN_DROP_GUARD == 15.0
     assert BADGE_MIN_AREA == 50
+    assert BADGE_HUE_RANGES == [(0, 25), (155, 180)]
+    assert BADGE_S_MIN == 70
+    assert BADGE_V_MIN == 70
     assert IDLE_INTERVAL == 1800.0
     assert WORK_HOURS == [(9, 12), (14, 17)]
     assert ZONES == [(0.0, 0.1), (0.5, 1.0), (0.85, 1.0)]
