@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from physiclaw.agent.engine import screen_layout as sl
+from physiclaw.agent.engine.skill import Skill
 from physiclaw import paths
 
 
@@ -95,6 +96,58 @@ def test_prune_builtin_skills_drops_screen_layout_when_learned() -> None:
 
     assert sl.SKILL_NAME not in out
     assert "im" in out  # other built-in skills untouched
+
+
+# ---------- fill_builtin_boxes ----------
+
+
+def _im_skill() -> Skill:
+    # Prose uses the placeholders too; only the fenced sequence should fill.
+    body = (
+        "Prose: tap `<input-hidden>`, then `<send>`.\n"
+        "```python\n"
+        'sequence(step1={"arg": <input-hidden>}, step5={"arg": <send>})\n'
+        "```\n"
+    )
+    return Skill(name="im", description="d", body=body, dir=Path("/x"), flat=True)
+
+
+def test_fill_builtin_boxes_noop_while_incomplete() -> None:
+    skills = {"im": _im_skill()}
+    out = sl.fill_builtin_boxes(skills)
+
+    assert out["im"].body == skills["im"].body       # unchanged
+    assert "<input-hidden>" in out["im"].body        # placeholders stay
+
+
+def test_fill_builtin_boxes_fills_code_block_only_leaves_prose() -> None:
+    _write_layout({
+        **{f: [0, 0, 1, 1] for f in sl.ALL_FIELDS},
+        "chat_input_kb_hidden": [0.098, 0.900, 0.716, 0.950],
+        "send": [0.752, 0.868, 0.990, 0.918],
+    })
+    out = sl.fill_builtin_boxes({"im": _im_skill()})
+    prose, code = out["im"].body.split("```python")
+
+    # Prose keeps the readable placeholder names.
+    assert "<input-hidden>" in prose
+    assert "<send>" in prose
+    # The fenced template gets concrete bboxes, no placeholders left.
+    assert "[0.098, 0.900, 0.716, 0.950]" in code
+    assert "[0.752, 0.868, 0.990, 0.918]" in code
+    assert "<input-hidden>" not in code
+    assert "<send>" not in code
+
+
+def test_fill_builtin_boxes_leaves_unmapped_skills_untouched() -> None:
+    _write_layout(_COMPLETE)
+    other = Skill(
+        name="open-app", description="d",
+        body="```python\n<paste-button>\n```", dir=Path("/x"),
+    )
+    out = sl.fill_builtin_boxes({"open-app": other})
+
+    assert out["open-app"] is other                   # same object, unfilled
 
 
 # ---------- tail_reminder / inject_tail ----------

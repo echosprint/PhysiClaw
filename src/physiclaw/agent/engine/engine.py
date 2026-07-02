@@ -123,6 +123,9 @@ def build_prompt_bundle(provider_id: str) -> PromptBundle:
     prompt for a session — the offline half of `_run_session`'s setup."""
     layout_incomplete = not screen_layout.is_learned()
     builtin_skills = screen_layout.prune_builtin_skills(skill.discover_builtin_skills())
+    # Inline the learned bboxes into the skill bodies (e.g. im's send sequence)
+    # so the agent uses coordinates directly instead of cross-referencing.
+    builtin_skills = screen_layout.fill_builtin_boxes(builtin_skills)
     user_skills = skill.discover_user_skills()
     local_registry = builtin_tool.build_registry(user_skills)
     local_schemas = builtin_tool.schemas(local_registry)

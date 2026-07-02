@@ -24,6 +24,7 @@ inject-the-layout.
 
 import json
 import logging
+from dataclasses import replace
 
 from physiclaw import paths
 from physiclaw.agent.engine.dto import Message, UserMessage
@@ -102,6 +103,54 @@ def prune_builtin_skills(skills: dict) -> dict:
     if is_learned():
         return {k: v for k, v in skills.items() if k != SKILL_NAME}
     return skills
+
+
+# Built-in skill markdown placeholder -> learned layout field. Keyed by skill:
+# the same token means different fields in different skills (im's <paste-button>
+# is the chat paste; open-app's is the Spotlight paste). Only `im` is filled —
+# it has a copy-paste `sequence` template the agent runs verbatim. Just the
+# tokens that appear in that fenced template (filling is code-block-only, so a
+# prose-only token like <backspace> would never substitute).
+_SKILL_BOX_TOKENS = {
+    "im": {
+        "<input-hidden>": "chat_input_kb_hidden",
+        "<input-visible>": "chat_input_kb_visible",
+        "<paste-button>": "chat_paste",
+        "<send>": "send",
+    },
+}
+
+
+def _sub_in_code_blocks(body: str, subs: dict) -> str:
+    """Apply `subs` (token -> replacement) only INSIDE fenced ``` code blocks.
+    Splitting on the fence, the odd-indexed segments are the code bodies."""
+    parts = body.split("```")
+    for i in range(1, len(parts), 2):
+        for token, val in subs.items():
+            parts[i] = parts[i].replace(token, val)
+    return "```".join(parts)
+
+
+def fill_builtin_boxes(skills: dict) -> dict:
+    """Once the layout is learned, swap the bbox placeholders (`<input-hidden>`,
+    `<send>`, ...) for concrete coordinates INSIDE the skill's fenced code
+    template (im's send `sequence`) so the agent runs it verbatim. Prose keeps
+    the readable placeholder names — they reference § Screen layout. No-op (a
+    fresh dict) while incomplete. Inputs aren't mutated; filled skills are
+    copies."""
+    if not is_learned():
+        return dict(skills)
+    layout = _load()
+    out = {}
+    for name, s in skills.items():
+        subs = {
+            token: _fmt(layout[field])
+            for token, field in _SKILL_BOX_TOKENS.get(name, {}).items()
+            if layout.get(field)
+        }
+        body = _sub_in_code_blocks(s.body, subs) if subs else s.body
+        out[name] = replace(s, body=body) if body != s.body else s
+    return out
 
 
 def load_layout_md() -> str:
