@@ -502,6 +502,10 @@ const STR = {
     zh: (when) => `机械臂、相机和屏幕都校准好了${when}。PhysiClaw 现在可以操作这部手机了。`,
   },
   s_finish_when: { en: (mm, ss) => ` in ${mm}m ${ss}s`, zh: (mm, ss) => `（用时 ${mm} 分 ${ss} 秒）` },
+  s_finish_learning: {
+    en: "On first run, PhysiClaw now spends a few minutes learning the chat app you use and your keyboard layout. Please keep your chat app in the bottom dock so the agent can find it easily.",
+    zh: "首次运行时，PhysiClaw 需要几分钟来熟悉你的聊天软件和键盘布局。请将聊天软件固定在底部栏，便于智能体找到它。",
+  },
   s_finish_close: { en: "You can close this tab safely.", zh: "现在可以放心关掉这个标签页了。" },
 };
 const normLang = (l) => (l === "zh" ? "zh" : "en");
@@ -997,6 +1001,7 @@ function finish(ctx) {
     hero.innerHTML = `<div class="big">✓</div>
       <h1 style="margin:0">${t("s_finish_readyTitle")}</h1>
       <p class="lede" style="margin:10px auto 0;max-width:42ch">${t("s_finish_readyLede", when)}</p>`;
+    hero.appendChild($(`<div class="note info center">${t("s_finish_learning")}</div>`));
     hero.appendChild($(`<div class="note info center">${t("s_finish_close")}</div>`));
   }
 
