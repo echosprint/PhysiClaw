@@ -252,6 +252,16 @@ def test_record_completes_setup_wechat() -> None:
     saved = json.loads(paths.screen_layout_json().read_text())
     assert saved["send"] == [0.752, 0.868, 0.99, 0.918]  # keyboard key
     assert saved["im_app"] == "WeChat"
+    # The `layout_learned` marker is persisted for out-of-module readers (the
+    # core orchestrator reads it without importing this module).
+    assert saved["layout_learned"] is True
+
+
+def test_record_writes_learned_false_while_incomplete() -> None:
+    sl.record("spotlight", "spotlight_input", [0.02, 0.582, 0.958, 0.66])
+
+    saved = json.loads(paths.screen_layout_json().read_text())
+    assert saved["layout_learned"] is False
 
 
 def test_record_completes_setup_whatsapp_send_from_mic() -> None:

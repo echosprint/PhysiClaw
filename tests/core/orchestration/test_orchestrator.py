@@ -157,6 +157,84 @@ def test_status_includes_bridge_connected(pc: PhysiClaw) -> None:
     assert out["bridge"] is True
 
 
+def test_status_reports_layout_learned(pc: PhysiClaw, mocker) -> None:
+    mocker.patch(
+        "physiclaw.core.orchestration.orchestrator._layout_learned",
+        return_value=True,
+    )
+
+    assert pc.status()["layout_learned"] is True
+
+
+def test_status_reports_layout_not_learned(pc: PhysiClaw, mocker) -> None:
+    mocker.patch(
+        "physiclaw.core.orchestration.orchestrator._layout_learned",
+        return_value=False,
+    )
+
+    assert pc.status()["layout_learned"] is False
+
+
+# ---------- _layout_learned (reads the marker screen_layout writes) ----------
+
+
+def _write_layout(physiclaw_home, payload: str) -> None:
+    from physiclaw import paths
+
+    paths.screen_layout_dir().mkdir(parents=True, exist_ok=True)
+    paths.screen_layout_json().write_text(payload, encoding="utf-8")
+
+
+def test_layout_learned_false_when_file_missing(physiclaw_home) -> None:
+    assert orchestrator._layout_learned() is False
+
+
+def test_layout_learned_true_when_marker_set(physiclaw_home) -> None:
+    _write_layout(physiclaw_home, '{"layout_learned": true}')
+
+    assert orchestrator._layout_learned() is True
+
+
+def test_layout_learned_false_when_marker_unset(physiclaw_home) -> None:
+    _write_layout(physiclaw_home, '{"send": [0, 0, 1, 1], "layout_learned": false}')
+
+    assert orchestrator._layout_learned() is False
+
+
+def test_layout_learned_false_when_marker_absent(physiclaw_home) -> None:
+    _write_layout(physiclaw_home, '{"send": [0, 0, 1, 1]}')
+
+    assert orchestrator._layout_learned() is False
+
+
+def test_layout_learned_false_on_malformed_json(physiclaw_home) -> None:
+    _write_layout(physiclaw_home, "{ not json")
+
+    assert orchestrator._layout_learned() is False
+
+
+def test_layout_learned_round_trips_with_screen_layout_record(physiclaw_home) -> None:
+    # The agent-side writer and the core-side reader must agree: once
+    # `record()` captures the final box, the orchestrator sees learned=True.
+    from physiclaw.agent.engine import screen_layout
+
+    assert orchestrator._layout_learned() is False
+    for page, field, bbox in [
+        ("spotlight", "spotlight_input", [0.1, 0.55, 0.9, 0.65]),
+        ("spotlight", "spotlight_paste", [0.3, 0.45, 0.5, 0.5]),
+        ("spotlight", "backspace", [0.85, 0.85, 0.95, 0.92]),
+        ("spotlight", "return", [0.85, 0.85, 0.95, 0.92]),
+        ("spotlight", "space", [0.3, 0.85, 0.7, 0.95]),
+        ("chat-no-keyboard", "chat_input_kb_hidden", [0.1, 0.9, 0.7, 0.96]),
+        ("chat-keyboard", "chat_input_kb_visible", [0.1, 0.55, 0.7, 0.65]),
+        ("chat-keyboard", "send", [0.85, 0.55, 0.98, 0.65]),
+        ("chat-keyboard", "chat_paste", [0.3, 0.45, 0.5, 0.5]),
+    ]:
+        screen_layout.record(page, field, bbox, app="wechat")
+
+    assert orchestrator._layout_learned() is True
+
+
 # ---------- require_hardware ----------
 
 

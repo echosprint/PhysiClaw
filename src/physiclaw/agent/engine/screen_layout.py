@@ -11,7 +11,10 @@ field belongs to) and, if it passes, merges it into the running layout and
 writes
 ``~/.physiclaw/screen-layout/``:
 
-  layout.json  the structured bboxes (source of truth, built up per page)
+  layout.json  the structured bboxes (source of truth, built up per page),
+               plus a `layout_learned` bool so out-of-module readers (the core
+               orchestrator's /api/status) can tell setup is done without
+               importing this module or knowing its page/field schema
   layout.md    the rendered card that `prompt._render_screen_layout` injects
 
 `is_learned()` (all pages captured) / `missing_pages()` / `load_layout_md()`
@@ -301,12 +304,17 @@ def record(page: str, field: str, bbox, app: str | None = None) -> str:
     layout[field] = [round(float(v), 3) for v in bbox]
     if _is_chat_page(page) and app and app.strip():
         layout["im_app"] = _app_label(app)
+    still = [f for f in ALL_FIELDS if f not in layout]
+    # Persist a plain `learned` flag alongside the boxes so readers outside
+    # this module (e.g. the core orchestrator's /api/status) can tell setup is
+    # done by reading the file — without importing this module or knowing its
+    # page/field schema. `is_learned()` derives the same truth from the schema.
+    layout["layout_learned"] = not still
     md = _render_md(layout)
     paths.screen_layout_dir().mkdir(parents=True, exist_ok=True)
     write_text(paths.screen_layout_json(), json.dumps(layout, indent=2))
     write_text(paths.screen_layout_md(), md + "\n")
 
-    still = [f for f in ALL_FIELDS if f not in layout]
     if still:
         # The per-turn first-run notice (tail_reminder) already lists which
         # fields remain and points at the skill — don't repeat it here.

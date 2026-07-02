@@ -1001,7 +1001,10 @@ function finish(ctx) {
     hero.innerHTML = `<div class="big">✓</div>
       <h1 style="margin:0">${t("s_finish_readyTitle")}</h1>
       <p class="lede" style="margin:10px auto 0;max-width:42ch">${t("s_finish_readyLede", when)}</p>`;
-    hero.appendChild($(`<div class="note info center">${t("s_finish_learning")}</div>`));
+    // The first-run learning note only applies before the layout is learned;
+    // on a recalibration (already learned) it's stale, so skip it.
+    if (!STATUS.layout_learned)
+      hero.appendChild($(`<div class="note info center">${t("s_finish_learning")}</div>`));
     hero.appendChild($(`<div class="note info center">${t("s_finish_close")}</div>`));
   }
 

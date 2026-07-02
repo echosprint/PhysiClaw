@@ -12,12 +12,15 @@ pipelines) lives in physiclaw.core.vision — the orchestrator only
 coordinates sub-modules, it never touches pixels directly.
 """
 
+import json
 import logging
 import threading
 import time
 from contextlib import contextmanager
 from typing import Any, Literal
 
+from physiclaw import paths
+from physiclaw.text import read_text
 from physiclaw.core.bridge import BridgeState
 from physiclaw.core.calibration import PARK_PCT, Calibration, ScreenTransforms
 from physiclaw.core.hardware.arm import StylusArm
@@ -40,6 +43,24 @@ from physiclaw.core.vision.ui_elements import detect_ui_elements, elements_to_js
 from physiclaw.core.vision.watchdog import Watchdog
 
 log = logging.getLogger(__name__)
+
+
+def _layout_learned() -> bool:
+    """Read the first-run layout's `learned` marker straight from its JSON.
+
+    The agent-side `screen_layout` module writes the marker (it owns the
+    page/field schema); core only reads it, so the orchestrator can report
+    first-run progress without importing the agent package."""
+    p = paths.screen_layout_json()
+    if not p.exists():
+        return False
+    try:
+        data = json.loads(read_text(p))
+    except (OSError, json.JSONDecodeError):
+        return False
+    # "layout_learned" is written by agent-side screen_layout.record() once
+    # every box is captured; core only reads it (keep in sync with that writer).
+    return bool(isinstance(data, dict) and data.get("layout_learned"))
 
 
 class PhysiClaw:
@@ -109,6 +130,7 @@ class PhysiClaw:
             "steps": steps,
             "calibrated": self.hardware_ready,
             "ready": self.ready,
+            "layout_learned": _layout_learned(),
         }
 
     def require_hardware(self):
