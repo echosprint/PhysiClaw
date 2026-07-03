@@ -188,3 +188,27 @@ uv run --group cad python -m hardware print                      # 3D-print pack
 uv run            python -m hardware manual                      # the manual
 uv run            python -m hardware sourcing                    # the sourcing guide
 ```
+
+---
+
+## Cutting a release
+
+Each `physiclaw-hardware-vX.Y` release bundles four zips, assembled by hand
+from a freshly regenerated `output/`:
+
+1. **Regenerate everything** so the artifacts are current.
+
+2. **Zip the four assets** from `output/`, keeping the same internal layout as
+   the previous release:
+   - **Assembly manual** (`make hw-manual-pdf`) — the whole `manual/` folder
+     (HTML + PDF in English and 中文, plus the step figures).
+   - **Sourcing guide** (`make hw-sourcing`) — the `sourcing/` folder (HTML in
+     English and 中文).
+   - **Camera frame** (`make hw-build`) — just the assembled camera-frame STEP
+     file, on its own.
+   - **Custom parts** (`make hw-print`) — the print package already produced in
+     `output/print_3d/`.
+
+3. **Publish** the release on GitHub with those four zips attached and a short
+   changelog. The tag points at the tip of `main`, so make sure your source
+   changes are committed and pushed first.
