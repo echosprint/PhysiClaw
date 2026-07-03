@@ -136,6 +136,8 @@ h1{font-size:30px;line-height:1.16;margin:0 0 13px;letter-spacing:-.025em;font-w
 .auto-check{position:absolute;top:-8px;right:-8px;width:21px;height:21px;border-radius:50%;background:var(--accent);display:grid;place-items:center;box-shadow:0 2px 6px rgba(0,0,0,.22);transform:scale(0);transition:transform .18s cubic-bezier(.34,1.56,.64,1)}
 .auto-btn.on .auto-check{transform:scale(1)}
 .auto-check svg{width:12px;height:12px;fill:none;stroke:var(--accent-ink);stroke-width:3.4;stroke-linecap:round;stroke-linejoin:round}
+.auto-hint{color:var(--faint);font-size:11.5px;line-height:1.55;max-width:34ch;margin:0 auto 0 0}
+.detail > .actions:has(.auto-hint) .btn.primary{margin-left:0}
 .btn{padding:12px 22px;border-radius:11px;font-weight:650;font-size:14.5px;
   background:var(--card2);border:1px solid var(--line2);transition:.15s;display:inline-flex;align-items:center;gap:9px}
 .btn:hover{border-color:var(--faint);transform:translateY(-1px)}
@@ -315,8 +317,8 @@ const STR = {
   working: { en: "Working…", zh: "处理中…" },
   autoBtn: { en: "Auto mode", zh: "自动模式" },
   autoHint: {
-    en: "Already set up before? Click it, then press Continue — PhysiClaw runs every step for you and pauses wherever it needs you.",
-    zh: "之前校准过？开启「自动模式」，再点「继续」——PhysiClaw 会自动跑完全部步骤，只在需要你动手的地方停下来。",
+    en: "Calibrated before and nothing's moved? Turn on Auto mode, then press Continue. PhysiClaw runs every step for you and stops only when it needs you.",
+    zh: "如果之前校准过、硬件位置没有变动，可以开启「自动模式」，再点「继续」。PhysiClaw 会自动跑完全部步骤，需要你时才停下。",
   },
   stepOf: { en: (n) => `Step ${n} of ${STEPS.length}`, zh: (n) => `第 ${n} / ${STEPS.length} 步` },
   finalStep: { en: "Final step", zh: "最后一步" },
@@ -499,7 +501,7 @@ const STR = {
   s_finish_readyLedeShort: { en: "The arm, camera, and screen are calibrated and working together.", zh: "机械臂、相机和屏幕已全部校准，正在协同工作。" },
   s_finish_readyLede: {
     en: (when) => `The arm, camera, and screen are all calibrated${when}. PhysiClaw can now see and tap the phone.`,
-    zh: (when) => `机械臂、相机和屏幕已全部校准${when}。PhysiClaw 现在既能看到、也能点到这部手机了。`,
+    zh: (when) => `机械臂、相机和屏幕已全部校准${when}。PhysiClaw 现在可以操作这部手机了。`,
   },
   s_finish_when: { en: (mm, ss) => ` in ${mm}m ${ss}s`, zh: (mm, ss) => `（用时 ${mm} 分 ${ss} 秒）` },
   s_finish_learning: {
@@ -772,14 +774,18 @@ function connectPhone(ctx) {
   // "Auto mode" toggle-button: click to arm (a check badge appears in the
   // top-right corner), then press Continue to run every step automatically
   // (pausing on any step that needs you). Disabled until the phone connects.
-  const autoBtn = $(`<button type="button" class="btn auto-btn" id="autoBtn" disabled title="${t("autoHint")}"><span class="auto-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg></span>${t("autoBtn")}</button>`);
+  const autoBtn = $(`<button type="button" class="btn auto-btn" id="autoBtn" disabled><span class="auto-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg></span>${t("autoBtn")}</button>`);
   autoBtn.classList.toggle("on", AUTO_ARMED);
   autoBtn.onclick = () => {
     AUTO_ARMED = !AUTO_ARMED;
     autoBtn.classList.toggle("on", AUTO_ARMED);
     if (!AUTO_ARMED) AUTO = false;
   };
+  // Auto-mode button sits just left of Continue on the right; its explanation
+  // (was a button tooltip) fills the left of the action bar, where the button
+  // used to be.
   actions.insertBefore(autoBtn, actions.firstChild);
+  actions.insertBefore($(`<p class="auto-hint">${t("autoHint")}</p>`), autoBtn);
   wrap.appendChild(actions);
 
   const qrCanvas = body.querySelector("#qr");
@@ -1005,7 +1011,8 @@ function finish(ctx) {
     // on a recalibration (already learned) it's stale, so skip it.
     if (!STATUS.layout_learned)
       hero.appendChild($(`<div class="note info center">${t("s_finish_learning")}</div>`));
-    hero.appendChild($(`<div class="note info center">${t("s_finish_close")}</div>`));
+    // Housekeeping line — kept faint so it doesn't compete with the info note.
+    hero.appendChild($(`<p style="text-align:center;color:var(--faint);font-size:12.5px;margin:14px 0 0">${t("s_finish_close")}</p>`));
   }
 
   if (alreadyReady) { showReady(""); return wrap; }
