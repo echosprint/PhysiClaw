@@ -1140,8 +1140,8 @@
       }
     ],
     "note": {
-      "en": "Imperial threads are the de facto standard in photographic equipment — camera mounting sockets are all 1/4-20.",
-      "zh": "摄影器材以英制螺纹为事实标准，摄像头安装接口均为 1/4-20 英制。"
+      "en": "Use with a 3/16\" imperial hex key.",
+      "zh": "搭配英制 3/16\" 内六角扳手使用。"
     }
   },
   {
@@ -1497,7 +1497,11 @@
         },
         "url": "https://detail.tmall.com/item.htm?id=601243664282&skuId=5709263519067"
       }
-    ]
+    ],
+    "note": {
+      "en": "Tighten with an 11mm open-end wrench.",
+      "zh": "搭配 11mm 开口扳手使用。"
+    }
   },
   {
     "part_id": "shim-5x8x0_5",
