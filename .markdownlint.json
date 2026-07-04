@@ -1,6 +1,6 @@
 {
   "default": true,
-  "MD013": { "tables": false, "code_blocks": false },
+  "MD013": false,
   "MD060": false,
   "table-column-style": false
 }
