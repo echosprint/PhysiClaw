@@ -17,15 +17,17 @@ import logging
 import threading
 import time
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import Any, Literal
 
-from physiclaw import paths
+from physiclaw import paths, verdict
 from physiclaw.text import read_text
 from physiclaw.core.bridge import BridgeState
 from physiclaw.core.calibration import PARK_PCT, Calibration, ScreenTransforms
 from physiclaw.core.hardware.arm import StylusArm
 from physiclaw.core.hardware.camera import Camera
 from physiclaw.core.hardware.iphone import AssistiveTouch
+from physiclaw.core.vision.change import frames_changed
 from physiclaw.core.vision.icon_detect import IconDetector
 from physiclaw.core.vision.ocr import OCRReader, results_to_elements
 from physiclaw.core.vision.util import (
@@ -43,6 +45,19 @@ from physiclaw.core.vision.ui_elements import detect_ui_elements, elements_to_js
 from physiclaw.core.vision.watchdog import Watchdog
 
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class GestureResult:
+    """What a screen-mutating gesture hands to the MCP tool layer: the
+    action text (screen-change verdict attached) plus the fused
+    post-gesture view — annotated JPEG + element listing detected on the
+    same parked after-frame the verdict used. `jpeg`/`listing` are None
+    when the camera or detector hiccupped; the tool layer then falls
+    back to a text-only result telling the agent to `peek`."""
+    text: str
+    jpeg: bytes | None = None
+    listing: str | None = None
 
 
 def _layout_learned() -> bool:
@@ -484,28 +499,126 @@ class PhysiClaw:
         self.move_to_bbox_center(bbox)
         self._arm.swipe_to(ex_mm, ey_mm, speed)
 
+    # ─── Screen-change verdict ────────────────────────────────
+
+    # Post-gesture settle before the fused view is captured: added to the
+    # ~1s of stylus retract + park, total ≈ 2s — enough for most page
+    # transitions (Anthropic's computer-use reference uses a 2.0s delay).
+    GESTURE_SETTLE_SECONDS = 1.0
+    # The arm crossing the lens re-triggers autofocus; a frame captured
+    # mid-hunt is blurry and poisons both the verdict and the fused view.
+    # Below this Laplacian variance, wait and re-grab once.
+    GRAB_BLUR_THRESHOLD = 80.0
+    GRAB_BLUR_RETRY_SECONDS = 1.5
+
+    def _grab_screen(self, settle: float = 0.0):
+        """Park (clearing the arm from the lens), let the screen and
+        autofocus settle for `settle`s, then capture the cropped
+        phone-screen frame for the gesture diff and fused view. Parking
+        first means the settle covers the AF hunt the arm's move
+        triggered, so the capture is usually sharp; a still-blurry frame
+        is re-grabbed once as a fallback.
+
+        Returns `(frame, sharp)`: frame is None on any failure (the view
+        is best-effort, never a reason to fail a gesture); sharp is False
+        when even the retry stayed below GRAB_BLUR_THRESHOLD — such a
+        frame still serves the fused view, but blur erases edges so it
+        diffs as "changed everywhere": the caller must skip the verdict
+        (None, the fail-open direction) rather than emit a false
+        `changed` that would reset the stuck guard. Caller must hold the
+        lock."""
+        try:
+            self.park()
+            if settle:
+                time.sleep(settle)
+            frame = crop_to_phone_screen(self.camera_view(), self.transforms)
+            if laplacian_variance(frame) < self.GRAB_BLUR_THRESHOLD:
+                log.debug("gesture frame blurry — waiting for autofocus")
+                time.sleep(self.GRAB_BLUR_RETRY_SECONDS)
+                frame = crop_to_phone_screen(self.camera_view(), self.transforms)
+                if laplacian_variance(frame) < self.GRAB_BLUR_THRESHOLD:
+                    log.warning("gesture frame still blurry after retry — verdict withheld")
+                    return frame, False
+            return frame, True
+        except Exception:
+            log.warning("screen frame grab failed", exc_info=True)
+            return None, False
+
+    def _with_view(self, action) -> GestureResult:
+        """Run a gesture body bracketed by before/after frames; return
+        the action text with the screen-change verdict attached PLUS the
+        fused post-gesture view (annotated JPEG + listing) detected on
+        the same after-frame. One capture serves both:
+
+          - the verdict is the agent's only evidence for SILENT REFUSALS
+            — a toast vanishes long before the arm parks, so "the screen
+            looks exactly the same" distinguishes a refused tap from a
+            landed one;
+          - the view replaces the act-then-peek turn pair — the agent
+            reads the new screen from the gesture result itself.
+
+        Caller must hold the lock. The before-grab needs no settle (the
+        arm was already parked from the previous op, screen static); the
+        after-grab settles so the transition completes and AF recovers
+        from the gesture's arm move before capture.
+        """
+        before, before_sharp = self._grab_screen()
+        result = action()
+        after, after_sharp = self._grab_screen(settle=self.GESTURE_SETTLE_SECONDS)
+        changed = None
+        jpeg = listing = None
+        if after is not None:
+            # Verdict only from two sharp frames — a blurry side diffs as
+            # "changed everywhere" (false `changed`, the harmful
+            # direction). The view below is best-effort either way.
+            if before is not None and before_sharp and after_sharp:
+                try:
+                    changed = frames_changed(before, after)
+                except Exception:
+                    log.debug("screen-verdict diff failed", exc_info=True)
+            try:
+                listing, annotated = self._detect(after)
+                jpeg = encode_jpeg(annotated)
+            except Exception:
+                log.warning("post-gesture view failed", exc_info=True)
+        return GestureResult(
+            text=verdict.attach(result, changed), jpeg=jpeg, listing=listing,
+        )
+
+    def _run_gesture(self, gesture, result: str) -> "GestureResult":
+        """Lock, run `gesture` bracketed by verdict/view frames, and
+        return `result` fused with the post-gesture view — the shared
+        shape of every public gesture below."""
+
+        def act() -> str:
+            gesture()
+            return result
+
+        with self.locked():
+            return self._with_view(act)
+
     # ─── Public gestures (with lock) ─────────────────────────
 
-    def tap(self, bbox: list[float]) -> str:
+    def tap(self, bbox: list[float]) -> "GestureResult":
         """Single tap at the center of a bbox."""
         validate_bbox(bbox)
-        with self.locked():
-            self._tap(bbox)
-            return f"Tapped at bbox {bbox}"
+        return self._run_gesture(
+            lambda: self._tap(bbox), f"Tapped at bbox {bbox}"
+        )
 
-    def double_tap(self, bbox: list[float]) -> str:
+    def double_tap(self, bbox: list[float]) -> "GestureResult":
         """Double tap at the center of a bbox."""
         validate_bbox(bbox)
-        with self.locked():
-            self._double_tap(bbox)
-            return f"Double tapped at bbox {bbox}"
+        return self._run_gesture(
+            lambda: self._double_tap(bbox), f"Double tapped at bbox {bbox}"
+        )
 
-    def long_press(self, bbox: list[float]) -> str:
+    def long_press(self, bbox: list[float]) -> "GestureResult":
         """Long press (~1.2s) at the center of a bbox."""
         validate_bbox(bbox)
-        with self.locked():
-            self._long_press(bbox)
-            return f"Long pressed at bbox {bbox}"
+        return self._run_gesture(
+            lambda: self._long_press(bbox), f"Long pressed at bbox {bbox}"
+        )
 
     def _validate_swipe(self, bbox, direction, size, speed):
         """Raises ValueError if any swipe arg is out of range."""
@@ -529,20 +642,30 @@ class PhysiClaw:
         direction: Literal["up", "down", "left", "right"],
         size: Literal["s", "m", "l", "xl", "xxl"] = "m",
         speed: Literal["slow", "medium", "fast"] = "medium",
-    ) -> str:
-        """Swipe from the bbox center in `direction` by `size` screen fraction."""
+    ) -> "GestureResult":
+        """Swipe from the bbox center in `direction` by `size` screen fraction.
+
+        `no visible change` in the verdict after a scroll swipe = end of
+        the list."""
         self._validate_swipe(bbox, direction, size, speed)
-        with self.locked():
-            self._swipe(bbox, direction, size, speed)
-            return f"Swiped {direction} {size} at bbox {bbox}"
+        return self._run_gesture(
+            lambda: self._swipe(bbox, direction, size, speed),
+            f"Swiped {direction} {size} at bbox {bbox}",
+        )
 
     def _send_to_clipboard(self, text: str) -> str:
-        """Copy text via AssistiveTouch long-press. Caller must hold the lock."""
+        """Copy text via AssistiveTouch long-press. Caller must hold the lock.
+
+        The result deliberately does NOT echo `text`: the agent already
+        sees it in its own tool_call args, and inside a `sequence` this
+        string joins the action text the engine scans for the screen
+        verdict — echoed free-form content (often quoted from an IM or
+        the screen) could carry marker-like text (`physiclaw.verdict`)."""
         self._require_assistive_touch()
         self._bridge.send_text(text)
         self._assistive_touch.long_press(self._arm, self.transforms.pct_to_grbl)
         if self._bridge.wait_clipboard(timeout=30.0):
-            return f"Copied '{text}' to phone clipboard"
+            return f"Copied {len(text)} chars to phone clipboard"
         return (
             "AssistiveTouch long-pressed but clipboard not confirmed "
             "— check the iOS Shortcut"
@@ -572,8 +695,14 @@ class PhysiClaw:
             self._long_press(arg)
             return f"Long pressed at bbox {arg}"
         if tool == "swipe":
+            # Error messages here avoid repr-ing the raw arg — they join
+            # the batch action text the engine scans for the verdict
+            # marker (see _send_to_clipboard).
             if not isinstance(arg, dict) or "bbox" not in arg or "direction" not in arg:
-                raise ValueError(f"swipe arg needs bbox + direction, got {arg!r}")
+                raise ValueError(
+                    f"swipe arg needs a dict with bbox + direction, got "
+                    f"{type(arg).__name__}"
+                )
             bbox, direction = arg["bbox"], arg["direction"]
             size, speed = arg.get("size", "m"), arg.get("speed", "medium")
             self._validate_swipe(bbox, direction, size, speed)
@@ -583,19 +712,25 @@ class PhysiClaw:
             if not isinstance(arg, str):
                 raise ValueError(
                     f"send_to_clipboard arg must be a string, got "
-                    f"{type(arg).__name__}: {arg!r}"
+                    f"{type(arg).__name__}"
                 )
             return self._send_to_clipboard(arg)
         raise ValueError(f"tool {tool!r} not allowed in sequence")
 
-    def sequence(self, steps: list[dict]) -> str:
+    def sequence(self, steps: list[dict]) -> "GestureResult":
         """Run multiple gestures atomically — one lock held across all steps.
 
         Each step: {"tool_name": str, "arg": ...}. Stops on first failure.
-        Lock is acquired once; no park between steps.
+        Lock is acquired once; no park between steps. Per-step camera
+        checks are deliberately absent: the stylus occludes the screen
+        mid-batch, and the sanctioned fast paths (paste popovers) EXPECT
+        the screen to change between steps — so safety comes from the
+        grounding policy (CONVENTION § Sequence bundling) plus the
+        whole-batch verdict and fused final view returned here.
         """
-        lines = []
-        with self.locked():
+
+        def act() -> str:
+            lines = []
             for i, s in enumerate(steps, 1):
                 tool = s["tool_name"]
                 try:
@@ -604,41 +739,53 @@ class PhysiClaw:
                 except Exception as e:
                     lines.append(f"{i} {tool} FAIL ({e})")
                     break
-        return "\n".join(lines)
+            return "\n".join(lines)
 
-    def home_screen(self) -> str:
+        with self.locked():
+            return self._with_view(act)
+
+    def home_screen(self) -> "GestureResult":
         """Go to the home screen via bottom-edge swipe up."""
-        with self.locked():
-            self._swipe([0.4, 0.96, 0.6, 0.98], "up", "xl", speed="fast")
-            return "Went to home screen"
+        return self._run_gesture(
+            lambda: self._swipe([0.4, 0.96, 0.6, 0.98], "up", "xl", speed="fast"),
+            "Went to home screen",
+        )
 
-    def go_back(self) -> str:
-        """Go back one screen via left-edge swipe right."""
-        with self.locked():
-            self._swipe([0.0, 0.4, 0.04, 0.6], "right", "xxl", speed="fast")
-            return "Went back"
+    def go_back(self) -> "GestureResult":
+        """Go back one screen via left-edge swipe right.
 
-    def force_quit(self) -> str:
+        `no visible change` in the verdict = the edge swipe didn't pop
+        (modal, root tab, image viewer) — the agent's cue to try another
+        exit."""
+        return self._run_gesture(
+            lambda: self._swipe([0.0, 0.4, 0.04, 0.6], "right", "xxl", speed="fast"),
+            "Went back",
+        )
+
+    def force_quit(self) -> "GestureResult":
         """Force-quit current app via the iOS app-switcher gesture.
 
         Step 1's swipe is short on purpose — a longer upward swipe from
         the bottom edge would go home instead of opening the switcher.
         """
-        with self.locked():
+
+        def gestures() -> None:
             self._swipe([0.4, 0.96, 0.6, 0.98], "up", "s", speed="slow")
             self._swipe([0.4, 0.45, 0.6, 0.55], "left", "m", speed="medium")
             self._swipe([0.4, 0.70, 0.6, 0.80], "up", "xl", speed="fast")
             self._tap([0.4, 0.92, 0.6, 0.96])
-            return "Force-quit current app"
 
-    def unlock_phone(self) -> str:
+        return self._run_gesture(gestures, "Force-quit current app")
+
+    def unlock_phone(self) -> "GestureResult":
         """Unlock the phone: wake → swipe up → wait for Face ID to fail → enter passcode.
 
         Fully mechanical — no AI. OCR finds digit "1" on the passcode
         screen, then taps it six times. Passcode is hardcoded to 111111 —
         a dedicated tool-phone passcode, not the user's real password.
         """
-        with self.locked():
+
+        def act() -> str:
             self._tap([0.4, 0.4, 0.6, 0.6])
             self._swipe([0.4, 0.96, 0.6, 0.98], "up", "l", speed="fast")
             self.park()
@@ -660,6 +807,9 @@ class PhysiClaw:
                 self._tap(digit_bbox)
 
             return "Passcode entered"
+
+        with self.locked():
+            return self._with_view(act)
 
     # ─── Lifecycle ─────────────────────────────────────────────
 

@@ -17,7 +17,6 @@ don't collide.
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
 
 import cv2
 
@@ -38,7 +37,9 @@ def _mkdir(d: Path) -> Path:
     return d
 
 
-ToolKind = Literal["peek", "screenshot"]
+# The view-producing tool being dumped: "peek", "screenshot", or any
+# gesture name — every gesture attaches a fused post-action view now.
+ToolKind = str
 
 
 def save_tool_call(kind: ToolKind, listing: str, jpeg: bytes | None = None) -> None:

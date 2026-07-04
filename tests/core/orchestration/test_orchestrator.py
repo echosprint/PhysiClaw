@@ -35,7 +35,8 @@ def _fake_transforms(*, swipe_end=(0.5, 0.6)):
 
 @pytest.fixture
 def pc(mocker) -> PhysiClaw:
-    """Construct PhysiClaw and pre-mock the assistive_touch + watchdog."""
+    """Construct PhysiClaw and pre-mock the assistive_touch + watchdog.
+    The post-gesture settle sleep is zeroed so gesture tests stay fast."""
     p = PhysiClaw()
     p._assistive_touch = MagicMock()
     p._assistive_touch.ready = True
@@ -43,6 +44,10 @@ def pc(mocker) -> PhysiClaw:
     p._assistive_touch.overlaps_at.return_value = False
     p._assistive_touch.swipe_crosses_at.return_value = False
     p._watchdog = MagicMock()
+    p.GESTURE_SETTLE_SECONDS = 0
+    # Synthetic test frames are flat (Laplacian variance 0) — disable the
+    # autofocus blur-retry so grabs stay one-frame-per-call.
+    p.GRAB_BLUR_THRESHOLD = 0
     return p
 
 
@@ -656,7 +661,7 @@ def test_tap_validates_and_dispatches(mocker, pc: PhysiClaw) -> None:
 
     out = pc.tap([0.1, 0.1, 0.2, 0.2])
 
-    assert "Tapped" in out
+    assert "Tapped" in out.text
     pc._arm.tap.assert_called_once()
 
 
@@ -665,7 +670,7 @@ def test_double_tap_validates_and_dispatches(pc: PhysiClaw) -> None:
 
     out = pc.double_tap([0.1, 0.1, 0.2, 0.2])
 
-    assert "Double tapped" in out
+    assert "Double tapped" in out.text
     pc._arm.double_tap.assert_called_once()
 
 
@@ -674,7 +679,7 @@ def test_long_press_validates_and_dispatches(pc: PhysiClaw) -> None:
 
     out = pc.long_press([0.1, 0.1, 0.2, 0.2])
 
-    assert "Long pressed" in out
+    assert "Long pressed" in out.text
     pc._arm.long_press.assert_called_once()
 
 
@@ -698,7 +703,7 @@ def test_swipe_dispatches(pc: PhysiClaw) -> None:
 
     out = pc.swipe([0.1, 0.1, 0.2, 0.2], "up", "m", "fast")
 
-    assert "Swiped up m" in out
+    assert "Swiped up m" in out.text
     pc._arm.swipe_to.assert_called_once()
 
 
@@ -713,7 +718,11 @@ def test_send_to_clipboard_happy_path(pc: PhysiClaw) -> None:
 
     out = pc.send_to_clipboard("hello world")
 
-    assert "Copied 'hello world'" in out
+    # Length, not the text itself: the echoed content would join the
+    # verdict-scanned action text on the sequence path (see
+    # _send_to_clipboard docstring).
+    assert "Copied 11 chars" in out
+    assert "hello world" not in out
     bridge.send_text.assert_called_once_with("hello world")
     pc._assistive_touch.long_press.assert_called_once()
 
@@ -743,9 +752,9 @@ def test_run_step_dispatches_each_tool(pc: PhysiClaw) -> None:
 def test_run_step_swipe_requires_dict_with_keys(pc: PhysiClaw) -> None:
     _wire_hardware(pc)
 
-    with pytest.raises(ValueError, match="swipe arg needs bbox"):
+    with pytest.raises(ValueError, match="swipe arg needs a dict"):
         pc._run_step("swipe", "not-a-dict")
-    with pytest.raises(ValueError, match="swipe arg needs bbox"):
+    with pytest.raises(ValueError, match="swipe arg needs a dict"):
         pc._run_step("swipe", {"bbox": [0, 0, 1, 1]})
 
 
@@ -774,7 +783,7 @@ def test_run_step_send_to_clipboard_dispatches(pc: PhysiClaw) -> None:
 
     out = pc._run_step("send_to_clipboard", "hi")
 
-    assert "Copied 'hi'" in out
+    assert "Copied 2 chars" in out
 
 
 def test_run_step_unknown_tool_raises(pc: PhysiClaw) -> None:
@@ -790,7 +799,7 @@ def test_sequence_runs_steps_in_order(pc: PhysiClaw) -> None:
         {"tool_name": "double_tap", "arg": [0.3, 0.3, 0.4, 0.4]},
     ])
 
-    lines = out.splitlines()
+    lines = out.text.splitlines()
     assert lines[0].startswith("1 tap ok")
     assert lines[1].startswith("2 double_tap ok")
 
@@ -805,10 +814,175 @@ def test_sequence_stops_on_first_failure(pc: PhysiClaw) -> None:
         {"tool_name": "tap", "arg": [0.5, 0.5, 0.6, 0.6]},
     ])
 
-    lines = out.splitlines()
+    lines = out.text.splitlines()
     assert lines[0].startswith("1 tap ok")
     assert lines[1].startswith("2 tap FAIL")
     assert len(lines) == 2  # third step skipped
+
+
+# ---------- screen-change verdict ----------
+
+
+def _wire_verdict_frames(mocker, pc: PhysiClaw, frames: list[np.ndarray]) -> None:
+    """Route `_grab_screen`'s crop through controlled frames — first call
+    returns frames[0] (before), second frames[1] (after). Detection on
+    the after-frame is stubbed so tests don't need the ONNX model."""
+    pc._cam.snapshot.return_value = np.zeros((4, 4, 3), dtype=np.uint8)
+    mocker.patch.object(orchestrator, "crop_to_phone_screen", side_effect=frames)
+    mocker.patch.object(pc, "_detect", return_value=("LISTING", MagicMock()))
+    mocker.patch.object(orchestrator, "encode_jpeg", return_value=b"VIEW_JPG")
+
+
+def test_tap_appends_changed_verdict(mocker, pc: PhysiClaw) -> None:
+    _wire_hardware(pc)
+    before = np.full((200, 100, 3), 128, dtype=np.uint8)
+    after = np.full((200, 100, 3), 30, dtype=np.uint8)
+    _wire_verdict_frames(mocker, pc, [before, after])
+
+    out = pc.tap([0.1, 0.1, 0.2, 0.2])
+
+    assert out.text.endswith("| screen: changed")
+
+
+def test_tap_appends_unchanged_verdict(mocker, pc: PhysiClaw) -> None:
+    _wire_hardware(pc)
+    frame = np.full((200, 100, 3), 128, dtype=np.uint8)
+    _wire_verdict_frames(mocker, pc, [frame, frame.copy()])
+
+    out = pc.tap([0.1, 0.1, 0.2, 0.2])
+
+    assert out.text.endswith("| screen: no visible change")
+
+
+def test_tap_unmarked_when_camera_fails(mocker, pc: PhysiClaw) -> None:
+    # Fail open: no frames → no marker, gesture result intact.
+    _wire_hardware(pc)
+    pc._cam.snapshot.return_value = None
+
+    out = pc.tap([0.1, 0.1, 0.2, 0.2])
+
+    assert out.text == "Tapped at bbox [0.1, 0.1, 0.2, 0.2]"
+    assert out.jpeg is None and out.listing is None
+    pc._arm.tap.assert_called_once()
+
+
+def test_sequence_appends_whole_batch_verdict(mocker, pc: PhysiClaw) -> None:
+    _wire_hardware(pc)
+    before = np.full((200, 100, 3), 128, dtype=np.uint8)
+    after = np.full((200, 100, 3), 30, dtype=np.uint8)
+    _wire_verdict_frames(mocker, pc, [before, after])
+
+    out = pc.sequence([{"tool_name": "tap", "arg": [0.1, 0.1, 0.2, 0.2]}])
+
+    assert out.text.splitlines()[0].startswith("1 tap ok")
+    assert out.text.endswith("| screen: changed")
+
+
+def test_go_back_unchanged_verdict_signals_no_pop(mocker, pc: PhysiClaw) -> None:
+    _wire_hardware(pc)
+    frame = np.full((200, 100, 3), 128, dtype=np.uint8)
+    _wire_verdict_frames(mocker, pc, [frame, frame.copy()])
+
+    out = pc.go_back()
+
+    assert out.text.endswith("| screen: no visible change")
+
+
+def test_grab_screen_retries_once_when_blurry(mocker, pc: PhysiClaw) -> None:
+    # A frame captured mid-autofocus-hunt (low Laplacian variance) is
+    # re-grabbed once after a settle wait.
+    _wire_hardware(pc)
+    pc.GRAB_BLUR_THRESHOLD = 50.0
+    pc._cam.snapshot.return_value = np.zeros((4, 4, 3), dtype=np.uint8)
+    rng = np.random.default_rng(7)
+    sharp = rng.integers(0, 255, size=(200, 100, 3), dtype=np.uint8)
+    blurry = np.full((200, 100, 3), 128, dtype=np.uint8)
+    mocker.patch.object(orchestrator, "crop_to_phone_screen", side_effect=[blurry, sharp])
+    mocker.patch.object(orchestrator.time, "sleep")
+
+    frame, sharp_flag = pc._grab_screen()
+
+    assert frame is sharp
+    assert sharp_flag is True
+    assert orchestrator.crop_to_phone_screen.call_count == 2
+
+
+def test_grab_screen_flags_frame_still_blurry_after_retry(mocker, pc: PhysiClaw) -> None:
+    # The retry frame is kept for the fused view but flagged unsharp so
+    # the caller withholds the verdict (blur diffs as changed everywhere).
+    _wire_hardware(pc)
+    pc.GRAB_BLUR_THRESHOLD = 50.0
+    pc._cam.snapshot.return_value = np.zeros((4, 4, 3), dtype=np.uint8)
+    blurry = np.full((200, 100, 3), 128, dtype=np.uint8)
+    mocker.patch.object(
+        orchestrator, "crop_to_phone_screen", side_effect=[blurry, blurry],
+    )
+    mocker.patch.object(orchestrator.time, "sleep")
+
+    frame, sharp_flag = pc._grab_screen()
+
+    assert frame is blurry
+    assert sharp_flag is False
+
+
+def test_blurry_after_frame_withholds_verdict_but_keeps_view(mocker, pc: PhysiClaw) -> None:
+    # Sharp-vs-blurry frames diff as a full-screen change — the verdict
+    # must fail open (no marker), while the view still attaches.
+    _wire_hardware(pc)
+    before = np.full((200, 100, 3), 128, dtype=np.uint8)
+    after = np.full((200, 100, 3), 30, dtype=np.uint8)
+    # Every grab reads blurry → each _grab_screen consumes two crops.
+    _wire_verdict_frames(mocker, pc, [before, before, after, after])
+    pc.GRAB_BLUR_THRESHOLD = float("inf")
+    mocker.patch.object(orchestrator.time, "sleep")
+
+    out = pc.tap([0.1, 0.1, 0.2, 0.2])
+
+    assert out.text == "Tapped at bbox [0.1, 0.1, 0.2, 0.2]"  # unmarked
+    assert out.jpeg == b"VIEW_JPG"
+    assert out.listing == "LISTING"
+
+
+# ---------- fused post-gesture view ----------
+
+
+def test_gesture_returns_fused_view(mocker, pc: PhysiClaw) -> None:
+    # The after-frame that feeds the verdict also feeds detection: the
+    # gesture result carries the annotated JPEG + listing like a peek.
+    _wire_hardware(pc)
+    before = np.full((200, 100, 3), 128, dtype=np.uint8)
+    after = np.full((200, 100, 3), 30, dtype=np.uint8)
+    _wire_verdict_frames(mocker, pc, [before, after])
+
+    out = pc.tap([0.1, 0.1, 0.2, 0.2])
+
+    assert out.jpeg == b"VIEW_JPG"
+    assert out.listing == "LISTING"
+
+
+def test_gesture_view_fails_open_when_detection_raises(mocker, pc: PhysiClaw) -> None:
+    _wire_hardware(pc)
+    before = np.full((200, 100, 3), 128, dtype=np.uint8)
+    after = np.full((200, 100, 3), 30, dtype=np.uint8)
+    pc._cam.snapshot.return_value = np.zeros((4, 4, 3), dtype=np.uint8)
+    mocker.patch.object(orchestrator, "crop_to_phone_screen", side_effect=[before, after])
+    mocker.patch.object(pc, "_detect", side_effect=RuntimeError("model missing"))
+
+    out = pc.tap([0.1, 0.1, 0.2, 0.2])
+
+    # Verdict still attaches; only the view is absent.
+    assert out.text.endswith("| screen: changed")
+    assert out.jpeg is None and out.listing is None
+
+
+def test_gesture_view_absent_without_after_frame(mocker, pc: PhysiClaw) -> None:
+    _wire_hardware(pc)
+    pc._cam.snapshot.return_value = None  # camera down
+
+    out = pc.tap([0.1, 0.1, 0.2, 0.2])
+
+    assert out.text == "Tapped at bbox [0.1, 0.1, 0.2, 0.2]"
+    assert out.jpeg is None and out.listing is None
 
 
 # ---------- macro gestures ----------
@@ -819,7 +993,7 @@ def test_home_screen_swipes_up(pc: PhysiClaw) -> None:
 
     out = pc.home_screen()
 
-    assert "Went to home screen" in out
+    assert "Went to home screen" in out.text
     pc._arm.swipe_to.assert_called_once()
 
 
@@ -828,7 +1002,7 @@ def test_go_back_swipes_right(pc: PhysiClaw) -> None:
 
     out = pc.go_back()
 
-    assert "Went back" in out
+    assert "Went back" in out.text
 
 
 def test_force_quit_runs_four_gestures(pc: PhysiClaw) -> None:
@@ -836,7 +1010,7 @@ def test_force_quit_runs_four_gestures(pc: PhysiClaw) -> None:
 
     out = pc.force_quit()
 
-    assert "Force-quit" in out
+    assert "Force-quit" in out.text
     # Three swipes + one tap.
     assert pc._arm.swipe_to.call_count == 3
     assert pc._arm.tap.call_count == 1
@@ -853,7 +1027,7 @@ def test_unlock_phone_returns_when_keypad_not_found(mocker, pc: PhysiClaw) -> No
 
     out = pc.unlock_phone()
 
-    assert "Failed to find passcode keypad" in out
+    assert "Failed to find passcode keypad" in out.text
 
 
 def test_unlock_phone_taps_six_times_when_keypad_found(mocker, pc: PhysiClaw) -> None:
@@ -866,7 +1040,7 @@ def test_unlock_phone_taps_six_times_when_keypad_found(mocker, pc: PhysiClaw) ->
 
     out = pc.unlock_phone()
 
-    assert "Passcode entered" in out
+    assert "Passcode entered" in out.text
     # 1 wake-tap + 6 digit-taps = 7 taps.
     assert pc._arm.tap.call_count == 7
 

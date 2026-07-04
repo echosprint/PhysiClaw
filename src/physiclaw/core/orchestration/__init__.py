@@ -5,6 +5,6 @@ and bbox workflow state. Image-output helpers (drawing, encoding,
 watermarking) live in physiclaw.core.vision.render.
 """
 
-from physiclaw.core.orchestration.orchestrator import PhysiClaw
+from physiclaw.core.orchestration.orchestrator import GestureResult, PhysiClaw
 
-__all__ = ["PhysiClaw"]
+__all__ = ["GestureResult", "PhysiClaw"]

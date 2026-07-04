@@ -46,3 +46,21 @@ ClipboardText = Annotated[
         min_length=1, max_length=10_000,
     ),
 ]
+
+
+# The `sequence` tool's batched action list. Per-step shape (tool_name +
+# that tool's arg) is documented in the tool docstring; step dispatch
+# validates tool_name and arg shape at execution time, so the schema
+# only pins the container: 2–5 objects (a 1-action "batch" is the plain
+# tool's job — same attached view, no bundling value).
+SequenceActions = Annotated[
+    list[dict],
+    Field(
+        description=(
+            "2-5 actions, run in order. Each: {\"tool_name\": tap / "
+            "double_tap / long_press / swipe / send_to_clipboard, "
+            "\"arg\": that tool's argument}."
+        ),
+        min_length=2, max_length=5,
+    ),
+]
