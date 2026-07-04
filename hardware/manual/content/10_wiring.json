@@ -125,6 +125,12 @@
         "style": "left:16mm; top:30mm; width:100mm;"
       },
       {
+        "h3": { "en": "Keep the stock leads under 100 mm", "zh": "原装引线不超过 100 mm" },
+        "body": { "en": "Cut the solenoid's stock leads back to 100 mm or less before splicing, so the joints sit clear of where the cable bends most — a joint that flexes with every gesture fatigues and snaps.", "zh": "电磁铁原装引线剪到不超过 100 mm 再接长，这样接头就不在线缆弯曲最大的地方，防止接头反复弯折、疲劳断裂。" },
+        "classes": "note overlay sm",
+        "style": "left:140mm; top:25mm; width:100mm;"
+      },
+      {
         "h3": { "en": "Stagger the splices", "zh": "错开接头" },
         "body": { "en": "Solder each joint and cover it with heat-shrink. Offset the two splices about 20 mm so the insulated joints don't sit side by side.", "zh": "每个接头先焊接，再套热缩管。把两个接头错开约 20 mm，别让它们并排挤在一起。" },
         "classes": "note overlay sm",

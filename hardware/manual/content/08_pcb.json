@@ -133,8 +133,8 @@
         "style": "right:30mm; top:30mm; width:100mm; max-width:100mm;"
       },
       {
-        "h3": { "en": "Extend the solenoid leads", "zh": "给电磁铁引线接长" },
-        "body": { "en": "The solenoid's stock leads are too short to reach the board — splice on extra wire to connect the solenoid to the control board.", "zh": "电磁铁原装的引线太短，够不到板子——接一段导线，把电磁铁连到控制板上。" },
+        "h3": { "en": "Anchor the solenoid leads", "zh": "固定电磁铁引线" },
+        "body": { "en": "Cable-tie the solenoid leads to the tube holder, so the solenoid's travel can't shake the wire at the control-board terminals — constant shaking works the contact loose, and the solenoid stops tapping the screen.", "zh": "用捆扎带把电磁铁引线固定在导管支架上，确保电磁铁移动时不会带动控制板端子处的引线晃动——反复晃动会导致接触不良，电磁铁就无法点击屏幕。" },
         "classes": "note overlay sm",
         "style": "right:30mm; top:50mm; width:100mm; max-width:100mm;"
       },
