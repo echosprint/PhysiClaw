@@ -11,6 +11,7 @@ check in :func:`read_live`.
 
 import json
 import os
+import sys
 import time
 
 from physiclaw import paths
@@ -85,7 +86,26 @@ def read_live() -> dict | None:
 
 
 def _pid_alive(pid: int) -> bool:
-    """True if a process with this pid currently exists. POSIX."""
+    """True if a process with this pid currently exists."""
+    if sys.platform == "win32":
+        # os.kill(pid, 0) is NOT a liveness probe on Windows: any signal
+        # other than CTRL_C/BREAK_EVENT unconditionally TerminateProcess()es
+        # the target — a doctor/status/update check would KILL the live
+        # server. Probe with a query-only process handle instead.
+        import ctypes
+
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        ERROR_ACCESS_DENIED = 5
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        handle = kernel32.OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION, False, pid
+        )
+        if handle:
+            kernel32.CloseHandle(handle)
+            return True
+        # Exists but owned by another user — still alive (mirrors the
+        # PermissionError case below).
+        return ctypes.get_last_error() == ERROR_ACCESS_DENIED
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
