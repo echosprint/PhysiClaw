@@ -78,7 +78,8 @@ job after opening the thread.
 
 ### Close
 
-1. Verify on screen — one final `peek`.
+1. Verify on screen — the last gesture's attached view usually shows
+   the result; `peek` only if it's stale or failed.
 2. Log the close — final summary line in `memory/YYYY-MM-DD.md`
    (purchases include merchant, brand, spec, quantity, price).
 3. Reply to the user in IM. Never reply before logging.
@@ -124,16 +125,26 @@ id [kind] "label" [left,top,right,bottom] conf
 - `label` — OCR text for `text`, empty for `icon`.
 - `conf` — detector confidence, 0-1.
 
-### peek vs screenshot
+### Views
 
-- **`peek`** (~4s, camera + annotated bboxes) — default. Call before
-  every tap/swipe to ground the target bbox; call after to verify
-  the screen changed.
+- **Every gesture attaches its own fresh view** (~2s after the
+  action): the result is `[outcome + verdict, image, listing]` — the
+  same shape as `peek`. Verify and pick the next target from it; a
+  `peek` right after a gesture is a wasted turn. The verdict reads
+  `screen: changed` / `screen: no visible change` — no visible change
+  = the action missed (retry ONCE) or the app refused with a toast
+  you can never see (stock limit, cap, disabled control). Read the
+  target value before any retry; unmoved after the retry = refusal,
+  stop pressing that element.
+- **`peek`** (~4s, camera + annotated bboxes) — for when you have NO
+  current view: the wake's first look, after waiting, after a
+  `screenshot`, or when a gesture's view failed / caught a loading
+  state.
 - **`screenshot`** (~12s, phone's pixel-perfect capture) — escalate
-  when `peek` can't see the target (tiny icon, glare, fine print).
-  **Has side effects:** triggers the iOS screenshot gesture, which
-  apps can observe (shopping apps pop a similar-items panel, share
-  sheet may appear, etc.). Always `peek` after a `screenshot`
+  when the camera can't see the target (tiny icon, glare, fine
+  print). **Has side effects:** triggers the iOS screenshot gesture,
+  which apps can observe (shopping apps pop a similar-items panel,
+  share sheet may appear, etc.). Always `peek` after a `screenshot`
   before tapping.
 
 ### Bboxes: copy, don't regenerate
@@ -165,12 +176,16 @@ live in each app's skill.
 
 Inside the Wake loop's Work phase, every individual action is:
 
-1. `peek` to orient and grab the target bbox.
+1. Orient — `peek` only when you have no current view; otherwise the
+   last gesture's attached view is your listing.
 2. If target missing, `screenshot` once → `peek` again (refresh
    after the mutating screenshot).
-3. Gesture tool with the bbox from step 1 or 2.
-4. `peek` to verify. Unchanged listing = action didn't land — retry
-   once, then pick a different bbox from the new listing.
+3. Gesture tool with the grounded bbox; a fully-grounded run of
+   gestures is ONE `sequence` call.
+4. Verify from the gesture's attached view — read the value you
+   tried to change and the `screen:` verdict. No visible change +
+   value unmoved = missed (retry once) or refused (stop; find the
+   stock/limit label or ask the user).
 
 ### Safety
 

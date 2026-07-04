@@ -230,7 +230,10 @@ def render_builtin(builtin: dict[str, Skill]) -> str:
         "## Built-in Skills",
         "",
         "Always available — no loading. Before acting, check for a match: if "
-        "one fits, follow its steps in order; else proceed normally.",
+        "one fits, follow its steps in order; else proceed normally. Boxes "
+        "written as `{{…}}` name learned elements — resolve them from SYSTEM "
+        "§ Screen layout (code templates already carry the substituted "
+        "coordinates, labeled by comments).",
         "",
     ]
     for s in builtin.values():

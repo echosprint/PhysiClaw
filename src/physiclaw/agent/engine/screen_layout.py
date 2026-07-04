@@ -95,6 +95,19 @@ def is_learned() -> bool:
     return not missing_pages()
 
 
+# Keys the user legitimately presses many times in a row (backspace-clearing
+# a field, spacing through text). The stuck guard exempts these targets from
+# same-target counting — repeated presses there are typing, not looping.
+REPEATABLE_KEY_FIELDS = ("backspace", "space", "return")
+
+
+def repeatable_key_boxes() -> list[list[float]]:
+    """Bboxes of the learned keyboard keys that are safe to press
+    repeatedly. Empty while the layout is unlearned."""
+    d = _load()
+    return [d[f] for f in REPEATABLE_KEY_FIELDS if isinstance(d.get(f), list)]
+
+
 def prune_builtin_skills(skills: dict) -> dict:
     """Drop the first-run `screen-layout` skill once the layout is learned —
     after setup its body is dead weight in `## Built-in Skills`. No-op (and a
@@ -111,12 +124,26 @@ def prune_builtin_skills(skills: dict) -> dict:
 # it has a copy-paste `sequence` template the agent runs verbatim. Just the
 # tokens that appear in that fenced template (filling is code-block-only, so a
 # prose-only token like <backspace> would never substitute).
+# Skill placeholders use the same `{{token}}` syntax as doctrine's
+# config tokens (prompt._DOCTRINE_TOKENS) — one placeholder style
+# everywhere. Two domains though: doctrine tokens are ALL substituted
+# (leftovers warn), while skill element tokens are substituted only
+# here, only inside code blocks, only once the layout is learned —
+# elsewhere they stay symbolic and the agent resolves them from
+# SYSTEM § Screen layout.
 _SKILL_BOX_TOKENS = {
     "im": {
-        "<input-hidden>": "chat_input_kb_hidden",
-        "<input-visible>": "chat_input_kb_visible",
-        "<paste-button>": "chat_paste",
-        "<send>": "send",
+        "{{input-hidden}}": "chat_input_kb_hidden",
+        "{{input-visible}}": "chat_input_kb_visible",
+        "{{paste-button}}": "chat_paste",
+        "{{send}}": "send",
+    },
+    # Same token name, different field per skill: {{paste-button}} is the
+    # CHAT paste box in `im` but the SPOTLIGHT paste box here.
+    "open-app": {
+        "{{search-field}}": "spotlight_input",
+        "{{backspace}}": "backspace",
+        "{{paste-button}}": "spotlight_paste",
     },
 }
 
@@ -132,12 +159,12 @@ def _sub_in_code_blocks(body: str, subs: dict) -> str:
 
 
 def fill_builtin_boxes(skills: dict) -> dict:
-    """Once the layout is learned, swap the bbox placeholders (`<input-hidden>`,
-    `<send>`, ...) for concrete coordinates INSIDE the skill's fenced code
-    template (im's send `sequence`) so the agent runs it verbatim. Prose keeps
-    the readable placeholder names — they reference § Screen layout. No-op (a
-    fresh dict) while incomplete. Inputs aren't mutated; filled skills are
-    copies."""
+    """Once the layout is learned, swap the bbox placeholders
+    (`{{input-hidden}}`, `{{send}}`, ...) for concrete coordinates INSIDE the
+    skill's fenced code template (im's send `sequence`) so the agent runs it
+    verbatim. Prose keeps the readable placeholder names — they reference
+    § Screen layout. No-op (a fresh dict) while incomplete. Inputs aren't
+    mutated; filled skills are copies."""
     if not is_learned():
         return dict(skills)
     layout = _load()
@@ -276,7 +303,7 @@ def _render_md(layout: dict) -> str:
     return "\n".join([
         "Key input boxes and keyboard landmarks, measured from your phone — "
         "`[left, top, right, bottom]`, 0–1. Trust these over generic priors; "
-        "re-`peek` if a tap misses.",
+        "re-ground from the current view if a tap misses.",
         "",
         f"**Chat input + Send below are {app}.** For any other IM app, ignore "
         "them and ground live. Spotlight + keyboard keys are system-wide.",
@@ -309,8 +336,8 @@ def _render_md(layout: dict) -> str:
         f"| space | {_fmt(layout.get('space'))} |",
         "",
         "Bottom-right key: label varies (`Send` / `Return` / `Search` / `搜索` / "
-        "`前往`), bbox stable. Tap not registering → `peek` that the keyboard is "
-        "actually visible.",
+        "`前往`), bbox stable. Tap not registering → check the current view: is "
+        "the keyboard actually visible?",
     ])
 
 

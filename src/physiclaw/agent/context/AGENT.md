@@ -19,7 +19,7 @@
 
 **Close.** One step per `[note, one-other]` turn:
 
-1. Final `peek` — verify the result on screen.
+1. Final verify — the last gesture's attached view usually shows the result; `peek` only if it's stale or failed.
 2. `append_log` (PERSISTENCE § Format). **Skip on WAIT / IDLE** — per-step logs cover it.
 3. Reply to the user in IM — never before logging.
 4. `go_back` to the chats list (the `im` Send flow already ends here — don't double it).
@@ -37,6 +37,7 @@ Sensitive apps (banking, health, photos, email): explicit ask only.
 
 - **Search, don't scroll.** Use the app's search.
 - **Back out, don't dig in.** 2–3 turns on a sub-page with no progress → `go_back` to the app's home, re-enter. Wrong entry points rarely recover in place (deeper trap: CONVENTION § Stuck).
+- **Vary the method, not the coordinates.** A retry that only nudges the bbox or swaps tap↔double_tap is the same failed attempt (CONVENTION § Stuck).
 - **Paste over typing.** `send_to_clipboard` → `long_press` → Paste. Keyboard is last resort.
 - **Read exactly.** Prices, names, addresses as displayed — never guess or round.
 - **Gather as you go.** Plan-relevant info → scratchpad before moving on; skip pure navigation (CONVENTION § Scratchpad).

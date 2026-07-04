@@ -1,22 +1,28 @@
 ---
 name: search-in-app
-description: Use when typing a query into a search box / search field inside any app — JD, Taobao, Meituan, App Store, Spotlight, Settings, etc. Covers focus → clear stale text → paste → submit. NOT for sending IM messages (use the `im` skill).
+description: Use when typing a query into a search box / search field inside any app — JD, Taobao, Meituan, App Store, Spotlight, Settings, etc. Covers finding the box → focus → clear stale text → paste → submit. NOT for sending IM messages (use the `im` skill).
 ---
 
 # Search in App
 
-Generic pattern: focus, paste, return.
+## The search box
+
+A rounded bar: magnifier icon left, gray placeholder text in the middle, camera / mic / Search button right. **The placeholder text's row IS the field — target its bbox**; the edge icons are decoys (camera = photo-search, right-edge button = submit).
+
+- **Home-page bars are buttons** (most shopping apps): the first tap opens the real search page — re-ground the input there (the placeholder word repeats as a chip below; take the topmost row).
+- **The placeholder is a live, rotating ad query**: submitting an empty field searches it — never tap search/return until YOUR text is in the box.
+
+## Steps
 
 1. `send_to_clipboard(text)`.
-2. `tap` the search field (bbox from the latest `peek`); keyboard appears.
-3. **Stale text?** Tap `<backspace>` 10–20× (one `sequence`). Paste does NOT replace existing text — a partial clear leaves you searching `"oldnew"`. Over-tapping is safe.
-4. `long_press` the search field — **its own turn**: the popover's bbox doesn't exist until the long_press fires (CONVENTION § Sequence bundling).
-5. `peek` — find the actual Paste popover bbox.
-6. One `sequence`: `tap` Paste (bbox from step 5) + `tap` return (learned keyboard layout) — both grounded.
-7. `peek` — results page rendered.
+2. `tap` the search box. Keyboard up = focused.
+3. **Stale text?** Gray text is the placeholder — it vanishes on paste. Dark text + `✕` = a stale query: `tap` the `✕`, else backspace (`{{backspace}}`) 10–20× (`sequence`s of 5; over-tap freely) — paste does NOT replace existing text.
+4. `long_press` the box — **its own turn** (the popover is born mid-gesture); its attached view shows the Paste popover — ground Paste from it.
+5. One `sequence`: `tap` Paste + `tap` the return/search key (`{{return}}`).
+6. Verify in the attached view: results rendered AND the query header shows YOUR text — the placeholder word instead = the paste missed; `go_back`, redo from step 4.
 
 ## Pitfalls
 
-- **Auto-suggest dropdown** — return submits **your typed string**; tap a suggestion only if you specifically want it.
-- **Placeholder, not stale text** — gray hint text isn't deletable; it vanishes on paste. Backspace changing nothing → just paste.
-- **Tap didn't raise the keyboard** — field may already be focused (cursor, no keyboard). Tap once more, or tap elsewhere then re-tap.
+- **Auto-suggest** — return submits your typed string; a tapped suggestion searches the SUGGESTION.
+- **AI-search toggle** (`AI搜索` / sparkle icon beside the bar) — NOT the field; tapping enters AI-answer mode. `go_back`, target the plain field.
+- **Keyboard didn't rise** — the field may already be focused; tap once more, or tap elsewhere then re-tap.

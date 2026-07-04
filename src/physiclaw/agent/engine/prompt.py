@@ -17,14 +17,41 @@ only in the schema, so the card is a redundant anchor.
 """
 import hashlib
 import logging
+import re
 from pathlib import Path
 
 from physiclaw.agent.engine import memory, mcp_inventory, screen_layout
+from physiclaw.config import CONFIG
 from physiclaw.text import read_text
 
 log = logging.getLogger(__name__)
 
 CONTEXT_DIR = Path(__file__).resolve().parent.parent / "context"
+
+# Engine-enforced thresholds quoted by the doctrine files. Doctrine uses
+# `{{token}}` placeholders so the prompt can never drift from the config
+# the engine actually enforces; substituted on every render (config is
+# process-constant, so the rendered bytes stay cache-stable).
+_DOCTRINE_TOKENS = {
+    "{{same_target_warn}}": str(CONFIG.engine.same_target_warn),
+    "{{same_target_block}}": str(CONFIG.engine.same_target_block),
+    "{{step_stuck_warn}}": str(CONFIG.engine.step_stuck_warn),
+    "{{step_stuck_urgent}}": str(CONFIG.engine.step_stuck_urgent),
+    "{{plan_required_after}}": str(CONFIG.engine.plan_required_after),
+}
+
+
+def _fill_tokens(name: str, body: str) -> str:
+    """Substitute `{{token}}` placeholders; warn on leftovers (a typo'd
+    token would otherwise reach the model as literal braces)."""
+    for token, value in _DOCTRINE_TOKENS.items():
+        body = body.replace(token, value)
+    leftover = re.search(r"\{\{[^}\n]*\}\}|\{\{", body)
+    if leftover:
+        log.warning(
+            "doctrine %s: unresolved placeholder %r", name, leftover.group(),
+        )
+    return body
 
 # OpenClaw-style modular doctrine: each named file is a slot with a defined
 # role. Files are rendered in this fixed order; any missing file contributes
@@ -125,7 +152,7 @@ def _load_doctrine_files() -> list[tuple[str, str]]:
             body = read_text(path).rstrip() if path.exists() else ""
         if not body:
             continue
-        out.append((name, body))
+        out.append((name, _fill_tokens(name, body)))
     return out
 
 
@@ -194,24 +221,36 @@ def _render_examples() -> list[str]:
     return [
         "## Examples",
         "",
-        "**Turn shape** — exactly `[note, one-other]`.",
+        "**Turn shape** — exactly `[note, one-other]`; summary = last result + this action.",
         "❌ `[peek]` alone · `[note, append_log, end_session]`.",
-        "✅ `[note(summary=\"peek to find Send in Alice's WeChat chat\"), peek()]`.",
+        "✅ `[note(summary=\"chats list visible — opening QiaoQian's thread\"), tap(bbox=[0.055, 0.171, 0.945, 0.243])]`.",
         "",
         "**Bbox transcription** — verbatim from the listing's bracket contents.",
-        "❌ Listing: `45 [icon] \"\" [0.520,0.662,0.717,0.775] 0.56` → you emit `tap(bbox=[0.518, 0.662, 0.717, 0.775])`. `0.518` is a regeneration; 0.002 of drift lands on the neighbor.",
+        "❌ Listing row `45 [icon] \"\" [0.520,0.662,0.717,0.775] 0.56` → `tap(bbox=[0.518, 0.662, 0.717, 0.775])` — `0.518` is a regeneration; 0.002 drift lands on the neighbor.",
         "✅ Transcribe the four numbers exactly — `0.520` stays `0.520`. Target not in any grounded source → `screenshot`, never fabricate.",
         "",
         "**Screenshot escalation** — when `peek` misses a target, re-peeking returns the same gap.",
         "❌ `peek` home, no JD icon → `peek` again → tap a Safari link labeled \"JD\" → wrong page, STUCK loop.",
         "✅ `peek` home, no JD icon → `screenshot` next turn, scratchpad the icon's bbox, `peek`, tap the copy. The icon was always there; the camera couldn't resolve it.",
         "",
+        "**Silent refusal** — toasts vanish before you can look; a value unmoved through two presses is the app saying no.",
+        "❌ qty stays 2 → assume the tap missed → 20 tap/double_tap/nudged-bbox retries across cart and checkout.",
+        "✅ tap `+` → `no visible change` → read qty in the attached view: still 2 → retry once → still 2 → refusal. Find the evidence (a \"limit 2 per order\" label, greyed `+`), scratchpad `TRIED: + stepper ×2, qty stuck at 2`, then ask the user: \"Store caps this at 2 — take 2, or switch brands?\" and WAIT.",
+        "",
+        "**Batch grounded runs** — all boxes known up front = one `sequence`, not five turns.",
+        "❌ On the chat page: tap input → send_to_clipboard → long_press input → tap Paste → tap Send as five single-action turns for one message.",
+        "✅ One `sequence(actions=[tap input, send_to_clipboard, long_press input, tap Paste, tap Send])` — its attached view shows the sent bubble, zero extra turns. Every box is pinned in SYSTEM § Screen layout.",
+        "",
+        "**Verify from the attached view, not a fresh peek** — every gesture returns the new screen.",
+        "❌ tap → `peek` → tap → `peek` — the peeks double your turns and say nothing the attached views didn't.",
+        "✅ tap → read the attached view (value, verdict, next target's bbox) → next gesture. `peek` only in the no-current-view cases (PHYSICLAW § Views).",
+        "",
         "**Add to cart** — success shows only in the small top-right cart badge; the page stays put.",
         "❌ Screen unchanged → tap again → duplicates. Or `screenshot` → shopping apps pop share panels.",
-        "✅ Tap once → `peek` the badge (2 → 3 = landed); unreadable → open the cart and check.",
+        "✅ Tap once → read the badge in the attached view (2 → 3 = landed); unreadable → open the cart and check.",
         "",
         "**Scratchpad accumulates** — plan-relevant payloads go in as you see them; navigation doesn't.",
-        "❌ Scroll 2 orders across 4 pages, scratchpad nothing → peeks stubbed by compaction, items lost, re-scrape.",
+        "❌ Scroll 2 orders across 4 pages, scratchpad nothing → views stubbed by compaction, items lost, re-scrape.",
         "✅ Order 1 visible → `note(..., scratchpad=\"order 1: cable ¥45, clips ¥17\")` → scroll → `note(..., scratchpad=\"order 1: cable ¥45, clips ¥17, tape ¥22\")` → order 2 → append its lines. Reaching WeChat, the scratchpad is the full answer.",
         "",
         "**Plan ticking** — tick on intent-confirmed, not per tap.",

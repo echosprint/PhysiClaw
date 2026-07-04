@@ -21,26 +21,25 @@ Most IM apps share the same chat-page shape: bubble list, bottom input bar, Send
 ## Send
 
 1. Confirm the contact in the chat header.
-2. Keyboard hidden → `tap` `<input-hidden>`; input shifts to `<input-visible>`.
-3. Stale text → `tap` `<backspace>` until empty.
-4. `send_to_clipboard(text)` → `long_press` `<input-visible>` → `tap` `<paste-button>`.
-5. `tap` `<send>` — NOT (+) / voice / camera. (WeChat: keyboard Send key; WhatsApp: round arrow replacing the mic.)
-6. Hide the keyboard: `tap` an empty chat area, or `swipe(bbox=[0.300, 0.300, 0.700, 0.500], direction="up", size="s")` — either keeps the sent bubble on-screen.
-7. `peek` — sent bubble appeared.
-8. `go_back` to the chats list — clean state for the next wake.
+2. Keyboard hidden → `tap` the chat input field (`{{input-hidden}}`); it shifts up above the keyboard (`{{input-visible}}`).
+3. Stale text in the input → `tap` backspace (`{{backspace}}`) until empty.
+4. `send_to_clipboard(text)` → `long_press` the input (`{{input-visible}}`) → `tap` Paste (`{{paste-button}}`).
+5. `tap` Send (`{{send}}`) — NOT (+) / voice / camera. (WeChat: keyboard Send key; WhatsApp: round arrow replacing the mic.)
+6. Hide the keyboard: `tap` an empty chat area, or `swipe(bbox=[0.300, 0.300, 0.700, 0.500], direction="up", size="s")` — its attached view should show your sent bubble.
+7. `go_back` to the chats list — clean state for the next wake.
 
-### Fast path
+### Fast path — REQUIRED here
 
-On the right 1:1 chat with clean input → collapse steps 2 + 4–5 into one `sequence` (boxes pinned; CONVENTION § Sequence bundling):
+On the right 1:1 chat with clean input, steps 2 + 4–5 are ONE `sequence` call — every box below is pinned (CONVENTION § Sequence bundling); its attached view shows the sent bubble:
 
 ```python
-sequence(
-    step1 = {"tool_name": "tap",               "arg": <input-hidden>},   # omit if keyboard already visible
-    step2 = {"tool_name": "send_to_clipboard", "arg": "<your text>"},
-    step3 = {"tool_name": "long_press",        "arg": <input-visible>},
-    step4 = {"tool_name": "tap",               "arg": <paste-button>},
-    step5 = {"tool_name": "tap",               "arg": <send>},
-)
+sequence(actions=[
+    {"tool_name": "tap",               "arg": {{input-hidden}}},   # chat input, keyboard down — omit if keyboard already visible
+    {"tool_name": "send_to_clipboard", "arg": "<your text>"},
+    {"tool_name": "long_press",        "arg": {{input-visible}}},  # chat input, keyboard up → Paste popover
+    {"tool_name": "tap",               "arg": {{paste-button}}},   # Paste
+    {"tool_name": "tap",               "arg": {{send}}},           # Send
+])
 ```
 
-Then steps 6–8. Layout shifts (banners, unread badges) → re-`peek` and re-ground; anchors are the header name + learned boxes.
+Then steps 6–7. Layout shifts (banners, unread badges) → re-ground from the current view; anchors are the header name + learned boxes.

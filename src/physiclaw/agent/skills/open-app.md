@@ -9,17 +9,34 @@ description: Use when you need to launch an app that is NOT on the current scree
 
 1. `send_to_clipboard(text="<app name>")` — the exact name the user used; a Chinese app keeps its Chinese name.
 2. `home_screen` — **skip if already on the home screen** (icon grid + dock, no in-app chrome).
-3. `swipe(bbox=<spotlight-pull>, direction="down", size="l")` — mid-screen origin (top edge opens Notification Center); `size="l"` avoids overshoot.
-4. `peek` — search field + keyboard visible.
-5. **Stale text?** One `sequence`: tap `<search-field>` then 4× tap `<backspace>`. Over-tapping an empty field is a no-op — over-estimate freely. Skip when empty. Prefer tap-backspace over `long_press(backspace)` — deterministic per tap.
-6. `long_press(<search-field>)` + `tap(<paste-button>)` — bundle into one `sequence` (both learned; CONVENTION § Sequence bundling). No popover = wrong element; re-`peek`.
-7. `peek` — results render below the field.
-8. `tap(<app-icon>)` — launch.
+3. `swipe(bbox=[0.3, 0.4, 0.7, 0.6], direction="down", size="l")` — mid-screen pull opens Spotlight (a top-edge origin would open Notification Center); `size="l"` avoids overshoot. Its attached view shows the search field + keyboard.
+4. **Stale text in the field?** Clear it — skip when empty; over-tapping an empty field is a no-op, so over-estimate freely (tap-backspace beats a long-press on backspace — deterministic per tap):
+
+   ```python
+   sequence(actions=[
+       {"tool_name": "tap", "arg": {{search-field}}},   # Spotlight search field
+       {"tool_name": "tap", "arg": {{backspace}}},      # backspace ×4
+       {"tool_name": "tap", "arg": {{backspace}}},
+       {"tool_name": "tap", "arg": {{backspace}}},
+       {"tool_name": "tap", "arg": {{backspace}}},
+   ])
+   ```
+
+5. Paste the name (CONVENTION § Sequence bundling — both boxes learned):
+
+   ```python
+   sequence(actions=[
+       {"tool_name": "long_press", "arg": {{search-field}}},   # Spotlight search field → Paste popover
+       {"tool_name": "tap",        "arg": {{paste-button}}},   # Paste / 粘贴 — NOT AutoFill
+   ])
+   ```
+
+   Its attached view shows the results below the field; no results = the paste missed — re-ground and redo.
+6. `tap(<app-icon>)` — launch; the attached view confirms the app opened.
 
 ## Fixed elements
 
-`<search-field>`, `<backspace>`, `<paste-button>` resolve from SYSTEM § Screen layout. Also:
+The commented boxes above come from SYSTEM § Screen layout, pre-substituted (`{{…}}` still showing = layout not learned — ground live). Also:
 
-- `<spotlight-pull>` — `[0.3, 0.4, 0.7, 0.6]` prior; mid-screen swipe anchor, not a peek target.
-- `<paste-button>` decoy — pick `Paste` / `粘贴` in the pill popover ABOVE the field, NOT `AutoFill`; it dismisses if you tap elsewhere first.
+- Paste decoy — pick `Paste` / `粘贴` in the pill popover ABOVE the field, NOT `AutoFill`; it dismisses if you tap elsewhere first.
 - `<app-icon>` — from the search results in the latest listing (§ Bboxes); label matches **exactly** — skip App Store badges and "in Safari" / web hits.

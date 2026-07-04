@@ -104,6 +104,57 @@ def test_render_doctrine_user_md_loads_via_memory(
     assert "User profile here" in out
 
 
+def test_render_doctrine_substitutes_config_tokens(
+    _isolate_context_dir: Path,
+) -> None:
+    # Doctrine quotes engine-enforced thresholds via {{token}} placeholders
+    # so the prompt can never drift from the config the engine enforces.
+    from physiclaw.config import CONFIG
+
+    (_isolate_context_dir / "CONVENTION.md").write_text(
+        "Blocked after {{plan_required_after}} turns; "
+        "warn at press #{{same_target_warn}}."
+    )
+
+    out = "\n".join(prompt._render_doctrine())
+
+    assert f"after {CONFIG.engine.plan_required_after} turns" in out
+    assert f"press #{CONFIG.engine.same_target_warn}" in out
+    assert "{{" not in out
+
+
+def test_shipped_doctrine_has_no_unresolved_tokens(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Integration guard against the REAL context/ files (undoing the
+    # autouse isolation): a typo'd {{token}} in shipped doctrine must
+    # fail CI, not just log at runtime. Also pins that the substituted
+    # thresholds actually appear where doctrine quotes them.
+    from physiclaw.config import CONFIG
+
+    real_ctx = Path(prompt.__file__).resolve().parent.parent / "context"
+    monkeypatch.setattr(prompt, "CONTEXT_DIR", real_ctx)
+
+    out = "\n".join(prompt._render_doctrine())
+
+    assert "{{" not in out
+    assert f"press #{CONFIG.engine.same_target_block}" in out
+    assert f"after {CONFIG.engine.plan_required_after} turns" in out
+
+
+def test_render_doctrine_warns_on_unresolved_token(
+    _isolate_context_dir: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+
+    (_isolate_context_dir / "AGENT.md").write_text("Cap: {{no_such_token}}.")
+
+    with caplog.at_level(logging.WARNING, logger="physiclaw.agent.engine.prompt"):
+        prompt._render_doctrine()
+
+    assert any("unresolved" in r.getMessage() for r in caplog.records)
+
+
 def test_render_doctrine_skips_empty_files(_isolate_context_dir: Path) -> None:
     (_isolate_context_dir / "IDENTITY.md").write_text("")
     (_isolate_context_dir / "AGENT.md").write_text("body")

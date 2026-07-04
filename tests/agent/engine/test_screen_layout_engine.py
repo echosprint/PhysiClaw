@@ -104,9 +104,9 @@ def test_prune_builtin_skills_drops_screen_layout_when_learned() -> None:
 def _im_skill() -> Skill:
     # Prose uses the placeholders too; only the fenced sequence should fill.
     body = (
-        "Prose: tap `<input-hidden>`, then `<send>`.\n"
+        "Prose: tap `{{input-hidden}}`, then `{{send}}`.\n"
         "```python\n"
-        'sequence(step1={"arg": <input-hidden>}, step5={"arg": <send>})\n'
+        'sequence(step1={"arg": {{input-hidden}}}, step5={"arg": {{send}}})\n'
         "```\n"
     )
     return Skill(name="im", description="d", body=body, dir=Path("/x"), flat=True)
@@ -117,7 +117,7 @@ def test_fill_builtin_boxes_noop_while_incomplete() -> None:
     out = sl.fill_builtin_boxes(skills)
 
     assert out["im"].body == skills["im"].body       # unchanged
-    assert "<input-hidden>" in out["im"].body        # placeholders stay
+    assert "{{input-hidden}}" in out["im"].body        # placeholders stay
 
 
 def test_fill_builtin_boxes_fills_code_block_only_leaves_prose() -> None:
@@ -130,24 +130,52 @@ def test_fill_builtin_boxes_fills_code_block_only_leaves_prose() -> None:
     prose, code = out["im"].body.split("```python")
 
     # Prose keeps the readable placeholder names.
-    assert "<input-hidden>" in prose
-    assert "<send>" in prose
+    assert "{{input-hidden}}" in prose
+    assert "{{send}}" in prose
     # The fenced template gets concrete bboxes, no placeholders left.
     assert "[0.098, 0.900, 0.716, 0.950]" in code
     assert "[0.752, 0.868, 0.990, 0.918]" in code
-    assert "<input-hidden>" not in code
-    assert "<send>" not in code
+    assert "{{input-hidden}}" not in code
+    assert "{{send}}" not in code
 
 
 def test_fill_builtin_boxes_leaves_unmapped_skills_untouched() -> None:
     _write_layout(_COMPLETE)
     other = Skill(
-        name="open-app", description="d",
-        body="```python\n<paste-button>\n```", dir=Path("/x"),
+        name="search-in-app", description="d",
+        body="```python\n{{paste-button}}\n```", dir=Path("/x"),
     )
-    out = sl.fill_builtin_boxes({"open-app": other})
+    out = sl.fill_builtin_boxes({"search-in-app": other})
 
-    assert out["open-app"] is other                   # same object, unfilled
+    assert out["search-in-app"] is other              # same object, unfilled
+
+
+def test_fill_builtin_boxes_open_app_uses_spotlight_fields() -> None:
+    # {{paste-button}} is a PER-SKILL mapping: chat_paste in `im`,
+    # spotlight_paste in `open-app`.
+    _write_layout({
+        **_COMPLETE,
+        "spotlight_input": [0.005, 0.599, 0.982, 0.657],
+        "spotlight_paste": [0.082, 0.561, 0.188, 0.583],
+        "backspace": [0.864, 0.804, 0.986, 0.856],
+    })
+    skill = Skill(
+        name="open-app", description="d", dir=Path("/x"),
+        body=(
+            "Prose {{search-field}} stays.\n"
+            "```python\n"
+            "{{search-field}} {{backspace}} {{paste-button}}\n"
+            "```\n"
+        ),
+    )
+    out = sl.fill_builtin_boxes({"open-app": skill})
+    prose, code = out["open-app"].body.split("```python")
+
+    assert "{{search-field}}" in prose
+    assert "[0.005, 0.599, 0.982, 0.657]" in code   # spotlight_input
+    assert "[0.864, 0.804, 0.986, 0.856]" in code   # backspace
+    assert "[0.082, 0.561, 0.188, 0.583]" in code   # spotlight_paste
+    assert "{{" not in code
 
 
 # ---------- tail_reminder / inject_tail ----------
