@@ -41,3 +41,18 @@ physiclaw doctor
 ```
 
 `doctor` reports current version, config path, the on-device vision model, detected hardware, the configured model, and installed skills.
+
+## Updating later
+
+PhysiClaw keeps itself current: every `physiclaw server` start checks PyPI and restarts into the newest release automatically. To update by hand — or if you've turned auto-update off:
+
+```bash
+physiclaw update           # update to the latest release
+physiclaw update --check   # only check, install nothing
+```
+
+Turn the automatic check off with:
+
+```bash
+physiclaw config set update.auto false
+```
