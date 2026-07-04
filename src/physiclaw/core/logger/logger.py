@@ -89,9 +89,15 @@ def _format_args(fn_name: str, kwargs: dict) -> str:
     if fn_name == "send_to_clipboard":
         return f"text=<{len(kwargs.get('text', ''))} chars>"
     if fn_name == "sequence":
-        steps = [v for v in kwargs.values() if isinstance(v, dict)]
-        names = [s.get("tool_name", "?") for s in steps]
-        return f"{len(steps)} steps: {', '.join(names)}"
+        # The schema's single param is a LIST of step dicts:
+        # actions=[{...}, ...] — scanning kwargs.values() for dicts finds
+        # nothing and logged every batch as "0 steps".
+        actions = kwargs.get("actions") or []
+        names = [
+            s.get("tool_name", "?") if isinstance(s, dict) else "?"
+            for s in actions
+        ]
+        return f"{len(names)} steps: {', '.join(names)}"
     arg_str = ", ".join(f"{k}={v!r}" for k, v in kwargs.items())
     if len(arg_str) > _MAX_ARG_LOG_LEN:
         arg_str = arg_str[: _MAX_ARG_LOG_LEN - 3] + "..."

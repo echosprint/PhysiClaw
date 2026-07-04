@@ -133,15 +133,25 @@ def test_format_args_send_to_clipboard_handles_missing_text() -> None:
 
 
 def test_format_args_sequence_summarizes_tool_names() -> None:
+    # Real FastMCP shape: ONE kwarg holding the list of step dicts. The
+    # old test passed steps as separate kwargs — an encoding the tool
+    # never receives — which let every live batch log as "0 steps".
     out = _format_args("sequence", {
-        "step1": {"tool_name": "tap", "arg": [0, 0, 1, 1]},
-        "step2": {"tool_name": "swipe", "arg": {}},
-        "step3": None,
+        "actions": [
+            {"tool_name": "tap", "arg": [0, 0, 1, 1]},
+            {"tool_name": "send_to_clipboard", "arg": "secret text"},
+            "garbage",
+        ],
     })
 
-    assert "2 steps:" in out
+    assert "3 steps:" in out
     assert "tap" in out
-    assert "swipe" in out
+    assert "send_to_clipboard" in out
+    assert "secret text" not in out  # step args stay redacted
+
+
+def test_format_args_sequence_handles_missing_actions() -> None:
+    assert "0 steps:" in _format_args("sequence", {})
 
 
 def test_format_args_default_renders_repr() -> None:
