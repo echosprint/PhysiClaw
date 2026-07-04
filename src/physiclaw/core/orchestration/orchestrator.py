@@ -78,6 +78,15 @@ def _layout_learned() -> bool:
     return bool(isinstance(data, dict) and data.get("layout_learned"))
 
 
+class ClipboardSyncError(RuntimeError):
+    """AT long-press fired but the phone never fetched the queued text.
+
+    Raised (not returned) so the `sequence` path ABORTS before any
+    paste/send step runs against the phone's stale clipboard — returning
+    a message here once let batches paste the previous query into an IM
+    and hit send, repeatedly messaging garbage to a real person."""
+
+
 class PhysiClaw:
     """Central orchestrator — owns hardware lifecycle and the busy lock.
 
@@ -93,6 +102,12 @@ class PhysiClaw:
         self._lock = threading.Lock()
         self._assistive_touch = AssistiveTouch()
         self._bridge: BridgeState | None = None
+        # Consecutive unconfirmed clipboard syncs (guarded by the gesture
+        # lock). Drives the shorter retry timeout + escalating error text
+        # in _send_to_clipboard; reset by any confirmed sync, or by
+        # CLIPBOARD_MISS_DECAY_SECONDS elapsing since the last miss.
+        self._clipboard_misses = 0
+        self._clipboard_miss_at = 0.0  # time.monotonic() of the last miss
         self._ocr_reader: OCRReader | None = None
         self._icon_detector: IconDetector | None = None
         self._watchdog = Watchdog()
@@ -511,6 +526,18 @@ class PhysiClaw:
     GRAB_BLUR_THRESHOLD = 80.0
     GRAB_BLUR_RETRY_SECONDS = 1.5
 
+    # A healthy clipboard Shortcut confirms in ~1s of the long-press; the
+    # generous first window covers a cold Shortcuts app. After a miss the
+    # Shortcut is almost certainly broken (moved AT button, permission
+    # dialog, phone off the LAN) — don't burn the full window per retry.
+    CLIPBOARD_CONFIRM_SECONDS = 30.0
+    CLIPBOARD_RETRY_CONFIRM_SECONDS = 8.0
+    # Miss state older than this is forgotten: the server process spans
+    # sessions, and a "Miss #2 in a row" escalation (or the short retry
+    # window) hours after an unrelated miss would be misleading — the
+    # phone may have been fixed or rebooted in between.
+    CLIPBOARD_MISS_DECAY_SECONDS = 600.0
+
     def _grab_screen(self, settle: float = 0.0):
         """Park (clearing the arm from the lens), let the screen and
         autofocus settle for `settle`s, then capture the cropped
@@ -656,20 +683,54 @@ class PhysiClaw:
     def _send_to_clipboard(self, text: str) -> str:
         """Copy text via AssistiveTouch long-press. Caller must hold the lock.
 
-        The result deliberately does NOT echo `text`: the agent already
+        Raises ``ClipboardSyncError`` when the phone never fetches the
+        text — the phone's clipboard still holds the PREVIOUS content,
+        so any follow-up paste would insert stale text. Raising (not
+        returning) makes a ``sequence`` abort before its paste/send
+        steps; the standalone tool surfaces it as a tool error.
+
+        The messages deliberately do NOT echo `text`: the agent already
         sees it in its own tool_call args, and inside a `sequence` this
         string joins the action text the engine scans for the screen
         verdict — echoed free-form content (often quoted from an IM or
         the screen) could carry marker-like text (`physiclaw.verdict`)."""
         self._require_assistive_touch()
+        if (
+            self._clipboard_misses
+            and time.monotonic() - self._clipboard_miss_at
+            > self.CLIPBOARD_MISS_DECAY_SECONDS
+        ):
+            self._clipboard_misses = 0
         self._bridge.send_text(text)
         self._assistive_touch.long_press(self._arm, self.transforms.pct_to_grbl)
-        if self._bridge.wait_clipboard(timeout=30.0):
-            return f"Copied {len(text)} chars to phone clipboard"
-        return (
-            "AssistiveTouch long-pressed but clipboard not confirmed "
-            "— check the iOS Shortcut"
+        timeout = (
+            self.CLIPBOARD_CONFIRM_SECONDS
+            if self._clipboard_misses == 0
+            else self.CLIPBOARD_RETRY_CONFIRM_SECONDS
         )
+        if self._bridge.wait_clipboard(timeout=timeout):
+            self._clipboard_misses = 0
+            return f"Copied {len(text)} chars to phone clipboard"
+        # Un-queue the text so a LATE Shortcut run can't fetch it after
+        # this timeout — the error below promises the phone clipboard
+        # still holds the previous content; keep that true, not racy.
+        self._bridge.clear_text()
+        self._clipboard_misses += 1
+        self._clipboard_miss_at = time.monotonic()
+        msg = (
+            "clipboard sync FAILED — AssistiveTouch long-pressed but the "
+            "phone never fetched the text; its clipboard still holds the "
+            "PREVIOUS content, so do NOT paste"
+        )
+        if self._clipboard_misses >= 2:
+            msg += (
+                f". Miss #{self._clipboard_misses} in a row — the clipboard "
+                "Shortcut is broken (moved AssistiveTouch button, a "
+                "Shortcuts permission dialog, or the phone lost the LAN). "
+                "STOP retrying this path: type with the keyboard instead, "
+                "or report the problem to your user"
+            )
+        raise ClipboardSyncError(msg)
 
     def send_to_clipboard(self, text: str) -> str:
         """Copy text to the phone's clipboard via AssistiveTouch long-press."""

@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from physiclaw.core.orchestration import orchestrator
-from physiclaw.core.orchestration.orchestrator import PhysiClaw
+from physiclaw.core.orchestration.orchestrator import ClipboardSyncError, PhysiClaw
 
 
 # ---------- Fixtures ----------
@@ -710,6 +710,15 @@ def test_swipe_dispatches(pc: PhysiClaw) -> None:
 # ---------- send_to_clipboard ----------
 
 
+def _wire_failing_bridge(pc: PhysiClaw) -> MagicMock:
+    """Wire hardware + a bridge whose clipboard sync never confirms."""
+    _wire_hardware(pc)
+    bridge = MagicMock()
+    bridge.wait_clipboard.return_value = False
+    pc.attach_bridge(bridge)
+    return bridge
+
+
 def test_send_to_clipboard_happy_path(pc: PhysiClaw) -> None:
     _wire_hardware(pc)
     bridge = MagicMock()
@@ -727,15 +736,83 @@ def test_send_to_clipboard_happy_path(pc: PhysiClaw) -> None:
     pc._assistive_touch.long_press.assert_called_once()
 
 
-def test_send_to_clipboard_unconfirmed(pc: PhysiClaw) -> None:
+def test_send_to_clipboard_unconfirmed_raises(pc: PhysiClaw) -> None:
+    # Raise, not return: a returned message once let `sequence` mark the
+    # step "ok" and paste+send the phone's STALE clipboard into an IM.
+    bridge = _wire_failing_bridge(pc)
+
+    with pytest.raises(ClipboardSyncError, match="do NOT paste"):
+        pc.send_to_clipboard("x")
+
+    bridge.wait_clipboard.assert_called_once_with(
+        timeout=pc.CLIPBOARD_CONFIRM_SECONDS
+    )
+
+
+def test_send_to_clipboard_second_miss_escalates_and_shortens_timeout(
+    pc: PhysiClaw,
+) -> None:
+    bridge = _wire_failing_bridge(pc)
+
+    with pytest.raises(ClipboardSyncError):
+        pc.send_to_clipboard("x")
+    with pytest.raises(ClipboardSyncError, match="Miss #2.*STOP retrying"):
+        pc.send_to_clipboard("x")
+
+    # First miss waits the full window; retries use the short one.
+    assert bridge.wait_clipboard.call_args_list[1].kwargs["timeout"] == (
+        pc.CLIPBOARD_RETRY_CONFIRM_SECONDS
+    )
+
+
+def test_send_to_clipboard_miss_clears_queued_text(pc: PhysiClaw) -> None:
+    # A LATE Shortcut run must not fetch the text after we've told the
+    # agent "the phone clipboard still holds the previous content".
+    bridge = _wire_failing_bridge(pc)
+
+    with pytest.raises(ClipboardSyncError):
+        pc.send_to_clipboard("x")
+
+    bridge.clear_text.assert_called_once()
+
+
+def test_send_to_clipboard_miss_state_decays(pc: PhysiClaw) -> None:
+    # The server process spans sessions — a miss hours ago must not
+    # shorten the window or claim "in a row" for today's first sync.
+    import time as _time
+
+    bridge = _wire_failing_bridge(pc)
+    pc._clipboard_misses = 1
+    pc._clipboard_miss_at = (
+        _time.monotonic() - pc.CLIPBOARD_MISS_DECAY_SECONDS - 1
+    )
+
+    with pytest.raises(ClipboardSyncError) as e:
+        pc.send_to_clipboard("x")
+
+    assert "Miss #" not in str(e.value)  # counted as a fresh first miss
+    bridge.wait_clipboard.assert_called_once_with(
+        timeout=pc.CLIPBOARD_CONFIRM_SECONDS
+    )
+
+
+def test_send_to_clipboard_success_resets_miss_counter(pc: PhysiClaw) -> None:
     _wire_hardware(pc)
     bridge = MagicMock()
-    bridge.wait_clipboard.return_value = False
+    bridge.wait_clipboard.side_effect = [False, True, False]
     pc.attach_bridge(bridge)
 
-    out = pc.send_to_clipboard("x")
+    with pytest.raises(ClipboardSyncError):
+        pc.send_to_clipboard("x")
+    assert "Copied" in pc.send_to_clipboard("x")
+    # Post-reset miss is #1 again: full window, no escalation text.
+    with pytest.raises(ClipboardSyncError) as e:
+        pc.send_to_clipboard("x")
 
-    assert "clipboard not confirmed" in out
+    assert "Miss #" not in str(e.value)
+    assert bridge.wait_clipboard.call_args_list[2].kwargs["timeout"] == (
+        pc.CLIPBOARD_CONFIRM_SECONDS
+    )
 
 
 # ---------- _run_step / sequence ----------
@@ -818,6 +895,28 @@ def test_sequence_stops_on_first_failure(pc: PhysiClaw) -> None:
     assert lines[0].startswith("1 tap ok")
     assert lines[1].startswith("2 tap FAIL")
     assert len(lines) == 2  # third step skipped
+
+
+def test_sequence_aborts_before_paste_on_unconfirmed_clipboard(
+    pc: PhysiClaw,
+) -> None:
+    # The 18:36 incident shape: [send_to_clipboard, long_press, tap Paste,
+    # tap Send]. An unconfirmed sync must kill the batch so the stale
+    # clipboard is never pasted and sent.
+    _wire_failing_bridge(pc)
+
+    out = pc.sequence([
+        {"tool_name": "send_to_clipboard", "arg": "新消息"},
+        {"tool_name": "long_press", "arg": [0.1, 0.9, 0.7, 0.95]},
+        {"tool_name": "tap", "arg": [0.1, 0.1, 0.2, 0.2]},
+    ])
+
+    lines = out.text.splitlines()
+    assert lines[0].startswith("1 send_to_clipboard FAIL")
+    assert "do NOT paste" in lines[0]
+    assert len(lines) == 1  # long_press + tap never ran
+    pc._arm.tap.assert_not_called()
+    pc._arm.long_press.assert_not_called()
 
 
 # ---------- screen-change verdict ----------
