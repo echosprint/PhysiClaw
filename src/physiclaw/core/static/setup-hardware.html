@@ -129,13 +129,11 @@ h1{font-size:30px;line-height:1.16;margin:0 0 13px;letter-spacing:-.025em;font-w
 .detail > .actions{margin-top:30px;padding-top:24px;border-top:1px solid var(--line)}
 /* Primary action always sits at the far right; Back stays at the far left. */
 .detail > .actions .btn.primary{margin-left:auto}
-/* "Auto mode" toggle-button — looks like a button; a check badge pops into the
-   top-right corner when it's armed. */
-.auto-btn{position:relative;overflow:visible}
+/* "Auto mode" toggle-button — armed state is just the accent border + tint.
+   Hover deepens whichever state it's in: off hovers neutral (the .btn
+   default), on hovers warmer — so the armed button never greys out. */
 .auto-btn.on{border-color:var(--accent);color:var(--strong);background:rgba(212,81,26,.1)}
-.auto-check{position:absolute;top:-8px;right:-8px;width:21px;height:21px;border-radius:50%;background:var(--accent);display:grid;place-items:center;box-shadow:0 2px 6px rgba(0,0,0,.22);transform:scale(0);transition:transform .18s cubic-bezier(.34,1.56,.64,1)}
-.auto-btn.on .auto-check{transform:scale(1)}
-.auto-check svg{width:12px;height:12px;fill:none;stroke:var(--accent-ink);stroke-width:3.4;stroke-linecap:round;stroke-linejoin:round}
+.auto-btn.on:hover{border-color:var(--accent-lt);background:rgba(212,81,26,.18)}
 .auto-hint{color:var(--faint);font-size:11.5px;line-height:1.55;max-width:34ch;margin:0 auto 0 0}
 .detail > .actions:has(.auto-hint) .btn.primary{margin-left:22px}
 .btn{padding:12px 22px;border-radius:11px;font-weight:650;font-size:14.5px;
@@ -774,7 +772,7 @@ function connectPhone(ctx) {
   // "Auto mode" toggle-button: click to arm (a check badge appears in the
   // top-right corner), then press Continue to run every step automatically
   // (pausing on any step that needs you). Disabled until the phone connects.
-  const autoBtn = $(`<button type="button" class="btn auto-btn" id="autoBtn" disabled><span class="auto-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg></span>${t("autoBtn")}</button>`);
+  const autoBtn = $(`<button type="button" class="btn auto-btn" id="autoBtn" disabled>${t("autoBtn")}</button>`);
   autoBtn.classList.toggle("on", AUTO_ARMED);
   autoBtn.onclick = () => {
     AUTO_ARMED = !AUTO_ARMED;
