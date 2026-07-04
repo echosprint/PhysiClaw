@@ -1,6 +1,6 @@
 ---
 title: Troubleshooting
-description: Fixes for common snags — PhysiClaw quitting on its own, and camera calibration failing despite a normal-looking preview.
+description: Fixes for common snags — PhysiClaw quitting on its own, camera calibration failing despite a normal-looking preview, and the solenoid tapping intermittently.
 ---
 
 ## PhysiClaw exits on its own after a while
@@ -17,4 +17,12 @@ The camera looks fine when you check it in a video or camera app, yet calibratio
 
 :::tip[Solution]
 Make sure the room is evenly lit, avoid glare on the screen, and set the phone's screen brightness to a suitable level.
+:::
+
+## Solenoid clicks sometimes, unresponsive other times
+
+Usually this is flex fatigue in the solenoid cable — the wire has broken. If the joint is soldered, solder wicks into the wire and makes that section stiff and brittle, so it can't take repeated bending. The cable is pulled straight as the gantry extends and bent as it returns; after enough cycles it breaks at the bend point. The broken ends touch and separate intermittently, so the clicks come and go.
+
+:::tip[Fix]
+Rewire it, keeping two things in mind: place the joint within 100 mm of the solenoid, clear of the section that flexes most; and secure the leads to the tube holder (the drag-chain bracket) with a zip tie, so the wiring at the control board terminals doesn't swing back and forth with the solenoid's movement and work the terminals loose over time.
 :::
