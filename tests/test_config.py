@@ -76,7 +76,12 @@ def test_config_error_is_value_error_subclass() -> None:
         ("engine", "wait_default_minutes", 15),
         ("engine", "react_cooldown_seconds", 6.0),
         ("engine", "stale_tick_threshold", 8),
-        ("engine", "state_decay_turns", 2),
+        ("engine", "state_decay_turns", 4),
+        ("engine", "same_target_warn", 3),
+        ("engine", "same_target_block", 5),
+        ("engine", "step_stuck_warn", 12),
+        ("engine", "step_stuck_urgent", 18),
+        ("engine", "plan_required_after", 8),
         # AgentConfig
         ("agent", "model", ""),
         # ProviderConfig
@@ -268,7 +273,11 @@ def test_to_toml_emits_header_and_section_comments_when_with_comments() -> None:
     [
         ("warm_start", "Timeouts for `physiclaw server --warm-start` hardware reconnect."),
         ("auto_pick", "Timeouts for the camera auto-pick step in `physiclaw setup hardware`."),
-        ("engine", "Runaway safeguard + retry + pacing for the agent's tool-call loop."),
+        (
+            "engine",
+            "Agent tool-call loop: runaway safeguards (turn cap, stuck guard, "
+            "plan gate) + retry + pacing.",
+        ),
         ("compact", "Screenshot compression before sending to the LLM."),
         ("memory", "Daily-log loading: bootstrap preload + on-demand `read_logs` defaults."),
         ("claude", "Applied when [agent] model = 'claude-code/...' (external CLI subprocess)."),

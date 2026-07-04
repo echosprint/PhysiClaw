@@ -17,14 +17,17 @@ import logging
 import time
 from dataclasses import dataclass
 
+from physiclaw import verdict
 from physiclaw.agent.engine import builtin_tool, compact, jobs, memory, plan, prompt, scratchpad, screen_layout, skill
 from physiclaw.agent.engine.builtin_tool import LocalTool, Session
 from physiclaw.agent.engine.mcp_tool import McpClient, get_mcp, list_tools_cached
 from physiclaw.agent.engine.dto import (
     AssistantMessage,
+    ContentBlock,
     FinishReason,
     Message,
     SystemMessage,
+    TextBlock,
     ToolCall,
     ToolResultMessage,
     UserMessage,
@@ -50,6 +53,18 @@ MAX_TURNS = CONFIG.engine.max_turns
 MAX_ATTEMPTS = CONFIG.engine.max_attempts
 RETRY_BACKOFF = CONFIG.engine.retry_backoff_seconds
 WAIT_DEFAULT_MINUTES = CONFIG.engine.wait_default_minutes
+PLAN_REQUIRED_AFTER = CONFIG.engine.plan_required_after
+
+# A model that can't hold the [note, one-other] shape burns a full
+# provider round-trip per corrective; after this many CONSECUTIVE
+# failures, end STUCK instead of paying up to MAX_TURNS of them.
+CORRECTIVE_LIMIT = 5
+
+# Tools that still run while the plan gate is closed: `note` is the
+# mandatory turn shape, `update_progress` is the way out, `end_session`
+# lets a legitimately plan-less wake (idle check-in) close instead of
+# being trapped.
+PLAN_GATE_EXEMPT = frozenset({"note", "update_progress", "end_session"})
 
 
 async def run(
@@ -162,14 +177,19 @@ def build_initial_messages(triggers: list[Trigger], system_prompt: str) -> list[
 
 
 def apply_request_tails(
-    messages: list[Message], session: Session, *, layout_incomplete: bool
+    messages: list[Message], session: Session, *, layout_incomplete: bool,
+    compaction_keep: int | None = None,
 ) -> list[Message]:
-    """Pin the per-turn tail slots to the request — scratchpad, plan, and
-    (while first-run setup is pending) the layout reminder — the LAST things the
-    model sees. Shared by `_loop` and the `prompt` dump so a turn-0 dump matches
-    the wire the engine sends. Does not mutate `messages`."""
+    """Pin the per-turn tail slots to the request — scratchpad, plan, the
+    pre-compression checkpoint notice (`compaction_keep` set = this is a
+    `collapse_pending` turn), and (while first-run setup is pending) the
+    layout reminder — the LAST things the model sees. Shared by `_loop` and
+    the `prompt` dump so a turn-0 dump matches the wire the engine sends.
+    Does not mutate `messages`."""
     out = scratchpad.inject_tail(messages, session.scratchpad)
     out = plan.inject_tail(out, session.plan)
+    if compaction_keep is not None:
+        out = compact.inject_checkpoint_tail(out, keep=compaction_keep)
     if layout_incomplete:
         out = screen_layout.inject_tail(out)
     return out
@@ -307,6 +327,8 @@ async def _loop(
 ) -> None:
     tr.write({"event": "prefix_pinned", "hash": prompt_hash})
 
+    consecutive_correctives = 0
+    checkpoint_retried = False  # one scratchpad corrective per collapse event
     for turn in range(MAX_TURNS):
         # Plan + scratchpad are just-in-time tails — keeps `messages[]`
         # cache-stable across writes. Plan goes last so the model reads
@@ -314,11 +336,28 @@ async def _loop(
         # setup, when the setup reminder rides one step further out so the
         # blocker is the very last thing the model sees (absent once learned).
         session.plan.tick_turn()
+        # Stuck-guard counters key on the in_progress step: a step change
+        # (via last turn's update_progress) wipes the same-target history.
+        session.guard.observe_step(session.plan.current_step())
+        # Pre-compression checkpoint: when this turn's completion will
+        # collapse old turns to their note-summary lines, this is the
+        # model's last look at them — the request carries a ⚠ tail and
+        # the turn's note must bank state into the scratchpad (enforced
+        # after the shape check below).
+        compaction_imminent = compact.collapse_pending(
+            messages,
+            first_at=provider.COLLAPSE_FIRST_AT_TURN,
+            interval=provider.COLLAPSE_INTERVAL_TURNS,
+            keep=provider.KEEP_RECENT_TURNS,
+        )
         # First-run reminder is empty once learned, and a session that started
         # learned stays learned — so skip the per-turn disk read entirely unless
         # setup was still pending at session start.
         request_messages = apply_request_tails(
             messages, session, layout_incomplete=layout_incomplete,
+            compaction_keep=(
+                provider.KEEP_RECENT_TURNS if compaction_imminent else None
+            ),
         )
         # Cache markers + the actual wire format are the provider's
         # business now; engine logs the wire form for debugging by asking
@@ -379,6 +418,9 @@ async def _loop(
         # breaks providers' "tool_calls → matching tool messages" rule and
         # anchors the model on its own failure on retry.
         if not asst.tool_calls:
+            consecutive_correctives += 1
+            if consecutive_correctives >= CORRECTIVE_LIMIT:
+                break  # → STUCK below; correctives aren't landing
             messages.pop()
             messages.append(UserMessage(content=(
                 "Your last turn had no tool_calls. Every turn must "
@@ -392,19 +434,48 @@ async def _loop(
         # trace even after image tool_results are compacted away; the
         # one-other cap forces one action per turn.
         if len(called) != 2 or called.count("note") != 1:
-            log.warning("turn %d: bad turn shape tool_calls=%s — injecting corrective", turn, called)
+            log.warning("turn %d: bad turn shape tool_calls=%s — injecting corrective", turn + 1, called)
             tr.write({"event": "bad_turn_shape", "turn": turn, "tool_calls": called})
+            consecutive_correctives += 1
+            if consecutive_correctives >= CORRECTIVE_LIMIT:
+                break  # → STUCK below; correctives aren't landing
             messages.pop()
             messages.append(UserMessage(content=_corrective_for_bad_shape(called)))
             continue
+        consecutive_correctives = 0
+
+        # Pre-compression checkpoint: require the scratchpad write-down
+        # while the folding turns are still readable. One retry, then
+        # fail open — losing detail beats stalling the session. A turn
+        # that closes the session skips it (nothing left to preserve).
+        if (
+            compaction_imminent
+            and not checkpoint_retried
+            and "end_session" not in called
+        ):
+            note_args = next(
+                tc.arguments for tc in asst.tool_calls if tc.name == "note"
+            )
+            sp = note_args.get("scratchpad") if isinstance(note_args, dict) else None
+            if not (isinstance(sp, str) and sp.strip()):
+                checkpoint_retried = True
+                log.info("turn %d: checkpoint note lacks scratchpad — corrective", turn + 1)
+                tr.write({"event": "checkpoint_corrective", "turn": turn})
+                messages.pop()
+                messages.append(UserMessage(content=_CHECKPOINT_CORRECTIVE))
+                continue
 
         # Principle 6: each tool_call gets exactly one ToolResult, in order,
         # in the very next messages. Also mark truncation: if finish=length,
         # the final tool_call's arguments may be cut off — the validator
         # catches it and pairs an error result, same path as any bad args.
         if asst.finish_reason == FinishReason.LENGTH:
-            log.warning("turn %d: finish=length; last tool_call args may be truncated", turn)
+            log.warning("turn %d: finish=length; last tool_call args may be truncated", turn + 1)
             tr.write({"event": "finish_length_warning", "turn": turn})
+
+        # Computed once per turn, threaded to _dispatch (which lacks
+        # `layout_incomplete`).
+        plan_overdue = _plan_overdue(turn, session.plan, layout_incomplete)
 
         for call in asst.tool_calls:
             result = await _dispatch(
@@ -415,6 +486,7 @@ async def _loop(
                 session=session,
                 tr=tr,
                 turn=turn,
+                plan_overdue=plan_overdue,
             )
             messages.append(result)
 
@@ -425,16 +497,43 @@ async def _loop(
             interval=provider.COLLAPSE_INTERVAL_TURNS,
             keep=provider.KEEP_RECENT_TURNS,
         )
+        # A completed turn closes any collapse event that was pending on
+        # it — the NEXT pending collapse gets a fresh corrective. Reset
+        # here (not on "not pending") because with a small interval every
+        # turn can be pending, which would otherwise burn the single
+        # retry on the first event forever.
+        checkpoint_retried = False
 
         if session.sentinel_status:
             return
+    else:
+        log.warning("engine hit max turns (%d)", MAX_TURNS)
+        session.sentinel_status = STUCK
+        session.sentinel_recap = f"max turns ({MAX_TURNS}) reached"
+        return
 
-    log.warning("engine hit max turns (%d)", MAX_TURNS)
+    # Reached only via the corrective-limit break above.
+    log.warning("%d consecutive turn-shape correctives — giving up", consecutive_correctives)
     session.sentinel_status = STUCK
-    session.sentinel_recap = f"max turns ({MAX_TURNS}) reached"
+    session.sentinel_recap = (
+        f"{consecutive_correctives} consecutive malformed turns — "
+        "model cannot hold the [note, one-other] shape"
+    )
 
 
 # ---------- dispatch ----------
+
+
+def _plan_overdue(turn: int, session_plan: "plan.Plan", layout_incomplete: bool) -> bool:
+    """Plan gate predicate: drafting the plan is mandatory. Keyed on the
+    raw turn index (not `turns_since_update`, which any update_progress
+    call resets) so it can't be dodged; off during first-run setup, whose
+    screen-layout flow legitimately runs many plan-less turns."""
+    return (
+        not layout_incomplete
+        and turn >= PLAN_REQUIRED_AFTER
+        and not session_plan.is_drafted()
+    )
 
 
 async def _dispatch(
@@ -446,11 +545,33 @@ async def _dispatch(
     session: Session,
     tr: Trace,
     turn: int,
+    plan_overdue: bool = False,
 ) -> ToolResultMessage:
     """Validate, then route to local handler or MCP. Always returns a
     ToolResultMessage — never raises (principle 5 + principle 6 require
     that every ToolCall is paired with a ToolResult even on failure)."""
     log.info("  → %s(%s)", call.name, format_call_args(call.name, call.arguments))
+
+    # Plan gate: while overdue, only the way out (and the turn shape) runs.
+    if plan_overdue and call.name not in PLAN_GATE_EXEMPT:
+        tr.write({
+            "event": "tool_blocked_no_plan", "turn": turn,
+            "name": call.name, "id": call.id,
+        })
+        log.warning("  ✗ %s: blocked by plan gate (no plan by turn %d)", call.name, turn)
+        return ToolResultMessage(
+            tool_call_id=call.id,
+            content=(
+                f"BLOCKED — not executed: turn {turn + 1} and no plan drafted. "
+                "Call update_progress NOW (CONVENTION § The plan). Read the IM "
+                "already? user_said verbatim + the full step list through "
+                "end_session. Still navigating to it? Draft the steps you know "
+                "(open app → read IM → re-plan) — steps alone open the gate; "
+                "fill user_said once read. Until then only note / "
+                "update_progress / end_session run."
+            ),
+            is_error=True,
+        )
 
     schema = schema_by_name.get(call.name)
     if schema is None:
@@ -478,6 +599,21 @@ async def _dispatch(
             is_error=True,
         )
 
+    # Stuck guard tier 2: refuse a looping call BEFORE actuating —
+    # exhausted target, repeated action cycle, or identical failing call.
+    # Models can ignore warnings; they can't ignore an action that
+    # doesn't execute.
+    blocked = session.guard.should_block(call.name, call.arguments)
+    if blocked is not None:
+        tr.write({
+            "event": "tool_blocked_stuck", "turn": turn,
+            "name": call.name, "id": call.id, "arguments": call.arguments,
+        })
+        log.warning("  ✗ %s: blocked by stuck guard", call.name)
+        return ToolResultMessage(
+            tool_call_id=call.id, content=blocked, is_error=True,
+        )
+
     local = local_registry.get(call.name)
     try:
         if local is not None:
@@ -492,6 +628,19 @@ async def _dispatch(
 
         blocks = await mcp.call_tool(call.name, call.arguments)
         content = mcp_blocks_to_content_blocks(blocks)
+        # Stuck guard tier 1: feed the gesture's screen-change verdict
+        # back in; any detector crossing its warn threshold (target /
+        # cycle / position orbit) appends a ⚠ to the result — the
+        # highest-adherence steering channel.
+        warning = session.guard.record(
+            call.name, call.arguments, verdict.parse(_action_text(blocks)),
+        )
+        if warning is not None:
+            tr.write({
+                "event": "stuck_warning", "turn": turn,
+                "name": call.name, "id": call.id,
+            })
+            content = _append_text(content, warning)
         tr.write({
             "event": "tool_result", "turn": turn,
             "name": call.name, "id": call.id,
@@ -503,14 +652,48 @@ async def _dispatch(
     except Exception as e:
         log.error("  ✗ %s failed: %s", call.name, e)
         tr.write({"event": "tool_error", "turn": turn, "name": call.name, "error": str(e)})
+        # Identical failing calls are loop evidence too (e.g. a target
+        # overlapping the AssistiveTouch button raises on every retry).
+        content = f"{call.name} failed: {e}"
+        err_warning = session.guard.record_error(call.name, call.arguments)
+        if err_warning is not None:
+            tr.write({
+                "event": "stuck_warning", "turn": turn,
+                "name": call.name, "id": call.id,
+            })
+            content = f"{content}\n{err_warning}"
         return ToolResultMessage(
             tool_call_id=call.id,
-            content=f"{call.name} failed: {e}",
+            content=content,
             is_error=True,
         )
 
 
 # ---------- helpers ----------
+
+
+def _action_text(blocks: list[dict]) -> str:
+    """The FIRST text block of a raw MCP tool result — the core-composed
+    action text carrying the verdict marker, and the ONLY safe haystack
+    for it. Later text blocks hold the OCR listing, i.e. whatever the
+    phone displays — scanning those would let on-screen text forge a
+    verdict (the agent IM'ing the user "…screen: no visible change…"
+    about a blocker, then operating in that chat, is enough). Must run
+    on the raw blocks: `mcp_blocks_to_content_blocks` fuses all text
+    blocks into one, erasing the boundary."""
+    for b in blocks:
+        if b.get("type") == "text":
+            return b.get("text") or ""
+    return ""
+
+
+def _append_text(
+    content: str | list[ContentBlock], extra: str
+) -> str | list[ContentBlock]:
+    """Append a line of text to a tool-result content, whatever its shape."""
+    if isinstance(content, str):
+        return f"{content}\n{extra}"
+    return [*content, TextBlock(text=extra)]
 
 
 async def _chat_with_retry(
@@ -551,6 +734,17 @@ def _log_usage(turn: int, asst: AssistantMessage, tr: Trace) -> str:
     if not total:
         return ""
     return f"token: {total / 1000:.1f}k, cache: {100 * u.cached_tokens / total:.0f}%"
+
+
+# Pre-compression checkpoint corrective (engine._loop). Mirrors the ⚠
+# tail the rejected turn already saw; names the exact re-issue shape.
+_CHECKPOINT_CORRECTIVE = (
+    "Rejected — context compresses after this turn: older turns keep "
+    "only their note summaries (scratchpad and plan survive in full). "
+    "Re-issue the SAME turn with `note` carrying BOTH `summary` and "
+    "`scratchpad` — rewrite the scratchpad with the facts and values "
+    "collected, the current situation, and what remains."
+)
 
 
 def _corrective_for_bad_shape(called: list[str]) -> str:

@@ -4,11 +4,11 @@ Covers:
   - placeholder constructors
   - collapse_old_turns: bootstrap state, threshold gating, summary
     accumulation across collapses, memory/skill artifact harvesting
-  - drop_stale_screens: idempotency, latest preserved, text-row filter
+  - drop_stale_screens: idempotency, latest preserved, gesture views
   - scale_image_bytes: small image passthrough, oversized scaled, decode
     failure fallback
-  - small helpers: _is_screen_obs_turn, _content_to_text, _has_image,
-    _filter_text_rows, _format_artifact_text, _carry_items, _render_slot
+  - small helpers: _content_to_text, _has_image, _stub_body,
+    _format_artifact_text, _carry_items, _render_slot
 """
 from __future__ import annotations
 
@@ -27,13 +27,14 @@ from physiclaw.agent.engine.compact import (
     SUMMARY_INITIAL,
     _carry_items,
     _content_to_text,
-    _filter_text_rows,
     _format_artifact_text,
     _has_image,
-    _is_screen_obs_turn,
     _render_slot,
+    _stub_body,
     collapse_old_turns,
+    collapse_pending,
     drop_stale_screens,
+    inject_checkpoint_tail,
     new_memory_placeholder,
     new_skills_placeholder,
     new_summary_placeholder,
@@ -147,41 +148,6 @@ def test_format_artifact_text_handles_unicode_args() -> None:
     assert "微信" in out
 
 
-# ---------- _is_screen_obs_turn ----------
-
-
-def _asst(*tool_names: str) -> AssistantMessage:
-    return AssistantMessage(
-        content="",
-        tool_calls=[
-            ToolCall(id=f"t{i}", name=name, arguments={})
-            for i, name in enumerate(tool_names)
-        ],
-        finish_reason=FinishReason.TOOL_CALLS,
-    )
-
-
-def test_is_screen_obs_turn_true_for_note_plus_peek() -> None:
-    assert _is_screen_obs_turn(_asst("note", "peek")) is True
-
-
-def test_is_screen_obs_turn_true_for_note_plus_screenshot() -> None:
-    assert _is_screen_obs_turn(_asst("note", "screenshot")) is True
-
-
-def test_is_screen_obs_turn_false_when_no_tool_calls() -> None:
-    assert _is_screen_obs_turn(_asst()) is False
-
-
-def test_is_screen_obs_turn_false_when_other_tool_present() -> None:
-    assert _is_screen_obs_turn(_asst("note", "tap")) is False
-
-
-def test_is_screen_obs_turn_false_when_only_note() -> None:
-    # Has note but no screen tool — still a turn boundary, not an obs.
-    assert _is_screen_obs_turn(_asst("note")) is False
-
-
 # ---------- _content_to_text / _has_image ----------
 
 
@@ -219,18 +185,18 @@ def test_has_image_false_when_only_text_blocks() -> None:
     assert _has_image([TextBlock(text="x")]) is False
 
 
-# ---------- _filter_text_rows ----------
+# ---------- _stub_body ----------
 
 
-def test_filter_text_rows_keeps_text_rows_drops_icon_rows() -> None:
-    listing = (
+def test_stub_body_keeps_text_rows_drops_icon_rows() -> None:
+    text = (
         'id [kind] "label" [left,top,right,bottom] conf\n'
         '1 [icon] "" [0.1,0.1,0.2,0.2] 0.95\n'
         '2 [text] "Send" [0.5,0.8,0.6,0.9] 0.99\n'
-        '3 [icon] "" [0.7,0.1,0.8,0.2] 0.90\n'
+        '3 [icon] "" [0.7,0.1,0.8,0.2] 0.90'
     )
 
-    out = _filter_text_rows(listing)
+    out = _stub_body(text)
 
     lines = out.splitlines()
     assert len(lines) == 2  # header + 1 text row
@@ -238,30 +204,46 @@ def test_filter_text_rows_keeps_text_rows_drops_icon_rows() -> None:
     assert "[icon]" not in out
 
 
-def test_filter_text_rows_returns_empty_when_no_text_rows() -> None:
-    listing = (
+def test_stub_body_keeps_action_text_and_verdict() -> None:
+    # A gesture view's text: action line first, then the listing.
+    text = (
+        "Tapped at bbox [0.9, 0.5, 0.98, 0.56] | screen: no visible change "
+        "— read the attached view\n"
         'id [kind] "label" [left,top,right,bottom] conf\n'
         '1 [icon] "" [0.1,0.1,0.2,0.2] 0.95\n'
+        '2 [text] "Add to Cart" [0.5,0.8,0.6,0.9] 0.99'
     )
 
-    assert _filter_text_rows(listing) == ""
+    out = _stub_body(text)
+
+    assert "screen: no visible change" in out  # retry history stays legible
+    assert '"Add to Cart"' in out
+    assert "[icon]" not in out
 
 
-def test_filter_text_rows_returns_empty_for_empty_listing() -> None:
-    assert _filter_text_rows("") == ""
-
-
-def test_filter_text_rows_skips_malformed_rows() -> None:
-    listing = (
-        'id [kind] "label"\n'
-        'not a valid row\n'
-        '1 [text] "ok" [0.1,0.1,0.2,0.2] 0.9\n'
+def test_stub_body_drops_header_when_no_text_rows_survive() -> None:
+    text = (
+        'id [kind] "label" [left,top,right,bottom] conf\n'
+        '1 [icon] "" [0.1,0.1,0.2,0.2] 0.95'
     )
 
-    out = _filter_text_rows(listing)
+    assert _stub_body(text) == ""
 
-    assert "not a valid row" not in out
-    assert "[text]" in out
+
+def test_stub_body_keeps_sequence_step_lines() -> None:
+    # `1 tap ok — …` starts with a digit but is not an element row.
+    text = (
+        "1 tap ok — Tapped at bbox [0.1, 0.9, 0.7, 0.95]\n"
+        "2 send_to_clipboard ok — Copied 'hi' to phone clipboard"
+    )
+
+    out = _stub_body(text)
+
+    assert "1 tap ok" in out and "2 send_to_clipboard ok" in out
+
+
+def test_stub_body_empty_for_empty_text() -> None:
+    assert _stub_body("") == ""
 
 
 # ---------- scale_image_bytes ----------
@@ -371,6 +353,74 @@ def test_drop_stale_screens_stubs_earlier_obs_keeps_latest() -> None:
     assert isinstance(latest, ToolResultMessage)
     assert latest.is_superseded is False
     assert _has_image(latest.content)
+
+
+def _gesture_pair(tcid: str = "g1") -> list[Message]:
+    """Build [asst-with-tap-call, tool_result-with-fused-view] — the
+    gesture result text (verdict + hint) and listing share one TextBlock,
+    as `mcp_blocks_to_content_blocks` produces."""
+    text = (
+        "Tapped at bbox [0.9, 0.5, 0.98, 0.56] | screen: changed — read the view\n"
+        'id [kind] "label" [left,top,right,bottom] conf\n'
+        '1 [text] "Add to Cart" [0.5,0.8,0.6,0.9] 0.99\n'
+        '2 [icon] "" [0.1,0.1,0.2,0.2] 0.95'
+    )
+    return [
+        AssistantMessage(
+            content="",
+            tool_calls=[
+                ToolCall(id=f"{tcid}-n", name="note", arguments={"summary": "x"}),
+                ToolCall(id=tcid, name="tap", arguments={"bbox": [0.9, 0.5, 0.98, 0.56]}),
+            ],
+            finish_reason=FinishReason.TOOL_CALLS,
+        ),
+        ToolResultMessage(tool_call_id=f"{tcid}-n", content="noted: x"),
+        ToolResultMessage(
+            tool_call_id=tcid,
+            content=[
+                TextBlock(text=text),
+                ImageBlock(media_type="image/jpeg", data_b64="aGk="),
+            ],
+        ),
+    ]
+
+
+def test_drop_stale_screens_stubs_gesture_view_keeps_latest_peek() -> None:
+    # Gesture views participate in latest-screen-wins: an older tap view
+    # is stubbed (action text + verdict + text rows survive) while the
+    # newest view — here a peek — keeps its image.
+    msgs: list[Message] = [
+        SystemMessage(content="sys"),
+        *_gesture_pair(),
+        *_peek_pair(),
+    ]
+
+    drop_stale_screens(msgs)
+
+    stale = msgs[3]
+    assert isinstance(stale, ToolResultMessage)
+    assert stale.is_superseded is True
+    assert isinstance(stale.content, str)
+    assert stale.content.startswith("(superseded tap)")
+    assert "screen: changed" in stale.content
+    assert '"Add to Cart"' in stale.content
+    assert "[icon]" not in stale.content
+    latest = msgs[6]
+    assert isinstance(latest, ToolResultMessage)
+    assert _has_image(latest.content)
+
+
+def test_drop_stale_screens_gesture_after_gesture() -> None:
+    msgs: list[Message] = [
+        SystemMessage(content="sys"),
+        *_gesture_pair("g1"),
+        *_gesture_pair("g2"),
+    ]
+
+    drop_stale_screens(msgs)
+
+    assert isinstance(msgs[3].content, str)  # older stubbed
+    assert _has_image(msgs[6].content)       # newest keeps its view
 
 
 def test_drop_stale_screens_idempotent_on_second_pass() -> None:
@@ -554,3 +604,304 @@ def test_collapse_skips_when_artifact_result_is_error() -> None:
     assert isinstance(skill_slot, UserMessage)
     # Error skipped — no skill artifact in slot.
     assert "oops" not in str(skill_slot.content)
+
+
+# ---------- collapse_pending / checkpoint tail ----------
+
+
+def test_collapse_pending_false_when_slots_missing() -> None:
+    msgs: list[Message] = [SystemMessage(content="s"), UserMessage(content="u")]
+    assert collapse_pending(msgs, first_at=1, interval=1, keep=1) is False
+
+
+def test_collapse_pending_predicts_first_collapse_exactly() -> None:
+    # first_at=3: with 2 complete turns the UPCOMING turn is the 3rd —
+    # its completion triggers the collapse, so pending is True; one
+    # turn earlier it isn't.
+    msgs = _scaffold_with_slots()
+    msgs.extend(_note_turn("a"))
+    assert collapse_pending(msgs, first_at=3, interval=10, keep=1) is False
+    msgs.extend(_note_turn("b"))
+    assert collapse_pending(msgs, first_at=3, interval=10, keep=1) is True
+
+
+def test_collapse_pending_agrees_with_collapse_trigger() -> None:
+    # The prediction and the collapse fire on the same turn: pending
+    # True → one more complete turn → collapse_old_turns folds.
+    msgs = _scaffold_with_slots()
+    for s in ("a", "b"):
+        msgs.extend(_note_turn(s))
+    assert collapse_pending(msgs, first_at=3, interval=10, keep=1) is True
+    msgs.extend(_note_turn("c"))
+    collapse_old_turns(msgs, first_at=3, interval=10, keep=1)
+    assert SUMMARY_HEADER in msgs[2].content
+    assert "- a" in msgs[2].content
+
+
+def test_collapse_pending_switches_threshold_after_first_collapse() -> None:
+    # After the first collapse the summary slot is rewritten and the
+    # trigger switches to keep+interval — pending must switch with it.
+    msgs = _scaffold_with_slots()
+    for s in ("a", "b", "c", "d"):
+        msgs.extend(_note_turn(s))
+    collapse_old_turns(msgs, first_at=3, interval=10, keep=1)
+    # 1 turn kept; threshold now keep+interval=11 → far from pending.
+    assert collapse_pending(msgs, first_at=3, interval=10, keep=1) is False
+    for i in range(9):
+        msgs.extend(_note_turn(f"t{i}"))
+    # 10 complete turns; the upcoming one is the 11th → pending.
+    assert collapse_pending(msgs, first_at=3, interval=10, keep=1) is True
+
+
+def test_inject_checkpoint_tail_appends_notice_last() -> None:
+    msgs = _scaffold_with_slots()
+
+    out = inject_checkpoint_tail(msgs, keep=7)
+
+    assert out is not msgs and len(out) == len(msgs) + 1
+    tail = out[-1]
+    assert isinstance(tail, UserMessage)
+    assert "compresses after this turn" in tail.content
+    assert "newest 7" in tail.content
+    assert "scratchpad" in tail.content
+
+
+# ---------- robustness: _stub_body × the real formatter ----------
+
+
+def test_stub_body_against_real_format_elements_output() -> None:
+    """The format coupling test: `_LISTING_HEADER` / `_ROW_RE` mirror
+    `core.vision.util.format_elements` — run the REAL formatter's output
+    through `_stub_body` so a formatter change breaks here, not in prod."""
+    from physiclaw.core.vision.util import format_elements
+
+    listing = format_elements([
+        {"id": 0, "kind": "icon", "label": "", "bbox": [0.1, 0.1, 0.2, 0.2], "conf": 0.95},
+        {"id": 1, "kind": "text", "label": "加入购物车", "bbox": [0.5, 0.8, 0.6, 0.9], "conf": 0.99},
+        {"id": 2, "kind": "text", "label": 'He said "hi" [ok]', "bbox": [0.1, 0.3, 0.4, 0.35], "conf": 0.80},
+        {"id": 3, "kind": "icon", "label": "", "bbox": [0.7, 0.1, 0.8, 0.2], "conf": 0.90},
+    ])
+    text = "Tapped at bbox [0.5, 0.8, 0.6, 0.9] | screen: changed — hint\n" + listing
+
+    out = _stub_body(text)
+
+    assert "screen: changed" in out            # action line survives
+    assert "加入购物车" in out                   # CJK text row survives
+    assert 'He said "hi" [ok]' in out          # brackets in label don't confuse the row regex
+    assert "[icon]" not in out                 # icon rows dropped
+    assert out.splitlines()[1] == 'id [kind] "label" [left,top,right,bottom] conf'
+
+
+def test_stub_body_real_formatter_icon_only_listing_drops_header() -> None:
+    from physiclaw.core.vision.util import format_elements
+
+    listing = format_elements([
+        {"id": 0, "kind": "icon", "label": "", "bbox": [0.1, 0.1, 0.2, 0.2], "conf": 0.95},
+    ])
+
+    assert _stub_body(listing) == ""
+
+
+# ---------- robustness: _stub_body properties (hypothesis) ----------
+
+
+from hypothesis import given, strategies as st  # noqa: E402
+
+# Lines that are NOT element rows and NOT the listing header — action
+# results, hints, warnings, sequence step lines, arbitrary text. The
+# blacklist covers every `str.splitlines` boundary, not just `\n` —
+# hypothesis found that e.g. `\x1e` inside a "line" gets re-split (a
+# pre-existing, benign normalization shared with the old filter).
+_LINE_BREAKS = "\n\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029"
+_non_row_line = st.text(
+    alphabet=st.characters(
+        blacklist_categories=("Cs",), blacklist_characters=_LINE_BREAKS,
+    ),
+    max_size=80,
+).filter(
+    lambda s: not compact._ROW_RE.match(s) and s != compact._LISTING_HEADER
+)
+
+
+@given(st.lists(_non_row_line, max_size=12))
+def test_stub_body_preserves_all_non_listing_lines(lines) -> None:
+    text = "\n".join(lines)
+
+    out = _stub_body(text)
+
+    # Every non-listing line survives verbatim (modulo outer strip).
+    assert out == text.strip()
+
+
+def _row(id_: int, kind: str, label: str) -> str:
+    return f'{id_} [{kind}] "{label}" [0.100,0.200,0.300,0.400] 0.90'
+
+
+@given(
+    kinds=st.lists(st.sampled_from(["icon", "text"]), min_size=1, max_size=10),
+    label=st.text(
+        alphabet=st.characters(blacklist_categories=("Cs",), blacklist_characters="\n"),
+        max_size=20,
+    ),
+)
+def test_stub_body_keeps_exactly_the_text_rows(kinds, label) -> None:
+    rows = [_row(i, k, label) for i, k in enumerate(kinds)]
+    text = compact._LISTING_HEADER + "\n" + "\n".join(rows)
+
+    out = _stub_body(text)
+
+    kept = [ln for ln in out.splitlines() if compact._ROW_RE.match(ln)]
+    assert len(kept) == kinds.count("text")
+    assert all(" [text] " in ln for ln in kept)
+
+
+@given(st.text(max_size=400))
+def test_stub_body_idempotent_and_total(text) -> None:
+    # Never raises on arbitrary input, and stubbing a stub is stable.
+    once = _stub_body(text)
+    assert _stub_body(once) == once
+
+
+# ---------- robustness: drop_stale_screens under an engine-like loop ----------
+
+
+def _view_result(tcid: str, text: str) -> ToolResultMessage:
+    return ToolResultMessage(
+        tool_call_id=tcid,
+        content=[
+            TextBlock(text=text),
+            ImageBlock(media_type="image/jpeg", data_b64="aGk="),
+        ],
+    )
+
+
+def test_drop_stale_screens_engine_loop_invariant() -> None:
+    """Simulate _loop: append a view-bearing turn, run drop_stale_screens
+    after every turn (as the engine does). Invariant at every point:
+    exactly ONE image in history; every earlier view is a superseded
+    string stub; no stub ever regains an image."""
+    msgs: list[Message] = [SystemMessage(content="sys")]
+    tools = ["tap", "peek", "swipe", "sequence", "screenshot", "go_back"]
+    for turn in range(30):
+        tool = tools[turn % len(tools)]
+        tcid = f"t{turn}"
+        msgs.append(AssistantMessage(
+            content="",
+            tool_calls=[
+                ToolCall(id=f"{tcid}-n", name="note", arguments={"summary": "x"}),
+                ToolCall(id=tcid, name=tool, arguments={}),
+            ],
+            finish_reason=FinishReason.TOOL_CALLS,
+        ))
+        msgs.append(ToolResultMessage(tool_call_id=f"{tcid}-n", content="noted: x"))
+        msgs.append(_view_result(tcid, f"{tool} result | screen: changed\n"
+                                       f'{compact._LISTING_HEADER}\n'
+                                       f'1 [text] "Send" [0.5,0.8,0.6,0.9] 0.99'))
+
+        drop_stale_screens(msgs)
+
+        imaged = [m for m in msgs
+                  if isinstance(m, ToolResultMessage) and _has_image(m.content)]
+        assert len(imaged) == 1, f"turn {turn}: {len(imaged)} images in history"
+        stubs = [m for m in msgs
+                 if isinstance(m, ToolResultMessage) and m.is_superseded]
+        assert len(stubs) == turn  # every prior view stubbed, none skipped
+        for s in stubs:
+            assert isinstance(s.content, str)
+            assert s.content.startswith("(superseded ")
+            assert "screen: changed" in s.content   # verdict survives stubbing
+            assert '"Send"' in s.content            # text row survives stubbing
+
+
+def test_drop_stale_screens_batch_stubs_all_but_last() -> None:
+    """One call over MANY accumulated views must stub every earlier one —
+    not just the first. (Mutation testing caught that incremental-call
+    tests never exercise 3+ unstubbed views at once: `[:-1]` vs `[:1]`
+    are indistinguishable with only two.)"""
+    msgs: list[Message] = [SystemMessage(content="sys")]
+    for turn in range(5):
+        tcid = f"t{turn}"
+        msgs.append(AssistantMessage(
+            content="",
+            tool_calls=[ToolCall(id=tcid, name="tap", arguments={})],
+            finish_reason=FinishReason.TOOL_CALLS,
+        ))
+        msgs.append(_view_result(tcid, f"Tapped {turn} | screen: changed"))
+
+    drop_stale_screens(msgs)  # single batch call, 5 views pending
+
+    results = [m for m in msgs if isinstance(m, ToolResultMessage)]
+    assert [m.is_superseded for m in results] == [True, True, True, True, False]
+    assert sum(1 for m in results if _has_image(m.content)) == 1
+    assert _has_image(results[-1].content)
+
+
+def test_drop_stale_screens_preserves_is_error_flag() -> None:
+    msgs: list[Message] = [
+        SystemMessage(content="s"),
+        AssistantMessage(
+            content="",
+            tool_calls=[ToolCall(id="e1", name="tap", arguments={})],
+            finish_reason=FinishReason.TOOL_CALLS,
+        ),
+        ToolResultMessage(
+            tool_call_id="e1",
+            content=[TextBlock(text="boom"), ImageBlock(media_type="image/jpeg", data_b64="aGk=")],
+            is_error=True,
+        ),
+        *_peek_pair(),
+    ]
+
+    drop_stale_screens(msgs)
+
+    stub = msgs[2]
+    assert isinstance(stub, ToolResultMessage)
+    assert stub.is_error is True
+    assert stub.is_superseded is True
+
+
+def test_drop_stale_screens_orphan_tool_call_id_falls_back_to_view() -> None:
+    # A result whose id matches no assistant tool_call (shouldn't happen,
+    # but must not crash) stubs with the generic header.
+    msgs: list[Message] = [
+        SystemMessage(content="s"),
+        ToolResultMessage(
+            tool_call_id="ghost",
+            content=[TextBlock(text="x"), ImageBlock(media_type="image/jpeg", data_b64="aGk=")],
+        ),
+        *_peek_pair(),
+    ]
+
+    drop_stale_screens(msgs)
+
+    stub = msgs[1]
+    assert isinstance(stub, ToolResultMessage)
+    assert stub.content.startswith("(superseded view)")
+
+
+def test_drop_stale_screens_composes_with_collapse_old_turns() -> None:
+    # The engine runs drop_stale_screens then collapse_old_turns each
+    # turn — verify the pair leaves slots intact and exactly one image.
+    msgs = _scaffold_with_slots()
+    for turn in range(12):
+        tcid = f"t{turn}"
+        msgs.append(AssistantMessage(
+            content="",
+            tool_calls=[
+                ToolCall(id=f"{tcid}-n", name="note", arguments={"summary": f"s{turn}"}),
+                ToolCall(id=tcid, name="tap", arguments={}),
+            ],
+            finish_reason=FinishReason.TOOL_CALLS,
+        ))
+        msgs.append(ToolResultMessage(tool_call_id=f"{tcid}-n", content="noted"))
+        msgs.append(_view_result(tcid, "Tapped | screen: changed"))
+        drop_stale_screens(msgs)
+        collapse_old_turns(msgs, first_at=6, interval=4, keep=2)
+
+    imaged = [m for m in msgs
+              if isinstance(m, ToolResultMessage) and _has_image(m.content)]
+    assert len(imaged) == 1
+    summary = msgs[2]
+    assert isinstance(summary, UserMessage)
+    assert SUMMARY_HEADER in str(summary.content)
+    assert "- s0" in str(summary.content)  # folded turns' notes harvested

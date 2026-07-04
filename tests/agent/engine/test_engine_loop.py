@@ -227,6 +227,321 @@ async def test_dispatch_mcp_exception_returns_error() -> None:
     assert "mcp down" in result.content
 
 
+# ---------- _dispatch × stuck guard ----------
+
+
+class VerdictMcpClient:
+    """Fake MCP whose gesture results carry the no-change verdict marker —
+    the input that drives the stuck guard's counters. `listing` adds a
+    second text block (the fused view's OCR listing)."""
+
+    def __init__(self, text="Tapped at bbox [...] | screen: no visible change",
+                 listing=None):
+        self.text = text
+        self.listing = listing
+        self.tool_calls: list[tuple] = []
+
+    async def call_tool(self, name, arguments):
+        self.tool_calls.append((name, arguments))
+        blocks = [{"type": "text", "text": self.text}]
+        if self.listing is not None:
+            blocks.append({"type": "text", "text": self.listing})
+        return blocks
+
+
+_TAP_SCHEMA = {
+    "name": "tap",
+    "input_schema": {
+        "type": "object",
+        "properties": {"bbox": {"type": "array"}},
+        "required": ["bbox"],
+    },
+}
+_STEPPER = [0.908, 0.526, 0.983, 0.562]
+
+
+def _all_text(content) -> str:
+    """Flatten a tool-result content (str or blocks) for assertions —
+    includes appended ⚠ warning blocks."""
+    if isinstance(content, str):
+        return content
+    return "\n".join(b.text for b in content if hasattr(b, "text"))
+
+
+async def _tap_n(session, mcp, n: int):
+    results = []
+    for _ in range(n):
+        results.append(await engine_mod._dispatch(
+            call=_tc("tap", {"bbox": list(_STEPPER)}),
+            schema_by_name={"tap": _TAP_SCHEMA},
+            mcp=mcp,
+            local_registry={},
+            session=session,
+            tr=MagicMock(),
+            turn=0,
+        ))
+    return results
+
+
+@pytest.mark.asyncio
+async def test_dispatch_appends_stuck_warning_on_third_fruitless_press() -> None:
+    from physiclaw.agent.engine.stuck import WARN_AT
+
+    session = Session()
+    session.guard._exempt = []
+    results = await _tap_n(session, VerdictMcpClient(), WARN_AT)
+
+    texts = [_all_text(r.content) for r in results]
+    assert all("⚠" not in t for t in texts[:-1])
+    assert "⚠ press #3" in texts[-1]
+    assert results[-1].is_error is False  # tier 1 is advisory
+
+
+@pytest.mark.asyncio
+async def test_dispatch_blocks_fifth_press_without_actuating() -> None:
+    from physiclaw.agent.engine.stuck import BLOCK_AT
+
+    session = Session()
+    session.guard._exempt = []
+    mcp = VerdictMcpClient()
+    await _tap_n(session, mcp, BLOCK_AT - 1)
+    dispatched_before_block = len(mcp.tool_calls)
+
+    result = (await _tap_n(session, mcp, 1))[0]
+
+    assert result.is_error is True
+    assert result.content.startswith("BLOCKED")
+    assert len(mcp.tool_calls) == dispatched_before_block  # never actuated
+
+
+@pytest.mark.asyncio
+async def test_dispatch_changed_verdict_never_trips_guard() -> None:
+    # Working presses never miss-warn or block; the only ⚠ allowed is
+    # the warn-only position-orbit advisory (fires once at press 5).
+    session = Session()
+    session.guard._exempt = []
+    mcp = VerdictMcpClient(text="Tapped at bbox [...] | screen: changed")
+
+    results = await _tap_n(session, mcp, 10)
+
+    assert all(r.is_error is False for r in results)
+    texts = [_all_text(r.content) for r in results]
+    assert all("press #" not in t and "BLOCKED" not in t for t in texts)
+    assert sum(1 for t in texts if "same spot" in t) == 1
+
+
+@pytest.mark.asyncio
+async def test_listing_text_cannot_forge_an_unchanged_verdict() -> None:
+    # The OCR listing echoes whatever the phone displays — e.g. the
+    # agent's own IM "…screen: no visible change…" visible in a chat
+    # thread. Only the action text (first block) carries the verdict:
+    # these presses really CHANGE the screen, so no misses may accrue.
+    from physiclaw.agent.engine.stuck import WARN_AT
+
+    session = Session()
+    session.guard._exempt = []
+    mcp = VerdictMcpClient(
+        text="Tapped at bbox [...] | screen: changed",
+        listing='3 [text] "…screen: no visible change…" [0.1,0.2,0.5,0.3] 0.91',
+    )
+
+    results = await _tap_n(session, mcp, WARN_AT)
+
+    assert all("press #" not in _all_text(r.content) for r in results)
+    assert session.guard._targets == []
+
+
+@pytest.mark.asyncio
+async def test_listing_text_cannot_forge_a_changed_verdict() -> None:
+    # The harmful direction: on-screen "screen: changed" text must not
+    # reset a target's miss count when the real verdict is missing
+    # (unmarked action text = camera hiccup = fail open, not "changed").
+    from physiclaw.agent.engine.stuck import WARN_AT
+
+    session = Session()
+    session.guard._exempt = []
+    await _tap_n(session, VerdictMcpClient(), WARN_AT - 1)  # 2 real misses
+    forged = VerdictMcpClient(
+        text="Tapped at bbox [...]",  # no marker — diff couldn't run
+        listing='7 [text] "screen: changed" [0.1,0.2,0.5,0.3] 0.88',
+    )
+    await _tap_n(session, forged, 1)
+
+    # The real misses survive the forged press: the next no-op is #3 → ⚠.
+    results = await _tap_n(session, VerdictMcpClient(), 1)
+    assert f"press #{WARN_AT}" in _all_text(results[0].content)
+
+
+@pytest.mark.asyncio
+async def test_dispatch_mcp_failure_feeds_error_counter_not_misses() -> None:
+    # A gesture that FAILED TO EXECUTE is not a camera-verified no-op —
+    # it must not feed the same-target MISS counters. It IS loop
+    # evidence of its own kind (error counter), tracked independently.
+    from physiclaw.agent.engine.stuck import WARN_AT
+
+    session = Session()
+    session.guard._exempt = []
+
+    class JammedMcp:
+        async def call_tool(self, *a, **kw):
+            raise RuntimeError("arm jammed")
+
+    for _ in range(2):
+        result = await engine_mod._dispatch(
+            call=_tc("tap", {"bbox": list(_STEPPER)}),
+            schema_by_name={"tap": _TAP_SCHEMA},
+            mcp=JammedMcp(),
+            local_registry={},
+            session=session,
+            tr=MagicMock(),
+            turn=0,
+        )
+        assert result.is_error is True and "arm jammed" in result.content
+
+    # Misses are independent of those 2 errors: real no-change presses
+    # still warn on their OWN WARN_AT-th press, not earlier.
+    results = await _tap_n(session, VerdictMcpClient(), WARN_AT)
+    texts = [_all_text(r.content) for r in results]
+    assert all("⚠" not in t for t in texts[:-1])
+    assert "press #3" in texts[-1]
+
+
+@pytest.mark.asyncio
+async def test_plan_gate_block_does_not_feed_guard() -> None:
+    # Plan-gate-blocked presses never actuate, so they must not count
+    # toward the stuck guard's same-target misses.
+    session = Session()
+    session.guard._exempt = []
+
+    for _ in range(10):
+        result = await engine_mod._dispatch(
+            call=_tc("tap", {"bbox": list(_STEPPER)}),
+            schema_by_name={"tap": _TAP_SCHEMA},
+            mcp=VerdictMcpClient(),
+            local_registry={},
+            session=session,
+            tr=MagicMock(),
+            turn=engine_mod.PLAN_REQUIRED_AFTER,
+            plan_overdue=True,
+        )
+        assert result.content.startswith("BLOCKED")
+
+    assert session.guard.should_block("tap", {"bbox": list(_STEPPER)}) is None
+
+
+@pytest.mark.asyncio
+async def test_dispatch_error_repeat_warns_and_blocks() -> None:
+    # Identical failing calls (AT-overlap raise, every retry) are loop
+    # evidence: warn at WARN_AT, refuse pre-dispatch at BLOCK_AT.
+    from physiclaw.agent.engine.stuck import BLOCK_AT, WARN_AT
+
+    session = Session()
+    session.guard._exempt = []
+
+    class OverlapMcp:
+        async def call_tool(self, *a, **kw):
+            raise RuntimeError("target overlaps AssistiveTouch button")
+
+    results = []
+    for _ in range(BLOCK_AT - 1):
+        results.append(await engine_mod._dispatch(
+            call=_tc("tap", {"bbox": list(_STEPPER)}),
+            schema_by_name={"tap": _TAP_SCHEMA},
+            mcp=OverlapMcp(),
+            local_registry={},
+            session=session,
+            tr=MagicMock(),
+            turn=0,
+        ))
+    assert all(r.is_error for r in results)
+    assert "⚠" in results[WARN_AT - 1].content  # warning on the WARN_AT-th
+
+    blocked = await engine_mod._dispatch(
+        call=_tc("tap", {"bbox": list(_STEPPER)}),
+        schema_by_name={"tap": _TAP_SCHEMA},
+        mcp=OverlapMcp(),
+        local_registry={},
+        session=session,
+        tr=MagicMock(),
+        turn=0,
+    )
+    assert blocked.content.startswith("BLOCKED")
+    assert "failed" in blocked.content
+
+
+# ---------- _dispatch × plan gate ----------
+
+
+async def _gated_dispatch(session, call, *, plan_overdue: bool):
+    schema = {"name": call.name, "input_schema": {"type": "object"}}
+    return await engine_mod._dispatch(
+        call=call,
+        schema_by_name={call.name: schema, "tap": _TAP_SCHEMA},
+        mcp=VerdictMcpClient(),
+        local_registry={},
+        session=session,
+        tr=MagicMock(),
+        turn=engine_mod.PLAN_REQUIRED_AFTER,
+        plan_overdue=plan_overdue,
+    )
+
+
+@pytest.mark.asyncio
+async def test_plan_gate_blocks_action_tools_when_overdue() -> None:
+    session = Session()
+
+    result = await _gated_dispatch(
+        session, _tc("tap", {"bbox": list(_STEPPER)}), plan_overdue=True,
+    )
+
+    assert result.is_error is True
+    assert result.content.startswith("BLOCKED")
+    assert "update_progress" in result.content
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["note", "update_progress", "end_session"])
+async def test_plan_gate_exempts_the_way_out(name: str) -> None:
+    # Exempt tools reach normal dispatch (here: unknown-tool error from an
+    # empty registry — anything but the plan-gate BLOCKED text).
+    session = Session()
+
+    result = await _gated_dispatch(session, _tc(name), plan_overdue=True)
+
+    assert not str(result.content).startswith("BLOCKED")
+
+
+@pytest.mark.asyncio
+async def test_plan_gate_open_when_not_overdue() -> None:
+    session = Session()
+
+    result = await _gated_dispatch(
+        session, _tc("tap", {"bbox": list(_STEPPER)}), plan_overdue=False,
+    )
+
+    assert result.is_error is False
+
+
+def test_plan_overdue_predicate() -> None:
+    # The gate arms only when: past the threshold turn AND the plan is
+    # still undrafted AND not in first-run setup.
+    from physiclaw.agent.engine.engine import _plan_overdue
+    from physiclaw.agent.engine.plan import Plan
+
+    fresh = Plan()
+    assert _plan_overdue(engine_mod.PLAN_REQUIRED_AFTER, fresh, False)
+    assert not _plan_overdue(engine_mod.PLAN_REQUIRED_AFTER - 1, fresh, False)
+    assert not _plan_overdue(engine_mod.PLAN_REQUIRED_AFTER, fresh, True)
+
+    drafted = Plan()
+    drafted.update(user_said="buy yogurt")
+    assert not _plan_overdue(engine_mod.PLAN_REQUIRED_AFTER, drafted, False)
+
+    steps_only = Plan()
+    steps_only.update(steps=[{"content": "reply to user", "status": "in_progress"}])
+    assert not _plan_overdue(engine_mod.PLAN_REQUIRED_AFTER, steps_only, False)
+
+
 # ---------- _loop ----------
 
 
@@ -373,6 +688,222 @@ async def test_loop_skips_layout_reminder_when_complete(mocker) -> None:
         tr=MagicMock(), rlog=MagicMock(), layout_incomplete=True,
     )
     spy.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_loop_stucks_after_consecutive_correctives(patched_loop_deps) -> None:
+    # A model that never holds the [note, one-other] shape must end
+    # STUCK after CORRECTIVE_LIMIT consecutive correctives instead of
+    # burning MAX_TURNS of round-trips.
+    registry = _registry()
+    schemas = _schemas(registry)
+    schema_by_name = {s["name"]: s for s in schemas}
+
+    bad = [_asst(tool_calls=[_tc("peek")]) for _ in range(engine_mod.CORRECTIVE_LIMIT + 3)]
+    provider = FakeProvider(bad)
+    session = Session()
+
+    await engine_mod._loop(
+        mcp=FakeMcpClient(), provider=provider,
+        messages=[SystemMessage(content="sys"), UserMessage(content="trig")],
+        tool_schemas=schemas, schema_by_name=schema_by_name,
+        local_registry=registry, session=session, prompt_hash="h",
+        tr=MagicMock(), rlog=MagicMock(),
+    )
+
+    assert session.sentinel_status == STUCK
+    assert "malformed turns" in session.sentinel_recap
+    assert len(provider.calls) == engine_mod.CORRECTIVE_LIMIT
+
+
+# ---------- pre-compression checkpoint ----------
+
+
+class CheckpointProvider(FakeProvider):
+    """Collapse knobs small enough to hit the checkpoint turn in a short
+    scripted session; records every request for tail assertions."""
+    COLLAPSE_FIRST_AT_TURN = 2
+    COLLAPSE_INTERVAL_TURNS = 100
+    KEEP_RECENT_TURNS = 1
+
+    def __init__(self, responses):
+        super().__init__(responses)
+        self.requests: list[list] = []
+
+    async def chat(self, messages, tools):
+        self.requests.append(list(messages))
+        return await super().chat(messages, tools)
+
+
+def _scaffold_messages() -> list:
+    """[system, trigger] + the three compaction slots, as bootstrap builds."""
+    return [
+        SystemMessage(content="sys"),
+        UserMessage(content="trig"),
+        engine_mod.compact.new_summary_placeholder(),
+        UserMessage(content=engine_mod.compact.MEMORY_INITIAL),
+        engine_mod.compact.new_skills_placeholder(),
+    ]
+
+
+def _req_texts(request: list) -> str:
+    return "\n".join(
+        m.content for m in request
+        if isinstance(m, UserMessage) and isinstance(m.content, str)
+    )
+
+
+async def _run_checkpoint_session(responses, provider_cls=CheckpointProvider):
+    registry = _registry()
+    schemas = _schemas(registry)
+    provider = provider_cls(responses)
+    session = Session()
+    messages = _scaffold_messages()
+    await engine_mod._loop(
+        mcp=FakeMcpClient(), provider=provider,
+        messages=messages, tool_schemas=schemas,
+        schema_by_name={s["name"]: s for s in schemas},
+        local_registry=registry, session=session, prompt_hash="h",
+        tr=MagicMock(), rlog=MagicMock(),
+    )
+    return provider, session, messages
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_requires_scratchpad_then_collapses() -> None:
+    # Turn before the first collapse: the request carries the ⚠ tail; a
+    # scratchpad-less note is rejected once; the compliant retry passes
+    # and the collapse folds turn 0 to its summary line.
+    provider, session, messages = await _run_checkpoint_session([
+        _asst(tool_calls=[_tc("note", {"summary": "a"}), _tc("peek")]),
+        _asst(tool_calls=[_tc("note", {"summary": "b"}), _tc("peek")]),
+        _asst(tool_calls=[
+            _tc("note", {"summary": "b", "scratchpad": "cart=3; addr saved"}),
+            _tc("peek"),
+        ]),
+        _asst(tool_calls=[
+            _tc("note", {"summary": "closing"}),
+            _tc("end_session", {"status": DONE, "recap": "done"}),
+        ]),
+    ])
+
+    assert session.sentinel_status == DONE
+    assert len(provider.calls) == 4
+    # ⚠ tail rides the imminent turn's requests only (1 = first attempt,
+    # 2 = retry) — not turn 0, not the post-collapse turn.
+    tails = ["newest 1 folds" in _req_texts(r) for r in provider.requests]
+    assert tails == [False, True, True, False]
+    # The retry request carries the checkpoint corrective.
+    assert "Re-issue the SAME turn" in _req_texts(provider.requests[2])
+    # The collapse fired: turn 0's summary folded into the slot.
+    assert "- a" in messages[2].content
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_fails_open_when_reminder_ignored() -> None:
+    # A model that never adds the scratchpad is corrected ONCE, then its
+    # summary-only note is accepted — compression proceeds on summaries
+    # alone rather than stalling the session.
+    provider, session, messages = await _run_checkpoint_session([
+        _asst(tool_calls=[_tc("note", {"summary": "a"}), _tc("peek")]),
+        _asst(tool_calls=[_tc("note", {"summary": "b"}), _tc("peek")]),
+        _asst(tool_calls=[_tc("note", {"summary": "b"}), _tc("peek")]),  # still none
+        _asst(tool_calls=[
+            _tc("note", {"summary": "closing"}),
+            _tc("end_session", {"status": DONE, "recap": "done"}),
+        ]),
+    ])
+
+    assert session.sentinel_status == DONE
+    assert len(provider.calls) == 4
+    correctives = sum(
+        "Re-issue the SAME turn" in _req_texts(r) for r in provider.requests
+    )
+    assert correctives == 1  # exactly one nudge, no reject loop
+    assert "- a" in messages[2].content  # collapse still fired
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_corrective_renews_per_collapse_event() -> None:
+    # With a tight interval EVERY turn is collapse-pending — the single
+    # retry must renew per collapse event (completed turn), not once per
+    # session, or every compression after the first gets no checkpoint.
+    class TightProvider(CheckpointProvider):
+        COLLAPSE_INTERVAL_TURNS = 1
+
+    def _plain_turn():
+        return _asst(tool_calls=[_tc("note", {"summary": "s"}), _tc("peek")])
+
+    provider, session, _ = await _run_checkpoint_session([
+        _plain_turn(),  # t0: not pending
+        _plain_turn(),  # t1: pending → corrective #1
+        _plain_turn(),  # t1 retry: fail open → collapse #1
+        _plain_turn(),  # t2: pending again → corrective #2
+        _plain_turn(),  # t2 retry: fail open → collapse #2
+        _asst(tool_calls=[
+            _tc("note", {"summary": "closing"}),
+            _tc("end_session", {"status": DONE, "recap": "done"}),
+        ]),             # t3: pending but end_session-exempt
+    ], provider_cls=TightProvider)
+
+    assert session.sentinel_status == DONE
+    assert len(provider.calls) == 6
+    correctives = sum(
+        "Re-issue the SAME turn" in _req_texts(r) for r in provider.requests
+    )
+    assert correctives == 2  # one per collapse event, renewed after each
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_skipped_on_end_session_turn() -> None:
+    # Closing on the checkpoint turn: nothing to preserve — no corrective.
+    provider, session, _ = await _run_checkpoint_session([
+        _asst(tool_calls=[_tc("note", {"summary": "a"}), _tc("peek")]),
+        _asst(tool_calls=[
+            _tc("note", {"summary": "closing"}),
+            _tc("end_session", {"status": DONE, "recap": "done"}),
+        ]),
+    ])
+
+    assert session.sentinel_status == DONE
+    assert len(provider.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_loop_corrective_counter_resets_on_good_turn(patched_loop_deps) -> None:
+    # Interleaved good turns reset the counter — occasional shape slips
+    # never accumulate into a STUCK.
+    registry = _registry()
+    schemas = _schemas(registry)
+    schema_by_name = {s["name"]: s for s in schemas}
+
+    def good(i):
+        return _asst(tool_calls=[
+            _tc("note", {"summary": f"turn {i}"}), _tc("peek"),
+        ])
+
+    responses = []
+    for i in range(engine_mod.CORRECTIVE_LIMIT - 1):
+        responses.append(_asst(tool_calls=[_tc("peek")]))  # bad shape
+    responses.append(good(0))  # resets the counter
+    for i in range(engine_mod.CORRECTIVE_LIMIT - 1):
+        responses.append(_asst(tool_calls=[_tc("peek")]))  # bad again
+    responses.append(_asst(tool_calls=[
+        _tc("note", {"summary": "closing"}),
+        _tc("end_session", {"status": DONE, "recap": "ok"}),
+    ]))
+    provider = FakeProvider(responses)
+    session = Session()
+
+    await engine_mod._loop(
+        mcp=FakeMcpClient(), provider=provider,
+        messages=[SystemMessage(content="sys"), UserMessage(content="trig")],
+        tool_schemas=schemas, schema_by_name=schema_by_name,
+        local_registry=registry, session=session, prompt_hash="h",
+        tr=MagicMock(), rlog=MagicMock(),
+    )
+
+    assert session.sentinel_status == DONE
 
 
 @pytest.mark.asyncio

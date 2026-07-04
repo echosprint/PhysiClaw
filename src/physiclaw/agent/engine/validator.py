@@ -162,6 +162,11 @@ def _check_value(key: str, value: Any, prop: dict[str, Any]) -> None:
             raise ValidationError(
                 f"{key}: array has {len(value)} items, min {min_items}"
             )
+        max_items = prop.get("maxItems")
+        if isinstance(max_items, int) and len(value) > max_items:
+            raise ValidationError(
+                f"{key}: array has {len(value)} items, max {max_items}"
+            )
 
     if expected_type == "object":
         sub_schema = prop

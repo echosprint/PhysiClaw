@@ -303,7 +303,10 @@ def test_render_appends_default_state_tip_after_decay_turns() -> None:
 
     expected_tip = (
         f"⚠ Plan still default after {plan_mod.DEFAULT_STATE_AFTER} "
-        "turns — read the user's IM and call update_progress."
+        "turns — read the user's IM and call update_progress. "
+        f"After {plan_mod.PLAN_REQUIRED_AFTER} turns with no plan the engine "
+        "blocks every tool except note / update_progress / "
+        "end_session."
     )
 
     assert expected_tip in p.render().splitlines()
@@ -345,6 +348,163 @@ def test_render_omits_stale_tick_tip_when_recently_updated() -> None:
     out = p.render()
 
     assert "turns since last update_progress" not in out
+
+
+# ---------- step-stuck tips ----------
+
+
+def _stuck_plan(step_turns: int) -> Plan:
+    """Non-default plan with one in_progress step that has run
+    `step_turns` turns, kept fresh via periodic no-op updates so the
+    stale-tick tip can't mask the step-stuck ones."""
+    p = Plan()
+    p.update(
+        user_said="buy yogurt",
+        steps=[{"content": "update quantity to 4", "status": "in_progress"}],
+    )
+    for i in range(step_turns):
+        p.tick_turn()
+        if i % 4 == 3:
+            p.update(understanding="still working the quantity step")
+    return p
+
+
+def test_step_stuck_warn_tip_fires_at_threshold() -> None:
+    p = _stuck_plan(plan_mod.STEP_STUCK_WARN)
+
+    out = p.render()
+
+    assert f"has run {plan_mod.STEP_STUCK_WARN} turns" in out
+    assert "CONVENTION" in out
+
+
+def test_step_stuck_urgent_tip_supersedes_warn() -> None:
+    p = _stuck_plan(plan_mod.STEP_STUCK_URGENT)
+
+    out = p.render()
+
+    assert "STOP" in out
+    assert "has run" not in out  # only the most urgent tip renders
+
+
+def test_step_stuck_tip_truncates_long_step_content() -> None:
+    # A 1000-char step must not balloon the tip that re-renders every
+    # turn once stuck — only a bounded prefix is quoted.
+    p = Plan()
+    long_step = "verify " * 140  # ~980 chars
+    p.update(user_said="x", steps=[{"content": long_step, "status": "in_progress"}])
+    for _ in range(plan_mod.STEP_STUCK_WARN):
+        p.tick_turn()
+
+    tip = p.render().splitlines()[-2]
+
+    assert "…" in tip
+    assert len(tip) < 300
+    assert tip.startswith("⚠ Step ▸ 'verify ")
+
+
+def test_step_stuck_tip_silent_below_threshold() -> None:
+    p = _stuck_plan(plan_mod.STEP_STUCK_WARN - 1)
+
+    out = p.render()
+
+    assert "likely stuck" not in out and "STOP" not in out
+
+
+def test_step_turns_reset_when_in_progress_step_changes() -> None:
+    p = _stuck_plan(plan_mod.STEP_STUCK_WARN)
+    p.update(steps=[
+        {"content": "update quantity to 4", "status": "completed"},
+        {"content": "pay for the order", "status": "in_progress"},
+    ])
+
+    assert p.step_turns == 0
+    assert "stuck" not in p.render()
+
+
+def test_step_turns_survive_unrelated_updates() -> None:
+    # Ticking understanding/user_said must NOT reset the step counter —
+    # that would let a chatty agent dodge the watchdog forever.
+    p = _stuck_plan(plan_mod.STEP_STUCK_WARN)
+
+    assert p.step_turns == plan_mod.STEP_STUCK_WARN
+
+
+def test_current_step_returns_in_progress_content() -> None:
+    p = Plan()
+    assert p.current_step() is None  # the seed step is pending
+    p.update(steps=[
+        {"content": "a", "status": "completed"},
+        {"content": "b", "status": "in_progress"},
+    ])
+    assert p.current_step() == "b"
+
+
+# ---------- is_drafted ----------
+
+
+def test_is_drafted_false_on_fresh_plan() -> None:
+    assert Plan().is_drafted() is False
+
+
+def test_is_drafted_true_once_user_said_set() -> None:
+    p = Plan()
+    p.update(user_said="buy yogurt")
+    assert p.is_drafted() is True
+
+
+def test_is_drafted_true_on_real_steps_without_user_said() -> None:
+    # Drafting steps counts even if the model never quoted the IM — the
+    # plan gate must not punish a structurally-complete plan.
+    p = Plan()
+    p.update(steps=[{"content": "reply to user", "status": "in_progress"}])
+    assert p.is_drafted() is True
+
+
+def test_is_drafted_false_for_empty_steps() -> None:
+    # Gate integrity: `update_progress(steps=[])` must NOT count as a
+    # draft — a gated model can't escape with a hollow plan.
+    p = Plan()
+    p.update(steps=[])
+    assert p.is_drafted() is False
+
+
+def test_is_drafted_false_for_blank_user_said_direct() -> None:
+    # Defense in depth: even if a future path stores a blank user_said
+    # (bypassing update()'s rejection), the predicate must not open the
+    # gate on it.
+    p = Plan()
+    p.user_said = "   "
+    assert p.is_drafted() is False
+
+
+def test_update_rejects_blank_user_said() -> None:
+    # Gate integrity: whitespace passes the schema's minLength but must
+    # not open the gate with an empty quote.
+    p = Plan()
+    with pytest.raises(ValueError, match="blank"):
+        p.update(user_said="   ")
+    assert p.is_drafted() is False
+
+
+def test_step_turns_survive_same_steps_reemit() -> None:
+    # Re-emitting the plan with the SAME in_progress step must not reset
+    # the stuck counter — else re-sending the plan dodges the watchdog.
+    p = Plan()
+    p.update(steps=[{"content": "update qty", "status": "in_progress"}])
+    for _ in range(5):
+        p.tick_turn()
+    p.update(steps=[
+        {"content": "update qty", "status": "in_progress"},
+        {"content": "pay", "status": "pending"},
+    ])
+    assert p.step_turns == 5
+
+
+def test_is_drafted_false_after_understanding_only_update() -> None:
+    p = Plan()
+    p.update(understanding="probably wants the weather")
+    assert p.is_drafted() is False
 
 
 # ---------- inject_tail ----------

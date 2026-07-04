@@ -80,7 +80,28 @@ class EngineConfig:
     wait_default_minutes: int = 15
     react_cooldown_seconds: float = 6.0
     stale_tick_threshold: int = 8
-    state_decay_turns: int = 2
+    # Draft-the-plan reminder. Reading the IM takes ~3 turns of navigation
+    # (wake peek → open app → open thread) before drafting is possible, so 4
+    # fires exactly at the natural draft turn — silent during legitimate
+    # navigation, per the tip philosophy: always-appearing tips get ignored.
+    state_decay_turns: int = 4
+    # Stuck guard (agent.engine.stuck) warn/block tiers — shared by all its
+    # detectors, named for the flagship case: the warn-th camera-verified
+    # no-change press on one target draws a ⚠; the block-th is refused
+    # pre-dispatch.
+    same_target_warn: int = 3
+    same_target_block: int = 5
+    # Plan step watchdog (agent.engine.plan): one in_progress step running
+    # this many turns raises the stuck tip (warn), then the report-to-user
+    # escalation (urgent).
+    step_stuck_warn: int = 12
+    step_stuck_urgent: int = 18
+    # Plan gate (agent.engine.engine._dispatch): after this many turns a
+    # session with no drafted plan has every tool blocked except
+    # note / update_progress / end_session. Must exceed a legitimate
+    # plan-less idle wake (peek IM → nothing → close) and the reminder
+    # threshold `state_decay_turns` above.
+    plan_required_after: int = 8
 
 
 @dataclass
@@ -203,7 +224,10 @@ _SECTION_COMMENTS: dict[str, str] = {
         "is needed on Windows to hit 1080p — the YUY2 default snaps to "
         "640×480 over USB. Drivers may round to the nearest supported mode."
     ),
-    "engine": "Runaway safeguard + retry + pacing for the agent's tool-call loop.",
+    "engine": (
+        "Agent tool-call loop: runaway safeguards (turn cap, stuck guard, "
+        "plan gate) + retry + pacing."
+    ),
     "agent": (
         "Engine + model selection. `model` is a `provider/model` ref, e.g. "
         "`qwen/qwen3.6-plus` or `claude-code/claude-sonnet-4-6`. "

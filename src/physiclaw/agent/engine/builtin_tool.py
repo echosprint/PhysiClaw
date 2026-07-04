@@ -12,6 +12,7 @@ from typing import Any, Awaitable, Callable
 
 from physiclaw.agent.engine import jobs, memory, scratchpad, screen_layout, skill
 from physiclaw.agent.engine.plan import Plan
+from physiclaw.agent.engine.stuck import StuckGuard
 from physiclaw.agent.engine.job_store import KIND_ONE_TIME, KIND_PERIODIC, NEVER, load_jobs
 from physiclaw.agent.runtime.sentinel import IDLE, STATUSES
 
@@ -28,6 +29,7 @@ class Session:
     restart_for_setup: bool = False
     plan: Plan = field(default_factory=Plan)
     scratchpad: str = ""
+    guard: StuckGuard = field(default_factory=StuckGuard)
 
 
 Handler = Callable[[Session, dict], Awaitable[str]]
@@ -189,20 +191,24 @@ _NOTE = LocalTool(
     name="note",
     description=(
         "MUST be called every turn alongside whatever other tool you call. "
-        "`summary` is one line (≤20 words) saying what you're doing this turn "
-        "and why. **It is the ONLY part of the turn that survives "
+        "`summary` is one line (≤20 words): the LAST result + this turn's "
+        "action (`qty still 2 after retry — opening product page`), never "
+        "intent alone. **It is the ONLY part of the turn that survives "
         "compaction** — once a turn ages out, the screen, the tap, every "
-        "other tool_result is gone; your `summary` alone represents that turn. "
-        "Write it to read cold.\n"
+        "other tool_result is gone; your `summary` alone represents that "
+        "turn, and intent-only summaries hide a retry loop from your future "
+        "self.\n"
         "\n"
-        "Optional `scratchpad` field — see CONVENTION § Scratchpad."
+        "Optional `scratchpad` field — see CONVENTION § Scratchpad. "
+        "REQUIRED on a ⚠ pre-compression checkpoint turn (a tail notice "
+        "tells you when)."
     ),
     input_schema={
         "type": "object",
         "properties": {
             "summary": {
                 "type": "string",
-                "description": "One line, ≤20 words: what you're doing this turn and why.",
+                "description": "One line, ≤20 words: last result + this turn's action.",
             },
             "scratchpad": {
                 "type": "string",
@@ -229,7 +235,7 @@ _UPDATE_PROGRESS = LocalTool(
         "\n"
         "Rules — when to call (draft once → tick after each step → re-plan "
         "on shift), step granularity (one objective per step), and the "
-        "skip-if-≤2-steps shortcut — all in CONVENTION § The plan."
+        "skip-if-≤4-steps shortcut — all in CONVENTION § The plan."
     ),
     input_schema={
         "type": "object",
