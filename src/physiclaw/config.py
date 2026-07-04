@@ -38,6 +38,15 @@ class ServerConfig:
 
 
 @dataclass
+class UpdateConfig:
+    """Self-update. ``auto = true`` makes ``physiclaw server`` check PyPI
+    at startup, install a newer release before serving, and restart into
+    it. ``PHYSICLAW_DISABLE_UPDATE_CHECK=1`` env overrides to off. The
+    explicit ``physiclaw update`` command works regardless."""
+    auto: bool = True
+
+
+@dataclass
 class WarmStartConfig:
     bridge_wait_timeout_seconds: int = 120
     bridge_settle_seconds: float = 2.0
@@ -174,6 +183,7 @@ class SkillsConfig:
 @dataclass
 class Config:
     server: ServerConfig = field(default_factory=ServerConfig)
+    update: UpdateConfig = field(default_factory=UpdateConfig)
     warm_start: WarmStartConfig = field(default_factory=WarmStartConfig)
     auto_pick: AutoPickConfig = field(default_factory=AutoPickConfig)
     camera: CameraConfig = field(default_factory=CameraConfig)
@@ -189,6 +199,7 @@ class Config:
 
 _SECTION_TYPES: dict[str, type] = {
     "server": ServerConfig,
+    "update": UpdateConfig,
     "warm_start": WarmStartConfig,
     "auto_pick": AutoPickConfig,
     "camera": CameraConfig,
@@ -217,6 +228,11 @@ _FILE_HEADER = """\
 """
 
 _SECTION_COMMENTS: dict[str, str] = {
+    "update": (
+        "Self-update. `auto = true` checks PyPI when `physiclaw server` "
+        "starts, installs a newer release before serving, and restarts "
+        "into it. PHYSICLAW_DISABLE_UPDATE_CHECK=1 env overrides to off."
+    ),
     "warm_start": "Timeouts for `physiclaw server --warm-start` hardware reconnect.",
     "auto_pick": "Timeouts for the camera auto-pick step in `physiclaw setup hardware`.",
     "camera": (

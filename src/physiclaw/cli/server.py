@@ -111,6 +111,15 @@ def server(
     ] = CONFIG.server.save_raw_camera,
 ) -> None:
     """Run the PhysiClaw MCP server."""
+    # Self-update BEFORE any state is written or hardware touched: a
+    # successful install hands this process over to the new version
+    # (re-exec on macOS/Linux, waited child on Windows) — it must not
+    # continue here, or lazy imports would load new code into this old
+    # process. Fail-soft — never blocks the server (see cli/update.py).
+    from physiclaw.cli.update import maybe_auto_update
+
+    maybe_auto_update()
+
     from physiclaw.core.logger import setup_logging
 
     for enabled, env in (

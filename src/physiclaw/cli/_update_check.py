@@ -131,6 +131,6 @@ def maybe_print_update_banner() -> None:
         return
     print(
         f"\n! physiclaw {_pkg_version} → {latest} available. "
-        f"Update with: uv tool upgrade physiclaw",
+        "Update with: physiclaw update",
         flush=True,
     )

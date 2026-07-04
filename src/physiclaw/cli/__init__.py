@@ -17,6 +17,7 @@ from physiclaw.cli.setup import setup_app
 from physiclaw.cli.skills import skills_app
 from physiclaw.cli.status import status
 from physiclaw.cli.uninstall import uninstall
+from physiclaw.cli.update import update
 
 app = typer.Typer(
     help=f"PhysiClaw {_pkg_version} — let AI agents physically operate a phone.",
@@ -28,6 +29,7 @@ app = typer.Typer(
 app.command()(doctor)
 app.command()(server)
 app.command()(status)
+app.command()(update)
 app.command()(flash)
 app.command()(clear)
 app.command()(reset)
