@@ -8,12 +8,12 @@ Scheduled work lives in `jobs/jobs.md`: id + 5-field cron + a context blob injec
 [pend] ──(cron fires)──▶ [fired] ──(finish_job)──▶ [done | fail | cancel]
 ```
 
-- **one-time** (default) — terminal; auto-purged 7 days after termination. For follow-ups, reminders, deferred actions.
-- **periodic** — `finish_job(id, "done"|"fail")` resets to `pend` (next fire time already advanced); only `cancel` is permanent.
+- **one-time** (default) — terminal; auto-purged 7 days after termination. For follow-ups, reminders, deferred actions — **including reply watchers**: schedule ONE check at a specific minute; if still unresolved, create the next check then. Never a `*/N` periodic watcher.
+- **periodic** — for genuinely recurring routines (min interval 30 min; `create_job` rejects faster). `finish_job(id, "done"|"fail")` means "done for THIS occurrence": it resets to `pend` and WILL fire again. When the routine's purpose is over, `cancel` — that's the only permanent stop.
 
 ## Outcome marking
 
-The engine never auto-marks. Every fired job needs its own `finish_job(id, status, recap)` this wake — a wake may fire several. Unmarked jobs sit in `fired` forever (`purge_stale` sweeps only terminal). Next wake: `list_jobs("fired")` to find orphans.
+The engine never auto-marks. Every fired job needs its own `finish_job(id, status, recap)` this wake — a wake may fire several. Jobs left in `fired` are auto-failed after 24 h. Next wake: `list_jobs("fired")` to find orphans.
 
 ## Ids & immutability
 

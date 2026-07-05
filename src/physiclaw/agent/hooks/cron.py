@@ -23,6 +23,7 @@ from physiclaw.agent.engine.job_store import (
     STATUS_FIRED,
     STATUS_PEND,
     Job,
+    expire_stale_fired,
     find_due,
     format_minute,
     load_jobs,
@@ -82,6 +83,15 @@ async def cron() -> Trigger | None:
         purge_stale(now=now, jobs=jobs)
     except Exception:
         log.exception("cron: purge_stale failed")
+
+    # Zombie sweep: auto-fail jobs stuck in `fired` for 24h+ — no session
+    # ever closed them, and they're invisible to both find_due (not pend)
+    # and purge_stale (not terminal). Purge targets terminal statuses,
+    # expire targets fired — disjoint, so sharing the loaded list is safe.
+    try:
+        expire_stale_fired(now=now, jobs=jobs)
+    except Exception:
+        log.exception("cron: expire_stale_fired failed")
 
     due = find_due(jobs, now)
     if not due:
@@ -197,6 +207,16 @@ def _cli() -> int:
             print(f"WRITE ERROR: {e}")
             return 1
         print(f"OK: {cmd} {job_id}")
+        if updates.get("Status") == STATUS_PEND:
+            # Same warning the in-process finish_job tool gives: agents
+            # kept reading "done" as "over" while the periodic job
+            # re-armed and fired again (2026-07-05 yogurt incident).
+            nxt = job.next_fire_time or "its next scheduled minute"
+            print(
+                f"NOTE: {job_id} is PERIODIC — re-armed, fires again at "
+                f"{nxt}. If its purpose is over, run: "
+                f"python -m physiclaw.agent.hooks.cron cancel {job_id}"
+            )
         return 0
 
     if cmd == "purge":

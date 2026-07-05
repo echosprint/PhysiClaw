@@ -79,7 +79,11 @@ Example: `2026-04-09T09:00`. Unfired fields use `(never)`.
 
 1. Run verify
 2. Based on user request, determine: **id**, **description**, **type**,
-   **schedule**, **context**
+   **schedule**, **context**. Type rules: reply-watchers / follow-ups are
+   **one-time** at a specific minute (recreate if still unresolved) —
+   never a `*/N` periodic. Periodic is for genuinely recurring routines,
+   minimum 30 min between fires (each fire wakes the whole agent, and
+   `done` re-arms a periodic job; only `cancel` stops it).
 3. Create `jobs/jobs.md` if it doesn't exist:
 
    ```markdown

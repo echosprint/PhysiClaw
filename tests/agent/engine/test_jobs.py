@@ -302,6 +302,48 @@ def test_create_job_records_next_fire_from_cron_schedule(
     assert "- Next fire time: 2026-04-28T15:00" in text
 
 
+def test_create_job_periodic_rejects_high_frequency_schedule(
+    _jobs_path: Path,
+) -> None:
+    # A */5 periodic "reply watcher" loops forever at full-agent cost
+    # (done re-arms it) — refused with a pointer to one-time.
+    with freeze_time("2026-04-28T07:00:00"), pytest.raises(
+        ValueError, match="ONE-TIME"
+    ):
+        jobs.create_job(
+            id="watcher",
+            description="d",
+            schedule="*/5 * * * *",
+            context="ten chars at least",
+            kind=KIND_PERIODIC,
+        )
+
+    assert not _jobs_path.exists()
+
+
+def test_create_job_one_time_allows_high_frequency_schedule(
+    _jobs_path: Path,
+) -> None:
+    # The floor is periodic-only — a one-time job fires once no matter
+    # what period its cron expression implies.
+    with freeze_time("2026-04-28T07:00:00"):
+        jobs.create_job(
+            id="check-once",
+            description="d",
+            schedule="*/5 * * * *",
+            context="ten chars at least",
+        )
+
+    assert "- Type: one-time" in _jobs_path.read_text()
+
+
+def test_min_fire_gap_uses_smallest_gap_of_mixed_schedule() -> None:
+    # `0,10 9 * * *` alternates 10 min and ~24 h gaps — the 10 min
+    # burst is what the floor must catch.
+    gap = job_store.min_fire_gap("0,10 9 * * *", dt.datetime(2026, 4, 28, 7, 0))
+    assert gap == dt.timedelta(minutes=10)
+
+
 def test_create_job_periodic_kind_records_periodic(_jobs_path: Path) -> None:
     with freeze_time("2026-04-28T07:00:00"):
         jobs.create_job(
@@ -437,6 +479,34 @@ def test_finish_job_periodic_done_resets_to_pend(_jobs_path: Path) -> None:
 
     text = _jobs_path.read_text()
     assert "- Status: pend" in text
+
+
+def test_finish_job_periodic_done_reply_flags_rearm(_jobs_path: Path) -> None:
+    # The 2026-07-05 yogurt loop: the agent read "done" as "over" while
+    # the periodic job re-armed and fired again minutes later. The tool
+    # reply must state the re-arm and the permanent way out (cancel).
+    _write_jobs(_jobs_path, _job_text(
+        job_id="periodic", kind="periodic", status="fired",
+        next_fire_time="2026-04-29T07:00",
+    ))
+
+    with freeze_time("2026-04-28T08:00:00"):
+        out = jobs.finish_job(id="periodic", status=STATUS_DONE, recap="ok")
+
+    assert "RE-ARMED" in out
+    assert "2026-04-29T07:00" in out
+    assert "cancel" in out
+
+
+def test_finish_job_one_time_reply_is_plain(_jobs_path: Path) -> None:
+    _write_jobs(_jobs_path, _job_text(
+        job_id="one-shot", kind="one-time", status="fired",
+    ))
+
+    with freeze_time("2026-04-28T08:00:00"):
+        out = jobs.finish_job(id="one-shot", status=STATUS_DONE, recap="ok")
+
+    assert out == "finished job 'one-shot' as done"
 
 
 def test_finish_job_periodic_fail_also_resets_to_pend(_jobs_path: Path) -> None:

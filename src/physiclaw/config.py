@@ -170,6 +170,9 @@ class ClaudeConfig:
 @dataclass
 class RetentionConfig:
     trace_days: int = 7
+    # A cron job stuck in `fired` (no session ever closed it) is
+    # auto-closed after this long: one-time → fail, periodic → re-armed.
+    fired_expire_hours: int = 24
 
 
 @dataclass

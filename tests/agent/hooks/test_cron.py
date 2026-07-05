@@ -396,6 +396,27 @@ def test_cli_done_periodic_resets_to_pend(
     assert rc == 0
     text = _jobs_path.read_text()
     assert "- Status: pend" in text
+    # The claude-code engine marks jobs through this CLI — it must get
+    # the same re-arm warning the in-process finish_job tool gives.
+    out = capsys.readouterr().out
+    assert "PERIODIC" in out
+    assert "2026-04-28T08:00" in out
+    assert "cancel p" in out
+
+
+def test_cli_done_one_time_prints_no_rearm_note(
+    _jobs_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    _jobs_path.parent.mkdir(parents=True, exist_ok=True)
+    _jobs_path.write_text(_job_text(
+        job_id="o", kind="one-time", status=STATUS_FIRED,
+        schedule="0 7 28 4 *", next_fire_time=NEVER,
+    ))
+
+    rc = _run_cli(monkeypatch, "done", "o", "ok")
+
+    assert rc == 0
+    assert "PERIODIC" not in capsys.readouterr().out
 
 
 def test_cli_cancel_marks_cancel(

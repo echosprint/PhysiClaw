@@ -354,7 +354,13 @@ async def test_list_jobs_renders_job_lines(mocker) -> None:
 
 @pytest.mark.asyncio
 async def test_finish_job_calls_jobs_finish(mocker) -> None:
-    spy = mocker.patch("physiclaw.agent.engine.jobs.finish_job")
+    # The handler passes finish_job's reply through verbatim — for a
+    # periodic job that reply carries the RE-ARMED warning the agent
+    # must see (see jobs.finish_job).
+    spy = mocker.patch(
+        "physiclaw.agent.engine.jobs.finish_job",
+        return_value="finished job 'x' as done",
+    )
 
     out = await _handle_finish_job(
         Session(), {"id": "x", "status": "done", "recap": "ok"}

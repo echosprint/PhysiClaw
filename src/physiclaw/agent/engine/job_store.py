@@ -265,6 +265,38 @@ def format_minute(t: dt.datetime) -> str:
     return t.replace(second=0, microsecond=0).isoformat(timespec="minutes")
 
 
+def min_fire_gap(
+    schedule: str, start: dt.datetime, samples: int = 5
+) -> dt.timedelta | None:
+    """Smallest gap between consecutive fires over the next `samples` fires.
+
+    Sampling (rather than parsing the cron fields) handles mixed
+    schedules like `0,10 9 * * *` whose gaps vary."""
+    prev = next_fire(schedule, start)
+    if prev is None:
+        return None
+    smallest: dt.timedelta | None = None
+    for _ in range(samples):
+        nxt = next_fire(schedule, prev)
+        if nxt is None:
+            break
+        gap = nxt - prev
+        if smallest is None or gap < smallest:
+            smallest = gap
+        prev = nxt
+    return smallest
+
+
+def _parse_minute(ts_str: str) -> dt.datetime | None:
+    """ISO-minute timestamp → datetime, or None on empty / garbage."""
+    if not ts_str:
+        return None
+    try:
+        return dt.datetime.fromisoformat(ts_str)
+    except ValueError:
+        return None
+
+
 # ---------- due check ----------
 
 
@@ -279,11 +311,8 @@ def find_due(jobs: list[Job], now: dt.datetime) -> list[Job]:
     for job in jobs:
         if job.status != STATUS_PEND:
             continue
-        if not job.next_fire_time:
-            continue
-        try:
-            nft = dt.datetime.fromisoformat(job.next_fire_time)
-        except ValueError:
+        nft = _parse_minute(job.next_fire_time)
+        if nft is None:
             continue
         if nft <= now:
             due.append(job)
@@ -337,11 +366,9 @@ def update_fields(path: Path, updates: dict[str, dict[str, str]]) -> None:
 def _latest_timestamp(job: Job) -> dt.datetime | None:
     """Most recent activity timestamp for a job, or None."""
     for ts_str in (job.execution_time, job.last_fire_time):
-        if ts_str:
-            try:
-                return dt.datetime.fromisoformat(ts_str)
-            except ValueError:
-                continue
+        ts = _parse_minute(ts_str)
+        if ts is not None:
+            return ts
     return None
 
 
@@ -359,6 +386,63 @@ def _remove_sections(path: Path, job_ids: set[str]) -> None:
     # Clean up any resulting triple+ blank lines.
     text = re.sub(r"\n{3,}", "\n\n", text)
     write_text(path, text)
+
+
+# A fired job no session ever closed sits outside both find_due (not
+# pend) and purge_stale (not terminal) — a permanent zombie. After this
+# long it is auto-closed so the miss surfaces in the file: one-time →
+# fail (terminal, purges later); periodic → pend, mirroring
+# finish_job's fail-on-periodic semantics — terminal would silently
+# kill a living routine over one unhandled fire.
+FIRED_EXPIRE = dt.timedelta(hours=CONFIG.retention.fired_expire_hours)
+
+
+def expire_stale_fired(
+    *,
+    now: dt.datetime,
+    jobs: list[Job] | None = None,
+    path: Path | None = None,
+) -> list[str]:
+    """Auto-close jobs stuck in `fired` for FIRED_EXPIRE or longer.
+
+    One-time zombies are failed; periodic zombies re-arm to `pend` (the
+    stale Next fire time makes them fire again promptly — worst case one
+    wake per FIRED_EXPIRE until a session closes them properly). Returns
+    the expired ids. Jobs with a missing/unparsable Last fire time are
+    left alone (they surface via `cron verify`)."""
+    if path is None:
+        path = JOBS_PATH
+    if jobs is None:
+        jobs = load_jobs(path)
+
+    updates: dict[str, dict[str, str]] = {}
+    for j in jobs:
+        if j.status != STATUS_FIRED:
+            continue
+        fired_at = _parse_minute(j.last_fire_time)
+        if fired_at is None:
+            continue
+        if now - fired_at >= FIRED_EXPIRE:
+            if j.kind == KIND_PERIODIC:
+                new_status, verdict = STATUS_PEND, "re-armed"
+            else:
+                new_status, verdict = STATUS_FAIL, "failed"
+            updates[j.id] = {
+                "Status": new_status,
+                "Execution time": format_minute(now),
+                "Execution result": (
+                    f"auto-{verdict}: fired {j.last_fire_time} "
+                    "but never finished"
+                ),
+            }
+
+    if updates:
+        update_fields(path, updates)
+        log.warning(
+            "jobs: auto-closed %d zombie fired job(s): %s",
+            len(updates), sorted(updates),
+        )
+    return sorted(updates)
 
 
 def purge_stale(

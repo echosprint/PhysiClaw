@@ -70,6 +70,7 @@ from physiclaw.agent.engine.job_store import (
     STATUS_PEND,
     TERMINAL_STATUSES,
     Job,
+    expire_stale_fired,
     find_due,
     format_minute,
     load_jobs,
@@ -743,6 +744,87 @@ def test_update_fields_raises_when_target_field_does_not_exist(
 
 
 # ---------- purge_stale ----------
+
+
+def test_expire_stale_fired_fails_one_time_zombie_after_24h(
+    tmp_path: Path,
+) -> None:
+    # A fired job no session ever closed is invisible to both find_due
+    # (not pend) and purge_stale (not terminal) — a permanent zombie
+    # (the qiaoqian-water-payment job sat that way for two weeks).
+    zombie = _job_section(
+        job_id="zombie",
+        kind="one-time",
+        status=STATUS_FIRED,
+        next_fire_time=NEVER,
+        last_fire_time="2026-04-26T12:00",  # > 24h before "now"
+    )
+    p = _write_jobs(tmp_path, zombie)
+
+    expired = expire_stale_fired(now=dt.datetime(2026, 4, 28, 0, 0), path=p)
+
+    assert expired == ["zombie"]
+    text = p.read_text()
+    assert "- Status: fail" in text
+    assert "auto-failed: fired 2026-04-26T12:00 but never finished" in text
+    assert "- Execution time: 2026-04-28T00:00" in text
+
+
+def test_expire_stale_fired_rearms_periodic_zombie(tmp_path: Path) -> None:
+    # Mirrors finish_job's fail-on-periodic semantics: terminal-failing
+    # a periodic zombie would purge — silently killing a living routine
+    # over one unhandled fire. Re-arm instead (worst case: one wake per
+    # FIRED_EXPIRE until a session closes it properly).
+    zombie = _job_section(
+        job_id="routine",
+        kind="periodic",
+        status=STATUS_FIRED,
+        next_fire_time="2026-04-26T13:00",
+        last_fire_time="2026-04-26T12:00",
+    )
+    p = _write_jobs(tmp_path, zombie)
+
+    expired = expire_stale_fired(now=dt.datetime(2026, 4, 28, 0, 0), path=p)
+
+    assert expired == ["routine"]
+    text = p.read_text()
+    assert "- Status: pend" in text
+    assert "auto-re-armed: fired 2026-04-26T12:00 but never finished" in text
+
+
+def test_expire_stale_fired_keeps_recently_fired_jobs(tmp_path: Path) -> None:
+    fresh = _job_section(
+        job_id="fresh",
+        status=STATUS_FIRED,
+        next_fire_time=NEVER,
+        last_fire_time="2026-04-27T23:30",  # 30 min before "now"
+    )
+    p = _write_jobs(tmp_path, fresh)
+
+    expired = expire_stale_fired(now=dt.datetime(2026, 4, 28, 0, 0), path=p)
+
+    assert expired == []
+    assert "- Status: fired" in p.read_text()
+
+
+def test_expire_stale_fired_ignores_non_fired_and_unparsable(
+    tmp_path: Path,
+) -> None:
+    pend = _job_section(job_id="pending", status=STATUS_PEND)
+    weird = _job_section(
+        job_id="weird",
+        status=STATUS_FIRED,
+        next_fire_time=NEVER,
+        last_fire_time="not-a-time",
+    )
+    p = _write_jobs(tmp_path, pend, weird)
+
+    expired = expire_stale_fired(now=dt.datetime(2026, 4, 28, 0, 0), path=p)
+
+    assert expired == []
+    text = p.read_text()
+    assert "- Status: pend" in text
+    assert "- Status: fired" in text
 
 
 def test_purge_stale_removes_terminal_jobs_older_than_window(

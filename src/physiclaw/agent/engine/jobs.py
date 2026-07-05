@@ -29,6 +29,7 @@ from physiclaw.agent.engine.job_store import (
     Job,
     format_minute,
     load_jobs,
+    min_fire_gap,
     next_fire,
     update_fields,
     validate_schedule,
@@ -38,6 +39,12 @@ from physiclaw.agent.runtime.hook import Trigger
 log = logging.getLogger(__name__)
 
 _CRON_PREFIX = "cron:"
+
+# Every periodic fire wakes the full agent (camera + LLM turns), and
+# done/fail re-arms the job — a `*/5` "reply watcher" therefore loops
+# forever at enormous cost once its purpose is gone (2026-07-05 yogurt
+# incident). Below this floor, force a one-time follow-up instead.
+PERIODIC_MIN_GAP = dt.timedelta(minutes=30)
 
 AUTO_WAIT_JOB_ID = "wait-check-auto"
 _AUTO_WAIT_DESCRIPTION = "Auto follow-up after WAIT with no explicit create_job."
@@ -97,13 +104,26 @@ def create_job(
 
     Raises ValueError on duplicate id (even if the existing entry is
     terminal — the agent must pick a fresh id), invalid kind, invalid
-    schedule, missing description, or context shorter than 10 chars.
+    schedule, a periodic schedule firing more often than
+    PERIODIC_MIN_GAP, missing description, or context shorter than
+    10 chars.
     """
     if not ID_RE.match(id):
         raise ValueError(f"invalid job id {id!r} (lowercase + digits + hyphens)")
     if kind not in (KIND_ONE_TIME, KIND_PERIODIC):
         raise ValueError(f"kind must be one-time or periodic, got {kind!r}")
     validate_schedule(schedule)
+    if kind == KIND_PERIODIC:
+        gap = min_fire_gap(schedule, dt.datetime.now())
+        if gap is not None and gap < PERIODIC_MIN_GAP:
+            raise ValueError(
+                f"periodic schedule {schedule!r} fires every "
+                f"{int(gap.total_seconds() // 60)} min — the minimum for "
+                f"periodic jobs is {int(PERIODIC_MIN_GAP.total_seconds() // 60)} "
+                "min (each fire wakes the whole agent). For a reply check or "
+                "follow-up, create a ONE-TIME job at a specific minute instead, "
+                "and create another one then if it's still unresolved."
+            )
     if len(context.strip()) < 10:
         raise ValueError("context must be at least 10 characters")
     description = description.strip()
@@ -175,7 +195,7 @@ def get_job(id: str) -> Job:
     return existing[id]
 
 
-def finish_job(*, id: str, status: str, recap: str) -> None:
+def finish_job(*, id: str, status: str, recap: str) -> str:
     """Mark a job as terminated. `status` is one of done / fail / cancel.
 
     Sets Status (or pend reset for periodic done/fail), Execution time
@@ -185,6 +205,9 @@ def finish_job(*, id: str, status: str, recap: str) -> None:
 
     For periodic jobs, done/fail reset to pend so the next firing still
     happens; cancel is permanent (to revive, create_job with a new id).
+    Returns the tool-reply line; when a periodic job re-arms, the reply
+    says so explicitly — agents kept reading "done" as "over" and the
+    job fired again minutes later (2026-07-05 yogurt incident).
     """
     if status not in TERMINAL_STATUSES:
         raise ValueError(
@@ -209,3 +232,11 @@ def finish_job(*, id: str, status: str, recap: str) -> None:
         "Execution result": recap.strip() or status,
     }})
     log.info("jobs: finished %s as %s", id, status)
+    if new_status == STATUS_PEND:
+        nxt = j.next_fire_time or "its next scheduled minute"
+        return (
+            f"finished job {id!r} as {status} — PERIODIC job, so it is "
+            f"RE-ARMED and will fire again at {nxt}. If its purpose is "
+            "over, call finish_job(status='cancel') now to stop it for good"
+        )
+    return f"finished job {id!r} as {status}"

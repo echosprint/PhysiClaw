@@ -141,8 +141,9 @@ async def _handle_list_jobs(_session: Session, args: dict) -> str:
 
 
 async def _handle_finish_job(_session: Session, args: dict) -> str:
-    jobs.finish_job(id=args["id"], status=args["status"], recap=args["recap"])
-    return f"finished job {args['id']!r} as {args['status']}"
+    # finish_job composes the reply — a periodic done/fail RE-ARMS the
+    # job, and the agent must see that in the tool result.
+    return jobs.finish_job(id=args["id"], status=args["status"], recap=args["recap"])
 
 
 async def _handle_wait(_session: Session, args: dict) -> str:
