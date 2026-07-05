@@ -14,9 +14,10 @@ import pytest
 from physiclaw.core.bridge.page import PageState
 
 
-def _bridge_stub(text: str = "default text") -> object:
+def _bridge_stub(text: str = "default text", copied: bool = False) -> object:
     obj = type("BridgeStub", (), {})()
     obj.current_text = lambda: text
+    obj.is_copied = lambda: copied
     return obj
 
 
@@ -127,7 +128,17 @@ def test_get_state_in_bridge_mode_includes_text_from_bridge() -> None:
         "mode": "bridge",
         "has_device_info": False,
         "text": "hello user",
+        "copied": False,
     }
+
+
+def test_get_state_in_bridge_mode_reflects_copied_flag() -> None:
+    bridge = _bridge_stub("done", copied=True)
+    p = PageState(bridge, _cal_stub())
+
+    state = p.get_state()
+
+    assert state["copied"] is True
 
 
 def test_get_state_includes_has_device_info_true_when_screen_dimension_set() -> None:

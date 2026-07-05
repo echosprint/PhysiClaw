@@ -126,6 +126,15 @@ class BridgeState:
         with self.lock:
             return self._text
 
+    def is_copied(self) -> bool:
+        """True once the queued text has been copied to the phone clipboard
+        — via the clipboard Shortcut fetch (:meth:`fetch_text`) or a
+        confirmed tap (:meth:`mark_clipboard_copied`). Cleared whenever new
+        text is queued or the text is cleared, so it always refers to the
+        CURRENT text. Drives the phone's on-screen "copied — paste to
+        verify" confirmation (see ``PageState.get_state``)."""
+        return self._clipboard_copied.is_set()
+
     def fetch_text(self) -> str | None:
         """Atomically read the queued text and mark it as copied.
 

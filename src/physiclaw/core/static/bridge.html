@@ -48,7 +48,7 @@ body.mode-bridge #bridge-layer{
 #msg-text{
   font-weight:600;
   text-align:center;
-  word-break:break-all;
+  white-space:nowrap;
   line-height:1.4;
   padding:20px;
   max-width:100%;
@@ -77,7 +77,15 @@ body.mode-bridge #bridge-layer{
   z-index:10;
 }
 #center-circle.show{opacity:1;}
-#msg-feedback{display:none}
+#msg-feedback{
+  display:none;
+  color:#16a34a;
+  font-weight:700;
+  font-size:min(5.5vw,24px);
+  letter-spacing:0.3px;
+  text-align:center;
+  margin-bottom:20px;
+}
 #msg-hint{
   position:fixed;
   bottom:calc(env(safe-area-inset-bottom,20px) + 16px);
@@ -273,11 +281,14 @@ body.mode-bridge #bridge-layer{
         // Orange circle showing where to place AT button
         var at = data.at || {x: 36, y: 200, r: 28};
         circle(at.x, at.y, at.r, '#f97316');
-        // Color nonce barcode — 20 colored squares in a vertical column
-        var nonce = data.nonce || {colors: [], x: 180, y: 300, size: 3};
+        // Grey nonce grid — squares laid out row-major, `cols` per row
+        var nonce = data.nonce || {colors: [], x: 180, y: 300, size: 3, cols: 8};
+        var ncols = nonce.cols || 8;
         for(var ni=0; ni<nonce.colors.length; ni++){
           var c = nonce.colors[ni];
-          rect(nonce.x, nonce.y + ni * nonce.size, nonce.size, nonce.size,
+          rect(nonce.x + (ni % ncols) * nonce.size,
+               nonce.y + Math.floor(ni / ncols) * nonce.size,
+               nonce.size, nonce.size,
                'rgb('+c[0]+','+c[1]+','+c[2]+')', 0);
         }
         break;
@@ -286,22 +297,37 @@ body.mode-bridge #bridge-layer{
   }
 
   function fitTextSize(){
-    // Shrink font until text fits the viewport without scrolling
-    var maxH = window.innerHeight * 0.7;
+    // Shrink the font until the text fits on ONE line within the viewport
+    // width (#msg-text is nowrap) — a short code like PhysiClaw-ED6F9B
+    // stays on a single line instead of wrapping and blowing up huge.
+    var maxW = window.innerWidth * 0.9;
     var size = Math.min(window.innerWidth * 0.14, 100);
     msgTextEl.style.fontSize = size + 'px';
-    while(size > 12 && msgTextEl.scrollHeight > maxH){
+    while(size > 12 && msgTextEl.scrollWidth > maxW){
       size -= 2;
       msgTextEl.style.fontSize = size + 'px';
     }
   }
 
   function renderBridge(data){
+    // Defaults; only the "copied" branch overrides these two.
+    msgFeedbackEl.style.display = 'none';
+    msgHintEl.textContent = 'tap anywhere to copy';
     if(data.text !== null){
       msgTextEl.textContent = data.text;
       msgTextEl.className = '';
-      msgHintEl.style.opacity = '0.4';
       fitTextSize();
+      if(data.copied){
+        // The clipboard Shortcut fetched the text (or a tap confirmed it).
+        // Confirm on-screen with the text still shown so the operator can
+        // paste it somewhere and check it matches.
+        msgFeedbackEl.textContent = '✓ written to clipboard';
+        msgFeedbackEl.style.display = 'block';
+        msgHintEl.textContent = 'paste anywhere to verify';
+        msgHintEl.style.opacity = '0.5';
+      } else {
+        msgHintEl.style.opacity = '0.4';
+      }
     } else {
       msgTextEl.textContent = 'PhysiClaw';
       msgTextEl.className = 'waiting';
@@ -343,12 +369,13 @@ body.mode-bridge #bridge-layer{
   // STATE — mirrors server's PageState.get_state() response
   // ════════════════════════════════════════════════════════
   // Updated every 250ms from GET /api/bridge/state. Touch handlers read this.
-  // Bridge mode:    {mode, text}
+  // Bridge mode:    {mode, text, copied}
   // Calibrate mode: {mode, phase, screen_dimension, grid:{cols,rows},
-  //                   dot?:{x,y}, at?:{x,y,r}, nonce?:{colors,x,y,size}}
+  //                   dot?:{x,y}, at?:{x,y,r}, nonce?:{colors,x,y,size,cols}}
   var state = {
     mode: 'bridge',
     text: null,
+    copied: false,
     phase: 'idle',
     grid: {cols: [0.25, 0.50, 0.75], rows: [0.20, 0.40, 0.50, 0.60, 0.80]},
     screen_dimension: null

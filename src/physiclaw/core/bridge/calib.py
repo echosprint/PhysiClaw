@@ -12,8 +12,10 @@ from physiclaw.core.bridge.nonce import (
     NONCE_CSS_X,
     NONCE_CSS_Y,
     NONCE_DARK,
+    NONCE_GRID_COLS,
     NONCE_LIGHT,
     NONCE_SQUARE_SIZE,
+    nonce_css_x,
 )
 from physiclaw.core.calibration.transforms import ViewportShift
 from physiclaw.core.hardware.iphone import AssistiveTouch
@@ -44,7 +46,7 @@ class CalibrationState:
         "corners",           # RGBM squares at phone-screen corners (auto-pick)
         "grid",              # 15 red dots at known viewport positions
         "dot",               # single orange dot at a given (x, y) in 0-1
-        "assistive_touch",   # AT circle + color nonce barcode
+        "assistive_touch",   # AT circle + grey nonce grid
     }
 
     def __init__(self):
@@ -142,6 +144,19 @@ class CalibrationState:
             vx * dim["viewport_width"], vy * dim["viewport_height"]
         )
 
+    def nonce_x(self) -> int:
+        """The nonce grid's left edge (CSS px) — centered on the viewport.
+
+        The single source for BOTH ends of the nonce protocol: get_state
+        serves it to the page (renderer) and the AT verification step
+        passes it to verify_nonce (sampler), so they can't disagree.
+        Falls back to NONCE_CSS_X before the page reports its dimensions.
+        """
+        dim = self.screen_dimension
+        if dim and dim.get("viewport_width"):
+            return nonce_css_x(dim["viewport_width"])
+        return NONCE_CSS_X
+
     def get_state(self) -> dict:
         """Get current display command for the page to render.
 
@@ -152,7 +167,7 @@ class CalibrationState:
               grid:  {cols, rows},
               dot:   {x, y},                       # only when phase=="dot"
               at:    {x, y, r},                    # only when phase=="assistive_touch"
-              nonce: {colors, x, y, size},         # only when phase=="assistive_touch"
+              nonce: {colors, x, y, size, cols},   # only when phase=="assistive_touch"
             }
         """
         with self.lock:
@@ -177,8 +192,9 @@ class CalibrationState:
                         [NONCE_LIGHT] * 3 if b else [NONCE_DARK] * 3
                         for b in self._screenshot_nonce
                     ],
-                    "x": NONCE_CSS_X,
+                    "x": self.nonce_x(),
                     "y": NONCE_CSS_Y,
                     "size": NONCE_SQUARE_SIZE,
+                    "cols": NONCE_GRID_COLS,
                 }
             return d

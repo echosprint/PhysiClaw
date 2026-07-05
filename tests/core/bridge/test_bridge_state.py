@@ -248,6 +248,44 @@ def test_fetch_text_when_no_text_returns_none_and_does_not_set_event(
     assert bs._clipboard_copied.is_set() is False
 
 
+# ---------- is_copied ----------
+
+
+def test_is_copied_false_before_any_copy(bs: BridgeState) -> None:
+    bs.send_text("payload")
+
+    assert bs.is_copied() is False
+
+
+def test_is_copied_true_after_fetch(bs: BridgeState) -> None:
+    bs.send_text("payload")
+    bs.fetch_text()
+
+    assert bs.is_copied() is True
+
+
+def test_is_copied_true_after_tap_confirmation(bs: BridgeState) -> None:
+    bs.mark_clipboard_copied()
+
+    assert bs.is_copied() is True
+
+
+def test_is_copied_resets_when_new_text_queued(bs: BridgeState) -> None:
+    # New text hasn't been copied yet — the flag must not linger from the
+    # previous copy, or the phone would falsely show a stale confirmation.
+    bs.mark_clipboard_copied()
+    bs.send_text("fresh")
+
+    assert bs.is_copied() is False
+
+
+def test_is_copied_resets_when_text_cleared(bs: BridgeState) -> None:
+    bs.mark_clipboard_copied()
+    bs.clear_text()
+
+    assert bs.is_copied() is False
+
+
 # ---------- mark_clipboard_copied / wait_clipboard ----------
 
 

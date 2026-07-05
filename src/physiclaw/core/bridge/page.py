@@ -42,5 +42,6 @@ class PageState:
             state.update(self.cal.get_state())
         else:
             state["text"] = self.bridge.current_text()
+            state["copied"] = self.bridge.is_copied()
 
         return state

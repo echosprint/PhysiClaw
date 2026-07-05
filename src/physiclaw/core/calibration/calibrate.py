@@ -26,7 +26,7 @@ import cv2
 import numpy as np
 
 from physiclaw import paths
-from physiclaw.core.bridge import BridgeState, CalibrationState
+from physiclaw.core.bridge import BridgeState, CalibrationState, PageState
 from physiclaw.core.bridge.nonce import NONCE_COUNT, verify_nonce
 from physiclaw.core.calibration.transforms import (
     PARK_PCT,
@@ -904,21 +904,25 @@ def verify_assistive_touch(
     bridge: BridgeState,
     cal: CalibrationState,
     pct_to_grbl: np.ndarray,
+    phone: PageState,
 ) -> dict:
     """Verify all three AT gestures end-to-end.
 
     1. Single-tap → "PhysiClaw Tap" Shortcut takes a screenshot (saved to Photos).
     2. Wait 5s for the screenshot animation to finish.
     3. Double-tap → "PhysiClaw Screenshot" Shortcut uploads the latest photo.
-       Verify the uploaded image contains the color nonce.
+       Verify the uploaded image contains the grey nonce grid.
     4. Long-press → "PhysiClaw Clipboard" Shortcut GETs /api/bridge/clipboard.
        Verify the server's clipboard-copied event fires within the timeout.
        Return the queued text so the user can paste-verify downstream.
 
     Requires:
-    - Phase "assistive_touch" already set on phone with nonce bits
+    - assistive-touch/show has run (generated the nonce bits) — this call
+      re-displays the grid itself, so the phone may be in any mode on entry
     - User has positioned AT at the orange circle
     - cal.viewport_shift is set (from pre-cal)
+
+    Leaves the phone on the plain bridge page after the clipboard confirmation.
 
     Returns:
         {
@@ -940,6 +944,14 @@ def verify_assistive_touch(
         raise RuntimeError("No nonce set — call assistive-touch/show first")
 
     bridge.clear_screenshot()
+
+    # Show the nonce grid for the screenshot sub-step, whatever mode the
+    # page was left in — a prior verify ends in bridge mode after its
+    # clipboard confirmation. Re-establishing it here makes this call
+    # self-sufficient instead of relying on assistive-touch/show still
+    # being on-screen.
+    phone.set_mode("calibrate", "assistive_touch", nonce_bits=nonce)
+    time.sleep(0.5)  # let the phone poll and render the grid before the shot
 
     log.info("  Single-tap AT (iOS screenshot)...")
     at.tap(arm, pct_to_grbl)
@@ -976,7 +988,7 @@ def verify_assistive_touch(
     if t is None:
         raise RuntimeError("viewport_shift not set — run measure-viewport-shift first")
 
-    shot_passed, matched = verify_nonce(img, t, nonce)
+    shot_passed, matched = verify_nonce(img, t, nonce, css_x=cal.nonce_x())
 
     if shot_passed:
         log.info(
@@ -993,6 +1005,12 @@ def verify_assistive_touch(
     time.sleep(5.0)
     clip_text = f"PhysiClaw-{random.randbytes(3).hex().upper()}"
     log.info(f"  Queuing clipboard text: {clip_text!r}")
+    # Flip the phone to bridge mode so it shows the text, then the
+    # "✓ written to clipboard — paste to verify" confirmation once the
+    # Shortcut fetches it. The AT circle / nonce grid were only needed
+    # for the screenshot sub-steps; the long-press lands on the iOS AT
+    # button regardless of what the web page is showing underneath.
+    phone.set_mode("bridge")
     bridge.send_text(clip_text)
 
     log.info("  Long-press AT (iOS Shortcut → fetch bridge text)...")
@@ -1002,12 +1020,18 @@ def verify_assistive_touch(
     clip_fetched = bridge.wait_clipboard(timeout=10.0)
     if clip_fetched:
         log.info(f"  ✓ Clipboard fetched from server — text: {clip_text!r}")
-        log.info("    Paste into Notes / any text field to verify the text matches.")
+        log.info("    Phone now shows the copied text — paste anywhere to verify.")
+        # Hold the confirmation on-screen so the operator can read it
+        # before we clear the text out.
+        time.sleep(3.0)
     else:
         log.warning("  ✗ Clipboard fetch timed out — server was not hit")
 
-    # Clear the queued text so the bridge page doesn't keep displaying the
-    # leftover nonce after the phone switches back to bridge mode.
+    # Clear the queued text — the phone drops back to the plain bridge page
+    # ("PhysiClaw"). We deliberately stay in bridge mode rather than
+    # restoring the calibration grid: a re-run re-establishes its own grid at
+    # the screenshot sub-step above, so ending here keeps the success screen
+    # clean instead of flashing the grid box back up.
     bridge.clear_text()
 
     passed = shot_passed and clip_fetched

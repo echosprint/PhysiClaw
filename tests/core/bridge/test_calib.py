@@ -29,6 +29,7 @@ from physiclaw.core.bridge.nonce import (
     NONCE_CSS_X,
     NONCE_CSS_Y,
     NONCE_DARK,
+    NONCE_GRID_COLS,
     NONCE_LIGHT,
     NONCE_SQUARE_SIZE,
 )
@@ -319,10 +320,37 @@ def test_get_state_assistive_touch_includes_at_and_nonce_blocks() -> None:
             [NONCE_DARK] * 3,   # bit 0 → dark
             [NONCE_LIGHT] * 3,  # bit 1 → light
         ],
-        "x": NONCE_CSS_X,
+        "x": NONCE_CSS_X,  # no screen_dimension yet → fallback
         "y": NONCE_CSS_Y,
         "size": NONCE_SQUARE_SIZE,
+        "cols": NONCE_GRID_COLS,
     }
+
+
+def test_nonce_x_falls_back_without_screen_dimension() -> None:
+    cs = CalibrationState()
+
+    assert cs.nonce_x() == NONCE_CSS_X
+
+
+def test_nonce_x_centers_grid_when_viewport_width_known() -> None:
+    cs = CalibrationState()
+    cs.screen_dimension = {"viewport_width": 390, "viewport_height": 844}
+
+    # 390/2 - (8*15)/2 = 135
+    assert cs.nonce_x() == 135
+
+
+def test_get_state_serves_the_centered_nonce_x_to_the_page() -> None:
+    # The page renders whatever x get_state serves, and verify_nonce is
+    # handed the same nonce_x() — this pins the served value to it.
+    cs = CalibrationState()
+    cs.screen_dimension = {"viewport_width": 390, "viewport_height": 844}
+    cs.set_phase("assistive_touch", nonce_bits=[1, 0])
+
+    state = cs.get_state()
+
+    assert state["nonce"]["x"] == cs.nonce_x() == 135
 
 
 def test_get_state_assistive_touch_without_nonce_omits_at_and_nonce_keys() -> None:

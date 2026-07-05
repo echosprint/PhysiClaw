@@ -945,7 +945,9 @@ def test_verify_assistive_touch_raises_when_at_unset(mocker) -> None:
     at.at_screen = None
 
     with pytest.raises(RuntimeError, match="AT position not set"):
-        cal_mod.verify_assistive_touch(arm, at, MagicMock(), MagicMock(), _identity_pct_to_grbl())
+        cal_mod.verify_assistive_touch(
+            arm, at, MagicMock(), MagicMock(), _identity_pct_to_grbl(), MagicMock()
+        )
 
 
 def test_verify_assistive_touch_raises_when_no_nonce(mocker) -> None:
@@ -956,7 +958,9 @@ def test_verify_assistive_touch_raises_when_no_nonce(mocker) -> None:
     cal._screenshot_nonce = None
 
     with pytest.raises(RuntimeError, match="No nonce set"):
-        cal_mod.verify_assistive_touch(arm, at, MagicMock(), cal, _identity_pct_to_grbl())
+        cal_mod.verify_assistive_touch(
+            arm, at, MagicMock(), cal, _identity_pct_to_grbl(), MagicMock()
+        )
 
 
 def test_verify_assistive_touch_returns_failed_dict_on_screenshot_timeout(mocker) -> None:
@@ -970,7 +974,7 @@ def test_verify_assistive_touch_returns_failed_dict_on_screenshot_timeout(mocker
     bridge.wait_screenshot.return_value = None  # timeout
 
     out = cal_mod.verify_assistive_touch(
-        arm, at, bridge, cal, _identity_pct_to_grbl(),
+        arm, at, bridge, cal, _identity_pct_to_grbl(), MagicMock(),
     )
 
     assert out["passed"] is False
@@ -989,7 +993,7 @@ def test_verify_assistive_touch_returns_failed_dict_on_decode_error(mocker) -> N
     bridge.wait_screenshot.return_value = b"not an image"
 
     out = cal_mod.verify_assistive_touch(
-        arm, at, bridge, cal, _identity_pct_to_grbl(),
+        arm, at, bridge, cal, _identity_pct_to_grbl(), MagicMock(),
     )
 
     assert out["passed"] is False
@@ -1009,7 +1013,9 @@ def test_verify_assistive_touch_raises_when_viewport_shift_unset(mocker) -> None
     bridge.wait_screenshot.return_value = buf.tobytes()
 
     with pytest.raises(RuntimeError, match="viewport_shift not set"):
-        cal_mod.verify_assistive_touch(arm, at, bridge, cal, _identity_pct_to_grbl())
+        cal_mod.verify_assistive_touch(
+            arm, at, bridge, cal, _identity_pct_to_grbl(), MagicMock()
+        )
 
 
 def test_verify_assistive_touch_full_success_path(mocker) -> None:
@@ -1035,13 +1041,51 @@ def test_verify_assistive_touch_full_success_path(mocker) -> None:
     mocker.patch.object(cal_mod, "verify_nonce", return_value=(True, 4))
 
     out = cal_mod.verify_assistive_touch(
-        arm, at, bridge, cal, _identity_pct_to_grbl(),
+        arm, at, bridge, cal, _identity_pct_to_grbl(), MagicMock(),
     )
 
     assert out["passed"] is True
     assert out["screenshot"]["passed"] is True
     assert out["clipboard"]["fetched"] is True
     assert out["clipboard"]["text"].startswith("PhysiClaw-")
+
+
+def test_verify_assistive_touch_shows_clipboard_confirmation_on_phone(mocker) -> None:
+    # On the clipboard sub-step the phone flips to bridge mode and the clip
+    # text is queued, so the page shows it then the "copied" confirmation.
+    mocker.patch.object(cal_mod.time, "sleep")
+    mocker.patch.object(cal_mod.random, "randbytes", return_value=b"\xab\xcd\xef")
+    arm = MagicMock()
+    at = MagicMock()
+    at.at_screen = (0.05, 0.1)
+    vshift = ViewportShift(
+        offset_x=0, offset_y=0, dpr=3.0,
+        screenshot_width=1170, screenshot_height=2532,
+    )
+    cal = _make_cal(viewport_shift=vshift)
+    cal._screenshot_nonce = [1, 0, 1, 0]
+    bridge = MagicMock()
+    bridge.wait_clipboard.return_value = True
+    img = np.zeros((400, 400, 3), dtype=np.uint8)
+    ok, buf = cv2.imencode(".png", img)
+    bridge.wait_screenshot.return_value = buf.tobytes()
+    mocker.patch.object(cal_mod, "verify_nonce", return_value=(True, 4))
+    phone = MagicMock()
+
+    cal_mod.verify_assistive_touch(
+        arm, at, bridge, cal, _identity_pct_to_grbl(), phone,
+    )
+
+    # Establishes its own grid up front (so a re-run doesn't depend on
+    # /show), then flips to bridge mode for the confirmation and stays there
+    # — success ends on the plain bridge page, not the grid.
+    assert phone.set_mode.call_args_list == [
+        mocker.call("calibrate", "assistive_touch", nonce_bits=[1, 0, 1, 0]),
+        mocker.call("bridge"),
+    ]
+    bridge.send_text.assert_called_once()
+    assert bridge.send_text.call_args[0][0].startswith("PhysiClaw-")
+    bridge.clear_text.assert_called_once()
 
 
 def test_verify_assistive_touch_clipboard_timeout(mocker) -> None:
@@ -1064,7 +1108,7 @@ def test_verify_assistive_touch_clipboard_timeout(mocker) -> None:
     mocker.patch.object(cal_mod, "verify_nonce", return_value=(True, 4))
 
     out = cal_mod.verify_assistive_touch(
-        arm, at, bridge, cal, _identity_pct_to_grbl(),
+        arm, at, bridge, cal, _identity_pct_to_grbl(), MagicMock(),
     )
 
     # Screenshot passed but clipboard didn't → overall failure.

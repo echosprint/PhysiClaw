@@ -54,4 +54,6 @@ def register(
 
     @mcp.custom_route("/api/calibrate/assistive-touch/verify", methods=["POST"])
     async def _at_verify(request):
-        return await handle_verify_assistive_touch(request, physiclaw, calib, bridge)
+        return await handle_verify_assistive_touch(
+            request, physiclaw, calib, bridge, phone
+        )

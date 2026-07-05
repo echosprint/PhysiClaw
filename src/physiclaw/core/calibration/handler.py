@@ -314,7 +314,7 @@ async def handle_trace_edge(request, physiclaw, phone: PageState):
 async def handle_show_assistive_touch(
     request, physiclaw, calib: CalibrationState, phone: PageState
 ):
-    """POST /api/calibrate/assistive-touch/show — display AT positioning circle + color nonce."""
+    """POST /api/calibrate/assistive-touch/show — display AT positioning circle + grey nonce grid."""
 
     if calib.viewport_shift is None:
         return _err("Run viewport-shift first", status_code=400)
@@ -331,9 +331,9 @@ async def handle_show_assistive_touch(
 
 
 async def handle_verify_assistive_touch(
-    request, physiclaw, calib: CalibrationState, bridge: BridgeState
+    request, physiclaw, calib: CalibrationState, bridge: BridgeState, phone: PageState
 ):
-    """POST /api/calibrate/assistive-touch/verify — tap AT, verify screenshot upload via color nonce."""
+    """POST /api/calibrate/assistive-touch/verify — tap AT, verify screenshot upload via the grey nonce grid."""
 
     def _do():
         if physiclaw._arm is None:
@@ -351,6 +351,7 @@ async def handle_verify_assistive_touch(
                 bridge,
                 calib,
                 pct_to_grbl,
+                phone,
             )
         finally:
             physiclaw.release()

@@ -6,9 +6,9 @@ image we build with the exact module constants (`NONCE_CSS_X`,
 in setup matches the math under test character-for-character; one DPR
 test exercises the scaling.
 
-Image layout for DPR=1, no offsets:
-  - sample column: x = NONCE_CSS_X + step//2
-  - sample row i:  y = NONCE_CSS_Y + i*step + step//2
+Image layout for DPR=1, no offsets (row-major grid, NONCE_GRID_COLS wide):
+  - sample i column: x = NONCE_CSS_X + (i % NONCE_GRID_COLS)*step + step//2
+  - sample i row:    y = NONCE_CSS_Y + (i // NONCE_GRID_COLS)*step + step//2
   where step = NONCE_SQUARE_SIZE (DPR=1).
 
 We build BGR images sized just large enough to cover the last sample
@@ -40,10 +40,12 @@ from physiclaw.core.bridge.nonce import (
     NONCE_CSS_X,
     NONCE_CSS_Y,
     NONCE_DARK,
+    NONCE_GRID_COLS,
     NONCE_LIGHT,
     NONCE_SQUARE_SIZE,
     NONCE_THRESHOLD,
     generate_nonce,
+    nonce_css_x,
     verify_nonce,
 )
 from physiclaw.core.calibration.transforms import ViewportShift
@@ -68,6 +70,7 @@ def _build_image(
     offset_x: int = 0,
     offset_y: int = 0,
     size: tuple[int, int] = (700, 400),
+    css_x: int = NONCE_CSS_X,
 ) -> np.ndarray:
     """Build a BGR image with sample-pixel grey levels matching `bits`.
 
@@ -77,11 +80,11 @@ def _build_image(
     h, w = size
     img = np.zeros((h, w, 3), dtype=np.uint8)
     step = int(NONCE_SQUARE_SIZE * dpr)
-    base_x = int(NONCE_CSS_X * dpr + offset_x)
+    base_x = int(css_x * dpr + offset_x)
     base_y = int(NONCE_CSS_Y * dpr + offset_y)
     for i, bit in enumerate(bits):
-        cx = base_x + step // 2
-        cy = base_y + i * step + step // 2
+        cx = base_x + (i % NONCE_GRID_COLS) * step + step // 2
+        cy = base_y + (i // NONCE_GRID_COLS) * step + step // 2
         if not (0 <= cy < h and 0 <= cx < w):
             # Caller is deliberately undersizing the image — leave the
             # pixel unwritten so the verifier hits the bounds check.
@@ -99,7 +102,8 @@ def _build_image(
     [
         ("NONCE_CSS_X", 180),
         ("NONCE_CSS_Y", 300),
-        ("NONCE_COUNT", 20),
+        ("NONCE_COUNT", 64),
+        ("NONCE_GRID_COLS", 8),
         ("NONCE_SQUARE_SIZE", 15),
         ("NONCE_DARK", 40),
         ("NONCE_LIGHT", 220),
@@ -328,7 +332,7 @@ def test_verify_nonce_logs_a_warning_per_out_of_bounds_square(
     # Build an image where many trailing squares are OOB and assert a
     # warning lands for each — a `break` would log only once.
     bits = [1] * NONCE_COUNT
-    img = _build_image(bits, size=(350, 400))  # squares from i=3 onward are OOB
+    img = _build_image(bits, size=(350, 400))  # grid rows 3+ (i>=24) are OOB
 
     with caplog.at_level(logging.WARNING, logger="physiclaw.core.bridge.nonce"):
         verify_nonce(img, _viewport(), bits)
@@ -398,6 +402,50 @@ def test_verify_includes_pixel_at_x_equals_zero_lower_bound() -> None:
 
     assert ok is True
     assert count == NONCE_COUNT
+
+
+# ---------- nonce_css_x + css_x override ----------
+
+
+def test_nonce_css_x_centers_the_grid_on_the_viewport() -> None:
+    # Left edge + half the grid width must land on the viewport midline.
+    grid_w = NONCE_GRID_COLS * NONCE_SQUARE_SIZE
+    for vw in (375, 390, 430):
+        x = nonce_css_x(vw)
+
+        assert x + grid_w / 2 == pytest.approx(vw / 2, abs=0.5)
+
+
+def test_verify_nonce_samples_at_the_given_css_x() -> None:
+    bits = [i % 2 for i in range(NONCE_COUNT)]
+    x = nonce_css_x(390)  # 135 — differs from the NONCE_CSS_X fallback
+    img = _build_image(bits, css_x=x)
+
+    ok, count = verify_nonce(img, _viewport(), bits, css_x=x)
+
+    assert ok is True
+    assert count == NONCE_COUNT
+
+
+def test_verify_nonce_css_x_none_falls_back_to_NONCE_CSS_X() -> None:
+    bits = [1] * NONCE_COUNT
+    img = _build_image(bits)  # rendered at the NONCE_CSS_X fallback
+
+    ok, count = verify_nonce(img, _viewport(), bits, css_x=None)
+
+    assert ok is True
+    assert count == NONCE_COUNT
+
+
+def test_verify_nonce_wrong_css_x_reads_unwritten_pixels() -> None:
+    # Renderer and sampler disagreeing on x must FAIL the verification —
+    # all-black pixels read as bit 0 against expected bit 1.
+    bits = [1] * NONCE_COUNT
+    img = _build_image(bits, css_x=135)
+
+    ok, _ = verify_nonce(img, _viewport(), bits, css_x=NONCE_CSS_X)
+
+    assert ok is False
 
 
 # ---------- verify_nonce: DPR + offsets ----------

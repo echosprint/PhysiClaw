@@ -578,7 +578,7 @@ async def test_handle_verify_assistive_touch_happy_path(mocker) -> None:
     )
 
     resp = await handle_verify_assistive_touch(
-        _fake_request(), physiclaw, MagicMock(), MagicMock(),
+        _fake_request(), physiclaw, MagicMock(), MagicMock(), MagicMock(),
     )
 
     assert _read_json(resp) == {"status": "ok", "verified": True}
@@ -592,7 +592,7 @@ async def test_handle_verify_assistive_touch_arm_not_connected() -> None:
     physiclaw._arm = None
 
     resp = await handle_verify_assistive_touch(
-        _fake_request(), physiclaw, MagicMock(), MagicMock(),
+        _fake_request(), physiclaw, MagicMock(), MagicMock(), MagicMock(),
     )
 
     assert resp.status_code == 500
@@ -606,7 +606,7 @@ async def test_handle_verify_assistive_touch_requires_pct_to_grbl() -> None:
     physiclaw.calibration = SimpleNamespace(pct_to_grbl=None)
 
     resp = await handle_verify_assistive_touch(
-        _fake_request(), physiclaw, MagicMock(), MagicMock(),
+        _fake_request(), physiclaw, MagicMock(), MagicMock(), MagicMock(),
     )
 
     assert resp.status_code == 500
@@ -621,7 +621,7 @@ async def test_handle_verify_assistive_touch_requires_at_show() -> None:
     physiclaw.assistive_touch.at_screen = None  # show step not run
 
     resp = await handle_verify_assistive_touch(
-        _fake_request(), physiclaw, MagicMock(), MagicMock(),
+        _fake_request(), physiclaw, MagicMock(), MagicMock(), MagicMock(),
     )
 
     assert resp.status_code == 500
