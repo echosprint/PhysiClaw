@@ -115,7 +115,7 @@ CRAB_SVG = """\
 """
 
 # Wiring section figure — splice the 12V and GND leads, staggering the two
-# joints 20 mm apart. White page background + the manual palette (accent 12V
+# joints 10 mm apart. White page background + the manual palette (accent 12V
 # wire, ink GND wire, mono dimension).
 WIRE_SPLICE_SVG = """\
 <svg width="760" height="340" viewBox="0 0 760 340" xmlns="http://www.w3.org/2000/svg" font-family="'Inter', 'Helvetica Neue', 'Segoe UI', Arial, sans-serif">
@@ -137,13 +137,13 @@ WIRE_SPLICE_SVG = """\
   <text x="104" y="125" font-size="15" font-weight="600" fill="#d4511a" text-anchor="end">12 V</text>
   <text x="104" y="215" font-size="15" font-weight="600" fill="#1f1f1f" text-anchor="end">GND</text>
 
-  <!-- ===== stagger dimension: 20 mm between the two splices ===== -->
+  <!-- ===== stagger dimension: 10 mm between the two splices ===== -->
   <line x1="300" y1="138" x2="300" y2="184" stroke="#b8b8b8" stroke-width="1" stroke-dasharray="3 3"/>
   <line x1="470" y1="138" x2="470" y2="184" stroke="#b8b8b8" stroke-width="1" stroke-dasharray="3 3"/>
   <line x1="300" y1="165" x2="470" y2="165" stroke="#6a6a6a" stroke-width="1.5"/>
   <polygon points="300,165 310,160.5 310,169.5" fill="#6a6a6a"/>
   <polygon points="470,165 460,160.5 460,169.5" fill="#6a6a6a"/>
   <rect x="351" y="154" width="68" height="22" rx="6" fill="#ffffff"/>
-  <text x="385" y="170" font-size="13" fill="#d4511a" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace">20 mm</text>
+  <text x="385" y="170" font-size="13" fill="#d4511a" text-anchor="middle" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace">10 mm</text>
 </svg>
 """
