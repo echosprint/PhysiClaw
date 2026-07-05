@@ -30,16 +30,31 @@ Most IM apps share the same chat-page shape: bubble list, bottom input bar, Send
 
 ### Fast path — REQUIRED here
 
-On the right 1:1 chat with clean input, steps 2 + 4–5 are ONE `sequence` call — every box below is pinned (CONVENTION § Sequence bundling); its attached view shows the sent bubble:
+On the right 1:1 chat with clean input, steps 2 + 4–5 are ONE `sequence` call (CONVENTION § Sequence bundling); the attached view shows the sent bubble. **Pick by the current keyboard state — run verbatim, never mix.**
+
+Keyboard **hidden** — the tap raises it; the input moves up to `{{input-visible}}`:
 
 ```python
 sequence(actions=[
-    {"tool_name": "tap",               "arg": {{input-hidden}}},   # chat input, keyboard down — omit if keyboard already visible
+    {"tool_name": "tap",               "arg": {{input-hidden}}},
     {"tool_name": "send_to_clipboard", "arg": "<your text>"},
-    {"tool_name": "long_press",        "arg": {{input-visible}}},  # chat input, keyboard up → Paste popover
-    {"tool_name": "tap",               "arg": {{paste-button}}},   # Paste
-    {"tool_name": "tap",               "arg": {{send}}},           # Send
+    {"tool_name": "long_press",        "arg": {{input-visible}}},
+    {"tool_name": "tap",               "arg": {{paste-button}}},
+    {"tool_name": "tap",               "arg": {{send}}},
 ])
 ```
+
+Keyboard **already up** — skip the tap:
+
+```python
+sequence(actions=[
+    {"tool_name": "send_to_clipboard", "arg": "<your text>"},
+    {"tool_name": "long_press",        "arg": {{input-visible}}},
+    {"tool_name": "tap",               "arg": {{paste-button}}},
+    {"tool_name": "tap",               "arg": {{send}}},
+])
+```
+
+With the keyboard up, `{{input-hidden}}` is the keyboard itself — never press it.
 
 Then steps 6–7. Layout shifts (banners, unread badges) → re-ground from the current view; anchors are the header name + learned boxes.
