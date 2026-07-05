@@ -4,7 +4,9 @@ Talks to a running ``physiclaw server`` over HTTP.
 """
 
 import base64
+import contextlib
 import json
+import logging
 import os
 import socket
 import sys
@@ -282,15 +284,19 @@ def run(auto: bool = False, trace: bool = False) -> None:
     # ── 7. Calibrate the camera (rotation/coverage check, then 15-dot mapping) ──
     print("\n── 7. Calibrate the camera ──")
     print("  Keep the whole screen in view, evenly lit and free of glare.")
+    # Interactive only: aiming with the OS camera app releases the device, so
+    # reopen it afterwards. In auto mode the camera stays connected from step 4
+    # — mirror the browser wizard, which calibrates the still-connected camera
+    # with no reopen (calibrateCamera in core/static/setup-hardware.html).
     if not auto:
         _camera_aim_adjust("Adjust the camera angle/distance if needed")
-    r_conn = api("POST", "/api/connect-camera", {"index": cam})
-    if not ok(r_conn):
-        _fail(
-            f"Couldn't reopen the camera: {_msg(r_conn)}. "
-            "Another app (Photo Booth / Camera / Zoom / FaceTime) may still be holding it."
-        )
-        sys.exit(1)
+        r_conn = api("POST", "/api/connect-camera", {"index": cam})
+        if not ok(r_conn):
+            _fail(
+                f"Couldn't reopen the camera: {_msg(r_conn)}. "
+                "Another app (Photo Booth / Camera / Zoom / FaceTime) may still be holding it."
+            )
+            sys.exit(1)
     r = calibrate("camera", 15)
     if not ok(r):
         _fail(f"Couldn't read the camera: {_msg(r)}")
@@ -377,6 +383,51 @@ def run(auto: bool = False, trace: bool = False) -> None:
     print("  The arm, camera, and screen are calibrated and working together.")
     print("  All MCP tools are now available.")
     print(f"{'='*40}")
+
+
+def await_bridge_and_calibrate(host: str, port: int) -> None:
+    """Wait for the server, then for the phone bridge to open, then run the
+    calibration wizard unattended — the engine behind ``physiclaw auto``.
+
+    Runs in a daemon thread off the MCP event loop and drives ``run(auto=True)``
+    over HTTP against this server, with the wizard's ``print()`` output
+    re-tagged as ``[setup wizard]`` (via :class:`LineLogStream`) so it joins
+    the tagged log stream instead of clashing with it. No desktop wizard is
+    opened; the operator just opens ``/bridge`` on the phone.
+    """
+    global BASE
+    log = logging.getLogger(__name__)
+    # Lazy: importing anything under core.server builds the app singletons,
+    # which the plain `physiclaw setup hardware` process must not trigger —
+    # this worker only ever runs inside the server process.
+    from physiclaw.core.server.net import wait_for_port
+
+    if not wait_for_port(host, port):
+        log.error("auto: server never started accepting connections; "
+                  "skipping auto-calibration.")
+        return
+
+    BASE = f"http://localhost:{port}"
+    log.info("auto: waiting for the phone bridge to connect…")
+    while True:
+        status = api("GET", "/api/status")
+        if status and (
+            status.get("bridge") or status.get("calibrated") or status.get("ready")
+        ):
+            break
+        time.sleep(1.0)
+
+    log.info("auto: phone bridge connected — starting calibration.")
+    from physiclaw.core.logger import LineLogStream, make_tagged_logger
+
+    wizard_log = make_tagged_logger("physiclaw.setup_wizard", "setup wizard")
+    try:
+        with contextlib.redirect_stdout(LineLogStream(wizard_log)):
+            run(auto=True)
+    except SystemExit as e:
+        log.error("auto-calibration stopped: %s", e)
+    except Exception:  # noqa: BLE001 — a failed setup must not crash the server
+        log.exception("auto-calibration failed")
 
 
 def hardware(

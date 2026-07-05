@@ -529,3 +529,91 @@ def test_run_uses_cached_viewport_in_auto_mode(
     out = capsys.readouterr().out
 
     assert "Using cached screenshot" in out
+
+
+# ---------- await_bridge_and_calibrate ----------
+
+
+def _patch_auto_worker(mocker, *, port_ok=True):
+    """Patch await_bridge_and_calibrate's collaborators: the lazy
+    core.server.net.wait_for_port import (faked so the test never loads the
+    real core.server package), the HTTP api(), sleep, run(), and the tagged
+    logger. `BASE` is patched so the worker's reassignment is restored after
+    the test. Returns a dict of the mocks."""
+    fake_net = MagicMock()
+    fake_net.wait_for_port.return_value = port_ok
+    mocker.patch.dict(
+        "sys.modules", {"physiclaw.core.server.net": fake_net},
+    )
+    mocker.patch("physiclaw.core.logger.make_tagged_logger", return_value=MagicMock())
+    mocker.patch.object(hw_mod, "BASE", hw_mod.BASE)  # restore after (worker mutates it)
+    return {
+        "api": mocker.patch.object(hw_mod, "api", return_value={"bridge": True}),
+        "sleep": mocker.patch.object(hw_mod.time, "sleep"),
+        "run": mocker.patch.object(hw_mod, "run"),
+    }
+
+
+def test_await_bridge_and_calibrate_runs_when_bridge_connects(mocker) -> None:
+    m = _patch_auto_worker(mocker)
+
+    hw_mod.await_bridge_and_calibrate("127.0.0.1", 8048)
+
+    assert hw_mod.BASE == "http://localhost:8048"
+    m["run"].assert_called_once_with(auto=True)
+
+
+def test_await_bridge_and_calibrate_skips_on_port_timeout(mocker) -> None:
+    m = _patch_auto_worker(mocker, port_ok=False)
+
+    hw_mod.await_bridge_and_calibrate("127.0.0.1", 8048)
+
+    m["run"].assert_not_called()
+
+
+def test_await_bridge_and_calibrate_polls_until_bridge(mocker) -> None:
+    m = _patch_auto_worker(mocker)
+    # No response, then not-connected, then connected — waits through both.
+    m["api"].side_effect = [None, {"bridge": False}, {"bridge": True}]
+
+    hw_mod.await_bridge_and_calibrate("127.0.0.1", 8048)
+
+    m["run"].assert_called_once_with(auto=True)
+    assert m["sleep"].call_count == 2  # one wait per non-connected poll
+
+
+def test_await_bridge_and_calibrate_starts_on_already_calibrated(mocker) -> None:
+    # A resumed server may already be calibrated/ready — proceed (run() itself
+    # short-circuits) rather than waiting forever for a fresh bridge flag.
+    m = _patch_auto_worker(mocker)
+    m["api"].return_value = {"calibrated": True}
+
+    hw_mod.await_bridge_and_calibrate("127.0.0.1", 8048)
+
+    m["run"].assert_called_once_with(auto=True)
+
+
+def test_await_bridge_and_calibrate_swallows_setup_exit(mocker) -> None:
+    # run() calls sys.exit on a step failure — must not crash the server.
+    m = _patch_auto_worker(mocker)
+    m["run"].side_effect = SystemExit(1)
+
+    hw_mod.await_bridge_and_calibrate("127.0.0.1", 8048)  # must not raise
+
+    m["run"].assert_called_once()
+
+
+def test_await_bridge_and_calibrate_routes_wizard_output_through_logger(mocker) -> None:
+    # The wizard's print() output is badged via LineLogStream, not dumped raw
+    # to stdout amid the tagged server logs.
+    m = _patch_auto_worker(mocker)
+    lines: list[str] = []
+    mocker.patch(
+        "physiclaw.core.logger.make_tagged_logger",
+        return_value=MagicMock(info=lambda x: lines.append(x)),
+    )
+    m["run"].side_effect = lambda auto: print("  ✓ Phone connected")
+
+    hw_mod.await_bridge_and_calibrate("127.0.0.1", 8048)
+
+    assert "  ✓ Phone connected" in lines

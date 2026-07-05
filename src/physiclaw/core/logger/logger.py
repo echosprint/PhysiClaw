@@ -8,11 +8,14 @@ Exports:
 
 import logging
 import os
+import re
 import sys
 import time
 from collections.abc import Awaitable, Callable
 from functools import wraps
 from typing import Any, TypeVar, cast
+
+_ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 
 log = logging.getLogger("physiclaw.tools")
 
@@ -30,8 +33,9 @@ _RED = "31"
 # Tag → accent color. Each entry-point picks its own so devs can skim
 # interleaved output at a glance.
 _TAG_COLORS = {
-    "physiclaw": "36",  # cyan — hardware server
-    "runtime": "35",    # magenta — agent loop
+    "physiclaw": "36",      # cyan — hardware server
+    "runtime": "35",        # magenta — agent loop
+    "setup wizard": "32",   # green — `physiclaw auto` calibration steps
 }
 
 
@@ -76,6 +80,48 @@ def setup_logging(tag: str, level: int = logging.INFO) -> None:
     handler = logging.StreamHandler()
     handler.setFormatter(_TaggedFormatter(tag, _colorize()))
     logging.basicConfig(level=level, handlers=[handler], force=True)
+
+
+def make_tagged_logger(name: str, tag: str, level: int = logging.INFO) -> logging.Logger:
+    """A standalone logger that emits in the ``[tag]`` format, independent of
+    the root handler (``propagate=False``) so its lines carry ``tag`` rather
+    than the process-wide one. Lets a sub-stream — e.g. the setup wizard's
+    output under ``physiclaw auto`` — be badged distinctly in interleaved
+    logs. Idempotent: re-calling returns the same logger without stacking
+    handlers."""
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
+    logger.propagate = False
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(_TaggedFormatter(tag, _colorize()))
+        logger.addHandler(handler)
+    return logger
+
+
+class LineLogStream:
+    """A line-buffered file-like object that re-emits written text through a
+    logger, one record per line. Pair with ``contextlib.redirect_stdout`` to
+    fold a component's ``print()`` output into the tagged log stream — e.g.
+    the setup wizard under ``physiclaw auto``. ANSI escapes are stripped (the
+    formatter re-colours) and blank lines dropped (they'd render as an empty
+    tagged prefix)."""
+
+    def __init__(self, logger: logging.Logger):
+        self._logger = logger
+        self._buf = ""
+
+    def write(self, s: str) -> int:
+        self._buf += s
+        while "\n" in self._buf:
+            line, self._buf = self._buf.split("\n", 1)
+            line = _ANSI_RE.sub("", line).rstrip()
+            if line:
+                self._logger.info(line)
+        return len(s)
+
+    def flush(self) -> None:
+        pass
 
 
 # Caps a tool-call log line so a 100KB clipboard body doesn't flood it.

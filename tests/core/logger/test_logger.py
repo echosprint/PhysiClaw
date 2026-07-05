@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -10,7 +11,9 @@ from physiclaw.core.logger.logger import (
     _colorize,
     _format_args,
     _TaggedFormatter,
+    LineLogStream,
     logged,
+    make_tagged_logger,
     setup_logging,
 )
 
@@ -113,6 +116,66 @@ def test_setup_logging_force_replaces_handlers(mocker) -> None:
     assert any(
         isinstance(h.formatter, _TaggedFormatter) for h in root.handlers
     )
+
+
+# ---------- make_tagged_logger ----------
+
+
+def test_make_tagged_logger_is_standalone_and_tagged(mocker) -> None:
+    mocker.patch.object(logger_mod, "_colorize", return_value=False)
+
+    lg = make_tagged_logger("physiclaw.test_wizard", "setup wizard")
+
+    # Standalone: won't double-print through the root [physiclaw] handler.
+    assert lg.propagate is False
+    assert len(lg.handlers) == 1
+    fmt = lg.handlers[0].formatter
+    assert isinstance(fmt, _TaggedFormatter)
+    rec = logging.LogRecord("x", logging.INFO, "f", 1, "hi", None, None)
+    assert fmt.format(rec).endswith("[setup wizard] hi")
+
+
+def test_make_tagged_logger_does_not_stack_handlers(mocker) -> None:
+    mocker.patch.object(logger_mod, "_colorize", return_value=False)
+
+    first = make_tagged_logger("physiclaw.test_wizard_2", "setup wizard")
+    again = make_tagged_logger("physiclaw.test_wizard_2", "setup wizard")
+
+    assert again is first
+    assert len(again.handlers) == 1  # idempotent — no duplicate handler
+
+
+# ---------- LineLogStream ----------
+
+
+def test_line_log_stream_emits_full_lines() -> None:
+    logger = MagicMock()
+    stream = LineLogStream(logger)
+
+    n = stream.write("── 1. Connect phone ──\n")
+
+    logger.info.assert_called_once_with("── 1. Connect phone ──")
+    assert n == len("── 1. Connect phone ──\n")
+
+
+def test_line_log_stream_strips_ansi_and_skips_blank_lines() -> None:
+    logger = MagicMock()
+    stream = LineLogStream(logger)
+
+    stream.write("\n")  # blank line from print("\n── …") — dropped
+    stream.write("  \033[32m✓\033[0m Arm connected\n")  # ANSI stripped
+
+    logger.info.assert_called_once_with("  ✓ Arm connected")
+
+
+def test_line_log_stream_buffers_partial_lines() -> None:
+    logger = MagicMock()
+    stream = LineLogStream(logger)
+
+    stream.write("half ")  # no newline yet — buffered, not emitted
+    logger.info.assert_not_called()
+    stream.write("line\n")
+    logger.info.assert_called_once_with("half line")
 
 
 # ---------- _format_args ----------

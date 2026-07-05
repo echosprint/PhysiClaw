@@ -15,7 +15,7 @@ runner = CliRunner()
 
 @pytest.mark.parametrize(
     "subcommand",
-    ["doctor", "server", "status", "setup", "config", "models", "skills"],
+    ["doctor", "server", "auto", "status", "setup", "config", "models", "skills"],
 )
 def test_top_level_help_lists_subcommand(subcommand: str) -> None:
     result = runner.invoke(app, ["--help"])

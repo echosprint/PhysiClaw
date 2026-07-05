@@ -78,6 +78,15 @@ def server(
             help="Don't auto-open the browser hardware-setup wizard on start.",
         ),
     ] = False,
+    auto_calibrate: Annotated[
+        bool,
+        typer.Option(
+            "--auto-calibrate",
+            hidden=True,
+            help="Internal (used by `physiclaw auto`): skip the desktop wizard "
+            "and calibrate unattended when the phone bridge opens.",
+        ),
+    ] = False,
     save_tool_calls: Annotated[
         bool,
         typer.Option(
@@ -209,6 +218,20 @@ def server(
                 _thread.interrupt_main()
 
         threading.Thread(target=_warm_start_thread, daemon=True).start()
+    elif auto_calibrate:
+        # `physiclaw auto`: no desktop wizard — a background thread waits for
+        # the phone bridge, then runs calibration unattended. The worker lives
+        # in the setup module (with the wizard it drives); import it lazily so
+        # `physiclaw server` doesn't pull the CLI setup module in at startup.
+        log.info("Auto mode: calibration will start when the phone opens /bridge.")
+
+        def _auto_calibrate_thread() -> None:
+            import importlib
+
+            hw = importlib.import_module("physiclaw.cli.setup.hardware")
+            hw.await_bridge_and_calibrate(host, port)
+
+        threading.Thread(target=_auto_calibrate_thread, daemon=True).start()
     elif no_setup_hardware:
         log.info(
             "Run `physiclaw setup hardware` in another shell to connect "

@@ -420,3 +420,33 @@ def test_server_warm_start_starts_thread(mocker) -> None:
     thread_spy.assert_called_once()
     assert thread_spy.call_args.kwargs.get("daemon") is True
     thread_spy.return_value.start.assert_called_once()
+
+
+# ---------- auto_calibrate branch (physiclaw auto) ----------
+
+
+def test_server_auto_calibrate_starts_thread_and_skips_wizard(mocker) -> None:
+    _patch_server_runtime_deps(mocker)
+    open_spy = mocker.patch("webbrowser.open")
+    # The branch spawns a thread that lazily imports the setup module and
+    # calls its worker — patch that worker where it lives.
+    worker_spy = mocker.patch(
+        "physiclaw.cli.setup.hardware.await_bridge_and_calibrate"
+    )
+    captured = {}
+
+    def fake_thread(target, daemon=False):
+        captured["target"] = target
+        return MagicMock()
+
+    mocker.patch.object(server_mod.threading, "Thread", side_effect=fake_thread)
+
+    server_mod.server(
+        port=8048, host="127.0.0.1", verbose=False,
+        no_runtime=True, warm_start=False, cam_index=None, auto_calibrate=True,
+        save_tool_calls=False, save_snapshots=False, save_screenshots=False,
+    )
+
+    open_spy.assert_not_called()  # no desktop wizard in auto mode
+    captured["target"]()          # run the daemon-thread body
+    worker_spy.assert_called_once_with("127.0.0.1", 8048)
