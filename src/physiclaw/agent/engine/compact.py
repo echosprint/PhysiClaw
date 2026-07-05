@@ -5,11 +5,18 @@
      arrive from `peek`/`screenshot` AND from every gesture (the fused
      post-action view), so staleness is keyed on ImageBlock presence,
      not tool names. Earlier view results are stubbed down to a marker
-     line (`(superseded <tool>)`) plus their surviving text: the action
-     result line (verdict included — the retry history must stay
-     legible) and the listing's TEXT rows. Icon-kind rows are dropped —
-     without the image, numbered icon boxes are opaque. Text rows are
-     self-documenting and survive as re-targetable anchors. The
+     line (`(superseded <tool>) — labels only, in order`) plus their
+     surviving text: the action result line (verdict included — the
+     retry history must stay legible) and the listing reduced to LABELS
+     ONLY — each `[text]` row's id index, kind tag, bbox and confidence
+     are dropped, leaving just the label text, one per line, in the
+     original top-to-bottom order and set off from the action line by a
+     blank line. Once the screen is gone those fields
+     are dead weight: you can't tap a bbox on a page you've left or
+     reference an old element's id, and a past detection's confidence is
+     moot — the label is the only content worth remembering (and it's
+     ~20% of a row's tokens; the rest is the 80% we drop). Icon rows are
+     label-less and dropped; the listing header is dropped too. The
      assistant message and its tool_calls stay intact, so the decision
      history ("I called peek here, tapped there") is preserved.
 
@@ -52,11 +59,26 @@ JPEG_QUALITY = CONFIG.compact.jpeg_quality
 # what happened. Cache-marker code does NOT parse this — providers find
 # stubs via the `is_superseded` flag on `ToolResultMessage`.
 STUB_PREFIX = "(superseded "
+# Suffix on the marker line — reminds the model this view was reduced to
+# on-screen labels only, in their original order, so it doesn't mistake a
+# bare label list for the current screen or try to re-tap a vanished bbox.
+STUB_NOTE = " — labels only, in order"
 
 # The element-listing shape produced by `core.vision.util.format_elements`
-# — keep the header string and the row regex in sync with that formatter.
+# — keep the header string and the row regexes in sync with that formatter.
 _LISTING_HEADER = 'id [kind] "label" [left,top,right,bottom] conf'
+# Prefix matcher — "is this line an element row?" (kept for the non-row
+# line strategy in tests; `_stub_body` itself uses the full-shape regexes
+# below so its output is stable under re-application).
 _ROW_RE = re.compile(r"^\d+ \[(icon|text)\] ")
+# Full-shape matchers. `_TEXT_ROW_RE` captures the label (group 1); the
+# greedy `.*` plus a `]`-free bbox class lets a label carry quotes and
+# brackets (`He said "hi" [ok]`) yet still peel off the trailing bbox +
+# confidence. `_ICON_ROW_RE` requires the empty-label icon shape so a
+# stubbed label that merely *looks* icon-ish isn't re-dropped on a second
+# pass (idempotency).
+_TEXT_ROW_RE = re.compile(r'^\d+ \[text\] "(.*)" \[[^\]]*\] [0-9.]+\s*$')
+_ICON_ROW_RE = re.compile(r'^\d+ \[icon\] "" \[[^\]]*\] [0-9.]+\s*$')
 
 
 # ---------- summary collapse (turn-age pruning) ----------
@@ -381,35 +403,40 @@ def _has_image(content: str | list[ContentBlock]) -> bool:
 
 
 def _stub_body(text: str) -> str:
-    """The text that survives when a view result is stubbed: everything
-    that isn't an element row (action result line with its verdict,
-    stuck warnings) plus the `[text]`-kind rows. Icon rows are opaque
-    once the image is gone; the listing header is dropped too when no
-    rows survive it.
+    """Reduce a stubbed view's element listing to bare labels (see the
+    module docstring for why the other row fields are dropped). Each
+    `[text]` row yields just its label, one per line in listing order;
+    icon rows and the header are dropped. Every non-listing line — the
+    action result with its verdict, stuck warnings, sequence step lines —
+    survives verbatim as decision history, and a blank line sets it off
+    from the label block.
 
-    Format coupling: `_LISTING_HEADER` / `_ROW_RE` mirror the shape
-    produced by `physiclaw.core.vision.util.format_elements`. Sequence
-    step lines (`1 tap ok — …`) don't match `_ROW_RE` (no bracket right
-    after the index) and are kept.
+    Format coupling: `_LISTING_HEADER` / `_TEXT_ROW_RE` / `_ICON_ROW_RE`
+    mirror the shape produced by `physiclaw.core.vision.util.format_elements`;
+    sequence step lines (`1 tap ok — …`) lack a quoted label + bbox and are
+    kept. Output is stable under re-application — a bare label can't match a
+    full-shape row regex unless it is itself a complete row, which OCR never
+    produces.
     """
-    out: list[str] = []
-    header_idx: int | None = None
-    kept_any_row = False
+    pre: list[str] = []     # action result + verdict + sequence steps
+    labels: list[str] = []  # surviving [text] labels, in listing order
     for line in text.splitlines():
         if line == _LISTING_HEADER:
-            header_idx = len(out)
-            out.append(line)
-            continue
-        m = _ROW_RE.match(line)
+            continue  # names columns that no longer exist
+        m = _TEXT_ROW_RE.match(line)
         if m:
-            if m.group(1) == "text":
-                out.append(line)
-                kept_any_row = True
+            label = m.group(1)
+            if label:  # drop empty-label text rows — no content to keep
+                labels.append(label)
             continue
-        out.append(line)
-    if header_idx is not None and not kept_any_row:
-        out.pop(header_idx)
-    return "\n".join(out).strip()
+        if _ICON_ROW_RE.match(line):
+            continue  # opaque without the image, and label-less
+        pre.append(line)
+    pre_s = "\n".join(pre).strip()
+    lbl_s = "\n".join(labels).strip()
+    if pre_s and lbl_s:
+        return f"{pre_s}\n\n{lbl_s}"  # blank line sets the label list apart
+    return pre_s or lbl_s
 
 
 def drop_stale_screens(messages: list[Message]) -> None:
@@ -446,7 +473,7 @@ def drop_stale_screens(messages: list[Message]) -> None:
         assert isinstance(tr, ToolResultMessage)  # guaranteed by the filter
         name = name_by_id.get(tr.tool_call_id, "view")
         body = _stub_body(_content_to_text(tr.content))
-        head = f"{STUB_PREFIX}{name})"
+        head = f"{STUB_PREFIX}{name}){STUB_NOTE}"
         messages[i] = ToolResultMessage(
             tool_call_id=tr.tool_call_id,
             content=f"{head}\n{body}" if body else head,

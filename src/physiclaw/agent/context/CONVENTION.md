@@ -21,7 +21,7 @@ Pinned at the request tail as `<plan>`; mutate via `update_progress`. Steps are 
 
 Automatic, two layers:
 
-- **Per-turn: latest screen wins.** Only the newest view — a gesture's attached view, `peek`, or `screenshot` — keeps its image + full listing; earlier ones stub to `(superseded <tool>)` plus the action line and **text rows**. Text rows (labelled buttons, tabs, category names — `Add to Cart`) stay re-targetable; icon rows drop — re-ground from the current view.
+- **Per-turn: latest screen wins.** Only the newest view (a gesture's view, `peek`, or `screenshot`) keeps its image + full listing; earlier ones stub to `(superseded <tool>) — labels only, in order` plus the action line — **text labels alone** (`Add to Cart`), no bboxes/ids/icons. Labels are a memory of that screen, not tap targets: to act on one, re-ground from the current view.
 - **Turn-age (~30 turns).** Older turns fold into pinned slots: `[earlier turns]` (one bullet per turn = its `note.summary`; the rest is gone), `[memory loads]` (all `read_memory`/`read_logs` results, in full), `[loaded skills]` (all skill bodies, in full). The last ~10 turns stay intact; plan + scratchpad sit at the tail.
 
 → Never rely on an old screen — only its `note.summary` bullet survives. DO trust already-loaded skills and logs — never reload. Anything bigger than a one-liner → scratchpad.
@@ -34,7 +34,7 @@ One turn before each compression the engine posts a ⚠ checkpoint tail and reje
 
 ## Bboxes — copy verbatim, never eyeball
 
-Every action bbox comes verbatim — every digit — from a grounded source: the latest view's listing (gesture, `peek`, or `screenshot`), a surviving text row from an earlier stub, a scratchpad copy of a prior listing row, or **SYSTEM § Screen layout**. Target absent from all → escalate to `screenshot`; never fabricate coords. Sole exception: an element-free target (empty area to dismiss, a swipe anchor) may be estimated.
+Every action bbox comes verbatim — every digit — from a grounded source: the latest view's listing (gesture, `peek`, or `screenshot`), a scratchpad copy of a prior listing row, or **SYSTEM § Screen layout**. Superseded stubs keep labels only — no bboxes — so a coord you'll still need after the screen changes must go to the scratchpad first (§ Scratchpad). Target absent from all → escalate to `screenshot`; never fabricate coords. Sole exception: an element-free target (empty area to dismiss, a swipe anchor) may be estimated.
 
 ## Sequence bundling
 

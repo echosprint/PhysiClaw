@@ -198,10 +198,12 @@ def test_stub_body_keeps_text_rows_drops_icon_rows() -> None:
 
     out = _stub_body(text)
 
-    lines = out.splitlines()
-    assert len(lines) == 2  # header + 1 text row
-    assert "[text]" in lines[1]
+    # Labels only: header, icon rows, id/tag/bbox/conf all gone — just "Send".
+    assert out == "Send"
+    assert "[text]" not in out  # kind tag dropped
     assert "[icon]" not in out
+    assert "0.99" not in out    # confidence dropped
+    assert "0.5,0.8" not in out  # bbox dropped
 
 
 def test_stub_body_keeps_action_text_and_verdict() -> None:
@@ -217,8 +219,11 @@ def test_stub_body_keeps_action_text_and_verdict() -> None:
     out = _stub_body(text)
 
     assert "screen: no visible change" in out  # retry history stays legible
-    assert '"Add to Cart"' in out
+    assert "Add to Cart" in out                # label survives...
+    assert '"Add to Cart"' not in out          # ...but not the quoted-row form
     assert "[icon]" not in out
+    assert "0.99" not in out                   # confidence dropped
+    assert "0.5,0.8" not in out                # row bbox dropped
 
 
 def test_stub_body_drops_header_when_no_text_rows_survive() -> None:
@@ -402,8 +407,10 @@ def test_drop_stale_screens_stubs_gesture_view_keeps_latest_peek() -> None:
     assert stale.is_superseded is True
     assert isinstance(stale.content, str)
     assert stale.content.startswith("(superseded tap)")
+    assert "labels only, in order" in stale.content  # reminder on the marker
     assert "screen: changed" in stale.content
-    assert '"Add to Cart"' in stale.content
+    assert "Add to Cart" in stale.content            # label survives (unquoted)
+    assert '"Add to Cart"' not in stale.content       # quoted-row form gone
     assert "[icon]" not in stale.content
     latest = msgs[6]
     assert isinstance(latest, ToolResultMessage)
@@ -686,10 +693,14 @@ def test_stub_body_against_real_format_elements_output() -> None:
     out = _stub_body(text)
 
     assert "screen: changed" in out            # action line survives
-    assert "加入购物车" in out                   # CJK text row survives
-    assert 'He said "hi" [ok]' in out          # brackets in label don't confuse the row regex
+    assert "加入购物车" in out                   # CJK label survives
+    assert 'He said "hi" [ok]' in out          # label w/ quotes+brackets peeled off whole
     assert "[icon]" not in out                 # icon rows dropped
-    assert out.splitlines()[1] == 'id [kind] "label" [left,top,right,bottom] conf'
+    assert "[text]" not in out                 # kind tag dropped
+    assert compact._LISTING_HEADER not in out  # header dropped
+    assert "0.99" not in out                   # bbox + confidence dropped
+    # Labels emitted in listing order, one per line.
+    assert "加入购物车\nHe said \"hi\" [ok]" in out
 
 
 def test_stub_body_real_formatter_icon_only_listing_drops_header() -> None:
@@ -740,19 +751,48 @@ def _row(id_: int, kind: str, label: str) -> str:
 @given(
     kinds=st.lists(st.sampled_from(["icon", "text"]), min_size=1, max_size=10),
     label=st.text(
-        alphabet=st.characters(blacklist_categories=("Cs",), blacklist_characters="\n"),
+        # No line-breaks (they'd split a row) and no `"` (label delimiter),
+        # so each row round-trips to exactly its label.
+        alphabet=st.characters(
+            blacklist_categories=("Cs",),
+            blacklist_characters=_LINE_BREAKS + '"',
+        ),
+        min_size=1,
         max_size=20,
-    ),
+    # No boundary whitespace: `_stub_body` strips the joined output, which
+    # would trim the first/last label's edges.
+    ).filter(lambda s: s == s.strip()),
 )
 def test_stub_body_keeps_exactly_the_text_rows(kinds, label) -> None:
-    rows = [_row(i, k, label) for i, k in enumerate(kinds)]
+    # Icon rows carry an empty label in real formatter output.
+    rows = [_row(i, k, label if k == "text" else "") for i, k in enumerate(kinds)]
     text = compact._LISTING_HEADER + "\n" + "\n".join(rows)
 
     out = _stub_body(text)
 
-    kept = [ln for ln in out.splitlines() if compact._ROW_RE.match(ln)]
-    assert len(kept) == kinds.count("text")
-    assert all(" [text] " in ln for ln in kept)
+    # One line per text row, each exactly the label, icon rows dropped,
+    # order preserved.
+    assert out.splitlines() == [label] * kinds.count("text")
+
+
+@given(
+    label=st.text(
+        alphabet=st.characters(blacklist_categories=("Cs",), blacklist_characters='"'),
+        min_size=1,
+        max_size=20,
+    ).filter(lambda s: s == s.strip()),
+)
+def test_stub_body_emitted_label_never_contains_a_newline(label) -> None:
+    """No emitted label carries a newline. `_stub_body` matches rows against
+    individual `splitlines()` lines, so a label field with an embedded
+    line break splits the row and can't round-trip as one label — it falls
+    through to the preamble instead. Locks the invariant against a future
+    switch to `re.DOTALL` / away from `splitlines()`."""
+    out = _stub_body(compact._LISTING_HEADER + "\n" + _row(0, "text", label))
+    if any(brk in label for brk in _LINE_BREAKS):
+        assert label not in out.splitlines()  # split apart, not a clean label
+    else:
+        assert out == label  # newline-free label round-trips exactly
 
 
 @given(st.text(max_size=400))
@@ -810,7 +850,8 @@ def test_drop_stale_screens_engine_loop_invariant() -> None:
             assert isinstance(s.content, str)
             assert s.content.startswith("(superseded ")
             assert "screen: changed" in s.content   # verdict survives stubbing
-            assert '"Send"' in s.content            # text row survives stubbing
+            assert "Send" in s.content              # label survives stubbing
+            assert '"Send"' not in s.content        # but not the quoted-row form
 
 
 def test_drop_stale_screens_batch_stubs_all_but_last() -> None:
