@@ -535,6 +535,18 @@ def test_check_phone_in_frame_flags_low_coverage(mocker) -> None:
     assert any("Move camera closer" in s for s in result["issues"])
 
 
+def test_check_phone_in_frame_accepts_coverage_just_above_25pct(mocker) -> None:
+    # 510×255 / (800×600) ≈ 27% — above the 25% floor but below the old 30%.
+    # Pins the threshold: a bump back to 0.30 would flag this as too small.
+    mocker.patch.object(cv2, "imwrite")
+    img = _phone_like_frame(800, 600, phone_w=510, phone_h=255)
+
+    result = check_phone_in_frame(img)
+
+    assert result["coverage"] == 0.27
+    assert not any("Move camera closer" in s for s in result["issues"])
+
+
 def test_check_phone_in_frame_flags_misaligned_long_axis(mocker) -> None:
     mocker.patch.object(cv2, "imwrite")
     # Image landscape but phone portrait.

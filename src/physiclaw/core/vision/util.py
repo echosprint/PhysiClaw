@@ -385,10 +385,10 @@ def check_phone_in_frame(frame: np.ndarray) -> dict:
             f"Camera may be tilted — phone aspect {phone_ratio:.2f} (diff {ratio_diff:.0%})"
         )
 
-    # Coverage: phone should fill ≥ 30% of frame.
-    if coverage < 0.30:
+    # Coverage: phone should fill ≥ 25% of frame.
+    if coverage < 0.25:
         issues.append(
-            f"Move camera closer — phone covers only {coverage:.0%} of image (need ≥30%)"
+            f"Move camera closer — phone covers only {coverage:.0%} of image (need ≥25%)"
         )
 
     log.info(
