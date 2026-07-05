@@ -209,8 +209,8 @@ def _cli() -> int:
         print(f"OK: {cmd} {job_id}")
         if updates.get("Status") == STATUS_PEND:
             # Same warning the in-process finish_job tool gives: agents
-            # kept reading "done" as "over" while the periodic job
-            # re-armed and fired again (2026-07-05 yogurt incident).
+            # read "done" as "over" while the periodic job re-arms and
+            # fires again minutes later.
             nxt = job.next_fire_time or "its next scheduled minute"
             print(
                 f"NOTE: {job_id} is PERIODIC — re-armed, fires again at "

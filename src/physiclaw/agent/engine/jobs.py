@@ -42,8 +42,8 @@ _CRON_PREFIX = "cron:"
 
 # Every periodic fire wakes the full agent (camera + LLM turns), and
 # done/fail re-arms the job — a `*/5` "reply watcher" therefore loops
-# forever at enormous cost once its purpose is gone (2026-07-05 yogurt
-# incident). Below this floor, force a one-time follow-up instead.
+# forever at enormous cost once its purpose is gone. Below this floor,
+# force a one-time follow-up instead.
 PERIODIC_MIN_GAP = dt.timedelta(minutes=30)
 
 AUTO_WAIT_JOB_ID = "wait-check-auto"
@@ -206,8 +206,8 @@ def finish_job(*, id: str, status: str, recap: str) -> str:
     For periodic jobs, done/fail reset to pend so the next firing still
     happens; cancel is permanent (to revive, create_job with a new id).
     Returns the tool-reply line; when a periodic job re-arms, the reply
-    says so explicitly — agents kept reading "done" as "over" and the
-    job fired again minutes later (2026-07-05 yogurt incident).
+    says so explicitly — agents read "done" as "over" and the job
+    fires again minutes later.
     """
     if status not in TERMINAL_STATUSES:
         raise ValueError(

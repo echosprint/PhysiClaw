@@ -482,8 +482,8 @@ def test_finish_job_periodic_done_resets_to_pend(_jobs_path: Path) -> None:
 
 
 def test_finish_job_periodic_done_reply_flags_rearm(_jobs_path: Path) -> None:
-    # The 2026-07-05 yogurt loop: the agent read "done" as "over" while
-    # the periodic job re-armed and fired again minutes later. The tool
+    # The re-fire trap: an agent reads "done" as "over" while the
+    # periodic job re-arms and fires again minutes later. The tool
     # reply must state the re-arm and the permanent way out (cancel).
     _write_jobs(_jobs_path, _job_text(
         job_id="periodic", kind="periodic", status="fired",

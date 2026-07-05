@@ -750,8 +750,7 @@ def test_expire_stale_fired_fails_one_time_zombie_after_24h(
     tmp_path: Path,
 ) -> None:
     # A fired job no session ever closed is invisible to both find_due
-    # (not pend) and purge_stale (not terminal) — a permanent zombie
-    # (the qiaoqian-water-payment job sat that way for two weeks).
+    # (not pend) and purge_stale (not terminal) — a permanent zombie.
     zombie = _job_section(
         job_id="zombie",
         kind="one-time",
