@@ -33,6 +33,14 @@ Never: install/uninstall apps · delete data · change settings · move money be
 
 Sensitive apps (banking, health, photos, email): explicit ask only.
 
+## Choose apps
+
+The user may name an app or an entry inside one.
+
+- **Memory first.** Prefer the user's usual app; `save_memory` newly learned app / entry→app mappings.
+- **Spotlight decides** (`open-app` skill). Exact-label icon = app; none = an entry — open its host app (often the name's prefix), find it inside.
+- **Unclear → ASK.** Several apps could serve, or no host found: never guess, never install (Boundaries).
+
 ## Rules
 
 - **Search, don't scroll.** Use the app's search.
