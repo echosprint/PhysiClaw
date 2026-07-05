@@ -18,11 +18,14 @@ bumped — anything that leaves the tip somewhere other than the park spot).
 """
 
 import logging
-import socket
 import sys
-import time
 
 from physiclaw.config import CONFIG
+
+# Re-exported from core.server.net (its true home) so existing callers —
+# `warm_start.wait_for_port`, `from ...warm_start import wait_for_port` —
+# keep working. The redundant alias marks it an intentional re-export.
+from physiclaw.core.server.net import wait_for_port as wait_for_port
 
 log = logging.getLogger(__name__)
 
@@ -31,38 +34,6 @@ BRIDGE_WAIT_TIMEOUT = CONFIG.warm_start.bridge_wait_timeout_seconds
 # After a /bridge load is detected, let the page finish rendering before
 # we start tapping dots at it.
 BRIDGE_SETTLE_SECONDS = CONFIG.warm_start.bridge_settle_seconds
-
-# How long to wait for uvicorn's listening socket to be accepting
-# connections, in seconds. IPv4 only — if --host is IPv6 this will time
-# out; today all callers use v4.
-PORT_WAIT_TIMEOUT = CONFIG.warm_start.port_wait_timeout_seconds
-PORT_WAIT_CONNECT_TIMEOUT = CONFIG.warm_start.port_wait_connect_timeout_seconds
-PORT_WAIT_INTERVAL = CONFIG.warm_start.port_wait_interval_seconds
-
-
-def wait_for_port(
-    host: str, port: int, timeout: float = PORT_WAIT_TIMEOUT
-) -> bool:
-    """Block until something is accepting TCP connections on (host, port).
-
-    Returns True on first successful connect, False if `timeout` elapses.
-    Lives here because the warm-start thread uses it to synchronize with
-    uvicorn startup — signalling SIGINT mid-startup leaks CancelledError
-    tracebacks through the lifespan machinery.
-    """
-    probe_host = "127.0.0.1" if host in ("0.0.0.0", "") else host
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(PORT_WAIT_CONNECT_TIMEOUT)
-            try:
-                s.connect((probe_host, port))
-                return True
-            except OSError:
-                pass
-        time.sleep(PORT_WAIT_INTERVAL)
-    return False
-
 
 
 

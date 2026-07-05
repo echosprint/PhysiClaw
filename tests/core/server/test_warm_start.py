@@ -1,7 +1,8 @@
-"""Tests for `physiclaw.core.server.warm_start` — focused on
-`wait_for_port` (testable) and `try_resume` happy-path / early-return
-branches with elaborate mocking. The `_sanity` helper is integration-
-only and lives behind hardware fakes.
+"""Tests for `physiclaw.core.server.warm_start` — the `try_resume`
+happy-path / early-return branches with elaborate mocking. The `_sanity`
+helper is integration-only and lives behind hardware fakes. `wait_for_port`
+now lives in `core.server.net` (tested in test_net.py); we only pin the
+re-export here.
 """
 from __future__ import annotations
 
@@ -9,73 +10,16 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from physiclaw.core.server import warm_start
-from physiclaw.core.server.warm_start import wait_for_port
+from physiclaw.core.server import net, warm_start
 
 
-# ---------- wait_for_port ----------
+# ---------- wait_for_port re-export ----------
 
 
-def test_wait_for_port_returns_true_on_immediate_connect(mocker) -> None:
-    fake_sock = MagicMock()
-    fake_sock.__enter__ = MagicMock(return_value=fake_sock)
-    fake_sock.__exit__ = MagicMock(return_value=None)
-    fake_sock.connect.return_value = None  # success
-    mocker.patch.object(warm_start.socket, "socket", return_value=fake_sock)
-
-    assert wait_for_port("127.0.0.1", 8048, timeout=1.0) is True
-
-
-def test_wait_for_port_returns_false_on_timeout(mocker) -> None:
-    fake_sock = MagicMock()
-    fake_sock.__enter__ = MagicMock(return_value=fake_sock)
-    fake_sock.__exit__ = MagicMock(return_value=None)
-    fake_sock.connect.side_effect = OSError("connection refused")
-    mocker.patch.object(warm_start.socket, "socket", return_value=fake_sock)
-    mocker.patch.object(warm_start.time, "sleep")
-    # Force the deadline immediately by faking monotonic.
-    times = iter([0.0, 100.0])  # deadline=1.0; first check passes, second exits
-    mocker.patch.object(
-        warm_start.time, "monotonic", side_effect=lambda: next(times)
-    )
-
-    assert wait_for_port("127.0.0.1", 8048, timeout=1.0) is False
-
-
-def test_wait_for_port_uses_loopback_when_host_is_wildcard(mocker) -> None:
-    fake_sock = MagicMock()
-    fake_sock.__enter__ = MagicMock(return_value=fake_sock)
-    fake_sock.__exit__ = MagicMock(return_value=None)
-    fake_sock.connect.return_value = None
-    mocker.patch.object(warm_start.socket, "socket", return_value=fake_sock)
-
-    wait_for_port("0.0.0.0", 8048, timeout=1.0)
-
-    fake_sock.connect.assert_called_once_with(("127.0.0.1", 8048))
-
-
-def test_wait_for_port_uses_loopback_when_host_is_empty(mocker) -> None:
-    fake_sock = MagicMock()
-    fake_sock.__enter__ = MagicMock(return_value=fake_sock)
-    fake_sock.__exit__ = MagicMock(return_value=None)
-    fake_sock.connect.return_value = None
-    mocker.patch.object(warm_start.socket, "socket", return_value=fake_sock)
-
-    wait_for_port("", 8048, timeout=1.0)
-
-    fake_sock.connect.assert_called_once_with(("127.0.0.1", 8048))
-
-
-def test_wait_for_port_uses_named_host_unchanged(mocker) -> None:
-    fake_sock = MagicMock()
-    fake_sock.__enter__ = MagicMock(return_value=fake_sock)
-    fake_sock.__exit__ = MagicMock(return_value=None)
-    fake_sock.connect.return_value = None
-    mocker.patch.object(warm_start.socket, "socket", return_value=fake_sock)
-
-    wait_for_port("api.host", 8048, timeout=1.0)
-
-    fake_sock.connect.assert_called_once_with(("api.host", 8048))
+def test_wait_for_port_is_re_exported_from_net() -> None:
+    # Callers still do `warm_start.wait_for_port` / `from ...warm_start import
+    # wait_for_port`; keep that pointing at the real implementation in net.
+    assert warm_start.wait_for_port is net.wait_for_port
 
 
 # ---------- try_resume: early-return branches ----------
