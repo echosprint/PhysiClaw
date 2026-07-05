@@ -224,7 +224,7 @@ def test_pingpong_fires_despite_changed_verdicts() -> None:
 
 
 def test_pingpong_nav_and_press_alternation() -> None:
-    # The yogurt-log shape: tap product row ↔ go_back, forever.
+    # Real-log shape: tap product row ↔ go_back, forever.
     g = _guard()
     for _ in range(BLOCK_AT):
         _pp(g, BOX_A)
@@ -449,3 +449,36 @@ def test_orbit_exempt_keys_never_tracked(mocker) -> None:
         assert g.record("tap", {"bbox": space}, False) is None
         assert g.record_error("tap", {"bbox": ret}) is None
     assert g._presses == []  # nothing entered the window at all
+
+
+# ---------- batch verdict attribution ----------
+
+
+def test_batch_changed_verdict_does_not_reset_target() -> None:
+    # A sequence's "changed" can come from ANY step (a keyboard rising),
+    # so it must not launder evidence built against one press target —
+    # a paste-flow loop survives on exactly this laundering.
+    g = _guard()
+    for _ in range(BLOCK_AT - 1):
+        _press(g, BOX)  # camera-verified no-ops
+    g.record("sequence", {"actions": [{"tool_name": "long_press", "arg": BOX}]}, True)
+
+    assert g.should_block("tap", {"bbox": BOX}) is not None
+
+
+def test_batch_changed_verdict_does_not_count_misses_either() -> None:
+    g = _guard()
+    args = {"actions": [{"tool_name": "long_press", "arg": BOX}]}
+    for _ in range(BLOCK_AT + 1):
+        g.record("sequence", args, True)  # unattributable — no evidence
+
+    assert g.should_block("tap", {"bbox": BOX}) is None
+
+
+def test_standalone_changed_press_still_resets_target() -> None:
+    g = _guard()
+    for _ in range(BLOCK_AT - 1):
+        _press(g, BOX)
+    _press(g, BOX, changed=True)  # single press owns its verdict
+
+    assert g.should_block("tap", {"bbox": BOX}) is None

@@ -33,7 +33,9 @@ The detectors, by the loop they catch:
      warning; blocking stays with the evidence-based detectors.
 
 What never counts: `screen: changed` presses (a qty stepper that works
-RESETS its target), missing verdicts (camera hiccup → fail open),
+RESETS its target — though a batch's changed verdict is unattributable,
+so it neither counts nor resets its steps), missing verdicts (camera
+hiccup → fail open),
 swipes in detector 1 (repeated scrolls are normal; direction-alternating
 swipes are caught by detector 2), and learned keyboard keys everywhere
 (backspace-clearing a field is 10–20 legitimate presses).
@@ -238,15 +240,24 @@ class StuckGuard:
     def record(self, name: str, arguments: dict, changed: bool | None) -> str | None:
         """Feed a dispatched gesture's screen-change verdict back in.
         Returns tier-1 warning text to append to the tool result when a
-        threshold is crossed, else None."""
+        threshold is crossed, else None.
+
+        Verdict attribution: a STANDALONE press owns its verdict — changed
+        proves the target works (reset), no-change is a miss. A `sequence`
+        verdict covers the whole batch: no-change means NO step changed
+        anything (every press is a miss — strictly true), but changed can
+        come from ANY step, so it neither counts nor resets the others
+        (a keyboard rising for step 1 must not launder step 3's dead
+        long-press)."""
         warnings: list[str] = []
+        single = name in PRESS_TOOLS
         for center in self._press_centers_counted(name, arguments):
             orbit = self._track_orbit(center)
             if orbit:
                 warnings.append(orbit)
             t = self._find(center)
             if changed is True:
-                if t is not None:
+                if single and t is not None:
                     self._targets.remove(t)
                 continue
             if changed is None:

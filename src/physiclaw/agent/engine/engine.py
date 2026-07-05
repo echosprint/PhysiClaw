@@ -599,6 +599,33 @@ async def _dispatch(
             is_error=True,
         )
 
+    # Layout lint: refuse a gesture that targets a learned box which
+    # cannot work in the current keyboard state (e.g. long_press on the
+    # keyboard-HIDDEN input box with the keyboard up presses the
+    # keyboard itself, and the stuck guard is blind to it — every press
+    # "changes" the screen). Sequences carry in-batch evidence; the
+    # session's KeyboardTracker carries it across calls (a raising tap
+    # one turn, the wrong long_press the next). Fail-open on any
+    # internal error.
+    if call.name in ("sequence", "long_press"):
+        try:
+            lint = screen_layout.lint_gesture(
+                call.name, call.arguments,
+                keyboard_up=session.kb.state == "up",
+            )
+        except Exception:
+            lint = None
+            log.exception("  layout lint failed — skipping")
+        if lint is not None:
+            tr.write({
+                "event": "tool_blocked_layout", "turn": turn,
+                "name": call.name, "id": call.id, "arguments": call.arguments,
+            })
+            log.warning("  ✗ %s: blocked by layout lint", call.name)
+            return ToolResultMessage(
+                tool_call_id=call.id, content=lint, is_error=True,
+            )
+
     # Stuck guard tier 2: refuse a looping call BEFORE actuating —
     # exhausted target, repeated action cycle, or identical failing call.
     # Models can ignore warnings; they can't ignore an action that
@@ -628,13 +655,14 @@ async def _dispatch(
 
         blocks = await mcp.call_tool(call.name, call.arguments)
         content = mcp_blocks_to_content_blocks(blocks)
+        changed = verdict.parse(_action_text(blocks))
+        # Keyboard belief feeds the layout lint on LATER dispatches.
+        session.kb.observe(call.name, call.arguments, changed)
         # Stuck guard tier 1: feed the gesture's screen-change verdict
         # back in; any detector crossing its warn threshold (target /
         # cycle / position orbit) appends a ⚠ to the result — the
         # highest-adherence steering channel.
-        warning = session.guard.record(
-            call.name, call.arguments, verdict.parse(_action_text(blocks)),
-        )
+        warning = session.guard.record(call.name, call.arguments, changed)
         if warning is not None:
             tr.write({
                 "event": "stuck_warning", "turn": turn,
@@ -652,6 +680,8 @@ async def _dispatch(
     except Exception as e:
         log.error("  ✗ %s failed: %s", call.name, e)
         tr.write({"event": "tool_error", "turn": turn, "name": call.name, "error": str(e)})
+        # A failed gesture leaves the screen state unproven.
+        session.kb.state = "unknown"
         # Identical failing calls are loop evidence too (e.g. a target
         # overlapping the AssistiveTouch button raises on every retry).
         content = f"{call.name} failed: {e}"

@@ -30,6 +30,10 @@ class Session:
     plan: Plan = field(default_factory=Plan)
     scratchpad: str = ""
     guard: StuckGuard = field(default_factory=StuckGuard)
+    # Cross-call keyboard belief for the layout lint (see KeyboardTracker).
+    kb: screen_layout.KeyboardTracker = field(
+        default_factory=screen_layout.KeyboardTracker
+    )
 
 
 Handler = Callable[[Session, dict], Awaitable[str]]

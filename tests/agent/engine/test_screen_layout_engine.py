@@ -407,3 +407,199 @@ def test_record_after_complete_says_no_restart() -> None:
     assert "will now restart" not in out
     saved = json.loads(paths.screen_layout_json().read_text())
     assert saved["send"] == [0.76, 0.868, 0.995, 0.918]  # correction saved
+
+
+# ---------- lint_sequence ----------
+
+_LINT_LAYOUT = {**_CHAT_HIDDEN, **_CHAT_VISIBLE_WECHAT}
+_HIDDEN_BOX = _CHAT_HIDDEN["chat_input_kb_hidden"]
+_VISIBLE_BOX = _CHAT_VISIBLE_WECHAT["chat_input_kb_visible"]
+_PASTE_BOX = _CHAT_VISIBLE_WECHAT["chat_paste"]
+_SEND_BOX = _CHAT_VISIBLE_WECHAT["send"]
+
+
+def test_lint_blocks_long_press_on_hidden_box_before_paste_tap() -> None:
+    # The classic wrong-box paste batch: with the keyboard up, the
+    # kb-hidden region is the keyboard — the popover never opens.
+    _write_layout(_LINT_LAYOUT)
+
+    msg = sl.lint_sequence([
+        {"tool_name": "long_press", "arg": _HIDDEN_BOX},
+        {"tool_name": "tap", "arg": _PASTE_BOX},
+        {"tool_name": "tap", "arg": _SEND_BOX},
+    ])
+
+    assert msg is not None and msg.startswith("BLOCKED")
+    assert "KEYBOARD-VISIBLE" in msg
+    assert str(_VISIBLE_BOX) in msg
+
+
+def test_lint_blocks_two_step_variant(  # turn 92's shape
+) -> None:
+    _write_layout(_LINT_LAYOUT)
+
+    msg = sl.lint_sequence([
+        {"tool_name": "long_press", "arg": _HIDDEN_BOX},
+        {"tool_name": "tap", "arg": _PASTE_BOX},
+    ])
+
+    assert msg is not None and msg.startswith("BLOCKED")
+
+
+def test_lint_blocks_long_press_on_hidden_after_tapping_it() -> None:
+    # Wrong-token substitution in the 5-step template: the tap raised
+    # the keyboard, so the later long_press presses the keyboard.
+    _write_layout(_LINT_LAYOUT)
+
+    msg = sl.lint_sequence([
+        {"tool_name": "tap", "arg": _HIDDEN_BOX},
+        {"tool_name": "send_to_clipboard", "arg": "hello"},
+        {"tool_name": "long_press", "arg": _HIDDEN_BOX},
+        {"tool_name": "tap", "arg": _PASTE_BOX},
+        {"tool_name": "tap", "arg": _SEND_BOX},
+    ])
+
+    assert msg is not None and "step 1 taps that box" in msg
+
+
+def test_lint_allows_the_correct_im_template() -> None:
+    _write_layout(_LINT_LAYOUT)
+
+    msg = sl.lint_sequence([
+        {"tool_name": "tap", "arg": _HIDDEN_BOX},
+        {"tool_name": "send_to_clipboard", "arg": "hello"},
+        {"tool_name": "long_press", "arg": _VISIBLE_BOX},
+        {"tool_name": "tap", "arg": _PASTE_BOX},
+        {"tool_name": "tap", "arg": _SEND_BOX},
+    ])
+
+    assert msg is None
+
+
+def test_lint_allows_bare_long_press_near_bottom() -> None:
+    # Long-pressing a bottom message bubble (copy menu) with no paste
+    # flow in the batch is legitimate — no prior input tap, no paste tap.
+    _write_layout(_LINT_LAYOUT)
+
+    msg = sl.lint_sequence([
+        {"tool_name": "long_press", "arg": _HIDDEN_BOX},
+        {"tool_name": "tap", "arg": [0.2, 0.75, 0.35, 0.79]},
+    ])
+
+    assert msg is None
+
+
+def test_lint_fails_open_without_learned_layout() -> None:
+    assert sl.lint_sequence([
+        {"tool_name": "long_press", "arg": [0.098, 0.9, 0.716, 0.95]},
+        {"tool_name": "tap", "arg": [0.12, 0.52, 0.3, 0.566]},
+    ]) is None
+
+
+def test_lint_fails_open_on_malformed_actions() -> None:
+    _write_layout(_LINT_LAYOUT)
+
+    assert sl.lint_sequence("not-a-list") is None
+    assert sl.lint_sequence(None) is None
+    assert sl.lint_sequence([{"tool_name": "long_press", "arg": ["x", 1]}]) is None
+    assert sl.lint_sequence([42, {"tool_name": "tap"}]) is None
+
+
+# ---------- KeyboardTracker ----------
+
+
+def _tracker_with_layout() -> "sl.KeyboardTracker":
+    _write_layout(_LINT_LAYOUT)
+    return sl.KeyboardTracker()
+
+
+def test_tracker_raising_press_with_changed_verdict_means_up() -> None:
+    kb = _tracker_with_layout()
+    kb.observe("tap", {"bbox": _HIDDEN_BOX}, True)
+    assert kb.state == "up"
+
+
+def test_tracker_raising_press_needs_camera_proof() -> None:
+    # A dead press (wire fault, silent refusal) must not claim "up".
+    kb = _tracker_with_layout()
+    kb.observe("tap", {"bbox": _HIDDEN_BOX}, False)
+    assert kb.state == "unknown"
+    kb.observe("tap", {"bbox": _HIDDEN_BOX}, None)
+    assert kb.state == "unknown"
+
+
+def test_tracker_nav_means_down_and_other_press_means_unknown() -> None:
+    kb = _tracker_with_layout()
+    kb.observe("tap", {"bbox": _HIDDEN_BOX}, True)
+    kb.observe("home_screen", {}, True)
+    assert kb.state == "down"
+
+    kb.observe("tap", {"bbox": _HIDDEN_BOX}, True)
+    kb.observe("tap", {"bbox": [0.4, 0.4, 0.5, 0.45]}, True)  # chat area
+    assert kb.state == "unknown"
+
+
+def test_tracker_typing_and_views_preserve_up() -> None:
+    kb = _tracker_with_layout()
+    kb.observe("tap", {"bbox": _HIDDEN_BOX}, True)
+    kb.observe("tap", {"bbox": _SEND_BOX}, True)      # keyboard key
+    kb.observe("peek", {}, None)                       # view
+    kb.observe("send_to_clipboard", {"text": "x"}, None)
+    assert kb.state == "up"
+
+
+def test_tracker_swipe_and_batch_presses_decay_to_unknown() -> None:
+    kb = _tracker_with_layout()
+    kb.observe("tap", {"bbox": _HIDDEN_BOX}, True)
+    kb.observe("swipe", {"bbox": [0.3, 0.5, 0.7, 0.6]}, True)
+    assert kb.state == "unknown"
+
+    kb.observe("tap", {"bbox": _HIDDEN_BOX}, True)
+    kb.observe("sequence", {"actions": [{"tool_name": "tap", "arg": [0.4, 0.4, 0.5, 0.45]}]}, True)
+    assert kb.state == "unknown"
+
+    kb.observe("tap", {"bbox": _HIDDEN_BOX}, True)
+    kb.observe("sequence", {"actions": [{"tool_name": "send_to_clipboard", "arg": "x"}]}, True)
+    assert kb.state == "up"  # clipboard-only batch touches nothing
+
+
+# ---------- lint_gesture (cross-call keyboard state) ----------
+
+
+def test_lint_gesture_blocks_standalone_long_press_when_keyboard_up() -> None:
+    # The cross-call shape: the raising tap happened in a PREVIOUS call.
+    _write_layout(_LINT_LAYOUT)
+
+    msg = sl.lint_gesture(
+        "long_press", {"bbox": _HIDDEN_BOX}, keyboard_up=True,
+    )
+
+    assert msg is not None and msg.startswith("BLOCKED")
+    assert "KEYBOARD-VISIBLE" in msg
+
+
+def test_lint_gesture_allows_standalone_long_press_otherwise() -> None:
+    _write_layout(_LINT_LAYOUT)
+
+    assert sl.lint_gesture("long_press", {"bbox": _HIDDEN_BOX}, keyboard_up=False) is None
+    assert sl.lint_gesture("long_press", {"bbox": _VISIBLE_BOX}, keyboard_up=True) is None
+    assert sl.lint_gesture("tap", {"bbox": _HIDDEN_BOX}, keyboard_up=True) is None
+
+
+def test_lint_gesture_blocks_bare_batch_long_press_when_keyboard_up() -> None:
+    # No in-batch evidence at all — the belief carries across calls.
+    _write_layout(_LINT_LAYOUT)
+
+    msg = sl.lint_gesture(
+        "sequence",
+        {"actions": [{"tool_name": "long_press", "arg": _HIDDEN_BOX}]},
+        keyboard_up=True,
+    )
+
+    assert msg is not None and "already up" in msg
+
+
+def test_lint_gesture_fails_open_without_layout() -> None:
+    assert sl.lint_gesture(
+        "long_press", {"bbox": [0.098, 0.9, 0.716, 0.95]}, keyboard_up=True,
+    ) is None

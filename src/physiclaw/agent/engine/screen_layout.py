@@ -24,7 +24,7 @@ inject-the-layout.
 
 import json
 import logging
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from physiclaw import paths
 from physiclaw.agent.engine.dto import Message, UserMessage
@@ -106,6 +106,200 @@ def repeatable_key_boxes() -> list[list[float]]:
     repeatedly. Empty while the layout is unlearned."""
     d = _load()
     return [d[f] for f in REPEATABLE_KEY_FIELDS if isinstance(d.get(f), list)]
+
+
+# Geometry for the sequence lint. The margin mirrors the stuck guard's
+# MATCH_TOLERANCE but lives here — stuck.py imports this module, so the
+# constant can't be shared without a cycle.
+_LINT_MARGIN = 0.02
+
+
+def _center_of(bbox) -> tuple[float, float] | None:
+    try:
+        left, top, right, bottom = (float(v) for v in bbox)
+    except (TypeError, ValueError):
+        return None
+    return (left + right) / 2, (top + bottom) / 2
+
+
+def _inside(center: tuple[float, float], bbox: list) -> bool:
+    left, top, right, bottom = bbox
+    return (
+        left - _LINT_MARGIN <= center[0] <= right + _LINT_MARGIN
+        and top - _LINT_MARGIN <= center[1] <= bottom + _LINT_MARGIN
+    )
+
+
+def _step_center(step, tool: str) -> tuple[float, float] | None:
+    """Center of a sequence step's bbox if it's the given press tool."""
+    if not isinstance(step, dict) or step.get("tool_name") != tool:
+        return None
+    return _center_of(step.get("arg") or [])
+
+
+def _taps_box(steps, box) -> bool:
+    """True if any step is a tap landing inside `box` (None/garbage → False)."""
+    if not isinstance(box, list):
+        return False
+    for s in steps:
+        c = _step_center(s, "tap")
+        if c is not None and _inside(c, box):
+            return True
+    return False
+
+
+# Gesture families the keyboard tracker interprets. Local copies — stuck.py
+# imports this module, so its identical constants can't be shared without a
+# cycle.
+_PRESS_TOOLS = ("tap", "double_tap", "long_press")
+_NAV_TOOLS = ("go_back", "home_screen", "force_quit")
+# Boxes that are only ever pressed while typing/pasting — a press there
+# neither raises nor dismisses the keyboard.
+_KEYBOARD_REGION_FIELDS = (
+    "chat_input_kb_visible", "send", "chat_paste",
+    "backspace", "return", "space", "spotlight_input", "spotlight_paste",
+)
+
+
+@dataclass
+class KeyboardTracker:
+    """Conservative cross-call belief about the on-screen keyboard.
+
+    "up" is claimed only when the camera verified the raising press (a
+    changed-verdict press on the chat input's keyboard-hidden box) and
+    every gesture since provably preserves it (typing/pasting boxes).
+    Nav gestures mean "down"; swipes, batches with presses, and presses
+    outside the keyboard region decay to "unknown". Views, local tools,
+    and clipboard syncs never touch the screen. Consumers act only on
+    "up" — "down"/"unknown" fail open.
+    """
+
+    state: str = "unknown"  # "up" | "down" | "unknown"
+
+    def observe(self, name: str, arguments: dict, changed: bool | None) -> None:
+        if name in _NAV_TOOLS:
+            self.state = "down"
+            return
+        if name == "swipe":
+            self.state = "unknown"
+            return
+        if name == "sequence":
+            actions = arguments.get("actions")
+            steps = actions if isinstance(actions, list) else []
+            if any(
+                isinstance(x, dict) and x.get("tool_name") in (*_PRESS_TOOLS, "swipe")
+                for x in steps
+            ):
+                # A batch verdict can't be attributed per step — any press
+                # or swipe inside may have moved the keyboard.
+                self.state = "unknown"
+            return
+        if name not in _PRESS_TOOLS:
+            return  # views / local tools / clipboard — screen untouched
+        c = _center_of(arguments.get("bbox") or [])
+        if c is None:
+            self.state = "unknown"
+            return
+        d = _load()
+        hidden = d.get("chat_input_kb_hidden")
+        if isinstance(hidden, list) and _inside(c, hidden):
+            # The raising press — but only the camera proves the keyboard
+            # actually rose (a dead press must not claim "up").
+            self.state = "up" if changed is True else "unknown"
+            return
+        for f in _KEYBOARD_REGION_FIELDS:
+            box = d.get(f)
+            if isinstance(box, list) and _inside(c, box):
+                return  # typing/pasting — keyboard state preserved
+        self.state = "unknown"  # a press elsewhere may have dismissed it
+
+
+def lint_gesture(name: str, arguments: dict, *, keyboard_up: bool) -> str | None:
+    """Pre-dispatch layout lint — blocking message, or None.
+
+    Covers both shapes of the wrong-box failure: a `sequence` (checked
+    always — in-batch evidence plus the caller's keyboard belief) and a
+    STANDALONE `long_press` (checked only when the keyboard is believed
+    up: the raising tap happened in an earlier call, so no in-batch
+    evidence can exist).
+    """
+    if name == "sequence":
+        return lint_sequence(arguments.get("actions"), keyboard_up=keyboard_up)
+    if name != "long_press" or not keyboard_up:
+        return None
+    d = _load()
+    hidden = d.get("chat_input_kb_hidden")
+    visible = d.get("chat_input_kb_visible")
+    if not (isinstance(hidden, list) and isinstance(visible, list)):
+        return None
+    c = _center_of(arguments.get("bbox") or [])
+    if c is None or not _inside(c, hidden):
+        return None
+    return (
+        f"BLOCKED — not executed: this long-press targets the chat input's "
+        f"KEYBOARD-HIDDEN box {hidden}, but the keyboard is up (your earlier "
+        "press on the input raised it), so that region is now the keyboard "
+        "itself and no Paste popover can appear there. Long-press the "
+        f"chat input's KEYBOARD-VISIBLE box {visible} instead "
+        "(SYSTEM § Screen layout)."
+    )
+
+
+def lint_sequence(actions, *, keyboard_up: bool = False) -> str | None:
+    """Pre-dispatch layout lint for a `sequence` batch — blocking message,
+    or None.
+
+    The one signature it refuses: a `long_press` on the chat input's
+    KEYBOARD-HIDDEN box at a point in the batch where the keyboard must
+    be up — because an earlier step tapped that box (which raises the
+    keyboard), because the caller already believes the keyboard is up
+    (`keyboard_up`, raised in an earlier call), or because a later step
+    taps the Paste box (which only ever appears above the RISEN input).
+    With the keyboard up, the kb-hidden region IS the keyboard's bottom
+    rows, so the popover never opens and the batch "succeeds" into a
+    no-op the stuck guard can't see (every press changes the screen).
+    The im template's correct box is `chat_input_kb_visible`.
+
+    Fail-open by design: unlearned layout, malformed steps, or missing
+    fields return None — this lint must never invent a blocker.
+    """
+    if not isinstance(actions, list):
+        return None
+    d = _load()
+    hidden = d.get("chat_input_kb_hidden")
+    visible = d.get("chat_input_kb_visible")
+    paste = d.get("chat_paste")
+    if not (isinstance(hidden, list) and isinstance(visible, list)):
+        return None
+
+    input_tapped_at: int | None = None
+    for i, step in enumerate(actions, 1):
+        tap_c = _step_center(step, "tap")
+        if tap_c is not None and _inside(tap_c, hidden):
+            if input_tapped_at is None:
+                input_tapped_at = i
+            continue
+        lp_c = _step_center(step, "long_press")
+        if lp_c is None or not _inside(lp_c, hidden):
+            continue
+        pastes_after = _taps_box(actions[i:], paste)
+        if input_tapped_at is None and not keyboard_up and not pastes_after:
+            continue  # bare long-press near the bottom — not the paste flow
+        if input_tapped_at is not None:
+            why = f"step {input_tapped_at} taps that box, which raises the keyboard"
+        elif keyboard_up:
+            why = "the keyboard is already up (raised by an earlier press on the input)"
+        else:
+            why = "the batch then taps the Paste box, which only appears above the RISEN input"
+        return (
+            f"BLOCKED — not executed: step {i} long-presses the chat input's "
+            f"KEYBOARD-HIDDEN box {hidden}, but {why}. With the keyboard up "
+            "that region is the keyboard itself, so no Paste popover can "
+            f"appear there. Long-press the chat input's KEYBOARD-VISIBLE box "
+            f"{visible} instead (SYSTEM § Screen layout) and keep the rest "
+            "of the batch."
+        )
+    return None
 
 
 def prune_builtin_skills(skills: dict) -> dict:

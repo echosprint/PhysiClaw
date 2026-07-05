@@ -1370,3 +1370,67 @@ async def test_run_setup_restart_fires_at_most_once(mocker) -> None:
     assert spy.call_count == 2
 
     assert spy.call_count == 2
+
+
+# ---------- _dispatch: layout lint ----------
+
+
+_SEQ_SCHEMA = {"name": "sequence", "input_schema": {"type": "object"}}
+
+
+@pytest.mark.asyncio
+async def test_dispatch_blocks_sequence_on_layout_lint(mocker) -> None:
+    mocker.patch.object(
+        engine_mod.screen_layout, "lint_gesture",
+        return_value="BLOCKED — not executed: wrong box",
+    )
+    mcp = FakeMcpClient()
+
+    result = await engine_mod._dispatch(
+        call=_tc("sequence", {"actions": [{"tool_name": "long_press", "arg": [0, 0.9, 1, 1]}]}),
+        schema_by_name={"sequence": _SEQ_SCHEMA},
+        mcp=mcp, local_registry={}, session=Session(), tr=MagicMock(), turn=0,
+    )
+
+    assert result.is_error is True
+    assert result.content.startswith("BLOCKED")
+    assert mcp.tool_calls == []  # never actuated
+
+
+@pytest.mark.asyncio
+async def test_dispatch_lint_failure_is_fail_open(mocker) -> None:
+    # A lint crash must never take down dispatch — the batch runs.
+    mocker.patch.object(
+        engine_mod.screen_layout, "lint_gesture",
+        side_effect=RuntimeError("lint bug"),
+    )
+    mcp = FakeMcpClient()
+
+    result = await engine_mod._dispatch(
+        call=_tc("sequence", {"actions": []}),
+        schema_by_name={"sequence": _SEQ_SCHEMA},
+        mcp=mcp, local_registry={}, session=Session(), tr=MagicMock(), turn=0,
+    )
+
+    assert result.is_error is not True
+    assert len(mcp.tool_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_dispatch_feeds_keyboard_tracker_the_verdict(mocker) -> None:
+    session = Session()
+    session.guard._exempt = []
+    kb_spy = mocker.patch.object(session.kb, "observe")
+    schema = {"name": "tap", "input_schema": {"type": "object"}}
+
+    await engine_mod._dispatch(
+        call=_tc("tap", {"bbox": [0.1, 0.9, 0.7, 0.95]}),
+        schema_by_name={"tap": schema},
+        mcp=VerdictMcpClient(), local_registry={}, session=session,
+        tr=MagicMock(), turn=0,
+    )
+
+    kb_spy.assert_called_once()
+    name, args, changed = kb_spy.call_args.args
+    assert name == "tap"
+    assert changed in (True, False)  # the parsed verdict, not None
