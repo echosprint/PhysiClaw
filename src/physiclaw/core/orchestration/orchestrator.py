@@ -505,14 +505,16 @@ class PhysiClaw:
         direction: Literal["up", "down", "left", "right"],
         size: Literal["s", "m", "l", "xl", "xxl"] = "m",
         speed: Literal["slow", "medium", "fast"] = "medium",
+        start_dwell: float = 0.0,
     ):
-        """Swipe from bbox center. Caller must hold the lock."""
+        """Swipe from bbox center. Caller must hold the lock. `start_dwell` (s)
+        anchors the touch-down at the start before sliding (see arm.swipe_to)."""
         self._require_no_at_crossing(bbox, direction)
         t = self.transforms
         ex, ey = t.swipe_end_pct(bbox, direction, self._SWIPE_DISTANCES[size])
         ex_mm, ey_mm = t.pct_to_grbl_mm(ex, ey)
         self.move_to_bbox_center(bbox)
-        self._arm.swipe_to(ex_mm, ey_mm, speed)
+        self._arm.swipe_to(ex_mm, ey_mm, speed, start_dwell=start_dwell)
 
     # ─── Screen-change verdict ────────────────────────────────
 
@@ -812,14 +814,25 @@ class PhysiClaw:
             "Went to home screen",
         )
 
+    # Hold the tip at the very edge this long after contact, before the slide,
+    # so iOS registers a touch-down inside the narrow interactive-pop zone —
+    # without it, a fast slide starting on contact skips past the edge and the
+    # gesture reads as a content scroll (no back). ~1.5 display frames.
+    BACK_EDGE_DWELL_SECONDS = 0.08
+
     def go_back(self) -> "GestureResult":
         """Go back one screen via left-edge swipe right.
 
-        `no visible change` in the verdict = the edge swipe didn't pop
-        (modal, root tab, image viewer) — the agent's cue to try another
+        Starts at the true left edge (x≈0) and dwells briefly on contact so the
+        touch is seen inside iOS's edge-pan zone before the slide arms the
+        interactive pop. `no visible change` in the verdict = the edge swipe
+        didn't pop (modal, root tab, image viewer) — the cue to try another
         exit."""
         return self._run_gesture(
-            lambda: self._swipe([0.0, 0.4, 0.04, 0.6], "right", "xxl", speed="fast"),
+            lambda: self._swipe(
+                [0.0, 0.4, 0.01, 0.6], "right", "xxl", speed="fast",
+                start_dwell=self.BACK_EDGE_DWELL_SECONDS,
+            ),
             "Went back",
         )
 

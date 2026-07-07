@@ -564,6 +564,22 @@ def test_swipe_to_presses_slides_to_endpoint_releases(mocker) -> None:
     assert written.rfind(b"G4 P0.2") > written.rfind(b"M5")  # rebound before park
 
 
+def test_swipe_to_start_dwell_anchors_touch_before_slide(mocker) -> None:
+    # press(3) + start-dwell G4(1) + G1 linear(1) + release(2) = 7 ok's.
+    arm, fake = _arm(
+        mocker, responses=[b"ok\n"] * 7,
+        status_replies=[b"<Idle|WPos:0,0>\n"],
+    )
+
+    arm.swipe_to(12.5, -4.0, speed="fast", start_dwell=0.08)
+
+    written = b"".join(fake.writes)
+    # The anchoring dwell holds contact at the start BEFORE the slide begins —
+    # so iOS registers the edge touch-down before the drag arms the pop.
+    assert b"G4 P0.08" in written
+    assert written.find(b"G4 P0.08") < written.rfind(b"G1 X12.500")
+
+
 # ---------- move ----------
 
 

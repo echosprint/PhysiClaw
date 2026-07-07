@@ -353,12 +353,20 @@ class StylusArm:
             self._send(GCODE_REL_LINEAR.format(x=dx, y=dy, f=f))  # XY slide
             self._send(GCODE_ABSOLUTE)  # restore absolute mode
 
-    def swipe_to(self, x, y, speed="medium"):
+    def swipe_to(self, x, y, speed="medium", start_dwell=0.0):
         """Swipe to an absolute work-coordinate (x, y) in mm: press, slide,
         release. Unlike :meth:`swipe` (relative cardinal direction), this
         slides to a caller-computed endpoint — used by the orchestrator with
-        calibrated screen→arm mm coordinates."""
+        calibrated screen→arm mm coordinates.
+
+        `start_dwell` (s) holds the tip stationary at the start AFTER contact,
+        before the slide — so iOS registers a touch-down at that point before
+        the drag. Needed for the left-edge back gesture: the interactive-pop
+        recognizer only arms if the touch is seen at the edge first; a fast
+        slide that starts moving on contact skips past the narrow edge zone."""
         with self.solenoid.held():
+            if start_dwell:
+                self._dwell(start_dwell)
             self._linear_move(x, y, speed=self.SWIPE_SPEEDS[speed])
         self.wait_idle()
 
