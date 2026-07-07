@@ -469,33 +469,45 @@
   },
   {
     "part_id": "motor-cable",
-    "ref": "—",
+    "ref": "¥2",
     "suppliers": [
       {
         "name": {
-          "en": "—",
-          "zh": "—"
+          "en": "Tianle",
+          "zh": "天乐"
         },
-        "url": ""
+        "product": {
+          "en": "0.3 m PH2.0-6P to XH-4P cable",
+          "zh": "0.3米 PH2.0-6P XH-4P"
+        },
+        "url": "https://item.taobao.com/item.htm?id=807040319382&skuId=5928464937081"
       },
       {
         "name": {
-          "en": "—",
-          "zh": "—"
+          "en": "Lunqu",
+          "zh": "轮趣"
         },
-        "url": ""
+        "product": {
+          "en": "XH2.54 4P to PH2.0 6P stepper motor cable (30 cm)",
+          "zh": "XH2.54 4P 转 PH2.0 6P 步进电机连接线（线长30cm）"
+        },
+        "url": "https://item.taobao.com/item.htm?id=594099488032&skuId=4330049361960"
       },
       {
         "name": {
-          "en": "—",
-          "zh": "—"
+          "en": "Linxiang",
+          "zh": "林祥电子"
         },
-        "url": ""
+        "product": {
+          "en": "XH2.54 4P to PH2.0 6P stepper motor cable (30 cm)",
+          "zh": "XH2.54 4P 转 PH2.0 6P 步进电机连接线（线长30cm）"
+        },
+        "url": "https://item.taobao.com/item.htm?id=822954691545&skuId=5949725363039"
       }
     ],
     "note": {
-      "en": "No separate purchase — the cable comes with the stepper motor.",
-      "zh": "无需单独购买，随步进电机附带。"
+      "en": "Optional — the cable bundled with the motor is ~1 m, too long to store neatly; a 30 cm one is plenty.",
+      "zh": "可选购买。电机自带的连接线约 1 米，太长不便收纳，买 30cm 的即可。"
     }
   },
   {
