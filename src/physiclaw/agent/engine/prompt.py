@@ -76,6 +76,7 @@ def render_system_prompts(
     memory_ctx: str = "",
     builtin_skills_ctx: str = "",
     user_skills_ctx: str = "",
+    pitfalls_ctx: str = "",
     provider_id: str = "",
 ) -> str:
     """Compose the full SYSTEM for one session — entirely session-stable.
@@ -89,7 +90,9 @@ def render_system_prompts(
       ## Tooling           inline tool index card (Qwen reliability)
       ## Built-in Skills   built-in skills, FULL bodies (always active)
       ## Screen layout     learned input/keyboard bboxes the skills above use
-      ## Available skills  user skills, name+description index (load on demand)
+      ## Available skills  user skills, name+description index (load on demand
+                           via the Skill tool)
+      ## Learned pitfalls  agent-flagged traps, always-on (add_pitfall appends)
       ## Examples          ❌/✅ for the most common per-turn failures
       ## Reasoning Format  provider-specific reasoning wrapper (e.g. Qwen
                            `<think>...</think>`); pulled from
@@ -109,6 +112,7 @@ def render_system_prompts(
         *_render_section(builtin_skills_ctx),
         *_render_screen_layout(),
         *_render_section(user_skills_ctx),
+        *_render_section(pitfalls_ctx),
         *_render_examples(),
         *_render_reasoning_format(provider_id),
         *_render_memory(memory_ctx),
@@ -327,6 +331,7 @@ def dump(
     memory_ctx: str = "",
     builtin_skills_ctx: str = "",
     user_skills_ctx: str = "",
+    pitfalls_ctx: str = "",
     provider_id: str = "",
 ) -> str:
     """Render the SYSTEM prompt the same way the engine does, with all
@@ -337,5 +342,6 @@ def dump(
         memory_ctx=memory_ctx,
         builtin_skills_ctx=builtin_skills_ctx,
         user_skills_ctx=user_skills_ctx,
+        pitfalls_ctx=pitfalls_ctx,
         provider_id=provider_id,
     )

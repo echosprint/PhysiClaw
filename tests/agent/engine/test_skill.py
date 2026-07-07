@@ -447,3 +447,17 @@ def test_render_section_uses_no_description_placeholder_when_empty() -> None:
     }
 
     assert "- **foo** — (no description)" in render_section(skills)
+
+
+# ---------- dispatch (user skills only) ----------
+
+
+def _sk(name: str, body: str = "body") -> Skill:
+    return Skill(name=name, description=f"{name} desc", body=body, dir=Path("/x"))
+
+
+def test_dispatch_resolves_by_exact_name() -> None:
+    m = {"jd": _sk("jd", "BODY")}
+    assert dispatch(m, {"name": "jd"}) == "BODY"
+    with pytest.raises(ValueError, match="unknown skill"):
+        dispatch(m, {"name": "nope"})

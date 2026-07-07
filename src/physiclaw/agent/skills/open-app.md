@@ -34,6 +34,10 @@ description: Use when you need to launch an app that is NOT on the current scree
    Its attached view shows the results below the field; no results = the paste missed — re-ground and redo.
 6. `tap(<app-icon>)` — launch; the attached view confirms the app opened.
 
+   **No app icon?** You searched an app name **+ an entry inside it** → no installed app matches. Backspace to the bare app-name prefix (step 4) until the icon shows. Never tap an "in Safari" / web result — that lands in the browser.
+
+   **Still nothing (mis-spelled)?** `home_screen`, then page for the icon by hand — `swipe(bbox=[0.01, 0.4, 0.02, 0.6], direction="right", size="l")` = previous page, `swipe(bbox=[0.98, 0.4, 0.99, 0.6], direction="left", size="l")` = next — then tap it.
+
 ## Fixed elements
 
 The commented boxes above come from SYSTEM § Screen layout, pre-substituted (`{{…}}` still showing = layout not learned — ground live). Also:

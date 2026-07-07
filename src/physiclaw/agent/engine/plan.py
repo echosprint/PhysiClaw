@@ -175,6 +175,14 @@ class Plan:
         lines.append("</plan>")
         return "\n".join(lines)
 
+    def snapshot(self) -> str:
+        """A compact, single-line view of the plan's semantic content for the
+        session trajectory (trajectory.record). Excludes the volatile `_tip()`
+        and the derivable progress count — so a snapshot changes only when the
+        model actually re-plans, not when a turn-counter ticks."""
+        steps = "; ".join(f"{STATUS_ICON[s.status]}{s.content}" for s in self.steps)
+        return f"{self.understanding} || {steps}"
+
     def _tip(self) -> str | None:
         """Contextual reminder line appended to render() when a signal
         fires. Silent when the plan is fresh — the model learns to ignore
@@ -183,7 +191,7 @@ class Plan:
         is_default = not self.is_drafted()
         step = self.current_step()
         if not is_default and step is not None:
-            # Steps may be up to 1000 chars; the tip re-renders every
+            # Steps may be up to 200 chars; the tip re-renders every
             # turn once stuck, so quote a bounded prefix.
             shown = step if len(step) <= 80 else step[:79] + "…"
             if self.step_turns >= STEP_STUCK_URGENT:

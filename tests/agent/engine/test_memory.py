@@ -491,3 +491,58 @@ def test_update_fact_with_empty_new_only_removes_first_match_and_keeps_others(
     assert (_memory_paths / "memory.md").read_text() == (
         "keep this line\nkeep this too\n"
     )
+
+
+# ---------- memory cues (scan_cues / cue_corrective) ----------
+
+
+def test_scan_cues_matches_english_and_chinese_with_context() -> None:
+    # Cues far enough apart (> 2×window) to yield two distinct snippets.
+    text = "记住我不吃辣。" + "x" * 120 + " remember this: code 4021."
+    cues = memory.scan_cues(text)
+
+    assert len(cues) == 2
+    assert any("记住我不吃辣" in c for c in cues)
+    assert any("remember this: code 4021" in c for c in cues)
+
+
+def test_scan_cues_none_when_no_signal() -> None:
+    assert memory.scan_cues("tapped the button, screen changed, added to cart") == []
+    assert memory.scan_cues("") == []
+
+
+def test_scan_cues_variants_match() -> None:
+    for t in ("don't forget the gate code", "keep in mind she prefers oat milk",
+              "别忘了买牛奶", "for next time: use the side door"):
+        assert memory.scan_cues(t), t
+
+
+def test_scan_cues_dedups_and_caps() -> None:
+    text = " ".join(["记住 X"] * 10)  # same snippet repeated
+    assert len(memory.scan_cues(text)) == 1  # deduped
+
+    many = " ".join(f"记住 item{i} zzzzzzzzzzzzzzzzzzzzzzzzzzzzzz" for i in range(9))
+    assert len(memory.scan_cues(many, window=5)) <= 5  # capped
+
+
+def test_cue_corrective_lists_snippets_and_names_the_fix() -> None:
+    out = memory.cue_corrective(["记住我不吃辣", "remember: code 4021"])
+    assert "记住我不吃辣" in out and "remember: code 4021" in out
+    assert "save_memory" in out
+
+
+# ---------- soft cap (over_soft_cap) ----------
+
+
+def test_over_soft_cap_reports_size_only_when_exceeded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(memory, "SOFT_CAP_CHARS", 10)
+    assert memory.over_soft_cap() is None  # empty store
+
+    memory.save_fact("x" * 40)
+    over = memory.over_soft_cap()
+    assert over == len(memory.load_persistent()) and over > 10
+
+    monkeypatch.setattr(memory, "SOFT_CAP_CHARS", 10_000)
+    assert memory.over_soft_cap() is None  # now comfortably under

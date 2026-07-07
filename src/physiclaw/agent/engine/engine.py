@@ -18,7 +18,7 @@ import time
 from dataclasses import dataclass
 
 from physiclaw import verdict
-from physiclaw.agent.engine import builtin_tool, compact, jobs, memory, plan, prompt, scratchpad, screen_layout, skill
+from physiclaw.agent.engine import builtin_tool, compact, curate, jobs, memory, pitfalls, plan, prompt, scratchpad, screen_layout, skill, trajectory
 from physiclaw.agent.engine.builtin_tool import LocalTool, Session
 from physiclaw.agent.engine.mcp_tool import McpClient, get_mcp, list_tools_cached
 from physiclaw.agent.engine.dto import (
@@ -131,6 +131,7 @@ class PromptBundle:
     layout_incomplete: bool
     builtin_skill_count: int
     user_skill_count: int
+    pitfall_count: int = 0
 
 
 def build_prompt_bundle(provider_id: str) -> PromptBundle:
@@ -144,11 +145,14 @@ def build_prompt_bundle(provider_id: str) -> PromptBundle:
     user_skills = skill.discover_user_skills()
     local_registry = builtin_tool.build_registry(user_skills)
     local_schemas = builtin_tool.schemas(local_registry)
+    pitfall_items = pitfalls.read()  # read once; render + count both use it
     system_prompt = prompt.render_system_prompts(
         local_tool_schemas=local_schemas,
         memory_ctx=memory.load_persistent(),
         builtin_skills_ctx=skill.render_builtin(builtin_skills),
         user_skills_ctx=skill.render_section(user_skills),
+        # Agent-flagged traps, always-on right after user skills (no Skill() load).
+        pitfalls_ctx=pitfalls.render_section(pitfall_items),
         provider_id=provider_id,
     )
     return PromptBundle(
@@ -158,6 +162,7 @@ def build_prompt_bundle(provider_id: str) -> PromptBundle:
         layout_incomplete=layout_incomplete,
         builtin_skill_count=len(builtin_skills),
         user_skill_count=len(user_skills),
+        pitfall_count=len(pitfall_items),
     )
 
 
@@ -248,9 +253,11 @@ async def _run_session(
             "local": sorted(local_registry.keys()),
         })
         log.info(
-            "tools loaded: %d MCP + %d local + %d built-in + %d user skills",
+            "tools loaded: %d MCP + %d local + %d built-in + %d user skills "
+            "+ %d pitfalls",
             len(mcp_tools), len(local_registry),
             bundle.builtin_skill_count, bundle.user_skill_count,
+            bundle.pitfall_count,
         )
 
         messages: list[Message] = build_initial_messages(triggers, system_prompt)
@@ -281,6 +288,11 @@ async def _run_session(
             "session done: status=%s recap=%r",
             session.sentinel_status, session.sentinel_recap,
         )
+        # Post-session pitfalls curation: a separate LLM pass (still-open
+        # provider) that consolidates the list + enforces the cap when the agent
+        # added traps this session. Fail-open — never affects the outcome.
+        if CONFIG.pitfalls.curate_enabled and session.added_pitfalls:
+            await curate.curate(provider, tr=tr)
         if session.sentinel_status == WAIT and not session.sentinel_turn_created_job:
             log.warning("WAIT with no create_job — auto-scheduling %d-min follow-up", WAIT_DEFAULT_MINUTES)
             _auto_schedule_wait_check(tr)
@@ -444,6 +456,19 @@ async def _loop(
             continue
         consecutive_correctives = 0
 
+        # Per-turn memory-cue scan: the agent's own note / scratchpad / plan
+        # text for "remember this" / "记住" signals. Scanned every turn (not
+        # just at close) so a durable fact survives even after compaction
+        # folds this turn away; accumulated on the session for the pre-close
+        # gate below.
+        # Skip the scan once the cap is full — the first N distinct cues win
+        # (append-order), so later ones would be truncated away anyway.
+        if CONFIG.engine.memory_cue_enabled and len(session.memory_cues) < _MAX_MEMORY_CUES:
+            for snip in memory.scan_cues(_memory_cue_text(asst)):
+                if snip not in session.memory_cues:
+                    session.memory_cues.append(snip)
+            del session.memory_cues[_MAX_MEMORY_CUES:]
+
         # Pre-compression checkpoint: require the scratchpad write-down
         # while the folding turns are still readable. One retry, then
         # fail open — losing detail beats stalling the session. A turn
@@ -459,11 +484,59 @@ async def _loop(
             sp = note_args.get("scratchpad") if isinstance(note_args, dict) else None
             if not (isinstance(sp, str) and sp.strip()):
                 checkpoint_retried = True
-                log.info("turn %d: checkpoint note lacks scratchpad — corrective", turn + 1)
-                tr.write({"event": "checkpoint_corrective", "turn": turn})
-                messages.pop()
-                messages.append(UserMessage(content=_CHECKPOINT_CORRECTIVE))
+                _reject_turn(
+                    messages, corrective=_CHECKPOINT_CORRECTIVE,
+                    log_msg="checkpoint note lacks scratchpad — corrective",
+                    event="checkpoint_corrective", turn=turn, tr=tr,
+                )
                 continue
+
+        # Pre-close pitfalls checkpoint: on a long DONE (a run that length
+        # almost always hit a trap), force `add_pitfall(...)` first so the traps
+        # — with the fix that worked — land for next time. The agent may add 0.
+        # One forced retry, then fail open.
+        if (
+            "end_session" in called
+            and not session.added_pitfalls
+            and not session.pitfall_retried
+        ):
+            end_status = next(
+                (tc.arguments.get("status", "") for tc in asst.tool_calls
+                 if tc.name == "end_session" and isinstance(tc.arguments, dict)),
+                "",
+            )
+            do_capture, seed = pitfalls.should_capture(end_status, turn, session)
+            if do_capture:
+                session.pitfall_retried = True
+                # Capture the closing turn's state too — this turn rejects before
+                # the post-dispatch record, so record here (dedups) so a plan that
+                # never completed a turn still reaches the trajectory.
+                trajectory.record(session, turn)
+                _reject_turn(
+                    messages,
+                    corrective=pitfalls.corrective(seed, trajectory.render(session)),
+                    log_msg=f"pre-close pitfalls checkpoint ({seed})",
+                    event="pitfall_checkpoint", turn=turn, tr=tr, seed=seed,
+                )
+                continue
+
+        # Pre-close memory-cue checkpoint: the session flagged something to
+        # remember (scanned per-turn above) but never called `save_memory`.
+        # Force one nudge with the matched cues + context, then fail open.
+        if (
+            "end_session" in called
+            and session.memory_cues
+            and not session.saved_memory
+            and not session.memory_retried
+        ):
+            session.memory_retried = True
+            _reject_turn(
+                messages, corrective=memory.cue_corrective(session.memory_cues),
+                log_msg=f"pre-close memory-cue checkpoint ({len(session.memory_cues)} cue(s))",
+                event="memory_cue_checkpoint", turn=turn, tr=tr,
+                cues=session.memory_cues,
+            )
+            continue
 
         # Principle 6: each tool_call gets exactly one ToolResult, in order,
         # in the very next messages. Also mark truncation: if finish=length,
@@ -489,6 +562,22 @@ async def _loop(
                 plan_overdue=plan_overdue,
             )
             messages.append(result)
+
+        # Snapshot this turn's plan/scratchpad so a hard close can reflect on
+        # the whole run's evolution, not just the final state — the plan on
+        # every update_progress and the scratchpad on every note(scratchpad=...)
+        # write (each explicit act is its own turn-tagged entry).
+        note_call = next((tc for tc in asst.tool_calls if tc.name == "note"), None)
+        scratchpad_written = bool(
+            note_call
+            and isinstance(note_call.arguments, dict)
+            and note_call.arguments.get("scratchpad") is not None
+        )
+        trajectory.record(
+            session, turn,
+            plan_updated="update_progress" in called,
+            scratchpad_written=scratchpad_written,
+        )
 
         compact.drop_stale_screens(messages)
         compact.collapse_old_turns(
@@ -632,6 +721,7 @@ async def _dispatch(
     # doesn't execute.
     blocked = session.guard.should_block(call.name, call.arguments)
     if blocked is not None:
+        session.stuck_events += 1  # inefficiency signal for the close reflection
         tr.write({
             "event": "tool_blocked_stuck", "turn": turn,
             "name": call.name, "id": call.id, "arguments": call.arguments,
@@ -664,6 +754,7 @@ async def _dispatch(
         # highest-adherence steering channel.
         warning = session.guard.record(call.name, call.arguments, changed)
         if warning is not None:
+            session.stuck_events += 1  # inefficiency signal for the close reflection
             tr.write({
                 "event": "stuck_warning", "turn": turn,
                 "name": call.name, "id": call.id,
@@ -687,6 +778,7 @@ async def _dispatch(
         content = f"{call.name} failed: {e}"
         err_warning = session.guard.record_error(call.name, call.arguments)
         if err_warning is not None:
+            session.stuck_events += 1  # inefficiency signal for the close reflection
             tr.write({
                 "event": "stuck_warning", "turn": turn,
                 "name": call.name, "id": call.id,
@@ -764,6 +856,45 @@ def _log_usage(turn: int, asst: AssistantMessage, tr: Trace) -> str:
     if not total:
         return ""
     return f"token: {total / 1000:.1f}k, cache: {100 * u.cached_tokens / total:.0f}%"
+
+
+# Cap on accumulated memory-cue snippets carried on the session (engine._loop).
+_MAX_MEMORY_CUES = 5
+
+
+def _reject_turn(
+    messages: list[Message], *, corrective: str, log_msg: str,
+    event: str, turn: int, tr: Trace, **event_extra: object,
+) -> None:
+    """Reject the just-appended assistant turn: pop it and append `corrective`
+    as a UserMessage, logging + tracing the one-shot rejection. The caller
+    owns the guard condition, its retry flag, and the `continue` — this only
+    centralizes the log / trace / pop↔append mechanic shared by the three
+    pre-compaction / pre-close gates (they differ only in trigger + message)."""
+    log.info("turn %d: %s", turn + 1, log_msg)
+    tr.write({"event": event, "turn": turn, **event_extra})
+    messages.pop()
+    messages.append(UserMessage(content=corrective))
+
+
+def _memory_cue_text(asst: AssistantMessage) -> str:
+    """The turn's own text worth scanning for memory cues: the `note`
+    summary + scratchpad, plus any `update_progress` plan text. These are
+    exactly the fields that survive compaction, so a cue banked here isn't
+    lost when the turn folds away."""
+    parts: list[str] = []
+    for tc in asst.tool_calls:
+        args = tc.arguments if isinstance(tc.arguments, dict) else {}
+        if tc.name == "note":
+            parts.append(args.get("summary") or "")
+            parts.append(args.get("scratchpad") or "")
+        elif tc.name == "update_progress":
+            parts.append(args.get("user_said") or "")
+            parts.append(args.get("understanding") or "")
+            for s in args.get("steps") or []:
+                if isinstance(s, dict):
+                    parts.append(s.get("content") or "")
+    return "\n".join(p for p in parts if p)
 
 
 # Pre-compression checkpoint corrective (engine._loop). Mirrors the ⚠

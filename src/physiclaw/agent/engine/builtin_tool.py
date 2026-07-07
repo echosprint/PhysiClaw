@@ -10,7 +10,7 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
-from physiclaw.agent.engine import jobs, memory, scratchpad, screen_layout, skill
+from physiclaw.agent.engine import jobs, memory, pitfalls, scratchpad, screen_layout, skill
 from physiclaw.agent.engine.plan import Plan
 from physiclaw.agent.engine.stuck import StuckGuard
 from physiclaw.agent.engine.job_store import KIND_ONE_TIME, KIND_PERIODIC, NEVER, load_jobs
@@ -27,8 +27,26 @@ class Session:
     # engine ends this session and re-runs the same triggers from scratch so
     # the fresh SYSTEM prompt carries the learned layout for the real task.
     restart_for_setup: bool = False
+    # Pitfalls gate (engine._loop): `added_pitfalls` set by `add_pitfall` (also
+    # triggers post-session curation); `pitfall_retried` makes the corrective
+    # one-shot. Capture fires on a long DONE (turn > capture_turn_floor);
+    # `stuck_events` (loop-guard tally) only enriches the corrective's seed.
+    added_pitfalls: bool = False
+    pitfall_retried: bool = False
+    stuck_events: int = 0
+    # Memory-cue gate (engine._loop): `memory_cues` = "remember this"/"记住"
+    # snippets scanned per turn; `saved_memory` set by save/update_memory;
+    # `memory_retried` makes the corrective one-shot.
+    memory_cues: list[str] = field(default_factory=list)
+    saved_memory: bool = False
+    memory_retried: bool = False
     plan: Plan = field(default_factory=Plan)
     scratchpad: str = ""
+    # Turn-tagged plan + scratchpad history (trajectory.record) fed to the
+    # reflect corrective at a hard close — reflect on the whole run, not just
+    # the final state.
+    plan_log: list[tuple[int, str]] = field(default_factory=list)
+    scratchpad_log: list[tuple[int, str]] = field(default_factory=list)
     guard: StuckGuard = field(default_factory=StuckGuard)
     # Cross-call keyboard belief for the layout lint (see KeyboardTracker).
     kb: screen_layout.KeyboardTracker = field(
@@ -80,9 +98,10 @@ async def _handle_append_log(_session: Session, args: dict) -> str:
     return "log appended"
 
 
-async def _handle_save_memory(_session: Session, args: dict) -> str:
+async def _handle_save_memory(session: Session, args: dict) -> str:
     memory.save_fact(args["text"])
-    return "fact saved to memory.md"
+    session.saved_memory = True  # satisfies the pre-close memory-cue gate
+    return memory.render_result(f"saved: {args['text'].strip()!r}")
 
 
 async def _handle_create_job(session: Session, args: dict) -> str:
@@ -124,9 +143,10 @@ async def _handle_read_logs(_session: Session, args: dict) -> str:
     return out if out else "(no log entries found)"
 
 
-async def _handle_update_memory(_session: Session, args: dict) -> str:
+async def _handle_update_memory(session: Session, args: dict) -> str:
     memory.update_fact(args["old"], args["new"])
-    return "memory.md updated"
+    session.saved_memory = True  # satisfies the pre-close memory-cue gate
+    return memory.render_result("memory.md updated")
 
 
 async def _handle_list_jobs(_session: Session, args: dict) -> str:
@@ -165,6 +185,16 @@ async def _handle_end_session(session: Session, args: dict) -> str:
     session.sentinel_status = status
     session.sentinel_recap = args.get("recap", "").strip()
     return f"session closing: {status}"
+
+
+async def _handle_add_pitfall(session: Session, args: dict) -> str:
+    # Prepend up to 3 traps (append-only), then mark the session so the pre-close
+    # gate lets `end_session` through and the post-session curator runs. Setting
+    # the flag even on a no-op is intentional — re-forcing an empty add is
+    # pointless (the agent judged there was nothing to bank).
+    res = pitfalls.add(args.get("items") or [])
+    session.added_pitfalls = True
+    return f"{res['added']} pitfall(s) added — {res['total']} total"
 
 
 async def _handle_report_screen_layout(session: Session, args: dict) -> str:
@@ -259,13 +289,14 @@ _UPDATE_PROGRESS = LocalTool(
             },
             "steps": {
                 "type": "array",
+                "maxItems": 20,
                 "items": {
                     "type": "object",
                     "properties": {
                         "content": {
                             "type": "string",
                             "minLength": 1,
-                            "maxLength": 1000,
+                            "maxLength": 200,
                             "description": "One concrete imperative action.",
                         },
                         "status": {
@@ -495,6 +526,31 @@ _WAIT = LocalTool(
 )
 
 
+_ADD_PITFALL = LocalTool(
+    name="add_pitfall",
+    description=(
+        "Bank up to 3 traps you hit AND got past this session, so a future run "
+        "skips them (append-only, joins the always-on `## Learned pitfalls`). "
+        "Each: **lead with the app**, then `trap → the fix that worked`, one "
+        "terse line. Empty list if none worth banking. Required before a long "
+        "DONE close."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "items": {
+                "type": "array",
+                "maxItems": 3,
+                "items": {"type": "string", "maxLength": 150},
+                "description": "Up to 3 traps, each `<app>: <trap> → <fix>`, terse.",
+            },
+        },
+        "required": ["items"],
+    },
+    handler=_handle_add_pitfall,
+)
+
+
 _END_SESSION = LocalTool(
     name="end_session",
     description=(
@@ -621,6 +677,7 @@ def build_registry(
         _FINISH_JOB.name: _FINISH_JOB,
         _WAIT.name: _WAIT,
         _REPORT_SCREEN_LAYOUT.name: _REPORT_SCREEN_LAYOUT,
+        _ADD_PITFALL.name: _ADD_PITFALL,
         _END_SESSION.name: _END_SESSION,
     }
     # First-run only: once the layout is learned, drop the setup tool — the

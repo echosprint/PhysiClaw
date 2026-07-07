@@ -25,6 +25,7 @@ from physiclaw.agent.engine.builtin_tool import (
     _handle_note,
     _handle_read_logs,
     _handle_read_memory,
+    _handle_add_pitfall,
     _handle_save_memory,
     _handle_skill_factory,
     _handle_update_memory,
@@ -33,6 +34,7 @@ from physiclaw.agent.engine.builtin_tool import (
     build_registry,
     schemas,
 )
+from physiclaw.agent.engine import memory, scratchpad
 from physiclaw.agent.engine.plan import Plan
 from physiclaw.agent.engine.skill import Skill
 
@@ -84,7 +86,7 @@ async def test_note_handler_writes_scratchpad_when_provided() -> None:
 @pytest.mark.asyncio
 async def test_note_handler_records_scratchpad_rejection_on_oversize() -> None:
     s = Session()
-    too_big = "x" * (64 * 1024 + 1)
+    too_big = "x" * (scratchpad.MAX_CHARS + 1)
 
     out = await _handle_note(s, {"summary": "x", "scratchpad": too_big})
 
@@ -140,10 +142,45 @@ async def test_append_log_calls_memory_append_log(mocker) -> None:
 async def test_save_memory_calls_memory_save_fact(mocker) -> None:
     spy = mocker.patch("physiclaw.agent.engine.memory.save_fact")
 
-    out = await _handle_save_memory(Session(), {"text": "user prefers metric"})
+    mocker.patch("physiclaw.agent.engine.memory.over_soft_cap", return_value=None)
+    s = Session()
+    out = await _handle_save_memory(s, {"text": "user prefers metric"})
 
-    assert out == "fact saved to memory.md"
+    assert out.startswith("saved: 'user prefers metric'")
+    assert "## memory.md (now)" in out  # echoes the full current store
     spy.assert_called_once_with("user prefers metric")
+    assert s.saved_memory is True  # satisfies the pre-close memory-cue gate
+
+
+@pytest.mark.asyncio
+async def test_save_memory_echoes_full_updated_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # No mocking — a real write, then the result echoes the whole store so the
+    # agent sees the current memory without a re-read (wake snapshot is stale).
+    # memory.MEMORY_* are import-bound module constants, so re-point them to tmp
+    # (like test_memory's _memory_paths) — else the real write leaks across tests.
+    mem = tmp_path / "mem"
+    mem.mkdir()
+    monkeypatch.setattr(memory, "MEMORY_DIR", mem)
+    monkeypatch.setattr(memory, "MEMORY_FILE", mem / "memory.md")
+
+    s = Session()
+    await _handle_save_memory(s, {"text": "fact one"})
+    out = await _handle_save_memory(s, {"text": "fact two"})
+
+    assert "## memory.md (now)" in out
+    assert "fact one" in out and "fact two" in out  # full store, both facts
+
+
+@pytest.mark.asyncio
+async def test_save_memory_nudges_to_consolidate_over_soft_cap(mocker) -> None:
+    mocker.patch("physiclaw.agent.engine.memory.save_fact")
+    mocker.patch("physiclaw.agent.engine.memory.over_soft_cap", return_value=2500)
+
+    out = await _handle_save_memory(Session(), {"text": "x"})
+
+    assert "update_memory" in out and "2500" in out  # curation nudge surfaced
 
 
 # ---------- _handle_create_job ----------
@@ -281,7 +318,8 @@ async def test_update_memory_calls_memory_update_fact(mocker) -> None:
         Session(), {"old": "metric", "new": "imperial"}
     )
 
-    assert out == "memory.md updated"
+    assert out.startswith("memory.md updated")
+    assert "## memory.md (now)" in out  # echoes the full current store
     spy.assert_called_once_with("metric", "imperial")
 
 
@@ -554,6 +592,30 @@ def test_build_registry_returns_local_tool_instances() -> None:
     assert all(isinstance(t, LocalTool) for t in reg.values())
 
 
+@pytest.mark.asyncio
+async def test_add_pitfall_handler_appends_and_sets_flag() -> None:
+    from physiclaw.agent.engine import pitfalls
+
+    s = Session()
+    out = await _handle_add_pitfall(s, {
+        "items": ["京东: Ai搜索 opens AI chat → use right-side 搜索"],
+    })
+
+    assert s.added_pitfalls is True
+    assert "1 pitfall" in out
+    assert pitfalls.read() == ["京东: Ai搜索 opens AI chat → use right-side 搜索"]
+
+
+@pytest.mark.asyncio
+async def test_add_pitfall_handler_sets_flag_even_when_nothing_added() -> None:
+    # An empty add still counts — re-forcing an empty capture is pointless.
+    s = Session()
+    out = await _handle_add_pitfall(s, {"items": ["   ", ""]})
+
+    assert s.added_pitfalls is True
+    assert "0 pitfall" in out
+
+
 def test_build_registry_includes_all_tool_categories(mocker) -> None:
     # First run (layout not learned): the setup tool is present.
     mocker.patch("physiclaw.agent.engine.screen_layout.is_learned", return_value=False)
@@ -563,7 +625,7 @@ def test_build_registry_includes_all_tool_categories(mocker) -> None:
         "note", "update_progress", "append_log", "save_memory",
         "read_memory", "read_logs", "update_memory",
         "create_job", "get_job", "list_jobs", "finish_job",
-        "wait", "report_screen_layout", "end_session",
+        "wait", "report_screen_layout", "add_pitfall", "end_session",
     }
 
 

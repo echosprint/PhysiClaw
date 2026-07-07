@@ -143,9 +143,9 @@ def _scan_root(root: Path, out: dict[str, Skill]) -> None:
 
 
 def dispatch(skills: dict[str, Skill], args: dict) -> str:
-    """Route a Skill() invocation. Raises ValueError / FileNotFoundError
-    on bad input so the engine's _dispatch marks the tool_result as
-    is_error=True (principle 5)."""
+    """Route a Skill() invocation by exact name. Raises ValueError /
+    FileNotFoundError on bad input so the engine's _dispatch marks the
+    tool_result as is_error=True (principle 5)."""
     name = (args.get("name") or "").strip()
     if not name:
         raise ValueError("Skill call requires a 'name' argument")

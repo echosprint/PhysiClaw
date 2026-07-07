@@ -111,6 +111,20 @@ class EngineConfig:
     # plan-less idle wake (peek IM → nothing → close) and the reminder
     # threshold `state_decay_turns` above.
     plan_required_after: int = 8
+    # Scratchpad hard cap (chars) — ships every turn, so a working-memory ceiling,
+    # not a dumping ground. Over-cap writes rejected with "summarize first".
+    scratchpad_max_chars: int = 8192
+    # Session trajectory: plan + scratchpad snapshots (per explicit write) fed to
+    # the pre-close pitfalls corrective. Both caps apply from the newest entry
+    # backward, keeping whole entries until either hits. `trajectory_max_snapshots`
+    # = entry count (+ per-log memory retention); `trajectory_budget` = rendered
+    # chars (practically large so a whole run is fed).
+    trajectory_max_snapshots: int = 300
+    trajectory_budget: int = 250 * 1024
+    # Pre-close memory-cue gate: scan each turn's note/scratchpad/plan for
+    # "remember this"/"记住" signals; at close, an unaddressed cue forces one
+    # `save_memory` nudge (fail-open). Disable to skip the scan + gate.
+    memory_cue_enabled: bool = True
 
 
 @dataclass
@@ -157,6 +171,9 @@ class CompactConfig:
 class MemoryConfig:
     default_log_entries: int = 20
     bootstrap_log_entries: int = 10
+    # Soft size budget for memory.md (chars) — rides every SYSTEM prompt. Over it,
+    # `save_memory` nudges consolidation via `update_memory` (soft, not enforced).
+    soft_cap_chars: int = 2048
 
 
 @dataclass
@@ -173,6 +190,22 @@ class RetentionConfig:
     # A cron job stuck in `fired` (no session ever closed it) is
     # auto-closed after this long: one-time → fail, periodic → re-armed.
     fired_expire_hours: int = 24
+
+
+@dataclass
+class PitfallsConfig:
+    """Agent-flagged turn-wasting traps (`add_pitfall`, 0–3 per long DONE
+    session, append-only, newest on top). Always injected after user skills.
+    `max_items` caps the list (curator consolidates toward it; a hard cut from
+    the bottom/oldest enforces it); `max_item_chars` clamps each line.
+    `capture_turn_floor` = the turn count above which a DONE close forces the
+    capture nudge (a long run almost always hit a trap worth banking; the agent
+    may still add 0). `capture_enabled` / `curate_enabled` gate the two passes."""
+    max_items: int = 100
+    max_item_chars: int = 120
+    capture_turn_floor: int = 50
+    capture_enabled: bool = True
+    curate_enabled: bool = True
 
 
 @dataclass
@@ -197,6 +230,7 @@ class Config:
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     claude: ClaudeConfig = field(default_factory=ClaudeConfig)
     retention: RetentionConfig = field(default_factory=RetentionConfig)
+    pitfalls: PitfallsConfig = field(default_factory=PitfallsConfig)
     skills: SkillsConfig = field(default_factory=SkillsConfig)
 
 
@@ -213,6 +247,7 @@ _SECTION_TYPES: dict[str, type] = {
     "memory": MemoryConfig,
     "claude": ClaudeConfig,
     "retention": RetentionConfig,
+    "pitfalls": PitfallsConfig,
     "skills": SkillsConfig,
 }
 
@@ -262,6 +297,11 @@ _SECTION_COMMENTS: dict[str, str] = {
     "memory": "Daily-log loading: bootstrap preload + on-demand `read_logs` defaults.",
     "claude": "Applied when [agent] model = 'claude-code/...' (external CLI subprocess).",
     "retention": "Purge window for on-disk engine trace logs + cron job history.",
+    "pitfalls": (
+        "Agent-flagged turn-wasting traps (~/.physiclaw/learned/pitfalls/), "
+        "0–3 appended per long DONE session, always shown after user skills. "
+        "`max_items` / `max_item_chars` bound the list; a curator consolidates."
+    ),
     "skills": (
         "Default source repo for `physiclaw skills install`. Empty = require "
         "`--from`. Accepts `owner/repo` shorthand or a full git URL."

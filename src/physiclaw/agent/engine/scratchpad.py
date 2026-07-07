@@ -12,12 +12,14 @@ tool — every turn already calls `note`, so a write costs no turn slot.
 The note handler delegates to `write()` here.
 """
 from physiclaw.agent.engine.dto import Message, UserMessage
+from physiclaw.config import CONFIG
 
 
-# Scratchpad ships in every prompt for the rest of the session — caps
-# the per-turn token cost. 64KB is generous (a 100-item list, a
-# multi-paragraph draft) and well below typical context limits.
-MAX_CHARS = 64 * 1024
+# Scratchpad ships in every prompt for the rest of the session, so its size is
+# a per-turn token cost — this cap is a working-memory ceiling, not a dumping
+# ground (a cart list, target bboxes, a short draft fit; a whole screen dump
+# does not). Over it, `write` rejects with "summarize first". Config knob.
+MAX_CHARS = CONFIG.engine.scratchpad_max_chars
 
 
 def write(session, content: str) -> str:

@@ -388,8 +388,9 @@ def test_step_stuck_urgent_tip_supersedes_warn() -> None:
 
 
 def test_step_stuck_tip_truncates_long_step_content() -> None:
-    # A 1000-char step must not balloon the tip that re-renders every
-    # turn once stuck — only a bounded prefix is quoted.
+    # The schema caps a step at 200 chars, but Plan.update doesn't enforce it
+    # — so defensively, an over-long step must still not balloon the tip that
+    # re-renders every turn once stuck; only a bounded prefix is quoted.
     p = Plan()
     long_step = "verify " * 140  # ~980 chars
     p.update(user_said="x", steps=[{"content": long_step, "status": "in_progress"}])

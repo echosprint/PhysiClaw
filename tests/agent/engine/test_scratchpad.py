@@ -4,8 +4,9 @@ Two public functions:
   - `write(session, content)` — set/clear `session.scratchpad`, status string
   - `inject_tail(messages, content)` — append a `<scratchpad>` UserMessage
 
-The module's `MAX_CHARS = 64 * 1024` cap is part of the protocol — it
-appears in the error message — so it gets a freeze test.
+`MAX_CHARS` is a config-driven cap (CONFIG.engine.scratchpad_max_chars) — it
+ships in every prompt tail, so it's a per-turn token ceiling — and it appears
+in the reject message, so it gets a freeze test against config.
 """
 from __future__ import annotations
 
@@ -15,10 +16,11 @@ import pytest
 
 from physiclaw.agent.engine.dto import UserMessage
 from physiclaw.agent.engine.scratchpad import MAX_CHARS, inject_tail, write
+from physiclaw.config import CONFIG
 
 
-def test_max_chars_constant_is_64_KiB() -> None:
-    assert MAX_CHARS == 64 * 1024
+def test_max_chars_tracks_config() -> None:
+    assert MAX_CHARS == CONFIG.engine.scratchpad_max_chars == 8192
 
 
 # ---------- write ----------

@@ -1052,6 +1052,289 @@ async def test_loop_finish_length_logs_warning(patched_loop_deps) -> None:
     assert "finish_length_warning" in events
 
 
+# ---------- pre-close pitfalls gate ----------
+
+
+def _pitfall_tool() -> LocalTool:
+    from physiclaw.agent.engine.builtin_tool import _handle_add_pitfall
+
+    return LocalTool(
+        name="add_pitfall",
+        description="add_pitfall",
+        input_schema={
+            "type": "object",
+            "properties": {"items": {"type": "array", "items": {"type": "string"}}},
+            "required": ["items"],
+        },
+        handler=_handle_add_pitfall,
+    )
+
+
+def _registry_with_pitfall() -> dict[str, LocalTool]:
+    reg = _registry()
+    pt = _pitfall_tool()
+    reg[pt.name] = pt
+    return reg
+
+
+def _close(status: str) -> AssistantMessage:
+    return _asst(tool_calls=[
+        _tc("note", {"summary": "closing"}),
+        _tc("end_session", {"status": status, "recap": "r"}),
+    ])
+
+
+def _pitfall_asst() -> AssistantMessage:
+    return _asst(tool_calls=[
+        _tc("note", {"summary": "banking traps"}),
+        _tc("add_pitfall", {"items": ["京东: avoid Ai搜索"]}),
+    ])
+
+
+async def _run_close_loop(provider, session, registry):
+    schemas = _schemas(registry)
+    messages: list = [SystemMessage(content="s")]
+    await engine_mod._loop(
+        mcp=FakeMcpClient(), provider=provider,
+        messages=messages, tool_schemas=schemas,
+        schema_by_name={s["name"]: s for s in schemas},
+        local_registry=registry, session=session, prompt_hash="h",
+        tr=MagicMock(), rlog=MagicMock(),
+    )
+    return messages
+
+
+def _pitfall_correctives(messages) -> list:
+    return [m for m in messages
+            if isinstance(m, UserMessage) and "add_pitfall(" in str(m.content)]
+
+
+def _floor0(monkeypatch) -> None:
+    # Drop capture_turn_floor to 0 so a short scripted DONE (turn 0) trips the gate.
+    from physiclaw import config
+    monkeypatch.setattr(config.CONFIG.pitfalls, "capture_turn_floor", 0)
+
+
+@pytest.mark.asyncio
+async def test_loop_forces_pitfall_on_long_done(patched_loop_deps, monkeypatch) -> None:
+    # A long DONE → force add_pitfall, then the re-issued close passes.
+    from physiclaw.agent.engine import pitfalls
+
+    _floor0(monkeypatch)
+    registry = _registry_with_pitfall()
+    provider = FakeProvider([_close(DONE), _pitfall_asst(), _close(DONE)])
+    session = Session()
+
+    messages = await _run_close_loop(provider, session, registry)
+
+    assert len(_pitfall_correctives(messages)) == 1
+    assert session.added_pitfalls is True
+    assert session.sentinel_status == DONE
+    assert pitfalls.read() == ["京东: avoid Ai搜索"]
+
+
+@pytest.mark.asyncio
+async def test_loop_pitfall_corrective_carries_trajectory(patched_loop_deps, monkeypatch) -> None:
+    # The turn-marked trajectory rides the corrective so the agent mines the
+    # real turn-wasters even after compaction folds early turns.
+    _floor0(monkeypatch)
+    registry = _registry_with_pitfall()
+    session = Session()
+    session.plan.update(
+        understanding="buy milk",
+        steps=[{"content": "search via 搜索 not Ai搜索", "status": "completed"}],
+    )
+    provider = FakeProvider([_close(DONE), _pitfall_asst(), _close(DONE)])
+
+    messages = await _run_close_loop(provider, session, registry)
+
+    corrective = _pitfall_correctives(messages)[0].content
+    assert "<session-trajectory>" in corrective
+    assert "search via 搜索 not Ai搜索" in corrective
+
+
+@pytest.mark.asyncio
+async def test_loop_pitfall_gate_fails_open_after_one_retry(patched_loop_deps, monkeypatch) -> None:
+    # Agent ignores the corrective and re-issues end_session — closes on the
+    # second attempt (one-shot), never adding.
+    _floor0(monkeypatch)
+    registry = _registry_with_pitfall()
+    provider = FakeProvider([_close(DONE), _close(DONE)])
+    session = Session()
+
+    messages = await _run_close_loop(provider, session, registry)
+
+    assert len(_pitfall_correctives(messages)) == 1
+    assert session.added_pitfalls is False
+    assert session.sentinel_status == DONE
+
+
+@pytest.mark.asyncio
+async def test_loop_no_pitfall_gate_on_stuck(patched_loop_deps, monkeypatch) -> None:
+    # A STUCK close never captures — the agent never escaped the trap, so it
+    # can't write a real fix. Even with the floor at 0.
+    _floor0(monkeypatch)
+    registry = _registry_with_pitfall()
+    provider = FakeProvider([_close(STUCK)])
+    session = Session()
+
+    messages = await _run_close_loop(provider, session, registry)
+
+    assert not _pitfall_correctives(messages)
+    assert session.sentinel_status == STUCK
+
+
+@pytest.mark.asyncio
+async def test_loop_no_pitfall_gate_on_short_done(patched_loop_deps) -> None:
+    # A short DONE (below capture_turn_floor) sailed through → no gate.
+    registry = _registry_with_pitfall()
+    provider = FakeProvider([_close(DONE)])  # closes at turn 0, far below the floor
+    session = Session()
+
+    messages = await _run_close_loop(provider, session, registry)
+
+    assert not _pitfall_correctives(messages)
+    assert session.sentinel_status == DONE
+
+
+@pytest.mark.asyncio
+async def test_loop_no_pitfall_gate_on_idle(patched_loop_deps, monkeypatch) -> None:
+    _floor0(monkeypatch)
+    registry = _registry_with_pitfall()
+    provider = FakeProvider([_close(IDLE)])
+    session = Session()
+
+    messages = await _run_close_loop(provider, session, registry)
+
+    assert not _pitfall_correctives(messages)
+    assert session.sentinel_status == IDLE
+
+
+def test_should_capture_matrix() -> None:
+    from physiclaw.agent.engine.pitfalls import should_capture
+    from physiclaw.config import CONFIG
+
+    floor = CONFIG.pitfalls.capture_turn_floor
+    s = Session()
+    assert should_capture(IDLE, 999, s)[0] is False
+    assert should_capture(WAIT, 999, s)[0] is False
+    # STUCK / FAIL never capture, however long.
+    assert should_capture(STUCK, floor + 5, s)[0] is False
+    assert should_capture(FAIL, floor + 5, s)[0] is False
+    # DONE captures only past the turn floor.
+    assert should_capture(DONE, floor - 1, s)[0] is False  # short DONE
+    do, seed = should_capture(DONE, floor, s)               # long DONE
+    assert do is True
+    assert f"{floor} turns" in seed and "DONE" in seed
+    # stuck_events only enriches the seed, doesn't gate.
+    looped = Session()
+    looped.stuck_events = 2
+    assert "2×" in should_capture(DONE, floor, looped)[1]
+
+
+def test_should_capture_disabled(monkeypatch) -> None:
+    from physiclaw import config
+    from physiclaw.agent.engine.pitfalls import should_capture
+
+    monkeypatch.setattr(config.CONFIG.pitfalls, "capture_enabled", False)
+    assert should_capture(DONE, 999, Session())[0] is False  # long DONE, but off
+
+
+# ---------- pre-close memory-cue gate ----------
+
+
+def _save_memory_tool() -> LocalTool:
+    async def _h(session, _args):
+        session.saved_memory = True
+        return "saved"
+    return LocalTool(
+        name="save_memory", description="save",
+        input_schema={"type": "object", "properties": {"text": {"type": "string"}},
+                      "required": ["text"]},
+        handler=_h,
+    )
+
+
+def _registry_with_save() -> dict[str, LocalTool]:
+    reg = _registry()
+    st = _save_memory_tool()
+    reg[st.name] = st
+    return reg
+
+
+def _note(summary: str, other_name: str, other_args: dict | None = None) -> AssistantMessage:
+    return _asst(tool_calls=[_tc("note", {"summary": summary}),
+                             _tc(other_name, other_args or {})])
+
+
+def _memory_correctives(messages) -> list:
+    return [m for m in messages
+            if isinstance(m, UserMessage) and "flagged something to remember" in str(m.content)]
+
+
+@pytest.mark.asyncio
+async def test_loop_scans_cue_each_turn_and_forces_save_before_close(patched_loop_deps) -> None:
+    registry = _registry_with_save()
+    # turn 0 banks a cue (note summary) alongside an action; close is IDLE so
+    # the pitfalls gate stays out of the way — only the memory gate fires.
+    provider = FakeProvider([
+        _note("记住 user hates cilantro", "peek"),
+        _note("closing", "end_session", {"status": IDLE, "recap": "r"}),
+        _note("saving", "save_memory", {"text": "no cilantro"}),
+        _note("closing", "end_session", {"status": IDLE, "recap": "r"}),
+    ])
+    session = Session()
+    messages = await _run_close_loop(provider, session, registry)
+
+    assert any("cilantro" in c for c in session.memory_cues)  # scanned turn 0
+    assert len(_memory_correctives(messages)) == 1
+    assert session.saved_memory is True
+    assert session.sentinel_status == IDLE
+
+
+@pytest.mark.asyncio
+async def test_loop_no_memory_gate_when_already_saved(patched_loop_deps) -> None:
+    registry = _registry_with_save()
+    provider = FakeProvider([
+        _note("记住 no cilantro", "save_memory", {"text": "no cilantro"}),
+        _note("closing", "end_session", {"status": IDLE, "recap": "r"}),
+    ])
+    session = Session()
+    messages = await _run_close_loop(provider, session, registry)
+
+    assert not _memory_correctives(messages)  # cue present but already saved
+    assert session.sentinel_status == IDLE
+
+
+@pytest.mark.asyncio
+async def test_loop_no_memory_gate_without_a_cue(patched_loop_deps) -> None:
+    registry = _registry_with_save()
+    provider = FakeProvider([_note("tapped the button", "end_session",
+                                    {"status": IDLE, "recap": "r"})])
+    session = Session()
+    messages = await _run_close_loop(provider, session, registry)
+
+    assert not session.memory_cues
+    assert not _memory_correctives(messages)
+    assert session.sentinel_status == IDLE
+
+
+@pytest.mark.asyncio
+async def test_loop_memory_gate_fails_open_after_one_retry(patched_loop_deps) -> None:
+    registry = _registry_with_save()
+    provider = FakeProvider([
+        _note("记住 the gate code 4021", "peek"),
+        _note("closing", "end_session", {"status": IDLE, "recap": "r"}),
+        _note("closing anyway", "end_session", {"status": IDLE, "recap": "r"}),
+    ])
+    session = Session()
+    messages = await _run_close_loop(provider, session, registry)
+
+    assert len(_memory_correctives(messages)) == 1  # one nudge, then closes
+    assert session.saved_memory is False
+    assert session.sentinel_status == IDLE
+
+
 # ---------- _run_session ----------
 
 

@@ -10,7 +10,9 @@ Read paths:
     them every wake would burn context.
 
 Write paths used by the local tool handlers: `append_log`, `save_fact`,
-`update_fact`.
+`update_fact`. After a save/update, `render_result` builds the tool result —
+the action line plus the full current store (so the agent sees the whole
+updated memory, since the injected snapshot goes stale mid-session).
 """
 import datetime as dt
 import re
@@ -137,6 +139,90 @@ def save_fact(text: str) -> None:
         return
     MEMORY_DIR.mkdir(parents=True, exist_ok=True)
     append_text(MEMORY_FILE, text + "\n")
+
+
+# Soft size budget for the always-injected semantic store (memory.md). Over
+# this, the save handler nudges the agent to consolidate — soft, not enforced:
+# unbounded growth turns memory.md into a token-heavy "junk drawer" that
+# degrades recall, but hard auto-pruning risks dropping a rare essential fact,
+# so the agent judges what to merge/keep (via `update_memory`).
+SOFT_CAP_CHARS = CONFIG.memory.soft_cap_chars
+
+
+def over_soft_cap() -> int | None:
+    """The current memory.md length if it exceeds `SOFT_CAP_CHARS`, else None."""
+    n = len(load_persistent())
+    return n if n > SOFT_CAP_CHARS else None
+
+
+def render_result(action: str) -> str:
+    """A save/update tool result: the `action` line + the full CURRENT
+    memory.md, so the agent always sees the whole updated store without a
+    re-read (the injected `## memory.md` is a wake snapshot and goes stale after
+    a mid-session write). Appends the soft-cap curation nudge when over budget."""
+    store = load_persistent() or "(empty)"
+    msg = f"{action}\n\n## memory.md (now)\n{store}"
+    over = over_soft_cap()
+    if over is not None:
+        # memory.md rides in every prompt, so keep it lean.
+        msg += (
+            f"\n\n~{over} chars, over the {SOFT_CAP_CHARS} soft cap — "
+            "use `update_memory` to merge or prune stale facts."
+        )
+    return msg
+
+
+# ---------- memory cues (pre-close save enforcement) ----------
+
+# "Please remember this" signals in the agent's own note / scratchpad / plan
+# text. Scanned every turn (robust to compaction folding the turn away) and
+# accumulated on the session; at close, an unaddressed cue forces one
+# `save_memory` nudge. Latin alternatives are case-folded via IGNORECASE;
+# the CJK ones match verbatim. Kept precision-leaning — a false positive
+# only costs a single fail-open nudge the agent can decline.
+_MEMORY_CUE_RE = re.compile(
+    r"remember\s+(?:this|that|to|:|,)"
+    r"|don'?t\s+forget|do\s+not\s+forget"
+    r"|keep\s+in\s+mind"
+    r"|for\s+(?:future|next)\s+(?:reference|time)"
+    r"|save\s+(?:this\s+)?to\s+memory"
+    r"|记住|记一下|记下来|记下|别忘|不要忘|务必记|以后记得|下次记得",
+    re.IGNORECASE,
+)
+
+
+def scan_cues(text: str, *, window: int = 50, limit: int = 5) -> list[str]:
+    """Snippets of `text` around any 'remember this' / '记住' cue — the match
+    plus `window` chars either side, so the agent gets the cue and its
+    context. Deduped (case-folded), capped at `limit`, order preserved."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for m in _MEMORY_CUE_RE.finditer(text or ""):
+        lo = max(0, m.start() - window)
+        hi = min(len(text), m.end() + window)
+        snippet = " ".join(text[lo:hi].split())
+        key = snippet.casefold()
+        if not snippet or key in seen:
+            continue
+        seen.add(key)
+        out.append(snippet)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def cue_corrective(snippets: list[str]) -> str:
+    """The pre-close corrective the engine injects when the session flagged
+    something to remember but never called `save_memory`. Hands the model
+    the matched cue(s) + context and names the exact fix."""
+    joined = "\n".join(f'- "{s}"' for s in snippets)
+    return (
+        "Rejected — you flagged something to remember but haven't saved it. "
+        "Matched cue(s):\n"
+        f"{joined}\n"
+        "If any is a durable fact/preference, `save_memory` it (one line); "
+        "one-off detail goes to `append_log`. Then re-issue `end_session`."
+    )
 
 
 def update_fact(old: str, new: str) -> None:
