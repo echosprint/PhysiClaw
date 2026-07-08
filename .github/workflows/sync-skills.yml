@@ -38,17 +38,24 @@ jobs:
           path: site
           token: ${{ secrets.SITE_TOKEN }}
 
-      - name: Mirror skills/ → PhysiClaw-site/skills
+      - name: Mirror skills/ → PhysiClaw-site/skills + write provenance
         run: |
           mkdir -p site/skills
           rsync -a --delete source/skills/ site/skills/
+          # Provenance the site build reads (scripts/build-official-skills.mjs):
+          #   repo    = the source repo + subdir the snapshot was mirrored from
+          #   commit  = the PhysiClaw SHA this snapshot came from (the version identity)
+          #   builtAt = that commit's timestamp, normalized to UTC (reproducible per commit)
+          builtAt="$(date -u -d "$(git -C source show -s --format=%cI "$GITHUB_SHA")" +%Y-%m-%dT%H:%M:%SZ)"
+          printf '{\n  "schemaVersion": 1,\n  "repo": "%s",\n  "subdir": "skills",\n  "commit": "%s",\n  "builtAt": "%s"\n}\n' \
+            "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$builtAt" > site/skills-source.json
 
       - name: Commit & push (only if changed)
         working-directory: site
         run: |
           git config user.name  "physiclaw-site"
           git config user.email "qiaoqianda@gmail.com"
-          git add skills
+          git add skills skills-source.json
           if git diff --cached --quiet; then
             echo "No skills changes to publish."
           else
