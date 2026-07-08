@@ -1,0 +1,57 @@
+# When the top-level skills/ directory changes on main, mirror it into the
+# PhysiClaw-site repo's ./skills directory and push. The site then serves /
+# publishes the skills from there.
+#
+# PhysiClaw is the source of truth for skills; this workflow just keeps the
+# site's copy in sync — including deletions (rsync --delete makes the site's
+# skills/ an exact mirror of the source).
+#
+# Required secret (Settings → Secrets and variables → Actions):
+#   SITE_TOKEN – a PAT / fine-grained token with WRITE (contents) access to
+#                physiclaw/PhysiClaw-site, so the sync commit can push.
+name: Sync skills
+
+on:
+  push:
+    branches: [main]
+    paths: ['skills/**']
+  workflow_dispatch: # allow manual re-sync
+
+concurrency:
+  group: sync-skills
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PhysiClaw (skills source)
+        uses: actions/checkout@v5
+        with:
+          path: source
+
+      - name: Checkout PhysiClaw-site (consumer)
+        uses: actions/checkout@v5
+        with:
+          repository: physiclaw/PhysiClaw-site
+          ref: main
+          path: site
+          token: ${{ secrets.SITE_TOKEN }}
+
+      - name: Mirror skills/ → PhysiClaw-site/skills
+        run: |
+          mkdir -p site/skills
+          rsync -a --delete source/skills/ site/skills/
+
+      - name: Commit & push (only if changed)
+        working-directory: site
+        run: |
+          git config user.name  "physiclaw-site"
+          git config user.email "qiaoqianda@gmail.com"
+          git add skills
+          if git diff --cached --quiet; then
+            echo "No skills changes to publish."
+          else
+            git commit -m "chore: sync skills from PhysiClaw@${GITHUB_SHA::7}"
+            git push
+          fi
