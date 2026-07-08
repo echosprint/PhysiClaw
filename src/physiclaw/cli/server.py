@@ -129,6 +129,13 @@ def server(
 
     maybe_auto_update()
 
+    # Kick off the official-skills sync in the background (daemon thread) so it
+    # never blocks startup; a session picks up any change at its next wake.
+    # Runs after the self-update handoff so the current version does the sync.
+    from physiclaw.cli.sync_official_skills import maybe_auto_sync
+
+    maybe_auto_sync()
+
     from physiclaw.core.logger import setup_logging
 
     for enabled, env in (

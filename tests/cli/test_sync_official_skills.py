@@ -428,3 +428,77 @@ def test_cli_sync_no_target_shows_help() -> None:
     result = runner.invoke(skills_mod.skills_app, ["sync"])
     # no_args_is_help → non-zero exit with usage listing the `official` command.
     assert "official" in result.output
+
+
+# ---------- maybe_auto_sync (server-startup hook, backgrounded) ----------
+
+
+@pytest.fixture
+def auto_env(mocker, monkeypatch):
+    """Baseline for maybe_auto_sync: sync_auto on, not CI, no live server.
+    Patches threading.Thread so the guards can be tested without actually
+    spawning the background sync. Yields the Thread mock."""
+    monkeypatch.delenv("CI", raising=False)
+    mocker.patch.object(
+        osk, "_load_config",
+        return_value=SimpleNamespace(skills=SimpleNamespace(sync_auto=True)),
+    )
+    mocker.patch("physiclaw.runtime_state.read_live", return_value=None)
+    return mocker.patch.object(osk.threading, "Thread")
+
+
+def test_auto_sync_spawns_background_daemon_thread(auto_env) -> None:
+    osk.maybe_auto_sync()
+    # The sync runs off the startup critical path, in a daemon thread.
+    auto_env.assert_called_once_with(
+        target=osk._run_sync_quiet, name="physiclaw-auto-sync", daemon=True
+    )
+    auto_env.return_value.start.assert_called_once_with()
+
+
+def test_auto_sync_skipped_when_disabled(mocker, monkeypatch) -> None:
+    monkeypatch.delenv("CI", raising=False)
+    mocker.patch.object(
+        osk, "_load_config",
+        return_value=SimpleNamespace(skills=SimpleNamespace(sync_auto=False)),
+    )
+    thread = mocker.patch.object(osk.threading, "Thread")
+
+    osk.maybe_auto_sync()
+
+    thread.assert_not_called()
+
+
+def test_auto_sync_skipped_under_ci(auto_env, monkeypatch) -> None:
+    monkeypatch.setenv("CI", "true")
+
+    osk.maybe_auto_sync()
+
+    auto_env.assert_not_called()  # no thread spawned
+
+
+def test_auto_sync_skipped_when_server_live(auto_env, mocker) -> None:
+    mocker.patch("physiclaw.runtime_state.read_live", return_value={"pid": 123})
+
+    osk.maybe_auto_sync()
+
+    auto_env.assert_not_called()  # don't race another server's swap
+
+
+# ---------- _run_sync_quiet (the daemon-thread body, fail-soft) ----------
+
+
+def test_run_sync_quiet_calls_sync(mocker) -> None:
+    called = mocker.patch.object(osk, "sync")
+    osk._run_sync_quiet()
+    called.assert_called_once_with()
+
+
+def test_run_sync_quiet_swallows_typer_exit(mocker) -> None:
+    mocker.patch.object(osk, "sync", side_effect=typer.Exit(code=1))
+    osk._run_sync_quiet()  # a hard sync abort must never escape the thread
+
+
+def test_run_sync_quiet_swallows_unexpected_error(mocker) -> None:
+    mocker.patch.object(osk, "sync", side_effect=RuntimeError("boom"))
+    osk._run_sync_quiet()  # any error is non-fatal

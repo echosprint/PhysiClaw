@@ -357,7 +357,7 @@ def _install(
 
     typer.echo(ok(f"installed {name} (from {source}" + (f" @ {ref}" if ref else "") + f", sha {sha[:7]})"))
     typer.echo(f"  → {target}")
-    typer.echo(next_hint(f"restart `physiclaw server` to pick up {name}."))
+    typer.echo(next_hint(f"your next agent session picks up {name} — no restart needed."))
 
 
 sync_app = typer.Typer(

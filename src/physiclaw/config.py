@@ -216,9 +216,15 @@ class SkillsConfig:
 
     ``official_base_url`` is the site namespace ``skills sync official``
     pulls from — ``latest.json``, the ``.zip`` pack, and its ``.sha256``
-    all live directly under it. Override only to point at a mirror/staging."""
+    all live directly under it. Override only to point at a mirror/staging.
+
+    ``sync_auto`` runs that sync at ``physiclaw server`` startup in a background
+    thread (never blocks startup; fail-soft; idempotent — a no-op when the commit
+    is unchanged), so official skills stay current without a manual command. The
+    next agent session picks up a change. Set false to pin what's mounted."""
     default_source: str = ""
     official_base_url: str = "https://physiclaw.ai/downloads/official-skills"
+    sync_auto: bool = True
 
 
 @dataclass
@@ -308,8 +314,9 @@ _SECTION_COMMENTS: dict[str, str] = {
         "`max_items` / `max_item_chars` bound the list; a curator consolidates."
     ),
     "skills": (
-        "Default source repo for `physiclaw skills install`. Empty = require "
-        "`--from`. Accepts `owner/repo` shorthand or a full git URL."
+        "`physiclaw skills`. `default_source`: repo for `install` (empty = "
+        "require `--from`; `owner/repo` or a git URL). `official_base_url` + "
+        "`sync_auto`: the `sync official` pack source + auto-sync at startup."
     ),
 }
 

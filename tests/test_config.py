@@ -107,6 +107,7 @@ def test_config_error_is_value_error_subclass() -> None:
         # SkillsConfig
         ("skills", "default_source", ""),
         ("skills", "official_base_url", "https://physiclaw.ai/downloads/official-skills"),
+        ("skills", "sync_auto", True),
     ],
 )
 def test_default_config_field_value_pinned(
@@ -309,8 +310,9 @@ def test_provider_section_comment_pinned() -> None:
 
 def test_skills_section_comment_pinned() -> None:
     assert config._SECTION_COMMENTS["skills"] == (
-        "Default source repo for `physiclaw skills install`. Empty = require "
-        "`--from`. Accepts `owner/repo` shorthand or a full git URL."
+        "`physiclaw skills`. `default_source`: repo for `install` (empty = "
+        "require `--from`; `owner/repo` or a git URL). `official_base_url` + "
+        "`sync_auto`: the `sync official` pack source + auto-sync at startup."
     )
 
 

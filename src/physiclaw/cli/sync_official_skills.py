@@ -22,15 +22,19 @@ Integrity here guards corruption, not a coordinated MITM — the checksum
 travels the same channel as the zip. Signature verification (the site
 publishing a signature) would be the next step for tamper-proofing.
 
-The mount takes effect next server session; discovery snapshots skills at
-session start.
+Skill discovery snapshots per agent session (in the separate runtime process),
+so the mount takes effect at the next session/wake — a running server picks up
+a change without a restart, and the atomic swap means a session always reads
+either the whole old or whole new tree.
 """
 import datetime as dt
 import hashlib
 import json
+import logging
 import os
 import shutil
 import tempfile
+import threading
 import urllib.error
 import zipfile
 from pathlib import Path
@@ -43,6 +47,8 @@ from physiclaw.cli._download import http_get, stream
 from physiclaw.cli._format import info, next_hint, ok, warn
 from physiclaw.config import load as _load_config
 from physiclaw.text import read_text, write_text
+
+log = logging.getLogger(__name__)
 
 SYNC_STATE_FILE = ".sync-state.json"
 STAGING_DIR = ".sync-staging"
@@ -255,8 +261,8 @@ def _write_sync_state(url: str, zip_hex: str, commit: str, count: int) -> None:
 
 def sync(*, force: bool = False, dry_run: bool = False) -> None:
     """Sync the official skill pack. Idempotent: a matching commit is a no-op
-    unless ``--force``. ``--dry-run`` does the freshness check only and
-    downloads nothing."""
+    unless ``--force``. ``--dry-run`` does the freshness check only and downloads
+    nothing."""
     base = _load_config().skills.official_base_url
     urls = _urls(base)
 
@@ -355,7 +361,7 @@ def sync(*, force: bool = False, dry_run: bool = False) -> None:
         typer.echo(
             warn(f"manifest lists {declared} skill(s) but {landed} landed on disk.")
         )
-    typer.echo(next_hint("restart `physiclaw server` to pick up official skills."))
+    typer.echo(next_hint("your next agent session picks these up — no restart needed."))
 
 
 def _read_source_json(p: Path) -> dict:
@@ -368,4 +374,46 @@ def _read_source_json(p: Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-__all__ = ["sync"]
+def maybe_auto_sync() -> None:
+    """Kick off a best-effort official-skills sync at ``physiclaw server``
+    startup, in a background daemon thread so it NEVER blocks startup — the
+    network I/O happens off the critical path while the server begins serving.
+
+    The cheap guards run synchronously here (so ``read_live`` sees only OTHER
+    servers, before this one records itself live); only the sync itself is
+    backgrounded. Silent no-op when disabled (``[skills] sync_auto = false``),
+    under CI (unattended network work a pipeline never asked for), or another
+    live server exists (its concurrent sync would race the ``official/skills``
+    swap). Idempotent: an unchanged commit is a no-op with no download.
+
+    Mutating ``official/skills`` mid-run is safe: the swap is an atomic
+    ``rename`` and skill discovery snapshots per session (in the separate
+    runtime process), so a session sees either the whole old or whole new tree
+    and picks up the change at its next wake."""
+    if not _load_config().skills.sync_auto:
+        return
+    if os.environ.get("CI", "").strip().lower() in ("1", "true", "yes"):
+        return
+    # Imported lazily — keeps this module import-light for the plain CLI path.
+    from physiclaw import runtime_state
+
+    if runtime_state.read_live():
+        return  # another instance owns official/ — don't race its swap
+    threading.Thread(
+        target=_run_sync_quiet, name="physiclaw-auto-sync", daemon=True
+    ).start()
+
+
+def _run_sync_quiet() -> None:
+    """The background-thread body: run ``sync`` fully fail-soft — a hard abort
+    (``typer.Exit``, already on stderr) or any unexpected error is swallowed so
+    the daemon thread dies quietly and the server is never affected."""
+    try:
+        sync()
+    except typer.Exit:
+        pass
+    except Exception:
+        log.exception("auto-sync: official skills sync failed (non-fatal)")
+
+
+__all__ = ["sync", "maybe_auto_sync"]
