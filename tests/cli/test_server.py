@@ -161,6 +161,20 @@ def test_server_no_setup_hardware_skips_wizard(
     assert "physiclaw setup hardware" in msgs
 
 
+def test_server_prints_version_first(mocker, capsys) -> None:
+    _patch_server_runtime_deps(mocker)
+
+    server_mod.server(
+        port=8048, host="127.0.0.1", verbose=False,
+        no_runtime=True, warm_start=False, cam_index=None,
+        save_tool_calls=False, save_snapshots=False, save_screenshots=False,
+    )
+
+    from physiclaw import __version__
+    first_line = capsys.readouterr().out.splitlines()[0]
+    assert first_line == f"PhysiClaw {__version__}"
+
+
 def test_server_default_invocation_runs_mcp(mocker) -> None:
     deps = _patch_server_runtime_deps(mocker)
 

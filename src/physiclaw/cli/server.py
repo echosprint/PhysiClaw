@@ -120,6 +120,10 @@ def server(
     ] = CONFIG.server.save_raw_camera,
 ) -> None:
     """Run the PhysiClaw MCP server."""
+    from physiclaw import __version__
+
+    typer.echo(f"PhysiClaw {__version__}")
+
     # Phase A self-update BEFORE any state is written or hardware touched:
     # if a newer version was staged by a prior run, install it OFFLINE (uv
     # links the warmed cache in ms) and hand this process over to it (re-exec
