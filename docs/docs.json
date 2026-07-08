@@ -45,6 +45,15 @@
       ]
     },
     {
+      "label": "Best practices",
+      "translations": {
+        "zh-CN": "最佳实践"
+      },
+      "items": [
+        "best-practices/best-practice"
+      ]
+    },
+    {
       "label": "Custom",
       "translations": {
         "zh-CN": "定制"

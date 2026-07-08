@@ -1,6 +1,6 @@
 ---
 title: Troubleshooting
-description: Fixes for common snags — PhysiClaw quitting on its own, camera calibration failing despite a normal-looking preview, and the solenoid tapping intermittently.
+description: Fixes for common snags — PhysiClaw quitting on its own, camera calibration failing despite a normal-looking preview, the solenoid tapping intermittently, and Shortcuts failing mid-run.
 ---
 
 ## PhysiClaw exits on its own after a while
@@ -25,4 +25,12 @@ Usually this is flex fatigue in the solenoid cable — the wire has broken. If t
 
 :::tip[Fix]
 Rewire it, keeping two things in mind: place the joint within 50 mm of the solenoid, clear of the section that flexes most; and secure the leads to the tube holder (the drag-chain bracket) with a zip tie, so the wiring at the control board terminals doesn't swing back and forth with the solenoid's movement and work the terminals loose over time.
+:::
+
+## Shortcuts suddenly stop working mid-run
+
+The server is still up, but the Shortcuts suddenly fail. Usually the phone or the computer switched Wi-Fi, so they're no longer on the same LAN and the Shortcuts can't reach the server.
+
+:::tip[Fix]
+Check both devices' Wi-Fi and put them back on the same network.
 :::
