@@ -70,6 +70,11 @@ def _patch_server_runtime_deps(mocker, *, primary: str = "http://device.local:80
     """Stub out everything heavy `server()` touches once it starts up."""
     mocker.patch.object(server_mod, "_spawn_runtime", return_value=MagicMock())
     mocker.patch("physiclaw.core.logger.setup_logging")
+    # The startup auto-update / skills-sync hooks have their own tests and would
+    # otherwise shell out / hit the network here — stub them to no-ops.
+    mocker.patch("physiclaw.cli.update.apply_staged_update")
+    mocker.patch("physiclaw.cli.update.start_stage_update_thread")
+    mocker.patch("physiclaw.cli.sync_official_skills.maybe_auto_sync")
     # Never spawn real threads (warm-start / setup-wizard) or open a real
     # browser during tests. Tests that need a thread body re-patch Thread to
     # capture the target and invoke it manually.

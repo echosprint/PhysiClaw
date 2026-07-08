@@ -279,13 +279,14 @@ def test_tool_version_none_on_uv_failure(mocker) -> None:
     assert up._tool_version("uv") is None
 
 
-# ---------- maybe_auto_update ----------
+# ---------- apply_staged_update / maybe_stage_update / _handoff ----------
 
 
 @pytest.fixture
 def auto_env(monkeypatch: pytest.MonkeyPatch, mocker):
-    """Clean slate for auto-update: kill switches off, os.environ restored
-    after the test (the success path mutates it for the re-exec marker)."""
+    """Clean slate for the auto-update hooks: kill switches off, os.environ
+    restored after the test (the success path mutates it for the re-exec
+    marker), CONFIG.update.auto on."""
     monkeypatch.delenv("PHYSICLAW_DISABLE_UPDATE_CHECK", raising=False)
     monkeypatch.delenv(up._AUTO_UPDATE_MARKER, raising=False)
     monkeypatch.delenv("CI", raising=False)  # the suite itself may run in CI
@@ -293,208 +294,310 @@ def auto_env(monkeypatch: pytest.MonkeyPatch, mocker):
     monkeypatch.setattr(up.CONFIG.update, "auto", True)
 
 
-def test_auto_update_skips_when_config_off(
-    auto_env, monkeypatch: pytest.MonkeyPatch, mocker,
-) -> None:
+# --- Phase A: apply_staged_update (offline, may re-exec) ---
+
+
+@pytest.fixture
+def staged_ready(auto_env, monkeypatch, mocker):
+    """A valid stage-and-apply setup: current 1.0.0, a 1.1.0 marker, and the
+    gate mocks (no live server, uv present, shim on PATH). Tests override
+    `_tool_version` / `_run` / `shutil.which` for their specific branch."""
+    monkeypatch.setattr(up, "_pkg_version", "1.0.0")
+    up._write_staged("1.1.0")
+    mocker.patch.object(up.runtime_state, "read_live", return_value=None)
+    mocker.patch.object(up, "_uv", return_value="/usr/bin/uv")
+    mocker.patch.object(up.shutil, "which", return_value="/x/physiclaw")
+
+
+def test_apply_noop_when_nothing_staged(auto_env, mocker) -> None:
+    # No marker → return before touching read_live / uv / network.
+    read_live = mocker.patch.object(up.runtime_state, "read_live")
+    run = mocker.patch.object(up, "_run")
+
+    up.apply_staged_update()
+
+    read_live.assert_not_called()
+    run.assert_not_called()
+
+
+def test_apply_skips_when_config_off(auto_env, monkeypatch, mocker) -> None:
     monkeypatch.setattr(up.CONFIG.update, "auto", False)
-    fetch = mocker.patch.object(up, "_fetch_pypi_version")
+    up._write_staged("1.1.0")
+    run = mocker.patch.object(up, "_run")
 
-    up.maybe_auto_update()
+    up.apply_staged_update()
 
-    fetch.assert_not_called()
+    run.assert_not_called()
 
 
-def test_auto_update_skips_when_env_disabled(
-    auto_env, monkeypatch: pytest.MonkeyPatch, mocker,
-) -> None:
+def test_apply_skips_when_env_disabled(auto_env, monkeypatch, mocker) -> None:
     monkeypatch.setenv("PHYSICLAW_DISABLE_UPDATE_CHECK", "1")
-    fetch = mocker.patch.object(up, "_fetch_pypi_version")
+    up._write_staged("1.1.0")
+    run = mocker.patch.object(up, "_run")
 
-    up.maybe_auto_update()
+    up.apply_staged_update()
 
-    fetch.assert_not_called()
+    run.assert_not_called()
 
 
-def test_auto_update_skips_after_reexec_marker(
-    auto_env, monkeypatch: pytest.MonkeyPatch, mocker,
-) -> None:
+def test_apply_skips_after_reexec_marker(auto_env, monkeypatch, mocker) -> None:
     monkeypatch.setenv(up._AUTO_UPDATE_MARKER, "1")
-    fetch = mocker.patch.object(up, "_fetch_pypi_version")
+    up._write_staged("1.1.0")
+    run = mocker.patch.object(up, "_run")
 
-    up.maybe_auto_update()
+    up.apply_staged_update()
 
-    fetch.assert_not_called()
+    run.assert_not_called()
 
 
-def test_auto_update_skips_in_ci(
-    auto_env, monkeypatch: pytest.MonkeyPatch, mocker,
-) -> None:
+def test_apply_skips_in_ci(auto_env, monkeypatch, mocker) -> None:
     monkeypatch.setenv("CI", "true")
-    fetch = mocker.patch.object(up, "_fetch_pypi_version")
+    up._write_staged("1.1.0")
+    run = mocker.patch.object(up, "_run")
 
-    up.maybe_auto_update()
+    up.apply_staged_update()
 
-    fetch.assert_not_called()
-
-
-def test_auto_update_skips_dev_and_pip_installs(auto_env, mocker) -> None:
-    mocker.patch.object(up, "_uv", return_value="/usr/bin/uv")
-    mocker.patch.object(up.shutil, "which", return_value="/x/physiclaw")
-    mocker.patch.object(up, "_tool_version", return_value=None)
-    fetch = mocker.patch.object(up, "_fetch_pypi_version")
-
-    up.maybe_auto_update()
-
-    fetch.assert_not_called()
+    run.assert_not_called()
 
 
-def test_auto_update_skips_when_another_server_is_live(auto_env, mocker) -> None:
-    # Installing would swap the venv underneath the running server.
+def test_apply_clears_stale_marker_when_not_newer(
+    auto_env, monkeypatch, mocker,
+) -> None:
+    # Staged version is not newer than current (we already updated past it).
+    monkeypatch.setattr(up, "_pkg_version", "1.1.0")
+    up._write_staged("1.1.0")
+    read_live = mocker.patch.object(up.runtime_state, "read_live")
+
+    up.apply_staged_update()
+
+    assert up._read_staged() is None  # stale marker cleared
+    read_live.assert_not_called()     # returned before the live check
+
+
+def test_apply_skips_when_another_server_live(staged_ready, mocker) -> None:
     mocker.patch.object(up.runtime_state, "read_live", return_value={"pid": 1})
-    fetch = mocker.patch.object(up, "_fetch_pypi_version")
+    run = mocker.patch.object(up, "_run")
 
-    up.maybe_auto_update()
+    up.apply_staged_update()
 
-    fetch.assert_not_called()
+    run.assert_not_called()
+    assert up._read_staged() == "1.1.0"  # marker kept — a later boot can apply
 
 
-def test_auto_update_skips_when_no_shim_to_hand_off(auto_env, mocker) -> None:
-    # No shim on PATH → a post-install hand-off would be impossible, and
-    # continuing with a swapped venv would mix versions — so don't install.
-    mocker.patch.object(up, "_uv", return_value="/usr/bin/uv")
+def test_apply_skips_dev_and_pip_installs(staged_ready, mocker) -> None:
+    mocker.patch.object(up, "_tool_version", return_value=None)
+    run = mocker.patch.object(up, "_run")
+
+    up.apply_staged_update()
+
+    run.assert_not_called()
+
+
+def test_apply_skips_when_no_shim(staged_ready, mocker) -> None:
     mocker.patch.object(up.shutil, "which", return_value=None)
-    fetch = mocker.patch.object(up, "_fetch_pypi_version")
-    run = mocker.patch.object(up, "_run_install")
+    run = mocker.patch.object(up, "_run")
 
-    up.maybe_auto_update()
-
-    fetch.assert_not_called()
-    run.assert_not_called()
-
-
-def test_auto_update_noop_when_up_to_date(
-    auto_env, physiclaw_home: Path, monkeypatch: pytest.MonkeyPatch, mocker,
-) -> None:
-    monkeypatch.setattr(up, "_pkg_version", "1.0.0")
-    mocker.patch.object(up, "_uv", return_value="/usr/bin/uv")
-    mocker.patch.object(up.shutil, "which", return_value="/x/physiclaw")
-    mocker.patch.object(up, "_tool_version", return_value="1.0.0")
-    mocker.patch.object(up, "_fetch_pypi_version", return_value="1.0.0")
-    run = mocker.patch.object(up, "_run_install")
-
-    up.maybe_auto_update()
+    up.apply_staged_update()
 
     run.assert_not_called()
-    # Cache still refreshed so doctor/status don't re-hit PyPI.
-    assert _cached_version(physiclaw_home) == "1.0.0"
 
 
-def test_auto_update_success_reexecs_on_posix(
-    auto_env, monkeypatch: pytest.MonkeyPatch, mocker, capsys,
+def test_apply_success_installs_offline_clears_marker_and_hands_off(
+    staged_ready, physiclaw_home: Path, mocker,
 ) -> None:
-    monkeypatch.setattr(up, "_pkg_version", "1.0.0")
+    mocker.patch.object(up, "_tool_version", side_effect=["1.0.0", "1.1.0"])
+    # Two _run calls: the offline install, then the `--version` health check.
+    run = mocker.patch.object(up, "_run", return_value=_proc(0))
+    handoff = mocker.patch.object(up, "_handoff")
+
+    up.apply_staged_update()
+
+    # First _run is the offline install command, not the online --refresh one.
+    install_cmd = run.call_args_list[0].args[0]
+    assert "--offline" in install_cmd and "physiclaw==1.1.0" in install_cmd
+    assert "--refresh" not in install_cmd
+    # Second _run verifies the new env actually runs before handing off.
+    assert run.call_args_list[1].args[0] == ["/x/physiclaw", "--version"]
+    handoff.assert_called_once_with("/x/physiclaw")
+    assert up._read_staged() is None                 # marker consumed
+    assert _cached_version(physiclaw_home) == "1.1.0"
+
+
+def test_apply_broken_env_does_not_hand_off(staged_ready, mocker, capsys) -> None:
+    # uv reports the new version installed, but `physiclaw --version` fails —
+    # a corrupt env. We must NOT re-exec into it; keep serving current.
+    mocker.patch.object(up, "_tool_version", side_effect=["1.0.0", "1.1.0"])
+    mocker.patch.object(
+        up, "_run",
+        side_effect=[_proc(0), _proc(1, stderr="ImportError")],  # install ok, --version broken
+    )
+    handoff = mocker.patch.object(up, "_handoff")
+
+    up.apply_staged_update()  # must not raise
+
+    handoff.assert_not_called()
+    assert up._read_staged() is None            # marker dropped → Phase B re-stages
+    assert "does not run" in capsys.readouterr().out
+
+
+def test_apply_failure_clears_marker_and_continues(
+    staged_ready, mocker, capsys,
+) -> None:
+    # Version didn't advance → offline apply failed (e.g. cache evicted).
+    mocker.patch.object(up, "_tool_version", side_effect=["1.0.0", "1.0.0"])
+    mocker.patch.object(up, "_run", return_value=_proc(1))
+    handoff = mocker.patch.object(up, "_handoff")
+
+    up.apply_staged_update()  # must not raise
+
+    handoff.assert_not_called()
+    assert up._read_staged() is None            # marker dropped → Phase B re-stages
+    assert "didn't apply" in capsys.readouterr().out
+
+
+# --- _handoff (unchanged re-exec; kept under the new hooks) ---
+
+
+def test_handoff_reexecs_on_posix(monkeypatch, mocker) -> None:
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr(sys, "argv", ["physiclaw", "server", "--port", "9000"])
-    mocker.patch.object(up, "_uv", return_value="/usr/bin/uv")
-    mocker.patch.object(up, "_tool_version", side_effect=["1.0.0", "1.1.0"])
-    mocker.patch.object(up, "_fetch_pypi_version", return_value="1.1.0")
-    mocker.patch.object(up, "_run_install", return_value=_proc(0))
-    mocker.patch.object(up.shutil, "which", return_value="/home/u/.local/bin/physiclaw")
-    # Real execv never returns; emulate that so the fallback path stays dark.
+    monkeypatch.delenv(up._AUTO_UPDATE_MARKER, raising=False)
+    mocker.patch.dict(os.environ)
     execv = mocker.patch.object(up.os, "execv", side_effect=SystemExit)
 
     with pytest.raises(SystemExit):
-        up.maybe_auto_update()
+        up._handoff("/home/u/.local/bin/physiclaw")
 
     execv.assert_called_once_with(
         "/home/u/.local/bin/physiclaw",
         ["/home/u/.local/bin/physiclaw", "server", "--port", "9000"],
     )
     assert os.environ[up._AUTO_UPDATE_MARKER] == "1"
-    assert "restarting" in capsys.readouterr().out
 
 
-def test_auto_update_success_hands_off_to_child_on_windows(
-    auto_env, monkeypatch: pytest.MonkeyPatch, mocker,
-) -> None:
-    # Windows can't re-exec (running exes are locked): the old process
-    # must become a thin waiter on a child running the new version, so
-    # no lazily imported module can mix versions in-process.
-    monkeypatch.setattr(up, "_pkg_version", "1.0.0")
+def test_handoff_child_on_windows(monkeypatch, mocker) -> None:
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(sys, "argv", ["physiclaw", "server"])
-    mocker.patch.object(up, "_uv", return_value="C:/bin/uv.exe")
-    mocker.patch.object(up.shutil, "which", return_value="C:/bin/physiclaw.exe")
-    mocker.patch.object(up, "_tool_version", side_effect=["1.0.0", "1.1.0"])
-    mocker.patch.object(up, "_fetch_pypi_version", return_value="1.1.0")
-    mocker.patch.object(up, "_run_install", return_value=_proc(0))
+    mocker.patch.dict(os.environ)
     execv = mocker.patch.object(up.os, "execv")
     child = MagicMock()
     child.wait.return_value = 0
     popen = mocker.patch.object(up.subprocess, "Popen", return_value=child)
 
     with pytest.raises(typer.Exit) as e:
-        up.maybe_auto_update()
+        up._handoff("C:/bin/physiclaw.exe")
 
     assert e.value.exit_code == 0
     execv.assert_not_called()
     popen.assert_called_once_with(["C:/bin/physiclaw.exe", "server"])
-    assert os.environ[up._AUTO_UPDATE_MARKER] == "1"
 
 
-def test_auto_update_falls_back_to_child_when_execv_fails(
-    auto_env, monkeypatch: pytest.MonkeyPatch, mocker,
-) -> None:
-    monkeypatch.setattr(up, "_pkg_version", "1.0.0")
+def test_handoff_falls_back_to_child_when_execv_fails(monkeypatch, mocker) -> None:
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr(sys, "argv", ["physiclaw", "server"])
-    mocker.patch.object(up, "_uv", return_value="/usr/bin/uv")
-    mocker.patch.object(up.shutil, "which", return_value="/x/physiclaw")
-    mocker.patch.object(up, "_tool_version", side_effect=["1.0.0", "1.1.0"])
-    mocker.patch.object(up, "_fetch_pypi_version", return_value="1.1.0")
-    mocker.patch.object(up, "_run_install", return_value=_proc(0))
+    mocker.patch.dict(os.environ)
     mocker.patch.object(up.os, "execv", side_effect=OSError("noexec"))
     child = MagicMock()
     child.wait.return_value = 7
     mocker.patch.object(up.subprocess, "Popen", return_value=child)
 
     with pytest.raises(typer.Exit) as e:
-        up.maybe_auto_update()
+        up._handoff("/x/physiclaw")
 
-    assert e.value.exit_code == 7  # child's exit code propagates
+    assert e.value.exit_code == 7
 
 
-def test_auto_update_failure_warns_and_continues(
-    auto_env, monkeypatch: pytest.MonkeyPatch, mocker, capsys,
+# --- Phase B: maybe_stage_update (background probe + warm + mark) ---
+
+
+def test_stage_skips_when_config_off(auto_env, monkeypatch, mocker) -> None:
+    monkeypatch.setattr(up.CONFIG.update, "auto", False)
+    fetch = mocker.patch.object(up, "_fetch_pypi_version")
+
+    up.maybe_stage_update()
+
+    fetch.assert_not_called()
+
+
+def test_stage_skips_when_env_disabled(auto_env, monkeypatch, mocker) -> None:
+    monkeypatch.setenv("PHYSICLAW_DISABLE_UPDATE_CHECK", "1")
+    fetch = mocker.patch.object(up, "_fetch_pypi_version")
+
+    up.maybe_stage_update()
+
+    fetch.assert_not_called()
+
+
+def test_stage_skips_in_ci(auto_env, monkeypatch, mocker) -> None:
+    monkeypatch.setenv("CI", "1")
+    fetch = mocker.patch.object(up, "_fetch_pypi_version")
+
+    up.maybe_stage_update()
+
+    fetch.assert_not_called()
+
+
+def test_stage_skips_dev_and_pip_installs(auto_env, mocker) -> None:
+    mocker.patch.object(up, "_uv", return_value="/usr/bin/uv")
+    mocker.patch.object(up, "_tool_version", return_value=None)
+    fetch = mocker.patch.object(up, "_fetch_pypi_version")
+
+    up.maybe_stage_update()
+
+    fetch.assert_not_called()
+
+
+def test_stage_up_to_date_clears_marker(
+    auto_env, physiclaw_home: Path, monkeypatch, mocker,
 ) -> None:
     monkeypatch.setattr(up, "_pkg_version", "1.0.0")
+    up._write_staged("0.9.0")  # a stale marker
     mocker.patch.object(up, "_uv", return_value="/usr/bin/uv")
-    mocker.patch.object(up.shutil, "which", return_value="/x/physiclaw")
-    mocker.patch.object(up, "_tool_version", side_effect=["1.0.0", "1.0.0"])
+    mocker.patch.object(up, "_tool_version", return_value="1.0.0")
+    mocker.patch.object(up, "_fetch_pypi_version", return_value="1.0.0")
+    run = mocker.patch.object(up, "_run")
+
+    up.maybe_stage_update()
+
+    run.assert_not_called()                       # no warm
+    assert up._read_staged() is None              # stale marker cleared
+    assert _cached_version(physiclaw_home) == "1.0.0"
+
+
+def test_stage_already_staged_skips_warm(auto_env, monkeypatch, mocker) -> None:
+    monkeypatch.setattr(up, "_pkg_version", "1.0.0")
+    up._write_staged("1.1.0")
+    mocker.patch.object(up, "_uv", return_value="/usr/bin/uv")
+    mocker.patch.object(up, "_tool_version", return_value="1.0.0")
     mocker.patch.object(up, "_fetch_pypi_version", return_value="1.1.0")
-    mocker.patch.object(
-        up, "_run_install", return_value=_proc(1, stderr="boom: no wheels\n"),
-    )
-    execv = mocker.patch.object(up.os, "execv")
+    run = mocker.patch.object(up, "_run")
 
-    up.maybe_auto_update()  # must NOT raise — the server must come up
+    up.maybe_stage_update()
 
-    execv.assert_not_called()
-    out = capsys.readouterr().out
-    assert "auto-update failed" in out
-    assert "boom: no wheels" in out
+    run.assert_not_called()  # already staged this version — don't re-download
 
 
-def test_auto_update_silent_when_pypi_unreachable(
-    auto_env, monkeypatch: pytest.MonkeyPatch, mocker, capsys,
-) -> None:
+def test_stage_warms_cache_and_writes_marker(auto_env, monkeypatch, mocker) -> None:
     monkeypatch.setattr(up, "_pkg_version", "1.0.0")
     mocker.patch.object(up, "_uv", return_value="/usr/bin/uv")
     mocker.patch.object(up, "_tool_version", return_value="1.0.0")
-    mocker.patch.object(up, "_fetch_pypi_version", return_value=None)
-    run = mocker.patch.object(up, "_run_install")
+    mocker.patch.object(up, "_fetch_pypi_version", return_value="1.1.0")
+    run = mocker.patch.object(up, "_run", return_value=_proc(0))
 
-    up.maybe_auto_update()
+    up.maybe_stage_update()
 
-    run.assert_not_called()
-    assert capsys.readouterr().out == ""
+    cmd = run.call_args.args[0]
+    assert "run" in cmd and "physiclaw==1.1.0" in cmd  # the warm command
+    assert up._read_staged() == "1.1.0"
+
+
+def test_stage_warm_failure_leaves_no_marker(auto_env, monkeypatch, mocker) -> None:
+    monkeypatch.setattr(up, "_pkg_version", "1.0.0")
+    mocker.patch.object(up, "_uv", return_value="/usr/bin/uv")
+    mocker.patch.object(up, "_tool_version", return_value="1.0.0")
+    mocker.patch.object(up, "_fetch_pypi_version", return_value="1.1.0")
+    mocker.patch.object(up, "_run", return_value=_proc(1))
+
+    up.maybe_stage_update()
+
+    assert up._read_staged() is None  # warm failed → don't mark

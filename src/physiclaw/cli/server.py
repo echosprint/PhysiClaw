@@ -120,21 +120,27 @@ def server(
     ] = CONFIG.server.save_raw_camera,
 ) -> None:
     """Run the PhysiClaw MCP server."""
-    # Self-update BEFORE any state is written or hardware touched: a
-    # successful install hands this process over to the new version
-    # (re-exec on macOS/Linux, waited child on Windows) — it must not
-    # continue here, or lazy imports would load new code into this old
-    # process. Fail-soft — never blocks the server (see cli/update.py).
-    from physiclaw.cli.update import maybe_auto_update
+    # Phase A self-update BEFORE any state is written or hardware touched:
+    # if a newer version was staged by a prior run, install it OFFLINE (uv
+    # links the warmed cache in ms) and hand this process over to it (re-exec
+    # on macOS/Linux, waited child on Windows) — it must not continue here, or
+    # lazy imports would load new code into this old process. Zero network on
+    # the critical path; fail-soft — never blocks the server (see cli/update.py).
+    from physiclaw.cli.update import apply_staged_update
 
-    maybe_auto_update()
+    apply_staged_update()
 
-    # Kick off the official-skills sync in the background (daemon thread) so it
-    # never blocks startup; a session picks up any change at its next wake.
-    # Runs after the self-update handoff so the current version does the sync.
+    # Background daemon threads — both run off the startup critical path so
+    # neither blocks serving. After any Phase A hand-off, so the current version
+    # does the work:
+    #   - skills: sync the official pack; a session picks it up at its next wake.
+    #   - update: Phase B — stage the NEXT release (probe + warm uv's cache +
+    #     marker) so the next startup can apply it offline.
     from physiclaw.cli.sync_official_skills import maybe_auto_sync
+    from physiclaw.cli.update import start_stage_update_thread
 
     maybe_auto_sync()
+    start_stage_update_thread()
 
     from physiclaw.core.logger import setup_logging
 
