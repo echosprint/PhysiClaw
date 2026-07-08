@@ -4,31 +4,35 @@ next release in the background; Phase A notifies at the next start that it's
 ready — see the "Two-phase update check" block further down).
 
 The installers (install.sh / install.ps1) put physiclaw on the machine
-with ``uv tool install physiclaw --python 3.12 --force --refresh``.
-Updating re-runs that exact command — one proven code path for install
-and update — with two twists:
+with ``uv tool install physiclaw --python 3.12 --force --refresh`` — an
+UNPINNED spec.
 
-  - ``--python`` is the *running* interpreter's version, so a tool env
-    someone moved to a newer Python stays there.
-  - The requirement spec stays UNPINNED (plain ``physiclaw``), so a
-    manual ``uv tool upgrade physiclaw`` keeps working afterwards.
-    ``--version X`` installs ``physiclaw==X`` and says so — the next
-    plain ``physiclaw update`` moves off the pin again.
+A plain ``physiclaw update`` then runs ``uv tool upgrade physiclaw``: it
+syncs the latest release INTO the existing environment without recreating
+it, so it never touches the running ``python.exe``. That's what makes
+updating safe on Windows — a from-inside ``uv tool install --force``
+recreates the env and dies removing a locked ``Scripts`` dir (``os error
+5``). Same shape as ``npm install -g``: replace the package, keep the
+interpreter. ``--version X`` is the exception — changing the pin (or
+downgrading) needs a full ``uv tool install physiclaw==X --force``, which
+recreates the env and so can fail on Windows while physiclaw runs; run it
+from a fresh shell if so.
 
 Success is judged from ``uv tool list`` — the actual on-disk state —
 not uv's exit code, which can lie on Windows (Defender briefly locking
-the fresh ``physiclaw.exe`` shim; see install.ps1's identical logic).
+the ``physiclaw.exe`` shim executable; see install.ps1's identical logic).
 
 LOCKED-FILE INVARIANT: installing swaps this venv's code on disk while
 Python imports lazily, so a physiclaw process that outlives an install
 risks loading NEW modules into an OLD process — and on Windows the
-running venv's ``python`` + native-extension DLLs are LOCKED, so a
-``--force`` reinstall from inside a live physiclaw dies mid-swap and
-corrupts the env. So we NEVER self-apply under a running server:
+running venv's ``python`` + native-extension DLLs are LOCKED, so
+recreating the env from inside a live physiclaw dies mid-swap and
+corrupts it. So we NEVER self-apply under a running server:
 
   - ``physiclaw update`` refuses to run while a server is live, and
     itself performs no physiclaw imports after the install — only
-    already-loaded code. This is the one path that actually installs.
+    already-loaded code. This is the one path that actually installs, and
+    its default ``uv tool upgrade`` leaves the running interpreter alone.
   - ``physiclaw server`` never installs. It only checks + notifies (see
     the two phases below); the user applies with ``physiclaw update``
     once the server is stopped.
@@ -149,21 +153,37 @@ def _tool_version(uv: str) -> str | None:
     return None
 
 
+def _upgrade_cmd(uv: str) -> list[str]:
+    # The DEFAULT update path. `uv tool upgrade` syncs the newer version INTO
+    # the existing environment — it never recreates/removes it (uv docs:
+    # "the upgrade operates on this existing environment rather than requiring
+    # you to recreate it"). So it never deletes the running `python.exe`, unlike
+    # `install --force`, which recreates the env and dies on Windows removing
+    # the locked `Scripts` dir (os error 5). Same idea as
+    # `npm install -g`: replace the package, keep the interpreter. physiclaw is
+    # installed UNPINNED, so upgrade resolves to the latest PyPI release; it also
+    # respects and retains the install-time `--python`, so no `--python` here
+    # (passing one would rebuild the env — the very thing we're avoiding).
+    return [uv, "tool", "upgrade", "physiclaw"]
+
+
 def _install_cmd(uv: str, spec: str) -> list[str]:
-    # `--refresh` invalidates uv's cached PyPI metadata so a release cut
-    # minutes ago still resolves (same reason install.sh passes it).
+    # Full reinstall — used ONLY to change the pinned version (`--version`,
+    # incl. downgrades), where `upgrade` can't help (it respects the install-time
+    # constraint). This RECREATES the environment, so on Windows it can fail
+    # while physiclaw is running (its venv `python.exe` is locked); if so, run it
+    # from a fresh shell. `--refresh` so a just-cut release still resolves.
     py = f"{sys.version_info.major}.{sys.version_info.minor}"
     return [uv, "tool", "install", spec, "--python", py, "--force", "--refresh"]
 
 
-def _run_install(uv: str, spec: str, *, capture: bool) -> subprocess.CompletedProcess | None:
-    """Run the install; None means it couldn't run at all (missing exe,
-    timeout). ``capture=False`` streams uv's own progress to the user —
-    it is the best diagnostic when something goes wrong."""
+def _run_cmd(cmd: list[str], *, capture: bool) -> subprocess.CompletedProcess | None:
+    """Run an install/upgrade command; None means it couldn't run at all
+    (missing exe, timeout). ``capture=False`` streams uv's own progress to the
+    user — the best diagnostic when something goes wrong."""
     try:
         return subprocess.run(
-            _install_cmd(uv, spec),
-            capture_output=capture, encoding="utf-8", errors="replace",
+            cmd, capture_output=capture, encoding="utf-8", errors="replace",
             timeout=_UV_INSTALL_TIMEOUT,
         )
     except (OSError, subprocess.TimeoutExpired):
@@ -221,7 +241,8 @@ def update(
         if version == _pkg_version:
             typer.echo(fmt.ok(f"physiclaw is already at {version}."))
             return
-        target, spec = version, f"physiclaw=={version}"
+        # Changing the pinned version → full reinstall (upgrade can't).
+        target, cmd = version, _install_cmd(uv, f"physiclaw=={version}")
     else:
         if latest is None:
             typer.echo(fmt.warn(
@@ -233,7 +254,8 @@ def update(
             _write_cache(latest)
             typer.echo(fmt.ok(f"physiclaw {_pkg_version} is up to date."))
             return
-        target, spec = latest, "physiclaw"
+        # Default path → in-place upgrade (keeps the running interpreter).
+        target, cmd = latest, _upgrade_cmd(uv)
 
     live = runtime_state.read_live()
     if live:
@@ -248,13 +270,13 @@ def update(
         raise typer.Exit(1)
 
     typer.echo(f"Updating physiclaw {_pkg_version} → {target} …")
-    proc = _run_install(uv, spec, capture=False)
+    proc = _run_cmd(cmd, capture=False)
     # From here on: no physiclaw imports — the on-disk code just changed
     # (everything below runs on modules loaded before the install).
 
     # Trust the on-disk state, not the exit code: on Windows uv can
     # report failure while the tool env updated fine (Defender briefly
-    # locking the new shim — install.ps1 handles the same case).
+    # locking the shim executable — install.ps1 handles the same case).
     new = _tool_version(uv)
     installed = new is not None and (
         new == target or (version is None and _is_newer(_pkg_version, new))
@@ -264,7 +286,7 @@ def update(
         typer.echo(fmt.warn(
             f"update failed (uv {rc}; installed version: {new or 'unknown'}).\n"
             f"  Retry manually with verbose output:\n"
-            f"      {' '.join(_install_cmd(uv, spec))} --verbose"
+            f"      {' '.join(cmd)} --verbose"
         ))
         raise typer.Exit(1)
 
@@ -290,7 +312,7 @@ def update(
             typer.echo(fmt.warn(
                 f"physiclaw {new} installed but won't run — the environment may "
                 "be half-written. Reinstall to repair:\n"
-                f"      {' '.join(_install_cmd(uv, spec))}\n"
+                f"      {' '.join(_install_cmd(uv, 'physiclaw'))}\n"
                 "  or: curl -fsSL https://physiclaw.ai/install.sh | bash"
             ))
             raise typer.Exit(1)

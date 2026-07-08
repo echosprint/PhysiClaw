@@ -2,7 +2,7 @@
 `physiclaw server` auto-update hook.
 
 Everything that touches uv / PyPI / the process table is patched at the
-module seams (`_uv`, `_tool_version`, `_run_install`, `_fetch_pypi_version`)
+module seams (`_uv`, `_tool_version`, `_run_cmd`, `_fetch_pypi_version`)
 so no test shells out or hits the network. The autouse `physiclaw_home`
 fixture isolates the version-check cache per test.
 """
@@ -37,7 +37,7 @@ def updatable(monkeypatch: pytest.MonkeyPatch, mocker) -> MagicMock:
     """Baseline: uv present, tool-managed at 1.0.0, PyPI offers 1.1.0.
 
     `_tool_version` answers 1.0.0 before the install and 1.1.0 after.
-    Yields the `_run_install` mock (succeeds by default).
+    Yields the `_run_cmd` mock (succeeds by default).
     """
     monkeypatch.setattr(up, "_pkg_version", "1.0.0")
     mocker.patch.object(up, "_uv", return_value="/usr/bin/uv")
@@ -46,7 +46,7 @@ def updatable(monkeypatch: pytest.MonkeyPatch, mocker) -> MagicMock:
     # Post-install health check: shim present, `--version` runs clean.
     mocker.patch.object(up.shutil, "which", return_value="/x/physiclaw")
     mocker.patch.object(up, "_run", return_value=_proc(0))
-    return mocker.patch.object(up, "_run_install", return_value=_proc(0))
+    return mocker.patch.object(up, "_run_cmd", return_value=_proc(0))
 
 
 # ---------- `physiclaw update` pre-flight ----------
@@ -66,7 +66,7 @@ def test_update_errors_when_not_tool_managed(mocker, capsys) -> None:
     mocker.patch.object(up, "_uv", return_value="/usr/bin/uv")
     mocker.patch.object(up, "_fetch_pypi_version", return_value="9.9.9")
     mocker.patch.object(up, "_tool_version", return_value=None)
-    run = mocker.patch.object(up, "_run_install")
+    run = mocker.patch.object(up, "_run_cmd")
 
     with pytest.raises(typer.Exit) as e:
         up.update(check=False, version=None)
@@ -83,7 +83,7 @@ def test_update_errors_when_pypi_unreachable(
     mocker.patch.object(up, "_uv", return_value="/usr/bin/uv")
     mocker.patch.object(up, "_tool_version", return_value="1.0.0")
     mocker.patch.object(up, "_fetch_pypi_version", return_value=None)
-    run = mocker.patch.object(up, "_run_install")
+    run = mocker.patch.object(up, "_run_cmd")
 
     with pytest.raises(typer.Exit) as e:
         up.update(check=False, version=None)
@@ -102,7 +102,7 @@ def test_update_noop_when_up_to_date(
     mocker.patch.object(up, "_uv", return_value="/usr/bin/uv")
     mocker.patch.object(up, "_tool_version", return_value="1.0.0")
     mocker.patch.object(up, "_fetch_pypi_version", return_value="1.0.0")
-    run = mocker.patch.object(up, "_run_install")
+    run = mocker.patch.object(up, "_run_cmd")
 
     up.update(check=False, version=None)
 
@@ -116,8 +116,11 @@ def test_update_installs_latest_unpinned(
 ) -> None:
     up.update(check=False, version=None)
 
-    # Unpinned spec — a later manual `uv tool upgrade` must keep working.
-    updatable.assert_called_once_with("/usr/bin/uv", "physiclaw", capture=False)
+    # Default path uses in-place `uv tool upgrade` (keeps the running venv
+    # python — the reason it works on Windows), not `install --force`.
+    updatable.assert_called_once_with(
+        ["/usr/bin/uv", "tool", "upgrade", "physiclaw"], capture=False,
+    )
     out = capsys.readouterr().out
     assert "1.0.0 → 1.1.0" in out
     assert _cached_version(physiclaw_home) == "1.1.0"
@@ -171,7 +174,7 @@ def test_update_fails_when_version_does_not_advance(
     mocker.patch.object(up, "_uv", return_value="/usr/bin/uv")
     mocker.patch.object(up, "_tool_version", side_effect=["1.0.0", "1.0.0"])
     mocker.patch.object(up, "_fetch_pypi_version", return_value="1.1.0")
-    mocker.patch.object(up, "_run_install", return_value=_proc(1))
+    mocker.patch.object(up, "_run_cmd", return_value=_proc(1))
 
     with pytest.raises(typer.Exit) as e:
         up.update(check=False, version=None)
@@ -189,11 +192,15 @@ def test_update_explicit_version_pins(
     mocker.patch.object(up, "_fetch_pypi_version", return_value="1.1.0")
     mocker.patch.object(up.shutil, "which", return_value="/x/physiclaw")
     mocker.patch.object(up, "_run", return_value=_proc(0))
-    run = mocker.patch.object(up, "_run_install", return_value=_proc(0))
+    run = mocker.patch.object(up, "_run_cmd", return_value=_proc(0))
 
     up.update(check=False, version="0.9.0")  # downgrade is allowed
 
-    run.assert_called_once_with("/usr/bin/uv", "physiclaw==0.9.0", capture=False)
+    # A pin/downgrade needs a full `install --force` (upgrade can't change it).
+    cmd = run.call_args.args[0]
+    assert cmd[:4] == ["/usr/bin/uv", "tool", "install", "physiclaw==0.9.0"]
+    assert "--force" in cmd
+    assert run.call_args.kwargs["capture"] is False
     out = capsys.readouterr().out
     assert "1.0.0 → 0.9.0" in out
     assert "pinned" in out.lower()
@@ -206,7 +213,7 @@ def test_update_explicit_version_noop_when_already_there(
     mocker.patch.object(up, "_uv", return_value="/usr/bin/uv")
     mocker.patch.object(up, "_tool_version", return_value="1.0.0")
     mocker.patch.object(up, "_fetch_pypi_version", return_value="1.1.0")
-    run = mocker.patch.object(up, "_run_install")
+    run = mocker.patch.object(up, "_run_cmd")
 
     up.update(check=False, version="1.0.0")
 
