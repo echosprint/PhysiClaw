@@ -90,8 +90,8 @@ def render_system_prompts(
       ## Tooling           inline tool index card (Qwen reliability)
       ## Built-in Skills   built-in skills, FULL bodies (always active)
       ## Screen layout     learned input/keyboard bboxes the skills above use
-      ## Available skills  user skills, name+description index (load on demand
-                           via the Skill tool)
+      ## Available skills  official + user skills (### subsections),
+                           name+description index (load on demand via Skill)
       ## Learned pitfalls  agent-flagged traps, always-on (add_pitfall appends)
       ## Examples          ❌/✅ for the most common per-turn failures
       ## Reasoning Format  provider-specific reasoning wrapper (e.g. Qwen

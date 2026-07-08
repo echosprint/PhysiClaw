@@ -1,6 +1,7 @@
 """Skill discovery and tiered dispatch.
 
-A skill comes in one of two shapes:
+A skill comes in one of two shapes — a built-in flat file, or a folder (the
+shape both official and user skills share):
 
   Built-in (flat file):  ``<pkg>/agent/skills/<name>.md``
       frontmatter (name, description) + body. Ships in the wheel, so every
@@ -8,22 +9,29 @@ A skill comes in one of two shapes:
       References (tier 3) aren't supported here; built-in skills are
       self-contained.
 
-  User (folder):  ``~/.physiclaw/skills/<name>/SKILL.md`` (+ optional
-      ``references/``, ``assets/``). The user's own skills — added or
-      overriding a built-in one.
+  Official (folder):  ``~/.physiclaw/official/skills/<name>/SKILL.md`` — the
+      curated pack synced by ``physiclaw skills sync official``. Same folder
+      shape as user skills; the sync owns the tree wholesale.
 
-Exactly two roots are scanned, in ascending precedence:
+  User (folder):  ``~/.physiclaw/skills/<name>/SKILL.md`` (+ optional
+      ``references/``, ``assets/``). The user's own skills.
+
+Three roots are scanned:
 
   1. built-in ``<pkg>/agent/skills/*.md`` — the shipped baseline, resolved
-     from the installed ``physiclaw`` package (never the cwd).
-  2. ``~/.physiclaw/skills/<name>/SKILL.md`` (home) — the ONLY place a
+     from the installed ``physiclaw`` package (never the cwd). **Always on:**
+     built-ins are inlined into SYSTEM every session and never shadowed.
+  2. ``~/.physiclaw/official/skills/<name>/SKILL.md`` (official).
+  3. ``~/.physiclaw/skills/<name>/SKILL.md`` (home) — the ONLY place a
      user's custom skills come from, so a ``uv tool install``-ed server
      finds them without a repo cwd.
 
-Home wins on name collision (scanned last → ``out[name] =`` replaces),
-so a user skill of the same name overrides the built-in one. The cwd is
-deliberately not a root — discovery must not depend on where the server
-was launched.
+Official and user are the on-demand set (``## Available skills``) and do NOT
+shadow each other: on a name clash both are kept, disambiguated as
+``<name>-official`` / ``<name>-user`` (see ``_merge_disambiguated``); an
+unclashed name passes through unchanged. Built-ins are separate and always
+on. The cwd is deliberately not a root — discovery must not depend on where
+the server was launched.
 
 Loading differs by kind — the two render into SEPARATE prompt sections, so
 they never merge or override each other:
@@ -41,7 +49,7 @@ Discovery is realpath-scoped within each root: a symlink that escapes
 its root is rejected so third-party skill installs can't path-traverse.
 """
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from physiclaw import paths
@@ -50,6 +58,7 @@ from physiclaw.text import read_text
 log = logging.getLogger(__name__)
 
 BUILTIN_SKILLS_DIR = paths.builtin_skills_dir()
+OFFICIAL_SKILLS_DIR = paths.official_skills_dir()
 HOME_SKILLS_DIR = paths.skills_dir()
 
 
@@ -63,6 +72,7 @@ class Skill:
     body: str
     dir: Path   # realpath; used to resolve references/ safely
     flat: bool = False  # built-in flat-.md skill: body is authoritative, no references/
+    source: str = "user"  # origin root: "built-in" | "official" | "user" — groups the index
 
 
 def discover_builtin_skills() -> dict[str, Skill]:
@@ -74,22 +84,45 @@ def discover_builtin_skills() -> dict[str, Skill]:
 
 
 def discover_user_skills() -> dict[str, Skill]:
-    """The user's own folder skills from ~/.physiclaw/skills/. Only their
-    name+description go in the SYSTEM prompt; the body loads on demand via
-    the Skill() tool."""
+    """The on-demand folder skills for ``## Available skills``: official (synced
+    to ~/.physiclaw/official/skills) + user (~/.physiclaw/skills). Only their
+    name+description go in the SYSTEM prompt; the body loads on demand via the
+    Skill() tool. Built-in skills are separate (always-on, inlined) and never
+    appear here. Official and user do NOT shadow each other — a name clash keeps
+    both, disambiguated ``<name>-official`` / ``<name>-user``."""
+    official: dict[str, Skill] = {}
+    _scan_root(OFFICIAL_SKILLS_DIR, official, source="official")
+    user: dict[str, Skill] = {}
+    _scan_root(HOME_SKILLS_DIR, user, source="user")
+    return _merge_disambiguated(official, user)
+
+
+def _merge_disambiguated(
+    official: dict[str, Skill], user: dict[str, Skill]
+) -> dict[str, Skill]:
+    """Combine the official + user on-demand skills WITHOUT shadowing. On a name
+    clash both are kept, renamed ``<name>-official`` / ``<name>-user`` — on the
+    dict key AND ``Skill.name``, so the index bullet (uses ``.name``), the
+    Skill-tool name list + dispatch (use the key) all agree. Unclashed names
+    pass through unchanged. Official is emitted first so it sorts ahead of its
+    user counterpart in the tool list."""
+    clashes = official.keys() & user.keys()
     out: dict[str, Skill] = {}
-    _scan_root(HOME_SKILLS_DIR, out)
+    for suffix, group in (("official", official), ("user", user)):
+        for name, sk in group.items():
+            key = f"{name}-{suffix}" if name in clashes else name
+            out[key] = replace(sk, name=key)
     return out
 
 
 def discover() -> dict[str, Skill]:
-    """Merged view — built-in first, then user (user wins on name collision).
-    Used by the Claude-provider plugin dir, which materializes every skill as
-    a Claude Code skill; the engine keeps the two kinds separate instead. One
-    bad skill skips silently rather than taking down the session.
-    """
+    """Merged view — built-in (always on), then the disambiguated official+user
+    on-demand set layered on top. Used by the Claude-provider plugin dir, which
+    materializes every skill as a Claude Code skill; the engine keeps built-in
+    (inlined) and on-demand (Skill()) separate instead. One bad skill skips
+    silently rather than taking down the session."""
     out = discover_builtin_skills()
-    _scan_root(HOME_SKILLS_DIR, out)
+    out.update(discover_user_skills())
     return out
 
 
@@ -112,10 +145,11 @@ def _scan_flat_root(root: Path, out: dict[str, Skill]) -> None:
             body=body.strip(),
             dir=root.resolve(),
             flat=True,
+            source="built-in",
         )
 
 
-def _scan_root(root: Path, out: dict[str, Skill]) -> None:
+def _scan_root(root: Path, out: dict[str, Skill], *, source: str = "user") -> None:
     if not root.exists():
         return
     root_real = root.resolve()
@@ -139,6 +173,7 @@ def _scan_root(root: Path, out: dict[str, Skill]) -> None:
             description=(fm.get("description") or "").strip(),
             body=body.strip(),
             dir=real,
+            source=source,
         )
 
 
@@ -200,23 +235,45 @@ def _split_frontmatter(text: str) -> tuple[dict[str, str], str]:
     return fm, body
 
 
-def _skill_bullets(skills: dict[str, Skill]) -> list[str]:
+def _skill_bullets(skills: list[Skill]) -> list[str]:
     """One `- **name** — description` index line per skill."""
     return [
         f"- **{s.name}** — {s.description or '(no description)'}"
-        for s in skills.values()
+        for s in skills
     ]
 
 
+# Subsection heading per `source`, in the order they appear under
+# `## Available skills` (dict insertion order). A subsection is emitted only if
+# that source has any skills.
+_SECTION_LABELS = {
+    "built-in": "built-in skills",
+    "official": "official skills",
+    "user": "user skills",
+}
+
+
 def render_section(skills: dict[str, Skill]) -> str:
-    """`## Available skills` + one `- **name** — description` line per skill;
-    empty string if none. A pure index — the body loads on demand via the
-    Skill tool, whose schema already documents invocation. Serves both the
-    Claude path's plugin skills and the engine's user skills. Built-in skills
-    use `render_builtin` instead (full bodies, not an index)."""
+    """`## Available skills`, split into `### official skills` / `### user skills`
+    subsections (and `### built-in skills` on the Claude path, which merges all
+    three) — one `- **name** — description` line per skill. Empty string if none.
+    A pure index; the body loads on demand via the Skill tool. Built-in skills in
+    the engine path use `render_builtin` instead (full bodies, not an index)."""
     if not skills:
         return ""
-    return "\n".join(["## Available skills\n", *_skill_bullets(skills)])
+    grouped: dict[str, list[Skill]] = {}
+    for s in skills.values():
+        grouped.setdefault(s.source, []).append(s)
+    # Known sources in fixed order first, then any unknown source (stable) so a
+    # future origin still renders rather than vanishing.
+    ordered = [s for s in _SECTION_LABELS if s in grouped]
+    ordered += [s for s in grouped if s not in _SECTION_LABELS]
+    blocks = [
+        f"### {_SECTION_LABELS.get(src, f'{src} skills')}\n\n"
+        + "\n".join(_skill_bullets(grouped[src]))
+        for src in ordered
+    ]
+    return "## Available skills\n\n" + "\n\n".join(blocks)
 
 
 def render_builtin(builtin: dict[str, Skill]) -> str:

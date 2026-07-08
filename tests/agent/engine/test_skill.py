@@ -1,11 +1,11 @@
 """Tests for `physiclaw.agent.engine.skill` — discovery + dispatch.
 
-Discovery scans exactly two roots: the built-in package root
-(`BUILTIN_SKILLS_DIR`, flat `.md`) and the user home root
-(`HOME_SKILLS_DIR` = paths.skills_dir(), folder `SKILL.md`). The autouse
-`_skill_roots` fixture re-points both at per-test tmp dirs. The cwd is
-NOT a discovery root; the fixture still chdirs to an empty tmp for
-hygiene.
+Discovery scans three roots: the built-in package root (`BUILTIN_SKILLS_DIR`,
+flat `.md`), the official pack root (`OFFICIAL_SKILLS_DIR` =
+paths.official_skills_dir()), and the user home root (`HOME_SKILLS_DIR` =
+paths.skills_dir()), both folder `SKILL.md`. The autouse `_skill_roots`
+fixture re-points all three at per-test tmp dirs. The cwd is NOT a discovery
+root; the fixture still chdirs to an empty tmp for hygiene.
 """
 from __future__ import annotations
 
@@ -31,17 +31,21 @@ from physiclaw.agent.engine.skill import (
 def _skill_roots(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[Path, Path]:
-    """Per-test home + cwd skill roots.
+    """Per-test builtin + official + home + cwd skill roots.
 
-    Also re-points the built-in root at an empty tmp dir so the real
-    shipped flat-.md skills don't leak into discovery assertions.
+    Re-points all three real roots at empty tmp dirs so the shipped
+    flat-.md skills and any synced official pack don't leak into
+    discovery assertions. Returns (home, cwd); the official root is
+    reached via ``skill_mod.OFFICIAL_SKILLS_DIR``.
     """
     home = tmp_path / "home_skills"
+    official = tmp_path / "official_skills"
     cwd = tmp_path / "cwd_root"
     cwd.mkdir()
     builtin = tmp_path / "builtin_skills"
     builtin.mkdir()
     monkeypatch.setattr(skill_mod, "BUILTIN_SKILLS_DIR", builtin)
+    monkeypatch.setattr(skill_mod, "OFFICIAL_SKILLS_DIR", official)
     monkeypatch.setattr(skill_mod, "HOME_SKILLS_DIR", home)
     monkeypatch.chdir(cwd)
     # CWD_SKILLS_DIR is `Path("skills")` — relative to cwd.
@@ -243,6 +247,62 @@ def test_discover_user_only_scans_home_root(_skill_roots) -> None:
 
     assert set(out) == {"taobao"}
     assert out["taobao"].flat is False
+
+
+# ---------- official skills: on-demand set, no shadowing ----------
+
+
+def test_discover_user_includes_official(_skill_roots) -> None:
+    home, _ = _skill_roots
+    _write_skill(skill_mod.OFFICIAL_SKILLS_DIR, "jd", description="official jd")
+    _write_skill(home, "taobao", description="user taobao")
+
+    out = discover_user_skills()
+
+    assert set(out) == {"jd", "taobao"}
+    assert out["jd"].description == "official jd"
+
+
+def test_official_and_user_clash_disambiguated(_skill_roots) -> None:
+    # Same name in both roots → both kept, suffixed; neither shadows the other.
+    home, _ = _skill_roots
+    _write_skill(skill_mod.OFFICIAL_SKILLS_DIR, "jd", description="official", body="off-body")
+    _write_skill(home, "jd", description="user", body="user-body")
+
+    out = discover_user_skills()
+
+    assert set(out) == {"jd-official", "jd-user"}
+    # Key AND Skill.name are both suffixed, so index bullet + dispatch agree.
+    assert out["jd-official"].name == "jd-official"
+    assert out["jd-official"].body == "off-body"
+    assert out["jd-user"].name == "jd-user"
+    assert out["jd-user"].body == "user-body"
+    # Dispatch routes by the disambiguated key.
+    assert dispatch(out, {"name": "jd-official"}) == "off-body"
+
+
+def test_no_clash_keeps_plain_names(_skill_roots) -> None:
+    home, _ = _skill_roots
+    _write_skill(skill_mod.OFFICIAL_SKILLS_DIR, "jd")
+    _write_skill(home, "taobao")
+
+    out = discover_user_skills()
+
+    assert set(out) == {"jd", "taobao"}
+    assert out["jd"].name == "jd"  # no clash → plain name, no suffix
+
+
+def test_builtin_always_on_alongside_clashing_on_demand(_skill_roots) -> None:
+    # A built-in is inlined independently; official/user disambiguation never
+    # touches it. discover() (merged Claude view) still surfaces all three.
+    home, _ = _skill_roots
+    _write_flat("im", description="built-in im")
+    _write_skill(skill_mod.OFFICIAL_SKILLS_DIR, "jd", description="official jd")
+    _write_skill(home, "jd", description="user jd")
+
+    assert set(discover_builtin_skills()) == {"im"}  # built-in unaffected
+    merged = discover()
+    assert set(merged) == {"im", "jd-official", "jd-user"}
 
 
 # ---------- render_builtin ----------
@@ -447,6 +507,39 @@ def test_render_section_uses_no_description_placeholder_when_empty() -> None:
     }
 
     assert "- **foo** — (no description)" in render_section(skills)
+
+
+def test_render_section_splits_official_and_user_subsections() -> None:
+    skills = {
+        "jd": Skill(name="jd", description="off", body="", dir=Path("/"), source="official"),
+        "taobao": Skill(name="taobao", description="usr", body="", dir=Path("/"), source="user"),
+    }
+
+    out = render_section(skills)
+
+    assert "## Available skills" in out
+    assert "### official skills" in out and "### user skills" in out
+    # official subsection precedes user, and each skill sits under its heading.
+    assert out.index("### official skills") < out.index("### user skills")
+    assert "- **jd** — off" in out
+    assert "- **taobao** — usr" in out
+
+
+def test_render_section_orders_builtin_official_user() -> None:
+    # The Claude merged view can carry all three sources at once.
+    skills = {
+        "im": Skill(name="im", description="b", body="", dir=Path("/"), source="built-in"),
+        "jd": Skill(name="jd", description="o", body="", dir=Path("/"), source="official"),
+        "taobao": Skill(name="taobao", description="u", body="", dir=Path("/"), source="user"),
+    }
+
+    out = render_section(skills)
+
+    assert (
+        out.index("### built-in skills")
+        < out.index("### official skills")
+        < out.index("### user skills")
+    )
 
 
 # ---------- dispatch (user skills only) ----------

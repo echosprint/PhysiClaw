@@ -4,8 +4,11 @@ Merges two skill sources into one ./skills subdir:
   1. agent/claude/skills/*   — claude-only skills (jobs, …) that shell
                                 out to engine-module scripts
   2. skill.discover()         — the shared skills: built-in flat-`.md`
-                                files from the package, plus the user's
-                                own folder skills from ~/.physiclaw/skills/.
+                                files from the package, plus folder skills
+                                from ~/.physiclaw/official/skills/ (synced
+                                pack) and ~/.physiclaw/skills/ (user). An
+                                official/user name clash is already suffixed
+                                `-official`/`-user` before it reaches here.
                                 Folder skills are symlinked (to keep any
                                 references/ live); built-in flat skills are
                                 materialized as skills/<name>/SKILL.md.
