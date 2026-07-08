@@ -1,15 +1,17 @@
 """Post-session pitfalls curator — a separate lightweight LLM pass that
 consolidates the learned-pitfalls list and enforces its cap.
 
-The agent only *appends* traps (0–3/session, append-only), so over time the list
-accumulates near-duplicates, over-specific one-offs, and stale entries. Once a
-session that added traps closes, `curate(...)` runs one throwaway LLM call over the
-whole list with a fixed prompt: merge duplicates, tighten wording, drop stale /
-low-value entries, and return **≤`max_items`** items — while PRESERVING every
-distinct trap (Hermes' hard lesson: a wholesale rewrite is where good lines get
-lost, so the prompt forbids dropping information). The result is written back
-through `pitfalls.replace`, which also hard-cuts to the cap and snapshots
-history, so a prune is always recoverable.
+The agent authors traps mid-run (0–3/session, append-only) and their quality
+varies, so over time the list accumulates near-duplicates, over-specific one-offs,
+vague/low-signal lines, and stale entries. Once a session that added traps closes,
+`curate(...)` runs one throwaway LLM call over the whole list with a fixed prompt:
+merge duplicates, tighten wording, drop the weak/stale entries, and return
+**≤`max_items`** items ordered best-first (most durable, broadly-useful traps on
+top). Merging (not wholesale rewriting) guards the Hermes lesson — a from-scratch
+rewrite is where good lines get lost, so the prompt keeps both when two might be
+distinct and forbids *inventing* traps. The best-first order is load-bearing:
+`pitfalls.replace` hard-cuts to the cap from the bottom, so the lowest-quality
+lines are the ones dropped. It also snapshots history, so a prune is recoverable.
 
 Reuses the session's still-open provider, makes NO tool calls, and is fully
 fail-open: a parse error or empty result leaves the list untouched.
@@ -28,14 +30,21 @@ def _system() -> str:
     cap = CONFIG.pitfalls.max_items
     return (
         "You curate a list of learned pitfalls — one-line traps an agent hit "
-        "while driving phone apps, each `app: trap → avoid/fix`. Consolidate "
-        "the list, but PRESERVE EVERY DISTINCT TRAP: merge near-duplicates into "
-        "one line that keeps the nuance, tighten wording, drop only stale or "
-        "low-value entries. When unsure whether two are the same trap, keep "
-        "both. Keep each line terse (lead with the app) and keep the most "
-        "useful nearer the top. Do NOT invent traps.\n"
-        f"Return ONLY a JSON array of strings, at most {cap} items, no prose, "
-        "no code fence."
+        "while driving phone apps, each `app: trap → avoid/fix`. The agent "
+        "authors these mid-run, so quality varies: some are sharp and reusable, "
+        "others are vague, over-specific to one screen, or restate the obvious. "
+        "Your job is to consolidate the list and surface the best.\n"
+        "Rules:\n"
+        f"- Return AT MOST {cap} items — a hard cap, not a target. Fewer is fine.\n"
+        "- ORDER BY QUALITY, best first: put the most durable, broadly-useful, "
+        "actionable traps at the top; the weakest last. This ordering matters — "
+        "if the list is trimmed to the cap, the lowest ones are dropped.\n"
+        "- Merge near-duplicates into one line that keeps the nuance; when unsure "
+        "whether two are the same trap, keep both (as separate lines).\n"
+        "- Drop stale, vague, one-off, or low-signal entries rather than pad to "
+        "the cap. Tighten wording; lead each line with the app; keep it terse.\n"
+        "- Do NOT invent traps or add information not already present.\n"
+        "Return ONLY a JSON array of strings, no prose, no code fence."
     )
 
 

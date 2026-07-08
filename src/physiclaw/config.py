@@ -201,7 +201,7 @@ class PitfallsConfig:
     `capture_turn_floor` = the turn count above which a DONE close forces the
     capture nudge (a long run almost always hit a trap worth banking; the agent
     may still add 0). `capture_enabled` / `curate_enabled` gate the two passes."""
-    max_items: int = 100
+    max_items: int = 20
     max_item_chars: int = 120
     capture_turn_floor: int = 50
     capture_enabled: bool = True
