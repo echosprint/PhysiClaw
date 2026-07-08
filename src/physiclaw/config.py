@@ -212,8 +212,13 @@ class PitfallsConfig:
 class SkillsConfig:
     """Source repo for ``physiclaw skills install``. Empty = no default;
     users must pass ``--from`` or set this key. Convention: the source
-    repo must contain a top-level ``skills/<name>/SKILL.md`` layout."""
+    repo must contain a top-level ``skills/<name>/SKILL.md`` layout.
+
+    ``official_base_url`` is the site namespace ``skills sync official``
+    pulls from — ``latest.json``, the ``.zip`` pack, and its ``.sha256``
+    all live directly under it. Override only to point at a mirror/staging."""
     default_source: str = ""
+    official_base_url: str = "https://physiclaw.ai/downloads/official-skills"
 
 
 @dataclass

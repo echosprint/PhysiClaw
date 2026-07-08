@@ -98,6 +98,26 @@ def skills_dir() -> Path:
     return HOME / "skills"
 
 
+def official_dir() -> Path:
+    """Official skill pack synced from the site (``physiclaw skills sync
+    official``). Kept separate from ``skills_dir()`` (user-authored): the
+    sync owns this tree wholesale — an atomic swap replaces ``official/skills``
+    on every run, so anything a user drops here is blown away. Layout::
+
+        official/
+        ├── source.json       (upstream manifest, extracted verbatim)
+        ├── skills/<name>/…    (the mounted skills)
+        └── .sync-state.json   (client-written sync bookkeeping)
+    """
+    return HOME / "official"
+
+
+def official_skills_dir() -> Path:
+    """The mounted official skills tree — a ``<name>/SKILL.md`` root like
+    ``skills_dir()``. Empty until the first successful ``skills sync official``."""
+    return official_dir() / "skills"
+
+
 def pitfalls_dir() -> Path:
     """Agent-flagged turn-wasting traps — ``learned/pitfalls/pitfalls.md`` (the
     live list, always injected into SYSTEM after user skills) plus an

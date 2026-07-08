@@ -106,6 +106,7 @@ def test_config_error_is_value_error_subclass() -> None:
         ("retention", "trace_days", 7),
         # SkillsConfig
         ("skills", "default_source", ""),
+        ("skills", "official_base_url", "https://physiclaw.ai/downloads/official-skills"),
     ],
 )
 def test_default_config_field_value_pinned(

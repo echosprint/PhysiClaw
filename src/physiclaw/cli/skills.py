@@ -360,6 +360,47 @@ def _install(
     typer.echo(next_hint(f"restart `physiclaw server` to pick up {name}."))
 
 
+sync_app = typer.Typer(
+    help="Sync curated skill packs published by PhysiClaw.",
+    epilog="Example: physiclaw skills sync official",
+    context_settings={"help_option_names": ["-h", "--help"]},
+    no_args_is_help=True,
+    add_completion=False,
+)
+
+
+@sync_app.command(
+    "official",
+    epilog="Example: physiclaw skills sync official --dry-run",
+)
+def _sync_official(
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="Only check whether a sync would run; download nothing.",
+        ),
+    ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Re-download and re-extract even if already up to date.",
+        ),
+    ] = False,
+) -> None:
+    """Pull the official skill pack from the site into
+    ``~/.physiclaw/official/``. Idempotent — a matching commit is a no-op."""
+    # Imported lazily so the heavy stdlib bits (zipfile/hashlib) load only
+    # when this command actually runs, keeping `physiclaw skills` startup lean.
+    from physiclaw.cli import sync_official_skills
+
+    sync_official_skills.sync(force=force, dry_run=dry_run)
+
+
+skills_app.add_typer(sync_app, name="sync")
+
+
 @skills_app.command(
     "list",
     epilog="Example: physiclaw skills list",
