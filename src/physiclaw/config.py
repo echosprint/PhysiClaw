@@ -39,10 +39,12 @@ class ServerConfig:
 
 @dataclass
 class UpdateConfig:
-    """Self-update. ``auto = true`` makes ``physiclaw server`` check PyPI
-    at startup, install a newer release before serving, and restart into
-    it. ``PHYSICLAW_DISABLE_UPDATE_CHECK=1`` env overrides to off. The
-    explicit ``physiclaw update`` command works regardless."""
+    """Update check. ``auto = true`` makes ``physiclaw server`` check PyPI in
+    the background and, at the next start, print a notice when a newer release
+    is ready — it never installs on its own (reinstalling the venv under a live
+    server can corrupt it on Windows). Apply with ``physiclaw update``.
+    ``PHYSICLAW_DISABLE_UPDATE_CHECK=1`` env overrides to off. The explicit
+    ``physiclaw update`` command works regardless."""
     auto: bool = True
 
 
@@ -278,9 +280,10 @@ _FILE_HEADER = """\
 
 _SECTION_COMMENTS: dict[str, str] = {
     "update": (
-        "Self-update. `auto = true` checks PyPI when `physiclaw server` "
-        "starts, installs a newer release before serving, and restarts "
-        "into it. PHYSICLAW_DISABLE_UPDATE_CHECK=1 env overrides to off."
+        "Update check. `auto = true` checks PyPI in the background while "
+        "`physiclaw server` runs and notifies at the next start when a newer "
+        "release is ready; apply it with `physiclaw update` (it never installs "
+        "on its own). PHYSICLAW_DISABLE_UPDATE_CHECK=1 env overrides to off."
     ),
     "warm_start": "Timeouts for `physiclaw server --warm-start` hardware reconnect.",
     "auto_pick": "Timeouts for the camera auto-pick step in `physiclaw setup hardware`.",

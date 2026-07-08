@@ -1,7 +1,7 @@
 """``physiclaw update`` — self-update the uv-managed install, plus the
-two-phase auto-update ``physiclaw server`` runs at startup (Phase A applies a
-previously-staged release offline; Phase B stages the next one in the
-background — see the "Two-phase auto-update" block further down).
+two-phase update check ``physiclaw server`` runs at startup (Phase B stages the
+next release in the background; Phase A notifies at the next start that it's
+ready — see the "Two-phase update check" block further down).
 
 The installers (install.sh / install.ps1) put physiclaw on the machine
 with ``uv tool install physiclaw --python 3.12 --force --refresh``.
@@ -19,35 +19,36 @@ Success is judged from ``uv tool list`` — the actual on-disk state —
 not uv's exit code, which can lie on Windows (Defender briefly locking
 the fresh ``physiclaw.exe`` shim; see install.ps1's identical logic).
 
-VERSION-MIXING INVARIANT: installing swaps this venv's code on disk
-while Python imports lazily, so any physiclaw process that outlives an
-install risks loading NEW modules into an OLD process. Three rules keep
-versions unmixed:
+LOCKED-FILE INVARIANT: installing swaps this venv's code on disk while
+Python imports lazily, so a physiclaw process that outlives an install
+risks loading NEW modules into an OLD process — and on Windows the
+running venv's ``python`` + native-extension DLLs are LOCKED, so a
+``--force`` reinstall from inside a live physiclaw dies mid-swap and
+corrupts the env. So we NEVER self-apply under a running server:
 
-  - ``physiclaw update`` refuses to run while a server is live (the
-    server would keep lazily importing for weeks), and itself performs
-    no physiclaw imports after the install — only already-loaded code.
-  - A successful apply never returns: it hands the process over to the
-    new version (:func:`_handoff`) instead of serving with a swapped
-    venv underneath.
-  - Phase A (applying a staged update) is skipped entirely when a
-    hand-off wouldn't be possible (no shim on PATH) or another live
-    server would be swapped underneath.
+  - ``physiclaw update`` refuses to run while a server is live, and
+    itself performs no physiclaw imports after the install — only
+    already-loaded code. This is the one path that actually installs.
+  - ``physiclaw server`` never installs. It only checks + notifies (see
+    the two phases below); the user applies with ``physiclaw update``
+    once the server is stopped.
 
-Auto-update (``[update] auto = true``, the default) is two-phase, so no
-network or heavy download ever sits on the startup critical path:
+The startup update check (``[update] auto = true``, the default) is
+two-phase, so no network or heavy download ever sits on the startup
+critical path:
 
   - Phase B (:func:`maybe_stage_update`) — a background daemon thread
     after serving starts: probe PyPI and, if newer, WARM uv's cache for
-    that version and drop a ``cache/update.json`` marker.
-  - Phase A (:func:`apply_staged_update`) — synchronous at startup,
-    OFFLINE: if the marker names a newer version, ``uv tool install
-    …==<ver> --offline`` links the warmed wheels in milliseconds, then
-    re-execs into it (a waited child on Windows, whose exes are locked).
+    that version (so a later ``physiclaw update`` is fast) and drop a
+    ``cache/update.json`` marker.
+  - Phase A (:func:`notify_staged_update`) — synchronous at startup: if
+    the marker names a newer version, print a one-line "ready — run
+    ``physiclaw update`` to apply" notice and keep serving. No install.
 
-An update thus lands one boot after it's published (stage on boot N,
-apply on boot N+1). Every step is fail-soft — an unreachable PyPI, a
-failed warm, or a failed offline apply never blocks the server.
+A notice thus appears one boot after a release is published (stage on
+boot N, notify on boot N+1). Every step is fail-soft — an unreachable
+PyPI or a failed warm never blocks the server, and nothing the server
+does can corrupt the install, because the server never touches it.
 
 Kill switches: ``physiclaw config set update.auto false``, or
 ``PHYSICLAW_DISABLE_UPDATE_CHECK=1`` (also silences the doctor/status
@@ -82,10 +83,10 @@ from physiclaw.text import read_text, write_text
 
 log = logging.getLogger(__name__)
 
-# Set before the post-apply hand-off so the re-exec'd process skips BOTH
-# phases (no re-apply, no re-stage) — guards against an update loop if the
-# install "succeeds" but the resolved version never advances (e.g. a
-# shadowing dev shim).
+# Env override that suppresses BOTH startup phases (no notice, no stage) for a
+# single run — e.g. a supervisor relaunching physiclaw right after applying an
+# update, so it doesn't immediately re-notify. Nothing in-process sets it; it's
+# an external escape hatch alongside the config/env kill switches.
 _AUTO_UPDATE_MARKER = "_PHYSICLAW_AUTO_UPDATED"
 
 # uv resolve+download on a cold cache is normally seconds; the ceiling
@@ -106,9 +107,9 @@ def _uv() -> str | None:
 
 
 def _auto_update_disabled() -> bool:
-    """The shared kill-switch gate for both auto-update phases: off via
-    ``[update] auto = false`` / ``PHYSICLAW_DISABLE_UPDATE_CHECK=1``, already
-    handed off this start (marker set), or running under CI (an unattended
+    """The shared kill-switch gate for both startup phases: off via
+    ``[update] auto = false`` / ``PHYSICLAW_DISABLE_UPDATE_CHECK=1``, the
+    per-run ``_AUTO_UPDATE_MARKER`` override, or running under CI (an unattended
     mid-job version jump is never what a pipeline wants)."""
     return (
         _disabled_via_env()
@@ -167,35 +168,6 @@ def _run_install(uv: str, spec: str, *, capture: bool) -> subprocess.CompletedPr
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
-
-
-def _handoff(exe: str) -> None:
-    """Continue as the freshly installed version, same argv. Never returns.
-
-    Required, not cosmetic: the install swapped this venv's code on
-    disk, and Python imports lazily — a process that kept running would
-    load NEW modules into an OLD process on its next import. POSIX
-    truly re-execs. Windows can't replace a running exe, so the old
-    process stays only as a thin waiter on a child running the new
-    version — it performs no further imports.
-    """
-    os.environ[_AUTO_UPDATE_MARKER] = "1"
-    argv = [exe, *sys.argv[1:]]
-    sys.stdout.flush()
-    sys.stderr.flush()
-    if sys.platform != "win32":
-        try:
-            os.execv(exe, argv)  # does not return
-        except OSError:
-            pass  # fall through to the waiter
-    child = subprocess.Popen(argv)
-    while True:
-        try:
-            code = child.wait()
-            break
-        except KeyboardInterrupt:
-            continue  # Ctrl-C reached the child too; wait for its exit
-    raise typer.Exit(code)
 
 
 def update(
@@ -301,6 +273,28 @@ def update(
             f"uv reported a failure, but physiclaw {new} is installed — "
             "likely a transient file lock; continuing."
         ))
+
+    # Verify the freshly-installed version actually RUNS before declaring
+    # success. `uv tool list` reports metadata, not env health: a mid-install
+    # failure (network drop, disk full, Ctrl-C) can leave site-packages
+    # half-written while the version still shows as installed, so the next
+    # `physiclaw` invocation would crash on import. A subprocess `--version`
+    # imports the new code in a throwaway process — invariant-safe (no mixing
+    # into this old one) and cross-platform (running the shim never needs to
+    # *replace* it, so no Windows file lock). Inconclusive (couldn't spawn) is
+    # treated as OK — only a definitive non-zero exit fails.
+    shim = shutil.which("physiclaw")
+    if shim is not None:
+        health = _run([shim, "--version"], timeout=_UV_QUERY_TIMEOUT)
+        if health is not None and health.returncode != 0:
+            typer.echo(fmt.warn(
+                f"physiclaw {new} installed but won't run — the environment may "
+                "be half-written. Reinstall to repair:\n"
+                f"      {' '.join(_install_cmd(uv, spec))}\n"
+                "  or: curl -fsSL https://physiclaw.ai/install.sh | bash"
+            ))
+            raise typer.Exit(1)
+
     _write_cache(new)
     typer.echo(fmt.ok(f"Updated physiclaw {_pkg_version} → {new}."))
     if version is not None:
@@ -310,23 +304,23 @@ def update(
         ))
 
 
-# ── Two-phase auto-update ──────────────────────────────────────────────
+# ── Two-phase update check ─────────────────────────────────────────────
 #
-# Self-update can't hot-swap the venv under a serving process (the version-
-# mixing invariant), so applying an update means installing + re-execing at
-# STARTUP, before serving. To keep the network off the startup critical path we
-# split the work:
+# The server never installs (the locked-file invariant), so its job is only to
+# find out an update exists and tell the user. Split in two so no network sits
+# on the startup critical path:
 #
 #   Phase B (`maybe_stage_update`) — background daemon thread, after serving
-#       starts: probe PyPI and, if newer, WARM uv's cache for that version and
-#       drop a `cache/update.json` marker. No install, no re-exec; touches only
-#       the shared uv cache + the marker, so it's safe mid-serve.
-#   Phase A (`apply_staged_update`) — synchronous, at startup, offline: if the
-#       marker names a newer version, `uv tool install …==<ver> --offline` links
-#       the warmed wheels in milliseconds, then hands off. Zero network.
+#       starts: probe PyPI and, if newer, WARM uv's cache for that version (so a
+#       later `physiclaw update` links from cache in ms) and drop a
+#       `cache/update.json` marker. No install; touches only the shared uv cache
+#       + the marker, so it's safe mid-serve.
+#   Phase A (`notify_staged_update`) — synchronous, at startup: if the marker
+#       names a newer version, print a "ready — run `physiclaw update`" notice
+#       and keep serving. No install.
 #
-# Net: an update lands one boot after it's published (stage on boot N, apply on
-# boot N+1), with no network or heavy download on any startup critical path.
+# Net: a notice appears one boot after a release is published (stage on boot N,
+# notify on boot N+1), with no network or heavy download on any startup path.
 
 
 def _stage_file() -> Path:
@@ -334,7 +328,7 @@ def _stage_file() -> Path:
 
 
 def _read_staged() -> str | None:
-    """The version a prior background stage prepared for offline apply, or None
+    """The newer version a prior background stage flagged as ready, or None
     (missing / unreadable / malformed marker)."""
     p = _stage_file()
     if not p.exists():
@@ -366,15 +360,6 @@ def _clear_staged() -> None:
         pass
 
 
-def _offline_install_cmd(uv: str, version: str) -> list[str]:
-    """Apply a staged version from uv's ALREADY-WARMED cache. ``--offline``
-    forbids network — it links prepared wheels in milliseconds, or fails fast if
-    the cache was evicted. No ``--refresh`` (that would hit the network)."""
-    py = f"{sys.version_info.major}.{sys.version_info.minor}"
-    return [uv, "tool", "install", f"physiclaw=={version}",
-            "--python", py, "--force", "--offline"]
-
-
 def _warm_cmd(uv: str, version: str) -> list[str]:
     """Warm uv's global cache for ``physiclaw==version`` WITHOUT touching the
     installed tool or running physiclaw's entrypoint: ``uv tool run`` builds a
@@ -385,27 +370,21 @@ def _warm_cmd(uv: str, version: str) -> list[str]:
             "python", "-c", "pass"]
 
 
-def apply_staged_update() -> None:
-    """Phase A — at ``physiclaw server`` startup, install a previously STAGED
-    newer version OFFLINE (uv links the warmed cache — milliseconds) and hand
-    the process over to it. Zero network on the critical path: the wheels were
-    fetched by a prior background stage (Phase B, :func:`maybe_stage_update`).
+def notify_staged_update() -> None:
+    """Phase A — at ``physiclaw server`` startup, NOTIFY that a newer version is
+    staged and ready, without touching the install.
+
+    Applying a self-update means reinstalling the tool venv, and that can't be
+    done safely under a live physiclaw: on Windows the running venv's ``python``
+    + native-extension DLLs are locked, so a ``--force`` reinstall dies mid-swap
+    and corrupts the env. Rather than dance around that with a detached
+    relaunch, we don't auto-apply in the foreground at all — we print a one-line
+    notice and keep serving. The user applies it with ``physiclaw update`` (which
+    refuses to run while a server is live, so they stop this one first).
 
     Silent no-op when: disabled (``[update] auto = false`` / env), under CI,
-    already handed off this start, nothing staged (or the stage isn't actually
-    newer), another live server exists, not a ``uv tool`` install, or no shim to
-    hand off to.
-
-    Never hands off to a broken install. After the offline install it checks
-    BOTH that the version advanced AND that the new shim actually runs
-    (``--version``). Either failure — a cache eviction (which fails at
-    resolve/download, before uv touches the env) or a rare corrupt install —
-    clears the marker and keeps serving the current (in-memory) version; Phase B
-    re-stages next cycle.
-
-    Same version-mixing invariant as before: a SUCCESSFUL, VERIFIED install
-    never returns — it re-execs into the new version via :func:`_handoff`,
-    performing no physiclaw imports after the on-disk swap."""
+    nothing staged (or the stage isn't actually newer), or not a ``uv tool``
+    install (a dev checkout / pip install has nothing we'd tell them to update)."""
     if _auto_update_disabled():
         return
     staged = _read_staged()
@@ -414,65 +393,24 @@ def apply_staged_update() -> None:
     if not _is_newer(_pkg_version, staged):
         _clear_staged()  # already at/past it — drop the stale marker
         return
-    if runtime_state.read_live():
-        return  # don't swap the venv under another live server
     uv = _uv()
-    if uv is None:
-        return
-    exe = shutil.which("physiclaw")
-    if exe is None:
-        return  # nowhere to hand off to after the swap → don't swap
-    if _tool_version(uv) is None:
-        return  # dev checkout / pip install — never auto-touch
+    if uv is None or _tool_version(uv) is None:
+        return  # dev checkout / pip install — nothing to point them at
 
-    typer.echo(
-        f"applying staged update: physiclaw {_pkg_version} → {staged} (offline; "
-        "disable with `physiclaw config set update.auto false`)"
-    )
-    proc = _run(_offline_install_cmd(uv, staged))
-    # No physiclaw imports past here — the on-disk code just changed. (Everything
-    # below is a subprocess or already-loaded code, never a fresh import.)
-    new = _tool_version(uv)
-    if new is None or not _is_newer(_pkg_version, new):
-        # Offline apply didn't advance the version — the common case is a cache
-        # eviction, which fails at RESOLVE/DOWNLOAD before uv touches the env,
-        # so the current install is untouched. Serve current; Phase B re-stages.
-        _clear_staged()
-        detail = "did not run" if proc is None else f"exit {proc.returncode}"
-        typer.echo(fmt.warn(
-            f"staged update to {staged} didn't apply (uv {detail}) — continuing "
-            f"on {_pkg_version}; will re-stage."
-        ))
-        return
-    # uv reports the new version installed — but `uv tool list` reports metadata,
-    # not env health. Verify the freshly-installed version actually RUNS before
-    # we hand off, so a rare corrupt install (uv #8812/#17378) can't crash the
-    # re-exec'd process and take the server down. `<shim> --version` is a
-    # subprocess (invariant-safe) that imports the new code in a throwaway
-    # process; on failure we keep serving the running (old) version.
-    healthy = _run([exe, "--version"])
-    if healthy is None or healthy.returncode != 0:
-        _clear_staged()
-        typer.echo(fmt.warn(
-            f"physiclaw {new} installed but does not run — staying on "
-            f"{_pkg_version} and re-staging. Retry manually: physiclaw update"
-        ))
-        return
-    _write_cache(new)
-    _clear_staged()
-    typer.echo(fmt.ok(f"physiclaw {new} installed (offline) — restarting."))
-    _handoff(exe)
+    typer.echo(fmt.info(
+        f"physiclaw {staged} available, run `physiclaw update` to apply."
+    ))
 
 
 def maybe_stage_update() -> None:
-    """Phase B — background staging for the next startup's offline apply.
+    """Phase B — background staging for the next startup's apply.
 
     Probes PyPI and, if a newer release exists, WARMS uv's cache for it (a heavy
     download — physiclaw's opencv/onnxruntime deps — hence background) and drops
-    a stage marker (:func:`_write_staged`). No install and no re-exec: it never
-    touches the installed tool, only the shared uv cache and the marker file, so
-    it is safe to run mid-serve and alongside other servers. Fully fail-soft;
-    meant to run in a daemon thread.
+    a stage marker (:func:`_write_staged`). No install: it never touches the
+    installed tool, only the shared uv cache and the marker file, so it is safe
+    to run mid-serve and alongside other servers. Fully fail-soft; meant to run
+    in a daemon thread.
 
     Skips the same kill switches as Phase A. When already at the latest, clears
     any stale marker; when the target is already staged, does nothing."""

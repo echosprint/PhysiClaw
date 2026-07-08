@@ -124,22 +124,20 @@ def server(
 
     typer.echo(f"PhysiClaw {__version__}")
 
-    # Phase A self-update BEFORE any state is written or hardware touched:
-    # if a newer version was staged by a prior run, install it OFFLINE (uv
-    # links the warmed cache in ms) and hand this process over to it (re-exec
-    # on macOS/Linux, waited child on Windows) — it must not continue here, or
-    # lazy imports would load new code into this old process. Zero network on
-    # the critical path; fail-soft — never blocks the server (see cli/update.py).
-    from physiclaw.cli.update import apply_staged_update
+    # Phase A update check: if a prior run staged a newer version, print a
+    # "ready — run `physiclaw update`" notice and keep going. The server NEVER
+    # self-installs (reinstalling the venv under a live physiclaw corrupts it on
+    # Windows — see cli/update.py); the user applies with `physiclaw update`.
+    from physiclaw.cli.update import notify_staged_update
 
-    apply_staged_update()
+    notify_staged_update()
 
     # Background daemon threads — both run off the startup critical path so
-    # neither blocks serving. After any Phase A hand-off, so the current version
-    # does the work:
+    # neither blocks serving:
     #   - skills: sync the official pack; a session picks it up at its next wake.
     #   - update: Phase B — stage the NEXT release (probe + warm uv's cache +
-    #     marker) so the next startup can apply it offline.
+    #     marker) so the next start can notify it's ready and `physiclaw update`
+    #     links it from cache fast.
     from physiclaw.cli.sync_official_skills import maybe_auto_sync
     from physiclaw.cli.update import start_stage_update_thread
 
