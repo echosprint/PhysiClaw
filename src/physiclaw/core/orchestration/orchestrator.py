@@ -817,8 +817,9 @@ class PhysiClaw:
     # Hold the tip at the very edge this long after contact, before the slide,
     # so iOS registers a touch-down inside the narrow interactive-pop zone —
     # without it, a fast slide starting on contact skips past the edge and the
-    # gesture reads as a content scroll (no back). ~1.5 display frames.
-    BACK_EDGE_DWELL_SECONDS = 0.08
+    # gesture reads as a content scroll (no back). ~9 display frames; 0.08
+    # (~1.5 frames) was too tight and intermittently missed the arming window.
+    BACK_EDGE_DWELL_SECONDS = 0.15
 
     def go_back(self) -> "GestureResult":
         """Go back one screen via left-edge swipe right.
