@@ -1,48 +1,23 @@
 ---
 name: jd
-description: PLACEHOLDER — Use when shopping on the JD (京东) app: searching for a product, comparing listings, adding to cart, and checking out. Load before acting in 京东. NOT yet implemented — the flow below is a stub to be filled in from real screens.
+description: Shop on the 京东 (JD) app. Use whenever the user wants to buy, order, or price something on 京东 / JD, including 京东七鲜 fresh groceries, or names the 京东 app.
 ---
 
-# 京东 (JD) — placeholder
+# 京东 (JD)
 
-> **Status: placeholder.** This skill is a stub so the `./skills` sync and
-> `physiclaw skills install` pipeline have something to carry. The flow,
-> element tables, and reference screenshots below are TODO — capture them
-> from the real app before relying on this.
+## Which store to search
 
-## Parameters
+- **Common goods** — the JD home page search bar.
+- **Groceries / fresh** — tap **京东七鲜** on the JD home page, then search inside it (delivers fast).
 
-| Name | Description | Example |
-|------|-------------|---------|
-| item_name | What to buy | 无线鼠标 |
+## Searching
 
-## Flow
+Tap the search area to open the search page. Long-press the placeholder to trigger the paste popup.
 
-### Screen 1: Home (jd_home)
+## Operating notes
 
-Fingerprint: TODO — one-line visual description for screen matching.
-Reference: screens/01_home.png (TODO)
-
-**Fixed elements** (same position every visit — tap directly):
-
-| Element | Position | Action |
-|---------|----------|--------|
-| Search bar | TODO `[l,t,r,b]` | → Search |
-
-**Action:** TODO — tap the search bar to reach the Search screen.
-
-### Screen 2: Search results (jd_search)
-
-TODO — search-first: paste `item_name`, submit, then pick a listing.
-
-### Screen 3: Product / Cart / Checkout
-
-TODO — add to cart, review item + price + address + fees, then
-**confirm with the user before paying**.
-
-## Notes
-
-- Paste over typing: `send_to_clipboard(item_name)` → `long_press` the
-  search field → tap **粘贴 / Paste**.
-- Read prices/specs exactly as shown; never round or guess.
-- Confirm before payment.
+- **Add to cart only once** — the page may not change even on success. Open the cart to confirm.
+- **Avoid `screenshot` on a product detail page** — it triggers the iOS share modal.
+- **Dismiss any popup / modal** (coupon, ad, share sheet) by tapping the dark area at the top of the screen.
+- **If `go_back` fails**, tap the **`<`** arrow in the top-left corner.
+- **Before paying, confirm with the user.**
