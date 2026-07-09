@@ -1,6 +1,7 @@
 """Shared HTTP download helpers for the CLI — a UA-pinned fetch and a
-chunked reader that draws a progress bar. Used by every CLI download (vision
-model, firmware) so the fetch behaviour and UX stay uniform.
+chunked reader that draws a progress bar (or streams quietly). Used by every
+CLI download (vision model, firmware, official skills) so the fetch behaviour
+and UX stay uniform.
 """
 
 import urllib.request
@@ -21,12 +22,13 @@ def http_get(url: str, timeout: int = 120):
     )
 
 
-def stream(resp, write, label: str) -> None:
+def stream(resp, write, label: str, *, progress: bool = True) -> None:
     """Read ``resp`` in 64 KiB chunks into ``write``, drawing a progress bar
-    sized from Content-Length (quietly streams if the length is unknown)."""
+    sized from Content-Length (quietly streams if the length is unknown, or if
+    ``progress=False`` — for small downloads where only the result matters)."""
     raw = resp.getheader("Content-Length")
     total = int(raw) if raw and raw.isdigit() else None
-    if total is None:
+    if not progress or total is None:
         for chunk in iter(lambda: resp.read(1 << 16), b""):
             write(chunk)
         return

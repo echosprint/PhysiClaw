@@ -145,13 +145,14 @@ def _download_to_temp(url: str) -> tuple[Path, str]:
     tmp = Path(name)
     try:
         with os.fdopen(fd, "wb") as f, http_get(url) as resp:
-            # Reuse the shared chunked reader (progress bar + 64 KiB chunks),
-            # hashing each chunk on the way to disk — constant memory.
+            # Reuse the shared chunked reader (64 KiB chunks), hashing each
+            # chunk on the way to disk — constant memory. progress=False: the
+            # skills pack is small, so no progress bar — just the synced result.
             def _write(chunk: bytes) -> None:
                 f.write(chunk)
                 digest.update(chunk)
 
-            stream(resp, _write, "  official skills")
+            stream(resp, _write, "  official skills", progress=False)
     except urllib.error.URLError as e:
         tmp.unlink(missing_ok=True)
         reason = f"HTTP {e.code}" if isinstance(e, urllib.error.HTTPError) else e.reason
@@ -298,8 +299,8 @@ def sync(*, force: bool = False, dry_run: bool = False) -> None:
     official.mkdir(parents=True, exist_ok=True)
 
     # 2. Download the pack to a temp file (/tmp), hashing as we stream so the
-    #    whole pack never sits in memory.
-    typer.echo(info(f"downloading official skills @ {remote_commit[:7]} …"))
+    #    whole pack never sits in memory. Quiet (no progress bar / announce
+    #    line) — the pack is small; only the final synced result is shown.
     zip_path, actual = _download_to_temp(urls["zip"])
     src: dict = {}          # the pack's manifest, parsed once from staging
     hash_notes: list[str] = []
