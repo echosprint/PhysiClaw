@@ -17,7 +17,6 @@ from hardware.assembly.procedures.motor_30_pulley import LEFT_PULLEY_GAP
 from hardware.parts.base import BaseStandardPart
 from hardware.parts.custom.idler_mount_front import (
     slot_center_y as ld_slot_center_y,
-    thickness as ld_block_thickness,
     top_hole_y as ld_top_hole_y,
     width as ld_block_width,
 )

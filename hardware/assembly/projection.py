@@ -1,6 +1,6 @@
 import math
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 
 from build123d import Axis, Shape, Vector
 
@@ -32,10 +32,6 @@ class Camera:
         )
 
     __rmul__ = __mul__
-
-    def rotate(self, angle: float) -> "Camera":
-        """Return a copy with ``roll`` set to ``angle`` (degrees)."""
-        return replace(self, roll=angle)
 
     @property
     def up(self) -> Vector:
@@ -95,8 +91,6 @@ class Camera:
         return cls(azimuth=azimuth, elevation=elevation, roll=roll)
 
 FRONT = Camera(0, 0)
-RIGHT = Camera(90, 0)
-TOP   = Camera(0, 90)
 ISO   = Camera(45, 35.2644)
 
 # Procedure-view presets. Naming encodes azimuth / elevation / non-zero
@@ -104,9 +98,7 @@ ISO   = Camera(45, 35.2644)
 # the one exception — kept semantic because the angle is calibrated to
 # the X-rail bbox.
 FRONT_LEFT_HIGH    = Camera(-30,  25)
-FRONT_RIGHT_HIGH   = Camera( 30,  25)
 FRONT_LEFT_LOW     = Camera(-30, -20)
-BACK_RIGHT_HIGH    = Camera(150,  25)
 BACK_RIGHT_LOW_R90 = Camera(120, -20, 90)
 FRONT_LEFT_LOW_R70 = Camera(-45, -20, 70)
 FRONT_HIGH_L10     = Camera( 15,  45, -10)

@@ -27,7 +27,7 @@ import random
 import re
 import string
 from pathlib import Path
-from typing import Iterable, Tuple
+from typing import Iterable
 
 from hardware.assembly.base import SVG_DIR
 from hardware.parts.base import REPO_ROOT

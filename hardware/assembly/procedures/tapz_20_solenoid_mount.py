@@ -88,7 +88,6 @@ from hardware.parts.custom.solenoid_mount import (
     keyboard_rect_center_y as mount_keyboard_center_y,
     screen_corner_csk_hole_from_bottom,
     thickness as mount_plate_thickness,
-    wall_thickness as mount_wall_thickness,
     width as mount_width,
 )
 from hardware.parts.standard.nut import Nut, SPECS as NUT_SPECS

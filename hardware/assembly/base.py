@@ -179,8 +179,3 @@ def _split_solid_ghost(assembly):
         found[label] = child
     solid = found.get(SOLID_LABEL, assembly)
     return solid, found.get(GHOST_LABEL)
-
-
-def render_all(assemblies):
-    for a in assemblies:
-        a.render()

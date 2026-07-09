@@ -30,7 +30,7 @@ Run from the repo root:
 from build123d import Compound, Location, Plane
 
 from hardware.assembly.base import BaseAssembly
-from hardware.assembly.projection import Camera, ISO
+from hardware.assembly.projection import Camera
 from hardware.parts.standard.bracket import (
     CornerBracket,
     corner_face_depth as face_depth,
