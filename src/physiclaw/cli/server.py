@@ -14,29 +14,6 @@ import typer
 from physiclaw.config import CONFIG
 
 
-def _spawn_runtime(port: int, verbose: bool, label: str) -> subprocess.Popen:
-    """Run the hook loop out-of-process so long-running hooks don't block
-    the MCP event loop. Terminated via atexit when the server exits.
-
-    `label` is the pre-resolved engine string (e.g. "engine=claude-code")
-    passed by the caller — the caller already did provider resolution to
-    record into runtime_state, so reuse that instead of resolving again.
-    """
-    log = logging.getLogger(__name__)
-    cmd = [
-        sys.executable,
-        "-m",
-        "physiclaw.agent.runtime",
-        "--server",
-        f"http://127.0.0.1:{port}",
-    ]
-    if verbose:
-        cmd.append("--verbose")
-    proc = subprocess.Popen(cmd)
-    log.info(f"Runtime loop started as subprocess (pid={proc.pid}, {label})")
-    return proc
-
-
 def server(
     port: Annotated[
         int, typer.Option("--port", help="MCP server port.")
@@ -119,33 +96,77 @@ def server(
         ),
     ] = CONFIG.server.save_raw_camera,
 ) -> None:
-    """Run the PhysiClaw MCP server."""
+    """Run the PhysiClaw MCP server.
+
+    Startup is a straight sequence of phases — a few inline, the rest in the
+    `_*` helpers below: banner + maintenance → save-flag env → logging → MCP
+    init → model resolution → endpoint log → hardware bring-up → runtime
+    subprocess → serve. The two background flows (hardware bring-up, runtime
+    loop) start daemon threads / a subprocess so `mcp.run()` serves first.
+    """
     from physiclaw import __version__
 
     typer.echo(f"PhysiClaw {__version__}")
-
-    # Phase A update check: if a prior run staged a newer version, print a
-    # "run `uv tool upgrade physiclaw`" notice and keep going. The server NEVER
-    # self-installs (reinstalling the venv under a live physiclaw corrupts it on
-    # Windows — see cli/update.py); the user upgrades manually via uv.
-    from physiclaw.cli.update import notify_staged_update
-
-    notify_staged_update()
-
-    # Background daemon threads — both run off the startup critical path so
-    # neither blocks serving:
-    #   - skills: sync the official pack; a session picks it up at its next wake.
-    #   - update: Phase B — stage the NEXT release (probe + warm uv's cache +
-    #     marker) so the next start can notify it's ready and the user's
-    #     `uv tool upgrade` links it from cache fast.
-    from physiclaw.cli.sync_official_skills import maybe_auto_sync
-    from physiclaw.cli.update import start_stage_update_thread
-
-    maybe_auto_sync()
-    start_stage_update_thread()
+    _run_startup_maintenance()
+    _apply_save_flags(save_tool_calls, save_snapshots, save_screenshots, save_raw_camera)
 
     from physiclaw.core.logger import setup_logging
 
+    setup_logging("physiclaw", logging.DEBUG if verbose else logging.INFO)
+    logging.getLogger("mcp").setLevel(logging.WARNING)
+
+    from physiclaw.core.server import mcp, shutdown
+
+    atexit.register(shutdown)
+    mcp.settings.host = host
+    mcp.settings.port = port
+    mcp.settings.log_level = "WARNING"
+
+    model_ref, runtime_label = _resolve_and_record_model(host, port)
+    _log_endpoints(host, port)
+    _start_hardware_bringup(
+        host, port,
+        warm_start=warm_start, cam_index=cam_index,
+        auto_calibrate=auto_calibrate, no_setup_hardware=no_setup_hardware,
+    )
+    _start_runtime_loop(
+        port, verbose,
+        no_runtime=no_runtime, model_ref=model_ref, runtime_label=runtime_label,
+    )
+
+    try:
+        mcp.run(transport="streamable-http")
+    except KeyboardInterrupt:
+        pass
+
+
+def _run_startup_maintenance() -> None:
+    """Startup housekeeping that must NOT block serving.
+
+    Phase A update check: if a prior run staged a newer version, print a
+    "run `uv tool upgrade physiclaw`" notice and keep going. The server NEVER
+    self-installs (reinstalling the venv under a live physiclaw corrupts it on
+    Windows — see cli/update.py); the user upgrades manually via uv.
+
+    Then two off-critical-path background flows:
+      - skills: sync the official pack; a session picks it up at its next wake.
+      - update: Phase B — stage the NEXT release (probe + warm uv's cache +
+        marker) so the next start can notify it's ready and the user's
+        `uv tool upgrade` links it from cache fast.
+    """
+    from physiclaw.cli.sync_official_skills import maybe_auto_sync
+    from physiclaw.cli.update import notify_staged_update, start_stage_update_thread
+
+    notify_staged_update()
+    maybe_auto_sync()
+    start_stage_update_thread()
+
+
+def _apply_save_flags(
+    save_tool_calls: bool, save_snapshots: bool,
+    save_screenshots: bool, save_raw_camera: bool,
+) -> None:
+    """Translate the --save-* flags into the env vars the core reads."""
     for enabled, env in (
         (save_tool_calls, "PHYSICLAW_SAVE_TOOL_CALLS"),
         (save_snapshots, "PHYSICLAW_SAVE_SNAPSHOTS"),
@@ -155,51 +176,50 @@ def server(
         if enabled:
             os.environ[env] = "1"
 
-    setup_logging("physiclaw", logging.DEBUG if verbose else logging.INFO)
-    logging.getLogger("mcp").setLevel(logging.WARNING)
-    from physiclaw.core.server import mcp, shutdown
 
-    atexit.register(shutdown)
+def _resolve_and_record_model(host: str, port: int) -> tuple[Optional[str], str]:
+    """Resolve the engine model ref and record the live (host, port, model).
 
-    mcp.settings.host = host
-    mcp.settings.port = port
-    mcp.settings.log_level = "WARNING"
+    Resolve ONCE here, in the same env the user invoked `physiclaw server`
+    from, so `doctor` in another shell reads the live choice instead of
+    re-resolving against an env that may be missing PHYSICLAW_MODEL. The
+    runtime subprocess reuses this via the pre-built label. A bad ref is
+    non-fatal for the HTTP server — record nothing (model_ref=None) and let
+    the runtime subprocess report the real error.
 
-    # Record the live (host, port) so `physiclaw doctor` probes the actual
-    # server, not the config-default port. atexit covers normal exits and
-    # KeyboardInterrupt; SIGTERM-without-cleanup is handled by doctor's
-    # pid-liveness check on read.
+    `runtime_state.write` also lets `doctor` probe the actual server, not the
+    config-default port. atexit covers normal exits and KeyboardInterrupt;
+    SIGTERM-without-cleanup is handled by doctor's pid-liveness check on read.
+
+    Returns (model_ref, runtime_label); model_ref is None when no model is set.
+    """
     from physiclaw import runtime_state
     from physiclaw.agent.runtime.launcher import engine_label, resolve as _resolve_model
 
-    # Resolve once here (in the same env the user invoked `physiclaw server`
-    # from) so `doctor` in another shell can read the live choice instead of
-    # re-resolving against an env that may be missing PHYSICLAW_MODEL.
-    # The runtime subprocess gets this same resolution via the pre-built
-    # label. A bad ref at this point is non-fatal for the HTTP server —
-    # record nothing and let the runtime subprocess report the real error.
     try:
-        _model_ref, _model_source = _resolve_model()
-        _runtime_label = engine_label(_model_ref)
+        model_ref, model_source = _resolve_model()
+        runtime_label = engine_label(model_ref)
     except RuntimeError:
-        _model_ref, _model_source = None, None
-        _runtime_label = "engine=(unset)"
-    runtime_state.write(
-        host, port, model_ref=_model_ref, model_source=_model_source,
-    )
+        model_ref, model_source = None, None
+        runtime_label = "engine=(unset)"
+    runtime_state.write(host, port, model_ref=model_ref, model_source=model_source)
     atexit.register(runtime_state.clear)
+    return model_ref, runtime_label
 
+
+def _log_endpoints(host: str, port: int) -> None:
+    """Log the MCP URL, the QR link, and the phone /bridge URLs — primary
+    (mDNS, survives IP changes) plus IP fallback, or a single URL and a
+    LocalHostName tip when the two coincide."""
+    log = logging.getLogger(__name__)
     from physiclaw.core.bridge import bridge_base_urls
 
-    log = logging.getLogger(__name__)
     primary, fallback = bridge_base_urls(port)
     display_host = "localhost" if host == "0.0.0.0" else host
     log.info(f"PhysiClaw MCP server on http://{display_host}:{port}/mcp")
     log.info(f"QR code (scan with phone): http://localhost:{port}/api/bridge/qr")
     if primary != fallback:
-        log.info(
-            f"Phone page: {primary}/bridge  (recommended — survives IP changes)"
-        )
+        log.info(f"Phone page: {primary}/bridge  (recommended — survives IP changes)")
         log.info(f"Fallback:   {fallback}/bridge  (if mDNS blocked)")
     else:
         log.info(f"Phone page: {fallback}/bridge")
@@ -207,80 +227,112 @@ def server(
             "Tip: set a stable LocalHostName for <name>.local URLs — "
             "see `physiclaw setup phone` (coming soon)."
         )
+
+
+def _start_hardware_bringup(
+    host: str, port: int, *, warm_start: bool, cam_index: Optional[int],
+    auto_calibrate: bool, no_setup_hardware: bool,
+) -> None:
+    """Dispatch hardware bring-up to one of four mutually exclusive modes. Each
+    (except --no-setup-hardware, which just waits) runs in a daemon thread so
+    `mcp.run()` can serve first — the phone needs the server already listening
+    to load /bridge."""
     if warm_start:
-        # Run warm-start in a background thread so mcp.run() below can start
-        # serving HTTP first — the phone needs the server listening to load
-        # /bridge and POST screen_dimension / touches. On failure, raise
-        # KeyboardInterrupt in the main thread (via _thread.interrupt_main —
-        # cross-platform; os.kill(SIGINT) on Windows would TerminateProcess
-        # and skip atexit) so mcp.run exits and atexit handlers
-        # (shutdown, arm park-off-screen) still fire cleanly.
-        from physiclaw.core.server import warm_start as ws
-
-        def _warm_start_thread() -> None:
-            if not ws.wait_for_port(host, port):
-                log.error(
-                    "warm-start: server never started accepting connections; "
-                    "exiting."
-                )
-                _thread.interrupt_main()
-                return
-            if not ws.try_resume(cam_index):
-                log.error(
-                    "Exiting. Re-run without --warm-start, then "
-                    "`physiclaw setup hardware` to recalibrate."
-                )
-                _thread.interrupt_main()
-
-        threading.Thread(target=_warm_start_thread, daemon=True).start()
+        _warm_start_hardware(host, port, cam_index)
     elif auto_calibrate:
-        # `physiclaw auto`: no desktop wizard — a background thread waits for
-        # the phone bridge, then runs calibration unattended. The worker lives
-        # in the setup module (with the wizard it drives); import it lazily so
-        # `physiclaw server` doesn't pull the CLI setup module in at startup.
-        log.info("Auto mode: calibration will start when the phone opens /bridge.")
-
-        def _auto_calibrate_thread() -> None:
-            import importlib
-
-            hw = importlib.import_module("physiclaw.cli.setup.hardware")
-            hw.await_bridge_and_calibrate(host, port)
-
-        threading.Thread(target=_auto_calibrate_thread, daemon=True).start()
+        _auto_calibrate_hardware(host, port)
     elif no_setup_hardware:
-        log.info(
+        logging.getLogger(__name__).info(
             "Run `physiclaw setup hardware` in another shell to connect "
             "hardware and calibrate — server is waiting."
         )
     else:
-        # Open the browser hardware-setup wizard once the server is actually
-        # accepting connections (the page immediately calls /api/status).
-        # Runs in a daemon thread so mcp.run() below can start serving first.
-        from physiclaw.core.server.warm_start import wait_for_port
+        _open_hardware_wizard(host, port)
 
-        setup_url = f"http://localhost:{port}/setup-hardware"
-        log.info(f"Hardware-setup wizard: {setup_url}  (disable with --no-setup-hardware)")
 
-        def _open_setup() -> None:
-            import webbrowser
+def _warm_start_hardware(host: str, port: int, cam_index: Optional[int]) -> None:
+    """--warm-start: resume from the saved calibration bundle in a background
+    thread. On failure, raise KeyboardInterrupt in the main thread (via
+    _thread.interrupt_main — cross-platform; os.kill(SIGINT) on Windows would
+    TerminateProcess and skip atexit) so `mcp.run()` exits and the atexit
+    handlers (shutdown, arm park-off-screen) still fire cleanly."""
+    log = logging.getLogger(__name__)
+    from physiclaw.core.server import warm_start as ws
 
-            if wait_for_port(host, port):
-                try:
-                    webbrowser.open(setup_url)
-                except Exception:  # noqa: BLE001 — never let a headless box crash startup
-                    log.debug("could not open browser for setup wizard", exc_info=True)
+    def _warm_start_thread() -> None:
+        if not ws.wait_for_port(host, port):
+            log.error(
+                "warm-start: server never started accepting connections; exiting."
+            )
+            _thread.interrupt_main()
+            return
+        if not ws.try_resume(cam_index):
+            log.error(
+                "Exiting. Re-run without --warm-start, then "
+                "`physiclaw setup hardware` to recalibrate."
+            )
+            _thread.interrupt_main()
 
-        threading.Thread(target=_open_setup, daemon=True).start()
+    threading.Thread(target=_warm_start_thread, daemon=True).start()
 
+
+def _auto_calibrate_hardware(host: str, port: int) -> None:
+    """--auto-calibrate (`physiclaw auto`): no desktop wizard — a background
+    thread waits for the phone bridge, then calibrates unattended. The worker
+    lives in the setup module (with the wizard it drives); import it lazily so
+    `physiclaw server` doesn't pull the CLI setup module in at startup."""
+    log = logging.getLogger(__name__)
+    log.info("Auto mode: calibration will start when the phone opens /bridge.")
+
+    def _auto_calibrate_thread() -> None:
+        import importlib
+
+        hw = importlib.import_module("physiclaw.cli.setup.hardware")
+        hw.await_bridge_and_calibrate(host, port)
+
+    threading.Thread(target=_auto_calibrate_thread, daemon=True).start()
+
+
+def _open_hardware_wizard(host: str, port: int) -> None:
+    """Default mode: open the browser hardware-setup wizard once the server is
+    actually accepting connections (the page immediately calls /api/status).
+    Runs in a daemon thread so `mcp.run()` can start serving first."""
+    log = logging.getLogger(__name__)
+    from physiclaw.core.server.warm_start import wait_for_port
+
+    setup_url = f"http://localhost:{port}/setup-hardware"
+    log.info(f"Hardware-setup wizard: {setup_url}  (disable with --no-setup-hardware)")
+
+    def _open_setup() -> None:
+        import webbrowser
+
+        if wait_for_port(host, port):
+            try:
+                webbrowser.open(setup_url)
+            except Exception:  # noqa: BLE001 — never let a headless box crash startup
+                log.debug("could not open browser for setup wizard", exc_info=True)
+
+    threading.Thread(target=_open_setup, daemon=True).start()
+
+
+def _start_runtime_loop(
+    port: int, verbose: bool, *, no_runtime: bool,
+    model_ref: Optional[str], runtime_label: str,
+) -> None:
+    """Spawn the agent runtime subprocess and register its atexit terminator,
+    unless disabled (--no-runtime) or no model is configured."""
+    log = logging.getLogger(__name__)
     if no_runtime:
         log.info("Runtime loop disabled by --no-runtime.")
-    elif _model_ref is None:
+        return
+    if model_ref is None:
         # First-run case: server is useful for hardware setup + manual MCP
         # tool calls, but the agent can't wake without a model. Skip spawn
         # rather than letting the subprocess crash with a stack trace.
         # Reuse `_NO_MODEL_MSG` so this hint stays in sync with the
         # RuntimeError raised elsewhere — single source of truth.
         from physiclaw.config import _NO_MODEL_MSG
+
         log.warning(
             "Runtime loop NOT started — %s\n"
             "  The MCP server is running and you can use it for hardware setup,\n"
@@ -288,20 +340,39 @@ def server(
             "`physiclaw server`.",
             _NO_MODEL_MSG,
         )
-    else:
-        runtime_proc = _spawn_runtime(port, verbose, _runtime_label)
+        return
 
-        def _stop_runtime() -> None:
-            if runtime_proc.poll() is None:
-                runtime_proc.terminate()
-                try:
-                    runtime_proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    runtime_proc.kill()
+    runtime_proc = _spawn_runtime(port, verbose, runtime_label)
 
-        atexit.register(_stop_runtime)
+    def _stop_runtime() -> None:
+        if runtime_proc.poll() is None:
+            runtime_proc.terminate()
+            try:
+                runtime_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                runtime_proc.kill()
 
-    try:
-        mcp.run(transport="streamable-http")
-    except KeyboardInterrupt:
-        pass
+    atexit.register(_stop_runtime)
+
+
+def _spawn_runtime(port: int, verbose: bool, label: str) -> subprocess.Popen:
+    """Run the hook loop out-of-process so long-running hooks don't block
+    the MCP event loop. Terminated via atexit when the server exits.
+
+    `label` is the pre-resolved engine string (e.g. "engine=claude-code")
+    passed by the caller — the caller already did provider resolution to
+    record into runtime_state, so reuse that instead of resolving again.
+    """
+    log = logging.getLogger(__name__)
+    cmd = [
+        sys.executable,
+        "-m",
+        "physiclaw.agent.runtime",
+        "--server",
+        f"http://127.0.0.1:{port}",
+    ]
+    if verbose:
+        cmd.append("--verbose")
+    proc = subprocess.Popen(cmd)
+    log.info(f"Runtime loop started as subprocess (pid={proc.pid}, {label})")
+    return proc
