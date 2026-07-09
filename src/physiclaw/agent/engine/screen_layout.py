@@ -299,6 +299,26 @@ def lint_sequence(actions, *, keyboard_up: bool = False) -> str | None:
             f"{visible} instead (SYSTEM § Screen layout) and keep the rest "
             "of the batch."
         )
+
+    # Reused-paste-box guard: the batch taps the learned chat Paste box but
+    # long-presses a box OTHER than the chat input it belongs to. chat_paste
+    # only exists above chat_input_kb_visible after long-pressing IT; copying
+    # the `im` bundled sequence into another app (a search field in Meituan /
+    # JD / …) long-presses THAT app's box, so the reused chat_paste coord lands
+    # on empty screen and the paste silently no-ops — the batch still "ok"s and
+    # the agent loops. The correct im template long-presses chat_input_kb_visible,
+    # so it never trips this.
+    if isinstance(paste, list) and _taps_box(actions, paste):
+        for step in actions:
+            c = _step_center(step, "long_press")
+            if c is not None and not _inside(c, visible):
+                return (
+                    f"BLOCKED — not executed: reuses IM chat Paste box "
+                    f"{paste} after long-pressing a different field. Its Paste "
+                    "popover is elsewhere: long-press the field ALONE (own turn), "
+                    "then read Paste from that view (`search-in-app`). Don't "
+                    "reuse chat_paste."
+                )
     return None
 
 

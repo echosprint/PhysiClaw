@@ -17,8 +17,8 @@ A rounded bar: magnifier icon left, gray placeholder text in the middle, camera 
 1. `send_to_clipboard(text)`.
 2. `tap` the search box. Keyboard up = focused.
 3. **Stale text?** Gray text is the placeholder — it vanishes on paste. Dark text + `✕` = a stale query: `tap` the `✕`, else backspace (`{{backspace}}`) 10–20× (`sequence`s of 5; over-tap freely) — paste does NOT replace existing text.
-4. `long_press` the box — **its own turn** (the popover is born mid-gesture); its attached view shows the Paste popover — ground Paste from it.
-5. One `sequence`: `tap` Paste + `tap` the return/search key (`{{return}}`).
+4. `long_press` the box — **its OWN turn, never in a `sequence`.** Long-press, then **LOOK**: ground Paste from the attached view.
+5. One `sequence`: `tap` Paste (now that you see it) + `tap` return/search (`{{return}}`).
 6. Verify in the attached view: results rendered AND the query header shows YOUR text — the placeholder word instead = the paste missed; `go_back`, redo from step 4.
 
 ## Pitfalls

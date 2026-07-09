@@ -476,6 +476,24 @@ def test_lint_allows_the_correct_im_template() -> None:
     assert msg is None
 
 
+def test_lint_blocks_reused_chat_paste_after_foreign_long_press() -> None:
+    # The Meituan failure: copy the `im` bundled sequence into a search app —
+    # long-press THAT app's search box, then tap WeChat's learned chat_paste,
+    # then return. The Paste popover is elsewhere, so the reused coord lands on
+    # empty screen and the paste silently no-ops. Must be blocked.
+    _write_layout(_LINT_LAYOUT)
+    search_box = [0.05, 0.055, 0.9, 0.10]  # a top-of-screen search bar, not a chat box
+
+    msg = sl.lint_sequence([
+        {"tool_name": "long_press", "arg": search_box},
+        {"tool_name": "tap", "arg": _PASTE_BOX},           # WeChat's chat_paste, reused
+        {"tool_name": "tap", "arg": [0.86, 0.86, 0.99, 0.92]},  # return / search key
+    ])
+
+    assert msg is not None and msg.startswith("BLOCKED")
+    assert "chat_paste" in msg
+
+
 def test_lint_allows_bare_long_press_near_bottom() -> None:
     # Long-pressing a bottom message bubble (copy menu) with no paste
     # flow in the batch is legitimate — no prior input tap, no paste tap.
