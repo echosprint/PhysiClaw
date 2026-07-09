@@ -272,7 +272,7 @@ def test_banner_prints_when_newer(
     banner_env.assert_called_once()
     msg = banner_env.call_args.args[0]
     assert "physiclaw 0.0.5 → 1.2.3 available" in msg
-    assert "physiclaw update" in msg
+    assert "uv tool upgrade physiclaw" in msg
 
 
 def test_banner_silent_when_at_latest(

@@ -42,11 +42,10 @@ physiclaw doctor
 
 `doctor` reports current version, config path, the on-device vision model, detected hardware, the configured model, and installed skills.
 
-## Updating later
+## Updating
 
-Update the PhysiClaw CLI:
+PhysiClaw is installed as a `uv` tool. Stop the server, then update it with uv:
 
 ```bash
-physiclaw update           # update to the latest release
-physiclaw update --check   # only check, install nothing
+uv tool upgrade physiclaw
 ```

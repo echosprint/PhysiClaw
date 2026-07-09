@@ -125,9 +125,9 @@ def server(
     typer.echo(f"PhysiClaw {__version__}")
 
     # Phase A update check: if a prior run staged a newer version, print a
-    # "ready — run `physiclaw update`" notice and keep going. The server NEVER
+    # "run `uv tool upgrade physiclaw`" notice and keep going. The server NEVER
     # self-installs (reinstalling the venv under a live physiclaw corrupts it on
-    # Windows — see cli/update.py); the user applies with `physiclaw update`.
+    # Windows — see cli/update.py); the user upgrades manually via uv.
     from physiclaw.cli.update import notify_staged_update
 
     notify_staged_update()
@@ -136,8 +136,8 @@ def server(
     # neither blocks serving:
     #   - skills: sync the official pack; a session picks it up at its next wake.
     #   - update: Phase B — stage the NEXT release (probe + warm uv's cache +
-    #     marker) so the next start can notify it's ready and `physiclaw update`
-    #     links it from cache fast.
+    #     marker) so the next start can notify it's ready and the user's
+    #     `uv tool upgrade` links it from cache fast.
     from physiclaw.cli.sync_official_skills import maybe_auto_sync
     from physiclaw.cli.update import start_stage_update_thread
 

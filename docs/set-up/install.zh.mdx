@@ -42,11 +42,10 @@ physiclaw doctor
 
 `doctor` 会报告当前版本、配置路径、本地视觉模型、检测到的硬件、配置的大模型、安装的技能。
 
-## 后续更新
+## 更新
 
-用以下命令更新 PhysiClaw CLI：
+PhysiClaw 以 `uv` 工具形式安装。先停止服务，再用 uv 更新：
 
 ```bash
-physiclaw update           # 更新到最新版本
-physiclaw update --check   # 只检查，不安装
+uv tool upgrade physiclaw
 ```
