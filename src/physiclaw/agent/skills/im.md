@@ -11,7 +11,7 @@ Most IM apps share the same chat-page shape: bubble list, bottom input bar, Send
 
 ## Read
 
-1. Open the app (dock icon, else `open-app`).
+1. **Tap its dock icon** — bottom dock, no labels, so go by the icon, don't search. `open-app` only if it's not in the dock.
 2. Chats tab (WeChat: **微信**; WhatsApp: **Chats**).
 3. **Tap the contact's row** — the thread, not the list preview (truncated, hides earlier messages).
 4. Read at the bottom; top bubble doesn't connect to your last reply → `swipe` down to the first unread.
