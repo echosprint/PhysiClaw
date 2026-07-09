@@ -199,20 +199,6 @@ def change_ratio(before: np.ndarray, after: np.ndarray) -> float | None:
     return int(np.count_nonzero(mask)) / mask.size
 
 
-def largest_change_blob(before: np.ndarray, after: np.ndarray) -> int | None:
-    """Pixel area of the largest single connected changed region, or None
-    when the frames are unreliable. Sensitivity to small-but-real changes
-    (a badge, one digit) lives here — the global ratio would dilute them."""
-    pair = _prepare(before, after)
-    if pair is None:
-        return None
-    mask = _opened_mask(*pair)
-    n, _labels, stats, _c = cv2.connectedComponentsWithStats(mask, connectivity=8)
-    if n <= 1:  # background only, no change
-        return 0
-    return int(stats[1:, cv2.CC_STAT_AREA].max())
-
-
 def frames_changed(before: np.ndarray, after: np.ndarray) -> bool | None:
     """True/False iff the screen visibly changed; None when the frames
     are unreliable — callers fail open (no verdict, no guard counting).
