@@ -13,6 +13,7 @@
 """
 import asyncio
 import datetime as dt
+import enum
 import logging
 import time
 from dataclasses import dataclass
@@ -323,6 +324,26 @@ async def _run_session(
 # ---------- core loop ----------
 
 
+class _Turn(enum.Enum):
+    """What `_loop` does after a turn's finish_reason + shape checks."""
+    PROCEED = enum.auto()  # well-formed — go run the turn's tools
+    RETRY = enum.auto()    # rejected, corrective injected — re-loop this index
+    ABORT = enum.auto()    # terminal sentinel set — return from `_loop`
+
+
+@dataclass
+class _LoopState:
+    """Loop-local counters that persist across turns within one `_loop` run,
+    grouped so the phase helpers can share them.
+
+    consecutive_correctives: malformed turns in a row — STUCK past the cap.
+    checkpoint_retried: at most one pre-compression scratchpad corrective per
+        collapse event (reset when a turn completes).
+    """
+    consecutive_correctives: int = 0
+    checkpoint_retried: bool = False
+
+
 async def _loop(
     *,
     mcp: McpClient,
@@ -337,261 +358,65 @@ async def _loop(
     rlog: RawLog,
     layout_incomplete: bool = False,
 ) -> None:
+    """The driver (principle 7): model → tool_calls → dispatch → results → model.
+
+    Each turn runs a fixed pipeline of phase helpers; the control flow between
+    them stays here so it's auditable in one place:
+      1. `_prepare_request`   — advance clocks, pin tails, log the request.
+      2. `_call_provider`     — chat with retry; None ⇒ STUCK, return.
+      3. `_enforce_shape`     — finish_reason + [note, one-other]; may RETRY/ABORT.
+      4. `_scan_memory_cues`  — accumulate "remember this" cues.
+      5. `_apply_close_gates` — pre-compression / pre-close checkpoints; may RETRY.
+      6. `_dispatch_turn`     — run the tool_calls, append their results.
+      7. `_finalize_turn`     — snapshot trajectory, compact history.
+    """
     tr.write({"event": "prefix_pinned", "hash": prompt_hash})
 
-    consecutive_correctives = 0
-    checkpoint_retried = False  # one scratchpad corrective per collapse event
+    state = _LoopState()
     for turn in range(MAX_TURNS):
-        # Plan + scratchpad are just-in-time tails — keeps `messages[]`
-        # cache-stable across writes. Plan goes last so the model reads
-        # "what to do next" last — except during first-run screen-layout
-        # setup, when the setup reminder rides one step further out so the
-        # blocker is the very last thing the model sees (absent once learned).
-        session.plan.tick_turn()
-        # Stuck-guard counters key on the in_progress step: a step change
-        # (via last turn's update_progress) wipes the same-target history.
-        session.guard.observe_step(session.plan.current_step())
-        # Pre-compression checkpoint: when this turn's completion will
-        # collapse old turns to their note-summary lines, this is the
-        # model's last look at them — the request carries a ⚠ tail and
-        # the turn's note must bank state into the scratchpad (enforced
-        # after the shape check below).
-        compaction_imminent = compact.collapse_pending(
-            messages,
-            first_at=provider.COLLAPSE_FIRST_AT_TURN,
-            interval=provider.COLLAPSE_INTERVAL_TURNS,
-            keep=provider.KEEP_RECENT_TURNS,
-        )
-        # First-run reminder is empty once learned, and a session that started
-        # learned stays learned — so skip the per-turn disk read entirely unless
-        # setup was still pending at session start.
-        request_messages = apply_request_tails(
-            messages, session, layout_incomplete=layout_incomplete,
-            compaction_keep=(
-                provider.KEEP_RECENT_TURNS if compaction_imminent else None
-            ),
-        )
-        # Cache markers + the actual wire format are the provider's
-        # business now; engine logs the wire form for debugging by asking
-        # the provider to serialize once.
-        wire_for_log = provider.serialize_history(request_messages)
-        tr.write({"event": "request", "turn": turn, "message_count": len(request_messages)})
-        rlog.write_request(turn, wire_for_log)
-        log.info("turn %d: %d messages → provider", turn + 1, len(request_messages))
-
-        t0 = time.perf_counter()
-        try:
-            asst = await _chat_with_retry(provider, request_messages, tool_schemas)
-        except Exception as e:
-            log.exception("provider exhausted retries")
-            tr.write({"event": "provider_failed", "turn": turn, "error": str(e)})
-            session.sentinel_status = STUCK
-            session.sentinel_recap = f"provider error: {e}"
-            return
-
-        elapsed_ms = int((time.perf_counter() - t0) * 1000)
-        rlog.write_response(turn, asst.raw, elapsed_ms=elapsed_ms)
-        tr.write({
-            "event": "response",
-            "turn": turn,
-            "finish_reason": asst.finish_reason,
-            "content_len": len(asst.content or ""),
-            "tool_calls": [
-                {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
-                for tc in asst.tool_calls
-            ],
-        })
-        cache_summary = _log_usage(turn, asst, tr)
-        called = asst.tool_names()
-        # Provider round-trip time first, then token/cache — all provider-call
-        # metrics grouped in the trailing segment.
-        metrics = f"{elapsed_ms / 1000:.1f}s"
-        if cache_summary:
-            metrics += f", {cache_summary}"
-        log.info(
-            "turn %d: finish=%s calls=%s — %s",
-            turn + 1, asst.finish_reason, called or None, metrics,
+        request_messages, compaction_imminent = _prepare_request(
+            session, messages, provider,
+            tr=tr, rlog=rlog, turn=turn, layout_incomplete=layout_incomplete,
         )
 
-        # Principle 2: AssistantMessage already has provider-specific
-        # fields (reasoning_content, thinking blocks) stripped at parse
-        # time inside the provider — append directly.
+        asst = await _call_provider(
+            provider, request_messages, tool_schemas,
+            session=session, tr=tr, rlog=rlog, turn=turn,
+        )
+        if asst is None:
+            return  # provider exhausted its retries — STUCK already set
+
+        # Principle 2: reasoning_content / thinking blocks were stripped at
+        # parse time inside the provider — append the assistant turn directly.
         messages.append(asst)
+        called = asst.tool_names()
 
-        # Principle 3: route on finish_reason.
-        if asst.finish_reason == FinishReason.CONTENT_FILTER:
-            log.error("content_filter — stopping session")
-            session.sentinel_status = FAIL
-            session.sentinel_recap = "content filter blocked response"
+        shape = _enforce_shape(messages, asst, called, state, session=session, turn=turn, tr=tr)
+        if shape is _Turn.ABORT:
             return
-
-        # Shape checks may reject the turn. The rejected assistant message
-        # must come back out of history: leaving orphan tool_calls behind
-        # breaks providers' "tool_calls → matching tool messages" rule and
-        # anchors the model on its own failure on retry.
-        if not asst.tool_calls:
-            consecutive_correctives += 1
-            if consecutive_correctives >= CORRECTIVE_LIMIT:
-                break  # → STUCK below; correctives aren't landing
-            messages.pop()
-            messages.append(UserMessage(content=(
-                "Your last turn had no tool_calls. Every turn must "
-                "either call tools or call end_session(status, recap) "
-                "to close. Reply again as a tool call — and include "
-                "note(summary=...) alongside."
-            )))
+        if shape is _Turn.RETRY:
             continue
 
-        # Turn shape: exactly [note, one-other]. `note` keeps a permanent
-        # trace even after image tool_results are compacted away; the
-        # one-other cap forces one action per turn.
-        if len(called) != 2 or called.count("note") != 1:
-            log.warning("turn %d: bad turn shape tool_calls=%s — injecting corrective", turn + 1, called)
-            tr.write({"event": "bad_turn_shape", "turn": turn, "tool_calls": called})
-            consecutive_correctives += 1
-            if consecutive_correctives >= CORRECTIVE_LIMIT:
-                break  # → STUCK below; correctives aren't landing
-            messages.pop()
-            messages.append(UserMessage(content=_corrective_for_bad_shape(called)))
-            continue
-        consecutive_correctives = 0
+        _scan_memory_cues(session, asst)
 
-        # Per-turn memory-cue scan: the agent's own note / scratchpad / plan
-        # text for "remember this" / "记住" signals. Scanned every turn (not
-        # just at close) so a durable fact survives even after compaction
-        # folds this turn away; accumulated on the session for the pre-close
-        # gate below.
-        # Skip the scan once the cap is full — the first N distinct cues win
-        # (append-order), so later ones would be truncated away anyway.
-        if CONFIG.engine.memory_cue_enabled and len(session.memory_cues) < _MAX_MEMORY_CUES:
-            for snip in memory.scan_cues(_memory_cue_text(asst)):
-                if snip not in session.memory_cues:
-                    session.memory_cues.append(snip)
-            del session.memory_cues[_MAX_MEMORY_CUES:]
-
-        # Pre-compression checkpoint: require the scratchpad write-down
-        # while the folding turns are still readable. One retry, then
-        # fail open — losing detail beats stalling the session. A turn
-        # that closes the session skips it (nothing left to preserve).
-        if (
-            compaction_imminent
-            and not checkpoint_retried
-            and "end_session" not in called
+        if _apply_close_gates(
+            messages, asst, called, state, session,
+            compaction_imminent=compaction_imminent, turn=turn, tr=tr,
         ):
-            note_args = next(
-                tc.arguments for tc in asst.tool_calls if tc.name == "note"
-            )
-            sp = note_args.get("scratchpad") if isinstance(note_args, dict) else None
-            if not (isinstance(sp, str) and sp.strip()):
-                checkpoint_retried = True
-                _reject_turn(
-                    messages, corrective=_CHECKPOINT_CORRECTIVE,
-                    log_msg="checkpoint note lacks scratchpad — corrective",
-                    event="checkpoint_corrective", turn=turn, tr=tr,
-                )
-                continue
-
-        # Pre-close pitfalls checkpoint: on a long DONE (a run that length
-        # almost always hit a trap), force `add_pitfall(...)` first so the traps
-        # — with the fix that worked — land for next time. The agent may add 0.
-        # One forced retry, then fail open.
-        if (
-            "end_session" in called
-            and not session.added_pitfalls
-            and not session.pitfall_retried
-        ):
-            end_status = next(
-                (tc.arguments.get("status", "") for tc in asst.tool_calls
-                 if tc.name == "end_session" and isinstance(tc.arguments, dict)),
-                "",
-            )
-            do_capture, seed = pitfalls.should_capture(end_status, turn, session)
-            if do_capture:
-                session.pitfall_retried = True
-                # Capture the closing turn's state too — this turn rejects before
-                # the post-dispatch record, so record here (dedups) so a plan that
-                # never completed a turn still reaches the trajectory.
-                trajectory.record(session, turn)
-                _reject_turn(
-                    messages,
-                    corrective=pitfalls.corrective(seed, trajectory.render(session)),
-                    log_msg=f"pre-close pitfalls checkpoint ({seed})",
-                    event="pitfall_checkpoint", turn=turn, tr=tr, seed=seed,
-                )
-                continue
-
-        # Pre-close memory-cue checkpoint: the session flagged something to
-        # remember (scanned per-turn above) but never called `save_memory`.
-        # Force one nudge with the matched cues + context, then fail open.
-        if (
-            "end_session" in called
-            and session.memory_cues
-            and not session.saved_memory
-            and not session.memory_retried
-        ):
-            session.memory_retried = True
-            _reject_turn(
-                messages, corrective=memory.cue_corrective(session.memory_cues),
-                log_msg=f"pre-close memory-cue checkpoint ({len(session.memory_cues)} cue(s))",
-                event="memory_cue_checkpoint", turn=turn, tr=tr,
-                cues=session.memory_cues,
-            )
             continue
 
-        # Principle 6: each tool_call gets exactly one ToolResult, in order,
-        # in the very next messages. Also mark truncation: if finish=length,
-        # the final tool_call's arguments may be cut off — the validator
-        # catches it and pairs an error result, same path as any bad args.
-        if asst.finish_reason == FinishReason.LENGTH:
-            log.warning("turn %d: finish=length; last tool_call args may be truncated", turn + 1)
-            tr.write({"event": "finish_length_warning", "turn": turn})
-
-        # Computed once per turn, threaded to _dispatch (which lacks
-        # `layout_incomplete`).
-        plan_overdue = _plan_overdue(turn, session.plan, layout_incomplete)
-
-        for call in asst.tool_calls:
-            result = await _dispatch(
-                call=call,
-                schema_by_name=schema_by_name,
-                mcp=mcp,
-                local_registry=local_registry,
-                session=session,
-                tr=tr,
-                turn=turn,
-                plan_overdue=plan_overdue,
-            )
-            messages.append(result)
-
-        # Snapshot this turn's plan/scratchpad so a hard close can reflect on
-        # the whole run's evolution, not just the final state — the plan on
-        # every update_progress and the scratchpad on every note(scratchpad=...)
-        # write (each explicit act is its own turn-tagged entry).
-        note_call = next((tc for tc in asst.tool_calls if tc.name == "note"), None)
-        scratchpad_written = bool(
-            note_call
-            and isinstance(note_call.arguments, dict)
-            and note_call.arguments.get("scratchpad") is not None
+        await _dispatch_turn(
+            messages, asst,
+            mcp=mcp, schema_by_name=schema_by_name, local_registry=local_registry,
+            session=session, tr=tr, turn=turn, layout_incomplete=layout_incomplete,
         )
-        trajectory.record(
-            session, turn,
-            plan_updated="update_progress" in called,
-            scratchpad_written=scratchpad_written,
-        )
-
-        compact.drop_stale_screens(messages)
-        compact.collapse_old_turns(
-            messages,
-            first_at=provider.COLLAPSE_FIRST_AT_TURN,
-            interval=provider.COLLAPSE_INTERVAL_TURNS,
-            keep=provider.KEEP_RECENT_TURNS,
-        )
-        # A completed turn closes any collapse event that was pending on
-        # it — the NEXT pending collapse gets a fresh corrective. Reset
-        # here (not on "not pending") because with a small interval every
-        # turn can be pending, which would otherwise burn the single
-        # retry on the first event forever.
-        checkpoint_retried = False
+        _finalize_turn(messages, asst, called, session, turn=turn, provider=provider)
+        # A completed turn closes any collapse event that was pending on it —
+        # the NEXT pending collapse gets a fresh corrective. Reset here (not on
+        # "not pending") because with a small interval every turn can be
+        # pending, which would otherwise burn the single retry on the first
+        # event forever.
+        state.checkpoint_retried = False
 
         if session.sentinel_status:
             return
@@ -599,14 +424,325 @@ async def _loop(
         log.warning("engine hit max turns (%d)", MAX_TURNS)
         session.sentinel_status = STUCK
         session.sentinel_recap = f"max turns ({MAX_TURNS}) reached"
-        return
 
-    # Reached only via the corrective-limit break above.
-    log.warning("%d consecutive turn-shape correctives — giving up", consecutive_correctives)
+
+# ---------- per-turn phases ----------
+
+
+def _prepare_request(
+    session: Session, messages: list[Message], provider: Provider,
+    *, tr: Trace, rlog: RawLog, turn: int, layout_incomplete: bool,
+) -> tuple[list[Message], bool]:
+    """Assemble and log this turn's request; return the wire-ready message list
+    and whether a collapse is imminent this turn.
+
+    Plan + scratchpad are just-in-time tails — keeps `messages[]` cache-stable
+    across writes. Plan goes last so the model reads "what to do next" last —
+    except during first-run screen-layout setup, when the setup reminder rides
+    one step further out so the blocker is the very last thing the model sees.
+    """
+    session.plan.tick_turn()
+    # Stuck-guard counters key on the in_progress step: a step change (via last
+    # turn's update_progress) wipes the same-target history.
+    session.guard.observe_step(session.plan.current_step())
+    # Pre-compression checkpoint: when this turn's completion will collapse old
+    # turns to their note-summary lines, this is the model's last look at them —
+    # the request carries a ⚠ tail and the turn's note must bank state into the
+    # scratchpad (enforced by `_apply_close_gates`).
+    compaction_imminent = compact.collapse_pending(
+        messages,
+        first_at=provider.COLLAPSE_FIRST_AT_TURN,
+        interval=provider.COLLAPSE_INTERVAL_TURNS,
+        keep=provider.KEEP_RECENT_TURNS,
+    )
+    # First-run reminder is empty once learned, and a session that started
+    # learned stays learned — so the per-turn disk read is skipped entirely
+    # unless setup was still pending at session start (`layout_incomplete`).
+    request_messages = apply_request_tails(
+        messages, session, layout_incomplete=layout_incomplete,
+        compaction_keep=(
+            provider.KEEP_RECENT_TURNS if compaction_imminent else None
+        ),
+    )
+    # Cache markers + the actual wire format are the provider's business now;
+    # log the wire form for debugging by asking the provider to serialize once.
+    wire_for_log = provider.serialize_history(request_messages)
+    tr.write({"event": "request", "turn": turn, "message_count": len(request_messages)})
+    rlog.write_request(turn, wire_for_log)
+    log.info("turn %d: %d messages → provider", turn + 1, len(request_messages))
+    return request_messages, compaction_imminent
+
+
+async def _call_provider(
+    provider: Provider, request_messages: list[Message], tool_schemas: list[dict],
+    *, session: Session, tr: Trace, rlog: RawLog, turn: int,
+) -> AssistantMessage | None:
+    """Call the provider (transient-retry), log the response, and return the
+    AssistantMessage. When the provider exhausts its retries: mark the session
+    STUCK, trace it, and return None — the caller returns from the loop."""
+    t0 = time.perf_counter()
+    try:
+        asst = await _chat_with_retry(provider, request_messages, tool_schemas)
+    except Exception as e:
+        log.exception("provider exhausted retries")
+        tr.write({"event": "provider_failed", "turn": turn, "error": str(e)})
+        session.sentinel_status = STUCK
+        session.sentinel_recap = f"provider error: {e}"
+        return None
+
+    elapsed_ms = int((time.perf_counter() - t0) * 1000)
+    rlog.write_response(turn, asst.raw, elapsed_ms=elapsed_ms)
+    tr.write({
+        "event": "response",
+        "turn": turn,
+        "finish_reason": asst.finish_reason,
+        "content_len": len(asst.content or ""),
+        "tool_calls": [
+            {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
+            for tc in asst.tool_calls
+        ],
+    })
+    cache_summary = _log_usage(turn, asst, tr)
+    # Provider round-trip time first, then token/cache — all provider-call
+    # metrics grouped in the trailing segment.
+    metrics = f"{elapsed_ms / 1000:.1f}s"
+    if cache_summary:
+        metrics += f", {cache_summary}"
+    log.info(
+        "turn %d: finish=%s calls=%s — %s",
+        turn + 1, asst.finish_reason, asst.tool_names() or None, metrics,
+    )
+    return asst
+
+
+def _enforce_shape(
+    messages: list[Message], asst: AssistantMessage, called: list[str],
+    state: _LoopState, *, session: Session, turn: int, tr: Trace,
+) -> _Turn:
+    """Route finish_reason and enforce the [note, one-other] turn shape.
+
+    - content_filter → FAIL, ABORT.
+    - no tool_calls, or a shape other than exactly [note, one-other] → pop the
+      rejected assistant turn (leaving orphan tool_calls breaks providers'
+      "tool_calls → matching tool messages" rule and anchors the model on its
+      own failure), inject a corrective, RETRY. After CORRECTIVE_LIMIT in a
+      row, give up STUCK rather than pay correctives up to MAX_TURNS.
+    - well-formed → reset the corrective streak, PROCEED.
+    """
+    # Principle 3: route on finish_reason.
+    if asst.finish_reason == FinishReason.CONTENT_FILTER:
+        log.error("content_filter — stopping session")
+        session.sentinel_status = FAIL
+        session.sentinel_recap = "content filter blocked response"
+        return _Turn.ABORT
+
+    if not asst.tool_calls:
+        return _reject_shape(messages, state, session, (
+            "Your last turn had no tool_calls. Every turn must "
+            "either call tools or call end_session(status, recap) "
+            "to close. Reply again as a tool call — and include "
+            "note(summary=...) alongside."
+        ))
+
+    # Turn shape: exactly [note, one-other]. `note` keeps a permanent trace
+    # even after image tool_results are compacted away; the one-other cap
+    # forces one action per turn.
+    if len(called) != 2 or called.count("note") != 1:
+        log.warning("turn %d: bad turn shape tool_calls=%s — injecting corrective", turn + 1, called)
+        tr.write({"event": "bad_turn_shape", "turn": turn, "tool_calls": called})
+        return _reject_shape(messages, state, session, _corrective_for_bad_shape(called))
+
+    state.consecutive_correctives = 0
+    return _Turn.PROCEED
+
+
+def _reject_shape(
+    messages: list[Message], state: _LoopState, session: Session, corrective: str,
+) -> _Turn:
+    """Count one malformed turn and RETRY it: past CORRECTIVE_LIMIT in a row,
+    give up STUCK; otherwise pop the rejected assistant turn (leaving orphan
+    tool_calls breaks providers' "tool_calls → matching tool messages" rule and
+    anchors the model on its own failure) and inject `corrective`."""
+    state.consecutive_correctives += 1
+    if state.consecutive_correctives >= CORRECTIVE_LIMIT:
+        return _give_up_on_shape(session, state)
+    messages.pop()
+    messages.append(UserMessage(content=corrective))
+    return _Turn.RETRY
+
+
+def _give_up_on_shape(session: Session, state: _LoopState) -> _Turn:
+    """Terminal STUCK when the model can't hold the turn shape after
+    CORRECTIVE_LIMIT consecutive rejections. The offending turn is left in
+    history (not popped) as the recap's evidence."""
+    log.warning(
+        "%d consecutive turn-shape correctives — giving up",
+        state.consecutive_correctives,
+    )
     session.sentinel_status = STUCK
     session.sentinel_recap = (
-        f"{consecutive_correctives} consecutive malformed turns — "
+        f"{state.consecutive_correctives} consecutive malformed turns — "
         "model cannot hold the [note, one-other] shape"
+    )
+    return _Turn.ABORT
+
+
+def _scan_memory_cues(session: Session, asst: AssistantMessage) -> None:
+    """Accumulate distinct "remember this" / "记住" cues from the turn's own
+    note / scratchpad / plan text onto the session. Scanned every turn (not
+    just at close) so a durable fact survives even after compaction folds this
+    turn away; the pre-close gate acts on the accumulation. Skipped once the
+    cap is full — the first N distinct cues win by append-order."""
+    if not (
+        CONFIG.engine.memory_cue_enabled
+        and len(session.memory_cues) < _MAX_MEMORY_CUES
+    ):
+        return
+    for snip in memory.scan_cues(_memory_cue_text(asst)):
+        if snip not in session.memory_cues:
+            session.memory_cues.append(snip)
+    del session.memory_cues[_MAX_MEMORY_CUES:]
+
+
+def _apply_close_gates(
+    messages: list[Message], asst: AssistantMessage, called: list[str],
+    state: _LoopState, session: Session,
+    *, compaction_imminent: bool, turn: int, tr: Trace,
+) -> bool:
+    """Run the pre-compression + pre-close checkpoints in order. Each may reject
+    this turn once and re-issue a corrective, then fails open. Returns True if a
+    gate rejected the turn (the caller re-loops), False to proceed to dispatch.
+    """
+    # Pre-compression checkpoint: require the scratchpad write-down while the
+    # folding turns are still readable. One retry, then fail open — losing
+    # detail beats stalling. A turn that closes the session skips it (nothing
+    # left to preserve).
+    if (
+        compaction_imminent
+        and not state.checkpoint_retried
+        and "end_session" not in called
+    ):
+        note_args = next(
+            tc.arguments for tc in asst.tool_calls if tc.name == "note"
+        )
+        sp = note_args.get("scratchpad") if isinstance(note_args, dict) else None
+        if not (isinstance(sp, str) and sp.strip()):
+            state.checkpoint_retried = True
+            _reject_turn(
+                messages, corrective=_CHECKPOINT_CORRECTIVE,
+                log_msg="checkpoint note lacks scratchpad — corrective",
+                event="checkpoint_corrective", turn=turn, tr=tr,
+            )
+            return True
+
+    # Pre-close pitfalls checkpoint: on a long DONE (a run that length almost
+    # always hit a trap), force `add_pitfall(...)` first so the traps — with the
+    # fix that worked — land for next time. The agent may add 0. One forced
+    # retry, then fail open.
+    if (
+        "end_session" in called
+        and not session.added_pitfalls
+        and not session.pitfall_retried
+    ):
+        end_status = next(
+            (tc.arguments.get("status", "") for tc in asst.tool_calls
+             if tc.name == "end_session" and isinstance(tc.arguments, dict)),
+            "",
+        )
+        do_capture, seed = pitfalls.should_capture(end_status, turn, session)
+        if do_capture:
+            session.pitfall_retried = True
+            # Capture the closing turn's state too — this turn rejects before
+            # the post-dispatch record, so record here (dedups) so a plan that
+            # never completed a turn still reaches the trajectory.
+            trajectory.record(session, turn)
+            _reject_turn(
+                messages,
+                corrective=pitfalls.corrective(seed, trajectory.render(session)),
+                log_msg=f"pre-close pitfalls checkpoint ({seed})",
+                event="pitfall_checkpoint", turn=turn, tr=tr, seed=seed,
+            )
+            return True
+
+    # Pre-close memory-cue checkpoint: the session flagged something to remember
+    # (scanned per-turn) but never called `save_memory`. Force one nudge with
+    # the matched cues + context, then fail open.
+    if (
+        "end_session" in called
+        and session.memory_cues
+        and not session.saved_memory
+        and not session.memory_retried
+    ):
+        session.memory_retried = True
+        _reject_turn(
+            messages, corrective=memory.cue_corrective(session.memory_cues),
+            log_msg=f"pre-close memory-cue checkpoint ({len(session.memory_cues)} cue(s))",
+            event="memory_cue_checkpoint", turn=turn, tr=tr,
+            cues=session.memory_cues,
+        )
+        return True
+
+    return False
+
+
+async def _dispatch_turn(
+    messages: list[Message], asst: AssistantMessage,
+    *, mcp: McpClient, schema_by_name: dict[str, dict],
+    local_registry: dict[str, LocalTool], session: Session,
+    tr: Trace, turn: int, layout_incomplete: bool,
+) -> None:
+    """Run the turn's tool_calls — principle 6: exactly one ToolResult per
+    ToolCall, in order, in the very next messages. Flags a length-truncation
+    warning first: if finish=length the final tool_call's arguments may be cut
+    off — the validator catches it and pairs an error result, same path as any
+    bad args."""
+    if asst.finish_reason == FinishReason.LENGTH:
+        log.warning("turn %d: finish=length; last tool_call args may be truncated", turn + 1)
+        tr.write({"event": "finish_length_warning", "turn": turn})
+
+    # Computed once per turn, threaded to _dispatch (which lacks
+    # `layout_incomplete`).
+    plan_overdue = _plan_overdue(turn, session.plan, layout_incomplete)
+    for call in asst.tool_calls:
+        result = await _dispatch(
+            call=call,
+            schema_by_name=schema_by_name,
+            mcp=mcp,
+            local_registry=local_registry,
+            session=session,
+            tr=tr,
+            turn=turn,
+            plan_overdue=plan_overdue,
+        )
+        messages.append(result)
+
+
+def _finalize_turn(
+    messages: list[Message], asst: AssistantMessage, called: list[str],
+    session: Session, *, turn: int, provider: Provider,
+) -> None:
+    """Post-dispatch bookkeeping. Snapshot this turn's plan/scratchpad so a hard
+    close can reflect on the whole run's evolution, not just the final state —
+    the plan on every update_progress and the scratchpad on every
+    note(scratchpad=...) write (each explicit act is its own turn-tagged
+    entry). Then compact: drop stale screens and collapse old turns."""
+    note_call = next((tc for tc in asst.tool_calls if tc.name == "note"), None)
+    scratchpad_written = bool(
+        note_call
+        and isinstance(note_call.arguments, dict)
+        and note_call.arguments.get("scratchpad") is not None
+    )
+    trajectory.record(
+        session, turn,
+        plan_updated="update_progress" in called,
+        scratchpad_written=scratchpad_written,
+    )
+    compact.drop_stale_screens(messages)
+    compact.collapse_old_turns(
+        messages,
+        first_at=provider.COLLAPSE_FIRST_AT_TURN,
+        interval=provider.COLLAPSE_INTERVAL_TURNS,
+        keep=provider.KEEP_RECENT_TURNS,
     )
 
 
