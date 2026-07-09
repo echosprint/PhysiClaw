@@ -17,6 +17,7 @@ from user-authored ones (the latter need ``--force`` to delete).
 
 import datetime as dt
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -236,7 +237,10 @@ def _atomic_replace(src: Path, dst: Path) -> None:
     ``--force``). ``src`` and ``dst`` MUST be on the same filesystem."""
     if dst.exists():
         shutil.rmtree(dst)
-    src.rename(dst)
+    # os.replace, not Path.rename: the cross-platform atomic move — matches
+    # this function's name and stays consistent with the official-skills sync
+    # swap. (dst is already removed above, so the move targets an absent path.)
+    os.replace(src, dst)
 
 
 @skills_app.command(

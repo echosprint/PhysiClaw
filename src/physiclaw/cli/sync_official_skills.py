@@ -14,7 +14,7 @@ Two identities, never conflated:
     tampered — the ``.sha256`` compare is what does).
 
 The swap is package-owned and same-filesystem: staging lives under
-``official/`` so the final ``rename`` is atomic, and only ``official/skills``
+``official/`` so the final ``os.replace`` is atomic, and only ``official/skills``
 + ``official/source.json`` are replaced. The zip is the authoritative full
 set, so a skill dropped upstream disappears here automatically.
 
@@ -138,7 +138,7 @@ def _download_to_temp(url: str) -> tuple[Path, str]:
     hold the whole pack in memory. Returns ``(temp_path, sha256_hex)``; the
     caller is responsible for unlinking the path. The temp file lives in the
     system temp dir (``/tmp`` on Linux) — only the later staging→install
-    ``rename`` needs to be same-filesystem, not this download."""
+    ``os.replace`` needs to be same-filesystem, not this download."""
     _require_https(url)
     digest = hashlib.sha256()
     fd, name = tempfile.mkstemp(prefix="physiclaw-official-", suffix=".zip")
@@ -335,13 +335,19 @@ def sync(*, force: bool = False, dry_run: bool = False) -> None:
                 staging / "skills", src.get("skills") or []
             )
 
-            # 6. Atomic swap of package-owned paths only. rm+rename on the same
+            # 6. Atomic swap of package-owned paths only, on the same
             #    filesystem; the full zip is the set, so removed skills drop.
+            #    os.replace (NOT Path.rename): Windows' os.rename refuses to
+            #    overwrite an existing target (WinError 183), so source.json —
+            #    renamed straight onto the prior file — threw on every re-sync,
+            #    leaving source.json + .sync-state.json stale (the state write
+            #    below never ran) and re-syncing on every startup. os.replace
+            #    overwrites atomically on Windows and POSIX alike.
             dst_skills = paths.official_skills_dir()
             if dst_skills.exists():
                 shutil.rmtree(dst_skills)
-            (staging / "skills").rename(dst_skills)
-            (staging / "source.json").rename(official / "source.json")
+            os.replace(staging / "skills", dst_skills)
+            os.replace(staging / "source.json", official / "source.json")
         finally:
             if staging.exists():
                 shutil.rmtree(staging)
@@ -387,7 +393,7 @@ def maybe_auto_sync() -> None:
     swap). Idempotent: an unchanged commit is a no-op with no download.
 
     Mutating ``official/skills`` mid-run is safe: the swap is an atomic
-    ``rename`` and skill discovery snapshots per session (in the separate
+    ``os.replace`` and skill discovery snapshots per session (in the separate
     runtime process), so a session sees either the whole old or whole new tree
     and picks up the change at its next wake."""
     if not _load_config().skills.sync_auto:

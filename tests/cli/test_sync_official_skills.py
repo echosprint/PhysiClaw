@@ -258,6 +258,35 @@ def test_changed_commit_replaces_and_drops_removed_skills(
     assert state["skillCount"] == 1
 
 
+def test_resync_over_existing_source_json_windows_rename_semantics(
+    official_home: Path, mocker
+) -> None:
+    # Guards a Windows-only bug: os.rename won't overwrite an existing target
+    # there (WinError 183), so re-syncing onto the prior source.json threw —
+    # leaving source.json + .sync-state.json stale. The swap must use
+    # os.replace. Simulate Windows rename semantics so the guard bites on POSIX.
+    _patch_net(mocker, _routes("a" * 40, ["jd"]))
+    osk.sync()  # first sync creates official/source.json + .sync-state.json
+
+    real_rename = Path.rename
+
+    def win_rename(self, target):
+        if Path(target).exists():
+            raise FileExistsError(f"[WinError 183] {target}")
+        return real_rename(self, target)
+
+    mocker.patch.object(Path, "rename", win_rename)
+
+    # Second sync must still overwrite source.json AND update sync-state
+    # (the code path uses os.replace, which win_rename doesn't intercept).
+    _patch_net(mocker, _routes("b" * 40, ["jd"]))
+    osk.sync()
+
+    assert json.loads((official_home / "source.json").read_text())["commit"] == "b" * 40
+    state = json.loads((official_home / osk.SYNC_STATE_FILE).read_text())
+    assert state["commit"] == "b" * 40
+
+
 # ---------- integrity ----------
 
 
