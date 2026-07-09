@@ -258,7 +258,7 @@ def maybe_stage_update() -> None:
         log.info("stage-update: warming cache for %s failed — will retry", latest)
         return  # warm failed — don't mark; retry next cycle
     _write_staged(latest)
-    log.info("stage-update: physiclaw %s staged for next startup", latest)
+    log.info("stage-update: physiclaw %s staged for the next startup's notice", latest)
 
 
 def start_stage_update_thread() -> None:
