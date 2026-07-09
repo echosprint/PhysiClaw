@@ -54,10 +54,10 @@ def test_compute_at_screen_pos_returns_and_stores() -> None:
     out = at.compute_at_screen_pos(s)
 
     # AT_CSS_X=39, dpr=3 → 117 / 1170 = 0.1
-    # AT_CSS_Y=200, dpr=3 → 600 / 2532 ≈ 0.2369
+    # AT_CSS_Y=260, dpr=3 → 780 / 2532 ≈ 0.3081
     assert out == at.at_screen
     assert out[0] == pytest.approx(117 / 1170)
-    assert out[1] == pytest.approx(600 / 2532)
+    assert out[1] == pytest.approx(780 / 2532)
 
 
 def test_compute_at_screen_pos_radius_axes() -> None:
