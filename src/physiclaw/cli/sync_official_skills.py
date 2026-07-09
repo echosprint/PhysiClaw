@@ -44,7 +44,7 @@ import typer
 
 from physiclaw import paths
 from physiclaw.cli._download import http_get, stream
-from physiclaw.cli._format import info, next_hint, ok, warn
+from physiclaw.cli._format import info, ok, warn
 from physiclaw.config import load as _load_config
 from physiclaw.text import read_text, write_text
 
@@ -368,7 +368,6 @@ def sync(*, force: bool = False, dry_run: bool = False) -> None:
         typer.echo(
             warn(f"manifest lists {declared} skill(s) but {landed} landed on disk.")
         )
-    typer.echo(next_hint("your next agent session picks these up — no restart needed."))
 
 
 def _read_source_json(p: Path) -> dict:
