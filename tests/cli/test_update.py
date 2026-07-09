@@ -246,6 +246,26 @@ def test_stage_already_staged_skips_warm(auto_env, monkeypatch, mocker) -> None:
     run.assert_not_called()  # already staged this version — don't re-download
 
 
+def test_stage_restages_when_a_newer_version_appears(
+    auto_env, monkeypatch, mocker
+) -> None:
+    # An older version is already staged; PyPI now advertises a newer one.
+    # Must warm + advance the marker to the NEWEST, not stay pinned to the
+    # stale stage — this is the "stage the newest whenever available" contract.
+    monkeypatch.setattr(up, "_pkg_version", "1.0.0")
+    up._write_staged("1.1.0")  # previously staged
+    mocker.patch.object(up, "_uv", return_value="/usr/bin/uv")
+    mocker.patch.object(up, "_tool_version", return_value="1.0.0")
+    mocker.patch.object(up, "_fetch_pypi_version", return_value="1.2.0")  # newer release
+    run = mocker.patch.object(up, "_run", return_value=_proc(0))
+
+    up.maybe_stage_update()
+
+    cmd = run.call_args.args[0]
+    assert "physiclaw==1.2.0" in cmd       # warmed the NEW version, not 1.1.0
+    assert up._read_staged() == "1.2.0"    # marker advanced to the newest
+
+
 def test_stage_warms_cache_and_writes_marker(auto_env, monkeypatch, mocker) -> None:
     monkeypatch.setattr(up, "_pkg_version", "1.0.0")
     mocker.patch.object(up, "_uv", return_value="/usr/bin/uv")
