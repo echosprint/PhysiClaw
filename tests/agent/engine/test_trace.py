@@ -5,7 +5,7 @@ file writes + day rollover, RawLog session-start/request/response
 emit + image scrubbing for both OpenAI (image_url) and Anthropic
 (image+source) wire shapes, and _purge_old retention.
 
-Module-level `_LOG_DIR` / `_RAW_DIR` / `_IMAGE_DIR` are bound at
+Module-level `_LOG_DIR` / `_RAW_DIR` / `_SESSIONS_DIR` are bound at
 import; the autouse fixture re-points them to per-test dirs.
 """
 from __future__ import annotations
@@ -34,11 +34,9 @@ from physiclaw.agent.engine.trace import (
 @pytest.fixture(autouse=True)
 def _trace_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     log_dir = tmp_path / "engine"
-    raw_dir = log_dir / "raw"
-    image_dir = raw_dir / "images"
     monkeypatch.setattr(trace, "_LOG_DIR", log_dir)
-    monkeypatch.setattr(trace, "_RAW_DIR", raw_dir)
-    monkeypatch.setattr(trace, "_IMAGE_DIR", image_dir)
+    monkeypatch.setattr(trace, "_RAW_DIR", log_dir / "raw")
+    monkeypatch.setattr(trace, "_SESSIONS_DIR", log_dir / "sessions")
     return log_dir
 
 
@@ -167,7 +165,7 @@ def test_brief_content_multiple_blocks_joined_by_plus() -> None:
 @pytest.mark.parametrize(
     "event, expected_substr",
     [
-        ({"event": "wake", "session": "s1", "provider": "openai", "triggers": [{"source": "phone"}]}, "WAKE session=s1"),
+        ({"event": "wake", "session": "s1", "model_ref": "openai/gpt-x", "triggers": [{"source": "phone"}]}, "WAKE session=s1 model=openai/gpt-x"),
         ({"event": "tools_loaded", "mcp": [1, 2], "local": [1]}, "tools: 2 MCP + 1 local"),
         ({"event": "request", "turn": 3, "message_count": 7}, "turn 3: request (7 messages)"),
         ({"event": "response", "turn": 1, "finish_reason": "stop", "tool_calls": [{"name": "tap"}]}, "turn 1: response finish=stop calls=['tap']"),
@@ -302,7 +300,7 @@ def test_rawlog_writes_session_start_line(_trace_dirs: Path) -> None:
     )
     log.close()
 
-    line = (_trace_dirs / "raw" / "sess-A.jsonl").read_text().splitlines()[0]
+    line = (_trace_dirs / "sessions" / "sess-A" / "wire.jsonl").read_text().splitlines()[0]
     obj = json.loads(line)
     assert obj["kind"] == "session_start"
     assert obj["provider"] == "anthropic"
@@ -314,7 +312,7 @@ def test_rawlog_writes_request_with_turn_index(_trace_dirs: Path) -> None:
     log.write_request(turn=3, messages=[{"role": "user", "content": "hi"}])
     log.close()
 
-    line = (_trace_dirs / "raw" / "sess-B.jsonl").read_text().splitlines()[0]
+    line = (_trace_dirs / "sessions" / "sess-B" / "wire.jsonl").read_text().splitlines()[0]
     obj = json.loads(line)
     assert obj["kind"] == "request"
     assert obj["turn"] == 3
@@ -326,7 +324,7 @@ def test_rawlog_writes_response_with_elapsed(_trace_dirs: Path) -> None:
     log.write_response(turn=1, raw={"id": "r1"}, elapsed_ms=42)
     log.close()
 
-    line = (_trace_dirs / "raw" / "sess-C.jsonl").read_text().splitlines()[0]
+    line = (_trace_dirs / "sessions" / "sess-C" / "wire.jsonl").read_text().splitlines()[0]
     obj = json.loads(line)
     assert obj["kind"] == "response"
     assert obj["elapsed_ms"] == 42
@@ -355,11 +353,12 @@ def test_rawlog_scrubs_openai_image_url_data_to_disk(_trace_dirs: Path) -> None:
 
     out = log._scrub_images(messages)
 
-    # The image_url is replaced with a path under images/<sess>_NNNNN.jpg
+    # The image_url is replaced with a session-relative turn-tagged path
+    # (turn defaults to -1 when scrubbing outside write_request).
     img_url = out[0]["content"][1]["image_url"]["url"]
-    assert img_url == "images/sess-IMG_00001.jpg"
-    # The actual file was written.
-    assert (_trace_dirs / "raw" / img_url).read_bytes() == raw_bytes
+    assert img_url == "images/00001_t-1.jpg"
+    # The actual file was written inside the session dir.
+    assert (_trace_dirs / "sessions" / "sess-IMG" / img_url).read_bytes() == raw_bytes
 
 
 def test_rawlog_scrubs_anthropic_image_block_to_ref(_trace_dirs: Path) -> None:
@@ -379,7 +378,7 @@ def test_rawlog_scrubs_anthropic_image_block_to_ref(_trace_dirs: Path) -> None:
     src = out[0]["content"][0]["source"]
     assert src["type"] == "ref"
     assert src["ref"].endswith(".png")
-    assert (_trace_dirs / "raw" / src["ref"]).read_bytes() == raw_bytes
+    assert (_trace_dirs / "sessions" / "sess-A" / src["ref"]).read_bytes() == raw_bytes
 
 
 def test_rawlog_scrubs_anthropic_tool_result_inner_content(_trace_dirs: Path) -> None:
@@ -514,3 +513,350 @@ def test_purge_old_removes_files_older_than_retention_days(
 def test_purge_old_returns_silently_when_dir_missing() -> None:
     # _RAW_DIR doesn't exist — must not raise.
     trace._purge_old()
+
+
+# ---------- events.jsonl ----------
+
+
+def _events(log_dir: Path, sid: str) -> list[dict]:
+    path = log_dir / "sessions" / sid / "events.jsonl"
+    return [json.loads(x) for x in path.read_text().splitlines()]
+
+
+def test_trace_writes_every_event_to_events_jsonl(_trace_dirs: Path) -> None:
+    t = Trace("s1")
+    t.write({"event": "request", "turn": 0, "message_count": 5})
+    t.write({"event": "prefix_pinned", "hash": "abc"})  # silent in daily log
+    t.close()
+
+    events = _events(_trace_dirs, "s1")
+    # Line 0 is always the environment snapshot — see its own tests.
+    assert events[0]["event"] == "env"
+    assert events[1]["event"] == "request"
+    assert events[1]["turn"] == 0
+    assert "t" in events[1]
+    # Silent events are still data.
+    assert events[2] == {"t": events[2]["t"], "event": "prefix_pinned", "hash": "abc"}
+
+
+def test_trace_events_jsonl_summarizes_tool_result_blocks(_trace_dirs: Path) -> None:
+    # blocks may carry base64 screens whose bytes already live in
+    # wire.jsonl — events.jsonl keeps a summary, not a second copy.
+    t = Trace("s1")
+    t.write({
+        "event": "tool_result", "turn": 1, "name": "tap", "id": "c1",
+        "arguments": {"bbox": [0, 0, 1, 1]},
+        "blocks": [{"type": "text", "text": "ok"}, {"type": "image", "data": "aGk="}],
+    })
+    t.close()
+
+    e = _events(_trace_dirs, "s1")[1]  # [0] is the env snapshot
+    assert "blocks" not in e
+    assert e["result_summary"] == "ok + <image 4b>"
+    assert e["arguments"] == {"bbox": [0, 0, 1, 1]}
+
+
+def test_trace_events_jsonl_degrades_on_non_serializable_values(
+    _trace_dirs: Path,
+) -> None:
+    t = Trace("s1")
+    t.write({"event": "tool_error", "turn": 0, "error": ValueError("boom")})
+    t.close()
+
+    e = _events(_trace_dirs, "s1")[1]  # [0] is the env snapshot
+    assert "boom" in e["error"]  # default=repr kicked in
+
+
+# ---------- session summary ----------
+
+
+def _feed_session(t: Trace) -> None:
+    """A synthetic event stream exercising every summary field."""
+    t.write({"event": "wake", "session": "s1", "model_ref": "moonshot/kimi-k2.6",
+             "triggers": [{"source": "phone", "description": "screen changed"}]})
+    t.write({"event": "prefix_pinned", "hash": "deadbeef"})
+    t.write({"event": "response", "turn": 0, "finish_reason": "tool_calls",
+             "content_len": 0, "elapsed_ms": 1500, "tool_calls": []})
+    t.write({"event": "cache", "turn": 0, "hit": 800, "create": 100,
+             "new": 100, "total": 1000, "out": 50})
+    t.write({"event": "tool_result", "turn": 0, "name": "note", "id": "a",
+             "arguments": {}, "text": "noted"})
+    t.write({"event": "tool_result", "turn": 1, "name": "tap", "id": "b",
+             "arguments": {}, "text": "tapped"})
+    t.write({"event": "tool_blocked_stuck", "turn": 1, "name": "tap", "id": "c"})
+    t.write({"event": "stuck_warning", "turn": 2, "name": "tap", "id": "d"})
+    t.write({"event": "tool_invalid_args", "turn": 2, "name": "tap", "id": "e",
+             "arguments": {}, "error": "bad bbox"})
+    t.write({"event": "bad_turn_shape", "turn": 3, "tool_calls": []})
+    t.write({"event": "done", "sentinel": "DONE", "recap": "all good"})
+
+
+def test_summary_json_derived_from_event_stream(_trace_dirs: Path) -> None:
+    t = Trace("s1")
+    _feed_session(t)
+    t.close()
+
+    s = json.loads((_trace_dirs / "sessions" / "s1" / "summary.json").read_text())
+    assert s["schema"] == 1
+    assert s["sid"] == "s1"
+    assert s["model_ref"] == "moonshot/kimi-k2.6"
+    assert s["provider"] == "moonshot"
+    assert s["prompt_hash"] == "deadbeef"
+    assert s["triggers"][0]["source"] == "phone"
+    assert s["outcome"] == {"sentinel": "DONE", "recap": "all good", "crashed": False}
+    assert s["turns"] == 4  # max turn 3 → 4 turns
+    assert s["provider_calls"] == 1
+    assert s["provider_time_ms"] == 1500
+    assert s["usage"]["input_tokens"] == 1000
+    assert s["usage"]["output_tokens"] == 50
+    assert s["usage"]["cache_read_tokens"] == 800
+    assert s["usage"]["cache_creation_tokens"] == 100
+    assert s["usage"]["cache_hit_pct"] == 80.0
+    assert s["tool_calls"] == {"note": 1, "tap": 1}
+    assert s["errors"]["blocked_stuck"] == 1
+    assert s["errors"]["invalid_args"] == 1
+    assert s["errors"]["correctives"] == 1
+    assert s["errors"]["blocked_plan"] == 0
+    assert s["stuck_events"] == 2  # blocked_stuck + stuck_warning
+    assert s["images"] == 0
+    assert "started_at" in s and "ended_at" in s and s["duration_s"] >= 0
+
+
+def test_summary_marks_crashed_sessions(_trace_dirs: Path) -> None:
+    t = Trace("s1")
+    t.write({"event": "wake", "session": "s1", "model_ref": "m/x", "triggers": []})
+    t.write({"event": "crashed"})
+    t.close()
+
+    s = json.loads((_trace_dirs / "sessions" / "s1" / "summary.json").read_text())
+    assert s["outcome"]["crashed"] is True
+    assert s["outcome"]["sentinel"] is None
+
+
+def test_close_writes_end_footer_to_daily_log(_trace_dirs: Path) -> None:
+    with freeze_time("2026-04-28T10:00:00"):
+        t = Trace("s1")
+        _feed_session(t)
+        t.close()
+
+    text = (_trace_dirs / "engine-2026-04-28.log").read_text()
+    assert "END session=s1 outcome=DONE turns=4" in text
+    assert "tokens=1.0k/50 cache=80% tools=2" in text
+
+
+def test_close_counts_images_from_session_dir(_trace_dirs: Path) -> None:
+    t = Trace("s1")
+    img_dir = _trace_dirs / "sessions" / "s1" / "images"
+    img_dir.mkdir(parents=True, exist_ok=True)
+    (img_dir / "00001_t0.jpg").write_bytes(b"x")
+    (img_dir / "00002_t1.jpg").write_bytes(b"y")
+    t.close()
+
+    s = json.loads((_trace_dirs / "sessions" / "s1" / "summary.json").read_text())
+    assert s["images"] == 2
+
+
+def test_close_writes_summary_only_once(_trace_dirs: Path) -> None:
+    t = Trace("s1")
+    t.close()
+    first = (_trace_dirs / "sessions" / "s1" / "summary.json").read_text()
+    t.close()  # idempotent — no rewrite, no raise
+    assert (_trace_dirs / "sessions" / "s1" / "summary.json").read_text() == first
+
+
+def test_fmt_tokens_scales() -> None:
+    assert trace.fmt_tokens(980) == "980"
+    assert trace.fmt_tokens(9_800) == "9.8k"
+    assert trace.fmt_tokens(1_200_000) == "1.2M"
+
+
+# ---------- turn-tagged images ----------
+
+
+def test_write_request_tags_images_with_turn(_trace_dirs: Path) -> None:
+    log = RawLog("sess-T")
+    b64 = base64.b64encode(b"img").decode()
+    log.write_request(turn=7, messages=[{
+        "role": "user",
+        "content": [
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+        ],
+    }])
+    log.close()
+
+    line = (_trace_dirs / "sessions" / "sess-T" / "wire.jsonl").read_text().splitlines()[0]
+    url = json.loads(line)["messages"][0]["content"][0]["image_url"]["url"]
+    assert url == "images/00001_t7.jpg"
+    assert (_trace_dirs / "sessions" / "sess-T" / url).read_bytes() == b"img"
+
+
+# ---------- retention: session dirs + daily logs ----------
+
+
+def _age(path: Path, days: float) -> None:
+    import os
+    ago = (dt.datetime.now() - dt.timedelta(days=days)).timestamp()
+    os.utime(path, (ago, ago))
+
+
+def test_purge_old_removes_stale_session_dirs(_trace_dirs: Path) -> None:
+    old = _trace_dirs / "sessions" / "20260101_000000"
+    old.mkdir(parents=True)
+    f = old / "events.jsonl"
+    f.write_text("{}")
+    _age(f, trace._RETENTION_DAYS + 1)
+    _age(old, trace._RETENTION_DAYS + 1)
+    young = _trace_dirs / "sessions" / "20990101_000000"
+    young.mkdir(parents=True)
+    (young / "events.jsonl").write_text("{}")
+
+    trace._purge_old()
+
+    assert not old.exists()
+    assert young.exists()
+
+
+def test_purge_old_spares_session_dir_with_a_recent_file(_trace_dirs: Path) -> None:
+    # Dir mtime is old but a file inside is fresh (e.g. summary written
+    # late) — the newest-file rule keeps it.
+    d = _trace_dirs / "sessions" / "20260101_000000"
+    d.mkdir(parents=True)
+    old_f = d / "events.jsonl"
+    old_f.write_text("{}")
+    _age(old_f, trace._RETENTION_DAYS + 1)
+    (d / "summary.json").write_text("{}")  # fresh
+    _age(d, trace._RETENTION_DAYS + 1)
+
+    trace._purge_old()
+
+    assert d.exists()
+
+
+def test_purge_old_removes_stale_daily_logs(_trace_dirs: Path) -> None:
+    _trace_dirs.mkdir(parents=True, exist_ok=True)
+    old = _trace_dirs / "engine-2026-01-01.log"
+    old.write_text("x")
+    _age(old, trace._LOG_RETENTION_DAYS + 1)
+    young = _trace_dirs / "engine-2099-01-01.log"
+    young.write_text("y")
+
+    trace._purge_old()
+
+    assert not old.exists()
+    assert young.exists()
+
+
+# ---------- new_sid ----------
+
+
+def test_new_sid_shape_and_uniqueness() -> None:
+    import re
+
+    sids = {trace.new_sid() for _ in range(50)}
+
+    # 50 mints in the same second must not collide — the random suffix
+    # is what makes instant-crash retries safe.
+    assert len(sids) == 50
+    for sid in sids:
+        assert re.fullmatch(r"\d{8}_\d{6}_[a-z0-9]{6}", sid)
+
+
+def test_new_sid_sorts_chronologically() -> None:
+    with freeze_time("2026-04-28T10:00:00"):
+        early = trace.new_sid()
+    with freeze_time("2026-04-28T10:00:01"):
+        late = trace.new_sid()
+
+    assert early < late  # lexicographic == chronological across seconds
+
+
+# ---------- env snapshot ----------
+
+
+def test_first_event_of_every_session_is_the_env_snapshot(_trace_dirs: Path) -> None:
+    Trace("s1").close()
+
+    e = _events(_trace_dirs, "s1")[0]
+    assert e["event"] == "env"
+    for key in ("physiclaw", "python", "os", "platform", "host", "utc_offset"):
+        assert e[key]
+    assert "auto_exposure" in e["config"]["camera"]
+    assert "max_image_edge_px" in e["config"]["compact"]
+
+
+def test_env_snapshot_never_carries_secrets(_trace_dirs: Path) -> None:
+    Trace("s1").close()
+
+    raw = (_trace_dirs / "sessions" / "s1" / "events.jsonl").read_text()
+    assert "api_key" not in raw
+    assert "provider_config" not in raw
+
+
+def test_summary_includes_env(_trace_dirs: Path) -> None:
+    t = Trace("s1")
+    t.write({"event": "done", "sentinel": "DONE", "recap": "ok"})
+    t.close()
+
+    s = json.loads((_trace_dirs / "sessions" / "s1" / "summary.json").read_text())
+    assert s["env"]["os"] in ("darwin", "win32", "linux")
+    assert s["env"]["config"]["camera"]["width"] > 0
+
+
+def test_env_renders_one_daily_log_line(_trace_dirs: Path) -> None:
+    with freeze_time("2026-04-28T10:00:00"):
+        Trace("s1").close()
+
+    text = (_trace_dirs / "engine-2026-04-28.log").read_text()
+    assert "env physiclaw=" in text
+    assert "host=" in text
+
+
+# ---------- cross-platform bytes + sessions README ----------
+
+
+def test_log_files_use_lf_newlines_regardless_of_platform(_trace_dirs: Path) -> None:
+    # newline="\n" pinned on every writer: identical bytes on Windows and
+    # POSIX, so hashing/diffing sessions across rigs is meaningful.
+    t = Trace("s1")
+    t.write({"event": "done", "sentinel": "DONE", "recap": "ok"})
+    t.close()
+    rlog = RawLog("s1")
+    rlog.write_request(turn=0, messages=[{"role": "user", "content": "hi"}])
+    rlog.close()
+
+    for name in ("events.jsonl", "wire.jsonl", "summary.json"):
+        raw = (_trace_dirs / "sessions" / "s1" / name).read_bytes()
+        assert b"\r" not in raw, name
+    daily = next(_trace_dirs.glob("engine-*.log")).read_bytes()
+    assert b"\r" not in daily
+
+
+def test_sessions_readme_written_once(_trace_dirs: Path) -> None:
+    Trace("s1").close()
+    readme = _trace_dirs / "sessions" / "README.md"
+    assert readme.is_file()
+    text = readme.read_text(encoding="utf-8")
+    assert "events.jsonl" in text and "summary.json" in text
+
+    stamp = readme.stat().st_mtime_ns
+    Trace("s2").close()  # second session must not rewrite it
+    assert readme.stat().st_mtime_ns == stamp
+
+
+def test_sessions_readme_documents_the_full_summary_schema() -> None:
+    # The README ships WITH the data as its format contract — every field
+    # summary.json actually emits must be named in it, so schema changes
+    # can't silently outrun the doc.
+    readme = trace.SESSIONS_README
+    s = trace._Summary("x").finalize(images=0)
+
+    for key in s:
+        assert key in readme, f"summary key {key!r} missing from SESSIONS_README"
+    for key in s["usage"]:
+        assert key in readme, f"usage key {key!r} missing from SESSIONS_README"
+    for key in s["errors"]:
+        assert key in readme, f"errors key {key!r} missing from SESSIONS_README"
+    for key in s["outcome"]:
+        assert key in readme, f"outcome key {key!r} missing from SESSIONS_README"
+    for name in ("events.jsonl", "wire.jsonl", "summary.json", "images/"):
+        assert name in readme

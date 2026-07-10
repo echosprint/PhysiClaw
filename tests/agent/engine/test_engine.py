@@ -285,3 +285,52 @@ def test_auto_schedule_wait_check_emits_failure_event_on_exception(
     payload = trace_stub.write.call_args.args[0]
     assert payload["event"] == "wait_auto_schedule_failed"
     assert "disk full" in payload["error"]
+
+
+def test_log_usage_emits_output_tokens_for_the_session_summary(
+    trace_stub,
+) -> None:
+    # The session summary sums `cache.out` into usage.output_tokens.
+    asst = AssistantMessage(
+        content="", tool_calls=[], finish_reason=FinishReason.STOP,
+        usage=Usage(prompt_tokens=100, cached_tokens=0,
+                    cache_creation_tokens=0, completion_tokens=77),
+    )
+
+    engine_mod._log_usage(turn=1, asst=asst, tr=trace_stub)
+
+    payload = trace_stub.write.call_args.args[0]
+    assert payload["out"] == 77
+
+
+@pytest.mark.asyncio
+async def test_call_provider_response_event_carries_elapsed_ms(
+    mocker, trace_stub,
+) -> None:
+    # The session summary sums `response.elapsed_ms` into provider_time_ms.
+    from physiclaw.agent.engine.builtin_tool import Session
+
+    asst = AssistantMessage(
+        content="", tool_calls=[], finish_reason=FinishReason.STOP,
+        usage=Usage(),
+    )
+    provider = mocker.MagicMock()
+    provider.chat = mocker.AsyncMock(return_value=asst)
+    rlog = mocker.MagicMock()
+
+    out = await engine_mod._call_provider(
+        provider, [], [], session=Session(), tr=trace_stub,
+        rlog=rlog, turn=0,
+    )
+
+    assert out is asst
+    response_event = next(
+        c.args[0] for c in trace_stub.write.call_args_list
+        if c.args[0].get("event") == "response"
+    )
+    assert isinstance(response_event["elapsed_ms"], int)
+    # RawLog got the same number.
+    assert (
+        rlog.write_response.call_args.kwargs["elapsed_ms"]
+        == response_event["elapsed_ms"]
+    )

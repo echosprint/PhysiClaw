@@ -10,6 +10,7 @@ from physiclaw.cli.clear import clear
 from physiclaw.cli.config import config_app
 from physiclaw.cli.doctor import doctor
 from physiclaw.cli.flash import flash
+from physiclaw.cli.logs import logs
 from physiclaw.cli.models import models_app
 from physiclaw.cli.prompt import prompt_app
 from physiclaw.cli.reset import reset
@@ -33,6 +34,7 @@ app.command()(auto)
 app.command()(status)
 app.command()(update)
 app.command()(flash)
+app.command()(logs)
 app.command()(clear)
 app.command()(reset)
 app.command()(uninstall)

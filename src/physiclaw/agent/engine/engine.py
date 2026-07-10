@@ -39,7 +39,7 @@ from physiclaw.agent.provider import (
     make_provider,
     mcp_blocks_to_content_blocks,
 )
-from physiclaw.agent.engine.trace import RawLog, Trace, brief_content, format_call_args, format_call_result
+from physiclaw.agent.engine.trace import RawLog, Trace, brief_content, format_call_args, format_call_result, new_sid
 from physiclaw.agent.engine.validator import ValidationError, validate_arguments
 from physiclaw.agent.runtime.hook import Trigger
 from physiclaw.agent.runtime.sentinel import FAIL, STUCK, WAIT
@@ -212,7 +212,7 @@ async def _run_session(
     from physiclaw.config import parse_model_ref
     provider_id, model_id = parse_model_ref(model_ref)
 
-    sid = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+    sid = new_sid()
     provider: Provider | None = None
     tr: Trace | None = None
     rlog: RawLog | None = None
@@ -497,6 +497,9 @@ async def _call_provider(
         "turn": turn,
         "finish_reason": asst.finish_reason,
         "content_len": len(asst.content or ""),
+        # Provider round-trip time — the session summary sums these
+        # into provider_time_ms.
+        "elapsed_ms": elapsed_ms,
         "tool_calls": [
             {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
             for tc in asst.tool_calls
@@ -537,6 +540,9 @@ def _enforce_shape(
         return _Turn.ABORT
 
     if not asst.tool_calls:
+        # Trace it like the other shape violation below, so the session
+        # summary's corrective count stays honest.
+        tr.write({"event": "bad_turn_shape", "turn": turn, "tool_calls": []})
         return _reject_shape(messages, state, session, (
             "Your last turn had no tool_calls. Every turn must "
             "either call tools or call end_session(status, recap) "
@@ -857,7 +863,7 @@ async def _dispatch(
     # doesn't execute.
     blocked = session.guard.should_block(call.name, call.arguments)
     if blocked is not None:
-        session.stuck_events += 1  # inefficiency signal for the close reflection
+        session.stuck_events += 1  # inefficiency signal; the adjacent tr.write mirrors it into the session summary
         tr.write({
             "event": "tool_blocked_stuck", "turn": turn,
             "name": call.name, "id": call.id, "arguments": call.arguments,
@@ -890,7 +896,7 @@ async def _dispatch(
         # highest-adherence steering channel.
         warning = session.guard.record(call.name, call.arguments, changed)
         if warning is not None:
-            session.stuck_events += 1  # inefficiency signal for the close reflection
+            session.stuck_events += 1  # inefficiency signal; the adjacent tr.write mirrors it into the session summary
             tr.write({
                 "event": "stuck_warning", "turn": turn,
                 "name": call.name, "id": call.id,
@@ -914,7 +920,7 @@ async def _dispatch(
         content = f"{call.name} failed: {e}"
         err_warning = session.guard.record_error(call.name, call.arguments)
         if err_warning is not None:
-            session.stuck_events += 1  # inefficiency signal for the close reflection
+            session.stuck_events += 1  # inefficiency signal; the adjacent tr.write mirrors it into the session summary
             tr.write({
                 "event": "stuck_warning", "turn": turn,
                 "name": call.name, "id": call.id,
@@ -988,6 +994,9 @@ def _log_usage(turn: int, asst: AssistantMessage, tr: Trace) -> str:
         "create": u.cache_creation_tokens,
         "new": new,
         "total": total,
+        # Output tokens — the session summary sums these into
+        # usage.output_tokens.
+        "out": u.completion_tokens,
     })
     if not total:
         return ""

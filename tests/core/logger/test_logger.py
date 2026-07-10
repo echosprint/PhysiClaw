@@ -306,3 +306,77 @@ async def test_logged_success_line_has_no_failed_marker(
     msgs = [r.getMessage() for r in caplog.records if "my_tool" in r.getMessage()]
     assert msgs
     assert not any("FAILED" in m for m in msgs)
+
+
+# ---------- _DailyFileHandler ----------
+
+
+def _file_logger(tmp_path, name: str):
+    import logging
+
+    from physiclaw.core.logger.logger import _DailyFileHandler
+
+    handler = _DailyFileHandler(tmp_path, "runtime", "runtime")
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    logger.handlers = [handler]
+    return logger, handler
+
+
+def test_daily_file_handler_writes_uncolored_tagged_lines(tmp_path) -> None:
+    from freezegun import freeze_time
+
+    with freeze_time("2026-04-28T10:00:00"):
+        logger, handler = _file_logger(tmp_path, "t.daily.plain")
+        logger.info("hello \033[31mred\033[0m world")
+        handler.close()
+
+    text = (tmp_path / "runtime-2026-04-28.log").read_text()
+    assert "[runtime] hello" in text
+    assert "\033[" not in text.split("hello")[0]  # prefix uncolored
+
+
+def test_daily_file_handler_rolls_to_new_day(tmp_path) -> None:
+    from freezegun import freeze_time
+
+    with freeze_time("2026-04-28T23:59:00") as ft:
+        logger, handler = _file_logger(tmp_path, "t.daily.roll")
+        logger.info("before midnight")
+        ft.move_to("2026-04-29T00:01:00")
+        logger.info("after midnight")
+        handler.close()
+
+    assert "before midnight" in (tmp_path / "runtime-2026-04-28.log").read_text()
+    assert "after midnight" in (tmp_path / "runtime-2026-04-29.log").read_text()
+
+
+def test_daily_file_handler_purges_old_dailies_at_construction(tmp_path) -> None:
+    import datetime as dt
+    import os
+
+    from physiclaw.config import CONFIG
+
+    old = tmp_path / "runtime-2026-01-01.log"
+    old.write_text("x")
+    ago = (dt.datetime.now() - dt.timedelta(days=CONFIG.retention.log_days + 1)).timestamp()
+    os.utime(old, (ago, ago))
+
+    _, handler = _file_logger(tmp_path, "t.daily.purge")
+    handler.close()
+
+    assert not old.exists()
+
+
+def test_setup_logging_with_unwritable_dir_falls_back_to_stderr(tmp_path) -> None:
+    import logging
+
+    from physiclaw.core.logger.logger import setup_logging
+
+    blocker = tmp_path / "blocked"
+    blocker.write_text("a file where a dir must go")
+
+    setup_logging("runtime", logging.INFO, file_dir=blocker / "sub")  # no raise
+
+    root = logging.getLogger()
+    assert len(root.handlers) == 1  # stream only

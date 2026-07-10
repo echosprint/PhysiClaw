@@ -22,12 +22,14 @@ from pathlib import Path
 from physiclaw import paths
 from physiclaw.agent.claude.plugin import prepare_plugin_dir
 from physiclaw.agent.engine import skill
+from physiclaw.agent.engine.trace import new_sid
 from physiclaw.agent.engine.mcp_inventory import discover_mcp_tools
 from physiclaw.text import read_text
 from physiclaw.agent.engine.skill import Skill
 from physiclaw.agent.runtime.hook import Trigger
 from physiclaw.agent.runtime.sentinel import parse_sentinel
 from physiclaw.config import CONFIG
+from physiclaw.core.logger.retention import purge_daily_logs
 
 log = logging.getLogger(__name__)
 
@@ -198,9 +200,13 @@ class _SessionLog:
 
     def __init__(self, sources: list[str]):
         LOG_DIR.mkdir(parents=True, exist_ok=True)
+        purge_daily_logs(LOG_DIR, "claude", CONFIG.retention.log_days)
         self._date = dt.datetime.now().strftime("%Y-%m-%d")
         self._last_text = ""  # most recent assistant text block, for sentinel check
-        self._f = open(LOG_DIR / f"claude-{self._date}.log", "a", encoding="utf-8")
+        self._f = open(
+            LOG_DIR / f"claude-{self._date}.log",
+            "a", encoding="utf-8", newline="\n",
+        )
         self._f.write(f"\n{'='*60}\n")
         self._write(f"WAKE triggers={sources}")
 
@@ -252,7 +258,10 @@ class _SessionLog:
             self._f.flush()
             self._f.close()
             self._date = today
-            self._f = open(LOG_DIR / f"claude-{today}.log", "a", encoding="utf-8")
+            self._f = open(
+                LOG_DIR / f"claude-{today}.log",
+                "a", encoding="utf-8", newline="\n",
+            )
             self._f.write(f"\n[{now:%H:%M:%S}] ROLLOVER ← continued from previous day\n")
         self._f.write(f"[{now:%H:%M:%S}] {msg}\n")
         self._f.flush()
@@ -440,9 +449,10 @@ async def spawn_claude(triggers: list[Trigger], *, model_id: str) -> None:
             await asyncio.sleep(RETRY_BACKOFF)
 
         # Plugin dir is the only per-attempt artifact. Fresh sid keeps
-        # retries from overlapping and, if we ever debug one, the tmp
-        # dir is uniquely labelled.
-        sid = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+        # retries from overlapping (the random suffix matters: a retry
+        # can start within the same second) and, if we ever debug one,
+        # the tmp dir is uniquely labelled.
+        sid = new_sid()
         plugin_dir = prepare_plugin_dir(sid, skills=skills)
         cmd = _build_cmd(
             triggers,

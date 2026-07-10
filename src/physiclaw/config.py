@@ -195,6 +195,9 @@ class ClaudeConfig:
 @dataclass
 class RetentionConfig:
     trace_days: int = 7
+    # Daily human-readable log files (engine-/runtime-/claude-*.log) are
+    # tiny next to session artifacts, so they keep a longer window.
+    log_days: int = 30
     # A cron job stuck in `fired` (no session ever closed it) is
     # auto-closed after this long: one-time → fail, periodic → re-armed.
     fired_expire_hours: int = 24

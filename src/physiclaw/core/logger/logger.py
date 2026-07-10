@@ -1,11 +1,13 @@
 """Shared log formatting and helpers for PhysiClaw.
 
 Exports:
-    setup_logging(tag, level) — colored TTY-aware root-logger config.
+    setup_logging(tag, level, file_dir=None) — colored TTY-aware
+    root-logger config, optionally mirrored to a daily log file.
     logged(fn) — decorator that logs an MCP tool call's completion
     with args and duration.
 """
 
+import datetime as dt
 import logging
 import os
 import re
@@ -13,6 +15,7 @@ import sys
 import time
 from collections.abc import Awaitable, Callable
 from functools import wraps
+from pathlib import Path
 from typing import Any, TypeVar, cast
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
@@ -75,11 +78,70 @@ class _TaggedFormatter(logging.Formatter):
         )
 
 
-def setup_logging(tag: str, level: int = logging.INFO) -> None:
-    """Configure the root logger with the colored, tagged format."""
-    handler = logging.StreamHandler()
-    handler.setFormatter(_TaggedFormatter(tag, _colorize()))
-    logging.basicConfig(level=level, handlers=[handler], force=True)
+class _DailyFileHandler(logging.Handler):
+    """Mirror log records into `<dir>/<prefix>-YYYY-MM-DD.log`, uncolored.
+
+    Re-opens the file when the date changes — the runtime is a long-lived
+    process, so a single open would strand everything in the start day's
+    file. Construction purges dailies older than
+    CONFIG.retention.log_days."""
+
+    def __init__(self, dir: Path, prefix: str, tag: str):
+        super().__init__()
+        from physiclaw.config import CONFIG
+        from physiclaw.core.logger.retention import purge_daily_logs
+
+        self._dir = dir
+        self._prefix = prefix
+        self._date = ""
+        self._f = None
+        self.setFormatter(_TaggedFormatter(tag, color=False))
+        dir.mkdir(parents=True, exist_ok=True)
+        purge_daily_logs(dir, prefix, CONFIG.retention.log_days)
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            today = dt.datetime.now().strftime("%Y-%m-%d")
+            if today != self._date:
+                if self._f is not None:
+                    self._f.close()
+                self._f = open(
+                    self._dir / f"{self._prefix}-{today}.log",
+                    "a", encoding="utf-8", newline="\n",
+                )
+                self._date = today
+            self._f.write(self.format(record) + "\n")
+            self._f.flush()
+        except Exception:
+            self.handleError(record)
+
+    def close(self) -> None:
+        try:
+            if self._f is not None and not self._f.closed:
+                self._f.close()
+        finally:
+            super().close()
+
+
+def setup_logging(
+    tag: str, level: int = logging.INFO, *, file_dir: Path | None = None,
+) -> None:
+    """Configure the root logger with the colored, tagged format.
+
+    With `file_dir`, records are additionally mirrored (uncolored) to a
+    daily `<tag>-YYYY-MM-DD.log` there — used by the runtime so wake
+    decisions and poll errors survive for post-mortems. File-handler
+    setup is fail-open: logging must never take the process down."""
+    handlers: list[logging.Handler] = []
+    stream = logging.StreamHandler()
+    stream.setFormatter(_TaggedFormatter(tag, _colorize()))
+    handlers.append(stream)
+    if file_dir is not None:
+        try:
+            handlers.append(_DailyFileHandler(file_dir, tag, tag))
+        except OSError:
+            pass  # unwritable dir → stderr-only; better than not starting
+    logging.basicConfig(level=level, handlers=handlers, force=True)
 
 
 def make_tagged_logger(name: str, tag: str, level: int = logging.INFO) -> logging.Logger:

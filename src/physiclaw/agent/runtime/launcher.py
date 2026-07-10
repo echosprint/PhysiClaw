@@ -41,6 +41,7 @@ from physiclaw.agent.provider import (
 )
 from physiclaw.agent.runtime import Runtime
 from physiclaw.config import model_ref_with_source, parse_model_ref
+from physiclaw import paths
 from physiclaw.core.logger import setup_logging
 
 log = logging.getLogger(__name__)
@@ -110,7 +111,12 @@ def launch() -> None:
     # before load_hooks() imports them.
     os.environ.setdefault("PHYSICLAW_SERVER", args.server)
 
-    setup_logging("runtime", logging.DEBUG if args.verbose else logging.INFO)
+    # Mirror to a daily file so wake decisions / poll errors survive for
+    # post-mortems — the runtime's stderr is gone once the terminal is.
+    setup_logging(
+        "runtime", logging.DEBUG if args.verbose else logging.INFO,
+        file_dir=paths.runtime_log_dir(),
+    )
     # Silence noisy per-request logs from httpx/httpcore.
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
