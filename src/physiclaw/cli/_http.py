@@ -82,21 +82,35 @@ def http_get(url: str, timeout: int = 120):
 def stream(resp, write, label: str, *, progress: bool = True) -> None:
     """Read ``resp`` in 64 KiB chunks into ``write``, drawing a progress bar
     sized from Content-Length (quietly streams if the length is unknown, or if
-    ``progress=False`` — for small downloads where only the result matters)."""
+    ``progress=False`` — for small downloads where only the result matters).
+
+    Raises ``urllib.error.ContentTooShortError`` (a ``URLError``, so every
+    caller's fallback path catches it) when the body ends short of the
+    declared Content-Length: a CDN dropping the connection mid-transfer just
+    makes ``read()`` return early with NO error, and the truncated bytes
+    would otherwise flow on into decoding/extraction as if complete."""
     raw = resp.getheader("Content-Length")
     total = int(raw) if raw and raw.isdigit() else None
+    received = 0
     if not progress or total is None:
         for chunk in iter(lambda: resp.read(1 << 16), b""):
             write(chunk)
-        return
-    # width=0 auto-fits the bar to the terminal. The default fixed width (36)
-    # plus the label and percent renders an ~80-column line, which wraps on a
-    # default-width window (iTerm2, Terminal); once wrapped, the redraw's \r
-    # only returns to the start of the wrapped row, so every update spills onto
-    # a new line instead of overwriting in place.
-    with typer.progressbar(
-        length=total, label=f"{label} ({total / 1048576:.1f} MiB)", width=0
-    ) as bar:
-        for chunk in iter(lambda: resp.read(1 << 16), b""):
-            write(chunk)
-            bar.update(len(chunk))
+            received += len(chunk)
+    else:
+        # width=0 auto-fits the bar to the terminal. The default fixed width
+        # (36) plus the label and percent renders an ~80-column line, which
+        # wraps on a default-width window (iTerm2, Terminal); once wrapped,
+        # the redraw's \r only returns to the start of the wrapped row, so
+        # every update spills onto a new line instead of overwriting in place.
+        with typer.progressbar(
+            length=total, label=f"{label} ({total / 1048576:.1f} MiB)", width=0
+        ) as bar:
+            for chunk in iter(lambda: resp.read(1 << 16), b""):
+                write(chunk)
+                received += len(chunk)
+                bar.update(len(chunk))
+    if total is not None and received < total:
+        raise urllib.error.ContentTooShortError(
+            f"retrieval incomplete: got only {received} out of {total} bytes",
+            None,
+        )

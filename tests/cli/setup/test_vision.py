@@ -148,6 +148,58 @@ def test_download_prebuilt_zip_reassembles_base64_parts(
     assert len(seen) == vision_mod._PREBUILT_PARTS
 
 
+def test_download_prebuilt_zip_retries_a_truncated_part(
+    tmp_path: Path, mocker,
+) -> None:
+    # A CDN dropping the connection mid-part makes read() end early with no
+    # error (the install.sh field failure) — stream()'s Content-Length check
+    # turns that into a retry, and the retry's clean bytes are used; the
+    # failed attempt's partial bytes must never reach the concatenation.
+    payload = _zip_bytes(b"PARTED-ONNX")
+    b64 = base64.b64encode(payload)
+    n = len(b64)
+    cuts = [b64[0:n // 4], b64[n // 4:n // 2], b64[n // 2:3 * n // 4], b64[3 * n // 4:]]
+    truncated_once = {"done": False}
+
+    def _fake_urlopen(req, **_kw):
+        i = int(req.full_url[-2:])
+        if i == 1 and not truncated_once["done"]:
+            truncated_once["done"] = True
+            # Body stops short of the declared length — no exception.
+            return _BytesCtx(cuts[1][: len(cuts[1]) // 2],
+                             content_length=str(len(cuts[1])))
+        return _BytesCtx(cuts[i])
+
+    mocker.patch.object(
+        http_mod.urllib.request, "urlopen", side_effect=_fake_urlopen
+    )
+
+    dest = tmp_path / "out.zip"
+    assert vision_mod._download_prebuilt_zip(dest) is True
+    assert dest.read_bytes() == payload
+
+
+def test_download_prebuilt_zip_corrupt_b64_falls_back_to_release(
+    tmp_path: Path, mocker,
+) -> None:
+    # Garbage that survives the length check (no Content-Length header, so
+    # stream can't verify) must not escape as a b64decode traceback — it
+    # falls through to the release like any other CDN failure. The parts
+    # concatenate to 17 base64 chars (≡1 mod 4), an impossible length.
+    def _fake_urlopen(req, **_kw):
+        if "b64" in req.full_url:
+            return _BytesCtx(b"abcde" if req.full_url.endswith("00") else b"abcd")
+        return _BytesCtx(b"WHOLE-ZIP")
+
+    mocker.patch.object(
+        http_mod.urllib.request, "urlopen", side_effect=_fake_urlopen
+    )
+
+    dest = tmp_path / "out.zip"
+    assert vision_mod._download_prebuilt_zip(dest) is True
+    assert dest.read_bytes() == b"WHOLE-ZIP"
+
+
 def test_download_prebuilt_zip_falls_back_to_release(
     tmp_path: Path, mocker,
 ) -> None:

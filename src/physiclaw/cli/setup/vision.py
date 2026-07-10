@@ -91,6 +91,23 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+def _fetch_part(url: str, label: str) -> bytes:
+    """Fetch one base64 part into its own buffer, retrying once — a single
+    mid-transfer drop shouldn't abandon the whole CDN path, and a failed
+    attempt must never leave partial bytes in the concatenated result
+    (that's how a truncated part once reached b64decode as garbage).
+    The retry's failure propagates to the caller's release fallback."""
+    buf = bytearray()
+    try:
+        with http_get(url) as r:
+            stream(r, buf.extend, label)
+    except OSError:
+        buf = bytearray()
+        with http_get(url) as r:
+            stream(r, buf.extend, f"{label} (retry)")
+    return bytes(buf)
+
+
 def _download_prebuilt_zip(dest: Path) -> bool:
     """Write the prebuilt zip to ``dest``.
 
@@ -101,11 +118,16 @@ def _download_prebuilt_zip(dest: Path) -> bool:
     try:
         b64 = bytearray()
         for i in range(_PREBUILT_PARTS):
-            with http_get(_PREBUILT_PARTS_URL.format(i=i)) as r:
-                stream(r, b64.extend, f"  vision model part {i + 1}/{_PREBUILT_PARTS}")
+            b64.extend(_fetch_part(
+                _PREBUILT_PARTS_URL.format(i=i),
+                f"  vision model part {i + 1}/{_PREBUILT_PARTS}",
+            ))
         dest.write_bytes(base64.b64decode(b64))
         return True
-    except OSError as e:
+    # ValueError covers binascii.Error from b64decode — belt-and-braces
+    # behind stream()'s truncation check, so corrupt parts fall through to
+    # the release instead of crashing the installer with a traceback.
+    except (OSError, ValueError) as e:
         typer.echo(typer.style(
             f"  CDN parts unavailable ({e}) — trying the release.",
             fg=typer.colors.YELLOW,

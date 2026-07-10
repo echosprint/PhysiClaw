@@ -181,3 +181,23 @@ def test_stream_writes_all_bytes_with_unknown_length() -> None:
     _http.stream(_StreamResp(data), out.extend, "test")  # no Content-Length
 
     assert bytes(out) == data
+
+
+def test_stream_raises_when_body_shorter_than_content_length() -> None:
+    # A dropped connection makes read() end early with NO error — the
+    # Content-Length check must turn that silent truncation into a raise
+    # (URLError subclass, so every caller's fallback path catches it).
+    out = bytearray()
+
+    with pytest.raises(urllib.error.ContentTooShortError):
+        _http.stream(
+            _StreamResp(b"z" * 3000, content_length="5000"), out.extend, "test"
+        )
+
+
+def test_stream_raises_on_truncation_in_quiet_mode_too() -> None:
+    with pytest.raises(urllib.error.ContentTooShortError):
+        _http.stream(
+            _StreamResp(b"z" * 10, content_length="5000"),
+            bytearray().extend, "test", progress=False,
+        )
