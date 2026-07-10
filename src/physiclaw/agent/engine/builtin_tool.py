@@ -7,52 +7,13 @@ turn). Other handlers are stateless. Source of truth for the registry is
 order in `tools[]` and exploits LLM position bias.
 """
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
 from physiclaw.agent.engine import jobs, memory, pitfalls, scratchpad, screen_layout, skill
-from physiclaw.agent.engine.plan import Plan
-from physiclaw.agent.engine.stuck import StuckGuard
 from physiclaw.agent.engine.job_store import KIND_ONE_TIME, KIND_PERIODIC, NEVER, load_jobs
+from physiclaw.agent.engine.session import Session
 from physiclaw.agent.runtime.sentinel import IDLE, STATUSES
-
-
-@dataclass
-class Session:
-    """Ephemeral state the engine and local tools share for one session."""
-    sentinel_status: str | None = None
-    sentinel_recap: str = ""
-    sentinel_turn_created_job: bool = False
-    # Set by report_screen_layout when it completes first-run setup: the
-    # engine ends this session and re-runs the same triggers from scratch so
-    # the fresh SYSTEM prompt carries the learned layout for the real task.
-    restart_for_setup: bool = False
-    # Pitfalls gate (engine._loop): `added_pitfalls` set by `add_pitfall` (also
-    # triggers post-session curation); `pitfall_retried` makes the corrective
-    # one-shot. Capture fires on a long DONE (turn > capture_turn_floor);
-    # `stuck_events` (loop-guard tally) only enriches the corrective's seed.
-    added_pitfalls: bool = False
-    pitfall_retried: bool = False
-    stuck_events: int = 0
-    # Memory-cue gate (engine._loop): `memory_cues` = "remember this"/"记住"
-    # snippets scanned per turn; `saved_memory` set by save/update_memory;
-    # `memory_retried` makes the corrective one-shot.
-    memory_cues: list[str] = field(default_factory=list)
-    saved_memory: bool = False
-    memory_retried: bool = False
-    plan: Plan = field(default_factory=Plan)
-    scratchpad: str = ""
-    # Turn-tagged plan + scratchpad history (trajectory.record) fed to the
-    # reflect corrective at a hard close — reflect on the whole run, not just
-    # the final state.
-    plan_log: list[tuple[int, str]] = field(default_factory=list)
-    scratchpad_log: list[tuple[int, str]] = field(default_factory=list)
-    guard: StuckGuard = field(default_factory=StuckGuard)
-    # Cross-call keyboard belief for the layout lint (see KeyboardTracker).
-    kb: screen_layout.KeyboardTracker = field(
-        default_factory=screen_layout.KeyboardTracker
-    )
-
 
 Handler = Callable[[Session, dict], Awaitable[str]]
 

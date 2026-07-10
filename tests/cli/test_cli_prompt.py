@@ -13,8 +13,9 @@ from unittest.mock import MagicMock
 
 from typer.testing import CliRunner
 
+from physiclaw.agent.engine import assemble as assemble_mod
 from physiclaw.agent.engine import engine as engine_mod
-from physiclaw.agent.engine.builtin_tool import Session
+from physiclaw.agent.engine.session import Session
 from physiclaw.agent.engine.dto import AssistantMessage, FinishReason, ToolCall, Usage
 from physiclaw.agent.runtime.hook import Trigger
 from physiclaw.agent.runtime.sentinel import DONE
@@ -69,7 +70,7 @@ def test_prompt_request_save_as_writes_file(tmp_path) -> None:
 
 class _FrozenDatetime:
     """Fixed clock so the trigger's `Now:` stamp is identical in the engine
-    run and the CLI build (both go through `engine.dt.datetime.now`)."""
+    run and the CLI build (both go through `assemble.dt.datetime.now`)."""
 
     @classmethod
     def now(cls, tz=None):  # noqa: ARG003
@@ -135,7 +136,7 @@ async def test_cli_request_matches_engine_turn0(monkeypatch) -> None:
     capture = _CaptureProvider()
     # Real assembly (skills, prompt render, placeholders, tails); only the
     # outside world is stubbed.
-    monkeypatch.setattr(engine_mod, "dt", _FakeDtModule)
+    monkeypatch.setattr(assemble_mod, "dt", _FakeDtModule)
     monkeypatch.setattr(engine_mod, "get_mcp", _aret(MagicMock()))
     monkeypatch.setattr(engine_mod, "list_tools_cached", _aret([]))
     monkeypatch.setattr(engine_mod, "make_provider", lambda *_a, **_k: capture)

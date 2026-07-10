@@ -6,7 +6,7 @@ from __future__ import annotations
 import pytest
 
 from physiclaw.agent.engine import trajectory
-from physiclaw.agent.engine.builtin_tool import Session
+from physiclaw.agent.engine.session import Session
 
 
 def _drafted_plan(session: Session, understanding: str, steps: list[str]) -> None:

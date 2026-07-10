@@ -3,7 +3,9 @@
 
 Phase 5 — exercises the full session lifecycle with a scripted
 FakeProvider and FakeMcpClient. Existing pure-helper tests live in
-`test_engine.py`; this file owns the loop coverage.
+`test_engine.py`; this file owns the loop coverage. Policy-object units
+(gates / guards / observers) are exercised through the loop here — their
+judgment is engine-visible behavior.
 """
 from __future__ import annotations
 
@@ -14,7 +16,19 @@ from unittest.mock import MagicMock
 import pytest
 
 from physiclaw.agent.engine import engine as engine_mod
-from physiclaw.agent.engine.builtin_tool import LocalTool, Session
+from physiclaw.agent.engine import (
+    builtin_tool as builtin_tool_mod,
+    compact as compact_mod,
+    jobs as jobs_mod,
+    memory as memory_mod,
+    plan as plan_mod,
+    policy as policy_mod,
+    prompt as prompt_mod,
+    scratchpad as scratchpad_mod,
+    screen_layout as screen_layout_mod,
+    skill as skill_mod,
+)
+from physiclaw.agent.engine.builtin_tool import LocalTool
 from physiclaw.agent.engine.dto import (
     AssistantMessage,
     FinishReason,
@@ -24,8 +38,10 @@ from physiclaw.agent.engine.dto import (
     Usage,
     UserMessage,
 )
+from physiclaw.agent.engine.session import Session
 from physiclaw.agent.runtime.hook import Trigger
 from physiclaw.agent.runtime.sentinel import DONE, FAIL, IDLE, STUCK, WAIT
+from physiclaw.config import CONFIG
 
 
 pytestmark = [pytest.mark.slow]
@@ -92,18 +108,48 @@ def _tc(name: str, args: dict | None = None, *, tcid: str = None) -> ToolCall:
     )
 
 
+def _settings(**over) -> engine_mod.Settings:
+    base = dict(
+        max_turns=300, max_session_attempts=3, provider_retry_attempts=3,
+        retry_backoff_seconds=0.0, wait_default_minutes=15,
+    )
+    base.update(over)
+    return engine_mod.Settings(**base)
+
+
+def _mk_run(provider=None, *, mcp=None, tool_schemas=None, schema_by_name=None,
+            local_registry=None, tr=None, rlog=None, layout_incomplete=False,
+            policies=None, settings=None) -> engine_mod.EngineRun:
+    tool_schemas = tool_schemas if tool_schemas is not None else []
+    return engine_mod.EngineRun(
+        provider=provider,
+        mcp=mcp if mcp is not None else FakeMcpClient(),
+        tool_schemas=tool_schemas,
+        schema_by_name=(
+            schema_by_name if schema_by_name is not None
+            else {s["name"]: s for s in tool_schemas}
+        ),
+        local_registry=local_registry if local_registry is not None else {},
+        tr=tr if tr is not None else MagicMock(),
+        rlog=rlog if rlog is not None else MagicMock(),
+        settings=settings or _settings(),
+        policies=(
+            policies if policies is not None
+            else policy_mod.default_policies(layout_incomplete=layout_incomplete)
+        ),
+        layout_incomplete=layout_incomplete,
+    )
+
+
 # ---------- _dispatch ----------
 
 
 @pytest.mark.asyncio
 async def test_dispatch_unknown_tool_returns_error() -> None:
-    tr = MagicMock()
     call = _tc("does_not_exist")
+    run = _mk_run()
 
-    result = await engine_mod._dispatch(
-        call=call, schema_by_name={}, mcp=FakeMcpClient(),
-        local_registry={}, session=Session(), tr=tr, turn=0,
-    )
+    result = await engine_mod._dispatch(run, Session(), call, 0)
 
     assert result.is_error is True
     assert "unknown tool" in result.content
@@ -112,7 +158,6 @@ async def test_dispatch_unknown_tool_returns_error() -> None:
 
 @pytest.mark.asyncio
 async def test_dispatch_invalid_args_returns_error() -> None:
-    tr = MagicMock()
     schema = {
         "name": "ping",
         "input_schema": {
@@ -121,15 +166,10 @@ async def test_dispatch_invalid_args_returns_error() -> None:
             "required": ["x"],
         },
     }
+    run = _mk_run(schema_by_name={"ping": schema})
 
     result = await engine_mod._dispatch(
-        call=_tc("ping", {}),  # missing required "x"
-        schema_by_name={"ping": schema},
-        mcp=FakeMcpClient(),
-        local_registry={},
-        session=Session(),
-        tr=tr,
-        turn=0,
+        run, Session(), _tc("ping", {}), 0,  # missing required "x"
     )
 
     assert result.is_error is True
@@ -138,23 +178,14 @@ async def test_dispatch_invalid_args_returns_error() -> None:
 
 @pytest.mark.asyncio
 async def test_dispatch_local_tool_returns_text() -> None:
-    tr = MagicMock()
-
     async def handler(_session, _args):
         return "hello"
 
     tool = LocalTool("greet", "say hi", {"type": "object"}, handler)
     schema = {"name": "greet", "input_schema": {"type": "object"}}
+    run = _mk_run(schema_by_name={"greet": schema}, local_registry={"greet": tool})
 
-    result = await engine_mod._dispatch(
-        call=_tc("greet"),
-        schema_by_name={"greet": schema},
-        mcp=FakeMcpClient(),
-        local_registry={"greet": tool},
-        session=Session(),
-        tr=tr,
-        turn=0,
-    )
+    result = await engine_mod._dispatch(run, Session(), _tc("greet"), 0)
 
     assert result.is_error is False
     assert result.content == "hello"
@@ -162,19 +193,11 @@ async def test_dispatch_local_tool_returns_text() -> None:
 
 @pytest.mark.asyncio
 async def test_dispatch_mcp_tool_returns_blocks() -> None:
-    tr = MagicMock()
     schema = {"name": "physiclaw__peek", "input_schema": {"type": "object"}}
     mcp = FakeMcpClient()
+    run = _mk_run(mcp=mcp, schema_by_name={"physiclaw__peek": schema})
 
-    result = await engine_mod._dispatch(
-        call=_tc("physiclaw__peek"),
-        schema_by_name={"physiclaw__peek": schema},
-        mcp=mcp,
-        local_registry={},
-        session=Session(),
-        tr=tr,
-        turn=0,
-    )
+    result = await engine_mod._dispatch(run, Session(), _tc("physiclaw__peek"), 0)
 
     assert result.is_error is False
     assert mcp.tool_calls == [("physiclaw__peek", {})]
@@ -182,23 +205,14 @@ async def test_dispatch_mcp_tool_returns_blocks() -> None:
 
 @pytest.mark.asyncio
 async def test_dispatch_local_handler_exception_returns_error() -> None:
-    tr = MagicMock()
-
     async def boom(_session, _args):
         raise RuntimeError("boom")
 
     tool = LocalTool("bad", "x", {"type": "object"}, boom)
     schema = {"name": "bad", "input_schema": {"type": "object"}}
+    run = _mk_run(schema_by_name={"bad": schema}, local_registry={"bad": tool})
 
-    result = await engine_mod._dispatch(
-        call=_tc("bad"),
-        schema_by_name={"bad": schema},
-        mcp=FakeMcpClient(),
-        local_registry={"bad": tool},
-        session=Session(),
-        tr=tr,
-        turn=0,
-    )
+    result = await engine_mod._dispatch(run, Session(), _tc("bad"), 0)
 
     assert result.is_error is True
     assert "boom" in result.content
@@ -206,22 +220,15 @@ async def test_dispatch_local_handler_exception_returns_error() -> None:
 
 @pytest.mark.asyncio
 async def test_dispatch_mcp_exception_returns_error() -> None:
-    tr = MagicMock()
     schema = {"name": "physiclaw__tap", "input_schema": {"type": "object"}}
 
     class BadMcp:
         async def call_tool(self, *a, **kw):
             raise RuntimeError("mcp down")
 
-    result = await engine_mod._dispatch(
-        call=_tc("physiclaw__tap"),
-        schema_by_name={"physiclaw__tap": schema},
-        mcp=BadMcp(),
-        local_registry={},
-        session=Session(),
-        tr=tr,
-        turn=0,
-    )
+    run = _mk_run(mcp=BadMcp(), schema_by_name={"physiclaw__tap": schema})
+
+    result = await engine_mod._dispatch(run, Session(), _tc("physiclaw__tap"), 0)
 
     assert result.is_error is True
     assert "mcp down" in result.content
@@ -269,16 +276,11 @@ def _all_text(content) -> str:
 
 
 async def _tap_n(session, mcp, n: int):
+    run = _mk_run(mcp=mcp, schema_by_name={"tap": _TAP_SCHEMA})
     results = []
     for _ in range(n):
         results.append(await engine_mod._dispatch(
-            call=_tc("tap", {"bbox": list(_STEPPER)}),
-            schema_by_name={"tap": _TAP_SCHEMA},
-            mcp=mcp,
-            local_registry={},
-            session=session,
-            tr=MagicMock(),
-            turn=0,
+            run, session, _tc("tap", {"bbox": list(_STEPPER)}), 0,
         ))
     return results
 
@@ -386,15 +388,10 @@ async def test_dispatch_mcp_failure_feeds_error_counter_not_misses() -> None:
         async def call_tool(self, *a, **kw):
             raise RuntimeError("arm jammed")
 
+    run = _mk_run(mcp=JammedMcp(), schema_by_name={"tap": _TAP_SCHEMA})
     for _ in range(2):
         result = await engine_mod._dispatch(
-            call=_tc("tap", {"bbox": list(_STEPPER)}),
-            schema_by_name={"tap": _TAP_SCHEMA},
-            mcp=JammedMcp(),
-            local_registry={},
-            session=session,
-            tr=MagicMock(),
-            turn=0,
+            run, session, _tc("tap", {"bbox": list(_STEPPER)}), 0,
         )
         assert result.is_error is True and "arm jammed" in result.content
 
@@ -412,17 +409,12 @@ async def test_plan_gate_block_does_not_feed_guard() -> None:
     # toward the stuck guard's same-target misses.
     session = Session()
     session.guard._exempt = []
+    run = _mk_run(mcp=VerdictMcpClient(), schema_by_name={"tap": _TAP_SCHEMA})
 
     for _ in range(10):
         result = await engine_mod._dispatch(
-            call=_tc("tap", {"bbox": list(_STEPPER)}),
-            schema_by_name={"tap": _TAP_SCHEMA},
-            mcp=VerdictMcpClient(),
-            local_registry={},
-            session=session,
-            tr=MagicMock(),
-            turn=engine_mod.PLAN_REQUIRED_AFTER,
-            plan_overdue=True,
+            run, session, _tc("tap", {"bbox": list(_STEPPER)}),
+            CONFIG.engine.plan_required_after,
         )
         assert result.content.startswith("BLOCKED")
 
@@ -442,28 +434,17 @@ async def test_dispatch_error_repeat_warns_and_blocks() -> None:
         async def call_tool(self, *a, **kw):
             raise RuntimeError("target overlaps AssistiveTouch button")
 
+    run = _mk_run(mcp=OverlapMcp(), schema_by_name={"tap": _TAP_SCHEMA})
     results = []
     for _ in range(BLOCK_AT - 1):
         results.append(await engine_mod._dispatch(
-            call=_tc("tap", {"bbox": list(_STEPPER)}),
-            schema_by_name={"tap": _TAP_SCHEMA},
-            mcp=OverlapMcp(),
-            local_registry={},
-            session=session,
-            tr=MagicMock(),
-            turn=0,
+            run, session, _tc("tap", {"bbox": list(_STEPPER)}), 0,
         ))
     assert all(r.is_error for r in results)
     assert "⚠" in results[WARN_AT - 1].content  # warning on the WARN_AT-th
 
     blocked = await engine_mod._dispatch(
-        call=_tc("tap", {"bbox": list(_STEPPER)}),
-        schema_by_name={"tap": _TAP_SCHEMA},
-        mcp=OverlapMcp(),
-        local_registry={},
-        session=session,
-        tr=MagicMock(),
-        turn=0,
+        run, session, _tc("tap", {"bbox": list(_STEPPER)}), 0,
     )
     assert blocked.content.startswith("BLOCKED")
     assert "failed" in blocked.content
@@ -472,18 +453,13 @@ async def test_dispatch_error_repeat_warns_and_blocks() -> None:
 # ---------- _dispatch × plan gate ----------
 
 
-async def _gated_dispatch(session, call, *, plan_overdue: bool):
+async def _gated_dispatch(session, call, *, turn: int):
     schema = {"name": call.name, "input_schema": {"type": "object"}}
-    return await engine_mod._dispatch(
-        call=call,
-        schema_by_name={call.name: schema, "tap": _TAP_SCHEMA},
+    run = _mk_run(
         mcp=VerdictMcpClient(),
-        local_registry={},
-        session=session,
-        tr=MagicMock(),
-        turn=engine_mod.PLAN_REQUIRED_AFTER,
-        plan_overdue=plan_overdue,
+        schema_by_name={call.name: schema, "tap": _TAP_SCHEMA},
     )
+    return await engine_mod._dispatch(run, session, call, turn)
 
 
 @pytest.mark.asyncio
@@ -491,7 +467,8 @@ async def test_plan_gate_blocks_action_tools_when_overdue() -> None:
     session = Session()
 
     result = await _gated_dispatch(
-        session, _tc("tap", {"bbox": list(_STEPPER)}), plan_overdue=True,
+        session, _tc("tap", {"bbox": list(_STEPPER)}),
+        turn=CONFIG.engine.plan_required_after,
     )
 
     assert result.is_error is True
@@ -502,11 +479,13 @@ async def test_plan_gate_blocks_action_tools_when_overdue() -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("name", ["note", "update_progress", "end_session"])
 async def test_plan_gate_exempts_the_way_out(name: str) -> None:
-    # Exempt tools reach normal dispatch (here: unknown-tool error from an
-    # empty registry — anything but the plan-gate BLOCKED text).
+    # Exempt tools reach normal dispatch (anything but the plan-gate
+    # BLOCKED text).
     session = Session()
 
-    result = await _gated_dispatch(session, _tc(name), plan_overdue=True)
+    result = await _gated_dispatch(
+        session, _tc(name), turn=CONFIG.engine.plan_required_after,
+    )
 
     assert not str(result.content).startswith("BLOCKED")
 
@@ -516,30 +495,31 @@ async def test_plan_gate_open_when_not_overdue() -> None:
     session = Session()
 
     result = await _gated_dispatch(
-        session, _tc("tap", {"bbox": list(_STEPPER)}), plan_overdue=False,
+        session, _tc("tap", {"bbox": list(_STEPPER)}), turn=0,
     )
 
     assert result.is_error is False
 
 
-def test_plan_overdue_predicate() -> None:
+def test_plan_gate_overdue_predicate() -> None:
     # The gate arms only when: past the threshold turn AND the plan is
     # still undrafted AND not in first-run setup.
-    from physiclaw.agent.engine.engine import _plan_overdue
-    from physiclaw.agent.engine.plan import Plan
+    n = CONFIG.engine.plan_required_after
+    gate = policy_mod.PlanGate(layout_incomplete=False, required_after=n)
+    setup_gate = policy_mod.PlanGate(layout_incomplete=True, required_after=n)
 
-    fresh = Plan()
-    assert _plan_overdue(engine_mod.PLAN_REQUIRED_AFTER, fresh, False)
-    assert not _plan_overdue(engine_mod.PLAN_REQUIRED_AFTER - 1, fresh, False)
-    assert not _plan_overdue(engine_mod.PLAN_REQUIRED_AFTER, fresh, True)
+    fresh = Session()
+    assert gate.overdue(fresh, n)
+    assert not gate.overdue(fresh, n - 1)
+    assert not setup_gate.overdue(fresh, n)
 
-    drafted = Plan()
-    drafted.update(user_said="buy yogurt")
-    assert not _plan_overdue(engine_mod.PLAN_REQUIRED_AFTER, drafted, False)
+    drafted = Session()
+    drafted.plan.update(user_said="buy yogurt")
+    assert not gate.overdue(drafted, n)
 
-    steps_only = Plan()
-    steps_only.update(steps=[{"content": "reply to user", "status": "in_progress"}])
-    assert not _plan_overdue(engine_mod.PLAN_REQUIRED_AFTER, steps_only, False)
+    steps_only = Session()
+    steps_only.plan.update(steps=[{"content": "reply to user", "status": "in_progress"}])
+    assert not gate.overdue(steps_only, n)
 
 
 # ---------- _loop ----------
@@ -597,25 +577,30 @@ def _schemas(registry: dict[str, LocalTool]) -> list[dict]:
     ]
 
 
+def _loop_run(provider, registry, **over) -> engine_mod.EngineRun:
+    schemas = _schemas(registry)
+    return _mk_run(
+        provider=provider, tool_schemas=schemas, local_registry=registry, **over,
+    )
+
+
 @pytest.fixture
 def patched_loop_deps(mocker):
     """Stub out compact / scratchpad / plan tail injection so _loop runs
     in isolation."""
-    mocker.patch.object(engine_mod.scratchpad, "inject_tail",
+    mocker.patch.object(scratchpad_mod, "inject_tail",
                         side_effect=lambda msgs, _sp: msgs)
-    mocker.patch.object(engine_mod.plan, "inject_tail",
+    mocker.patch.object(plan_mod, "inject_tail",
                         side_effect=lambda msgs, _p: msgs)
-    mocker.patch.object(engine_mod.screen_layout, "inject_tail",
+    mocker.patch.object(screen_layout_mod, "inject_tail",
                         side_effect=lambda msgs: msgs)
-    mocker.patch.object(engine_mod.compact, "drop_stale_screens")
-    mocker.patch.object(engine_mod.compact, "collapse_old_turns")
+    mocker.patch.object(compact_mod, "drop_stale_screens")
+    mocker.patch.object(compact_mod, "collapse_old_turns")
 
 
 @pytest.mark.asyncio
 async def test_loop_closes_cleanly_on_end_session(patched_loop_deps) -> None:
     registry = _registry()
-    schemas = _schemas(registry)
-    schema_by_name = {s["name"]: s for s in schemas}
 
     asst = _asst(
         tool_calls=[
@@ -632,13 +617,7 @@ async def test_loop_closes_cleanly_on_end_session(patched_loop_deps) -> None:
         UserMessage(content="trig"),
     ]
 
-    await engine_mod._loop(
-        mcp=FakeMcpClient(), provider=provider,
-        messages=messages, tool_schemas=schemas,
-        schema_by_name=schema_by_name, local_registry=registry,
-        session=session, prompt_hash="h",
-        tr=MagicMock(), rlog=MagicMock(),
-    )
+    await engine_mod._loop(_loop_run(provider, registry), session, messages)
 
     assert session.sentinel_status == DONE
     assert session.sentinel_recap == "all done"
@@ -652,17 +631,16 @@ async def test_loop_closes_cleanly_on_end_session(patched_loop_deps) -> None:
 async def test_loop_skips_layout_reminder_when_complete(mocker) -> None:
     # Default (layout_incomplete=False) must NOT call screen_layout.inject_tail
     # — that avoids a per-turn disk read once setup is done.
-    mocker.patch.object(engine_mod.scratchpad, "inject_tail",
+    mocker.patch.object(scratchpad_mod, "inject_tail",
                         side_effect=lambda msgs, _sp: msgs)
-    mocker.patch.object(engine_mod.plan, "inject_tail",
+    mocker.patch.object(plan_mod, "inject_tail",
                         side_effect=lambda msgs, _p: msgs)
-    mocker.patch.object(engine_mod.compact, "drop_stale_screens")
-    mocker.patch.object(engine_mod.compact, "collapse_old_turns")
-    spy = mocker.patch.object(engine_mod.screen_layout, "inject_tail",
+    mocker.patch.object(compact_mod, "drop_stale_screens")
+    mocker.patch.object(compact_mod, "collapse_old_turns")
+    spy = mocker.patch.object(screen_layout_mod, "inject_tail",
                               side_effect=lambda msgs: msgs)
 
     registry = _registry()
-    schemas = _schemas(registry)
     asst = _asst(tool_calls=[
         _tc("note", {"summary": "x"}),
         _tc("end_session", {"status": DONE, "recap": "done"}),
@@ -670,22 +648,16 @@ async def test_loop_skips_layout_reminder_when_complete(mocker) -> None:
     session = Session()
 
     await engine_mod._loop(
-        mcp=FakeMcpClient(), provider=FakeProvider([asst]),
-        messages=[SystemMessage(content="s")], tool_schemas=schemas,
-        schema_by_name={s["name"]: s for s in schemas},
-        local_registry=registry, session=session, prompt_hash="h",
-        tr=MagicMock(), rlog=MagicMock(),  # layout_incomplete defaults False
+        _loop_run(FakeProvider([asst]), registry),  # layout_incomplete defaults False
+        session, [SystemMessage(content="s")],
     )
     spy.assert_not_called()
 
     # With layout_incomplete=True it IS injected each turn.
     session2 = Session()
     await engine_mod._loop(
-        mcp=FakeMcpClient(), provider=FakeProvider([asst]),
-        messages=[SystemMessage(content="s")], tool_schemas=schemas,
-        schema_by_name={s["name"]: s for s in schemas},
-        local_registry=registry, session=session2, prompt_hash="h",
-        tr=MagicMock(), rlog=MagicMock(), layout_incomplete=True,
+        _loop_run(FakeProvider([asst]), registry, layout_incomplete=True),
+        session2, [SystemMessage(content="s")],
     )
     spy.assert_called()
 
@@ -694,21 +666,16 @@ async def test_loop_skips_layout_reminder_when_complete(mocker) -> None:
 async def test_loop_stucks_after_consecutive_correctives(patched_loop_deps) -> None:
     # A model that never holds the [note, one-other] shape must end
     # STUCK after CORRECTIVE_LIMIT consecutive correctives instead of
-    # burning MAX_TURNS of round-trips.
+    # burning max_turns of round-trips.
     registry = _registry()
-    schemas = _schemas(registry)
-    schema_by_name = {s["name"]: s for s in schemas}
 
     bad = [_asst(tool_calls=[_tc("peek")]) for _ in range(engine_mod.CORRECTIVE_LIMIT + 3)]
     provider = FakeProvider(bad)
     session = Session()
 
     await engine_mod._loop(
-        mcp=FakeMcpClient(), provider=provider,
-        messages=[SystemMessage(content="sys"), UserMessage(content="trig")],
-        tool_schemas=schemas, schema_by_name=schema_by_name,
-        local_registry=registry, session=session, prompt_hash="h",
-        tr=MagicMock(), rlog=MagicMock(),
+        _loop_run(provider, registry), session,
+        [SystemMessage(content="sys"), UserMessage(content="trig")],
     )
 
     assert session.sentinel_status == STUCK
@@ -740,9 +707,9 @@ def _scaffold_messages() -> list:
     return [
         SystemMessage(content="sys"),
         UserMessage(content="trig"),
-        engine_mod.compact.new_summary_placeholder(),
-        UserMessage(content=engine_mod.compact.MEMORY_INITIAL),
-        engine_mod.compact.new_skills_placeholder(),
+        compact_mod.new_summary_placeholder(),
+        UserMessage(content=compact_mod.MEMORY_INITIAL),
+        compact_mod.new_skills_placeholder(),
     ]
 
 
@@ -755,17 +722,10 @@ def _req_texts(request: list) -> str:
 
 async def _run_checkpoint_session(responses, provider_cls=CheckpointProvider):
     registry = _registry()
-    schemas = _schemas(registry)
     provider = provider_cls(responses)
     session = Session()
     messages = _scaffold_messages()
-    await engine_mod._loop(
-        mcp=FakeMcpClient(), provider=provider,
-        messages=messages, tool_schemas=schemas,
-        schema_by_name={s["name"]: s for s in schemas},
-        local_registry=registry, session=session, prompt_hash="h",
-        tr=MagicMock(), rlog=MagicMock(),
-    )
+    await engine_mod._loop(_loop_run(provider, registry), session, messages)
     return provider, session, messages
 
 
@@ -874,8 +834,6 @@ async def test_loop_corrective_counter_resets_on_good_turn(patched_loop_deps) ->
     # Interleaved good turns reset the counter — occasional shape slips
     # never accumulate into a STUCK.
     registry = _registry()
-    schemas = _schemas(registry)
-    schema_by_name = {s["name"]: s for s in schemas}
 
     def good(i):
         return _asst(tool_calls=[
@@ -896,11 +854,8 @@ async def test_loop_corrective_counter_resets_on_good_turn(patched_loop_deps) ->
     session = Session()
 
     await engine_mod._loop(
-        mcp=FakeMcpClient(), provider=provider,
-        messages=[SystemMessage(content="sys"), UserMessage(content="trig")],
-        tool_schemas=schemas, schema_by_name=schema_by_name,
-        local_registry=registry, session=session, prompt_hash="h",
-        tr=MagicMock(), rlog=MagicMock(),
+        _loop_run(provider, registry), session,
+        [SystemMessage(content="sys"), UserMessage(content="trig")],
     )
 
     assert session.sentinel_status == DONE
@@ -909,17 +864,12 @@ async def test_loop_corrective_counter_resets_on_good_turn(patched_loop_deps) ->
 @pytest.mark.asyncio
 async def test_loop_routes_content_filter_to_fail(patched_loop_deps) -> None:
     registry = _registry()
-    schemas = _schemas(registry)
     asst = _asst(finish=FinishReason.CONTENT_FILTER)
     provider = FakeProvider([asst])
     session = Session()
 
     await engine_mod._loop(
-        mcp=FakeMcpClient(), provider=provider,
-        messages=[SystemMessage(content="s")], tool_schemas=schemas,
-        schema_by_name={s["name"]: s for s in schemas},
-        local_registry=registry, session=session, prompt_hash="h",
-        tr=MagicMock(), rlog=MagicMock(),
+        _loop_run(provider, registry), session, [SystemMessage(content="s")],
     )
 
     assert session.sentinel_status == FAIL
@@ -929,16 +879,11 @@ async def test_loop_routes_content_filter_to_fail(patched_loop_deps) -> None:
 @pytest.mark.asyncio
 async def test_loop_provider_failure_marks_stuck(patched_loop_deps) -> None:
     registry = _registry()
-    schemas = _schemas(registry)
     provider = FakeProvider([RuntimeError("network")])
     session = Session()
 
     await engine_mod._loop(
-        mcp=FakeMcpClient(), provider=provider,
-        messages=[SystemMessage(content="s")], tool_schemas=schemas,
-        schema_by_name={s["name"]: s for s in schemas},
-        local_registry=registry, session=session, prompt_hash="h",
-        tr=MagicMock(), rlog=MagicMock(),
+        _loop_run(provider, registry), session, [SystemMessage(content="s")],
     )
 
     assert session.sentinel_status == STUCK
@@ -948,7 +893,6 @@ async def test_loop_provider_failure_marks_stuck(patched_loop_deps) -> None:
 @pytest.mark.asyncio
 async def test_loop_no_tool_calls_injects_corrective(patched_loop_deps) -> None:
     registry = _registry()
-    schemas = _schemas(registry)
     asst_no_calls = _asst(content="just talking")
     asst_close = _asst(tool_calls=[
         _tc("note", {"summary": "x"}),
@@ -958,13 +902,7 @@ async def test_loop_no_tool_calls_injects_corrective(patched_loop_deps) -> None:
     session = Session()
     messages: list = [SystemMessage(content="s")]
 
-    await engine_mod._loop(
-        mcp=FakeMcpClient(), provider=provider,
-        messages=messages, tool_schemas=schemas,
-        schema_by_name={s["name"]: s for s in schemas},
-        local_registry=registry, session=session, prompt_hash="h",
-        tr=MagicMock(), rlog=MagicMock(),
-    )
+    await engine_mod._loop(_loop_run(provider, registry), session, messages)
 
     correctives = [
         m for m in messages
@@ -979,7 +917,6 @@ async def test_loop_bad_turn_shape_injects_corrective(
     patched_loop_deps,
 ) -> None:
     registry = _registry()
-    schemas = _schemas(registry)
     bad = _asst(tool_calls=[_tc("peek")])
     good = _asst(tool_calls=[
         _tc("note", {"summary": "y"}),
@@ -989,13 +926,7 @@ async def test_loop_bad_turn_shape_injects_corrective(
     session = Session()
     messages: list = [SystemMessage(content="s")]
 
-    await engine_mod._loop(
-        mcp=FakeMcpClient(), provider=provider,
-        messages=messages, tool_schemas=schemas,
-        schema_by_name={s["name"]: s for s in schemas},
-        local_registry=registry, session=session, prompt_hash="h",
-        tr=MagicMock(), rlog=MagicMock(),
-    )
+    await engine_mod._loop(_loop_run(provider, registry), session, messages)
 
     correctives = [
         m for m in messages
@@ -1006,19 +937,14 @@ async def test_loop_bad_turn_shape_injects_corrective(
 
 
 @pytest.mark.asyncio
-async def test_loop_max_turns_marks_stuck(patched_loop_deps, mocker) -> None:
-    mocker.patch.object(engine_mod, "MAX_TURNS", 2)
+async def test_loop_max_turns_marks_stuck(patched_loop_deps) -> None:
     registry = _registry()
-    schemas = _schemas(registry)
     provider = FakeProvider([_asst() for _ in range(2)])
     session = Session()
 
     await engine_mod._loop(
-        mcp=FakeMcpClient(), provider=provider,
-        messages=[SystemMessage(content="s")], tool_schemas=schemas,
-        schema_by_name={s["name"]: s for s in schemas},
-        local_registry=registry, session=session, prompt_hash="h",
-        tr=MagicMock(), rlog=MagicMock(),
+        _loop_run(provider, registry, settings=_settings(max_turns=2)),
+        session, [SystemMessage(content="s")],
     )
 
     assert session.sentinel_status == STUCK
@@ -1028,7 +954,6 @@ async def test_loop_max_turns_marks_stuck(patched_loop_deps, mocker) -> None:
 @pytest.mark.asyncio
 async def test_loop_finish_length_logs_warning(patched_loop_deps) -> None:
     registry = _registry()
-    schemas = _schemas(registry)
     asst = _asst(
         tool_calls=[
             _tc("note", {"summary": "x"}),
@@ -1041,11 +966,7 @@ async def test_loop_finish_length_logs_warning(patched_loop_deps) -> None:
     tr = MagicMock()
 
     await engine_mod._loop(
-        mcp=FakeMcpClient(), provider=provider,
-        messages=[SystemMessage(content="s")], tool_schemas=schemas,
-        schema_by_name={s["name"]: s for s in schemas},
-        local_registry=registry, session=session, prompt_hash="h",
-        tr=tr, rlog=MagicMock(),
+        _loop_run(provider, registry, tr=tr), session, [SystemMessage(content="s")],
     )
 
     events = [c.args[0].get("event") for c in tr.write.call_args_list]
@@ -1092,15 +1013,8 @@ def _pitfall_asst() -> AssistantMessage:
 
 
 async def _run_close_loop(provider, session, registry):
-    schemas = _schemas(registry)
     messages: list = [SystemMessage(content="s")]
-    await engine_mod._loop(
-        mcp=FakeMcpClient(), provider=provider,
-        messages=messages, tool_schemas=schemas,
-        schema_by_name={s["name"]: s for s in schemas},
-        local_registry=registry, session=session, prompt_hash="h",
-        tr=MagicMock(), rlog=MagicMock(),
-    )
+    await engine_mod._loop(_loop_run(provider, registry), session, messages)
     return messages
 
 
@@ -1212,7 +1126,6 @@ async def test_loop_no_pitfall_gate_on_idle(patched_loop_deps, monkeypatch) -> N
 
 def test_should_capture_matrix() -> None:
     from physiclaw.agent.engine.pitfalls import should_capture
-    from physiclaw.config import CONFIG
 
     floor = CONFIG.pitfalls.capture_turn_floor
     s = Session()
@@ -1352,34 +1265,34 @@ def _patch_session_deps(mocker):
                         side_effect=_async_returning(FakeMcpClient()))
     mocker.patch.object(engine_mod, "list_tools_cached",
                         side_effect=_async_returning([]))
-    mocker.patch.object(engine_mod.skill, "discover_builtin_skills", return_value={})
-    mocker.patch.object(engine_mod.skill, "discover_user_skills", return_value={})
+    mocker.patch.object(skill_mod, "discover_builtin_skills", return_value={})
+    mocker.patch.object(skill_mod, "discover_user_skills", return_value={})
     mocker.patch.object(
-        engine_mod.builtin_tool, "build_registry", return_value=_registry(),
+        builtin_tool_mod, "build_registry", return_value=_registry(),
     )
     mocker.patch.object(
-        engine_mod.builtin_tool, "schemas", return_value=_schemas(_registry()),
+        builtin_tool_mod, "schemas", return_value=_schemas(_registry()),
     )
-    mocker.patch.object(engine_mod.memory, "load_persistent", return_value="")
-    mocker.patch.object(engine_mod.skill, "render_builtin", return_value="")
-    mocker.patch.object(engine_mod.skill, "render_section", return_value="")
-    mocker.patch.object(engine_mod.prompt, "render_system_prompts", return_value="SYSTEM")
-    mocker.patch.object(engine_mod.prompt, "prefix_hash", return_value="hashX")
-    mocker.patch.object(engine_mod.compact, "new_summary_placeholder",
+    mocker.patch.object(memory_mod, "load_persistent", return_value="")
+    mocker.patch.object(skill_mod, "render_builtin", return_value="")
+    mocker.patch.object(skill_mod, "render_section", return_value="")
+    mocker.patch.object(prompt_mod, "render_system_prompts", return_value="SYSTEM")
+    mocker.patch.object(prompt_mod, "prefix_hash", return_value="hashX")
+    mocker.patch.object(compact_mod, "new_summary_placeholder",
                         return_value=UserMessage(content="<sum>"))
-    mocker.patch.object(engine_mod.compact, "new_memory_placeholder",
+    mocker.patch.object(compact_mod, "new_memory_placeholder",
                         return_value=UserMessage(content="<mem>"))
-    mocker.patch.object(engine_mod.compact, "new_skills_placeholder",
+    mocker.patch.object(compact_mod, "new_skills_placeholder",
                         return_value=UserMessage(content="<skl>"))
-    mocker.patch.object(engine_mod.scratchpad, "inject_tail",
+    mocker.patch.object(scratchpad_mod, "inject_tail",
                         side_effect=lambda msgs, _sp: msgs)
-    mocker.patch.object(engine_mod.plan, "inject_tail",
+    mocker.patch.object(plan_mod, "inject_tail",
                         side_effect=lambda msgs, _p: msgs)
-    mocker.patch.object(engine_mod.screen_layout, "inject_tail",
+    mocker.patch.object(screen_layout_mod, "inject_tail",
                         side_effect=lambda msgs: msgs)
-    mocker.patch.object(engine_mod.compact, "drop_stale_screens")
-    mocker.patch.object(engine_mod.compact, "collapse_old_turns")
-    mocker.patch.object(engine_mod.jobs, "format_fired", return_value="")
+    mocker.patch.object(compact_mod, "drop_stale_screens")
+    mocker.patch.object(compact_mod, "collapse_old_turns")
+    mocker.patch.object(jobs_mod, "format_fired", return_value="")
 
     fake_tr = MagicMock()
     fake_rlog = MagicMock()
@@ -1480,10 +1393,10 @@ async def test_run_session_wait_with_create_job_skips_auto_schedule(
     registry = {**_registry(), "end_session": custom}
     schemas = _schemas(registry)
     mocker.patch.object(
-        engine_mod.builtin_tool, "build_registry", return_value=registry,
+        builtin_tool_mod, "build_registry", return_value=registry,
     )
     mocker.patch.object(
-        engine_mod.builtin_tool, "schemas", return_value=schemas,
+        builtin_tool_mod, "schemas", return_value=schemas,
     )
 
     asst = _asst(tool_calls=[
@@ -1507,10 +1420,10 @@ async def test_run_session_wait_with_create_job_skips_auto_schedule(
 
 @pytest.mark.asyncio
 async def test_run_retries_on_stuck(mocker) -> None:
-    mocker.patch.object(engine_mod, "MAX_ATTEMPTS", 3)
+    mocker.patch.object(engine_mod.CONFIG.engine, "max_attempts", 3)
     statuses = iter([STUCK, STUCK, DONE])
 
-    async def fake_session(triggers, *, model_ref, session: Session):
+    async def fake_session(triggers, *, model_ref, session: Session, settings=None):
         session.sentinel_status = next(statuses)
         session.sentinel_recap = "x"
 
@@ -1525,9 +1438,9 @@ async def test_run_retries_on_stuck(mocker) -> None:
 
 @pytest.mark.asyncio
 async def test_run_stops_after_done(mocker) -> None:
-    mocker.patch.object(engine_mod, "MAX_ATTEMPTS", 5)
+    mocker.patch.object(engine_mod.CONFIG.engine, "max_attempts", 5)
 
-    async def fake_session(triggers, *, model_ref, session: Session):
+    async def fake_session(triggers, *, model_ref, session: Session, settings=None):
         session.sentinel_status = DONE
 
     spy = mocker.patch.object(
@@ -1541,9 +1454,9 @@ async def test_run_stops_after_done(mocker) -> None:
 
 @pytest.mark.asyncio
 async def test_run_gives_up_after_max_stucks(mocker) -> None:
-    mocker.patch.object(engine_mod, "MAX_ATTEMPTS", 2)
+    mocker.patch.object(engine_mod.CONFIG.engine, "max_attempts", 2)
 
-    async def fake_session(triggers, *, model_ref, session: Session):
+    async def fake_session(triggers, *, model_ref, session: Session, settings=None):
         session.sentinel_status = STUCK
         session.sentinel_recap = "always stuck"
 
@@ -1561,7 +1474,7 @@ async def test_run_restarts_once_after_setup_completes(mocker) -> None:
     # Session 1 finishes first-run setup → restart; session 2 does the task.
     outcomes = iter([("setup", True), (DONE, False)])
 
-    async def fake_session(triggers, *, model_ref, session: Session):
+    async def fake_session(triggers, *, model_ref, session: Session, settings=None):
         status, restart = next(outcomes)
         session.sentinel_status = None if restart else status
         session.restart_for_setup = restart
@@ -1579,7 +1492,7 @@ async def test_run_no_restart_when_only_first_run_trigger(mocker) -> None:
     # completes the layout is saved and loads on the next wake, so the loop
     # must NOT restart (which would replay the stale "learn the layout"
     # trigger and re-enter first-run setup).
-    async def fake_session(triggers, *, model_ref, session: Session):
+    async def fake_session(triggers, *, model_ref, session: Session, settings=None):
         session.sentinel_status = IDLE
         session.restart_for_setup = True
 
@@ -1599,7 +1512,7 @@ async def test_run_restarts_when_real_trigger_accompanies_first_run(mocker) -> N
     # request is handled with the layout loaded.
     outcomes = iter([(None, True), (DONE, False)])
 
-    async def fake_session(triggers, *, model_ref, session: Session):
+    async def fake_session(triggers, *, model_ref, session: Session, settings=None):
         status, restart = next(outcomes)
         session.sentinel_status = status
         session.restart_for_setup = restart
@@ -1619,11 +1532,11 @@ async def test_run_restarts_when_real_trigger_accompanies_first_run(mocker) -> N
 
 @pytest.mark.asyncio
 async def test_run_setup_restart_does_not_consume_stuck_attempt(mocker) -> None:
-    # Even with MAX_ATTEMPTS=1, the setup restart still allows the task session.
-    mocker.patch.object(engine_mod, "MAX_ATTEMPTS", 1)
+    # Even with max_attempts=1, the setup restart still allows the task session.
+    mocker.patch.object(engine_mod.CONFIG.engine, "max_attempts", 1)
     outcomes = iter([("setup", True), (DONE, False)])
 
-    async def fake_session(triggers, *, model_ref, session: Session):
+    async def fake_session(triggers, *, model_ref, session: Session, settings=None):
         status, restart = next(outcomes)
         session.sentinel_status = None if restart else status
         session.restart_for_setup = restart
@@ -1638,9 +1551,9 @@ async def test_run_setup_restart_does_not_consume_stuck_attempt(mocker) -> None:
 @pytest.mark.asyncio
 async def test_run_setup_restart_fires_at_most_once(mocker) -> None:
     # A pathological session that keeps flagging restart must not loop forever.
-    mocker.patch.object(engine_mod, "MAX_ATTEMPTS", 3)
+    mocker.patch.object(engine_mod.CONFIG.engine, "max_attempts", 3)
 
-    async def fake_session(triggers, *, model_ref, session: Session):
+    async def fake_session(triggers, *, model_ref, session: Session, settings=None):
         session.sentinel_status = DONE
         session.restart_for_setup = True  # always flags
 
@@ -1650,8 +1563,6 @@ async def test_run_setup_restart_fires_at_most_once(mocker) -> None:
 
     # 1 setup restart (uncounted) + then the guard blocks further restarts and
     # the DONE session ends the loop → 2 total.
-    assert spy.call_count == 2
-
     assert spy.call_count == 2
 
 
@@ -1664,15 +1575,16 @@ _SEQ_SCHEMA = {"name": "sequence", "input_schema": {"type": "object"}}
 @pytest.mark.asyncio
 async def test_dispatch_blocks_sequence_on_layout_lint(mocker) -> None:
     mocker.patch.object(
-        engine_mod.screen_layout, "lint_gesture",
+        screen_layout_mod, "lint_gesture",
         return_value="BLOCKED — not executed: wrong box",
     )
     mcp = FakeMcpClient()
+    run = _mk_run(mcp=mcp, schema_by_name={"sequence": _SEQ_SCHEMA})
 
     result = await engine_mod._dispatch(
-        call=_tc("sequence", {"actions": [{"tool_name": "long_press", "arg": [0, 0.9, 1, 1]}]}),
-        schema_by_name={"sequence": _SEQ_SCHEMA},
-        mcp=mcp, local_registry={}, session=Session(), tr=MagicMock(), turn=0,
+        run, Session(),
+        _tc("sequence", {"actions": [{"tool_name": "long_press", "arg": [0, 0.9, 1, 1]}]}),
+        0,
     )
 
     assert result.is_error is True
@@ -1684,15 +1596,14 @@ async def test_dispatch_blocks_sequence_on_layout_lint(mocker) -> None:
 async def test_dispatch_lint_failure_is_fail_open(mocker) -> None:
     # A lint crash must never take down dispatch — the batch runs.
     mocker.patch.object(
-        engine_mod.screen_layout, "lint_gesture",
+        screen_layout_mod, "lint_gesture",
         side_effect=RuntimeError("lint bug"),
     )
     mcp = FakeMcpClient()
+    run = _mk_run(mcp=mcp, schema_by_name={"sequence": _SEQ_SCHEMA})
 
     result = await engine_mod._dispatch(
-        call=_tc("sequence", {"actions": []}),
-        schema_by_name={"sequence": _SEQ_SCHEMA},
-        mcp=mcp, local_registry={}, session=Session(), tr=MagicMock(), turn=0,
+        run, Session(), _tc("sequence", {"actions": []}), 0,
     )
 
     assert result.is_error is not True
@@ -1705,12 +1616,10 @@ async def test_dispatch_feeds_keyboard_tracker_the_verdict(mocker) -> None:
     session.guard._exempt = []
     kb_spy = mocker.patch.object(session.kb, "observe")
     schema = {"name": "tap", "input_schema": {"type": "object"}}
+    run = _mk_run(mcp=VerdictMcpClient(), schema_by_name={"tap": schema})
 
     await engine_mod._dispatch(
-        call=_tc("tap", {"bbox": [0.1, 0.9, 0.7, 0.95]}),
-        schema_by_name={"tap": schema},
-        mcp=VerdictMcpClient(), local_registry={}, session=session,
-        tr=MagicMock(), turn=0,
+        run, session, _tc("tap", {"bbox": [0.1, 0.9, 0.7, 0.95]}), 0,
     )
 
     kb_spy.assert_called_once()

@@ -92,7 +92,12 @@ class CameraConfig:
 @dataclass
 class EngineConfig:
     max_turns: int = 300
+    # Session-level STUCK retries (engine.run): fresh session attempts after
+    # a session ends STUCK. Distinct from `provider_retry_attempts` below.
     max_attempts: int = 3
+    # Per-call provider retries on transient errors (rate limit, 5xx) within
+    # one turn, each spaced by `retry_backoff_seconds`.
+    provider_retry_attempts: int = 3
     retry_backoff_seconds: float = 5.0
     wait_default_minutes: int = 15
     react_cooldown_seconds: float = 6.0

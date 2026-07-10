@@ -1,8 +1,8 @@
 """Tests for `physiclaw.agent.engine.engine` — focused on testable
 helpers. The full `run()` loop is integration-tested separately
-(deferred to Sprint 8 with hardware fakes); here we cover the pure
-units: `_chat_with_retry`, `_log_usage`, `_corrective_for_bad_shape`,
-`_format_triggers`, `_auto_schedule_wait_check`.
+(`test_engine_loop.py`); here we cover the pure units:
+`_chat_with_retry`, `_log_usage`, `_corrective_for_bad_shape`,
+`assemble.format_triggers`, `_auto_schedule_wait_check`.
 """
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ import pytest
 from freezegun import freeze_time
 
 from physiclaw.agent.engine import engine as engine_mod
+from physiclaw.agent.engine.assemble import format_triggers
 from physiclaw.agent.engine.dto import (
     AssistantMessage,
     FinishReason,
@@ -21,9 +22,9 @@ from physiclaw.agent.engine.engine import (
     _auto_schedule_wait_check,
     _chat_with_retry,
     _corrective_for_bad_shape,
-    _format_triggers,
     _log_usage,
 )
+from physiclaw.agent.engine.session import Session
 from physiclaw.agent.engine.trace import Trace
 from physiclaw.agent.provider.provider_base import ProviderTransientError
 from physiclaw.agent.runtime.hook import Trigger
@@ -38,7 +39,7 @@ async def test_chat_with_retry_returns_immediately_on_success(mocker) -> None:
     asst = AssistantMessage(content="ok", tool_calls=[], finish_reason=FinishReason.STOP)
     provider.chat = mocker.AsyncMock(return_value=asst)
 
-    out = await _chat_with_retry(provider, [], [])
+    out = await _chat_with_retry(provider, [], [], attempts=3, backoff=0.0)
 
     assert out is asst
     assert provider.chat.await_count == 1
@@ -53,23 +54,20 @@ async def test_chat_with_retry_retries_then_succeeds(mocker) -> None:
         side_effect=[ProviderTransientError("transient"), asst]
     )
 
-    out = await _chat_with_retry(provider, [], [])
+    out = await _chat_with_retry(provider, [], [], attempts=3, backoff=0.0)
 
     assert out is asst
     assert provider.chat.await_count == 2
 
 
 @pytest.mark.asyncio
-async def test_chat_with_retry_raises_runtime_after_max_attempts(
-    mocker, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_chat_with_retry_raises_runtime_after_max_attempts(mocker) -> None:
     mocker.patch("asyncio.sleep")
-    monkeypatch.setattr(engine_mod, "MAX_ATTEMPTS", 2)
     provider = mocker.MagicMock()
     provider.chat = mocker.AsyncMock(side_effect=ProviderTransientError("nope"))
 
     with pytest.raises(RuntimeError, match=r"^provider failed after 2 attempts:"):
-        await _chat_with_retry(provider, [], [])
+        await _chat_with_retry(provider, [], [], attempts=2, backoff=0.0)
 
 
 @pytest.mark.asyncio
@@ -78,7 +76,7 @@ async def test_chat_with_retry_does_not_catch_permanent_errors(mocker) -> None:
     provider.chat = mocker.AsyncMock(side_effect=RuntimeError("permanent"))
 
     with pytest.raises(RuntimeError, match=r"^permanent$"):
-        await _chat_with_retry(provider, [], [])
+        await _chat_with_retry(provider, [], [], attempts=3, backoff=0.0)
 
 
 # ---------- _log_usage ----------
@@ -194,7 +192,7 @@ def test_corrective_for_three_notes() -> None:
     assert "called `note` 3 times" in out
 
 
-# ---------- _format_triggers ----------
+# ---------- assemble.format_triggers ----------
 
 
 def test_format_triggers_includes_now_and_each_trigger() -> None:
@@ -204,7 +202,7 @@ def test_format_triggers_includes_now_and_each_trigger() -> None:
     ]
 
     with freeze_time("2026-04-28T14:30:00"):
-        out = _format_triggers(triggers)
+        out = format_triggers(triggers)
 
     assert out.startswith("Now: 2026-04-28")
     assert "[Current wake — act on this]" in out
@@ -216,7 +214,7 @@ def test_format_triggers_uses_manual_for_empty_source() -> None:
     triggers = [Trigger(description="user typed", source="")]
 
     with freeze_time("2026-04-28T14:30:00"):
-        out = _format_triggers(triggers)
+        out = format_triggers(triggers)
 
     assert "manual: user typed" in out
 
@@ -225,13 +223,13 @@ def test_format_triggers_appends_cron_context_when_provided() -> None:
     triggers = [Trigger(description="x", source="phone")]
 
     with freeze_time("2026-04-28T14:30:00"):
-        out = _format_triggers(triggers, cron_ctx="## Scheduled jobs firing now\n\n### foo")
+        out = format_triggers(triggers, cron_ctx="## Scheduled jobs firing now\n\n### foo")
 
     assert out.endswith("### foo")
 
 
 def test_format_triggers_omits_cron_section_when_blank() -> None:
-    out = _format_triggers([Trigger(description="x", source="phone")])
+    out = format_triggers([Trigger(description="x", source="phone")])
 
     assert "Scheduled jobs" not in out
 
@@ -240,13 +238,12 @@ def test_format_triggers_omits_cron_section_when_blank() -> None:
 
 
 def test_auto_schedule_wait_check_calls_jobs_upsert(
-    trace_stub, mocker, monkeypatch: pytest.MonkeyPatch
+    trace_stub, mocker,
 ) -> None:
-    monkeypatch.setattr(engine_mod, "WAIT_DEFAULT_MINUTES", 15)
     upsert = mocker.patch("physiclaw.agent.engine.jobs.upsert_auto_wait_check")
 
     with freeze_time("2026-04-28T14:00:00"):
-        _auto_schedule_wait_check(trace_stub)
+        _auto_schedule_wait_check(trace_stub, minutes=15)
 
     upsert.assert_called_once()
     target_arg = upsert.call_args.args[0]
@@ -261,7 +258,7 @@ def test_auto_schedule_wait_check_emits_scheduled_event_on_success(
 ) -> None:
     mocker.patch("physiclaw.agent.engine.jobs.upsert_auto_wait_check")
 
-    _auto_schedule_wait_check(trace_stub)
+    _auto_schedule_wait_check(trace_stub, minutes=15)
 
     payload = trace_stub.write.call_args.args[0]
     assert payload["event"] == "wait_auto_scheduled"
@@ -280,7 +277,7 @@ def test_auto_schedule_wait_check_emits_failure_event_on_exception(
     )
 
     with caplog.at_level(logging.ERROR, logger="physiclaw.agent.engine.engine"):
-        _auto_schedule_wait_check(trace_stub)
+        _auto_schedule_wait_check(trace_stub, minutes=15)
 
     payload = trace_stub.write.call_args.args[0]
     assert payload["event"] == "wait_auto_schedule_failed"
@@ -303,12 +300,21 @@ def test_log_usage_emits_output_tokens_for_the_session_summary(
     assert payload["out"] == 77
 
 
+def _settings(**over) -> engine_mod.Settings:
+    base = dict(
+        max_turns=300, max_session_attempts=3, provider_retry_attempts=3,
+        retry_backoff_seconds=0.0, wait_default_minutes=15,
+    )
+    base.update(over)
+    return engine_mod.Settings(**base)
+
+
 @pytest.mark.asyncio
 async def test_call_provider_response_event_carries_elapsed_ms(
     mocker, trace_stub,
 ) -> None:
     # The session summary sums `response.elapsed_ms` into provider_time_ms.
-    from physiclaw.agent.engine.builtin_tool import Session
+    from physiclaw.agent.engine.policy import default_policies
 
     asst = AssistantMessage(
         content="", tool_calls=[], finish_reason=FinishReason.STOP,
@@ -317,11 +323,14 @@ async def test_call_provider_response_event_carries_elapsed_ms(
     provider = mocker.MagicMock()
     provider.chat = mocker.AsyncMock(return_value=asst)
     rlog = mocker.MagicMock()
-
-    out = await engine_mod._call_provider(
-        provider, [], [], session=Session(), tr=trace_stub,
-        rlog=rlog, turn=0,
+    run = engine_mod.EngineRun(
+        provider=provider, mcp=mocker.MagicMock(), tool_schemas=[],
+        schema_by_name={}, local_registry={}, tr=trace_stub, rlog=rlog,
+        settings=_settings(),
+        policies=default_policies(layout_incomplete=False),
     )
+
+    out = await engine_mod._call_provider(run, Session(), [], turn=0)
 
     assert out is asst
     response_event = next(

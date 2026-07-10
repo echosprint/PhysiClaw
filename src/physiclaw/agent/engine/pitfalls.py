@@ -17,7 +17,7 @@ snapshot to `history.jsonl`, so a curator prune is always recoverable.
 This module owns the write (`add`, `replace`), read (`read`, `render_section`),
 and the pre-close gate (`should_capture`, `corrective`) that forces an
 `add_pitfall(...)` before a long DONE. The curator (`curate.py`) is the only
-caller of `replace`; `engine._loop` is the only caller of the gate.
+caller of `replace`; `policy.PitfallCheckpoint` is the only caller of the gate.
 """
 import datetime as dt
 import json
@@ -30,7 +30,7 @@ from physiclaw.config import CONFIG
 from physiclaw.text import append_text, read_text, write_text
 
 if TYPE_CHECKING:
-    from physiclaw.agent.engine.builtin_tool import Session
+    from physiclaw.agent.engine.session import Session
 
 _FILE = "pitfalls.md"
 _HISTORY = "history.jsonl"
@@ -146,8 +146,8 @@ def render_section(items: list[str] | None = None) -> str:
 # turns): the task succeeded, and a run that long almost always stumbled over
 # something worth banking. The agent judges what (it may add 0). A STUCK / FAIL
 # session never escaped the trap (the "fix" would be a guess) and a short DONE
-# sailed through — neither captures. `engine._loop` intercepts the closing
-# `end_session`, rejects it once, and injects `corrective(seed)`.
+# sailed through — neither captures. `policy.PitfallCheckpoint` intercepts the
+# closing `end_session`, rejects it once, and injects `corrective(seed)`.
 
 
 def should_capture(status: str, turn: int, session: "Session") -> tuple[bool, str]:

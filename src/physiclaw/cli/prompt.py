@@ -3,9 +3,9 @@
 A debugging aid: `prompt system` prints the SYSTEM prompt exactly as a session
 would build it; `prompt request` prints that plus the turn-0 message array (the
 full request handed to the model). Both go through the engine's own assembly
-(`build_prompt_bundle` / `build_initial_messages`) so the output can't drift
-from what the running agent actually sends. Pass `--save-as FILE` to write the
-dump to a file instead of stdout.
+(`assemble.build_prompt_bundle` / `assemble.build_initial_messages`) so the
+output can't drift from what the running agent actually sends. Pass
+`--save-as FILE` to write the dump to a file instead of stdout.
 """
 from __future__ import annotations
 
@@ -62,28 +62,28 @@ def _emit(text: str, save_as: Path | None) -> None:
 def system(save_as: _SaveAs = None) -> None:
     """Print the SYSTEM prompt (doctrine + tooling + skills + learned screen
     layout + examples + memory)."""
-    from physiclaw.agent.engine import engine
+    from physiclaw.agent.engine import assemble
 
-    _emit(engine.build_prompt_bundle(_provider_id()).system_prompt, save_as)
+    _emit(assemble.build_prompt_bundle(_provider_id()).system_prompt, save_as)
 
 
 @prompt_app.command()
 def request(save_as: _SaveAs = None) -> None:
     """Print the full turn-0 request: the SYSTEM prompt plus the message array
     (wake trigger + compaction slots + plan/scratchpad/first-run tails)."""
-    from physiclaw.agent.engine import engine
-    from physiclaw.agent.engine.builtin_tool import Session
+    from physiclaw.agent.engine import assemble
+    from physiclaw.agent.engine.session import Session
     from physiclaw.agent.runtime.hook import Trigger
 
-    bundle = engine.build_prompt_bundle(_provider_id())
+    bundle = assemble.build_prompt_bundle(_provider_id())
     # A representative camera wake — the trigger text is runtime-specific.
     triggers = [Trigger(description="phone screen changed", source="phone")]
-    messages = engine.build_initial_messages(triggers, bundle.system_prompt)
+    messages = assemble.build_initial_messages(triggers, bundle.system_prompt)
 
     # Mirror `_loop`'s turn-0: tick the plan, then pin the same tail slots.
     session = Session()
     session.plan.tick_turn()
-    messages = engine.apply_request_tails(
+    messages = assemble.apply_request_tails(
         messages, session, layout_incomplete=bundle.layout_incomplete,
     )
 
