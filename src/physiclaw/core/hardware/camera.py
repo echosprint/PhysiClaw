@@ -62,6 +62,32 @@ def silenced_stderr():
         os.close(devnull)
 
 
+def configure_capture(cap, *, exposure_auto: bool, exposure: int) -> None:
+    """Apply PhysiClaw's capture properties to an open cv2.VideoCapture.
+
+    Order is load-bearing: FOURCC must be set before width/height —
+    Windows MSMF re-negotiates on format change, and YUY2 (the default)
+    caps at 640×480 over USB even for 4K cameras; MJPG-compressed makes
+    1920×1080 actually reachable. Exposure comes AFTER the size
+    negotiation, because renegotiation is exactly what can leave the
+    driver's auto-exposure off/misconfigured (the Windows blown-frames
+    root cause). Drivers snap to the nearest supported mode; the caller
+    logs the truth after the first frame.
+
+    Shared by `Camera._open` and the doctor's deep camera probe so the
+    probe meters the same negotiation the server runs.
+    """
+    # AVFoundation (macOS) ignores this; V4L (Linux) honors it.
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*CONFIG.camera.fourcc))
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, CONFIG.camera.width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CONFIG.camera.height)
+    if exposure_auto:
+        platform.camera_set_auto_exposure(cap)
+    else:
+        platform.camera_set_manual_exposure(cap, exposure)
+
+
 # ─── Reusable Camera class ──────────────────────────────────────
 
 
@@ -110,12 +136,25 @@ class Camera:
         self.rotation: int = -1  # no rotation until calibration step 3 sets it
         self._frame = None
         self._frame_time = 0.0
+        # Monotonic count of published frames — the settle primitive for
+        # exposure tuning (`wait_frames`): after a property set, "wait N
+        # frames" is deterministic where "sleep N/fps" is not.
+        self._frame_seq = 0
         # Separate from _frame_time because _reopen() resets _frame_time —
         # which would otherwise postpone the FATAL_AFTER_SECONDS check
         # indefinitely. _first_fail_time resets only on a real good frame.
         self._first_fail_time: float | None = None
         self._cond = threading.Condition()
         self._stopped = threading.Event()
+        # cv2.VideoCapture is not thread-safe for concurrent read()+set():
+        # this lock serializes the reader's cap.read() against exposure
+        # setters, _reopen, and close. Non-reentrant, never nested; _open
+        # does NOT take it (callers hold it, or run before the thread).
+        self._cap_lock = threading.Lock()
+        # Exposure state remembered on the instance so _reopen() re-applies
+        # a converged manual value instead of silently reverting to auto.
+        self._exposure_auto: bool = CONFIG.camera.auto_exposure
+        self._exposure_value: int = CONFIG.camera.exposure
 
         self._open()
         self._warmup()
@@ -130,25 +169,25 @@ class Camera:
     # ─── cv2 lifecycle ──────────────────────────────────────────
 
     def _open(self):
-        """Open the underlying ``cv2.VideoCapture``. Retries with macOS perm prompt."""
+        """Open the underlying ``cv2.VideoCapture``. Retries with macOS perm
+        prompt. Caller must hold ``_cap_lock`` or run before the reader
+        thread starts (``__init__``/``_warmup``)."""
+        backend = platform.camera_backend()
         with silenced_stderr():
-            self.cap = cv2.VideoCapture(self.index)
+            self.cap = cv2.VideoCapture(self.index, backend)
             if not self.cap.isOpened():
                 platform.ensure_camera_permission()
-                self.cap = cv2.VideoCapture(self.index)
+                self.cap = cv2.VideoCapture(self.index, backend)
         if not self.cap.isOpened():
             raise RuntimeError(f"Cannot open camera index {self.index}")
-        # AVFoundation (macOS) ignores this; V4L (Linux) honors it.
-        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        # FOURCC must be set before width/height — Windows MSMF re-negotiates
-        # on format change. YUY2 (the default) caps at 640×480 over USB even
-        # for 4K cameras; MJPG-compressed makes 1920×1080 actually reachable.
-        # Drivers snap to the nearest supported mode; _warmup logs the truth.
-        self.cap.set(
-            cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*CONFIG.camera.fourcc)
+        # FOURCC → size → exposure, in that order (see configure_capture).
+        # Reads the REMEMBERED exposure state, so a converged manual value
+        # survives _reopen()'s reconstruction of the cap.
+        configure_capture(
+            self.cap,
+            exposure_auto=self._exposure_auto,
+            exposure=self._exposure_value,
         )
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, CONFIG.camera.width)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CONFIG.camera.height)
 
     def _warmup(self):
         """Discard initial auto-exposure frames and verify reads work."""
@@ -162,6 +201,7 @@ class Camera:
                 with self._cond:
                     self._frame = frame
                     self._frame_time = time.monotonic()
+                    self._frame_seq += 1
                 return
             # Read returned no frame — likely macOS perm denied silently.
             self.cap.release()
@@ -170,18 +210,22 @@ class Camera:
         raise RuntimeError(f"Camera {self.index}: read failed")
 
     def _reopen(self):
-        """Close and reopen the cap. Called by the reader on stale frames."""
+        """Close and reopen the cap. Called by the reader on stale frames.
+        `_open` re-applies the remembered exposure state, so a converged
+        manual exposure survives the reconnect."""
         log.warning(f"Camera {self.index}: reconnecting cv2.VideoCapture")
-        try:
-            self.cap.release()
-        except Exception:
-            pass
-        try:
-            self._open()
-            with self._cond:
-                self._frame_time = time.monotonic()  # reset stale clock
-        except Exception as e:
-            log.error(f"Camera {self.index}: reopen failed: {e!r}")
+        with self._cap_lock:
+            try:
+                self.cap.release()
+            except Exception:
+                pass
+            try:
+                self._open()
+            except Exception as e:
+                log.error(f"Camera {self.index}: reopen failed: {e!r}")
+                return
+        with self._cond:
+            self._frame_time = time.monotonic()  # reset stale clock
 
     # ─── Background reader ──────────────────────────────────────
 
@@ -193,7 +237,10 @@ class Camera:
         """
         while not self._stopped.is_set():
             try:
-                ok, frame = self.cap.read()
+                # Serialized against exposure setters / _reopen / close —
+                # cv2.VideoCapture can't take a concurrent set()+read().
+                with self._cap_lock:
+                    ok, frame = self.cap.read()
             except Exception as e:
                 log.warning(f"Camera {self.index}: cap.read() raised {e!r}")
                 ok, frame = False, None
@@ -205,6 +252,7 @@ class Camera:
                 with self._cond:
                     self._frame = frame
                     self._frame_time = now
+                    self._frame_seq += 1
                     self._cond.notify_all()
                 continue
 
@@ -228,6 +276,43 @@ class Camera:
             # cap.read() raises or returns empty every tick (e.g. display
             # asleep), otherwise the loop would spin at full CPU.
             self._stopped.wait(self.READER_BACKOFF_SECONDS)
+
+    # ─── Exposure control ───────────────────────────────────────
+
+    @property
+    def exposure_tunable(self) -> bool:
+        """Whether this OS backend honors exposure properties at all
+        (False on macOS — AVFoundation ignores them)."""
+        return platform.CAMERA_EXPOSURE_TUNABLE
+
+    def set_auto_exposure(self) -> None:
+        """Hand exposure back to the camera firmware. Remembered, so a
+        later `_reopen` keeps the choice."""
+        self._exposure_auto = True
+        with self._cap_lock:
+            platform.camera_set_auto_exposure(self.cap)
+
+    def set_manual_exposure(self, value: int) -> None:
+        """Hold a fixed exposure (backend-native units). Remembered, so a
+        later `_reopen` re-applies it. Verification is the caller's job —
+        measured frame brightness, never the driver's word."""
+        self._exposure_auto = False
+        self._exposure_value = value
+        with self._cap_lock:
+            platform.camera_set_manual_exposure(self.cap, value)
+
+    def wait_frames(self, n: int, timeout: float = 5.0) -> bool:
+        """Block until the reader publishes `n` MORE frames (or timeout).
+
+        The settle primitive for exposure tuning: drivers apply property
+        changes with latency, so "wait N fresh frames" is the
+        deterministic version of "sleep a bit". Returns False on timeout
+        (reader stalled) — callers treat that as a failed meter."""
+        with self._cond:
+            target = self._frame_seq + n
+            return self._cond.wait_for(
+                lambda: self._frame_seq >= target, timeout=timeout,
+            )
 
     # ─── Frame accessors ────────────────────────────────────────
 
@@ -301,4 +386,5 @@ class Camera:
         self._stopped.set()
         if self._thread.is_alive():
             self._thread.join(timeout=3.0)
-        self.cap.release()
+        with self._cap_lock:
+            self.cap.release()

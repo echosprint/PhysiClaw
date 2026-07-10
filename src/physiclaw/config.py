@@ -81,6 +81,12 @@ class CameraConfig:
     width: int = 1920
     height: int = 1080
     fourcc: str = "MJPG"
+    # Exposure control (Windows/Linux; macOS AVFoundation exposes no
+    # exposure props through OpenCV, so both keys are ignored there).
+    # The startup tune verifies with measured brightness and falls back
+    # to manual stepping when firmware auto-exposure misbehaves.
+    auto_exposure: bool = True
+    exposure: int = -6
 
 
 @dataclass
@@ -331,6 +337,8 @@ _FIELD_COMMENTS: dict[tuple[str, str], str] = {
     ("server", "save_raw_camera"): "dump every raw camera frame at capture",
     ("memory", "default_log_entries"): "on-demand `read_logs` default size (max 200)",
     ("memory", "bootstrap_log_entries"): "auto-preloaded into the memory slot at every wake",
+    ("camera", "auto_exposure"): "false = hold `exposure` manually (Windows/Linux; macOS ignores)",
+    ("camera", "exposure"): "log2 seconds on Windows (-6 = 1/64s, indoors -4..-8); manual-fallback start",
 }
 
 

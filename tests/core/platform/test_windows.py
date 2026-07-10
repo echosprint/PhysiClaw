@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import socket
 import sys
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import pytest
 
@@ -109,3 +109,39 @@ def test_open_image_files_noop_on_empty_list(mocker) -> None:
     windows.open_image_files([])
 
     spy.assert_not_called()
+
+
+# ---------- camera exposure ----------
+
+
+def test_camera_exposure_tunable_on_windows() -> None:
+    assert windows.CAMERA_EXPOSURE_TUNABLE is True
+
+
+def test_camera_backend_is_msmf() -> None:
+    # MSMF is the only Windows backend where AE can be re-enabled.
+    import cv2
+
+    assert windows.camera_backend() == cv2.CAP_MSMF
+
+
+def test_set_auto_exposure_msmf_encoding() -> None:
+    # cap_msmf.cpp: nonzero → VideoProcAmp_Flags_Auto.
+    import cv2
+
+    cap = MagicMock()
+    windows.camera_set_auto_exposure(cap)
+
+    assert cap.set.call_args_list == [call(cv2.CAP_PROP_AUTO_EXPOSURE, 1)]
+
+
+def test_set_manual_exposure_msmf_encoding() -> None:
+    import cv2
+
+    cap = MagicMock()
+    windows.camera_set_manual_exposure(cap, -6)
+
+    assert cap.set.call_args_list == [
+        call(cv2.CAP_PROP_AUTO_EXPOSURE, 0),
+        call(cv2.CAP_PROP_EXPOSURE, -6),
+    ]

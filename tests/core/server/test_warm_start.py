@@ -161,6 +161,8 @@ def test_try_resume_succeeds_on_clean_path(mocker) -> None:
     # Origin re-pinned from the park spot so the bundle's affine stays valid.
     app.restore_park_origin.assert_called_once()
     app.home_screen.assert_called_once()
+    # Exposure tune runs between home (dark scene showing) and ready.
+    app.tune_exposure.assert_called_once()
     app.mark_ready.assert_called_once()
 
 

@@ -65,6 +65,51 @@ def open_image_files(paths: list[str]) -> None:
             pass
 
 
+# ─── camera exposure ────────────────────────────────────────
+#
+# cv2 is imported lazily inside each function: the doctor CLI imports this
+# package on its cv2-import-failure path, so a top-level import would mask
+# the very error it reports.
+
+# MSMF exposes AE toggling via IAMCameraControl; DSHOW can't re-enable AE
+# once off (opencv#17019).
+CAMERA_EXPOSURE_TUNABLE = True
+
+
+def camera_backend() -> int:
+    """Capture backend for cv2.VideoCapture: explicit MSMF.
+
+    Modern OpenCV defaults to MSMF on Windows already — the explicit flag
+    documents intent and guards against DSHOW-default builds, where
+    auto-exposure could never be re-enabled programmatically."""
+    import cv2
+
+    return cv2.CAP_MSMF
+
+
+def camera_set_auto_exposure(cap) -> None:
+    """Ask the driver for firmware auto-exposure.
+
+    MSMF maps CAP_PROP_AUTO_EXPOSURE nonzero → VideoProcAmp_Flags_Auto,
+    0 → Manual (cap_msmf.cpp). set()/get() are unreliable across drivers —
+    verification is measured frame brightness, never the return value."""
+    import cv2
+
+    cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
+
+
+def camera_set_manual_exposure(cap, exposure: int) -> None:
+    """Hold a fixed exposure. Value is log2 seconds per the DirectShow
+    CameraControl_Exposure spec (-6 ≈ 1/64s; indoors -4..-8) — though
+    drivers may deviate, which the caller's measured-brightness stall
+    check catches. Setting CAP_PROP_EXPOSURE already carries the Manual
+    flag on MSMF; the explicit AE-off keeps intent obvious."""
+    import cv2
+
+    cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0)
+    cap.set(cv2.CAP_PROP_EXPOSURE, exposure)
+
+
 # ─── doctor diagnostics ─────────────────────────────────────
 
 

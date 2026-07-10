@@ -426,3 +426,115 @@ def test_close_stops_thread_and_releases(mocker) -> None:
     assert cam._stopped.is_set()
     assert vc.released is True
     assert not cam._thread.is_alive()
+
+
+# ---------- exposure control ----------
+
+
+def test_open_applies_exposure_after_size_negotiation(mocker) -> None:
+    # Renegotiation (FOURCC/size) is what disables driver AE — the
+    # re-assert must come after it or it gets wiped.
+    vc = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 200)
+    order: list = []
+    mocker.patch.object(
+        camera_mod.platform, "camera_set_auto_exposure",
+        side_effect=lambda cap: order.append("exposure"),
+    )
+    real_set = vc.set
+    vc.set = lambda prop, value: (order.append(prop), real_set(prop, value))
+
+    _open_camera_no_thread(mocker, vc=vc)
+
+    assert order.index("exposure") > order.index(cv2.CAP_PROP_FRAME_HEIGHT)
+
+
+def test_open_applies_manual_exposure_when_config_disables_auto(mocker) -> None:
+    mocker.patch.object(camera_mod.CONFIG.camera, "auto_exposure", False)
+    mocker.patch.object(camera_mod.CONFIG.camera, "exposure", -5)
+    manual_spy = mocker.patch.object(
+        camera_mod.platform, "camera_set_manual_exposure",
+    )
+    vc = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 200)
+
+    _open_camera_no_thread(mocker, vc=vc)
+
+    manual_spy.assert_called_once_with(vc, -5)
+
+
+def test_reopen_reapplies_remembered_manual_exposure(mocker) -> None:
+    vc1 = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 200)
+    cam = _open_camera_no_thread(mocker, vc=vc1)
+    manual_spy = mocker.patch.object(
+        camera_mod.platform, "camera_set_manual_exposure",
+    )
+
+    cam.set_manual_exposure(-7)
+    manual_spy.assert_called_once_with(vc1, -7)
+
+    vc2 = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 10)
+    mocker.patch.object(cv2, "VideoCapture", return_value=vc2)
+    cam._reopen()
+
+    # The reconstructed cap got the remembered value, not a revert to auto.
+    manual_spy.assert_called_with(vc2, -7)
+
+
+def test_set_auto_exposure_remembered_across_reopen(mocker) -> None:
+    vc1 = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 200)
+    cam = _open_camera_no_thread(mocker, vc=vc1)
+    auto_spy = mocker.patch.object(
+        camera_mod.platform, "camera_set_auto_exposure",
+    )
+
+    cam.set_auto_exposure()
+
+    vc2 = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 10)
+    mocker.patch.object(cv2, "VideoCapture", return_value=vc2)
+    cam._reopen()
+
+    auto_spy.assert_called_with(vc2)
+
+
+def test_exposure_setter_holds_cap_lock(mocker) -> None:
+    # cv2.VideoCapture can't take set() concurrent with read() — the
+    # setter must run under the same lock the reader loop uses.
+    vc = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 200)
+    cam = _open_camera_no_thread(mocker, vc=vc)
+    seen: dict = {}
+    mocker.patch.object(
+        camera_mod.platform, "camera_set_auto_exposure",
+        side_effect=lambda cap: seen.setdefault(
+            "locked", cam._cap_lock.locked(),
+        ),
+    )
+
+    cam.set_auto_exposure()
+
+    assert seen["locked"] is True
+
+
+def test_wait_frames_returns_when_reader_publishes(mocker) -> None:
+    vc = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 200)
+    cam = _open_camera_no_thread(mocker, vc=vc)
+
+    def publish(n: int) -> None:
+        for _ in range(n):
+            time.sleep(0.01)
+            with cam._cond:
+                cam._frame_seq += 1
+                cam._cond.notify_all()
+
+    t = threading.Thread(target=publish, args=(3,))
+    t.start()
+    try:
+        assert cam.wait_frames(3, timeout=2.0) is True
+    finally:
+        t.join(timeout=1.0)
+
+
+def test_wait_frames_times_out_without_publisher(mocker) -> None:
+    vc = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 200)
+    cam = _open_camera_no_thread(mocker, vc=vc)
+
+    assert cam.wait_frames(1, timeout=0.05) is False
+

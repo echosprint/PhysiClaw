@@ -122,27 +122,79 @@ def _probe_vision_model_deep() -> str:
 
 
 def _probe_camera_frame(index: int) -> str:
-    """cap.read() catches the macOS-TCC-denied case (isOpened lies)."""
+    """cap.read() catches the macOS-TCC-denied case (isOpened lies).
+
+    Reproduces the server's real capture negotiation (backend + FOURCC +
+    size + exposure via `configure_capture`) so the frame it meters is
+    the frame sessions will see, then judges it with `quality.assess` —
+    catching a blown/blurry rig at doctor time instead of mid-task."""
     import cv2
 
-    from physiclaw.core.hardware.camera import silenced_stderr
+    from physiclaw.config import CONFIG
+    from physiclaw.core import platform as os_platform
+    from physiclaw.core.hardware.camera import configure_capture, silenced_stderr
 
     with silenced_stderr():
-        cap = cv2.VideoCapture(index)
+        cap = cv2.VideoCapture(index, os_platform.camera_backend())
         try:
-            for _ in range(3):
-                ok, frame = cap.read()
-                if ok and frame is not None:
-                    h, w = frame.shape[:2]
-                    return _fmt_ok(f"camera {index}: frame OK ({w}x{h})")
-            from physiclaw.core import platform as os_platform
-
-            return _fmt_warn(
-                f"camera {index}: opens but no frame "
-                f"({os_platform.camera_denied_hint()})"
+            configure_capture(
+                cap,
+                exposure_auto=CONFIG.camera.auto_exposure,
+                exposure=CONFIG.camera.exposure,
             )
+            frame = None
+            # ~10 reads: the first frames are pre-auto-exposure garbage.
+            for _ in range(10):
+                ok, got = cap.read()
+                if ok and got is not None:
+                    frame = got
+            if frame is None:
+                return _fmt_warn(
+                    f"camera {index}: opens but no frame "
+                    f"({os_platform.camera_denied_hint()})"
+                )
         finally:
             cap.release()
+    h, w = frame.shape[:2]
+    good, clause = _frame_quality_verdict(frame)
+    line = f"camera {index}: frame OK ({w}x{h}) — {clause}"
+    return _fmt_ok(line) if good else _fmt_warn(line)
+
+
+def _frame_quality_verdict(frame) -> tuple[bool, str]:
+    """One quality clause for the camera line, cropped to the phone screen
+    when the calibration bundle allows it (rotated-frame size must match
+    the bundle's cam_size, else the crop coords don't apply)."""
+    import cv2
+
+    from physiclaw.core.calibration.state import Calibration
+    from physiclaw.core.vision import quality
+    from physiclaw.core.vision.util import crop_to_phone_screen
+
+    scope = "whole frame — no calibration crop"
+    cal = Calibration.load()  # None on missing/unreadable bundle, logged
+    if cal is not None and cal.transforms_ready:
+        if cal.effective_rotation() != -1:
+            frame = cv2.rotate(frame, cal.effective_rotation())
+        h, w = frame.shape[:2]
+        if (w, h) == tuple(cal.cam_size):
+            frame = crop_to_phone_screen(frame, cal.transforms())
+            scope = "phone-screen crop"
+        else:
+            scope = (
+                f"whole frame — size {w}x{h} != calibrated "
+                f"{cal.cam_size[0]}x{cal.cam_size[1]}"
+            )
+    r = quality.assess(frame)
+    stats = (
+        f"sharpness {r.sharpness:.0f}, clip {r.clip_pct:.0%}, "
+        f"median {r.median_luma:.0f} ({scope})"
+    )
+    if r.blown:
+        return False, f"quality BLOWN — overexposed/glare: {stats}"
+    if r.blurry:
+        return False, f"quality BLURRY — check focus: {stats}"
+    return True, f"quality ok: {stats}"
 
 
 def _probe_calibration_deep() -> str:

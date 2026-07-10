@@ -23,6 +23,10 @@ else:
 
 ensure_camera_permission = _impl.ensure_camera_permission
 local_hostname = _impl.local_hostname
+CAMERA_EXPOSURE_TUNABLE = _impl.CAMERA_EXPOSURE_TUNABLE
+camera_backend = _impl.camera_backend
+camera_set_auto_exposure = _impl.camera_set_auto_exposure
+camera_set_manual_exposure = _impl.camera_set_manual_exposure
 open_camera_aim_app = _impl.open_camera_aim_app
 quit_camera_aim_app = _impl.quit_camera_aim_app
 open_image_files = _impl.open_image_files
@@ -35,6 +39,10 @@ TRUST_PROXY_ENV = _impl.TRUST_PROXY_ENV
 __all__ = [
     "ensure_camera_permission",
     "local_hostname",
+    "CAMERA_EXPOSURE_TUNABLE",
+    "camera_backend",
+    "camera_set_auto_exposure",
+    "camera_set_manual_exposure",
     "open_camera_aim_app",
     "quit_camera_aim_app",
     "open_image_files",

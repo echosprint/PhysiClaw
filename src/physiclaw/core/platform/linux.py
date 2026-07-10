@@ -84,6 +84,51 @@ def open_image_files(paths: list[str]) -> None:
             pass
 
 
+# ─── camera exposure ────────────────────────────────────────
+#
+# cv2 is imported lazily inside each function: the doctor CLI imports this
+# package on its cv2-import-failure path, so a top-level import would mask
+# the very error it reports.
+
+CAMERA_EXPOSURE_TUNABLE = True
+
+
+def camera_backend() -> int:
+    """Capture backend for cv2.VideoCapture: explicit V4L2.
+
+    The exposure setters below encode raw V4L2 menu values — pinning the
+    backend makes that invariant real instead of hoping OpenCV doesn't
+    pick GStreamer (symmetric with windows.py pinning MSMF)."""
+    import cv2
+
+    return cv2.CAP_V4L2
+
+
+def camera_set_auto_exposure(cap) -> None:
+    """Ask the driver for auto-exposure.
+
+    Modern OpenCV 4.x V4L2 passes raw menu values: 3 =
+    V4L2_EXPOSURE_APERTURE_PRIORITY (the usual UVC "auto"), 1 = manual.
+    (Older builds normalized to 0.75/0.25 — not our regime, we require
+    opencv>=4.8.) Verification is measured frame brightness, never the
+    set() return value."""
+    import cv2
+
+    cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)
+
+
+def camera_set_manual_exposure(cap, exposure: int) -> None:
+    """Hold a fixed exposure. V4L2 exposure units are device-specific
+    (often 100µs ticks), NOT the Windows log2-seconds scale — small
+    integer steps may measure as no change, which the caller's stall
+    check treats as "driver ignores sets" and correctly reverts to
+    auto."""
+    import cv2
+
+    cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
+    cap.set(cv2.CAP_PROP_EXPOSURE, exposure)
+
+
 # ─── doctor diagnostics ─────────────────────────────────────
 
 

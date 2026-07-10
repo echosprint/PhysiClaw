@@ -21,9 +21,11 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from physiclaw import paths, verdict
+from physiclaw.config import CONFIG
 from physiclaw.text import read_text
 from physiclaw.core.bridge import BridgeState
 from physiclaw.core.calibration import PARK_PCT, Calibration, ScreenTransforms
+from physiclaw.core.hardware import exposure
 from physiclaw.core.hardware.arm import StylusArm
 from physiclaw.core.hardware.camera import Camera
 from physiclaw.core.hardware.iphone import AssistiveTouch
@@ -134,7 +136,11 @@ class PhysiClaw:
         return self._ready and self.hardware_ready
 
     def mark_ready(self) -> None:
-        """Called by /setup after its final step (phone on Home Screen)."""
+        """Called by /setup after its final step (phone on Home Screen).
+
+        Kept pure (tests pin it). Any NEW path that flips ready should
+        also schedule `tune_exposure()` — see the two existing callers
+        (`server/watch.py` /api/ready, `server/warm_start.py`)."""
         self._ready = True
 
     # ─── State queries ────────────────────────────────────────
@@ -202,6 +208,54 @@ class PhysiClaw:
                 self.park()
             except Exception:
                 pass
+            self.release()
+
+    # ─── Exposure tune ───────────────────────────────────────
+
+    def tune_exposure(self) -> None:
+        """Startup verify-and-converge for camera exposure. Fail-open:
+        never raises, never blocks a session.
+
+        Runs once the transforms exist (setup finished, or a warm-start
+        bundle loaded) and the phone is on the home screen — the dark
+        scene that exposed the Windows AE failure. Meters the PHONE-SCREEN
+        crop, never the whole frame: the dark desk around the phone would
+        otherwise dominate the scene and drive AE to blow out the screen.
+        macOS exits at `exposure_tunable` (AVFoundation ignores exposure
+        props; its firmware AE works). Worst case a few seconds, bounded
+        by `wait_frames` timeouts; skipped entirely if the hardware is
+        busy. A failed tune reverts to auto — the runtime quality monitor
+        keeps warning the agent, so nothing is lost."""
+        cam, t = self._cam, self.transforms
+        if cam is None or t is None or not cam.exposure_tunable:
+            return
+        try:
+            self.acquire()
+        except RuntimeError:
+            log.info("exposure tune: hardware busy — skipped")
+            return
+        try:
+            self.park()  # stylus off the glass — it would pollute the crop
+
+            def meter():
+                if not cam.wait_frames(exposure.SETTLE_FRAMES, timeout=5.0):
+                    return None
+                frame = cam.peek()
+                if frame is None:
+                    return None
+                return quality.assess(crop_to_phone_screen(frame, t))
+
+            result = exposure.converge(
+                meter,
+                cam.set_auto_exposure,
+                cam.set_manual_exposure,
+                start=CONFIG.camera.exposure,
+                prefer_auto=CONFIG.camera.auto_exposure,
+            )
+            log.info("exposure tune: %s", result.detail)
+        except Exception:
+            log.exception("exposure tune failed — leaving camera as-is")
+        finally:
             self.release()
 
     # ─── Watchdog ────────────────────────────────────────────

@@ -108,3 +108,22 @@ async def test_ready_route_marks_and_returns_ready_state(
 
     pl.mark_ready.assert_called_once()
     assert json.loads(bytes(resp.body).decode()) == {"ok": True, "ready": True}
+
+
+@pytest.mark.asyncio
+async def test_ready_route_fires_exposure_tune(fake_mcp, async_request) -> None:
+    # Fire-and-forget on the default executor: the response must not wait
+    # for the tune, but the tune must run.
+    import asyncio
+
+    pl = MagicMock()
+    pl.ready = True
+    watch_reg.register(fake_mcp, pl)
+
+    await fake_mcp.get("/api/ready", "POST")(async_request())
+
+    for _ in range(100):
+        if pl.tune_exposure.called:
+            break
+        await asyncio.sleep(0.01)
+    pl.tune_exposure.assert_called_once()

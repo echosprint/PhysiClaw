@@ -1277,3 +1277,112 @@ def test_quality_check_failure_never_costs_the_view(mocker, pc: PhysiClaw) -> No
     out = pc.tap([0.1, 0.1, 0.2, 0.2])
 
     assert out.listing == "LISTING"  # fail-open: view intact, no line
+
+
+# ---------- tune_exposure ----------
+
+
+def _tune_ok() -> object:
+    from physiclaw.core.hardware.exposure import TuneResult
+
+    return TuneResult(mode="auto", exposure=None, ok=True, detail="in band")
+
+
+def test_tune_exposure_noop_without_camera(mocker, pc: PhysiClaw) -> None:
+    conv = mocker.patch.object(orchestrator.exposure, "converge")
+
+    pc.tune_exposure()  # no camera, no transforms — silently returns
+
+    conv.assert_not_called()
+
+
+def test_tune_exposure_noop_when_platform_not_tunable(mocker, pc: PhysiClaw) -> None:
+    _wire_hardware(pc)
+    pc._cam.exposure_tunable = False
+    conv = mocker.patch.object(orchestrator.exposure, "converge")
+
+    pc.tune_exposure()  # the macOS path
+
+    conv.assert_not_called()
+
+
+def test_tune_exposure_skips_when_busy(mocker, pc: PhysiClaw) -> None:
+    _wire_hardware(pc)
+    pc._cam.exposure_tunable = True
+    conv = mocker.patch.object(orchestrator.exposure, "converge")
+    pc.acquire()
+    try:
+        pc.tune_exposure()
+    finally:
+        pc.release()
+
+    conv.assert_not_called()
+
+
+def test_tune_exposure_runs_converge_and_releases_lock(mocker, pc: PhysiClaw) -> None:
+    _wire_hardware(pc)
+    pc._cam.exposure_tunable = True
+    conv = mocker.patch.object(
+        orchestrator.exposure, "converge", return_value=_tune_ok(),
+    )
+
+    pc.tune_exposure()
+
+    conv.assert_called_once()
+    kwargs = conv.call_args.kwargs
+    from physiclaw.config import CONFIG
+    assert kwargs["start"] == CONFIG.camera.exposure
+    assert kwargs["prefer_auto"] == CONFIG.camera.auto_exposure
+    # Setters are the camera's own bound methods.
+    args = conv.call_args.args
+    assert args[1] == pc._cam.set_auto_exposure
+    assert args[2] == pc._cam.set_manual_exposure
+    pc.acquire()  # lock released after the tune
+    pc.release()
+
+
+def test_tune_exposure_meter_crops_and_assesses(mocker, pc: PhysiClaw) -> None:
+    _wire_hardware(pc)
+    pc._cam.exposure_tunable = True
+    frame = np.full((200, 100, 3), 128, dtype=np.uint8)
+    pc._cam.wait_frames.return_value = True
+    pc._cam.peek.return_value = frame
+    cropped = np.full((100, 50, 3), 128, dtype=np.uint8)
+    mocker.patch.object(orchestrator, "crop_to_phone_screen", return_value=cropped)
+    assess = mocker.patch.object(orchestrator.quality, "assess")
+    conv = mocker.patch.object(
+        orchestrator.exposure, "converge", return_value=_tune_ok(),
+    )
+
+    pc.tune_exposure()
+
+    meter = conv.call_args.args[0]
+    report = meter()
+    assess.assert_called_once_with(cropped)
+    assert report is assess.return_value
+
+
+def test_tune_exposure_meter_fails_open_on_stalled_reader(mocker, pc: PhysiClaw) -> None:
+    _wire_hardware(pc)
+    pc._cam.exposure_tunable = True
+    pc._cam.wait_frames.return_value = False  # reader stalled
+    conv = mocker.patch.object(
+        orchestrator.exposure, "converge", return_value=_tune_ok(),
+    )
+
+    pc.tune_exposure()
+
+    assert conv.call_args.args[0]() is None
+
+
+def test_tune_exposure_swallows_converge_crash(mocker, pc: PhysiClaw) -> None:
+    _wire_hardware(pc)
+    pc._cam.exposure_tunable = True
+    mocker.patch.object(
+        orchestrator.exposure, "converge", side_effect=RuntimeError("boom"),
+    )
+
+    pc.tune_exposure()  # no raise
+
+    pc.acquire()  # and the lock is not leaked
+    pc.release()

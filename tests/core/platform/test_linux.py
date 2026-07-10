@@ -6,7 +6,7 @@ launches.
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 from physiclaw.core.platform import linux
 
@@ -103,3 +103,40 @@ def test_hardware_permission_hints_silent_when_in_group(monkeypatch) -> None:
     monkeypatch.setattr(linux, "_in_group", lambda name: True)
     monkeypatch.setattr(linux, "_group_exists", lambda name: True)
     assert linux.hardware_permission_hints() == []
+
+
+# ---------- camera exposure ----------
+
+
+def test_camera_exposure_tunable_on_linux() -> None:
+    assert linux.CAMERA_EXPOSURE_TUNABLE is True
+
+
+def test_camera_backend_is_v4l2() -> None:
+    # The setters encode raw V4L2 menu values — the backend must match.
+    import cv2
+
+    assert linux.camera_backend() == cv2.CAP_V4L2
+
+
+def test_set_auto_exposure_v4l2_encoding() -> None:
+    # Modern OpenCV 4.x V4L2 takes raw menu values: 3 = aperture-priority
+    # auto (the usual UVC "auto"), not the legacy normalized 0.75.
+    import cv2
+
+    cap = MagicMock()
+    linux.camera_set_auto_exposure(cap)
+
+    assert cap.set.call_args_list == [call(cv2.CAP_PROP_AUTO_EXPOSURE, 3)]
+
+
+def test_set_manual_exposure_v4l2_encoding() -> None:
+    import cv2
+
+    cap = MagicMock()
+    linux.camera_set_manual_exposure(cap, 200)
+
+    assert cap.set.call_args_list == [
+        call(cv2.CAP_PROP_AUTO_EXPOSURE, 1),
+        call(cv2.CAP_PROP_EXPOSURE, 200),
+    ]

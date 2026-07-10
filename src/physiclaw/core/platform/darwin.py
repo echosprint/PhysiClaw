@@ -86,6 +86,31 @@ def open_image_files(paths: list[str]) -> None:
     subprocess.run(["open", *paths])
 
 
+# ─── camera exposure ────────────────────────────────────────
+
+# AVFoundation exposes no exposure properties through OpenCV — set() is
+# ignored / returns False on macOS, so there is nothing to tune. The
+# camera firmware's own auto-exposure runs untouched (and works well).
+CAMERA_EXPOSURE_TUNABLE = False
+
+
+def camera_backend() -> int:
+    """Capture backend for cv2.VideoCapture: let OpenCV pick (AVFoundation)."""
+    import cv2
+
+    return cv2.CAP_ANY
+
+
+def camera_set_auto_exposure(cap) -> None:
+    """No-op — AVFoundation ignores CAP_PROP_AUTO_EXPOSURE; firmware AE
+    is always in charge on macOS."""
+
+
+def camera_set_manual_exposure(cap, exposure: int) -> None:
+    """No-op — AVFoundation ignores CAP_PROP_EXPOSURE; manual exposure
+    cannot be set through OpenCV on macOS."""
+
+
 # ─── doctor diagnostics ─────────────────────────────────────
 
 

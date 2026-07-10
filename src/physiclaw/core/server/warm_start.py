@@ -166,6 +166,11 @@ def try_resume(cam_index_override: int | None) -> bool:
     # then flip ready. home_screen's locked() context auto-parks the arm
     # off-screen on exit, so nothing is hovering over the glass afterward.
     physiclaw.home_screen()
+    # Home screen showing = the dark scene that exposes AE failure — the
+    # right moment to verify/converge exposure. Synchronous is fine:
+    # try_resume already runs on a background thread, and tune_exposure
+    # is fail-open + bounded by frame-wait timeouts.
+    physiclaw.tune_exposure()
     physiclaw.mark_ready()
     log.info(
         f"--warm-start: resumed from bundle "

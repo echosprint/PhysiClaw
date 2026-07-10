@@ -46,4 +46,10 @@ def register(mcp, physiclaw):
     @mcp.custom_route("/api/ready", methods=["POST"])
     async def _mark_ready(request):  # noqa: ARG001
         physiclaw.mark_ready()
+        # Fire-and-forget: setup just parked the phone on the home screen
+        # (the dark scene that exposes AE failure), so verify/converge
+        # exposure now — without stalling the wizard's finish screen.
+        # tune_exposure is internally fail-open, so the future can't
+        # carry an exception that matters.
+        asyncio.get_event_loop().run_in_executor(None, physiclaw.tune_exposure)
         return JSONResponse({"ok": True, "ready": physiclaw.ready})

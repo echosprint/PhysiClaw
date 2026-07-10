@@ -144,3 +144,26 @@ def test_open_image_files_noop_on_empty_list(mocker) -> None:
     darwin.open_image_files([])
 
     spy.assert_not_called()
+
+
+# ---------- camera exposure ----------
+
+
+def test_camera_exposure_not_tunable_on_macos() -> None:
+    # AVFoundation ignores exposure props through OpenCV entirely.
+    assert darwin.CAMERA_EXPOSURE_TUNABLE is False
+
+
+def test_camera_backend_lets_opencv_pick() -> None:
+    import cv2
+
+    assert darwin.camera_backend() == cv2.CAP_ANY
+
+
+def test_exposure_setters_are_noops() -> None:
+    cap = MagicMock()
+
+    darwin.camera_set_auto_exposure(cap)
+    darwin.camera_set_manual_exposure(cap, -6)
+
+    cap.set.assert_not_called()
