@@ -6,8 +6,9 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from physiclaw.core.orchestration import orchestrator
-from physiclaw.core.orchestration.orchestrator import ClipboardSyncError, PhysiClaw
+from physiclaw.core.orchestration import observation, orchestrator
+from physiclaw.core.orchestration.clipboard import ClipboardSyncError
+from physiclaw.core.orchestration.orchestrator import PhysiClaw
 
 
 # ---------- Fixtures ----------
@@ -44,15 +45,15 @@ def pc(mocker) -> PhysiClaw:
     p._assistive_touch.overlaps_at.return_value = False
     p._assistive_touch.swipe_crosses_at.return_value = False
     p._watchdog = MagicMock()
-    p.GESTURE_SETTLE_SECONDS = 0
+    p._observer.GESTURE_SETTLE_SECONDS = 0
     # Synthetic test frames are flat (Laplacian variance 0) — disable the
     # autofocus blur-retry so grabs stay one-frame-per-call.
-    p.GRAB_BLUR_THRESHOLD = 0
+    p._observer.GRAB_BLUR_THRESHOLD = 0
     # Flat frames also read as blurry to the camera-quality monitor —
     # neutralize it so its ⚠ line doesn't join every listing. The
     # camera-quality tests below re-arm it per test.
-    p._quality = MagicMock()
-    p._quality.observe.return_value = None
+    p._observer._quality = MagicMock()
+    p._observer._quality.observe.return_value = None
     return p
 
 
@@ -476,20 +477,26 @@ def test_require_assistive_touch_raises_when_not_ready(pc: PhysiClaw) -> None:
         pc._require_assistive_touch()
 
 
-def test_require_no_at_overlap_raises(pc: PhysiClaw) -> None:
+def test_tap_blocked_when_target_overlaps_assistive_touch(pc: PhysiClaw) -> None:
+    # Guard unit tests live in test_gestures.py — this pins the wiring:
+    # dispatch consults the validator before moving the arm.
     _wire_hardware(pc)
     pc._assistive_touch.overlaps_at.return_value = True
 
     with pytest.raises(ValueError, match="overlaps AssistiveTouch"):
-        pc._require_no_at_overlap([0.0, 0.0, 0.1, 0.1], "tap")
+        pc.tap([0.0, 0.0, 0.1, 0.1])
+
+    pc._arm.tap.assert_not_called()
 
 
-def test_require_no_at_crossing_raises(pc: PhysiClaw) -> None:
+def test_swipe_blocked_when_crossing_assistive_touch(pc: PhysiClaw) -> None:
     _wire_hardware(pc)
     pc._assistive_touch.swipe_crosses_at.return_value = True
 
     with pytest.raises(ValueError, match="crosses AssistiveTouch"):
-        pc._require_no_at_crossing([0.0, 0.0, 0.1, 0.1], "up")
+        pc.swipe([0.0, 0.0, 0.1, 0.1], "up")
+
+    pc._arm.swipe_to.assert_not_called()
 
 
 # ---------- lazy detectors ----------
@@ -588,14 +595,14 @@ def _wire_peek(mocker, pc: PhysiClaw, *, listing: str = "ok", sharpness=200.0):
     if isinstance(sharpness, list):
         blur_values = iter(sharpness)
         mocker.patch.object(
-            orchestrator, "laplacian_variance",
+            observation, "laplacian_variance",
             side_effect=lambda *_: next(blur_values),
         )
     else:
         mocker.patch.object(
-            orchestrator, "laplacian_variance", return_value=sharpness,
+            observation, "laplacian_variance", return_value=sharpness,
         )
-    sleep_spy = mocker.patch.object(orchestrator.time, "sleep")
+    sleep_spy = mocker.patch.object(observation.time, "sleep")
     mocker.patch.object(
         orchestrator, "detect_ui_elements",
         return_value=([], np.zeros((4, 4, 3), dtype=np.uint8)),
@@ -689,19 +696,11 @@ def test_long_press_validates_and_dispatches(pc: PhysiClaw) -> None:
     pc._arm.long_press.assert_called_once()
 
 
-def test_validate_swipe_rejects_bad_direction(pc: PhysiClaw) -> None:
+def test_swipe_rejects_out_of_range_args(pc: PhysiClaw) -> None:
+    # Range-check unit tests live in test_gestures.py — this pins the
+    # wiring: the public path validates before touching hardware.
     with pytest.raises(ValueError, match="direction must be"):
-        pc._validate_swipe([0.1, 0.1, 0.2, 0.2], "diagonal", "m", "medium")
-
-
-def test_validate_swipe_rejects_bad_size(pc: PhysiClaw) -> None:
-    with pytest.raises(ValueError, match="size must be"):
-        pc._validate_swipe([0.1, 0.1, 0.2, 0.2], "up", "huge", "medium")
-
-
-def test_validate_swipe_rejects_bad_speed(pc: PhysiClaw) -> None:
-    with pytest.raises(ValueError, match="speed must be"):
-        pc._validate_swipe([0.1, 0.1, 0.2, 0.2], "up", "m", "warp")
+        pc.swipe([0.1, 0.1, 0.2, 0.2], "diagonal")
 
 
 def test_swipe_dispatches(pc: PhysiClaw) -> None:
@@ -751,23 +750,7 @@ def test_send_to_clipboard_unconfirmed_raises(pc: PhysiClaw) -> None:
         pc.send_to_clipboard("x")
 
     bridge.wait_clipboard.assert_called_once_with(
-        timeout=pc.CLIPBOARD_CONFIRM_SECONDS
-    )
-
-
-def test_send_to_clipboard_second_miss_escalates_and_shortens_timeout(
-    pc: PhysiClaw,
-) -> None:
-    bridge = _wire_failing_bridge(pc)
-
-    with pytest.raises(ClipboardSyncError):
-        pc.send_to_clipboard("x")
-    with pytest.raises(ClipboardSyncError, match="Miss #2.*STOP retrying"):
-        pc.send_to_clipboard("x")
-
-    # First miss waits the full window; retries use the short one.
-    assert bridge.wait_clipboard.call_args_list[1].kwargs["timeout"] == (
-        pc.CLIPBOARD_RETRY_CONFIRM_SECONDS
+        timeout=pc._clipboard.CONFIRM_SECONDS
     )
 
 
@@ -782,27 +765,10 @@ def test_send_to_clipboard_miss_clears_queued_text(pc: PhysiClaw) -> None:
     bridge.clear_text.assert_called_once()
 
 
-def test_send_to_clipboard_miss_state_decays(pc: PhysiClaw) -> None:
-    # The server process spans sessions — a miss hours ago must not
-    # shorten the window or claim "in a row" for today's first sync.
-    import time as _time
-
-    bridge = _wire_failing_bridge(pc)
-    pc._clipboard_misses = 1
-    pc._clipboard_miss_at = (
-        _time.monotonic() - pc.CLIPBOARD_MISS_DECAY_SECONDS - 1
-    )
-
-    with pytest.raises(ClipboardSyncError) as e:
-        pc.send_to_clipboard("x")
-
-    assert "Miss #" not in str(e.value)  # counted as a fresh first miss
-    bridge.wait_clipboard.assert_called_once_with(
-        timeout=pc.CLIPBOARD_CONFIRM_SECONDS
-    )
-
-
 def test_send_to_clipboard_success_resets_miss_counter(pc: PhysiClaw) -> None:
+    # Escalation/decay/timeout policy is unit-tested in test_clipboard.py —
+    # this pins the wiring: a miss is recorded, a confirmed sync resets it,
+    # and the state's window reaches wait_clipboard on every call.
     _wire_hardware(pc)
     bridge = MagicMock()
     bridge.wait_clipboard.side_effect = [False, True, False]
@@ -817,7 +783,7 @@ def test_send_to_clipboard_success_resets_miss_counter(pc: PhysiClaw) -> None:
 
     assert "Miss #" not in str(e.value)
     assert bridge.wait_clipboard.call_args_list[2].kwargs["timeout"] == (
-        pc.CLIPBOARD_CONFIRM_SECONDS
+        pc._clipboard.CONFIRM_SECONDS
     )
 
 
@@ -832,15 +798,6 @@ def test_run_step_dispatches_each_tool(pc: PhysiClaw) -> None:
     assert "Long pressed" in pc._run_step("long_press", [0.1, 0.1, 0.2, 0.2])
 
 
-def test_run_step_swipe_requires_dict_with_keys(pc: PhysiClaw) -> None:
-    _wire_hardware(pc)
-
-    with pytest.raises(ValueError, match="swipe arg needs a dict"):
-        pc._run_step("swipe", "not-a-dict")
-    with pytest.raises(ValueError, match="swipe arg needs a dict"):
-        pc._run_step("swipe", {"bbox": [0, 0, 1, 1]})
-
-
 def test_run_step_swipe_happy_path(pc: PhysiClaw) -> None:
     _wire_hardware(pc)
 
@@ -849,13 +806,6 @@ def test_run_step_swipe_happy_path(pc: PhysiClaw) -> None:
     })
 
     assert "Swiped up m" in out
-
-
-def test_run_step_send_to_clipboard_requires_string(pc: PhysiClaw) -> None:
-    _wire_hardware(pc)
-
-    with pytest.raises(ValueError, match="must be a string"):
-        pc._run_step("send_to_clipboard", 42)
 
 
 def test_run_step_send_to_clipboard_dispatches(pc: PhysiClaw) -> None:
@@ -870,6 +820,9 @@ def test_run_step_send_to_clipboard_dispatches(pc: PhysiClaw) -> None:
 
 
 def test_run_step_unknown_tool_raises(pc: PhysiClaw) -> None:
+    # Parse-error unit tests live in test_gestures.py — this pins the
+    # wiring: validator errors surface from `_run_step` (and so abort a
+    # `sequence` step).
     with pytest.raises(ValueError, match="not allowed in sequence"):
         pc._run_step("delete_app", "anything")
 
@@ -935,7 +888,7 @@ def _wire_verdict_frames(mocker, pc: PhysiClaw, frames: list[np.ndarray]) -> Non
     pc._cam.snapshot.return_value = np.zeros((4, 4, 3), dtype=np.uint8)
     mocker.patch.object(orchestrator, "crop_to_phone_screen", side_effect=frames)
     mocker.patch.object(pc, "_detect", return_value=("LISTING", MagicMock()))
-    mocker.patch.object(orchestrator, "encode_jpeg", return_value=b"VIEW_JPG")
+    mocker.patch.object(observation, "encode_jpeg", return_value=b"VIEW_JPG")
 
 
 def test_tap_appends_changed_verdict(mocker, pc: PhysiClaw) -> None:
@@ -993,41 +946,24 @@ def test_go_back_unchanged_verdict_signals_no_pop(mocker, pc: PhysiClaw) -> None
     assert out.text.endswith("| screen: no visible change")
 
 
-def test_grab_screen_retries_once_when_blurry(mocker, pc: PhysiClaw) -> None:
-    # A frame captured mid-autofocus-hunt (low Laplacian variance) is
-    # re-grabbed once after a settle wait.
+def test_grab_screen_wiring_retries_through_orchestrator(mocker, pc: PhysiClaw) -> None:
+    # The observer's blur-retry drives the orchestrator's park + crop
+    # wiring — a blurry first crop grabs a second one. (The retry logic
+    # itself is unit-tested in test_observation.py.)
     _wire_hardware(pc)
-    pc.GRAB_BLUR_THRESHOLD = 50.0
+    pc._observer.GRAB_BLUR_THRESHOLD = 50.0
     pc._cam.snapshot.return_value = np.zeros((4, 4, 3), dtype=np.uint8)
     rng = np.random.default_rng(7)
     sharp = rng.integers(0, 255, size=(200, 100, 3), dtype=np.uint8)
     blurry = np.full((200, 100, 3), 128, dtype=np.uint8)
     mocker.patch.object(orchestrator, "crop_to_phone_screen", side_effect=[blurry, sharp])
-    mocker.patch.object(orchestrator.time, "sleep")
+    mocker.patch.object(observation.time, "sleep")
 
-    frame, sharp_flag = pc._grab_screen()
+    frame, sharp_flag = pc._observer.grab_screen()
 
     assert frame is sharp
     assert sharp_flag is True
     assert orchestrator.crop_to_phone_screen.call_count == 2
-
-
-def test_grab_screen_flags_frame_still_blurry_after_retry(mocker, pc: PhysiClaw) -> None:
-    # The retry frame is kept for the fused view but flagged unsharp so
-    # the caller withholds the verdict (blur diffs as changed everywhere).
-    _wire_hardware(pc)
-    pc.GRAB_BLUR_THRESHOLD = 50.0
-    pc._cam.snapshot.return_value = np.zeros((4, 4, 3), dtype=np.uint8)
-    blurry = np.full((200, 100, 3), 128, dtype=np.uint8)
-    mocker.patch.object(
-        orchestrator, "crop_to_phone_screen", side_effect=[blurry, blurry],
-    )
-    mocker.patch.object(orchestrator.time, "sleep")
-
-    frame, sharp_flag = pc._grab_screen()
-
-    assert frame is blurry
-    assert sharp_flag is False
 
 
 def test_blurry_after_frame_withholds_verdict_but_keeps_view(mocker, pc: PhysiClaw) -> None:
@@ -1036,10 +972,10 @@ def test_blurry_after_frame_withholds_verdict_but_keeps_view(mocker, pc: PhysiCl
     _wire_hardware(pc)
     before = np.full((200, 100, 3), 128, dtype=np.uint8)
     after = np.full((200, 100, 3), 30, dtype=np.uint8)
-    # Every grab reads blurry → each _grab_screen consumes two crops.
+    # Every grab reads blurry → each grab_screen consumes two crops.
     _wire_verdict_frames(mocker, pc, [before, before, after, after])
-    pc.GRAB_BLUR_THRESHOLD = float("inf")
-    mocker.patch.object(orchestrator.time, "sleep")
+    pc._observer.GRAB_BLUR_THRESHOLD = float("inf")
+    mocker.patch.object(observation.time, "sleep")
 
     out = pc.tap([0.1, 0.1, 0.2, 0.2])
 
@@ -1229,7 +1165,7 @@ def test_shutdown_swallows_camera_close_failure(pc: PhysiClaw) -> None:
 
 def test_peek_appends_quality_warning_to_listing(mocker, pc: PhysiClaw) -> None:
     _wire_peek(mocker, pc, listing="rows")
-    pc._quality.observe.return_value = "⚠ camera: bad"
+    pc._observer._quality.observe.return_value = "⚠ camera: bad"
 
     _, listing = pc.peek()
 
@@ -1241,7 +1177,7 @@ def test_gesture_view_carries_quality_warning(mocker, pc: PhysiClaw) -> None:
     before = np.full((200, 100, 3), 128, dtype=np.uint8)
     after = np.full((200, 100, 3), 30, dtype=np.uint8)
     _wire_verdict_frames(mocker, pc, [before, after])
-    pc._quality.observe.return_value = "⚠ camera: bad"
+    pc._observer._quality.observe.return_value = "⚠ camera: bad"
 
     out = pc.tap([0.1, 0.1, 0.2, 0.2])
 
@@ -1258,13 +1194,13 @@ def test_gesture_warning_rides_action_text_when_detect_fails(mocker, pc: PhysiCl
     after = np.full((200, 100, 3), 30, dtype=np.uint8)
     _wire_verdict_frames(mocker, pc, [before, after])
     pc._detect.side_effect = RuntimeError("model gone")
-    pc._quality.observe.return_value = "⚠ camera: bad"
+    pc._observer._quality.observe.return_value = "⚠ camera: bad"
 
     out = pc.tap([0.1, 0.1, 0.2, 0.2])
 
     assert out.listing is None
     assert out.text.endswith("\n⚠ camera: bad")
-    pc._quality.observe.assert_called_once()
+    pc._observer._quality.observe.assert_called_once()
 
 
 def test_quality_check_failure_never_costs_the_view(mocker, pc: PhysiClaw) -> None:
@@ -1272,7 +1208,7 @@ def test_quality_check_failure_never_costs_the_view(mocker, pc: PhysiClaw) -> No
     before = np.full((200, 100, 3), 128, dtype=np.uint8)
     after = np.full((200, 100, 3), 30, dtype=np.uint8)
     _wire_verdict_frames(mocker, pc, [before, after])
-    pc._quality.observe.side_effect = RuntimeError("boom")
+    pc._observer._quality.observe.side_effect = RuntimeError("boom")
 
     out = pc.tap([0.1, 0.1, 0.2, 0.2])
 

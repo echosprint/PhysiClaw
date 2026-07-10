@@ -32,7 +32,7 @@ The arm's motion makes the raw diff physically unreliable; a false
 and re-hides silent refusals). Three fixes:
 
   - AUTOFOCUS HUNTING (the arm crossing the lens re-triggers AF) makes
-    frames blurry. Handled at ACQUISITION: `_grab_screen` retries a
+    frames blurry. Handled at ACQUISITION: `GestureObserver.grab_screen` retries a
     low-sharpness capture once so AF settles. Not handled here — a
     diff-time focus-mismatch guard cannot distinguish "AF blur" from
     "blank screen gained content", a real change it must not eat.
