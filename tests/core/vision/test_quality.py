@@ -6,8 +6,13 @@ import numpy as np
 import pytest
 
 from physiclaw.core.vision import quality
-from physiclaw.core.vision.quality import QualityMonitor, QualityReport, assess
-from physiclaw.core.vision.util import NORMALIZED_WIDTH
+from physiclaw.core.vision.quality import (
+    NORMALIZED_WIDTH,
+    QualityMonitor,
+    QualityReport,
+    assess,
+    laplacian_variance,
+)
 
 
 def _checkerboard(
@@ -21,6 +26,19 @@ def _checkerboard(
 
 def _flat(h: int = 200, w: int = 100, value: int = 128) -> np.ndarray:
     return np.full((h, w, 3), value, dtype=np.uint8)
+
+
+# ---------- laplacian_variance ----------
+
+
+def test_laplacian_variance_for_uniform_image_is_zero() -> None:
+    img = _flat()
+
+    assert laplacian_variance(img) == 0.0
+
+
+def test_laplacian_variance_for_image_with_strong_edges_is_higher() -> None:
+    assert laplacian_variance(_checkerboard()) > 100.0
 
 
 # ---------- assess ----------

@@ -23,7 +23,8 @@ from typing import Any, Callable
 from physiclaw import verdict
 from physiclaw.core.vision import quality
 from physiclaw.core.vision.change import frames_changed
-from physiclaw.core.vision.util import encode_jpeg, laplacian_variance
+from physiclaw.core.vision.quality import laplacian_variance
+from physiclaw.core.vision.util import encode_jpeg
 
 log = logging.getLogger(__name__)
 

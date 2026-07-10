@@ -20,10 +20,10 @@ import math
 import threading
 import time
 
-import cv2
 import numpy as np
 
-from physiclaw.core.vision.util import hsv_mask
+from physiclaw.core.vision.colors import hsv_mask
+from physiclaw.core.vision.preprocess import grayscale, to_hsv
 
 log = logging.getLogger(__name__)
 
@@ -83,17 +83,13 @@ ZONES = [(0.0, 0.1), (0.5, 1.0), (0.80, 1.0)]
 
 # --- Helpers ---
 
-def _gray(frame: np.ndarray) -> np.ndarray:
-    return cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-
 def _check_content(slow: np.ndarray, fast: np.ndarray) -> dict:
     """Detect new visual content via std/mean divergence. The mean threshold
     adapts to the scene brightness so a screen lighting up in a dim room still
     trips it (see MEAN_RATIO); the std threshold is absolute but gated against a
     brightness collapse (see MEAN_DROP_GUARD) so the screen dimming/off — which
     also blips the std — doesn't false-wake."""
-    sg, fg = _gray(slow), _gray(fast)
+    sg, fg = grayscale(slow), grayscale(fast)
     s_mean = float(np.mean(sg))
     std_delta = round(float(np.std(fg)) - float(np.std(sg)), 1)
     mean_delta = round(float(np.mean(fg)) - s_mean, 1)
@@ -116,8 +112,7 @@ def _check_badge(slow: np.ndarray, fast: np.ndarray) -> dict:
               for lo, hi in BADGE_HUE_RANGES]
 
     def warm(f):
-        hsv = cv2.cvtColor(f, cv2.COLOR_BGR2HSV)
-        return int(np.count_nonzero(hsv_mask(hsv, ranges)))
+        return int(np.count_nonzero(hsv_mask(to_hsv(f), ranges)))
     delta = warm(fast) - warm(slow)
     return {"warm_delta": delta, "wake": delta > BADGE_MIN_AREA}
 

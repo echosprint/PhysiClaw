@@ -43,11 +43,10 @@ from physiclaw.core.vision.grid_detect import (
     sort_dots_to_grid,
     detect_orange_dot as _detect_orange_dot,
 )
-from physiclaw.core.vision.util import (
-    check_phone_in_frame,
-    find_largest_hsv_blob,
-    red_ranges,
-)
+from physiclaw.core.vision.blobs import find_largest_hsv_blob
+from physiclaw.core.vision.colors import ORANGE_HSV_RANGE, hsv_mask, red_ranges
+from physiclaw.core.vision.preprocess import to_hsv
+from physiclaw.core.vision.util import check_phone_in_frame
 
 log = logging.getLogger(__name__)
 
@@ -145,12 +144,12 @@ def measure_viewport_shift(
     sh, sw = img.shape[:2]
     log.info(f"  Screenshot decoded: {sw}×{sh}px")
 
-    # Detect orange square (same HSV range as _detect_orange_dot)
+    # Detect orange square — ORANGE_HSV_RANGE is the same table
+    # _detect_orange_dot matches against, so the two can't drift.
     # Known CSS position: top-left (100, 200), size 50px → center (125, 225)
     SQUARE_CSS_X, SQUARE_CSS_Y, SQUARE_CSS_SIZE = 100, 200, 50
 
-    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, np.array([5, 100, 100]), np.array([25, 255, 255]))
+    mask = hsv_mask(to_hsv(img), [ORANGE_HSV_RANGE])
     mask = cv2.morphologyEx(
         mask, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
     )

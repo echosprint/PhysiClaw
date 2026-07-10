@@ -20,6 +20,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from physiclaw.core.vision.preprocess import grayscale
 from physiclaw.text import read_text
 
 log = logging.getLogger(__name__)
@@ -147,7 +148,7 @@ def detect_key_boxes(
         - bg_value: keyboard background pixel value (for contrast-aware drawing)
     """
     h, w = frame.shape[:2]
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    gray = grayscale(frame)
 
     sb = detect_space_bottom(gray)
     if sb is None:
@@ -199,7 +200,7 @@ def draw_detected_keys(
         is_dark = bg_value < 128
     else:
         # Estimate from the keyboard region (bottom 30% of image)
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        gray = grayscale(frame)
         is_dark = np.mean(gray[int(0.7 * h) :]) < 128
     color = (0, 255, 0) if is_dark else (0, 0, 255)  # green or red
 
@@ -231,13 +232,10 @@ QWERTY_ROW3_LETTERS = list("zxcvbnm")
 DIGIT_ROW = list("1234567890")
 
 
-def _label_row(
-    keys: list[tuple[int, int]], row_type: str, is_numeric: bool = False
-) -> list[dict]:
+def _label_row(keys: list[tuple[int, int]], row_type: str) -> list[dict]:
     """Label keys in a single row based on key count and widths.
 
     row_type: "letter" or "bottom"
-    is_numeric: True if this is the numeric keyboard (changes bottom row labels)
 
     Returns list of {left, right, element, action} dicts.
     """
@@ -331,7 +329,7 @@ def label_keyboard(
     Returns None if detection fails.
     """
     h, w = frame.shape[:2]
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    gray = grayscale(frame)
 
     sb = detect_space_bottom(gray)
     if sb is None:
@@ -361,7 +359,7 @@ def label_keyboard(
         is_last = i == len(all_rows) - 1
 
         if is_last:
-            labeled = _label_row(keys, "bottom", is_numeric=is_numeric)
+            labeled = _label_row(keys, "bottom")
         elif is_numeric and i == 0:
             # Numeric row 1: digits
             labeled = []

@@ -15,7 +15,8 @@ from starlette.responses import HTMLResponse, JSONResponse
 from physiclaw.core.bridge.handler import render_phone_page_html
 from physiclaw.core.hardware.camera import Camera
 from physiclaw.core.vision.render import watermark_index
-from physiclaw.core.vision.util import detect_bridge_corners, encode_jpeg
+from physiclaw.core.vision.grid_detect import detect_bridge_corners
+from physiclaw.core.vision.util import encode_jpeg
 
 from physiclaw.config import CONFIG
 

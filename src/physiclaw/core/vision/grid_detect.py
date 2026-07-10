@@ -13,13 +13,14 @@ import logging
 import cv2
 import numpy as np
 
-from physiclaw.core.vision.util import (
-    CORNER_HSV_RANGES,
+from physiclaw.core.vision.blobs import (
     contour_centroid,
     find_all_hsv_blobs,
     find_largest_hsv_blob,
-    redness,
+    hsv_blob_centroids,
 )
+from physiclaw.core.vision.colors import CORNER_HSV_RANGES, ORANGE_HSV_RANGE, redness
+from physiclaw.core.vision.preprocess import to_hsv
 
 log = logging.getLogger(__name__)
 
@@ -148,8 +149,71 @@ def compute_affine_transforms(
 # A corner cluster (bridge.html `corners` phase) is a 2×2 RGBM block ~20% of
 # the phone's shorter side; the four sit at the screen corners, which are far
 # apart in frame. 25% of the frame's shorter side groups one cluster's blobs
-# without ever merging two corners. Matches detect_bridge_corners' span.
+# without ever merging two corners. Shared by both corner detectors below.
 _CORNER_CLUSTER_SPAN_FRAC = 0.25
+
+
+def _is_clockwise_rgbm_cluster(
+    cluster: dict[str, tuple[float, float]], max_span: float
+) -> bool:
+    """Four RGBM centroids must be tightly grouped and traverse R→G→M→B
+    clockwise around their centroid (any cyclic rotation, so any of the
+    four camera rotations passes)."""
+    from math import atan2
+
+    xs = [p[0] for p in cluster.values()]
+    ys = [p[1] for p in cluster.values()]
+    if max(xs) - min(xs) > max_span or max(ys) - min(ys) > max_span:
+        return False
+    cx = sum(xs) / 4
+    cy = sum(ys) / 4
+    ordered = sorted(
+        cluster.items(), key=lambda kv: atan2(kv[1][1] - cy, kv[1][0] - cx)
+    )
+    return "".join(name for name, _ in ordered) in "RGMBRGMB"
+
+
+def detect_bridge_corners(
+    frame: np.ndarray, max_cluster_span: float | None = None
+) -> dict | None:
+    """Find one intact RGBM cluster rendered by bridge.html's ``corners``
+    phase. bridge.html draws the same 2×2 RGBM cluster at all four
+    screen corners, so a stylus occluding up to three of them still
+    leaves enough to identify the camera.
+
+    Returns the four centroids of the first intact cluster, or ``None``
+    if no combination of detected blobs forms a tight-enough group
+    whose clockwise order is a cyclic rotation of RGBM.
+
+    ``max_cluster_span`` defaults to ``_CORNER_CLUSTER_SPAN_FRAC`` of the
+    frame's shorter side — each on-phone cluster is ~20% of the phone's
+    shorter side (`bs` = 10% per quadrant in bridge.html's ``corners``
+    case), and the phone fills 60–80% of the frame during setup, so 25%
+    leaves comfortable margin without admitting cross-cluster pairings.
+    """
+    if max_cluster_span is None:
+        max_cluster_span = min(frame.shape[:2]) * _CORNER_CLUSTER_SPAN_FRAC
+
+    hsv = to_hsv(frame)
+    blobs = {
+        name: hsv_blob_centroids(hsv, hsv_ranges)
+        for name, hsv_ranges in CORNER_HSV_RANGES.items()
+    }
+
+    if not all(blobs[k] for k in "RGBM"):
+        return None
+
+    # Brute force — at most 4 clusters × 1 blob per color per cluster =
+    # 4⁴ = 256 candidates. The span filter rejects cross-cluster pairings
+    # almost immediately, so this stays cheap in practice.
+    for r in blobs["R"]:
+        for g in blobs["G"]:
+            for b in blobs["B"]:
+                for m in blobs["M"]:
+                    candidate = {"R": r, "G": g, "B": b, "M": m}
+                    if _is_clockwise_rgbm_cluster(candidate, max_cluster_span):
+                        return candidate
+    return None
 
 
 def detect_screen_corners(
@@ -168,9 +232,10 @@ def detect_screen_corners(
     if max_cluster_span is None:
         max_cluster_span = min(frame.shape[:2]) * _CORNER_CLUSTER_SPAN_FRAC
 
+    hsv = to_hsv(frame)
     pts: list[tuple[float, float, str]] = []
     for name, ranges in CORNER_HSV_RANGES.items():
-        for cx, cy in find_all_hsv_blobs(frame, ranges, min_area=50):
+        for cx, cy in hsv_blob_centroids(hsv, ranges):
             pts.append((cx, cy, name))
 
     used = [False] * len(pts)
@@ -237,10 +302,6 @@ def point_in_polygon(poly: np.ndarray | None, x: float, y: float) -> bool:
 
 # ─── Orange dot detection (for validation) ───────────────────
 
-# Orange validation dot #f97316 ≈ HSV H=20°, S=90%, V=97% → OpenCV H≈10. One
-# range, shared by the largest- and nearest-blob paths so they can't drift.
-_ORANGE_HSV_LOWER = [5, 100, 100]
-_ORANGE_HSV_UPPER = [25, 255, 255]
 _ORANGE_MIN_AREA = 50
 
 
@@ -266,10 +327,10 @@ def detect_orange_dot(
     """
     if near is None:
         return find_largest_hsv_blob(
-            frame, _ORANGE_HSV_LOWER, _ORANGE_HSV_UPPER, min_area=_ORANGE_MIN_AREA
+            frame, *ORANGE_HSV_RANGE, min_area=_ORANGE_MIN_AREA
         )
     blobs = find_all_hsv_blobs(
-        frame, _ORANGE_HSV_LOWER, _ORANGE_HSV_UPPER, min_area=_ORANGE_MIN_AREA
+        frame, *ORANGE_HSV_RANGE, min_area=_ORANGE_MIN_AREA
     )
     if not blobs:
         return None

@@ -57,6 +57,8 @@ accumulates, never acts on a single verdict.
 import cv2
 import numpy as np
 
+from physiclaw.core.vision.preprocess import gaussian_blur, grayscale
+
 # Fraction of frame height to drop from the top before diffing — covers
 # the iOS status bar (clock, signal) on the cropped phone-screen frame.
 STATUS_BAR_FRAC = 0.06
@@ -111,8 +113,8 @@ def _prepare(before: np.ndarray, after: np.ndarray) -> tuple[np.ndarray, np.ndar
     if before.shape != after.shape:
         after = cv2.resize(after, (before.shape[1], before.shape[0]))
     top = int(before.shape[0] * STATUS_BAR_FRAC)
-    a = cv2.GaussianBlur(cv2.cvtColor(before[top:], cv2.COLOR_BGR2GRAY), (_BLUR_KSIZE,) * 2, 0)
-    b = cv2.GaussianBlur(cv2.cvtColor(after[top:], cv2.COLOR_BGR2GRAY), (_BLUR_KSIZE,) * 2, 0)
+    a = gaussian_blur(grayscale(before[top:]), _BLUR_KSIZE)
+    b = gaussian_blur(grayscale(after[top:]), _BLUR_KSIZE)
 
     # Brightness align, clamped: correct AE drift, keep real transitions.
     delta = round(float(a.mean()) - float(b.mean()))

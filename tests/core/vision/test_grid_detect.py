@@ -7,6 +7,7 @@ import pytest
 
 from physiclaw.core.vision.grid_detect import (
     compute_affine_transforms,
+    detect_bridge_corners,
     detect_orange_dot,
     detect_red_dots,
     detect_screen_corners,
@@ -288,3 +289,70 @@ def test_point_in_polygon_inside_outside_and_none() -> None:
     assert point_in_polygon(poly, 300, 200) is True
     assert point_in_polygon(poly, 5, 5) is False
     assert point_in_polygon(None, 0, 0) is True  # no gate
+
+
+# ---------- detect_bridge_corners ----------
+
+
+def _swatch(img: np.ndarray, cx: int, cy: int, color_bgr: tuple, half: int = 6) -> None:
+    img[cy - half:cy + half, cx - half:cx + half] = color_bgr
+
+
+def _draw_rgbm_cluster(
+    img: np.ndarray, cx: int, cy: int, spacing: int = 10, swatch: int = 12
+) -> None:
+    """Draw an R-G-M-B 2×2 cluster around (cx, cy) in clockwise order:
+    R at NW, G at NE, M (magenta) at SE, B at SW. M sits diagonal to R.
+    Cluster span ≈ 2*spacing+swatch.
+    """
+    s = swatch // 2
+    _swatch(img, cx - spacing, cy - spacing, (0, 0, 255), s)    # NW: R
+    _swatch(img, cx + spacing, cy - spacing, (0, 255, 0), s)    # NE: G
+    _swatch(img, cx + spacing, cy + spacing, (255, 0, 255), s)  # SE: M
+    _swatch(img, cx - spacing, cy + spacing, (255, 0, 0), s)    # SW: B
+
+
+def test_detect_bridge_corners_returns_none_when_a_color_is_absent() -> None:
+    # Only R, G, B — M missing entirely.
+    img = _frame(400, 400)
+    _swatch(img, 65, 65, (0, 0, 255), 15)
+    _swatch(img, 115, 65, (0, 255, 0), 15)
+    _swatch(img, 115, 115, (255, 0, 0), 15)
+
+    assert detect_bridge_corners(img) is None
+
+
+def test_detect_bridge_corners_returns_dict_with_four_centroids() -> None:
+    img = _frame(400, 400)
+    _draw_rgbm_cluster(img, 200, 200, spacing=10, swatch=12)
+
+    result = detect_bridge_corners(img)
+
+    assert result is not None
+    assert set(result.keys()) == {"R", "G", "B", "M"}
+    # Centroids land near the drawn positions.
+    rx, ry = result["R"]
+    assert 180 < rx < 200 and 180 < ry < 200
+
+
+def test_detect_bridge_corners_uses_explicit_max_cluster_span_when_supplied() -> None:
+    # Caller can override the default-derived span. With a generous
+    # explicit span the spread-out cluster IS accepted.
+    img = _frame(400, 400)
+    _draw_rgbm_cluster(img, 200, 200, spacing=10, swatch=12)
+
+    result = detect_bridge_corners(img, max_cluster_span=80)
+
+    assert result is not None
+
+
+def test_detect_bridge_corners_rejects_clusters_exceeding_max_span() -> None:
+    # Spread the four colors across the whole frame — span >> 25%.
+    img = _frame(400, 400)
+    _swatch(img, 15, 15, (0, 0, 255), 15)      # R top-left
+    _swatch(img, 385, 15, (0, 255, 0), 15)     # G top-right
+    _swatch(img, 385, 385, (255, 0, 0), 15)    # B bottom-right
+    _swatch(img, 15, 385, (255, 0, 255), 15)   # M bottom-left
+
+    # Default max_span = 25% of min(side) = 100 — these are 400 apart.
+    assert detect_bridge_corners(img) is None

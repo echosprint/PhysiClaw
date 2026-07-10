@@ -169,7 +169,7 @@ def _frame_quality_verdict(frame) -> tuple[bool, str]:
 
     from physiclaw.core.calibration.state import Calibration
     from physiclaw.core.vision import quality
-    from physiclaw.core.vision.util import crop_to_phone_screen
+    from physiclaw.core.vision.preprocess import crop_to_phone_screen
 
     scope = "whole frame — no calibration crop"
     cal = Calibration.load()  # None on missing/unreadable bundle, logged

@@ -32,13 +32,38 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
-from physiclaw.core.vision.util import laplacian_variance
+from physiclaw.core.vision.preprocess import grayscale, resize_to_width
+
+# Laplacian variance is not scale-invariant: the same screen captured at
+# a higher resolution scores differently, so sharpness scores (and the
+# thresholds tuned against them) only transfer between rigs when measured
+# at one working width. Frames wider than this are downscaled before
+# scoring; narrower ones are scored as-is (upscaling would interpolation-
+# smooth genuinely sharp pixels into false blur). 480 ≈ the crop width of
+# the corpora the thresholds were calibrated on.
+NORMALIZED_WIDTH = 480
+
+
+def laplacian_variance(frame: np.ndarray) -> float:
+    """Variance of Laplacian — a focus/blur estimate. Higher = sharper.
+
+    Accepts a BGR or already-gray frame; frames wider than
+    NORMALIZED_WIDTH are downscaled first so scores are comparable
+    across cameras and resolutions. Sharp phone screenshots with
+    text/icons typically score 300+; severe motion blur or out-of-focus
+    drops it under 80. Run on the cropped phone-screen region —
+    backgrounds (cutting mat, ruler) contain their own edges that would
+    mask real blur on the screen.
+    """
+    gray = resize_to_width(grayscale(frame), NORMALIZED_WIDTH)
+    return float(cv2.Laplacian(gray, cv2.CV_16S).var())
+
 
 # Below this Laplacian variance a phone-screen crop is unreadably soft.
-# One number, one scale: `laplacian_variance` normalizes frames to
-# NORMALIZED_WIDTH internally, and the orchestrator's PEEK/GRAB
-# blur-retry thresholds are defined FROM this constant — this check runs
-# AFTER those retries, so a frame still under it means the retry didn't
+# One number, one scale: `laplacian_variance` (above) normalizes frames
+# to NORMALIZED_WIDTH, and the orchestrator's PEEK/GRAB blur-retry
+# thresholds are defined FROM this constant — this check runs AFTER
+# those retries, so a frame still under it means the retry didn't
 # recover (AF genuinely failing, not just mid-hunt).
 BLUR_THRESHOLD = 80.0
 
@@ -95,7 +120,7 @@ def assess(frame: np.ndarray) -> QualityReport:
     and resolutions. The luma stats are distribution-shaped and scale-
     independent, so they read the native crop directly.
     """
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    gray = grayscale(frame)
     return QualityReport(
         sharpness=laplacian_variance(gray),
         clip_pct=float((gray >= CLIP_LUMA).mean()),

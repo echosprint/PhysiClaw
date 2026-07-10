@@ -1,4 +1,10 @@
-"""Image codec, similarity, and shape-analysis utilities."""
+"""Image codec, bbox-validation, and one-off diagnostic utilities.
+
+Preprocessing stages (grayscale/HSV/blur/resize/crop) live in
+`physiclaw.core.vision.preprocess`; color and blob primitives in
+`colors` / `blobs`; the sharpness metric next to its thresholds in
+`quality`.
+"""
 
 import json
 import logging
@@ -8,88 +14,17 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from physiclaw.core.vision.preprocess import grayscale
+
 log = logging.getLogger(__name__)
 
 _ROTATION_DEBUG_PATH = str(Path(tempfile.gettempdir()) / "physiclaw_camera_rotation.jpg")
-
-FRAME_SIMILARITY_SIZE = (320, 240)
 
 
 def encode_jpeg(frame: np.ndarray, quality: int = 85) -> bytes:
     """Encode a BGR frame to JPEG bytes."""
     _, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
     return jpeg.tobytes()
-
-
-def phone_screen_crop_box(
-    frame: np.ndarray, transforms
-) -> tuple[int, int, int, int] | None:
-    """Camera pixel rectangle (left, top, right, bottom) enclosing the phone screen.
-
-    Returns None if calibration is missing or the rectangle degenerates
-    after clamping to frame bounds.
-    """
-    if transforms is None:
-        return None
-    (x0, y0), (x1, y1) = transforms.bbox_to_pixel_rect([0.0, 0.0, 1.0, 1.0])
-    h, w = frame.shape[:2]
-    left, right = max(0, min(x0, x1)), min(w, max(x0, x1))
-    top, bottom = max(0, min(y0, y1)), min(h, max(y0, y1))
-    if right <= left or bottom <= top:
-        return None
-    return (left, top, right, bottom)
-
-
-def crop_to_phone_screen(
-    frame: np.ndarray, transforms, max_long_edge: int = 1024
-) -> np.ndarray:
-    """Crop to the phone-screen region and downscale to cap vision tokens.
-
-    Returns the frame untouched if calibration is missing.
-    """
-    box = phone_screen_crop_box(frame, transforms)
-    if box is None:
-        return frame
-    left, top, right, bottom = box
-    cropped = frame[top:bottom, left:right]
-    long_edge = max(cropped.shape[:2])
-    if long_edge > max_long_edge:
-        scale = max_long_edge / long_edge
-        new_size = (int(cropped.shape[1] * scale), int(cropped.shape[0] * scale))
-        cropped = cv2.resize(cropped, new_size, interpolation=cv2.INTER_AREA)
-    return cropped
-
-
-# Laplacian variance is not scale-invariant: the same screen captured at
-# a higher resolution scores differently, so sharpness scores (and the
-# thresholds tuned against them) only transfer between rigs when measured
-# at one working width. Frames wider than this are downscaled before
-# scoring; narrower ones are scored as-is (upscaling would interpolation-
-# smooth genuinely sharp pixels into false blur). 480 ≈ the crop width of
-# the corpora the thresholds were calibrated on.
-NORMALIZED_WIDTH = 480
-
-
-def laplacian_variance(frame: np.ndarray) -> float:
-    """Variance of Laplacian — a focus/blur estimate. Higher = sharper.
-
-    Accepts a BGR or already-gray frame; frames wider than
-    NORMALIZED_WIDTH are downscaled first so scores are comparable
-    across cameras and resolutions. Sharp phone screenshots with
-    text/icons typically score 300+; severe motion blur or out-of-focus
-    drops it under 80. Run on the cropped phone-screen region —
-    backgrounds (cutting mat, ruler) contain their own edges that would
-    mask real blur on the screen.
-    """
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
-    h, w = gray.shape[:2]
-    if w > NORMALIZED_WIDTH:
-        gray = cv2.resize(
-            gray,
-            (NORMALIZED_WIDTH, round(h * NORMALIZED_WIDTH / w)),
-            interpolation=cv2.INTER_AREA,
-        )
-    return float(cv2.Laplacian(gray, cv2.CV_16S).var())
 
 
 def decode_image(data: bytes) -> np.ndarray:
@@ -101,242 +36,6 @@ def decode_image(data: bytes) -> np.ndarray:
     return frame
 
 
-def hsv_mask(hsv: np.ndarray, ranges) -> np.ndarray:
-    """OR of ``cv2.inRange`` over one or more ``(lower, upper)`` HSV ranges.
-
-    Lets one call cover a hue that wraps the 0/180 seam — red is passed both
-    ``[0..10]`` and ``[170..180]``. The leaf primitive every colour detector
-    builds on (blob centroids here, the dock badge's pixel count in the
-    watchdog), so "red needs two ranges" lives in exactly one place.
-    """
-    mask = None
-    for lo, hi in ranges:
-        m = cv2.inRange(hsv, np.array(lo), np.array(hi))
-        mask = m if mask is None else (mask | m)
-    return mask
-
-
-def redness(frame: np.ndarray) -> np.ndarray:
-    """Per-pixel "how red" map: ``R - max(G, B)``, clipped to 0–255 (uint8).
-
-    Robust where an HSV saturation floor isn't: small red marks on a bright
-    screen desaturate to pink under a camera (low S, dim V), but their red
-    channel still sits clearly above green/blue. Redness isolates them when
-    ``red_ranges`` + an S/V threshold would wipe them out. Use this for faint
-    targets (calibration dots); use :func:`red_ranges` for bold solid red
-    (orientation markers, dock badges, corner squares).
-    """
-    bgr = frame.astype(np.int16)
-    r = bgr[:, :, 2] - np.maximum(bgr[:, :, 0], bgr[:, :, 1])
-    return np.clip(r, 0, 255).astype(np.uint8)
-
-
-def red_ranges(s_min: int = 100, v_min: int = 100):
-    """The two HSV ranges covering red across the 0/180 hue seam.
-
-    Callers pick the S/V floor that suits them: the orientation marker and the
-    camera-pick corner blocks pass 80 (both wash out under a camera on a bright
-    screen), while the dock badge keeps the default 100. Hue bounds are fixed.
-    Faint targets like the calibration dots use :func:`redness` instead.
-    """
-    return [
-        ([0, s_min, v_min], [10, 255, 255]),
-        ([170, s_min, v_min], [180, 255, 255]),
-    ]
-
-
-def _as_ranges(lower, upper):
-    """Normalise a colour spec to a list of ``(lower, upper)`` pairs:
-    ``(lower, upper)`` → one range; ``upper=None`` → ``lower`` is already a
-    list of ranges (e.g. ``red_ranges()``)."""
-    return [(lower, upper)] if upper is not None else list(lower)
-
-
-def contour_centroid(cnt) -> tuple[float, float] | None:
-    """Area-weighted centroid ``(cx, cy)`` of a contour, or ``None`` if it's
-    degenerate (zero area)."""
-    m = cv2.moments(cnt)
-    if m["m00"] == 0:
-        return None
-    return (m["m10"] / m["m00"], m["m01"] / m["m00"])
-
-
-def _hsv_blob_centroids(
-    hsv: np.ndarray,
-    ranges,
-    *,
-    min_area: int,
-    morph_op: int,
-    morph_kernel: tuple[int, int],
-) -> list[tuple[float, float]]:
-    """Core of the HSV-blob pipeline, reusable when the caller already
-    has an HSV frame. Returns every centroid with area ≥ ``min_area``.
-    """
-    mask = hsv_mask(hsv, ranges)
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, morph_kernel)
-    mask = cv2.morphologyEx(mask, morph_op, kernel)
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    out: list[tuple[float, float]] = []
-    for cnt in contours:
-        if cv2.contourArea(cnt) < min_area:
-            continue
-        c = contour_centroid(cnt)
-        if c is not None:
-            out.append(c)
-    return out
-
-
-def find_all_hsv_blobs(
-    frame: np.ndarray,
-    lower,
-    upper=None,
-    *,
-    min_area: int = 50,
-    morph_op: int = cv2.MORPH_OPEN,
-    morph_kernel: tuple[int, int] = (5, 5),
-) -> list[tuple[float, float]]:
-    """Return centroids of every HSV-matched blob above ``min_area``.
-
-    One range as ``lower``/``upper``, or a list of ranges as ``lower``
-    (``upper`` omitted) for a wrapping hue — see :func:`red_ranges`. Same
-    pipeline as :func:`find_largest_hsv_blob` but keeps every qualifying
-    contour; order is undefined, so callers cluster by position.
-    """
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    return _hsv_blob_centroids(
-        hsv,
-        _as_ranges(lower, upper),
-        min_area=min_area,
-        morph_op=morph_op,
-        morph_kernel=morph_kernel,
-    )
-
-
-def find_largest_hsv_blob(
-    frame: np.ndarray,
-    lower,
-    upper=None,
-    *,
-    min_area: int = 50,
-    morph_op: int = cv2.MORPH_OPEN,
-    morph_kernel: tuple[int, int] = (5, 5),
-) -> tuple[float, float] | None:
-    """Centroid (cx, cy) of the largest HSV-matched blob, or None.
-
-    One range as ``lower``/``upper``, or a list of ranges as ``lower``
-    (``upper`` omitted) to cover a hue that wraps the 0/180 seam — see
-    :func:`red_ranges`. Applies one morphology pass (``open`` kills
-    salt-and-pepper, ``close`` seals gaps) and returns the biggest contour's
-    centroid, or ``None`` when none reaches ``min_area``.
-    """
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    mask = hsv_mask(hsv, _as_ranges(lower, upper))
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, morph_kernel)
-    mask = cv2.morphologyEx(mask, morph_op, kernel)
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
-        return None
-    largest = max(contours, key=cv2.contourArea)
-    if cv2.contourArea(largest) < min_area:
-        return None
-    return contour_centroid(largest)
-
-
-# S/V floor for the corner blocks. On a dim rig the captured blocks sit at
-# ~S/V 100-120, so the old floor of 100 was right at the edge — a slightly
-# dimmer setup would miss them. 80 adds margin. Don't drop below ~60: there
-# the search starts matching colourful home-screen app icons and the cluster
-# check mis-reads them as a corner cluster.
-_CORNER_SV_MIN = 80
-# Magenta, not yellow, is the 4th corner colour: a camera renders the screen's
-# yellow as a yellow-green (H≈44) that drifts out of the Yellow band and into
-# Green, so the yellow blocks vanish and the all-four-colours check fails.
-# Magenta (#ff00ff = red+blue, no green) sits alone in the otherwise-empty
-# 130–170 hue channel — far from R/G/B and from anything in a typical workshop.
-CORNER_HSV_RANGES = {
-    "R": red_ranges(_CORNER_SV_MIN, _CORNER_SV_MIN),
-    "G": [([40, _CORNER_SV_MIN, _CORNER_SV_MIN], [80, 255, 255])],
-    "B": [([100, _CORNER_SV_MIN, _CORNER_SV_MIN], [130, 255, 255])],
-    "M": [([134, _CORNER_SV_MIN, _CORNER_SV_MIN], [169, 255, 255])],
-}
-
-
-def _is_clockwise_rgbm_cluster(
-    cluster: dict[str, tuple[float, float]], max_span: float
-) -> bool:
-    """Four RGBM centroids must be tightly grouped and traverse R→G→M→B
-    clockwise around their centroid (any cyclic rotation, so any of the
-    four camera rotations passes)."""
-    from math import atan2
-
-    xs = [p[0] for p in cluster.values()]
-    ys = [p[1] for p in cluster.values()]
-    if max(xs) - min(xs) > max_span or max(ys) - min(ys) > max_span:
-        return False
-    cx = sum(xs) / 4
-    cy = sum(ys) / 4
-    ordered = sorted(
-        cluster.items(), key=lambda kv: atan2(kv[1][1] - cy, kv[1][0] - cx)
-    )
-    return "".join(name for name, _ in ordered) in "RGMBRGMB"
-
-
-def detect_bridge_corners(
-    frame: np.ndarray, max_cluster_span: float | None = None
-) -> dict | None:
-    """Find one intact RGBM cluster rendered by bridge.html's ``corners``
-    phase. bridge.html draws the same 2×2 RGBM cluster at all four
-    screen corners, so a stylus occluding up to three of them still
-    leaves enough to identify the camera.
-
-    Returns the four centroids of the first intact cluster, or ``None``
-    if no combination of detected blobs forms a tight-enough group
-    whose clockwise order is a cyclic rotation of RGBM.
-
-    ``max_cluster_span`` defaults to 25% of the frame's shorter side —
-    each on-phone cluster is ~20% of the phone's shorter side (`bs` =
-    10% per quadrant in bridge.html's ``corners`` case), and the phone
-    fills 60–80% of the frame during setup, so 25% leaves comfortable
-    margin without admitting cross-cluster pairings.
-    """
-    if max_cluster_span is None:
-        max_cluster_span = min(frame.shape[:2]) * 0.25
-
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    blobs: dict[str, list[tuple[float, float]]] = {k: [] for k in "RGBM"}
-    for name, hsv_ranges in CORNER_HSV_RANGES.items():
-        blobs[name] = _hsv_blob_centroids(
-            hsv, hsv_ranges, min_area=50,
-            morph_op=cv2.MORPH_OPEN, morph_kernel=(5, 5),
-        )
-
-    if not all(blobs[k] for k in "RGBM"):
-        return None
-
-    # Brute force — at most 4 clusters × 1 blob per color per cluster =
-    # 4⁴ = 256 candidates. The span filter rejects cross-cluster pairings
-    # almost immediately, so this stays cheap in practice.
-    for r in blobs["R"]:
-        for g in blobs["G"]:
-            for b in blobs["B"]:
-                for m in blobs["M"]:
-                    candidate = {"R": r, "G": g, "B": b, "M": m}
-                    if _is_clockwise_rgbm_cluster(candidate, max_cluster_span):
-                        return candidate
-    return None
-
-
-def frame_similarity(a: np.ndarray, b: np.ndarray) -> float:
-    """Normalized cross-correlation of two frames in [-1, 1].
-
-    Downsample to a common grayscale size and let cv2.matchTemplate
-    compute Pearson's r. ~1 means same scene, ~0 uncorrelated.
-    """
-    ga = cv2.resize(cv2.cvtColor(a, cv2.COLOR_BGR2GRAY), FRAME_SIMILARITY_SIZE)
-    gb = cv2.resize(cv2.cvtColor(b, cv2.COLOR_BGR2GRAY), FRAME_SIMILARITY_SIZE)
-    return float(cv2.matchTemplate(ga, gb, cv2.TM_CCOEFF_NORMED)[0, 0])
-
-
 def check_phone_in_frame(frame: np.ndarray) -> dict:
     """Shape/coverage/straightness diagnostic from one overhead frame.
 
@@ -344,7 +43,7 @@ def check_phone_in_frame(frame: np.ndarray) -> dict:
     Saves an annotated frame to ``<tempdir>/physiclaw_camera_rotation.jpg``.
     Raises if no bright region is detected (camera read failed or phone off).
     """
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    gray = grayscale(frame)
     _, mask = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:

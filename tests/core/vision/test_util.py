@@ -1,43 +1,27 @@
-"""Tests for `physiclaw.core.vision.util` — image codec + shape helpers.
+"""Tests for `physiclaw.core.vision.util` — codecs, bbox validation,
+numpad inference, element formatting, and the phone-in-frame diagnostic.
 
-All tests use synthetic BGR `np.ndarray` images. No real photos
-required — colored squares, gradients, and white-on-black masks
-exercise the HSV pipeline, blur metrics, and contour analysis.
-
-For HSV color tests we draw saturated pixels into a BGR canvas:
-  - Red:     [0, 0, 255]
-  - Green:   [0, 255, 0]
-  - Blue:    [255, 0, 0]
-  - Magenta: [255, 0, 255]
-
-`check_phone_in_frame` writes a debug JPEG under `tempfile.gettempdir()`
-as a side effect; tests mock `cv2.imwrite` to keep the host clean.
+All tests use synthetic BGR `np.ndarray` images — no real photos
+required. `check_phone_in_frame` writes a debug JPEG under
+`tempfile.gettempdir()` as a side effect; tests mock `cv2.imwrite` to
+keep the host clean.
 """
 from __future__ import annotations
 
-from types import SimpleNamespace
 from typing import Any
 
 import cv2
 import numpy as np
 import pytest
 
-from physiclaw.core.vision import util
 from physiclaw.core.vision.util import (
-    FRAME_SIMILARITY_SIZE,
     bbox_on_screen,
     check_phone_in_frame,
     compact_json,
     decode_image,
-    detect_bridge_corners,
     encode_jpeg,
-    find_all_hsv_blobs,
-    find_largest_hsv_blob,
     find_numpad_digit,
     format_elements,
-    frame_similarity,
-    laplacian_variance,
-    phone_screen_crop_box,
     validate_bbox,
 )
 
@@ -191,110 +175,6 @@ def test_format_elements_handles_missing_or_none_label_as_empty_string() -> None
     assert '"" [' in out
 
 
-# ---------- phone_screen_crop_box ----------
-
-
-def test_phone_screen_crop_box_returns_none_when_transforms_missing() -> None:
-    frame = np.zeros((480, 640, 3), dtype=np.uint8)
-
-    assert phone_screen_crop_box(frame, None) is None
-
-
-def test_phone_screen_crop_box_returns_clamped_box_for_in_bounds_rect() -> None:
-    frame = np.zeros((600, 800, 3), dtype=np.uint8)
-    transforms = SimpleNamespace(
-        bbox_to_pixel_rect=lambda b: ((100, 80), (700, 520))
-    )
-
-    out = phone_screen_crop_box(frame, transforms)
-
-    assert out == (100, 80, 700, 520)
-
-
-def test_phone_screen_crop_box_clamps_box_to_frame_bounds() -> None:
-    frame = np.zeros((600, 800, 3), dtype=np.uint8)
-    # tl beyond top-left, br beyond bottom-right.
-    transforms = SimpleNamespace(
-        bbox_to_pixel_rect=lambda b: ((-50, -30), (900, 700))
-    )
-
-    out = phone_screen_crop_box(frame, transforms)
-
-    assert out == (0, 0, 800, 600)
-
-
-def test_phone_screen_crop_box_returns_none_for_degenerate_rect() -> None:
-    frame = np.zeros((600, 800, 3), dtype=np.uint8)
-    # Both corners at the same point — zero area after clamping.
-    transforms = SimpleNamespace(
-        bbox_to_pixel_rect=lambda b: ((100, 100), (100, 100))
-    )
-
-    assert phone_screen_crop_box(frame, transforms) is None
-
-
-def test_phone_screen_crop_box_handles_inverted_corners() -> None:
-    frame = np.zeros((600, 800, 3), dtype=np.uint8)
-    # Coords swapped: br listed first conceptually.
-    transforms = SimpleNamespace(
-        bbox_to_pixel_rect=lambda b: ((700, 520), (100, 80))
-    )
-
-    out = phone_screen_crop_box(frame, transforms)
-
-    assert out == (100, 80, 700, 520)
-
-
-# ---------- crop_to_phone_screen ----------
-
-
-def test_crop_to_phone_screen_returns_frame_unchanged_when_transforms_none() -> None:
-    frame = np.zeros((480, 640, 3), dtype=np.uint8)
-
-    out = util.crop_to_phone_screen(frame, transforms=None)
-
-    assert out is frame
-
-
-def test_crop_to_phone_screen_returns_cropped_region_when_box_fits() -> None:
-    frame = np.zeros((480, 640, 3), dtype=np.uint8)
-    transforms = SimpleNamespace(
-        bbox_to_pixel_rect=lambda b: ((100, 80), (300, 200))
-    )
-
-    out = util.crop_to_phone_screen(frame, transforms, max_long_edge=1024)
-
-    assert out.shape == (120, 200, 3)  # (h, w, c) — cropped to box size
-
-
-def test_crop_to_phone_screen_downscales_when_long_edge_exceeds_cap() -> None:
-    frame = np.zeros((600, 800, 3), dtype=np.uint8)
-    transforms = SimpleNamespace(
-        bbox_to_pixel_rect=lambda b: ((0, 0), (800, 600))
-    )
-
-    out = util.crop_to_phone_screen(frame, transforms, max_long_edge=400)
-
-    assert max(out.shape[:2]) == 400
-
-
-# ---------- laplacian_variance ----------
-
-
-def test_laplacian_variance_for_uniform_image_is_zero() -> None:
-    flat = np.full((100, 100, 3), 128, dtype=np.uint8)
-
-    assert laplacian_variance(flat) == 0.0
-
-
-def test_laplacian_variance_for_image_with_strong_edges_is_higher() -> None:
-    flat = np.full((100, 100, 3), 128, dtype=np.uint8)
-    edgy = flat.copy()
-    edgy[40:60, :] = 0  # horizontal black band creates edges
-
-    assert laplacian_variance(edgy) > laplacian_variance(flat)
-
-
 # ---------- encode_jpeg / decode_image ----------
 
 
@@ -312,175 +192,6 @@ def test_encode_jpeg_then_decode_image_round_trips_to_close_pixel_values() -> No
 def test_decode_image_raises_on_invalid_bytes() -> None:
     with pytest.raises(RuntimeError, match=r"^Failed to decode image bytes$"):
         decode_image(b"not an image")
-
-
-# ---------- frame_similarity ----------
-
-
-def test_frame_similarity_size_constant_pinned() -> None:
-    assert FRAME_SIMILARITY_SIZE == (320, 240)
-
-
-def test_frame_similarity_identical_frames_correlate_to_one() -> None:
-    a = np.random.RandomState(0).randint(0, 255, (240, 320, 3), dtype=np.uint8)
-
-    assert frame_similarity(a, a) == pytest.approx(1.0)
-
-
-def test_frame_similarity_inverted_frames_correlate_to_minus_one() -> None:
-    a = np.random.RandomState(1).randint(0, 255, (240, 320, 3), dtype=np.uint8)
-    b = 255 - a
-
-    # Pixel-wise inversion → grayscale inversion → ~ -1 correlation.
-    assert frame_similarity(a, b) < -0.9
-
-
-# ---------- find_largest_hsv_blob ----------
-
-
-def _red_lower_upper() -> tuple[list[int], list[int]]:
-    # Saturated red, hue 0–10.
-    return ([0, 100, 100], [10, 255, 255])
-
-
-def test_find_largest_hsv_blob_returns_none_when_no_match() -> None:
-    img = np.zeros((100, 100, 3), dtype=np.uint8)
-    lower, upper = _red_lower_upper()
-
-    assert find_largest_hsv_blob(img, lower, upper) is None
-
-
-def test_find_largest_hsv_blob_returns_centroid_of_solid_square() -> None:
-    img = np.zeros((200, 200, 3), dtype=np.uint8)
-    _draw_rect(img, 50, 60, 150, 140, (0, 0, 255))  # red square
-    lower, upper = _red_lower_upper()
-
-    cx, cy = find_largest_hsv_blob(img, lower, upper)
-
-    # Center should be ~(100, 100) within a few pixels of OpenCV moments.
-    assert 95 < cx < 105
-    assert 95 < cy < 105
-
-
-def test_find_largest_hsv_blob_picks_the_larger_of_two_blobs() -> None:
-    img = np.zeros((200, 300, 3), dtype=np.uint8)
-    _draw_rect(img, 10, 10, 30, 30, (0, 0, 255))     # small (20×20)
-    _draw_rect(img, 200, 100, 280, 180, (0, 0, 255))  # big (80×80)
-    lower, upper = _red_lower_upper()
-
-    cx, cy = find_largest_hsv_blob(img, lower, upper)
-
-    # Centroid lands inside the big blob, not the small one.
-    assert 200 < cx < 280
-    assert 100 < cy < 180
-
-
-def test_find_largest_hsv_blob_filters_below_min_area() -> None:
-    img = np.zeros((200, 200, 3), dtype=np.uint8)
-    _draw_rect(img, 100, 100, 105, 105, (0, 0, 255))  # tiny 5×5 blob
-    lower, upper = _red_lower_upper()
-
-    # Default min_area=50 — single 25-pixel blob is below threshold.
-    assert find_largest_hsv_blob(img, lower, upper, min_area=50) is None
-    # Below-area override — same blob is now found.
-    assert find_largest_hsv_blob(img, lower, upper, min_area=10) is not None
-
-
-# ---------- find_all_hsv_blobs ----------
-
-
-def test_find_all_hsv_blobs_empty_when_no_match() -> None:
-    img = np.zeros((100, 100, 3), dtype=np.uint8)
-    lower, upper = _red_lower_upper()
-
-    assert find_all_hsv_blobs(img, lower, upper) == []
-
-
-def test_find_all_hsv_blobs_returns_centroid_per_qualifying_contour() -> None:
-    img = np.zeros((200, 300, 3), dtype=np.uint8)
-    _draw_rect(img, 50, 50, 100, 100, (0, 0, 255))
-    _draw_rect(img, 200, 50, 250, 100, (0, 0, 255))
-    _draw_rect(img, 50, 150, 100, 195, (0, 0, 255))
-    lower, upper = _red_lower_upper()
-
-    centroids = find_all_hsv_blobs(img, lower, upper)
-
-    assert len(centroids) == 3
-
-
-# ---------- detect_bridge_corners ----------
-
-
-def _draw_rgbm_cluster(
-    img: np.ndarray,
-    cx: int,
-    cy: int,
-    spacing: int = 10,
-    swatch: int = 12,
-) -> None:
-    """Draw an R-G-M-B 2×2 cluster around (cx, cy) in clockwise order:
-    R at NW, G at NE, M (magenta) at SE, B at SW. M sits diagonal to R.
-    Cluster span ≈ 2*spacing+swatch.
-    """
-    s = swatch // 2
-    # NW: R
-    _draw_rect(img, cx - spacing - s, cy - spacing - s,
-               cx - spacing + s, cy - spacing + s, (0, 0, 255))
-    # NE: G
-    _draw_rect(img, cx + spacing - s, cy - spacing - s,
-               cx + spacing + s, cy - spacing + s, (0, 255, 0))
-    # SE: M (magenta)
-    _draw_rect(img, cx + spacing - s, cy + spacing - s,
-               cx + spacing + s, cy + spacing + s, (255, 0, 255))
-    # SW: B
-    _draw_rect(img, cx - spacing - s, cy + spacing - s,
-               cx - spacing + s, cy + spacing + s, (255, 0, 0))
-
-
-def test_detect_bridge_corners_returns_none_when_a_color_is_absent() -> None:
-    # Only R, G, B — M missing entirely.
-    img = np.zeros((400, 400, 3), dtype=np.uint8)
-    _draw_rect(img, 50, 50, 80, 80, (0, 0, 255))
-    _draw_rect(img, 100, 50, 130, 80, (0, 255, 0))
-    _draw_rect(img, 100, 100, 130, 130, (255, 0, 0))
-
-    assert detect_bridge_corners(img) is None
-
-
-def test_detect_bridge_corners_returns_dict_with_four_centroids() -> None:
-    img = np.zeros((400, 400, 3), dtype=np.uint8)
-    _draw_rgbm_cluster(img, 200, 200, spacing=10, swatch=12)
-
-    result = detect_bridge_corners(img)
-
-    assert result is not None
-    assert set(result.keys()) == {"R", "G", "B", "M"}
-    # Centroids land near the drawn positions.
-    rx, ry = result["R"]
-    assert 180 < rx < 200 and 180 < ry < 200
-
-
-def test_detect_bridge_corners_uses_explicit_max_cluster_span_when_supplied() -> None:
-    # Caller can override the default-derived span. With a generous
-    # explicit span the spread-out cluster IS accepted.
-    img = np.zeros((400, 400, 3), dtype=np.uint8)
-    _draw_rgbm_cluster(img, 200, 200, spacing=10, swatch=12)
-
-    result = detect_bridge_corners(img, max_cluster_span=80)
-
-    assert result is not None
-
-
-def test_detect_bridge_corners_rejects_clusters_exceeding_max_span() -> None:
-    # Spread the four colors across the whole frame — span >> 25%.
-    img = np.zeros((400, 400, 3), dtype=np.uint8)
-    _draw_rect(img, 0, 0, 30, 30, (0, 0, 255))      # R top-left
-    _draw_rect(img, 370, 0, 400, 30, (0, 255, 0))   # G top-right
-    _draw_rect(img, 370, 370, 400, 400, (255, 0, 0))  # B bottom-right
-    _draw_rect(img, 0, 370, 30, 400, (255, 0, 255))   # M bottom-left
-
-    # Default max_span = 25% of min(side) = 100 — these are 400 apart.
-    assert detect_bridge_corners(img) is None
 
 
 # ---------- check_phone_in_frame ----------

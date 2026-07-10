@@ -37,14 +37,16 @@ from physiclaw.core.hardware.iphone import AssistiveTouch
 from physiclaw.core.vision import quality
 from physiclaw.core.vision.icon_detect import IconDetector
 from physiclaw.core.vision.ocr import OCRReader, results_to_elements
+from physiclaw.core.vision.preprocess import (
+    crop_to_phone_screen,
+    phone_screen_crop_box,
+)
 from physiclaw.core.vision.util import (
     bbox_on_screen,
-    crop_to_phone_screen,
     decode_image,
     encode_jpeg,
     format_elements,
     find_numpad_digit,
-    phone_screen_crop_box,
     validate_bbox,
 )
 from physiclaw.core.vision.ui_elements import detect_ui_elements, elements_to_json

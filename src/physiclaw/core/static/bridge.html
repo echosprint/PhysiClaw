@@ -244,13 +244,13 @@ body.mode-bridge #bridge-layer{
         //   B M
         // Magenta (not yellow): the camera renders the screen's yellow as a
         // yellow-green that collides with the Green block — magenta sits alone
-        // in the empty 130–170 hue band (vision/util.py:CORNER_HSV_RANGES).
+        // in the empty 130–170 hue band (vision/colors.py:CORNER_HSV_RANGES).
         // M sits diagonal to R (R+B = magenta) so it never borders the red
         // block — its only same-channel neighbour is blue.
         (function drawCornerClusters(){
           // 10% of phone's shorter side per quadrant → 2×2 cluster ≈ 20%
           // of phone's shorter side. Camera-side `max_cluster_span` is 25%
-          // of frame's shorter side (vision/util.py:detect_bridge_corners),
+          // of frame's shorter side (vision/grid_detect.py:detect_bridge_corners),
           // so even with the phone filling most of the frame the cluster
           // stays well under the cross-cluster cutoff.
           var bs = Math.min(W, H) * 0.10;  // block size (one RGBM quadrant)

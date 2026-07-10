@@ -28,20 +28,7 @@ from physiclaw.core.vision.watchdog import (
     _check_content,
     _crop_zones,
     _ema_update,
-    _gray,
 )
-
-
-# ---------- _gray ----------
-
-
-def test_gray_converts_bgr_to_grayscale() -> None:
-    bgr = np.full((10, 10, 3), [255, 0, 0], dtype=np.uint8)  # blue
-
-    out = _gray(bgr)
-
-    assert out.ndim == 2
-    assert out.shape == (10, 10)
 
 
 # ---------- _check_content ----------

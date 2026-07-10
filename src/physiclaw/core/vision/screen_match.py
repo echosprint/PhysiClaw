@@ -17,6 +17,8 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
+from physiclaw.core.vision.preprocess import grayscale, to_hsv
+
 log = logging.getLogger(__name__)
 
 # ─── ORB feature matching ────────────────────────────────────
@@ -56,8 +58,8 @@ def match_screen(
     Returns:
         MatchResult with match status, confidence, and homography.
     """
-    gray_cam = cv2.cvtColor(camera_frame, cv2.COLOR_BGR2GRAY)
-    gray_ref = cv2.cvtColor(reference, cv2.COLOR_BGR2GRAY)
+    gray_cam = grayscale(camera_frame)
+    gray_ref = grayscale(reference)
 
     orb = cv2.ORB_create(nfeatures=_ORB_FEATURES)
     kp_ref, desc_ref = orb.detectAndCompute(gray_ref, None)
@@ -165,8 +167,8 @@ def frames_differ(
     Args:
         threshold: difference threshold (0-1). Higher = more different needed.
     """
-    gray_a = cv2.cvtColor(frame_a, cv2.COLOR_BGR2GRAY)
-    gray_b = cv2.cvtColor(frame_b, cv2.COLOR_BGR2GRAY)
+    gray_a = grayscale(frame_a)
+    gray_b = grayscale(frame_b)
 
     hist_a = cv2.calcHist([gray_a], [0], None, [64], [0, 256])
     hist_b = cv2.calcHist([gray_b], [0], None, [64], [0, 256])
@@ -194,7 +196,7 @@ def detect_dark_overlay(
         dark_ratio_threshold: fraction of pixels that must be dark (0-1)
         brightness_threshold: V-channel value below which a pixel is "dark"
     """
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    hsv = to_hsv(frame)
     v_channel = hsv[:, :, 2]
     dark_pixels = np.count_nonzero(v_channel < brightness_threshold)
     ratio = dark_pixels / v_channel.size
