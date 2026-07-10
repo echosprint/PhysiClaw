@@ -48,6 +48,11 @@ def pc(mocker) -> PhysiClaw:
     # Synthetic test frames are flat (Laplacian variance 0) — disable the
     # autofocus blur-retry so grabs stay one-frame-per-call.
     p.GRAB_BLUR_THRESHOLD = 0
+    # Flat frames also read as blurry to the camera-quality monitor —
+    # neutralize it so its ⚠ line doesn't join every listing. The
+    # camera-quality tests below re-arm it per test.
+    p._quality = MagicMock()
+    p._quality.observe.return_value = None
     return p
 
 
@@ -570,25 +575,39 @@ def test_detect_calls_ui_pipeline(mocker, pc: PhysiClaw) -> None:
 # ---------- peek ----------
 
 
-def test_peek_retries_on_blurry_frame(mocker, pc: PhysiClaw) -> None:
+def _wire_peek(mocker, pc: PhysiClaw, *, listing: str = "ok", sharpness=200.0):
+    """Stub peek's whole pipeline: hardware, pass-through crop, sharpness,
+    detection (returning `listing`), and JPEG encode. `sharpness` is a
+    single score, or a list consumed one grab at a time (blur-retry
+    tests). Returns the patched `time.sleep` spy."""
     _wire_hardware(pc)
     pc._ocr_reader = MagicMock()
     pc._icon_detector = MagicMock()
     pc._cam.snapshot.return_value = np.zeros((10, 10, 3), dtype=np.uint8)
     mocker.patch.object(orchestrator, "crop_to_phone_screen", side_effect=lambda f, t: f)
-    blur_values = iter([10.0, 100.0])
-    mocker.patch.object(
-        orchestrator, "laplacian_variance",
-        side_effect=lambda *_: next(blur_values),
-    )
-    mocker.patch.object(orchestrator.time, "sleep")
+    if isinstance(sharpness, list):
+        blur_values = iter(sharpness)
+        mocker.patch.object(
+            orchestrator, "laplacian_variance",
+            side_effect=lambda *_: next(blur_values),
+        )
+    else:
+        mocker.patch.object(
+            orchestrator, "laplacian_variance", return_value=sharpness,
+        )
+    sleep_spy = mocker.patch.object(orchestrator.time, "sleep")
     mocker.patch.object(
         orchestrator, "detect_ui_elements",
         return_value=([], np.zeros((4, 4, 3), dtype=np.uint8)),
     )
     mocker.patch.object(orchestrator, "elements_to_json", return_value=[])
-    mocker.patch.object(orchestrator, "format_elements", return_value="ok")
+    mocker.patch.object(orchestrator, "format_elements", return_value=listing)
     mocker.patch.object(orchestrator, "encode_jpeg", return_value=b"JPG")
+    return sleep_spy
+
+
+def test_peek_retries_on_blurry_frame(mocker, pc: PhysiClaw) -> None:
+    _wire_peek(mocker, pc, sharpness=[10.0, 100.0])
 
     jpg, listing = pc.peek()
 
@@ -599,20 +618,7 @@ def test_peek_retries_on_blurry_frame(mocker, pc: PhysiClaw) -> None:
 
 
 def test_peek_does_not_retry_on_sharp_frame(mocker, pc: PhysiClaw) -> None:
-    _wire_hardware(pc)
-    pc._ocr_reader = MagicMock()
-    pc._icon_detector = MagicMock()
-    pc._cam.snapshot.return_value = np.zeros((4, 4, 3), dtype=np.uint8)
-    mocker.patch.object(orchestrator, "crop_to_phone_screen", side_effect=lambda f, t: f)
-    mocker.patch.object(orchestrator, "laplacian_variance", return_value=200.0)
-    sleep_spy = mocker.patch.object(orchestrator.time, "sleep")
-    mocker.patch.object(
-        orchestrator, "detect_ui_elements",
-        return_value=([], np.zeros((4, 4, 3), dtype=np.uint8)),
-    )
-    mocker.patch.object(orchestrator, "elements_to_json", return_value=[])
-    mocker.patch.object(orchestrator, "format_elements", return_value="ok")
-    mocker.patch.object(orchestrator, "encode_jpeg", return_value=b"JPG")
+    sleep_spy = _wire_peek(mocker, pc)
 
     pc.peek()
 
@@ -1216,3 +1222,58 @@ def test_shutdown_swallows_camera_close_failure(pc: PhysiClaw) -> None:
     pc._cam.close.side_effect = RuntimeError("camera busy")
 
     pc.shutdown()  # no raise
+
+
+# ---------- camera-quality warning (AF/AE failure) ----------
+
+
+def test_peek_appends_quality_warning_to_listing(mocker, pc: PhysiClaw) -> None:
+    _wire_peek(mocker, pc, listing="rows")
+    pc._quality.observe.return_value = "⚠ camera: bad"
+
+    _, listing = pc.peek()
+
+    assert listing == "rows\n⚠ camera: bad"
+
+
+def test_gesture_view_carries_quality_warning(mocker, pc: PhysiClaw) -> None:
+    _wire_hardware(pc)
+    before = np.full((200, 100, 3), 128, dtype=np.uint8)
+    after = np.full((200, 100, 3), 30, dtype=np.uint8)
+    _wire_verdict_frames(mocker, pc, [before, after])
+    pc._quality.observe.return_value = "⚠ camera: bad"
+
+    out = pc.tap([0.1, 0.1, 0.2, 0.2])
+
+    assert out.listing == "LISTING\n⚠ camera: bad"
+    assert out.text.endswith("| screen: changed")  # verdict untouched
+
+
+def test_gesture_warning_rides_action_text_when_detect_fails(mocker, pc: PhysiClaw) -> None:
+    # Detection crashing must not silence the observation: a blurry/blown
+    # frame is a plausible CAUSE of the failed view, so with no listing to
+    # carry the ⚠ line it rides the action text instead.
+    _wire_hardware(pc)
+    before = np.full((200, 100, 3), 128, dtype=np.uint8)
+    after = np.full((200, 100, 3), 30, dtype=np.uint8)
+    _wire_verdict_frames(mocker, pc, [before, after])
+    pc._detect.side_effect = RuntimeError("model gone")
+    pc._quality.observe.return_value = "⚠ camera: bad"
+
+    out = pc.tap([0.1, 0.1, 0.2, 0.2])
+
+    assert out.listing is None
+    assert out.text.endswith("\n⚠ camera: bad")
+    pc._quality.observe.assert_called_once()
+
+
+def test_quality_check_failure_never_costs_the_view(mocker, pc: PhysiClaw) -> None:
+    _wire_hardware(pc)
+    before = np.full((200, 100, 3), 128, dtype=np.uint8)
+    after = np.full((200, 100, 3), 30, dtype=np.uint8)
+    _wire_verdict_frames(mocker, pc, [before, after])
+    pc._quality.observe.side_effect = RuntimeError("boom")
+
+    out = pc.tap([0.1, 0.1, 0.2, 0.2])
+
+    assert out.listing == "LISTING"  # fail-open: view intact, no line

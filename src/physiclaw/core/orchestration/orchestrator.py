@@ -27,6 +27,7 @@ from physiclaw.core.calibration import PARK_PCT, Calibration, ScreenTransforms
 from physiclaw.core.hardware.arm import StylusArm
 from physiclaw.core.hardware.camera import Camera
 from physiclaw.core.hardware.iphone import AssistiveTouch
+from physiclaw.core.vision import quality
 from physiclaw.core.vision.change import frames_changed
 from physiclaw.core.vision.icon_detect import IconDetector
 from physiclaw.core.vision.ocr import OCRReader, results_to_elements
@@ -111,6 +112,10 @@ class PhysiClaw:
         self._ocr_reader: OCRReader | None = None
         self._icon_detector: IconDetector | None = None
         self._watchdog = Watchdog()
+        # Judges every camera view for AF/AE failure (blur / blown
+        # highlights); shared across peeks and gesture views so a
+        # persistent rig problem escalates to "tell your user".
+        self._quality = quality.QualityMonitor()
         self._ready = False  # set True only after /setup finishes its last step
 
     # ─── Wiring ──────────────────────────────────────────────
@@ -407,7 +412,26 @@ class PhysiClaw:
         )
         return format_elements(elements_to_json(elements)), annotated
 
-    PEEK_BLUR_THRESHOLD = 80.0
+    def _observe_quality(self, source: str, frame) -> str | None:
+        """Judge a camera view for AF/AE failure; on a bad one, warn in the
+        log and return the agent-facing ⚠ line for the caller to attach.
+
+        Runs AFTER the blur-retry grabs, so a frame still failing here means
+        the retry didn't recover it. Fail-open: a crash in the check never
+        costs the view."""
+        try:
+            warning = self._quality.observe(quality.assess(frame))
+        except Exception:
+            log.exception("camera-quality check failed — skipping")
+            return None
+        if warning is not None:
+            log.warning("%s: %s", source, warning)
+        return warning
+
+    # Blur-retry gate, same measurement and scale as the quality monitor's
+    # verdict (laplacian_variance normalizes internally) — one number,
+    # defined once.
+    PEEK_BLUR_THRESHOLD = quality.BLUR_THRESHOLD
 
     def peek(self) -> tuple[bytes, str]:
         """Overhead camera snapshot + icon detection + OCR.
@@ -431,6 +455,9 @@ class PhysiClaw:
                 time.sleep(2.0)
                 cropped = crop_to_phone_screen(self.camera_view(), self.transforms)
             listing, annotated = self._detect(cropped)
+            warning = self._observe_quality("peek", cropped)
+            if warning is not None:
+                listing = f"{listing}\n{warning}"
             return encode_jpeg(annotated), listing
 
     def screenshot(self) -> tuple[bytes, str]:
@@ -524,8 +551,9 @@ class PhysiClaw:
     GESTURE_SETTLE_SECONDS = 1.0
     # The arm crossing the lens re-triggers autofocus; a frame captured
     # mid-hunt is blurry and poisons both the verdict and the fused view.
-    # Below this Laplacian variance, wait and re-grab once.
-    GRAB_BLUR_THRESHOLD = 80.0
+    # Below this Laplacian variance, wait and re-grab once. Same number
+    # and scale as the quality monitor's blur verdict.
+    GRAB_BLUR_THRESHOLD = quality.BLUR_THRESHOLD
     GRAB_BLUR_RETRY_SECONDS = 1.5
 
     # A healthy clipboard Shortcut confirms in ~1s of the long-press; the
@@ -610,9 +638,20 @@ class PhysiClaw:
                 jpeg = encode_jpeg(annotated)
             except Exception:
                 log.warning("post-gesture view failed", exc_info=True)
-        return GestureResult(
-            text=verdict.attach(result, changed), jpeg=jpeg, listing=listing,
-        )
+            warning = self._observe_quality("gesture view", after)
+        else:
+            warning = None
+        text = verdict.attach(result, changed)
+        if warning is not None:
+            if listing is not None:
+                listing = f"{listing}\n{warning}"
+            else:
+                # Detection failed, so there's no listing to carry the line —
+                # ride the action text: a blurry/blown frame is a plausible
+                # CAUSE of the failed view, and the agent needs to hear it
+                # before blindly re-peeking.
+                text = f"{text}\n{warning}"
+        return GestureResult(text=text, jpeg=jpeg, listing=listing)
 
     def _run_gesture(self, gesture, result: str) -> "GestureResult":
         """Lock, run `gesture` bracketed by verdict/view frames, and

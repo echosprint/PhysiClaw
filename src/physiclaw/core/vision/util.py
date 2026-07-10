@@ -60,15 +60,35 @@ def crop_to_phone_screen(
     return cropped
 
 
+# Laplacian variance is not scale-invariant: the same screen captured at
+# a higher resolution scores differently, so sharpness scores (and the
+# thresholds tuned against them) only transfer between rigs when measured
+# at one working width. Frames wider than this are downscaled before
+# scoring; narrower ones are scored as-is (upscaling would interpolation-
+# smooth genuinely sharp pixels into false blur). 480 ≈ the crop width of
+# the corpora the thresholds were calibrated on.
+NORMALIZED_WIDTH = 480
+
+
 def laplacian_variance(frame: np.ndarray) -> float:
     """Variance of Laplacian — a focus/blur estimate. Higher = sharper.
 
-    Sharp phone screenshots with text/icons typically score 300+; severe
-    motion blur or out-of-focus drops it under 80. Run on the cropped
-    phone-screen region — backgrounds (cutting mat, ruler) contain their
-    own edges that would mask real blur on the screen.
+    Accepts a BGR or already-gray frame; frames wider than
+    NORMALIZED_WIDTH are downscaled first so scores are comparable
+    across cameras and resolutions. Sharp phone screenshots with
+    text/icons typically score 300+; severe motion blur or out-of-focus
+    drops it under 80. Run on the cropped phone-screen region —
+    backgrounds (cutting mat, ruler) contain their own edges that would
+    mask real blur on the screen.
     """
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
+    h, w = gray.shape[:2]
+    if w > NORMALIZED_WIDTH:
+        gray = cv2.resize(
+            gray,
+            (NORMALIZED_WIDTH, round(h * NORMALIZED_WIDTH / w)),
+            interpolation=cv2.INTER_AREA,
+        )
     return float(cv2.Laplacian(gray, cv2.CV_16S).var())
 
 
