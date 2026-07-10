@@ -16,6 +16,7 @@ from typing import Annotated
 import typer
 
 from physiclaw import __version__, paths, runtime_state
+from physiclaw.cli import _http
 from physiclaw.cli._format import info as _fmt_info
 from physiclaw.cli._format import ok as _fmt_ok
 from physiclaw.cli._format import section as _fmt_section
@@ -77,12 +78,6 @@ def _probe_server(live: dict | None) -> tuple[str, int, bool, dict | None]:
     Caller-supplied ``live`` so doctor runs one ``read_live()`` per
     invocation — used twice (server probe + Provider section).
     """
-    # Lazy: httpx import is ~100ms — paid only when doctor actually runs,
-    # not on every `physiclaw --help`.
-    import httpx
-
-    from physiclaw.core import platform
-
     if live:
         host, port = live["host"], live["port"]
     else:
@@ -92,15 +87,9 @@ def _probe_server(live: dict | None) -> tuple[str, int, bool, dict | None]:
     bind_all = host == "0.0.0.0"
     if bind_all:
         host = "localhost"
-    try:
-        r = httpx.get(
-            f"http://{host}:{port}/api/status",
-            timeout=1.0,
-            trust_env=platform.TRUST_PROXY_ENV,
-        )
-        return (host, port, bind_all, r.json())
-    except (httpx.HTTPError, ValueError):
-        return (host, port, bind_all, None)
+    # _http.api handles the proxy-bypass policy and fails soft to None.
+    status = _http.api(f"http://{host}:{port}", "GET", "/api/status", timeout=1.0)
+    return (host, port, bind_all, status)
 
 
 # --- Deep probes (only run with --deep). ------------------------------------
@@ -221,18 +210,12 @@ def _probe_calibration_deep() -> str:
 
 
 def _probe_bridge_deep(host: str, port: int) -> str:
-    import httpx  # cached after _probe_server's first import
-
-    from physiclaw.core import platform
-
     try:
-        r = httpx.get(
-            f"http://{host}:{port}/api/bridge/state",
-            timeout=1.0,
-            trust_env=platform.TRUST_PROXY_ENV,
+        state = _http.fetch_json(
+            f"http://{host}:{port}/api/bridge/state", timeout=1.0
         )
-        connected = r.json().get("connected", False)
-    except (httpx.HTTPError, ValueError) as e:
+        connected = state.get("connected", False)
+    except (OSError, ValueError) as e:
         # Network/parse failure is a real problem — keep the warn.
         return _fmt_warn(f"bridge: {type(e).__name__}: {e}")
     if connected:

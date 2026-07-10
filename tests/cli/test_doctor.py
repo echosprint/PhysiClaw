@@ -5,7 +5,7 @@ import importlib
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import httpx
+import urllib.error
 import typer
 from typer.testing import CliRunner
 
@@ -65,10 +65,7 @@ def test_list_cameras_breaks_after_two_misses(mocker) -> None:
 
 
 def test_probe_server_uses_live_state_when_provided(mocker) -> None:
-    fake_resp = MagicMock()
-    fake_resp.json.return_value = {"ready": True}
-    mocker.patch.object(doctor_mod, "httpx", create=True)
-    mocker.patch("httpx.get", return_value=fake_resp)
+    mocker.patch.object(doctor_mod._http, "api", return_value={"ready": True})
 
     host, port, bind_all, status = doctor_mod._probe_server(
         {"host": "127.0.0.1", "port": 9000},
@@ -81,9 +78,7 @@ def test_probe_server_uses_live_state_when_provided(mocker) -> None:
 
 
 def test_probe_server_renames_0_0_0_0_to_localhost(mocker) -> None:
-    fake_resp = MagicMock()
-    fake_resp.json.return_value = {"ready": False}
-    mocker.patch("httpx.get", return_value=fake_resp)
+    mocker.patch.object(doctor_mod._http, "api", return_value={"ready": False})
 
     host, _port, bind_all, _status = doctor_mod._probe_server(
         {"host": "0.0.0.0", "port": 8048},
@@ -94,9 +89,7 @@ def test_probe_server_renames_0_0_0_0_to_localhost(mocker) -> None:
 
 
 def test_probe_server_falls_back_to_config(mocker) -> None:
-    fake_resp = MagicMock()
-    fake_resp.json.return_value = {"ready": True}
-    mocker.patch("httpx.get", return_value=fake_resp)
+    mocker.patch.object(doctor_mod._http, "api", return_value={"ready": True})
 
     host, port, bind_all, status = doctor_mod._probe_server(None)
 
@@ -106,7 +99,8 @@ def test_probe_server_falls_back_to_config(mocker) -> None:
 
 
 def test_probe_server_returns_none_on_http_error(mocker) -> None:
-    mocker.patch("httpx.get", side_effect=httpx.ConnectError("refused"))
+    # _http.api is fail-soft (None on refused/timeout) — pin the pass-through.
+    mocker.patch.object(doctor_mod._http, "api", return_value=None)
 
     host, port, bind_all, status = doctor_mod._probe_server(
         {"host": "x", "port": 1},
@@ -263,9 +257,9 @@ def test_probe_calibration_deep_partial_no_missing(mocker) -> None:
 
 
 def test_probe_bridge_deep_connected(mocker) -> None:
-    fake_resp = MagicMock()
-    fake_resp.json.return_value = {"connected": True}
-    mocker.patch("httpx.get", return_value=fake_resp)
+    mocker.patch.object(
+        doctor_mod._http, "fetch_json", return_value={"connected": True}
+    )
 
     out = doctor_mod._probe_bridge_deep("localhost", 8048)
 
@@ -273,9 +267,9 @@ def test_probe_bridge_deep_connected(mocker) -> None:
 
 
 def test_probe_bridge_deep_not_paired(mocker) -> None:
-    fake_resp = MagicMock()
-    fake_resp.json.return_value = {"connected": False}
-    mocker.patch("httpx.get", return_value=fake_resp)
+    mocker.patch.object(
+        doctor_mod._http, "fetch_json", return_value={"connected": False}
+    )
 
     out = doctor_mod._probe_bridge_deep("localhost", 8048)
 
@@ -283,11 +277,15 @@ def test_probe_bridge_deep_not_paired(mocker) -> None:
 
 
 def test_probe_bridge_deep_http_error(mocker) -> None:
-    mocker.patch("httpx.get", side_effect=httpx.ConnectError("x"))
+    # The warn line carries the failure detail (exception type + message).
+    mocker.patch.object(
+        doctor_mod._http, "fetch_json",
+        side_effect=urllib.error.URLError("x"),
+    )
 
     out = doctor_mod._probe_bridge_deep("localhost", 8048)
 
-    assert "ConnectError" in out
+    assert "URLError" in out
 
 
 # ---------- _skills_lines ----------

@@ -38,13 +38,12 @@ import threading
 import urllib.error
 import zipfile
 from pathlib import Path
-from typing import NoReturn
 
 import typer
 
 from physiclaw import paths
-from physiclaw.cli._download import http_get, stream
-from physiclaw.cli._format import info, ok, warn
+from physiclaw.cli._http import http_get, stream
+from physiclaw.cli._format import exit_error, info, ok, warn
 from physiclaw.config import load as _load_config
 from physiclaw.text import read_text, write_text
 
@@ -61,17 +60,9 @@ class _NotPublished(Exception):
     error the caller should surface as a failure."""
 
 
-def _fail(msg: str) -> NoReturn:
-    """Echo ``error: <msg>`` to stderr and abort with exit code 1 — the one
-    failure shape every step in this command uses (no traceback for expected
-    errors: bad URL, network down, corrupt pack)."""
-    typer.echo(f"error: {msg}", err=True)
-    raise typer.Exit(code=1)
-
-
 def _require_https(url: str) -> None:
     if not url.startswith("https://"):
-        _fail(f"refusing non-HTTPS official-skills URL: {url}")
+        exit_error(f"refusing non-HTTPS official-skills URL: {url}")
 
 
 def _urls(base: str) -> dict[str, str]:
@@ -93,18 +84,18 @@ def _fetch_bytes(url: str) -> bytes:
     except urllib.error.HTTPError as e:
         if e.code == 404:
             raise _NotPublished from e
-        _fail(f"GET {url} failed: HTTP {e.code}")
+        exit_error(f"GET {url} failed: HTTP {e.code}")
     except urllib.error.URLError as e:
-        _fail(f"GET {url} failed: {e.reason}")
+        exit_error(f"GET {url} failed: {e.reason}")
 
 
 def _fetch_json(url: str) -> dict:
     try:
         data = json.loads(_fetch_bytes(url).decode("utf-8"))
     except (ValueError, UnicodeDecodeError) as e:
-        _fail(f"{url} did not return valid JSON: {e}")
+        exit_error(f"{url} did not return valid JSON: {e}")
     if not isinstance(data, dict):
-        _fail(f"{url} did not return a JSON object.")
+        exit_error(f"{url} did not return a JSON object.")
     return data
 
 
@@ -156,7 +147,7 @@ def _download_to_temp(url: str) -> tuple[Path, str]:
     except urllib.error.URLError as e:
         tmp.unlink(missing_ok=True)
         reason = f"HTTP {e.code}" if isinstance(e, urllib.error.HTTPError) else e.reason
-        _fail(f"GET {url} failed: {reason}")
+        exit_error(f"GET {url} failed: {reason}")
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
@@ -173,13 +164,13 @@ def _extract_zip(zip_path: Path, dest: Path) -> None:
             for member in zf.namelist():
                 target = (dest / member).resolve()
                 if target != dest_real and not target.is_relative_to(dest_real):
-                    _fail(
+                    exit_error(
                         f"zip entry escapes staging dir: {member!r} — "
                         "aborting (possible zip-slip)."
                     )
             zf.extractall(dest)
     except zipfile.BadZipFile as e:
-        _fail(f"downloaded pack is not a valid zip: {e}")
+        exit_error(f"downloaded pack is not a valid zip: {e}")
 
 
 def _sanity_check_layout(staging: Path) -> None:
@@ -188,7 +179,7 @@ def _sanity_check_layout(staging: Path) -> None:
     malformed pack — refuse rather than mount it."""
     entries = {p.name for p in staging.iterdir()}
     if entries != {"source.json", "skills"} or not (staging / "skills").is_dir():
-        _fail(
+        exit_error(
             f"unexpected package layout {sorted(entries)} — expected "
             "exactly source.json + skills/."
         )
@@ -276,7 +267,7 @@ def sync(*, force: bool = False, dry_run: bool = False) -> None:
 
     remote_commit = str(latest.get("commit") or "")
     if not remote_commit:
-        _fail(f"{urls['latest']} is missing 'commit'.")
+        exit_error(f"{urls['latest']} is missing 'commit'.")
 
     local_commit = str((_read_sync_state() or {}).get("commit") or "")
     up_to_date = bool(local_commit) and local_commit == remote_commit
@@ -309,9 +300,9 @@ def sync(*, force: bool = False, dry_run: bool = False) -> None:
         #    touch the install. Mismatch = corrupt/tampered → abort untouched.
         expected = _parse_sha256(_fetch_bytes(urls["sha256"]).decode("utf-8", "replace"))
         if expected is None:
-            _fail(f"{urls['sha256']} is not a valid sha256sum line.")
+            exit_error(f"{urls['sha256']} is not a valid sha256sum line.")
         if actual != expected:
-            _fail(
+            exit_error(
                 f"checksum mismatch — expected {expected[:12]}…, got "
                 f"{actual[:12]}…. Aborting; the install was not touched."
             )

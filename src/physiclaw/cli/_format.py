@@ -3,7 +3,14 @@
 Every command uses the same ``✓ ok`` / ``! warn`` line shape and the same
 "Next: <cmd>" footer; centralizing here keeps tone uniform and avoids
 ad-hoc ``typer.style(...fg=...)`` repetition.
+
+Two voices live here: the flat ``ok``/``warn``/``info`` lines most
+commands echo, and the indented ``step_*`` lines of the setup wizard
+(``physiclaw setup hardware``), which mirror the browser wizard's step
+markers. ``exit_error`` is the one failure shape for expected errors.
 """
+
+from typing import NoReturn
 
 import typer
 
@@ -34,3 +41,26 @@ def section(title: str) -> str:
     (yellow) so the reader can scan section boundaries at a glance in
     commands that emit multi-section reports (``doctor``, ``status``)."""
     return typer.style(title, fg=typer.colors.BRIGHT_CYAN, bold=True)
+
+
+def step_ok(msg: str = "OK") -> str:
+    """Setup-wizard step line: two-space indent + green ``✓`` + msg."""
+    return f"  {typer.style('✓', fg=typer.colors.GREEN)} {msg}"
+
+
+def step_fail(msg: str) -> str:
+    """Setup-wizard step failure: two-space indent + red ``✗ msg``."""
+    return "  " + typer.style(f"✗ {msg}", fg=typer.colors.RED)
+
+
+def step_warn(msg: str) -> str:
+    """Setup-wizard step warning: two-space indent + yellow ``⚠ msg``."""
+    return "  " + typer.style(f"⚠ {msg}", fg=typer.colors.YELLOW)
+
+
+def exit_error(msg: str, code: int = 1) -> NoReturn:
+    """Echo ``error: <msg>`` to stderr and abort with ``code`` — the one
+    failure shape expected CLI errors use (no traceback for bad input,
+    network down, corrupt downloads, missing files)."""
+    typer.echo(f"error: {msg}", err=True)
+    raise typer.Exit(code=code)

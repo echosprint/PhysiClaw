@@ -9,7 +9,6 @@ plus the `hardware` typer entry point.
 from __future__ import annotations
 
 import importlib
-import json
 from unittest.mock import MagicMock
 
 import pytest
@@ -26,83 +25,19 @@ runner = CliRunner()
 # ---------- api ----------
 
 
-def _resp(payload: dict, status: int = 200) -> MagicMock:
-    """Build a context-manager-compatible urllib response."""
-    resp = MagicMock()
-    resp.read.return_value = json.dumps(payload).encode()
-    resp.__enter__ = lambda s: s
-    resp.__exit__ = lambda s, *a: None
-    return resp
+def test_api_binds_the_module_base(mocker) -> None:
+    # The transport is unit-tested in tests/cli/test__http.py — this pins
+    # the wiring: the wizard's api() calls _http.api with the mutable
+    # module-global BASE.
+    spy = mocker.patch.object(hw_mod._http, "api", return_value={"x": 1})
+    mocker.patch.object(hw_mod, "BASE", "http://example:1234")
 
-
-def test_api_get_no_body(mocker) -> None:
-    spy = mocker.patch.object(
-        hw_mod._OPENER, "open",
-        return_value=_resp({"x": 1}),
-    )
-
-    out = hw_mod.api("GET", "/api/status")
+    out = hw_mod.api("GET", "/api/status", timeout=5)
 
     assert out == {"x": 1}
-    req = spy.call_args.args[0]
-    assert req.method == "GET"
-
-
-def test_api_post_with_body(mocker) -> None:
-    spy = mocker.patch.object(
-        hw_mod._OPENER, "open",
-        return_value=_resp({"status": "ok"}),
+    spy.assert_called_once_with(
+        "http://example:1234", "GET", "/api/status", body=None, timeout=5
     )
-
-    out = hw_mod.api("POST", "/api/x", body={"k": "v"})
-
-    assert out["status"] == "ok"
-    req = spy.call_args.args[0]
-    assert req.headers["Content-type"] == "application/json"
-
-
-def test_api_post_no_body_sends_empty_bytes(mocker) -> None:
-    spy = mocker.patch.object(
-        hw_mod._OPENER, "open",
-        return_value=_resp({"status": "ok"}),
-    )
-
-    hw_mod.api("POST", "/api/x")
-
-    # Empty bytes body for POST.
-    req = spy.call_args.args[0]
-    assert req.data == b""
-
-
-def test_api_returns_parsed_error_body_on_http_error(mocker) -> None:
-    err = hw_mod.urllib.error.HTTPError(
-        url="x", code=500, msg="boom", hdrs=None, fp=None,
-    )
-    err.read = lambda: b'{"status": "error", "message": "x"}'
-    mocker.patch.object(hw_mod._OPENER, "open", side_effect=err)
-
-    out = hw_mod.api("GET", "/api/x")
-
-    assert out == {"status": "error", "message": "x"}
-
-
-def test_api_returns_none_on_unparseable_error_body(mocker) -> None:
-    err = hw_mod.urllib.error.HTTPError(
-        url="x", code=500, msg="boom", hdrs=None, fp=None,
-    )
-    err.read = lambda: b"not json"
-    mocker.patch.object(hw_mod._OPENER, "open", side_effect=err)
-
-    assert hw_mod.api("GET", "/api/x") is None
-
-
-def test_api_returns_none_on_connection_error(mocker) -> None:
-    mocker.patch.object(
-        hw_mod._OPENER, "open",
-        side_effect=ConnectionError("refused"),
-    )
-
-    assert hw_mod.api("GET", "/api/x") is None
 
 
 # ---------- ok ----------

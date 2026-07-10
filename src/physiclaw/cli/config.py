@@ -15,7 +15,7 @@ from typing import Annotated
 import typer
 
 from physiclaw import config as _config
-from physiclaw.cli._format import ok
+from physiclaw.cli._format import exit_error, ok
 
 config_app = typer.Typer(
     help="Show or edit the user config file.",
@@ -29,8 +29,7 @@ def _load_or_exit(path: Path | None = None) -> _config.Config:
     try:
         return _config.load(path)
     except _config.ConfigError as e:
-        typer.echo(f"error: {e}", err=True)
-        raise typer.Exit(code=1)
+        exit_error(str(e))
 
 
 @config_app.command("path")
@@ -78,8 +77,7 @@ def _get(
     try:
         val = _config.get(cfg, dotted)
     except _config.ConfigError as e:
-        typer.echo(f"error: {e}", err=True)
-        raise typer.Exit(code=1)
+        exit_error(str(e))
     if isinstance(val, bool):
         typer.echo("true" if val else "false")
     else:
@@ -102,8 +100,7 @@ def _set(
     try:
         _config.set_dotted(dotted, value)
     except _config.ConfigError as e:
-        typer.echo(f"error: {e}", err=True)
-        raise typer.Exit(code=1)
+        exit_error(str(e))
     typer.echo(ok(f"{dotted} updated"))
     typer.echo("Restart `physiclaw server` to apply.")
 
@@ -119,8 +116,7 @@ def _unset(
     try:
         removed = _config.unset_dotted(dotted)
     except _config.ConfigError as e:
-        typer.echo(f"error: {e}", err=True)
-        raise typer.Exit(code=1)
+        exit_error(str(e))
     if removed:
         typer.echo(ok(f"{dotted} reverted to default"))
         typer.echo("Restart `physiclaw server` to apply.")

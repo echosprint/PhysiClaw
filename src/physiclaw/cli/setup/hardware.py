@@ -5,15 +5,12 @@ Talks to a running ``physiclaw server`` over HTTP.
 
 import base64
 import contextlib
-import json
 import logging
 import os
 import socket
 import sys
 import tempfile
 import time
-import urllib.error
-import urllib.request
 import webbrowser
 from pathlib import Path
 from typing import Annotated
@@ -21,17 +18,11 @@ from typing import Annotated
 import typer
 
 from physiclaw import paths
+from physiclaw.cli import _http
+from physiclaw.cli._format import step_fail, step_ok, step_warn
 from physiclaw.core import platform
 
 BASE = os.environ.get("PHYSICLAW_SERVER", "http://localhost:8048")
-
-# Trust the system proxy for loopback only on platforms where the bypass
-# list reliably excludes localhost (see physiclaw.core.platform).
-_OPENER = (
-    urllib.request.build_opener()
-    if platform.TRUST_PROXY_ENV
-    else urllib.request.build_opener(urllib.request.ProxyHandler({}))
-)
 
 
 def _viewport_cache_candidates() -> list:
@@ -40,19 +31,9 @@ def _viewport_cache_candidates() -> list:
 
 
 def api(method, path, body=None, timeout=60):
-    data = json.dumps(body).encode() if body else (b"" if method == "POST" else None)
-    hdrs = {"Content-Type": "application/json"} if body else {}
-    req = urllib.request.Request(BASE + path, data=data, method=method, headers=hdrs)
-    try:
-        with _OPENER.open(req, timeout=timeout) as r:
-            return json.loads(r.read())
-    except urllib.error.HTTPError as e:
-        try:
-            return json.loads(e.read())
-        except Exception:
-            return None
-    except Exception:
-        return None
+    """This wizard's server call — `_http.api` bound to the (mutable)
+    module-global BASE."""
+    return _http.api(BASE, method, path, body=body, timeout=timeout)
 
 
 def ok(r):
@@ -127,15 +108,15 @@ def calibrate_retry(step, fail_msg, retry_prompt, auto, predicate=None, timeout=
 
 
 def _done(msg="OK"):
-    print(f"  \033[32m✓\033[0m {msg}")
+    print(step_ok(msg))
 
 
 def _fail(msg):
-    print(f"  \033[31m✗ {msg}\033[0m")
+    print(step_fail(msg))
 
 
 def _warn(msg):
-    print(f"  \033[33m⚠ {msg}\033[0m")
+    print(step_warn(msg))
 
 
 def run(auto: bool = False, trace: bool = False) -> None:

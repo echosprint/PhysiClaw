@@ -24,7 +24,7 @@ from typing import Annotated
 import typer
 
 from physiclaw import paths
-from physiclaw.cli._download import http_get, stream
+from physiclaw.cli._http import http_get, stream
 from physiclaw.cli._format import ok
 
 _PT_URL = (

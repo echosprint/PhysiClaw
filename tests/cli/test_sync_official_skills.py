@@ -50,7 +50,7 @@ class _FakeResp:
         return False
 
     def getheader(self, _name: str) -> str | None:
-        # No Content-Length → `_download.stream` quietly streams (no bar).
+        # No Content-Length → `_http.stream` quietly streams (no bar).
         return None
 
     def read(self, n: int = -1) -> bytes:

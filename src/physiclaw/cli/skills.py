@@ -28,7 +28,7 @@ from typing import Annotated
 import typer
 
 from physiclaw import paths
-from physiclaw.cli._format import ok, warn
+from physiclaw.cli._format import exit_error, ok, warn
 from physiclaw.config import load as _load_config
 from physiclaw.text import read_text, write_text
 
@@ -112,17 +112,15 @@ def _resolve_source(from_flag: str | None) -> str:
     else:
         cfg = _load_config()
         if not cfg.skills.default_source:
-            typer.echo(
-                "error: no skill source configured.\n\n"
+            exit_error(
+                "no skill source configured.\n\n"
                 "Options:\n"
                 "  • Install from a specific repo:\n"
                 "      physiclaw skills install <name> --from owner/repo\n"
                 "  • Set a permanent default:\n"
                 "      physiclaw config set skills.default_source owner/repo\n"
-                "  • Repo convention: top-level skills/<name>/SKILL.md.",
-                err=True,
+                "  • Repo convention: top-level skills/<name>/SKILL.md."
             )
-            raise typer.Exit(code=1)
         source = _normalize_source(cfg.skills.default_source)
     _reject_physiclaw_home_source(source)
     return source
@@ -144,24 +142,20 @@ def _reject_physiclaw_home_source(source: str) -> None:
         src_path.relative_to(paths.HOME.resolve())
     except ValueError:
         return
-    typer.echo(
-        f"error: --from {source!r} resolves inside {paths.HOME} "
+    exit_error(
+        f"--from {source!r} resolves inside {paths.HOME} "
         "(PhysiClaw's own home).\n"
         "Skills install from an external git repo. Pick a path outside "
-        "the PhysiClaw home, or use a remote URL.",
-        err=True,
+        "the PhysiClaw home, or use a remote URL."
     )
-    raise typer.Exit(code=1)
 
 
 def _validate_name(name: str) -> None:
     if not _NAME_RE.fullmatch(name):
-        typer.echo(
-            f"error: invalid skill name {name!r}. Allowed: "
-            "letters, digits, '.', '_', '-'.",
-            err=True,
+        exit_error(
+            f"invalid skill name {name!r}. Allowed: "
+            "letters, digits, '.', '_', '-'."
         )
-        raise typer.Exit(code=1)
 
 
 def _git(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
@@ -177,17 +171,14 @@ def _git(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
             text=True,
         )
     except FileNotFoundError:
-        typer.echo(
-            "error: `git` not found on PATH. Install it and retry:\n"
+        exit_error(
+            "`git` not found on PATH. Install it and retry:\n"
             "  macOS: xcode-select --install  (or `brew install git`)\n"
-            "  linux: apt install git  (or your distro's package manager)",
-            err=True,
+            "  linux: apt install git  (or your distro's package manager)"
         )
-        raise typer.Exit(code=1) from None
     if result.returncode != 0:
         err = (result.stderr or result.stdout or "").strip()
-        typer.echo(f"error: git {args[0]} failed: {err}", err=True)
-        raise typer.Exit(code=1)
+        exit_error(f"git {args[0]} failed: {err}")
     return result
 
 
@@ -282,20 +273,16 @@ def _install(
     if target.exists() and not force:
         prov = read_provenance(target)
         if prov is None:
-            typer.echo(
-                f"error: ~/.physiclaw/skills/{name}/ exists and was not installed "
+            exit_error(
+                f"~/.physiclaw/skills/{name}/ exists and was not installed "
                 f"by this CLI (no {PROVENANCE_FILE!s} marker). Refusing to touch "
-                f"user-authored skills. Pass --force to overwrite anyway.",
-                err=True,
+                f"user-authored skills. Pass --force to overwrite anyway."
             )
-        else:
-            typer.echo(
-                f"error: {name} is already installed (from {prov.get('source')!s} "
-                f"@ {prov.get('ref') or prov.get('sha', '')[:7]}). "
-                f"Pass --force to reinstall.",
-                err=True,
-            )
-        raise typer.Exit(code=1)
+        exit_error(
+            f"{name} is already installed (from {prov.get('source')!s} "
+            f"@ {prov.get('ref') or prov.get('sha', '')[:7]}). "
+            f"Pass --force to reinstall."
+        )
 
     home.mkdir(parents=True, exist_ok=True)
 
@@ -306,20 +293,16 @@ def _install(
 
         src_skill = clone_dir / "skills" / name
         if not src_skill.is_dir():
-            typer.echo(
-                f"error: {source} does not contain skills/{name}/ "
-                f"(convention: top-level skills/<name>/SKILL.md).",
-                err=True,
+            exit_error(
+                f"{source} does not contain skills/{name}/ "
+                f"(convention: top-level skills/<name>/SKILL.md)."
             )
-            raise typer.Exit(code=1)
 
         skill_md = src_skill / "SKILL.md"
         if not skill_md.is_file():
-            typer.echo(
-                f"error: skills/{name}/ is missing SKILL.md — not a valid skill.",
-                err=True,
+            exit_error(
+                f"skills/{name}/ is missing SKILL.md — not a valid skill."
             )
-            raise typer.Exit(code=1)
 
         declared_name = _read_skill_name(skill_md, fallback=name)
         if declared_name != name:
@@ -330,7 +313,7 @@ def _install(
             # Source must be reconciled — the installer can't fix it here.
             alt_dir_exists = (clone_dir / "skills" / declared_name).is_dir()
             lines = [
-                f"error: source skills/{name}/SKILL.md declares "
+                f"source skills/{name}/SKILL.md declares "
                 f"name={declared_name!r} — inconsistent with its directory "
                 f"name. Runtime would key this skill as {declared_name!r}, "
                 f"so `Skill(name={name!r})` would fail after install.",
@@ -346,8 +329,7 @@ def _install(
                     f"`physiclaw skills install {declared_name}` — that dir "
                     f"also exists in the source.",
                 ]
-            typer.echo("\n".join(lines), err=True)
-            raise typer.Exit(code=1)
+            exit_error("\n".join(lines))
 
         # Copy to a sibling of target, then atomic-rename — leaves the old
         # install intact on any copy failure.
@@ -445,18 +427,15 @@ def _uninstall(
     _validate_name(name)
     target = paths.skills_dir() / name
     if not target.exists():
-        typer.echo(f"error: {name} is not installed (no {target}).", err=True)
-        raise typer.Exit(code=1)
+        exit_error(f"{name} is not installed (no {target}).")
 
     prov = read_provenance(target)
     if prov is None and not force:
-        typer.echo(
-            f"error: {name} has no {PROVENANCE_FILE} marker — looks user-authored. "
+        exit_error(
+            f"{name} has no {PROVENANCE_FILE} marker — looks user-authored. "
             f"Pass --force to remove it anyway, or delete manually:\n"
-            f"    rm -rf {target}",
-            err=True,
+            f"    rm -rf {target}"
         )
-        raise typer.Exit(code=1)
 
     shutil.rmtree(target)
     typer.echo(ok(f"removed {name}"))

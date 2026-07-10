@@ -38,7 +38,7 @@ from typing import Annotated
 import typer
 
 from physiclaw import config as _config
-from physiclaw.cli._format import next_hint, ok, section, warn
+from physiclaw.cli._format import exit_error, next_hint, ok, section, warn
 
 # Provider package imports happen inside command bodies — pulling
 # `agent.provider` at module load drags httpx (~80ms) into every
@@ -163,43 +163,35 @@ def _use_impl(ref: str) -> None:
     from physiclaw.agent.provider import discovered
 
     if "/" not in ref:
-        typer.echo(
-            f"error: {ref!r} is not a `provider/model` ref. "
+        exit_error(
+            f"{ref!r} is not a `provider/model` ref. "
             "Pass an exact ref like `openai/gpt-5.4` "
-            "(run `physiclaw models list` to see candidates).",
-            err=True,
+            "(run `physiclaw models list` to see candidates)."
         )
-        raise typer.Exit(code=1)
 
     try:
         provider_id, model_id = _config.parse_model_ref(ref)
     except ValueError as e:
-        typer.echo(f"error: {e}", err=True)
-        raise typer.Exit(code=1)
+        exit_error(str(e))
 
     known_all = _known_provider_ids()
     if provider_id not in known_all:
-        typer.echo(
-            f"error: unknown provider {provider_id!r} (known: {', '.join(known_all)})",
-            err=True,
+        exit_error(
+            f"unknown provider {provider_id!r} (known: {', '.join(known_all)})"
         )
-        raise typer.Exit(code=1)
 
     source = _discovery_source(provider_id)
     if not discovered.is_cached(source, model_id):
-        typer.echo(
-            f"error: model {model_id!r} not in {provider_id} discovery cache.\n"
+        exit_error(
+            f"model {model_id!r} not in {provider_id} discovery cache.\n"
             f"  hint: run `physiclaw models discover {provider_id}` "
-            "to refresh the live list, then retry.",
-            err=True,
+            "to refresh the live list, then retry."
         )
-        raise typer.Exit(code=1)
 
     try:
         _config.set_dotted("agent.model", ref)
     except _config.ConfigError as e:
-        typer.echo(f"error: {e}", err=True)
-        raise typer.Exit(code=1)
+        exit_error(str(e))
     typer.echo(ok(f"agent.model = {ref}"))
     typer.echo(f"  {provider_id}/{model_id}")
     typer.echo("Restart `physiclaw server` to apply.")
@@ -244,27 +236,22 @@ def _key(
     provider's API so you can pick one with `models use` immediately."""
     if provider in _PROVIDER_ALIAS:
         target = _PROVIDER_ALIAS[provider]
-        typer.echo(
-            f"error: {provider} reuses {target}'s key — set it there.\n"
-            f"  hint: run `physiclaw models key {target}`.",
-            err=True,
+        exit_error(
+            f"{provider} reuses {target}'s key — set it there.\n"
+            f"  hint: run `physiclaw models key {target}`."
         )
-        raise typer.Exit(code=1)
     known_all = _known_provider_ids()
     if provider not in known_all:
-        typer.echo(
-            f"error: unknown provider {provider!r} (known: {', '.join(known_all)})",
-            err=True,
+        exit_error(
+            f"unknown provider {provider!r} (known: {', '.join(known_all)})"
         )
-        raise typer.Exit(code=1)
     if value is None:
         value = typer.prompt(f"{provider} api key", hide_input=True)
     path = _key_config_path(provider)
     try:
         _config.set_dotted(path, value)
     except _config.ConfigError as e:
-        typer.echo(f"error: {e}", err=True)
-        raise typer.Exit(code=1)
+        exit_error(str(e))
     typer.echo(ok(f"{path} set"))
     typer.echo()
     try:
@@ -349,19 +336,16 @@ def _discover(
     """
     known_all = _known_provider_ids()
     if provider not in known_all:
-        typer.echo(
-            f"error: unknown provider {provider!r} "
-            f"(known: {', '.join(known_all)})",
-            err=True,
+        exit_error(
+            f"unknown provider {provider!r} "
+            f"(known: {', '.join(known_all)})"
         )
-        raise typer.Exit(code=1)
 
     source = _discovery_source(provider)
     try:
         models = _fetch_live_models(source)
     except Exception as e:
-        typer.echo(f"error: discover failed — {type(e).__name__}: {e}", err=True)
-        raise typer.Exit(code=1)
+        exit_error(f"discover failed — {type(e).__name__}: {e}")
     _print_live_models_table(source, models, display=provider)
 
 

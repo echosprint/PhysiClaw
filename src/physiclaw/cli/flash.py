@@ -41,7 +41,7 @@ from urllib.error import URLError
 
 import typer
 
-from physiclaw.cli._download import http_get, stream
+from physiclaw.cli._http import http_get, stream
 from physiclaw.cli._format import ok
 
 FIRMWARE_URL = "https://physiclaw.ai/downloads/firmware/fluidnc_4_0_3.zip"
