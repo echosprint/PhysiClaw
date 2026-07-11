@@ -207,6 +207,46 @@ def test_use_model_not_in_cache_exits_1(mocker) -> None:
     assert "not in openai discovery cache" in result.output
 
 
+def test_use_claude_code_with_empty_cache_writes_config(mocker) -> None:
+    """Subscription-only setup: no anthropic key, so the aliased cache is
+    empty — claude-code refs skip cache validation (the `claude` CLI
+    validates model ids itself)."""
+    mocker.patch.object(
+        models_mod._config, "parse_model_ref",
+        return_value=("claude-code", "claude-sonnet-4-6"),
+    )
+    mocker.patch.object(
+        models_mod, "_known_provider_ids", return_value=("claude-code",),
+    )
+    fake_disc = mocker.patch("physiclaw.agent.provider.discovered")
+    fake_disc.is_cached.return_value = False
+    fake_disc.model_ids.return_value = set()
+    spy = mocker.patch.object(models_mod._config, "set_dotted")
+
+    result = runner.invoke(models_app, ["use", "claude-code/claude-sonnet-4-6"])
+
+    assert result.exit_code == 0
+    spy.assert_called_once_with("agent.model", "claude-code/claude-sonnet-4-6")
+
+
+def test_use_claude_code_with_populated_cache_still_validates(mocker) -> None:
+    mocker.patch.object(
+        models_mod._config, "parse_model_ref",
+        return_value=("claude-code", "ghost"),
+    )
+    mocker.patch.object(
+        models_mod, "_known_provider_ids", return_value=("claude-code",),
+    )
+    fake_disc = mocker.patch("physiclaw.agent.provider.discovered")
+    fake_disc.is_cached.return_value = False
+    fake_disc.model_ids.return_value = {"claude-sonnet-4-6"}
+
+    result = runner.invoke(models_app, ["use", "claude-code/ghost"])
+
+    assert result.exit_code == 1
+    assert "not in claude-code discovery cache" in result.output
+
+
 def test_use_happy_path_writes_config(mocker) -> None:
     mocker.patch.object(
         models_mod._config, "parse_model_ref",

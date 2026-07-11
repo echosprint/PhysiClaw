@@ -182,11 +182,16 @@ def _use_impl(ref: str) -> None:
 
     source = _discovery_source(provider_id)
     if not discovered.is_cached(source, model_id):
-        exit_error(
-            f"model {model_id!r} not in {provider_id} discovery cache.\n"
-            f"  hint: run `physiclaw models discover {provider_id}` "
-            "to refresh the live list, then retry."
-        )
+        # claude-code with an empty anthropic cache: a subscription-only
+        # user has no API key to run discovery with, and the `claude`
+        # CLI validates model ids itself — let the ref through.
+        skip = provider_id == "claude-code" and not discovered.model_ids(source)
+        if not skip:
+            exit_error(
+                f"model {model_id!r} not in {provider_id} discovery cache.\n"
+                f"  hint: run `physiclaw models discover {provider_id}` "
+                "to refresh the live list, then retry."
+            )
 
     try:
         _config.set_dotted("agent.model", ref)
