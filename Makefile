@@ -1,4 +1,4 @@
-.PHONY: test test-cov test-fast test-slow test-integration test-all mutate lint help bump build publish release \
+.PHONY: test test-cov test-fast test-slow test-integration test-all mutate lint fmt help bump build publish release \
         hw-help hw-parts hw-build hw-step hw-print hw-manual hw-manual-pdf hw-sourcing hw-mark hw-replay hw-camera hw-rebuild hw-release
 
 PY ?= uv run
@@ -33,7 +33,8 @@ help:
 	@echo "  test-integration      — only @pytest.mark.integration"
 	@echo "  test-all              — every test, including slow and integration"
 	@echo "  mutate MOD=path       — mutmut on a path (e.g. MOD=src/physiclaw/agent/engine/validator.py)"
-	@echo "  lint                  — ruff check"
+	@echo "  lint                  — ruff check + format check"
+	@echo "  fmt                   — ruff format (src, tests, hardware, scripts)"
 	@echo "  bump [VERSION=X.Y.Z]  — bump version. Defaults to incrementing the last"
 	@echo "                          component split by '.' (0.0.7 → 0.0.8). Override with"
 	@echo "                          VERSION for major/minor jumps. Commits LOCALLY."
@@ -82,6 +83,10 @@ mutate:
 
 lint:
 	$(PY) ruff check src/ tests/
+	$(PY) ruff format --check src/ tests/ hardware/ scripts/
+
+fmt:
+	$(PY) ruff format src/ tests/ hardware/ scripts/
 
 # --- Release workflow ---------------------------------------------------------
 #
