@@ -161,6 +161,30 @@ def test_launch_runs_claude_path_for_claude_code(
     assert runtime_cls.call_args.kwargs["label"].startswith("engine=claude-code")
 
 
+@pytest.mark.integration
+def test_launch_normalizes_proxy_env_first(
+    mocker, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A direct `python -m physiclaw.agent.runtime` skips the CLI root
+    callback, so launch() must normalize `socks://` proxy env itself —
+    before anything builds an httpx client (regression: on Linux with a
+    VPN on, the poll hook's client raised `Unknown scheme for proxy URL`
+    every tick and the agent never woke). Guarded via the earliest exit
+    path (no model): env must already be rewritten by then."""
+    import os
+
+    monkeypatch.setenv("all_proxy", "socks://127.0.0.1:7897")
+    monkeypatch.delenv("PHYSICLAW_MODEL", raising=False)
+    from physiclaw import config as _cfg
+    monkeypatch.setattr(_cfg.CONFIG.agent, "model", "")
+    monkeypatch.setattr("sys.argv", ["runtime"])
+
+    with pytest.raises(SystemExit):
+        launcher.launch()
+
+    assert os.environ["all_proxy"] == "socks5://127.0.0.1:7897"
+
+
 def _stub_asyncio_run(mocker, *, raise_kbd_interrupt: bool = False):
     """Stub `asyncio.run` so it accepts the inner `_main()` coroutine
     without awaiting it. Without `.close()`, Python flags the unawaited

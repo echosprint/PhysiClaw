@@ -20,6 +20,7 @@ from physiclaw.cli.skills import skills_app
 from physiclaw.cli.status import status
 from physiclaw.cli.uninstall import uninstall
 from physiclaw.cli.update import update
+from physiclaw.proxy import normalize_proxy_env
 
 app = typer.Typer(
     help=f"PhysiClaw {_pkg_version} — let AI agents physically operate a phone.",
@@ -85,6 +86,9 @@ def _root(
         ),
     ] = False,
 ) -> None:
+    # VPN clients export `all_proxy=socks://…`, a scheme httpx rejects —
+    # rewrite it before any command builds an HTTP client.
+    normalize_proxy_env()
     # Bare `physiclaw` (no subcommand) defaults to `physiclaw server`.
     if ctx.invoked_subcommand is None:
         server()

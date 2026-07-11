@@ -42,6 +42,7 @@ from physiclaw.agent.provider import (
 from physiclaw.agent.runtime import Runtime
 from physiclaw.config import model_ref_with_source, parse_model_ref
 from physiclaw import paths
+from physiclaw.proxy import normalize_proxy_env
 from physiclaw.core.logger import setup_logging
 
 log = logging.getLogger(__name__)
@@ -93,6 +94,12 @@ def resolve() -> tuple[str, str]:
 
 
 def launch() -> None:
+    # Normally inherited already normalized from the server process, but
+    # a direct `python -m physiclaw.agent.runtime` skips the CLI callback
+    # — and a raw `socks://` proxy env kills every httpx client here
+    # (provider AND the loopback poll/MCP clients, whose construction
+    # parses the env even though loopback is proxy-bypassed).
+    normalize_proxy_env()
     parser = argparse.ArgumentParser(description="PhysiClaw runtime loop")
     parser.add_argument("--server", default="http://127.0.0.1:8048")
     parser.add_argument("--interval", type=float, default=1.0)

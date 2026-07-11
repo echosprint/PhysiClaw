@@ -25,6 +25,9 @@ dependencies = [
     "opencv-python>=4.8",
     "numpy>=1.26",
     "mcp[cli]>=1.2",
+    # Direct import; [socks] pulls socksio so socks5:// proxies work
+    # (physiclaw.proxy rewrites Linux VPN clients' socks:// to socks5://).
+    "httpx[socks]>=0.27",
     "croniter>=6.2.2",
     "rapidocr>=3.7.0",
     "onnxruntime>=1.24.0",
