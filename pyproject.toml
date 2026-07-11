@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "physiclaw"
-version = "0.2.8"
+version = "0.2.9"
 description = "Give AI agents a physical finger to operate any phone — robotic stylus + camera, no APIs needed."
 license = "MIT"
 license-files = ["LICENSE"]
