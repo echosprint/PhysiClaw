@@ -12,9 +12,9 @@ live with the functions that emit them):
   1. `system` field, sent as `[{type: text, text, cache_control: ephemeral}]`.
   2. Latest stubbed screen-obs `tool_result` — the source DTO has
      `is_superseded=True` (set by `compact.drop_stale_screens`); the
-     base `serialize_history` template invokes `_mark_stub` to attach
-     `cache_control` to the inner tool_result block. No string
-     parsing, no post-pass.
+     base `serialize_history` template invokes the `AnthropicCacheMarkers`
+     factory to attach `cache_control` to the inner tool_result block.
+     No string parsing, no post-pass.
 
 `thinking` blocks in the response are stripped from the assistant-echo
 path (principle 2) — they would break re-serialization to history. The
@@ -30,7 +30,6 @@ from physiclaw.agent.engine.dto import (
     ImageBlock,
     Message,
     SystemMessage,
-    TextBlock,
     ToolCall,
     ToolResultMessage,
     Usage,
@@ -39,9 +38,11 @@ from physiclaw.agent.engine.dto import (
 from physiclaw.agent.provider.provider_base import (
     EPHEMERAL_CACHE_CONTROL,
     BaseProvider,
+    CacheMarkers,
     ProviderPermanentError,
     ProviderTransientError,
 )
+from physiclaw.agent.provider.wire import encode_content
 
 # `anthropic` SDK is lazy-imported inside `_build_client` and `chat()` so
 # `physiclaw --help` (and any session that doesn't pick this provider)
@@ -53,6 +54,12 @@ log = logging.getLogger(__name__)
 # for tool-loop turns; bump if responses get truncated.
 _DEFAULT_MAX_TOKENS = 8192
 
+# Anthropic rejects empty content arrays; this is the canonical
+# fallback for both the content encoder and assistant blocks.
+# Treat as immutable — never mutate.
+_EMPTY_TEXT_BLOCK = {"type": "text", "text": ""}
+_EMPTY_CONTENT = [_EMPTY_TEXT_BLOCK]
+
 _STOP_REASON_MAP: dict[str, FinishReason] = {
     "end_turn":      FinishReason.STOP,
     "stop_sequence": FinishReason.STOP,
@@ -62,15 +69,34 @@ _STOP_REASON_MAP: dict[str, FinishReason] = {
 }
 
 
+class AnthropicCacheMarkers(CacheMarkers):
+    """Anthropic-shape marker mechanics. Only the stub anchor lives in
+    the messages array — Anthropic accepts `cache_control` directly on
+    a `tool_result` block, so `mark_stub` annotates the inner block.
+    The entry shape from `_encode_message(ToolResultMessage)` is
+    `{role: user, content: [tr_block]}`; we shallow-copy the wrapper
+    and the inner block so caller-held dicts aren't mutated.
+    `mark_system` stays the identity — Anthropic's system rides outside
+    the messages array and is marked on the top-level `system` payload
+    field in `chat()`."""
+
+    def mark_stub(self, entry: dict) -> dict:
+        tr_block = entry["content"][0]
+        return {
+            **entry,
+            "content": [{**tr_block, "cache_control": EPHEMERAL_CACHE_CONTROL}],
+        }
+
+
 class AnthropicCompatibleProvider(BaseProvider):
     """Base for providers speaking Anthropic's `/v1/messages` shape via
     `AsyncAnthropic`. See `BaseProvider` for the auth declarations
-    vendors are expected to set; this class plugs the wire-shape hooks
-    (`_encode_message` / `_mark_stub`) into the inherited
-    `serialize_history` template, and adds the request flow in
-    `chat()`. `_mark_system` stays the base no-op — Anthropic's system
-    rides outside the messages array, so it's marked on the top-level
-    `system` payload field in `chat()`."""
+    vendors are expected to set; this class plugs the wire-shape
+    encoder (`_encode_message`) and the `AnthropicCacheMarkers` factory
+    into the inherited `serialize_history` template, and adds the
+    request flow in `chat()`."""
+
+    CACHE_MARKERS: CacheMarkers = AnthropicCacheMarkers()
 
     def _build_client(self, key: str, *, timeout: float, base_url: str | None):
         """Override: use Anthropic's official async SDK instead of httpx
@@ -120,18 +146,6 @@ class AnthropicCompatibleProvider(BaseProvider):
             }
         log.warning("anthropic: dropping unknown message type %r", type(msg).__name__)
         return None
-
-    def _mark_stub(self, entry: dict) -> dict:
-        """Anthropic accepts `cache_control` directly on a `tool_result`
-        block. The entry shape from `_encode_message(ToolResultMessage)`
-        is `{role: user, content: [tr_block]}`; we shallow-copy the
-        wrapper and the inner block so caller-held dicts aren't
-        mutated."""
-        tr_block = entry["content"][0]
-        return {
-            **entry,
-            "content": [{**tr_block, "cache_control": EPHEMERAL_CACHE_CONTROL}],
-        }
 
     # ---------- request flow ----------
 
@@ -196,29 +210,28 @@ def _extract_system_text(history: list[Message]) -> str:
     )
 
 
+def _anthropic_image_part(block: ImageBlock) -> dict:
+    return {
+        "type":   "image",
+        "source": {
+            "type":       "base64",
+            "media_type": block.media_type,
+            "data":       block.data_b64,
+        },
+    }
+
+
 def _content_to_anthropic(content) -> str | list[dict]:
     """User / tool-result content (`str` or list of `ContentBlock`) →
-    Anthropic content (string or block list)."""
-    if isinstance(content, str):
-        return content
-    if not isinstance(content, list):
-        return str(content) if content is not None else ""
-    blocks: list[dict] = []
-    for block in content:
-        if isinstance(block, TextBlock):
-            blocks.append({"type": "text", "text": block.text})
-        elif isinstance(block, ImageBlock):
-            blocks.append({
-                "type":   "image",
-                "source": {
-                    "type":       "base64",
-                    "media_type": block.media_type,
-                    "data":       block.data_b64,
-                },
-            })
-        else:
-            log.warning("anthropic: dropping unknown block type %r", type(block).__name__)
-    return blocks or [{"type": "text", "text": ""}]
+    Anthropic content (string or block list). Block dispatch is the
+    shared `wire.encode_content`; only the image part shape and the
+    empty fallback are ours."""
+    return encode_content(
+        content,
+        image_part=_anthropic_image_part,
+        empty=_EMPTY_CONTENT,
+        label="anthropic",
+    )
 
 
 def _assistant_blocks(msg: AssistantMessage) -> list[dict]:
@@ -235,7 +248,7 @@ def _assistant_blocks(msg: AssistantMessage) -> list[dict]:
         })
     if not blocks:
         # Anthropic rejects empty assistant content arrays.
-        blocks.append({"type": "text", "text": ""})
+        blocks.append(_EMPTY_TEXT_BLOCK)
     return blocks
 
 

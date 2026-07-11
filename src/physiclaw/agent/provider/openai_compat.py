@@ -5,13 +5,16 @@ inherit from `OpenAICompatibleProvider` and declare `BASE_URL` plus
 any auth quirks. This file owns:
 
   - the request/response flow (`chat`)
-  - DTO → wire serialization (`serialize_history`, delegating block-
-    level encoding to `wire.py`)
-  - cache-control marker placement (system + latest stubbed tool_result)
+  - DTO → wire serialization (`_encode_message`, delegating block-
+    level encoding to `wire.py`; the inherited `serialize_history`
+    template assembles the list)
+  - cache-control marker mechanics (`OpenAICacheMarkers`; the base
+    template owns placement — system + latest stubbed tool_result)
   - response parsing (`_parse_response` + `_parse_usage` methods).
-    Vendor quirks live with the vendor: a vendor whose `usage` shape
-    differs from the OpenAI standard overrides `_parse_usage` on its
-    own class — this base stays vendor-agnostic.
+    `_parse_usage` tolerates the known shape drift among OpenAI-compat
+    endpoints (top-level `cached_tokens` when the nested location is
+    empty); a vendor whose `usage` shape differs beyond that overrides
+    `_parse_usage` on its own class.
 
 Cache-control marker layout — two anchors, chosen so cached bytes
 survive turns AND wakes:
@@ -49,6 +52,7 @@ from physiclaw.agent.engine.dto import (
 from physiclaw.agent.provider.provider_base import (
     EPHEMERAL_CACHE_CONTROL,
     BaseProvider,
+    CacheMarkers,
     ProviderPermanentError,
     ProviderTransientError,
 )
@@ -62,13 +66,27 @@ from physiclaw.agent.provider.wire import (
 log = logging.getLogger(__name__)
 
 
+class OpenAICacheMarkers(CacheMarkers):
+    """OpenAI-shape marker mechanics: both anchors (system entry,
+    stubbed tool_result) carry string content on the wire, so both
+    wrap it in a single cache-controlled text block the same way."""
+
+    def mark_system(self, entry: dict) -> dict:
+        return _with_cache_marker(entry)
+
+    def mark_stub(self, entry: dict) -> dict:
+        return _with_cache_marker(entry)
+
+
 class OpenAICompatibleProvider(BaseProvider):
     """Base for providers that speak the OpenAI `/chat/completions` wire
     format. See `BaseProvider` for the auth declarations vendors are
-    expected to set; this class plugs the wire-shape hooks
-    (`_encode_message` / `_mark_system` / `_mark_stub`) into the
+    expected to set; this class plugs the wire-shape encoder
+    (`_encode_message`) and the `OpenAICacheMarkers` factory into the
     inherited `serialize_history` template, and adds the HTTP request
     flow in `chat()`."""
+
+    CACHE_MARKERS: CacheMarkers = OpenAICacheMarkers()
 
     async def chat(
         self,
@@ -128,12 +146,6 @@ class OpenAICompatibleProvider(BaseProvider):
         # subtypes added without updating the dispatch.
         assert_never(msg)
 
-    def _mark_system(self, entry: dict) -> dict:
-        return _with_cache_marker(entry)
-
-    def _mark_stub(self, entry: dict) -> dict:
-        return _with_cache_marker(entry)
-
     # ---------- response parsing (vendor-overridable) ----------
 
     def _parse_response(self, raw: dict) -> AssistantMessage:
@@ -182,16 +194,21 @@ class OpenAICompatibleProvider(BaseProvider):
     def _parse_usage(self, raw: dict) -> Usage:
         """OpenAI-standard `usage` block → normalized `Usage`. Cache
         stats live under `prompt_tokens_details.cached_tokens` and
-        `prompt_tokens_details.cache_creation_input_tokens`. Vendors
-        whose response shape differs (Moonshot top-level cached_tokens,
-        future others) override this method on the vendor class — the
-        base stays unaware of vendor quirks."""
+        `prompt_tokens_details.cache_creation_input_tokens`; when the
+        nested location is empty, `cached_tokens` is also probed at the
+        top of the block — Moonshot K2 sometimes surfaces it there, and
+        the probe is a no-op for vendors that never do (standard OpenAI
+        shapes carry no top-level key). Vendors whose shape differs
+        beyond that override this method on the vendor class."""
         u = (raw or {}).get("usage") or {}
         details = u.get("prompt_tokens_details") or {}
+        cached = int(details.get("cached_tokens", 0) or 0)
+        if not cached:
+            cached = int(u.get("cached_tokens", 0) or 0)
         return Usage(
             prompt_tokens=int(u.get("prompt_tokens", 0) or 0),
             completion_tokens=int(u.get("completion_tokens", 0) or 0),
-            cached_tokens=int(details.get("cached_tokens", 0) or 0),
+            cached_tokens=cached,
             cache_creation_tokens=int(details.get("cache_creation_input_tokens", 0) or 0),
         )
 

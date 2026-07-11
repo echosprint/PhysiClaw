@@ -1,5 +1,5 @@
-"""Moonshot — OpenAI-compatible endpoint. Provider id is the API
-surface (`moonshot`), not the brand (`kimi`).
+"""Moonshot — OpenAI-compatible endpoint. Pure declaration. Provider id
+is the API surface (`moonshot`), not the brand (`kimi`).
 
 Auth: `MOONSHOT_API_KEY` env, or `[provider] moonshot_api_key` in
 `~/.physiclaw/config.toml`. `BASE_URL` defaults to the China endpoint;
@@ -7,9 +7,9 @@ override via `[providers.moonshot] base_url = "https://api.moonshot.ai/v1"`
 in user config (a key minted for one domain returns 401 on the other).
 
 Caching: Moonshot honors `cache_control: {type: ephemeral}` markers on
-text blocks — same shape as DashScope. We INHERIT the parent's
-`_mark_system` / `_mark_stub` overrides; they're load-bearing for
-cross-wake hits. Empirically (A/B against the API):
+text blocks — same shape as DashScope, so the inherited
+`OpenAICacheMarkers` are load-bearing for cross-wake hits. Empirically
+(A/B against the API):
 
   - Markers OFF + identical request          : 100% hit (full byte match)
   - Markers OFF + user-message change        :   0% hit (cache busted)
@@ -22,33 +22,19 @@ markers, every wake hits cache up to the marked anchors. The earlier
 "K2 is purely auto-prefix, markers redundant" reading turned out to
 match only the byte-identical case.
 
-We still override `_parse_usage` because K2 sometimes places
-`cached_tokens` at the top of the `usage` block instead of nested.
-"""
-from dataclasses import replace
+Collapse cadence: inherits the base defaults (COLLAPSE_INTERVAL_TURNS
+= 20) — same cadence as Anthropic/Qwen. The whole-prefix invalidation
+on K2.x makes each collapse more expensive than for anchored caches,
+but a longer interval (was 30) noticeably hurt context-length quality
+on long sessions; 20 keeps the prompt tighter at the cost of one extra
+cache write per ~10 turns.
 
-from physiclaw.agent.engine.dto import Usage
+K2's occasional top-level `usage.cached_tokens` placement is handled
+by the base `_parse_usage` fallback in `openai_compat.py`.
+"""
 from physiclaw.agent.provider.openai_compat import OpenAICompatibleProvider
 
 
 class MoonshotProvider(OpenAICompatibleProvider):
     PROVIDER_ID = "moonshot"
     BASE_URL = "https://api.moonshot.cn/v1"
-
-    # Inherits base default (COLLAPSE_INTERVAL_TURNS = 20) — same
-    # cadence as Anthropic/Qwen. The whole-prefix invalidation on K2.x
-    # makes each collapse more expensive than for anchored caches, but
-    # the longer interval (was 30) noticeably hurt context-length
-    # quality on long sessions; 20 keeps the prompt tighter at the
-    # cost of one extra cache write per ~10 turns.
-
-    def _parse_usage(self, raw: dict) -> Usage:
-        """K2 may surface `cached_tokens` at the top of the `usage`
-        block instead of nested under `prompt_tokens_details`. Inherit
-        the base parser, then fall through to the top-level location
-        only if the nested read came up empty."""
-        base = super()._parse_usage(raw)
-        if base.cached_tokens:
-            return base
-        top_level = int(((raw or {}).get("usage") or {}).get("cached_tokens", 0) or 0)
-        return replace(base, cached_tokens=top_level) if top_level else base

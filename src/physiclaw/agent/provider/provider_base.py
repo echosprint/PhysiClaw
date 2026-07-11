@@ -8,9 +8,10 @@ concrete bases sit on top of `BaseProvider`:
   - `AnthropicCompatibleProvider` (in `anthropic_compat.py`) —
     vendors speaking Anthropic's `/v1/messages` shape (Anthropic).
 
-Vendor classes declare `PROVIDER_ID`, `BASE_URL`, and (when the
-default `<ID>_API_KEY` env-var convention doesn't fit) `API_KEY_ENV_VARS`.
-`BASE_URL` is overridable per-instance via `~/.physiclaw/config.toml`'s
+Vendor classes declare `PROVIDER_ID`, `BASE_URL`, and — when the
+defaults don't fit — `API_KEY_ENV_VARS` (env-var aliases) or
+`SYSTEM_PROMPT_FRAGMENT` (reasoning-convention addendum). `BASE_URL`
+is overridable per-instance via `~/.physiclaw/config.toml`'s
 `[providers.<id>] base_url = "..."` (e.g. Moonshot's .cn vs .ai split,
 or pointing at a proxy).
 
@@ -81,6 +82,40 @@ class Provider(Protocol):
 EPHEMERAL_CACHE_CONTROL = {"type": "ephemeral"}
 
 
+# ---------- cache-marker factory ----------
+
+
+class CacheMarkers:
+    """Wire-shape cache-marker mechanics — *how* a `cache_control`
+    attaches to a wire entry. The `serialize_history` template owns
+    *where* markers go (system entry at index 0, latest superseded
+    tool_result); each wire shape ships one `CacheMarkers` subclass
+    saying how its entries carry the marker, and a provider picks its
+    factory once via the `CACHE_MARKERS` class attribute.
+
+    Both hooks return a marked shallow copy; caller-held dicts are
+    never mutated. Defaults are identity, which makes the base the
+    null object — a provider that must not mark declares
+    `NO_CACHE_MARKERS` (e.g. Google, whose shim ignores the field and
+    whose implicit cache the on/off wrapping would perturb) — and lets
+    a shape override only the placements its messages array actually
+    carries (Anthropic marks system on the top-level `system` payload
+    field in `chat()`, not on a messages entry, so its subclass
+    overrides `mark_stub` alone).
+    """
+
+    def mark_system(self, entry: dict) -> dict:
+        return entry
+
+    def mark_stub(self, entry: dict) -> dict:
+        return entry
+
+
+# The null object — identity on both hooks. Declaring this (rather
+# than a `None` sentinel) keeps `serialize_history` branch-free.
+NO_CACHE_MARKERS = CacheMarkers()
+
+
 # ---------- BaseProvider ----------
 
 
@@ -99,6 +134,9 @@ class BaseProvider:
         wins). Defaults to `("<PROVIDER_ID>_API_KEY",)`. Override only
         when a vendor accepts more than one (e.g. Qwen takes both
         `QWEN_API_KEY` and `DASHSCOPE_API_KEY`).
+      - `SYSTEM_PROMPT_FRAGMENT` — per-vendor reasoning-convention
+        addendum for the system prompt (e.g. Qwen's `<think>...</think>`
+        wrapper).
 
     Subclass MAY override:
       - `_build_client()` if the wire client isn't a stock
@@ -106,8 +144,6 @@ class BaseProvider:
       - `_api_key()` if auth doesn't fit the env-var/config pattern
       - `_missing_key_message()` for a richer error string
       - `_model_env_var()` if the env override isn't `<ID>_MODEL`
-      - `system_prompt_fragment()` to inject a per-vendor reasoning
-        wrapper into the system prompt (e.g. Qwen's `<think>...</think>`)
       - `chat()` and `serialize_history()` — provided by the wire-shape
         intermediate base; vendors normally don't touch them
 
@@ -119,6 +155,15 @@ class BaseProvider:
     PROVIDER_ID: str = ""
     BASE_URL: str = ""
     API_KEY_ENV_VARS: tuple[str, ...] = ()
+
+    # Per-vendor system-prompt addendum; see `system_prompt_fragment()`.
+    SYSTEM_PROMPT_FRAGMENT: str = ""
+
+    # Cache-marker factory for this provider's wire shape. Each
+    # wire-shape base sets its own (`OpenAICacheMarkers` /
+    # `AnthropicCacheMarkers`); a vendor whose endpoint ignores markers
+    # resets to `NO_CACHE_MARKERS` — see `GoogleProvider`.
+    CACHE_MARKERS: CacheMarkers = NO_CACHE_MARKERS
 
     # Turn-age summary collapse — see `compact.collapse_old_turns`.
     # All three knobs live here so vendor-specific tuning (cache
@@ -223,18 +268,19 @@ class BaseProvider:
     @classmethod
     def system_prompt_fragment(cls) -> str:
         """Per-vendor system-prompt addendum (e.g. Qwen's `<think>...</think>`
-        wrapper instructions). Default: empty. Override on the vendor
-        class when the model needs an explicit reasoning convention."""
-        return ""
+        wrapper instructions). Default: empty. Declare
+        `SYSTEM_PROMPT_FRAGMENT` on the vendor class when the model
+        needs an explicit reasoning convention."""
+        return cls.SYSTEM_PROMPT_FRAGMENT
 
     # ---------- DTO → wire (template method, shared across wire shapes) ----------
 
     def serialize_history(self, history: list[Message]) -> list[dict]:
         """Single-pass DTO history → provider wire-format messages, with
-        cache markers attached to:
-          - the `SystemMessage` at index 0 (via `_mark_system`), and
-          - the latest `ToolResultMessage` flagged `is_superseded`
-            (via `_mark_stub`).
+        cache markers attached (via the `CACHE_MARKERS` factory; the
+        default `NO_CACHE_MARKERS` is identity) to:
+          - the `SystemMessage` at index 0, and
+          - the latest `ToolResultMessage` flagged `is_superseded`.
 
         Subclasses implement `_encode_message` (DTO → wire dict, list of
         wire dicts, or `None` to skip). Most encodings are 1:1; the list
@@ -245,6 +291,7 @@ class BaseProvider:
         (system rides outside the messages array). Cache markers attach
         to the first entry of any split; superseded results don't carry
         images, so their list is always single-element."""
+        markers = self.CACHE_MARKERS
         out: list[dict] = []
         last_stub_idx: int | None = None
         for i, msg in enumerate(history):
@@ -256,12 +303,12 @@ class BaseProvider:
             if not entries:
                 continue
             if i == 0 and isinstance(msg, SystemMessage):
-                entries[0] = self._mark_system(entries[0])
+                entries[0] = markers.mark_system(entries[0])
             elif isinstance(msg, ToolResultMessage) and msg.is_superseded:
                 last_stub_idx = len(out)
             out.extend(entries)
         if last_stub_idx is not None:
-            out[last_stub_idx] = self._mark_stub(out[last_stub_idx])
+            out[last_stub_idx] = markers.mark_stub(out[last_stub_idx])
         return out
 
     def _encode_message(self, msg: Message) -> dict | list[dict] | None:
@@ -271,20 +318,6 @@ class BaseProvider:
         raise NotImplementedError(
             f"{type(self).__name__} must implement _encode_message"
         )
-
-    def _mark_system(self, entry: dict) -> dict:
-        """Attach `cache_control` to the system entry. Default: no-op
-        (Anthropic marks system on the top-level `system` field, not on
-        a messages-array entry). OpenAI-shape providers override to
-        wrap the string content in a cache-controlled text block."""
-        return entry
-
-    def _mark_stub(self, entry: dict) -> dict:
-        """Attach `cache_control` to a stubbed `tool_result` entry.
-        Default: no-op. Override per wire shape — OpenAI wraps the
-        whole entry's content; Anthropic annotates the inner
-        `tool_result` block."""
-        return entry
 
     # ---------- request flow: provided by wire-shape subclasses ----------
 

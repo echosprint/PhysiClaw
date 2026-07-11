@@ -25,6 +25,7 @@ from physiclaw.agent.engine.dto import (
     UserMessage,
 )
 from physiclaw.agent.provider.openai_compat import (
+    OpenAICacheMarkers,
     OpenAICompatibleProvider,
     _normalize_finish,
     _with_cache_marker,
@@ -168,21 +169,29 @@ def test_encode_unknown_message_subtype_raises_assert_never(
         provider._encode_message(_Weird())  # type: ignore[arg-type]
 
 
-# ---------- _mark_system / _mark_stub ----------
+# ---------- CACHE_MARKERS factory ----------
 
 
-def test_mark_system_delegates_to_with_cache_marker(provider: _TestOpenAI) -> None:
+def test_cache_markers_factory_is_openai_shape() -> None:
+    assert isinstance(OpenAICompatibleProvider.CACHE_MARKERS, OpenAICacheMarkers)
+
+
+def test_cache_markers_mark_system_delegates_to_with_cache_marker(
+    provider: _TestOpenAI,
+) -> None:
     entry = {"role": "system", "content": "sys"}
 
-    out = provider._mark_system(entry)
+    out = provider.CACHE_MARKERS.mark_system(entry)
 
     assert out["content"][0]["cache_control"] == EPHEMERAL_CACHE_CONTROL
 
 
-def test_mark_stub_delegates_to_with_cache_marker(provider: _TestOpenAI) -> None:
+def test_cache_markers_mark_stub_delegates_to_with_cache_marker(
+    provider: _TestOpenAI,
+) -> None:
     entry = {"role": "tool", "content": "stale"}
 
-    out = provider._mark_stub(entry)
+    out = provider.CACHE_MARKERS.mark_stub(entry)
 
     assert out["content"][0]["cache_control"] == EPHEMERAL_CACHE_CONTROL
 
@@ -648,3 +657,65 @@ def test_parse_usage_handles_none_when_passed_a_none_raw(
 ) -> None:
     # Defensive: `(raw or {}).get("usage")` — None raw is permitted.
     assert provider._parse_usage(None) == Usage()
+
+
+# ---------- _parse_usage: top-level cached_tokens fallback ----------
+#
+# Moonshot K2 sometimes surfaces `cached_tokens` at the top of the
+# `usage` block instead of nested under `prompt_tokens_details`; the
+# base parser probes there only when the nested read came up empty, so
+# the fallback is a no-op for vendors that never do this.
+
+
+def test_parse_usage_falls_through_to_top_level_cached_tokens_when_nested_empty(
+    provider: _TestOpenAI,
+) -> None:
+    raw = {
+        "usage": {
+            "prompt_tokens": 200,
+            "completion_tokens": 30,
+            "cached_tokens": 150,  # top-level, no nested details
+        },
+    }
+
+    out = provider._parse_usage(raw)
+
+    assert out.cached_tokens == 150
+    assert out.prompt_tokens == 200
+
+
+def test_parse_usage_prefers_nested_cached_tokens_over_top_level_when_both_set(
+    provider: _TestOpenAI,
+) -> None:
+    """Defensive: if a response carries both, nested wins (it's the
+    standard location). The fallback only fires on empty nested."""
+    raw = {
+        "usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 10,
+            "cached_tokens": 999,  # would-be top-level
+            "prompt_tokens_details": {"cached_tokens": 80},
+        },
+    }
+
+    out = provider._parse_usage(raw)
+
+    assert out.cached_tokens == 80
+
+
+def test_parse_usage_handles_string_top_level_cached_tokens(
+    provider: _TestOpenAI,
+) -> None:
+    """Some upstream proxies stringify integers; the int() cast in the
+    fallback must accept that."""
+    raw = {
+        "usage": {
+            "prompt_tokens": 50,
+            "completion_tokens": 5,
+            "cached_tokens": "42",  # stringified
+        },
+    }
+
+    out = provider._parse_usage(raw)
+
+    assert out.cached_tokens == 42

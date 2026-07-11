@@ -1,8 +1,8 @@
-"""Tests for `physiclaw.agent.provider.vendors.openai` — adapter class.
+"""Tests for `physiclaw.agent.provider.vendors.openai` — declaration.
 
 Native OpenAI endpoint. Reasoning models surface chain-of-thought via
-API field, not a prompt wrapper — so unlike Qwen, no
-`system_prompt_fragment` override.
+API field, not a prompt wrapper — so unlike Qwen, no declared
+`SYSTEM_PROMPT_FRAGMENT`.
 """
 from __future__ import annotations
 
@@ -25,14 +25,10 @@ def test_inherits_openai_compat() -> None:
     assert issubclass(OpenAIProvider, OpenAICompatibleProvider)
 
 
-def test_no_system_prompt_fragment_override() -> None:
+def test_no_system_prompt_fragment_declared() -> None:
     """Unlike Qwen (which wraps reasoning in `<think>...</think>`),
     OpenAI's reasoning models surface chain-of-thought via API field,
-    not a prompt convention. The vendor inherits the base (no-op)
-    fragment from BaseProvider rather than overriding it."""
-    # Qwen overrides → 'QwenProvider.system_prompt_fragment'.
-    # OpenAI inherits → 'BaseProvider.system_prompt_fragment'.
-    assert (
-        OpenAIProvider.system_prompt_fragment.__qualname__
-        != "OpenAIProvider.system_prompt_fragment"
-    )
+    not a prompt convention — the vendor keeps the base's empty
+    declaration."""
+    assert OpenAIProvider.SYSTEM_PROMPT_FRAGMENT == ""
+    assert OpenAIProvider.system_prompt_fragment() == ""

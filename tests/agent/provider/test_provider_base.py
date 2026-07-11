@@ -30,7 +30,9 @@ from physiclaw.agent.engine.dto import (
 )
 from physiclaw.agent.provider.provider_base import (
     EPHEMERAL_CACHE_CONTROL,
+    NO_CACHE_MARKERS,
     BaseProvider,
+    CacheMarkers,
     Provider,
     ProviderError,
     ProviderPermanentError,
@@ -65,6 +67,24 @@ def _stub_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 def stub() -> _TestProvider:
     return _TestProvider()
+
+
+class _RecordingMarkers(CacheMarkers):
+    """Marker factory that records what it was asked to mark and tags
+    the returned copies, so tests can pin *where* the template applies
+    markers without a concrete wire shape."""
+
+    def __init__(self) -> None:
+        self.system_entries: list[dict] = []
+        self.stub_entries: list[dict] = []
+
+    def mark_system(self, entry: dict) -> dict:
+        self.system_entries.append(entry)
+        return {**entry, "marked": "system"}
+
+    def mark_stub(self, entry: dict) -> dict:
+        self.stub_entries.append(entry)
+        return {**entry, "marked": "stub"}
 
 
 # ---------- error hierarchy ----------
@@ -323,6 +343,15 @@ def test_system_prompt_fragment_default_is_empty_string() -> None:
     assert BaseProvider.system_prompt_fragment() == ""
 
 
+def test_system_prompt_fragment_returns_declared_class_attr() -> None:
+    class _Frag(BaseProvider):
+        PROVIDER_ID = "frag"
+        BASE_URL = "https://x"
+        SYSTEM_PROMPT_FRAGMENT = "wrap reasoning in <think>"
+
+    assert _Frag.system_prompt_fragment() == "wrap reasoning in <think>"
+
+
 # ---------- serialize_history ----------
 
 
@@ -341,31 +370,35 @@ def test_serialize_history_dispatches_each_message_through_encode(
 
 
 def test_serialize_history_marks_system_at_index_zero(
-    stub: _TestProvider, mocker
+    stub: _TestProvider,
 ) -> None:
-    spy = mocker.spy(_TestProvider, "_mark_system")
+    markers = _RecordingMarkers()
+    stub.CACHE_MARKERS = markers
 
-    stub.serialize_history([SystemMessage(content="sys")])
+    out = stub.serialize_history([SystemMessage(content="sys")])
 
-    spy.assert_called_once()
+    assert markers.system_entries == [{"role": "system", "content": "sys"}]
+    assert out[0]["marked"] == "system"
 
 
 def test_serialize_history_does_not_mark_system_at_non_zero_index(
-    stub: _TestProvider, mocker
+    stub: _TestProvider,
 ) -> None:
-    spy = mocker.spy(_TestProvider, "_mark_system")
+    markers = _RecordingMarkers()
+    stub.CACHE_MARKERS = markers
 
     stub.serialize_history(
         [UserMessage(content="hi"), SystemMessage(content="late")]
     )
 
-    spy.assert_not_called()
+    assert markers.system_entries == []
 
 
 def test_serialize_history_marks_last_superseded_tool_result_stub(
-    stub: _TestProvider, mocker
+    stub: _TestProvider,
 ) -> None:
-    spy = mocker.spy(_TestProvider, "_mark_stub")
+    markers = _RecordingMarkers()
+    stub.CACHE_MARKERS = markers
     earlier_stub = ToolResultMessage(
         tool_call_id="t1", content="old", is_superseded=True
     )
@@ -373,9 +406,12 @@ def test_serialize_history_marks_last_superseded_tool_result_stub(
         tool_call_id="t2", content="newer", is_superseded=True
     )
 
-    stub.serialize_history([earlier_stub, UserMessage(content="x"), later_stub])
+    out = stub.serialize_history(
+        [earlier_stub, UserMessage(content="x"), later_stub]
+    )
 
-    spy.assert_called_once()
+    assert [e["id"] for e in markers.stub_entries] == ["t2"]
+    assert out[2]["marked"] == "stub"
 
 
 def test_serialize_history_skips_messages_when_encode_returns_none() -> None:
@@ -488,23 +524,39 @@ async def test_default_list_models_raises_not_implemented_error(
         await stub.list_models()
 
 
-# ---------- _mark_system / _mark_stub default no-op ----------
+# ---------- CacheMarkers null object ----------
 
 
-def test_default_mark_system_returns_entry_unchanged(
-    stub: _TestProvider,
-) -> None:
+def test_base_provider_cache_markers_defaults_to_null_object() -> None:
+    assert BaseProvider.CACHE_MARKERS is NO_CACHE_MARKERS
+
+
+def test_no_cache_markers_mark_system_is_identity() -> None:
     entry = {"role": "system", "content": "x"}
 
-    assert stub._mark_system(entry) is entry
+    assert NO_CACHE_MARKERS.mark_system(entry) is entry
 
 
-def test_default_mark_stub_returns_entry_unchanged(
-    stub: _TestProvider,
-) -> None:
+def test_no_cache_markers_mark_stub_is_identity() -> None:
     entry = {"role": "tool", "content": "x"}
 
-    assert stub._mark_stub(entry) is entry
+    assert NO_CACHE_MARKERS.mark_stub(entry) is entry
+
+
+def test_serialize_history_leaves_entries_unmarked_with_null_markers(
+    stub: _TestProvider,
+) -> None:
+    # `_TestProvider` inherits NO_CACHE_MARKERS — both anchor
+    # positions must come through untouched.
+    out = stub.serialize_history([
+        SystemMessage(content="sys"),
+        ToolResultMessage(tool_call_id="t1", content="old", is_superseded=True),
+    ])
+
+    assert out == [
+        {"role": "system", "content": "sys"},
+        {"role": "tool", "id": "t1", "content": "old"},
+    ]
 
 
 # ---------- aclose ----------

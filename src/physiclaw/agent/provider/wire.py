@@ -12,8 +12,11 @@ Two transformation directions:
     `user_content_to_openai`, `tool_to_wire` produce OpenAI dicts.
     `OpenAICompatibleProvider._encode_message` calls them per DTO; the
     inherited `BaseProvider.serialize_history` template assembles the
-    list and places cache markers. Anthropic doesn't use these — its
-    translators live in `provider/anthropic_compat.py`.
+    list and places cache markers. Anthropic's message translators live
+    in `provider/anthropic_compat.py`, but its ContentBlock dispatch
+    runs through the shared `encode_content` here — TextBlock/ImageBlock
+    handling (and any future block type or scaling change) lands once,
+    with only the per-shape part dicts differing.
 
 Provider-specific response fields (Qwen's `reasoning_content`,
 Anthropic's `thinking` blocks) are stripped at parse time inside the
@@ -24,6 +27,7 @@ prefix cache and confuse the model).
 import base64
 import json
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from physiclaw.agent.engine import compact
@@ -88,23 +92,51 @@ def tool_result_to_wire(result: ToolResultMessage) -> dict[str, Any]:
     }
 
 
-def user_content_to_openai(content: str | list[ContentBlock]) -> str | list[dict]:
-    """Engine ContentBlocks → OpenAI multipart content array. Plain strings
-    pass through unchanged so text-only messages stay cheap."""
+def encode_content(
+    content: str | list[ContentBlock] | None,
+    *,
+    image_part: Callable[[ImageBlock], dict],
+    empty: str | list[dict],
+    label: str,
+) -> str | list[dict]:
+    """Shared ContentBlock dispatch for every wire shape. Plain strings
+    pass through unchanged so text-only messages stay cheap; unknown
+    block types are dropped with a warning (tagged `label` so the log
+    names the caller); an all-dropped/empty list falls back to `empty`
+    (each shape's legal empty content). TextBlock's part is inlined —
+    OpenAI and Anthropic agree on `{type: text, text}` — so callers
+    supply only what actually differs (`image_part`, `empty`), and
+    ImageBlock/scaling changes land here once."""
     if isinstance(content, str):
         return content
+    if not isinstance(content, list):
+        return str(content) if content is not None else ""
     parts: list[dict] = []
     for block in content:
         if isinstance(block, TextBlock):
             parts.append({"type": "text", "text": block.text})
         elif isinstance(block, ImageBlock):
-            parts.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:{block.media_type};base64,{block.data_b64}"},
-            })
+            parts.append(image_part(block))
         else:
-            log.warning("user_content_to_openai: dropping unknown block %r", type(block).__name__)
-    return parts or ""
+            log.warning("%s: dropping unknown block %r", label, type(block).__name__)
+    return parts or empty
+
+
+def _openai_image_part(block: ImageBlock) -> dict:
+    return {
+        "type": "image_url",
+        "image_url": {"url": f"data:{block.media_type};base64,{block.data_b64}"},
+    }
+
+
+def user_content_to_openai(content: str | list[ContentBlock]) -> str | list[dict]:
+    """Engine ContentBlocks → OpenAI multipart content array."""
+    return encode_content(
+        content,
+        image_part=_openai_image_part,
+        empty="",
+        label="user_content_to_openai",
+    )
 
 
 # ---------- MCP response → DTO ContentBlocks ----------

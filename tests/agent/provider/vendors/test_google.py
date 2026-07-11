@@ -20,6 +20,7 @@ from physiclaw.agent.engine.dto import (
     ToolResultMessage,
     UserMessage,
 )
+from physiclaw.agent.provider.provider_base import NO_CACHE_MARKERS
 from physiclaw.agent.provider.vendors.google import (
     GoogleProvider,
     _SIG_BYPASS,
@@ -94,19 +95,15 @@ async def test_list_models_passes_through_id_without_models_prefix(
     assert await provider.list_models() == [{"id": "gemini-3"}]
 
 
-# ---------- _mark_system / _mark_stub: disabled for Google ----------
+# ---------- cache markers: disabled for Google ----------
 
 
-def test_mark_system_returns_entry_unchanged(provider: GoogleProvider) -> None:
-    entry = {"role": "system", "content": "sys"}
-
-    assert provider._mark_system(entry) is entry
-
-
-def test_mark_stub_returns_entry_unchanged(provider: GoogleProvider) -> None:
-    entry = {"role": "tool", "content": "stale"}
-
-    assert provider._mark_stub(entry) is entry
+def test_cache_markers_disabled() -> None:
+    """The shim ignores `cache_control`, and the shifting stub marker
+    would perturb Gemini's implicit prefix cache — markers off. (The
+    null-object template path itself is pinned in
+    `test_provider_base.py`.)"""
+    assert GoogleProvider.CACHE_MARKERS is NO_CACHE_MARKERS
 
 
 # ---------- _encode_message dispatch ----------

@@ -8,17 +8,20 @@ concept (subprocess engine, not direct Anthropic API).
 
 Layout:
   - `provider_base.py`     — `Provider` Protocol, errors,
+                             `CacheMarkers` factory contract,
                              `BaseProvider` (auth + HTTP-client +
-                             `system_prompt_fragment` hook +
+                             `SYSTEM_PROMPT_FRAGMENT` hook +
                              `serialize_history` template)
   - `openai_compat.py`     — `OpenAICompatibleProvider`:
-                             `/chat/completions` wire flow + cache
-                             markers + response parser
+                             `/chat/completions` wire flow +
+                             `OpenAICacheMarkers` + response parser
   - `anthropic_compat.py`  — `AnthropicCompatibleProvider`:
                              `/v1/messages` wire flow (Anthropic SDK) +
-                             per-block cache markers
+                             `AnthropicCacheMarkers` (per-block)
   - `wire.py`              — DTO ↔ OpenAI wire-format adapters used by
-                             `openai_compat.py`
+                             `openai_compat.py`, plus the shared
+                             `encode_content` block dispatch both wire
+                             shapes route through
   - `registry.py`          — id → class map, lookup helpers
                              (`make_provider`, `provider_class`,
                              `provider_key_status`, `is_known`,
@@ -27,7 +30,9 @@ Layout:
       - `qwen.py`      — `QwenProvider` (DashScope)   — OpenAI-compat
       - `moonshot.py`  — `MoonshotProvider` (Kimi)    — OpenAI-compat
       - `openai.py`    — `OpenAIProvider` (GPT-5)     — OpenAI-compat
+      - `deepseek.py`  — `DeepSeekProvider` (stub)    — OpenAI-compat
       - `google.py`    — `GoogleProvider` (Gemini)    — OpenAI-compat
+                         with shim-quirk overrides
       - `anthropic.py` — `AnthropicProvider` (Claude) — Anthropic-compat
 
 This `__init__.py` is a thin re-export surface — import from here
@@ -57,6 +62,7 @@ from physiclaw.agent.provider.registry import (
     provider_key_status,
 )
 from physiclaw.agent.provider.vendors.anthropic import AnthropicProvider
+from physiclaw.agent.provider.vendors.deepseek import DeepSeekProvider
 from physiclaw.agent.provider.vendors.google import GoogleProvider
 from physiclaw.agent.provider.vendors.moonshot import MoonshotProvider
 from physiclaw.agent.provider.vendors.openai import OpenAIProvider
@@ -74,6 +80,7 @@ __all__ = [
     "AnthropicCompatibleProvider",
     "AnthropicProvider",
     "BaseProvider",
+    "DeepSeekProvider",
     "GoogleProvider",
     "MoonshotProvider",
     "OpenAICompatibleProvider",

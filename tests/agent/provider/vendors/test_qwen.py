@@ -1,4 +1,11 @@
-"""Tests for `physiclaw.agent.provider.vendors.qwen` — DashScope adapter."""
+"""Tests for `physiclaw.agent.provider.vendors.qwen` — DashScope
+declaration.
+
+Pure pins: the id and base URL are registry routing keys, the env vars
+are auth precedence, and the declared `SYSTEM_PROMPT_FRAGMENT` is
+returned by the base `system_prompt_fragment()` hook (mechanics
+exercised in `test_provider_base.py`).
+"""
 from __future__ import annotations
 
 from physiclaw.agent.provider.vendors.qwen import QwenProvider
@@ -29,7 +36,7 @@ def test_api_key_env_vars_supports_both_qwen_and_dashscope() -> None:
     assert QwenProvider.API_KEY_ENV_VARS == ("QWEN_API_KEY", "DASHSCOPE_API_KEY")
 
 
-# ---------- system_prompt_fragment ----------
+# ---------- SYSTEM_PROMPT_FRAGMENT declaration ----------
 
 
 def test_system_prompt_fragment_mentions_think_wrapper() -> None:
@@ -59,9 +66,8 @@ def test_system_prompt_fragment_is_classmethod() -> None:
     assert len(out) > 0
 
 
-def test_system_prompt_fragment_is_deterministic() -> None:
-    """Pinning the prompt: any reword surfaces here as a failed test."""
-    a = QwenProvider.system_prompt_fragment()
-    b = QwenProvider.system_prompt_fragment()
-
-    assert a == b
+def test_system_prompt_fragment_matches_declared_attr() -> None:
+    """The base hook returns the declaration verbatim — any reword
+    surfaces here as a failed test."""
+    assert QwenProvider.system_prompt_fragment() == QwenProvider.SYSTEM_PROMPT_FRAGMENT
+    assert QwenProvider.SYSTEM_PROMPT_FRAGMENT != ""

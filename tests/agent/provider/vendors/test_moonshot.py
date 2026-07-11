@@ -1,19 +1,16 @@
-"""Tests for `physiclaw.agent.provider.vendors.moonshot` — Moonshot/K2 adapter.
+"""Tests for `physiclaw.agent.provider.vendors.moonshot` — Moonshot/K2
+declaration.
 
-The override of interest is `_parse_usage`: K2 occasionally surfaces
-`cached_tokens` at the top of the `usage` block instead of nested
-under `prompt_tokens_details`. The fallback only kicks in when the
-nested read came up empty.
+The vendor is a pure declaration: K2's top-level `usage.cached_tokens`
+quirk is handled by the base `_parse_usage` fallback (exercised in
+`test_openai_compat.py`), and the load-bearing cache markers are the
+inherited `OpenAICacheMarkers`.
 """
 from __future__ import annotations
 
-from physiclaw.agent.engine.dto import Usage
+from physiclaw.agent.provider.openai_compat import OpenAICompatibleProvider
+from physiclaw.agent.provider.provider_base import NO_CACHE_MARKERS
 from physiclaw.agent.provider.vendors.moonshot import MoonshotProvider
-
-
-def _make_provider() -> MoonshotProvider:
-    """Bypass __init__ so we don't need an API key at construction time."""
-    return MoonshotProvider.__new__(MoonshotProvider)
 
 
 # ---------- class metadata ----------
@@ -27,113 +24,23 @@ def test_provider_id_and_base_url_pinned() -> None:
 
 
 def test_inherits_openai_compat() -> None:
-    from physiclaw.agent.provider.openai_compat import OpenAICompatibleProvider
-
     assert issubclass(MoonshotProvider, OpenAICompatibleProvider)
 
 
-# ---------- _parse_usage ----------
+# ---------- inherited cache markers ----------
 
 
-def test_parse_usage_uses_nested_when_present() -> None:
-    """Standard OpenAI shape: cached_tokens nested under
-    prompt_tokens_details — base parser handles it; override is a no-op."""
-    p = _make_provider()
-    raw = {
-        "usage": {
-            "prompt_tokens": 100,
-            "completion_tokens": 50,
-            "prompt_tokens_details": {"cached_tokens": 80},
-        },
-    }
-
-    usage = p._parse_usage(raw)
-
-    assert usage.prompt_tokens == 100
-    assert usage.completion_tokens == 50
-    assert usage.cached_tokens == 80
+def test_inherits_cache_markers() -> None:
+    """The inherited `OpenAICacheMarkers` are load-bearing for K2
+    cross-wake cache hits (see the module docstring's A/B results) —
+    a well-meaning `CACHE_MARKERS = NO_CACHE_MARKERS` here would
+    silently cold-start every wake."""
+    assert MoonshotProvider.CACHE_MARKERS is OpenAICompatibleProvider.CACHE_MARKERS
+    assert MoonshotProvider.CACHE_MARKERS is not NO_CACHE_MARKERS
 
 
-def test_parse_usage_falls_through_to_top_level_when_nested_empty() -> None:
-    """K2 quirk: cached_tokens lives at the top of the usage block,
-    not under prompt_tokens_details. Override picks it up only when
-    the nested location is empty/missing."""
-    p = _make_provider()
-    raw = {
-        "usage": {
-            "prompt_tokens": 200,
-            "completion_tokens": 30,
-            "cached_tokens": 150,  # top-level, no nested details
-        },
-    }
-
-    usage = p._parse_usage(raw)
-
-    assert usage.cached_tokens == 150
-    assert usage.prompt_tokens == 200
-
-
-def test_parse_usage_prefers_nested_over_top_level_when_both_set() -> None:
-    """Defensive: if a response carries both, nested wins (it's the
-    standard location). Override only fires on empty nested."""
-    p = _make_provider()
-    raw = {
-        "usage": {
-            "prompt_tokens": 100,
-            "completion_tokens": 10,
-            "cached_tokens": 999,  # would-be top-level
-            "prompt_tokens_details": {"cached_tokens": 80},
-        },
-    }
-
-    usage = p._parse_usage(raw)
-
-    assert usage.cached_tokens == 80
-
-
-def test_parse_usage_zero_when_neither_location_has_value() -> None:
-    p = _make_provider()
-    raw = {
-        "usage": {"prompt_tokens": 100, "completion_tokens": 10},
-    }
-
-    usage = p._parse_usage(raw)
-
-    assert usage.cached_tokens == 0
-
-
-def test_parse_usage_handles_missing_usage_block() -> None:
-    """Some error responses arrive without a usage block at all."""
-    p = _make_provider()
-
-    usage = p._parse_usage({})
-
-    assert isinstance(usage, Usage)
-    assert usage.cached_tokens == 0
-    assert usage.prompt_tokens == 0
-
-
-def test_parse_usage_handles_none_usage_block() -> None:
-    """Defensive: usage key exists but is None."""
-    p = _make_provider()
-
-    usage = p._parse_usage({"usage": None})
-
-    assert usage.cached_tokens == 0
-
-
-def test_parse_usage_handles_string_top_level_cached_tokens() -> None:
-    """Some upstream proxies stringify integers; the int() cast in the
-    fallback must accept that."""
-    p = _make_provider()
-    raw = {
-        "usage": {
-            "prompt_tokens": 50,
-            "completion_tokens": 5,
-            "cached_tokens": "42",  # stringified
-        },
-    }
-
-    usage = p._parse_usage(raw)
-
-    assert usage.cached_tokens == 42
+def test_no_parse_usage_override() -> None:
+    """K2's top-level `cached_tokens` quirk is handled by the base
+    `_parse_usage` fallback — a vendor override reappearing here would
+    mean the quirk handling is duplicated."""
+    assert "_parse_usage" not in MoonshotProvider.__dict__

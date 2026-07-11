@@ -36,6 +36,7 @@ from physiclaw.agent.engine.dto import (
     UserMessage,
 )
 from physiclaw.agent.provider.anthropic_compat import (
+    AnthropicCacheMarkers,
     AnthropicCompatibleProvider,
     _DEFAULT_MAX_TOKENS,
     _STOP_REASON_MAP,
@@ -235,10 +236,16 @@ def test_encode_unknown_message_type_returns_none_with_warning(
     )
 
 
-# ---------- _mark_stub ----------
+# ---------- CACHE_MARKERS factory ----------
 
 
-def test_mark_stub_attaches_ephemeral_cache_control_to_inner_block(
+def test_cache_markers_factory_is_anthropic_shape() -> None:
+    assert isinstance(
+        AnthropicCompatibleProvider.CACHE_MARKERS, AnthropicCacheMarkers
+    )
+
+
+def test_cache_markers_mark_stub_attaches_ephemeral_cache_control_to_inner_block(
     provider: _TestAnthropic,
 ) -> None:
     entry = {
@@ -246,11 +253,18 @@ def test_mark_stub_attaches_ephemeral_cache_control_to_inner_block(
         "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "stale"}],
     }
 
-    out = provider._mark_stub(entry)
+    out = provider.CACHE_MARKERS.mark_stub(entry)
 
     assert out["content"][0]["cache_control"] == EPHEMERAL_CACHE_CONTROL
     # Original entry untouched (shallow copy).
     assert "cache_control" not in entry["content"][0]
+
+
+def test_cache_markers_mark_system_is_identity() -> None:
+    # System rides outside the messages array — marked in chat(), not here.
+    entry = {"role": "system", "content": "sys"}
+
+    assert AnthropicCacheMarkers().mark_system(entry) is entry
 
 
 # ---------- chat: payload construction ----------
@@ -522,13 +536,16 @@ def test_content_to_anthropic_drops_unknown_block_with_warning(
     class _Weird:
         pass
 
-    with caplog.at_level(logging.WARNING, logger="physiclaw.agent.provider.anthropic_compat"):
+    # Block dispatch is shared — the warning is emitted by
+    # `wire.encode_content`, tagged with the anthropic label.
+    with caplog.at_level(logging.WARNING, logger="physiclaw.agent.provider.wire"):
         out = _content_to_anthropic([_Weird()])  # type: ignore[list-item]
 
     # Falls back to single empty-text block since list became empty.
     assert out == [{"type": "text", "text": ""}]
     assert any(
-        r.getMessage().startswith("anthropic: dropping unknown block type")
+        r.getMessage().startswith("anthropic: dropping unknown block")
+        and "_Weird" in r.getMessage()
         for r in caplog.records
     )
 

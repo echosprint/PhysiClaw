@@ -96,7 +96,7 @@ def render_system_prompts(
       ## Examples          ❌/✅ for the most common per-turn failures
       ## Reasoning Format  provider-specific reasoning wrapper (e.g. Qwen
                            `<think>...</think>`); pulled from
-                           `OpenAICompatibleProvider.system_prompt_fragment()`
+                           `BaseProvider.system_prompt_fragment()`
       ## memory.md         session-stable persistent facts — live file
                            dump (the spec lives in the PERSISTENCE.md slot)
 
@@ -307,7 +307,7 @@ def _first_sentence(text: str) -> str:
 
 # Cache-marker placement lives in the provider classes — see
 # `BaseProvider.serialize_history` (template) and the per-shape
-# `_mark_system` / `_mark_stub` hooks. It's a wire-format concern that
+# `CacheMarkers` factories. It's a wire-format concern that
 # belongs with the request builder, not the prompt assembly.
 
 

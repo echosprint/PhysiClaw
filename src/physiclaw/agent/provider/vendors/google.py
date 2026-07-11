@@ -41,6 +41,7 @@ from physiclaw.agent.engine.dto import (
     ToolResultMessage,
 )
 from physiclaw.agent.provider.openai_compat import OpenAICompatibleProvider
+from physiclaw.agent.provider.provider_base import NO_CACHE_MARKERS
 from physiclaw.agent.provider.wire import (
     assistant_to_wire,
     user_content_to_openai,
@@ -56,6 +57,19 @@ class GoogleProvider(OpenAICompatibleProvider):
     PROVIDER_ID = "google"
     BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
 
+    # Cache markers: disabled. Gemini's shim ignores Anthropic-style
+    # `cache_control`. The bigger reason for stripping is that the stub
+    # marker tracks the *latest* superseded tool_result, whose position
+    # shifts forward every screen-obs turn — wrapping that one entry
+    # on/off perturbs exactly the prefix bytes Gemini's implicit cache
+    # wants to anchor on. Hits surface via standard
+    # `usage.prompt_tokens_details.cached_tokens`; the base `_parse_usage`
+    # already reads it. Implicit caching itself is non-deterministic
+    # across both Flash and Pro (intermittent zero-hit turns on stable
+    # prefixes; see issue googleapis/python-genai#2064 and
+    # tests/probe_google_cache_*) — don't bank on the theoretical 75%.
+    CACHE_MARKERS = NO_CACHE_MARKERS
+
     async def list_models(self) -> list[dict]:
         """Strip Gemini's `models/` id prefix so the user-facing form
         is uniform across providers (`gemini-2.5-flash`, not
@@ -63,25 +77,6 @@ class GoogleProvider(OpenAICompatibleProvider):
         on the chat side, so no re-prefixing is needed when sending."""
         raw = await super().list_models()
         return [{**m, "id": m.get("id", "").removeprefix("models/")} for m in raw]
-
-    # ---------- cache markers: disabled for Google ----------
-    #
-    # Gemini's shim ignores Anthropic-style `cache_control`. The bigger
-    # reason for stripping is that the stub marker tracks the *latest*
-    # superseded tool_result, whose position shifts forward every
-    # screen-obs turn — wrapping that one entry on/off perturbs exactly
-    # the prefix bytes Gemini's implicit cache wants to anchor on.
-    # Hits surface via standard `usage.prompt_tokens_details.cached_tokens`;
-    # the base `_parse_usage` already reads it. Implicit caching itself
-    # is non-deterministic across both Flash and Pro (intermittent zero-
-    # hit turns on stable prefixes; see issue googleapis/python-genai#2064
-    # and tests/probe_google_cache_*) — don't bank on the theoretical 75%.
-
-    def _mark_system(self, entry: dict) -> dict:
-        return entry
-
-    def _mark_stub(self, entry: dict) -> dict:
-        return entry
 
     # ---------- request side: shim quirk overrides ----------
 
