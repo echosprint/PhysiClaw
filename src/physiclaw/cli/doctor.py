@@ -204,16 +204,15 @@ def _probe_calibration_deep() -> str:
         return _fmt_ok("calibration: bundle complete")
     missing = [k for k, v in data.items() if v is None]
     return _fmt_warn(
-        f"calibration: partial (missing: {missing})" if missing
+        f"calibration: partial (missing: {missing})"
+        if missing
         else f"calibration: partial (keys: {sorted(data.keys())})"
     )
 
 
 def _probe_bridge_deep(host: str, port: int) -> str:
     try:
-        state = _http.fetch_json(
-            f"http://{host}:{port}/api/bridge/state", timeout=1.0
-        )
+        state = _http.fetch_json(f"http://{host}:{port}/api/bridge/state", timeout=1.0)
         connected = state.get("connected", False)
     except (OSError, ValueError) as e:
         # Network/parse failure is a real problem — keep the warn.
@@ -317,10 +316,12 @@ def _probe_provider_deep(provider_id: str, model_id: str) -> str:
 
     history = [
         SystemMessage(content="You are a one-word reply bot."),
-        UserMessage(content=[
-            TextBlock(text="What word is in this image? Reply with just the word."),
-            ImageBlock(media_type="image/png", data_b64=_PROBE_IMAGE_B64),
-        ]),
+        UserMessage(
+            content=[
+                TextBlock(text="What word is in this image? Reply with just the word."),
+                ImageBlock(media_type="image/png", data_b64=_PROBE_IMAGE_B64),
+            ]
+        ),
     ]
 
     async def _run():
@@ -353,8 +354,7 @@ def _probe_provider_deep(provider_id: str, model_id: str) -> str:
         )
     u = asst.usage
     usage_str = (
-        f"{u.prompt_tokens}p+{u.completion_tokens}c"
-        if u.prompt_tokens else "no usage"
+        f"{u.prompt_tokens}p+{u.completion_tokens}c" if u.prompt_tokens else "no usage"
     )
     return _fmt_ok(
         f"{provider_id}/{model_id}: reply={brief(reply, 40)!r} "
@@ -379,8 +379,7 @@ def doctor(
     typer.echo(f"  physiclaw:  {__version__}")
     typer.echo(f"  python:     {sys.version.split()[0]} ({sys.executable})")
     typer.echo(
-        f"  platform:   {platform.system()} {platform.release()} "
-        f"({platform.machine()})"
+        f"  platform:   {platform.system()} {platform.release()} ({platform.machine()})"
     )
     uv = shutil.which("uv")
     typer.echo(f"  uv:         {uv or '(not found — not required for runtime)'}")
@@ -400,9 +399,11 @@ def doctor(
     if cp.exists():
         typer.echo(_fmt_ok(f"config.toml: {cp}"))
     else:
-        typer.echo(_fmt_warn(
-            f"no config yet — using built-in defaults. Edit via `physiclaw config edit` ({cp})"
-        ))
+        typer.echo(
+            _fmt_warn(
+                f"no config yet — using built-in defaults. Edit via `physiclaw config edit` ({cp})"
+            )
+        )
 
     typer.echo()
     typer.echo(_fmt_section("Assets"))
@@ -413,10 +414,12 @@ def doctor(
         if deep:
             typer.echo(_probe_vision_model_deep())
     else:
-        typer.echo(_fmt_warn(
-            f"vision model missing: {model}\n"
-            "    Run: physiclaw setup local-vision-model"
-        ))
+        typer.echo(
+            _fmt_warn(
+                f"vision model missing: {model}\n"
+                "    Run: physiclaw setup local-vision-model"
+            )
+        )
 
     typer.echo()
     typer.echo(_fmt_section("Hardware"))
@@ -431,7 +434,11 @@ def doctor(
             # Bind mode is a config decision the user already made; surface
             # the fact without the yellow `!` since a healthy server isn't
             # a warning state. Security notes live in the README.
-            typer.echo(_fmt_info("bind: 0.0.0.0 (LAN-reachable; intended for the phone bridge)"))
+            typer.echo(
+                _fmt_info(
+                    "bind: 0.0.0.0 (LAN-reachable; intended for the phone bridge)"
+                )
+            )
         for label in ("arm", "camera", "calibrated", "ready"):
             if status.get(label):
                 typer.echo(_fmt_ok(f"{label}: yes"))
@@ -458,14 +465,16 @@ def doctor(
         else:
             relevant = candidate_ports()
             if relevant:
-                typer.echo(_fmt_warn(
-                    f"no GRBL detected (saw {len(relevant)} candidate port(s): "
-                    f"{', '.join(relevant)})"
-                ))
+                typer.echo(
+                    _fmt_warn(
+                        f"no GRBL detected (saw {len(relevant)} candidate port(s): "
+                        f"{', '.join(relevant)})"
+                    )
+                )
             else:
-                typer.echo(_fmt_warn(
-                    "no serial ports detected — connect the arm and re-run."
-                ))
+                typer.echo(
+                    _fmt_warn("no serial ports detected — connect the arm and re-run.")
+                )
         from physiclaw.core import platform as os_platform
 
         cv2_err = _opencv_import_error()
@@ -479,9 +488,11 @@ def doctor(
                     for idx in cams:
                         typer.echo(_probe_camera_frame(idx))
             else:
-                typer.echo(_fmt_warn(
-                    f"cameras: none detected ({os_platform.camera_denied_hint()})"
-                ))
+                typer.echo(
+                    _fmt_warn(
+                        f"cameras: none detected ({os_platform.camera_denied_hint()})"
+                    )
+                )
         for hint in os_platform.hardware_permission_hints():
             typer.echo(_fmt_warn(hint))
 
@@ -493,10 +504,12 @@ def doctor(
         if deep:
             typer.echo(_probe_calibration_deep())
     else:
-        typer.echo(_fmt_warn(
-            f"no calibration yet: {bundle}\n"
-            "    Run: physiclaw  (starts the server and opens the hardware-setup wizard)"
-        ))
+        typer.echo(
+            _fmt_warn(
+                f"no calibration yet: {bundle}\n"
+                "    Run: physiclaw  (starts the server and opens the hardware-setup wizard)"
+            )
+        )
 
     typer.echo()
     typer.echo(_fmt_section("Engine"))
@@ -532,13 +545,16 @@ def doctor(
     # real `chat()` round-trip on the active provider (proves network +
     # auth + billing + model response).
     from physiclaw.agent.provider import CLAUDE_CODE_ID, provider_key_status
+
     if active_provider and active_provider != CLAUDE_CODE_ID:
         masked, source = provider_key_status(active_provider)
         if masked is None:
-            typer.echo(_fmt_warn(
-                f"{active_provider} api key: (unset) — required for the active model. "
-                f"Set via `physiclaw models key {active_provider}` or env var."
-            ))
+            typer.echo(
+                _fmt_warn(
+                    f"{active_provider} api key: (unset) — required for the active model. "
+                    f"Set via `physiclaw models key {active_provider}` or env var."
+                )
+            )
         else:
             typer.echo(_fmt_ok(f"{active_provider} api key: {masked} ({source})"))
             if deep and active_model:

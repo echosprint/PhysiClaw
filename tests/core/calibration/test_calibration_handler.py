@@ -1,4 +1,5 @@
 """Tests for `physiclaw.core.calibration.handler` — calibration HTTP routes."""
+
 from __future__ import annotations
 
 import dataclasses
@@ -31,12 +32,14 @@ from physiclaw.core.calibration.transforms import ViewportShift
 def _async(value: Any):
     async def _coro():
         return value
+
     return _coro
 
 
 def _async_raise(exc: Exception):
     async def _coro():
         raise exc
+
     return _coro
 
 
@@ -101,8 +104,11 @@ async def test_run_blocking_runs_sync_callable() -> None:
 
 def _viewport_shift() -> ViewportShift:
     return ViewportShift(
-        offset_x=0.0, offset_y=0.0, dpr=3.0,
-        screenshot_width=1170, screenshot_height=2532,
+        offset_x=0.0,
+        offset_y=0.0,
+        dpr=3.0,
+        screenshot_width=1170,
+        screenshot_height=2532,
     )
 
 
@@ -117,7 +123,11 @@ async def test_handle_measure_viewport_shift_happy_path(mocker) -> None:
     spy = mocker.patch.object(handler, "measure_viewport_shift", return_value=vs)
 
     resp = await handle_measure_viewport_shift(
-        _fake_request(json_obj={"fresh": True}), physiclaw, calib, bridge, phone,
+        _fake_request(json_obj={"fresh": True}),
+        physiclaw,
+        calib,
+        bridge,
+        phone,
     )
 
     body = _read_json(resp)
@@ -138,7 +148,11 @@ async def test_handle_measure_viewport_shift_default_fresh_false(mocker) -> None
     spy = mocker.patch.object(handler, "measure_viewport_shift", return_value=vs)
 
     await handle_measure_viewport_shift(
-        _fake_request(raise_on_json=True), physiclaw, calib, bridge, phone,
+        _fake_request(raise_on_json=True),
+        physiclaw,
+        calib,
+        bridge,
+        phone,
     )
 
     spy.assert_called_once_with(calib, bridge, fresh=False)
@@ -149,11 +163,17 @@ async def test_handle_measure_viewport_shift_returns_err_on_exception(mocker) ->
     physiclaw = MagicMock()
     calib = MagicMock()
     mocker.patch.object(
-        handler, "measure_viewport_shift", side_effect=RuntimeError("no upload"),
+        handler,
+        "measure_viewport_shift",
+        side_effect=RuntimeError("no upload"),
     )
 
     resp = await handle_measure_viewport_shift(
-        _fake_request(json_obj={}), physiclaw, calib, MagicMock(), MagicMock(),
+        _fake_request(json_obj={}),
+        physiclaw,
+        calib,
+        MagicMock(),
+        MagicMock(),
     )
 
     assert resp.status_code == 500
@@ -164,11 +184,13 @@ async def test_handle_measure_viewport_shift_returns_err_on_exception(mocker) ->
 
 
 def _identity_pct_to_grbl() -> np.ndarray:
-    return np.array([
-        [10.0, 0.0, 0.0],
-        [0.0, 20.0, 0.0],
-        [0.0, 0.0, 1.0],
-    ])
+    return np.array(
+        [
+            [10.0, 0.0, 0.0],
+            [0.0, 20.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
 
 
 @pytest.mark.asyncio
@@ -180,13 +202,17 @@ async def test_handle_calibrate_arm_happy_path(mocker) -> None:
     phone = MagicMock()
     pct_to_grbl = _identity_pct_to_grbl()
     mocker.patch.object(
-        handler, "calibrate_arm",
+        handler,
+        "calibrate_arm",
         return_value=(pct_to_grbl, 0.01, [(0.1, 0.1, 0)]),
     )
     mocker.patch.object(handler, "TILT_ALIGNED_THRESHOLD", 0.05)
 
     resp = await handle_calibrate_arm(
-        _fake_request(json_obj={}), physiclaw, calib, phone,
+        _fake_request(json_obj={}),
+        physiclaw,
+        calib,
+        phone,
     )
 
     body = _read_json(resp)
@@ -194,7 +220,8 @@ async def test_handle_calibrate_arm_happy_path(mocker) -> None:
     assert body["pairs"] == 4  # 1 touch + 3 probe
     assert body["aligned"] is True
     physiclaw._arm.set_direction_mapping.assert_called_once_with(
-        (10.0, 0.0), (0.0, 20.0),
+        (10.0, 0.0),
+        (0.0, 20.0),
     )
     physiclaw.park.assert_called_once()
     assert physiclaw.calibration.pct_to_grbl is pct_to_grbl
@@ -212,13 +239,17 @@ async def test_handle_calibrate_arm_from_park_centers_stylus(mocker) -> None:
         pct_to_grbl_mm=lambda x, y: (5.0, 6.0),
     )
     mocker.patch.object(
-        handler, "calibrate_arm",
+        handler,
+        "calibrate_arm",
         return_value=(_identity_pct_to_grbl(), 0.01, []),
     )
     mocker.patch.object(handler, "TILT_ALIGNED_THRESHOLD", 0.05)
 
     resp = await handle_calibrate_arm(
-        _fake_request(json_obj={"from_park": True}), physiclaw, MagicMock(), MagicMock(),
+        _fake_request(json_obj={"from_park": True}),
+        physiclaw,
+        MagicMock(),
+        MagicMock(),
     )
 
     assert _read_json(resp)["status"] == "ok"
@@ -237,7 +268,10 @@ async def test_handle_calibrate_arm_from_park_without_bundle_errors(mocker) -> N
     cal_arm = mocker.patch.object(handler, "calibrate_arm")
 
     resp = await handle_calibrate_arm(
-        _fake_request(json_obj={"from_park": True}), physiclaw, MagicMock(), MagicMock(),
+        _fake_request(json_obj={"from_park": True}),
+        physiclaw,
+        MagicMock(),
+        MagicMock(),
     )
 
     body = _read_json(resp)
@@ -253,7 +287,10 @@ async def test_handle_calibrate_arm_arm_not_connected() -> None:
     physiclaw._arm = None
 
     resp = await handle_calibrate_arm(
-        _fake_request(json_obj={}), physiclaw, MagicMock(), MagicMock(),
+        _fake_request(json_obj={}),
+        physiclaw,
+        MagicMock(),
+        MagicMock(),
     )
 
     assert resp.status_code == 500
@@ -266,11 +303,16 @@ async def test_handle_calibrate_arm_releases_on_failure(mocker) -> None:
     physiclaw._arm = MagicMock()
     physiclaw.calibration = SimpleNamespace(pct_to_grbl=None)
     mocker.patch.object(
-        handler, "calibrate_arm", side_effect=RuntimeError("probe failed"),
+        handler,
+        "calibrate_arm",
+        side_effect=RuntimeError("probe failed"),
     )
 
     resp = await handle_calibrate_arm(
-        _fake_request(json_obj={}), physiclaw, MagicMock(), MagicMock(),
+        _fake_request(json_obj={}),
+        physiclaw,
+        MagicMock(),
+        MagicMock(),
     )
 
     assert resp.status_code == 500
@@ -286,12 +328,15 @@ async def test_handle_calibrate_camera_frame_happy_path(mocker) -> None:
     physiclaw._cam = MagicMock()
     physiclaw.calibration = SimpleNamespace()
     mocker.patch.object(
-        handler, "calibrate_camera_frame",
+        handler,
+        "calibrate_camera_frame",
         return_value={"rotation": 90, "issues": []},
     )
 
     resp = await handle_calibrate_camera_frame(
-        _fake_request(json_obj={}), physiclaw, MagicMock(),
+        _fake_request(json_obj={}),
+        physiclaw,
+        MagicMock(),
     )
 
     body = _read_json(resp)
@@ -308,7 +353,9 @@ async def test_handle_calibrate_camera_frame_camera_not_connected() -> None:
     physiclaw._cam = None
 
     resp = await handle_calibrate_camera_frame(
-        _fake_request(), physiclaw, MagicMock(),
+        _fake_request(),
+        physiclaw,
+        MagicMock(),
     )
 
     assert resp.status_code == 500
@@ -320,11 +367,15 @@ async def test_handle_calibrate_camera_frame_releases_on_failure(mocker) -> None
     physiclaw = MagicMock()
     physiclaw._cam = MagicMock()
     mocker.patch.object(
-        handler, "calibrate_camera_frame", side_effect=RuntimeError("no markers"),
+        handler,
+        "calibrate_camera_frame",
+        side_effect=RuntimeError("no markers"),
     )
 
     resp = await handle_calibrate_camera_frame(
-        _fake_request(), physiclaw, MagicMock(),
+        _fake_request(),
+        physiclaw,
+        MagicMock(),
     )
 
     assert resp.status_code == 500
@@ -341,11 +392,15 @@ async def test_handle_compute_camera_mapping_happy_path(mocker) -> None:
     physiclaw.calibration = SimpleNamespace(effective_rotation=lambda: 90)
     pct_to_cam = np.eye(3)
     mocker.patch.object(
-        handler, "compute_camera_mapping", return_value=(pct_to_cam, (1920, 1080)),
+        handler,
+        "compute_camera_mapping",
+        return_value=(pct_to_cam, (1920, 1080)),
     )
 
     resp = await handle_compute_camera_mapping(
-        _fake_request(), physiclaw, MagicMock(),
+        _fake_request(),
+        physiclaw,
+        MagicMock(),
     )
 
     body = _read_json(resp)
@@ -362,7 +417,9 @@ async def test_handle_compute_camera_mapping_camera_not_connected() -> None:
     physiclaw._cam = None
 
     resp = await handle_compute_camera_mapping(
-        _fake_request(), physiclaw, MagicMock(),
+        _fake_request(),
+        physiclaw,
+        MagicMock(),
     )
 
     assert resp.status_code == 500
@@ -375,11 +432,15 @@ async def test_handle_compute_camera_mapping_releases_on_failure(mocker) -> None
     physiclaw._cam = MagicMock()
     physiclaw.calibration = SimpleNamespace(effective_rotation=lambda: 0)
     mocker.patch.object(
-        handler, "compute_camera_mapping", side_effect=RuntimeError("dots missing"),
+        handler,
+        "compute_camera_mapping",
+        side_effect=RuntimeError("dots missing"),
     )
 
     resp = await handle_compute_camera_mapping(
-        _fake_request(), physiclaw, MagicMock(),
+        _fake_request(),
+        physiclaw,
+        MagicMock(),
     )
 
     assert resp.status_code == 500
@@ -408,7 +469,10 @@ async def test_handle_validate_calibration_happy_path_and_persists(mocker) -> No
     mocker.patch.object(handler, "validate_calibration", return_value=results)
 
     resp = await handle_validate_calibration(
-        _fake_request(), physiclaw, calib, phone,
+        _fake_request(),
+        physiclaw,
+        calib,
+        phone,
     )
 
     body = _read_json(resp)
@@ -435,12 +499,16 @@ async def test_handle_validate_calibration_does_not_save_when_not_calibrated(
     physiclaw.calibration = cal
     phone = MagicMock()
     mocker.patch.object(
-        handler, "validate_calibration",
+        handler,
+        "validate_calibration",
         return_value=[{"passed": False}, {"passed": True}],
     )
 
     resp = await handle_validate_calibration(
-        _fake_request(), physiclaw, MagicMock(), phone,
+        _fake_request(),
+        physiclaw,
+        MagicMock(),
+        phone,
     )
 
     body = _read_json(resp)
@@ -455,7 +523,10 @@ async def test_handle_validate_calibration_arm_not_connected() -> None:
     physiclaw._arm = None
 
     resp = await handle_validate_calibration(
-        _fake_request(), physiclaw, MagicMock(), MagicMock(),
+        _fake_request(),
+        physiclaw,
+        MagicMock(),
+        MagicMock(),
     )
 
     assert resp.status_code == 500
@@ -471,7 +542,10 @@ async def test_handle_validate_calibration_requires_transforms_ready() -> None:
     physiclaw.calibration = cal
 
     resp = await handle_validate_calibration(
-        _fake_request(), physiclaw, MagicMock(), MagicMock(),
+        _fake_request(),
+        physiclaw,
+        MagicMock(),
+        MagicMock(),
     )
 
     assert resp.status_code == 500
@@ -536,7 +610,10 @@ async def test_handle_show_assistive_touch_happy_path(mocker) -> None:
     mocker.patch.object(handler, "generate_nonce", return_value=[1, 0, 1])
 
     resp = await handle_show_assistive_touch(
-        _fake_request(), physiclaw, calib, phone,
+        _fake_request(),
+        physiclaw,
+        calib,
+        phone,
     )
 
     body = _read_json(resp)
@@ -547,7 +624,9 @@ async def test_handle_show_assistive_touch_happy_path(mocker) -> None:
         calib.viewport_shift,
     )
     phone.set_mode.assert_called_once_with(
-        "calibrate", phase="assistive_touch", nonce_bits=[1, 0, 1],
+        "calibrate",
+        phase="assistive_touch",
+        nonce_bits=[1, 0, 1],
     )
 
 
@@ -557,7 +636,10 @@ async def test_handle_show_assistive_touch_requires_viewport_shift() -> None:
     calib = SimpleNamespace(viewport_shift=None)
 
     resp = await handle_show_assistive_touch(
-        _fake_request(), physiclaw, calib, MagicMock(),
+        _fake_request(),
+        physiclaw,
+        calib,
+        MagicMock(),
     )
 
     assert resp.status_code == 400
@@ -574,11 +656,17 @@ async def test_handle_verify_assistive_touch_happy_path(mocker) -> None:
     physiclaw.calibration = SimpleNamespace(pct_to_grbl=_identity_pct_to_grbl())
     physiclaw.assistive_touch.at_screen = (0.1, 0.2)
     spy = mocker.patch.object(
-        handler, "verify_assistive_touch", return_value={"verified": True},
+        handler,
+        "verify_assistive_touch",
+        return_value={"verified": True},
     )
 
     resp = await handle_verify_assistive_touch(
-        _fake_request(), physiclaw, MagicMock(), MagicMock(), MagicMock(),
+        _fake_request(),
+        physiclaw,
+        MagicMock(),
+        MagicMock(),
+        MagicMock(),
     )
 
     assert _read_json(resp) == {"status": "ok", "verified": True}
@@ -592,7 +680,11 @@ async def test_handle_verify_assistive_touch_arm_not_connected() -> None:
     physiclaw._arm = None
 
     resp = await handle_verify_assistive_touch(
-        _fake_request(), physiclaw, MagicMock(), MagicMock(), MagicMock(),
+        _fake_request(),
+        physiclaw,
+        MagicMock(),
+        MagicMock(),
+        MagicMock(),
     )
 
     assert resp.status_code == 500
@@ -606,7 +698,11 @@ async def test_handle_verify_assistive_touch_requires_pct_to_grbl() -> None:
     physiclaw.calibration = SimpleNamespace(pct_to_grbl=None)
 
     resp = await handle_verify_assistive_touch(
-        _fake_request(), physiclaw, MagicMock(), MagicMock(), MagicMock(),
+        _fake_request(),
+        physiclaw,
+        MagicMock(),
+        MagicMock(),
+        MagicMock(),
     )
 
     assert resp.status_code == 500
@@ -621,7 +717,11 @@ async def test_handle_verify_assistive_touch_requires_at_show() -> None:
     physiclaw.assistive_touch.at_screen = None  # show step not run
 
     resp = await handle_verify_assistive_touch(
-        _fake_request(), physiclaw, MagicMock(), MagicMock(), MagicMock(),
+        _fake_request(),
+        physiclaw,
+        MagicMock(),
+        MagicMock(),
+        MagicMock(),
     )
 
     assert resp.status_code == 500

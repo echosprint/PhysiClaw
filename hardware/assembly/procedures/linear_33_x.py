@@ -34,7 +34,7 @@ from hardware.assembly.procedures.linear_31_x import LI31X
 from hardware.assembly.procedures.linear_32_x import LI32X
 from hardware.assembly.projection import MAIN_FRAME_VIEW, Camera
 
-RAIL_EXPLODE = 30    # mm — exploded: rail lifted outward along world -Y
+RAIL_EXPLODE = 30  # mm — exploded: rail lifted outward along world -Y
 
 
 class LI33X(BaseAssembly):
@@ -49,7 +49,7 @@ class LI33X(BaseAssembly):
         # frame / joint placement math. Forward joint_base so further
         # downstream consumers (linear_41_idler_lj1) can reach the
         # LI20Joint feature-center hooks without re-deriving placement.
-        slot_face_y   = base.beam_slot_face_world_y
+        slot_face_y = base.beam_slot_face_world_y
         rail_center_z = base.beam_center_world_z
         self.joint_base = base.joint_base
 
@@ -59,11 +59,15 @@ class LI33X(BaseAssembly):
             rail_bottom_y = slot_face_y
 
         rail = LI32X(exploded=False).build()
-        rail.move(Location(Plane(
-            origin=(0, rail_bottom_y, rail_center_z),
-            x_dir=(1, 0, 0),    # rail native +X (length) → world +X
-            z_dir=(0, -1, 0),   # rail native +Z (top)   → world -Y (outboard)
-        )))
+        rail.move(
+            Location(
+                Plane(
+                    origin=(0, rail_bottom_y, rail_center_z),
+                    x_dir=(1, 0, 0),  # rail native +X (length) → world +X
+                    z_dir=(0, -1, 0),  # rail native +Z (top)   → world -Y (outboard)
+                )
+            )
+        )
 
         return Compound(label="linear_33_x", children=[base_compound, rail])
 

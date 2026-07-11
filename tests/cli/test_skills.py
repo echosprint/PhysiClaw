@@ -1,4 +1,5 @@
 """Tests for `physiclaw.cli.skills` — install/list/uninstall CLI."""
+
 from __future__ import annotations
 
 import importlib
@@ -26,18 +27,22 @@ def fake_home(tmp_path: Path, mocker) -> Path:
 
 
 def _git_completed(stdout: str = "", stderr: str = "", returncode: int = 0):
-    return subprocess.CompletedProcess(args=["git"], returncode=returncode,
-                                        stdout=stdout, stderr=stderr)
+    return subprocess.CompletedProcess(
+        args=["git"], returncode=returncode, stdout=stdout, stderr=stderr
+    )
 
 
 # ---------- _normalize_source ----------
 
 
-@pytest.mark.parametrize("inp,expected", [
-    ("https://github.com/x/y.git", "https://github.com/x/y.git"),
-    ("ssh://git@host/x.git", "ssh://git@host/x.git"),
-    ("git@github.com:x/y.git", "git@github.com:x/y.git"),
-])
+@pytest.mark.parametrize(
+    "inp,expected",
+    [
+        ("https://github.com/x/y.git", "https://github.com/x/y.git"),
+        ("ssh://git@host/x.git", "ssh://git@host/x.git"),
+        ("git@github.com:x/y.git", "git@github.com:x/y.git"),
+    ],
+)
 def test_normalize_source_passes_url_forms_through(inp: str, expected: str) -> None:
     assert skills_mod._normalize_source(inp) == expected
 
@@ -64,7 +69,9 @@ def test_normalize_source_expands_owner_repo_shorthand() -> None:
 
 
 def test_normalize_source_owner_repo_keeps_existing_dot_git() -> None:
-    assert skills_mod._normalize_source("foo/bar.git") == "https://github.com/foo/bar.git"
+    assert (
+        skills_mod._normalize_source("foo/bar.git") == "https://github.com/foo/bar.git"
+    )
 
 
 def test_normalize_source_empty_returns_empty() -> None:
@@ -89,6 +96,7 @@ def test_validate_name_accepts_safe_names() -> None:
 @pytest.mark.parametrize("bad", ["../escape", "/abs", ".dotfile", "has space", ""])
 def test_validate_name_rejects_unsafe(bad: str) -> None:
     import typer
+
     with pytest.raises(typer.Exit):
         skills_mod._validate_name(bad)
 
@@ -120,10 +128,13 @@ def test_read_provenance_returns_none_on_corrupt_json(tmp_path: Path) -> None:
 
 
 def test_installed_skill_dirs_empty_when_root_missing(
-    tmp_path: Path, mocker,
+    tmp_path: Path,
+    mocker,
 ) -> None:
     mocker.patch.object(
-        skills_mod.paths, "skills_dir", return_value=tmp_path / "missing",
+        skills_mod.paths,
+        "skills_dir",
+        return_value=tmp_path / "missing",
     )
 
     assert skills_mod.installed_skill_dirs() == []
@@ -165,12 +176,14 @@ def test_resolve_source_exits_1_when_unconfigured(mocker) -> None:
     cfg.skills.default_source = ""
     mocker.patch.object(skills_mod, "_load_config", return_value=cfg)
     import typer
+
     with pytest.raises(typer.Exit):
         skills_mod._resolve_source(None)
 
 
 def test_resolve_source_rejects_path_inside_physiclaw_home(
-    tmp_path: Path, mocker,
+    tmp_path: Path,
+    mocker,
 ) -> None:
     mocker.patch.object(skills_mod.paths, "HOME", tmp_path)
     inside = tmp_path / "skills-source"
@@ -193,7 +206,8 @@ def test_resolve_source_url_skips_home_check(mocker) -> None:
 
 def test_git_runs_command(mocker) -> None:
     spy = mocker.patch.object(
-        skills_mod.subprocess, "run",
+        skills_mod.subprocess,
+        "run",
         return_value=_git_completed(stdout="ok"),
     )
 
@@ -205,19 +219,24 @@ def test_git_runs_command(mocker) -> None:
 
 def test_git_exits_1_when_not_found(mocker) -> None:
     mocker.patch.object(
-        skills_mod.subprocess, "run", side_effect=FileNotFoundError,
+        skills_mod.subprocess,
+        "run",
+        side_effect=FileNotFoundError,
     )
     import typer
+
     with pytest.raises(typer.Exit):
         skills_mod._git("status")
 
 
 def test_git_exits_1_on_nonzero(mocker) -> None:
     mocker.patch.object(
-        skills_mod.subprocess, "run",
+        skills_mod.subprocess,
+        "run",
         return_value=_git_completed(stderr="bad ref", returncode=1),
     )
     import typer
+
     with pytest.raises(typer.Exit):
         skills_mod._git("clone", "x")
 
@@ -234,7 +253,7 @@ def test_read_skill_name_no_frontmatter_uses_fallback(tmp_path: Path) -> None:
 
 def test_read_skill_name_extracts_from_frontmatter(tmp_path: Path) -> None:
     md = tmp_path / "SKILL.md"
-    md.write_text('---\nname: actual\nother: x\n---\n\nbody')
+    md.write_text("---\nname: actual\nother: x\n---\n\nbody")
 
     assert skills_mod._read_skill_name(md, "dirname") == "actual"
 
@@ -347,9 +366,13 @@ def test_uninstall_validates_name(fake_home: Path) -> None:
 # ---------- install ----------
 
 
-def _populate_clone(clone_dir: Path, *, name: str = "myskill",
-                    declared_name: str | None = None,
-                    skill_md: bool = True) -> None:
+def _populate_clone(
+    clone_dir: Path,
+    *,
+    name: str = "myskill",
+    declared_name: str | None = None,
+    skill_md: bool = True,
+) -> None:
     """Build a fake cloned repo at `clone_dir` with skills/<name>/."""
     sk = clone_dir / "skills" / name
     sk.mkdir(parents=True)
@@ -362,6 +385,7 @@ def _populate_clone(clone_dir: Path, *, name: str = "myskill",
 
 def _stub_clone(mocker, populate):
     """Stub `_clone` to populate the clone dir + return a dummy sha."""
+
     def _fake_clone(source, ref, dest):
         populate(dest)
         return "abcdef0123456789"
@@ -373,14 +397,13 @@ def test_install_happy_path(fake_home: Path, mocker) -> None:
     _stub_clone(mocker, lambda d: _populate_clone(d, name="myskill"))
 
     result = runner.invoke(
-        skills_app, ["install", "myskill", "--from", "owner/repo"],
+        skills_app,
+        ["install", "myskill", "--from", "owner/repo"],
     )
 
     assert result.exit_code == 0
     assert (fake_home / "myskill" / "SKILL.md").exists()
-    prov = json.loads(
-        (fake_home / "myskill" / skills_mod.PROVENANCE_FILE).read_text()
-    )
+    prov = json.loads((fake_home / "myskill" / skills_mod.PROVENANCE_FILE).read_text())
     assert prov["source"] == "https://github.com/owner/repo.git"
     assert prov["sha"].startswith("abcdef")
 
@@ -392,7 +415,8 @@ def test_install_invalid_name_exit_1(fake_home: Path) -> None:
 
 
 def test_install_existing_provenanced_without_force(
-    fake_home: Path, mocker,
+    fake_home: Path,
+    mocker,
 ) -> None:
     fake_home.mkdir(parents=True)
     target = fake_home / "myskill"
@@ -408,7 +432,8 @@ def test_install_existing_provenanced_without_force(
 
 
 def test_install_existing_user_authored_without_force(
-    fake_home: Path, mocker,
+    fake_home: Path,
+    mocker,
 ) -> None:
     fake_home.mkdir(parents=True)
     target = fake_home / "myskill"
@@ -424,7 +449,8 @@ def test_install_no_skill_in_source(fake_home: Path, mocker) -> None:
     _stub_clone(mocker, lambda d: None)
 
     result = runner.invoke(
-        skills_app, ["install", "missing", "--from", "owner/repo"],
+        skills_app,
+        ["install", "missing", "--from", "owner/repo"],
     )
 
     assert result.exit_code == 1
@@ -438,7 +464,8 @@ def test_install_missing_skill_md(fake_home: Path, mocker) -> None:
     )
 
     result = runner.invoke(
-        skills_app, ["install", "myskill", "--from", "owner/repo"],
+        skills_app,
+        ["install", "myskill", "--from", "owner/repo"],
     )
 
     assert result.exit_code == 1
@@ -452,11 +479,12 @@ def test_install_declared_name_mismatch(fake_home: Path, mocker) -> None:
     )
 
     result = runner.invoke(
-        skills_app, ["install", "myskill", "--from", "owner/repo"],
+        skills_app,
+        ["install", "myskill", "--from", "owner/repo"],
     )
 
     assert result.exit_code == 1
-    assert "name='other'" in result.output or "name=\"other\"" in result.output
+    assert "name='other'" in result.output or 'name="other"' in result.output
 
 
 def test_install_with_ref_flag(fake_home: Path, mocker) -> None:
@@ -490,7 +518,8 @@ def test_install_force_overwrites_existing(fake_home: Path, mocker) -> None:
     _stub_clone(mocker, lambda d: _populate_clone(d, name="myskill"))
 
     result = runner.invoke(
-        skills_app, ["install", "myskill", "--from", "owner/repo", "--force"],
+        skills_app,
+        ["install", "myskill", "--from", "owner/repo", "--force"],
     )
 
     assert result.exit_code == 0
@@ -503,7 +532,8 @@ def test_install_force_overwrites_existing(fake_home: Path, mocker) -> None:
 
 def test_clone_invokes_git_with_depth_and_branch(mocker, tmp_path: Path) -> None:
     spy = mocker.patch.object(
-        skills_mod, "_git",
+        skills_mod,
+        "_git",
         side_effect=[
             _git_completed(),  # clone
             _git_completed(stdout="abc123\n"),  # rev-parse
@@ -520,7 +550,8 @@ def test_clone_invokes_git_with_depth_and_branch(mocker, tmp_path: Path) -> None
 
 def test_clone_no_branch_when_ref_omitted(mocker, tmp_path: Path) -> None:
     spy = mocker.patch.object(
-        skills_mod, "_git",
+        skills_mod,
+        "_git",
         side_effect=[
             _git_completed(),
             _git_completed(stdout="def456\n"),

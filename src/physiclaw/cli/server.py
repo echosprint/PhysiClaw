@@ -76,7 +76,7 @@ def server(
         typer.Option(
             "--save-snapshots",
             help="Write each snapshot frame (rotated, with the bbox overlay) "
-                 "under the user data dir.",
+            "under the user data dir.",
         ),
     ] = CONFIG.server.save_snapshots,
     save_screenshots: Annotated[
@@ -91,8 +91,8 @@ def server(
         typer.Option(
             "--save-raw-camera",
             help="Write every raw camera frame as it's captured under the user "
-                 "data dir (calibration, peek, snapshot). Clear with "
-                 "`physiclaw clear`.",
+            "data dir (calibration, peek, snapshot). Clear with "
+            "`physiclaw clear`.",
         ),
     ] = CONFIG.server.save_raw_camera,
 ) -> None:
@@ -123,7 +123,9 @@ def server(
     log = logging.getLogger(__name__)
     log.info("PhysiClaw %s", __version__)
     _run_startup_maintenance()
-    _apply_save_flags(save_tool_calls, save_snapshots, save_screenshots, save_raw_camera)
+    _apply_save_flags(
+        save_tool_calls, save_snapshots, save_screenshots, save_raw_camera
+    )
 
     from physiclaw.core.server import mcp, shutdown
 
@@ -135,13 +137,19 @@ def server(
     model_ref, runtime_label = _resolve_and_record_model(host, port)
     _log_endpoints(host, port)
     _start_hardware_bringup(
-        host, port,
-        warm_start=warm_start, cam_index=cam_index,
-        auto_calibrate=auto_calibrate, no_setup_hardware=no_setup_hardware,
+        host,
+        port,
+        warm_start=warm_start,
+        cam_index=cam_index,
+        auto_calibrate=auto_calibrate,
+        no_setup_hardware=no_setup_hardware,
     )
     _start_runtime_loop(
-        port, verbose,
-        no_runtime=no_runtime, model_ref=model_ref, runtime_label=runtime_label,
+        port,
+        verbose,
+        no_runtime=no_runtime,
+        model_ref=model_ref,
+        runtime_label=runtime_label,
     )
 
     try:
@@ -173,8 +181,10 @@ def _run_startup_maintenance() -> None:
 
 
 def _apply_save_flags(
-    save_tool_calls: bool, save_snapshots: bool,
-    save_screenshots: bool, save_raw_camera: bool,
+    save_tool_calls: bool,
+    save_snapshots: bool,
+    save_screenshots: bool,
+    save_raw_camera: bool,
 ) -> None:
     """Translate the --save-* flags into the env vars the core reads."""
     for enabled, env in (
@@ -240,8 +250,13 @@ def _log_endpoints(host: str, port: int) -> None:
 
 
 def _start_hardware_bringup(
-    host: str, port: int, *, warm_start: bool, cam_index: Optional[int],
-    auto_calibrate: bool, no_setup_hardware: bool,
+    host: str,
+    port: int,
+    *,
+    warm_start: bool,
+    cam_index: Optional[int],
+    auto_calibrate: bool,
+    no_setup_hardware: bool,
 ) -> None:
     """Dispatch hardware bring-up to one of four mutually exclusive modes. Each
     (except --no-setup-hardware, which just waits) runs in a daemon thread so
@@ -326,8 +341,12 @@ def _open_hardware_wizard(host: str, port: int) -> None:
 
 
 def _start_runtime_loop(
-    port: int, verbose: bool, *, no_runtime: bool,
-    model_ref: Optional[str], runtime_label: str,
+    port: int,
+    verbose: bool,
+    *,
+    no_runtime: bool,
+    model_ref: Optional[str],
+    runtime_label: str,
 ) -> None:
     """Spawn the agent runtime subprocess and register its atexit terminator,
     unless disabled (--no-runtime) or no model is configured."""

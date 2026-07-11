@@ -10,6 +10,7 @@ self-correct from, vs. a Pydantic ValidationError from the MCP layer.
 The orchestrator runs `validate_bbox` again as defense-in-depth before
 any GRBL move.
 """
+
 from typing import Annotated
 
 from pydantic import Field
@@ -27,7 +28,8 @@ Bbox = Annotated[
             "Screen bbox [left, top, right, bottom] as 0-1 decimals, "
             "with left < right and top < bottom."
         ),
-        min_length=4, max_length=4,
+        min_length=4,
+        max_length=4,
     ),
 ]
 
@@ -43,7 +45,8 @@ ClipboardText = Annotated[
             "Plain text to copy to the phone's clipboard. MUST be a "
             "string — pass the text directly, not a JSON object."
         ),
-        min_length=1, max_length=10_000,
+        min_length=1,
+        max_length=10_000,
     ),
 ]
 
@@ -57,10 +60,11 @@ SequenceActions = Annotated[
     list[dict],
     Field(
         description=(
-            "2-5 actions, run in order. Each: {\"tool_name\": tap / "
+            '2-5 actions, run in order. Each: {"tool_name": tap / '
             "double_tap / long_press / swipe / send_to_clipboard, "
-            "\"arg\": that tool's argument}."
+            '"arg": that tool\'s argument}.'
         ),
-        min_length=2, max_length=5,
+        min_length=2,
+        max_length=5,
     ),
 ]

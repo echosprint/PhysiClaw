@@ -8,6 +8,7 @@ testable helpers (`grid_positions`, `_find_viewport_cache`, `_tap_once`,
 `_pick_rotation_from_markers`, `_tap_and_read`, `_tilt_from_affine`,
 `calibrate_camera_frame`, `measure_viewport_shift`).
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -55,7 +56,8 @@ def test_grid_positions_yields_15_in_outer_rows_inner_cols_order() -> None:
 
 
 def test_find_viewport_cache_returns_none_when_absent(
-    tmp_path: Path, mocker,
+    tmp_path: Path,
+    mocker,
 ) -> None:
     mocker.patch.object(cal_mod, "VIEWPORT_CACHE_STEM", tmp_path / "viewport")
 
@@ -63,7 +65,8 @@ def test_find_viewport_cache_returns_none_when_absent(
 
 
 def test_find_viewport_cache_returns_png_when_present(
-    tmp_path: Path, mocker,
+    tmp_path: Path,
+    mocker,
 ) -> None:
     stem = tmp_path / "viewport"
     png = stem.with_suffix(".png")
@@ -76,7 +79,8 @@ def test_find_viewport_cache_returns_png_when_present(
 
 
 def test_find_viewport_cache_prefers_png_over_jpg(
-    tmp_path: Path, mocker,
+    tmp_path: Path,
+    mocker,
 ) -> None:
     stem = tmp_path / "viewport"
     stem.with_suffix(".png").write_bytes(b"png")
@@ -87,7 +91,8 @@ def test_find_viewport_cache_prefers_png_over_jpg(
 
 
 def test_find_viewport_cache_falls_back_to_jpg(
-    tmp_path: Path, mocker,
+    tmp_path: Path,
+    mocker,
 ) -> None:
     stem = tmp_path / "viewport"
     jpg = stem.with_suffix(".jpg")
@@ -114,11 +119,13 @@ def test_tap_once_strikes_solenoid() -> None:
 
 def test_pick_rotation_from_markers_no_rotation(mocker) -> None:
     """UP above RIGHT, mostly vertical separation → 0° / no rotation."""
-    blob_calls = iter([
-        (50.0, 100.0),  # blue UP at top
-        (50.0, 200.0),  # red RIGHT at bottom
-        None,            # no wrapped red
-    ])
+    blob_calls = iter(
+        [
+            (50.0, 100.0),  # blue UP at top
+            (50.0, 200.0),  # red RIGHT at bottom
+            None,  # no wrapped red
+        ]
+    )
     mocker.patch(
         "physiclaw.core.calibration.calibrate.find_largest_hsv_blob",
         side_effect=lambda *a, **kw: next(blob_calls),
@@ -132,11 +139,13 @@ def test_pick_rotation_from_markers_no_rotation(mocker) -> None:
 
 def test_pick_rotation_from_markers_90_clockwise(mocker) -> None:
     """UP at left, RIGHT at right, mostly horizontal → 90°."""
-    blob_calls = iter([
-        (100.0, 50.0),  # blue UP at left
-        (200.0, 50.0),  # red RIGHT at right
-        None,
-    ])
+    blob_calls = iter(
+        [
+            (100.0, 50.0),  # blue UP at left
+            (200.0, 50.0),  # red RIGHT at right
+            None,
+        ]
+    )
     mocker.patch(
         "physiclaw.core.calibration.calibrate.find_largest_hsv_blob",
         side_effect=lambda *a, **kw: next(blob_calls),
@@ -149,11 +158,13 @@ def test_pick_rotation_from_markers_90_clockwise(mocker) -> None:
 
 def test_pick_rotation_from_markers_180(mocker) -> None:
     """UP below RIGHT, mostly vertical → 180°."""
-    blob_calls = iter([
-        (50.0, 200.0),  # blue UP at bottom
-        (50.0, 100.0),  # red RIGHT at top
-        None,
-    ])
+    blob_calls = iter(
+        [
+            (50.0, 200.0),  # blue UP at bottom
+            (50.0, 100.0),  # red RIGHT at top
+            None,
+        ]
+    )
     mocker.patch(
         "physiclaw.core.calibration.calibrate.find_largest_hsv_blob",
         side_effect=lambda *a, **kw: next(blob_calls),
@@ -166,11 +177,13 @@ def test_pick_rotation_from_markers_180(mocker) -> None:
 
 def test_pick_rotation_from_markers_90_counterclockwise(mocker) -> None:
     """Default fallthrough — UP right of RIGHT."""
-    blob_calls = iter([
-        (200.0, 50.0),  # blue UP at right
-        (100.0, 50.0),  # red RIGHT at left
-        None,
-    ])
+    blob_calls = iter(
+        [
+            (200.0, 50.0),  # blue UP at right
+            (100.0, 50.0),  # red RIGHT at left
+            None,
+        ]
+    )
     mocker.patch(
         "physiclaw.core.calibration.calibrate.find_largest_hsv_blob",
         side_effect=lambda *a, **kw: next(blob_calls),
@@ -184,10 +197,12 @@ def test_pick_rotation_from_markers_90_counterclockwise(mocker) -> None:
 def test_pick_rotation_from_markers_raises_when_red_missing(mocker) -> None:
     """Red is one search over both hue ends (via red_ranges); if it finds
     nothing, the step fails with a clear message."""
-    blob_calls = iter([
-        (50.0, 100.0),  # blue UP
-        None,            # red: nothing at either hue end
-    ])
+    blob_calls = iter(
+        [
+            (50.0, 100.0),  # blue UP
+            None,  # red: nothing at either hue end
+        ]
+    )
     mocker.patch(
         "physiclaw.core.calibration.calibrate.find_largest_hsv_blob",
         side_effect=lambda *a, **kw: next(blob_calls),
@@ -228,8 +243,10 @@ def test_tap_and_read_refires_on_miss(mocker) -> None:
     arm = MagicMock()
     cal = MagicMock()
     cal.flush_touches.side_effect = [
-        [], [],          # attempt 0: clear + miss
-        [], [{"x": 1}],  # attempt 1: clear + hit on re-fire
+        [],
+        [],  # attempt 0: clear + miss
+        [],
+        [{"x": 1}],  # attempt 1: clear + hit on re-fire
     ]
 
     touch = _tap_and_read(arm, cal, gx=0, gy=0, max_retries=3)
@@ -256,10 +273,12 @@ def test_tap_and_read_returns_none_after_max_retries(mocker) -> None:
 def test_tilt_from_affine_zero_for_aligned_axes() -> None:
     # cv2.estimateAffine2D returns (2, 3): first two cols are the linear
     # part, last col the offset. `_tilt_from_affine` slices [:, :2].
-    affine = np.array([
-        [10.0, 0.0, 0.0],
-        [0.0, 20.0, 0.0],
-    ])
+    affine = np.array(
+        [
+            [10.0, 0.0, 0.0],
+            [0.0, 20.0, 0.0],
+        ]
+    )
 
     tilt = _tilt_from_affine(affine)
 
@@ -268,10 +287,12 @@ def test_tilt_from_affine_zero_for_aligned_axes() -> None:
 
 def test_tilt_from_affine_diagonal_returns_one() -> None:
     # 45° rotation — arm-X aligned diagonally with screen.
-    affine = np.array([
-        [1.0, 1.0, 0.0],
-        [1.0, -1.0, 0.0],
-    ])
+    affine = np.array(
+        [
+            [1.0, 1.0, 0.0],
+            [1.0, -1.0, 0.0],
+        ]
+    )
 
     tilt = _tilt_from_affine(affine)
 
@@ -280,10 +301,12 @@ def test_tilt_from_affine_diagonal_returns_one() -> None:
 
 def test_tilt_from_affine_singular_returns_one() -> None:
     # Singular linear part → LinAlgError → fallback 1.0.
-    affine = np.array([
-        [1.0, 1.0, 0.0],
-        [2.0, 2.0, 0.0],
-    ])
+    affine = np.array(
+        [
+            [1.0, 1.0, 0.0],
+            [2.0, 2.0, 0.0],
+        ]
+    )
 
     tilt = _tilt_from_affine(affine)
 
@@ -309,15 +332,20 @@ def test_calibrate_camera_frame_returns_diagnostic_dict(mocker) -> None:
     cam._fresh_frame.return_value = np.zeros((480, 640, 3), np.uint8)
     cal = MagicMock()
     mocker.patch.object(
-        cal_mod, "check_phone_in_frame",
+        cal_mod,
+        "check_phone_in_frame",
         return_value={
-            "ok": True, "issues": [], "coverage": 0.9,
-            "aspect_ratio": 16/9, "image_size": (480, 640),
+            "ok": True,
+            "issues": [],
+            "coverage": 0.9,
+            "aspect_ratio": 16 / 9,
+            "image_size": (480, 640),
             "phone_region": (0, 0, 100, 100),
         },
     )
     mocker.patch.object(
-        cal_mod, "_pick_rotation_from_markers",
+        cal_mod,
+        "_pick_rotation_from_markers",
         return_value=(cv2.ROTATE_90_CLOCKWISE, "90° clockwise"),
     )
 
@@ -334,10 +362,15 @@ def test_calibrate_camera_frame_returns_diagnostic_dict(mocker) -> None:
 
 
 def _orange_square_image(
-    *, css_size: int = 50, dpr: float = 3.0,
-    expected_cx: int = 125, expected_cy: int = 225,
-    actual_cx: int | None = None, actual_cy: int | None = None,
-    sw: int = 1170, sh: int = 2532,
+    *,
+    css_size: int = 50,
+    dpr: float = 3.0,
+    expected_cx: int = 125,
+    expected_cy: int = 225,
+    actual_cx: int | None = None,
+    actual_cy: int | None = None,
+    sw: int = 1170,
+    sh: int = 2532,
 ) -> bytes:
     """Build a JPEG with an orange square at a known position."""
     img = np.zeros((sh, sw, 3), dtype=np.uint8)
@@ -346,7 +379,7 @@ def _orange_square_image(
     cy = actual_cy if actual_cy is not None else int(expected_cy * dpr)
     half = px_size // 2
     # OpenCV BGR — orange is roughly (0, 165, 255).
-    img[cy - half:cy + half, cx - half:cx + half] = (0, 165, 255)
+    img[cy - half : cy + half, cx - half : cx + half] = (0, 165, 255)
     ok, buf = cv2.imencode(".jpg", img)
     assert ok
     return buf.tobytes()
@@ -371,11 +404,14 @@ def test_measure_viewport_shift_raises_when_dim_zero_width(mocker) -> None:
 
 
 def test_measure_viewport_shift_raises_when_screenshot_timeout(
-    mocker, tmp_path: Path,
+    mocker,
+    tmp_path: Path,
 ) -> None:
     mocker.patch.object(cal_mod.time, "sleep")
     mocker.patch.object(
-        cal_mod, "VIEWPORT_CACHE_STEM", tmp_path / "viewport",
+        cal_mod,
+        "VIEWPORT_CACHE_STEM",
+        tmp_path / "viewport",
     )
     cal = MagicMock()
     cal.screen_dimension = {"viewport_width": 390, "viewport_height": 844}
@@ -387,11 +423,14 @@ def test_measure_viewport_shift_raises_when_screenshot_timeout(
 
 
 def test_measure_viewport_shift_raises_on_decode_failure(
-    mocker, tmp_path: Path,
+    mocker,
+    tmp_path: Path,
 ) -> None:
     mocker.patch.object(cal_mod.time, "sleep")
     mocker.patch.object(
-        cal_mod, "VIEWPORT_CACHE_STEM", tmp_path / "viewport",
+        cal_mod,
+        "VIEWPORT_CACHE_STEM",
+        tmp_path / "viewport",
     )
     cal = MagicMock()
     cal.screen_dimension = {"viewport_width": 390, "viewport_height": 844}
@@ -403,11 +442,14 @@ def test_measure_viewport_shift_raises_on_decode_failure(
 
 
 def test_measure_viewport_shift_raises_when_no_orange_detected(
-    mocker, tmp_path: Path,
+    mocker,
+    tmp_path: Path,
 ) -> None:
     mocker.patch.object(cal_mod.time, "sleep")
     mocker.patch.object(
-        cal_mod, "VIEWPORT_CACHE_STEM", tmp_path / "viewport",
+        cal_mod,
+        "VIEWPORT_CACHE_STEM",
+        tmp_path / "viewport",
     )
     cal = MagicMock()
     cal.screen_dimension = {"viewport_width": 390, "viewport_height": 844}
@@ -422,7 +464,8 @@ def test_measure_viewport_shift_raises_when_no_orange_detected(
 
 
 def test_measure_viewport_shift_succeeds_and_caches(
-    mocker, tmp_path: Path,
+    mocker,
+    tmp_path: Path,
 ) -> None:
     mocker.patch.object(cal_mod.time, "sleep")
     cache_stem = tmp_path / "viewport"
@@ -442,7 +485,8 @@ def test_measure_viewport_shift_succeeds_and_caches(
 
 
 def test_measure_viewport_shift_uses_cache_when_not_fresh(
-    mocker, tmp_path: Path,
+    mocker,
+    tmp_path: Path,
 ) -> None:
     mocker.patch.object(cal_mod.time, "sleep")
     cache_stem = tmp_path / "viewport"
@@ -460,7 +504,8 @@ def test_measure_viewport_shift_uses_cache_when_not_fresh(
 
 
 def test_measure_viewport_shift_png_cache_extension(
-    mocker, tmp_path: Path,
+    mocker,
+    tmp_path: Path,
 ) -> None:
     mocker.patch.object(cal_mod.time, "sleep")
     cache_stem = tmp_path / "viewport"
@@ -527,9 +572,7 @@ def test_calibrate_arm_succeeds(mocker) -> None:
         {"x": 0.5, "y": 0.6},
     ]
     grid_touches = [
-        {"x": col, "y": row}
-        for row in cal.GRID_ROWS_PCT
-        for col in cal.GRID_COLS_PCT
+        {"x": col, "y": row} for row in cal.GRID_ROWS_PCT for col in cal.GRID_COLS_PCT
     ]
 
     # Mock _tap_and_read directly to bypass the inner flush_touches loop.
@@ -561,7 +604,8 @@ def test_calibrate_arm_raises_on_probe_x_miss(mocker) -> None:
     arm = MagicMock()
     cal = _make_cal()
     mocker.patch.object(
-        cal_mod, "_tap_and_read",
+        cal_mod,
+        "_tap_and_read",
         side_effect=[{"x": 0.5, "y": 0.5}, None],
     )
 
@@ -574,7 +618,8 @@ def test_calibrate_arm_raises_on_probe_y_miss(mocker) -> None:
     arm = MagicMock()
     cal = _make_cal()
     mocker.patch.object(
-        cal_mod, "_tap_and_read",
+        cal_mod,
+        "_tap_and_read",
         side_effect=[
             {"x": 0.5, "y": 0.5},
             {"x": 0.6, "y": 0.5},
@@ -598,7 +643,9 @@ def test_calibrate_arm_raises_when_too_few_grid_hits(mocker) -> None:
     ]
     grid_misses = [None] * 15
     mocker.patch.object(
-        cal_mod, "_tap_and_read", side_effect=probe + grid_misses,
+        cal_mod,
+        "_tap_and_read",
+        side_effect=probe + grid_misses,
     )
 
     with pytest.raises(RuntimeError, match="only 3 valid taps"):
@@ -609,8 +656,11 @@ def test_calibrate_arm_uses_viewport_pct_when_shift_set(mocker) -> None:
     mocker.patch.object(cal_mod.time, "sleep")
     arm = MagicMock()
     vshift = ViewportShift(
-        offset_x=0, offset_y=0, dpr=3.0,
-        screenshot_width=1170, screenshot_height=2532,
+        offset_x=0,
+        offset_y=0,
+        dpr=3.0,
+        screenshot_width=1170,
+        screenshot_height=2532,
     )
     cal = _make_cal(viewport_shift=vshift)
     cal.viewport_pct_to_screenshot_pct.side_effect = lambda c, r: (c, r)
@@ -621,9 +671,7 @@ def test_calibrate_arm_uses_viewport_pct_when_shift_set(mocker) -> None:
         {"x": 0.5, "y": 0.6},
     ]
     grid = [
-        {"x": col, "y": row}
-        for row in cal.GRID_ROWS_PCT
-        for col in cal.GRID_COLS_PCT
+        {"x": col, "y": row} for row in cal.GRID_ROWS_PCT for col in cal.GRID_COLS_PCT
     ]
     mocker.patch.object(cal_mod, "_tap_and_read", side_effect=probe + grid)
 
@@ -642,8 +690,11 @@ def _grid_dot_image(rows=5, cols=3, w=600, h=900) -> np.ndarray:
     for row in CalibrationState.GRID_ROWS_PCT:
         for col in CalibrationState.GRID_COLS_PCT:
             cv2.circle(
-                img, (int(col * w), int(row * h)),
-                radius=10, color=(0, 0, 255), thickness=-1,
+                img,
+                (int(col * w), int(row * h)),
+                radius=10,
+                color=(0, 0, 255),
+                thickness=-1,
             )
     return img
 
@@ -706,9 +757,9 @@ def test_compute_camera_mapping_applies_rotation(mocker) -> None:
 
 def _draw_corner_cluster(frame: np.ndarray, cx: int, cy: int, d: int = 20) -> None:
     """Draw a 2×2 RGBM corner cluster centered at (cx, cy)."""
-    cv2.circle(frame, (cx - d, cy - d), 8, (0, 0, 255), -1)    # R
-    cv2.circle(frame, (cx + d, cy - d), 8, (0, 255, 0), -1)    # G
-    cv2.circle(frame, (cx + d, cy + d), 8, (255, 0, 0), -1)    # B
+    cv2.circle(frame, (cx - d, cy - d), 8, (0, 0, 255), -1)  # R
+    cv2.circle(frame, (cx + d, cy - d), 8, (0, 255, 0), -1)  # G
+    cv2.circle(frame, (cx + d, cy + d), 8, (255, 0, 0), -1)  # B
     cv2.circle(frame, (cx - d, cy + d), 8, (255, 0, 255), -1)  # M (magenta)
 
 
@@ -762,8 +813,11 @@ def test_compute_camera_mapping_uses_viewport_shift(mocker) -> None:
     cam = MagicMock()
     cam._fresh_frame.return_value = _grid_dot_image()
     vshift = ViewportShift(
-        offset_x=0, offset_y=0, dpr=3.0,
-        screenshot_width=1170, screenshot_height=2532,
+        offset_x=0,
+        offset_y=0,
+        dpr=3.0,
+        screenshot_width=1170,
+        screenshot_height=2532,
     )
     cal = _make_cal(viewport_shift=vshift)
     cal.viewport_pct_to_screenshot_pct.side_effect = lambda c, r: (c, r)
@@ -777,17 +831,21 @@ def test_compute_camera_mapping_uses_viewport_shift(mocker) -> None:
 
 
 def _identity_pct_to_grbl() -> np.ndarray:
-    return np.array([
-        [10.0, 0.0, 0.0],
-        [0.0, 20.0, 0.0],
-    ])
+    return np.array(
+        [
+            [10.0, 0.0, 0.0],
+            [0.0, 20.0, 0.0],
+        ]
+    )
 
 
 def _identity_pct_to_cam() -> np.ndarray:
-    return np.array([
-        [1.0, 0.0, 0.0],
-        [0.0, 1.0, 0.0],
-    ])
+    return np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+        ]
+    )
 
 
 def test_validate_calibration_records_passed_when_touches_match(mocker) -> None:
@@ -800,19 +858,22 @@ def test_validate_calibration_records_passed_when_touches_match(mocker) -> None:
 
     # detect_orange_dot returns the dot at the same pct (camera 0-1 = screen 0-1).
     mocker.patch.object(
-        cal_mod, "_detect_orange_dot",
+        cal_mod,
+        "_detect_orange_dot",
         side_effect=lambda f, **kw: (50, 50),  # at center of 100×100 → 0.5 pct
     )
     # Touches always come back at the expected position.
-    cal.flush_touches.side_effect = (
-        [[], [{"x": 0.5, "y": 0.5}]] * 5
-    )
+    cal.flush_touches.side_effect = [[], [{"x": 0.5, "y": 0.5}]] * 5
 
     results = cal_mod.validate_calibration(
-        arm, cam, cal, rotation=-1,
+        arm,
+        cam,
+        cal,
+        rotation=-1,
         pct_to_grbl=_identity_pct_to_grbl(),
         pct_to_cam=_identity_pct_to_cam(),
-        cam_size=(100, 100), num_tests=2,
+        cam_size=(100, 100),
+        num_tests=2,
     )
 
     assert len(results) == 2
@@ -827,15 +888,17 @@ def test_validate_calibration_falls_back_when_dot_undetected(mocker) -> None:
     cam._fresh_frame.return_value = np.zeros((100, 100, 3), np.uint8)
     cal = _make_cal()
     mocker.patch.object(cal_mod, "_detect_orange_dot", return_value=None)
-    cal.flush_touches.side_effect = (
-        [[], [{"x": 0.5, "y": 0.5}]] * 1
-    )
+    cal.flush_touches.side_effect = [[], [{"x": 0.5, "y": 0.5}]] * 1
 
     results = cal_mod.validate_calibration(
-        arm, cam, cal, rotation=-1,
+        arm,
+        cam,
+        cal,
+        rotation=-1,
         pct_to_grbl=_identity_pct_to_grbl(),
         pct_to_cam=_identity_pct_to_cam(),
-        cam_size=(100, 100), num_tests=1,
+        cam_size=(100, 100),
+        num_tests=1,
     )
 
     assert len(results) == 1
@@ -851,16 +914,22 @@ def test_validate_calibration_records_failure_on_no_touch(mocker) -> None:
     cam._fresh_frame.return_value = np.zeros((100, 100, 3), np.uint8)
     cal = _make_cal()
     mocker.patch.object(
-        cal_mod, "_detect_orange_dot", return_value=(50, 50),
+        cal_mod,
+        "_detect_orange_dot",
+        return_value=(50, 50),
     )
     # All flushes return empty → tap retries 4 times, each fails.
     cal.flush_touches.return_value = []
 
     results = cal_mod.validate_calibration(
-        arm, cam, cal, rotation=-1,
+        arm,
+        cam,
+        cal,
+        rotation=-1,
         pct_to_grbl=_identity_pct_to_grbl(),
         pct_to_cam=_identity_pct_to_cam(),
-        cam_size=(100, 100), num_tests=1,
+        cam_size=(100, 100),
+        num_tests=1,
     )
 
     assert len(results) == 1
@@ -879,23 +948,27 @@ def test_validate_calibration_refires_on_miss(mocker) -> None:
 
     # First two flushes (clear + miss) then clear + hit on retry.
     cal.flush_touches.side_effect = [
-        [], [],                      # attempt 0: clear + miss
-        [], [{"x": 0.5, "y": 0.5}],  # attempt 1: clear + hit
+        [],
+        [],  # attempt 0: clear + miss
+        [],
+        [{"x": 0.5, "y": 0.5}],  # attempt 1: clear + hit
     ]
 
     results = cal_mod.validate_calibration(
-        arm, cam, cal, rotation=-1,
+        arm,
+        cam,
+        cal,
+        rotation=-1,
         pct_to_grbl=_identity_pct_to_grbl(),
         pct_to_cam=_identity_pct_to_cam(),
-        cam_size=(100, 100), num_tests=1,
+        cam_size=(100, 100),
+        num_tests=1,
     )
 
     assert results[0]["passed"] is True
 
 
-def test_validate_calibration_rejects_off_screen_backprojection(
-    mocker, caplog
-) -> None:
+def test_validate_calibration_rejects_off_screen_backprojection(mocker, caplog) -> None:
     # A detected blob that back-projects past the panel edge must not steer the
     # arm off-screen — the guard falls back to the known position instead.
     mocker.patch.object(cal_mod.time, "sleep")
@@ -910,10 +983,14 @@ def test_validate_calibration_rejects_off_screen_backprojection(
 
     with caplog.at_level("WARNING"):
         results = cal_mod.validate_calibration(
-            arm, cam, cal, rotation=-1,
+            arm,
+            cam,
+            cal,
+            rotation=-1,
             pct_to_grbl=_identity_pct_to_grbl(),
             pct_to_cam=_identity_pct_to_cam(),
-            cam_size=(100, 100), num_tests=1,
+            cam_size=(100, 100),
+            num_tests=1,
         )
 
     assert results[0]["passed"] is True  # fell back to the known position
@@ -963,7 +1040,9 @@ def test_verify_assistive_touch_raises_when_no_nonce(mocker) -> None:
         )
 
 
-def test_verify_assistive_touch_returns_failed_dict_on_screenshot_timeout(mocker) -> None:
+def test_verify_assistive_touch_returns_failed_dict_on_screenshot_timeout(
+    mocker,
+) -> None:
     mocker.patch.object(cal_mod.time, "sleep")
     arm = MagicMock()
     at = MagicMock()
@@ -974,7 +1053,12 @@ def test_verify_assistive_touch_returns_failed_dict_on_screenshot_timeout(mocker
     bridge.wait_screenshot.return_value = None  # timeout
 
     out = cal_mod.verify_assistive_touch(
-        arm, at, bridge, cal, _identity_pct_to_grbl(), MagicMock(),
+        arm,
+        at,
+        bridge,
+        cal,
+        _identity_pct_to_grbl(),
+        MagicMock(),
     )
 
     assert out["passed"] is False
@@ -993,7 +1077,12 @@ def test_verify_assistive_touch_returns_failed_dict_on_decode_error(mocker) -> N
     bridge.wait_screenshot.return_value = b"not an image"
 
     out = cal_mod.verify_assistive_touch(
-        arm, at, bridge, cal, _identity_pct_to_grbl(), MagicMock(),
+        arm,
+        at,
+        bridge,
+        cal,
+        _identity_pct_to_grbl(),
+        MagicMock(),
     )
 
     assert out["passed"] is False
@@ -1021,14 +1110,19 @@ def test_verify_assistive_touch_raises_when_viewport_shift_unset(mocker) -> None
 def test_verify_assistive_touch_full_success_path(mocker) -> None:
     mocker.patch.object(cal_mod.time, "sleep")
     mocker.patch.object(
-        cal_mod.random, "randbytes", return_value=b"\xab\xcd\xef",
+        cal_mod.random,
+        "randbytes",
+        return_value=b"\xab\xcd\xef",
     )
     arm = MagicMock()
     at = MagicMock()
     at.at_screen = (0.05, 0.1)
     vshift = ViewportShift(
-        offset_x=0, offset_y=0, dpr=3.0,
-        screenshot_width=1170, screenshot_height=2532,
+        offset_x=0,
+        offset_y=0,
+        dpr=3.0,
+        screenshot_width=1170,
+        screenshot_height=2532,
     )
     cal = _make_cal(viewport_shift=vshift)
     cal._screenshot_nonce = [1, 0, 1, 0]
@@ -1041,7 +1135,12 @@ def test_verify_assistive_touch_full_success_path(mocker) -> None:
     mocker.patch.object(cal_mod, "verify_nonce", return_value=(True, 4))
 
     out = cal_mod.verify_assistive_touch(
-        arm, at, bridge, cal, _identity_pct_to_grbl(), MagicMock(),
+        arm,
+        at,
+        bridge,
+        cal,
+        _identity_pct_to_grbl(),
+        MagicMock(),
     )
 
     assert out["passed"] is True
@@ -1059,8 +1158,11 @@ def test_verify_assistive_touch_shows_clipboard_confirmation_on_phone(mocker) ->
     at = MagicMock()
     at.at_screen = (0.05, 0.1)
     vshift = ViewportShift(
-        offset_x=0, offset_y=0, dpr=3.0,
-        screenshot_width=1170, screenshot_height=2532,
+        offset_x=0,
+        offset_y=0,
+        dpr=3.0,
+        screenshot_width=1170,
+        screenshot_height=2532,
     )
     cal = _make_cal(viewport_shift=vshift)
     cal._screenshot_nonce = [1, 0, 1, 0]
@@ -1073,7 +1175,12 @@ def test_verify_assistive_touch_shows_clipboard_confirmation_on_phone(mocker) ->
     phone = MagicMock()
 
     cal_mod.verify_assistive_touch(
-        arm, at, bridge, cal, _identity_pct_to_grbl(), phone,
+        arm,
+        at,
+        bridge,
+        cal,
+        _identity_pct_to_grbl(),
+        phone,
     )
 
     # Establishes its own grid up front (so a re-run doesn't depend on
@@ -1095,8 +1202,11 @@ def test_verify_assistive_touch_clipboard_timeout(mocker) -> None:
     at = MagicMock()
     at.at_screen = (0.05, 0.1)
     vshift = ViewportShift(
-        offset_x=0, offset_y=0, dpr=3.0,
-        screenshot_width=1170, screenshot_height=2532,
+        offset_x=0,
+        offset_y=0,
+        dpr=3.0,
+        screenshot_width=1170,
+        screenshot_height=2532,
     )
     cal = _make_cal(viewport_shift=vshift)
     cal._screenshot_nonce = [1, 0, 1, 0]
@@ -1108,7 +1218,12 @@ def test_verify_assistive_touch_clipboard_timeout(mocker) -> None:
     mocker.patch.object(cal_mod, "verify_nonce", return_value=(True, 4))
 
     out = cal_mod.verify_assistive_touch(
-        arm, at, bridge, cal, _identity_pct_to_grbl(), MagicMock(),
+        arm,
+        at,
+        bridge,
+        cal,
+        _identity_pct_to_grbl(),
+        MagicMock(),
     )
 
     # Screenshot passed but clipboard didn't → overall failure.

@@ -1,4 +1,5 @@
 """Tests for `physiclaw.core.vision.quality` — AF/AE failure detection."""
+
 from __future__ import annotations
 
 import cv2

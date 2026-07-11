@@ -19,6 +19,7 @@ and the pre-close gate (`should_capture`, `corrective`) that forces an
 `add_pitfall(...)` before a long DONE. The curator (`curate.py`) is the only
 caller of `replace`; `policy.PitfallCheckpoint` is the only caller of the gate.
 """
+
 import datetime as dt
 import json
 import re
@@ -35,7 +36,9 @@ if TYPE_CHECKING:
 _FILE = "pitfalls.md"
 _HISTORY = "history.jsonl"
 _HEADER = "## Learned pitfalls"
-_DOCTRINE = "Traps past runs hit — don't repeat a listed one; ignore ones for other apps."
+_DOCTRINE = (
+    "Traps past runs hit — don't repeat a listed one; ignore ones for other apps."
+)
 _BULLET_RE = re.compile(r"^\s*-\s+(.*\S)\s*$")
 
 
@@ -86,7 +89,11 @@ def read() -> list[str]:
 def _append_history(op: str, items: list[str]) -> None:
     path = paths.pitfalls_dir() / _HISTORY
     path.parent.mkdir(parents=True, exist_ok=True)
-    record = {"ts": dt.datetime.now().isoformat(timespec="seconds"), "op": op, "items": items}
+    record = {
+        "ts": dt.datetime.now().isoformat(timespec="seconds"),
+        "op": op,
+        "items": items,
+    }
     append_text(path, json.dumps(record, ensure_ascii=False) + "\n")
 
 

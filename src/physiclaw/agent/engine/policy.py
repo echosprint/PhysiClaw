@@ -25,6 +25,7 @@ verdict (keyboard belief must update before the stuck guard records).
 A new behavior = one new class here + one line in `default_policies()`;
 `engine.py` stays untouched.
 """
+
 import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -47,6 +48,7 @@ class Rejection:
     """A TurnGate verdict: pop the assistant turn, inject `corrective`,
     re-run the turn. `event` must stay stable — the session summary counts
     rejection kinds by trace event name (see trace._CORRECTIVE_EVENTS)."""
+
     corrective: str
     event: str
     log_msg: str
@@ -58,6 +60,7 @@ class Block:
     """A DispatchGuard verdict: refuse the call pre-actuation and pair it
     with an error ToolResult carrying `content`. `event` names the trace
     event (trace maps tool_blocked_* into per-kind summary counters)."""
+
     content: str
     event: str
     log_msg: str
@@ -67,6 +70,7 @@ class Block:
 class Advisory:
     """A ResultObserver verdict: append `text` to the tool result and
     emit `event` to the trace."""
+
     text: str
     event: str = "stuck_warning"
 
@@ -82,8 +86,13 @@ class TurnGate:
         that accumulate evidence across turns (e.g. memory cues)."""
 
     def check(
-        self, session: "Session", asst: AssistantMessage, called: list[str],
-        *, turn: int, compaction_imminent: bool,
+        self,
+        session: "Session",
+        asst: AssistantMessage,
+        called: list[str],
+        *,
+        turn: int,
+        compaction_imminent: bool,
     ) -> Rejection | None:
         return None
 
@@ -114,7 +123,12 @@ class ResultObserver:
     """
 
     def observe(
-        self, session: "Session", call: ToolCall, *, changed: bool | None, failed: bool,
+        self,
+        session: "Session",
+        call: ToolCall,
+        *,
+        changed: bool | None,
+        failed: bool,
     ) -> Advisory | None:
         return None
 
@@ -147,7 +161,8 @@ class CompactionCheckpoint(TurnGate):
         if not compaction_imminent or self._retried or "end_session" in called:
             return None
         note_args = next(
-            (tc.arguments for tc in asst.tool_calls if tc.name == "note"), None,
+            (tc.arguments for tc in asst.tool_calls if tc.name == "note"),
+            None,
         )
         sp = note_args.get("scratchpad") if isinstance(note_args, dict) else None
         if isinstance(sp, str) and sp.strip():
@@ -181,8 +196,11 @@ class PitfallCheckpoint(TurnGate):
         if "end_session" not in called or session.added_pitfalls or self._retried:
             return None
         end_status = next(
-            (tc.arguments.get("status", "") for tc in asst.tool_calls
-             if tc.name == "end_session" and isinstance(tc.arguments, dict)),
+            (
+                tc.arguments.get("status", "")
+                for tc in asst.tool_calls
+                if tc.name == "end_session" and isinstance(tc.arguments, dict)
+            ),
             "",
         )
         do_capture, seed = pitfalls.should_capture(end_status, turn, session)
@@ -223,7 +241,7 @@ class MemoryCueCheckpoint(TurnGate):
         for snip in memory.scan_cues(_cue_text(asst)):
             if snip not in session.memory_cues:
                 session.memory_cues.append(snip)
-        del session.memory_cues[self.MAX_CUES:]
+        del session.memory_cues[self.MAX_CUES :]
 
     def check(self, session, asst, called, *, turn, compaction_imminent):
         if (
@@ -238,8 +256,7 @@ class MemoryCueCheckpoint(TurnGate):
             corrective=memory.cue_corrective(session.memory_cues),
             event="memory_cue_checkpoint",
             log_msg=(
-                f"pre-close memory-cue checkpoint "
-                f"({len(session.memory_cues)} cue(s))"
+                f"pre-close memory-cue checkpoint ({len(session.memory_cues)} cue(s))"
             ),
             extra={"cues": list(session.memory_cues)},
         )
@@ -329,7 +346,8 @@ class LayoutLint(DispatchGuard):
             return None
         try:
             lint = screen_layout.lint_gesture(
-                call.name, call.arguments,
+                call.name,
+                call.arguments,
                 keyboard_up=session.kb.state == "up",
             )
         except Exception:

@@ -7,6 +7,7 @@ layer, which is HTTPX-native and avoids monkeypatching internals.
 A small `_TestOpenAI(OpenAICompatibleProvider)` subclass is used
 throughout; an autouse fixture supplies the API key.
 """
+
 from __future__ import annotations
 
 
@@ -65,11 +66,13 @@ def test_with_cache_marker_wraps_content_in_text_block_with_ephemeral_marker() -
 
     assert out == {
         "role": "system",
-        "content": [{
-            "type": "text",
-            "text": "you are helpful",
-            "cache_control": EPHEMERAL_CACHE_CONTROL,
-        }],
+        "content": [
+            {
+                "type": "text",
+                "text": "you are helpful",
+                "cache_control": EPHEMERAL_CACHE_CONTROL,
+            }
+        ],
     }
 
 
@@ -104,13 +107,13 @@ def test_normalize_finish_unknown_value_falls_back_to_stop_with_warning(
 ) -> None:
     import logging
 
-    with caplog.at_level(logging.WARNING, logger="physiclaw.agent.provider.openai_compat"):
+    with caplog.at_level(
+        logging.WARNING, logger="physiclaw.agent.provider.openai_compat"
+    ):
         out = _normalize_finish("future_unknown_reason")
 
     assert out == FinishReason.STOP
-    assert any(
-        "unknown finish_reason" in r.getMessage() for r in caplog.records
-    )
+    assert any("unknown finish_reason" in r.getMessage() for r in caplog.records)
 
 
 # ---------- _encode_message ----------
@@ -131,9 +134,7 @@ def test_encode_user_message_string_content(provider: _TestOpenAI) -> None:
 def test_encode_user_message_with_block_list_routed_through_user_content(
     provider: _TestOpenAI,
 ) -> None:
-    out = provider._encode_message(
-        UserMessage(content=[TextBlock(text="hi")])
-    )
+    out = provider._encode_message(UserMessage(content=[TextBlock(text="hi")]))
 
     assert out["role"] == "user"
     assert out["content"] == [{"type": "text", "text": "hi"}]
@@ -142,9 +143,13 @@ def test_encode_user_message_with_block_list_routed_through_user_content(
 def test_encode_assistant_message_routes_through_assistant_to_wire(
     provider: _TestOpenAI,
 ) -> None:
-    out = provider._encode_message(AssistantMessage(
-        content="ack", tool_calls=[], finish_reason=FinishReason.STOP,
-    ))
+    out = provider._encode_message(
+        AssistantMessage(
+            content="ack",
+            tool_calls=[],
+            finish_reason=FinishReason.STOP,
+        )
+    )
 
     assert out == {"role": "assistant", "content": "ack"}
 
@@ -152,9 +157,7 @@ def test_encode_assistant_message_routes_through_assistant_to_wire(
 def test_encode_tool_result_message_routes_through_tool_result_to_wire(
     provider: _TestOpenAI,
 ) -> None:
-    out = provider._encode_message(
-        ToolResultMessage(tool_call_id="t1", content="ok")
-    )
+    out = provider._encode_message(ToolResultMessage(tool_call_id="t1", content="ok"))
 
     assert out == {"role": "tool", "tool_call_id": "t1", "content": "ok"}
 
@@ -215,6 +218,7 @@ async def test_chat_posts_to_chat_completions_with_payload(
     assert route.call_count == 1
     payload = route.calls.last.request.read().decode()
     import json
+
     body = json.loads(payload)
     assert body["model"] == "gpt-test"
     assert body["messages"] == [{"role": "user", "content": "ping"}]
@@ -226,24 +230,32 @@ async def test_chat_payload_includes_tools_and_tool_choice_when_present(
     provider: _TestOpenAI, respx_mock: respx.MockRouter
 ) -> None:
     route = respx_mock.post("https://api.openai.test/v1/chat/completions").respond(
-        json={"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}], "usage": {}},
+        json={
+            "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+            "usage": {},
+        },
     )
 
     await provider.chat(
         [UserMessage(content="x")],
-        tools=[{"name": "tap", "description": "Tap", "input_schema": {"type": "object"}}],
+        tools=[
+            {"name": "tap", "description": "Tap", "input_schema": {"type": "object"}}
+        ],
     )
 
     import json
+
     body = json.loads(route.calls.last.request.read())
-    assert body["tools"] == [{
-        "type": "function",
-        "function": {
-            "name": "tap",
-            "description": "Tap",
-            "parameters": {"type": "object"},
-        },
-    }]
+    assert body["tools"] == [
+        {
+            "type": "function",
+            "function": {
+                "name": "tap",
+                "description": "Tap",
+                "parameters": {"type": "object"},
+            },
+        }
+    ]
     assert body["tool_choice"] == "auto"
 
 
@@ -253,10 +265,12 @@ async def test_chat_returns_assistant_message_on_success(
 ) -> None:
     respx_mock.post("https://api.openai.test/v1/chat/completions").respond(
         json={
-            "choices": [{
-                "message": {"content": "hello"},
-                "finish_reason": "stop",
-            }],
+            "choices": [
+                {
+                    "message": {"content": "hello"},
+                    "finish_reason": "stop",
+                }
+            ],
             "usage": {"prompt_tokens": 7, "completion_tokens": 3},
         },
     )
@@ -305,14 +319,19 @@ async def test_chat_maps_429_to_transient(
     import logging
 
     respx_mock.post("https://api.openai.test/v1/chat/completions").respond(
-        429, json={"error": "rate limited"},
+        429,
+        json={"error": "rate limited"},
     )
 
-    with caplog.at_level(logging.WARNING, logger="physiclaw.agent.provider.openai_compat"):
+    with caplog.at_level(
+        logging.WARNING, logger="physiclaw.agent.provider.openai_compat"
+    ):
         with pytest.raises(ProviderTransientError, match=r"^HTTP 429: "):
             await provider.chat([UserMessage(content="x")], [])
 
-    assert any("provider HTTP 429 (transient)" in r.getMessage() for r in caplog.records)
+    assert any(
+        "provider HTTP 429 (transient)" in r.getMessage() for r in caplog.records
+    )
 
 
 @pytest.mark.asyncio
@@ -320,7 +339,8 @@ async def test_chat_maps_500_to_transient(
     provider: _TestOpenAI, respx_mock: respx.MockRouter
 ) -> None:
     respx_mock.post("https://api.openai.test/v1/chat/completions").respond(
-        500, json={"error": "boom"},
+        500,
+        json={"error": "boom"},
     )
 
     with pytest.raises(ProviderTransientError, match=r"^HTTP 500: "):
@@ -336,14 +356,19 @@ async def test_chat_maps_400_to_permanent(
     import logging
 
     respx_mock.post("https://api.openai.test/v1/chat/completions").respond(
-        400, json={"error": "bad model"},
+        400,
+        json={"error": "bad model"},
     )
 
-    with caplog.at_level(logging.ERROR, logger="physiclaw.agent.provider.openai_compat"):
+    with caplog.at_level(
+        logging.ERROR, logger="physiclaw.agent.provider.openai_compat"
+    ):
         with pytest.raises(ProviderPermanentError, match=r"^HTTP 400: "):
             await provider.chat([UserMessage(content="x")], [])
 
-    assert any("provider HTTP 400 (permanent)" in r.getMessage() for r in caplog.records)
+    assert any(
+        "provider HTTP 400 (permanent)" in r.getMessage() for r in caplog.records
+    )
 
 
 # ---------- list_models ----------
@@ -397,7 +422,8 @@ async def test_list_models_maps_4xx_to_permanent(
     provider: _TestOpenAI, respx_mock: respx.MockRouter
 ) -> None:
     respx_mock.get("https://api.openai.test/v1/models").respond(
-        401, json={"error": "unauthorized"},
+        401,
+        json={"error": "unauthorized"},
     )
 
     with pytest.raises(ProviderPermanentError, match=r"^HTTP 401: "):
@@ -423,10 +449,12 @@ def test_parse_response_non_string_content_serialized_to_json(
     provider: _TestOpenAI,
 ) -> None:
     raw = {
-        "choices": [{
-            "message": {"content": [{"type": "text", "text": "x"}]},
-            "finish_reason": "stop",
-        }],
+        "choices": [
+            {
+                "message": {"content": [{"type": "text", "text": "x"}]},
+                "finish_reason": "stop",
+            }
+        ],
     }
 
     out = provider._parse_response(raw)
@@ -448,23 +476,25 @@ def test_parse_response_finish_reason_default_stop_when_missing(
 
 def test_parse_response_extracts_tool_calls(provider: _TestOpenAI) -> None:
     raw = {
-        "choices": [{
-            "message": {
-                "content": "",
-                "tool_calls": [{
-                    "id": "call_1",
-                    "function": {"name": "tap", "arguments": '{"x": 0.5}'},
-                }],
-            },
-            "finish_reason": "tool_calls",
-        }],
+        "choices": [
+            {
+                "message": {
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "function": {"name": "tap", "arguments": '{"x": 0.5}'},
+                        }
+                    ],
+                },
+                "finish_reason": "tool_calls",
+            }
+        ],
     }
 
     out = provider._parse_response(raw)
 
-    assert out.tool_calls == [
-        ToolCall(id="call_1", name="tap", arguments={"x": 0.5})
-    ]
+    assert out.tool_calls == [ToolCall(id="call_1", name="tap", arguments={"x": 0.5})]
     assert out.finish_reason == FinishReason.TOOL_CALLS
 
 
@@ -474,16 +504,20 @@ def test_parse_response_tool_call_arguments_dict_passthrough(
     # When `arguments` is already a dict (some non-strict providers),
     # it's passed through without JSON parsing.
     raw = {
-        "choices": [{
-            "message": {
-                "content": "",
-                "tool_calls": [{
-                    "id": "c1",
-                    "function": {"name": "tap", "arguments": {"x": 1}},
-                }],
-            },
-            "finish_reason": "tool_calls",
-        }],
+        "choices": [
+            {
+                "message": {
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "c1",
+                            "function": {"name": "tap", "arguments": {"x": 1}},
+                        }
+                    ],
+                },
+                "finish_reason": "tool_calls",
+            }
+        ],
     }
 
     out = provider._parse_response(raw)
@@ -497,16 +531,20 @@ def test_parse_response_tool_call_with_non_dict_args_wrapped_in_raw(
     # If arguments JSON parses to a list (or other non-dict), wrap so
     # the validator still sees a dict shape.
     raw = {
-        "choices": [{
-            "message": {
-                "content": "",
-                "tool_calls": [{
-                    "id": "c1",
-                    "function": {"name": "x", "arguments": "[1, 2, 3]"},
-                }],
-            },
-            "finish_reason": "tool_calls",
-        }],
+        "choices": [
+            {
+                "message": {
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "c1",
+                            "function": {"name": "x", "arguments": "[1, 2, 3]"},
+                        }
+                    ],
+                },
+                "finish_reason": "tool_calls",
+            }
+        ],
     }
 
     out = provider._parse_response(raw)
@@ -520,16 +558,20 @@ def test_parse_response_tool_call_with_malformed_json_passes_through(
     # Per principle 4/5: don't drop — surface the malformed string for
     # the validator to flag.
     raw = {
-        "choices": [{
-            "message": {
-                "content": "",
-                "tool_calls": [{
-                    "id": "c1",
-                    "function": {"name": "x", "arguments": "{invalid"},
-                }],
-            },
-            "finish_reason": "tool_calls",
-        }],
+        "choices": [
+            {
+                "message": {
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "c1",
+                            "function": {"name": "x", "arguments": "{invalid"},
+                        }
+                    ],
+                },
+                "finish_reason": "tool_calls",
+            }
+        ],
     }
 
     out = provider._parse_response(raw)
@@ -545,14 +587,18 @@ def test_parse_response_generates_id_when_tool_call_id_missing(
         return_value=mocker.MagicMock(hex="abcdef1234567890"),
     )
     raw = {
-        "choices": [{
-            "message": {
-                "tool_calls": [{
-                    "function": {"name": "tap", "arguments": "{}"},
-                }],
-            },
-            "finish_reason": "tool_calls",
-        }],
+        "choices": [
+            {
+                "message": {
+                    "tool_calls": [
+                        {
+                            "function": {"name": "tap", "arguments": "{}"},
+                        }
+                    ],
+                },
+                "finish_reason": "tool_calls",
+            }
+        ],
     }
 
     out = provider._parse_response(raw)
@@ -571,18 +617,24 @@ def test_parse_response_logs_exception_when_tool_call_parse_fails(
         side_effect=RuntimeError("boom"),
     )
     raw = {
-        "choices": [{
-            "message": {
-                "tool_calls": [{
-                    "id": "c1",
-                    "function": {"name": "x", "arguments": "{}"},
-                }],
-            },
-            "finish_reason": "tool_calls",
-        }],
+        "choices": [
+            {
+                "message": {
+                    "tool_calls": [
+                        {
+                            "id": "c1",
+                            "function": {"name": "x", "arguments": "{}"},
+                        }
+                    ],
+                },
+                "finish_reason": "tool_calls",
+            }
+        ],
     }
 
-    with caplog.at_level(logging.ERROR, logger="physiclaw.agent.provider.openai_compat"):
+    with caplog.at_level(
+        logging.ERROR, logger="physiclaw.agent.provider.openai_compat"
+    ):
         out = provider._parse_response(raw)
 
     # The bad tool call gets dropped; the log captures the exception.

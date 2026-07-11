@@ -4,6 +4,7 @@ helpers. The full `run()` loop is integration-tested separately
 `_chat_with_retry`, `_log_usage`, `_corrective_for_bad_shape`,
 `assemble.format_triggers`, `_auto_schedule_wait_check`.
 """
+
 from __future__ import annotations
 
 import datetime as dt
@@ -36,7 +37,9 @@ from physiclaw.agent.runtime.hook import Trigger
 @pytest.mark.asyncio
 async def test_chat_with_retry_returns_immediately_on_success(mocker) -> None:
     provider = mocker.MagicMock()
-    asst = AssistantMessage(content="ok", tool_calls=[], finish_reason=FinishReason.STOP)
+    asst = AssistantMessage(
+        content="ok", tool_calls=[], finish_reason=FinishReason.STOP
+    )
     provider.chat = mocker.AsyncMock(return_value=asst)
 
     out = await _chat_with_retry(provider, [], [], attempts=3, backoff=0.0)
@@ -49,7 +52,9 @@ async def test_chat_with_retry_returns_immediately_on_success(mocker) -> None:
 async def test_chat_with_retry_retries_then_succeeds(mocker) -> None:
     mocker.patch("asyncio.sleep")
     provider = mocker.MagicMock()
-    asst = AssistantMessage(content="ok", tool_calls=[], finish_reason=FinishReason.STOP)
+    asst = AssistantMessage(
+        content="ok", tool_calls=[], finish_reason=FinishReason.STOP
+    )
     provider.chat = mocker.AsyncMock(
         side_effect=[ProviderTransientError("transient"), asst]
     )
@@ -92,7 +97,10 @@ def test_log_usage_returns_empty_string_when_no_usage_data(
     trace_stub,
 ) -> None:
     asst = AssistantMessage(
-        content="x", tool_calls=[], finish_reason=FinishReason.STOP, usage=Usage(),
+        content="x",
+        tool_calls=[],
+        finish_reason=FinishReason.STOP,
+        usage=Usage(),
     )
 
     out = _log_usage(turn=1, asst=asst, tr=trace_stub)
@@ -105,7 +113,9 @@ def test_log_usage_emits_cache_event_with_derived_new_count(
     trace_stub,
 ) -> None:
     asst = AssistantMessage(
-        content="x", tool_calls=[], finish_reason=FinishReason.STOP,
+        content="x",
+        tool_calls=[],
+        finish_reason=FinishReason.STOP,
         usage=Usage(prompt_tokens=200, cached_tokens=120, cache_creation_tokens=30),
     )
 
@@ -124,7 +134,9 @@ def test_log_usage_emits_cache_event_with_derived_new_count(
 
 def test_log_usage_returns_token_summary_with_cache_pct(trace_stub) -> None:
     asst = AssistantMessage(
-        content="", tool_calls=[], finish_reason=FinishReason.STOP,
+        content="",
+        tool_calls=[],
+        finish_reason=FinishReason.STOP,
         usage=Usage(prompt_tokens=10000, cached_tokens=5000, cache_creation_tokens=0),
     )
 
@@ -139,7 +151,9 @@ def test_log_usage_clamps_new_at_zero_when_cached_exceeds_total(
     # Defensive: if a provider reports cached > total (shouldn't happen
     # but...), `new` floors at 0.
     asst = AssistantMessage(
-        content="", tool_calls=[], finish_reason=FinishReason.STOP,
+        content="",
+        tool_calls=[],
+        finish_reason=FinishReason.STOP,
         usage=Usage(prompt_tokens=100, cached_tokens=200, cache_creation_tokens=0),
     )
 
@@ -223,7 +237,9 @@ def test_format_triggers_appends_cron_context_when_provided() -> None:
     triggers = [Trigger(description="x", source="phone")]
 
     with freeze_time("2026-04-28T14:30:00"):
-        out = format_triggers(triggers, cron_ctx="## Scheduled jobs firing now\n\n### foo")
+        out = format_triggers(
+            triggers, cron_ctx="## Scheduled jobs firing now\n\n### foo"
+        )
 
     assert out.endswith("### foo")
 
@@ -238,7 +254,8 @@ def test_format_triggers_omits_cron_section_when_blank() -> None:
 
 
 def test_auto_schedule_wait_check_calls_jobs_upsert(
-    trace_stub, mocker,
+    trace_stub,
+    mocker,
 ) -> None:
     upsert = mocker.patch("physiclaw.agent.engine.jobs.upsert_auto_wait_check")
 
@@ -289,9 +306,15 @@ def test_log_usage_emits_output_tokens_for_the_session_summary(
 ) -> None:
     # The session summary sums `cache.out` into usage.output_tokens.
     asst = AssistantMessage(
-        content="", tool_calls=[], finish_reason=FinishReason.STOP,
-        usage=Usage(prompt_tokens=100, cached_tokens=0,
-                    cache_creation_tokens=0, completion_tokens=77),
+        content="",
+        tool_calls=[],
+        finish_reason=FinishReason.STOP,
+        usage=Usage(
+            prompt_tokens=100,
+            cached_tokens=0,
+            cache_creation_tokens=0,
+            completion_tokens=77,
+        ),
     )
 
     engine_mod._log_usage(turn=1, asst=asst, tr=trace_stub)
@@ -302,8 +325,11 @@ def test_log_usage_emits_output_tokens_for_the_session_summary(
 
 def _settings(**over) -> engine_mod.Settings:
     base = dict(
-        max_turns=300, max_session_attempts=3, provider_retry_attempts=3,
-        retry_backoff_seconds=0.0, wait_default_minutes=15,
+        max_turns=300,
+        max_session_attempts=3,
+        provider_retry_attempts=3,
+        retry_backoff_seconds=0.0,
+        wait_default_minutes=15,
     )
     base.update(over)
     return engine_mod.Settings(**base)
@@ -311,21 +337,29 @@ def _settings(**over) -> engine_mod.Settings:
 
 @pytest.mark.asyncio
 async def test_call_provider_response_event_carries_elapsed_ms(
-    mocker, trace_stub,
+    mocker,
+    trace_stub,
 ) -> None:
     # The session summary sums `response.elapsed_ms` into provider_time_ms.
     from physiclaw.agent.engine.policy import default_policies
 
     asst = AssistantMessage(
-        content="", tool_calls=[], finish_reason=FinishReason.STOP,
+        content="",
+        tool_calls=[],
+        finish_reason=FinishReason.STOP,
         usage=Usage(),
     )
     provider = mocker.MagicMock()
     provider.chat = mocker.AsyncMock(return_value=asst)
     rlog = mocker.MagicMock()
     run = engine_mod.EngineRun(
-        provider=provider, mcp=mocker.MagicMock(), tool_schemas=[],
-        schema_by_name={}, local_registry={}, tr=trace_stub, rlog=rlog,
+        provider=provider,
+        mcp=mocker.MagicMock(),
+        tool_schemas=[],
+        schema_by_name={},
+        local_registry={},
+        tr=trace_stub,
+        rlog=rlog,
         settings=_settings(),
         policies=default_policies(layout_incomplete=False),
     )
@@ -334,7 +368,8 @@ async def test_call_provider_response_event_carries_elapsed_ms(
 
     assert out is asst
     response_event = next(
-        c.args[0] for c in trace_stub.write.call_args_list
+        c.args[0]
+        for c in trace_stub.write.call_args_list
         if c.args[0].get("event") == "response"
     )
     assert isinstance(response_event["elapsed_ms"], int)

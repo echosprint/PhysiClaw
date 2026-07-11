@@ -93,24 +93,25 @@ from hardware.parts.custom.solenoid_mount import (
 from hardware.parts.standard.nut import Nut, SPECS as NUT_SPECS
 from hardware.parts.standard.screw import FHCS_DIMS, Screw, head_skirt
 
-BHCS_LENGTH    = 8     # mm — M3 BHCS underhead length (plate corner → clamp top corner)
-FHCS_LENGTH    = 10    # mm — M3 FHCS overall length (wall corner CSK)
-EXPLODE_OUT    = 30    # mm — exploded: TZ11SolenoidAttach lifted outboard along world -Y
-SCREW_EXPLODE  = 30    # mm — exploded: BHCS shank tip floats further along world -Y
-FHCS_EXPLODE   = 30    # mm — exploded: FHCS lifted out of its CSK along world -Z
-NUT_EXPLODE    = 15    # mm — exploded: each nut pulled out its install axis by this much
+BHCS_LENGTH = 8  # mm — M3 BHCS underhead length (plate corner → clamp top corner)
+FHCS_LENGTH = 10  # mm — M3 FHCS overall length (wall corner CSK)
+EXPLODE_OUT = 30  # mm — exploded: TZ11SolenoidAttach lifted outboard along world -Y
+SCREW_EXPLODE = 30  # mm — exploded: BHCS shank tip floats further along world -Y
+FHCS_EXPLODE = 30  # mm — exploded: FHCS lifted out of its CSK along world -Z
+NUT_EXPLODE = 15  # mm — exploded: each nut pulled out its install axis by this much
 
-NUT_THICKNESS  = NUT_SPECS["square"]["M3"]["thickness"]
-FHCS_HEAD_HEIGHT = FHCS_DIMS["M3"]["k"] + head_skirt   # cone + rim skirt
+NUT_THICKNESS = NUT_SPECS["square"]["M3"]["thickness"]
+FHCS_HEAD_HEIGHT = FHCS_DIMS["M3"]["k"] + head_skirt  # cone + rim skirt
 
 # ── BeltClamp feature positions in tapz_20 world ─────────────────────────────
 # Clamp placement (BE20Clamp): origin = (-length/2, SLIDER_MOUNT_Y - thickness/2,
 # SLIDER_MOUNT_Z - clamp_grid_y), x_dir = (1,0,0), z_dir = (0,-1,0). So clamp
 # native +X → world +X, +Y → world +Z, +Z → world -Y.
 _clamp_origin_x = SLIDER_MOUNT_X - clamp_length / 2
-_clamp_grid_y   = (slot1_center_y + slot2_center_y) / 2
+_clamp_grid_y = (slot1_center_y + slot2_center_y) / 2
 _clamp_origin_y = SLIDER_MOUNT_Y - clamp_thickness / 2
 _clamp_origin_z = SLIDER_MOUNT_Z - _clamp_grid_y
+
 
 # Convenience: clamp native (n_x, n_y, n_z) → tapz_20 world.
 def _clamp_to_world(n_x, n_y, n_z):
@@ -120,28 +121,33 @@ def _clamp_to_world(n_x, n_y, n_z):
         _clamp_origin_z + n_y,
     )
 
+
 # Clamp top face (mating with plate's -Z face).
-CLAMP_TOP_Y     = _clamp_origin_y - clamp_thickness / 2     # = SLIDER_MOUNT_Y - clamp_thickness
+CLAMP_TOP_Y = (
+    _clamp_origin_y - clamp_thickness / 2
+)  # = SLIDER_MOUNT_Y - clamp_thickness
 # Clamp top corner-hole X positions: pre-mirror hole at native X =
 # -length/2 + corner_hole_offset (= -6); mirror about x = length/2 puts
 # its copy at native X = 3·length/2 - corner_hole_offset (= +26). With
 # _clamp_origin_x = -length/2, world X = ±(length - corner_hole_offset)
 # = ±16.
-_CORNER_NX_LEFT  = -clamp_length / 2 + corner_hole_offset
+_CORNER_NX_LEFT = -clamp_length / 2 + corner_hole_offset
 _CORNER_NX_RIGHT = +3 * clamp_length / 2 - corner_hole_offset
-CORNER_HOLE_X    = [_clamp_origin_x + nx for nx in (_CORNER_NX_LEFT, _CORNER_NX_RIGHT)]
+CORNER_HOLE_X = [_clamp_origin_x + nx for nx in (_CORNER_NX_LEFT, _CORNER_NX_RIGHT)]
 
 # Clamp top corner-hole Y rows (in clamp native Y, mapped to world Z).
-_CORNER_NY_NEG = -clamp_width / 2 + corner_hole_offset      # -Y corner (= -8.5)
-_CORNER_NY_POS = +clamp_width / 2 - corner_hole_offset      # +Y corner (= +8.5)
-CORNER_HOLE_Z  = [_clamp_origin_z + ny for ny in (_CORNER_NY_NEG, _CORNER_NY_POS)]
+_CORNER_NY_NEG = -clamp_width / 2 + corner_hole_offset  # -Y corner (= -8.5)
+_CORNER_NY_POS = +clamp_width / 2 - corner_hole_offset  # +Y corner (= +8.5)
+CORNER_HOLE_Z = [_clamp_origin_z + ny for ny in (_CORNER_NY_NEG, _CORNER_NY_POS)]
 
 # Horizontal-pocket nut center, in clamp native Z.
 # Slot top is at face_local Y = clamp_thickness - left_rect1_top_offset; the
 # nut socket rectangle has height M3_NUT_T (= face-local Y), so its center is
 # half that below the top.
-_HNUT_NZ = -clamp_thickness / 2 + (clamp_thickness - left_rect1_top_offset - M3_NUT_T / 2)
-HNUT_Y   = _clamp_origin_y - _HNUT_NZ
+_HNUT_NZ = -clamp_thickness / 2 + (
+    clamp_thickness - left_rect1_top_offset - M3_NUT_T / 2
+)
+HNUT_Y = _clamp_origin_y - _HNUT_NZ
 # Horizontal nut Y in native Y matches the corner-hole Y row (centered on the
 # screw axis at native Y = ±8.5).
 
@@ -150,8 +156,8 @@ HNUT_Y   = _clamp_origin_y - _HNUT_NZ
 # where left_rect2_w = M3_NUT_T. Face-local Y = front_hole_offset.
 _VNUT_NY = +clamp_width / 2 - (clamp_width - left_rect2_right_from_front - M3_NUT_T / 2)
 _VNUT_NZ = -clamp_thickness / 2 + front_hole_offset
-VNUT_Y   = _clamp_origin_y - _VNUT_NZ
-VNUT_Z   = _clamp_origin_z + _VNUT_NY
+VNUT_Y = _clamp_origin_y - _VNUT_NZ
+VNUT_Z = _clamp_origin_z + _VNUT_NY
 
 # ── SolenoidMount placement in tapz_20 world ──────────────────────────────────
 # Mount native +X → world +X, +Y → world -Z, +Z → world +Y (right-handed).
@@ -189,17 +195,22 @@ MOUNT_ORIGIN_Z = _clamp_origin_z + mount_keyboard_center_y
 # Derived from the imported tapz_11 origin (not hardcoded), so it tracks the
 # screen-pattern position automatically — e.g. shifting
 # screen_pattern_base_from_bottom moves _TZ11_MOUNT_Z and the placement follows.
-TAPZ11_TO_TAPZ20 = Location(Plane(
-    origin=(MOUNT_ORIGIN_X - _TZ11_MOUNT_Y,
+TAPZ11_TO_TAPZ20 = Location(
+    Plane(
+        origin=(
+            MOUNT_ORIGIN_X - _TZ11_MOUNT_Y,
             MOUNT_ORIGIN_Y + _TZ11_MOUNT_Z,
-            MOUNT_ORIGIN_Z + _TZ11_MOUNT_X),
-    x_dir=(0, 0, -1),
-    z_dir=(0, -1, 0),
-))
+            MOUNT_ORIGIN_Z + _TZ11_MOUNT_X,
+        ),
+        x_dir=(0, 0, -1),
+        z_dir=(0, -1, 0),
+    )
+)
 
 
 class TZ20SolenoidMount(BaseAssembly):
     camera = [MAIN_FRAME_VIEW, Camera(-13.83, -31.54, -31.35)]
+
     def _build(self) -> Compound:
         base_compound = BE30MotorB(exploded=False).build()
 
@@ -225,11 +236,15 @@ class TZ20SolenoidMount(BaseAssembly):
         for world_x in CORNER_HOLE_X:
             for world_z in CORNER_HOLE_Z:
                 screw = Screw("BHCS", "M3", BHCS_LENGTH).build()
-                screw.move(Location(Plane(
-                    origin=(world_x, bhcs_underhead_y, world_z),
-                    x_dir=(1, 0, 0),     # round screw — choice cosmetic
-                    z_dir=(0, -1, 0),    # native +Z (head) → world -Y
-                )))
+                screw.move(
+                    Location(
+                        Plane(
+                            origin=(world_x, bhcs_underhead_y, world_z),
+                            x_dir=(1, 0, 0),  # round screw — choice cosmetic
+                            z_dir=(0, -1, 0),  # native +Z (head) → world -Y
+                        )
+                    )
+                )
                 bhcs_screws.append(screw)
 
         # ── 4 × M3 square nuts — captive in the BeltClamp horizontal pockets ──
@@ -241,15 +256,23 @@ class TZ20SolenoidMount(BaseAssembly):
         # NUT_EXPLODE.
         horizontal_nuts = []
         for world_x in CORNER_HOLE_X:
-            install_dir = -1 if world_x < 0 else +1     # -X face for LEFT, +X for RIGHT
+            install_dir = -1 if world_x < 0 else +1  # -X face for LEFT, +X for RIGHT
             nut_x = world_x + (install_dir * NUT_EXPLODE if self.exploded else 0)
             for world_z in CORNER_HOLE_Z:
                 nut = Nut("square", "M3").build()
-                nut.move(Location(Plane(
-                    origin=(nut_x, HNUT_Y - NUT_THICKNESS / 2, world_z),
-                    x_dir=(1, 0, 0),
-                    z_dir=(0, +1, 0),    # nut native +Z (chamfer) → world +Y (away from screw)
-                )))
+                nut.move(
+                    Location(
+                        Plane(
+                            origin=(nut_x, HNUT_Y - NUT_THICKNESS / 2, world_z),
+                            x_dir=(1, 0, 0),
+                            z_dir=(
+                                0,
+                                +1,
+                                0,
+                            ),  # nut native +Z (chamfer) → world +Y (away from screw)
+                        )
+                    )
+                )
                 horizontal_nuts.append(nut)
 
         # ── 2 × FHCS M3 × 10 — heads sunk in the wall corner CSK holes ────────
@@ -264,22 +287,30 @@ class TZ20SolenoidMount(BaseAssembly):
         # the clamp front-face hole, engaging the captive square nut in the
         # vertical pocket. Underhead seating plane = back face + head height
         # so the head ends up FLUSH (not standing proud of the surface).
-        wall_back_z       = MOUNT_ORIGIN_Z - mount_width / 2
-        csk_native_z      = mount_plate_thickness / 2 + screen_corner_csk_hole_from_bottom
-        csk_world_y       = MOUNT_ORIGIN_Y + csk_native_z
-        fhcs_under_z      = wall_back_z + FHCS_HEAD_HEIGHT
+        wall_back_z = MOUNT_ORIGIN_Z - mount_width / 2
+        csk_native_z = mount_plate_thickness / 2 + screen_corner_csk_hole_from_bottom
+        csk_world_y = MOUNT_ORIGIN_Y + csk_native_z
+        fhcs_under_z = wall_back_z + FHCS_HEAD_HEIGHT
         if self.exploded:
-            csk_world_y -= EXPLODE_OUT     # travel with sub-assembly along world -Y
-            fhcs_under_z -= FHCS_EXPLODE   # plus lift out of the CSK along world -Z
+            csk_world_y -= EXPLODE_OUT  # travel with sub-assembly along world -Y
+            fhcs_under_z -= FHCS_EXPLODE  # plus lift out of the CSK along world -Z
 
         fhcs_screws = []
         for world_x in CORNER_HOLE_X:
             screw = Screw("FHCS", "M3", FHCS_LENGTH).build()
-            screw.move(Location(Plane(
-                origin=(world_x, csk_world_y, fhcs_under_z),
-                x_dir=(1, 0, 0),
-                z_dir=(0, 0, -1),    # native +Z (head) → world -Z (head sinks into CSK from back face)
-            )))
+            screw.move(
+                Location(
+                    Plane(
+                        origin=(world_x, csk_world_y, fhcs_under_z),
+                        x_dir=(1, 0, 0),
+                        z_dir=(
+                            0,
+                            0,
+                            -1,
+                        ),  # native +Z (head) → world -Z (head sinks into CSK from back face)
+                    )
+                )
+            )
             fhcs_screws.append(screw)
 
         # ── 2 × M3 square nuts — captive in the BeltClamp vertical pockets ────
@@ -294,21 +325,32 @@ class TZ20SolenoidMount(BaseAssembly):
             install_dir = -1 if world_x < 0 else +1
             nut_x = world_x + (install_dir * NUT_EXPLODE if self.exploded else 0)
             nut = Nut("square", "M3").build()
-            nut.move(Location(Plane(
-                origin=(nut_x, VNUT_Y, VNUT_Z - NUT_THICKNESS / 2),
-                x_dir=(1, 0, 0),
-                z_dir=(0, 0, +1),    # nut native +Z (chamfer) → world +Z (away from screw)
-            )))
+            nut.move(
+                Location(
+                    Plane(
+                        origin=(nut_x, VNUT_Y, VNUT_Z - NUT_THICKNESS / 2),
+                        x_dir=(1, 0, 0),
+                        z_dir=(
+                            0,
+                            0,
+                            +1,
+                        ),  # nut native +Z (chamfer) → world +Z (away from screw)
+                    )
+                )
+            )
             vertical_nuts.append(nut)
 
-        return Compound(label="tapz_20_solenoid_mount", children=[
-            base_compound,
-            sub,
-            *bhcs_screws,
-            *horizontal_nuts,
-            *fhcs_screws,
-            *vertical_nuts,
-        ])
+        return Compound(
+            label="tapz_20_solenoid_mount",
+            children=[
+                base_compound,
+                sub,
+                *bhcs_screws,
+                *horizontal_nuts,
+                *fhcs_screws,
+                *vertical_nuts,
+            ],
+        )
 
 
 if __name__ == "__main__":

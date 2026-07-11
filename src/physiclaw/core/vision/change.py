@@ -54,6 +54,7 @@ camera can resolve (sub-blob) is missed, so doctrine keeps telling the
 agent to READ the value it tried to change, and the stuck guard only
 accumulates, never acts on a single verdict.
 """
+
 import cv2
 import numpy as np
 
@@ -106,7 +107,9 @@ _BLUR_KSIZE = 5
 _OPEN_KERNEL = np.ones((3, 3), np.uint8)
 
 
-def _prepare(before: np.ndarray, after: np.ndarray) -> tuple[np.ndarray, np.ndarray] | None:
+def _prepare(
+    before: np.ndarray, after: np.ndarray
+) -> tuple[np.ndarray, np.ndarray] | None:
     """Crop, gray, blur, brightness-align (clamped), vibration-align.
     Returns the comparable gray pair, or None when the rig moved too far
     to compare honestly."""
@@ -130,8 +133,8 @@ def _prepare(before: np.ndarray, after: np.ndarray) -> tuple[np.ndarray, np.ndar
         dx, dy = shift
         if dx or dy:
             h, w = a.shape
-            a = a[max(0, -dy):h - max(0, dy), max(0, -dx):w - max(0, dx)]
-            b = b[max(0, dy):h - max(0, -dy), max(0, dx):w - max(0, -dx)]
+            a = a[max(0, -dy) : h - max(0, dy), max(0, -dx) : w - max(0, dx)]
+            b = b[max(0, dy) : h - max(0, -dy), max(0, dx) : w - max(0, -dx)]
     return a, b
 
 

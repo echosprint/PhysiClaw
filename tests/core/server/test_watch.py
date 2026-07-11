@@ -2,6 +2,7 @@
 
 `fake_mcp` and `async_request` fixtures live in `conftest.py`.
 """
+
 from __future__ import annotations
 
 import json
@@ -42,7 +43,8 @@ async def test_watch_route_returns_watchdog_result(fake_mcp, async_request) -> N
 
 @pytest.mark.asyncio
 async def test_watch_route_runtime_error_returns_no_wake(
-    fake_mcp, async_request,
+    fake_mcp,
+    async_request,
 ) -> None:
     pl = MagicMock()
     pl.watch.side_effect = RuntimeError("not calibrated")
@@ -55,7 +57,8 @@ async def test_watch_route_runtime_error_returns_no_wake(
 
 @pytest.mark.asyncio
 async def test_watch_route_unexpected_exception_returns_503(
-    fake_mcp, async_request,
+    fake_mcp,
+    async_request,
 ) -> None:
     pl = MagicMock()
     pl.watch.side_effect = Exception("kaboom")
@@ -82,7 +85,8 @@ async def test_home_screen_route_dispatches(fake_mcp, async_request) -> None:
 
 @pytest.mark.asyncio
 async def test_home_screen_route_returns_503_on_failure(
-    fake_mcp, async_request,
+    fake_mcp,
+    async_request,
 ) -> None:
     pl = MagicMock()
     pl.home_screen.side_effect = RuntimeError("arm jammed")
@@ -98,7 +102,8 @@ async def test_home_screen_route_returns_503_on_failure(
 
 @pytest.mark.asyncio
 async def test_ready_route_marks_and_returns_ready_state(
-    fake_mcp, async_request,
+    fake_mcp,
+    async_request,
 ) -> None:
     pl = MagicMock()
     pl.ready = True

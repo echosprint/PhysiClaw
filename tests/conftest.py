@@ -12,6 +12,7 @@ Two non-obvious pieces:
    `paths.HOME` and `paths.LOG_DIR` to a per-test tmp dir, so tests that
    write under HOME don't bleed state across each other.
 """
+
 from __future__ import annotations
 
 import logging

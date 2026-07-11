@@ -3,67 +3,68 @@ from build123d import *
 from hardware.parts.base import BaseStandardPart
 
 # ── Parameters ────────────────────────────────────────────────────────────────
-outer_w  = 15 * MM    # X, on XZ plane
-outer_h  = 30 * MM    # Z, on XZ plane
-depth    = 13 * MM    # extrusion along the plane normal (Y)
-inner_w  = 13 * MM    # X cavity — leaves 1 mm walls on each X side
-inner_h  = 28 * MM    # Z cavity — leaves 1 mm walls on each Z side
+outer_w = 15 * MM  # X, on XZ plane
+outer_h = 30 * MM  # Z, on XZ plane
+depth = 13 * MM  # extrusion along the plane normal (Y)
+inner_w = 13 * MM  # X cavity — leaves 1 mm walls on each X side
+inner_h = 28 * MM  # Z cavity — leaves 1 mm walls on each Z side
 
 # Inner cylinder (coil core), axis along Z, centered in the cavity.
-cyl_radius = 6  * MM
+cyl_radius = 6 * MM
 cyl_height = 28 * MM
 
 # Plunger rod protruding above the shell top face, concentric with the coil.
 rod_diameter = 5.8 * MM
-rod_height   = 20  * MM
+rod_height = 20 * MM
 
 # Slot cut across the rod top (along Y), e.g. for a horn/clevis pin.
-slot_width = 1.6 * MM    # along X
-slot_depth = 8   * MM    # down from the rod top face
+slot_width = 1.6 * MM  # along X
+slot_depth = 8 * MM  # down from the rod top face
 
 # Cross-pin hole through the rod along X, measured down from the rod top.
-hole_diameter   = 2   * MM
+hole_diameter = 2 * MM
 hole_z_from_top = 2.8 * MM
 
 # Retaining flange around the rod (id matches rod, forms a collar).
-ring_id         = 5.8 * MM
-ring_od         = 8   * MM
-ring_thick      = 1   * MM
-ring_z_from_top = 9   * MM
+ring_id = 5.8 * MM
+ring_od = 8 * MM
+ring_thick = 1 * MM
+ring_z_from_top = 9 * MM
 
 # Compression spring between shell top face and ring bottom, around the rod.
-spring_id       = 6   * MM    # just over rod_diameter for slip fit
+spring_id = 6 * MM  # just over rod_diameter for slip fit
 spring_wire_dia = 0.8 * MM
-spring_pitch    = 2   * MM
+spring_pitch = 2 * MM
 
 # Bottom pin extending in -Z from the shell bottom face.
 bottom_rod_radius = 1.4 * MM
-bottom_rod_height = 10  * MM
+bottom_rod_height = 10 * MM
 
 # Stacked annular grooves on the bottom rod (thread-like appearance).
-groove_length_from_bottom = 4   * MM    # grooves fill the bottom 4 mm
-groove_width              = 0.2 * MM    # along Z
-groove_depth              = 0.1 * MM    # radial
-groove_pitch              = 0.5 * MM    # center-to-center between adjacent grooves
+groove_length_from_bottom = 4 * MM  # grooves fill the bottom 4 mm
+groove_width = 0.2 * MM  # along Z
+groove_depth = 0.1 * MM  # radial
+groove_pitch = 0.5 * MM  # center-to-center between adjacent grooves
 
 # Bushing ring just below the shell, around the bottom rod.
-bottom_ring_id    = 3 * MM
-bottom_ring_od    = 4 * MM
+bottom_ring_id = 3 * MM
+bottom_ring_od = 4 * MM
 bottom_ring_thick = 2 * MM
 
 # Two M3 mounting holes on the left face, drilled along +X.
-mount_hole_dia       = 3  * MM
-mount_hole_depth     = 1  * MM
+mount_hole_dia = 3 * MM
+mount_hole_depth = 1 * MM
 mount_hole_z_spacing = 15 * MM
 
 # Two lead wires exiting the shell back face (-Y), near the bottom.
 # Each is an L: a circle extruded out along -Y, then bent down along -Z,
 # with a sphere rounding the elbow.
-wire_radius   = 0.5 * MM
-wire_length   = 4   * MM    # protrusion along -Y from the back face
-wire_drop     = 8   * MM    # then bends down along -Z
-wire_x_offset = 4   * MM    # half-spacing → wires at x = ±wire_x_offset
-wire_z        = -outer_h / 2 + 4 * MM    # height up from the shell bottom
+wire_radius = 0.5 * MM
+wire_length = 4 * MM  # protrusion along -Y from the back face
+wire_drop = 8 * MM  # then bends down along -Z
+wire_x_offset = 4 * MM  # half-spacing → wires at x = ±wire_x_offset
+wire_z = -outer_h / 2 + 4 * MM  # height up from the shell bottom
+
 
 # ── Geometry ──────────────────────────────────────────────────────────────────
 class Solenoid(BaseStandardPart):
@@ -108,7 +109,7 @@ class Solenoid(BaseStandardPart):
             hole_center_x = -outer_w / 2 + mount_hole_depth / 2
             with Locations(
                 (hole_center_x, -depth / 2, -mount_hole_z_spacing / 2),
-                (hole_center_x, -depth / 2,  mount_hole_z_spacing / 2),
+                (hole_center_x, -depth / 2, mount_hole_z_spacing / 2),
             ):
                 Cylinder(
                     radius=mount_hole_dia / 2,
@@ -158,7 +159,11 @@ class Solenoid(BaseStandardPart):
         with BuildPart() as bottom_ring:
             with Locations((0, -depth / 2, bottom_z - bottom_ring_thick / 2)):
                 Cylinder(radius=bottom_ring_od / 2, height=bottom_ring_thick)
-                Cylinder(radius=bottom_ring_id / 2, height=bottom_ring_thick, mode=Mode.SUBTRACT)
+                Cylinder(
+                    radius=bottom_ring_id / 2,
+                    height=bottom_ring_thick,
+                    mode=Mode.SUBTRACT,
+                )
 
         # Two lead wires: circles drawn on the XZ plane (offset back to the
         # coil's Y center so each wire roots *inside* the coil) and extruded

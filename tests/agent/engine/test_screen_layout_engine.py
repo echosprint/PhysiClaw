@@ -3,6 +3,7 @@
 The agent measures the boxes off a screenshot and reports them; this module
 only sanity-checks and merges. No bridge fetch, no vision model.
 """
+
 from __future__ import annotations
 
 import json
@@ -33,7 +34,12 @@ def _write_layout(fields: dict) -> None:
 
 # Real-ish boxes that pass each field's region check.
 _SPOTLIGHT = {
-    "spotlight_input": [0.020, 0.582, 0.958, 0.660],  # near the bottom, above the keyboard
+    "spotlight_input": [
+        0.020,
+        0.582,
+        0.958,
+        0.660,
+    ],  # near the bottom, above the keyboard
     "spotlight_paste": [0.090, 0.512, 0.205, 0.560],
     "space": [0.251, 0.868, 0.747, 0.920],
     "backspace": [0.867, 0.809, 0.995, 0.861],
@@ -116,16 +122,18 @@ def test_fill_builtin_boxes_noop_while_incomplete() -> None:
     skills = {"im": _im_skill()}
     out = sl.fill_builtin_boxes(skills)
 
-    assert out["im"].body == skills["im"].body       # unchanged
-    assert "{{input-hidden}}" in out["im"].body        # placeholders stay
+    assert out["im"].body == skills["im"].body  # unchanged
+    assert "{{input-hidden}}" in out["im"].body  # placeholders stay
 
 
 def test_fill_builtin_boxes_fills_code_block_only_leaves_prose() -> None:
-    _write_layout({
-        **{f: [0, 0, 1, 1] for f in sl.ALL_FIELDS},
-        "chat_input_kb_hidden": [0.098, 0.900, 0.716, 0.950],
-        "send": [0.752, 0.868, 0.990, 0.918],
-    })
+    _write_layout(
+        {
+            **{f: [0, 0, 1, 1] for f in sl.ALL_FIELDS},
+            "chat_input_kb_hidden": [0.098, 0.900, 0.716, 0.950],
+            "send": [0.752, 0.868, 0.990, 0.918],
+        }
+    )
     out = sl.fill_builtin_boxes({"im": _im_skill()})
     prose, code = out["im"].body.split("```python")
 
@@ -142,25 +150,31 @@ def test_fill_builtin_boxes_fills_code_block_only_leaves_prose() -> None:
 def test_fill_builtin_boxes_leaves_unmapped_skills_untouched() -> None:
     _write_layout(_COMPLETE)
     other = Skill(
-        name="search-in-app", description="d",
-        body="```python\n{{paste-button}}\n```", dir=Path("/x"),
+        name="search-in-app",
+        description="d",
+        body="```python\n{{paste-button}}\n```",
+        dir=Path("/x"),
     )
     out = sl.fill_builtin_boxes({"search-in-app": other})
 
-    assert out["search-in-app"] is other              # same object, unfilled
+    assert out["search-in-app"] is other  # same object, unfilled
 
 
 def test_fill_builtin_boxes_open_app_uses_spotlight_fields() -> None:
     # {{paste-button}} is a PER-SKILL mapping: chat_paste in `im`,
     # spotlight_paste in `open-app`.
-    _write_layout({
-        **_COMPLETE,
-        "spotlight_input": [0.005, 0.599, 0.982, 0.657],
-        "spotlight_paste": [0.082, 0.561, 0.188, 0.583],
-        "backspace": [0.864, 0.804, 0.986, 0.856],
-    })
+    _write_layout(
+        {
+            **_COMPLETE,
+            "spotlight_input": [0.005, 0.599, 0.982, 0.657],
+            "spotlight_paste": [0.082, 0.561, 0.188, 0.583],
+            "backspace": [0.864, 0.804, 0.986, 0.856],
+        }
+    )
     skill = Skill(
-        name="open-app", description="d", dir=Path("/x"),
+        name="open-app",
+        description="d",
+        dir=Path("/x"),
         body=(
             "Prose {{search-field}} stays.\n"
             "```python\n"
@@ -172,9 +186,9 @@ def test_fill_builtin_boxes_open_app_uses_spotlight_fields() -> None:
     prose, code = out["open-app"].body.split("```python")
 
     assert "{{search-field}}" in prose
-    assert "[0.005, 0.599, 0.982, 0.657]" in code   # spotlight_input
-    assert "[0.864, 0.804, 0.986, 0.856]" in code   # backspace
-    assert "[0.082, 0.561, 0.188, 0.583]" in code   # spotlight_paste
+    assert "[0.005, 0.599, 0.982, 0.657]" in code  # spotlight_input
+    assert "[0.864, 0.804, 0.986, 0.856]" in code  # backspace
+    assert "[0.082, 0.561, 0.188, 0.583]" in code  # spotlight_paste
     assert "{{" not in code
 
 
@@ -226,18 +240,26 @@ def test_inject_tail_noop_when_complete() -> None:
 
 
 # All fields except `send`, so a single chat-keyboard `send` call completes it.
-_ALL_BUT_SEND = {**_SPOTLIGHT, **_CHAT_HIDDEN, **{k: v for k, v in _CHAT_VISIBLE_WECHAT.items() if k != "send"}}
+_ALL_BUT_SEND = {
+    **_SPOTLIGHT,
+    **_CHAT_HIDDEN,
+    **{k: v for k, v in _CHAT_VISIBLE_WECHAT.items() if k != "send"},
+}
 
 
 # ---------- record: guards ----------
 
 
 def test_record_rejects_unknown_page() -> None:
-    assert "unknown page" in sl.record("bogus", "spotlight_input", [0.03, 0.08, 0.88, 0.13])
+    assert "unknown page" in sl.record(
+        "bogus", "spotlight_input", [0.03, 0.08, 0.88, 0.13]
+    )
 
 
 def test_record_chat_page_needs_app() -> None:
-    out = sl.record("chat-no-keyboard", "chat_input_kb_hidden", [0.098, 0.9, 0.716, 0.95])  # no app
+    out = sl.record(
+        "chat-no-keyboard", "chat_input_kb_hidden", [0.098, 0.9, 0.716, 0.95]
+    )  # no app
     assert "needs the IM app" in out
     assert not paths.screen_layout_json().exists()  # nothing saved
 
@@ -278,7 +300,9 @@ def test_record_saves_one_box_and_confirms() -> None:
     assert saved["spotlight_input"] == [0.02, 0.582, 0.958, 0.66]  # rounded, stored
     assert "Saved `spotlight_input`" in out
     assert "still to capture" in out.lower()  # incomplete; count only, no field list
-    assert "space" not in out  # remaining fields NOT re-listed (tail_reminder does that)
+    assert (
+        "space" not in out
+    )  # remaining fields NOT re-listed (tail_reminder does that)
     assert paths.screen_layout_md().exists()  # card persisted to disk
 
 
@@ -304,7 +328,9 @@ def test_render_md_includes_paste_section() -> None:
 
 def test_record_merges_without_clobber_and_labels_app() -> None:
     _write_layout({"spotlight_input": [0.02, 0.582, 0.958, 0.66]})
-    sl.record("chat-no-keyboard", "chat_input_kb_hidden", [0.098, 0.9, 0.716, 0.95], "wechat")
+    sl.record(
+        "chat-no-keyboard", "chat_input_kb_hidden", [0.098, 0.9, 0.716, 0.95], "wechat"
+    )
 
     saved = json.loads(paths.screen_layout_json().read_text())
     assert saved["spotlight_input"] == [0.02, 0.582, 0.958, 0.66]  # preserved
@@ -368,7 +394,12 @@ def test_record_accepts_any_chat_app() -> None:
 
 
 def test_record_labels_unknown_app_verbatim() -> None:
-    sl.record("chat-no-keyboard", "chat_input_kb_hidden", [0.098, 0.9, 0.716, 0.95], "SomeNewChatApp")
+    sl.record(
+        "chat-no-keyboard",
+        "chat_input_kb_hidden",
+        [0.098, 0.9, 0.716, 0.95],
+        "SomeNewChatApp",
+    )
     saved = json.loads(paths.screen_layout_json().read_text())
     assert saved["im_app"] == "SomeNewChatApp"  # not in the nice-case map → as passed
 
@@ -385,7 +416,12 @@ def test_record_same_field_twice_overwrites() -> None:
     sl.record("spotlight", "spotlight_input", [0.03, 0.585, 0.955, 0.655])
 
     saved = json.loads(paths.screen_layout_json().read_text())
-    assert saved["spotlight_input"] == [0.03, 0.585, 0.955, 0.655]  # overwritten, not duplicated
+    assert saved["spotlight_input"] == [
+        0.03,
+        0.585,
+        0.955,
+        0.655,
+    ]  # overwritten, not duplicated
 
 
 def test_record_completing_call_announces_restart() -> None:
@@ -400,7 +436,9 @@ def test_record_completing_call_announces_restart() -> None:
 def test_record_after_complete_says_no_restart() -> None:
     # Layout already complete → re-reporting a box updates it but does NOT claim
     # a restart (the handler only restarts on the call that finishes setup).
-    _write_layout({**_ALL_BUT_SEND, "send": [0.752, 0.868, 0.990, 0.918], "im_app": "WeChat"})
+    _write_layout(
+        {**_ALL_BUT_SEND, "send": [0.752, 0.868, 0.990, 0.918], "im_app": "WeChat"}
+    )
     out = sl.record("chat-keyboard", "send", [0.760, 0.868, 0.995, 0.918], "wechat")
 
     assert "No restart needed" in out
@@ -423,11 +461,13 @@ def test_lint_blocks_long_press_on_hidden_box_before_paste_tap() -> None:
     # kb-hidden region is the keyboard — the popover never opens.
     _write_layout(_LINT_LAYOUT)
 
-    msg = sl.lint_sequence([
-        {"tool_name": "long_press", "arg": _HIDDEN_BOX},
-        {"tool_name": "tap", "arg": _PASTE_BOX},
-        {"tool_name": "tap", "arg": _SEND_BOX},
-    ])
+    msg = sl.lint_sequence(
+        [
+            {"tool_name": "long_press", "arg": _HIDDEN_BOX},
+            {"tool_name": "tap", "arg": _PASTE_BOX},
+            {"tool_name": "tap", "arg": _SEND_BOX},
+        ]
+    )
 
     assert msg is not None and msg.startswith("BLOCKED")
     assert "KEYBOARD-VISIBLE" in msg
@@ -438,10 +478,12 @@ def test_lint_blocks_two_step_variant(  # turn 92's shape
 ) -> None:
     _write_layout(_LINT_LAYOUT)
 
-    msg = sl.lint_sequence([
-        {"tool_name": "long_press", "arg": _HIDDEN_BOX},
-        {"tool_name": "tap", "arg": _PASTE_BOX},
-    ])
+    msg = sl.lint_sequence(
+        [
+            {"tool_name": "long_press", "arg": _HIDDEN_BOX},
+            {"tool_name": "tap", "arg": _PASTE_BOX},
+        ]
+    )
 
     assert msg is not None and msg.startswith("BLOCKED")
 
@@ -451,13 +493,15 @@ def test_lint_blocks_long_press_on_hidden_after_tapping_it() -> None:
     # the keyboard, so the later long_press presses the keyboard.
     _write_layout(_LINT_LAYOUT)
 
-    msg = sl.lint_sequence([
-        {"tool_name": "tap", "arg": _HIDDEN_BOX},
-        {"tool_name": "send_to_clipboard", "arg": "hello"},
-        {"tool_name": "long_press", "arg": _HIDDEN_BOX},
-        {"tool_name": "tap", "arg": _PASTE_BOX},
-        {"tool_name": "tap", "arg": _SEND_BOX},
-    ])
+    msg = sl.lint_sequence(
+        [
+            {"tool_name": "tap", "arg": _HIDDEN_BOX},
+            {"tool_name": "send_to_clipboard", "arg": "hello"},
+            {"tool_name": "long_press", "arg": _HIDDEN_BOX},
+            {"tool_name": "tap", "arg": _PASTE_BOX},
+            {"tool_name": "tap", "arg": _SEND_BOX},
+        ]
+    )
 
     assert msg is not None and "step 1 taps that box" in msg
 
@@ -465,13 +509,15 @@ def test_lint_blocks_long_press_on_hidden_after_tapping_it() -> None:
 def test_lint_allows_the_correct_im_template() -> None:
     _write_layout(_LINT_LAYOUT)
 
-    msg = sl.lint_sequence([
-        {"tool_name": "tap", "arg": _HIDDEN_BOX},
-        {"tool_name": "send_to_clipboard", "arg": "hello"},
-        {"tool_name": "long_press", "arg": _VISIBLE_BOX},
-        {"tool_name": "tap", "arg": _PASTE_BOX},
-        {"tool_name": "tap", "arg": _SEND_BOX},
-    ])
+    msg = sl.lint_sequence(
+        [
+            {"tool_name": "tap", "arg": _HIDDEN_BOX},
+            {"tool_name": "send_to_clipboard", "arg": "hello"},
+            {"tool_name": "long_press", "arg": _VISIBLE_BOX},
+            {"tool_name": "tap", "arg": _PASTE_BOX},
+            {"tool_name": "tap", "arg": _SEND_BOX},
+        ]
+    )
 
     assert msg is None
 
@@ -484,11 +530,16 @@ def test_lint_blocks_reused_chat_paste_after_foreign_long_press() -> None:
     _write_layout(_LINT_LAYOUT)
     search_box = [0.05, 0.055, 0.9, 0.10]  # a top-of-screen search bar, not a chat box
 
-    msg = sl.lint_sequence([
-        {"tool_name": "long_press", "arg": search_box},
-        {"tool_name": "tap", "arg": _PASTE_BOX},           # WeChat's chat_paste, reused
-        {"tool_name": "tap", "arg": [0.86, 0.86, 0.99, 0.92]},  # return / search key
-    ])
+    msg = sl.lint_sequence(
+        [
+            {"tool_name": "long_press", "arg": search_box},
+            {"tool_name": "tap", "arg": _PASTE_BOX},  # WeChat's chat_paste, reused
+            {
+                "tool_name": "tap",
+                "arg": [0.86, 0.86, 0.99, 0.92],
+            },  # return / search key
+        ]
+    )
 
     assert msg is not None and msg.startswith("BLOCKED")
     assert "chat_paste" in msg
@@ -499,19 +550,26 @@ def test_lint_allows_bare_long_press_near_bottom() -> None:
     # flow in the batch is legitimate — no prior input tap, no paste tap.
     _write_layout(_LINT_LAYOUT)
 
-    msg = sl.lint_sequence([
-        {"tool_name": "long_press", "arg": _HIDDEN_BOX},
-        {"tool_name": "tap", "arg": [0.2, 0.75, 0.35, 0.79]},
-    ])
+    msg = sl.lint_sequence(
+        [
+            {"tool_name": "long_press", "arg": _HIDDEN_BOX},
+            {"tool_name": "tap", "arg": [0.2, 0.75, 0.35, 0.79]},
+        ]
+    )
 
     assert msg is None
 
 
 def test_lint_fails_open_without_learned_layout() -> None:
-    assert sl.lint_sequence([
-        {"tool_name": "long_press", "arg": [0.098, 0.9, 0.716, 0.95]},
-        {"tool_name": "tap", "arg": [0.12, 0.52, 0.3, 0.566]},
-    ]) is None
+    assert (
+        sl.lint_sequence(
+            [
+                {"tool_name": "long_press", "arg": [0.098, 0.9, 0.716, 0.95]},
+                {"tool_name": "tap", "arg": [0.12, 0.52, 0.3, 0.566]},
+            ]
+        )
+        is None
+    )
 
 
 def test_lint_fails_open_on_malformed_actions() -> None:
@@ -560,8 +618,8 @@ def test_tracker_nav_means_down_and_other_press_means_unknown() -> None:
 def test_tracker_typing_and_views_preserve_up() -> None:
     kb = _tracker_with_layout()
     kb.observe("tap", {"bbox": _HIDDEN_BOX}, True)
-    kb.observe("tap", {"bbox": _SEND_BOX}, True)      # keyboard key
-    kb.observe("peek", {}, None)                       # view
+    kb.observe("tap", {"bbox": _SEND_BOX}, True)  # keyboard key
+    kb.observe("peek", {}, None)  # view
     kb.observe("send_to_clipboard", {"text": "x"}, None)
     assert kb.state == "up"
 
@@ -573,11 +631,17 @@ def test_tracker_swipe_and_batch_presses_decay_to_unknown() -> None:
     assert kb.state == "unknown"
 
     kb.observe("tap", {"bbox": _HIDDEN_BOX}, True)
-    kb.observe("sequence", {"actions": [{"tool_name": "tap", "arg": [0.4, 0.4, 0.5, 0.45]}]}, True)
+    kb.observe(
+        "sequence",
+        {"actions": [{"tool_name": "tap", "arg": [0.4, 0.4, 0.5, 0.45]}]},
+        True,
+    )
     assert kb.state == "unknown"
 
     kb.observe("tap", {"bbox": _HIDDEN_BOX}, True)
-    kb.observe("sequence", {"actions": [{"tool_name": "send_to_clipboard", "arg": "x"}]}, True)
+    kb.observe(
+        "sequence", {"actions": [{"tool_name": "send_to_clipboard", "arg": "x"}]}, True
+    )
     assert kb.state == "up"  # clipboard-only batch touches nothing
 
 
@@ -589,7 +653,9 @@ def test_lint_gesture_blocks_standalone_long_press_when_keyboard_up() -> None:
     _write_layout(_LINT_LAYOUT)
 
     msg = sl.lint_gesture(
-        "long_press", {"bbox": _HIDDEN_BOX}, keyboard_up=True,
+        "long_press",
+        {"bbox": _HIDDEN_BOX},
+        keyboard_up=True,
     )
 
     assert msg is not None and msg.startswith("BLOCKED")
@@ -599,8 +665,12 @@ def test_lint_gesture_blocks_standalone_long_press_when_keyboard_up() -> None:
 def test_lint_gesture_allows_standalone_long_press_otherwise() -> None:
     _write_layout(_LINT_LAYOUT)
 
-    assert sl.lint_gesture("long_press", {"bbox": _HIDDEN_BOX}, keyboard_up=False) is None
-    assert sl.lint_gesture("long_press", {"bbox": _VISIBLE_BOX}, keyboard_up=True) is None
+    assert (
+        sl.lint_gesture("long_press", {"bbox": _HIDDEN_BOX}, keyboard_up=False) is None
+    )
+    assert (
+        sl.lint_gesture("long_press", {"bbox": _VISIBLE_BOX}, keyboard_up=True) is None
+    )
     assert sl.lint_gesture("tap", {"bbox": _HIDDEN_BOX}, keyboard_up=True) is None
 
 
@@ -618,6 +688,11 @@ def test_lint_gesture_blocks_bare_batch_long_press_when_keyboard_up() -> None:
 
 
 def test_lint_gesture_fails_open_without_layout() -> None:
-    assert sl.lint_gesture(
-        "long_press", {"bbox": [0.098, 0.9, 0.716, 0.95]}, keyboard_up=True,
-    ) is None
+    assert (
+        sl.lint_gesture(
+            "long_press",
+            {"bbox": [0.098, 0.9, 0.716, 0.95]},
+            keyboard_up=True,
+        )
+        is None
+    )

@@ -64,8 +64,14 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 # Shared with the manual build: localization, BOM row grouping, step timing,
 # content loading and the html-lang / masthead-mark conventions.
 from build_manual import (
-    CONTENT_DIR, HTML_LANG, URL_MARK, BuildError,
-    _rowspans, _step, load_pages, loc,
+    CONTENT_DIR,
+    HTML_LANG,
+    URL_MARK,
+    BuildError,
+    _rowspans,
+    _step,
+    load_pages,
+    loc,
 )
 
 # --------------------------------------------------------------------------- #
@@ -81,7 +87,7 @@ OUTPUT_DIR = SCRIPT_DIR / ".." / "output" / "sourcing"
 LANG_FILENAME = {"en": "sourcing_guide.html", "zh": "physiclaw采购指南.html"}
 
 SUPPLIERS_PER_ROW = 3  # supplier slots per part
-DITTO = "Ditto"        # field value: merge this cell with the row above
+DITTO = "Ditto"  # field value: merge this cell with the row above
 
 # UI chrome strings (content strings come localized from the JSON sources).
 UI = {
@@ -89,33 +95,33 @@ UI = {
     "h1": {"en": "Sourcing guide", "zh": "采购指南"},
     "lede": {
         "en": "This guide covers every part in the assembly manual's bill "
-              "of materials, with three reference suppliers per part.<br>"
-              "Reference prices are subtotals for the required quantity "
-              "(not unit prices; shipping excluded) and do not represent "
-              "actual transaction prices — vendors may adjust pricing at "
-              "any time; use them only to gauge the general price level.",
+        "of materials, with three reference suppliers per part.<br>"
+        "Reference prices are subtotals for the required quantity "
+        "(not unit prices; shipping excluded) and do not represent "
+        "actual transaction prices — vendors may adjust pricing at "
+        "any time; use them only to gauge the general price level.",
         "zh": "本指南涵盖装配手册物料清单的全部零件，每项零件列出三家参考供应商。<br>"
-              "参考价为所需数量的合计金额（非单价，不含运费），并非实际成交价格"
-              "——厂商可能随时调价，仅供衡量大致价格水平。",
+        "参考价为所需数量的合计金额（非单价，不含运费），并非实际成交价格"
+        "——厂商可能随时调价，仅供衡量大致价格水平。",
     },
     "pending": {"en": "to be found", "zh": "待补充"},
     "disclaimer": {
         "en": "<strong>Disclaimer:</strong> Supplier and product listings in "
-              "this guide are provided for reference only. We are not "
-              "affiliated with, and receive no compensation from, any of the "
-              "vendors listed, and we make no representation or warranty as "
-              "to the quality, pricing, or availability of their products. "
-              "Please verify the specifications and purchase from a vendor "
-              "of your choice. Should any listed product prove "
-              "unsatisfactory, or should you have a reliable vendor to "
-              "recommend, we welcome your feedback and will review and "
-              "update the listings accordingly.",
+        "this guide are provided for reference only. We are not "
+        "affiliated with, and receive no compensation from, any of the "
+        "vendors listed, and we make no representation or warranty as "
+        "to the quality, pricing, or availability of their products. "
+        "Please verify the specifications and purchase from a vendor "
+        "of your choice. Should any listed product prove "
+        "unsatisfactory, or should you have a reliable vendor to "
+        "recommend, we welcome your feedback and will review and "
+        "update the listings accordingly.",
         "zh": "<strong>免责声明：</strong>本指南所列供应商及商品链接仅供采购参考。"
-              "我们与所列商家不存在任何关联或利益关系，"
-              "对其商品的质量、价格及供货情况不作任何保证。"
-              "请按规格自行甄选，从您信任的商家购买。"
-              "如所列商品存在质量问题，或您有优质供应商推荐，"
-              "欢迎向我们反馈，我们将及时核实并更新相关条目。",
+        "我们与所列商家不存在任何关联或利益关系，"
+        "对其商品的质量、价格及供货情况不作任何保证。"
+        "请按规格自行甄选，从您信任的商家购买。"
+        "如所列商品存在质量问题，或您有优质供应商推荐，"
+        "欢迎向我们反馈，我们将及时核实并更新相关条目。",
     },
     "inquiry_label": {"en": "Inquiry message", "zh": "询价说明"},
     "supplier_n": {"en": "Supplier", "zh": "供应商"},
@@ -188,20 +194,29 @@ def load_bom_rows() -> list[dict]:
     renamed or split content file cannot desync the two builds. Every row
     must carry a unique ``part_id`` — that id is the sourcing data's key, so
     a missing or duplicated one would silently orphan entries."""
-    rows = [row for page in load_pages() if page.get("type") == "bom"
-            for row in page.get("rows", [])]
+    rows = [
+        row
+        for page in load_pages()
+        if page.get("type") == "bom"
+        for row in page.get("rows", [])
+    ]
     if not rows:
         raise BuildError(f"no 'bom' page rows found in {CONTENT_DIR}")
-    missing = [f'{r["component"]["en"]} | {r["spec"]["en"]}'
-               for r in rows if not r.get("part_id")]
+    missing = [
+        f"{r['component']['en']} | {r['spec']['en']}"
+        for r in rows
+        if not r.get("part_id")
+    ]
     if missing:
-        raise BuildError("BOM row(s) missing a part_id:\n"
-                         + "\n".join(f"    {k}" for k in missing))
+        raise BuildError(
+            "BOM row(s) missing a part_id:\n" + "\n".join(f"    {k}" for k in missing)
+        )
     ids = [r["part_id"] for r in rows]
     if len(ids) != len(set(ids)):
         dupes = sorted({i for i in ids if ids.count(i) > 1})
-        raise BuildError("duplicate part_id(s) in the BOM:\n"
-                         + "\n".join(f"    {i}" for i in dupes))
+        raise BuildError(
+            "duplicate part_id(s) in the BOM:\n" + "\n".join(f"    {i}" for i in dupes)
+        )
     return rows
 
 
@@ -212,13 +227,16 @@ def load_sourcing_data() -> list[dict]:
         return []
     data = json.loads(VENDOR_FILE.read_text(encoding="utf-8"))
     if not isinstance(data, list):
-        raise BuildError(f"{VENDOR_FILE.name} must be a JSON array "
-                         "(one entry per BOM row, keyed by part_id)")
+        raise BuildError(
+            f"{VENDOR_FILE.name} must be a JSON array "
+            "(one entry per BOM row, keyed by part_id)"
+        )
     return data
 
 
-def sync_entries(rows: list[dict],
-                 entries: list[dict]) -> tuple[list[dict], list[str], list[str]]:
+def sync_entries(
+    rows: list[dict], entries: list[dict]
+) -> tuple[list[dict], list[str], list[str]]:
     """Align the entry array with the BOM: one entry per row, in BOM order.
     Missing rows get a bare ``{"part_id": …}``; entries whose id no longer
     matches a row are dropped and reported. Authored entries pass through
@@ -226,8 +244,10 @@ def sync_entries(rows: list[dict],
     ids = [e.get("part_id") for e in entries]
     dupes = sorted({i for i in ids if i and ids.count(i) > 1})
     if dupes:
-        raise BuildError(f"duplicate part_id(s) in {VENDOR_FILE.name}:\n"
-                         + "\n".join(f"    {i}" for i in dupes))
+        raise BuildError(
+            f"duplicate part_id(s) in {VENDOR_FILE.name}:\n"
+            + "\n".join(f"    {i}" for i in dupes)
+        )
     by_id = {e.get("part_id"): e for e in entries}
     row_ids = {r["part_id"] for r in rows}
     synced: list[dict] = []
@@ -243,7 +263,8 @@ def sync_entries(rows: list[dict],
 
 def write_sourcing_file(entries: list[dict]) -> None:
     VENDOR_FILE.write_text(
-        json.dumps(entries, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        json.dumps(entries, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -261,8 +282,10 @@ def ditto_walk(values: list, col: str, ids: list[str]) -> tuple[list[int], list]
     for i, value in enumerate(values):
         if value == DITTO:
             if anchor < 0:
-                raise BuildError(f'"{DITTO}" in {col!r} of entry {ids[i]!r} '
-                                 "has no row above to merge with")
+                raise BuildError(
+                    f'"{DITTO}" in {col!r} of entry {ids[i]!r} '
+                    "has no row above to merge with"
+                )
             spans[anchor] += 1
             resolved.append(resolved[anchor])
         else:
@@ -308,9 +331,11 @@ def _inquiry_button(message: str, lang: str, flip: bool = False) -> str:
     # the hover preview and the copied text are the same string.
     msg_attr = html.escape(message, quote=True).replace("\n", "&#10;")
     cls = "copy flip" if flip else "copy"
-    return (f'<button class="{cls}" type="button" data-q="{msg_attr}">'
-            f"{COPY_ICON_SVG}{CHECK_ICON_SVG}"
-            f'<span>{ui("inquiry_label", lang)}</span></button>')
+    return (
+        f'<button class="{cls}" type="button" data-q="{msg_attr}">'
+        f"{COPY_ICON_SVG}{CHECK_ICON_SVG}"
+        f"<span>{ui('inquiry_label', lang)}</span></button>"
+    )
 
 
 def render_supplier_cell(supplier: dict | None, lang: str, span: int) -> str:
@@ -326,9 +351,13 @@ def render_supplier_cell(supplier: dict | None, lang: str, span: int) -> str:
         href = html.escape(clean_taobao_url(supplier["url"]), quote=True)
         name = f'<a href="{href}" target="_blank" rel="noopener">{name}</a>'
     product = loc(supplier.get("product") or "", lang)
-    product_html = f'<div class="v-prod">{html.escape(product)}</div>' if product else ""
-    return (f'<td class="offer"{_span_attr(span)}><div class="v-vendor">{name}</div>'
-            f"{product_html}</td>")
+    product_html = (
+        f'<div class="v-prod">{html.escape(product)}</div>' if product else ""
+    )
+    return (
+        f'<td class="offer"{_span_attr(span)}><div class="v-vendor">{name}</div>'
+        f"{product_html}</td>"
+    )
 
 
 def render_table(rows: list[dict], entries: list[dict], lang: str) -> str:
@@ -341,8 +370,10 @@ def render_table(rows: list[dict], entries: list[dict], lang: str) -> str:
 
     ref_spans, refs = ditto_walk([e.get("ref") for e in entries], "ref", ids)
     note_spans, notes = ditto_walk([e.get("note") for e in entries], "note", ids)
-    sup_walks = [ditto_walk(col, f"suppliers[{j}]", ids)
-                 for j, col in enumerate(supplier_columns(entries))]
+    sup_walks = [
+        ditto_walk(col, f"suppliers[{j}]", ids)
+        for j, col in enumerate(supplier_columns(entries))
+    ]
     # The inquiry has no cell of its own — it rides as a copy control inside
     # the part's note ({inquiry}), so only its resolved values are used.
     _, inquiries = ditto_walk([e.get("inquiry") for e in entries], "inquiry", ids)
@@ -353,11 +384,15 @@ def render_table(rows: list[dict], entries: list[dict], lang: str) -> str:
         if cls_span[idx]:
             cells += f'<td class="cls"{_span_attr(cls_span[idx])}>{loc(row["cls"], lang)}</td>'
         if comp_span[idx]:
-            cells += (f'<td class="comp"{_span_attr(comp_span[idx])}>'
-                      f'{loc(row["component"], lang)}</td>')
-        cells += (f'<td class="spec">{loc(row["spec"], lang)}</td>'
-                  f'<td class="qty">{row["qty"]}</td>'
-                  f'<td class="desc">{loc(row["desc"], lang)}</td>')
+            cells += (
+                f'<td class="comp"{_span_attr(comp_span[idx])}>'
+                f"{loc(row['component'], lang)}</td>"
+            )
+        cells += (
+            f'<td class="spec">{loc(row["spec"], lang)}</td>'
+            f'<td class="qty">{row["qty"]}</td>'
+            f'<td class="desc">{loc(row["desc"], lang)}</td>'
+        )
 
         message = loc(inquiries[idx] or "", lang)
         for spans, col in sup_walks:
@@ -365,16 +400,22 @@ def render_table(rows: list[dict], entries: list[dict], lang: str) -> str:
                 cells += render_supplier_cell(col[idx], lang, spans[idx])
         if ref_spans[idx]:
             ref = loc(refs[idx] or "", lang) or "—"
-            cells += f'<td class="ref"{_span_attr(ref_spans[idx])}>{html.escape(ref)}</td>'
+            cells += (
+                f'<td class="ref"{_span_attr(ref_spans[idx])}>{html.escape(ref)}</td>'
+            )
         if note_spans[idx]:
             # Notes are prose — emitted as trusted HTML, like the manual's
             # content strings.
             note = loc(notes[idx] or "", lang)
             if "{inquiry}" in note:
                 if not message:
-                    raise BuildError(f"note of entry {ids[idx]!r} uses "
-                                     "{inquiry} but the part has no inquiry message")
-                note = note.replace("{inquiry}", _inquiry_button(message, lang, flip=True))
+                    raise BuildError(
+                        f"note of entry {ids[idx]!r} uses "
+                        "{inquiry} but the part has no inquiry message"
+                    )
+                note = note.replace(
+                    "{inquiry}", _inquiry_button(message, lang, flip=True)
+                )
             cells += f'<td class="note"{_span_attr(note_spans[idx])}>{note or "—"}</td>'
 
         # Only class starts get a heavier separator; the full cell grid
@@ -383,14 +424,19 @@ def render_table(rows: list[dict], entries: list[dict], lang: str) -> str:
         body.append(f"<tr{row_cls}>{cells}</tr>")
 
     supplier_ths = "".join(
-        f'<th>{ui("supplier_n", lang)} {j + 1}</th>' for j in range(SUPPLIERS_PER_ROW))
-    head = (f'<tr><th>{ui("th_cls", lang)}</th><th>{ui("th_component", lang)}</th>'
-            f'<th>{ui("th_spec", lang)}</th><th>{ui("th_qty", lang)}</th>'
-            f'<th>{ui("th_desc", lang)}</th>'
-            f'{supplier_ths}<th>{ui("th_ref", lang)}</th>'
-            f'<th>{ui("th_note", lang)}</th></tr>')
-    return (f'<div class="table-wrap"><table class="sourcing">'
-            f"<thead>{head}</thead><tbody>{''.join(body)}</tbody></table></div>")
+        f"<th>{ui('supplier_n', lang)} {j + 1}</th>" for j in range(SUPPLIERS_PER_ROW)
+    )
+    head = (
+        f"<tr><th>{ui('th_cls', lang)}</th><th>{ui('th_component', lang)}</th>"
+        f"<th>{ui('th_spec', lang)}</th><th>{ui('th_qty', lang)}</th>"
+        f"<th>{ui('th_desc', lang)}</th>"
+        f"{supplier_ths}<th>{ui('th_ref', lang)}</th>"
+        f"<th>{ui('th_note', lang)}</th></tr>"
+    )
+    return (
+        f'<div class="table-wrap"><table class="sourcing">'
+        f"<thead>{head}</thead><tbody>{''.join(body)}</tbody></table></div>"
+    )
 
 
 # Page script: copy-to-clipboard for the per-row inquiry message. Both file://
@@ -437,10 +483,14 @@ def build(langs: list[str], out_dir: Path, scaffold: bool) -> list[Path]:
         write_sourcing_file(entries)
         print(f"  synced {VENDOR_FILE.name}: +{len(added)} new empty entr(y/ies)")
     elif added:
-        print(f"  note: {len(added)} BOM row(s) have no sourcing entry "
-              f"(rendered with defaults) — run with --scaffold to add them")
+        print(
+            f"  note: {len(added)} BOM row(s) have no sourcing entry "
+            f"(rendered with defaults) — run with --scaffold to add them"
+        )
     if stale:
-        print(f"  warning: {len(stale)} stale entr(y/ies) no longer match a BOM part_id:")
+        print(
+            f"  warning: {len(stale)} stale entr(y/ies) no longer match a BOM part_id:"
+        )
         for i in stale:
             print(f"    {i}")
 
@@ -458,15 +508,20 @@ def build(langs: list[str], out_dir: Path, scaffold: bool) -> list[Path]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
-        "--lang", choices=("en", "zh", "all"), default="all",
+        "--lang",
+        choices=("en", "zh", "all"),
+        default="all",
         help="language(s) to render (default: all)",
     )
     parser.add_argument(
-        "--out", type=Path, default=OUTPUT_DIR,
+        "--out",
+        type=Path,
+        default=OUTPUT_DIR,
         help="output directory (default: ../output/sourcing)",
     )
     parser.add_argument(
-        "--scaffold", action="store_true",
+        "--scaffold",
+        action="store_true",
         help="sync sourcing_vendors.json with the BOM (add bare part_id entries) before building",
     )
     args = parser.parse_args()

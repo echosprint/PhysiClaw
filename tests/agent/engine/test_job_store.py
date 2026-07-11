@@ -49,6 +49,7 @@ behavior tests at the module's public surface):
     text never actually contains triple+ blank lines and the cleanup
     is defensive only.
 """
+
 from __future__ import annotations
 
 import datetime as dt
@@ -289,7 +290,9 @@ def test_load_jobs_ignores_non_id_documentation_section_alongside_real_jobs(
 def test_load_jobs_raises_on_duplicate_id(tmp_path: Path) -> None:
     p = _write_jobs(tmp_path, _job_section(), _job_section())
 
-    with pytest.raises(ValueError, match=r"^duplicate job id: 'user-greet-2026-04-28'$"):
+    with pytest.raises(
+        ValueError, match=r"^duplicate job id: 'user-greet-2026-04-28'$"
+    ):
         load_jobs(p)
 
 
@@ -375,9 +378,7 @@ def test_load_jobs_raises_when_pend_next_fire_time_is_not_iso(
         tmp_path, _job_section(status="pend", next_fire_time="not a timestamp")
     )
 
-    with pytest.raises(
-        ValueError, match=r"is not a valid ISO timestamp"
-    ):
+    with pytest.raises(ValueError, match=r"is not a valid ISO timestamp"):
         load_jobs(p)
 
 
@@ -394,9 +395,7 @@ def test_load_jobs_raises_when_next_fire_time_does_not_match_schedule(
         ),
     )
 
-    with pytest.raises(
-        ValueError, match=r"does not match Schedule"
-    ):
+    with pytest.raises(ValueError, match=r"does not match Schedule"):
         load_jobs(p)
 
 
@@ -430,9 +429,7 @@ def test_load_jobs_raises_with_comma_separated_list_when_multiple_fields_missing
     # Multi-field message uses ', '.join; mutant that wraps the join
     # separator only shows when at least 2 fields are missing.
     section = _job_section()
-    section = re.sub(
-        r"^- (Status|Schedule):.*\n", "", section, flags=re.MULTILINE
-    )
+    section = re.sub(r"^- (Status|Schedule):.*\n", "", section, flags=re.MULTILINE)
     p = _write_jobs(tmp_path, section)
 
     with pytest.raises(
@@ -490,9 +487,7 @@ def test_load_jobs_raises_on_done_job_with_malformed_next_fire_time(
     # If a non-pend job DOES have a next_fire_time set, it must still
     # be a valid ISO timestamp (even though the cron-match check is
     # skipped).
-    p = _write_jobs(
-        tmp_path, _job_section(status="done", next_fire_time="not iso")
-    )
+    p = _write_jobs(tmp_path, _job_section(status="done", next_fire_time="not iso"))
 
     with pytest.raises(ValueError, match=r"is not a valid ISO timestamp"):
         load_jobs(p)
@@ -582,11 +577,17 @@ def test_format_minute_input_with_zero_seconds_returns_same_minute_string() -> N
 def test_find_due_returns_pend_jobs_at_or_before_now() -> None:
     now = dt.datetime(2026, 4, 28, 12, 0)
     due_job = Job(
-        id="due", kind=KIND_PERIODIC, schedule="* * * * *", description="d",
+        id="due",
+        kind=KIND_PERIODIC,
+        schedule="* * * * *",
+        description="d",
         next_fire_time="2026-04-28T11:30",
     )
     future_job = Job(
-        id="future", kind=KIND_PERIODIC, schedule="* * * * *", description="d",
+        id="future",
+        kind=KIND_PERIODIC,
+        schedule="* * * * *",
+        description="d",
         next_fire_time="2026-04-28T13:00",
     )
 
@@ -596,7 +597,10 @@ def test_find_due_returns_pend_jobs_at_or_before_now() -> None:
 def test_find_due_at_exact_minute_includes_the_job() -> None:
     now = dt.datetime(2026, 4, 28, 12, 0)
     job = Job(
-        id="j", kind=KIND_PERIODIC, schedule="* * * * *", description="d",
+        id="j",
+        kind=KIND_PERIODIC,
+        schedule="* * * * *",
+        description="d",
         next_fire_time="2026-04-28T12:00",
     )
 
@@ -607,12 +611,18 @@ def test_find_due_at_exact_minute_includes_the_job() -> None:
 def test_find_due_skips_non_pend_jobs() -> None:
     now = dt.datetime(2026, 4, 28, 12, 0)
     fired = Job(
-        id="f", kind=KIND_PERIODIC, schedule="* * * * *", description="d",
+        id="f",
+        kind=KIND_PERIODIC,
+        schedule="* * * * *",
+        description="d",
         status=STATUS_FIRED,
         next_fire_time="2026-04-28T11:30",
     )
     done = Job(
-        id="d", kind=KIND_PERIODIC, schedule="* * * * *", description="d",
+        id="d",
+        kind=KIND_PERIODIC,
+        schedule="* * * * *",
+        description="d",
         status=STATUS_DONE,
         next_fire_time="2026-04-28T11:30",
     )
@@ -623,7 +633,10 @@ def test_find_due_skips_non_pend_jobs() -> None:
 def test_find_due_skips_pend_with_empty_next_fire_time() -> None:
     now = dt.datetime(2026, 4, 28, 12, 0)
     job = Job(
-        id="x", kind=KIND_PERIODIC, schedule="* * * * *", description="d",
+        id="x",
+        kind=KIND_PERIODIC,
+        schedule="* * * * *",
+        description="d",
         next_fire_time="",
     )
 
@@ -633,7 +646,10 @@ def test_find_due_skips_pend_with_empty_next_fire_time() -> None:
 def test_find_due_skips_pend_with_unparseable_iso_timestamp() -> None:
     now = dt.datetime(2026, 4, 28, 12, 0)
     job = Job(
-        id="x", kind=KIND_PERIODIC, schedule="* * * * *", description="d",
+        id="x",
+        kind=KIND_PERIODIC,
+        schedule="* * * * *",
+        description="d",
         next_fire_time="not iso",
     )
 
@@ -647,19 +663,32 @@ def test_find_due_continues_past_skipped_jobs_to_collect_later_due_ones() -> Non
     # short-circuit and miss the due job.
     now = dt.datetime(2026, 4, 28, 12, 0)
     skipped_status = Job(
-        id="a", kind=KIND_PERIODIC, schedule="* * * * *", description="d",
-        status=STATUS_FIRED, next_fire_time="2026-04-28T11:00",
+        id="a",
+        kind=KIND_PERIODIC,
+        schedule="* * * * *",
+        description="d",
+        status=STATUS_FIRED,
+        next_fire_time="2026-04-28T11:00",
     )
     skipped_no_time = Job(
-        id="b", kind=KIND_PERIODIC, schedule="* * * * *", description="d",
+        id="b",
+        kind=KIND_PERIODIC,
+        schedule="* * * * *",
+        description="d",
         next_fire_time="",
     )
     skipped_bad_iso = Job(
-        id="c", kind=KIND_PERIODIC, schedule="* * * * *", description="d",
+        id="c",
+        kind=KIND_PERIODIC,
+        schedule="* * * * *",
+        description="d",
         next_fire_time="not iso",
     )
     real_due = Job(
-        id="due", kind=KIND_PERIODIC, schedule="* * * * *", description="d",
+        id="due",
+        kind=KIND_PERIODIC,
+        schedule="* * * * *",
+        description="d",
         next_fire_time="2026-04-28T11:00",
     )
 
@@ -738,7 +767,8 @@ def test_update_fields_raises_when_target_field_does_not_exist(
     p = _write_jobs(tmp_path, _job_section())
 
     with pytest.raises(
-        ValueError, match=r"^user-greet-2026-04-28: field '- Garbage:' not found",
+        ValueError,
+        match=r"^user-greet-2026-04-28: field '- Garbage:' not found",
     ):
         update_fields(p, {"user-greet-2026-04-28": {"Garbage": "x"}})
 
@@ -940,6 +970,7 @@ def test_purge_stale_logs_summary_when_jobs_are_purged(
     p = _write_jobs(tmp_path, section)
 
     import logging
+
     with caplog.at_level(logging.INFO, logger="physiclaw.agent.engine.job_store"):
         with freeze_time("2026-04-28T00:00"):
             purge_stale(p)

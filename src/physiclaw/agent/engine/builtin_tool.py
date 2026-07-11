@@ -6,12 +6,25 @@ turn). Other handlers are stateless. Source of truth for the registry is
 `build_registry()` at the bottom; insertion order there determines wire
 order in `tools[]` and exploits LLM position bias.
 """
+
 import asyncio
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
-from physiclaw.agent.engine import jobs, memory, pitfalls, scratchpad, screen_layout, skill
-from physiclaw.agent.engine.job_store import KIND_ONE_TIME, KIND_PERIODIC, NEVER, load_jobs
+from physiclaw.agent.engine import (
+    jobs,
+    memory,
+    pitfalls,
+    scratchpad,
+    screen_layout,
+    skill,
+)
+from physiclaw.agent.engine.job_store import (
+    KIND_ONE_TIME,
+    KIND_PERIODIC,
+    NEVER,
+    load_jobs,
+)
 from physiclaw.agent.engine.session import Session
 from physiclaw.agent.runtime.sentinel import IDLE, STATUSES
 
@@ -121,7 +134,9 @@ async def _handle_list_jobs(_session: Session, args: dict) -> str:
     lines = [f"{len(rows)} job(s):"]
     for j in rows:
         nxt = j.next_fire_time or NEVER
-        lines.append(f"  [{j.kind}] [{j.status}] {j.id} — {j.description} (next: {nxt})")
+        lines.append(
+            f"  [{j.kind}] [{j.status}] {j.id} — {j.description} (next: {nxt})"
+        )
     return "\n".join(lines)
 
 
@@ -140,9 +155,7 @@ async def _handle_wait(_session: Session, args: dict) -> str:
 async def _handle_end_session(session: Session, args: dict) -> str:
     status = args["status"]
     if status not in STATUSES:
-        raise ValueError(
-            f"status must be one of {sorted(STATUSES)}, got {status!r}"
-        )
+        raise ValueError(f"status must be one of {sorted(STATUSES)}, got {status!r}")
     session.sentinel_status = status
     session.sentinel_recap = args.get("recap", "").strip()
     return f"session closing: {status}"
@@ -161,15 +174,19 @@ async def _handle_add_pitfall(session: Session, args: dict) -> str:
 async def _handle_report_screen_layout(session: Session, args: dict) -> str:
     was_complete = screen_layout.is_learned()
     result = screen_layout.record(
-        args.get("page", ""), args.get("field", ""),
-        args.get("bbox") or [], args.get("app"),
+        args.get("page", ""),
+        args.get("field", ""),
+        args.get("bbox") or [],
+        args.get("app"),
     )
     # If THIS call finished first-run setup, close the session cleanly and ask
     # the engine to restart — the fresh SYSTEM prompt then carries the layout
     # so the agent handles the original request with it loaded.
     if not was_complete and screen_layout.is_learned():
         session.sentinel_status = IDLE
-        session.sentinel_recap = "first-run screen layout captured — restarting to load it"
+        session.sentinel_recap = (
+            "first-run screen layout captured — restarting to load it"
+        )
         session.restart_for_setup = True
     return result
 
@@ -177,6 +194,7 @@ async def _handle_report_screen_layout(session: Session, args: dict) -> str:
 def _handle_skill_factory(skill_registry: dict[str, skill.Skill]) -> Handler:
     async def _handle(_session: Session, args: dict) -> str:
         return skill.dispatch(skill_registry, args)
+
     return _handle
 
 
@@ -336,7 +354,10 @@ _CREATE_JOB = LocalTool(
         "properties": {
             "id": {"type": "string", "description": "lowercase / digits / hyphens"},
             "description": {"type": "string"},
-            "schedule": {"type": "string", "description": "5-field cron (min hour dom mon dow)"},
+            "schedule": {
+                "type": "string",
+                "description": "5-field cron (min hour dom mon dow)",
+            },
             "context": {"type": "string", "description": "at least 10 chars"},
             "kind": {"type": "string", "enum": [KIND_ONE_TIME, KIND_PERIODIC]},
         },
@@ -416,7 +437,10 @@ _UPDATE_MEMORY = LocalTool(
         "type": "object",
         "properties": {
             "old": {"type": "string", "description": "Exact substring to replace."},
-            "new": {"type": "string", "description": "Replacement; empty string deletes the line."},
+            "new": {
+                "type": "string",
+                "description": "Replacement; empty string deletes the line.",
+            },
         },
         "required": ["old", "new"],
     },
@@ -661,5 +685,3 @@ def build_registry(
             handler=_handle_skill_factory(skill_registry),
         )
     return tools
-
-

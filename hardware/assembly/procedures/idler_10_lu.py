@@ -69,15 +69,15 @@ from hardware.parts.standard.pulley import Pulley2GT20T, flange_belt_h
 from hardware.parts.standard.ring import SPECS as RING_SPECS, Ring
 from hardware.parts.standard.screw import SHOULDER_DIMS, Screw
 
-RING_SPEC          = "M5x8x0.5"
-LEFT_SHOULDER_LEN  = 20    # mm — covers ring + idler + ring + idler (18 mm)
-RIGHT_SHOULDER_LEN = 10    # mm — covers ring + idler (9 mm)
-FRAME_BHCS_LEN    = 10    # mm — BHCS M5 underhead length (center cbore, frame mount)
-EXPLODE_SEPARATION =  5    # mm — exploded: air between adjacent parts in a stack
-SCREW_GAP          = 12    # mm — exploded: taller-stack top → shared shank-tip line
-NUT_GAP            = 15    # mm — exploded: block side face → side-pocket nut center, along ±X
-TOP_NUT_LIFT       = 44    # mm — exploded: block top face → top-pocket nut center, along +Z
-                           #      (clears the idler stacks so the nut reads as a separate step)
+RING_SPEC = "M5x8x0.5"
+LEFT_SHOULDER_LEN = 20  # mm — covers ring + idler + ring + idler (18 mm)
+RIGHT_SHOULDER_LEN = 10  # mm — covers ring + idler (9 mm)
+FRAME_BHCS_LEN = 10  # mm — BHCS M5 underhead length (center cbore, frame mount)
+EXPLODE_SEPARATION = 5  # mm — exploded: air between adjacent parts in a stack
+SCREW_GAP = 12  # mm — exploded: taller-stack top → shared shank-tip line
+NUT_GAP = 15  # mm — exploded: block side face → side-pocket nut center, along ±X
+TOP_NUT_LIFT = 44  # mm — exploded: block top face → top-pocket nut center, along +Z
+#      (clears the idler stacks so the nut reads as a separate step)
 
 
 class ID10Lu(BaseAssembly):
@@ -85,25 +85,33 @@ class ID10Lu(BaseAssembly):
 
     def _build(self) -> Compound:
         block = IdlerMountMotor().build()
-        ring_h        = RING_SPECS[RING_SPEC]["height"]
+        ring_h = RING_SPECS[RING_SPEC]["height"]
         nut_thickness = NUT_SPECS["square"]["M4"]["thickness"]
-        block_top_z   = block_thickness / 2
-        block_side_x  = block_length / 2
-        thread_len    = SHOULDER_DIMS["M4"]["thread_len"]
+        block_top_z = block_thickness / 2
+        block_side_x = block_length / 2
+        thread_len = SHOULDER_DIMS["M4"]["thread_len"]
 
         idler = lambda: Pulley2GT20T(kind="idler", toothed=False).build()
-        ring  = lambda: Ring(RING_SPEC).build()
+        ring = lambda: Ring(RING_SPEC).build()
         columns = [
-            (-outer_hole_offset, LEFT_SHOULDER_LEN, [
-                (ring,  ring_h),
-                (idler, flange_belt_h),
-                (ring,  ring_h),
-                (idler, flange_belt_h),
-            ]),
-            (+outer_hole_offset, RIGHT_SHOULDER_LEN, [
-                (ring,  ring_h),
-                (idler, flange_belt_h),
-            ]),
+            (
+                -outer_hole_offset,
+                LEFT_SHOULDER_LEN,
+                [
+                    (ring, ring_h),
+                    (idler, flange_belt_h),
+                    (ring, ring_h),
+                    (idler, flange_belt_h),
+                ],
+            ),
+            (
+                +outer_hole_offset,
+                RIGHT_SHOULDER_LEN,
+                [
+                    (ring, ring_h),
+                    (idler, flange_belt_h),
+                ],
+            ),
         ]
 
         sep = EXPLODE_SEPARATION if self.exploded else 0
@@ -155,9 +163,7 @@ class ID10Lu(BaseAssembly):
         for x, _, _ in columns:
             nut = Nut("square", "M4").build().rotate(Axis.X, 180)
             side_sign = 1 if x > 0 else -1
-            nut_x = (
-                side_sign * (block_side_x + NUT_GAP) if self.exploded else x
-            )
+            nut_x = side_sign * (block_side_x + NUT_GAP) if self.exploded else x
             # After the flip the part spans local z ∈ [-thickness, 0]; offset
             # by +thickness so the chamfered face lands at the pocket floor.
             nut.move(Location((nut_x, 0, nut_bottom_z + nut_thickness)))

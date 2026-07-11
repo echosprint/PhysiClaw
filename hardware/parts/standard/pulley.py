@@ -7,48 +7,48 @@ from hardware.parts.base import BaseStandardPart
 # ── Parameters ────────────────────────────────────────────────────────────────
 # GT2 timing belt geometry — shared between the motor pulley (driven) and a
 # free-spinning idler (used to keep tension on the belt run).
-flange_diameter = 18   * MM    # outer flange OD
-bore_diameter   =  5   * MM    # through-bore for the motor shaft
-flange_belt_h   =  8.5 * MM    # axial height of the flange + belt + flange stack
+flange_diameter = 18 * MM  # outer flange OD
+bore_diameter = 5 * MM  # through-bore for the motor shaft
+flange_belt_h = 8.5 * MM  # axial height of the flange + belt + flange stack
 
-belt_width      =  6   * MM    # toothed band axial length
-tooth_pitch     =  2   * MM    # 2GT
-tooth_count     = 20
-tooth_depth     = 0.76 * MM    # GT2 tooth-gap radial depth
+belt_width = 6 * MM  # toothed band axial length
+tooth_pitch = 2 * MM  # 2GT
+tooth_count = 20
+tooth_depth = 0.76 * MM  # GT2 tooth-gap radial depth
 
 # Derived: pitch diameter on which the belt sits (D = N·p / π).
-pitch_diameter  = tooth_count * tooth_pitch / math.pi
+pitch_diameter = tooth_count * tooth_pitch / math.pi
 
 # Hub: only on the motor pulley. Adds shaft-clamp length and carries an
 # M3 tapped set-screw that presses against the motor's D-flat. The hub
 # sits below the flange/belt stack (z = 0 is the motor-facing face).
-hub_diameter    = 18 * MM
-hub_height      =  7.5 * MM
-set_screw_d     =  3   * MM    # M3 — threads aren't modeled; the screw body is a plain rod
-set_screw_z     = hub_height / 2
-set_screw_length    = 5   * MM    # M3 × 5 grub screw
-set_screw_hex_s     = 1.5 * MM    # hex drive across-flats (ISO 4026 for M3)
+hub_diameter = 18 * MM
+hub_height = 7.5 * MM
+set_screw_d = 3 * MM  # M3 — threads aren't modeled; the screw body is a plain rod
+set_screw_z = hub_height / 2
+set_screw_length = 5 * MM  # M3 × 5 grub screw
+set_screw_hex_s = 1.5 * MM  # hex drive across-flats (ISO 4026 for M3)
 set_screw_hex_depth = 1.5 * MM
 
 # Bearing-look ring grooves: thin annular indents on the idler's top and
 # bottom faces — visual race-separator lines. Skipped on the pulley (its
 # bottom face is hidden against the motor body).
-ring_grooves    = [
+ring_grooves = [
     (6.2 * MM, 6.4 * MM),
 ]
-ring_depth      = 0.3 * MM
+ring_depth = 0.3 * MM
 
 # Lead-in chamfer on the bore openings (top + bottom faces) so the part
 # slips onto its shaft without scraping.
-bore_chamfer    = 0.2 * MM
+bore_chamfer = 0.2 * MM
 
 # Lead-in chamfer where each set-screw hole breaks through the hub OD.
 set_screw_chamfer = 0.3 * MM
 
 # Tolerances used by edge-picking filters in `_build`.
-FLOAT_TOL       = 0.01 * MM    # exact-match slack for face Z + radius
-chamfer_z_tol   = 1.5  * MM    # axial window around set_screw_z
-chamfer_r_tol   = 1.0  * MM    # radial slack inside hub_r when picking the entry curve
+FLOAT_TOL = 0.01 * MM  # exact-match slack for face Z + radius
+chamfer_z_tol = 1.5 * MM  # axial window around set_screw_z
+chamfer_r_tol = 1.0 * MM  # radial slack inside hub_r when picking the entry curve
 
 KINDS = ("pulley", "idler")
 
@@ -69,10 +69,8 @@ def _build_set_screw():
         with BuildSketch(Plane.XY.offset(set_screw_length)):
             RegularPolygon(radius=hex_circumradius, side_count=6)
         extrude(amount=-set_screw_hex_depth, mode=Mode.SUBTRACT)
-    return (
-        ss.part
-        .rotate(Axis.X, -90)
-        .translate((0, hub_diameter / 2 - set_screw_length, set_screw_z))
+    return ss.part.rotate(Axis.X, -90).translate(
+        (0, hub_diameter / 2 - set_screw_length, set_screw_z)
     )
 
 
@@ -143,7 +141,7 @@ class Pulley2GT20T(BaseStandardPart):
             if self.toothed:
                 overshoot = 0.5 * MM
                 radial_center = pitch_diameter / 2 - tooth_depth / 2 + overshoot / 2
-                chord = math.pi * pitch_diameter / tooth_count / 2   # half-pitch chord
+                chord = math.pi * pitch_diameter / tooth_count / 2  # half-pitch chord
                 band_z_center = hub_h + flange_thick + belt_width / 2
                 with Locations((0, 0, band_z_center)):
                     with PolarLocations(radial_center, tooth_count):
@@ -170,8 +168,12 @@ class Pulley2GT20T(BaseStandardPart):
             # screw wedges the round side of the shaft against it.
             if is_pulley:
                 hole_planes = [
-                    Plane(origin=(0, 0, set_screw_z), x_dir=(1, 0, 0), z_dir=(0, 1, 0)),   # +Y
-                    Plane(origin=(0, 0, set_screw_z), x_dir=(0, 1, 0), z_dir=(1, 0, 0)),   # +X
+                    Plane(
+                        origin=(0, 0, set_screw_z), x_dir=(1, 0, 0), z_dir=(0, 1, 0)
+                    ),  # +Y
+                    Plane(
+                        origin=(0, 0, set_screw_z), x_dir=(0, 1, 0), z_dir=(1, 0, 0)
+                    ),  # +X
                 ]
                 for plane in hole_planes:
                     with BuildSketch(plane):
@@ -191,10 +193,13 @@ class Pulley2GT20T(BaseStandardPart):
             # hole) have different radii or different Z and are filtered out.
             bore_r = bore_diameter / 2
             bore_mouths = [
-                e for e in p.edges().filter_by(GeomType.CIRCLE)
+                e
+                for e in p.edges().filter_by(GeomType.CIRCLE)
                 if abs(e.radius - bore_r) < FLOAT_TOL
-                and (abs(e.center().Z) < FLOAT_TOL
-                     or abs(e.center().Z - total_h) < FLOAT_TOL)
+                and (
+                    abs(e.center().Z) < FLOAT_TOL
+                    or abs(e.center().Z - total_h) < FLOAT_TOL
+                )
             ]
             chamfer(bore_mouths, length=bore_chamfer)
 
@@ -208,8 +213,10 @@ class Pulley2GT20T(BaseStandardPart):
                 entry_edges = []
                 for e in p.edges().filter_by(GeomType.BSPLINE):
                     c = e.center()
-                    if (abs(c.Z - set_screw_z) < chamfer_z_tol
-                            and (c.X ** 2 + c.Y ** 2) ** 0.5 > hub_r - chamfer_r_tol):
+                    if (
+                        abs(c.Z - set_screw_z) < chamfer_z_tol
+                        and (c.X**2 + c.Y**2) ** 0.5 > hub_r - chamfer_r_tol
+                    ):
                         entry_edges.append(e)
                 chamfer(entry_edges, length=set_screw_chamfer)
 
@@ -218,7 +225,7 @@ class Pulley2GT20T(BaseStandardPart):
             # (90° apart in top view) so the exported STEP shows both screws
             # seated in their holes.
             screw_y = _build_set_screw()
-            screw_x = screw_y.rotate(Axis.Z, -90)   # +Y screw → +X screw
+            screw_x = screw_y.rotate(Axis.Z, -90)  # +Y screw → +X screw
             return Compound(
                 label="pulley",
                 children=[p.part, screw_y, screw_x],

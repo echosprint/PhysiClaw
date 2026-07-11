@@ -4,6 +4,7 @@ The `physiclaw_home` autouse fixture (in `tests/conftest.py`) makes
 ``paths.HOME`` a fresh tmp dir per test. We populate it with placeholder
 files to verify deletion vs. preservation.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -41,7 +42,9 @@ def populated_home(physiclaw_home: Path) -> Path:
 # ---------- --data ----------
 
 
-def test_uninstall_data_yes_removes_home(populated_home: Path, runner: CliRunner) -> None:
+def test_uninstall_data_yes_removes_home(
+    populated_home: Path, runner: CliRunner
+) -> None:
     result = runner.invoke(_make_app(), ["--data", "--yes"])
 
     assert result.exit_code == 0, result.stdout
@@ -50,7 +53,9 @@ def test_uninstall_data_yes_removes_home(populated_home: Path, runner: CliRunner
     assert "uv tool uninstall physiclaw" in result.stdout
 
 
-def test_uninstall_all_is_alias_for_data(populated_home: Path, runner: CliRunner) -> None:
+def test_uninstall_all_is_alias_for_data(
+    populated_home: Path, runner: CliRunner
+) -> None:
     result = runner.invoke(_make_app(), ["--all", "--yes"])
 
     assert result.exit_code == 0
@@ -58,7 +63,8 @@ def test_uninstall_all_is_alias_for_data(populated_home: Path, runner: CliRunner
 
 
 def test_uninstall_data_prompts_when_no_yes(
-    populated_home: Path, runner: CliRunner,
+    populated_home: Path,
+    runner: CliRunner,
 ) -> None:
     result = runner.invoke(_make_app(), ["--data"], input="y\n")
 
@@ -78,7 +84,8 @@ def test_uninstall_data_aborts_on_no(populated_home: Path, runner: CliRunner) ->
 
 
 def test_uninstall_config_removes_only_config(
-    populated_home: Path, runner: CliRunner,
+    populated_home: Path,
+    runner: CliRunner,
 ) -> None:
     result = runner.invoke(_make_app(), ["--config", "--yes"])
 
@@ -90,7 +97,8 @@ def test_uninstall_config_removes_only_config(
 
 
 def test_uninstall_config_when_missing_skips_gracefully(
-    physiclaw_home: Path, runner: CliRunner,
+    physiclaw_home: Path,
+    runner: CliRunner,
 ) -> None:
     # No config.toml created.
     result = runner.invoke(_make_app(), ["--config", "--yes"])
@@ -103,7 +111,8 @@ def test_uninstall_config_when_missing_skips_gracefully(
 
 
 def test_uninstall_dry_run_does_not_delete(
-    populated_home: Path, runner: CliRunner,
+    populated_home: Path,
+    runner: CliRunner,
 ) -> None:
     result = runner.invoke(_make_app(), ["--data", "--dry-run"])
 
@@ -115,7 +124,8 @@ def test_uninstall_dry_run_does_not_delete(
 
 
 def test_uninstall_dry_run_with_config_does_not_delete(
-    populated_home: Path, runner: CliRunner,
+    populated_home: Path,
+    runner: CliRunner,
 ) -> None:
     cfg = populated_home / "config.toml"
     result = runner.invoke(_make_app(), ["--config", "--dry-run"])
@@ -129,7 +139,8 @@ def test_uninstall_dry_run_with_config_does_not_delete(
 
 
 def test_uninstall_interactive_yes_removes_home(
-    populated_home: Path, runner: CliRunner,
+    populated_home: Path,
+    runner: CliRunner,
 ) -> None:
     # First prompt: "Remove everything?" → y; Second: "Remove all PhysiClaw data?" → y
     result = runner.invoke(_make_app(), [], input="y\ny\n")
@@ -139,7 +150,8 @@ def test_uninstall_interactive_yes_removes_home(
 
 
 def test_uninstall_interactive_first_no_keeps_data(
-    populated_home: Path, runner: CliRunner,
+    populated_home: Path,
+    runner: CliRunner,
 ) -> None:
     result = runner.invoke(_make_app(), [], input="n\n")
 
@@ -150,7 +162,8 @@ def test_uninstall_interactive_first_no_keeps_data(
 
 
 def test_uninstall_interactive_no_home_skips_gracefully(
-    physiclaw_home: Path, runner: CliRunner,
+    physiclaw_home: Path,
+    runner: CliRunner,
 ) -> None:
     # Remove the auto-created home dir to simulate a fresh box.
     physiclaw_home.rmdir()
@@ -167,7 +180,8 @@ def test_uninstall_interactive_no_home_skips_gracefully(
 
 
 def test_final_reminder_prints_even_when_nothing_done(
-    populated_home: Path, runner: CliRunner,
+    populated_home: Path,
+    runner: CliRunner,
 ) -> None:
     # User declines the interactive prompt — we still want the manual reminder.
     result = runner.invoke(_make_app(), [], input="n\n")
@@ -176,7 +190,8 @@ def test_final_reminder_prints_even_when_nothing_done(
 
 
 def test_final_reminder_prints_after_dry_run(
-    populated_home: Path, runner: CliRunner,
+    populated_home: Path,
+    runner: CliRunner,
 ) -> None:
     result = runner.invoke(_make_app(), ["--data", "--dry-run"])
 
@@ -187,7 +202,8 @@ def test_final_reminder_prints_after_dry_run(
 
 
 def test_data_wins_over_config_when_both_passed(
-    populated_home: Path, runner: CliRunner,
+    populated_home: Path,
+    runner: CliRunner,
 ) -> None:
     result = runner.invoke(_make_app(), ["--data", "--config", "--yes"])
 
@@ -199,7 +215,8 @@ def test_data_wins_over_config_when_both_passed(
 
 
 def test_uninstall_config_uses_config_module_path(
-    populated_home: Path, runner: CliRunner,
+    populated_home: Path,
+    runner: CliRunner,
 ) -> None:
     expected = _config.config_path()
     assert expected.exists()  # populated_home seeded it

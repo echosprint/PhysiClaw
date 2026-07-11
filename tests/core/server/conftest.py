@@ -4,6 +4,7 @@
 test can verify both the wire layout (path + methods) and the runtime
 dispatch (handler invocation with state args).
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -22,6 +23,7 @@ class FakeMcp:
         def deco(fn):
             self.routes.append((path, tuple(methods), fn))
             return fn
+
         return deco
 
     def get(self, path: str, method: str = "GET"):

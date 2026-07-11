@@ -6,6 +6,7 @@ message array the engine hands the provider, and asserts the CLI's
 `prompt system` / `prompt request` output reproduces it byte-for-byte — so the
 dump can never drift from what the running agent actually sends.
 """
+
 from __future__ import annotations
 
 import datetime as _dt
@@ -104,8 +105,11 @@ class _CaptureProvider:
             content="",
             tool_calls=[
                 ToolCall(id="t1", name="note", arguments={"summary": "done"}),
-                ToolCall(id="t2", name="end_session",
-                         arguments={"status": DONE, "recap": "fin"}),
+                ToolCall(
+                    id="t2",
+                    name="end_session",
+                    arguments={"status": DONE, "recap": "fin"},
+                ),
             ],
             finish_reason=FinishReason.TOOL_CALLS,
             usage=Usage(),
@@ -118,6 +122,7 @@ class _CaptureProvider:
 def _aret(value):
     async def _coro(*_a, **_k):
         return value
+
     return _coro
 
 
@@ -129,7 +134,9 @@ def _content(msg) -> str:
     content = msg.content
     if isinstance(content, str):
         return content
-    return "\n".join(getattr(b, "text", None) or f"[{type(b).__name__}]" for b in content)
+    return "\n".join(
+        getattr(b, "text", None) or f"[{type(b).__name__}]" for b in content
+    )
 
 
 async def test_cli_request_matches_engine_turn0(monkeypatch) -> None:
@@ -147,7 +154,9 @@ async def test_cli_request_matches_engine_turn0(monkeypatch) -> None:
 
     trigger = Trigger(description="phone screen changed", source="phone")
     await engine_mod._run_session(
-        [trigger], model_ref="fake/fake-model", session=Session(),
+        [trigger],
+        model_ref="fake/fake-model",
+        session=Session(),
     )
 
     engine_req = capture.captured

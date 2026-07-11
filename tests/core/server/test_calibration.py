@@ -2,6 +2,7 @@
 
 `fake_mcp` and `async_request` fixtures live in `conftest.py`.
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -16,8 +17,11 @@ pytestmark = [pytest.mark.integration]
 
 def test_calibration_register_wires_all_routes(fake_mcp) -> None:
     calib_reg.register(
-        fake_mcp, physiclaw=MagicMock(), bridge=MagicMock(),
-        calib=MagicMock(), phone=MagicMock(),
+        fake_mcp,
+        physiclaw=MagicMock(),
+        bridge=MagicMock(),
+        calib=MagicMock(),
+        phone=MagicMock(),
     )
 
     expected = {
@@ -37,7 +41,9 @@ def test_calibration_register_wires_all_routes(fake_mcp) -> None:
 
 @pytest.mark.asyncio
 async def test_calibration_routes_forward_to_handlers(
-    fake_mcp, async_request, mocker,
+    fake_mcp,
+    async_request,
+    mocker,
 ) -> None:
     handlers = [
         "handle_measure_viewport_shift",
@@ -53,6 +59,7 @@ async def test_calibration_routes_forward_to_handlers(
 
     async def _ok(*a, **kw):
         return "ok"
+
     for s in spies.values():
         s.side_effect = _ok
 

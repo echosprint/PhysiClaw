@@ -32,8 +32,10 @@ from hardware.assembly.procedures.board_31_tube_tnut import BO31TubeTnut
 from hardware.assembly.projection import Camera, MAIN_FRAME_VIEW
 from hardware.parts.custom import tube_holder as TH
 
-TH_X    = -65 * MM  # position along the extrusion (-X side; socket boss points world -Y = up)
-EXPLODE = 60        # mm — exploded: holder sub-assembly lifted off along +Z
+TH_X = (
+    -65 * MM
+)  # position along the extrusion (-X side; socket boss points world -Y = up)
+EXPLODE = 60  # mm — exploded: holder sub-assembly lifted off along +Z
 
 # board_31 sub-assembly (TubeHolder native frame) → mounted on the top short 2040's
 # +Z side face. 180° about Z points the socket boss along world -Y (physically up),

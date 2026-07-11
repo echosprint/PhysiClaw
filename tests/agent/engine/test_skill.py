@@ -7,6 +7,7 @@ paths.skills_dir()), both folder `SKILL.md`. The autouse `_skill_roots`
 fixture re-points all three at per-test tmp dirs. The cwd is NOT a discovery
 root; the fixture still chdirs to an empty tmp for hygiene.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -28,9 +29,7 @@ from physiclaw.agent.engine.skill import (
 
 
 @pytest.fixture(autouse=True)
-def _skill_roots(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> tuple[Path, Path]:
+def _skill_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
     """Per-test builtin + official + home + cwd skill roots.
 
     Re-points all three real roots at empty tmp dirs so the shipped
@@ -53,7 +52,10 @@ def _skill_roots(
 
 
 def _write_skill(
-    root: Path, name: str, *, description: str = "do something",
+    root: Path,
+    name: str,
+    *,
+    description: str = "do something",
     body: str = "Workflow steps here.",
     extra_files: dict[str, str] | None = None,
 ) -> Path:
@@ -126,9 +128,7 @@ def test_discover_uses_directory_name_when_frontmatter_lacks_name(
     home, _ = _skill_roots
     skill_dir = home / "no-name"
     skill_dir.mkdir(parents=True)
-    (skill_dir / "SKILL.md").write_text(
-        "---\ndescription: only desc\n---\nbody\n"
-    )
+    (skill_dir / "SKILL.md").write_text("---\ndescription: only desc\n---\nbody\n")
 
     out = discover()
 
@@ -136,7 +136,8 @@ def test_discover_uses_directory_name_when_frontmatter_lacks_name(
 
 
 def test_discover_rejects_symlink_resolving_outside_root(
-    tmp_path: Path, _skill_roots,
+    tmp_path: Path,
+    _skill_roots,
 ) -> None:
     home, _ = _skill_roots
     home.mkdir()
@@ -170,7 +171,9 @@ def test_discover_strips_frontmatter_whitespace_from_description_and_body(
 # ---------- built-in flat-.md discovery ----------
 
 
-def _write_flat(name: str, *, description: str = "flat desc", body: str = "flat body") -> None:
+def _write_flat(
+    name: str, *, description: str = "flat desc", body: str = "flat body"
+) -> None:
     """Write a built-in-style flat `<name>.md` into the (monkeypatched) root."""
     root = skill_mod.BUILTIN_SKILLS_DIR
     root.mkdir(parents=True, exist_ok=True)
@@ -266,7 +269,9 @@ def test_discover_user_includes_official(_skill_roots) -> None:
 def test_official_and_user_clash_disambiguated(_skill_roots) -> None:
     # Same name in both roots → both kept, suffixed; neither shadows the other.
     home, _ = _skill_roots
-    _write_skill(skill_mod.OFFICIAL_SKILLS_DIR, "jd", description="official", body="off-body")
+    _write_skill(
+        skill_mod.OFFICIAL_SKILLS_DIR, "jd", description="official", body="off-body"
+    )
     _write_skill(home, "jd", description="user", body="user-body")
 
     out = discover_user_skills()
@@ -314,7 +319,9 @@ def test_render_builtin_empty_when_no_skills() -> None:
 
 def test_render_builtin_inlines_full_bodies() -> None:
     skills = {
-        "im": Skill(name="im", description="d", body="IM WORKFLOW", dir=Path("/"), flat=True),
+        "im": Skill(
+            name="im", description="d", body="IM WORKFLOW", dir=Path("/"), flat=True
+        ),
     }
 
     out = render_builtin(skills)
@@ -349,9 +356,7 @@ def test_dispatch_returns_body_for_known_skill(_skill_roots) -> None:
 
 
 def test_dispatch_raises_on_missing_name_arg() -> None:
-    with pytest.raises(
-        ValueError, match=r"^Skill call requires a 'name' argument$"
-    ):
+    with pytest.raises(ValueError, match=r"^Skill call requires a 'name' argument$"):
         dispatch({}, {})
 
 
@@ -373,9 +378,7 @@ def test_dispatch_raises_on_unknown_skill_name(_skill_roots) -> None:
 
 
 def test_dispatch_lists_none_when_no_skills_available() -> None:
-    with pytest.raises(
-        ValueError, match=r"^unknown skill 'x'\. Available: \(none\)$"
-    ):
+    with pytest.raises(ValueError, match=r"^unknown skill 'x'\. Available: \(none\)$"):
         dispatch({}, {"name": "x"})
 
 
@@ -411,7 +414,8 @@ def test_dispatch_loads_reference_when_reference_arg_present(
 ) -> None:
     home, _ = _skill_roots
     _write_skill(
-        home, "foo",
+        home,
+        "foo",
         extra_files={"references/spec.md": "spec contents here"},
     )
 
@@ -426,7 +430,8 @@ def test_dispatch_loads_reference_when_reference_arg_present(
 def test_load_reference_returns_file_contents(_skill_roots) -> None:
     home, _ = _skill_roots
     _write_skill(
-        home, "foo",
+        home,
+        "foo",
         extra_files={"references/note.md": "hi"},
     )
     skills = discover()
@@ -494,9 +499,7 @@ def test_split_frontmatter_skips_lines_without_colon() -> None:
 
 
 def test_split_frontmatter_handles_value_containing_colons() -> None:
-    fm, _ = _split_frontmatter(
-        "---\nurl: https://example.com:443\n---\nbody\n"
-    )
+    fm, _ = _split_frontmatter("---\nurl: https://example.com:443\n---\nbody\n")
 
     assert fm == {"url": "https://example.com:443"}
 
@@ -516,7 +519,9 @@ def test_render_section_empty_when_no_skills() -> None:
 
 def test_render_section_lists_each_skill_as_bullet() -> None:
     skills = {
-        "foo": Skill(name="foo", description="do foo", body="SECRET STEPS", dir=Path("/")),
+        "foo": Skill(
+            name="foo", description="do foo", body="SECRET STEPS", dir=Path("/")
+        ),
         "bar": Skill(name="bar", description="do bar", body="", dir=Path("/")),
     }
 
@@ -538,8 +543,12 @@ def test_render_section_uses_no_description_placeholder_when_empty() -> None:
 
 def test_render_section_splits_official_and_user_subsections() -> None:
     skills = {
-        "jd": Skill(name="jd", description="off", body="", dir=Path("/"), source="official"),
-        "taobao": Skill(name="taobao", description="usr", body="", dir=Path("/"), source="user"),
+        "jd": Skill(
+            name="jd", description="off", body="", dir=Path("/"), source="official"
+        ),
+        "taobao": Skill(
+            name="taobao", description="usr", body="", dir=Path("/"), source="user"
+        ),
     }
 
     out = render_section(skills)
@@ -555,9 +564,15 @@ def test_render_section_splits_official_and_user_subsections() -> None:
 def test_render_section_orders_builtin_official_user() -> None:
     # The Claude merged view can carry all three sources at once.
     skills = {
-        "im": Skill(name="im", description="b", body="", dir=Path("/"), source="built-in"),
-        "jd": Skill(name="jd", description="o", body="", dir=Path("/"), source="official"),
-        "taobao": Skill(name="taobao", description="u", body="", dir=Path("/"), source="user"),
+        "im": Skill(
+            name="im", description="b", body="", dir=Path("/"), source="built-in"
+        ),
+        "jd": Skill(
+            name="jd", description="o", body="", dir=Path("/"), source="official"
+        ),
+        "taobao": Skill(
+            name="taobao", description="u", body="", dir=Path("/"), source="user"
+        ),
     }
 
     out = render_section(skills)

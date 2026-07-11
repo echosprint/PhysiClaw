@@ -1,4 +1,5 @@
 """Tests for `physiclaw.agent.hooks.cron`."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -9,7 +10,11 @@ from freezegun import freeze_time
 
 from physiclaw.agent.engine import job_store
 from physiclaw.agent.hooks import cron
-from physiclaw.agent.hooks.cron import _build_trigger_description, _cli, cron as cron_hook
+from physiclaw.agent.hooks.cron import (
+    _build_trigger_description,
+    _cli,
+    cron as cron_hook,
+)
 from physiclaw.agent.engine.job_store import (
     KIND_ONE_TIME,
     KIND_PERIODIC,
@@ -21,19 +26,21 @@ from physiclaw.agent.engine.job_store import (
 
 
 @pytest.fixture(autouse=True)
-def _jobs_path(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Path:
+def _jobs_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     p = tmp_path / "jobs.md"
     monkeypatch.setattr(cron, "JOBS_PATH", p)
     monkeypatch.setattr(job_store, "JOBS_PATH", p)
     return p
 
 
-def _job_text(*, job_id: str, status: str = STATUS_PEND,
-              kind: str = "periodic",
-              schedule: str = "0 7 * * *",
-              next_fire_time: str = "2026-04-29T07:00") -> str:
+def _job_text(
+    *,
+    job_id: str,
+    status: str = STATUS_PEND,
+    kind: str = "periodic",
+    schedule: str = "0 7 * * *",
+    next_fire_time: str = "2026-04-29T07:00",
+) -> str:
     return dedent(
         f"""\
         ## {job_id}
@@ -56,8 +63,11 @@ def _job_text(*, job_id: str, status: str = STATUS_PEND,
 
 def test_build_trigger_description_includes_job_block_and_done_fail_lines() -> None:
     j = Job(
-        id="x", kind=KIND_PERIODIC, schedule="* * * * *",
-        description="Do thing", context="some context",
+        id="x",
+        kind=KIND_PERIODIC,
+        schedule="* * * * *",
+        description="Do thing",
+        context="some context",
     )
 
     out = _build_trigger_description([j])
@@ -71,8 +81,20 @@ def test_build_trigger_description_includes_job_block_and_done_fail_lines() -> N
 
 
 def test_build_trigger_description_handles_multiple_jobs() -> None:
-    a = Job(id="a", kind=KIND_PERIODIC, schedule="* * * * *", description="d-a", context="ctx")
-    b = Job(id="b", kind=KIND_ONE_TIME, schedule="* * * * *", description="d-b", context="ctx")
+    a = Job(
+        id="a",
+        kind=KIND_PERIODIC,
+        schedule="* * * * *",
+        description="d-a",
+        context="ctx",
+    )
+    b = Job(
+        id="b",
+        kind=KIND_ONE_TIME,
+        schedule="* * * * *",
+        description="d-b",
+        context="ctx",
+    )
 
     out = _build_trigger_description([a, b])
 
@@ -106,9 +128,7 @@ async def test_cron_returns_none_when_load_jobs_raises(
 @pytest.mark.asyncio
 async def test_cron_returns_none_when_no_due_jobs(_jobs_path: Path) -> None:
     _jobs_path.parent.mkdir(parents=True, exist_ok=True)
-    _jobs_path.write_text(
-        _job_text(job_id="future", next_fire_time="2027-01-01T00:00")
-    )
+    _jobs_path.write_text(_job_text(job_id="future", next_fire_time="2027-01-01T00:00"))
 
     with freeze_time("2026-04-28T07:00:00"):
         out = await cron_hook()
@@ -121,10 +141,14 @@ async def test_cron_fires_due_one_time_job_and_marks_fired(
     _jobs_path: Path,
 ) -> None:
     _jobs_path.parent.mkdir(parents=True, exist_ok=True)
-    _jobs_path.write_text(_job_text(
-        job_id="due-one", kind="one-time",
-        schedule="0 7 * * *", next_fire_time="2026-04-28T07:00",
-    ))
+    _jobs_path.write_text(
+        _job_text(
+            job_id="due-one",
+            kind="one-time",
+            schedule="0 7 * * *",
+            next_fire_time="2026-04-28T07:00",
+        )
+    )
 
     with freeze_time("2026-04-28T07:00:00"):
         trigger = await cron_hook()
@@ -143,10 +167,14 @@ async def test_cron_periodic_job_recomputes_next_fire(
     _jobs_path: Path,
 ) -> None:
     _jobs_path.parent.mkdir(parents=True, exist_ok=True)
-    _jobs_path.write_text(_job_text(
-        job_id="periodic", kind="periodic",
-        schedule="0 * * * *", next_fire_time="2026-04-28T07:00",
-    ))
+    _jobs_path.write_text(
+        _job_text(
+            job_id="periodic",
+            kind="periodic",
+            schedule="0 * * * *",
+            next_fire_time="2026-04-28T07:00",
+        )
+    )
 
     with freeze_time("2026-04-28T07:00:00"):
         await cron_hook()
@@ -160,8 +188,12 @@ async def test_cron_periodic_job_recomputes_next_fire(
 async def test_cron_multiple_due_jobs_combined_in_source(_jobs_path: Path) -> None:
     _jobs_path.parent.mkdir(parents=True, exist_ok=True)
     _jobs_path.write_text(
-        _job_text(job_id="job-a", schedule="0 7 * * *", next_fire_time="2026-04-28T07:00")
-        + _job_text(job_id="job-b", schedule="0 7 * * *", next_fire_time="2026-04-28T07:00")
+        _job_text(
+            job_id="job-a", schedule="0 7 * * *", next_fire_time="2026-04-28T07:00"
+        )
+        + _job_text(
+            job_id="job-b", schedule="0 7 * * *", next_fire_time="2026-04-28T07:00"
+        )
     )
 
     with freeze_time("2026-04-28T07:00:00"):
@@ -178,9 +210,13 @@ async def test_cron_logs_warning_when_purge_stale_raises(
     import logging
 
     _jobs_path.parent.mkdir(parents=True, exist_ok=True)
-    _jobs_path.write_text(_job_text(
-        job_id="x", schedule="0 7 * * *", next_fire_time="2027-01-01T07:00",
-    ))
+    _jobs_path.write_text(
+        _job_text(
+            job_id="x",
+            schedule="0 7 * * *",
+            next_fire_time="2027-01-01T07:00",
+        )
+    )
     mocker.patch.object(cron, "purge_stale", side_effect=RuntimeError("nope"))
 
     with caplog.at_level(logging.ERROR, logger="physiclaw.agent.hooks.cron"):
@@ -196,9 +232,13 @@ async def test_cron_still_fires_when_update_fields_raises(
     import logging
 
     _jobs_path.parent.mkdir(parents=True, exist_ok=True)
-    _jobs_path.write_text(_job_text(
-        job_id="due", schedule="0 7 * * *", next_fire_time="2026-04-28T07:00",
-    ))
+    _jobs_path.write_text(
+        _job_text(
+            job_id="due",
+            schedule="0 7 * * *",
+            next_fire_time="2026-04-28T07:00",
+        )
+    )
     mocker.patch.object(cron, "update_fields", side_effect=OSError("disk full"))
 
     with caplog.at_level(logging.ERROR, logger="physiclaw.agent.hooks.cron"):
@@ -208,10 +248,7 @@ async def test_cron_still_fires_when_update_fields_raises(
     # Trigger is still produced — better double-fire than miss.
     assert trigger is not None
     assert trigger.source == "cron:due"
-    assert any(
-        "failed to write fire times" in r.getMessage()
-        for r in caplog.records
-    )
+    assert any("failed to write fire times" in r.getMessage() for r in caplog.records)
 
 
 # ---------- CLI ----------
@@ -244,9 +281,13 @@ def test_cli_verify_lists_jobs(
     _jobs_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     _jobs_path.parent.mkdir(parents=True, exist_ok=True)
-    _jobs_path.write_text(_job_text(
-        job_id="alpha", schedule="0 7 * * *", next_fire_time="2026-04-29T07:00",
-    ))
+    _jobs_path.write_text(
+        _job_text(
+            job_id="alpha",
+            schedule="0 7 * * *",
+            next_fire_time="2026-04-29T07:00",
+        )
+    )
 
     rc = _run_cli(monkeypatch, "verify")
     out = capsys.readouterr().out
@@ -273,9 +314,13 @@ def test_cli_jobs_to_do_none(
     _jobs_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     _jobs_path.parent.mkdir(parents=True, exist_ok=True)
-    _jobs_path.write_text(_job_text(
-        job_id="x", schedule="0 7 * * *", next_fire_time="2026-04-29T07:00",
-    ))
+    _jobs_path.write_text(
+        _job_text(
+            job_id="x",
+            schedule="0 7 * * *",
+            next_fire_time="2026-04-29T07:00",
+        )
+    )
 
     rc = _run_cli(monkeypatch, "jobs-to-do")
 
@@ -287,10 +332,14 @@ def test_cli_jobs_to_do_lists_fired(
     _jobs_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     _jobs_path.parent.mkdir(parents=True, exist_ok=True)
-    _jobs_path.write_text(_job_text(
-        job_id="firedjob", status=STATUS_FIRED,
-        schedule="0 7 * * *", next_fire_time="2026-04-29T07:00",
-    ))
+    _jobs_path.write_text(
+        _job_text(
+            job_id="firedjob",
+            status=STATUS_FIRED,
+            schedule="0 7 * * *",
+            next_fire_time="2026-04-29T07:00",
+        )
+    )
 
     rc = _run_cli(monkeypatch, "jobs-to-do")
     out = capsys.readouterr().out
@@ -325,9 +374,13 @@ def test_cli_done_unknown_id(
     _jobs_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     _jobs_path.parent.mkdir(parents=True, exist_ok=True)
-    _jobs_path.write_text(_job_text(
-        job_id="real", schedule="0 7 * * *", next_fire_time="2026-04-29T07:00",
-    ))
+    _jobs_path.write_text(
+        _job_text(
+            job_id="real",
+            schedule="0 7 * * *",
+            next_fire_time="2026-04-29T07:00",
+        )
+    )
 
     rc = _run_cli(monkeypatch, "done", "nope")
 
@@ -351,10 +404,15 @@ def test_cli_done_one_time_marks_done(
     _jobs_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     _jobs_path.parent.mkdir(parents=True, exist_ok=True)
-    _jobs_path.write_text(_job_text(
-        job_id="ot", kind="one-time", status=STATUS_FIRED,
-        schedule="0 7 * * *", next_fire_time=NEVER,
-    ))
+    _jobs_path.write_text(
+        _job_text(
+            job_id="ot",
+            kind="one-time",
+            status=STATUS_FIRED,
+            schedule="0 7 * * *",
+            next_fire_time=NEVER,
+        )
+    )
 
     rc = _run_cli(monkeypatch, "done", "ot", "all", "good")
 
@@ -369,10 +427,15 @@ def test_cli_fail_one_time_marks_fail(
     _jobs_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     _jobs_path.parent.mkdir(parents=True, exist_ok=True)
-    _jobs_path.write_text(_job_text(
-        job_id="ot", kind="one-time", status=STATUS_FIRED,
-        schedule="0 7 * * *", next_fire_time=NEVER,
-    ))
+    _jobs_path.write_text(
+        _job_text(
+            job_id="ot",
+            kind="one-time",
+            status=STATUS_FIRED,
+            schedule="0 7 * * *",
+            next_fire_time=NEVER,
+        )
+    )
 
     rc = _run_cli(monkeypatch, "fail", "ot")
 
@@ -386,10 +449,15 @@ def test_cli_done_periodic_resets_to_pend(
     _jobs_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     _jobs_path.parent.mkdir(parents=True, exist_ok=True)
-    _jobs_path.write_text(_job_text(
-        job_id="p", kind="periodic", status=STATUS_FIRED,
-        schedule="0 * * * *", next_fire_time="2026-04-28T08:00",
-    ))
+    _jobs_path.write_text(
+        _job_text(
+            job_id="p",
+            kind="periodic",
+            status=STATUS_FIRED,
+            schedule="0 * * * *",
+            next_fire_time="2026-04-28T08:00",
+        )
+    )
 
     rc = _run_cli(monkeypatch, "done", "p", "ok")
 
@@ -408,10 +476,15 @@ def test_cli_done_one_time_prints_no_rearm_note(
     _jobs_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     _jobs_path.parent.mkdir(parents=True, exist_ok=True)
-    _jobs_path.write_text(_job_text(
-        job_id="o", kind="one-time", status=STATUS_FIRED,
-        schedule="0 7 28 4 *", next_fire_time=NEVER,
-    ))
+    _jobs_path.write_text(
+        _job_text(
+            job_id="o",
+            kind="one-time",
+            status=STATUS_FIRED,
+            schedule="0 7 28 4 *",
+            next_fire_time=NEVER,
+        )
+    )
 
     rc = _run_cli(monkeypatch, "done", "o", "ok")
 
@@ -423,9 +496,13 @@ def test_cli_cancel_marks_cancel(
     _jobs_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     _jobs_path.parent.mkdir(parents=True, exist_ok=True)
-    _jobs_path.write_text(_job_text(
-        job_id="c", schedule="0 7 * * *", next_fire_time="2026-04-29T07:00",
-    ))
+    _jobs_path.write_text(
+        _job_text(
+            job_id="c",
+            schedule="0 7 * * *",
+            next_fire_time="2026-04-29T07:00",
+        )
+    )
 
     rc = _run_cli(monkeypatch, "cancel", "c")
 
@@ -435,14 +512,21 @@ def test_cli_cancel_marks_cancel(
 
 
 def test_cli_done_write_error(
-    _jobs_path: Path, monkeypatch: pytest.MonkeyPatch, mocker,
-    capsys: pytest.CaptureFixture
+    _jobs_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mocker,
+    capsys: pytest.CaptureFixture,
 ) -> None:
     _jobs_path.parent.mkdir(parents=True, exist_ok=True)
-    _jobs_path.write_text(_job_text(
-        job_id="x", kind="one-time", status=STATUS_FIRED,
-        schedule="0 7 * * *", next_fire_time=NEVER,
-    ))
+    _jobs_path.write_text(
+        _job_text(
+            job_id="x",
+            kind="one-time",
+            status=STATUS_FIRED,
+            schedule="0 7 * * *",
+            next_fire_time=NEVER,
+        )
+    )
     mocker.patch.object(cron, "update_fields", side_effect=OSError("boom"))
 
     rc = _run_cli(monkeypatch, "done", "x")
@@ -452,8 +536,10 @@ def test_cli_done_write_error(
 
 
 def test_cli_purge_nothing(
-    _jobs_path: Path, monkeypatch: pytest.MonkeyPatch, mocker,
-    capsys: pytest.CaptureFixture
+    _jobs_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mocker,
+    capsys: pytest.CaptureFixture,
 ) -> None:
     mocker.patch.object(cron, "purge_stale", return_value=[])
 
@@ -464,8 +550,10 @@ def test_cli_purge_nothing(
 
 
 def test_cli_purge_with_results(
-    _jobs_path: Path, monkeypatch: pytest.MonkeyPatch, mocker,
-    capsys: pytest.CaptureFixture
+    _jobs_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mocker,
+    capsys: pytest.CaptureFixture,
 ) -> None:
     mocker.patch.object(cron, "purge_stale", return_value=["a", "b"])
 

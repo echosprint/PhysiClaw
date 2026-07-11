@@ -53,11 +53,12 @@ from hardware.parts.custom.idler_mount_front import (
     thickness as block_thickness,
 )
 
-RD_EXPLODE = 40    # mm — exploded: outboard air gap, slot face → rd block bottom
+RD_EXPLODE = 40  # mm — exploded: outboard air gap, slot face → rd block bottom
 
 
 class ID41Rd(BaseAssembly):
     camera = [MAIN_FRAME_VIEW, Camera(40.06, -53.35, 47.58)]
+
     def _build(self) -> Compound:
         # Base layer — always assembled. Bundles frame + LU/RU/LD
         # mounts + their brackets; this step adds the RD mount on top.
@@ -88,15 +89,27 @@ class ID41Rd(BaseAssembly):
         block_center_z = rd_tnut_world_z - slot_center_y
 
         rd_compound = ID40Rd(exploded=False).build()
-        rd_compound.move(Location(Plane(
-            origin=(+half_w, block_center_y, block_center_z),
-            x_dir=(1, 0, 0),    # native +X → world +X (block X along extrusion narrow dir)
-            z_dir=(0, -1, 0),   # native +Z (top face) → world -Y (outboard)
-        )))                     # → native +Y → world +Z (back face up)
+        rd_compound.move(
+            Location(
+                Plane(
+                    origin=(+half_w, block_center_y, block_center_z),
+                    x_dir=(
+                        1,
+                        0,
+                        0,
+                    ),  # native +X → world +X (block X along extrusion narrow dir)
+                    z_dir=(0, -1, 0),  # native +Z (top face) → world -Y (outboard)
+                )
+            )
+        )  # → native +Y → world +Z (back face up)
 
-        return Compound(label="idler_41_rd", children=[
-            base_compound, rd_compound,
-        ])
+        return Compound(
+            label="idler_41_rd",
+            children=[
+                base_compound,
+                rd_compound,
+            ],
+        )
 
 
 if __name__ == "__main__":

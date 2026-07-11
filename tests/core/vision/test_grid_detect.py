@@ -1,4 +1,5 @@
 """Tests for `physiclaw.core.vision.grid_detect`."""
+
 from __future__ import annotations
 
 import cv2
@@ -99,11 +100,17 @@ def test_sort_dots_to_grid_orders_row_major() -> None:
     grid = sort_dots_to_grid(dots, rows=3, cols=2)
 
     # Row-major order: (10,10), (20,10), (10,30), (20,30), (10,50), (20,50)
-    expected = np.array([
-        [10, 10], [20, 10],
-        [10, 30], [20, 30],
-        [10, 50], [20, 50],
-    ], dtype=np.float64)
+    expected = np.array(
+        [
+            [10, 10],
+            [20, 10],
+            [10, 30],
+            [20, 30],
+            [10, 50],
+            [20, 50],
+        ],
+        dtype=np.float64,
+    )
     np.testing.assert_array_equal(grid, expected)
     assert grid.shape == (6, 2)
 
@@ -128,10 +135,16 @@ def test_sort_dots_to_grid_returns_float64_dtype() -> None:
 
 
 def test_compute_affine_transforms_returns_2x3_pair() -> None:
-    pcts = np.array([
-        [0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0],
-        [0.5, 0.5],
-    ], dtype=np.float32)
+    pcts = np.array(
+        [
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 1.0],
+            [0.5, 0.5],
+        ],
+        dtype=np.float32,
+    )
     grbl = pcts * 100  # scale to mm
     pixels = pcts * np.array([800, 1000], dtype=np.float32)
 
@@ -142,10 +155,16 @@ def test_compute_affine_transforms_returns_2x3_pair() -> None:
 
 
 def test_compute_affine_transforms_round_trips() -> None:
-    pcts = np.array([
-        [0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0],
-        [0.5, 0.5],
-    ], dtype=np.float32)
+    pcts = np.array(
+        [
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 1.0],
+            [0.5, 0.5],
+        ],
+        dtype=np.float32,
+    )
     grbl = pcts * 100
     pixels = pcts * np.array([800, 1000], dtype=np.float32)
 
@@ -177,7 +196,10 @@ def test_detect_orange_dot_returns_center(mocker) -> None:
 
     assert out == (123.4, 56.7)
     spy.assert_called_once_with(
-        frame, [5, 100, 100], [25, 255, 255], min_area=50,
+        frame,
+        [5, 100, 100],
+        [25, 255, 255],
+        min_area=50,
     )
 
 
@@ -197,7 +219,7 @@ def test_detect_orange_dot_with_expected_picks_nearest_not_largest() -> None:
     # A big orange reflection far away and the small real dot near the prediction.
     frame = _frame(400, 400)
     _draw_dot(frame, 300, 300, _ORANGE_BGR, radius=22)  # largest
-    _draw_dot(frame, 60, 60, _ORANGE_BGR, radius=8)     # nearest to expected
+    _draw_dot(frame, 60, 60, _ORANGE_BGR, radius=8)  # nearest to expected
 
     # No hint → largest blob (the reflection).
     cx, _ = detect_orange_dot(frame)
@@ -224,9 +246,9 @@ def test_detect_orange_dot_max_dist_rejects_far_match() -> None:
 
 def _draw_corner(frame: np.ndarray, cx: int, cy: int, d: int = 20) -> None:
     """Draw a 2×2 RGBM corner cluster centered at (cx, cy)."""
-    _draw_dot(frame, cx - d, cy - d, (0, 0, 255))    # R
-    _draw_dot(frame, cx + d, cy - d, (0, 255, 0))    # G
-    _draw_dot(frame, cx + d, cy + d, (255, 0, 0))    # B
+    _draw_dot(frame, cx - d, cy - d, (0, 0, 255))  # R
+    _draw_dot(frame, cx + d, cy - d, (0, 255, 0))  # G
+    _draw_dot(frame, cx + d, cy + d, (255, 0, 0))  # B
     _draw_dot(frame, cx - d, cy + d, (255, 0, 255))  # M (magenta)
 
 
@@ -295,7 +317,7 @@ def test_point_in_polygon_inside_outside_and_none() -> None:
 
 
 def _swatch(img: np.ndarray, cx: int, cy: int, color_bgr: tuple, half: int = 6) -> None:
-    img[cy - half:cy + half, cx - half:cx + half] = color_bgr
+    img[cy - half : cy + half, cx - half : cx + half] = color_bgr
 
 
 def _draw_rgbm_cluster(
@@ -306,10 +328,10 @@ def _draw_rgbm_cluster(
     Cluster span ≈ 2*spacing+swatch.
     """
     s = swatch // 2
-    _swatch(img, cx - spacing, cy - spacing, (0, 0, 255), s)    # NW: R
-    _swatch(img, cx + spacing, cy - spacing, (0, 255, 0), s)    # NE: G
+    _swatch(img, cx - spacing, cy - spacing, (0, 0, 255), s)  # NW: R
+    _swatch(img, cx + spacing, cy - spacing, (0, 255, 0), s)  # NE: G
     _swatch(img, cx + spacing, cy + spacing, (255, 0, 255), s)  # SE: M
-    _swatch(img, cx - spacing, cy + spacing, (255, 0, 0), s)    # SW: B
+    _swatch(img, cx - spacing, cy + spacing, (255, 0, 0), s)  # SW: B
 
 
 def test_detect_bridge_corners_returns_none_when_a_color_is_absent() -> None:
@@ -349,10 +371,10 @@ def test_detect_bridge_corners_uses_explicit_max_cluster_span_when_supplied() ->
 def test_detect_bridge_corners_rejects_clusters_exceeding_max_span() -> None:
     # Spread the four colors across the whole frame — span >> 25%.
     img = _frame(400, 400)
-    _swatch(img, 15, 15, (0, 0, 255), 15)      # R top-left
-    _swatch(img, 385, 15, (0, 255, 0), 15)     # G top-right
-    _swatch(img, 385, 385, (255, 0, 0), 15)    # B bottom-right
-    _swatch(img, 15, 385, (255, 0, 255), 15)   # M bottom-left
+    _swatch(img, 15, 15, (0, 0, 255), 15)  # R top-left
+    _swatch(img, 385, 15, (0, 255, 0), 15)  # G top-right
+    _swatch(img, 385, 385, (255, 0, 0), 15)  # B bottom-right
+    _swatch(img, 15, 385, (255, 0, 255), 15)  # M bottom-left
 
     # Default max_span = 25% of min(side) = 100 — these are 400 apart.
     assert detect_bridge_corners(img) is None

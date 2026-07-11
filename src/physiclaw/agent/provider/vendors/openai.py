@@ -8,6 +8,7 @@ so no `SYSTEM_PROMPT_FRAGMENT`.
 Auth: `OPENAI_API_KEY` env, or `[provider] openai_api_key` in
 `~/.physiclaw/config.toml`.
 """
+
 from physiclaw.agent.provider.openai_compat import OpenAICompatibleProvider
 
 

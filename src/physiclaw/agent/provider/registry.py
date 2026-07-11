@@ -5,6 +5,7 @@ this module just wires them into a dict and exposes the lookups
 (`provider_class`, `provider_key_status`, `make_provider`,
 `is_known`).
 """
+
 from physiclaw.agent.provider.provider_base import BaseProvider, Provider
 from physiclaw.agent.provider.vendors.anthropic import AnthropicProvider
 from physiclaw.agent.provider.vendors.deepseek import DeepSeekProvider
@@ -19,12 +20,12 @@ CLAUDE_CODE_ID = "claude-code"
 
 
 _PROVIDER_CLASSES: dict[str, type[BaseProvider]] = {
-    QwenProvider.PROVIDER_ID:      QwenProvider,
-    MoonshotProvider.PROVIDER_ID:  MoonshotProvider,
-    OpenAIProvider.PROVIDER_ID:    OpenAIProvider,
+    QwenProvider.PROVIDER_ID: QwenProvider,
+    MoonshotProvider.PROVIDER_ID: MoonshotProvider,
+    OpenAIProvider.PROVIDER_ID: OpenAIProvider,
     AnthropicProvider.PROVIDER_ID: AnthropicProvider,
-    GoogleProvider.PROVIDER_ID:    GoogleProvider,
-    DeepSeekProvider.PROVIDER_ID:  DeepSeekProvider,
+    GoogleProvider.PROVIDER_ID: GoogleProvider,
+    DeepSeekProvider.PROVIDER_ID: DeepSeekProvider,
 }
 
 
@@ -53,6 +54,7 @@ def provider_key_status(provider_id: str) -> tuple[str | None, str | None]:
     Both fields are `None` if the key is unset OR `provider_id` isn't
     a known in-process provider."""
     from physiclaw.config import resolve_provider_key
+
     cls = _PROVIDER_CLASSES.get(provider_id)
     if cls is None:
         return None, None

@@ -78,12 +78,13 @@ from hardware.parts.custom.idler_mount_motor import (
 )
 from hardware.parts.standard.bracket import flat_hole_spacing
 
-RU_EXPLODE      = 40    # mm — exploded: outboard air gap, slot face → ru block bottom
-BRACKET_EXPLODE = 30    # mm — exploded: +X air gap, ru block front face → bracket
+RU_EXPLODE = 40  # mm — exploded: outboard air gap, slot face → ru block bottom
+BRACKET_EXPLODE = 30  # mm — exploded: +X air gap, ru block front face → bracket
 
 
 class ID22Ru(BaseAssembly):
     camera = [MAIN_FRAME_VIEW, Camera(61.32, -54.86, 67.24)]
+
     def _build(self) -> Compound:
         # Base layer — always assembled. Bundles frame + LU mount + LU
         # bracket; this step adds the RU mount + RU bracket on top.
@@ -110,11 +111,15 @@ class ID22Ru(BaseAssembly):
         else:
             block_center_y = slot_face_y - block_thickness / 2
         ru_compound = ID20Ru(exploded=False).build()
-        ru_compound.move(Location(Plane(
-            origin=(+half_w, block_center_y, ru_tnut_world_z),
-            x_dir=(0, 0, +1),   # native +X (length=42) → world +Z (along long)
-            z_dir=(0, -1, 0),   # native +Z (top face)  → world -Y (outboard)
-        )))                     # → native +Y → world -X, native -Y (front) → +X
+        ru_compound.move(
+            Location(
+                Plane(
+                    origin=(+half_w, block_center_y, ru_tnut_world_z),
+                    x_dir=(0, 0, +1),  # native +X (length=42) → world +Z (along long)
+                    z_dir=(0, -1, 0),  # native +Z (top face)  → world -Y (outboard)
+                )
+            )
+        )  # → native +Y → world -X, native -Y (front) → +X
 
         # Block-tying bracket — placed flat against the world +X face,
         # BHCS shanks pointing world -X. The plane axes map ID21Ru's
@@ -133,7 +138,7 @@ class ID22Ru(BaseAssembly):
         # In X, the bracket bottom (native z = bracket_bottom_z) lands
         # on the front face at world x = front_face_x; exploded pulls
         # the bracket BRACKET_EXPLODE further in +X.
-        front_face_x = +half_w + block_width / 2            # = +105
+        front_face_x = +half_w + block_width / 2  # = +105
         front_face_hole_y = block_center_y - front_hole_center_z
         half_hole = flat_hole_spacing / 2
 
@@ -142,16 +147,25 @@ class ID22Ru(BaseAssembly):
         bracket_origin_x = front_face_x - bracket_asm.bracket_bottom_z
         if self.exploded:
             bracket_origin_x += BRACKET_EXPLODE
-        bracket_origin_y = front_face_hole_y + half_hole    # RIGHT lands on hole
-        bracket_compound.move(Location(Plane(
-            origin=(bracket_origin_x, bracket_origin_y, ru_tnut_world_z),
-            x_dir=(0, -1, 0),
-            z_dir=(+1, 0, 0),
-        )))
+        bracket_origin_y = front_face_hole_y + half_hole  # RIGHT lands on hole
+        bracket_compound.move(
+            Location(
+                Plane(
+                    origin=(bracket_origin_x, bracket_origin_y, ru_tnut_world_z),
+                    x_dir=(0, -1, 0),
+                    z_dir=(+1, 0, 0),
+                )
+            )
+        )
 
-        return Compound(label="idler_22_ru", children=[
-            base_compound, ru_compound, bracket_compound,
-        ])
+        return Compound(
+            label="idler_22_ru",
+            children=[
+                base_compound,
+                ru_compound,
+                bracket_compound,
+            ],
+        )
 
 
 if __name__ == "__main__":

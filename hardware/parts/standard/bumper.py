@@ -3,18 +3,18 @@ from build123d import *
 from hardware.parts.base import BaseStandardPart
 
 # ── Parameters ────────────────────────────────────────────────────────────────
-body_diameter  = 20 * MM
-body_height    = 22 * MM
+body_diameter = 20 * MM
+body_height = 22 * MM
 
 # Counterbore pocket on the bottom face (recess for a screw head).
 cbore_diameter = 14 * MM
-cbore_depth    = 16 * MM
+cbore_depth = 16 * MM
 
 # Through-hole along the cylinder axis (Z).
-hole_diameter  =  5.3 * MM
+hole_diameter = 5.3 * MM
 
 # Fillet radius on the bottom face edges.
-bottom_fillet  = 0.5 * MM
+bottom_fillet = 0.5 * MM
 
 
 # ── Geometry ──────────────────────────────────────────────────────────────────

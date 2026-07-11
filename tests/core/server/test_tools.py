@@ -10,6 +10,7 @@ Hint strings are pinned to module-level constants in `tools.py`. Any
 silent reword to a hint surfaces here as a failed test — the hints
 are part of the prompt contract sent to the agent.
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -39,6 +40,7 @@ class FakeMcp:
             self.tools[fn.__name__] = fn
             self.tool_kwargs[fn.__name__] = kwargs
             return fn
+
         return deco
 
 
@@ -87,10 +89,18 @@ def test_register_wires_all_expected_tools(registered) -> None:
     mcp, _ = registered
 
     expected = {
-        "peek", "screenshot",
-        "tap", "double_tap", "long_press", "swipe",
-        "home_screen", "go_back", "force_quit", "unlock_phone",
-        "send_to_clipboard", "sequence",
+        "peek",
+        "screenshot",
+        "tap",
+        "double_tap",
+        "long_press",
+        "swipe",
+        "home_screen",
+        "go_back",
+        "force_quit",
+        "unlock_phone",
+        "send_to_clipboard",
+        "sequence",
     }
     assert set(mcp.tools.keys()) == expected
 
@@ -101,10 +111,18 @@ def test_tool_registration_order_is_stable(registered) -> None:
     mcp, _ = registered
 
     assert list(mcp.tools.keys()) == [
-        "peek", "screenshot",
-        "tap", "double_tap", "long_press", "swipe",
-        "home_screen", "go_back", "force_quit", "unlock_phone",
-        "send_to_clipboard", "sequence",
+        "peek",
+        "screenshot",
+        "tap",
+        "double_tap",
+        "long_press",
+        "swipe",
+        "home_screen",
+        "go_back",
+        "force_quit",
+        "unlock_phone",
+        "send_to_clipboard",
+        "sequence",
     ]
 
 
@@ -137,7 +155,9 @@ async def test_peek_returns_image_and_listing(registered) -> None:
     assert out[0]._mime_type == "image/jpeg"
     assert out[1] == "peek-listing"
     tools_mod.save_tool_call.assert_called_once_with(
-        "peek", "peek-listing", b"PEEK_JPG",
+        "peek",
+        "peek-listing",
+        b"PEEK_JPG",
     )
 
 
@@ -155,7 +175,9 @@ async def test_screenshot_returns_image_and_listing(registered) -> None:
     assert out[0]._mime_type == "image/jpeg"
     assert out[1] == "ss-listing"
     tools_mod.save_tool_call.assert_called_once_with(
-        "screenshot", "ss-listing", b"SS_JPG",
+        "screenshot",
+        "ss-listing",
+        b"SS_JPG",
     )
 
 

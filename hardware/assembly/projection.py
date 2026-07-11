@@ -16,6 +16,7 @@ class Camera:
       * roll: roll around the view axis. Positive = object rotates
         clockwise on paper. 0 = world +Z projected as up.
     """
+
     azimuth: float
     elevation: float
     roll: float = 0.0
@@ -26,9 +27,9 @@ class Camera:
         el = math.radians(self.elevation)
         horizontal = math.cos(el)
         return Vector(
-             horizontal * math.sin(az) * distance,
+            horizontal * math.sin(az) * distance,
             -horizontal * math.cos(az) * distance,
-             math.sin(el) * distance,
+            math.sin(el) * distance,
         )
 
     __rmul__ = __mul__
@@ -73,9 +74,9 @@ class Camera:
         # raises ValueError, surfaced to the caller.
         axis = Axis((0, 0, 0), (ax, ay, az_))
         deg = math.degrees(angle_rad)
-        right  = Vector(1, 0,  0).rotate(axis, deg)
-        up_cam = Vector(0, 1,  0).rotate(axis, deg)
-        fwd    = Vector(0, 0, -1).rotate(axis, deg)
+        right = Vector(1, 0, 0).rotate(axis, deg)
+        up_cam = Vector(0, 1, 0).rotate(axis, deg)
+        fwd = Vector(0, 0, -1).rotate(axis, deg)
 
         elevation = math.degrees(math.asin(max(-1.0, min(1.0, -fwd.Z))))
         if abs(fwd.Z) > 0.99999:
@@ -85,24 +86,26 @@ class Camera:
             roll = math.degrees(math.atan2(up_cam.X, up_cam.Y))
         else:
             azimuth = math.degrees(math.atan2(-fwd.X, fwd.Y))
-            roll    = math.degrees(math.atan2(right.Z, up_cam.Z))
+            roll = math.degrees(math.atan2(right.Z, up_cam.Z))
 
         azimuth = (azimuth + 180.0) % 360.0 - 180.0
         return cls(azimuth=azimuth, elevation=elevation, roll=roll)
 
+
 FRONT = Camera(0, 0)
-ISO   = Camera(45, 35.2644)
+ISO = Camera(45, 35.2644)
 
 # Procedure-view presets. Naming encodes azimuth / elevation / non-zero
 # roll so the angle is readable at the import site. `MAIN_FRAME_VIEW` is
 # the one exception — kept semantic because the angle is calibrated to
 # the X-rail bbox.
-FRONT_LEFT_HIGH    = Camera(-30,  25)
-FRONT_LEFT_LOW     = Camera(-30, -20)
+FRONT_LEFT_HIGH = Camera(-30, 25)
+FRONT_LEFT_LOW = Camera(-30, -20)
 BACK_RIGHT_LOW_R90 = Camera(120, -20, 90)
 FRONT_LEFT_LOW_R70 = Camera(-45, -20, 70)
-FRONT_HIGH_L10     = Camera( 15,  45, -10)
-MAIN_FRAME_VIEW    = Camera( -15, -15, -3)
+FRONT_HIGH_L10 = Camera(15, 45, -10)
+MAIN_FRAME_VIEW = Camera(-15, -15, -3)
+
 
 def camera_view(
     shape: Shape,
@@ -123,9 +126,17 @@ def camera_view(
     center, which warps the projection direction per subset.
     """
     bbox = shape.bounding_box()
-    reach = max(abs(v) for v in (
-        bbox.min.X, bbox.max.X, bbox.min.Y, bbox.max.Y, bbox.min.Z, bbox.max.Z,
-    ))
+    reach = max(
+        abs(v)
+        for v in (
+            bbox.min.X,
+            bbox.max.X,
+            bbox.min.Y,
+            bbox.max.Y,
+            bbox.min.Z,
+            bbox.max.Z,
+        )
+    )
     look_at = bbox.center()
     return look_at + camera * (reach * distance_factor), camera.up, look_at
 
@@ -154,6 +165,7 @@ if __name__ == "__main__":
     #     echo  '<paste>' | uv run --group cad python -m hardware.assembly.projection
     #
     import sys
+
     s = sys.argv[1] if len(sys.argv) > 1 else sys.stdin.read()
     try:
         cam = Camera.from_freecad_view(s)
@@ -169,7 +181,7 @@ if __name__ == "__main__":
             "\n"
             "Pass the printed Inventor block to this module:\n"
             "\n"
-            "    uv run --group cad python -m hardware.assembly.projection \"$(pbpaste)\"\n",
+            '    uv run --group cad python -m hardware.assembly.projection "$(pbpaste)"\n',
             file=sys.stderr,
         )
         sys.exit(1)

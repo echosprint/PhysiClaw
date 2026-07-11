@@ -21,25 +21,33 @@ Caveat: a travel change alters the rail's mounting-hole count
 """
 
 # ── BASE knobs — the only values you normally change ─────────────────────────
-X_TRAVEL = 110    # mm — toolhead carriage travel along the X crossbeam
-Y_TRAVEL = 200    # mm — gantry travel along the long extrusions
+X_TRAVEL = 110  # mm — toolhead carriage travel along the X crossbeam
+Y_TRAVEL = 200  # mm — gantry travel along the long extrusions
 
 # ── Shared fixed allowances ──────────────────────────────────────────────────
-CARRIAGE_LENGTH = 40    # mm — MGN9H slider footprint a rail loses to travel (≈ 39.9)
-EXT_2040_WIDTH  = 20    # mm — 2040 narrow-face width (= 2 × extrusion leg)
+CARRIAGE_LENGTH = 40  # mm — MGN9H slider footprint a rail loses to travel (≈ 39.9)
+EXT_2040_WIDTH = 20  # mm — 2040 narrow-face width (= 2 × extrusion leg)
 
 # ── X axis: travel → rail → crossbeam → frame width ──────────────────────────
-X_BEAM_END_ALLOWANCE  = 35    # mm — crossbeam overhang past the rail, out to the joints
-X_EXTRUSION_CLEARANCE = 5     # mm — frame wider than the beam so it fits between the longs
-X_RAIL_LENGTH      = X_TRAVEL + CARRIAGE_LENGTH             # = 150  MGN9H X rail
-X_BEAM_LENGTH      = X_RAIL_LENGTH + X_BEAM_END_ALLOWANCE   # = 185  1020 crossbeam
-X_EXTRUSION_LENGTH = X_BEAM_LENGTH + X_EXTRUSION_CLEARANCE  # = 190  short 2040 (frame width)
+X_BEAM_END_ALLOWANCE = 35  # mm — crossbeam overhang past the rail, out to the joints
+X_EXTRUSION_CLEARANCE = 5  # mm — frame wider than the beam so it fits between the longs
+X_RAIL_LENGTH = X_TRAVEL + CARRIAGE_LENGTH  # = 150  MGN9H X rail
+X_BEAM_LENGTH = X_RAIL_LENGTH + X_BEAM_END_ALLOWANCE  # = 185  1020 crossbeam
+X_EXTRUSION_LENGTH = (
+    X_BEAM_LENGTH + X_EXTRUSION_CLEARANCE
+)  # = 190  short 2040 (frame width)
 
 # ── Y axis: travel → rail → long extrusion ───────────────────────────────────
-Y_EXTRUSION_END_ALLOWANCE = 105   # mm — frame past the rail (end pulley-mount / idler blocks)
-Y_RAIL_LENGTH      = Y_TRAVEL + CARRIAGE_LENGTH                 # = 240  MGN9H Y rail
-Y_EXTRUSION_LENGTH = Y_RAIL_LENGTH + Y_EXTRUSION_END_ALLOWANCE  # = 345  long 2040 (frame length)
+Y_EXTRUSION_END_ALLOWANCE = (
+    105  # mm — frame past the rail (end pulley-mount / idler blocks)
+)
+Y_RAIL_LENGTH = Y_TRAVEL + CARRIAGE_LENGTH  # = 240  MGN9H Y rail
+Y_EXTRUSION_LENGTH = (
+    Y_RAIL_LENGTH + Y_EXTRUSION_END_ALLOWANCE
+)  # = 345  long 2040 (frame length)
 
 # ── Phone bed (tracks X) ─────────────────────────────────────────────────────
 # Cross-beam spans the frame width plus both long extrusions' widths.
-PHONE_BED_BEAM_LENGTH = X_EXTRUSION_LENGTH + 2 * EXT_2040_WIDTH  # = 230  1020 phone-bed beam
+PHONE_BED_BEAM_LENGTH = (
+    X_EXTRUSION_LENGTH + 2 * EXT_2040_WIDTH
+)  # = 230  1020 phone-bed beam

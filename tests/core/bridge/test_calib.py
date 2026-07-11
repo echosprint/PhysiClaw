@@ -20,6 +20,7 @@ Accepted equivalent mutmut survivors:
     log output of a debug-level emit would couple tests to a
     non-contract surface.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -217,17 +218,18 @@ def test_flush_touches_returns_empty_list_when_no_events() -> None:
 def test_viewport_to_screenshot_pct_raises_when_shift_unset() -> None:
     cs = CalibrationState()
 
-    with pytest.raises(
-        RuntimeError, match=r"^Viewport shift not measured"
-    ):
+    with pytest.raises(RuntimeError, match=r"^Viewport shift not measured"):
         cs.viewport_to_screenshot_pct(50, 100)
 
 
 def test_viewport_to_screenshot_pct_delegates_to_viewport_shift() -> None:
     cs = CalibrationState()
     cs.viewport_shift = ViewportShift(
-        offset_x=10, offset_y=20, dpr=2.0,
-        screenshot_width=200, screenshot_height=400,
+        offset_x=10,
+        offset_y=20,
+        dpr=2.0,
+        screenshot_width=200,
+        screenshot_height=400,
     )
 
     sx, sy = cs.viewport_to_screenshot_pct(50, 100)
@@ -242,8 +244,11 @@ def test_viewport_to_screenshot_pct_delegates_to_viewport_shift() -> None:
 def test_viewport_pct_to_screenshot_pct_raises_when_screen_dimension_unset() -> None:
     cs = CalibrationState()
     cs.viewport_shift = ViewportShift(
-        offset_x=0, offset_y=0, dpr=1.0,
-        screenshot_width=100, screenshot_height=100,
+        offset_x=0,
+        offset_y=0,
+        dpr=1.0,
+        screenshot_width=100,
+        screenshot_height=100,
     )
 
     with pytest.raises(RuntimeError, match=r"^Screen dimension not set$"):
@@ -254,8 +259,11 @@ def test_viewport_pct_to_screenshot_pct_chains_through_viewport_shift() -> None:
     cs = CalibrationState()
     cs.screen_dimension = {"viewport_width": 200, "viewport_height": 400}
     cs.viewport_shift = ViewportShift(
-        offset_x=0, offset_y=0, dpr=1.0,
-        screenshot_width=200, screenshot_height=400,
+        offset_x=0,
+        offset_y=0,
+        dpr=1.0,
+        screenshot_width=200,
+        screenshot_height=400,
     )
 
     sx, sy = cs.viewport_pct_to_screenshot_pct(0.5, 0.25)
@@ -317,7 +325,7 @@ def test_get_state_assistive_touch_includes_at_and_nonce_blocks() -> None:
     assert state["nonce"] == {
         "colors": [
             [NONCE_LIGHT] * 3,  # bit 1 → light
-            [NONCE_DARK] * 3,   # bit 0 → dark
+            [NONCE_DARK] * 3,  # bit 0 → dark
             [NONCE_LIGHT] * 3,  # bit 1 → light
         ],
         "x": NONCE_CSS_X,  # no screen_dimension yet → fallback

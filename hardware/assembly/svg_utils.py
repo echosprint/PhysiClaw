@@ -48,7 +48,7 @@ def strip_root_dims(text: str) -> str:
 
 
 _NON_SCALING_STROKE_STYLE = (
-    '<style>svg * { vector-effect: non-scaling-stroke; }</style>'
+    "<style>svg * { vector-effect: non-scaling-stroke; }</style>"
 )
 
 
@@ -79,6 +79,7 @@ def get_root_viewbox(text: str) -> str | None:
 def set_root_viewbox(text: str, viewbox: str) -> str:
     """Replace (or insert) the ``viewBox`` attribute on the root
     ``<svg>`` opening tag. Other attributes are preserved verbatim."""
+
     def rewrite(m: re.Match) -> str:
         tag = m.group(0)
         if _VIEWBOX_ATTR_RE.search(tag):
@@ -86,6 +87,7 @@ def set_root_viewbox(text: str, viewbox: str) -> str:
         # Insert just before the closing ">" (or "/>") of the opening tag.
         end = -2 if tag.endswith("/>") else -1
         return f'{tag[:end]} viewBox="{viewbox}"{tag[end:]}'
+
     return ROOT_TAG_RE.sub(rewrite, text, count=1)
 
 

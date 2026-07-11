@@ -7,6 +7,7 @@ that a few patterns cover every public method:
   - `?`          → status reply, e.g. `<Idle|WPos:0.000,0.000>`
   - any G-code   → `ok\n` or `error:N\n` or `ALARM:N\n`
 """
+
 from __future__ import annotations
 
 from collections import deque
@@ -82,13 +83,15 @@ class FakeSerial:
 
 
 def _arm(
-    mocker, *,
+    mocker,
+    *,
     responses: Iterable[bytes] = (),
     status_replies: Iterable[bytes] = (),
 ) -> tuple[StylusArm, FakeSerial]:
     """Build a StylusArm with FakeSerial as its serial backend, no setup()."""
     fake = FakeSerial(
-        responses=list(responses), status_replies=list(status_replies),
+        responses=list(responses),
+        status_replies=list(status_replies),
     )
     mocker.patch.object(arm_mod, "detect_grbl", return_value="/dev/cu.fake")
     mocker.patch.object(arm_mod.serial, "Serial", return_value=fake)
@@ -102,10 +105,14 @@ def _arm(
 def test_init_uses_detect_grbl_when_port_omitted(mocker) -> None:
     fake = FakeSerial()
     detect_spy = mocker.patch.object(
-        arm_mod, "detect_grbl", return_value="/dev/cu.test",
+        arm_mod,
+        "detect_grbl",
+        return_value="/dev/cu.test",
     )
     serial_spy = mocker.patch.object(
-        arm_mod.serial, "Serial", return_value=fake,
+        arm_mod.serial,
+        "Serial",
+        return_value=fake,
     )
     mocker.patch.object(arm_mod.time, "sleep")
 
@@ -126,7 +133,9 @@ def test_init_raises_when_no_grbl_detected(mocker) -> None:
 def test_init_uses_explicit_port_when_provided(mocker) -> None:
     fake = FakeSerial()
     serial_spy = mocker.patch.object(
-        arm_mod.serial, "Serial", return_value=fake,
+        arm_mod.serial,
+        "Serial",
+        return_value=fake,
     )
     mocker.patch.object(arm_mod.time, "sleep")
     detect_spy = mocker.patch.object(arm_mod, "detect_grbl")
@@ -190,10 +199,14 @@ def test_send_optional_error_does_not_desync_next_command(mocker) -> None:
     # `[MSG:ERR: ...]` line (LF terminator → no extra ok). After swallowing the
     # optional error, the stray `[MSG]` is a non-terminator the next command's
     # read loop skips, so M5 still reads its OWN ok and never sees a stale one.
-    arm, _ = _arm(mocker, responses=[
-        b"error:162\n", b"[MSG:ERR: Read-only setting]\n",  # $32=0 reply (no ok)
-        b"ok\n",  # M5's own reply
-    ])
+    arm, _ = _arm(
+        mocker,
+        responses=[
+            b"error:162\n",
+            b"[MSG:ERR: Read-only setting]\n",  # $32=0 reply (no ok)
+            b"ok\n",  # M5's own reply
+        ],
+    )
 
     arm._send("$32=0", optional=True)
     arm._send("M5")  # must not raise — skips the stray [MSG], reads its ok
@@ -204,7 +217,8 @@ def test_send_optional_error_does_not_desync_next_command(mocker) -> None:
 
 def test_query_status_returns_status_line(mocker) -> None:
     arm, _ = _arm(
-        mocker, status_replies=[b"<Idle|WPos:0.000,0.000>\r\n"],
+        mocker,
+        status_replies=[b"<Idle|WPos:0.000,0.000>\r\n"],
     )
 
     line = arm._query_status()
@@ -223,7 +237,8 @@ def test_query_status_returns_empty_when_no_response(mocker) -> None:
 
 def test_wait_idle_returns_when_idle(mocker) -> None:
     arm, _ = _arm(
-        mocker, status_replies=[b"<Idle|WPos:0.000,0.000>\n"],
+        mocker,
+        status_replies=[b"<Idle|WPos:0.000,0.000>\n"],
     )
 
     arm.wait_idle()  # no raise
@@ -256,7 +271,8 @@ def test_wait_idle_raises_on_timeout(mocker) -> None:
 
 def test_position_parses_wpos(mocker) -> None:
     arm, _ = _arm(
-        mocker, status_replies=[b"<Idle|WPos:1.500,2.500|FS:0,0>\n"],
+        mocker,
+        status_replies=[b"<Idle|WPos:1.500,2.500|FS:0,0>\n"],
     )
 
     x, y = arm.position()
@@ -276,11 +292,14 @@ def test_position_falls_back_to_mpos_minus_wco(mocker) -> None:
 
 
 def test_position_uses_mpos_only_with_warning(
-    mocker, caplog: pytest.LogCaptureFixture,
+    mocker,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     import logging
+
     arm, _ = _arm(
-        mocker, status_replies=[b"<Idle|MPos:3.000,4.000>\n"],
+        mocker,
+        status_replies=[b"<Idle|MPos:3.000,4.000>\n"],
     )
 
     with caplog.at_level(logging.WARNING, logger="physiclaw.core.hardware.arm"):
@@ -388,7 +407,9 @@ def test_set_work_position_sends_G92_with_coords(mocker) -> None:
 
 def test_return_to_origin_fast_moves_and_waits(mocker) -> None:
     arm, fake = _arm(
-        mocker, responses=[b"ok\n"], status_replies=[b"<Idle|WPos:0,0>\n"],
+        mocker,
+        responses=[b"ok\n"],
+        status_replies=[b"<Idle|WPos:0,0>\n"],
     )
 
     arm.return_to_origin()
@@ -405,8 +426,14 @@ def test_set_direction_mapping_builds_8_directions() -> None:
 
     # 8 cardinal + diagonal entries.
     assert set(arm.MOVE_DIRECTIONS.keys()) == {
-        "right", "left", "bottom", "top",
-        "top-left", "top-right", "bottom-left", "bottom-right",
+        "right",
+        "left",
+        "bottom",
+        "top",
+        "top-left",
+        "top-right",
+        "bottom-left",
+        "bottom-right",
     }
     assert arm.MOVE_DIRECTIONS["right"] == (1.0, 0.0)
     assert arm.MOVE_DIRECTIONS["left"] == (-1.0, -0.0)
@@ -503,7 +530,9 @@ def test_double_tap_fires_two_strikes(mocker) -> None:
     gap_count = sum(1 for w in fake.writes if w == b"G4 P0.1\n")
     release_count = sum(1 for w in fake.writes if w == b"G4 P0.2\n")
     assert strike_count == 2
-    assert gap_count == 1  # brief inter-tap lift (DOUBLE_TAP_GAP_MS), not a full release
+    assert (
+        gap_count == 1
+    )  # brief inter-tap lift (DOUBLE_TAP_GAP_MS), not a full release
     assert release_count == 1  # full spring-clear only after the second strike
 
 
@@ -549,7 +578,8 @@ def test_swipe_raises_when_directions_unset(mocker) -> None:
 def test_swipe_to_presses_slides_to_endpoint_releases(mocker) -> None:
     # press(3) + G1 linear(1) + release(2) = 6 ok's, then wait_idle.
     arm, fake = _arm(
-        mocker, responses=[b"ok\n"] * 6,
+        mocker,
+        responses=[b"ok\n"] * 6,
         status_replies=[b"<Idle|WPos:0,0>\n"],
     )
 
@@ -567,7 +597,8 @@ def test_swipe_to_presses_slides_to_endpoint_releases(mocker) -> None:
 def test_swipe_to_start_dwell_anchors_touch_before_slide(mocker) -> None:
     # press(3) + start-dwell G4(1) + G1 linear(1) + release(2) = 7 ok's.
     arm, fake = _arm(
-        mocker, responses=[b"ok\n"] * 7,
+        mocker,
+        responses=[b"ok\n"] * 7,
         status_replies=[b"<Idle|WPos:0,0>\n"],
     )
 
@@ -585,7 +616,8 @@ def test_swipe_to_start_dwell_anchors_touch_before_slide(mocker) -> None:
 
 def test_move_emits_relative_fast_move(mocker) -> None:
     arm, fake = _arm(
-        mocker, responses=[b"ok\n"] * 2,
+        mocker,
+        responses=[b"ok\n"] * 2,
         status_replies=[b"<Idle|WPos:0,0>\n"],
     )
     arm.set_direction_mapping(right_vec=(1.0, 0.0), down_vec=(0.0, 1.0))
@@ -599,7 +631,8 @@ def test_move_emits_relative_fast_move(mocker) -> None:
 
 def test_move_normalizes_diagonal(mocker) -> None:
     arm, fake = _arm(
-        mocker, responses=[b"ok\n"] * 2,
+        mocker,
+        responses=[b"ok\n"] * 2,
         status_replies=[b"<Idle|WPos:0,0>\n"],
     )
     arm.set_direction_mapping(right_vec=(1.0, 0.0), down_vec=(0.0, 1.0))

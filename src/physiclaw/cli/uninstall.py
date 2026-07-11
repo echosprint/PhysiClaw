@@ -40,7 +40,7 @@ def uninstall(
         typer.Option(
             "--config",
             help="Remove only the user config file. Calibration, memory, "
-                 "and downloaded models are kept.",
+            "and downloaded models are kept.",
         ),
     ] = False,
     all_: Annotated[

@@ -5,6 +5,7 @@ These primitives were previously covered only indirectly through the
 blob detectors; the direct tests here pin the seam-wrapping OR, the
 redness map's clipping, and the calibrated range tables.
 """
+
 from __future__ import annotations
 
 import cv2
@@ -60,8 +61,8 @@ def test_hsv_mask_ors_ranges_across_the_hue_seam() -> None:
 
 def test_redness_high_for_red_zero_for_gray() -> None:
     img = np.zeros((2, 4, 3), dtype=np.uint8)
-    img[:, :2] = (0, 0, 200)        # red: R - max(G,B) = 200
-    img[:, 2:] = (128, 128, 128)    # gray: R - max(G,B) = 0
+    img[:, :2] = (0, 0, 200)  # red: R - max(G,B) = 200
+    img[:, 2:] = (128, 128, 128)  # gray: R - max(G,B) = 0
 
     r = redness(img)
 

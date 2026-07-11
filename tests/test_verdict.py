@@ -1,4 +1,5 @@
 """Tests for `physiclaw.verdict` — the screen-change marker vocabulary."""
+
 from __future__ import annotations
 
 import pytest

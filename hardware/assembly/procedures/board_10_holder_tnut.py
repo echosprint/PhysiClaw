@@ -39,9 +39,9 @@ from hardware.parts.custom.pcb_holder import (
 from hardware.parts.standard.screw import FHCS_DIMS, Screw, head_skirt
 from hardware.parts.standard.t_nut import HAMMER_TOTAL_HEIGHT, LENGTHS, TNut
 
-FHCS_LENGTH   = 12    # mm — FHCS M5 overall length
-SCREW_EXPLODE = 25    # mm — exploded: screw lifts above the holder
-NUT_EXPLODE   = 30    # mm — exploded: nut drops below the rib
+FHCS_LENGTH = 12  # mm — FHCS M5 overall length
+SCREW_EXPLODE = 25  # mm — exploded: screw lifts above the holder
+NUT_EXPLODE = 30  # mm — exploded: nut drops below the rib
 
 # Z of the FHCS local origin (cone base) so the head's flat top lands flush with
 # the holder top face. FHCS head spans local z = 0 → k + head_skirt.
@@ -72,12 +72,13 @@ class BO10HolderTnut(BaseAssembly):
             # the mouth sits at the rib underside (z = -tab_thick) and the bore
             # lands on the screw axis (native bore at z = length / 2).
             nut = TNut("hammer", "M5").build()
-            nz = -tab_thick - HAMMER_TOTAL_HEIGHT - (NUT_EXPLODE if self.exploded else 0)
+            nz = (
+                -tab_thick - HAMMER_TOTAL_HEIGHT - (NUT_EXPLODE if self.exploded else 0)
+            )
             nut.move(Location((x, rib_cy + hammer_len / 2, nz), (90, 0, 0)))
             nuts.append(nut)
 
-        return Compound(label="board_10_holder_tnut",
-                        children=[holder, *screws, *nuts])
+        return Compound(label="board_10_holder_tnut", children=[holder, *screws, *nuts])
 
 
 if __name__ == "__main__":

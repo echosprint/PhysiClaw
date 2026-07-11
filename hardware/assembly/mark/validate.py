@@ -57,10 +57,10 @@ def _validate_rect(c: dict) -> dict | None:
     if w <= 0 or h <= 0:
         return None
     return {
-        "x":  _num(c.get("x"), "x"),
-        "y":  _num(c.get("y"), "y"),
-        "w":  w,
-        "h":  h,
+        "x": _num(c.get("x"), "x"),
+        "y": _num(c.get("y"), "y"),
+        "w": w,
+        "h": h,
         "rx": max(0.0, _num(c.get("rx", 0), "rx")),
     }
 
@@ -72,7 +72,7 @@ def _validate_circle(c: dict) -> dict | None:
     return {
         "cx": _num(c.get("cx"), "cx"),
         "cy": _num(c.get("cy"), "cy"),
-        "r":  r,
+        "r": r,
     }
 
 
@@ -100,11 +100,11 @@ def _validate_line_like(c: dict) -> dict | None:
 
 _DISPATCH = {
     "polygon": _validate_polygon,
-    "rect":    _validate_rect,
-    "circle":  _validate_circle,
+    "rect": _validate_rect,
+    "circle": _validate_circle,
     "ellipse": _validate_ellipse,
-    "line":    _validate_line_like,
-    "arrow":   _validate_line_like,
+    "line": _validate_line_like,
+    "arrow": _validate_line_like,
 }
 
 
@@ -133,10 +133,12 @@ def validate_shapes(raw) -> List[dict]:
         geom = _DISPATCH[t](geom_raw)
         if geom is None:
             continue
-        out.append({
-            "type":     t,
-            "geom":     geom,
-            "color":    validate_color(s.get("color")) or {**DEFAULT_COLOR},
-            "outlined": bool(s.get("outlined", False)),
-        })
+        out.append(
+            {
+                "type": t,
+                "geom": geom,
+                "color": validate_color(s.get("color")) or {**DEFAULT_COLOR},
+                "outlined": bool(s.get("outlined", False)),
+            }
+        )
     return out

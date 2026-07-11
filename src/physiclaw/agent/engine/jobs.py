@@ -13,6 +13,7 @@ there until the agent explicitly closes them.
 Data model + jobs.md I/O lives in `physiclaw.agent.engine.job_store`. The hook
 that actually ticks and fires is `physiclaw.agent.hooks.cron`.
 """
+
 import datetime as dt
 import logging
 
@@ -59,7 +60,7 @@ def fired_job_ids(triggers: list[Trigger]) -> list[str]:
     for t in triggers:
         if not t.source or not t.source.startswith(_CRON_PREFIX):
             continue
-        ids.extend(x for x in t.source[len(_CRON_PREFIX):].split(",") if x)
+        ids.extend(x for x in t.source[len(_CRON_PREFIX) :].split(",") if x)
     return ids
 
 
@@ -79,11 +80,7 @@ def format_fired(triggers: list[Trigger]) -> str:
         j = jobs.get(jid)
         if j is None:
             continue
-        blocks.append(
-            f"### {j.id}\n"
-            f"{j.description}\n\n"
-            f"Context: {j.context}"
-        )
+        blocks.append(f"### {j.id}\n{j.description}\n\nContext: {j.context}")
     if not blocks:
         return ""
     return "## Scheduled jobs firing now\n\n" + "\n\n".join(blocks)
@@ -166,17 +163,24 @@ def upsert_auto_wait_check(at: dt.datetime) -> None:
     history on reschedule so the row reads as a fresh pending job."""
     schedule = f"{at.minute} {at.hour} {at.day} {at.month} *"
     if AUTO_WAIT_JOB_ID in {j.id for j in load_jobs()}:
-        update_fields(JOBS_PATH, {AUTO_WAIT_JOB_ID: {
-            "Schedule": f"`{schedule}`",
-            "Status": STATUS_PEND,
-            "Next fire time": format_minute(at),
-            "Last fire time": NEVER,
-            "Execution time": NEVER,
-            "Execution result": NEVER,
-        }})
+        update_fields(
+            JOBS_PATH,
+            {
+                AUTO_WAIT_JOB_ID: {
+                    "Schedule": f"`{schedule}`",
+                    "Status": STATUS_PEND,
+                    "Next fire time": format_minute(at),
+                    "Last fire time": NEVER,
+                    "Execution time": NEVER,
+                    "Execution result": NEVER,
+                }
+            },
+        )
         log.info(
             "jobs: rescheduled %s (schedule=%r, next=%s)",
-            AUTO_WAIT_JOB_ID, schedule, format_minute(at),
+            AUTO_WAIT_JOB_ID,
+            schedule,
+            format_minute(at),
         )
     else:
         create_job(
@@ -218,19 +222,22 @@ def finish_job(*, id: str, status: str, recap: str) -> str:
         raise ValueError(f"no job with id {id!r}")
     j = existing[id]
     if j.status in TERMINAL_STATUSES:
-        raise ValueError(
-            f"job {id!r} is already in terminal status {j.status!r}"
-        )
+        raise ValueError(f"job {id!r} is already in terminal status {j.status!r}")
     new_status = (
         STATUS_PEND
         if j.kind == KIND_PERIODIC and status in (STATUS_DONE, STATUS_FAIL)
         else status
     )
-    update_fields(JOBS_PATH, {id: {
-        "Status": new_status,
-        "Execution time": format_minute(dt.datetime.now()),
-        "Execution result": recap.strip() or status,
-    }})
+    update_fields(
+        JOBS_PATH,
+        {
+            id: {
+                "Status": new_status,
+                "Execution time": format_minute(dt.datetime.now()),
+                "Execution result": recap.strip() or status,
+            }
+        },
+    )
     log.info("jobs: finished %s as %s", id, status)
     if new_status == STATUS_PEND:
         nxt = j.next_fire_time or "its next scheduled minute"

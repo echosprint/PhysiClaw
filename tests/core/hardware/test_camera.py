@@ -5,6 +5,7 @@ AVFoundation / V4L stack never opens. Background reader thread is
 either stopped immediately after construction or invoked manually
 with `_reader_loop` for thread-internal tests.
 """
+
 from __future__ import annotations
 
 import logging
@@ -121,6 +122,7 @@ def test_camera_init_warms_up_and_starts_reader(mocker) -> None:
         # FOURCC must precede width/height — Windows MSMF re-negotiates on
         # format change, so width/height set before FOURCC gets discarded.
         from physiclaw.config import CONFIG
+
         props = [p for p, _ in vc.set_calls]
         fourcc_idx = props.index(cv2.CAP_PROP_FOURCC)
         width_idx = props.index(cv2.CAP_PROP_FRAME_WIDTH)
@@ -177,8 +179,7 @@ def test_camera_warmup_raises_after_repeated_read_failures(mocker) -> None:
     # _open is called once at __init__ + once per warmup retry attempt.
     # Warmup loops 2 attempts and reopens after the first → 3 caps total.
     bad_caps = [
-        FakeVideoCapture(index=0, read_results=[(False, None)] * 200)
-        for _ in range(3)
+        FakeVideoCapture(index=0, read_results=[(False, None)] * 200) for _ in range(3)
     ]
     mocker.patch.object(cv2, "VideoCapture", side_effect=bad_caps)
     mocker.patch.object(camera_mod.platform, "ensure_camera_permission")
@@ -256,7 +257,9 @@ def test_reader_loop_reconnects_after_stale(mocker) -> None:
     cam._frame_time = 0.0  # very old
     cam._stopped.clear()
     mocker.patch.object(
-        cam._stopped, "wait", side_effect=lambda t: cam._stopped.set(),
+        cam._stopped,
+        "wait",
+        side_effect=lambda t: cam._stopped.set(),
     )
 
     cam._reader_loop()
@@ -271,7 +274,9 @@ def test_reader_loop_fatal_after_long_failure(mocker) -> None:
     cam._stopped.clear()
     interrupt_spy = mocker.patch.object(camera_mod._thread, "interrupt_main")
     mocker.patch.object(
-        cam._stopped, "wait", side_effect=lambda t: cam._stopped.set(),
+        cam._stopped,
+        "wait",
+        side_effect=lambda t: cam._stopped.set(),
     )
 
     cam._reader_loop()
@@ -288,7 +293,8 @@ def test_reopen_swallows_release_failure(mocker) -> None:
     bad_cap.release.side_effect = RuntimeError("already closed")
     cam.cap = bad_cap
     new_vc = FakeVideoCapture(
-        index=0, read_results=[(True, _frame())] * 200,
+        index=0,
+        read_results=[(True, _frame())] * 200,
     )
     mocker.patch.object(cv2, "VideoCapture", return_value=new_vc)
     mocker.patch.object(camera_mod.platform, "ensure_camera_permission")
@@ -302,7 +308,8 @@ def test_reopen_swallows_release_failure(mocker) -> None:
 
 
 def test_reopen_logs_when_open_raises(
-    mocker, caplog: pytest.LogCaptureFixture,
+    mocker,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     cam, _ = _ready_camera(mocker)
     cam.cap = MagicMock()
@@ -437,7 +444,8 @@ def test_open_applies_exposure_after_size_negotiation(mocker) -> None:
     vc = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 200)
     order: list = []
     mocker.patch.object(
-        camera_mod.platform, "camera_set_auto_exposure",
+        camera_mod.platform,
+        "camera_set_auto_exposure",
         side_effect=lambda cap: order.append("exposure"),
     )
     real_set = vc.set
@@ -452,7 +460,8 @@ def test_open_applies_manual_exposure_when_config_disables_auto(mocker) -> None:
     mocker.patch.object(camera_mod.CONFIG.camera, "auto_exposure", False)
     mocker.patch.object(camera_mod.CONFIG.camera, "exposure", -5)
     manual_spy = mocker.patch.object(
-        camera_mod.platform, "camera_set_manual_exposure",
+        camera_mod.platform,
+        "camera_set_manual_exposure",
     )
     vc = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 200)
 
@@ -465,7 +474,8 @@ def test_reopen_reapplies_remembered_manual_exposure(mocker) -> None:
     vc1 = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 200)
     cam = _open_camera_no_thread(mocker, vc=vc1)
     manual_spy = mocker.patch.object(
-        camera_mod.platform, "camera_set_manual_exposure",
+        camera_mod.platform,
+        "camera_set_manual_exposure",
     )
 
     cam.set_manual_exposure(-7)
@@ -483,7 +493,8 @@ def test_set_auto_exposure_remembered_across_reopen(mocker) -> None:
     vc1 = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 200)
     cam = _open_camera_no_thread(mocker, vc=vc1)
     auto_spy = mocker.patch.object(
-        camera_mod.platform, "camera_set_auto_exposure",
+        camera_mod.platform,
+        "camera_set_auto_exposure",
     )
 
     cam.set_auto_exposure()
@@ -502,9 +513,11 @@ def test_exposure_setter_holds_cap_lock(mocker) -> None:
     cam = _open_camera_no_thread(mocker, vc=vc)
     seen: dict = {}
     mocker.patch.object(
-        camera_mod.platform, "camera_set_auto_exposure",
+        camera_mod.platform,
+        "camera_set_auto_exposure",
         side_effect=lambda cap: seen.setdefault(
-            "locked", cam._cap_lock.locked(),
+            "locked",
+            cam._cap_lock.locked(),
         ),
     )
 
@@ -537,4 +550,3 @@ def test_wait_frames_times_out_without_publisher(mocker) -> None:
     cam = _open_camera_no_thread(mocker, vc=vc)
 
     assert cam.wait_frames(1, timeout=0.05) is False
-

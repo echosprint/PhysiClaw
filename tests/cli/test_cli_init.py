@@ -1,4 +1,5 @@
 """Tests for `physiclaw.cli.__init__` — top-level Typer app wiring."""
+
 from __future__ import annotations
 
 import pytest

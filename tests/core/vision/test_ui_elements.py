@@ -1,4 +1,5 @@
 """Tests for `physiclaw.core.vision.ui_elements`."""
+
 from __future__ import annotations
 
 import logging
@@ -25,14 +26,19 @@ from physiclaw.core.vision.ui_elements import (
 
 def test_ui_element_to_dict_rounds_values() -> None:
     e = UIElement(
-        id=3, kind="text", label="hi",
-        bbox=[0.12345, 0.6789, 0.999, 0.111], conf=0.876,
+        id=3,
+        kind="text",
+        label="hi",
+        bbox=[0.12345, 0.6789, 0.999, 0.111],
+        conf=0.876,
     )
 
     out = e.to_dict()
 
     assert out == {
-        "id": 3, "kind": "text", "label": "hi",
+        "id": 3,
+        "kind": "text",
+        "label": "hi",
         "bbox": [0.123, 0.679, 0.999, 0.111],
         "conf": 0.88,
     }
@@ -198,7 +204,10 @@ def test_detect_icons_uses_supplied_detector(mocker) -> None:
 
     out = _detect_icons(
         np.zeros((1000, 500, 3), dtype=np.uint8),
-        500, 1000, fake_det, 0.2,
+        500,
+        1000,
+        fake_det,
+        0.2,
     )
 
     assert len(out) == 1
@@ -208,14 +217,19 @@ def test_detect_icons_uses_supplied_detector(mocker) -> None:
 
 
 def test_detect_icons_handles_missing_model(
-    mocker, caplog: pytest.LogCaptureFixture,
+    mocker,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     fake_det = MagicMock()
     fake_det.detect.side_effect = FileNotFoundError("no model")
 
     with caplog.at_level(logging.WARNING, logger="physiclaw.core.vision.ui_elements"):
         out = _detect_icons(
-            np.zeros((10, 10, 3), dtype=np.uint8), 10, 10, fake_det, 0.2,
+            np.zeros((10, 10, 3), dtype=np.uint8),
+            10,
+            10,
+            fake_det,
+            0.2,
         )
 
     assert out == []
@@ -233,7 +247,9 @@ def test_detect_texts_uses_supplied_reader(mocker) -> None:
 
     out = _detect_texts(
         np.zeros((1000, 500, 3), dtype=np.uint8),
-        500, 1000, fake_reader,
+        500,
+        1000,
+        fake_reader,
     )
 
     assert len(out) == 1
@@ -243,14 +259,18 @@ def test_detect_texts_uses_supplied_reader(mocker) -> None:
 
 
 def test_detect_texts_handles_import_error(
-    mocker, caplog: pytest.LogCaptureFixture,
+    mocker,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     fake_reader = MagicMock()
     fake_reader.read.side_effect = ImportError("rapidocr")
 
     with caplog.at_level(logging.WARNING, logger="physiclaw.core.vision.ui_elements"):
         out = ui_elements._detect_texts(
-            np.zeros((10, 10, 3), dtype=np.uint8), 10, 10, fake_reader,
+            np.zeros((10, 10, 3), dtype=np.uint8),
+            10,
+            10,
+            fake_reader,
         )
 
     assert out == []

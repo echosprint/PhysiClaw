@@ -46,7 +46,7 @@ class HexDriver(BaseStandardPart):
         s = dim["s"]
         L_short = dim["short_arm"]
         L_long = dim["long_arm"]
-        r_bend = s   # bend radius ≈ across-flats — matches typical Allen keys
+        r_bend = s  # bend radius ≈ across-flats — matches typical Allen keys
         hex_circumradius = s / (2 * math.cos(math.radians(30)))
 
         with BuildPart() as p:

@@ -26,6 +26,7 @@ input invariant):
     reads produces the same luminance. Killing these would require
     a non-grey pixel, which violates the spec.
 """
+
 from __future__ import annotations
 
 import logging
@@ -337,9 +338,7 @@ def test_verify_nonce_logs_a_warning_per_out_of_bounds_square(
     with caplog.at_level(logging.WARNING, logger="physiclaw.core.bridge.nonce"):
         verify_nonce(img, _viewport(), bits)
 
-    oob_count = sum(
-        1 for r in caplog.records if "out of bounds" in r.getMessage()
-    )
+    oob_count = sum(1 for r in caplog.records if "out of bounds" in r.getMessage())
     assert oob_count >= 2
 
 
@@ -354,7 +353,9 @@ def test_verify_nonce_pixel_out_of_bounds_does_not_count_as_match() -> None:
     assert count == 0
 
 
-def test_verify_with_image_height_exactly_at_first_sample_row_treats_it_as_oob() -> None:
+def test_verify_with_image_height_exactly_at_first_sample_row_treats_it_as_oob() -> (
+    None
+):
     # The upper-bound check is `cy < img.shape[0]` (strict). A `<=`
     # mutation would let cy == h slip through and IndexError on the
     # pixel access.
@@ -475,9 +476,7 @@ def test_verify_nonce_applies_viewport_offsets_to_base_coords() -> None:
 
 
 @given(
-    bits=st.lists(
-        st.sampled_from([0, 1]), min_size=NONCE_COUNT, max_size=NONCE_COUNT
-    )
+    bits=st.lists(st.sampled_from([0, 1]), min_size=NONCE_COUNT, max_size=NONCE_COUNT)
 )
 @settings(deadline=None, max_examples=50)
 def test_verify_round_trip_holds_for_any_bit_sequence(bits: list[int]) -> None:

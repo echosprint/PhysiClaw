@@ -31,17 +31,15 @@ from hardware.assembly.procedures.phone_40_bed_frame import PH40BedFrame
 from hardware.assembly.projection import Camera, MAIN_FRAME_VIEW
 from hardware.parts.custom.pcb_holder import rib_cx, tab_thick
 
-SHORT_FACE_Z = LONG_LENGTH    # mm — top short 2040 outward (+Z) side face, = 335
-HOLDER_X     = 0              # mm — position along the short (centered)
-EXPLODE      = 60             # mm — exploded: holder pulled out along +Z off the face
+SHORT_FACE_Z = LONG_LENGTH  # mm — top short 2040 outward (+Z) side face, = 335
+HOLDER_X = 0  # mm — position along the short (centered)
+EXPLODE = 60  # mm — exploded: holder pulled out along +Z off the face
 
 # board_10 (holder native frame) → mounted on the top short's +Z side face.
 # +90° about Z aligns the rib's two nuts across the two Y=±10 slots; the
 # translation seats the rib face on Z = SHORT_FACE_Z and centers the nuts on
 # Y = 0. Exposed so board_30 can place the PCB with the same transform.
-BOARD_PLACEMENT = Location(
-    (HOLDER_X, -rib_cx, SHORT_FACE_Z + tab_thick), (0, 0, 90)
-)
+BOARD_PLACEMENT = Location((HOLDER_X, -rib_cx, SHORT_FACE_Z + tab_thick), (0, 0, 90))
 
 
 class BO20Frame(BaseAssembly):

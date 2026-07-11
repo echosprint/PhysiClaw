@@ -7,6 +7,7 @@ so `paths.runtime_state_file()` lands under tmp_path automatically.
 PermissionError, OSError, success) are observable through `read_live`,
 so tests drive it via `mocker.patch("os.kill", side_effect=…)`.
 """
+
 from __future__ import annotations
 
 import json
@@ -149,9 +150,7 @@ def test_clear_silently_passes_when_file_disappears_before_unlink(
 # ---------- read_live ----------
 
 
-def test_pid_alive_calls_os_kill_with_signal_zero(
-    physiclaw_home: Path, mocker
-) -> None:
+def test_pid_alive_calls_os_kill_with_signal_zero(physiclaw_home: Path, mocker) -> None:
     # Run BEFORE any test that calls real `os.kill` — the mutated form
     # `os.kill(pid, 1)` would deliver SIGHUP to the pytest process and
     # crash the test runner before this assertion gets a chance to fail.

@@ -3,6 +3,7 @@
 Network calls (`socket.socket`, `socket.gethostbyname`) and the platform
 hostname helper are mocked so tests don't hit the real network or shell.
 """
+
 from __future__ import annotations
 
 import socket

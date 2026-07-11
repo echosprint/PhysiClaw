@@ -1,4 +1,5 @@
 """Tests for `physiclaw.core.vision.screen_match`."""
+
 from __future__ import annotations
 
 import numpy as np

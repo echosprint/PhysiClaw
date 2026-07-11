@@ -30,9 +30,11 @@ def render_phone_page_html(filename: str, port: int) -> str:
     each picks its own cache headers).
     """
     primary, fallback = bridge_base_urls(port)
-    return read_text(STATIC_DIR / filename).replace(
-        "__PHONE_URL__", f"{primary}/bridge"
-    ).replace("__PHONE_URL_FALLBACK__", f"{fallback}/bridge")
+    return (
+        read_text(STATIC_DIR / filename)
+        .replace("__PHONE_URL__", f"{primary}/bridge")
+        .replace("__PHONE_URL_FALLBACK__", f"{fallback}/bridge")
+    )
 
 
 async def serve_bridge_page(request):

@@ -52,7 +52,7 @@ from hardware.parts.standard.t_nut import (
 )
 
 # X_BEAM_LENGTH (Extrusion1020 length) — see assembly/travel_ranges.py
-TNUT_EXPLODE  = 30     # mm — exploded: each t-nut slid further toward open end
+TNUT_EXPLODE = 30  # mm — exploded: each t-nut slid further toward open end
 
 # 1020 native Y of the cavity ceiling (where standard t-nut wings
 # catch from below — the slot narrows above this).
@@ -63,17 +63,16 @@ BEAM_CAVITY_TOP_Y_NATIVE = 8
 # XyJoint hole-grid X offset + big-CSK X offset in joint native:
 #   right_csk_world_x = half_w + grid_center_x - big_csk_native_x
 #   (where grid_center_x is XyJointLeft's, = -9 mm).
-_half_w        = SHORT_LENGTH / 2 + EXT_THICKNESS / 2
-_csk_ll_x      = -joint_length / 2 + csk_hole_from_left
-_csk_ur_x      = _csk_ll_x + csk_x_spacing
+_half_w = SHORT_LENGTH / 2 + EXT_THICKNESS / 2
+_csk_ll_x = -joint_length / 2 + csk_hole_from_left
+_csk_ur_x = _csk_ll_x + csk_x_spacing
 _grid_center_x = (_csk_ll_x + _csk_ur_x) / 2
-_big_csk_x     = (_csk_ur_x + extra_hole2_dx_from_csk
-                  + big_csk_dx_from_extra2)
-SCREW_SPACING  = 2 * (_half_w + _grid_center_x - _big_csk_x)
+_big_csk_x = _csk_ur_x + extra_hole2_dx_from_csk + big_csk_dx_from_extra2
+SCREW_SPACING = 2 * (_half_w + _grid_center_x - _big_csk_x)
 
 # T-nut centers in 1020 native Z (= world X after placement, with
 # the 1020 centered on world X = 0).
-_end_gap       = (X_BEAM_LENGTH - SCREW_SPACING) / 2
+_end_gap = (X_BEAM_LENGTH - SCREW_SPACING) / 2
 TNUT_POSITIONS = (_end_gap, X_BEAM_LENGTH - _end_gap)
 
 
@@ -102,8 +101,7 @@ class LI30X(BaseAssembly):
             # T-nut bore is at native (0, _, length/2); offset origin
             # so the bore center lands at z_center.
             nut = TNut("standard", "M5").build()
-            nut.move(Location((0, tnut_origin_y,
-                               z_center - tnut_length / 2)))
+            nut.move(Location((0, tnut_origin_y, z_center - tnut_length / 2)))
             tnuts.append(nut)
 
         return Compound(label="linear_30_x", children=[beam, *tnuts])

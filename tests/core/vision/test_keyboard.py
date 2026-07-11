@@ -1,4 +1,5 @@
 """Tests for `physiclaw.core.vision.keyboard`."""
+
 from __future__ import annotations
 
 import logging
@@ -131,7 +132,8 @@ def test_detect_keys_in_row_empty_when_all_bg() -> None:
 
 
 def test_detect_key_boxes_returns_empty_when_space_not_found(
-    mocker, caplog: pytest.LogCaptureFixture,
+    mocker,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     mocker.patch.object(keyboard, "detect_space_bottom", return_value=None)
 
@@ -144,7 +146,8 @@ def test_detect_key_boxes_returns_empty_when_space_not_found(
 
 
 def test_detect_key_boxes_returns_empty_when_no_rows(
-    mocker, caplog: pytest.LogCaptureFixture,
+    mocker,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     mocker.patch.object(keyboard, "detect_space_bottom", return_value=80)
     mocker.patch.object(keyboard, "detect_row_boundaries", return_value=([], None))
@@ -160,11 +163,14 @@ def test_detect_key_boxes_returns_normalized_bboxes(mocker) -> None:
     h, w = 100, 200
     mocker.patch.object(keyboard, "detect_space_bottom", return_value=90)
     mocker.patch.object(
-        keyboard, "detect_row_boundaries",
+        keyboard,
+        "detect_row_boundaries",
         return_value=([(60, 80)], 50),  # one row top=60, bot=80
     )
     mocker.patch.object(
-        keyboard, "detect_keys_in_row", return_value=[(20, 60), (100, 140)],
+        keyboard,
+        "detect_keys_in_row",
+        return_value=[(20, 60), (100, 140)],
     )
 
     boxes, bg = detect_key_boxes(np.zeros((h, w, 3), dtype=np.uint8))
@@ -306,7 +312,8 @@ def test_label_keyboard_returns_none_on_no_rows(mocker) -> None:
 def test_label_keyboard_alpha_keyboard_assigns_qwerty(mocker) -> None:
     mocker.patch.object(keyboard, "detect_space_bottom", return_value=90)
     mocker.patch.object(
-        keyboard, "detect_row_boundaries",
+        keyboard,
+        "detect_row_boundaries",
         # bottom-up rows; will be reversed → top-first
         return_value=(
             [(80, 90), (60, 75), (40, 55), (20, 35)],
@@ -322,7 +329,11 @@ def test_label_keyboard_alpha_keyboard_assigns_qwerty(mocker) -> None:
         if top == 40:
             return [(i * 10, i * 10 + 8) for i in range(9)]
         if top == 60:
-            return [(0, 30)] + [(50 + i * 10, 50 + i * 10 + 8) for i in range(7)] + [(150, 180)]
+            return (
+                [(0, 30)]
+                + [(50 + i * 10, 50 + i * 10 + 8) for i in range(7)]
+                + [(150, 180)]
+            )
         return [(0, 50), (60, 100), (110, 150), (160, 200)]
 
     mocker.patch.object(keyboard, "detect_keys_in_row", side_effect=fake_keys)
@@ -345,7 +356,8 @@ def test_label_keyboard_alpha_keyboard_assigns_qwerty(mocker) -> None:
 def test_label_keyboard_numeric_keyboard_assigns_digits(mocker) -> None:
     mocker.patch.object(keyboard, "detect_space_bottom", return_value=90)
     mocker.patch.object(
-        keyboard, "detect_row_boundaries",
+        keyboard,
+        "detect_row_boundaries",
         return_value=([(80, 90), (60, 75), (40, 55), (20, 35)], 50),
     )
 
@@ -373,13 +385,16 @@ def test_label_keyboard_numeric_keyboard_assigns_digits(mocker) -> None:
 def test_label_keyboard_numeric_first_row_extra_keys_marked_unknown(mocker) -> None:
     mocker.patch.object(keyboard, "detect_space_bottom", return_value=90)
     mocker.patch.object(
-        keyboard, "detect_row_boundaries",
+        keyboard,
+        "detect_row_boundaries",
         return_value=([(80, 90), (60, 75), (40, 55), (20, 35)], 50),
     )
 
     def fake_keys(_g, top, _bot, _bg):
         if top == 20:
-            return [(i * 10, i * 10 + 8) for i in range(11)]  # 11 keys, exceeds DIGIT_ROW
+            return [
+                (i * 10, i * 10 + 8) for i in range(11)
+            ]  # 11 keys, exceeds DIGIT_ROW
         if top == 40:
             return [(i * 10, i * 10 + 8) for i in range(10)]
         if top == 60:
@@ -401,8 +416,11 @@ def test_render_pages_emits_table_per_page() -> None:
     pages = {
         "Alpha Keyboard": [
             [
-                {"position": [0.0, 0.0, 0.1, 0.1],
-                 "element": "q", "action": "Types 'q'"},
+                {
+                    "position": [0.0, 0.0, 0.1, 0.1],
+                    "element": "q",
+                    "action": "Types 'q'",
+                },
             ],
         ],
     }
@@ -441,15 +459,15 @@ def test_render_pages_includes_bbox_image_when_provided() -> None:
 
 
 def test_generate_preset_substitutes_pages(
-    tmp_path: Path, mocker,
+    tmp_path: Path,
+    mocker,
 ) -> None:
     template = tmp_path / "template.md"
     template.write_text("# Header\n\n{{pages}}\n\nfooter\n")
     mocker.patch.object(keyboard, "TEMPLATE_PATH", template)
     pages = {
         "Alpha Keyboard": [
-            [{"position": [0.0, 0.0, 0.1, 0.1],
-              "element": "q", "action": "x"}],
+            [{"position": [0.0, 0.0, 0.1, 0.1], "element": "q", "action": "x"}],
         ],
     }
 

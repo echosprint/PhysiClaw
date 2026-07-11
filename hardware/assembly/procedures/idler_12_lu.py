@@ -69,12 +69,13 @@ from hardware.parts.custom.idler_mount_motor import (
 )
 from hardware.parts.standard.bracket import flat_hole_spacing
 
-LU_EXPLODE      = 40    # mm — exploded: outboard air gap, slot face → lu block bottom
-BRACKET_EXPLODE = 30    # mm — exploded: -X air gap, lu block front face → bracket
+LU_EXPLODE = 40  # mm — exploded: outboard air gap, slot face → lu block bottom
+BRACKET_EXPLODE = 30  # mm — exploded: -X air gap, lu block front face → bracket
 
 
 class ID12Lu(BaseAssembly):
     camera = [MAIN_FRAME_VIEW, Camera(-54.17, -69.62, -57.05)]
+
     def _build(self) -> Compound:
         # Frame layer — always assembled.
         frame_compound = FR41Bumper(exploded=False).build()
@@ -99,11 +100,15 @@ class ID12Lu(BaseAssembly):
         else:
             block_center_y = slot_face_y - block_thickness / 2
         lu_compound = ID10Lu(exploded=False).build()
-        lu_compound.move(Location(Plane(
-            origin=(-half_w, block_center_y, lu_tnut_world_z),
-            x_dir=(0, 0, -1),   # native +X (length=42) → world -Z (along long)
-            z_dir=(0, -1, 0),   # native +Z (top face)  → world -Y (outboard)
-        )))                     # → native +Y → world +X, native -Y (front) → -X
+        lu_compound.move(
+            Location(
+                Plane(
+                    origin=(-half_w, block_center_y, lu_tnut_world_z),
+                    x_dir=(0, 0, -1),  # native +X (length=42) → world -Z (along long)
+                    z_dir=(0, -1, 0),  # native +Z (top face)  → world -Y (outboard)
+                )
+            )
+        )  # → native +Y → world +X, native -Y (front) → -X
 
         # Block-tying bracket — placed flat against the world -X face,
         # BHCS shanks pointing world +X. The plane axes map ID11Lu's
@@ -122,7 +127,7 @@ class ID12Lu(BaseAssembly):
         # In X, the bracket bottom (native z = bracket_bottom_z) lands
         # on the front face at world x = front_face_x; exploded pulls
         # the bracket BRACKET_EXPLODE further in -X.
-        front_face_x = -half_w - block_width / 2            # = -105
+        front_face_x = -half_w - block_width / 2  # = -105
         front_face_hole_y = block_center_y - front_hole_center_z
         half_hole = flat_hole_spacing / 2
 
@@ -131,16 +136,25 @@ class ID12Lu(BaseAssembly):
         bracket_origin_x = front_face_x + bracket_asm.bracket_bottom_z
         if self.exploded:
             bracket_origin_x -= BRACKET_EXPLODE
-        bracket_origin_y = front_face_hole_y + half_hole    # RIGHT lands on hole
-        bracket_compound.move(Location(Plane(
-            origin=(bracket_origin_x, bracket_origin_y, lu_tnut_world_z),
-            x_dir=(0, -1, 0),
-            z_dir=(-1, 0, 0),
-        )))
+        bracket_origin_y = front_face_hole_y + half_hole  # RIGHT lands on hole
+        bracket_compound.move(
+            Location(
+                Plane(
+                    origin=(bracket_origin_x, bracket_origin_y, lu_tnut_world_z),
+                    x_dir=(0, -1, 0),
+                    z_dir=(-1, 0, 0),
+                )
+            )
+        )
 
-        return Compound(label="idler_12_lu", children=[
-            frame_compound, lu_compound, bracket_compound,
-        ])
+        return Compound(
+            label="idler_12_lu",
+            children=[
+                frame_compound,
+                lu_compound,
+                bracket_compound,
+            ],
+        )
 
 
 if __name__ == "__main__":

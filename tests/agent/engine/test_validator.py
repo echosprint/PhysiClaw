@@ -29,6 +29,7 @@ Accepted equivalent mutants (cannot be killed by behavior tests):
   - `break` ↔ `continue` immediately after `matched = True` — same
     rationale; matched cannot regress.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -105,9 +106,9 @@ def test_unknown_property_does_not_short_circuit_later_known_validation() -> Non
     "bbox",
     [
         "not a list",
-        [0.0, 0.0, 1.0],            # too short
+        [0.0, 0.0, 1.0],  # too short
         [0.0, 0.0, 1.0, 1.0, 0.5],  # too long
-        [],                          # empty
+        [],  # empty
         {"l": 0, "t": 0, "r": 1, "b": 1},  # dict, not list
     ],
 )
@@ -129,9 +130,7 @@ def test_bbox_wrong_shape_raises_with_anchored_message(bbox: Any) -> None:
     ],
 )
 def test_bbox_non_number_coord_raises_with_anchored_message(bbox: list[Any]) -> None:
-    with pytest.raises(
-        ValidationError, match=r"^bbox: each coord must be a number;"
-    ):
+    with pytest.raises(ValidationError, match=r"^bbox: each coord must be a number;"):
         validate_arguments({"bbox": bbox}, {"type": "object", "properties": {}})
 
 
@@ -154,16 +153,14 @@ def test_bbox_coord_out_of_unit_range_raises(bbox: list[float]) -> None:
 @pytest.mark.parametrize(
     "bbox",
     [
-        [0.5, 0.0, 0.4, 1.0],   # left > right
-        [0.5, 0.0, 0.5, 1.0],   # left == right
-        [0.0, 0.5, 1.0, 0.4],   # top > bottom
-        [0.0, 0.5, 1.0, 0.5],   # top == bottom
+        [0.5, 0.0, 0.4, 1.0],  # left > right
+        [0.5, 0.0, 0.5, 1.0],  # left == right
+        [0.0, 0.5, 1.0, 0.4],  # top > bottom
+        [0.0, 0.5, 1.0, 0.5],  # top == bottom
     ],
 )
 def test_bbox_inverted_or_degenerate_raises(bbox: list[float]) -> None:
-    with pytest.raises(
-        ValidationError, match=r"^bbox: left < right, top < bottom;"
-    ):
+    with pytest.raises(ValidationError, match=r"^bbox: left < right, top < bottom;"):
         validate_arguments({"bbox": bbox}, {"type": "object", "properties": {}})
 
 
@@ -290,7 +287,7 @@ def test_string_at_maxLength_boundary_passes() -> None:
         ("string", "hello"),
         ("integer", 42),
         ("number", 3.14),
-        ("number", 7),         # int is also valid number
+        ("number", 7),  # int is also valid number
         ("boolean", True),
         ("array", [1, 2]),
         ("object", {"k": 1}),
@@ -309,7 +306,7 @@ def test_type_match_passes(type_str: str, value: Any) -> None:
         ("string", 42),
         ("integer", "42"),
         ("number", "3.14"),
-        ("boolean", 1),        # int is not bool here
+        ("boolean", 1),  # int is not bool here
         ("array", "list"),
         ("object", []),
         ("null", 0),
@@ -332,7 +329,9 @@ def test_type_list_accepts_either_member(value: Any) -> None:
     validate_arguments({"v": value}, schema)
 
 
-def test_type_list_boolean_then_string_with_string_value_falls_through_to_string() -> None:
+def test_type_list_boolean_then_string_with_string_value_falls_through_to_string() -> (
+    None
+):
     # The boolean-arm `continue` (after the inner block) must be `continue`
     # not `break`; otherwise the loop would exit and the later "string"
     # type wouldn't get checked.
@@ -344,7 +343,9 @@ def test_type_list_boolean_then_string_with_string_value_falls_through_to_string
     validate_arguments({"v": "abc"}, schema)
 
 
-def test_type_list_integer_then_boolean_with_bool_value_falls_through_to_boolean() -> None:
+def test_type_list_integer_then_boolean_with_bool_value_falls_through_to_boolean() -> (
+    None
+):
     # The integer/number bool-guard `continue` must be `continue` not
     # `break`; otherwise a bool wouldn't reach the later "boolean" arm.
     schema = {
@@ -518,7 +519,9 @@ def test_nested_object_with_only_required_still_recurses() -> None:
         },
     }
 
-    with pytest.raises(ValidationError, match=r"^missing required argument\(s\): inner$"):
+    with pytest.raises(
+        ValidationError, match=r"^missing required argument\(s\): inner$"
+    ):
         validate_arguments({"outer": {}}, schema)
 
 

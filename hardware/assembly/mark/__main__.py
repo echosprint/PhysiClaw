@@ -21,7 +21,10 @@ from hardware.assembly.mark.server import make_server
 
 def main(argv: List[str]) -> int:
     if len(argv) != 2:
-        print("usage: python -m hardware.assembly.mark <input.svg | patch.json>", file=sys.stderr)
+        print(
+            "usage: python -m hardware.assembly.mark <input.svg | patch.json>",
+            file=sys.stderr,
+        )
         return 2
     arg = Path(argv[1]).expanduser().resolve()
     if not arg.exists():
@@ -31,7 +34,9 @@ def main(argv: List[str]) -> int:
         # A patch file → edit its source SVG with the patch loaded.
         src = source_for_patch(arg)
         if not src.exists():
-            print(f"no source SVG for patch {arg.name}: expected {src}", file=sys.stderr)
+            print(
+                f"no source SVG for patch {arg.name}: expected {src}", file=sys.stderr
+            )
             return 2
     elif arg.suffix.lower() == ".svg":
         src = arg

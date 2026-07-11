@@ -33,15 +33,15 @@ from hardware.parts.standard.gooseneck import (
 )
 from hardware.parts.standard.nut import SPECS as NUT_SPECS
 
-NUT_THICK   = NUT_SPECS["hex"]["1/4-20"]["thickness"]   # mm — hex nut height
+NUT_THICK = NUT_SPECS["hex"]["1/4-20"]["thickness"]  # mm — hex nut height
 # Gooseneck arm span. The names follow camera_20's own (bracket-local) frame —
 # RISE along bracket +Z, REACH along bracket +X — but camera_40's mount rotates
 # the bracket 90°, so INSTALLED the bracket-Z rise reads as the HORIZONTAL reach
 # out from the extrusion face and the bracket-X reach as the VERTICAL drop. The
 # values are set for the installed result: 150 mm vertical × 85 mm horizontal.
-GOOSE_REACH  = 100    # along bracket +Z → installed HORIZONTAL (out from the face)
-GOOSE_RISE = 150   # along bracket +X → installed VERTICAL (drop toward the bed)
-GOOSE_GAP   = 16    # mm — exploded: gooseneck slid off the stud along −X
+GOOSE_REACH = 100  # along bracket +Z → installed HORIZONTAL (out from the face)
+GOOSE_RISE = 150  # along bracket +X → installed VERTICAL (drop toward the bed)
+GOOSE_GAP = 16  # mm — exploded: gooseneck slid off the stud along −X
 
 
 class Camera20Gooseneck(BaseAssembly):
@@ -53,7 +53,7 @@ class Camera20Gooseneck(BaseAssembly):
         # this step's new part — the gooseneck — explodes); it exposes the
         # camera-screw anchors (cam_y / cam_z / cam_offset).
         bracket = Camera10Bracket(exploded=False)
-        base = bracket.build()   # bracket + frame fasteners + 1/4-20 screw + hex nut
+        base = bracket.build()  # bracket + frame fasteners + 1/4-20 screw + hex nut
         cam_y, cam_z, cam_offset = bracket.cam_y, bracket.cam_z, bracket.cam_offset
 
         # The 1/4-20 screw protrudes on the −X face (head on +X). Thread the
@@ -61,13 +61,15 @@ class Camera20Gooseneck(BaseAssembly):
         # opens +X (toward the stud) so the screw enters it; the neck then arcs
         # up to a free male stud.
         nut_back_x = -cam_offset - NUT_THICK
-        mouth_x    = nut_back_x - (GOOSE_GAP if self.exploded else 0)
+        mouth_x = nut_back_x - (GOOSE_GAP if self.exploded else 0)
 
         female_pt = (mouth_x - female_collar_len, cam_y, cam_z)
-        male_pt   = (female_pt[0] - GOOSE_RISE, cam_y, cam_z + GOOSE_REACH)
+        male_pt = (female_pt[0] - GOOSE_RISE, cam_y, cam_z + GOOSE_REACH)
         goose = Gooseneck(
-            point1=male_pt,   direction1=(0, 0, -1),   # male stud points +Z (up)
-            point2=female_pt, direction2=(1, 0, 0),    # female mouth opens +X onto the stud
+            point1=male_pt,
+            direction1=(0, 0, -1),  # male stud points +Z (up)
+            point2=female_pt,
+            direction2=(1, 0, 0),  # female mouth opens +X onto the stud
         ).build()
 
         # Rotate the whole gooseneck 180° about the screw axis (world X

@@ -84,7 +84,9 @@ def _update_check_disabled() -> bool:
     )
 
 
-def _run(cmd: list[str], *, timeout: int = _UV_INSTALL_TIMEOUT) -> subprocess.CompletedProcess | None:
+def _run(
+    cmd: list[str], *, timeout: int = _UV_INSTALL_TIMEOUT
+) -> subprocess.CompletedProcess | None:
     """Run a uv subcommand, capturing UTF-8 output; None if it couldn't run at
     all (missing exe, timeout). Explicit UTF-8 because uv emits UTF-8 regardless
     of the console codepage, and non-UTF-8 Windows locales (cp936, cp1252) would
@@ -92,7 +94,10 @@ def _run(cmd: list[str], *, timeout: int = _UV_INSTALL_TIMEOUT) -> subprocess.Co
     config.toml)."""
     try:
         return subprocess.run(
-            cmd, capture_output=True, encoding="utf-8", errors="replace",
+            cmd,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
         )
     except (OSError, subprocess.TimeoutExpired):
@@ -121,10 +126,7 @@ def update() -> None:
     # is just a signpost to the real command, since it's the intuitive thing to
     # type. `uv tool upgrade` upgrades in place, but the server maps the native
     # DLLs, so it must be stopped first.
-    typer.echo(
-        "To update, stop the server and run:\n\n"
-        "    uv tool upgrade physiclaw"
-    )
+    typer.echo("To update, stop the server and run:\n\n    uv tool upgrade physiclaw")
 
 
 # ── Two-phase update check ─────────────────────────────────────────────
@@ -168,10 +170,15 @@ def _write_staged(version: str) -> None:
     try:
         p = _stage_file()
         p.parent.mkdir(parents=True, exist_ok=True)
-        write_text(p, json.dumps({
-            "version": version,
-            "staged_at": datetime.now(timezone.utc).isoformat(),
-        }))
+        write_text(
+            p,
+            json.dumps(
+                {
+                    "version": version,
+                    "staged_at": datetime.now(timezone.utc).isoformat(),
+                }
+            ),
+        )
     except OSError:
         pass  # non-fatal — Phase B just re-stages next cycle
 
@@ -189,8 +196,17 @@ def _warm_cmd(uv: str, version: str) -> list[str]:
     throwaway env with that version — downloading + preparing its wheels into
     the shared cache — and runs a no-op ``python -c pass``. ``--refresh`` so a
     just-cut release resolves."""
-    return [uv, "tool", "run", "--refresh", "--from", f"physiclaw=={version}",
-            "python", "-c", "pass"]
+    return [
+        uv,
+        "tool",
+        "run",
+        "--refresh",
+        "--from",
+        f"physiclaw=={version}",
+        "python",
+        "-c",
+        "pass",
+    ]
 
 
 def notify_staged_update() -> None:
@@ -224,7 +240,8 @@ def notify_staged_update() -> None:
     log.info(
         "physiclaw %s available (you're on %s) — "
         "stop the server and run `uv tool upgrade physiclaw`.",
-        staged, _pkg_version,
+        staged,
+        _pkg_version,
     )
 
 

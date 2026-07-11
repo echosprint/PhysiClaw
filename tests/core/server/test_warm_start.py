@@ -4,6 +4,7 @@ helper is integration-only and lives behind hardware fakes. `wait_for_port`
 now lives in `core.server.net` (tested in test_net.py); we only pin the
 re-export here.
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -30,17 +31,14 @@ def test_try_resume_returns_false_when_no_bundle(
 ) -> None:
     import logging
 
-    mocker.patch(
-        "physiclaw.core.calibration.state.Calibration.load", return_value=None
-    )
+    mocker.patch("physiclaw.core.calibration.state.Calibration.load", return_value=None)
 
     with caplog.at_level(logging.ERROR, logger="physiclaw.core.server.warm_start"):
         result = warm_start.try_resume(cam_index_override=None)
 
     assert result is False
     assert any(
-        "no calibration bundle on disk" in r.getMessage()
-        for r in caplog.records
+        "no calibration bundle on disk" in r.getMessage() for r in caplog.records
     )
 
 
@@ -67,10 +65,7 @@ def test_try_resume_returns_false_when_bundle_incomplete(
         result = warm_start.try_resume(cam_index_override=None)
 
     assert result is False
-    assert any(
-        "bundle on disk is incomplete" in r.getMessage()
-        for r in caplog.records
-    )
+    assert any("bundle on disk is incomplete" in r.getMessage() for r in caplog.records)
 
 
 def test_try_resume_returns_false_when_hardware_connect_raises(
@@ -137,7 +132,8 @@ def test_try_resume_succeeds_on_clean_path(mocker) -> None:
     cal = _ready_bundle()
     app = _ready_app(cal)
     mocker.patch(
-        "physiclaw.core.calibration.state.Calibration.load", return_value=cal,
+        "physiclaw.core.calibration.state.Calibration.load",
+        return_value=cal,
     )
     mocker.patch("physiclaw.core.server.app.physiclaw", app)
     fake_calib_state = MagicMock()
@@ -171,7 +167,8 @@ def test_try_resume_uses_cam_index_override(mocker) -> None:
     cal = _ready_bundle()
     app = _ready_app(cal)
     mocker.patch(
-        "physiclaw.core.calibration.state.Calibration.load", return_value=cal,
+        "physiclaw.core.calibration.state.Calibration.load",
+        return_value=cal,
     )
     mocker.patch("physiclaw.core.server.app.physiclaw", app)
     mocker.patch("physiclaw.core.server.app._calib", MagicMock())
@@ -190,7 +187,8 @@ def test_try_resume_falls_back_to_cam_index_zero(mocker) -> None:
     cal.cam_index = None
     app = _ready_app(cal)
     mocker.patch(
-        "physiclaw.core.calibration.state.Calibration.load", return_value=cal,
+        "physiclaw.core.calibration.state.Calibration.load",
+        return_value=cal,
     )
     mocker.patch("physiclaw.core.server.app.physiclaw", app)
     mocker.patch("physiclaw.core.server.app._calib", MagicMock())
@@ -205,7 +203,8 @@ def test_try_resume_falls_back_to_cam_index_zero(mocker) -> None:
 
 @pytest.mark.integration
 def test_try_resume_returns_false_when_bridge_never_connects(
-    mocker, caplog: pytest.LogCaptureFixture,
+    mocker,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     import logging
 
@@ -213,7 +212,8 @@ def test_try_resume_returns_false_when_bridge_never_connects(
     app = _ready_app(cal)
     app._bridge.wait_for_connection.return_value = False
     mocker.patch(
-        "physiclaw.core.calibration.state.Calibration.load", return_value=cal,
+        "physiclaw.core.calibration.state.Calibration.load",
+        return_value=cal,
     )
     mocker.patch("physiclaw.core.server.app.physiclaw", app)
     mocker.patch("physiclaw.core.server.app._calib", MagicMock())
@@ -232,7 +232,8 @@ def test_try_resume_returns_false_when_sanity_fails(mocker) -> None:
     cal = _ready_bundle()
     app = _ready_app(cal)
     mocker.patch(
-        "physiclaw.core.calibration.state.Calibration.load", return_value=cal,
+        "physiclaw.core.calibration.state.Calibration.load",
+        return_value=cal,
     )
     mocker.patch("physiclaw.core.server.app.physiclaw", app)
     mocker.patch("physiclaw.core.server.app._calib", MagicMock())
@@ -272,9 +273,11 @@ def test_sanity_passes_when_all_taps_within_tolerance(mocker) -> None:
 
 @pytest.mark.integration
 def test_sanity_fails_when_no_taps_received(
-    mocker, caplog: pytest.LogCaptureFixture,
+    mocker,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     import logging
+
     mocker.patch(
         "physiclaw.core.calibration.calibrate.validate_calibration",
         return_value=[
@@ -294,9 +297,11 @@ def test_sanity_fails_when_no_taps_received(
 
 @pytest.mark.integration
 def test_sanity_fails_when_taps_received_but_off(
-    mocker, caplog: pytest.LogCaptureFixture,
+    mocker,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     import logging
+
     mocker.patch(
         "physiclaw.core.calibration.calibrate.validate_calibration",
         return_value=[

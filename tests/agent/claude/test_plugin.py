@@ -1,4 +1,5 @@
 """Tests for `physiclaw.agent.claude.plugin`."""
+
 from __future__ import annotations
 
 import json
@@ -80,9 +81,7 @@ def test_link_or_copy_creates_symlink(tmp_path: Path) -> None:
     assert dst.resolve() == src.resolve()
 
 
-def test_link_or_copy_falls_back_to_copytree_on_oserror(
-    tmp_path: Path, mocker
-) -> None:
+def test_link_or_copy_falls_back_to_copytree_on_oserror(tmp_path: Path, mocker) -> None:
     src = _make_skill_dir(tmp_path, "src")
     dst = tmp_path / "dst"
 
@@ -127,7 +126,8 @@ def test_prepare_plugin_dir_writes_plugin_json_with_session_name(
 
 
 def test_prepare_plugin_dir_links_user_skills(
-    tmp_path: Path, _isolate_claude_only: Path,
+    tmp_path: Path,
+    _isolate_claude_only: Path,
 ) -> None:
     user_skills_root = tmp_path / "user_skills"
     sk_dir = _make_skill_dir(user_skills_root, "wechat")
@@ -144,15 +144,19 @@ def test_prepare_plugin_dir_links_user_skills(
 
 
 def test_prepare_plugin_dir_materializes_flat_builtin_skill(
-    tmp_path: Path, _isolate_claude_only: Path,
+    tmp_path: Path,
+    _isolate_claude_only: Path,
 ) -> None:
     # A built-in flat skill has dir = the shared root (no per-skill SKILL.md);
     # the plugin must write skills/<name>/SKILL.md from the snapshot.
     builtin_root = tmp_path / "built-in"
     builtin_root.mkdir()
     sk = Skill(
-        name="im", description="messaging", body="im steps",
-        dir=builtin_root, flat=True,
+        name="im",
+        description="messaging",
+        body="im steps",
+        dir=builtin_root,
+        flat=True,
     )
 
     root = prepare_plugin_dir("sflat", skills={"im": sk})
@@ -182,7 +186,8 @@ def test_prepare_plugin_dir_links_claude_only_skills(
 
 
 def test_prepare_plugin_dir_claude_only_wins_on_collision(
-    tmp_path: Path, _isolate_claude_only: Path,
+    tmp_path: Path,
+    _isolate_claude_only: Path,
 ) -> None:
     # Claude-only "jobs" with body "claude"
     co_jobs = _make_skill_dir(_isolate_claude_only, "jobs", body="claude version")
@@ -234,7 +239,8 @@ def test_prepare_plugin_dir_skips_files_in_claude_only_root(
 
 
 def test_prepare_plugin_dir_skips_polluted_claude_only_skill_and_logs(
-    _isolate_claude_only: Path, caplog: pytest.LogCaptureFixture,
+    _isolate_claude_only: Path,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     polluted = _make_skill_dir(_isolate_claude_only, "polluted")
     (polluted / "CLAUDE.md").write_text("stray")
@@ -253,7 +259,8 @@ def test_prepare_plugin_dir_skips_polluted_claude_only_skill_and_logs(
 
 
 def test_prepare_plugin_dir_skips_polluted_user_skill(
-    tmp_path: Path, _isolate_claude_only: Path,
+    tmp_path: Path,
+    _isolate_claude_only: Path,
 ) -> None:
     user_root = tmp_path / "user"
     sk_dir = _make_skill_dir(user_root, "bad")
@@ -269,12 +276,15 @@ def test_prepare_plugin_dir_skips_polluted_user_skill(
 
 
 def test_prepare_plugin_dir_calls_discover_when_skills_none(
-    _isolate_claude_only: Path, mocker, tmp_path: Path,
+    _isolate_claude_only: Path,
+    mocker,
+    tmp_path: Path,
 ) -> None:
     user_root = tmp_path / "user"
     sk_dir = _make_skill_dir(user_root, "auto")
     spy = mocker.patch.object(
-        plugin.skill, "discover",
+        plugin.skill,
+        "discover",
         return_value={"auto": _skill("auto", sk_dir)},
     )
 
@@ -288,12 +298,11 @@ def test_prepare_plugin_dir_calls_discover_when_skills_none(
 
 
 def test_prepare_plugin_dir_handles_missing_claude_only_dir(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Point at a path that doesn't exist.
-    monkeypatch.setattr(
-        plugin, "_CLAUDE_ONLY_SKILLS_DIR", tmp_path / "does-not-exist"
-    )
+    monkeypatch.setattr(plugin, "_CLAUDE_ONLY_SKILLS_DIR", tmp_path / "does-not-exist")
 
     root = prepare_plugin_dir("s9", skills={})
 
@@ -306,7 +315,9 @@ def test_prepare_plugin_dir_handles_missing_claude_only_dir(
 
 
 def test_prepare_plugin_dir_logs_info_with_linked_skills(
-    tmp_path: Path, _isolate_claude_only: Path, caplog: pytest.LogCaptureFixture,
+    tmp_path: Path,
+    _isolate_claude_only: Path,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     _make_skill_dir(_isolate_claude_only, "jobs")
     sk_dir = _make_skill_dir(tmp_path / "user", "wechat")

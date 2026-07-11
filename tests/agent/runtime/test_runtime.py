@@ -4,6 +4,7 @@ Runtime.start tests are integration-leaning (intricate event-loop +
 hooks side effects); covered with one happy-path-and-stop scenario,
 the rest deferred.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -45,18 +46,14 @@ async def test_maybe_await_awaits_coroutines() -> None:
 
 @pytest.mark.asyncio
 async def test_check_ready_true(respx_mock: respx.MockRouter) -> None:
-    respx_mock.get("http://test.host:8048/api/status").respond(
-        json={"ready": True}
-    )
+    respx_mock.get("http://test.host:8048/api/status").respond(json={"ready": True})
 
     assert await _check_ready() is True
 
 
 @pytest.mark.asyncio
 async def test_check_ready_false(respx_mock: respx.MockRouter) -> None:
-    respx_mock.get("http://test.host:8048/api/status").respond(
-        json={"ready": False}
-    )
+    respx_mock.get("http://test.host:8048/api/status").respond(json={"ready": False})
 
     assert await _check_ready() is False
 
@@ -141,7 +138,8 @@ async def test_start_ready_calls_react_when_triggers_fire(mocker) -> None:
 
     triggers = [Trigger(description="phone", source="phone")]
     mocker.patch.object(
-        runtime, "check_hooks",
+        runtime,
+        "check_hooks",
         side_effect=[triggers] + [[]] * 10,
     )
 
@@ -171,7 +169,8 @@ async def test_start_skips_react_when_not_ready(mocker) -> None:
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_start_warns_only_once_per_blip(
-    mocker, caplog: pytest.LogCaptureFixture,
+    mocker,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     import logging
 
@@ -197,7 +196,8 @@ async def test_start_warns_only_once_per_blip(
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_start_logs_ready_transition(
-    mocker, caplog: pytest.LogCaptureFixture,
+    mocker,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     import logging
 
@@ -218,7 +218,8 @@ async def test_start_logs_ready_transition(
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_start_exception_in_tick_logs_and_continues(
-    mocker, caplog: pytest.LogCaptureFixture,
+    mocker,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     import logging
 
@@ -262,4 +263,5 @@ async def test_start_cancellation_propagates(mocker) -> None:
 def _async_returning(value):
     async def _coro(*a, **kw):
         return value
+
     return _coro

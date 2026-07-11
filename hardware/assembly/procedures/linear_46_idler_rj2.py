@@ -23,7 +23,7 @@ from hardware.assembly.procedures.linear_40_idler_lj1 import LI40IdlerLj1
 
 class LI46IdlerRj2(LI40IdlerLj1):
     compound_label = "linear_46_idler_rj2"
-    toothed        = True
+    toothed = True
 
 
 if __name__ == "__main__":

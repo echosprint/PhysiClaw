@@ -49,7 +49,9 @@ from physiclaw.core.server.types import Bbox, ClipboardText, SequenceActions
 # say "read the attached view" — a hint that said "`peek` to verify"
 # would cause the exact wasted turn the fused view removes.
 #
-HINT_VIEW_AFTER_TAP = "— read the attached view: did the value/state you targeted change?"
+HINT_VIEW_AFTER_TAP = (
+    "— read the attached view: did the value/state you targeted change?"
+)
 HINT_VIEW_AFTER_DOUBLE_TAP = "— read the attached view: did the zoom / selection land?"
 HINT_VIEW_AFTER_LONG_PRESS = (
     "— the attached view shows the revealed popover / menu; tap your "

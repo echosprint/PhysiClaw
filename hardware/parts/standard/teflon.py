@@ -19,18 +19,19 @@ Run from the repo root:
 
     uv run --group cad python -m hardware.parts.standard.teflon
 """
+
 from build123d import *
 
 from hardware.parts.base import BaseStandardPart
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
-default_od = 4 * MM    # outer diameter (generic PTFE bowden)
-default_id = 2 * MM    # inner diameter; wall = (od - id) / 2 = 1 mm
+default_od = 4 * MM  # outer diameter (generic PTFE bowden)
+default_id = 2 * MM  # inner diameter; wall = (od - id) / 2 = 1 mm
 
 # Default routing: a smooth bend leaving vertical (+Z) and arriving horizontal (+X).
-default_point1     = (0, 0, 0)
+default_point1 = (0, 0, 0)
 default_direction1 = (0, 0, 1)
-default_point2     = (30 * MM, 0, 20 * MM)
+default_point2 = (30 * MM, 0, 20 * MM)
 default_direction2 = (1, 0, 0)
 
 # Apex offset (fraction of the chord) inserted when the end tangents oppose, so
@@ -73,10 +74,15 @@ class Teflon(BaseStandardPart):
         d2 = Vector(*self.direction2).normalized()
         pts = [self.point1, self.point2]
         if d1.dot(d2) < 0:
-            apex = (p1 + p2) / 2 + (d1 - d2).normalized() * (WAYPOINT_FRAC * (p2 - p1).length)
+            apex = (p1 + p2) / 2 + (d1 - d2).normalized() * (
+                WAYPOINT_FRAC * (p2 - p1).length
+            )
             pts = [self.point1, tuple(apex), self.point2]
-        return Spline(*pts, tangents=(self.direction1, self.direction2),
-                      tangent_scalars=self.tangent_scalars)
+        return Spline(
+            *pts,
+            tangents=(self.direction1, self.direction2),
+            tangent_scalars=self.tangent_scalars,
+        )
 
     @property
     def cut_length(self) -> float:
@@ -99,8 +105,16 @@ class Teflon(BaseStandardPart):
     def geom_key(self):
         # Geometry depends on the full routing, not just the spec (the apex is
         # derived from these, so it needn't be keyed separately).
-        return ("Teflon", self.point1, self.direction1, self.point2,
-                self.direction2, self.od, self.id, self.tangent_scalars)
+        return (
+            "Teflon",
+            self.point1,
+            self.direction1,
+            self.point2,
+            self.direction2,
+            self.od,
+            self.id,
+            self.tangent_scalars,
+        )
 
     def _build(self):
         spine = self._spline()

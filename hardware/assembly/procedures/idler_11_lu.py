@@ -56,12 +56,12 @@ from hardware.parts.standard.t_nut import (
 
 FRAME_BHCS_LENGTH = 10  # mm — LEFT, frame-slot side: into the hammer T-nut
 BLOCK_BHCS_LENGTH = 12  # mm — RIGHT, block side: 4 bracket + 3.5 standoff
-                        #      + 4 nut = 11.5 needed for full engagement
-BRACKET_GAP = 20     # mm — exploded: visual gap between t-nut top and bracket bottom
-SCREW_GAP   = 8      # mm — exploded: visual gap between bracket top and screw shank tips
-TNUT_LIFT   = 5      # mm — assembled: nut slid up the shank toward the bracket
-                     #      (closes the 6 mm shank-protrusion gap to ~1 mm,
-                     #      reads as "screw threaded most of the way in")
+#      + 4 nut = 11.5 needed for full engagement
+BRACKET_GAP = 20  # mm — exploded: visual gap between t-nut top and bracket bottom
+SCREW_GAP = 8  # mm — exploded: visual gap between bracket top and screw shank tips
+TNUT_LIFT = 5  # mm — assembled: nut slid up the shank toward the bracket
+#      (closes the 6 mm shank-protrusion gap to ~1 mm,
+#      reads as "screw threaded most of the way in")
 
 
 class ID11Lu(BaseAssembly):
@@ -89,11 +89,15 @@ class ID11Lu(BaseAssembly):
         # assembled mode the nut is slid TNUT_LIFT up the shank toward
         # the bracket; exploded keeps it on the floor at z=0.
         tnut_lift = 0 if self.exploded else TNUT_LIFT
-        nut.move(Location(Plane(
-            origin=(-half_hole, hammer_half_length, tnut_lift),
-            x_dir=(1, 0, 0),
-            z_dir=(0, -1, 0),
-        )))
+        nut.move(
+            Location(
+                Plane(
+                    origin=(-half_hole, hammer_half_length, tnut_lift),
+                    x_dir=(1, 0, 0),
+                    z_dir=(0, -1, 0),
+                )
+            )
+        )
 
         # Layout per variant (mirrors frame_30_bracket_tnut so the two
         # files read identically apart from the missing RIGHT t-nut):
@@ -111,7 +115,7 @@ class ID11Lu(BaseAssembly):
             tip_z = bracket_z + plate_thick / 2 + SCREW_GAP
             screw_zs = [tip_z + length for length in lengths]
         else:
-            screw_z   = HAMMER_TOTAL_HEIGHT + FRAME_BHCS_LENGTH
+            screw_z = HAMMER_TOTAL_HEIGHT + FRAME_BHCS_LENGTH
             bracket_z = screw_z - plate_thick / 2
             screw_zs = [screw_z, screw_z]
 
@@ -123,9 +127,14 @@ class ID11Lu(BaseAssembly):
         # flush-mount this sub-assembly — same hook as FR30BracketTnut.
         self.bracket_bottom_z = bracket_z - plate_thick / 2
 
-        return Compound(label=self.compound_label, children=[
-            bracket, nut, *screws,
-        ])
+        return Compound(
+            label=self.compound_label,
+            children=[
+                bracket,
+                nut,
+                *screws,
+            ],
+        )
 
 
 if __name__ == "__main__":

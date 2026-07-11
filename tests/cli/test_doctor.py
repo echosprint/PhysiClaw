@@ -1,4 +1,5 @@
 """Tests for `physiclaw.cli.doctor` — health-check command."""
+
 from __future__ import annotations
 
 import importlib
@@ -21,6 +22,7 @@ runner = CliRunner()
 
 def test_list_cameras_returns_open_indices(mocker) -> None:
     import cv2
+
     captures = {}
 
     def make_cap(i):
@@ -45,7 +47,7 @@ def test_list_cameras_breaks_after_two_misses(mocker) -> None:
 
     def make_cap(i):
         cap = MagicMock()
-        cap.isOpened.return_value = (i == 0)
+        cap.isOpened.return_value = i == 0
         return cap
 
     spy = mocker.patch.object(cv2, "VideoCapture", side_effect=make_cap)
@@ -143,6 +145,7 @@ def test_probe_vision_model_deep_failure(mocker) -> None:
 def test_probe_camera_frame_ok(mocker) -> None:
     import cv2
     import numpy as np
+
     fake_frame = np.zeros((480, 640, 3), dtype=np.uint8)
     fake_cap = MagicMock()
     fake_cap.read.return_value = (True, fake_frame)
@@ -160,6 +163,7 @@ def test_probe_camera_frame_ok(mocker) -> None:
 
 def test_probe_camera_frame_no_frame(mocker) -> None:
     import cv2
+
     fake_cap = MagicMock()
     fake_cap.read.return_value = (False, None)
     mocker.patch.object(cv2, "VideoCapture", return_value=fake_cap)
@@ -186,7 +190,9 @@ def test_probe_calibration_deep_no_bundle(mocker) -> None:
 
 def test_probe_calibration_deep_unreadable(mocker) -> None:
     mocker.patch.object(
-        doctor_mod.paths, "load_calibration_bundle", return_value={"x": 1},
+        doctor_mod.paths,
+        "load_calibration_bundle",
+        return_value={"x": 1},
     )
     fake_cal_module = MagicMock()
     fake_cal_module.Calibration.from_dict.side_effect = ValueError("bad")
@@ -202,7 +208,9 @@ def test_probe_calibration_deep_unreadable(mocker) -> None:
 
 def test_probe_calibration_deep_complete(mocker) -> None:
     mocker.patch.object(
-        doctor_mod.paths, "load_calibration_bundle", return_value={"a": 1},
+        doctor_mod.paths,
+        "load_calibration_bundle",
+        return_value={"a": 1},
     )
     fake_cal = MagicMock(complete=True)
     fake_cal_module = MagicMock()
@@ -219,7 +227,8 @@ def test_probe_calibration_deep_complete(mocker) -> None:
 
 def test_probe_calibration_deep_partial_with_missing(mocker) -> None:
     mocker.patch.object(
-        doctor_mod.paths, "load_calibration_bundle",
+        doctor_mod.paths,
+        "load_calibration_bundle",
         return_value={"a": None, "b": 1, "c": None},
     )
     fake_cal = MagicMock(complete=False)
@@ -238,7 +247,9 @@ def test_probe_calibration_deep_partial_with_missing(mocker) -> None:
 
 def test_probe_calibration_deep_partial_no_missing(mocker) -> None:
     mocker.patch.object(
-        doctor_mod.paths, "load_calibration_bundle", return_value={"a": 1, "b": 2},
+        doctor_mod.paths,
+        "load_calibration_bundle",
+        return_value={"a": 1, "b": 2},
     )
     fake_cal = MagicMock(complete=False)
     fake_cal_module = MagicMock()
@@ -279,7 +290,8 @@ def test_probe_bridge_deep_not_paired(mocker) -> None:
 def test_probe_bridge_deep_http_error(mocker) -> None:
     # The warn line carries the failure detail (exception type + message).
     mocker.patch.object(
-        doctor_mod._http, "fetch_json",
+        doctor_mod._http,
+        "fetch_json",
         side_effect=urllib.error.URLError("x"),
     )
 
@@ -313,7 +325,9 @@ def test_skills_lines_with_provenance(mocker, tmp_path: Path) -> None:
     fake_skills = MagicMock()
     fake_skills.installed_skill_dirs.return_value = [skill_dir]
     fake_skills.read_provenance.return_value = {
-        "source": "owner/repo", "ref": "main", "sha": "abc1234",
+        "source": "owner/repo",
+        "ref": "main",
+        "sha": "abc1234",
     }
     fake_skills.PROVENANCE_FILE = ".installed-from"
     mocker.patch.dict("sys.modules", {"physiclaw.cli.skills": fake_skills})
@@ -330,7 +344,9 @@ def test_skills_lines_uses_sha_when_no_ref(mocker, tmp_path: Path) -> None:
     fake_skills = MagicMock()
     fake_skills.installed_skill_dirs.return_value = [skill_dir]
     fake_skills.read_provenance.return_value = {
-        "source": "owner/repo", "ref": "", "sha": "abcdef0123",
+        "source": "owner/repo",
+        "ref": "",
+        "sha": "abcdef0123",
     }
     fake_skills.PROVENANCE_FILE = ".installed-from"
     mocker.patch.dict("sys.modules", {"physiclaw.cli.skills": fake_skills})
@@ -374,11 +390,15 @@ def test_skills_lines_unparseable_provenance(mocker, tmp_path: Path) -> None:
 # ---------- doctor command (smoke) ----------
 
 
-def _patch_doctor_environment(mocker, *, server_status: dict | None = None,
-                                model_exists: bool = False,
-                                bundle_exists: bool = False,
-                                live_ref: str | None = None,
-                                key_unset: bool = True) -> None:
+def _patch_doctor_environment(
+    mocker,
+    *,
+    server_status: dict | None = None,
+    model_exists: bool = False,
+    bundle_exists: bool = False,
+    live_ref: str | None = None,
+    key_unset: bool = True,
+) -> None:
     """Stub everything `doctor()` touches so the command runs to completion."""
     mocker.patch.object(doctor_mod.paths, "ensure_dirs")
     mocker.patch.object(doctor_mod.paths, "HOME", Path("/fake/home"))
@@ -401,19 +421,24 @@ def _patch_doctor_environment(mocker, *, server_status: dict | None = None,
     fake_state = MagicMock()
     if live_ref:
         fake_state.read_live.return_value = {
-            "host": "127.0.0.1", "port": 8048,
-            "model_ref": live_ref, "model_source": "config",
+            "host": "127.0.0.1",
+            "port": 8048,
+            "model_ref": live_ref,
+            "model_source": "config",
         }
     else:
         fake_state.read_live.return_value = None
     mocker.patch.object(doctor_mod, "runtime_state", fake_state)
 
     mocker.patch.object(
-        doctor_mod, "_probe_server",
+        doctor_mod,
+        "_probe_server",
         return_value=("localhost", 8048, False, server_status),
     )
     mocker.patch.object(doctor_mod, "_list_cameras", return_value=[0])
-    mocker.patch.object(doctor_mod, "_skills_lines", return_value=["  (none installed)"])
+    mocker.patch.object(
+        doctor_mod, "_skills_lines", return_value=["  (none installed)"]
+    )
 
     fake_launcher = MagicMock()
     fake_launcher.engine_label.return_value = "engine=openai"
@@ -446,7 +471,10 @@ def test_doctor_server_running_and_ready(mocker) -> None:
     _patch_doctor_environment(
         mocker,
         server_status={
-            "arm": True, "camera": True, "calibrated": True, "ready": True,
+            "arm": True,
+            "camera": True,
+            "calibrated": True,
+            "ready": True,
         },
         model_exists=True,
         bundle_exists=True,
@@ -492,7 +520,8 @@ def test_doctor_no_grbl_detected(mocker) -> None:
     fake_grbl.detect_grbl.return_value = None
     fake_grbl.candidate_ports.return_value = []
     mocker.patch.dict(
-        "sys.modules", {"physiclaw.core.hardware.grbl": fake_grbl},
+        "sys.modules",
+        {"physiclaw.core.hardware.grbl": fake_grbl},
     )
 
     result = runner.invoke(app, [])
@@ -506,7 +535,8 @@ def test_doctor_no_grbl_with_candidate_ports(mocker) -> None:
     fake_grbl.detect_grbl.return_value = None
     fake_grbl.candidate_ports.return_value = ["/dev/cu.usbserial-A"]
     mocker.patch.dict(
-        "sys.modules", {"physiclaw.core.hardware.grbl": fake_grbl},
+        "sys.modules",
+        {"physiclaw.core.hardware.grbl": fake_grbl},
     )
 
     result = runner.invoke(app, [])
@@ -515,14 +545,29 @@ def test_doctor_no_grbl_with_candidate_ports(mocker) -> None:
 
 
 def test_doctor_warns_about_bind_all(mocker) -> None:
-    _patch_doctor_environment(mocker, server_status={
-        "arm": True, "camera": True, "calibrated": True, "ready": True,
-    })
+    _patch_doctor_environment(
+        mocker,
+        server_status={
+            "arm": True,
+            "camera": True,
+            "calibrated": True,
+            "ready": True,
+        },
+    )
     mocker.patch.object(
-        doctor_mod, "_probe_server",
-        return_value=("localhost", 8048, True, {
-            "arm": True, "camera": True, "calibrated": True, "ready": True,
-        }),
+        doctor_mod,
+        "_probe_server",
+        return_value=(
+            "localhost",
+            8048,
+            True,
+            {
+                "arm": True,
+                "camera": True,
+                "calibrated": True,
+                "ready": True,
+            },
+        ),
     )
 
     result = runner.invoke(app, [])
@@ -532,12 +577,14 @@ def test_doctor_warns_about_bind_all(mocker) -> None:
 
 def test_doctor_engine_invalid_when_resolve_fails(mocker) -> None:
     _patch_doctor_environment(
-        mocker, server_status=None,
+        mocker,
+        server_status=None,
     )
     fake_launcher = MagicMock()
     fake_launcher.resolve.side_effect = RuntimeError("no model set")
     mocker.patch.dict(
-        "sys.modules", {"physiclaw.agent.runtime.launcher": fake_launcher},
+        "sys.modules",
+        {"physiclaw.agent.runtime.launcher": fake_launcher},
     )
 
     result = runner.invoke(app, [])
@@ -577,16 +624,24 @@ def test_doctor_deep_runs_probes(mocker) -> None:
         key_unset=False,
     )
     vision_spy = mocker.patch.object(
-        doctor_mod, "_probe_vision_model_deep", return_value="✓ vision OK",
+        doctor_mod,
+        "_probe_vision_model_deep",
+        return_value="✓ vision OK",
     )
     bridge_spy = mocker.patch.object(
-        doctor_mod, "_probe_bridge_deep", return_value="✓ bridge OK",
+        doctor_mod,
+        "_probe_bridge_deep",
+        return_value="✓ bridge OK",
     )
     calib_spy = mocker.patch.object(
-        doctor_mod, "_probe_calibration_deep", return_value="✓ calib OK",
+        doctor_mod,
+        "_probe_calibration_deep",
+        return_value="✓ calib OK",
     )
     provider_spy = mocker.patch.object(
-        doctor_mod, "_probe_provider_deep", return_value="✓ provider OK",
+        doctor_mod,
+        "_probe_provider_deep",
+        return_value="✓ provider OK",
     )
 
     runner.invoke(app, ["--deep"])
@@ -603,6 +658,7 @@ def test_doctor_deep_runs_probes(mocker) -> None:
 def _make_async(value):
     async def _coro(*a, **kw):
         return value
+
     return _coro
 
 
@@ -610,7 +666,8 @@ def test_probe_provider_deep_setup_error_returns_warn(mocker) -> None:
     fake_provider = MagicMock()
     fake_provider.make_provider.side_effect = ValueError("missing api key")
     mocker.patch.dict(
-        "sys.modules", {"physiclaw.agent.provider": fake_provider},
+        "sys.modules",
+        {"physiclaw.agent.provider": fake_provider},
     )
 
     out = doctor_mod._probe_provider_deep("openai", "gpt-5")
@@ -629,7 +686,8 @@ def test_probe_provider_deep_chat_exception_returns_warn(mocker) -> None:
     fake_module = MagicMock()
     fake_module.make_provider.return_value = fake_prov
     mocker.patch.dict(
-        "sys.modules", {"physiclaw.agent.provider": fake_module},
+        "sys.modules",
+        {"physiclaw.agent.provider": fake_module},
     )
 
     out = doctor_mod._probe_provider_deep("openai", "gpt-5")
@@ -640,11 +698,13 @@ def test_probe_provider_deep_chat_exception_returns_warn(mocker) -> None:
 
 def test_probe_provider_deep_empty_reply_returns_warn(mocker) -> None:
     from physiclaw.agent.engine.dto import (
-        AssistantMessage, FinishReason,
+        AssistantMessage,
+        FinishReason,
     )
 
     asst = AssistantMessage(
-        content="", tool_calls=[],
+        content="",
+        tool_calls=[],
         finish_reason=FinishReason.STOP,
     )
     fake_prov = MagicMock()
@@ -654,7 +714,8 @@ def test_probe_provider_deep_empty_reply_returns_warn(mocker) -> None:
     fake_module = MagicMock()
     fake_module.make_provider.return_value = fake_prov
     mocker.patch.dict(
-        "sys.modules", {"physiclaw.agent.provider": fake_module},
+        "sys.modules",
+        {"physiclaw.agent.provider": fake_module},
     )
 
     out = doctor_mod._probe_provider_deep("openai", "gpt-5")
@@ -664,7 +725,9 @@ def test_probe_provider_deep_empty_reply_returns_warn(mocker) -> None:
 
 def test_probe_provider_deep_vision_check_fails(mocker) -> None:
     from physiclaw.agent.engine.dto import (
-        AssistantMessage, FinishReason, Usage,
+        AssistantMessage,
+        FinishReason,
+        Usage,
     )
 
     asst = AssistantMessage(
@@ -680,7 +743,8 @@ def test_probe_provider_deep_vision_check_fails(mocker) -> None:
     fake_module = MagicMock()
     fake_module.make_provider.return_value = fake_prov
     mocker.patch.dict(
-        "sys.modules", {"physiclaw.agent.provider": fake_module},
+        "sys.modules",
+        {"physiclaw.agent.provider": fake_module},
     )
 
     out = doctor_mod._probe_provider_deep("openai", "gpt-5")
@@ -691,7 +755,9 @@ def test_probe_provider_deep_vision_check_fails(mocker) -> None:
 
 def test_probe_provider_deep_success_with_usage(mocker) -> None:
     from physiclaw.agent.engine.dto import (
-        AssistantMessage, FinishReason, Usage,
+        AssistantMessage,
+        FinishReason,
+        Usage,
     )
 
     asst = AssistantMessage(
@@ -707,7 +773,8 @@ def test_probe_provider_deep_success_with_usage(mocker) -> None:
     fake_module = MagicMock()
     fake_module.make_provider.return_value = fake_prov
     mocker.patch.dict(
-        "sys.modules", {"physiclaw.agent.provider": fake_module},
+        "sys.modules",
+        {"physiclaw.agent.provider": fake_module},
     )
 
     out = doctor_mod._probe_provider_deep("openai", "gpt-5")
@@ -719,7 +786,9 @@ def test_probe_provider_deep_success_with_usage(mocker) -> None:
 
 def test_probe_provider_deep_success_no_usage(mocker) -> None:
     from physiclaw.agent.engine.dto import (
-        AssistantMessage, FinishReason, Usage,
+        AssistantMessage,
+        FinishReason,
+        Usage,
     )
 
     asst = AssistantMessage(
@@ -735,7 +804,8 @@ def test_probe_provider_deep_success_no_usage(mocker) -> None:
     fake_module = MagicMock()
     fake_module.make_provider.return_value = fake_prov
     mocker.patch.dict(
-        "sys.modules", {"physiclaw.agent.provider": fake_module},
+        "sys.modules",
+        {"physiclaw.agent.provider": fake_module},
     )
 
     out = doctor_mod._probe_provider_deep("openai", "gpt-5")

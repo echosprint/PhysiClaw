@@ -51,6 +51,7 @@ they never merge or override each other:
 Discovery is realpath-scoped within each root: a symlink that escapes
 its root is rejected so third-party skill installs can't path-traverse.
 """
+
 import logging
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -70,12 +71,15 @@ class Skill:
     """Snapshot of a skill at discover() time. `body` and `dir` are
     captured on session start; edits to SKILL.md mid-session are not
     reflected (deliberate: protects the SYSTEM prompt cache prefix)."""
+
     name: str
     description: str
     body: str
-    dir: Path   # realpath; used to resolve references/ safely
+    dir: Path  # realpath; used to resolve references/ safely
     flat: bool = False  # built-in flat-.md skill: body is authoritative, no references/
-    source: str = "user"  # origin root: "built-in" | "official" | "user" — groups the index
+    source: str = (
+        "user"  # origin root: "built-in" | "official" | "user" — groups the index
+    )
 
 
 def discover_builtin_skills() -> dict[str, Skill]:
@@ -163,7 +167,8 @@ def _scan_root(root: Path, out: dict[str, Skill], *, source: str = "user") -> No
         if not real.is_relative_to(root_real):
             log.warning(
                 "skill %s resolves outside %s; skipping (path traversal guard)",
-                d.name, root,
+                d.name,
+                root,
             )
             continue
         md = real / "SKILL.md"
@@ -223,9 +228,7 @@ def _load_reference(skill: Skill, ref_path: str) -> str:
     root = skill.dir / "references"
     target = (root / ref_path).resolve()
     if not target.is_relative_to(root):
-        raise ValueError(
-            f"reference path {ref_path!r} escapes skill directory"
-        )
+        raise ValueError(f"reference path {ref_path!r} escapes skill directory")
     if not target.exists():
         raise FileNotFoundError(
             f"reference {ref_path!r} not found in skill {skill.name!r}"
@@ -242,7 +245,7 @@ def _split_frontmatter(text: str) -> tuple[dict[str, str], str]:
     if end < 0:
         return {}, text
     fm_text = text[4:end]
-    body = text[end + 4:].lstrip("\n")
+    body = text[end + 4 :].lstrip("\n")
     fm: dict[str, str] = {}
     for line in fm_text.splitlines():
         if ":" in line:
@@ -253,10 +256,7 @@ def _split_frontmatter(text: str) -> tuple[dict[str, str], str]:
 
 def _skill_bullets(skills: list[Skill]) -> list[str]:
     """One `- **name** — description` index line per skill."""
-    return [
-        f"- **{s.name}** — {s.description or '(no description)'}"
-        for s in skills
-    ]
+    return [f"- **{s.name}** — {s.description or '(no description)'}" for s in skills]
 
 
 # Subsection heading per `source`, in the order they appear under
@@ -317,5 +317,3 @@ def render_builtin(builtin: dict[str, Skill]) -> str:
             lines.append(s.body)
             lines.append("")
     return "\n".join(lines).rstrip()
-
-

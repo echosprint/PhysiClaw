@@ -14,6 +14,7 @@ Write paths used by the local tool handlers: `append_log`, `save_fact`,
 the action line plus the full current store (so the agent sees the whole
 updated memory, since the injected snapshot goes stale mid-session).
 """
+
 import datetime as dt
 import re
 

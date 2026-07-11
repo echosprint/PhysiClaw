@@ -6,6 +6,7 @@ pyproject.toml `[tool.coverage.run] omit`, but the bootstrap is still
 worth a smoke test so a typo here doesn't silently break
 `python -m physiclaw.agent.runtime`.
 """
+
 from __future__ import annotations
 
 import runpy
@@ -29,7 +30,8 @@ def test_run_as_main_invokes_launch(mocker, monkeypatch) -> None:
     # Patch the symbol on the launcher module so the shim's import gets
     # the spy when runpy reloads it.
     monkeypatch.setattr(
-        "physiclaw.agent.runtime.launcher.launch", spy,
+        "physiclaw.agent.runtime.launcher.launch",
+        spy,
     )
     # Drop cached __main__ so runpy fully re-executes it.
     sys.modules.pop("physiclaw.agent.runtime.__main__", None)
@@ -44,7 +46,8 @@ def test_imported_normally_does_not_invoke_launch(mocker, monkeypatch) -> None:
     launch — the guard exists for exactly this reason."""
     spy = MagicMock()
     monkeypatch.setattr(
-        "physiclaw.agent.runtime.launcher.launch", spy,
+        "physiclaw.agent.runtime.launcher.launch",
+        spy,
     )
     sys.modules.pop("physiclaw.agent.runtime.__main__", None)
 

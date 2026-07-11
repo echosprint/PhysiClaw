@@ -1,4 +1,5 @@
 """Tests for `physiclaw.core.vision.change` — gesture frame diffing."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -70,7 +71,7 @@ def test_small_localized_change_detected() -> None:
     b = a.copy()
     b[100:124, 100:124] = 240  # 24x24 badge, ~0.12% of the frame
     assert change.change_ratio(a, b) < change.RATIO_THRESHOLD  # ratio alone misses it
-    assert change.frames_changed(a, b) is True                 # blob catches it
+    assert change.frames_changed(a, b) is True  # blob catches it
 
 
 def test_thin_cursor_change_ignored() -> None:

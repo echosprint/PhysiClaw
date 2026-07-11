@@ -6,6 +6,7 @@ and spam the log with "GET stream disconnected" on every close.
 Module-level `get_mcp()` returns the singleton; `close_mcp()` tears it
 down at process exit.
 """
+
 import logging
 import os
 from contextlib import AsyncExitStack
@@ -101,17 +102,21 @@ class McpClient:
             if ctype == "text":
                 blocks.append({"type": "text", "text": c.text})
             elif ctype == "image":
-                blocks.append({
-                    "type": "image",
-                    "mime_type": getattr(c, "mimeType", "image/jpeg"),
-                    "data": c.data,
-                })
+                blocks.append(
+                    {
+                        "type": "image",
+                        "mime_type": getattr(c, "mimeType", "image/jpeg"),
+                        "data": c.data,
+                    }
+                )
             else:
                 # Unknown block type — stringify for debugging. MCP may grow
                 # resource/embedded types later; we don't fail on those.
                 blocks.append({"type": "text", "text": repr(c)})
         if getattr(result, "isError", False):
-            joined = " | ".join(b.get("text", "") for b in blocks if b["type"] == "text")
+            joined = " | ".join(
+                b.get("text", "") for b in blocks if b["type"] == "text"
+            )
             raise RuntimeError(f"tool {name!r} failed: {joined}")
         return blocks
 

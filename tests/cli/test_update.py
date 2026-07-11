@@ -6,6 +6,7 @@ Everything that touches uv / PyPI is patched at the module seams (`_uv`,
 the network. The autouse `physiclaw_home` fixture isolates the version-check
 cache per test.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -21,7 +22,9 @@ up = importlib.import_module("physiclaw.cli.update")
 
 
 def _proc(returncode: int = 0, stderr: str = "") -> subprocess.CompletedProcess:
-    return subprocess.CompletedProcess(args=[], returncode=returncode, stdout="", stderr=stderr)
+    return subprocess.CompletedProcess(
+        args=[], returncode=returncode, stdout="", stderr=stderr
+    )
 
 
 def _cached_version(home: Path) -> str | None:
@@ -135,7 +138,9 @@ def test_notify_skips_in_ci(auto_env, monkeypatch, mocker) -> None:
 
 
 def test_notify_clears_stale_marker_when_not_newer(
-    auto_env, monkeypatch, mocker,
+    auto_env,
+    monkeypatch,
+    mocker,
 ) -> None:
     # Staged version is not newer than current (we already updated past it).
     monkeypatch.setattr(up, "_pkg_version", "1.1.0")
@@ -145,11 +150,13 @@ def test_notify_clears_stale_marker_when_not_newer(
     up.notify_staged_update()
 
     assert up._read_staged() is None  # stale marker cleared
-    uv.assert_not_called()            # returned before the uv check
+    uv.assert_not_called()  # returned before the uv check
 
 
 def test_notify_stays_silent_for_dev_and_pip_installs(
-    staged_ready, mocker, caplog,
+    staged_ready,
+    mocker,
+    caplog,
 ) -> None:
     # Not a uv-tool install → nothing to point the user at; say nothing, and
     # leave the marker (a real uv-tool run elsewhere may still want it).
@@ -163,7 +170,9 @@ def test_notify_stays_silent_for_dev_and_pip_installs(
 
 
 def test_notify_logs_ready_notice_and_keeps_marker(
-    staged_ready, mocker, caplog,
+    staged_ready,
+    mocker,
+    caplog,
 ) -> None:
     # The real case: a newer version is staged and we're a uv-tool install.
     # Log a one-line notice pointing at `uv tool upgrade physiclaw` (logged,
@@ -221,7 +230,10 @@ def test_stage_skips_dev_and_pip_installs(auto_env, mocker) -> None:
 
 
 def test_stage_up_to_date_clears_marker(
-    auto_env, physiclaw_home: Path, monkeypatch, mocker,
+    auto_env,
+    physiclaw_home: Path,
+    monkeypatch,
+    mocker,
 ) -> None:
     monkeypatch.setattr(up, "_pkg_version", "1.0.0")
     up._write_staged("0.9.0")  # a stale marker
@@ -232,8 +244,8 @@ def test_stage_up_to_date_clears_marker(
 
     up.maybe_stage_update()
 
-    run.assert_not_called()                       # no warm
-    assert up._read_staged() is None              # stale marker cleared
+    run.assert_not_called()  # no warm
+    assert up._read_staged() is None  # stale marker cleared
     assert _cached_version(physiclaw_home) == "1.0.0"
 
 
@@ -260,14 +272,16 @@ def test_stage_restages_when_a_newer_version_appears(
     up._write_staged("1.1.0")  # previously staged
     mocker.patch.object(up, "_uv", return_value="/usr/bin/uv")
     mocker.patch.object(up, "_tool_version", return_value="1.0.0")
-    mocker.patch.object(up, "_fetch_pypi_version", return_value="1.2.0")  # newer release
+    mocker.patch.object(
+        up, "_fetch_pypi_version", return_value="1.2.0"
+    )  # newer release
     run = mocker.patch.object(up, "_run", return_value=_proc(0))
 
     up.maybe_stage_update()
 
     cmd = run.call_args.args[0]
-    assert "physiclaw==1.2.0" in cmd       # warmed the NEW version, not 1.1.0
-    assert up._read_staged() == "1.2.0"    # marker advanced to the newest
+    assert "physiclaw==1.2.0" in cmd  # warmed the NEW version, not 1.1.0
+    assert up._read_staged() == "1.2.0"  # marker advanced to the newest
 
 
 def test_stage_warms_cache_and_writes_marker(auto_env, monkeypatch, mocker) -> None:

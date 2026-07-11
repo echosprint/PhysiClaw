@@ -29,10 +29,10 @@ from hardware.assembly.travel_ranges import X_RAIL_LENGTH
 
 
 class LI32X(LI10Y):
-    compound_label     = "linear_32_x"
-    rail_length        = X_RAIL_LENGTH    # mm — see assembly/travel_ranges.py
-    screw_hole_indices = (1, 3, 5, 7)     # 7-hole (150 mm) rail — both ends, 40 mm pitch
-    slider_position    = 0.5    # slider centered along the rail
+    compound_label = "linear_32_x"
+    rail_length = X_RAIL_LENGTH  # mm — see assembly/travel_ranges.py
+    screw_hole_indices = (1, 3, 5, 7)  # 7-hole (150 mm) rail — both ends, 40 mm pitch
+    slider_position = 0.5  # slider centered along the rail
 
 
 if __name__ == "__main__":

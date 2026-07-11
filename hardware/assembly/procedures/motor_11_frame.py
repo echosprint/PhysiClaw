@@ -63,11 +63,12 @@ from hardware.assembly.procedures.motor_10_bracket import MO10Bracket
 from hardware.assembly.projection import MAIN_FRAME_VIEW, Camera
 from hardware.parts.standard.extrusion import cb_end_offset
 
-MOTOR_EXPLODE = 40    # mm — exploded: outboard air gap, slot face → bracket bottom
+MOTOR_EXPLODE = 40  # mm — exploded: outboard air gap, slot face → bracket bottom
 
 
 class MO11Frame(BaseAssembly):
     camera = [MAIN_FRAME_VIEW, Camera(-32.50, 48.55, -133.86)]
+
     def _build(self) -> Compound:
         # Base layer — always assembled. Bundles frame + all 4 idler
         # corner mounts + their brackets; this step adds the left
@@ -79,8 +80,7 @@ class MO11Frame(BaseAssembly):
         # -SHORT_LENGTH/2 + p (its placement plane has x_dir=(0,-1,0),
         # z_dir=(1,0,0), so local +Z → world +X).
         left_t1_world_x = -SHORT_LENGTH / 2 + SHORT_TOP_END_GAP
-        left_t2_world_x = (-SHORT_LENGTH / 2
-                           + SHORT_TOP_END_GAP + SHORT_TOP_INNER_GAP)
+        left_t2_world_x = -SHORT_LENGTH / 2 + SHORT_TOP_END_GAP + SHORT_TOP_INNER_GAP
         short_top_world_z = LONG_LENGTH - cb_end_offset
 
         # Bracket hooks (bracket_bottom_z, m5_native_x, stack_height)
@@ -97,17 +97,26 @@ class MO11Frame(BaseAssembly):
         origin_x = (left_t1_world_x + left_t2_world_x) / 2
         # Bracket bottom touches the rings at world y = -EXT_THICKNESS
         # - stack_height. Exploded pulls origin further in -Y.
-        origin_y = (-EXT_THICKNESS - bracket_asm.stack_height
-                    + bracket_asm.bracket_bottom_z)
+        origin_y = (
+            -EXT_THICKNESS - bracket_asm.stack_height + bracket_asm.bracket_bottom_z
+        )
         if self.exploded:
             origin_y -= MOTOR_EXPLODE
         origin_z = short_top_world_z - bracket_asm.m5_native_x
 
-        motor_compound.move(Location(Plane(
-            origin=(origin_x, origin_y, origin_z),
-            x_dir=(0, 0, +1),   # native +X (bracket length) → world +Z (into frame)
-            z_dir=(0, -1, 0),   # native +Z (bracket / head side) → world -Y
-        )))                     # → native +Y (M5 pair) → world -X (along short_top)
+        motor_compound.move(
+            Location(
+                Plane(
+                    origin=(origin_x, origin_y, origin_z),
+                    x_dir=(
+                        0,
+                        0,
+                        +1,
+                    ),  # native +X (bracket length) → world +Z (into frame)
+                    z_dir=(0, -1, 0),  # native +Z (bracket / head side) → world -Y
+                )
+            )
+        )  # → native +Y (M5 pair) → world -X (along short_top)
 
         # Hook for motor_30_pulley — plane where a pulley would seat
         # on the motor shaft. Origin sits on the bracket top face
@@ -121,9 +130,13 @@ class MO11Frame(BaseAssembly):
             z_dir=(0, -1, 0),
         )
 
-        return Compound(label="motor_11_frame", children=[
-            base_compound, motor_compound,
-        ])
+        return Compound(
+            label="motor_11_frame",
+            children=[
+                base_compound,
+                motor_compound,
+            ],
+        )
 
 
 if __name__ == "__main__":

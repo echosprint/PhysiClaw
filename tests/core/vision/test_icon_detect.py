@@ -1,4 +1,5 @@
 """Tests for `physiclaw.core.vision.icon_detect`."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -21,13 +22,16 @@ def _make_detector(mocker, output: np.ndarray, model_path: Path):
     fake_net = MagicMock()
     fake_net.forward.return_value = output[None]  # add batch dim
     mocker.patch.object(
-        icon_detect.cv2.dnn, "readNetFromONNX", return_value=fake_net,
+        icon_detect.cv2.dnn,
+        "readNetFromONNX",
+        return_value=fake_net,
     )
     return IconDetector(model_path=model_path), fake_net
 
 
-def _yolo_output(detections: list[tuple[float, float, float, float, float]],
-                 *, total: int = 100) -> np.ndarray:
+def _yolo_output(
+    detections: list[tuple[float, float, float, float, float]], *, total: int = 100
+) -> np.ndarray:
     """Build a (5, N) YOLO-format output: cx, cy, w, h, conf."""
     arr = np.zeros((5, total), dtype=np.float32)
     for i, (cx, cy, w, h, c) in enumerate(detections):
@@ -58,7 +62,9 @@ def test_init_loads_model(tmp_path: Path, mocker) -> None:
     model.touch()
     fake_net = MagicMock()
     spy = mocker.patch.object(
-        icon_detect.cv2.dnn, "readNetFromONNX", return_value=fake_net,
+        icon_detect.cv2.dnn,
+        "readNetFromONNX",
+        return_value=fake_net,
     )
 
     detector = IconDetector(model_path=model)
@@ -71,12 +77,15 @@ def test_init_loads_model(tmp_path: Path, mocker) -> None:
 
 
 def test_detect_returns_empty_when_no_predictions_above_threshold(
-    tmp_path: Path, mocker,
+    tmp_path: Path,
+    mocker,
 ) -> None:
-    output = _yolo_output([
-        (640, 640, 100, 100, 0.05),
-        (320, 320, 50, 50, 0.10),
-    ])
+    output = _yolo_output(
+        [
+            (640, 640, 100, 100, 0.05),
+            (320, 320, 50, 50, 0.10),
+        ]
+    )
     detector, _ = _make_detector(mocker, output, tmp_path / "m.onnx")
 
     out = detector.detect(np.zeros((1280, 1280, 3), dtype=np.uint8))
@@ -85,11 +94,14 @@ def test_detect_returns_empty_when_no_predictions_above_threshold(
 
 
 def test_detect_returns_elements_above_threshold(
-    tmp_path: Path, mocker,
+    tmp_path: Path,
+    mocker,
 ) -> None:
-    output = _yolo_output([
-        (640, 640, 100, 100, 0.9),
-    ])
+    output = _yolo_output(
+        [
+            (640, 640, 100, 100, 0.9),
+        ]
+    )
     detector, _ = _make_detector(mocker, output, tmp_path / "m.onnx")
 
     out = detector.detect(np.zeros((1280, 1280, 3), dtype=np.uint8))
@@ -103,9 +115,11 @@ def test_detect_returns_elements_above_threshold(
 
 def test_detect_scales_bbox_back_to_original(tmp_path: Path, mocker) -> None:
     # Frame is 640x640 → letterbox scales 2x → INPUT_SIZE 1280.
-    output = _yolo_output([
-        (640, 640, 100, 100, 0.9),  # in 1280x1280 model space
-    ])
+    output = _yolo_output(
+        [
+            (640, 640, 100, 100, 0.9),  # in 1280x1280 model space
+        ]
+    )
     detector, _ = _make_detector(mocker, output, tmp_path / "m.onnx")
 
     out = detector.detect(np.zeros((640, 640, 3), dtype=np.uint8))
@@ -117,9 +131,11 @@ def test_detect_scales_bbox_back_to_original(tmp_path: Path, mocker) -> None:
 
 def test_detect_clamps_bbox_to_frame(tmp_path: Path, mocker) -> None:
     # Box predicted off-frame; should clamp to (0, 0, w, h).
-    output = _yolo_output([
-        (10, 10, 100, 100, 0.9),  # extends past x=0 / y=0
-    ])
+    output = _yolo_output(
+        [
+            (10, 10, 100, 100, 0.9),  # extends past x=0 / y=0
+        ]
+    )
     detector, _ = _make_detector(mocker, output, tmp_path / "m.onnx")
 
     out = detector.detect(np.zeros((1280, 1280, 3), dtype=np.uint8))
@@ -130,13 +146,16 @@ def test_detect_clamps_bbox_to_frame(tmp_path: Path, mocker) -> None:
 
 
 def test_detect_sorts_top_to_bottom_then_left_to_right(
-    tmp_path: Path, mocker,
+    tmp_path: Path,
+    mocker,
 ) -> None:
-    output = _yolo_output([
-        (800, 800, 50, 50, 0.9),  # bottom
-        (200, 200, 50, 50, 0.85),  # top-left
-        (600, 200, 50, 50, 0.85),  # top-right (same y as top-left)
-    ])
+    output = _yolo_output(
+        [
+            (800, 800, 50, 50, 0.9),  # bottom
+            (200, 200, 50, 50, 0.85),  # top-left
+            (600, 200, 50, 50, 0.85),  # top-right (same y as top-left)
+        ]
+    )
     detector, _ = _make_detector(mocker, output, tmp_path / "m.onnx")
 
     out = detector.detect(np.zeros((1280, 1280, 3), dtype=np.uint8))
@@ -148,19 +167,26 @@ def test_detect_sorts_top_to_bottom_then_left_to_right(
 
 
 def test_detect_respects_custom_confidence_threshold(
-    tmp_path: Path, mocker,
+    tmp_path: Path,
+    mocker,
 ) -> None:
-    output = _yolo_output([
-        (640, 640, 50, 50, 0.5),
-    ])
+    output = _yolo_output(
+        [
+            (640, 640, 50, 50, 0.5),
+        ]
+    )
     detector, _ = _make_detector(mocker, output, tmp_path / "m.onnx")
 
     # Default threshold 0.3 → returns one.
     assert len(detector.detect(np.zeros((1280, 1280, 3), dtype=np.uint8))) == 1
     # Tighter threshold → empty.
-    assert detector.detect(
-        np.zeros((1280, 1280, 3), dtype=np.uint8), confidence=0.6,
-    ) == []
+    assert (
+        detector.detect(
+            np.zeros((1280, 1280, 3), dtype=np.uint8),
+            confidence=0.6,
+        )
+        == []
+    )
 
 
 # ---------- annotate ----------

@@ -18,21 +18,30 @@ _SKIP_KEYWORDS = {"bluetooth", "bt-", "debug", "wlan", "wifi", "airpods"}
 # both macOS-style device names (`/dev/tty.usbserial-XXXX`) and Windows-style
 # port descriptions (`USB-SERIAL CH340 (COM3)`, `Arduino Uno (COM5)`).
 _LIKELY_KEYWORDS = {
-    "ch340", "cp210", "ftdi", "usbserial", "usbmodem", "wch",
-    "serial", "arduino", "prolific",
+    "ch340",
+    "cp210",
+    "ftdi",
+    "usbserial",
+    "usbmodem",
+    "wch",
+    "serial",
+    "arduino",
+    "prolific",
 }
 
 # USB vendor ids of the USB-serial bridge chips these boards use. The VID is
 # identical on macOS, Windows and Linux no matter how the port is named, so
 # it's the most reliable cross-platform signal. The MKS DLC32 V2.1 is a CH340
 # (0x1A86); the rest cover other common GRBL/ESP32 boards.
-_LIKELY_VIDS = frozenset({
-    0x1A86,  # QinHeng CH340/CH341 — MKS DLC32 V2.1
-    0x10C4,  # Silicon Labs CP210x
-    0x0403,  # FTDI
-    0x067B,  # Prolific PL2303
-    0x303A,  # Espressif — native-USB ESP32-S2/S3/C3
-})
+_LIKELY_VIDS = frozenset(
+    {
+        0x1A86,  # QinHeng CH340/CH341 — MKS DLC32 V2.1
+        0x10C4,  # Silicon Labs CP210x
+        0x0403,  # FTDI
+        0x067B,  # Prolific PL2303
+        0x303A,  # Espressif — native-USB ESP32-S2/S3/C3
+    }
+)
 
 
 def _probe_port(port: str, baudrate: int = GRBL_BAUDRATE) -> str | None:

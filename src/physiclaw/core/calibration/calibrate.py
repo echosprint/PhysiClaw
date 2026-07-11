@@ -85,7 +85,10 @@ def _tap_once(arm: StylusArm):
 
 
 def measure_viewport_shift(
-    cal: CalibrationState, bridge: BridgeState, *, fresh: bool = False,
+    cal: CalibrationState,
+    bridge: BridgeState,
+    *,
+    fresh: bool = False,
 ) -> ViewportShift:
     """Measure the viewport→screenshot pixel offset and DPR.
 
@@ -220,10 +223,15 @@ def _pick_rotation_from_markers(frame: np.ndarray) -> tuple[int, str]:
     cv2.ROTATE_{90_CLOCKWISE, 180, 90_COUNTERCLOCKWISE}. Raises if either
     marker is missing.
     """
+
     def _blob(lower, upper=None):
         return find_largest_hsv_blob(
-            frame, lower, upper, min_area=500,
-            morph_op=cv2.MORPH_CLOSE, morph_kernel=(15, 15),
+            frame,
+            lower,
+            upper,
+            min_area=500,
+            morph_op=cv2.MORPH_CLOSE,
+            morph_kernel=(15, 15),
         )
 
     # UP = blue (#2563eb → H≈110). RIGHT = red (#ef4444), which straddles the
@@ -238,7 +246,9 @@ def _pick_rotation_from_markers(frame: np.ndarray) -> tuple[int, str]:
     up_x, up_y = up
     right_x, right_y = right
 
-    log.info(f"  Blue UP at ({up_x:.0f}, {up_y:.0f}), red RIGHT at ({right_x:.0f}, {right_y:.0f})")
+    log.info(
+        f"  Blue UP at ({up_x:.0f}, {up_y:.0f}), red RIGHT at ({right_x:.0f}, {right_y:.0f})"
+    )
 
     if up_y < right_y and abs(up_x - right_x) < abs(up_y - right_y):
         return -1, "0° — no rotation needed"
@@ -368,7 +378,9 @@ def calibrate_arm(
     time.sleep(0.5)
 
     # Probe triangle — bootstrap the screen→arm mapping.
-    log.info(f"  Probe triangle: 3 taps at (0,0), (+{PROBE_D:.0f},0), (0,+{PROBE_D:.0f})")
+    log.info(
+        f"  Probe triangle: 3 taps at (0,0), (+{PROBE_D:.0f},0), (0,+{PROBE_D:.0f})"
+    )
     t_center = _tap_and_read(arm, cal, 0, 0)
     if not t_center:
         raise RuntimeError("Arm calibration FAILED — no touch at center")
@@ -387,9 +399,7 @@ def calibrate_arm(
         ],
         dtype=np.float64,
     )
-    probe_grbl = np.array(
-        [[0, 0], [PROBE_D, 0], [0, PROBE_D]], dtype=np.float64
-    )
+    probe_grbl = np.array([[0, 0], [PROBE_D, 0], [0, PROBE_D]], dtype=np.float64)
     probe_affine, _ = cv2.estimateAffine2D(probe_screen, probe_grbl)
     if probe_affine is None:
         raise RuntimeError("Arm calibration FAILED — probe affine fit failed")
@@ -448,8 +458,7 @@ def calibrate_arm(
     tilt = _tilt_from_affine(pct_to_grbl)
     aligned = tilt < TILT_ALIGNED_THRESHOLD
     log.info(
-        f"  Tilt ratio: {tilt:.4f} "
-        f"(want < {TILT_ALIGNED_THRESHOLD}; aligned={aligned})"
+        f"  Tilt ratio: {tilt:.4f} (want < {TILT_ALIGNED_THRESHOLD}; aligned={aligned})"
     )
     if not aligned:
         log.warning(
@@ -470,9 +479,7 @@ def calibrate_arm(
     pct_to_grbl[1, 2] -= center_grbl[1]
     cal.set_phase("center")
 
-    log.info(
-        f"  ✓ Arm calibration done: {len(grbl_pts)} pairs, tilt={tilt:.4f}"
-    )
+    log.info(f"  ✓ Arm calibration done: {len(grbl_pts)} pairs, tilt={tilt:.4f}")
     return pct_to_grbl, tilt, grid_touches
 
 
@@ -484,8 +491,8 @@ def calibrate_arm(
 # one lands a full row/column away, so these cleanly separate good from bad
 # while tolerating lens distortion and the mild perspective an affine can't
 # model.
-GRID_FIT_MIN_INLIERS = 14          # of 15; RANSAC homography @ 0.01 screen-0-1
-GRID_FIT_MAX_RESIDUAL = 0.04       # max affine reprojection error, camera 0-1
+GRID_FIT_MIN_INLIERS = 14  # of 15; RANSAC homography @ 0.01 screen-0-1
+GRID_FIT_MAX_RESIDUAL = 0.04  # max affine reprojection error, camera 0-1
 # Outward margin on the corner-bounded screen polygon, as a fraction of the
 # shorter frame side — generous enough never to clip a real grid dot.
 SCREEN_POLY_MARGIN_FRAC = 0.05
@@ -570,8 +577,10 @@ def compute_camera_mapping(
     coord_space = "screenshot 0-1" if cal.viewport_shift else "viewport 0-1"
     if cal.viewport_shift:
         screen_pcts = np.array(
-            [list(cal.viewport_pct_to_screenshot_pct(col, row))
-             for col, row in grid_positions(cal)],
+            [
+                list(cal.viewport_pct_to_screenshot_pct(col, row))
+                for col, row in grid_positions(cal)
+            ],
             dtype=np.float64,
         )
     else:

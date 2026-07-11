@@ -21,6 +21,7 @@ path (principle 2) — they would break re-serialization to history. The
 full raw payload is preserved on `AssistantMessage.raw` for log-side
 inspection.
 """
+
 import logging
 import uuid
 
@@ -61,10 +62,10 @@ _EMPTY_TEXT_BLOCK = {"type": "text", "text": ""}
 _EMPTY_CONTENT = [_EMPTY_TEXT_BLOCK]
 
 _STOP_REASON_MAP: dict[str, FinishReason] = {
-    "end_turn":      FinishReason.STOP,
+    "end_turn": FinishReason.STOP,
     "stop_sequence": FinishReason.STOP,
-    "max_tokens":    FinishReason.LENGTH,
-    "tool_use":      FinishReason.TOOL_CALLS,
+    "max_tokens": FinishReason.LENGTH,
+    "tool_use": FinishReason.TOOL_CALLS,
     # `refusal`, `pause_turn`, etc. fall through to STOP.
 }
 
@@ -109,6 +110,7 @@ class AnthropicCompatibleProvider(BaseProvider):
         clients that bypass the proxy. Don't pass a bespoke ``http_client`` just
         to set that: it would drop the SDK's tuned connection defaults."""
         from anthropic import AsyncAnthropic
+
         return AsyncAnthropic(api_key=key, base_url=base_url, timeout=timeout)
 
     async def aclose(self) -> None:
@@ -120,7 +122,11 @@ class AnthropicCompatibleProvider(BaseProvider):
         entry surfaces `id`, `display_name`, `created_at`."""
         resp = await self._client.models.list()
         return [
-            {"id": m.id, "display_name": m.display_name, "created_at": str(m.created_at)}
+            {
+                "id": m.id,
+                "display_name": m.display_name,
+                "created_at": str(m.created_at),
+            }
             for m in resp.data
         ]
 
@@ -138,11 +144,13 @@ class AnthropicCompatibleProvider(BaseProvider):
         if isinstance(msg, ToolResultMessage):
             return {
                 "role": "user",
-                "content": [{
-                    "type":         "tool_result",
-                    "tool_use_id":  msg.tool_call_id,
-                    "content":      _content_to_anthropic(msg.content),
-                }],
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": msg.tool_call_id,
+                        "content": _content_to_anthropic(msg.content),
+                    }
+                ],
             }
         log.warning("anthropic: dropping unknown message type %r", type(msg).__name__)
         return None
@@ -164,19 +172,21 @@ class AnthropicCompatibleProvider(BaseProvider):
         am_messages = self.serialize_history(history)
         system = _extract_system_text(history)
         payload: dict = {
-            "model":      self.model,
+            "model": self.model,
             "max_tokens": _DEFAULT_MAX_TOKENS,
-            "messages":   am_messages,
+            "messages": am_messages,
         }
         if system:
             # Anthropic's `system` accepts a list of text blocks; a
             # `cache_control` on the trailing block caches the whole
             # system for 5 min — the cross-wake anchor.
-            payload["system"] = [{
-                "type":          "text",
-                "text":          system,
-                "cache_control": EPHEMERAL_CACHE_CONTROL,
-            }]
+            payload["system"] = [
+                {
+                    "type": "text",
+                    "text": system,
+                    "cache_control": EPHEMERAL_CACHE_CONTROL,
+                }
+            ]
         if tools:
             payload["tools"] = [_tool_to_anthropic(t) for t in tools]
 
@@ -205,18 +215,17 @@ def _extract_system_text(history: list[Message]) -> str:
     Anthropic's top-level `system` field expects. Empty when no system
     messages are present."""
     return "\n\n".join(
-        m.content for m in history
-        if isinstance(m, SystemMessage) and m.content
+        m.content for m in history if isinstance(m, SystemMessage) and m.content
     )
 
 
 def _anthropic_image_part(block: ImageBlock) -> dict:
     return {
-        "type":   "image",
+        "type": "image",
         "source": {
-            "type":       "base64",
+            "type": "base64",
             "media_type": block.media_type,
-            "data":       block.data_b64,
+            "data": block.data_b64,
         },
     }
 
@@ -240,12 +249,14 @@ def _assistant_blocks(msg: AssistantMessage) -> list[dict]:
     if msg.content:
         blocks.append({"type": "text", "text": msg.content})
     for tc in msg.tool_calls:
-        blocks.append({
-            "type":  "tool_use",
-            "id":    tc.id or f"auto_{uuid.uuid4().hex[:8]}",
-            "name":  tc.name,
-            "input": tc.arguments,
-        })
+        blocks.append(
+            {
+                "type": "tool_use",
+                "id": tc.id or f"auto_{uuid.uuid4().hex[:8]}",
+                "name": tc.name,
+                "input": tc.arguments,
+            }
+        )
     if not blocks:
         # Anthropic rejects empty assistant content arrays.
         blocks.append(_EMPTY_TEXT_BLOCK)
@@ -256,9 +267,10 @@ def _tool_to_anthropic(tool: dict) -> dict:
     """Local tool schema → Anthropic `tools=` entry. The shape happens to
     match our local format almost verbatim — `input_schema` is the same key."""
     return {
-        "name":         tool["name"],
-        "description":  tool.get("description", ""),
-        "input_schema": tool.get("input_schema") or {"type": "object", "properties": {}},
+        "name": tool["name"],
+        "description": tool.get("description", ""),
+        "input_schema": tool.get("input_schema")
+        or {"type": "object", "properties": {}},
     }
 
 
@@ -274,16 +286,18 @@ def _from_anthropic_response(resp) -> AssistantMessage:
     inspection."""
     text_parts: list[str] = []
     tool_calls: list[ToolCall] = []
-    for block in (resp.content or []):
+    for block in resp.content or []:
         bt = getattr(block, "type", None)
         if bt == "text":
             text_parts.append(getattr(block, "text", "") or "")
         elif bt == "tool_use":
-            tool_calls.append(ToolCall(
-                id=getattr(block, "id", None) or f"auto_{uuid.uuid4().hex[:8]}",
-                name=getattr(block, "name", "") or "",
-                arguments=getattr(block, "input", None) or {},
-            ))
+            tool_calls.append(
+                ToolCall(
+                    id=getattr(block, "id", None) or f"auto_{uuid.uuid4().hex[:8]}",
+                    name=getattr(block, "name", "") or "",
+                    arguments=getattr(block, "input", None) or {},
+                )
+            )
 
     stop_raw = getattr(resp, "stop_reason", None) or "end_turn"
     finish = _STOP_REASON_MAP.get(stop_raw, FinishReason.STOP)

@@ -9,6 +9,7 @@ Anthropic SDK exception classes (`APIConnectionError`, `APIStatusError`,
 etc.) are real classes and constructed with synthetic
 `httpx.Request`/`Response` objects so error-mapping branches work.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -74,9 +75,7 @@ def provider(mocker) -> _TestAnthropic:
     fake_client.close = mocker.AsyncMock()
     fake_client.messages.create = mocker.AsyncMock()
     fake_client.models.list = mocker.AsyncMock()
-    mocker.patch(
-        "anthropic.AsyncAnthropic", return_value=fake_client
-    )
+    mocker.patch("anthropic.AsyncAnthropic", return_value=fake_client)
     return _TestAnthropic(model="claude-test")
 
 
@@ -143,8 +142,16 @@ async def test_list_models_normalizes_each_entry(
     out = await provider.list_models()
 
     assert out == [
-        {"id": "claude-opus-4-7", "display_name": "Claude Opus 4.7", "created_at": "2026-01-01"},
-        {"id": "claude-sonnet-4-6", "display_name": "Claude Sonnet 4.6", "created_at": "2025-09-01"},
+        {
+            "id": "claude-opus-4-7",
+            "display_name": "Claude Opus 4.7",
+            "created_at": "2026-01-01",
+        },
+        {
+            "id": "claude-sonnet-4-6",
+            "display_name": "Claude Sonnet 4.6",
+            "created_at": "2025-09-01",
+        },
     ]
 
 
@@ -164,10 +171,12 @@ def test_encode_user_message_with_string_content(provider: _TestAnthropic) -> No
 
 def test_encode_user_message_with_block_list(provider: _TestAnthropic) -> None:
     out = provider._encode_message(
-        UserMessage(content=[
-            TextBlock(text="caption"),
-            ImageBlock(media_type="image/png", data_b64="aGk="),
-        ])
+        UserMessage(
+            content=[
+                TextBlock(text="caption"),
+                ImageBlock(media_type="image/png", data_b64="aGk="),
+            ]
+        )
     )
 
     assert out["role"] == "user"
@@ -180,7 +189,9 @@ def test_encode_user_message_with_block_list(provider: _TestAnthropic) -> None:
 
 def test_encode_assistant_message_text_only(provider: _TestAnthropic) -> None:
     out = provider._encode_message(
-        AssistantMessage(content="hello", tool_calls=[], finish_reason=FinishReason.STOP)
+        AssistantMessage(
+            content="hello", tool_calls=[], finish_reason=FinishReason.STOP
+        )
     )
 
     assert out == {"role": "assistant", "content": [{"type": "text", "text": "hello"}]}
@@ -208,9 +219,7 @@ def test_encode_assistant_message_with_tool_calls(provider: _TestAnthropic) -> N
 def test_encode_tool_result_message_wraps_in_tool_result_block(
     provider: _TestAnthropic,
 ) -> None:
-    out = provider._encode_message(
-        ToolResultMessage(tool_call_id="t1", content="ok")
-    )
+    out = provider._encode_message(ToolResultMessage(tool_call_id="t1", content="ok"))
 
     assert out == {
         "role": "user",
@@ -226,7 +235,9 @@ def test_encode_unknown_message_type_returns_none_with_warning(
     class _Weird:
         pass
 
-    with caplog.at_level(logging.WARNING, logger="physiclaw.agent.provider.anthropic_compat"):
+    with caplog.at_level(
+        logging.WARNING, logger="physiclaw.agent.provider.anthropic_compat"
+    ):
         out = provider._encode_message(_Weird())  # type: ignore[arg-type]
 
     assert out is None
@@ -240,9 +251,7 @@ def test_encode_unknown_message_type_returns_none_with_warning(
 
 
 def test_cache_markers_factory_is_anthropic_shape() -> None:
-    assert isinstance(
-        AnthropicCompatibleProvider.CACHE_MARKERS, AnthropicCacheMarkers
-    )
+    assert isinstance(AnthropicCompatibleProvider.CACHE_MARKERS, AnthropicCacheMarkers)
 
 
 def test_cache_markers_mark_stub_attaches_ephemeral_cache_control_to_inner_block(
@@ -308,11 +317,13 @@ async def test_chat_payload_includes_system_with_cache_control_when_present(
     )
 
     payload = provider._client.messages.create.call_args.kwargs
-    assert payload["system"] == [{
-        "type": "text",
-        "text": "be helpful",
-        "cache_control": EPHEMERAL_CACHE_CONTROL,
-    }]
+    assert payload["system"] == [
+        {
+            "type": "text",
+            "text": "be helpful",
+            "cache_control": EPHEMERAL_CACHE_CONTROL,
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -320,7 +331,9 @@ async def test_chat_payload_omits_system_when_no_system_messages(
     provider: _TestAnthropic,
 ) -> None:
     fake_resp = SimpleNamespace(
-        content=[], stop_reason="end_turn", usage=None,
+        content=[],
+        stop_reason="end_turn",
+        usage=None,
         model_dump=lambda: {},
     )
     provider._client.messages.create.return_value = fake_resp
@@ -336,22 +349,28 @@ async def test_chat_payload_includes_tools_when_present(
     provider: _TestAnthropic,
 ) -> None:
     fake_resp = SimpleNamespace(
-        content=[], stop_reason="end_turn", usage=None,
+        content=[],
+        stop_reason="end_turn",
+        usage=None,
         model_dump=lambda: {},
     )
     provider._client.messages.create.return_value = fake_resp
 
     await provider.chat(
         [UserMessage(content="hi")],
-        tools=[{"name": "tap", "description": "Tap", "input_schema": {"type": "object"}}],
+        tools=[
+            {"name": "tap", "description": "Tap", "input_schema": {"type": "object"}}
+        ],
     )
 
     payload = provider._client.messages.create.call_args.kwargs
-    assert payload["tools"] == [{
-        "name": "tap",
-        "description": "Tap",
-        "input_schema": {"type": "object"},
-    }]
+    assert payload["tools"] == [
+        {
+            "name": "tap",
+            "description": "Tap",
+            "input_schema": {"type": "object"},
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -359,7 +378,9 @@ async def test_chat_payload_omits_tools_when_empty(
     provider: _TestAnthropic,
 ) -> None:
     fake_resp = SimpleNamespace(
-        content=[], stop_reason="end_turn", usage=None,
+        content=[],
+        stop_reason="end_turn",
+        usage=None,
         model_dump=lambda: {},
     )
     provider._client.messages.create.return_value = fake_resp
@@ -426,15 +447,18 @@ async def test_chat_maps_5xx_status_to_transient(
 ) -> None:
     import logging
 
-    provider._client.messages.create.side_effect = _status_err(503, "service unavailable")
+    provider._client.messages.create.side_effect = _status_err(
+        503, "service unavailable"
+    )
 
-    with caplog.at_level(logging.WARNING, logger="physiclaw.agent.provider.anthropic_compat"):
+    with caplog.at_level(
+        logging.WARNING, logger="physiclaw.agent.provider.anthropic_compat"
+    ):
         with pytest.raises(ProviderTransientError, match=r"^HTTP 503: "):
             await provider.chat([UserMessage(content="x")], [])
 
     assert any(
-        "anthropic HTTP 503 (transient)" in r.getMessage()
-        for r in caplog.records
+        "anthropic HTTP 503 (transient)" in r.getMessage() for r in caplog.records
     )
 
 
@@ -446,13 +470,14 @@ async def test_chat_maps_4xx_status_to_permanent(
 
     provider._client.messages.create.side_effect = _status_err(400, "bad model")
 
-    with caplog.at_level(logging.ERROR, logger="physiclaw.agent.provider.anthropic_compat"):
+    with caplog.at_level(
+        logging.ERROR, logger="physiclaw.agent.provider.anthropic_compat"
+    ):
         with pytest.raises(ProviderPermanentError, match=r"^HTTP 400: "):
             await provider.chat([UserMessage(content="x")], [])
 
     assert any(
-        "anthropic HTTP 400 (permanent)" in r.getMessage()
-        for r in caplog.records
+        "anthropic HTTP 400 (permanent)" in r.getMessage() for r in caplog.records
     )
 
 
@@ -486,7 +511,11 @@ async def test_chat_returns_assistant_message_on_success(
 
 def test_extract_system_text_concatenates_with_double_newline() -> None:
     out = _extract_system_text(
-        [SystemMessage(content="a"), UserMessage(content="x"), SystemMessage(content="b")]
+        [
+            SystemMessage(content="a"),
+            UserMessage(content="x"),
+            SystemMessage(content="b"),
+        ]
     )
 
     assert out == "a\n\nb"
@@ -518,14 +547,14 @@ def test_content_to_anthropic_text_block_emits_text_dict() -> None:
 
 
 def test_content_to_anthropic_image_block_emits_base64_source() -> None:
-    out = _content_to_anthropic(
-        [ImageBlock(media_type="image/jpeg", data_b64="aGk=")]
-    )
+    out = _content_to_anthropic([ImageBlock(media_type="image/jpeg", data_b64="aGk=")])
 
-    assert out == [{
-        "type": "image",
-        "source": {"type": "base64", "media_type": "image/jpeg", "data": "aGk="},
-    }]
+    assert out == [
+        {
+            "type": "image",
+            "source": {"type": "base64", "media_type": "image/jpeg", "data": "aGk="},
+        }
+    ]
 
 
 def test_content_to_anthropic_drops_unknown_block_with_warning(
@@ -570,11 +599,13 @@ def test_assistant_blocks_text_only() -> None:
 
 
 def test_assistant_blocks_with_tool_calls() -> None:
-    out = _assistant_blocks(AssistantMessage(
-        content="reasoning",
-        tool_calls=[ToolCall(id="t1", name="tap", arguments={"x": 1})],
-        finish_reason=FinishReason.TOOL_CALLS,
-    ))
+    out = _assistant_blocks(
+        AssistantMessage(
+            content="reasoning",
+            tool_calls=[ToolCall(id="t1", name="tap", arguments={"x": 1})],
+            finish_reason=FinishReason.TOOL_CALLS,
+        )
+    )
 
     assert out == [
         {"type": "text", "text": "reasoning"},
@@ -584,9 +615,13 @@ def test_assistant_blocks_with_tool_calls() -> None:
 
 def test_assistant_blocks_empty_falls_back_to_empty_text(mocker) -> None:
     # Anthropic rejects empty assistant content arrays.
-    out = _assistant_blocks(AssistantMessage(
-        content="", tool_calls=[], finish_reason=FinishReason.STOP,
-    ))
+    out = _assistant_blocks(
+        AssistantMessage(
+            content="",
+            tool_calls=[],
+            finish_reason=FinishReason.STOP,
+        )
+    )
 
     assert out == [{"type": "text", "text": ""}]
 
@@ -597,11 +632,13 @@ def test_assistant_blocks_generates_id_when_tool_call_id_empty(mocker) -> None:
         return_value=mocker.MagicMock(hex="abcdef1234567890"),
     )
 
-    out = _assistant_blocks(AssistantMessage(
-        content="",
-        tool_calls=[ToolCall(id="", name="t", arguments={})],
-        finish_reason=FinishReason.TOOL_CALLS,
-    ))
+    out = _assistant_blocks(
+        AssistantMessage(
+            content="",
+            tool_calls=[ToolCall(id="", name="t", arguments={})],
+            finish_reason=FinishReason.TOOL_CALLS,
+        )
+    )
 
     assert out[0]["id"] == "auto_abcdef12"
 
@@ -610,10 +647,13 @@ def test_assistant_blocks_generates_id_when_tool_call_id_empty(mocker) -> None:
 
 
 def test_tool_to_anthropic_full_payload() -> None:
-    out = _tool_to_anthropic({
-        "name": "tap", "description": "Tap a coord",
-        "input_schema": {"type": "object", "properties": {}},
-    })
+    out = _tool_to_anthropic(
+        {
+            "name": "tap",
+            "description": "Tap a coord",
+            "input_schema": {"type": "object", "properties": {}},
+        }
+    )
 
     assert out == {
         "name": "tap",
@@ -690,9 +730,7 @@ def test_from_response_extracts_tool_use_blocks() -> None:
 
     out = _from_anthropic_response(resp)
 
-    assert out.tool_calls == [
-        ToolCall(id="t1", name="tap", arguments={"x": 1})
-    ]
+    assert out.tool_calls == [ToolCall(id="t1", name="tap", arguments={"x": 1})]
     assert out.finish_reason == FinishReason.TOOL_CALLS
 
 
@@ -711,7 +749,10 @@ def test_from_response_uses_default_finish_reason_when_stop_unknown() -> None:
 
 def test_from_response_defaults_stop_reason_to_end_turn_when_none() -> None:
     resp = SimpleNamespace(
-        content=[], stop_reason=None, usage=None, model_dump=lambda: {},
+        content=[],
+        stop_reason=None,
+        usage=None,
+        model_dump=lambda: {},
     )
 
     out = _from_anthropic_response(resp)
@@ -766,12 +807,14 @@ def test_parse_usage_returns_zero_filled_when_resp_has_no_usage() -> None:
 
 
 def test_parse_usage_sums_fresh_cached_created_into_prompt_tokens() -> None:
-    resp = SimpleNamespace(usage=SimpleNamespace(
-        input_tokens=10,
-        output_tokens=20,
-        cache_read_input_tokens=100,
-        cache_creation_input_tokens=5,
-    ))
+    resp = SimpleNamespace(
+        usage=SimpleNamespace(
+            input_tokens=10,
+            output_tokens=20,
+            cache_read_input_tokens=100,
+            cache_creation_input_tokens=5,
+        )
+    )
 
     out = _parse_anthropic_usage(resp)
 
@@ -789,11 +832,15 @@ def test_parse_usage_handles_missing_attrs_as_zero() -> None:
 
 
 def test_parse_usage_handles_none_attribute_values_as_zero() -> None:
-    out = _parse_anthropic_usage(SimpleNamespace(usage=SimpleNamespace(
-        input_tokens=None,
-        output_tokens=None,
-        cache_read_input_tokens=None,
-        cache_creation_input_tokens=None,
-    )))
+    out = _parse_anthropic_usage(
+        SimpleNamespace(
+            usage=SimpleNamespace(
+                input_tokens=None,
+                output_tokens=None,
+                cache_read_input_tokens=None,
+                cache_creation_input_tokens=None,
+            )
+        )
+    )
 
     assert out == Usage()

@@ -162,9 +162,7 @@ async def handle_calibrate_arm(
 # ─── Camera frame calibration — setup check + rotation ──────
 
 
-async def handle_calibrate_camera_frame(
-    request, physiclaw, calib: CalibrationState
-):
+async def handle_calibrate_camera_frame(request, physiclaw, calib: CalibrationState):
     """POST /api/calibrate/camera — one-frame camera setup + rotation.
 
     Parks the stylus off the phone's top-left corner (screen pct

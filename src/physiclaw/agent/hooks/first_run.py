@@ -13,6 +13,7 @@ engine does NOT restart it; the captured layout loads on the next wake. If the
 wake fails, the phone watchdog plus the SYSTEM first-run notice retry it on the
 next screen change. Auto-discovered by `physiclaw.agent.runtime.hook.load_hooks()`.
 """
+
 import logging
 
 from physiclaw.agent.engine import screen_layout

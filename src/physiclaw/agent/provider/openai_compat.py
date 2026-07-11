@@ -32,6 +32,7 @@ Provider-specific response leakage (Qwen's `reasoning_content`) is
 stripped here at parse time so it never re-rides the wire on the next
 turn (would break the prefix cache).
 """
+
 import json
 import logging
 import uuid
@@ -163,23 +164,27 @@ class OpenAICompatibleProvider(BaseProvider):
             content = json.dumps(content, ensure_ascii=False)
 
         tool_calls: list[ToolCall] = []
-        for tc in (message.get("tool_calls") or []):
+        for tc in message.get("tool_calls") or []:
             try:
                 fn = tc.get("function") or {}
                 args_str = fn.get("arguments") or "{}"
                 try:
-                    args = json.loads(args_str) if isinstance(args_str, str) else args_str
+                    args = (
+                        json.loads(args_str) if isinstance(args_str, str) else args_str
+                    )
                     if not isinstance(args, dict):
                         args = {"_raw": args}
                 except json.JSONDecodeError:
                     # Principle 4/5: don't silently drop; pass malformed
                     # args through so the validator flags it on dispatch.
                     args = {"_malformed_json": args_str}
-                tool_calls.append(ToolCall(
-                    id=tc.get("id") or f"auto_{uuid.uuid4().hex[:8]}",
-                    name=fn.get("name") or "",
-                    arguments=args,
-                ))
+                tool_calls.append(
+                    ToolCall(
+                        id=tc.get("id") or f"auto_{uuid.uuid4().hex[:8]}",
+                        name=fn.get("name") or "",
+                        arguments=args,
+                    )
+                )
             except Exception:
                 log.exception("failed to parse tool_call: %s", tc)
 
@@ -209,7 +214,9 @@ class OpenAICompatibleProvider(BaseProvider):
             prompt_tokens=int(u.get("prompt_tokens", 0) or 0),
             completion_tokens=int(u.get("completion_tokens", 0) or 0),
             cached_tokens=cached,
-            cache_creation_tokens=int(details.get("cache_creation_input_tokens", 0) or 0),
+            cache_creation_tokens=int(
+                details.get("cache_creation_input_tokens", 0) or 0
+            ),
         )
 
 
@@ -222,10 +229,13 @@ def _with_cache_marker(entry: dict) -> dict:
     content (system message + stubbed tool_result both qualify in the
     OpenAI wire shape)."""
     out = dict(entry)
-    out["content"] = [{
-        "type": "text", "text": entry["content"],
-        "cache_control": EPHEMERAL_CACHE_CONTROL,
-    }]
+    out["content"] = [
+        {
+            "type": "text",
+            "text": entry["content"],
+            "cache_control": EPHEMERAL_CACHE_CONTROL,
+        }
+    ]
     return out
 
 

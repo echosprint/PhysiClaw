@@ -17,6 +17,7 @@ Every failure path ends in `set_auto()` + a descriptive TuneResult
 (unless the user pinned manual in config): firmware AE plus the runtime
 ⚠ warnings beat a bad frozen manual value.
 """
+
 import logging
 from dataclasses import dataclass
 from typing import Callable, Literal
@@ -56,8 +57,8 @@ class TuneResult:
 
     mode: Literal["auto", "manual"]
     exposure: int | None  # the held manual value; None in auto mode
-    ok: bool              # True = final metered frame is in band
-    detail: str           # human line for the tune log
+    ok: bool  # True = final metered frame is in band
+    detail: str  # human line for the tune log
 
 
 def _good(r: QualityReport) -> bool:
@@ -96,7 +97,9 @@ def converge(
         return TuneResult("auto", None, False, "no frame — exposure left as-is")
     if _good(r):
         return TuneResult(
-            "auto", None, True,
+            "auto",
+            None,
+            True,
             f"in band as-is (median {r.median_luma:.0f}, clip {r.clip_pct:.0%})",
         )
 
@@ -107,7 +110,9 @@ def converge(
             return TuneResult("auto", None, False, "no frame after AE re-assert")
         if _good(r):
             return TuneResult(
-                "auto", None, True,
+                "auto",
+                None,
+                True,
                 f"recovered by AE re-assert (median {r.median_luma:.0f})",
             )
 
@@ -130,22 +135,24 @@ def converge(
         prev_luma = r.median_luma
         if _good(r):
             return TuneResult(
-                "manual", exp, True,
+                "manual",
+                exp,
+                True,
                 f"converged at {exp} in {step} step(s) "
                 f"(median {r.median_luma:.0f}, clip {r.clip_pct:.0%})",
             )
         if not r.blown and (best is None or exp < best):
             best = exp
-        direction = (
-            -1 if (r.blown or r.median_luma > BLOWN_MEDIAN_LUMA) else 1
-        )
+        direction = -1 if (r.blown or r.median_luma > BLOWN_MEDIAN_LUMA) else 1
         if last_dir and direction != last_dir:
             flips += 1
             if flips >= 2:
                 if best is not None:
                     set_manual(best)
                     return TuneResult(
-                        "manual", best, False,
+                        "manual",
+                        best,
+                        False,
                         f"band between steps — held darkest non-blown {best}",
                     )
                 reason = "oscillating with no non-blown step"
@@ -160,7 +167,9 @@ def converge(
     if not prefer_auto and best is not None:
         set_manual(best)
         return TuneResult(
-            "manual", best, False,
+            "manual",
+            best,
+            False,
             f"{reason} — held best manual {best} (auto disabled in config)",
         )
     set_auto()

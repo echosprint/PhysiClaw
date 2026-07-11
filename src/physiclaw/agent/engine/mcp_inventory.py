@@ -7,6 +7,7 @@ complete even when the dump is generated offline (no MCP) and as a
 guaranteed-present baseline at runtime (live MCP tool_schemas can
 augment with richer descriptions but won't drop tools).
 """
+
 import ast
 import logging
 from pathlib import Path
@@ -15,10 +16,7 @@ from physiclaw.text import read_text
 
 log = logging.getLogger(__name__)
 
-_TOOLS_PY = (
-    Path(__file__).resolve().parents[2]
-    / "core" / "server" / "tools.py"
-)
+_TOOLS_PY = Path(__file__).resolve().parents[2] / "core" / "server" / "tools.py"
 
 
 def discover_mcp_tools() -> list[dict]:
@@ -41,10 +39,12 @@ def discover_mcp_tools() -> list[dict]:
             continue
         if not _has_mcp_tool_decorator(node):
             continue
-        out.append({
-            "name": node.name,
-            "description": ast.get_docstring(node) or "",
-        })
+        out.append(
+            {
+                "name": node.name,
+                "description": ast.get_docstring(node) or "",
+            }
+        )
     return out
 
 

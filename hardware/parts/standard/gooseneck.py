@@ -20,35 +20,36 @@ Run from the repo root:
 
     uv run --group cad python -m hardware.parts.standard.gooseneck
 """
+
 from build123d import *
 
 from hardware.parts.base import BaseStandardPart
 
 # ── Neck ──────────────────────────────────────────────────────────────────────
-default_od = 10 * MM   # solid neck outer diameter
+default_od = 10 * MM  # solid neck outer diameter
 
 # Default routing: a smooth bend leaving vertical (+Z), arriving horizontal (+X).
-default_point1     = (0, 0, 0)
+default_point1 = (0, 0, 0)
 default_direction1 = (0, 0, 1)
-default_point2     = (30 * MM, 0, 20 * MM)
+default_point2 = (30 * MM, 0, 20 * MM)
 default_direction2 = (1, 0, 0)
 
 # ── 1/4"-20 UNC thread (photo / CNC mount standard) ───────────────────────────
-thread_major = 6.35 * MM    # 1/4"
-stud_len     = 10   * MM     # male protrusion
-socket_bore  = 5.2  * MM     # female tapped-hole minor diameter
-socket_depth = 11   * MM     # female thread depth
-thread_pitch = 1.27 * MM     # 20 TPI
-groove_depth = 0.35 * MM     # radial groove (thread valley) depth
-groove_w     = 0.4  * MM     # groove width along the axis
+thread_major = 6.35 * MM  # 1/4"
+stud_len = 10 * MM  # male protrusion
+socket_bore = 5.2 * MM  # female tapped-hole minor diameter
+socket_depth = 11 * MM  # female thread depth
+thread_pitch = 1.27 * MM  # 20 TPI
+groove_depth = 0.35 * MM  # radial groove (thread valley) depth
+groove_w = 0.4 * MM  # groove width along the axis
 
 # End ferrules (metal collars that carry the threads).
-male_collar_len   = 6 * MM
-female_collar_len = socket_depth + 2 * MM   # deep enough to hold the bore
-end_chamfer       = 0.6 * MM
+male_collar_len = 6 * MM
+female_collar_len = socket_depth + 2 * MM  # deep enough to hold the bore
+end_chamfer = 0.6 * MM
 
-COL_NECK  = Color(0.20, 0.20, 0.22)   # coated flexible neck
-COL_METAL = Color(0.75, 0.75, 0.78)   # threaded end fittings
+COL_NECK = Color(0.20, 0.20, 0.22)  # coated flexible neck
+COL_METAL = Color(0.75, 0.75, 0.78)  # threaded end fittings
 
 
 def _stud_grooves(p, z0: float, length: float, major_r: float):
@@ -67,11 +68,13 @@ def _male_end(od: float) -> Part:
     """Collar + male 1/4"-20 stud, canonical +Z (z=0 on the neck end face).
     The collar matches the neck diameter ``od``."""
     with BuildPart() as p:
-        Cylinder(od / 2, male_collar_len,
-                 align=(Align.CENTER, Align.CENTER, Align.MIN))
+        Cylinder(od / 2, male_collar_len, align=(Align.CENTER, Align.CENTER, Align.MIN))
         with Locations((0, 0, male_collar_len)):
-            Cylinder(thread_major / 2, stud_len,
-                     align=(Align.CENTER, Align.CENTER, Align.MIN))
+            Cylinder(
+                thread_major / 2,
+                stud_len,
+                align=(Align.CENTER, Align.CENTER, Align.MIN),
+            )
         _stud_grooves(p, male_collar_len, stud_len, thread_major / 2)
         # Chamfer the stud tip (highest circular edge).
         tip = p.edges().filter_by(GeomType.CIRCLE).group_by(Axis.Z)[-1]
@@ -83,11 +86,16 @@ def _female_end(od: float) -> Part:
     """Collar with a female 1/4"-20 socket bored in from the outer face.
     The collar matches the neck diameter ``od``."""
     with BuildPart() as p:
-        Cylinder(od / 2, female_collar_len,
-                 align=(Align.CENTER, Align.CENTER, Align.MIN))
+        Cylinder(
+            od / 2, female_collar_len, align=(Align.CENTER, Align.CENTER, Align.MIN)
+        )
         with Locations((0, 0, female_collar_len)):
-            Cylinder(socket_bore / 2, socket_depth,
-                     align=(Align.CENTER, Align.CENTER, Align.MAX), mode=Mode.SUBTRACT)
+            Cylinder(
+                socket_bore / 2,
+                socket_depth,
+                align=(Align.CENTER, Align.CENTER, Align.MAX),
+                mode=Mode.SUBTRACT,
+            )
         # Chamfer the outer-face edges (collar rim + socket mouth).
         mouth = p.edges().filter_by(GeomType.CIRCLE).group_by(Axis.Z)[-1]
         chamfer(mouth, end_chamfer)
@@ -117,9 +125,12 @@ class Gooseneck(BaseStandardPart):
 
     def _spline(self):
         """The routing spine as a standalone edge (drives length + sweep)."""
-        return Spline(self.point1, self.point2,
-                      tangents=(self.direction1, self.direction2),
-                      tangent_scalars=self.tangent_scalars)
+        return Spline(
+            self.point1,
+            self.point2,
+            tangents=(self.direction1, self.direction2),
+            tangent_scalars=self.tangent_scalars,
+        )
 
     @property
     def neck_length(self) -> float:
@@ -139,8 +150,15 @@ class Gooseneck(BaseStandardPart):
         return f"Gooseneck Ø{self.od:g} × {round(self.neck_length)} mm, 1/4-20 M/F"
 
     def geom_key(self):
-        return ("Gooseneck", self.point1, self.direction1, self.point2,
-                self.direction2, self.od, self.tangent_scalars)
+        return (
+            "Gooseneck",
+            self.point1,
+            self.direction1,
+            self.point2,
+            self.direction2,
+            self.od,
+            self.tangent_scalars,
+        )
 
     def _build(self):
         spine = self._spline()
@@ -158,7 +176,7 @@ class Gooseneck(BaseStandardPart):
         # End fittings, each placed with local +Z pointing outward along the
         # tangent: the male stud leaves point1 (so -direction1), the female
         # socket faces out of point2 (so +direction2).
-        male_plane   = Plane(origin=self.point1, z_dir=tuple(-c for c in self.direction1))
+        male_plane = Plane(origin=self.point1, z_dir=tuple(-c for c in self.direction1))
         female_plane = Plane(origin=self.point2, z_dir=self.direction2)
 
         male = _male_end(self.od).moved(Location(male_plane))
@@ -172,10 +190,16 @@ class Gooseneck(BaseStandardPart):
         body = Compound(label="Gooseneck", children=[neck_part, male, female])
 
         # Mounting references: male stud tip and female socket mouth.
-        RigidJoint("stud", to_part=body,
-                   joint_location=Location(male_plane.offset(male_collar_len + stud_len)))
-        RigidJoint("socket", to_part=body,
-                   joint_location=Location(female_plane.offset(female_collar_len)))
+        RigidJoint(
+            "stud",
+            to_part=body,
+            joint_location=Location(male_plane.offset(male_collar_len + stud_len)),
+        )
+        RigidJoint(
+            "socket",
+            to_part=body,
+            joint_location=Location(female_plane.offset(female_collar_len)),
+        )
         return body
 
 

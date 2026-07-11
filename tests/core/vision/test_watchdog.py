@@ -1,4 +1,5 @@
 """Tests for `physiclaw.core.vision.watchdog`."""
+
 from __future__ import annotations
 
 import time
@@ -77,7 +78,7 @@ def test_check_content_wake_on_dim_scene_below_absolute_threshold() -> None:
 
     assert out["mean_delta"] == 3.0
     assert out["mean_delta"] < MEAN_INCREASE  # would miss the fixed threshold
-    assert out["mean_thr"] < MEAN_INCREASE    # adaptive threshold dropped
+    assert out["mean_thr"] < MEAN_INCREASE  # adaptive threshold dropped
     assert out["wake"] is True
 
 
@@ -105,9 +106,9 @@ def test_check_content_no_wake_on_brightness_collapse_despite_std_jump() -> None
 
     out = _check_content(slow, fast)
 
-    assert out["std_delta"] > STD_INCREASE            # std alone would fire
-    assert out["mean_delta"] < -MEAN_DROP_GUARD       # but the scene collapsed
-    assert out["wake"] is False                       # so no wake
+    assert out["std_delta"] > STD_INCREASE  # std alone would fire
+    assert out["mean_delta"] < -MEAN_DROP_GUARD  # but the scene collapsed
+    assert out["wake"] is False  # so no wake
 
 
 # ---------- _check_badge ----------
@@ -242,7 +243,9 @@ def test_watchdog_reinitializes_after_stale_gap(mocker) -> None:
     w.poll(_frame(), _fake_transforms())
     # Jump time forward past EMA_STALE.
     mocker.patch.object(
-        watchdog.time, "monotonic", return_value=w._poll_time + EMA_STALE + 1,
+        watchdog.time,
+        "monotonic",
+        return_value=w._poll_time + EMA_STALE + 1,
     )
 
     out = w.poll(_frame(), _fake_transforms())
@@ -319,7 +322,11 @@ def test_watchdog_badge_wakes_in_any_dock_slot(x0: int) -> None:
     base = np.full((200, 100, 3), 100, dtype=np.uint8)
     w.poll(base, t)  # init, no badge
     badged = base.copy()
-    badged[165:185, x0:x0 + 15] = (0, 0, 255)  # small badge in one slot (dock rows 160-199)
+    badged[165:185, x0 : x0 + 15] = (
+        0,
+        0,
+        255,
+    )  # small badge in one slot (dock rows 160-199)
 
     out = w.poll(badged, t)
 

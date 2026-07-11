@@ -32,7 +32,16 @@ except ImportError:
 
 BAUD = 115200
 _SKIP = ("bluetooth", "bt-", "debug", "wlan", "wifi", "airpods")
-_LIKELY = ("ch340", "cp210", "ftdi", "usbserial", "usbmodem", "wch", "arduino", "prolific")
+_LIKELY = (
+    "ch340",
+    "cp210",
+    "ftdi",
+    "usbserial",
+    "usbmodem",
+    "wch",
+    "arduino",
+    "prolific",
+)
 
 
 def find_port() -> str | None:
@@ -82,10 +91,12 @@ def connect(port: str | None) -> serial.Serial:
     return ser
 
 
-_OPTIONAL_ERRORS = frozenset({
-    "error:3",    # setting/command not recognized (GRBL + FluidNC)
-    "error:162",  # FluidNC: setting disabled (now lives in YAML)
-})
+_OPTIONAL_ERRORS = frozenset(
+    {
+        "error:3",  # setting/command not recognized (GRBL + FluidNC)
+        "error:162",  # FluidNC: setting disabled (now lives in YAML)
+    }
+)
 
 
 def send(ser: serial.Serial, cmd: str, *, optional: bool = False) -> None:
@@ -171,19 +182,41 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Hit-and-keep solenoid test via M3/M5.")
     ap.add_argument("--port", help="serial device (default: auto-detect)")
     ap.add_argument("--taps", type=int, default=3, help="short taps (default: 3)")
-    ap.add_argument("--tap-ms", type=int, default=80, help="tap contact ms (default: 80)")
-    ap.add_argument("--gap", type=float, default=0.5, help="seconds between taps (default: 0.5)")
-    ap.add_argument("--hold", type=float, default=2.0,
-                    help="long-hold seconds, 0 to skip (default: 2.0)")
-    ap.add_argument("--s-hit", type=int, default=1000, help="peak S-value (default: 1000)")
-    ap.add_argument("--s-hold", type=int, default=150,
-                    help="hold S-value (default: 150 = 15%% duty)")
-    ap.add_argument("--settle-ms", type=int, default=80,
-                    help="settle dwell after hit (default: 80)")
-    ap.add_argument("--keep-on", type=float, default=0.0,
-                    help="diagnostic: hold M3 on for N seconds, skip taps + hold")
-    ap.add_argument("--laser", action="store_true",
-                    help="use laser mode ($32=1) instead of spindle mode ($32=0)")
+    ap.add_argument(
+        "--tap-ms", type=int, default=80, help="tap contact ms (default: 80)"
+    )
+    ap.add_argument(
+        "--gap", type=float, default=0.5, help="seconds between taps (default: 0.5)"
+    )
+    ap.add_argument(
+        "--hold",
+        type=float,
+        default=2.0,
+        help="long-hold seconds, 0 to skip (default: 2.0)",
+    )
+    ap.add_argument(
+        "--s-hit", type=int, default=1000, help="peak S-value (default: 1000)"
+    )
+    ap.add_argument(
+        "--s-hold",
+        type=int,
+        default=150,
+        help="hold S-value (default: 150 = 15%% duty)",
+    )
+    ap.add_argument(
+        "--settle-ms", type=int, default=80, help="settle dwell after hit (default: 80)"
+    )
+    ap.add_argument(
+        "--keep-on",
+        type=float,
+        default=0.0,
+        help="diagnostic: hold M3 on for N seconds, skip taps + hold",
+    )
+    ap.add_argument(
+        "--laser",
+        action="store_true",
+        help="use laser mode ($32=1) instead of spindle mode ($32=0)",
+    )
     args = ap.parse_args()
     laser_mode = 1 if args.laser else 0
 
@@ -198,7 +231,7 @@ def main() -> int:
         # works on a bare GRBL board with no config.
         send(ser, f"$32={laser_mode}", optional=True)
         send(ser, "$33=20000", optional=True)  # 20 kHz, above adult hearing
-        send(ser, "$30=1000", optional=True)   # S-range 0..1000
+        send(ser, "$30=1000", optional=True)  # S-range 0..1000
 
         dump_settings(ser)
         send(ser, "M5")  # failsafe — start with coil off
@@ -206,8 +239,10 @@ def main() -> int:
         try:
             if args.keep_on > 0:
                 pin = "LASER" if laser_mode else "SPINDLE"
-                print(f"\n=== keep-on {args.keep_on:.1f}s @ S{args.s_hit} "
-                      f"($32={laser_mode}, {pin} pin) ===")
+                print(
+                    f"\n=== keep-on {args.keep_on:.1f}s @ S{args.s_hit} "
+                    f"($32={laser_mode}, {pin} pin) ==="
+                )
                 send(ser, f"M3 S{args.s_hit}")
                 time.sleep(args.keep_on)
                 send(ser, "M5")
@@ -224,8 +259,10 @@ def main() -> int:
 
             if args.hold > 0:
                 settle_s = args.settle_ms / 1000.0
-                print(f"\n=== hold {args.hold:.2f}s @ S{args.s_hold} "
-                      f"(hit S{args.s_hit}, settle {args.settle_ms}ms) ===")
+                print(
+                    f"\n=== hold {args.hold:.2f}s @ S{args.s_hold} "
+                    f"(hit S{args.s_hit}, settle {args.settle_ms}ms) ==="
+                )
                 send(ser, f"M3 S{args.s_hit}")
                 send(ser, f"G4 P{settle_s:.3f}")
                 send(ser, f"M3 S{args.s_hold}")

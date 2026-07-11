@@ -3,6 +3,7 @@
 Helper coverage lives in `test_spawn.py`; this file owns the
 spawn_claude flow with a fake `asyncio.create_subprocess_exec`.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -44,8 +45,9 @@ class _FakeProc:
         self.killed = True
 
 
-def _result_line(status_line: str = ">> DONE - all good", *,
-                 num_turns: int = 5) -> bytes:
+def _result_line(
+    status_line: str = ">> DONE - all good", *, num_turns: int = 5
+) -> bytes:
     """Build a fake stream-json sequence ending in a result event with
     a final assistant text containing the sentinel."""
     asst = {
@@ -54,9 +56,14 @@ def _result_line(status_line: str = ">> DONE - all good", *,
     }
     return [
         json.dumps(asst).encode() + b"\n",
-        json.dumps({
-            "type": "result", "num_turns": num_turns, "result": "all good",
-        }).encode() + b"\n",
+        json.dumps(
+            {
+                "type": "result",
+                "num_turns": num_turns,
+                "result": "all good",
+            }
+        ).encode()
+        + b"\n",
         b"",
     ]
 
@@ -68,7 +75,9 @@ def patch_environment(mocker, tmp_path: Path):
     mocker.patch.object(spawn_mod, "_mcp_tools", return_value=[])
     mocker.patch.object(spawn_mod.skill, "discover", return_value={})
     mocker.patch.object(
-        spawn_mod, "_render_system_prompt", return_value="SYSTEM",
+        spawn_mod,
+        "_render_system_prompt",
+        return_value="SYSTEM",
     )
     mocker.patch.object(spawn_mod, "_child_env", return_value={})
 
@@ -99,7 +108,8 @@ def patch_environment(mocker, tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_spawn_claude_done_on_first_attempt(
-    mocker, patch_environment,
+    mocker,
+    patch_environment,
 ) -> None:
     proc = _FakeProc(lines=_result_line(">> DONE - ok"))
 
@@ -107,12 +117,15 @@ async def test_spawn_claude_done_on_first_attempt(
         return proc
 
     mocker.patch.object(
-        spawn_mod.asyncio, "create_subprocess_exec", side_effect=_exec,
+        spawn_mod.asyncio,
+        "create_subprocess_exec",
+        side_effect=_exec,
     )
     spawn_spy = mocker.spy(spawn_mod, "prepare_plugin_dir")
 
     await spawn_mod.spawn_claude(
-        [Trigger(description="t")], model_id="opus",
+        [Trigger(description="t")],
+        model_id="opus",
     )
 
     spawn_spy.assert_called_once()
@@ -122,7 +135,8 @@ async def test_spawn_claude_done_on_first_attempt(
 
 @pytest.mark.asyncio
 async def test_spawn_claude_retries_on_undone(
-    mocker, patch_environment,
+    mocker,
+    patch_environment,
 ) -> None:
     """Two UNDONE attempts (no sentinel), third returns DONE."""
     mocker.patch.object(spawn_mod, "MAX_ATTEMPTS", 3)
@@ -138,11 +152,14 @@ async def test_spawn_claude_retries_on_undone(
         return next(procs_iter)
 
     mocker.patch.object(
-        spawn_mod.asyncio, "create_subprocess_exec", side_effect=_exec,
+        spawn_mod.asyncio,
+        "create_subprocess_exec",
+        side_effect=_exec,
     )
 
     await spawn_mod.spawn_claude(
-        [Trigger(description="t")], model_id="opus",
+        [Trigger(description="t")],
+        model_id="opus",
     )
 
     # All three attempts ran.
@@ -153,9 +170,12 @@ async def test_spawn_claude_retries_on_undone(
 
 @pytest.mark.asyncio
 async def test_spawn_claude_gives_up_after_max_undone(
-    mocker, patch_environment, caplog: pytest.LogCaptureFixture,
+    mocker,
+    patch_environment,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     import logging
+
     mocker.patch.object(spawn_mod, "MAX_ATTEMPTS", 2)
 
     proc = _FakeProc(lines=[b"\n", b""])
@@ -164,12 +184,15 @@ async def test_spawn_claude_gives_up_after_max_undone(
         return proc
 
     mocker.patch.object(
-        spawn_mod.asyncio, "create_subprocess_exec", side_effect=_exec,
+        spawn_mod.asyncio,
+        "create_subprocess_exec",
+        side_effect=_exec,
     )
 
     with caplog.at_level(logging.ERROR, logger="physiclaw.agent.claude.spawn"):
         await spawn_mod.spawn_claude(
-            [Trigger(description="t")], model_id="opus",
+            [Trigger(description="t")],
+            model_id="opus",
         )
 
     assert any("giving up after 2 UNDONE" in r.getMessage() for r in caplog.records)
@@ -177,21 +200,27 @@ async def test_spawn_claude_gives_up_after_max_undone(
 
 @pytest.mark.asyncio
 async def test_spawn_claude_logs_nonzero_exit(
-    mocker, patch_environment, caplog: pytest.LogCaptureFixture,
+    mocker,
+    patch_environment,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     import logging
+
     proc = _FakeProc(lines=_result_line(">> DONE - x"), returncode=1)
 
     async def _exec(*args, **kwargs):
         return proc
 
     mocker.patch.object(
-        spawn_mod.asyncio, "create_subprocess_exec", side_effect=_exec,
+        spawn_mod.asyncio,
+        "create_subprocess_exec",
+        side_effect=_exec,
     )
 
     with caplog.at_level(logging.ERROR, logger="physiclaw.agent.claude.spawn"):
         await spawn_mod.spawn_claude(
-            [Trigger(description="t")], model_id="opus",
+            [Trigger(description="t")],
+            model_id="opus",
         )
 
     assert any("claude exited 1" in r.getMessage() for r in caplog.records)
@@ -199,7 +228,9 @@ async def test_spawn_claude_logs_nonzero_exit(
 
 @pytest.mark.asyncio
 async def test_spawn_claude_kills_on_timeout(
-    mocker, patch_environment, caplog: pytest.LogCaptureFixture,
+    mocker,
+    patch_environment,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     import logging
 
@@ -209,16 +240,21 @@ async def test_spawn_claude_kills_on_timeout(
         return proc
 
     mocker.patch.object(
-        spawn_mod.asyncio, "create_subprocess_exec", side_effect=_exec,
+        spawn_mod.asyncio,
+        "create_subprocess_exec",
+        side_effect=_exec,
     )
     mocker.patch.object(
-        spawn_mod, "_stream", side_effect=asyncio.TimeoutError,
+        spawn_mod,
+        "_stream",
+        side_effect=asyncio.TimeoutError,
     )
     mocker.patch.object(spawn_mod, "MAX_ATTEMPTS", 1)
 
     with caplog.at_level(logging.ERROR, logger="physiclaw.agent.claude.spawn"):
         await spawn_mod.spawn_claude(
-            [Trigger(description="t")], model_id="opus",
+            [Trigger(description="t")],
+            model_id="opus",
         )
 
     assert proc.killed is True
@@ -227,7 +263,8 @@ async def test_spawn_claude_kills_on_timeout(
 
 @pytest.mark.asyncio
 async def test_spawn_claude_cleans_plugin_dir_on_failure(
-    mocker, patch_environment,
+    mocker,
+    patch_environment,
 ) -> None:
     """Even when subprocess creation fails, plugin dir gets rmtree'd."""
 
@@ -235,13 +272,16 @@ async def test_spawn_claude_cleans_plugin_dir_on_failure(
         raise RuntimeError("can't fork")
 
     mocker.patch.object(
-        spawn_mod.asyncio, "create_subprocess_exec", side_effect=_bad_exec,
+        spawn_mod.asyncio,
+        "create_subprocess_exec",
+        side_effect=_bad_exec,
     )
     mocker.patch.object(spawn_mod, "MAX_ATTEMPTS", 1)
 
     with pytest.raises(RuntimeError, match="can't fork"):
         await spawn_mod.spawn_claude(
-            [Trigger(description="t")], model_id="opus",
+            [Trigger(description="t")],
+            model_id="opus",
         )
 
     assert not patch_environment["plugin"].exists()
@@ -249,9 +289,12 @@ async def test_spawn_claude_cleans_plugin_dir_on_failure(
 
 @pytest.mark.asyncio
 async def test_spawn_claude_logs_done_summary_on_clean_exit(
-    mocker, patch_environment, caplog: pytest.LogCaptureFixture,
+    mocker,
+    patch_environment,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     import logging
+
     proc = _FakeProc(
         lines=_result_line(">> DONE - turns ok", num_turns=12),
     )
@@ -260,12 +303,15 @@ async def test_spawn_claude_logs_done_summary_on_clean_exit(
         return proc
 
     mocker.patch.object(
-        spawn_mod.asyncio, "create_subprocess_exec", side_effect=_exec,
+        spawn_mod.asyncio,
+        "create_subprocess_exec",
+        side_effect=_exec,
     )
 
     with caplog.at_level(logging.INFO, logger="physiclaw.agent.claude.spawn"):
         await spawn_mod.spawn_claude(
-            [Trigger(description="t")], model_id="opus",
+            [Trigger(description="t")],
+            model_id="opus",
         )
 
     assert any("turns=12" in r.getMessage() for r in caplog.records)
@@ -273,7 +319,8 @@ async def test_spawn_claude_logs_done_summary_on_clean_exit(
 
 @pytest.mark.asyncio
 async def test_spawn_claude_first_attempt_no_backoff(
-    mocker, patch_environment,
+    mocker,
+    patch_environment,
 ) -> None:
     """Backoff sleep only fires on retry, never before the first attempt."""
     proc = _FakeProc(lines=_result_line(">> DONE - x"))
@@ -282,13 +329,16 @@ async def test_spawn_claude_first_attempt_no_backoff(
         return proc
 
     mocker.patch.object(
-        spawn_mod.asyncio, "create_subprocess_exec", side_effect=_exec,
+        spawn_mod.asyncio,
+        "create_subprocess_exec",
+        side_effect=_exec,
     )
 
     sleep_spy = spawn_mod.asyncio.sleep  # already patched in fixture
 
     await spawn_mod.spawn_claude(
-        [Trigger(description="t")], model_id="opus",
+        [Trigger(description="t")],
+        model_id="opus",
     )
 
     sleep_spy.assert_not_called()

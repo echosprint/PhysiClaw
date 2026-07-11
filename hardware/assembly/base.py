@@ -122,7 +122,9 @@ class BaseAssembly(BasePart):
             # sub-micron degenerate ellipse; ExportSVG then warns it is "too small
             # to export safely". The skipped remnant is ~1e-6 mm — invisible — so
             # the warning is pure noise. Silence just that one message.
-            warnings.filterwarnings("ignore", message="Skipping ellipse that is too small")
+            warnings.filterwarnings(
+                "ignore", message="Skipping ellipse that is too small"
+            )
             for i, cam in enumerate(self.cameras):
                 # Camera + look_at derived from the FULL assembly bbox so
                 # solid and ghost layers align pixel-for-pixel. Without a
@@ -140,16 +142,22 @@ class BaseAssembly(BasePart):
                         line_type=self.ghost_line_type,
                     )
 
-                solid_visible, _ = solid.project_to_viewport(cam_pos, up, look_at=look_at)
+                solid_visible, _ = solid.project_to_viewport(
+                    cam_pos, up, look_at=look_at
+                )
                 exporter.add_shape(ShapeList(solid_visible), layer=SOLID_LABEL)
                 if ghost is not None:
-                    ghost_visible, _ = ghost.project_to_viewport(cam_pos, up, look_at=look_at)
+                    ghost_visible, _ = ghost.project_to_viewport(
+                        cam_pos, up, look_at=look_at
+                    )
                     exporter.add_shape(ShapeList(ghost_visible), layer=GHOST_LABEL)
 
                 path = self.svg_path(index=i)
                 path.parent.mkdir(parents=True, exist_ok=True)
                 exporter.write(str(path))
-                path.write_text(inject_non_scaling_strokes(strip_root_dims(path.read_text())))
+                path.write_text(
+                    inject_non_scaling_strokes(strip_root_dims(path.read_text()))
+                )
 
 
 def _split_solid_ghost(assembly):

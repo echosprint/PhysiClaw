@@ -29,6 +29,7 @@
 AND sets `is_superseded=True` on the new DTO. Providers find the latest
 stub via the typed flag — no string parsing across modules.
 """
+
 import json
 import logging
 import re
@@ -150,7 +151,9 @@ def new_memory_placeholder() -> UserMessage:
     if not log_text:
         return UserMessage(content=MEMORY_INITIAL)
     entry = _format_artifact_text(
-        "read_logs", {"entries": memory.BOOTSTRAP_LOG_ENTRIES}, log_text,
+        "read_logs",
+        {"entries": memory.BOOTSTRAP_LOG_ENTRIES},
+        log_text,
     )
     return UserMessage(content=_render_slot(MEMORY_HEADER, [entry], sep="\n\n"))
 
@@ -197,7 +200,10 @@ def collapse_pending(
     Same threshold as the collapse itself; the +1 counts the upcoming
     turn. Missing slots → False (collapse would refuse too)."""
     threshold = _trigger_threshold(
-        messages, first_at=first_at, interval=interval, keep=keep,
+        messages,
+        first_at=first_at,
+        interval=interval,
+        keep=keep,
     )
     if threshold is None:
         return False
@@ -209,15 +215,19 @@ def inject_checkpoint_tail(messages: list[Message], *, keep: int) -> list[Messag
     """Append the pre-compression checkpoint notice — the engine adds it
     on `collapse_pending` turns only, as one of the LAST things the model
     sees. Original list is not mutated."""
-    return messages + [UserMessage(content=(
-        f"⚠ Context compresses after this turn: every turn except the "
-        f"newest {keep} folds to its note summary line — screens, "
-        "listings and results there are erased. Your `note` this turn "
-        "REQUIRES `scratchpad`: rewrite it (full replacement) with what "
-        "your future self needs — facts and values collected (IDs, "
-        "prices, counts), the current situation, and what remains. "
-        "Scratchpad and plan survive compression in full."
-    ))]
+    return messages + [
+        UserMessage(
+            content=(
+                f"⚠ Context compresses after this turn: every turn except the "
+                f"newest {keep} folds to its note summary line — screens, "
+                "listings and results there are erased. Your `note` this turn "
+                "REQUIRES `scratchpad`: rewrite it (full replacement) with what "
+                "your future self needs — facts and values collected (IDs, "
+                "prices, counts), the current situation, and what remains. "
+                "Scratchpad and plan survive compression in full."
+            )
+        )
+    ]
 
 
 def collapse_old_turns(
@@ -263,16 +273,16 @@ def collapse_old_turns(
     (EOQ analysis in this file's module-level comment).
     """
     threshold = _trigger_threshold(
-        messages, first_at=first_at, interval=interval, keep=keep,
+        messages,
+        first_at=first_at,
+        interval=interval,
+        keep=keep,
     )
     if threshold is None:
         log.warning("collapse_old_turns: missing summary/memory/skill slots")
         return
 
-    turn_starts = [
-        i for i, m in enumerate(messages)
-        if isinstance(m, AssistantMessage)
-    ]
+    turn_starts = [i for i, m in enumerate(messages) if isinstance(m, AssistantMessage)]
     if len(turn_starts) < threshold:
         return
 
@@ -418,7 +428,7 @@ def _stub_body(text: str) -> str:
     full-shape row regex unless it is itself a complete row, which OCR never
     produces.
     """
-    pre: list[str] = []     # action result + verdict + sequence steps
+    pre: list[str] = []  # action result + verdict + sequence steps
     labels: list[str] = []  # surviving [text] labels, in listing order
     for line in text.splitlines():
         if line == _LISTING_HEADER:
@@ -456,7 +466,8 @@ def drop_stale_screens(messages: list[Message]) -> None:
     so further passes skip it.
     """
     view_indices = [
-        i for i, m in enumerate(messages)
+        i
+        for i, m in enumerate(messages)
         if isinstance(m, ToolResultMessage) and _has_image(m.content)
     ]
     if len(view_indices) <= 1:
@@ -464,8 +475,10 @@ def drop_stale_screens(messages: list[Message]) -> None:
 
     name_by_id = {
         tc.id: tc.name
-        for m in messages if isinstance(m, AssistantMessage)
-        for tc in m.tool_calls if tc.id
+        for m in messages
+        if isinstance(m, AssistantMessage)
+        for tc in m.tool_calls
+        if tc.id
     }
 
     for i in view_indices[:-1]:

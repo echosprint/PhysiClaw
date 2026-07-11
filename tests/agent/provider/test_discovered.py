@@ -5,6 +5,7 @@ time; the autouse `_dir_fixture` re-points it to a per-test directory
 so writes don't bleed. The two import-time tests at the bottom use
 `importlib.reload` to validate the literal "discovered" subdir name.
 """
+
 from __future__ import annotations
 
 import json
@@ -184,9 +185,7 @@ def test_model_ids_returns_set_of_ids(_dir_fixture: Path) -> None:
 def test_model_ids_filters_empty_string_ids(_dir_fixture: Path) -> None:
     # Defensive — if a provider returns a model with empty id, it must
     # not pollute the membership check.
-    discovered.save(
-        "openai", [{"id": "gpt-5"}, {"id": ""}, {"name": "no-id-key"}]
-    )
+    discovered.save("openai", [{"id": "gpt-5"}, {"id": ""}, {"name": "no-id-key"}])
 
     assert discovered.model_ids("openai") == {"gpt-5"}
 
@@ -228,4 +227,3 @@ def test_dir_at_import_lives_under_paths_HOME(physiclaw_home: Path) -> None:
 
     assert discovered._DIR == physiclaw_home / "discovered"
     assert discovered._DIR.name == "discovered"
-

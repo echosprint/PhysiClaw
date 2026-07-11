@@ -8,6 +8,7 @@ Two public functions:
 ships in every prompt tail, so it's a per-turn token ceiling — and it appears
 in the reject message, so it gets a freeze test against config.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace

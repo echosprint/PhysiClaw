@@ -2,6 +2,7 @@
 
 `httpx.AsyncClient` is mocked so tests don't hit the real server.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -54,9 +55,7 @@ async def test_phone_watch_returns_trigger_when_wake_true(
 async def test_phone_watch_uses_default_reason_when_missing(
     respx_mock: respx.MockRouter,
 ) -> None:
-    respx_mock.get("http://test.host:8048/api/phone/watch").respond(
-        json={"wake": True}
-    )
+    respx_mock.get("http://test.host:8048/api/phone/watch").respond(json={"wake": True})
 
     out = await phone_watch()
 

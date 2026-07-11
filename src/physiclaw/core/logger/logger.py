@@ -36,9 +36,9 @@ _RED = "31"
 # Tag → accent color. Each entry-point picks its own so devs can skim
 # interleaved output at a glance.
 _TAG_COLORS = {
-    "physiclaw": "36",      # cyan — hardware server
-    "runtime": "35",        # magenta — agent loop
-    "setup wizard": "32",   # green — `physiclaw auto` calibration steps
+    "physiclaw": "36",  # cyan — hardware server
+    "runtime": "35",  # magenta — agent loop
+    "setup wizard": "32",  # green — `physiclaw auto` calibration steps
 }
 
 
@@ -107,7 +107,9 @@ class _DailyFileHandler(logging.Handler):
                     self._f.close()
                 self._f = open(
                     self._dir / f"{self._prefix}-{today}.log",
-                    "a", encoding="utf-8", newline="\n",
+                    "a",
+                    encoding="utf-8",
+                    newline="\n",
                 )
                 self._date = today
             self._f.write(self.format(record) + "\n")
@@ -124,7 +126,10 @@ class _DailyFileHandler(logging.Handler):
 
 
 def setup_logging(
-    tag: str, level: int = logging.INFO, *, file_dir: Path | None = None,
+    tag: str,
+    level: int = logging.INFO,
+    *,
+    file_dir: Path | None = None,
 ) -> None:
     """Configure the root logger with the colored, tagged format.
 
@@ -144,7 +149,9 @@ def setup_logging(
     logging.basicConfig(level=level, handlers=handlers, force=True)
 
 
-def make_tagged_logger(name: str, tag: str, level: int = logging.INFO) -> logging.Logger:
+def make_tagged_logger(
+    name: str, tag: str, level: int = logging.INFO
+) -> logging.Logger:
     """A standalone logger that emits in the ``[tag]`` format, independent of
     the root handler (``propagate=False``) so its lines carry ``tag`` rather
     than the process-wide one. Lets a sub-stream — e.g. the setup wizard's
@@ -202,8 +209,7 @@ def _format_args(fn_name: str, kwargs: dict) -> str:
         # nothing and logged every batch as "0 steps".
         actions = kwargs.get("actions") or []
         names = [
-            s.get("tool_name", "?") if isinstance(s, dict) else "?"
-            for s in actions
+            s.get("tool_name", "?") if isinstance(s, dict) else "?" for s in actions
         ]
         return f"{len(names)} steps: {', '.join(names)}"
     arg_str = ", ".join(f"{k}={v!r}" for k, v in kwargs.items())
@@ -219,6 +225,7 @@ def logged(fn: AsyncFn) -> AsyncFn:
     the server stream tells a fast failure apart from a fast success (both would
     otherwise read as an identical `tool X(…) — 0.0s`). Cancellation
     (BaseException) propagates unlogged — it isn't a tool completion."""
+
     # FastMCP dispatches tool calls with keyword args only (positional
     # args land in `args` but never in practice); the log reads kwargs.
     @wraps(fn)
@@ -244,4 +251,5 @@ def logged(fn: AsyncFn) -> AsyncFn:
             time.monotonic() - t0,
         )
         return result
+
     return cast(AsyncFn, wrapper)

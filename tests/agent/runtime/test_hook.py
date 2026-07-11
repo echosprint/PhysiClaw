@@ -1,4 +1,5 @@
 """Tests for `physiclaw.agent.runtime.hook` — hook registry."""
+
 from __future__ import annotations
 
 import pytest
@@ -127,9 +128,7 @@ async def test_check_hooks_logs_exception_and_continues(
     assert out == [Trigger(description="survived")]
     # Anchored equality so `XX...XX` literal mutations (mutmut's string
     # wrapping) can't sneak through the substring check.
-    assert any(
-        r.getMessage() == "hook failed: boom" for r in caplog.records
-    )
+    assert any(r.getMessage() == "hook failed: boom" for r in caplog.records)
 
 
 # ---------- clear ----------
@@ -152,9 +151,7 @@ def test_clear_removes_all_hooks() -> None:
 def test_load_hooks_is_idempotent(mocker) -> None:
     fake_pkg = mocker.MagicMock()
     fake_pkg.__path__ = ["/fake/path"]
-    spy = mocker.patch.object(
-        hook.importlib, "import_module", return_value=fake_pkg
-    )
+    spy = mocker.patch.object(hook.importlib, "import_module", return_value=fake_pkg)
     mocker.patch.object(hook.pkgutil, "iter_modules", return_value=[])
 
     hook.load_hooks()
@@ -167,9 +164,7 @@ def test_load_hooks_is_idempotent(mocker) -> None:
 def test_load_hooks_skips_underscore_prefixed_modules(mocker) -> None:
     fake_pkg = mocker.MagicMock()
     fake_pkg.__path__ = ["/fake/path"]
-    mocker.patch.object(
-        hook.importlib, "import_module", return_value=fake_pkg
-    )
+    mocker.patch.object(hook.importlib, "import_module", return_value=fake_pkg)
 
     fake_modinfos = [
         mocker.MagicMock(name="real-mod"),

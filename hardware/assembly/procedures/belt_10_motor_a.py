@@ -37,21 +37,26 @@ from hardware.assembly.procedures.linear_47_idler_rj2 import LI47IdlerRj2
 from hardware.assembly.projection import FRONT
 from hardware.parts.standard.belt import Belt, motor_a_path
 
-BELT_EXPLODE = 30    # mm — exploded: shift the belt outboard along world -Y
-                     #      so it lifts clear of the pulleys / idlers and the
-                     #      routing reads cleanly from the camera
+BELT_EXPLODE = 30  # mm — exploded: shift the belt outboard along world -Y
+#      so it lifts clear of the pulleys / idlers and the
+#      routing reads cleanly from the camera
 
 
 class BE10MotorA(BaseAssembly):
     camera = FRONT
+
     def _build(self) -> Compound:
         base_compound = LI47IdlerRj2(exploded=False).build()
         belt = Belt(path=motor_a_path, name="motor_a", motor="A").build()
         if self.exploded:
             belt.move(Location((0, -BELT_EXPLODE, 0)))
-        return Compound(label="belt_10_motor_a", children=[
-            base_compound, belt,
-        ])
+        return Compound(
+            label="belt_10_motor_a",
+            children=[
+                base_compound,
+                belt,
+            ],
+        )
 
 
 if __name__ == "__main__":

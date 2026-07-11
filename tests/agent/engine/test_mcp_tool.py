@@ -5,6 +5,7 @@ both mocked with `AsyncMock`. Tests assert the public-surface
 behavior: URL construction, session lifecycle, content normalization,
 error mapping, and the process-level singleton + cache.
 """
+
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
@@ -95,9 +96,7 @@ def patched_transport(mocker, fake_session):
     async def fake_session_ctx(read, write):
         yield fake_session
 
-    mocker.patch.object(
-        mcp_tool, "ClientSession", side_effect=fake_session_ctx
-    )
+    mocker.patch.object(mcp_tool, "ClientSession", side_effect=fake_session_ctx)
     fake_session.captured = captured
     return fake_session
 
@@ -154,10 +153,14 @@ async def test_async_enter_handles_none_instructions(
 
 @pytest.mark.asyncio
 async def test_list_tools_returns_normalized_dicts(patched_transport) -> None:
-    patched_transport.list_tools.return_value = SimpleNamespace(tools=[
-        SimpleNamespace(name="tap", description="Tap", inputSchema={"type": "object"}),
-        SimpleNamespace(name="peek", description=None, inputSchema={}),
-    ])
+    patched_transport.list_tools.return_value = SimpleNamespace(
+        tools=[
+            SimpleNamespace(
+                name="tap", description="Tap", inputSchema={"type": "object"}
+            ),
+            SimpleNamespace(name="peek", description=None, inputSchema={}),
+        ]
+    )
 
     async with mcp_tool.McpClient() as c:
         out = await c.list_tools()
@@ -220,7 +223,8 @@ async def test_call_tool_image_default_mime_when_missing(
         data = "aGk="
 
     patched_transport.call_tool.return_value = SimpleNamespace(
-        content=[_ImgBlob()], isError=False,
+        content=[_ImgBlob()],
+        isError=False,
     )
 
     async with mcp_tool.McpClient() as c:
@@ -240,7 +244,8 @@ async def test_call_tool_unknown_block_type_stringified_as_text(
             return "<future-thing>"
 
     patched_transport.call_tool.return_value = SimpleNamespace(
-        content=[_Mystery()], isError=False,
+        content=[_Mystery()],
+        isError=False,
     )
 
     async with mcp_tool.McpClient() as c:
@@ -252,7 +257,8 @@ async def test_call_tool_unknown_block_type_stringified_as_text(
 @pytest.mark.asyncio
 async def test_call_tool_passes_args_to_session(patched_transport) -> None:
     patched_transport.call_tool.return_value = SimpleNamespace(
-        content=[], isError=False,
+        content=[],
+        isError=False,
     )
 
     async with mcp_tool.McpClient() as c:
@@ -268,7 +274,8 @@ async def test_call_tool_uses_empty_dict_when_args_none(
     patched_transport,
 ) -> None:
     patched_transport.call_tool.return_value = SimpleNamespace(
-        content=[], isError=False,
+        content=[],
+        isError=False,
     )
 
     async with mcp_tool.McpClient() as c:
@@ -341,9 +348,11 @@ async def test_get_mcp_cleans_up_stack_on_aenter_failure(mocker) -> None:
 async def test_list_tools_cached_caches_first_result(
     patched_transport,
 ) -> None:
-    patched_transport.list_tools.return_value = SimpleNamespace(tools=[
-        SimpleNamespace(name="tap", description="Tap", inputSchema={}),
-    ])
+    patched_transport.list_tools.return_value = SimpleNamespace(
+        tools=[
+            SimpleNamespace(name="tap", description="Tap", inputSchema={}),
+        ]
+    )
 
     a = await mcp_tool.list_tools_cached()
     b = await mcp_tool.list_tools_cached()
@@ -387,6 +396,5 @@ async def test_close_mcp_logs_warning_on_aclose_exception(
         await mcp_tool.close_mcp()
 
     assert any(
-        r.getMessage().startswith("MCP client close failed")
-        for r in caplog.records
+        r.getMessage().startswith("MCP client close failed") for r in caplog.records
     )

@@ -4,6 +4,7 @@ The right backend is bound at import time based on ``sys.platform``;
 the package re-exports a flat API that callers use without checking
 the platform themselves.
 """
+
 from __future__ import annotations
 
 import sys
@@ -36,6 +37,7 @@ def test_public_api_surface_is_exhaustive() -> None:
 
 def test_all_backends_export_the_same_api() -> None:
     from physiclaw.core.platform import darwin, linux, windows
+
     public = set(platform.__all__)
     for module in (darwin, linux, windows):
         missing = [n for n in public if not hasattr(module, n)]

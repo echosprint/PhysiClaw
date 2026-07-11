@@ -32,6 +32,7 @@ cache write per ~10 turns.
 K2's occasional top-level `usage.cached_tokens` placement is handled
 by the base `_parse_usage` fallback in `openai_compat.py`.
 """
+
 from physiclaw.agent.provider.openai_compat import OpenAICompatibleProvider
 
 

@@ -36,14 +36,19 @@ def write(
     """
     p = paths.runtime_state_file()
     p.parent.mkdir(parents=True, exist_ok=True)
-    write_text(p, json.dumps({
-        "pid": os.getpid(),
-        "host": host,
-        "port": port,
-        "model_ref": model_ref,
-        "model_source": model_source,
-        "started_at": time.time(),
-    }))
+    write_text(
+        p,
+        json.dumps(
+            {
+                "pid": os.getpid(),
+                "host": host,
+                "port": port,
+                "model_ref": model_ref,
+                "model_source": model_source,
+                "started_at": time.time(),
+            }
+        ),
+    )
 
 
 def clear() -> None:
@@ -97,9 +102,7 @@ def _pid_alive(pid: int) -> bool:
         PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
         ERROR_ACCESS_DENIED = 5
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        handle = kernel32.OpenProcess(
-            PROCESS_QUERY_LIMITED_INFORMATION, False, pid
-        )
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
         if handle:
             kernel32.CloseHandle(handle)
             return True

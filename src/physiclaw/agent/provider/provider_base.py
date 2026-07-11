@@ -19,6 +19,7 @@ Principle 2: normalize at the boundary — providers return
 `AssistantMessage` regardless of their wire shape.
 Principle 3: preserve the real `finish_reason` — never derive it.
 """
+
 import logging
 import os
 from typing import Protocol
@@ -224,6 +225,7 @@ class BaseProvider:
         """Class `BASE_URL` unless the user has set
         `[providers.<id>] base_url = "..."` in `~/.physiclaw/config.toml`."""
         from physiclaw.config import provider_base_url_override
+
         return provider_base_url_override(cls.PROVIDER_ID) or cls.BASE_URL
 
     def _auth_headers(self, key: str) -> dict[str, str]:
@@ -244,6 +246,7 @@ class BaseProvider:
         <PROVIDER_ID>_api_key`. Override for non-standard auth (OAuth,
         sigv4, etc.)."""
         from physiclaw.config import resolve_provider_key
+
         return resolve_provider_key(self._env_vars(), self._config_key())[0]
 
     def _missing_key_message(self) -> str:

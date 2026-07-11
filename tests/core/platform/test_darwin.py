@@ -3,6 +3,7 @@
 Tests run on every platform: subprocess and socket calls are mocked, so
 we exercise the dispatch logic regardless of where the suite is run.
 """
+
 from __future__ import annotations
 
 import socket
@@ -42,7 +43,8 @@ def test_ensure_camera_permission_swallows_missing_imagesnap(mocker) -> None:
 
 def test_ensure_camera_permission_swallows_timeout(mocker) -> None:
     mocker.patch.object(
-        darwin.subprocess, "run",
+        darwin.subprocess,
+        "run",
         side_effect=subprocess.TimeoutExpired(cmd="imagesnap", timeout=5),
     )
 
@@ -77,7 +79,8 @@ def test_local_hostname_falls_back_when_scutil_missing(mocker) -> None:
 
 def test_local_hostname_falls_back_when_scutil_times_out(mocker) -> None:
     mocker.patch.object(
-        darwin.subprocess, "run",
+        darwin.subprocess,
+        "run",
         side_effect=subprocess.TimeoutExpired(cmd="scutil", timeout=1),
     )
     mocker.patch.object(socket, "gethostname", return_value="host")

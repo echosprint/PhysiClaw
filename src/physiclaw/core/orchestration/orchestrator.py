@@ -153,9 +153,7 @@ class PhysiClaw:
         return {
             "arm": self._arm is not None,
             "camera": self._cam is not None,
-            "bridge": (
-                self._bridge.connected if self._bridge is not None else False
-            ),
+            "bridge": (self._bridge.connected if self._bridge is not None else False),
             "steps": steps,
             "calibrated": self.hardware_ready,
             "ready": self.ready,
@@ -704,7 +702,10 @@ class PhysiClaw:
         exit."""
         return self._run_macro(
             lambda: self._swipe(
-                [0.0, 0.4, 0.01, 0.6], "right", "xxl", speed="fast",
+                [0.0, 0.4, 0.01, 0.6],
+                "right",
+                "xxl",
+                speed="fast",
                 start_dwell=self.BACK_EDGE_DWELL_SECONDS,
             ),
             "Went back",

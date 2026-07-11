@@ -9,6 +9,7 @@ screen-match). Two dataclasses:
 Hypothesis is used for the `pct → cam_pixel → pct` round-trip; tolerance
 is 1/cam_width because `pct_to_cam_pixel` truncates with `int()`.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -236,9 +237,7 @@ def test_pct_to_cam_pixel_applies_translation() -> None:
     # Non-zero translation — proves the homogeneous `1.0` coord is used as
     # the third element (mutating it to `2.0` would double the offset).
     pct_to_cam = np.array([[1.0, 0.0, 0.1], [0.0, 1.0, 0.2]])
-    st_obj = ScreenTransforms(
-        IDENTITY_AFFINE.copy(), pct_to_cam, cam_size=(1000, 1000)
-    )
+    st_obj = ScreenTransforms(IDENTITY_AFFINE.copy(), pct_to_cam, cam_size=(1000, 1000))
 
     # cam_01 = (x + 0.1, y + 0.2) ; px = (int((x+0.1)*1000), int((y+0.2)*1000))
     assert st_obj.pct_to_cam_pixel(0.0, 0.0) == (100, 200)
@@ -261,9 +260,7 @@ def test_pixel_to_pct_subtracts_translation() -> None:
     # With translation b in pct_to_cam, the inverse must subtract it.
     # Mutating `cam_01 - b` to `cam_01 + b` would double-displace the result.
     pct_to_cam = np.array([[1.0, 0.0, 0.1], [0.0, 1.0, 0.2]])
-    st_obj = ScreenTransforms(
-        IDENTITY_AFFINE.copy(), pct_to_cam, cam_size=(1000, 1000)
-    )
+    st_obj = ScreenTransforms(IDENTITY_AFFINE.copy(), pct_to_cam, cam_size=(1000, 1000))
 
     # pct_to_cam_pixel(0.4, 0.3) = (500, 500); inverse should return (0.4, 0.3).
     assert st_obj.pixel_to_pct(500, 500) == pytest.approx((0.4, 0.3))

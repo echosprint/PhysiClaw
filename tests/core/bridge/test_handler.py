@@ -5,6 +5,7 @@ construct minimal fake requests (with `body()` and `json()` async
 methods) and use real `BridgeState` / `CalibrationState` / `PageState`
 instances.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -39,11 +40,13 @@ def _no_real_save_screenshot(mocker) -> None:
 def _async_returning(value: Any):
     async def _coro():
         return value
+
     return _coro
 
 
-def _fake_request(body_bytes: bytes | None = None, json_obj: Any = None,
-                  url_port: int | None = 8048):
+def _fake_request(
+    body_bytes: bytes | None = None, json_obj: Any = None, url_port: int | None = 8048
+):
     req = SimpleNamespace()
     req.body = _async_returning(body_bytes if body_bytes is not None else b"")
     req.json = _async_returning(json_obj)
@@ -81,6 +84,7 @@ async def test_handle_phone_state_calls_poll_and_returns_state(mocker) -> None:
     resp = await handle_phone_state(_fake_request(), phone)
 
     import json
+
     body = json.loads(resp.body)
     assert body["mode"] == "bridge"
     # `bridge.poll` updates last_seen — was 0, now > 0.
@@ -98,6 +102,7 @@ async def test_handle_clipboard_copied_marks_event() -> None:
     resp = await handle_clipboard_copied(_fake_request(), bridge)
 
     import json
+
     assert json.loads(resp.body) == {"ok": True}
     assert bridge._clipboard_copied.is_set()
 
@@ -110,18 +115,25 @@ async def test_handle_screen_dimension_records_into_calib() -> None:
     cal = CalibrationState()
 
     resp = await handle_screen_dimension(
-        _fake_request(json_obj={
-            "screen_width": 1170, "screen_height": 2532,
-            "viewport_width": 390, "viewport_height": 844,
-        }),
+        _fake_request(
+            json_obj={
+                "screen_width": 1170,
+                "screen_height": 2532,
+                "viewport_width": 390,
+                "viewport_height": 844,
+            }
+        ),
         cal,
     )
 
     import json
+
     assert json.loads(resp.body) == {"ok": True}
     assert cal.screen_dimension == {
-        "width": 1170, "height": 2532,
-        "viewport_width": 390, "viewport_height": 844,
+        "width": 1170,
+        "height": 2532,
+        "viewport_width": 390,
+        "viewport_height": 844,
     }
 
 
@@ -132,7 +144,10 @@ async def test_handle_screen_dimension_defaults_missing_fields_to_zero() -> None
     await handle_screen_dimension(_fake_request(json_obj={}), cal)
 
     assert cal.screen_dimension == {
-        "width": 0, "height": 0, "viewport_width": 0, "viewport_height": 0,
+        "width": 0,
+        "height": 0,
+        "viewport_width": 0,
+        "viewport_height": 0,
     }
 
 
@@ -147,6 +162,7 @@ async def test_handle_screenshot_upload_stores_data_and_returns_size() -> None:
     resp = await handle_screenshot_upload(_fake_request(body_bytes=payload), bridge)
 
     import json
+
     body = json.loads(resp.body)
     assert body == {"ok": True, "size": len(payload)}
     assert bridge._screenshot_data == payload
@@ -262,6 +278,7 @@ async def test_mode_switch_bridge_returns_ok() -> None:
     resp = await handle_mode_switch(_fake_request(json_obj={"mode": "bridge"}), phone)
 
     import json
+
     body = json.loads(resp.body)
     assert body == {"ok": True, "mode": "bridge"}
 
@@ -272,11 +289,20 @@ async def test_mode_switch_calibrate_with_phase_passes_kwargs() -> None:
     cal = CalibrationState()
     phone = PageState(bridge, cal)
 
-    resp = await handle_mode_switch(_fake_request(json_obj={
-        "mode": "calibrate", "phase": "dot", "dot_x": 0.3, "dot_y": 0.7,
-    }), phone)
+    resp = await handle_mode_switch(
+        _fake_request(
+            json_obj={
+                "mode": "calibrate",
+                "phase": "dot",
+                "dot_x": 0.3,
+                "dot_y": 0.7,
+            }
+        ),
+        phone,
+    )
 
     import json
+
     body = json.loads(resp.body)
     assert body == {"ok": True, "mode": "calibrate", "phase": "dot"}
     assert cal.phase == "dot"
@@ -307,9 +333,15 @@ async def test_mode_switch_400_on_calibrate_without_phase() -> None:
 async def test_mode_switch_400_on_unknown_phase() -> None:
     phone = PageState(BridgeState(), CalibrationState())
 
-    resp = await handle_mode_switch(_fake_request(json_obj={
-        "mode": "calibrate", "phase": "non-existent",
-    }), phone)
+    resp = await handle_mode_switch(
+        _fake_request(
+            json_obj={
+                "mode": "calibrate",
+                "phase": "non-existent",
+            }
+        ),
+        phone,
+    )
 
     assert resp.status_code == 400
 
@@ -328,7 +360,8 @@ async def test_serve_qr_page_substitutes_phone_url(
     )
     monkeypatch.setattr(handler, "STATIC_DIR", static)
     mocker.patch.object(
-        handler, "bridge_base_urls",
+        handler,
+        "bridge_base_urls",
         return_value=("http://mac.local:8048", "http://192.168.1.1:8048"),
     )
 
@@ -348,7 +381,9 @@ async def test_serve_qr_page_uses_default_port_when_url_port_none(
     (static / "qr.html").write_text("<html></html>")
     monkeypatch.setattr(handler, "STATIC_DIR", static)
     base_urls = mocker.patch.object(
-        handler, "bridge_base_urls", return_value=("p", "f"),
+        handler,
+        "bridge_base_urls",
+        return_value=("p", "f"),
     )
 
     await serve_qr_page(_fake_request(url_port=None))
@@ -363,8 +398,11 @@ async def test_serve_qr_page_uses_default_port_when_url_port_none(
 async def test_handle_calib_touch_records_touch_with_screenshot_pcts() -> None:
     cal = CalibrationState()
     cal.viewport_shift = ViewportShift(
-        offset_x=0, offset_y=0, dpr=1.0,
-        screenshot_width=200, screenshot_height=400,
+        offset_x=0,
+        offset_y=0,
+        dpr=1.0,
+        screenshot_width=200,
+        screenshot_height=400,
     )
 
     resp = await handle_calib_touch(
@@ -373,6 +411,7 @@ async def test_handle_calib_touch_records_touch_with_screenshot_pcts() -> None:
     )
 
     import json
+
     assert json.loads(resp.body) == {"ok": True}
     assert len(cal.touches) == 1
     touch = cal.touches[0]

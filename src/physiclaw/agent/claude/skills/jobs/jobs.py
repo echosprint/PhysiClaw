@@ -11,6 +11,7 @@ and `physiclaw.agent.engine.job_store`. Those same functions back the
 native engine's local tools, so the jobs.md format stays invariant
 whichever engine is driving.
 """
+
 import argparse
 import sys
 
@@ -28,7 +29,12 @@ from physiclaw.agent.engine.job_store import (
 
 _ALL = "all"
 _LIST_STATUSES = (
-    _ALL, STATUS_PEND, STATUS_FIRED, STATUS_DONE, STATUS_FAIL, STATUS_CANCEL,
+    _ALL,
+    STATUS_PEND,
+    STATUS_FIRED,
+    STATUS_DONE,
+    STATUS_FAIL,
+    STATUS_CANCEL,
 )
 
 

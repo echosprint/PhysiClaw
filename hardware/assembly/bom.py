@@ -50,6 +50,7 @@ class BomEntry:
 
 # ── Collection ────────────────────────────────────────────────────────────────
 
+
 def collect(step: BaseAssembly) -> list[BomEntry]:
     """Build the step and aggregate its BOM. Returns a sorted list.
 
@@ -76,6 +77,7 @@ def collect(step: BaseAssembly) -> list[BomEntry]:
 
 # ── Delta against a predecessor step ──────────────────────────────────────────
 
+
 def delta(current: list[BomEntry], previous: list[BomEntry]) -> list[BomEntry]:
     """Entries added at the current step that weren't at the previous
     step. Quantity is the cumulative delta (current − previous, omitting
@@ -91,6 +93,7 @@ def delta(current: list[BomEntry], previous: list[BomEntry]) -> list[BomEntry]:
 
 
 # ── Predecessor discovery ────────────────────────────────────────────────────
+
 
 def predecessor_module(module_name: str) -> str | None:
     """Return the predecessor procedure's module name (e.g.
@@ -121,6 +124,7 @@ def predecessor_module(module_name: str) -> str | None:
 
 # ── Markdown writer ───────────────────────────────────────────────────────────
 
+
 def to_markdown(entries: list[BomEntry], *, title: str) -> str:
     standard = [e for e in entries if e.category == "standard"]
     custom = [e for e in entries if e.category == "custom"]
@@ -142,7 +146,10 @@ def _section(heading: str, entries: list[BomEntry]) -> list[str]:
 
 # ── Public entry point ────────────────────────────────────────────────────────
 
-def write_bom(step_name: str, *, cumulative: bool = True, want_delta: bool = False) -> None:
+
+def write_bom(
+    step_name: str, *, cumulative: bool = True, want_delta: bool = False
+) -> None:
     """Build ``step_name`` and write its BOM Markdown to ``BOM_DIR`` —
     cumulative and/or delta-vs-predecessor.
 
@@ -160,4 +167,6 @@ def write_bom(step_name: str, *, cumulative: bool = True, want_delta: bool = Fal
         if prev_name is not None:
             entries = delta(current, collect(load_step(prev_name)))
             title = f"{step_name} — delta vs. {prev_name.rsplit('.', 1)[-1]}"
-            (BOM_DIR / f"{step_name}_delta.md").write_text(to_markdown(entries, title=title))
+            (BOM_DIR / f"{step_name}_delta.md").write_text(
+                to_markdown(entries, title=title)
+            )

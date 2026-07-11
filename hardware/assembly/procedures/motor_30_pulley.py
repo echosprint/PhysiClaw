@@ -36,29 +36,30 @@ from hardware.assembly.procedures.motor_21_frame import MO21Frame
 from hardware.assembly.projection import MAIN_FRAME_VIEW, Camera
 from hardware.parts.standard.pulley import Pulley2GT20T
 
-LEFT_PULLEY_GAP  =  0    # mm — LEFT pulley belt-band lands on the LOWER idler
-                         #      plane (Y = -42.75) so motor A's pulley is coplanar
-                         #      with the LU/LD/LJ2/RJ1 idler belt-bands it drives.
-                         #      0 = pulley hub seated flush on the bracket-top pad.
-                         #      Tuned for motor A's 8 mm spacer (M6x12x8); a taller
-                         #      spacer stands the motor off further and needs its
-                         #      own gap (cf. RIGHT_PULLEY_GAP for the 12 mm side,
-                         #      and the ring spec in motor_10_bracket).
-RIGHT_PULLEY_GAP =  5    # mm — RIGHT pulley belt-band lands on the UPPER idler
-                         #      plane (Y = -51.75) so motor B's pulley is coplanar
-                         #      with the LU.top1 / RU.top1 idler belt-bands it
-                         #      drives. Tuned for motor B's 12 mm spacer (M6x12x12).
-                         #      The two belt runs sit 9 mm apart (lower -42.75 /
-                         #      upper -51.75): 4 mm from the 8/12 mm spacer
-                         #      difference plus the 5 mm gap difference here.
-PULLEY_EXPLODE   = 30    # mm — exploded: pull each pulley outboard along world
-                         #      -Y (the motor shaft direction) so they read as
-                         #      separate pieces installed onto the motor shafts.
-                         #      Matches motor_21_frame's -Y explode convention.
+LEFT_PULLEY_GAP = 0  # mm — LEFT pulley belt-band lands on the LOWER idler
+#      plane (Y = -42.75) so motor A's pulley is coplanar
+#      with the LU/LD/LJ2/RJ1 idler belt-bands it drives.
+#      0 = pulley hub seated flush on the bracket-top pad.
+#      Tuned for motor A's 8 mm spacer (M6x12x8); a taller
+#      spacer stands the motor off further and needs its
+#      own gap (cf. RIGHT_PULLEY_GAP for the 12 mm side,
+#      and the ring spec in motor_10_bracket).
+RIGHT_PULLEY_GAP = 5  # mm — RIGHT pulley belt-band lands on the UPPER idler
+#      plane (Y = -51.75) so motor B's pulley is coplanar
+#      with the LU.top1 / RU.top1 idler belt-bands it
+#      drives. Tuned for motor B's 12 mm spacer (M6x12x12).
+#      The two belt runs sit 9 mm apart (lower -42.75 /
+#      upper -51.75): 4 mm from the 8/12 mm spacer
+#      difference plus the 5 mm gap difference here.
+PULLEY_EXPLODE = 30  # mm — exploded: pull each pulley outboard along world
+#      -Y (the motor shaft direction) so they read as
+#      separate pieces installed onto the motor shafts.
+#      Matches motor_21_frame's -Y explode convention.
 
 
 class MO30Pulley(BaseAssembly):
     camera = [MAIN_FRAME_VIEW, Camera(-64.27, 40.48, -110.78)]
+
     def _build(self) -> Compound:
         # Build the prior step and keep the instance so we can read
         # the pulley_plane hooks for both motors. The base is always
@@ -70,7 +71,7 @@ class MO30Pulley(BaseAssembly):
         pulleys = []
         for plane, gap in (
             (frame.base.pulley_plane, LEFT_PULLEY_GAP),
-            (frame.pulley_plane,      RIGHT_PULLEY_GAP),
+            (frame.pulley_plane, RIGHT_PULLEY_GAP),
         ):
             pulley = Pulley2GT20T(kind="pulley").build()
             # Lift the pulley along its native +Z (the shaft axis)
@@ -85,9 +86,13 @@ class MO30Pulley(BaseAssembly):
                 pulley.move(Location((0, -PULLEY_EXPLODE, 0)))
             pulleys.append(pulley)
 
-        return Compound(label="motor_30_pulley", children=[
-            frame_compound, *pulleys,
-        ])
+        return Compound(
+            label="motor_30_pulley",
+            children=[
+                frame_compound,
+                *pulleys,
+            ],
+        )
 
 
 if __name__ == "__main__":

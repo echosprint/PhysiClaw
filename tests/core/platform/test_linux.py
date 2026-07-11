@@ -4,6 +4,7 @@ The module only imports stdlib, so it imports and runs on any host — the
 OS calls (`shutil.which`, `subprocess`) are mocked so nothing actually
 launches.
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, call
@@ -88,7 +89,8 @@ def test_opencv_import_hint_only_for_libgl() -> None:
 def test_hardware_permission_hints_warns_when_not_in_group(monkeypatch) -> None:
     # video + ttyUSB nodes exist; user is in neither 'video' nor 'dialout'.
     monkeypatch.setattr(
-        linux.glob, "glob",
+        linux.glob,
+        "glob",
         lambda pat: ["/dev/video0"] if "video" in pat else ["/dev/ttyUSB0"],
     )
     monkeypatch.setattr(linux, "_in_group", lambda name: False)
@@ -151,9 +153,9 @@ def test_set_manual_exposure_tick_conversion_bounds() -> None:
     import cv2
 
     for log2_value, ticks in [
-        (-11, 5),     # band floor: 0.49ms
-        (-2, 2500),   # band ceiling: 250ms
-        (-20, 1),     # far out of band: clamps to the 1-tick floor, not 0
+        (-11, 5),  # band floor: 0.49ms
+        (-2, 2500),  # band ceiling: 250ms
+        (-20, 1),  # far out of band: clamps to the 1-tick floor, not 0
     ]:
         cap = MagicMock()
         linux.camera_set_manual_exposure(cap, log2_value)

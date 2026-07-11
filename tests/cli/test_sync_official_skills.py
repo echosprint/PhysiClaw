@@ -6,6 +6,7 @@ each URL to canned bytes (or raises a 404 HTTPError for anything unmapped),
 so no test hits the wire. Packs are built in-memory as real STORED zips so
 extraction, zip-slip, and checksum paths run for real.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -56,9 +57,9 @@ class _FakeResp:
 
     def read(self, n: int = -1) -> bytes:
         if n is None or n < 0:
-            chunk = self._data[self._pos:]
+            chunk = self._data[self._pos :]
         else:
-            chunk = self._data[self._pos:self._pos + n]
+            chunk = self._data[self._pos : self._pos + n]
         self._pos += len(chunk)
         return chunk
 
@@ -102,8 +103,14 @@ def _build_pack(
     manifest hash is deliberately wrong (exercises per-skill mismatch)."""
     contents = {n: _skill_md(n) for n in skill_names}
     skills = [
-        {"name": n, "path": f"skills/{n}", "description": "d",
-         "hash": ("sha256:" + "f" * 64) if n in bad_hash else _skill_hash(contents[n])}
+        {
+            "name": n,
+            "path": f"skills/{n}",
+            "description": "d",
+            "hash": ("sha256:" + "f" * 64)
+            if n in bad_hash
+            else _skill_hash(contents[n]),
+        }
         for n in skill_names
     ]
     if declared is not None:  # pad with ghosts the pack doesn't actually ship
@@ -139,8 +146,12 @@ def _routes(
     data, hexd = _build_pack(commit, skill_names, declared=declared, bad_hash=bad_hash)
     return {
         LATEST_URL: json.dumps(
-            {"schemaVersion": 1, "commit": commit, "builtAt": "x",
-             "skillCount": len(skill_names)}
+            {
+                "schemaVersion": 1,
+                "commit": commit,
+                "builtAt": "x",
+                "skillCount": len(skill_names),
+            }
         ).encode(),
         ZIP_URL: data,
         SHA_URL: f"{hexd}  physiclaw_official_skills.zip\n".encode(),
@@ -152,7 +163,8 @@ def official_home(tmp_path: Path, mocker) -> Path:
     d = tmp_path / "official"
     mocker.patch.object(osk.paths, "official_dir", return_value=d)
     mocker.patch.object(
-        osk, "_load_config",
+        osk,
+        "_load_config",
         return_value=SimpleNamespace(skills=SimpleNamespace(official_base_url=BASE)),
     )
     return d
@@ -216,9 +228,7 @@ def test_fresh_install_mounts_and_records_state(
 
 def test_up_to_date_skips_download(official_home: Path, mocker, capsys) -> None:
     official_home.mkdir(parents=True)
-    (official_home / osk.SYNC_STATE_FILE).write_text(
-        json.dumps({"commit": "a" * 40})
-    )
+    (official_home / osk.SYNC_STATE_FILE).write_text(json.dumps({"commit": "a" * 40}))
     calls: list[str] = []
     _patch_net(mocker, _routes("a" * 40, ["jd"]), calls)
 
@@ -470,7 +480,8 @@ def auto_env(mocker, monkeypatch):
     spawning the background sync. Yields the Thread mock."""
     monkeypatch.delenv("CI", raising=False)
     mocker.patch.object(
-        osk, "_load_config",
+        osk,
+        "_load_config",
         return_value=SimpleNamespace(skills=SimpleNamespace(sync_auto=True)),
     )
     mocker.patch("physiclaw.runtime_state.read_live", return_value=None)
@@ -489,7 +500,8 @@ def test_auto_sync_spawns_background_daemon_thread(auto_env) -> None:
 def test_auto_sync_skipped_when_disabled(mocker, monkeypatch) -> None:
     monkeypatch.delenv("CI", raising=False)
     mocker.patch.object(
-        osk, "_load_config",
+        osk,
+        "_load_config",
         return_value=SimpleNamespace(skills=SimpleNamespace(sync_auto=False)),
     )
     thread = mocker.patch.object(osk.threading, "Thread")

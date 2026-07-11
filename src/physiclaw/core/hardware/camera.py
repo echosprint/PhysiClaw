@@ -311,7 +311,8 @@ class Camera:
         with self._cond:
             target = self._frame_seq + n
             return self._cond.wait_for(
-                lambda: self._frame_seq >= target, timeout=timeout,
+                lambda: self._frame_seq >= target,
+                timeout=timeout,
             )
 
     # ─── Frame accessors ────────────────────────────────────────
@@ -327,8 +328,7 @@ class Camera:
             self._cond.wait_for(
                 lambda: (
                     self._frame is not None
-                    and time.monotonic() - self._frame_time
-                    < self.FRESH_MAX_AGE_SECONDS
+                    and time.monotonic() - self._frame_time < self.FRESH_MAX_AGE_SECONDS
                 ),
                 timeout=self.FRAME_WAIT_SECONDS,
             )

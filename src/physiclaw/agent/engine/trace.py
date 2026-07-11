@@ -1,42 +1,43 @@
 """Engine session logs — a daily human narrative + a per-session artifact dir.
 
-  1. `Trace` — per-day human-readable log
-       log/engine/engine-YYYY-MM-DD.log
-     Matches the shape of `agent/claude/spawn.py`'s _SessionLog so
-     operators scan either runtime the same way. One-line summaries
-     via `_summarize(event)`; internal bookkeeping events in
-     `_SILENT_EVENTS` are skipped there. Each session ends with an
-     `END session=… outcome=… turns=…` footer carrying the headline
-     metrics.
+1. `Trace` — per-day human-readable log
+     log/engine/engine-YYYY-MM-DD.log
+   Matches the shape of `agent/claude/spawn.py`'s _SessionLog so
+   operators scan either runtime the same way. One-line summaries
+   via `_summarize(event)`; internal bookkeeping events in
+   `_SILENT_EVENTS` are skipped there. Each session ends with an
+   `END session=… outcome=… turns=…` footer carrying the headline
+   metrics.
 
-  2. Per-session artifacts under log/engine/sessions/<sid>/ — the dir is
-     self-contained (image refs are relative), so "share the bad session"
-     is one directory copy:
+2. Per-session artifacts under log/engine/sessions/<sid>/ — the dir is
+   self-contained (image refs are relative), so "share the bad session"
+   is one directory copy:
 
-       events.jsonl   every engine event (incl. `_SILENT_EVENTS`) as
-                      structured data: {"t": iso-ms, "event": ..., turn?,
-                      ...fields}. `tool_result.blocks` is summarized
-                      (`result_summary`) — the full payload already lives
-                      in wire.jsonl. Written by `Trace`.
-       wire.jsonl     the provider round-trips, written by `RawLog`:
-                      {"t","kind":"session_start",provider,model,
-                       prompt_hash,tools} once, then per turn
-                      {"t","turn","kind":"request","messages":[...]} and
-                      {"t","turn","kind":"response","elapsed_ms","raw"}.
-                      Inline base64 images are extracted to
-                      images/<NNNNN>_t<turn>.<ext> and replaced by that
-                      relative path.
-       summary.json   session metrics derived from the event stream at
-                      `Trace.close()` (schema v1): outcome, turns, token/
-                      cache totals, tool-call counts, error counts. The
-                      `physiclaw logs` CLI reads these.
-       images/        post-view screenshots, turn-tagged.
+     events.jsonl   every engine event (incl. `_SILENT_EVENTS`) as
+                    structured data: {"t": iso-ms, "event": ..., turn?,
+                    ...fields}. `tool_result.blocks` is summarized
+                    (`result_summary`) — the full payload already lives
+                    in wire.jsonl. Written by `Trace`.
+     wire.jsonl     the provider round-trips, written by `RawLog`:
+                    {"t","kind":"session_start",provider,model,
+                     prompt_hash,tools} once, then per turn
+                    {"t","turn","kind":"request","messages":[...]} and
+                    {"t","turn","kind":"response","elapsed_ms","raw"}.
+                    Inline base64 images are extracted to
+                    images/<NNNNN>_t<turn>.<ext> and replaced by that
+                    relative path.
+     summary.json   session metrics derived from the event stream at
+                    `Trace.close()` (schema v1): outcome, turns, token/
+                    cache totals, tool-call counts, error counts. The
+                    `physiclaw logs` CLI reads these.
+     images/        post-view screenshots, turn-tagged.
 
-     Retention: on each session bootstrap, session dirs (and legacy
-     log/engine/raw/ files) older than CONFIG.retention.trace_days are
-     purged; daily engine-*.log files older than
-     CONFIG.retention.log_days.
+   Retention: on each session bootstrap, session dirs (and legacy
+   log/engine/raw/ files) older than CONFIG.retention.trace_days are
+   purged; daily engine-*.log files older than
+   CONFIG.retention.log_days.
 """
+
 import base64
 import dataclasses
 import datetime as dt
@@ -118,6 +119,7 @@ def new_sid() -> str:
     """
     suffix = "".join(secrets.choice(_SID_ALPHABET) for _ in range(6))
     return f"{dt.datetime.now():%Y%m%d_%H%M%S}_{suffix}"
+
 
 # mime → filename suffix for images extracted from data-URLs. Everything
 # we actually serve is JPEG via compact.scale_image_bytes, but keep the
@@ -303,7 +305,9 @@ class Trace:
         self._date = dt.datetime.now().strftime("%Y-%m-%d")
         self._f = open(
             _LOG_DIR / f"engine-{self._date}.log",
-            "a", encoding="utf-8", newline="\n",
+            "a",
+            encoding="utf-8",
+            newline="\n",
         )
         self._f.write(f"\n{'=' * 60}\n")
         self._f.flush()
@@ -375,7 +379,9 @@ class Trace:
             self._date = today
             self._f = open(
                 _LOG_DIR / f"engine-{today}.log",
-                "a", encoding="utf-8", newline="\n",
+                "a",
+                encoding="utf-8",
+                newline="\n",
             )
             self._f.write(
                 f"\n[{now:%H:%M:%S}] ROLLOVER ← continued from previous day\n"
@@ -389,10 +395,14 @@ class Trace:
 
 # Corrective events: the engine rejected a turn and re-asked. Grouped so
 # summary.errors.correctives counts every rejection kind uniformly.
-_CORRECTIVE_EVENTS = frozenset({
-    "bad_turn_shape", "checkpoint_corrective",
-    "pitfall_checkpoint", "memory_cue_checkpoint",
-})
+_CORRECTIVE_EVENTS = frozenset(
+    {
+        "bad_turn_shape",
+        "checkpoint_corrective",
+        "pitfall_checkpoint",
+        "memory_cue_checkpoint",
+    }
+)
 # Events that mirror a `session.stuck_events += 1` in engine.py — keep in
 # sync with those increment sites.
 _STUCK_EVENTS = frozenset({"stuck_warning", "tool_blocked_stuck"})
@@ -499,16 +509,22 @@ class _Summary:
                 "cache_creation_tokens": self.cache_creation,
                 "cache_hit_pct": (
                     round(100 * self.cache_read / self.input_tokens, 1)
-                    if self.input_tokens else 0.0
+                    if self.input_tokens
+                    else 0.0
                 ),
             },
             "tool_calls": dict(self.tool_calls),
             "errors": {
                 key: self.errors.get(key, 0)
                 for key in (
-                    "blocked_plan", "blocked_layout", "blocked_stuck",
-                    "invalid_args", "unknown_tool", "tool_errors",
-                    "correctives", "provider_failures",
+                    "blocked_plan",
+                    "blocked_layout",
+                    "blocked_stuck",
+                    "invalid_args",
+                    "unknown_tool",
+                    "tool_errors",
+                    "correctives",
+                    "provider_failures",
                 )
             },
             "stuck_events": self.stuck_events,
@@ -544,7 +560,8 @@ def _write_json_atomic(path: Path, obj: dict[str, Any]) -> None:
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(
         json.dumps(obj, ensure_ascii=False, indent=2, default=repr) + "\n",
-        encoding="utf-8", newline="\n",
+        encoding="utf-8",
+        newline="\n",
     )
     tmp.replace(path)
 
@@ -568,14 +585,14 @@ def _summarize(event: dict[str, Any]) -> str | None:  # noqa: C901 — flat disp
         triggers = event.get("triggers") or []
         sources = [x.get("source") or "?" for x in triggers]
         return (
-            f"WAKE session={event.get('session','?')} "
-            f"model={event.get('model_ref','?')} triggers={sources}"
+            f"WAKE session={event.get('session', '?')} "
+            f"model={event.get('model_ref', '?')} triggers={sources}"
         )
     if name == "env":
         return (
-            f"env physiclaw={event.get('physiclaw','?')} "
-            f"python={event.get('python','?')} {event.get('platform','?')} "
-            f"host={event.get('host','?')} utc{event.get('utc_offset','?')}"
+            f"env physiclaw={event.get('physiclaw', '?')} "
+            f"python={event.get('python', '?')} {event.get('platform', '?')} "
+            f"host={event.get('host', '?')} utc{event.get('utc_offset', '?')}"
         )
     if name == "tools_loaded":
         return (
@@ -583,14 +600,14 @@ def _summarize(event: dict[str, Any]) -> str | None:  # noqa: C901 — flat disp
             f"{len(event.get('local') or [])} local"
         )
     if name == "request":
-        return f"{pfx}request ({event.get('message_count','?')} messages)"
+        return f"{pfx}request ({event.get('message_count', '?')} messages)"
     if name == "response":
         calls = [c.get("name") for c in event.get("tool_calls") or []]
-        return f"{pfx}response finish={event.get('finish_reason','?')} calls={calls}"
+        return f"{pfx}response finish={event.get('finish_reason', '?')} calls={calls}"
     if name == "cache":
         return (
-            f"{pfx}cache hit={event.get('hit',0)} create={event.get('create',0)} "
-            f"new={event.get('new',0)} / total={event.get('total',0)}"
+            f"{pfx}cache hit={event.get('hit', 0)} create={event.get('create', 0)} "
+            f"new={event.get('new', 0)} / total={event.get('total', 0)}"
         )
     if name == "tool_result":
         tool_name = event.get("name", "?")
@@ -601,43 +618,36 @@ def _summarize(event: dict[str, Any]) -> str | None:  # noqa: C901 — flat disp
             result = brief_content(event.get("blocks") or [])
         return f"{pfx}{tool_name}({args}) → {result}"
     if name == "tool_invalid_args":
-        return f"{pfx}{event.get('name','?')} invalid args: {brief(event.get('error',''), 200)}"
+        return f"{pfx}{event.get('name', '?')} invalid args: {brief(event.get('error', ''), 200)}"
     if name == "tool_unknown":
-        return f"{pfx}{event.get('name','?')} unknown tool"
+        return f"{pfx}{event.get('name', '?')} unknown tool"
     if name == "tool_error":
-        return f"{pfx}{event.get('name','?')} failed: {brief(event.get('error',''), 200)}"
+        return f"{pfx}{event.get('name', '?')} failed: {brief(event.get('error', ''), 200)}"
     if name == "violations":
         return f"{pfx}violations {event.get('codes') or []}"
     if name == "log_append":
-        return f"{pfx}log: {brief(event.get('entry',''), 200)}"
+        return f"{pfx}log: {brief(event.get('entry', ''), 200)}"
     if name == "memory_save":
-        return f"{pfx}memory: {brief(event.get('text',''), 200)}"
+        return f"{pfx}memory: {brief(event.get('text', ''), 200)}"
     if name == "sentinel":
-        return (
-            f"{pfx}SENTINEL {event.get('name','?')} — "
-            f"{event.get('recap','')}"
-        )
+        return f"{pfx}SENTINEL {event.get('name', '?')} — {event.get('recap', '')}"
     if name == "wait_auto_scheduled":
-        return (
-            f"WAIT auto-scheduled: {event.get('job_id')} "
-            f"at {event.get('at')}"
-        )
+        return f"WAIT auto-scheduled: {event.get('job_id')} at {event.get('at')}"
     if name == "wait_auto_schedule_failed":
-        return f"WAIT auto-schedule failed: {event.get('error','?')}"
+        return f"WAIT auto-schedule failed: {event.get('error', '?')}"
     if name == "done":
         return (
-            f"OUTCOME: {event.get('sentinel') or '(none)'} — "
-            f"{event.get('recap','')}"
+            f"OUTCOME: {event.get('sentinel') or '(none)'} — {event.get('recap', '')}"
         )
     if name == "crashed":
         return "CRASHED"
     if name == "provider_failed":
-        return f"{pfx}provider failed: {brief(event.get('error',''), 200)}"
+        return f"{pfx}provider failed: {brief(event.get('error', ''), 200)}"
     if name == "prefix_drift":
         return (
             f"{pfx}!! PREFIX DRIFT "
-            f"expected={event.get('expected','')[:12]}… "
-            f"actual={event.get('actual','')[:12]}…"
+            f"expected={event.get('expected', '')[:12]}… "
+            f"actual={event.get('actual', '')[:12]}…"
         )
     if name in _SILENT_EVENTS:
         return None
@@ -687,8 +697,10 @@ class RawLog:
         # keeps per-turn records lean.
         self._emit(
             "session_start",
-            provider=provider, model=model,
-            prompt_hash=prompt_hash, tools=tools,
+            provider=provider,
+            model=model,
+            prompt_hash=prompt_hash,
+            tools=tools,
         )
 
     def write_request(self, turn: int, messages: list[dict]) -> None:
@@ -696,7 +708,11 @@ class RawLog:
         self._emit("request", turn=turn, messages=self._scrub_images(messages))
 
     def write_response(
-        self, turn: int, raw: dict[str, Any], *, elapsed_ms: int,
+        self,
+        turn: int,
+        raw: dict[str, Any],
+        *,
+        elapsed_ms: int,
     ) -> None:
         self._emit("response", turn=turn, elapsed_ms=elapsed_ms, raw=raw)
 
@@ -782,14 +798,17 @@ class RawLog:
             data = src.get("data") or ""
             mime = src.get("media_type") or "image/jpeg"
             rel = self._persist_image(mime, data) if data else ""
-            scrubbed = {"type": "ref", "ref": rel} if rel else {"type": "base64", "byte_count": len(data)}
+            scrubbed = (
+                {"type": "ref", "ref": rel}
+                if rel
+                else {"type": "base64", "byte_count": len(data)}
+            )
             return {"type": "image", "source": scrubbed}
         if bt == "tool_result":
             inner = b.get("content")
             if isinstance(inner, list):
                 scrubbed_inner = [
-                    self._scrub_block(x) if isinstance(x, dict) else x
-                    for x in inner
+                    self._scrub_block(x) if isinstance(x, dict) else x for x in inner
                 ]
                 return {**b, "content": scrubbed_inner}
             return b
@@ -803,7 +822,9 @@ def _now() -> str:
 
 
 def _purge_old(
-    *, days: int = _RETENTION_DAYS, log_days: int = _LOG_RETENTION_DAYS,
+    *,
+    days: int = _RETENTION_DAYS,
+    log_days: int = _LOG_RETENTION_DAYS,
 ) -> None:
     """Session-bootstrap retention sweep, three targets:
 
@@ -834,8 +855,7 @@ def _purge_old(
     removed = 0
     try:
         session_dirs = [
-            d for d in _SESSIONS_DIR.iterdir()
-            if d.is_dir() and not d.is_symlink()
+            d for d in _SESSIONS_DIR.iterdir() if d.is_dir() and not d.is_symlink()
         ]
     except OSError:
         session_dirs = []

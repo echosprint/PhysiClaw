@@ -32,11 +32,11 @@ from typing import Iterable
 from hardware.assembly.base import SVG_DIR
 from hardware.parts.base import REPO_ROOT
 
-PATCH_DIR     = REPO_ROOT / "hardware" / "assembly" / "patch"
-ID_ALPHABET   = string.ascii_lowercase
-ID_LEN        = 4
+PATCH_DIR = REPO_ROOT / "hardware" / "assembly" / "patch"
+ID_ALPHABET = string.ascii_lowercase
+ID_LEN = 4
 ORIG_SENTINEL = "orig"
-ID_RE         = re.compile(rf"^[{ID_ALPHABET}]{{{ID_LEN}}}$")
+ID_RE = re.compile(rf"^[{ID_ALPHABET}]{{{ID_LEN}}}$")
 
 
 def snapshot_path(src: Path, op_id: str) -> Path:
@@ -129,9 +129,9 @@ def make_entry(
             }
         out.append(item)
     return {
-        "id":      op_id,
-        "preop":   preop,
-        "shapes":  out,
+        "id": op_id,
+        "preop": preop,
+        "shapes": out,
         "viewBox": viewbox,
     }
 

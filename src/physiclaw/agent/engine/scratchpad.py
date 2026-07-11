@@ -11,6 +11,7 @@ Mutation funnels through the optional `scratchpad` field on the `note`
 tool — every turn already calls `note`, so a write costs no turn slot.
 The note handler delegates to `write()` here.
 """
+
 from physiclaw.agent.engine.dto import Message, UserMessage
 from physiclaw.config import CONFIG
 

@@ -61,11 +61,12 @@ from hardware.parts.custom.idler_mount_front import (
     thickness as block_thickness,
 )
 
-LD_EXPLODE = 40    # mm — exploded: outboard air gap, slot face → ld block bottom
+LD_EXPLODE = 40  # mm — exploded: outboard air gap, slot face → ld block bottom
 
 
 class ID31Ld(BaseAssembly):
     camera = [MAIN_FRAME_VIEW, Camera(50.88, -36.72, 60.03)]
+
     def _build(self) -> Compound:
         # Base layer — always assembled. Bundles frame + LU/RU mounts
         # + their brackets; this step adds the LD mount on top.
@@ -96,15 +97,27 @@ class ID31Ld(BaseAssembly):
         block_center_z = ld_tnut_world_z - slot_center_y
 
         ld_compound = ID30Ld(exploded=False).build()
-        ld_compound.move(Location(Plane(
-            origin=(-half_w, block_center_y, block_center_z),
-            x_dir=(1, 0, 0),    # native +X → world +X (block X along extrusion narrow dir)
-            z_dir=(0, -1, 0),   # native +Z (top face) → world -Y (outboard)
-        )))                     # → native +Y → world +Z (back face up)
+        ld_compound.move(
+            Location(
+                Plane(
+                    origin=(-half_w, block_center_y, block_center_z),
+                    x_dir=(
+                        1,
+                        0,
+                        0,
+                    ),  # native +X → world +X (block X along extrusion narrow dir)
+                    z_dir=(0, -1, 0),  # native +Z (top face) → world -Y (outboard)
+                )
+            )
+        )  # → native +Y → world +Z (back face up)
 
-        return Compound(label="idler_31_ld", children=[
-            base_compound, ld_compound,
-        ])
+        return Compound(
+            label="idler_31_ld",
+            children=[
+                base_compound,
+                ld_compound,
+            ],
+        )
 
 
 if __name__ == "__main__":

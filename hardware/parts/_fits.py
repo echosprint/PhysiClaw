@@ -9,6 +9,7 @@ For FDM-printed parts, real holes print 0.1-0.3 mm undersized. Bump up
 by ~0.2 mm above NORMAL, or use LOOSE, when the target is FDM rather
 than machined. Test-print a tolerance gauge if unsure.
 """
+
 from build123d import MM
 
 #                              CLOSE     NORMAL    LOOSE
@@ -42,5 +43,5 @@ M5_NUT_W, M5_NUT_T = 8.3 * MM, 4.0 * MM
 # Standard 0.1-inch header pitch, and the row-to-row spacing of a 2×8
 # stepper-driver carrier (StepStick / Pololu form factor = 5 × 2.54 mm). Shared
 # by the controller board's driver sockets and the driver module so they mate.
-HDR_PITCH        = 2.54 * MM
+HDR_PITCH = 2.54 * MM
 DRIVER_ROW_PITCH = 12.7 * MM

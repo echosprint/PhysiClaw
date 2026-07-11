@@ -7,6 +7,7 @@ full request handed to the model). Both go through the engine's own assembly
 output can't drift from what the running agent actually sends. Pass
 `--save-as FILE` to write the dump to a file instead of stdout.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -84,7 +85,9 @@ def request(save_as: _SaveAs = None) -> None:
     session = Session()
     session.plan.tick_turn()
     messages = assemble.apply_request_tails(
-        messages, session, layout_incomplete=bundle.layout_incomplete,
+        messages,
+        session,
+        layout_incomplete=bundle.layout_incomplete,
     )
 
     text = "".join(

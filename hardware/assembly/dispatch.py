@@ -31,13 +31,26 @@ _STEM_RE = re.compile(r"^(?P<family>[a-z]+)_(?P<nn>\d+)_(?P<descriptor>.+)$")
 
 # Dependency-order families — lower index built first. Clustering each batch
 # within a family lets the in-batch geometry cache reuse the shared chain.
-_FAMILIES = ("fastener", "frame", "idler", "motor", "linear", "belt", "tapz", "phone", "board", "camera", "wire")
+_FAMILIES = (
+    "fastener",
+    "frame",
+    "idler",
+    "motor",
+    "linear",
+    "belt",
+    "tapz",
+    "phone",
+    "board",
+    "camera",
+    "wire",
+)
 _FAMILY_PRIORITY = {name: i for i, name in enumerate(_FAMILIES)}
 DEFAULT_BATCH_SIZE = 5
 MAX_STEM_RETRIES = 3
 
 
 # ── Discovery & loading ───────────────────────────────────────────────────────
+
 
 def list_procedures() -> list[str]:
     """All procedure module stems, sorted by family then NN."""
@@ -75,6 +88,7 @@ def load_step(module_name: str) -> BaseAssembly:
 
 # ── Ordering & batching ───────────────────────────────────────────────────────
 
+
 def _family_of(stem: str) -> str:
     return stem.split("_", 1)[0]
 
@@ -96,11 +110,12 @@ def _batches(batch_size: int) -> list[list[str]]:
     for _, group in groupby(_ordered_stems(), key=_family_of):
         stems = list(group)
         for i in range(0, len(stems), batch_size):
-            out.append(stems[i:i + batch_size])
+            out.append(stems[i : i + batch_size])
     return out
 
 
 # ── Crash-retry ────────────────────────────────────────────────────────────────
+
 
 def retry_stems(
     stems: list[str],

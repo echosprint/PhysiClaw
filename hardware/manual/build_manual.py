@@ -236,14 +236,18 @@ def render_note(note: dict, ctx: Ctx) -> str:
     # a bare run of text gets a single <p> wrapper to match the source markup.
     body_html = body if body.lstrip().startswith("<") else f"<p>{body}</p>"
     heading = f"<h3{h3_class}{h3_style}>{loc(note['h3'], ctx.lang)}</h3>{body_html}"
-    inner = f"{NOTE_ICONS[note['icon']]}<div>{heading}</div>" if note.get("icon") else heading
+    inner = (
+        f"{NOTE_ICONS[note['icon']]}<div>{heading}</div>"
+        if note.get("icon")
+        else heading
+    )
     return f'<div class="{note["classes"]}"{style}>{inner}</div>'
 
 
 def render_bom(bom: dict, ctx: Ctx) -> str:
     """Render the bill-of-materials overlay table."""
     rows = "".join(
-        f'<tr><td>{loc(r["component"], ctx.lang)}</td>'
+        f"<tr><td>{loc(r['component'], ctx.lang)}</td>"
         f'<td class="spec">{loc(r["spec"], ctx.lang)}</td>'
         f'<td class="qty">{r["qty"]}</td></tr>'
         for r in bom["rows"]
@@ -279,7 +283,9 @@ def figure_alt(fig: dict) -> str:
     return re.sub(r"_([a-z]+)$", r" \1", base)
 
 
-def render_figure(fig: dict, ctx: Ctx, extra_class: str = "", style_on: str = "img") -> str:
+def render_figure(
+    fig: dict, ctx: Ctx, extra_class: str = "", style_on: str = "img"
+) -> str:
     """Render a `.fig` cell wrapping a lazily-loaded `<img>` for one SVG render.
 
     ``style_on`` selects where the figure's inline style lands: on the ``<img>``
@@ -382,7 +388,7 @@ def render_cover(page: dict, ctx: Ctx) -> str:
         f'<div class="render"><img src="{render_src}" '
         'alt="PhysiClaw.ai, fully assembled"></div>'
         '<div class="title-block">'
-        f'<h1>{loc(page["title"], ctx.lang)}</h1>'
+        f"<h1>{loc(page['title'], ctx.lang)}</h1>"
         f'<p class="tag"> {loc(page["tag"], ctx.lang)} </p>'
         '<div class="red-rule"></div></div>'
         f'<div class="ver">VERSION {page["version"]}</div>'
@@ -396,7 +402,7 @@ def render_toc(page: dict, ctx: Ctx) -> str:
     # never hardcodes page numbers either.
     rows = "".join(
         f'<a class="toc-row" href="#{r.get("page", "")}">'
-        f'<span>{loc(r["label"], ctx.lang)}</span>'
+        f"<span>{loc(r['label'], ctx.lang)}</span>"
         f'<span class="pg">{r["_pgno"]:02d}</span></a>'
         for r in page["rows"]
     )
@@ -445,7 +451,7 @@ def render_hardware_ref(page: dict, ctx: Ctx) -> str:
         entries.append(
             f'<div class="hw-entry"><div class="icon">{icon}</div>'
             '<div class="note">'
-            f'<h3>{loc(e["h3"], ctx.lang)}</h3><p>{loc(e["body"], ctx.lang)}</p>{ref}'
+            f"<h3>{loc(e['h3'], ctx.lang)}</h3><p>{loc(e['body'], ctx.lang)}</p>{ref}"
             "</div></div>"
         )
     # Row count is a pure layout concern — `.hw-grid` uses `grid-auto-rows`
@@ -472,7 +478,7 @@ def render_opener(page: dict, ctx: Ctx) -> str:
     body = (
         '<div class="opener">'
         f'<div class="secnum">{loc(page["secnum"], ctx.lang)}</div>'
-        f'<h1>{loc(page["h1"], ctx.lang)}</h1>'
+        f"<h1>{loc(page['h1'], ctx.lang)}</h1>"
         f'<p class="lede"> {loc(page["lede"], ctx.lang)} </p>'
         '<div class="bar"></div></div>'
     )
@@ -505,8 +511,7 @@ def render_wide_top(page: dict, ctx: Ctx) -> str:
     cells = [render_figure(figures[0], ctx, "wide")]
     cells += [render_figure(f, ctx) for f in figures[1:]]
     body = (
-        f'<div class="wide-top">{"".join(cells)}</div>'
-        f"{render_notes_and_bom(page, ctx)}"
+        f'<div class="wide-top">{"".join(cells)}</div>{render_notes_and_bom(page, ctx)}'
     )
     return page_shell(page, ctx, body)
 
@@ -534,11 +539,11 @@ def render_back(page: dict, ctx: Ctx) -> str:
         f'<div class="corner">{BACK_CORNER_SVG}</div>'
         '<div class="top">'
         f'<div class="stamp">{loc(page["stamp"], ctx.lang)}</div>'
-        f'<h2>{loc(page["h2"], ctx.lang)}</h2>'
+        f"<h2>{loc(page['h2'], ctx.lang)}</h2>"
         f'<p class="quote"> {loc(page["quote"], ctx.lang)} </p></div>'
         '<div class="bottom"><div class="brand-line">'
         f'<img class="footmark" src="{ctx.assets.crab}" alt="PhysiClaw logo">'
-        f'<div><div><strong>{loc(page["brand"], ctx.lang)}</strong></div>{sub}</div>'
+        f"<div><div><strong>{loc(page['brand'], ctx.lang)}</strong></div>{sub}</div>"
         "</div></div>"
     )
     return page_shell(page, ctx, body, "back")
@@ -576,8 +581,10 @@ def render_bom_page(page: dict, ctx: Ctx) -> str:
         if cls_span[idx]:
             cells += f'<td class="cls" rowspan="{cls_span[idx]}">{loc(r["cls"], ctx.lang)}</td>'
         if comp_span[idx]:
-            cells += (f'<td class="comp" rowspan="{comp_span[idx]}">'
-                      f'{loc(r["component"], ctx.lang)}</td>')
+            cells += (
+                f'<td class="comp" rowspan="{comp_span[idx]}">'
+                f"{loc(r['component'], ctx.lang)}</td>"
+            )
         # Group separators: "grp" starts a new class, "sub" a new component.
         row_name = "grp" if cls_span[idx] else "sub" if comp_span[idx] else ""
         row_cls = f' class="{row_name}"' if row_name else ""
@@ -599,7 +606,7 @@ def render_bom_page(page: dict, ctx: Ctx) -> str:
     table = (
         '<table class="bom-table"><thead><tr>'
         f"{head_cells}"
-        f'</tr></thead><tbody>{"".join(body_parts)}</tbody></table>'
+        f"</tr></thead><tbody>{''.join(body_parts)}</tbody></table>"
     )
     # The masthead title already reads "Bill of materials" (with the "(cont.)"
     # marker on overflow pages), so no small in-body label is rendered — the
@@ -656,9 +663,13 @@ def assign_page_numbers(pages: list[dict]) -> None:
             toc_pages.append(page)
         pid = page.get("page")
         if pid is None:
-            raise ValueError(f"page #{i} (type {page.get('type')!r}) is missing a 'page' id")
+            raise ValueError(
+                f"page #{i} (type {page.get('type')!r}) is missing a 'page' id"
+            )
         if pid in id_to_no:
-            raise ValueError(f"duplicate page id {pid!r} (pages #{id_to_no[pid]} and #{i})")
+            raise ValueError(
+                f"duplicate page id {pid!r} (pages #{id_to_no[pid]} and #{i})"
+            )
         id_to_no[pid] = i
     # Resolve each TOC row's printed number now that the full position map is
     # built — a row may reference a page that follows the TOC itself.
@@ -690,10 +701,11 @@ def _balanced_split(rows: list[dict], per_page: int) -> list[list[dict]]:
     if not rows:
         return [[]]
     total = len(rows)
-    n_pages = max(1, -(-total // per_page))   # ceil
+    n_pages = max(1, -(-total // per_page))  # ceil
     # Component boundaries — the only row indices a page may break at.
     free = [
-        i for i in range(1, total)
+        i
+        for i in range(1, total)
         if (rows[i]["cls"]["en"], rows[i]["component"]["en"])
         != (rows[i - 1]["cls"]["en"], rows[i - 1]["component"]["en"])
     ]
@@ -717,7 +729,11 @@ def _paginate_bom(rows: list[dict], per_page: int) -> list[list[dict]]:
     page); the spans between forced breaks are then balanced independently by
     ``_balanced_split`` so each one still respects ``per_page``. Empty input
     falls through as a single empty span to ``_balanced_split``'s own ``[[]]``."""
-    forced = [0, *(i for i in range(1, len(rows)) if rows[i].get("break_before")), len(rows)]
+    forced = [
+        0,
+        *(i for i in range(1, len(rows)) if rows[i].get("break_before")),
+        len(rows),
+    ]
     pages: list[list[dict]] = []
     for a, b in zip(forced, forced[1:]):
         pages.extend(_balanced_split(rows[a:b], per_page))
@@ -741,7 +757,7 @@ def paginate_bom_pages(pages: list[dict]) -> None:
     extras: list[dict] = []
     for n, chunk in enumerate(chunks[1:], start=2):
         cont = copy.deepcopy(template)
-        cont["page"] = f'{template["page"]}-{n}'
+        cont["page"] = f"{template['page']}-{n}"
         cont["rows"] = chunk
         # Tag the continuation in the masthead title (the in-body label was
         # dropped to give the table more room), per translation.
@@ -753,7 +769,7 @@ def paginate_bom_pages(pages: list[dict]) -> None:
             }
         extras.append(cont)
     if extras:
-        pages[idx + 1:idx + 1] = extras
+        pages[idx + 1 : idx + 1] = extras
 
 
 def cover_render_src(pages: list[dict], ctx: Ctx) -> str | None:
@@ -766,7 +782,11 @@ def cover_title(pages: list[dict], ctx: Ctx) -> str:
     """The cover's localized title, reused as the browser-tab <title> so the
     two never drift (and the ZH manual gets a ZH tab title)."""
     cover = next((p for p in pages if p["type"] == "cover"), None)
-    return loc(cover["title"], ctx.lang) if cover and "title" in cover else "PhysiClaw Assembly Manual"
+    return (
+        loc(cover["title"], ctx.lang)
+        if cover and "title" in cover
+        else "PhysiClaw Assembly Manual"
+    )
 
 
 def render_document(pages: list[dict], css: str, ctx: Ctx) -> str:
@@ -799,15 +819,21 @@ CHROME_APP_PATHS = (
 
 def find_chrome() -> str | None:
     """Path to a Chromium-family browser, or None if none is installed."""
-    for name in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "chrome"):
+    for name in (
+        "google-chrome",
+        "google-chrome-stable",
+        "chromium",
+        "chromium-browser",
+        "chrome",
+    ):
         if found := shutil.which(name):
             return found
     return next((p for p in CHROME_APP_PATHS if Path(p).exists()), None)
 
 
-PDF_TIMEOUT = 90    # s per attempt — a clean print is ~40s; this is generous
-PDF_ATTEMPTS = 2    # a fresh process retry covers the rare launch that never
-                    # writes the file (cf. the OCCT crash-retry in dispatch.py).
+PDF_TIMEOUT = 90  # s per attempt — a clean print is ~40s; this is generous
+PDF_ATTEMPTS = 2  # a fresh process retry covers the rare launch that never
+# writes the file (cf. the OCCT crash-retry in dispatch.py).
 
 
 def _chrome_print(chrome: str, src_uri: str, profile: str, pdf_path: Path) -> bool:
@@ -825,12 +851,22 @@ def _chrome_print(chrome: str, src_uri: str, profile: str, pdf_path: Path) -> bo
         return pdf_path.exists() and pdf_path.stat().st_size > 0
 
     proc = subprocess.Popen(
-        [chrome, "--headless=new", "--disable-gpu", "--no-sandbox",
-         "--disable-dev-shm-usage", "--disable-background-networking",
-         f"--user-data-dir={profile}", "--no-pdf-header-footer",
-         "--virtual-time-budget=30000",
-         f"--print-to-pdf={pdf_path}", src_uri],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True,
+        [
+            chrome,
+            "--headless=new",
+            "--disable-gpu",
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-background-networking",
+            f"--user-data-dir={profile}",
+            "--no-pdf-header-footer",
+            "--virtual-time-budget=30000",
+            f"--print-to-pdf={pdf_path}",
+            src_uri,
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
     )
     try:
         deadline = time.monotonic() + PDF_TIMEOUT
@@ -864,9 +900,12 @@ def render_pdf(html: str, pdf_path: Path, chrome: str) -> bool:
     True once a non-empty PDF is produced, else False."""
     html = html.replace(' loading="lazy"', "")
     for attempt in range(1, PDF_ATTEMPTS + 1):
-        with tempfile.TemporaryDirectory() as profile, \
-             tempfile.NamedTemporaryFile("w", suffix=".html", dir=pdf_path.parent,
-                                         encoding="utf-8", delete=False) as tmp:
+        with (
+            tempfile.TemporaryDirectory() as profile,
+            tempfile.NamedTemporaryFile(
+                "w", suffix=".html", dir=pdf_path.parent, encoding="utf-8", delete=False
+            ) as tmp,
+        ):
             tmp_path = Path(tmp.name)
             tmp.write(html)
             tmp.flush()
@@ -878,7 +917,9 @@ def render_pdf(html: str, pdf_path: Path, chrome: str) -> bool:
             return True
         pdf_path.unlink(missing_ok=True)
         tail = " — retrying" if attempt < PDF_ATTEMPTS else " — skipped"
-        print(f"warning: PDF render failed for {pdf_path.name} (attempt {attempt}){tail}")
+        print(
+            f"warning: PDF render failed for {pdf_path.name} (attempt {attempt}){tail}"
+        )
     return False
 
 
@@ -888,7 +929,11 @@ def _clear_output_dir(out_dir: Path) -> None:
     the sidecar assets after switching to ``--assets inline``. Mirrors
     ``build_procedures._clear_outputs``: only the extensions this script
     generates are touched, so user-placed files are left alone."""
-    targets = [(out_dir, "*.html"), (out_dir, "*.pdf"), (out_dir / ASSETS_SUBDIR, "*.svg")]
+    targets = [
+        (out_dir, "*.html"),
+        (out_dir, "*.pdf"),
+        (out_dir / ASSETS_SUBDIR, "*.svg"),
+    ]
     cleared = 0
     for d, pattern in targets:
         if not d.exists():
@@ -917,7 +962,9 @@ def _step(label: str) -> Iterator[None]:
     print(f"{time.monotonic() - t0:>5.1f}s")
 
 
-def build(langs: list[str], out_dir: Path, inline: bool, pdf: bool = False) -> list[Path]:
+def build(
+    langs: list[str], out_dir: Path, inline: bool, pdf: bool = False
+) -> list[Path]:
     """Render the requested languages into ``out_dir`` and return written files.
 
     Always writes the HTML; also writes a PDF per language when ``pdf`` is set
@@ -933,8 +980,12 @@ def build(langs: list[str], out_dir: Path, inline: bool, pdf: bool = False) -> l
     with _step("load + number pages"):
         css = STYLES_CSS.read_text(encoding="utf-8")
         pages = load_pages()
-        paginate_bom_pages(pages)  # split the authored BOM rows across pages (may add pages)
-        assign_page_numbers(pages)  # position-derived footer + TOC numbers (after BOM split)
+        paginate_bom_pages(
+            pages
+        )  # split the authored BOM rows across pages (may add pages)
+        assign_page_numbers(
+            pages
+        )  # position-derived footer + TOC numbers (after BOM split)
     assets: Assets = InlineAssets() if inline else ExternalAssets()
 
     chrome = find_chrome() if pdf else None
@@ -970,19 +1021,27 @@ def build(langs: list[str], out_dir: Path, inline: bool, pdf: bool = False) -> l
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
-        "--lang", choices=("en", "zh", "all"), default="all",
+        "--lang",
+        choices=("en", "zh", "all"),
+        default="all",
         help="language(s) to render (default: all)",
     )
     parser.add_argument(
-        "--assets", choices=("external", "inline"), default="external",
+        "--assets",
+        choices=("external", "inline"),
+        default="external",
         help="external: lazy-loaded sidecar files (default); inline: one self-contained file",
     )
     parser.add_argument(
-        "--out", type=Path, default=OUTPUT_DIR,
+        "--out",
+        type=Path,
+        default=OUTPUT_DIR,
         help="output directory (default: ../output/manual)",
     )
     parser.add_argument(
-        "--pdf", action=argparse.BooleanOptionalAction, default=False,
+        "--pdf",
+        action=argparse.BooleanOptionalAction,
+        default=False,
         help="also render a PDF per language via headless Chrome (default: off — HTML only)",
     )
     args = parser.parse_args()

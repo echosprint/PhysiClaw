@@ -35,9 +35,7 @@ def register(mcp, physiclaw):
     @mcp.custom_route("/api/phone/home", methods=["POST"])
     async def _home(request):  # noqa: ARG001
         try:
-            await asyncio.get_event_loop().run_in_executor(
-                None, physiclaw.home_screen
-            )
+            await asyncio.get_event_loop().run_in_executor(None, physiclaw.home_screen)
             return JSONResponse({"ok": True})
         except Exception as e:
             log.exception("home_screen failed")

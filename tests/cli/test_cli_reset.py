@@ -4,6 +4,7 @@ The autouse `physiclaw_home` fixture (tests/conftest.py) re-points
 `paths.HOME` at a fresh tmp dir per test, so `calibration_dir()` and
 `screen_layout_dir()` live under it and deletion is isolated.
 """
+
 from __future__ import annotations
 
 import typer
@@ -73,5 +74,5 @@ def test_reset_cancelled_keeps_everything() -> None:
 
     assert result.exit_code == 1
     assert "Cancelled" in result.stdout
-    assert paths.screen_layout_json().exists()      # still there
-    assert paths.calibration_bundle().exists()      # still there
+    assert paths.screen_layout_json().exists()  # still there
+    assert paths.calibration_bundle().exists()  # still there

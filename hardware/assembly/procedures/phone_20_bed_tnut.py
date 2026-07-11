@@ -29,17 +29,23 @@ from build123d import Compound, Location
 
 from hardware.assembly.base import BaseAssembly
 from hardware.assembly.projection import FRONT_LEFT_HIGH, Camera
-from hardware.parts.custom.phone_bed import PhoneBed, ear_x_center, ear_y_center, thickness
+from hardware.parts.custom.phone_bed import (
+    PhoneBed,
+    ear_x_center,
+    ear_y_center,
+    thickness,
+)
 from hardware.parts.standard.screw import FHCS_DIMS, Screw, head_skirt
 from hardware.parts.standard.t_nut import HAMMER_TOTAL_HEIGHT, LENGTHS, TNut
 
-FHCS_LENGTH   = 8     # mm — FHCS M3 overall length
-SCREW_EXPLODE = 25    # mm — exploded: screw lifts above the bed
-NUT_EXPLODE   = 30    # mm — exploded: nut drops below the bed
+FHCS_LENGTH = 8  # mm — FHCS M3 overall length
+SCREW_EXPLODE = 25  # mm — exploded: screw lifts above the bed
+NUT_EXPLODE = 30  # mm — exploded: nut drops below the bed
 
 # The four ear hole centers (CounterSinkHole positions in PhoneBed).
-EAR_POSITIONS = [(sx * ear_x_center, sy * ear_y_center)
-                 for sx in (-1, 1) for sy in (-1, 1)]
+EAR_POSITIONS = [
+    (sx * ear_x_center, sy * ear_y_center) for sx in (-1, 1) for sy in (-1, 1)
+]
 
 # Z of the FHCS local origin (cone base) so the head's flat top lands flush
 # with the bed top face. FHCS head spans local z = 0 → k + head_skirt.
@@ -71,8 +77,7 @@ class PH20BedTnut(BaseAssembly):
             nut.move(Location((x, y + hammer_len / 2, nz), (90, 0, 0)))
             nuts.append(nut)
 
-        return Compound(label="phone_20_bed_tnut",
-                        children=[bed, *screws, *nuts])
+        return Compound(label="phone_20_bed_tnut", children=[bed, *screws, *nuts])
 
 
 if __name__ == "__main__":

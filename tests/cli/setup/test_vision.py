@@ -1,4 +1,5 @@
 """Tests for `physiclaw.cli.setup.vision` — local vision model download."""
+
 from __future__ import annotations
 
 import base64
@@ -37,6 +38,7 @@ class _BytesCtx:
             return self._len if self._len is not None else default
         return default
 
+
 runner = CliRunner()
 app = typer.Typer()
 app.command()(vision_mod.vision)
@@ -45,7 +47,8 @@ app.command()(vision_mod.vision)
 def _stub_download(mocker, payload: bytes = b"PT") -> None:
     """Replace the HF fetch (http_get -> urlopen) with one returning payload."""
     mocker.patch.object(
-        http_mod.urllib.request, "urlopen",
+        http_mod.urllib.request,
+        "urlopen",
         side_effect=lambda *_a, **_k: _BytesCtx(payload),
     )
 
@@ -85,7 +88,8 @@ def _stub_prebuilt(mocker, onnx_bytes: bytes, *, pin_hash: bool = True) -> None:
     )
     if pin_hash:
         mocker.patch.object(
-            vision_mod, "_PREBUILT_ONNX_SHA256",
+            vision_mod,
+            "_PREBUILT_ONNX_SHA256",
             hashlib.sha256(onnx_bytes).hexdigest(),
         )
 
@@ -106,7 +110,8 @@ def test_vision_prebuilt_installs_without_uv(tmp_path: Path, mocker) -> None:
 
 
 def test_vision_prebuilt_checksum_mismatch_falls_back_to_build(
-    tmp_path: Path, mocker,
+    tmp_path: Path,
+    mocker,
 ) -> None:
     onnx = tmp_path / "models" / "omniparser_icon_detect" / "model.onnx"
     mocker.patch.object(vision_mod.paths, "omniparser_onnx", return_value=onnx)
@@ -126,21 +131,25 @@ def test_vision_prebuilt_checksum_mismatch_falls_back_to_build(
 
 
 def test_download_prebuilt_zip_reassembles_base64_parts(
-    tmp_path: Path, mocker,
+    tmp_path: Path,
+    mocker,
 ) -> None:
     payload = _zip_bytes(b"PARTED-ONNX")
     b64 = base64.b64encode(payload)
     n = len(b64)
-    cuts = [b64[0:n // 4], b64[n // 4:n // 2], b64[n // 2:3 * n // 4], b64[3 * n // 4:]]
+    cuts = [
+        b64[0 : n // 4],
+        b64[n // 4 : n // 2],
+        b64[n // 2 : 3 * n // 4],
+        b64[3 * n // 4 :],
+    ]
     seen: list[str] = []
 
     def _fake_urlopen(req, **_kw):
         seen.append(req.full_url)
         return _BytesCtx(cuts[len(seen) - 1])
 
-    mocker.patch.object(
-        http_mod.urllib.request, "urlopen", side_effect=_fake_urlopen
-    )
+    mocker.patch.object(http_mod.urllib.request, "urlopen", side_effect=_fake_urlopen)
 
     dest = tmp_path / "out.zip"
     assert vision_mod._download_prebuilt_zip(dest) is True
@@ -149,7 +158,8 @@ def test_download_prebuilt_zip_reassembles_base64_parts(
 
 
 def test_download_prebuilt_zip_retries_a_truncated_part(
-    tmp_path: Path, mocker,
+    tmp_path: Path,
+    mocker,
 ) -> None:
     # A CDN dropping the connection mid-part makes read() end early with no
     # error (the install.sh field failure) — stream()'s Content-Length check
@@ -158,7 +168,12 @@ def test_download_prebuilt_zip_retries_a_truncated_part(
     payload = _zip_bytes(b"PARTED-ONNX")
     b64 = base64.b64encode(payload)
     n = len(b64)
-    cuts = [b64[0:n // 4], b64[n // 4:n // 2], b64[n // 2:3 * n // 4], b64[3 * n // 4:]]
+    cuts = [
+        b64[0 : n // 4],
+        b64[n // 4 : n // 2],
+        b64[n // 2 : 3 * n // 4],
+        b64[3 * n // 4 :],
+    ]
     truncated_once = {"done": False}
 
     def _fake_urlopen(req, **_kw):
@@ -166,13 +181,12 @@ def test_download_prebuilt_zip_retries_a_truncated_part(
         if i == 1 and not truncated_once["done"]:
             truncated_once["done"] = True
             # Body stops short of the declared length — no exception.
-            return _BytesCtx(cuts[1][: len(cuts[1]) // 2],
-                             content_length=str(len(cuts[1])))
+            return _BytesCtx(
+                cuts[1][: len(cuts[1]) // 2], content_length=str(len(cuts[1]))
+            )
         return _BytesCtx(cuts[i])
 
-    mocker.patch.object(
-        http_mod.urllib.request, "urlopen", side_effect=_fake_urlopen
-    )
+    mocker.patch.object(http_mod.urllib.request, "urlopen", side_effect=_fake_urlopen)
 
     dest = tmp_path / "out.zip"
     assert vision_mod._download_prebuilt_zip(dest) is True
@@ -180,7 +194,8 @@ def test_download_prebuilt_zip_retries_a_truncated_part(
 
 
 def test_download_prebuilt_zip_corrupt_b64_falls_back_to_release(
-    tmp_path: Path, mocker,
+    tmp_path: Path,
+    mocker,
 ) -> None:
     # Garbage that survives the length check (no Content-Length header, so
     # stream can't verify) must not escape as a b64decode traceback — it
@@ -191,9 +206,7 @@ def test_download_prebuilt_zip_corrupt_b64_falls_back_to_release(
             return _BytesCtx(b"abcde" if req.full_url.endswith("00") else b"abcd")
         return _BytesCtx(b"WHOLE-ZIP")
 
-    mocker.patch.object(
-        http_mod.urllib.request, "urlopen", side_effect=_fake_urlopen
-    )
+    mocker.patch.object(http_mod.urllib.request, "urlopen", side_effect=_fake_urlopen)
 
     dest = tmp_path / "out.zip"
     assert vision_mod._download_prebuilt_zip(dest) is True
@@ -201,7 +214,8 @@ def test_download_prebuilt_zip_corrupt_b64_falls_back_to_release(
 
 
 def test_download_prebuilt_zip_falls_back_to_release(
-    tmp_path: Path, mocker,
+    tmp_path: Path,
+    mocker,
 ) -> None:
     # CDN parts fail; the whole-zip release (also fetched via http_get) wins.
     def _fake_urlopen(req, **_kw):
@@ -209,9 +223,7 @@ def test_download_prebuilt_zip_falls_back_to_release(
             raise OSError("CDN down")
         return _BytesCtx(b"WHOLE-ZIP")
 
-    mocker.patch.object(
-        http_mod.urllib.request, "urlopen", side_effect=_fake_urlopen
-    )
+    mocker.patch.object(http_mod.urllib.request, "urlopen", side_effect=_fake_urlopen)
 
     dest = tmp_path / "out.zip"
     assert vision_mod._download_prebuilt_zip(dest) is True
@@ -226,9 +238,7 @@ def test_download_prebuilt_zip_sets_user_agent(tmp_path: Path, mocker) -> None:
         seen_ua.append(req.get_header("User-agent"))
         return _BytesCtx(b"")  # body irrelevant — we only assert the header
 
-    mocker.patch.object(
-        http_mod.urllib.request, "urlopen", side_effect=_fake_urlopen
-    )
+    mocker.patch.object(http_mod.urllib.request, "urlopen", side_effect=_fake_urlopen)
     vision_mod._download_prebuilt_zip(tmp_path / "out.zip")
     assert seen_ua and all(ua == http_mod.USER_AGENT for ua in seen_ua)
 
@@ -258,7 +268,8 @@ def test_vision_build_aborts_when_uv_missing(tmp_path: Path, mocker) -> None:
 
 
 def test_vision_downloads_converts_and_cleans_up(
-    tmp_path: Path, mocker,
+    tmp_path: Path,
+    mocker,
 ) -> None:
     onnx = tmp_path / "models" / "omniparser_icon_detect" / "model.onnx"
     mocker.patch.object(vision_mod.paths, "omniparser_onnx", return_value=onnx)
@@ -315,7 +326,8 @@ def test_vision_force_purges_stale_scratch(tmp_path: Path, mocker) -> None:
     (convert_dir / vision_mod._PT_NAME).write_bytes(b"stale PT")
 
     download_spy = mocker.patch.object(
-        http_mod.urllib.request, "urlopen",
+        http_mod.urllib.request,
+        "urlopen",
         side_effect=lambda *_a, **_k: _BytesCtx(b"FRESH PT"),
     )
     _stub_uv_run(mocker)
@@ -327,7 +339,8 @@ def test_vision_force_purges_stale_scratch(tmp_path: Path, mocker) -> None:
 
 
 def test_vision_skips_download_when_pt_already_exists(
-    tmp_path: Path, mocker,
+    tmp_path: Path,
+    mocker,
 ) -> None:
     onnx = tmp_path / "models" / "omniparser_icon_detect" / "model.onnx"
     mocker.patch.object(vision_mod.paths, "omniparser_onnx", return_value=onnx)
@@ -353,7 +366,8 @@ def test_vision_keeps_scratch_on_uv_failure(tmp_path: Path, mocker) -> None:
     _stub_download(mocker)
 
     mocker.patch.object(
-        vision_mod.subprocess, "run",
+        vision_mod.subprocess,
+        "run",
         return_value=subprocess.CompletedProcess([], returncode=2),
     )
 
@@ -366,7 +380,8 @@ def test_vision_keeps_scratch_on_uv_failure(tmp_path: Path, mocker) -> None:
 
 
 def test_vision_keeps_scratch_when_onnx_not_produced(
-    tmp_path: Path, mocker,
+    tmp_path: Path,
+    mocker,
 ) -> None:
     onnx = tmp_path / "models" / "omniparser_icon_detect" / "model.onnx"
     mocker.patch.object(vision_mod.paths, "omniparser_onnx", return_value=onnx)
@@ -374,7 +389,8 @@ def test_vision_keeps_scratch_when_onnx_not_produced(
     _stub_download(mocker)
 
     mocker.patch.object(
-        vision_mod.subprocess, "run",
+        vision_mod.subprocess,
+        "run",
         return_value=subprocess.CompletedProcess([], returncode=0),
     )
 

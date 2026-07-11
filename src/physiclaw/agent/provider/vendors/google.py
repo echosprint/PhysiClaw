@@ -33,6 +33,7 @@ parameter, but defaults to off. Until we wire that param, it would
 return non-reasoning responses, which violates PhysiClaw's requirement.
 Gemini 3 series (`gemini-3.x-*-preview`) uses dynamic thinking by default.
 """
+
 from physiclaw.agent.engine.dto import (
     AssistantMessage,
     ContentBlock,
@@ -85,10 +86,9 @@ class GoogleProvider(OpenAICompatibleProvider):
             return _encode_tool_result(msg)
         if isinstance(msg, AssistantMessage) and msg.tool_calls:
             entry = assistant_to_wire(msg)
-            sig = (
-                (msg.vendor_extra.get("google") or {}).get("thought_signature")
-                or _SIG_BYPASS
-            )
+            sig = (msg.vendor_extra.get("google") or {}).get(
+                "thought_signature"
+            ) or _SIG_BYPASS
             entry["tool_calls"][0]["extra_content"] = {
                 "google": {"thought_signature": sig},
             }
@@ -125,17 +125,20 @@ def _encode_tool_result(result: ToolResultMessage) -> list[dict]:
         for b in result.content:
             (image_blocks if isinstance(b, ImageBlock) else text_blocks).append(b)
     if not image_blocks:
-        return [{
-            "role": "tool",
-            "tool_call_id": result.tool_call_id,
-            "content": user_content_to_openai(result.content),
-        }]
+        return [
+            {
+                "role": "tool",
+                "tool_call_id": result.tool_call_id,
+                "content": user_content_to_openai(result.content),
+            }
+        ]
     return [
         {
             "role": "tool",
             "tool_call_id": result.tool_call_id,
             "content": user_content_to_openai(text_blocks)
-                       if text_blocks else "(image attached in next message)",
+            if text_blocks
+            else "(image attached in next message)",
         },
         {"role": "user", "content": user_content_to_openai(image_blocks)},
     ]

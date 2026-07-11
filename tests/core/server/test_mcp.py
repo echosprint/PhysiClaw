@@ -10,6 +10,7 @@ by `physiclaw.core.server.mcp` (the FastMCP instance) once
 `physiclaw.core.server.__init__` runs. We use `importlib.import_module`
 to get the module object reliably.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -36,7 +37,11 @@ def test_instructions_loaded_from_disk() -> None:
     on-disk content so a typo in the path is caught."""
     expected = (
         Path(__file__).resolve().parents[3]
-        / "src" / "physiclaw" / "agent" / "context" / "PHYSICLAW.md"
+        / "src"
+        / "physiclaw"
+        / "agent"
+        / "context"
+        / "PHYSICLAW.md"
     )
     assert mcp_mod._INSTRUCTIONS == expected.read_text(encoding="utf-8")
 

@@ -1,4 +1,5 @@
 """Tests for `physiclaw.core.hardware.handler` — hardware setup HTTP routes."""
+
 from __future__ import annotations
 
 import base64
@@ -29,8 +30,10 @@ from physiclaw.core.hardware.handler import (
 async def test_handle_setup_page_serves_wizard(mocker) -> None:
     # Substitution lives in bridge.handler.render_phone_page_html now.
     import physiclaw.core.bridge.handler as bridge_handler
+
     mocker.patch.object(
-        bridge_handler, "bridge_base_urls",
+        bridge_handler,
+        "bridge_base_urls",
         return_value=("http://device.local:8048", "http://10.0.0.5:8048"),
     )
     req = _fake_request()
@@ -53,18 +56,23 @@ async def test_handle_setup_page_serves_wizard(mocker) -> None:
 def _async(value: Any):
     async def _coro():
         return value
+
     return _coro
 
 
 def _async_raise(exc: Exception):
     async def _coro():
         raise exc
+
     return _coro
 
 
-def _fake_request(json_obj: Any = None, raise_on_json: bool = False,
-                  path_params: dict | None = None,
-                  query_params: dict | None = None):
+def _fake_request(
+    json_obj: Any = None,
+    raise_on_json: bool = False,
+    path_params: dict | None = None,
+    query_params: dict | None = None,
+):
     req = SimpleNamespace()
     if raise_on_json:
         req.json = _async_raise(RuntimeError("bad body"))
@@ -213,7 +221,8 @@ def test_capture_raw_returns_none_on_runtime_error(mocker) -> None:
 def test_auto_pick_camera_returns_first_match(mocker) -> None:
     frames = [None, np.zeros((4, 4, 3), dtype=np.uint8), None]
     capture_spy = mocker.patch.object(
-        handler, "_capture_raw",
+        handler,
+        "_capture_raw",
         side_effect=lambda idx: frames[idx] if idx < len(frames) else None,
     )
 
@@ -267,7 +276,9 @@ async def test_handle_connect_camera_explicit_index(mocker) -> None:
     phone = MagicMock()
 
     resp = await handle_connect_camera(
-        _fake_request(json_obj={"index": 2}), physiclaw, phone,
+        _fake_request(json_obj={"index": 2}),
+        physiclaw,
+        phone,
     )
 
     body = _read_json(resp)
@@ -287,7 +298,9 @@ async def test_handle_connect_camera_auto_pick_happy_path(mocker) -> None:
     mocker.patch.object(handler.time, "sleep")
 
     resp = await handle_connect_camera(
-        _fake_request(json_obj={"index": "auto"}), physiclaw, phone,
+        _fake_request(json_obj={"index": "auto"}),
+        physiclaw,
+        phone,
     )
 
     body = _read_json(resp)
@@ -303,7 +316,9 @@ async def test_handle_connect_camera_auto_pick_happy_path(mocker) -> None:
 
 
 @pytest.mark.asyncio
-async def test_handle_connect_camera_auto_pick_treats_missing_body_as_auto(mocker) -> None:
+async def test_handle_connect_camera_auto_pick_treats_missing_body_as_auto(
+    mocker,
+) -> None:
     physiclaw = _fake_physiclaw_cam_index(idx=1)
     physiclaw._bridge.wait_for_connection.return_value = True
     phone = MagicMock()
@@ -311,20 +326,26 @@ async def test_handle_connect_camera_auto_pick_treats_missing_body_as_auto(mocke
     mocker.patch.object(handler.time, "sleep")
 
     resp = await handle_connect_camera(
-        _fake_request(raise_on_json=True), physiclaw, phone,
+        _fake_request(raise_on_json=True),
+        physiclaw,
+        phone,
     )
 
     assert _read_json(resp)["status"] == "ok"
 
 
 @pytest.mark.asyncio
-async def test_handle_connect_camera_auto_pick_fails_when_bridge_not_polling(mocker) -> None:
+async def test_handle_connect_camera_auto_pick_fails_when_bridge_not_polling(
+    mocker,
+) -> None:
     physiclaw = _fake_physiclaw_cam_index()
     physiclaw._bridge.wait_for_connection.return_value = False
     phone = MagicMock()
 
     resp = await handle_connect_camera(
-        _fake_request(json_obj={"index": "auto"}), physiclaw, phone,
+        _fake_request(json_obj={"index": "auto"}),
+        physiclaw,
+        phone,
     )
 
     assert resp.status_code == 500
@@ -344,7 +365,9 @@ async def test_handle_connect_camera_auto_pick_no_match(mocker) -> None:
     mocker.patch.object(handler.time, "sleep")
 
     resp = await handle_connect_camera(
-        _fake_request(json_obj={"index": "auto"}), physiclaw, phone,
+        _fake_request(json_obj={"index": "auto"}),
+        physiclaw,
+        phone,
     )
 
     assert resp.status_code == 500
@@ -361,7 +384,9 @@ async def test_handle_connect_camera_releases_on_connect_failure(mocker) -> None
     phone = MagicMock()
 
     resp = await handle_connect_camera(
-        _fake_request(json_obj={"index": 0}), physiclaw, phone,
+        _fake_request(json_obj={"index": 0}),
+        physiclaw,
+        phone,
     )
 
     assert resp.status_code == 500
@@ -374,7 +399,9 @@ async def test_handle_connect_camera_stores_index_in_calibration(mocker) -> None
     phone = MagicMock()
 
     await handle_connect_camera(
-        _fake_request(json_obj={"index": 2}), physiclaw, phone,
+        _fake_request(json_obj={"index": 2}),
+        physiclaw,
+        phone,
     )
 
     # Stored on the calibration namespace as int.
@@ -461,7 +488,9 @@ async def test_handle_camera_preview_default_watermark_is_false(mocker) -> None:
 @pytest.mark.asyncio
 async def test_handle_camera_preview_returns_404_on_capture_failure(mocker) -> None:
     mocker.patch.object(
-        handler, "camera_preview", side_effect=RuntimeError("no frame"),
+        handler,
+        "camera_preview",
+        side_effect=RuntimeError("no frame"),
     )
 
     resp = await handle_camera_preview(

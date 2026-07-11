@@ -11,6 +11,7 @@ Removal policy: if this package is deleted, the native engine
 probes for this package at runtime; missing → claude-code is simply
 not a selectable engine. No dead code elsewhere.
 """
+
 from physiclaw.agent.claude.spawn import spawn_claude
 
 # User-facing engine name for PHYSICLAW_PROVIDER and [provider] name.

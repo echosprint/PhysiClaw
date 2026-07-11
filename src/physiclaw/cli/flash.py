@@ -111,8 +111,15 @@ def _detect_port() -> Optional[str]:
 
 def _uv_esptool(args: list[str]) -> None:
     cmd = [
-        "uv", "run", "--no-project", "--with", "esptool>=4,<5",
-        "python", "-c", _ESPTOOL_RUN, *args,
+        "uv",
+        "run",
+        "--no-project",
+        "--with",
+        "esptool>=4,<5",
+        "python",
+        "-c",
+        _ESPTOOL_RUN,
+        *args,
     ]
     try:
         subprocess.run(cmd, check=True)
@@ -134,7 +141,9 @@ def flash(
     ] = None,
     erase: Annotated[
         bool,
-        typer.Option("--erase", help="Erase the chip before writing (fixes boot loops)."),
+        typer.Option(
+            "--erase", help="Erase the chip before writing (fixes boot loops)."
+        ),
     ] = False,
     dry_run: Annotated[
         bool,
@@ -142,7 +151,9 @@ def flash(
     ] = False,
 ) -> None:
     """Flash FluidNC firmware onto the MKS DLC32 control board."""
-    typer.secho("Flash FluidNC firmware to the MKS DLC32 V2.1 control board\n", bold=True)
+    typer.secho(
+        "Flash FluidNC firmware to the MKS DLC32 V2.1 control board\n", bold=True
+    )
 
     with tempfile.TemporaryDirectory(prefix="physiclaw-fw-") as td:
         typer.echo("→ Downloading firmware …")
@@ -171,12 +182,18 @@ def flash(
 
         write = [
             *base,
-            "--before", "default_reset",
-            "--after", "hard_reset",
-            "write_flash", "-z",
-            "--flash_mode", "dio",
-            "--flash_freq", "80m",
-            "--flash_size", "detect",
+            "--before",
+            "default_reset",
+            "--after",
+            "hard_reset",
+            "write_flash",
+            "-z",
+            "--flash_mode",
+            "dio",
+            "--flash_freq",
+            "80m",
+            "--flash_size",
+            "detect",
         ]
         for offset, p in files:
             write += [offset, str(p)]

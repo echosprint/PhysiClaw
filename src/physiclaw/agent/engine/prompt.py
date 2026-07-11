@@ -15,6 +15,7 @@ The inline `## Tooling` index card duplicates the schema sent via the
 provider's `tools=` API — open-weight models often miss tools that appear
 only in the schema, so the card is a redundant anchor.
 """
+
 import hashlib
 import logging
 import re
@@ -49,23 +50,26 @@ def _fill_tokens(name: str, body: str) -> str:
     leftover = re.search(r"\{\{[^}\n]*\}\}|\{\{", body)
     if leftover:
         log.warning(
-            "doctrine %s: unresolved placeholder %r", name, leftover.group(),
+            "doctrine %s: unresolved placeholder %r",
+            name,
+            leftover.group(),
         )
     return body
+
 
 # OpenClaw-style modular doctrine: each named file is a slot with a defined
 # role. Files are rendered in this fixed order; any missing file contributes
 # nothing. Drop a new file in src/physiclaw/agent/context/ to opt into a slot — picked up
 # on next session start without touching code.
 DOCTRINE_FILE_ORDER = (
-    "IDENTITY.md",    # who PhysiClaw is — short, one-paragraph card
-    "USER.md",        # who PhysiClaw serves — read from memory/USER.md
-    "SOUL.md",        # personality / tone / voice
-    "AGENT.md",       # operational rules: Loop / Boundaries / Rules / Continuity
-    "PHYSICLAW.md",   # tool-surface mechanics — also shipped via MCP initialize
-    "TOOLS.md",       # extra user-authored tool guidance
-    "PERSISTENCE.md", # memory.md vs YYYY-MM-DD.md + read/write tools
-    "JOBS.md",        # jobs.md + create_job/get_job/list_jobs/finish_job (immutable, append-only)
+    "IDENTITY.md",  # who PhysiClaw is — short, one-paragraph card
+    "USER.md",  # who PhysiClaw serves — read from memory/USER.md
+    "SOUL.md",  # personality / tone / voice
+    "AGENT.md",  # operational rules: Loop / Boundaries / Rules / Continuity
+    "PHYSICLAW.md",  # tool-surface mechanics — also shipped via MCP initialize
+    "TOOLS.md",  # extra user-authored tool guidance
+    "PERSISTENCE.md",  # memory.md vs YYYY-MM-DD.md + read/write tools
+    "JOBS.md",  # jobs.md + create_job/get_job/list_jobs/finish_job (immutable, append-only)
     "CONVENTION.md",  # engine turn rules — last so it sits next to mechanics
 )
 
@@ -227,19 +231,19 @@ def _render_examples() -> list[str]:
         "",
         "**Turn shape** — exactly `[note, one-other]`; summary = last result + this action.",
         "❌ `[peek]` alone · `[note, append_log, end_session]`.",
-        "✅ `[note(summary=\"chats list visible — opening QiaoQian's thread\"), tap(bbox=[0.055, 0.171, 0.945, 0.243])]`.",
+        '✅ `[note(summary="chats list visible — opening QiaoQian\'s thread"), tap(bbox=[0.055, 0.171, 0.945, 0.243])]`.',
         "",
         "**Bbox transcription** — verbatim from the listing's bracket contents.",
-        "❌ Listing row `45 [icon] \"\" [0.520,0.662,0.717,0.775] 0.56` → `tap(bbox=[0.518, 0.662, 0.717, 0.775])` — `0.518` is a regeneration; 0.002 drift lands on the neighbor.",
+        '❌ Listing row `45 [icon] "" [0.520,0.662,0.717,0.775] 0.56` → `tap(bbox=[0.518, 0.662, 0.717, 0.775])` — `0.518` is a regeneration; 0.002 drift lands on the neighbor.',
         "✅ Transcribe the four numbers exactly — `0.520` stays `0.520`. Target not in any grounded source → `screenshot`, never fabricate.",
         "",
         "**Screenshot escalation** — when `peek` misses a target, re-peeking returns the same gap.",
-        "❌ `peek` home, no JD icon → `peek` again → tap a Safari link labeled \"JD\" → wrong page, STUCK loop.",
+        '❌ `peek` home, no JD icon → `peek` again → tap a Safari link labeled "JD" → wrong page, STUCK loop.',
         "✅ `peek` home, no JD icon → `screenshot` next turn, scratchpad the icon's bbox, `peek`, tap the copy. The icon was always there; the camera couldn't resolve it.",
         "",
         "**Silent refusal** — toasts vanish before you can look; a value unmoved through two presses is the app saying no.",
         "❌ qty stays 2 → assume the tap missed → 20 tap/double_tap/nudged-bbox retries across cart and checkout.",
-        "✅ tap `+` → `no visible change` → read qty in the attached view: still 2 → retry once → still 2 → refusal. Find the evidence (a \"limit 2 per order\" label, greyed `+`), scratchpad `TRIED: + stepper ×2, qty stuck at 2`, then ask the user: \"Store caps this at 2 — take 2, or switch brands?\" and WAIT.",
+        '✅ tap `+` → `no visible change` → read qty in the attached view: still 2 → retry once → still 2 → refusal. Find the evidence (a "limit 2 per order" label, greyed `+`), scratchpad `TRIED: + stepper ×2, qty stuck at 2`, then ask the user: "Store caps this at 2 — take 2, or switch brands?" and WAIT.',
         "",
         "**Batch grounded runs** — all boxes known up front = one `sequence`, not five turns.",
         "❌ On the chat page: tap input → send_to_clipboard → long_press input → tap Paste → tap Send as five single-action turns for one message.",
@@ -255,7 +259,7 @@ def _render_examples() -> list[str]:
         "",
         "**Scratchpad accumulates** — plan-relevant payloads go in as you see them; navigation doesn't.",
         "❌ Scroll 2 orders across 4 pages, scratchpad nothing → views stubbed by compaction, items lost, re-scrape.",
-        "✅ Order 1 visible → `note(..., scratchpad=\"order 1: cable ¥45, clips ¥17\")` → scroll → `note(..., scratchpad=\"order 1: cable ¥45, clips ¥17, tape ¥22\")` → order 2 → append its lines. Reaching WeChat, the scratchpad is the full answer.",
+        '✅ Order 1 visible → `note(..., scratchpad="order 1: cable ¥45, clips ¥17")` → scroll → `note(..., scratchpad="order 1: cable ¥45, clips ¥17, tape ¥22")` → order 2 → append its lines. Reaching WeChat, the scratchpad is the full answer.',
         "",
         "**Plan ticking** — tick on intent-confirmed, not per tap.",
         "❌ Complete step 1, never `update_progress` again · tick after every tap.",

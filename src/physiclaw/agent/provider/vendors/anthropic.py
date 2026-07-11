@@ -8,6 +8,7 @@ endpoint directly through `AsyncAnthropic` — wire-format flow lives in
 Auth: `ANTHROPIC_API_KEY` env, or `[provider] anthropic_api_key` in
 `~/.physiclaw/config.toml`.
 """
+
 from physiclaw.agent.provider.anthropic_compat import AnthropicCompatibleProvider
 
 

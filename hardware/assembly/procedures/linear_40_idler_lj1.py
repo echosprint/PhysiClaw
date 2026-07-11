@@ -52,22 +52,22 @@ from hardware.parts.standard.pulley import Pulley2GT20T, flange_belt_h
 from hardware.parts.standard.ring import SPECS as RING_SPECS, Ring
 from hardware.parts.standard.screw import SHOULDER_DIMS, Screw
 
-WASHER_SPEC        = "M5x8x0.5"
-SPACER_SPEC        = "M5x10x9"
-EXPLODE_SEPARATION =  5    # mm — exploded: air between adjacent stack parts
-SCREW_GAP          = 12    # mm — exploded: idler exploded top → screw thread tip
+WASHER_SPEC = "M5x8x0.5"
+SPACER_SPEC = "M5x10x9"
+EXPLODE_SEPARATION = 5  # mm — exploded: air between adjacent stack parts
+SCREW_GAP = 12  # mm — exploded: idler exploded top → screw thread tip
 
 
 class LI40IdlerLj1(BaseAssembly):
-    compound_label: str  = "linear_40_idler_lj1"
-    toothed: bool        = False
+    compound_label: str = "linear_40_idler_lj1"
+    toothed: bool = False
     include_spacer: bool = True
-    shoulder_len: int    = 20    # mm — pairs with the 18 mm spacer+washer+idler stack
+    shoulder_len: int = 20  # mm — pairs with the 18 mm spacer+washer+idler stack
     camera = FRONT_LEFT_HIGH
 
     def _build(self) -> Compound:
-        washer_h   = RING_SPECS[WASHER_SPEC]["height"]
-        spacer_h   = RING_SPECS[SPACER_SPEC]["height"]
+        washer_h = RING_SPECS[WASHER_SPEC]["height"]
+        spacer_h = RING_SPECS[SPACER_SPEC]["height"]
         thread_len = SHOULDER_DIMS["M4"]["thread_len"]
 
         # Bottom→top order. Each entry: (part, axial height). The
@@ -76,20 +76,22 @@ class LI40IdlerLj1(BaseAssembly):
         if self.include_spacer:
             stack.append((Ring(SPACER_SPEC).build(), spacer_h))
         stack.append((Ring(WASHER_SPEC).build(), washer_h))
-        stack.append((
-            Pulley2GT20T(kind="idler", toothed=self.toothed).build(),
-            flange_belt_h,
-        ))
+        stack.append(
+            (
+                Pulley2GT20T(kind="idler", toothed=self.toothed).build(),
+                flange_belt_h,
+            )
+        )
 
         sep = EXPLODE_SEPARATION if self.exploded else 0
 
         placed = []
-        cursor_z = 0        # bottom face of the next part to place
+        cursor_z = 0  # bottom face of the next part to place
         for part, h in stack:
             part.move(Location((0, 0, cursor_z)))
             placed.append(part)
             cursor_z += h + sep
-        idler_top_z = cursor_z - sep   # top face of the topmost stack part
+        idler_top_z = cursor_z - sep  # top face of the topmost stack part
 
         if self.exploded:
             thread_tip_z = idler_top_z + SCREW_GAP

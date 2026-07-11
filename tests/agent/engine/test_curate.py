@@ -3,6 +3,7 @@ consolidates the learned-pitfalls list.
 
 The autouse `physiclaw_home` fixture isolates `paths.pitfalls_dir()`.
 """
+
 from __future__ import annotations
 
 import pytest

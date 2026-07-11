@@ -53,14 +53,14 @@ from hardware.parts.standard.motor import Nema17Motor, default_height
 from hardware.parts.standard.ring import SPECS as RING_SPECS, Ring
 from hardware.parts.standard.screw import Screw
 
-BHCS_M3_LENGTH = 6           # mm — BHCS M3 underhead length (motor mount)
-BRACKET_GAP    = 30          # mm — exploded: motor top face → bracket bottom
-SCREW_GAP      = 15          # mm — exploded: bracket top → screw shank tip
-RING_GAP       = 12          # mm — exploded: bracket bottom → ring top (drop
-                             #      the rings clear of the bracket so the
-                             #      spacer reads as a separate part)
-RING_STACK_GAP = 6           # mm — exploded: gap between stacked spacers on one
-                             #      M5 hole so each reads as a distinct part
+BHCS_M3_LENGTH = 6  # mm — BHCS M3 underhead length (motor mount)
+BRACKET_GAP = 30  # mm — exploded: motor top face → bracket bottom
+SCREW_GAP = 15  # mm — exploded: bracket top → screw shank tip
+RING_GAP = 12  # mm — exploded: bracket bottom → ring top (drop
+#      the rings clear of the bracket so the
+#      spacer reads as a separate part)
+RING_STACK_GAP = 6  # mm — exploded: gap between stacked spacers on one
+#      M5 hole so each reads as a distinct part
 
 
 class MO10Bracket(BaseAssembly):
@@ -75,12 +75,12 @@ class MO10Bracket(BaseAssembly):
     # stands off an 8 mm spacer so its pulley lands on the LOWER belt plane;
     # Motor B (motor_20_bracket) overrides to a 12 mm spacer (M6x12x12, UPPER
     # plane) and the longer M5×20 screw that spans it.
-    RING_SPEC: str = "M6x12x8"      # 12 mm OD × 8 mm tall spacer (M6 bore)
-    RING_COUNT: int = 1             # spacers stacked per M5 hole (standoff = N × ring)
-    BHCS_M5_LENGTH: int = 16        # mm — BHCS M5 underhead length (frame mount)
-    motor_z_rotation: float = 180   # 180° puts the plug on native +Y → world
-                                    # -X (LEFT side from top view) when
-                                    # placed via motor_11_frame's mapping.
+    RING_SPEC: str = "M6x12x8"  # 12 mm OD × 8 mm tall spacer (M6 bore)
+    RING_COUNT: int = 1  # spacers stacked per M5 hole (standoff = N × ring)
+    BHCS_M5_LENGTH: int = 16  # mm — BHCS M5 underhead length (frame mount)
+    motor_z_rotation: float = 180  # 180° puts the plug on native +Y → world
+    # -X (LEFT side from top view) when
+    # placed via motor_11_frame's mapping.
     camera = [FRONT_LEFT_HIGH, Camera(-155.66, 16.36, 1.12)]
 
     def _build(self) -> Compound:
@@ -88,7 +88,7 @@ class MO10Bracket(BaseAssembly):
         bracket = MotorBracketPart().build()
         screws_m3 = [Screw("BHCS", "M3", BHCS_M3_LENGTH).build() for _ in range(4)]
         screws_m5 = [Screw("BHCS", "M5", self.BHCS_M5_LENGTH).build() for _ in range(2)]
-        ring_height  = RING_SPECS[self.RING_SPEC]["height"]
+        ring_height = RING_SPECS[self.RING_SPEC]["height"]
         stack_height = ring_height * self.RING_COUNT
 
         # Motor: centered at origin; body top face at z = +height/2.
@@ -106,7 +106,7 @@ class MO10Bracket(BaseAssembly):
         bracket_dx = motor_plate_length / 2 - motor_shaft_x_offset
         half_pitch = motor_mount_pitch / 2
         m5_world_x = bracket_dx + motor_plate_length / 2 - motor_m5_x_inset
-        half_m5    = motor_m5_pitch / 2
+        half_m5 = motor_m5_pitch / 2
 
         # Layout per variant:
         #   exploded:  bracket lifted BRACKET_GAP above the motor top
@@ -123,11 +123,11 @@ class MO10Bracket(BaseAssembly):
         # a bracket-side feature whose mate is the frame, not present
         # in this assembly, so we anchor them to the bracket instead.
         bracket_bottom_z = motor_top_z + (BRACKET_GAP if self.exploded else 0)
-        bracket_top_z    = bracket_bottom_z + motor_plate_thick
+        bracket_top_z = bracket_bottom_z + motor_plate_thick
         if self.exploded:
             shank_tip_z = bracket_top_z + SCREW_GAP
-            m3_under_z  = shank_tip_z + BHCS_M3_LENGTH
-            m5_under_z  = shank_tip_z + self.BHCS_M5_LENGTH
+            m3_under_z = shank_tip_z + BHCS_M3_LENGTH
+            m5_under_z = shank_tip_z + self.BHCS_M5_LENGTH
         else:
             m3_under_z = m5_under_z = bracket_top_z
         bracket.move(Location((bracket_dx, 0, (bracket_top_z + bracket_bottom_z) / 2)))
@@ -136,9 +136,9 @@ class MO10Bracket(BaseAssembly):
         # rotation: head at +Z, shank at -Z.
         m3_positions = [
             (-half_pitch, -half_pitch),
-            (-half_pitch,  half_pitch),
-            ( half_pitch, -half_pitch),
-            ( half_pitch,  half_pitch),
+            (-half_pitch, half_pitch),
+            (half_pitch, -half_pitch),
+            (half_pitch, half_pitch),
         ]
         for screw, (sx, sy) in zip(screws_m3, m3_positions):
             screw.move(Location((sx, sy, m3_under_z)))
@@ -156,7 +156,7 @@ class MO10Bracket(BaseAssembly):
         ring_top_z = bracket_bottom_z - (RING_GAP if self.exploded else 0)
         ring_pitch = ring_height + (RING_STACK_GAP if self.exploded else 0)
         rings = []
-        for (rx, ry) in m5_positions:
+        for rx, ry in m5_positions:
             for k in range(self.RING_COUNT):
                 ring = Ring(self.RING_SPEC).build()
                 ring.move(Location((rx, ry, ring_top_z - ring_height - k * ring_pitch)))
@@ -173,13 +173,20 @@ class MO10Bracket(BaseAssembly):
         #                       single ring): the bracket-to-slot-face offset
         #                       the frame composition gauges the motor by.
         self.bracket_bottom_z = bracket_bottom_z
-        self.bracket_top_z    = bracket_top_z
-        self.m5_native_x      = m5_world_x
-        self.stack_height     = stack_height
+        self.bracket_top_z = bracket_top_z
+        self.m5_native_x = m5_world_x
+        self.stack_height = stack_height
 
-        return Compound(label=self.compound_label, children=[
-            motor, bracket, *screws_m3, *screws_m5, *rings,
-        ])
+        return Compound(
+            label=self.compound_label,
+            children=[
+                motor,
+                bracket,
+                *screws_m3,
+                *screws_m5,
+                *rings,
+            ],
+        )
 
 
 if __name__ == "__main__":

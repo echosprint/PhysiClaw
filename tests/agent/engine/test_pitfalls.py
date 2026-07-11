@@ -4,6 +4,7 @@ learned-pitfalls list.
 The autouse `physiclaw_home` fixture points `paths.HOME` at a per-test tmp dir,
 so `paths.pitfalls_dir()` resolves under it.
 """
+
 from __future__ import annotations
 
 import json
@@ -16,7 +17,9 @@ from physiclaw.agent.engine import pitfalls
 
 def _history() -> list[dict]:
     path = paths.pitfalls_dir() / "history.jsonl"
-    return [json.loads(ln) for ln in path.read_text(encoding="utf-8").splitlines() if ln]
+    return [
+        json.loads(ln) for ln in path.read_text(encoding="utf-8").splitlines() if ln
+    ]
 
 
 # ---------- helpers ----------
@@ -50,7 +53,9 @@ def test_add_caps_to_three_per_call() -> None:
 
 def test_add_dedups_against_existing() -> None:
     pitfalls.add(["京东: avoid Ai搜索"])
-    res = pitfalls.add(["京东: Avoid  AI搜索".replace("AI", "Ai"), "new one"])  # first is a dupe
+    res = pitfalls.add(
+        ["京东: Avoid  AI搜索".replace("AI", "Ai"), "new one"]
+    )  # first is a dupe
     assert res["added"] == 1  # only "new one"
     assert pitfalls.read().count("京东: avoid Ai搜索") == 1
 

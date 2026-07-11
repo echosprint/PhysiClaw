@@ -6,6 +6,7 @@ are auth precedence, and the declared `SYSTEM_PROMPT_FRAGMENT` is
 returned by the base `system_prompt_fragment()` hook (mechanics
 exercised in `test_provider_base.py`).
 """
+
 from __future__ import annotations
 
 from physiclaw.agent.provider.vendors.qwen import QwenProvider

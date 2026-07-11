@@ -7,6 +7,7 @@ surface (input parsing, return strings, session mutation).
 `schemas()` and `build_registry()` are exercised at the bottom for
 the wire-format and ordering contract.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -191,16 +192,24 @@ async def test_create_job_calls_jobs_create_and_marks_session(mocker) -> None:
     spy = mocker.patch("physiclaw.agent.engine.jobs.create_job")
     s = Session()
 
-    out = await _handle_create_job(s, {
-        "id": "user-greet", "description": "d",
-        "schedule": "0 7 * * *", "context": "ten chars at least",
-    })
+    out = await _handle_create_job(
+        s,
+        {
+            "id": "user-greet",
+            "description": "d",
+            "schedule": "0 7 * * *",
+            "context": "ten chars at least",
+        },
+    )
 
     assert out == "scheduled job 'user-greet'"
     assert s.sentinel_turn_created_job is True
     spy.assert_called_once_with(
-        id="user-greet", description="d", schedule="0 7 * * *",
-        context="ten chars at least", kind="one-time",
+        id="user-greet",
+        description="d",
+        schedule="0 7 * * *",
+        context="ten chars at least",
+        kind="one-time",
     )
 
 
@@ -208,10 +217,16 @@ async def test_create_job_calls_jobs_create_and_marks_session(mocker) -> None:
 async def test_create_job_uses_explicit_kind_when_provided(mocker) -> None:
     spy = mocker.patch("physiclaw.agent.engine.jobs.create_job")
 
-    await _handle_create_job(Session(), {
-        "id": "x", "description": "d", "schedule": "* * * * *",
-        "context": "ten chars at least", "kind": "periodic",
-    })
+    await _handle_create_job(
+        Session(),
+        {
+            "id": "x",
+            "description": "d",
+            "schedule": "* * * * *",
+            "context": "ten chars at least",
+            "kind": "periodic",
+        },
+    )
 
     assert spy.call_args.kwargs["kind"] == "periodic"
 
@@ -232,9 +247,7 @@ async def test_get_job_renders_full_job_block(mocker) -> None:
     fake_job.last_fire_time = ""
     fake_job.execution_time = ""
     fake_job.execution_result = ""
-    mocker.patch(
-        "physiclaw.agent.engine.jobs.get_job", return_value=fake_job
-    )
+    mocker.patch("physiclaw.agent.engine.jobs.get_job", return_value=fake_job)
 
     out = await _handle_get_job(Session(), {"id": "x"})
 
@@ -262,9 +275,7 @@ async def test_read_memory_returns_persistent_or_placeholder(mocker) -> None:
 
 @pytest.mark.asyncio
 async def test_read_memory_placeholder_when_empty(mocker) -> None:
-    mocker.patch(
-        "physiclaw.agent.engine.memory.load_persistent", return_value=""
-    )
+    mocker.patch("physiclaw.agent.engine.memory.load_persistent", return_value="")
 
     out = await _handle_read_memory(Session(), {})
 
@@ -298,9 +309,7 @@ async def test_read_logs_uses_explicit_entries(mocker) -> None:
 
 @pytest.mark.asyncio
 async def test_read_logs_placeholder_when_empty(mocker) -> None:
-    mocker.patch(
-        "physiclaw.agent.engine.memory.load_recent_entries", return_value=""
-    )
+    mocker.patch("physiclaw.agent.engine.memory.load_recent_entries", return_value="")
 
     out = await _handle_read_logs(Session(), {})
 
@@ -314,9 +323,7 @@ async def test_read_logs_placeholder_when_empty(mocker) -> None:
 async def test_update_memory_calls_memory_update_fact(mocker) -> None:
     spy = mocker.patch("physiclaw.agent.engine.memory.update_fact")
 
-    out = await _handle_update_memory(
-        Session(), {"old": "metric", "new": "imperial"}
-    )
+    out = await _handle_update_memory(Session(), {"old": "metric", "new": "imperial"})
 
     assert out.startswith("memory.md updated")
     assert "## memory.md (now)" in out  # echoes the full current store
@@ -328,9 +335,7 @@ async def test_update_memory_calls_memory_update_fact(mocker) -> None:
 
 @pytest.mark.asyncio
 async def test_list_jobs_returns_no_jobs_message_when_empty(mocker) -> None:
-    mocker.patch(
-        "physiclaw.agent.engine.builtin_tool.load_jobs", return_value=[]
-    )
+    mocker.patch("physiclaw.agent.engine.builtin_tool.load_jobs", return_value=[])
 
     out = await _handle_list_jobs(Session(), {})
 
@@ -346,9 +351,7 @@ async def test_list_jobs_filters_by_status(mocker) -> None:
         j.description = "d"
         j.next_fire_time = ""
 
-    mocker.patch(
-        "physiclaw.agent.engine.builtin_tool.load_jobs", return_value=fake
-    )
+    mocker.patch("physiclaw.agent.engine.builtin_tool.load_jobs", return_value=fake)
 
     out = await _handle_list_jobs(Session(), {"status": "pend"})
 
@@ -363,9 +366,7 @@ async def test_list_jobs_no_match_message_when_filter_empty(mocker) -> None:
     fake[0].id, fake[0].kind, fake[0].status = "a", "periodic", "done"
     fake[0].description = "d"
     fake[0].next_fire_time = ""
-    mocker.patch(
-        "physiclaw.agent.engine.builtin_tool.load_jobs", return_value=fake
-    )
+    mocker.patch("physiclaw.agent.engine.builtin_tool.load_jobs", return_value=fake)
 
     out = await _handle_list_jobs(Session(), {"status": "fail"})
 
@@ -378,9 +379,7 @@ async def test_list_jobs_renders_job_lines(mocker) -> None:
     fake.id, fake.kind, fake.status = "x", "periodic", "pend"
     fake.description = "do things"
     fake.next_fire_time = "2026-04-28T07:00"
-    mocker.patch(
-        "physiclaw.agent.engine.builtin_tool.load_jobs", return_value=[fake]
-    )
+    mocker.patch("physiclaw.agent.engine.builtin_tool.load_jobs", return_value=[fake])
 
     out = await _handle_list_jobs(Session(), {})
 
@@ -508,24 +507,33 @@ async def test_report_screen_layout_handler_restarts_on_completion(mocker) -> No
     )
 
     mocker.patch(
-        "physiclaw.agent.engine.screen_layout.record", return_value="done",
+        "physiclaw.agent.engine.screen_layout.record",
+        return_value="done",
     )
     # is_learned: False before the call, True after → this call completed setup.
     mocker.patch(
-        "physiclaw.agent.engine.screen_layout.is_learned", side_effect=[False, True],
+        "physiclaw.agent.engine.screen_layout.is_learned",
+        side_effect=[False, True],
     )
 
     session = Session()
     await _handle_report_screen_layout(
         session,
-        {"page": "chat-keyboard", "app": "wechat", "field": "send", "bbox": [0.75, 0.87, 0.99, 0.92]},
+        {
+            "page": "chat-keyboard",
+            "app": "wechat",
+            "field": "send",
+            "bbox": [0.75, 0.87, 0.99, 0.92],
+        },
     )
 
     assert session.restart_for_setup is True
     assert session.sentinel_status == IDLE
 
 
-async def test_report_screen_layout_handler_no_restart_when_already_complete(mocker) -> None:
+async def test_report_screen_layout_handler_no_restart_when_already_complete(
+    mocker,
+) -> None:
     from physiclaw.agent.engine.builtin_tool import (
         _handle_report_screen_layout,
     )
@@ -537,7 +545,12 @@ async def test_report_screen_layout_handler_no_restart_when_already_complete(moc
     session = Session()
     await _handle_report_screen_layout(
         session,
-        {"page": "chat-keyboard", "app": "wechat", "field": "send", "bbox": [0.76, 0.87, 0.99, 0.92]},
+        {
+            "page": "chat-keyboard",
+            "app": "wechat",
+            "field": "send",
+            "bbox": [0.76, 0.87, 0.99, 0.92],
+        },
     )
 
     assert session.restart_for_setup is False
@@ -553,7 +566,12 @@ def test_schemas_flattens_registry_to_wire_dicts() -> None:
     out = schemas(registry)
 
     assert all(set(d) == {"name", "description", "input_schema"} for d in out)
-    assert {d["name"] for d in out} >= {"note", "update_progress", "wait", "end_session"}
+    assert {d["name"] for d in out} >= {
+        "note",
+        "update_progress",
+        "wait",
+        "end_session",
+    }
 
 
 # ---------- build_registry ----------
@@ -597,9 +615,12 @@ async def test_add_pitfall_handler_appends_and_sets_flag() -> None:
     from physiclaw.agent.engine import pitfalls
 
     s = Session()
-    out = await _handle_add_pitfall(s, {
-        "items": ["京东: Ai搜索 opens AI chat → use right-side 搜索"],
-    })
+    out = await _handle_add_pitfall(
+        s,
+        {
+            "items": ["京东: Ai搜索 opens AI chat → use right-side 搜索"],
+        },
+    )
 
     assert s.added_pitfalls is True
     assert "1 pitfall" in out
@@ -622,10 +643,21 @@ def test_build_registry_includes_all_tool_categories(mocker) -> None:
     keys = set(build_registry({}).keys())
 
     assert keys == {
-        "note", "update_progress", "append_log", "save_memory",
-        "read_memory", "read_logs", "update_memory",
-        "create_job", "get_job", "list_jobs", "finish_job",
-        "wait", "report_screen_layout", "add_pitfall", "end_session",
+        "note",
+        "update_progress",
+        "append_log",
+        "save_memory",
+        "read_memory",
+        "read_logs",
+        "update_memory",
+        "create_job",
+        "get_job",
+        "list_jobs",
+        "finish_job",
+        "wait",
+        "report_screen_layout",
+        "add_pitfall",
+        "end_session",
     }
 
 

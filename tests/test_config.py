@@ -17,6 +17,7 @@ at most one element (Config has only one nesting level: Config →
 SectionConfig → leaf), so the join separator is never applied to two
 strings. Joining an empty or 1-element list ignores the separator.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -106,7 +107,11 @@ def test_config_error_is_value_error_subclass() -> None:
         ("retention", "trace_days", 7),
         # SkillsConfig
         ("skills", "default_source", ""),
-        ("skills", "official_base_url", "https://physiclaw.ai/downloads/official-skills"),
+        (
+            "skills",
+            "official_base_url",
+            "https://physiclaw.ai/downloads/official-skills",
+        ),
         ("skills", "sync_auto", True),
     ],
 )
@@ -157,24 +162,21 @@ def test_load_raises_friendly_ConfigError_when_file_isnt_utf8(
     """
     p = tmp_path / "corrupted.toml"
     # Mimic the user's bug: "—" in a comment encoded as GBK (0xa1 0xad).
-    p.write_bytes(b'# header with em-dash \xa1\xad and a key\nfoo = 1\n')
+    p.write_bytes(b"# header with em-dash \xa1\xad and a key\nfoo = 1\n")
 
     with pytest.raises(config.ConfigError) as exc_info:
         config.load(p)
 
     msg = str(exc_info.value)
     assert "not valid UTF-8" in msg
-    assert "0xa1" in msg              # the offending byte the user actually saw
-    assert "delete the file" in msg   # recovery hint
-    assert str(p) in msg              # path so the user knows where to delete
+    assert "0xa1" in msg  # the offending byte the user actually saw
+    assert "delete the file" in msg  # recovery hint
+    assert str(p) in msg  # path so the user knows where to delete
 
 
 def test_load_parses_valid_toml(tmp_path: Path) -> None:
     p = tmp_path / "config.toml"
-    p.write_text(
-        "[server]\nport = 9999\n\n"
-        "[engine]\nmax_turns = 500\n"
-    )
+    p.write_text("[server]\nport = 9999\n\n[engine]\nmax_turns = 500\n")
 
     cfg = config.load(p)
 
@@ -237,9 +239,7 @@ def test_load_accepts_freeform_providers_section_without_validating(
 ) -> None:
     # `[providers.<id>]` is in _FREEFORM_SECTIONS — read directly elsewhere.
     p = tmp_path / "config.toml"
-    p.write_text(
-        '[providers.openai]\nbase_url = "https://proxy.example/v1"\n'
-    )
+    p.write_text('[providers.openai]\nbase_url = "https://proxy.example/v1"\n')
 
     cfg = config.load(p)
 
@@ -273,20 +273,34 @@ def test_to_toml_emits_header_and_section_comments_when_with_comments() -> None:
 @pytest.mark.parametrize(
     "section_key, expected_comment_fragment",
     [
-        ("warm_start", "Timeouts for `physiclaw server --warm-start` hardware reconnect."),
-        ("auto_pick", "Timeouts for the camera auto-pick step in `physiclaw setup hardware`."),
+        (
+            "warm_start",
+            "Timeouts for `physiclaw server --warm-start` hardware reconnect.",
+        ),
+        (
+            "auto_pick",
+            "Timeouts for the camera auto-pick step in `physiclaw setup hardware`.",
+        ),
         (
             "engine",
             "Agent tool-call loop: runaway safeguards (turn cap, stuck guard, "
             "plan gate) + retry + pacing.",
         ),
         ("compact", "Screenshot compression before sending to the LLM."),
-        ("memory", "Daily-log loading: bootstrap preload + on-demand `read_logs` defaults."),
-        ("claude", "Applied when [agent] model = 'claude-code/...' (external CLI subprocess)."),
+        (
+            "memory",
+            "Daily-log loading: bootstrap preload + on-demand `read_logs` defaults.",
+        ),
+        (
+            "claude",
+            "Applied when [agent] model = 'claude-code/...' (external CLI subprocess).",
+        ),
         ("retention", "Purge window for on-disk engine trace logs + cron job history."),
     ],
 )
-def test_section_comment_pinned(section_key: str, expected_comment_fragment: str) -> None:
+def test_section_comment_pinned(
+    section_key: str, expected_comment_fragment: str
+) -> None:
     assert config._SECTION_COMMENTS[section_key] == expected_comment_fragment
 
 
@@ -320,11 +334,23 @@ def test_skills_section_comment_pinned() -> None:
     "section, field, expected_inline",
     [
         ("server", "save_tool_calls", "dump every peek/screenshot output"),
-        ("server", "save_snapshots", "dump each snapshot frame (rotated, with bbox overlay)"),
+        (
+            "server",
+            "save_snapshots",
+            "dump each snapshot frame (rotated, with bbox overlay)",
+        ),
         ("server", "save_screenshots", "dump every raw phone-own screenshot"),
         ("server", "save_raw_camera", "dump every raw camera frame at capture"),
-        ("memory", "default_log_entries", "on-demand `read_logs` default size (max 200)"),
-        ("memory", "bootstrap_log_entries", "auto-preloaded into the memory slot at every wake"),
+        (
+            "memory",
+            "default_log_entries",
+            "on-demand `read_logs` default size (max 200)",
+        ),
+        (
+            "memory",
+            "bootstrap_log_entries",
+            "auto-preloaded into the memory slot at every wake",
+        ),
     ],
 )
 def test_field_inline_comment_pinned(
@@ -467,9 +493,7 @@ def test_get_raises_when_descending_into_a_leaf_value() -> None:
 
 
 def test_get_raises_when_segment_unknown_at_level() -> None:
-    with pytest.raises(
-        config.ConfigError, match=r"^unknown key 'mystery' at <root>"
-    ):
+    with pytest.raises(config.ConfigError, match=r"^unknown key 'mystery' at <root>"):
         config.get(config.Config(), "mystery")
 
 
@@ -479,9 +503,16 @@ def test_get_raises_when_segment_unknown_at_level() -> None:
 @pytest.mark.parametrize(
     "raw, expected",
     [
-        ("true", True), ("1", True), ("yes", True), ("on", True),
-        ("TRUE", True), ("Yes", True),
-        ("false", False), ("0", False), ("no", False), ("off", False),
+        ("true", True),
+        ("1", True),
+        ("yes", True),
+        ("on", True),
+        ("TRUE", True),
+        ("Yes", True),
+        ("false", False),
+        ("0", False),
+        ("no", False),
+        ("off", False),
     ],
 )
 def test_coerce_bool_accepts_known_variants(raw: str, expected: bool) -> None:
@@ -527,23 +558,17 @@ def test_validate_dotted_returns_section_and_field() -> None:
     ["", "single", "a.b.c", ".trailing", "leading.", "."],
 )
 def test_validate_dotted_rejects_wrong_shape(bad: str) -> None:
-    with pytest.raises(
-        config.ConfigError, match=r"^key must be section\.field"
-    ):
+    with pytest.raises(config.ConfigError, match=r"^key must be section\.field"):
         config._validate_dotted(bad)
 
 
 def test_validate_dotted_rejects_unknown_section() -> None:
-    with pytest.raises(
-        config.ConfigError, match=r"^unknown section 'mystery'"
-    ):
+    with pytest.raises(config.ConfigError, match=r"^unknown section 'mystery'"):
         config._validate_dotted("mystery.field")
 
 
 def test_validate_dotted_rejects_unknown_field_within_known_section() -> None:
-    with pytest.raises(
-        config.ConfigError, match=r"^unknown key 'mystery' at server"
-    ):
+    with pytest.raises(config.ConfigError, match=r"^unknown key 'mystery' at server"):
         config._validate_dotted("server.mystery")
 
 
@@ -675,7 +700,7 @@ def test_provider_base_url_override_returns_none_when_provider_absent(
 ) -> None:
     p = config.config_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text("[providers.qwen]\nbase_url = \"https://x.com\"\n")
+    p.write_text('[providers.qwen]\nbase_url = "https://x.com"\n')
 
     assert config.provider_base_url_override("openai") is None
 
@@ -685,9 +710,7 @@ def test_provider_base_url_override_returns_string_when_present(
 ) -> None:
     p = config.config_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(
-        "[providers.openai]\nbase_url = \"https://proxy.example/v1\"\n"
-    )
+    p.write_text('[providers.openai]\nbase_url = "https://proxy.example/v1"\n')
 
     assert config.provider_base_url_override("openai") == "https://proxy.example/v1"
 
@@ -766,14 +789,14 @@ def test_parse_model_ref_splits_on_first_slash() -> None:
 
 def test_parse_model_ref_keeps_extra_slashes_in_model_segment() -> None:
     assert config.parse_model_ref("openrouter/openai/gpt-5") == (
-        "openrouter", "openai/gpt-5"
+        "openrouter",
+        "openai/gpt-5",
     )
 
 
 def test_parse_model_ref_raises_on_no_slash() -> None:
     expected = (
-        "model ref 'qwen-only' must be 'provider/model' "
-        "(e.g. 'qwen/qwen3.6-plus')"
+        "model ref 'qwen-only' must be 'provider/model' (e.g. 'qwen/qwen3.6-plus')"
     )
     with pytest.raises(ValueError) as exc_info:
         config.parse_model_ref("qwen-only")
@@ -822,18 +845,14 @@ def test_resolve_provider_key_falls_back_to_config(
 ) -> None:
     config.CONFIG.provider.qwen_api_key = "from-config"
 
-    key, source = config.resolve_provider_key(
-        ("UNSET_VAR",), config_key="qwen_api_key"
-    )
+    key, source = config.resolve_provider_key(("UNSET_VAR",), config_key="qwen_api_key")
 
     assert key == "from-config"
     assert source == "config.toml [provider] qwen_api_key"
 
 
 def test_resolve_provider_key_returns_none_when_nothing_set() -> None:
-    key, source = config.resolve_provider_key(
-        ("UNSET_VAR",), config_key="qwen_api_key"
-    )
+    key, source = config.resolve_provider_key(("UNSET_VAR",), config_key="qwen_api_key")
 
     assert key is None
     assert source is None

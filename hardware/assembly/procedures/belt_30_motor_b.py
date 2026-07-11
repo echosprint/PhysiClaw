@@ -24,21 +24,26 @@ from hardware.assembly.procedures.belt_20_clamp import BE20Clamp
 from hardware.assembly.projection import FRONT
 from hardware.parts.standard.belt import Belt, motor_a_path
 
-BELT_EXPLODE = 30    # mm — exploded: shift motor B's belt further outboard
-                     #      along world -Y so the routing reads clearly
-                     #      above the existing structure
+BELT_EXPLODE = 30  # mm — exploded: shift motor B's belt further outboard
+#      along world -Y so the routing reads clearly
+#      above the existing structure
 
 
 class BE30MotorB(BaseAssembly):
     camera = FRONT
+
     def _build(self) -> Compound:
         base_compound = BE20Clamp(exploded=False).build()
         belt = Belt(path=motor_a_path, name="motor_b", motor="B").build()
         if self.exploded:
             belt.move(Location((0, -BELT_EXPLODE, 0)))
-        return Compound(label="belt_30_motor_b", children=[
-            base_compound, belt,
-        ])
+        return Compound(
+            label="belt_30_motor_b",
+            children=[
+                base_compound,
+                belt,
+            ],
+        )
 
 
 if __name__ == "__main__":

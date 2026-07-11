@@ -21,6 +21,7 @@ read exactly once, at reflect time. Both the retained-snapshot count and the
 rendered char count are capped (`CONFIG.engine`), so a long session with a
 full (8KB) scratchpad stays bounded in memory and in the prompt.
 """
+
 from physiclaw.config import CONFIG
 
 # Per-entry framing charged against the render budget (the `[tNN] <kind>\n`
@@ -88,10 +89,9 @@ def render(session, budget: int | None = None, max_count: int | None = None) -> 
 
     # (turn, kind, text); stable sort keeps plan before scratchpad on a shared
     # turn (plan_log built first) — reads "re-planned, then wrote notes".
-    entries = (
-        [(t, "plan", text) for t, text in session.plan_log]
-        + [(t, "scratchpad", text) for t, text in session.scratchpad_log]
-    )
+    entries = [(t, "plan", text) for t, text in session.plan_log] + [
+        (t, "scratchpad", text) for t, text in session.scratchpad_log
+    ]
     if not entries:
         return ""
     entries.sort(key=lambda e: e[0])
@@ -99,9 +99,14 @@ def render(session, budget: int | None = None, max_count: int | None = None) -> 
     kept, elided = _select(entries, budget, max_count)
     kept.reverse()  # back to ascending for display
 
-    lines = ["<session-trajectory>", "(the run oldest→newest — plan re-plans + scratchpad writes)"]
+    lines = [
+        "<session-trajectory>",
+        "(the run oldest→newest — plan re-plans + scratchpad writes)",
+    ]
     if elided:
-        lines.append(f"({elided} earlier entr{'y' if elided == 1 else 'ies'} elided to fit)")
+        lines.append(
+            f"({elided} earlier entr{'y' if elided == 1 else 'ies'} elided to fit)"
+        )
     for t, kind, text in kept:
         lines.append(f"[t{t}] {kind}\n{text}")
 

@@ -2,6 +2,7 @@
 loopback-rewrite for wildcard hosts. All socket/time interaction is mocked;
 no real ports are opened.
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock

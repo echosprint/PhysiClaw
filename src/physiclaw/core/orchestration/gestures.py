@@ -33,7 +33,11 @@ Size = Literal["s", "m", "l", "xl", "xxl"]
 Speed = Literal["slow", "medium", "fast"]
 
 SWIPE_DISTANCES: dict[Size, float] = {
-    "s": 0.1, "m": 0.3, "l": 0.5, "xl": 0.75, "xxl": 0.90,
+    "s": 0.1,
+    "m": 0.3,
+    "l": 0.5,
+    "xl": 0.75,
+    "xxl": 0.90,
 }
 SWIPE_DIRS: tuple[Direction, ...] = get_args(Direction)
 SWIPE_SPEEDS: tuple[Speed, ...] = get_args(Speed)
@@ -118,9 +122,7 @@ class GestureValidator:
                 f"size must be one of {list(SWIPE_DISTANCES)}, got {size!r}"
             )
         if speed not in SWIPE_SPEEDS:
-            raise ValueError(
-                f"speed must be one of {SWIPE_SPEEDS}, got {speed!r}"
-            )
+            raise ValueError(f"speed must be one of {SWIPE_SPEEDS}, got {speed!r}")
 
     # ─── Sequence-step parsing ─────────────────────────────────
 
@@ -153,8 +155,7 @@ class GestureValidator:
         if tool == "send_to_clipboard":
             if not isinstance(arg, str):
                 raise ValueError(
-                    f"send_to_clipboard arg must be a string, got "
-                    f"{type(arg).__name__}"
+                    f"send_to_clipboard arg must be a string, got {type(arg).__name__}"
                 )
             return SendToClipboard(arg)
         raise ValueError(f"tool {tool!r} not allowed in sequence")

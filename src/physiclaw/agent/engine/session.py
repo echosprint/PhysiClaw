@@ -10,6 +10,7 @@ behavioral policy (e.g. a gate's one-shot corrective flag) lives on the
 policy object instead (`policy.py`), where fresh-per-session construction
 makes the one-shot semantics structural.
 """
+
 from dataclasses import dataclass, field
 
 from physiclaw.agent.engine import screen_layout
@@ -20,6 +21,7 @@ from physiclaw.agent.engine.stuck import StuckGuard
 @dataclass
 class Session:
     """Ephemeral state the engine and local tools share for one session."""
+
     sentinel_status: str | None = None
     sentinel_recap: str = ""
     sentinel_turn_created_job: bool = False

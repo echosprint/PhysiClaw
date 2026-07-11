@@ -50,6 +50,7 @@ from functools import cache
 from hardware.assembly.base import SVG_DIR, BaseAssembly, svg_path_for
 from hardware.assembly.mark.patch import patch_path
 from hardware.assembly.mark.replay import replay_one
+
 # Procedure ordering & batching live in dispatch.py so the BOM and render
 # pipelines share one source of truth.
 from hardware.assembly.dispatch import (
@@ -60,7 +61,10 @@ from hardware.assembly.dispatch import (
     load_class,
     retry_stems,
 )
-from hardware.assembly.bom import BOM_DIR, write_bom  # only for the optional --bom feature
+from hardware.assembly.bom import (
+    BOM_DIR,
+    write_bom,
+)  # only for the optional --bom feature
 from hardware.assembly import cache as stepcache
 from hardware.parts.base import REPO_ROOT, STEP_DIR
 
@@ -86,9 +90,15 @@ def _clear_outputs(clear_bom: bool = False) -> None:
 
 def _run_one(cls: type[BaseAssembly], exploded: bool) -> tuple[float, float, float]:
     asm = cls(exploded=exploded)
-    t0 = time.monotonic(); asm.build();  t_build  = time.monotonic() - t0
-    t0 = time.monotonic(); asm.export(); t_export = time.monotonic() - t0
-    t0 = time.monotonic(); asm.render(); t_render = time.monotonic() - t0
+    t0 = time.monotonic()
+    asm.build()
+    t_build = time.monotonic() - t0
+    t0 = time.monotonic()
+    asm.export()
+    t_export = time.monotonic() - t0
+    t0 = time.monotonic()
+    asm.render()
+    t_render = time.monotonic() - t0
     return t_build, t_export, t_render
 
 
@@ -106,40 +116,46 @@ def _replay_patches_for(stem: str, exploded: bool) -> int:
         try:
             written += len(replay_one(svg))
         except Exception as exc:  # malformed patch / I/O — keep building
-            print(f"    WARN: patch replay failed for {svg.name}: "
-                  f"{type(exc).__name__}: {exc}")
+            print(
+                f"    WARN: patch replay failed for {svg.name}: "
+                f"{type(exc).__name__}: {exc}"
+            )
     return written
 
 
-def _build_stems(stems: list[str], *, bom: bool = False, bom_delta: bool = False) -> int:
+def _build_stems(
+    stems: list[str], *, bom: bool = False, bom_delta: bool = False
+) -> int:
     classes = [(stem, load_class(stem)) for stem in stems]
 
-    name_w   = max(len(name) for name, _ in classes)
-    runs     = len(classes) * 2
+    name_w = max(len(name) for name, _ in classes)
+    runs = len(classes) * 2
     failures: list[tuple[str, str, BaseException]] = []
-    sums     = {"build": 0.0, "export": 0.0, "render": 0.0}
-    t_wall0  = time.monotonic()
+    sums = {"build": 0.0, "export": 0.0, "render": 0.0}
+    t_wall0 = time.monotonic()
 
     print(f"Building {len(classes)} procedures × 2 variants = {runs} runs\n")
     print(
         f"  {'procedure':<{name_w}}  {'variant':<9}  "
         f"{'build':>7}  {'export':>7}  {'render':>7}  {'total':>7}  status"
     )
-    print(f"  {'-' * name_w}  {'-'*9}  {'-'*7}  {'-'*7}  {'-'*7}  {'-'*7}  ------")
+    print(
+        f"  {'-' * name_w}  {'-' * 9}  {'-' * 7}  {'-' * 7}  {'-' * 7}  {'-' * 7}  ------"
+    )
 
     for short, cls in classes:
         for exploded in (True, False):
             variant = "exploded" if exploded else "assembled"
             try:
                 tb, te, tr = _run_one(cls, exploded)
-                sums["build"]  += tb
+                sums["build"] += tb
                 sums["export"] += te
                 sums["render"] += tr
                 n_patches = _replay_patches_for(short, exploded)
                 patch_tag = f"  +{n_patches} patch snap" if n_patches else ""
                 print(
                     f"  {short:<{name_w}}  {variant:<9}  "
-                    f"{tb:6.2f}s  {te:6.2f}s  {tr:6.2f}s  {tb+te+tr:6.2f}s  ok"
+                    f"{tb:6.2f}s  {te:6.2f}s  {tr:6.2f}s  {tb + te + tr:6.2f}s  ok"
                     f"{patch_tag}"
                 )
             except Exception as exc:
@@ -154,18 +170,22 @@ def _build_stems(stems: list[str], *, bom: bool = False, bom_delta: bool = False
         if bom or bom_delta:
             try:
                 write_bom(short, cumulative=bom, want_delta=bom_delta)
-                kinds = " + ".join(k for k, on in (("cumulative", bom), ("delta", bom_delta)) if on)
+                kinds = " + ".join(
+                    k for k, on in (("cumulative", bom), ("delta", bom_delta)) if on
+                )
                 print(f"  {short:<{name_w}}  bom        wrote {kinds}")
             except Exception as exc:
-                print(f"  {short:<{name_w}}  bom        FAIL {type(exc).__name__}: {exc}")
+                print(
+                    f"  {short:<{name_w}}  bom        FAIL {type(exc).__name__}: {exc}"
+                )
 
     wall = time.monotonic() - t_wall0
-    cpu  = sum(sums.values())
+    cpu = sum(sums.values())
     print(
         f"\n{runs - len(failures)}/{runs} OK   "
         f"wall {wall:.1f}s   "
         f"build {sums['build']:.1f}s  export {sums['export']:.1f}s  render {sums['render']:.1f}s   "
-        f"(cpu/wall = {cpu/wall:.2f})"
+        f"(cpu/wall = {cpu / wall:.2f})"
     )
 
     if failures:
@@ -178,10 +198,16 @@ def _build_stems(stems: list[str], *, bom: bool = False, bom_delta: bool = False
 
 
 def _run_subprocess(stems: list[str], bom_flags: tuple[str, ...] = ()) -> int:
-    return subprocess.call([
-        sys.executable, "-m", "hardware.assembly.build_procedures",
-        "--stems", *stems, *bom_flags,
-    ])
+    return subprocess.call(
+        [
+            sys.executable,
+            "-m",
+            "hardware.assembly.build_procedures",
+            "--stems",
+            *stems,
+            *bom_flags,
+        ]
+    )
 
 
 _VARIANTS = (("exploded", True), ("assembled", False))
@@ -205,12 +231,19 @@ def _missing_variants(stem: str) -> list[str]:
     variant is complete only when ALL its cameras' SVGs exist. Checking just
     ``_cam0`` would miss a crash *between* cameras — exactly the OCCT HLR
     SIGSEGV that the retry exists to recover from."""
-    return [name for name, exploded in _VARIANTS
-            if any(not svg_path_for(stem, exploded, index=i).exists()
-                   for i in range(_camera_count(stem, exploded)))]
+    return [
+        name
+        for name, exploded in _VARIANTS
+        if any(
+            not svg_path_for(stem, exploded, index=i).exists()
+            for i in range(_camera_count(stem, exploded))
+        )
+    ]
 
 
-def _dispatch(batch_size: int, bom_flags: tuple[str, ...] = (), use_cache: bool = True) -> int:
+def _dispatch(
+    batch_size: int, bom_flags: tuple[str, ...] = (), use_cache: bool = True
+) -> int:
     """Build every batch, skipping steps the cache already covers.
 
     Per stem (see ``assembly/cache.py``): if the *source* layer is fresh
@@ -239,9 +272,11 @@ def _dispatch(batch_size: int, bom_flags: tuple[str, ...] = (), use_cache: bool 
         pruned = stepcache.prune(position)
         cached = {s: stepcache.source_cached(s, want_bom=want_bom) for s in position}
         n_cached = sum(cached.values())
-        print(f"cache: {stepcache.CACHE_DIR.relative_to(REPO_ROOT)} — "
-              f"{n_cached}/{total} cached, {total - n_cached} to build"
-              + (f"   (pruned {pruned} stale)" if pruned else ""))
+        print(
+            f"cache: {stepcache.CACHE_DIR.relative_to(REPO_ROOT)} — "
+            f"{n_cached}/{total} cached, {total - n_cached} to build"
+            + (f"   (pruned {pruned} stale)" if pruned else "")
+        )
     t_wall0 = time.monotonic()
 
     def header(stems: list[str]) -> str:
@@ -284,12 +319,16 @@ def _dispatch(batch_size: int, bom_flags: tuple[str, ...] = (), use_cache: bool 
             # fresh process (new heap layout) until its outputs land or we
             # exhaust the retries.
             incomplete = [s for s in misses if _missing_variants(s)]
-            print(f"\n--- batch exit {rc}; retrying {len(incomplete)}/{len(misses)} incomplete stem(s) ---")
+            print(
+                f"\n--- batch exit {rc}; retrying {len(incomplete)}/{len(misses)} incomplete stem(s) ---"
+            )
             retry_stems(
                 incomplete,
                 run=lambda s: _run_subprocess([s], bom_flags),
                 done=lambda s: not _missing_variants(s),
-                log=lambda s, a: print(header([s]) + f"  (retry {a}/{MAX_STEM_RETRIES})"),
+                log=lambda s, a: print(
+                    header([s]) + f"  (retry {a}/{MAX_STEM_RETRIES})"
+                ),
             )
         if use_cache:
             for s in misses:
@@ -301,9 +340,11 @@ def _dispatch(batch_size: int, bom_flags: tuple[str, ...] = (), use_cache: bool 
     failed_variants = [(s, v) for s in position for v in _missing_variants(s)]
     ok_assemblies = sum(1 for s in position if not _missing_variants(s))
     n_step = len(list(STEP_DIR.glob("*.step")))
-    n_svg  = len(list(SVG_DIR.glob("*.svg")))
-    cache_note = f"   cache: {n_fresh} hit + {n_replay} patch-replay" if use_cache else ""
-    tally  = (
+    n_svg = len(list(SVG_DIR.glob("*.svg")))
+    cache_note = (
+        f"   cache: {n_fresh} hit + {n_replay} patch-replay" if use_cache else ""
+    )
+    tally = (
         f"{ok_assemblies}/{total} assemblies   "
         f"wrote {n_step} .step / {n_svg} .svg{cache_note}   "
         f"total wall {wall:.1f}s"

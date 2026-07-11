@@ -48,4 +48,6 @@ async def phone_watch() -> Trigger | None:
     data = r.json()
     if not data.get("wake"):
         return None
-    return Trigger(description=data.get("reason", "phone screen changed"), source="phone")
+    return Trigger(
+        description=data.get("reason", "phone screen changed"), source="phone"
+    )

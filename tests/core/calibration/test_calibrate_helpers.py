@@ -13,6 +13,7 @@ Synthetic BGR frames drive the marker tests; the rotation thresholds
 in the source compare blob centroid positions, so we render markers
 at coordinates that unambiguously satisfy each branch.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -128,7 +129,7 @@ def _frame_with_up_and_right(
     up_xy: tuple[int, int], right_xy: tuple[int, int], shape=(600, 800, 3)
 ) -> np.ndarray:
     img = np.zeros(shape, dtype=np.uint8)
-    _draw_marker(img, *up_xy, color_bgr=(255, 100, 0))   # blue (BGR)
+    _draw_marker(img, *up_xy, color_bgr=(255, 100, 0))  # blue (BGR)
     _draw_marker(img, *right_xy, color_bgr=(0, 50, 255))  # red (BGR)
     return img
 
@@ -205,7 +206,7 @@ def test_pick_rotation_detects_red_at_high_hue_end() -> None:
     )
     img = np.zeros((600, 800, 3), dtype=np.uint8)
     _draw_marker(img, 400, 100, (255, 100, 0))  # blue UP
-    _draw_marker(img, 500, 300, red_hi)         # red RIGHT, high-hue end
+    _draw_marker(img, 500, 300, red_hi)  # red RIGHT, high-hue end
 
     code, label = _pick_rotation_from_markers(img)
 

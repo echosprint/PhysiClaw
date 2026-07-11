@@ -1,4 +1,5 @@
 """Tests for `physiclaw.cli._format`."""
+
 from __future__ import annotations
 
 

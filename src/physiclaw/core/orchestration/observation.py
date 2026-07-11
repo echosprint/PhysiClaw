@@ -37,6 +37,7 @@ class GestureResult:
     same parked after-frame the verdict used. `jpeg`/`listing` are None
     when the camera or detector hiccupped; the tool layer then falls
     back to a text-only result telling the agent to `peek`."""
+
     text: str
     jpeg: bytes | None = None
     listing: str | None = None
@@ -76,7 +77,7 @@ class GestureObserver:
         monitor: quality.QualityMonitor | None = None,
     ):
         self._park = park
-        self._grab = grab      # () -> cropped phone-screen BGR frame
+        self._grab = grab  # () -> cropped phone-screen BGR frame
         self._detect = detect  # frame -> (element listing, annotated frame)
         self._quality = monitor if monitor is not None else quality.QualityMonitor()
 
@@ -110,7 +111,8 @@ class GestureObserver:
         if sharpness < self.PEEK_BLUR_THRESHOLD:
             log.warning(
                 "peek: blurry frame (laplacian var=%.1f < %.0f) — retrying",
-                sharpness, self.PEEK_BLUR_THRESHOLD,
+                sharpness,
+                self.PEEK_BLUR_THRESHOLD,
             )
             time.sleep(self.PEEK_BLUR_RETRY_SECONDS)
             frame = self._grab()
@@ -142,7 +144,9 @@ class GestureObserver:
                 time.sleep(self.GRAB_BLUR_RETRY_SECONDS)
                 frame = self._grab()
                 if laplacian_variance(frame) < self.GRAB_BLUR_THRESHOLD:
-                    log.warning("gesture frame still blurry after retry — verdict withheld")
+                    log.warning(
+                        "gesture frame still blurry after retry — verdict withheld"
+                    )
                     return frame, False
             return frame, True
         except Exception:

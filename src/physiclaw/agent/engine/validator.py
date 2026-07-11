@@ -13,6 +13,7 @@ On failure, the engine does NOT actuate — it pairs the call with an error
 This is a deliberately small subset of JSONSchema — just the shapes the
 MCP tools and our local synthetic tools use. No external dep.
 """
+
 from typing import Any
 
 
@@ -53,14 +54,18 @@ def validate_arguments(args: Any, schema: dict[str, Any]) -> None:
         }
     """
     if not isinstance(args, dict):
-        raise ValidationError(f"arguments must be a JSON object, got {type(args).__name__}")
+        raise ValidationError(
+            f"arguments must be a JSON object, got {type(args).__name__}"
+        )
 
     properties = schema.get("properties") or {}
     required = set(schema.get("required") or [])
 
     missing = [k for k in required if k not in args]
     if missing:
-        raise ValidationError(f"missing required argument(s): {', '.join(sorted(missing))}")
+        raise ValidationError(
+            f"missing required argument(s): {', '.join(sorted(missing))}"
+        )
 
     # Bbox shape — IDENTICAL LOGIC to `validate_bbox` in
     # core/vision/util.py (same checks, same order, same messages). Keep
@@ -71,7 +76,9 @@ def validate_arguments(args: Any, schema: dict[str, Any]) -> None:
     bbox = args.get("bbox")
     if bbox is not None:
         if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
-            raise ValidationError(f"bbox: must be [left, top, right, bottom]; got {bbox!r}")
+            raise ValidationError(
+                f"bbox: must be [left, top, right, bottom]; got {bbox!r}"
+            )
         if not all(isinstance(v, (int, float)) for v in bbox):
             raise ValidationError(f"bbox: each coord must be a number; got {bbox!r}")
         left, top, right, bottom = bbox
@@ -96,9 +103,7 @@ def validate_arguments(args: Any, schema: dict[str, Any]) -> None:
 def _check_value(key: str, value: Any, prop: dict[str, Any]) -> None:
     enum = prop.get("enum")
     if enum is not None and value not in enum:
-        raise ValidationError(
-            f"{key}: value {value!r} is not one of {enum}"
-        )
+        raise ValidationError(f"{key}: value {value!r} is not one of {enum}")
 
     if _is_number(value):
         minimum = prop.get("minimum")
@@ -125,7 +130,9 @@ def _check_value(key: str, value: Any, prop: dict[str, Any]) -> None:
         return
 
     # `type` may be a list in JSONSchema (e.g. ["string", "null"]).
-    types_to_check = expected_type if isinstance(expected_type, list) else [expected_type]
+    types_to_check = (
+        expected_type if isinstance(expected_type, list) else [expected_type]
+    )
     matched = False
     for t in types_to_check:
         py_type = _TYPE_MAP.get(t)

@@ -5,6 +5,7 @@ squares drawn on black exercise the mask → morphology → contour →
 centroid pipeline. The bridge-corner detector built on this pipeline is
 tested in test_grid_detect.py.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -72,7 +73,7 @@ def test_find_largest_hsv_blob_returns_centroid_of_solid_square() -> None:
 
 def test_find_largest_hsv_blob_picks_the_larger_of_two_blobs() -> None:
     img = np.zeros((200, 300, 3), dtype=np.uint8)
-    _draw_rect(img, 10, 10, 30, 30, (0, 0, 255))     # small (20×20)
+    _draw_rect(img, 10, 10, 30, 30, (0, 0, 255))  # small (20×20)
     _draw_rect(img, 200, 100, 280, 180, (0, 0, 255))  # big (80×80)
     lower, upper = _red_lower_upper()
 
@@ -118,8 +119,8 @@ def test_find_all_hsv_blobs_returns_centroid_per_qualifying_contour() -> None:
 
 def test_find_all_hsv_blobs_filters_below_min_area() -> None:
     img = np.zeros((200, 300, 3), dtype=np.uint8)
-    _draw_rect(img, 50, 50, 100, 100, (0, 0, 255))   # 50×50 — kept
-    _draw_rect(img, 200, 50, 210, 60, (0, 0, 255))   # 10×10 — dropped
+    _draw_rect(img, 50, 50, 100, 100, (0, 0, 255))  # 50×50 — kept
+    _draw_rect(img, 200, 50, 210, 60, (0, 0, 255))  # 10×10 — dropped
     lower, upper = _red_lower_upper()
 
     centroids = find_all_hsv_blobs(img, lower, upper, min_area=500)

@@ -13,6 +13,7 @@ output. Killing them would require golden-image diffs that are
 brittle across cv2 versions and font shipments. The visual contract
 is vetted by eye, not by unit tests.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -82,9 +83,7 @@ def test_annotate_elements_returns_copy_not_mutating_original() -> None:
     frame = np.zeros((600, 800, 3), dtype=np.uint8)
     snapshot = frame.copy()
 
-    out = annotate_elements(
-        frame, [_icon(1, [0.1, 0.1, 0.3, 0.3])], 800, 600
-    )
+    out = annotate_elements(frame, [_icon(1, [0.1, 0.1, 0.3, 0.3])], 800, 600)
 
     assert out is not frame
     np.testing.assert_array_equal(frame, snapshot)
@@ -114,9 +113,7 @@ def test_annotate_elements_uses_green_for_icon_and_red_for_text() -> None:
     # OpenCV is BGR. Green = (0, 255, 0); Red = (0, 0, 255).
     frame = np.zeros((600, 800, 3), dtype=np.uint8)
 
-    icon_only = annotate_elements(
-        frame, [_icon(1, [0.1, 0.1, 0.3, 0.3])], 800, 600
-    )
+    icon_only = annotate_elements(frame, [_icon(1, [0.1, 0.1, 0.3, 0.3])], 800, 600)
     text_only = annotate_elements(
         frame, [_text(2, [0.1, 0.1, 0.3, 0.3])], 800, 600, include_text=True
     )
@@ -170,7 +167,8 @@ def test_annotate_elements_continues_past_text_to_draw_later_icon() -> None:
             _text(1, [0.1, 0.1, 0.2, 0.2]),
             _icon(2, [0.5, 0.5, 0.7, 0.7]),
         ],
-        800, 600,
+        800,
+        600,
     )
 
     # The icon's green border lands in the (400-560, 300-420) region.

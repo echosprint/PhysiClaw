@@ -52,11 +52,12 @@ from hardware.assembly.procedures.frame_30_bracket_tnut import FR30BracketTnut
 from hardware.assembly.projection import MAIN_FRAME_VIEW
 from hardware.parts.standard.extrusion import cb_end_offset
 
-BRACKET_EXPLODE = 20   # mm — exploded: air gap, slot face → FR30BracketTnut t-nut floor
+BRACKET_EXPLODE = 20  # mm — exploded: air gap, slot face → FR30BracketTnut t-nut floor
 
 
 class FR31Bracket(BaseAssembly):
     camera = MAIN_FRAME_VIEW
+
     def _build(self) -> Compound:
         # Frame layer — always assembled (it's the prior step's result).
         frame = FR20SHCS(exploded=False)
@@ -64,7 +65,7 @@ class FR31Bracket(BaseAssembly):
 
         top_z = LONG_LENGTH - cb_end_offset
         bot_z = cb_end_offset
-        slot_face_y = -EXT_THICKNESS   # outboard face of the longs
+        slot_face_y = -EXT_THICKNESS  # outboard face of the longs
 
         bracket_groups = []
         for sign_x in (-1, 1):
@@ -81,17 +82,24 @@ class FR31Bracket(BaseAssembly):
                     origin_y = slot_face_y - BRACKET_EXPLODE
                 else:
                     origin_y = slot_face_y + bt.bracket_bottom_z
-                bt_compound.move(Location(Plane(
-                    origin=(corner_edge_x, origin_y, corner_z),
-                    x_dir=(-sign_x, 0, 0),   # LEFT hole → long side
-                    z_dir=(0, -1, 0),        # chain runs outboard
-                )))
+                bt_compound.move(
+                    Location(
+                        Plane(
+                            origin=(corner_edge_x, origin_y, corner_z),
+                            x_dir=(-sign_x, 0, 0),  # LEFT hole → long side
+                            z_dir=(0, -1, 0),  # chain runs outboard
+                        )
+                    )
+                )
                 bracket_groups.append(bt_compound)
 
-        return Compound(label="frame_31_bracket", children=[
-            frame_compound,
-            *bracket_groups,
-        ])
+        return Compound(
+            label="frame_31_bracket",
+            children=[
+                frame_compound,
+                *bracket_groups,
+            ],
+        )
 
 
 if __name__ == "__main__":

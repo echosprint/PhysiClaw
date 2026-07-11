@@ -5,22 +5,22 @@ from hardware.parts.base import BaseStandardPart
 # ── Parameters ────────────────────────────────────────────────────────────────
 # Stylus tip stack, top → bottom.
 seg1_diameter = 7.9 * MM
-seg1_height   = 3.5 * MM
+seg1_height = 3.5 * MM
 
 seg2_diameter = 8.5 * MM
-seg2_height   = 4.1 * MM
+seg2_height = 4.1 * MM
 
-seg3_diameter = 7   * MM
-seg3_height   = 1.4 * MM
+seg3_diameter = 7 * MM
+seg3_height = 1.4 * MM
 
-ball_radius   = 3.5 * MM    # lower hemisphere at the bottom
+ball_radius = 3.5 * MM  # lower hemisphere at the bottom
 
 # M3 mounting hole on the top face, axial.
-m3_hole_dia   = 3 * MM
+m3_hole_dia = 3 * MM
 m3_hole_depth = 4 * MM
 
 # Edge chamfer applied to seg2 top/bottom and the seg1 top face circles.
-edge_chamfer  = 0.2 * MM    # capped by 0.3 mm radial gap at seg1↔seg2 junction
+edge_chamfer = 0.2 * MM  # capped by 0.3 mm radial gap at seg1↔seg2 junction
 
 
 # ── Geometry ──────────────────────────────────────────────────────────────────
@@ -54,11 +54,14 @@ class Tip(BaseStandardPart):
             seg2_bot_z = -(seg1_height + seg2_height)
             seg2_r = seg2_diameter / 2
             seg2_edges = [
-                e for e in p.edges()
+                e
+                for e in p.edges()
                 if e.geom_type == GeomType.CIRCLE
                 and abs(e.radius - seg2_r) < 0.01
-                and (abs(e.center().Z - seg2_top_z) < 0.01
-                     or abs(e.center().Z - seg2_bot_z) < 0.01)
+                and (
+                    abs(e.center().Z - seg2_top_z) < 0.01
+                    or abs(e.center().Z - seg2_bot_z) < 0.01
+                )
             ]
             chamfer(seg2_edges, length=edge_chamfer)
             # Chamfer both circle edges on the top face (Z=0).

@@ -39,14 +39,14 @@ class CalibrationState:
     # Phases are visual primitives — each renders one thing on the
     # page; they're reused across different calibration steps.
     PHASES = {
-        "idle",              # blank — waiting
-        "screenshot_cal",    # orange square at viewport (100, 200) for pre-cal
-        "center",            # orange circle at screen center
-        "markers",           # blue UP + red RIGHT labels for camera orientation
-        "corners",           # RGBM squares at phone-screen corners (auto-pick)
-        "grid",              # 15 red dots at known viewport positions
-        "dot",               # single orange dot at a given (x, y) in 0-1
-        "assistive_touch",   # AT circle + grey nonce grid
+        "idle",  # blank — waiting
+        "screenshot_cal",  # orange square at viewport (100, 200) for pre-cal
+        "center",  # orange circle at screen center
+        "markers",  # blue UP + red RIGHT labels for camera orientation
+        "corners",  # RGBM squares at phone-screen corners (auto-pick)
+        "grid",  # 15 red dots at known viewport positions
+        "dot",  # single orange dot at a given (x, y) in 0-1
+        "assistive_touch",  # AT circle + grey nonce grid
     }
 
     def __init__(self):
@@ -63,9 +63,7 @@ class CalibrationState:
         self.viewport_shift: ViewportShift | None = (
             None  # viewport→screenshot offset + DPR from pre-cal step
         )
-        self._screenshot_nonce: list[int] | None = (
-            None  # NONCE_COUNT bits for Step 7
-        )
+        self._screenshot_nonce: list[int] | None = None  # NONCE_COUNT bits for Step 7
 
     def set_phase(self, phase: str, **kwargs):
         """Set the calibration display phase.
@@ -124,9 +122,7 @@ class CalibrationState:
         """
         t = self.viewport_shift
         if t is None:
-            raise RuntimeError(
-                "Viewport shift not measured — run viewport-shift first"
-            )
+            raise RuntimeError("Viewport shift not measured — run viewport-shift first")
         return t.css_to_pct(client_x, client_y)
 
     def viewport_pct_to_screenshot_pct(

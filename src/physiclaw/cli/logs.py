@@ -8,6 +8,7 @@ sessions, so the per-session stream is the clean source). `--json` emits
 machine-readable output for scripting; `--save [DEST]` zips a session
 (with its format README) for backups or bug reports.
 """
+
 from __future__ import annotations
 
 import json
@@ -27,10 +28,12 @@ def logs(
         ),
     ] = None,
     n: Annotated[
-        int, typer.Option("-n", help="Sessions to list / narrative lines to show."),
+        int,
+        typer.Option("-n", help="Sessions to list / narrative lines to show."),
     ] = 20,
     as_json: Annotated[
-        bool, typer.Option("--json", help="Machine-readable output."),
+        bool,
+        typer.Option("--json", help="Machine-readable output."),
     ] = False,
     save: Annotated[
         bool,
@@ -60,7 +63,9 @@ def logs(
     elif dest is not None:
         # A destination without --save is a forgotten flag, not a request
         # for the detail view — refuse rather than silently ignore it.
-        typer.echo(warn(f"a destination needs --save: physiclaw logs {sid} --save {dest}"))
+        typer.echo(
+            warn(f"a destination needs --save: physiclaw logs {sid} --save {dest}")
+        )
         raise typer.Exit(1)
     else:
         _show_session(_resolve(sessions_dir, sid), n=n, as_json=as_json)
@@ -75,8 +80,7 @@ def _resolve(sessions_dir: Path, query: str) -> Path:
         return exact
     try:
         matches = sorted(
-            d for d in sessions_dir.iterdir()
-            if d.is_dir() and d.name.endswith(query)
+            d for d in sessions_dir.iterdir() if d.is_dir() and d.name.endswith(query)
         )
     except OSError:
         matches = []
@@ -103,14 +107,18 @@ def _load_summary(d: Path) -> dict[str, Any] | None:
 def _stub_summary(d: Path) -> dict[str, Any]:
     """Row for a session dir without a summary.json (hard-killed session
     or one still running) — visible rather than silently missing."""
-    return {"sid": d.name, "outcome": {"sentinel": "?", "recap": "(no summary — killed or still running)"}}
+    return {
+        "sid": d.name,
+        "outcome": {"sentinel": "?", "recap": "(no summary — killed or still running)"},
+    }
 
 
 def _collect(sessions_dir: Path, n: int) -> list[dict[str, Any]]:
     try:
         dirs = sorted(
             (d for d in sessions_dir.iterdir() if d.is_dir()),
-            key=lambda d: d.name, reverse=True,
+            key=lambda d: d.name,
+            reverse=True,
         )
     except OSError:
         dirs = []
@@ -123,8 +131,12 @@ def _list_sessions(sessions_dir: Path, *, n: int, as_json: bool) -> None:
         typer.echo(json.dumps(summaries, ensure_ascii=False, indent=2))
         return
     if not summaries:
-        typer.echo(info("no sessions yet — logs appear under "
-                        f"{sessions_dir} after the first agent wake"))
+        typer.echo(
+            info(
+                "no sessions yet — logs appear under "
+                f"{sessions_dir} after the first agent wake"
+            )
+        )
         return
     typer.echo(section(f"Sessions ({len(summaries)} most recent)"))
     typer.echo(
@@ -138,14 +150,15 @@ def _list_sessions(sessions_dir: Path, *, n: int, as_json: bool) -> None:
 def _row(s: dict[str, Any]) -> str:
     from physiclaw.agent.engine.trace import brief, fmt_tokens
 
-    outcome = (s.get("outcome") or {})
+    outcome = s.get("outcome") or {}
     sentinel = outcome.get("sentinel") or "?"
     if outcome.get("crashed"):
         sentinel = "CRASH"
     u = s.get("usage") or {}
     tokens = (
         f"{fmt_tokens(u['input_tokens'])}/{fmt_tokens(u['output_tokens'])}"
-        if u else "-"
+        if u
+        else "-"
     )
     cache = f"{u['cache_hit_pct']:.0f}%" if u else "-"
     dur = f"{s['duration_s']:.0f}s" if "duration_s" in s else "-"
@@ -191,11 +204,15 @@ def _save_session(d: Path, dest: Path | None) -> None:
 
     from physiclaw.cli._format import ok
 
-    typer.echo(ok(f"saved {len(files)} file(s) ({images} screenshots, "
-                  f"{size_kb:.0f} KB) → {out}"))
-    typer.echo(warn(
-        "PRIVATE: phone screenshots + full prompts inside — review before sharing"
-    ))
+    typer.echo(
+        ok(
+            f"saved {len(files)} file(s) ({images} screenshots, "
+            f"{size_kb:.0f} KB) → {out}"
+        )
+    )
+    typer.echo(
+        warn("PRIVATE: phone screenshots + full prompts inside — review before sharing")
+    )
 
 
 # ---------- detail mode ----------
@@ -207,7 +224,9 @@ def _show_session(d: Path, *, n: int, as_json: bool) -> None:
         raise typer.Exit(1)
     summary = _load_summary(d)
     if as_json:
-        typer.echo(json.dumps(summary or _stub_summary(d), ensure_ascii=False, indent=2))
+        typer.echo(
+            json.dumps(summary or _stub_summary(d), ensure_ascii=False, indent=2)
+        )
         return
     if summary is not None:
         typer.echo(section(f"Session {d.name}"))
@@ -240,6 +259,6 @@ def _echo_narrative(events_path: Path, n: int) -> None:
         except json.JSONDecodeError:
             continue
         stamp = str(event.pop("t", ""))[11:19]  # popped: the line carries it,
-        msg = summarize_event(event)            # and fallback repr would echo it
+        msg = summarize_event(event)  # and fallback repr would echo it
         if msg is not None:
             typer.echo(f"  [{stamp}] {msg}")

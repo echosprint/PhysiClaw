@@ -18,7 +18,9 @@ from physiclaw.core.vision.preprocess import grayscale
 
 log = logging.getLogger(__name__)
 
-_ROTATION_DEBUG_PATH = str(Path(tempfile.gettempdir()) / "physiclaw_camera_rotation.jpg")
+_ROTATION_DEBUG_PATH = str(
+    Path(tempfile.gettempdir()) / "physiclaw_camera_rotation.jpg"
+)
 
 
 def encode_jpeg(frame: np.ndarray, quality: int = 85) -> bytes:

@@ -4,6 +4,7 @@ These run on every platform: subprocess, socket, and os.startfile are
 mocked, so the windows module's dispatch logic is exercised regardless
 of where the suite is run.
 """
+
 from __future__ import annotations
 
 import socket

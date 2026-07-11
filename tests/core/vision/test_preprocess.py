@@ -1,4 +1,5 @@
 """Tests for `physiclaw.core.vision.preprocess` — shared frame stages."""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -124,9 +125,7 @@ def test_phone_screen_crop_box_returns_none_when_transforms_missing() -> None:
 
 def test_phone_screen_crop_box_returns_clamped_box_for_in_bounds_rect() -> None:
     frame = np.zeros((600, 800, 3), dtype=np.uint8)
-    transforms = SimpleNamespace(
-        bbox_to_pixel_rect=lambda b: ((100, 80), (700, 520))
-    )
+    transforms = SimpleNamespace(bbox_to_pixel_rect=lambda b: ((100, 80), (700, 520)))
 
     out = phone_screen_crop_box(frame, transforms)
 
@@ -136,9 +135,7 @@ def test_phone_screen_crop_box_returns_clamped_box_for_in_bounds_rect() -> None:
 def test_phone_screen_crop_box_clamps_box_to_frame_bounds() -> None:
     frame = np.zeros((600, 800, 3), dtype=np.uint8)
     # tl beyond top-left, br beyond bottom-right.
-    transforms = SimpleNamespace(
-        bbox_to_pixel_rect=lambda b: ((-50, -30), (900, 700))
-    )
+    transforms = SimpleNamespace(bbox_to_pixel_rect=lambda b: ((-50, -30), (900, 700)))
 
     out = phone_screen_crop_box(frame, transforms)
 
@@ -148,9 +145,7 @@ def test_phone_screen_crop_box_clamps_box_to_frame_bounds() -> None:
 def test_phone_screen_crop_box_returns_none_for_degenerate_rect() -> None:
     frame = np.zeros((600, 800, 3), dtype=np.uint8)
     # Both corners at the same point — zero area after clamping.
-    transforms = SimpleNamespace(
-        bbox_to_pixel_rect=lambda b: ((100, 100), (100, 100))
-    )
+    transforms = SimpleNamespace(bbox_to_pixel_rect=lambda b: ((100, 100), (100, 100)))
 
     assert phone_screen_crop_box(frame, transforms) is None
 
@@ -158,9 +153,7 @@ def test_phone_screen_crop_box_returns_none_for_degenerate_rect() -> None:
 def test_phone_screen_crop_box_handles_inverted_corners() -> None:
     frame = np.zeros((600, 800, 3), dtype=np.uint8)
     # Coords swapped: br listed first conceptually.
-    transforms = SimpleNamespace(
-        bbox_to_pixel_rect=lambda b: ((700, 520), (100, 80))
-    )
+    transforms = SimpleNamespace(bbox_to_pixel_rect=lambda b: ((700, 520), (100, 80)))
 
     out = phone_screen_crop_box(frame, transforms)
 
@@ -180,9 +173,7 @@ def test_crop_to_phone_screen_returns_frame_unchanged_when_transforms_none() -> 
 
 def test_crop_to_phone_screen_returns_cropped_region_when_box_fits() -> None:
     frame = np.zeros((480, 640, 3), dtype=np.uint8)
-    transforms = SimpleNamespace(
-        bbox_to_pixel_rect=lambda b: ((100, 80), (300, 200))
-    )
+    transforms = SimpleNamespace(bbox_to_pixel_rect=lambda b: ((100, 80), (300, 200)))
 
     out = crop_to_phone_screen(frame, transforms, max_long_edge=1024)
 
@@ -191,9 +182,7 @@ def test_crop_to_phone_screen_returns_cropped_region_when_box_fits() -> None:
 
 def test_crop_to_phone_screen_downscales_when_long_edge_exceeds_cap() -> None:
     frame = np.zeros((900, 700, 3), dtype=np.uint8)
-    transforms = SimpleNamespace(
-        bbox_to_pixel_rect=lambda b: ((0, 0), (700, 900))
-    )
+    transforms = SimpleNamespace(bbox_to_pixel_rect=lambda b: ((0, 0), (700, 900)))
 
     out = crop_to_phone_screen(frame, transforms, max_long_edge=400)
 

@@ -84,9 +84,7 @@ class BridgeState:
         """
         return time.time() - self.last_seen < 0.5
 
-    def wait_for_connection(
-        self, timeout: float, settle_seconds: float = 1.0
-    ) -> bool:
+    def wait_for_connection(self, timeout: float, settle_seconds: float = 1.0) -> bool:
         """Block until the phone has been polling steadily for
         `settle_seconds` continuously, or `timeout` elapses.
 

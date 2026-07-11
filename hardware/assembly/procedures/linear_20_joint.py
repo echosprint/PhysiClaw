@@ -68,11 +68,11 @@ from hardware.parts.custom.xy_joint_left import (
 from hardware.parts.custom.xy_joint_right import XyJointRight
 from hardware.parts.standard.screw import FHCS_DIMS, Screw, head_skirt
 
-FHCS_LENGTH   = 10    # mm — M3 FHCS overall length
-JOINT_EXPLODE = 30    # mm — exploded: joint lifted outboard along world -Y
-SCREW_EXPLODE = 25    # mm — exploded: FHCS lifted above its CSK pocket along
-                      #      joint native +Z (mapped to world -Y by the
-                      #      placement plane), so the install path reads clearly
+FHCS_LENGTH = 10  # mm — M3 FHCS overall length
+JOINT_EXPLODE = 30  # mm — exploded: joint lifted outboard along world -Y
+SCREW_EXPLODE = 25  # mm — exploded: FHCS lifted above its CSK pocket along
+#      joint native +Z (mapped to world -Y by the
+#      placement plane), so the install path reads clearly
 
 
 def _csk_positions(mirrored: bool) -> list[tuple[float, float]]:
@@ -96,6 +96,7 @@ def _csk_positions(mirrored: bool) -> list[tuple[float, float]]:
 
 class LI20Joint(BaseAssembly):
     camera = [MAIN_FRAME_VIEW, Camera(-69.27, 20.49, -97.29)]
+
     def _build(self) -> Compound:
         self.base = LI11Y(exploded=False)
         base_compound = self.base.build()
@@ -105,15 +106,14 @@ class LI20Joint(BaseAssembly):
         # thickness/2 - head_height. Exploded mode lifts the screw
         # further along native +Z so it floats above the CSK pocket.
         fhcs_head_height = FHCS_DIMS["M3"]["k"] + head_skirt
-        screw_z_seated   = joint_thickness / 2 - fhcs_head_height
-        screw_z = (screw_z_seated + SCREW_EXPLODE
-                   if self.exploded else screw_z_seated)
+        screw_z_seated = joint_thickness / 2 - fhcs_head_height
+        screw_z = screw_z_seated + SCREW_EXPLODE if self.exploded else screw_z_seated
 
         # Feature positions in the part-native frame of XyJointLeft. The
         # same points in XyJointRight have their X mirrored — handled
         # inside native_to_world below.
-        big_csk_native_left     = (big_csk_x, big_csk_y)
-        extra_hole_native_left  = (extra_hole_x, extra_hole_y)
+        big_csk_native_left = (big_csk_x, big_csk_y)
+        extra_hole_native_left = (extra_hole_x, extra_hole_y)
         extra_hole2_native_left = (extra_hole2_x, extra_hole2_y)
 
         # Front-pocket center in native — pocket spans native Y =
@@ -129,10 +129,12 @@ class LI20Joint(BaseAssembly):
         # edge, offset inward by depth/2 along -slant_z_dir. Native Z =
         # pocket_face_y (same as the front pocket).
         slant_pocket_native_left = (
-            slant_origin.X + slant_pocket_face_x * slant_x_dir.X
-                - (slant_pocket_depth / 2) * slant_z_dir.X,
-            slant_origin.Y + slant_pocket_face_x * slant_x_dir.Y
-                - (slant_pocket_depth / 2) * slant_z_dir.Y,
+            slant_origin.X
+            + slant_pocket_face_x * slant_x_dir.X
+            - (slant_pocket_depth / 2) * slant_z_dir.X,
+            slant_origin.Y
+            + slant_pocket_face_x * slant_x_dir.Y
+            - (slant_pocket_depth / 2) * slant_z_dir.Y,
             pocket_face_y,
         )
 
@@ -151,20 +153,20 @@ class LI20Joint(BaseAssembly):
         # Plus world (dx, dy, dz) per joint of the slant face frame:
         #   * slant_x_dir_worlds          — direction along the slant edge
         #   * slant_z_dir_worlds          — slant face outward normal
-        self.big_csk_world_centers       = []
-        self.extra_hole_world_centers    = []
-        self.extra_hole2_world_centers   = []
-        self.front_pocket_world_centers  = []
-        self.slant_pocket_world_centers  = []
-        self.slant_x_dir_worlds          = []
-        self.slant_z_dir_worlds          = []
+        self.big_csk_world_centers = []
+        self.extra_hole_world_centers = []
+        self.extra_hole2_world_centers = []
+        self.front_pocket_world_centers = []
+        self.slant_pocket_world_centers = []
+        self.slant_x_dir_worlds = []
+        self.slant_z_dir_worlds = []
         # LEFT slider (index 0) gets XyJointRight; RIGHT slider gets
         # XyJointLeft — the joints are swapped (and 180° spun via
         # x_dir below) so their cutout / slant features land on the
         # correct frame side once installed.
         for slider_center, joint_cls, mirrored in (
             (self.base.slider_mount_centers[0], XyJointRight, True),
-            (self.base.slider_mount_centers[1], XyJointLeft,  False),
+            (self.base.slider_mount_centers[1], XyJointLeft, False),
         ):
             csk_positions = _csk_positions(mirrored)
             # In-part hole-grid center — used to compute the placement
@@ -173,9 +175,7 @@ class LI20Joint(BaseAssembly):
             grid_center_y = sum(p[1] for p in csk_positions) / 4
 
             joint = joint_cls().build()
-            screws = [
-                Screw("FHCS", "M3", FHCS_LENGTH).build() for _ in range(4)
-            ]
+            screws = [Screw("FHCS", "M3", FHCS_LENGTH).build() for _ in range(4)]
             for screw, (px, py) in zip(screws, csk_positions):
                 screw.move(Location((px, py, screw_z)))
             joint_compound = Compound(
@@ -200,11 +200,15 @@ class LI20Joint(BaseAssembly):
                 origin_y -= JOINT_EXPLODE
             origin_z = sz + grid_center_y
 
-            joint_compound.move(Location(Plane(
-                origin=(origin_x, origin_y, origin_z),
-                x_dir=(-1, 0, 0),   # joint native +X → world -X (180° Z spin)
-                z_dir=(0, -1, 0),   # joint native +Z (top) → world -Y (outboard)
-            )))
+            joint_compound.move(
+                Location(
+                    Plane(
+                        origin=(origin_x, origin_y, origin_z),
+                        x_dir=(-1, 0, 0),  # joint native +X → world -X (180° Z spin)
+                        z_dir=(0, -1, 0),  # joint native +Z (top) → world -Y (outboard)
+                    )
+                )
+            )
             joints.append(joint_compound)
 
             # Feature centers in world — placement plane maps native
@@ -222,9 +226,7 @@ class LI20Joint(BaseAssembly):
                     dx = -dx
                 return (-dx, -dz, -dy)
 
-            self.big_csk_world_centers.append(
-                native_to_world(*big_csk_native_left, 0)
-            )
+            self.big_csk_world_centers.append(native_to_world(*big_csk_native_left, 0))
             self.extra_hole_world_centers.append(
                 native_to_world(*extra_hole_native_left, joint_thickness / 2)
             )

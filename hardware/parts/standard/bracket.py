@@ -3,13 +3,13 @@ from build123d import *
 from hardware.parts.base import BaseStandardPart
 
 # ── FlatBracket parameters ────────────────────────────────────────────────────
-flat_plate_width   = 40 * MM    # W, along X
-flat_plate_height  = 18 * MM    # H, along Y
-flat_plate_thick   =  4 * MM    # T, along Z
+flat_plate_width = 40 * MM  # W, along X
+flat_plate_height = 18 * MM  # H, along Y
+flat_plate_thick = 4 * MM  # T, along Z
 
 # Two inline through-holes along W, centered in H.
 flat_hole_diameter = 5.5 * MM
-flat_hole_spacing  = 20  * MM   # center-to-center
+flat_hole_spacing = 20 * MM  # center-to-center
 
 
 # ── MotorBracket parameters ───────────────────────────────────────────────────
@@ -17,23 +17,23 @@ flat_hole_spacing  = 20  * MM   # center-to-center
 # offset 20 mm from the LEFT (-X) edge, centered in Y. The four M3
 # mounting holes sit at the corners of a 31 mm square (NEMA 17 bolt
 # pattern), centered on the shaft hole.
-motor_plate_length = 60   * MM    # along X
-motor_plate_width  = 42   * MM    # along Y
-motor_plate_thick  =  3 * MM    # along Z
+motor_plate_length = 60 * MM  # along X
+motor_plate_width = 42 * MM  # along Y
+motor_plate_thick = 3 * MM  # along Z
 
-motor_shaft_d        = 25 * MM    # shaft / pilot pass-through
-motor_shaft_x_offset = 20 * MM    # shaft hole center, from -X (left) edge
+motor_shaft_d = 25 * MM  # shaft / pilot pass-through
+motor_shaft_x_offset = 20 * MM  # shaft hole center, from -X (left) edge
 
-motor_mount_hole_d = 3.3 * MM     # M3 clearance
-motor_mount_pitch  = 31  * MM     # NEMA 17 square pattern, corner-to-corner
+motor_mount_hole_d = 3.3 * MM  # M3 clearance
+motor_mount_pitch = 31 * MM  # NEMA 17 square pattern, corner-to-corner
 
 # Two M5 clearance holes inset from the +X (right) edge, aligned along
 # Y with 25 mm pitch and centered top-to-bottom.
-motor_m5_hole_d   = 5.5 * MM      # M5 clearance
-motor_m5_x_inset  = 8  * MM      # from +X (right) edge
-motor_m5_pitch    = 25  * MM      # center-to-center, along Y
+motor_m5_hole_d = 5.5 * MM  # M5 clearance
+motor_m5_x_inset = 8 * MM  # from +X (right) edge
+motor_m5_pitch = 25 * MM  # center-to-center, along Y
 
-motor_corner_fillet = 3 * MM      # the four Z-parallel outer corners
+motor_corner_fillet = 3 * MM  # the four Z-parallel outer corners
 
 
 # ── CornerBracket parameters ──────────────────────────────────────────────────
@@ -43,13 +43,15 @@ motor_corner_fillet = 3 * MM      # the four Z-parallel outer corners
 # extends corner_face_depth out from the bend — the horizontal face in +X
 # (z 0..thickness), the vertical face in +Z (x 0..thickness). Each face carries
 # one through-hole centered on the face (mid-bend, mid-depth).
-corner_bend_length = 26  * MM    # the connection edge, along Y
-corner_face_depth  = 30  * MM    # how far each face reaches out from the bend
-corner_thickness   =  4  * MM    # plate thickness
-corner_hole_d      = 6.5 * MM    # one through-hole per face, centered
-corner_bend_fillet =  4  * MM    # inner bend radius on the concave corner (x=t, z=t)
-corner_end_fillet  =  2  * MM    # round on the two inner free-end edges (x=d, z=t) and (x=t, z=d)
-corner_edge_tol    = 1e-3        # fuzz for matching the inner edges by center
+corner_bend_length = 26 * MM  # the connection edge, along Y
+corner_face_depth = 30 * MM  # how far each face reaches out from the bend
+corner_thickness = 4 * MM  # plate thickness
+corner_hole_d = 6.5 * MM  # one through-hole per face, centered
+corner_bend_fillet = 4 * MM  # inner bend radius on the concave corner (x=t, z=t)
+corner_end_fillet = (
+    2 * MM
+)  # round on the two inner free-end edges (x=d, z=t) and (x=t, z=d)
+corner_edge_tol = 1e-3  # fuzz for matching the inner edges by center
 
 
 # ── Geometry ──────────────────────────────────────────────────────────────────
@@ -86,7 +88,7 @@ class MotorBracket(BaseStandardPart):
         # at the user-spec'd 20 mm. M5 pair offset in +X from center
         # so the inset measures from the right edge.
         shaft_x = -motor_plate_length / 2 + motor_shaft_x_offset
-        m5_x    =  motor_plate_length / 2 - motor_m5_x_inset
+        m5_x = motor_plate_length / 2 - motor_m5_x_inset
         with BuildPart() as p:
             Box(motor_plate_length, motor_plate_width, motor_plate_thick)
             with Locations((shaft_x, 0, motor_plate_thick / 2)):
@@ -144,11 +146,15 @@ class CornerBracket(BaseStandardPart):
             # they sit on the 4 mm arms and can't carry the full bend radius.
             def y_edges_at(*centers):
                 return [
-                    e for e in p.edges().filter_by(Axis.Y)
-                    if any(abs(e.center().X - cx) < corner_edge_tol
-                           and abs(e.center().Z - cz) < corner_edge_tol
-                           for cx, cz in centers)
+                    e
+                    for e in p.edges().filter_by(Axis.Y)
+                    if any(
+                        abs(e.center().X - cx) < corner_edge_tol
+                        and abs(e.center().Z - cz) < corner_edge_tol
+                        for cx, cz in centers
+                    )
                 ]
+
             fillet(y_edges_at((t, t)), radius=corner_bend_fillet)
             # re-query: the bend fillet rebuilt the solid
             fillet(y_edges_at((d, t), (t, d)), radius=corner_end_fillet)

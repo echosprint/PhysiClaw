@@ -7,6 +7,7 @@ adapter. Per-element constraints (left < right, top < bottom) live in
 `agent/engine/validator.py` and `core/vision/util.validate_bbox` —
 those are tested separately.
 """
+
 from __future__ import annotations
 
 import pytest

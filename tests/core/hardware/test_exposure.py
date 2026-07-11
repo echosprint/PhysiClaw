@@ -1,4 +1,5 @@
 """Tests for `physiclaw.core.hardware.exposure` — the convergence loop."""
+
 from __future__ import annotations
 
 from physiclaw.core.hardware import exposure
@@ -56,7 +57,10 @@ def test_ae_reassert_recovers_without_manual() -> None:
     rig = Rig(GOOD, {})
 
     res = converge(
-        lambda: next(reports), rig.set_auto, rig.set_manual, start=-6,
+        lambda: next(reports),
+        rig.set_auto,
+        rig.set_manual,
+        start=-6,
     )
 
     assert res.ok and res.mode == "auto"
@@ -104,7 +108,10 @@ def test_meter_losing_frames_mid_stepping_fails_open() -> None:
     rig = Rig(BLOWN, {})
 
     res = converge(
-        lambda: next(reports), rig.set_auto, rig.set_manual, start=-6,
+        lambda: next(reports),
+        rig.set_auto,
+        rig.set_manual,
+        start=-6,
     )
 
     assert not res.ok and res.mode == "auto"
@@ -122,15 +129,15 @@ def test_start_is_clamped_into_range() -> None:
 def test_range_exhaustion_reverts_to_auto() -> None:
     # Every step measures darker but stays blown; from MIN_EXPOSURE the
     # next darker step clamps to itself → range exhausted → auto.
-    luma = {
-        e: _r(150.0 + 5 * e, clip=0.3)
-        for e in range(exposure.MIN_EXPOSURE, -5)
-    }
+    luma = {e: _r(150.0 + 5 * e, clip=0.3) for e in range(exposure.MIN_EXPOSURE, -5)}
     rig = Rig(BLOWN, luma)
 
     res = converge(
-        rig.meter, rig.set_auto, rig.set_manual,
-        start=-6, max_steps=20,
+        rig.meter,
+        rig.set_auto,
+        rig.set_manual,
+        start=-6,
+        max_steps=20,
     )
 
     assert not res.ok and res.mode == "auto"
@@ -141,12 +148,15 @@ def test_range_exhaustion_reverts_to_auto() -> None:
 def test_prefer_auto_false_skips_reassert_and_keeps_best_manual() -> None:
     # User pinned manual in config: no AE re-assert, and on failure the
     # best (darkest non-blown) step is held instead of reverting.
-    rig = Rig(BLOWN, {-6: _r(190.0, clip=0.2), -7: _r(185.0, clip=0.2),
-                      -8: _r(15.0)})
+    rig = Rig(BLOWN, {-6: _r(190.0, clip=0.2), -7: _r(185.0, clip=0.2), -8: _r(15.0)})
 
     res = converge(
-        rig.meter, rig.set_auto, rig.set_manual,
-        start=-6, max_steps=3, prefer_auto=False,
+        rig.meter,
+        rig.set_auto,
+        rig.set_manual,
+        start=-6,
+        max_steps=3,
+        prefer_auto=False,
     )
 
     assert not res.ok and res.mode == "manual" and res.exposure == -8
@@ -155,11 +165,17 @@ def test_prefer_auto_false_skips_reassert_and_keeps_best_manual() -> None:
 
 
 def test_max_steps_bounds_the_search() -> None:
-    rig = Rig(BLOWN, {-6: _r(190.0, clip=0.2), -7: _r(185.0, clip=0.2),
-                      -8: _r(180.0, clip=0.2)})
+    rig = Rig(
+        BLOWN,
+        {-6: _r(190.0, clip=0.2), -7: _r(185.0, clip=0.2), -8: _r(180.0, clip=0.2)},
+    )
 
     res = converge(
-        rig.meter, rig.set_auto, rig.set_manual, start=-6, max_steps=3,
+        rig.meter,
+        rig.set_auto,
+        rig.set_manual,
+        start=-6,
+        max_steps=3,
     )
 
     assert len(rig.manual_calls) == 3

@@ -71,9 +71,7 @@ class Runtime:
             returns, so a slow reaction naturally throttles the loop.
     """
 
-    def __init__(
-        self, react: React, *, interval: float = 1.0, label: str = ""
-    ):
+    def __init__(self, react: React, *, interval: float = 1.0, label: str = ""):
         self.react = react
         self.interval = interval
         # human-readable engine/provider tag, surfaced in ready logs so the

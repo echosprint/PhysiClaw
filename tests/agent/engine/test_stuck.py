@@ -1,4 +1,5 @@
 """Tests for `physiclaw.agent.engine.stuck` — the same-target press guard."""
+
 from __future__ import annotations
 
 import pytest
@@ -133,7 +134,9 @@ def test_non_gesture_tools_ignored(tool: str) -> None:
 def test_learned_keyboard_keys_exempt(mocker) -> None:
     backspace = [0.864, 0.804, 0.986, 0.856]
     mocker.patch.object(
-        stuck.screen_layout, "repeatable_key_boxes", return_value=[backspace],
+        stuck.screen_layout,
+        "repeatable_key_boxes",
+        return_value=[backspace],
     )
     g = StuckGuard()
     for _ in range(20):
@@ -153,10 +156,12 @@ def test_malformed_bbox_ignored() -> None:
 
 def test_sequence_press_steps_counted() -> None:
     g = _guard()
-    args = {"actions": [
-        {"tool_name": "tap", "arg": BOX},
-        {"tool_name": "send_to_clipboard", "arg": "hello"},
-    ]}
+    args = {
+        "actions": [
+            {"tool_name": "tap", "arg": BOX},
+            {"tool_name": "send_to_clipboard", "arg": "hello"},
+        ]
+    }
     for _ in range(BLOCK_AT - 1):
         g.record("sequence", args, False)
     # The exhausted target blocks the whole batch that includes it...
@@ -284,7 +289,9 @@ def test_pingpong_exempt_keyboard_keys_never_tracked(mocker) -> None:
     key_a = [0.100, 0.800, 0.160, 0.860]
     key_b = [0.300, 0.800, 0.360, 0.860]
     mocker.patch.object(
-        stuck.screen_layout, "repeatable_key_boxes", return_value=[key_a, key_b],
+        stuck.screen_layout,
+        "repeatable_key_boxes",
+        return_value=[key_a, key_b],
     )
     g = StuckGuard()
     for _ in range(10):
@@ -333,7 +340,7 @@ def test_period3_distinct_content_not_flagged() -> None:
     for i in range(8):
         item = [0.1, 0.06 * i, 0.2, 0.06 * i + 0.05]
         _pp(g, item)
-        _pp(g, BOX_B)          # "add to cart" button, same every round
+        _pp(g, BOX_B)  # "add to cart" button, same every round
         g.record("go_back", {}, True)
     assert g.should_block("go_back", {}) is None
 
@@ -382,12 +389,12 @@ def test_orbit_warns_on_fifth_same_pos_press_mixed_everything() -> None:
     # 5 of the last 10 presses on one spot — across gesture types,
     # verdicts, errors, and interleaved other targets — must warn.
     g = _guard()
-    g.record("tap", {"bbox": BOX}, True)            # 1: changed
-    g.record("tap", {"bbox": FAR_BOX}, True)        # other spot
-    g.record("double_tap", {"bbox": BOX}, False)    # 2: no change
-    g.record_error("long_press", {"bbox": BOX})     # 3: raised
-    g.record("tap", {"bbox": FAR_BOX}, True)        # other spot
-    g.record("tap", {"bbox": BOX}, True)            # 4: changed
+    g.record("tap", {"bbox": BOX}, True)  # 1: changed
+    g.record("tap", {"bbox": FAR_BOX}, True)  # other spot
+    g.record("double_tap", {"bbox": BOX}, False)  # 2: no change
+    g.record_error("long_press", {"bbox": BOX})  # 3: raised
+    g.record("tap", {"bbox": FAR_BOX}, True)  # other spot
+    g.record("tap", {"bbox": BOX}, True)  # 4: changed
     warning = g.record("tap", {"bbox": NEAR_BOX}, True)  # 5: jittered
 
     assert warning is not None and "same spot" in warning
@@ -440,7 +447,8 @@ def test_orbit_exempt_keys_never_tracked(mocker) -> None:
     ret = [0.749, 0.864, 0.987, 0.916]
     space = [0.256, 0.865, 0.742, 0.916]
     mocker.patch.object(
-        stuck.screen_layout, "repeatable_key_boxes",
+        stuck.screen_layout,
+        "repeatable_key_boxes",
         return_value=[backspace, ret, space],
     )
     g = StuckGuard()

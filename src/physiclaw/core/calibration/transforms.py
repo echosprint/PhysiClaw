@@ -103,9 +103,7 @@ class ScreenTransforms:
         elif direction == "right":
             ex, ey = cx + dist, cy
         else:
-            raise ValueError(
-                f"direction must be up/down/left/right, got {direction!r}"
-            )
+            raise ValueError(f"direction must be up/down/left/right, got {direction!r}")
         return (max(0.0, min(1.0, ex)), max(0.0, min(1.0, ey)))
 
     def pct_to_grbl_mm(self, x: float, y: float) -> tuple[float, float]:

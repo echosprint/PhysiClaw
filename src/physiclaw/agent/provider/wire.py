@@ -24,6 +24,7 @@ respective provider — they MUST NOT appear in the assistant content
 that gets re-serialized back to wire on the next turn (would break the
 prefix cache and confuse the model).
 """
+
 import base64
 import json
 import logging
@@ -52,8 +53,10 @@ def tool_to_wire(tool: dict) -> dict:
         "function": {
             "name": tool["name"],
             "description": tool.get("description", ""),
-            "parameters": tool.get("input_schema") or {
-                "type": "object", "properties": {},
+            "parameters": tool.get("input_schema")
+            or {
+                "type": "object",
+                "properties": {},
             },
         },
     }

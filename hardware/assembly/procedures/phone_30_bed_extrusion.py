@@ -35,7 +35,7 @@ from hardware.assembly.procedures.phone_20_bed_tnut import PH20BedTnut
 from hardware.assembly.projection import FRONT_LEFT_HIGH, Camera
 from hardware.parts.custom.phone_bed import ear_y_center
 
-BED_EXPLODE = 40    # mm — exploded: bed assembly lifted off the beams in +Z
+BED_EXPLODE = 40  # mm — exploded: bed assembly lifted off the beams in +Z
 
 
 class PH30BedExtrusion(BaseAssembly):

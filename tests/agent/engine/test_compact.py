@@ -10,6 +10,7 @@ Covers:
   - small helpers: _content_to_text, _has_image, _stub_body,
     _format_artifact_text, _carry_items, _render_slot
 """
+
 from __future__ import annotations
 
 
@@ -82,7 +83,9 @@ def test_new_memory_placeholder_pre_populates_when_logs_present(
     from physiclaw.agent.engine import memory
 
     monkeypatch.setattr(
-        memory, "load_recent_entries", lambda n: "[2026-04-28 09:00] hi",
+        memory,
+        "load_recent_entries",
+        lambda n: "[2026-04-28 09:00] hi",
     )
     monkeypatch.setattr(memory, "BOOTSTRAP_LOG_ENTRIES", 3)
 
@@ -118,7 +121,10 @@ def test_carry_items_extracts_items_separated_by_newline() -> None:
 def test_carry_items_handles_double_newline_separator() -> None:
     body = f"{MEMORY_HEADER}\nfirst entry\n\nsecond entry"
 
-    assert _carry_items(body, MEMORY_HEADER, sep="\n\n") == ["first entry", "second entry"]
+    assert _carry_items(body, MEMORY_HEADER, sep="\n\n") == [
+        "first entry",
+        "second entry",
+    ]
 
 
 def test_render_slot_with_items() -> None:
@@ -164,9 +170,7 @@ def test_content_to_text_first_text_block_in_multipart() -> None:
 
 
 def test_content_to_text_returns_empty_when_no_text_block_in_list() -> None:
-    out = _content_to_text(
-        [ImageBlock(media_type="image/jpeg", data_b64="aGk=")]
-    )
+    out = _content_to_text([ImageBlock(media_type="image/jpeg", data_b64="aGk=")])
 
     assert out == ""
 
@@ -176,9 +180,12 @@ def test_has_image_false_for_string() -> None:
 
 
 def test_has_image_true_when_image_block_present() -> None:
-    assert _has_image(
-        [TextBlock(text="x"), ImageBlock(media_type="image/jpeg", data_b64="a")]
-    ) is True
+    assert (
+        _has_image(
+            [TextBlock(text="x"), ImageBlock(media_type="image/jpeg", data_b64="a")]
+        )
+        is True
+    )
 
 
 def test_has_image_false_when_only_text_blocks() -> None:
@@ -202,7 +209,7 @@ def test_stub_body_keeps_text_rows_drops_icon_rows() -> None:
     assert out == "Send"
     assert "[text]" not in out  # kind tag dropped
     assert "[icon]" not in out
-    assert "0.99" not in out    # confidence dropped
+    assert "0.99" not in out  # confidence dropped
     assert "0.5,0.8" not in out  # bbox dropped
 
 
@@ -219,11 +226,11 @@ def test_stub_body_keeps_action_text_and_verdict() -> None:
     out = _stub_body(text)
 
     assert "screen: no visible change" in out  # retry history stays legible
-    assert "Add to Cart" in out                # label survives...
-    assert '"Add to Cart"' not in out          # ...but not the quoted-row form
+    assert "Add to Cart" in out  # label survives...
+    assert '"Add to Cart"' not in out  # ...but not the quoted-row form
     assert "[icon]" not in out
-    assert "0.99" not in out                   # confidence dropped
-    assert "0.5,0.8" not in out                # row bbox dropped
+    assert "0.99" not in out  # confidence dropped
+    assert "0.5,0.8" not in out  # row bbox dropped
 
 
 def test_stub_body_drops_header_when_no_text_rows_survive() -> None:
@@ -301,7 +308,9 @@ def test_scale_image_bytes_returns_input_on_decode_failure() -> None:
 # ---------- drop_stale_screens ----------
 
 
-def _peek_pair(listing: str = 'id [kind] "label" [left,top,right,bottom] conf') -> list[Message]:
+def _peek_pair(
+    listing: str = 'id [kind] "label" [left,top,right,bottom] conf',
+) -> list[Message]:
     """Build [asst-with-peek-call, tool_result-with-image]."""
     return [
         AssistantMessage(
@@ -312,9 +321,7 @@ def _peek_pair(listing: str = 'id [kind] "label" [left,top,right,bottom] conf') 
             ],
             finish_reason=FinishReason.TOOL_CALLS,
         ),
-        ToolResultMessage(
-            tool_call_id="t1", content="noted: x"
-        ),
+        ToolResultMessage(tool_call_id="t1", content="noted: x"),
         ToolResultMessage(
             tool_call_id="t2",
             content=[
@@ -375,7 +382,9 @@ def _gesture_pair(tcid: str = "g1") -> list[Message]:
             content="",
             tool_calls=[
                 ToolCall(id=f"{tcid}-n", name="note", arguments={"summary": "x"}),
-                ToolCall(id=tcid, name="tap", arguments={"bbox": [0.9, 0.5, 0.98, 0.56]}),
+                ToolCall(
+                    id=tcid, name="tap", arguments={"bbox": [0.9, 0.5, 0.98, 0.56]}
+                ),
             ],
             finish_reason=FinishReason.TOOL_CALLS,
         ),
@@ -409,8 +418,8 @@ def test_drop_stale_screens_stubs_gesture_view_keeps_latest_peek() -> None:
     assert stale.content.startswith("(superseded tap)")
     assert "labels only, in order" in stale.content  # reminder on the marker
     assert "screen: changed" in stale.content
-    assert "Add to Cart" in stale.content            # label survives (unquoted)
-    assert '"Add to Cart"' not in stale.content       # quoted-row form gone
+    assert "Add to Cart" in stale.content  # label survives (unquoted)
+    assert '"Add to Cart"' not in stale.content  # quoted-row form gone
     assert "[icon]" not in stale.content
     latest = msgs[6]
     assert isinstance(latest, ToolResultMessage)
@@ -427,7 +436,7 @@ def test_drop_stale_screens_gesture_after_gesture() -> None:
     drop_stale_screens(msgs)
 
     assert isinstance(msgs[3].content, str)  # older stubbed
-    assert _has_image(msgs[6].content)       # newest keeps its view
+    assert _has_image(msgs[6].content)  # newest keeps its view
 
 
 def test_drop_stale_screens_idempotent_on_second_pass() -> None:
@@ -454,8 +463,7 @@ def test_collapse_old_turns_warns_when_slots_missing(
         collapse_old_turns(msgs, first_at=10, interval=10, keep=5)
 
     assert any(
-        "missing summary/memory/skill slots" in r.getMessage()
-        for r in caplog.records
+        "missing summary/memory/skill slots" in r.getMessage() for r in caplog.records
     )
 
 
@@ -484,7 +492,9 @@ def _note_turn(summary: str) -> list[Message]:
         AssistantMessage(
             content="",
             tool_calls=[
-                ToolCall(id=f"t-{summary}", name="note", arguments={"summary": summary}),
+                ToolCall(
+                    id=f"t-{summary}", name="note", arguments={"summary": summary}
+                ),
             ],
             finish_reason=FinishReason.TOOL_CALLS,
         ),
@@ -516,11 +526,13 @@ def test_collapse_no_op_when_no_salvageable_content() -> None:
     """Many turns but none have note/memory/skill calls → no-op."""
     msgs = _scaffold_with_slots()
     for i in range(5):
-        msgs.append(AssistantMessage(
-            content="",
-            tool_calls=[ToolCall(id=f"t{i}", name="tap", arguments={})],
-            finish_reason=FinishReason.TOOL_CALLS,
-        ))
+        msgs.append(
+            AssistantMessage(
+                content="",
+                tool_calls=[ToolCall(id=f"t{i}", name="tap", arguments={})],
+                finish_reason=FinishReason.TOOL_CALLS,
+            )
+        )
         msgs.append(ToolResultMessage(tool_call_id=f"t{i}", content="ok"))
 
     snapshot = [(m.__class__, getattr(m, "content", None)) for m in msgs]
@@ -533,11 +545,15 @@ def test_collapse_no_op_when_no_salvageable_content() -> None:
 def test_collapse_harvests_memory_tool_results() -> None:
     msgs = _scaffold_with_slots()
     for i in range(3):
-        msgs.append(AssistantMessage(
-            content="",
-            tool_calls=[ToolCall(id=f"r{i}", name="read_memory", arguments={"key": f"k{i}"})],
-            finish_reason=FinishReason.TOOL_CALLS,
-        ))
+        msgs.append(
+            AssistantMessage(
+                content="",
+                tool_calls=[
+                    ToolCall(id=f"r{i}", name="read_memory", arguments={"key": f"k{i}"})
+                ],
+                finish_reason=FinishReason.TOOL_CALLS,
+            )
+        )
         msgs.append(ToolResultMessage(tool_call_id=f"r{i}", content=f"value-{i}"))
     msgs.extend(_note_turn("step-keep"))  # latest kept turn
 
@@ -554,11 +570,13 @@ def test_collapse_harvests_memory_tool_results() -> None:
 
 def test_collapse_harvests_skill_tool_results() -> None:
     msgs = _scaffold_with_slots()
-    msgs.append(AssistantMessage(
-        content="",
-        tool_calls=[ToolCall(id="s1", name="Skill", arguments={"name": "wechat"})],
-        finish_reason=FinishReason.TOOL_CALLS,
-    ))
+    msgs.append(
+        AssistantMessage(
+            content="",
+            tool_calls=[ToolCall(id="s1", name="Skill", arguments={"name": "wechat"})],
+            finish_reason=FinishReason.TOOL_CALLS,
+        )
+    )
     msgs.append(ToolResultMessage(tool_call_id="s1", content="WeChat workflow body"))
     for s in ("a", "b", "c"):
         msgs.extend(_note_turn(s))
@@ -594,14 +612,20 @@ def test_collapse_subsequent_collapse_uses_keep_plus_interval_threshold() -> Non
 
 def test_collapse_skips_when_artifact_result_is_error() -> None:
     msgs = _scaffold_with_slots()
-    msgs.append(AssistantMessage(
-        content="",
-        tool_calls=[ToolCall(id="s1", name="Skill", arguments={"name": "x"})],
-        finish_reason=FinishReason.TOOL_CALLS,
-    ))
-    msgs.append(ToolResultMessage(
-        tool_call_id="s1", content="oops", is_error=True,
-    ))
+    msgs.append(
+        AssistantMessage(
+            content="",
+            tool_calls=[ToolCall(id="s1", name="Skill", arguments={"name": "x"})],
+            finish_reason=FinishReason.TOOL_CALLS,
+        )
+    )
+    msgs.append(
+        ToolResultMessage(
+            tool_call_id="s1",
+            content="oops",
+            is_error=True,
+        )
+    )
     for s in ("a", "b", "c"):
         msgs.extend(_note_turn(s))
 
@@ -682,33 +706,67 @@ def test_stub_body_against_real_format_elements_output() -> None:
     through `_stub_body` so a formatter change breaks here, not in prod."""
     from physiclaw.core.vision.util import format_elements
 
-    listing = format_elements([
-        {"id": 0, "kind": "icon", "label": "", "bbox": [0.1, 0.1, 0.2, 0.2], "conf": 0.95},
-        {"id": 1, "kind": "text", "label": "加入购物车", "bbox": [0.5, 0.8, 0.6, 0.9], "conf": 0.99},
-        {"id": 2, "kind": "text", "label": 'He said "hi" [ok]', "bbox": [0.1, 0.3, 0.4, 0.35], "conf": 0.80},
-        {"id": 3, "kind": "icon", "label": "", "bbox": [0.7, 0.1, 0.8, 0.2], "conf": 0.90},
-    ])
+    listing = format_elements(
+        [
+            {
+                "id": 0,
+                "kind": "icon",
+                "label": "",
+                "bbox": [0.1, 0.1, 0.2, 0.2],
+                "conf": 0.95,
+            },
+            {
+                "id": 1,
+                "kind": "text",
+                "label": "加入购物车",
+                "bbox": [0.5, 0.8, 0.6, 0.9],
+                "conf": 0.99,
+            },
+            {
+                "id": 2,
+                "kind": "text",
+                "label": 'He said "hi" [ok]',
+                "bbox": [0.1, 0.3, 0.4, 0.35],
+                "conf": 0.80,
+            },
+            {
+                "id": 3,
+                "kind": "icon",
+                "label": "",
+                "bbox": [0.7, 0.1, 0.8, 0.2],
+                "conf": 0.90,
+            },
+        ]
+    )
     text = "Tapped at bbox [0.5, 0.8, 0.6, 0.9] | screen: changed — hint\n" + listing
 
     out = _stub_body(text)
 
-    assert "screen: changed" in out            # action line survives
-    assert "加入购物车" in out                   # CJK label survives
-    assert 'He said "hi" [ok]' in out          # label w/ quotes+brackets peeled off whole
-    assert "[icon]" not in out                 # icon rows dropped
-    assert "[text]" not in out                 # kind tag dropped
+    assert "screen: changed" in out  # action line survives
+    assert "加入购物车" in out  # CJK label survives
+    assert 'He said "hi" [ok]' in out  # label w/ quotes+brackets peeled off whole
+    assert "[icon]" not in out  # icon rows dropped
+    assert "[text]" not in out  # kind tag dropped
     assert compact._LISTING_HEADER not in out  # header dropped
-    assert "0.99" not in out                   # bbox + confidence dropped
+    assert "0.99" not in out  # bbox + confidence dropped
     # Labels emitted in listing order, one per line.
-    assert "加入购物车\nHe said \"hi\" [ok]" in out
+    assert '加入购物车\nHe said "hi" [ok]' in out
 
 
 def test_stub_body_real_formatter_icon_only_listing_drops_header() -> None:
     from physiclaw.core.vision.util import format_elements
 
-    listing = format_elements([
-        {"id": 0, "kind": "icon", "label": "", "bbox": [0.1, 0.1, 0.2, 0.2], "conf": 0.95},
-    ])
+    listing = format_elements(
+        [
+            {
+                "id": 0,
+                "kind": "icon",
+                "label": "",
+                "bbox": [0.1, 0.1, 0.2, 0.2],
+                "conf": 0.95,
+            },
+        ]
+    )
 
     assert _stub_body(listing) == ""
 
@@ -726,12 +784,11 @@ from hypothesis import given, strategies as st  # noqa: E402
 _LINE_BREAKS = "\n\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029"
 _non_row_line = st.text(
     alphabet=st.characters(
-        blacklist_categories=("Cs",), blacklist_characters=_LINE_BREAKS,
+        blacklist_categories=("Cs",),
+        blacklist_characters=_LINE_BREAKS,
     ),
     max_size=80,
-).filter(
-    lambda s: not compact._ROW_RE.match(s) and s != compact._LISTING_HEADER
-)
+).filter(lambda s: not compact._ROW_RE.match(s) and s != compact._LISTING_HEADER)
 
 
 @given(st.lists(_non_row_line, max_size=12))
@@ -759,8 +816,8 @@ def _row(id_: int, kind: str, label: str) -> str:
         ),
         min_size=1,
         max_size=20,
-    # No boundary whitespace: `_stub_body` strips the joined output, which
-    # would trim the first/last label's edges.
+        # No boundary whitespace: `_stub_body` strips the joined output, which
+        # would trim the first/last label's edges.
     ).filter(lambda s: s == s.strip()),
 )
 def test_stub_body_keeps_exactly_the_text_rows(kinds, label) -> None:
@@ -825,33 +882,44 @@ def test_drop_stale_screens_engine_loop_invariant() -> None:
     for turn in range(30):
         tool = tools[turn % len(tools)]
         tcid = f"t{turn}"
-        msgs.append(AssistantMessage(
-            content="",
-            tool_calls=[
-                ToolCall(id=f"{tcid}-n", name="note", arguments={"summary": "x"}),
-                ToolCall(id=tcid, name=tool, arguments={}),
-            ],
-            finish_reason=FinishReason.TOOL_CALLS,
-        ))
+        msgs.append(
+            AssistantMessage(
+                content="",
+                tool_calls=[
+                    ToolCall(id=f"{tcid}-n", name="note", arguments={"summary": "x"}),
+                    ToolCall(id=tcid, name=tool, arguments={}),
+                ],
+                finish_reason=FinishReason.TOOL_CALLS,
+            )
+        )
         msgs.append(ToolResultMessage(tool_call_id=f"{tcid}-n", content="noted: x"))
-        msgs.append(_view_result(tcid, f"{tool} result | screen: changed\n"
-                                       f'{compact._LISTING_HEADER}\n'
-                                       f'1 [text] "Send" [0.5,0.8,0.6,0.9] 0.99'))
+        msgs.append(
+            _view_result(
+                tcid,
+                f"{tool} result | screen: changed\n"
+                f"{compact._LISTING_HEADER}\n"
+                f'1 [text] "Send" [0.5,0.8,0.6,0.9] 0.99',
+            )
+        )
 
         drop_stale_screens(msgs)
 
-        imaged = [m for m in msgs
-                  if isinstance(m, ToolResultMessage) and _has_image(m.content)]
+        imaged = [
+            m
+            for m in msgs
+            if isinstance(m, ToolResultMessage) and _has_image(m.content)
+        ]
         assert len(imaged) == 1, f"turn {turn}: {len(imaged)} images in history"
-        stubs = [m for m in msgs
-                 if isinstance(m, ToolResultMessage) and m.is_superseded]
+        stubs = [
+            m for m in msgs if isinstance(m, ToolResultMessage) and m.is_superseded
+        ]
         assert len(stubs) == turn  # every prior view stubbed, none skipped
         for s in stubs:
             assert isinstance(s.content, str)
             assert s.content.startswith("(superseded ")
-            assert "screen: changed" in s.content   # verdict survives stubbing
-            assert "Send" in s.content              # label survives stubbing
-            assert '"Send"' not in s.content        # but not the quoted-row form
+            assert "screen: changed" in s.content  # verdict survives stubbing
+            assert "Send" in s.content  # label survives stubbing
+            assert '"Send"' not in s.content  # but not the quoted-row form
 
 
 def test_drop_stale_screens_batch_stubs_all_but_last() -> None:
@@ -862,11 +930,13 @@ def test_drop_stale_screens_batch_stubs_all_but_last() -> None:
     msgs: list[Message] = [SystemMessage(content="sys")]
     for turn in range(5):
         tcid = f"t{turn}"
-        msgs.append(AssistantMessage(
-            content="",
-            tool_calls=[ToolCall(id=tcid, name="tap", arguments={})],
-            finish_reason=FinishReason.TOOL_CALLS,
-        ))
+        msgs.append(
+            AssistantMessage(
+                content="",
+                tool_calls=[ToolCall(id=tcid, name="tap", arguments={})],
+                finish_reason=FinishReason.TOOL_CALLS,
+            )
+        )
         msgs.append(_view_result(tcid, f"Tapped {turn} | screen: changed"))
 
     drop_stale_screens(msgs)  # single batch call, 5 views pending
@@ -887,7 +957,10 @@ def test_drop_stale_screens_preserves_is_error_flag() -> None:
         ),
         ToolResultMessage(
             tool_call_id="e1",
-            content=[TextBlock(text="boom"), ImageBlock(media_type="image/jpeg", data_b64="aGk=")],
+            content=[
+                TextBlock(text="boom"),
+                ImageBlock(media_type="image/jpeg", data_b64="aGk="),
+            ],
             is_error=True,
         ),
         *_peek_pair(),
@@ -908,7 +981,10 @@ def test_drop_stale_screens_orphan_tool_call_id_falls_back_to_view() -> None:
         SystemMessage(content="s"),
         ToolResultMessage(
             tool_call_id="ghost",
-            content=[TextBlock(text="x"), ImageBlock(media_type="image/jpeg", data_b64="aGk=")],
+            content=[
+                TextBlock(text="x"),
+                ImageBlock(media_type="image/jpeg", data_b64="aGk="),
+            ],
         ),
         *_peek_pair(),
     ]
@@ -926,21 +1002,26 @@ def test_drop_stale_screens_composes_with_collapse_old_turns() -> None:
     msgs = _scaffold_with_slots()
     for turn in range(12):
         tcid = f"t{turn}"
-        msgs.append(AssistantMessage(
-            content="",
-            tool_calls=[
-                ToolCall(id=f"{tcid}-n", name="note", arguments={"summary": f"s{turn}"}),
-                ToolCall(id=tcid, name="tap", arguments={}),
-            ],
-            finish_reason=FinishReason.TOOL_CALLS,
-        ))
+        msgs.append(
+            AssistantMessage(
+                content="",
+                tool_calls=[
+                    ToolCall(
+                        id=f"{tcid}-n", name="note", arguments={"summary": f"s{turn}"}
+                    ),
+                    ToolCall(id=tcid, name="tap", arguments={}),
+                ],
+                finish_reason=FinishReason.TOOL_CALLS,
+            )
+        )
         msgs.append(ToolResultMessage(tool_call_id=f"{tcid}-n", content="noted"))
         msgs.append(_view_result(tcid, "Tapped | screen: changed"))
         drop_stale_screens(msgs)
         collapse_old_turns(msgs, first_at=6, interval=4, keep=2)
 
-    imaged = [m for m in msgs
-              if isinstance(m, ToolResultMessage) and _has_image(m.content)]
+    imaged = [
+        m for m in msgs if isinstance(m, ToolResultMessage) and _has_image(m.content)
+    ]
     assert len(imaged) == 1
     summary = msgs[2]
     assert isinstance(summary, UserMessage)

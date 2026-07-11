@@ -28,14 +28,14 @@ from hardware.parts.standard.board import MksBoard, pcb_th
 from hardware.parts.standard.nut import Nut, SPECS as NUT_SPECS
 from hardware.parts.standard.screw import Screw
 
-STANDOFF_TOP = thickness + cyl_h        # holder standoff top (PCB bottom rests here)
-PCB_TOP      = STANDOFF_TOP + pcb_th    # PCB top face (BHCS head bears here)
-BHCS_LENGTH  = 10                       # mm — M3 BHCS underhead length
-NUT_THICK    = NUT_SPECS["square"]["M3"]["thickness"]
+STANDOFF_TOP = thickness + cyl_h  # holder standoff top (PCB bottom rests here)
+PCB_TOP = STANDOFF_TOP + pcb_th  # PCB top face (BHCS head bears here)
+BHCS_LENGTH = 10  # mm — M3 BHCS underhead length
+NUT_THICK = NUT_SPECS["square"]["M3"]["thickness"]
 
-PCB_EXPLODE  = 35    # mm — exploded: PCB lifted off the standoffs
-SCREW_EXTRA  = 18    # mm — exploded: screws float this much above the PCB
-NUT_EXPLODE  = 25    # mm — exploded: square nuts dropped below the plate
+PCB_EXPLODE = 35  # mm — exploded: PCB lifted off the standoffs
+SCREW_EXTRA = 18  # mm — exploded: screws float this much above the PCB
+NUT_EXPLODE = 25  # mm — exploded: square nuts dropped below the plate
 
 
 class BO30Pcb(BaseAssembly):

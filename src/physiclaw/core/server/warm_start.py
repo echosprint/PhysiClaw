@@ -36,7 +36,6 @@ BRIDGE_WAIT_TIMEOUT = CONFIG.warm_start.bridge_wait_timeout_seconds
 BRIDGE_SETTLE_SECONDS = CONFIG.warm_start.bridge_settle_seconds
 
 
-
 def _sanity(physiclaw, calib, phone) -> bool:
     """Run a compact end-to-end tap verification. Returns True iff every
     tap landed within tolerance. No-touches counts as failure — warm-start
@@ -120,8 +119,10 @@ def try_resume(cam_index_override: int | None) -> bool:
     if not cal.complete:
         log.error("--warm-start: bundle on disk is incomplete")
         return False
-    cam_index = cam_index_override if cam_index_override is not None else (
-        cal.cam_index if cal.cam_index is not None else 0
+    cam_index = (
+        cam_index_override
+        if cam_index_override is not None
+        else (cal.cam_index if cal.cam_index is not None else 0)
     )
     try:
         physiclaw.connect_arm()
@@ -172,8 +173,5 @@ def try_resume(cam_index_override: int | None) -> bool:
     # is fail-open + bounded by frame-wait timeouts.
     physiclaw.tune_exposure()
     physiclaw.mark_ready()
-    log.info(
-        f"--warm-start: resumed from bundle "
-        f"(cam={cam_index}) — MCP tools ready"
-    )
+    log.info(f"--warm-start: resumed from bundle (cam={cam_index}) — MCP tools ready")
     return True

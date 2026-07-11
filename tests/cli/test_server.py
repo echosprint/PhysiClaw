@@ -5,6 +5,7 @@ integration. We exercise `_spawn_runtime` directly and the env-var
 wiring + warm-start + no-runtime branches with the heavy boundaries
 (mcp.run, runtime subprocess, warm_start thread) mocked out.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -40,7 +41,9 @@ def test_spawn_runtime_builds_cmd_with_port_and_label(mocker) -> None:
 
 def test_spawn_runtime_passes_verbose_flag(mocker) -> None:
     spy = mocker.patch.object(
-        server_mod.subprocess, "Popen", return_value=MagicMock(pid=1),
+        server_mod.subprocess,
+        "Popen",
+        return_value=MagicMock(pid=1),
     )
 
     server_mod._spawn_runtime(9000, verbose=True, label="engine=x")
@@ -49,10 +52,13 @@ def test_spawn_runtime_passes_verbose_flag(mocker) -> None:
 
 
 def test_spawn_runtime_logs_label(
-    mocker, caplog: pytest.LogCaptureFixture,
+    mocker,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     mocker.patch.object(
-        server_mod.subprocess, "Popen", return_value=MagicMock(pid=99),
+        server_mod.subprocess,
+        "Popen",
+        return_value=MagicMock(pid=99),
     )
 
     with caplog.at_level(logging.INFO, logger="physiclaw.cli.server"):
@@ -64,9 +70,13 @@ def test_spawn_runtime_logs_label(
 # ---------- server CLI invocation ----------
 
 
-def _patch_server_runtime_deps(mocker, *, primary: str = "http://device.local:8048",
-                                fallback: str = "http://127.0.0.1:8048",
-                                resolve_raises: bool = False):
+def _patch_server_runtime_deps(
+    mocker,
+    *,
+    primary: str = "http://device.local:8048",
+    fallback: str = "http://127.0.0.1:8048",
+    resolve_raises: bool = False,
+):
     """Stub out everything heavy `server()` touches once it starts up."""
     mocker.patch.object(server_mod, "_spawn_runtime", return_value=MagicMock())
     mocker.patch("physiclaw.core.logger.setup_logging")
@@ -98,23 +108,33 @@ def _patch_server_runtime_deps(mocker, *, primary: str = "http://device.local:80
 
     # Patch directly on parent packages so attribute lookups resolve to fakes.
     import physiclaw
+
     mocker.patch.object(physiclaw, "runtime_state", fake_state, create=True)
     fake_core_server = MagicMock(
-        mcp=fake_mcp, shutdown=fake_shutdown, warm_start=fake_warm,
+        mcp=fake_mcp,
+        shutdown=fake_shutdown,
+        warm_start=fake_warm,
     )
     import physiclaw.core
+
     mocker.patch.object(physiclaw.core, "server", fake_core_server, create=True)
-    mocker.patch.dict("sys.modules", {
-        "physiclaw.core.server": fake_core_server,
-        "physiclaw.core.server.warm_start": fake_warm,
-        "physiclaw.agent.runtime.launcher": fake_launcher,
-        "physiclaw.core.bridge": fake_bridge,
-    })
+    mocker.patch.dict(
+        "sys.modules",
+        {
+            "physiclaw.core.server": fake_core_server,
+            "physiclaw.core.server.warm_start": fake_warm,
+            "physiclaw.agent.runtime.launcher": fake_launcher,
+            "physiclaw.core.bridge": fake_bridge,
+        },
+    )
 
     return {
-        "mcp": fake_mcp, "shutdown": fake_shutdown,
-        "state": fake_state, "launcher": fake_launcher,
-        "bridge": fake_bridge, "warm_start": fake_warm,
+        "mcp": fake_mcp,
+        "shutdown": fake_shutdown,
+        "state": fake_state,
+        "launcher": fake_launcher,
+        "bridge": fake_bridge,
+        "warm_start": fake_warm,
     }
 
 
@@ -130,9 +150,15 @@ def test_server_opens_setup_wizard_by_default(mocker) -> None:
     mocker.patch.object(server_mod.threading, "Thread", side_effect=fake_thread)
 
     server_mod.server(
-        port=8048, host="127.0.0.1", verbose=False,
-        no_runtime=True, warm_start=False, cam_index=None,
-        save_tool_calls=False, save_snapshots=False, save_screenshots=False,
+        port=8048,
+        host="127.0.0.1",
+        verbose=False,
+        no_runtime=True,
+        warm_start=False,
+        cam_index=None,
+        save_tool_calls=False,
+        save_snapshots=False,
+        save_screenshots=False,
     )
 
     # The wizard opens only after the port is accepting connections.
@@ -142,7 +168,8 @@ def test_server_opens_setup_wizard_by_default(mocker) -> None:
 
 
 def test_server_no_setup_hardware_skips_wizard(
-    mocker, caplog: pytest.LogCaptureFixture,
+    mocker,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     _patch_server_runtime_deps(mocker)
     open_spy = mocker.patch("webbrowser.open")
@@ -150,9 +177,16 @@ def test_server_no_setup_hardware_skips_wizard(
 
     with caplog.at_level(logging.INFO, logger="physiclaw.cli.server"):
         server_mod.server(
-            port=8048, host="127.0.0.1", verbose=False,
-            no_runtime=True, warm_start=False, cam_index=None, no_setup_hardware=True,
-            save_tool_calls=False, save_snapshots=False, save_screenshots=False,
+            port=8048,
+            host="127.0.0.1",
+            verbose=False,
+            no_runtime=True,
+            warm_start=False,
+            cam_index=None,
+            no_setup_hardware=True,
+            save_tool_calls=False,
+            save_snapshots=False,
+            save_screenshots=False,
         )
 
     thread_spy.assert_not_called()  # no warm-start, no wizard → no threads
@@ -169,12 +203,19 @@ def test_server_logs_version_first(mocker, caplog) -> None:
 
     with caplog.at_level(logging.INFO, logger="physiclaw.cli.server"):
         server_mod.server(
-            port=8048, host="127.0.0.1", verbose=False,
-            no_runtime=True, warm_start=False, cam_index=None,
-            save_tool_calls=False, save_snapshots=False, save_screenshots=False,
+            port=8048,
+            host="127.0.0.1",
+            verbose=False,
+            no_runtime=True,
+            warm_start=False,
+            cam_index=None,
+            save_tool_calls=False,
+            save_snapshots=False,
+            save_screenshots=False,
         )
 
     from physiclaw import __version__
+
     messages = [r.getMessage() for r in caplog.records]
     assert f"PhysiClaw {__version__}" in messages
 
@@ -190,14 +231,26 @@ def test_server_drops_uvicorn_invalid_http_noise(mocker) -> None:
     _patch_server_runtime_deps(mocker)
 
     server_mod.server(
-        port=8048, host="127.0.0.1", verbose=False,
-        no_runtime=True, warm_start=False, cam_index=None,
-        save_tool_calls=False, save_snapshots=False, save_screenshots=False,
+        port=8048,
+        host="127.0.0.1",
+        verbose=False,
+        no_runtime=True,
+        warm_start=False,
+        cam_index=None,
+        save_tool_calls=False,
+        save_snapshots=False,
+        save_screenshots=False,
     )
 
     def record(msg: str) -> logging.LogRecord:
         return logging.LogRecord(
-            "uvicorn.error", logging.WARNING, __file__, 0, msg, None, None,
+            "uvicorn.error",
+            logging.WARNING,
+            __file__,
+            0,
+            msg,
+            None,
+            None,
         )
 
     assert not uvicorn_logger.filter(record("Invalid HTTP request received."))
@@ -208,9 +261,15 @@ def test_server_default_invocation_runs_mcp(mocker) -> None:
     deps = _patch_server_runtime_deps(mocker)
 
     server_mod.server(
-        port=8048, host="127.0.0.1", verbose=False,
-        no_runtime=True, warm_start=False, cam_index=None,
-        save_tool_calls=False, save_snapshots=False, save_screenshots=False,
+        port=8048,
+        host="127.0.0.1",
+        verbose=False,
+        no_runtime=True,
+        warm_start=False,
+        cam_index=None,
+        save_tool_calls=False,
+        save_snapshots=False,
+        save_screenshots=False,
     )
 
     deps["mcp"].run.assert_called_once_with(transport="streamable-http")
@@ -219,7 +278,8 @@ def test_server_default_invocation_runs_mcp(mocker) -> None:
 
 
 def test_server_save_flags_set_env_vars(
-    mocker, monkeypatch: pytest.MonkeyPatch,
+    mocker,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch_server_runtime_deps(mocker)
     monkeypatch.delenv("PHYSICLAW_SAVE_TOOL_CALLS", raising=False)
@@ -227,12 +287,19 @@ def test_server_save_flags_set_env_vars(
     monkeypatch.delenv("PHYSICLAW_SAVE_SCREENSHOTS", raising=False)
 
     server_mod.server(
-        port=8048, host="127.0.0.1", verbose=False,
-        no_runtime=True, warm_start=False, cam_index=None,
-        save_tool_calls=True, save_snapshots=True, save_screenshots=True,
+        port=8048,
+        host="127.0.0.1",
+        verbose=False,
+        no_runtime=True,
+        warm_start=False,
+        cam_index=None,
+        save_tool_calls=True,
+        save_snapshots=True,
+        save_screenshots=True,
     )
 
     import os
+
     assert os.environ["PHYSICLAW_SAVE_TOOL_CALLS"] == "1"
     assert os.environ["PHYSICLAW_SAVE_SNAPSHOTS"] == "1"
     assert os.environ["PHYSICLAW_SAVE_SCREENSHOTS"] == "1"
@@ -242,9 +309,15 @@ def test_server_records_unset_when_resolve_fails(mocker) -> None:
     deps = _patch_server_runtime_deps(mocker, resolve_raises=True)
 
     server_mod.server(
-        port=8048, host="127.0.0.1", verbose=False,
-        no_runtime=True, warm_start=False, cam_index=None,
-        save_tool_calls=False, save_snapshots=False, save_screenshots=False,
+        port=8048,
+        host="127.0.0.1",
+        verbose=False,
+        no_runtime=True,
+        warm_start=False,
+        cam_index=None,
+        save_tool_calls=False,
+        save_snapshots=False,
+        save_screenshots=False,
     )
 
     # Recorded (host, port, model_ref=None, model_source=None) since resolve failed.
@@ -255,7 +328,8 @@ def test_server_records_unset_when_resolve_fails(mocker) -> None:
 
 
 def test_server_skips_runtime_spawn_when_no_model_configured(
-    mocker, caplog: pytest.LogCaptureFixture,
+    mocker,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """First-run UX: with no model set, the MCP server still starts but the
     runtime subprocess is not spawned (a stack trace is the bug we're avoiding).
@@ -265,9 +339,15 @@ def test_server_skips_runtime_spawn_when_no_model_configured(
 
     with caplog.at_level(logging.WARNING, logger="physiclaw.cli.server"):
         server_mod.server(
-            port=8048, host="127.0.0.1", verbose=False,
-            no_runtime=False, warm_start=False, cam_index=None,
-            save_tool_calls=False, save_snapshots=False, save_screenshots=False,
+            port=8048,
+            host="127.0.0.1",
+            verbose=False,
+            no_runtime=False,
+            warm_start=False,
+            cam_index=None,
+            save_tool_calls=False,
+            save_snapshots=False,
+            save_screenshots=False,
         )
 
     spawn_spy.assert_not_called()
@@ -282,22 +362,36 @@ def test_server_keyboard_interrupt_is_swallowed(mocker) -> None:
 
     # Should NOT raise.
     server_mod.server(
-        port=8048, host="127.0.0.1", verbose=False,
-        no_runtime=True, warm_start=False, cam_index=None,
-        save_tool_calls=False, save_snapshots=False, save_screenshots=False,
+        port=8048,
+        host="127.0.0.1",
+        verbose=False,
+        no_runtime=True,
+        warm_start=False,
+        cam_index=None,
+        save_tool_calls=False,
+        save_snapshots=False,
+        save_screenshots=False,
     )
 
 
 def test_server_spawns_runtime_subprocess_by_default(mocker) -> None:
     _patch_server_runtime_deps(mocker)
     spawn_spy = mocker.patch.object(
-        server_mod, "_spawn_runtime", return_value=MagicMock(),
+        server_mod,
+        "_spawn_runtime",
+        return_value=MagicMock(),
     )
 
     server_mod.server(
-        port=8048, host="127.0.0.1", verbose=True,
-        no_runtime=False, warm_start=False, cam_index=None,
-        save_tool_calls=False, save_snapshots=False, save_screenshots=False,
+        port=8048,
+        host="127.0.0.1",
+        verbose=True,
+        no_runtime=False,
+        warm_start=False,
+        cam_index=None,
+        save_tool_calls=False,
+        save_snapshots=False,
+        save_screenshots=False,
     )
 
     spawn_spy.assert_called_once_with(8048, True, "engine=openai")
@@ -308,16 +402,23 @@ def test_server_no_runtime_skips_subprocess(mocker) -> None:
     spawn_spy = mocker.patch.object(server_mod, "_spawn_runtime")
 
     server_mod.server(
-        port=8048, host="127.0.0.1", verbose=False,
-        no_runtime=True, warm_start=False, cam_index=None,
-        save_tool_calls=False, save_snapshots=False, save_screenshots=False,
+        port=8048,
+        host="127.0.0.1",
+        verbose=False,
+        no_runtime=True,
+        warm_start=False,
+        cam_index=None,
+        save_tool_calls=False,
+        save_snapshots=False,
+        save_screenshots=False,
     )
 
     spawn_spy.assert_not_called()
 
 
 def test_server_logs_single_phone_url_when_no_mdns(
-    mocker, caplog: pytest.LogCaptureFixture,
+    mocker,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     _patch_server_runtime_deps(
         mocker,
@@ -327,14 +428,18 @@ def test_server_logs_single_phone_url_when_no_mdns(
 
     with caplog.at_level(logging.INFO, logger="physiclaw.cli.server"):
         server_mod.server(
-            port=8048, host="127.0.0.1", verbose=False,
-            no_runtime=True, warm_start=False, cam_index=None,
-            save_tool_calls=False, save_snapshots=False, save_screenshots=False,
+            port=8048,
+            host="127.0.0.1",
+            verbose=False,
+            no_runtime=True,
+            warm_start=False,
+            cam_index=None,
+            save_tool_calls=False,
+            save_snapshots=False,
+            save_screenshots=False,
         )
 
-    assert any(
-        "stable LocalHostName" in r.getMessage() for r in caplog.records
-    )
+    assert any("stable LocalHostName" in r.getMessage() for r in caplog.records)
 
 
 def test_server_runtime_stop_terminates_subprocess(mocker) -> None:
@@ -345,14 +450,21 @@ def test_server_runtime_stop_terminates_subprocess(mocker) -> None:
     register_spy = mocker.patch.object(server_mod.atexit, "register")
 
     server_mod.server(
-        port=8048, host="127.0.0.1", verbose=False,
-        no_runtime=False, warm_start=False, cam_index=None,
-        save_tool_calls=False, save_snapshots=False, save_screenshots=False,
+        port=8048,
+        host="127.0.0.1",
+        verbose=False,
+        no_runtime=False,
+        warm_start=False,
+        cam_index=None,
+        save_tool_calls=False,
+        save_snapshots=False,
+        save_screenshots=False,
     )
 
     # Find the registered _stop_runtime closure and run it.
     stop_calls = [
-        c for c in register_spy.call_args_list
+        c
+        for c in register_spy.call_args_list
         if callable(c.args[0]) and getattr(c.args[0], "__name__", "") == "_stop_runtime"
     ]
     assert stop_calls
@@ -370,13 +482,20 @@ def test_server_runtime_stop_kills_after_timeout(mocker) -> None:
     register_spy = mocker.patch.object(server_mod.atexit, "register")
 
     server_mod.server(
-        port=8048, host="127.0.0.1", verbose=False,
-        no_runtime=False, warm_start=False, cam_index=None,
-        save_tool_calls=False, save_snapshots=False, save_screenshots=False,
+        port=8048,
+        host="127.0.0.1",
+        verbose=False,
+        no_runtime=False,
+        warm_start=False,
+        cam_index=None,
+        save_tool_calls=False,
+        save_snapshots=False,
+        save_screenshots=False,
     )
 
     stop = next(
-        c.args[0] for c in register_spy.call_args_list
+        c.args[0]
+        for c in register_spy.call_args_list
         if callable(c.args[0]) and getattr(c.args[0], "__name__", "") == "_stop_runtime"
     )
     stop()
@@ -398,9 +517,15 @@ def test_warm_start_thread_exits_on_port_timeout(mocker) -> None:
     interrupt_spy = mocker.patch.object(server_mod._thread, "interrupt_main")
 
     server_mod.server(
-        port=8048, host="127.0.0.1", verbose=False,
-        no_runtime=True, warm_start=True, cam_index=None,
-        save_tool_calls=False, save_snapshots=False, save_screenshots=False,
+        port=8048,
+        host="127.0.0.1",
+        verbose=False,
+        no_runtime=True,
+        warm_start=True,
+        cam_index=None,
+        save_tool_calls=False,
+        save_snapshots=False,
+        save_screenshots=False,
     )
 
     # Run the thread body manually.
@@ -422,9 +547,15 @@ def test_warm_start_thread_exits_on_resume_failure(mocker) -> None:
     interrupt_spy = mocker.patch.object(server_mod._thread, "interrupt_main")
 
     server_mod.server(
-        port=8048, host="127.0.0.1", verbose=False,
-        no_runtime=True, warm_start=True, cam_index=None,
-        save_tool_calls=False, save_snapshots=False, save_screenshots=False,
+        port=8048,
+        host="127.0.0.1",
+        verbose=False,
+        no_runtime=True,
+        warm_start=True,
+        cam_index=None,
+        save_tool_calls=False,
+        save_snapshots=False,
+        save_screenshots=False,
     )
 
     captured["target"]()
@@ -445,9 +576,15 @@ def test_warm_start_thread_exits_silently_when_resume_succeeds(mocker) -> None:
     interrupt_spy = mocker.patch.object(server_mod._thread, "interrupt_main")
 
     server_mod.server(
-        port=8048, host="127.0.0.1", verbose=False,
-        no_runtime=True, warm_start=True, cam_index=None,
-        save_tool_calls=False, save_snapshots=False, save_screenshots=False,
+        port=8048,
+        host="127.0.0.1",
+        verbose=False,
+        no_runtime=True,
+        warm_start=True,
+        cam_index=None,
+        save_tool_calls=False,
+        save_snapshots=False,
+        save_screenshots=False,
     )
 
     captured["target"]()
@@ -460,9 +597,15 @@ def test_server_warm_start_starts_thread(mocker) -> None:
     thread_spy = mocker.patch.object(server_mod.threading, "Thread")
 
     server_mod.server(
-        port=8048, host="127.0.0.1", verbose=False,
-        no_runtime=True, warm_start=True, cam_index=None,
-        save_tool_calls=False, save_snapshots=False, save_screenshots=False,
+        port=8048,
+        host="127.0.0.1",
+        verbose=False,
+        no_runtime=True,
+        warm_start=True,
+        cam_index=None,
+        save_tool_calls=False,
+        save_snapshots=False,
+        save_screenshots=False,
     )
 
     thread_spy.assert_called_once()
@@ -478,9 +621,7 @@ def test_server_auto_calibrate_starts_thread_and_skips_wizard(mocker) -> None:
     open_spy = mocker.patch("webbrowser.open")
     # The branch spawns a thread that lazily imports the setup module and
     # calls its worker — patch that worker where it lives.
-    worker_spy = mocker.patch(
-        "physiclaw.cli.setup.hardware.await_bridge_and_calibrate"
-    )
+    worker_spy = mocker.patch("physiclaw.cli.setup.hardware.await_bridge_and_calibrate")
     captured = {}
 
     def fake_thread(target, daemon=False):
@@ -490,11 +631,18 @@ def test_server_auto_calibrate_starts_thread_and_skips_wizard(mocker) -> None:
     mocker.patch.object(server_mod.threading, "Thread", side_effect=fake_thread)
 
     server_mod.server(
-        port=8048, host="127.0.0.1", verbose=False,
-        no_runtime=True, warm_start=False, cam_index=None, auto_calibrate=True,
-        save_tool_calls=False, save_snapshots=False, save_screenshots=False,
+        port=8048,
+        host="127.0.0.1",
+        verbose=False,
+        no_runtime=True,
+        warm_start=False,
+        cam_index=None,
+        auto_calibrate=True,
+        save_tool_calls=False,
+        save_snapshots=False,
+        save_screenshots=False,
     )
 
     open_spy.assert_not_called()  # no desktop wizard in auto mode
-    captured["target"]()          # run the daemon-thread body
+    captured["target"]()  # run the daemon-thread body
     worker_spy.assert_called_once_with("127.0.0.1", 8048)

@@ -34,6 +34,7 @@ The cache lives at ``hardware/output/.cache`` (git-ignored with the rest of
 ``output/``) and needs no build123d import — only the stdlib — so the
 dispatcher can decide hit/miss before spawning a worker.
 """
+
 from __future__ import annotations
 
 import ast
@@ -79,6 +80,7 @@ def _snap_svg_re(stem: str) -> re.Pattern:
 
 
 # ── content hashing ──────────────────────────────────────────────────────────
+
 
 def _module_to_path(mod: str) -> Path | None:
     """``hardware.a.b.c`` → ``<repo>/hardware/a/b/c.py`` (None if not a file)."""
@@ -169,6 +171,7 @@ def patch_key(stem: str) -> str:
 
 # ── store / restore / prune ──────────────────────────────────────────────────
 
+
 def _entry(stem: str) -> Path:
     return CACHE_DIR / stem
 
@@ -181,9 +184,11 @@ def _dest_dir(name: str) -> Path:
 # files to drop), restore (which to copy back), and the completeness checks.
 def _is_source(stem: str, name: str, *, want_bom: bool = True) -> bool:
     """``name`` belongs to ``stem``'s source layer (.step / raw .svg / BOM)."""
-    return (name.endswith(".step")
-            or bool(_raw_svg_re(stem).match(name))
-            or (want_bom and name.endswith(".md")))
+    return (
+        name.endswith(".step")
+        or bool(_raw_svg_re(stem).match(name))
+        or (want_bom and name.endswith(".md"))
+    )
 
 
 def _is_snapshot(stem: str, name: str) -> bool:
@@ -199,7 +204,9 @@ def _source_outputs(stem: str) -> list[Path]:
     """``.step`` + raw ``.svg`` + BOM ``.md`` for ``stem`` currently on disk."""
     files = [p for v in _VARIANTS for p in STEP_DIR.glob(f"{stem}_{v}.step")]
     files += _svgs(stem, _raw_svg_re(stem))
-    files += [p for p in (BOM_DIR / f"{stem}.md", BOM_DIR / f"{stem}_delta.md") if p.exists()]
+    files += [
+        p for p in (BOM_DIR / f"{stem}.md", BOM_DIR / f"{stem}_delta.md") if p.exists()
+    ]
     return files
 
 
@@ -282,14 +289,24 @@ def _entry_intact(stem: str, files: dict[str, str]) -> bool:
 
 def store_source(stem: str) -> None:
     """Replace ``stem``'s source layer (.step / raw .svg / .md) + source key."""
-    _store_layer(stem, key_file=_SOURCE_KEY, key_value=source_key(stem),
-                 belongs=lambda n: _is_source(stem, n), outputs=_source_outputs(stem))
+    _store_layer(
+        stem,
+        key_file=_SOURCE_KEY,
+        key_value=source_key(stem),
+        belongs=lambda n: _is_source(stem, n),
+        outputs=_source_outputs(stem),
+    )
 
 
 def store_snapshots(stem: str) -> None:
     """Replace ``stem``'s snapshot layer (.svg op snapshots) + patch key."""
-    _store_layer(stem, key_file=_PATCH_KEY, key_value=patch_key(stem),
-                 belongs=lambda n: _is_snapshot(stem, n), outputs=_snapshot_outputs(stem))
+    _store_layer(
+        stem,
+        key_file=_PATCH_KEY,
+        key_value=patch_key(stem),
+        belongs=lambda n: _is_snapshot(stem, n),
+        outputs=_snapshot_outputs(stem),
+    )
 
 
 def source_cached(stem: str, *, want_bom: bool) -> bool:
@@ -319,8 +336,9 @@ def snapshots_cached(stem: str) -> bool:
 
 
 def restore_source(stem: str, *, want_bom: bool = True) -> None:
-    _restore(f for f in _entry(stem).iterdir()
-             if _is_source(stem, f.name, want_bom=want_bom))
+    _restore(
+        f for f in _entry(stem).iterdir() if _is_source(stem, f.name, want_bom=want_bom)
+    )
 
 
 def restore_snapshots(stem: str) -> None:

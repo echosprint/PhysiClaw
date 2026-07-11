@@ -46,11 +46,12 @@ from hardware.assembly.projection import MAIN_FRAME_VIEW
 from hardware.parts.standard.bumper import body_height as bumper_height
 from hardware.parts.standard.extrusion import cb_end_offset
 
-BUMPER_EXPLODE = 25     # mm — exploded: outboard air gap, +Y slot face → bumper top
+BUMPER_EXPLODE = 25  # mm — exploded: outboard air gap, +Y slot face → bumper top
 
 
 class FR41Bumper(BaseAssembly):
     camera = MAIN_FRAME_VIEW
+
     def _build(self) -> Compound:
         # Frame layer — always assembled (it's the prior step's result).
         frame = FR31Bracket(exploded=False)
@@ -80,17 +81,24 @@ class FR41Bumper(BaseAssembly):
                     origin_y = back_slot_face_y + bumper_height + BUMPER_EXPLODE
                 else:
                     origin_y = back_slot_face_y + bumper_height
-                bm_compound.move(Location(Plane(
-                    origin=(sign_x * half_w, origin_y, corner_z),
-                    x_dir=(1, 0, 0),
-                    z_dir=(0, -1, 0),
-                )))
+                bm_compound.move(
+                    Location(
+                        Plane(
+                            origin=(sign_x * half_w, origin_y, corner_z),
+                            x_dir=(1, 0, 0),
+                            z_dir=(0, -1, 0),
+                        )
+                    )
+                )
                 bumpers.append(bm_compound)
 
-        return Compound(label="frame_41_bumper", children=[
-            frame_compound,
-            *bumpers,
-        ])
+        return Compound(
+            label="frame_41_bumper",
+            children=[
+                frame_compound,
+                *bumpers,
+            ],
+        )
 
 
 if __name__ == "__main__":

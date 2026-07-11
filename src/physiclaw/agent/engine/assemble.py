@@ -7,10 +7,22 @@ engine (`engine._run_session` / `engine._prepare_request`) and the
 `physiclaw prompt` dump (`cli/prompt.py`), so a dump can never drift from
 the wire the running agent actually sends.
 """
+
 import datetime as dt
 from dataclasses import dataclass
 
-from physiclaw.agent.engine import builtin_tool, compact, jobs, memory, pitfalls, plan, prompt, scratchpad, screen_layout, skill
+from physiclaw.agent.engine import (
+    builtin_tool,
+    compact,
+    jobs,
+    memory,
+    pitfalls,
+    plan,
+    prompt,
+    scratchpad,
+    screen_layout,
+    skill,
+)
 from physiclaw.agent.engine.builtin_tool import LocalTool
 from physiclaw.agent.engine.dto import Message, SystemMessage, UserMessage
 from physiclaw.agent.engine.session import Session
@@ -24,6 +36,7 @@ class PromptBundle:
     matches the real request. `local_registry`/`local_schemas` are the engine's
     local tools; `layout_incomplete` gates the first-run reminder; the skill
     counts are for the session's tools-loaded log line."""
+
     system_prompt: str
     local_registry: dict[str, LocalTool]
     local_schemas: list[dict]
@@ -65,15 +78,20 @@ def build_prompt_bundle(provider_id: str) -> PromptBundle:
     )
 
 
-def build_initial_messages(triggers: list[Trigger], system_prompt: str) -> list[Message]:
+def build_initial_messages(
+    triggers: list[Trigger], system_prompt: str
+) -> list[Message]:
     """The message array a session starts with: cached SYSTEM prompt, the
     wake-trigger user message (date anchor + fired-job context), and the three
     pre-allocated compaction slots (summary / memory / skills)."""
     return [
         SystemMessage(content=system_prompt),
-        UserMessage(content=format_triggers(
-            triggers, cron_ctx=jobs.format_fired(triggers),
-        )),
+        UserMessage(
+            content=format_triggers(
+                triggers,
+                cron_ctx=jobs.format_fired(triggers),
+            )
+        ),
         compact.new_summary_placeholder(),
         compact.new_memory_placeholder(),
         compact.new_skills_placeholder(),
@@ -81,7 +99,10 @@ def build_initial_messages(triggers: list[Trigger], system_prompt: str) -> list[
 
 
 def apply_request_tails(
-    messages: list[Message], session: Session, *, layout_incomplete: bool,
+    messages: list[Message],
+    session: Session,
+    *,
+    layout_incomplete: bool,
     compaction_keep: int | None = None,
 ) -> list[Message]:
     """Pin the per-turn tail slots to the request — scratchpad, plan, the

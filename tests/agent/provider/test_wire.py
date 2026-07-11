@@ -23,6 +23,7 @@ Accepted equivalent mutants (cannot be killed by behavior tests):
     string output for a single text block. Pure optimization, no
     observable difference.
 """
+
 from __future__ import annotations
 
 import json
@@ -109,9 +110,7 @@ def test_assistant_to_wire_text_only_no_tool_calls_omits_tool_calls_key() -> Non
 
 
 def test_assistant_to_wire_empty_content_becomes_empty_string_not_none() -> None:
-    asst = AssistantMessage(
-        content="", tool_calls=[], finish_reason=FinishReason.STOP
-    )
+    asst = AssistantMessage(content="", tool_calls=[], finish_reason=FinishReason.STOP)
 
     wire = assistant_to_wire(asst)
 

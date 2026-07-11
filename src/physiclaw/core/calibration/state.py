@@ -40,12 +40,12 @@ BUNDLE_PATH = paths.calibration_bundle()
 @dataclasses.dataclass
 class Calibration:
     viewport_shift: ViewportShift | None = None
-    cam_rotation: int | None = None               # cv2 rotation code: -1, 0, 1, 2
-    pct_to_grbl: np.ndarray | None = None         # 2×3 affine: screen 0-1 → arm mm
-    pct_to_cam: np.ndarray | None = None          # 2×3 affine: screen 0-1 → camera 0-1
-    cam_size: tuple[int, int] | None = None       # (width, height) in camera pixels
-    cam_index: int | None = None                  # USB camera index (for warm-restart)
-    screen_dimension: dict | None = None          # width, height, viewport_w/h in CSS pt
+    cam_rotation: int | None = None  # cv2 rotation code: -1, 0, 1, 2
+    pct_to_grbl: np.ndarray | None = None  # 2×3 affine: screen 0-1 → arm mm
+    pct_to_cam: np.ndarray | None = None  # 2×3 affine: screen 0-1 → camera 0-1
+    cam_size: tuple[int, int] | None = None  # (width, height) in camera pixels
+    cam_index: int | None = None  # USB camera index (for warm-restart)
+    screen_dimension: dict | None = None  # width, height, viewport_w/h in CSS pt
 
     @property
     def transforms_ready(self) -> bool:
@@ -118,7 +118,8 @@ class Calibration:
         return {
             "viewport_shift": (
                 dataclasses.asdict(self.viewport_shift)
-                if self.viewport_shift is not None else None
+                if self.viewport_shift is not None
+                else None
             ),
             "cam_rotation": self.cam_rotation,
             "pct_to_grbl": (

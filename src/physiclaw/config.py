@@ -45,6 +45,7 @@ class UpdateConfig:
     server can corrupt it on Windows). Apply with ``uv tool upgrade physiclaw``
     once the server is stopped. ``PHYSICLAW_DISABLE_UPDATE_CHECK=1`` env
     overrides to off."""
+
     check: bool = True
 
 
@@ -64,6 +65,7 @@ class AutoPickConfig:
     feedback when the phone /bridge page isn't responding. Cap stays
     below the CLI's HTTP timeout (60s) so the auto-pick loop has time
     to iterate camera indices after the bridge comes online."""
+
     bridge_wait_timeout_seconds: int = 25
     bridge_settle_seconds: float = 1.5
 
@@ -78,6 +80,7 @@ class CameraConfig:
     1920×1080 over a single USB cable. cv2.set() is best-effort —
     drivers snap to their nearest supported mode; the actual size is
     logged by Camera._warmup after the first frame."""
+
     width: int = 1920
     height: int = 1080
     fourcc: str = "MJPG"
@@ -217,6 +220,7 @@ class PitfallsConfig:
     `capture_turn_floor` = the turn count above which a DONE close forces the
     capture nudge (a long run almost always hit a trap worth banking; the agent
     may still add 0). `capture_enabled` / `curate_enabled` gate the two passes."""
+
     max_items: int = 20
     max_item_chars: int = 120
     capture_turn_floor: int = 50
@@ -238,6 +242,7 @@ class SkillsConfig:
     thread (never blocks startup; fail-soft; idempotent — a no-op when the commit
     is unchanged), so official skills stay current without a manual command. The
     next agent session picks up a change. Set false to pin what's mounted."""
+
     default_source: str = ""
     official_base_url: str = "https://physiclaw.ai/downloads/official-skills"
     sync_auto: bool = True
@@ -340,13 +345,25 @@ _SECTION_COMMENTS: dict[str, str] = {
 
 _FIELD_COMMENTS: dict[tuple[str, str], str] = {
     ("server", "save_tool_calls"): "dump every peek/screenshot output",
-    ("server", "save_snapshots"): "dump each snapshot frame (rotated, with bbox overlay)",
+    (
+        "server",
+        "save_snapshots",
+    ): "dump each snapshot frame (rotated, with bbox overlay)",
     ("server", "save_screenshots"): "dump every raw phone-own screenshot",
     ("server", "save_raw_camera"): "dump every raw camera frame at capture",
     ("memory", "default_log_entries"): "on-demand `read_logs` default size (max 200)",
-    ("memory", "bootstrap_log_entries"): "auto-preloaded into the memory slot at every wake",
-    ("camera", "auto_exposure"): "false = hold `exposure` manually (Windows/Linux; macOS ignores)",
-    ("camera", "exposure"): "log2 seconds (-6 = 1/64s, indoors -4..-8); manual-fallback start",
+    (
+        "memory",
+        "bootstrap_log_entries",
+    ): "auto-preloaded into the memory slot at every wake",
+    (
+        "camera",
+        "auto_exposure",
+    ): "false = hold `exposure` manually (Windows/Linux; macOS ignores)",
+    (
+        "camera",
+        "exposure",
+    ): "log2 seconds (-6 = 1/64s, indoors -4..-8); manual-fallback start",
 }
 
 
@@ -380,8 +397,8 @@ def load(path: Path | None = None) -> Config:
             f"{path} is not valid UTF-8 (got byte 0x{e.object[e.start]:02x} at "
             f"position {e.start}). TOML requires UTF-8.\n"
             f"  Recover: delete the file and re-run.\n"
-            f"      Windows: Remove-Item \"{path}\"\n"
-            f"      macOS/Linux: rm \"{path}\""
+            f'      Windows: Remove-Item "{path}"\n'
+            f'      macOS/Linux: rm "{path}"'
         ) from e
     except (OSError, tomllib.TOMLDecodeError) as e:
         raise ConfigError(f"failed to read {path}: {e}") from e
@@ -397,7 +414,9 @@ def load(path: Path | None = None) -> Config:
     for key, cls in _SECTION_TYPES.items():
         overrides = raw.get(key, {})
         if not isinstance(overrides, dict):
-            raise ConfigError(f"[{key}] must be a table, got {type(overrides).__name__}")
+            raise ConfigError(
+                f"[{key}] must be a table, got {type(overrides).__name__}"
+            )
         built[key] = _build_section(key, cls, overrides)
 
     return Config(**built)
@@ -595,8 +614,12 @@ try:
     CONFIG: Config = load()
 except ConfigError as _e:
     import sys as _sys
+
     print(f"physiclaw: {_e}", file=_sys.stderr)
-    print("physiclaw: continuing with default config; fix the file or delete it.", file=_sys.stderr)
+    print(
+        "physiclaw: continuing with default config; fix the file or delete it.",
+        file=_sys.stderr,
+    )
     CONFIG = Config()
 
 
@@ -647,14 +670,11 @@ def parse_model_ref(ref: str) -> tuple[str, str]:
     """
     if "/" not in ref:
         raise ValueError(
-            f"model ref {ref!r} must be 'provider/model' "
-            "(e.g. 'qwen/qwen3.6-plus')"
+            f"model ref {ref!r} must be 'provider/model' (e.g. 'qwen/qwen3.6-plus')"
         )
     provider_id, model_id = ref.split("/", 1)
     if not (provider_id and model_id):
-        raise ValueError(
-            f"model ref {ref!r} has empty provider or model segment"
-        )
+        raise ValueError(f"model ref {ref!r} has empty provider or model segment")
     return provider_id, model_id
 
 

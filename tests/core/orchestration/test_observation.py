@@ -4,6 +4,7 @@ The observer takes plain `park` / `grab` / `detect` callables, so the
 grab-retry, verdict, and warning-attachment logic is tested here without
 an arm, camera, or the orchestrator's wiring (that wiring is covered in
 test_orchestrator.py)."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -220,7 +221,9 @@ def test_with_view_withholds_verdict_when_side_blurry(mocker) -> None:
 def test_with_view_verdict_diff_failure_fails_open(mocker) -> None:
     mocker.patch.object(observation, "encode_jpeg", return_value=b"VIEW_JPG")
     mocker.patch.object(
-        observation, "frames_changed", side_effect=RuntimeError("diff crashed"),
+        observation,
+        "frames_changed",
+        side_effect=RuntimeError("diff crashed"),
     )
     obs = _observer([_flat(128), _flat(30)])
 

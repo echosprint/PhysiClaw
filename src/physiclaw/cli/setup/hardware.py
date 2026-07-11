@@ -94,7 +94,9 @@ def calibrate(step, timeout=60, body=None):
     return api("POST", f"/api/calibrate/{step}", body=body, timeout=timeout)
 
 
-def calibrate_retry(step, fail_msg, retry_prompt, auto, predicate=None, timeout=30, body=None):
+def calibrate_retry(
+    step, fail_msg, retry_prompt, auto, predicate=None, timeout=30, body=None
+):
     if predicate is None:
         predicate = ok
     while True:
@@ -153,7 +155,9 @@ def run(auto: bool = False, trace: bool = False) -> None:
     print("\n── 2. Position the rig ──")
     print("  1. Connect the control board — USB to the computer, plus 12 V power.")
     print("  2. Connect the camera to the computer over USB.")
-    print("  3. Seat the phone in the holder, top-left corner against the holder's corner;")
+    print(
+        "  3. Seat the phone in the holder, top-left corner against the holder's corner;"
+    )
     print("     keep the screen level and facing straight up.")
     print("  4. Keep the phone unlocked, with the bridge page in the foreground.")
     if not auto:
@@ -213,15 +217,17 @@ def run(auto: bool = False, trace: bool = False) -> None:
     # Cache policy: interactive setup always re-measures; --auto trusts
     # the cached screenshot at ~/.physiclaw/calibration/cache/viewport.png
     # if it exists.
-    vp_cache = next(
-        (p for p in _viewport_cache_candidates() if p.exists()), None
-    )
+    vp_cache = next((p for p in _viewport_cache_candidates() if p.exists()), None)
     if auto and vp_cache is not None:
         print(f"  Using cached screenshot: {vp_cache} (delete to re-measure)")
     else:
         if vp_cache is not None:
-            print(f"  Cached screenshot at {vp_cache} ignored (interactive: fresh measurement).")
-        print("  The phone shows an orange square. Tap AssistiveTouch once (screenshot),")
+            print(
+                f"  Cached screenshot at {vp_cache} ignored (interactive: fresh measurement)."
+            )
+        print(
+            "  The phone shows an orange square. Tap AssistiveTouch once (screenshot),"
+        )
         print("  then double-tap it (upload).")
     while True:
         if ok(calibrate("viewport-shift", 35, body={"fresh": not auto})):
@@ -241,6 +247,7 @@ def run(auto: bool = False, trace: bool = False) -> None:
         wait("Move the stylus tip over the orange circle, then continue")
     print("  The arm taps 18 points to learn how its motion lines up with the screen.")
     if ask("Don't touch the rig. Ready?", auto):
+
         def _arm_fail(resp):
             return (
                 "Couldn't calibrate: "
@@ -251,13 +258,17 @@ def run(auto: bool = False, trace: bool = False) -> None:
         # In auto mode the stylus is parked off-screen — tell the server to
         # drive it onto the screen center first (mirrors the wizard's auto).
         r = calibrate_retry(
-            "arm", _arm_fail, "Retry?", auto, timeout=120,
+            "arm",
+            _arm_fail,
+            "Retry?",
+            auto,
+            timeout=120,
             body={"from_park": True} if auto else None,
         )
         tilt = r.get("tilt_ratio", 0)
         if not r.get("aligned"):
             _warn(
-                f"Phone looks slightly rotated relative to the arm ({tilt*100:.1f}%) — "
+                f"Phone looks slightly rotated relative to the arm ({tilt * 100:.1f}%) — "
                 "straighten it and rerun if validation fails later"
             )
         _done(f"Arm calibrated — mapped {r.get('pairs')} points")
@@ -287,10 +298,7 @@ def run(auto: bool = False, trace: bool = False) -> None:
     print(f"  rotation {r.get('rotation_name')}, coverage {r.get('coverage'):.0%}")
     m = calibrate_retry(
         "camera-mapping",
-        lambda r: (
-            "Couldn't map the dots: "
-            f"{_msg(r)}"
-        ),
+        lambda r: f"Couldn't map the dots: {_msg(r)}",
         "Reduce glare / fix lighting. Retry?",
         auto,
     )
@@ -359,11 +367,11 @@ def run(auto: bool = False, trace: bool = False) -> None:
 
     elapsed = time.time() - t0
     mins, secs = int(elapsed // 60), int(elapsed % 60)
-    print(f"\n{'='*40}")
+    print(f"\n{'=' * 40}")
     _done(f"PhysiClaw is ready — set up in {mins}m {secs}s.")
     print("  The arm, camera, and screen are calibrated and working together.")
     print("  All MCP tools are now available.")
-    print(f"{'='*40}")
+    print(f"{'=' * 40}")
 
 
 def await_bridge_and_calibrate(host: str, port: int) -> None:
@@ -384,8 +392,10 @@ def await_bridge_and_calibrate(host: str, port: int) -> None:
     from physiclaw.core.server.net import wait_for_port
 
     if not wait_for_port(host, port):
-        log.error("auto: server never started accepting connections; "
-                  "skipping auto-calibration.")
+        log.error(
+            "auto: server never started accepting connections; "
+            "skipping auto-calibration."
+        )
         return
 
     BASE = f"http://localhost:{port}"

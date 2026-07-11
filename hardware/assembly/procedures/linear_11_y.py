@@ -55,11 +55,12 @@ from hardware.parts.standard.mgn9h import (
     slider_position,
 )
 
-RAIL_EXPLODE = 40    # mm — exploded: outboard air gap, slot face → rail bottom
+RAIL_EXPLODE = 40  # mm — exploded: outboard air gap, slot face → rail bottom
 
 
 class LI11Y(BaseAssembly):
     camera = [MAIN_FRAME_VIEW, Camera(-57.02, 34.80, -114.34)]
+
     def _build(self) -> Compound:
         # Base layer — always assembled.
         base_compound = MO30Pulley(exploded=False).build()
@@ -76,8 +77,8 @@ class LI11Y(BaseAssembly):
         # with its 20 mm width axis along world Z, so its top edge
         # sits width/2 above that. Center the rail in the gap between.
         lu_block_bottom_z = (LONG_LENGTH - LONG_TOP_GAP) - lu_block_length / 2
-        ld_block_top_z    = (LONG_BOT_GAP - ld_slot_center_y) + ld_block_width / 2
-        rail_center_z     = (ld_block_top_z + lu_block_bottom_z) / 2
+        ld_block_top_z = (LONG_BOT_GAP - ld_slot_center_y) + ld_block_width / 2
+        rail_center_z = (ld_block_top_z + lu_block_bottom_z) / 2
 
         if self.exploded:
             rail_bottom_y = slot_face_y - RAIL_EXPLODE
@@ -95,17 +96,23 @@ class LI11Y(BaseAssembly):
         self.slider_mount_centers = []
         for world_x in (-half_w, +half_w):
             rail_compound = LI10Y(exploded=False).build()
-            rail_compound.move(Location(Plane(
-                origin=(world_x, rail_bottom_y, rail_center_z),
-                x_dir=(0, 0, +1),   # rail native +X (length) → world +Z
-                z_dir=(0, -1, 0),   # rail native +Z (top)    → world -Y
-            )))
+            rail_compound.move(
+                Location(
+                    Plane(
+                        origin=(world_x, rail_bottom_y, rail_center_z),
+                        x_dir=(0, 0, +1),  # rail native +X (length) → world +Z
+                        z_dir=(0, -1, 0),  # rail native +Z (top)    → world -Y
+                    )
+                )
+            )
             rails.append(rail_compound)
-            self.slider_mount_centers.append((
-                world_x,
-                rail_bottom_y - slider_top_z,
-                rail_center_z + slider_x_offset,
-            ))
+            self.slider_mount_centers.append(
+                (
+                    world_x,
+                    rail_bottom_y - slider_top_z,
+                    rail_center_z + slider_x_offset,
+                )
+            )
 
         return Compound(label="linear_11_y", children=[base_compound, *rails])
 

@@ -14,6 +14,7 @@ Accepted equivalent mutmut survivors:
   - Local-variable type annotations `Type | None` ↔ `Type & None` —
     not evaluated at runtime.
 """
+
 from __future__ import annotations
 
 
@@ -269,9 +270,7 @@ def test_resolved_base_url_returns_class_default_when_no_override(
 ) -> None:
     from physiclaw import config
 
-    monkeypatch.setattr(
-        config, "provider_base_url_override", lambda pid: None
-    )
+    monkeypatch.setattr(config, "provider_base_url_override", lambda pid: None)
 
     assert _TestProvider._resolved_base_url() == "https://stub.example/v1"
 
@@ -387,9 +386,7 @@ def test_serialize_history_does_not_mark_system_at_non_zero_index(
     markers = _RecordingMarkers()
     stub.CACHE_MARKERS = markers
 
-    stub.serialize_history(
-        [UserMessage(content="hi"), SystemMessage(content="late")]
-    )
+    stub.serialize_history([UserMessage(content="hi"), SystemMessage(content="late")])
 
     assert markers.system_entries == []
 
@@ -406,9 +403,7 @@ def test_serialize_history_marks_last_superseded_tool_result_stub(
         tool_call_id="t2", content="newer", is_superseded=True
     )
 
-    out = stub.serialize_history(
-        [earlier_stub, UserMessage(content="x"), later_stub]
-    )
+    out = stub.serialize_history([earlier_stub, UserMessage(content="x"), later_stub])
 
     assert [e["id"] for e in markers.stub_entries] == ["t2"]
     assert out[2]["marked"] == "stub"
@@ -548,10 +543,12 @@ def test_serialize_history_leaves_entries_unmarked_with_null_markers(
 ) -> None:
     # `_TestProvider` inherits NO_CACHE_MARKERS — both anchor
     # positions must come through untouched.
-    out = stub.serialize_history([
-        SystemMessage(content="sys"),
-        ToolResultMessage(tool_call_id="t1", content="old", is_superseded=True),
-    ])
+    out = stub.serialize_history(
+        [
+            SystemMessage(content="sys"),
+            ToolResultMessage(tool_call_id="t1", content="old", is_superseded=True),
+        ]
+    )
 
     assert out == [
         {"role": "system", "content": "sys"},
@@ -563,9 +560,7 @@ def test_serialize_history_leaves_entries_unmarked_with_null_markers(
 
 
 @pytest.mark.asyncio
-async def test_aclose_closes_underlying_client(
-    stub: _TestProvider, mocker
-) -> None:
+async def test_aclose_closes_underlying_client(stub: _TestProvider, mocker) -> None:
     aclose_mock = mocker.patch.object(stub._client, "aclose")
 
     await stub.aclose()

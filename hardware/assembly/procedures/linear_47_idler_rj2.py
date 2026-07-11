@@ -45,22 +45,25 @@ from hardware.assembly.procedures.linear_46_idler_rj2 import LI46IdlerRj2
 from hardware.assembly.projection import Camera, MAIN_FRAME_VIEW
 from hardware.parts.standard.nut import SPECS as NUT_SPECS, Nut
 
-BUNDLE_EXPLODE = 35    # mm — exploded: bundle lifted along world -Y (outboard)
-NUT_EXPLODE    = 25    # mm — exploded: nut slid along +slant_z_dir (pocket opening)
+BUNDLE_EXPLODE = 35  # mm — exploded: bundle lifted along world -Y (outboard)
+NUT_EXPLODE = 25  # mm — exploded: nut slid along +slant_z_dir (pocket opening)
 
 
 class LI47IdlerRj2(BaseAssembly):
     camera = [MAIN_FRAME_VIEW, Camera(-54.76, -61.19, -54.19)]
+
     def _build(self) -> Compound:
         base = LI45IdlerRj1(exploded=False)
         base_compound = base.build()
 
-        joint          = base.joint_base
-        bundle_origin  = joint.extra_hole2_world_centers[1]   # RIGHT joint top, on extra_hole2
-        pocket_center  = joint.slant_pocket_world_centers[1]  # RIGHT joint slant pocket
-        slant_x_w      = joint.slant_x_dir_worlds[1]          # slant edge dir in world
-        slant_z_w      = joint.slant_z_dir_worlds[1]          # slant face normal in world
-        nut_thickness  = NUT_SPECS["square"]["M4"]["thickness"]
+        joint = base.joint_base
+        bundle_origin = joint.extra_hole2_world_centers[
+            1
+        ]  # RIGHT joint top, on extra_hole2
+        pocket_center = joint.slant_pocket_world_centers[1]  # RIGHT joint slant pocket
+        slant_x_w = joint.slant_x_dir_worlds[1]  # slant edge dir in world
+        slant_z_w = joint.slant_z_dir_worlds[1]  # slant face normal in world
+        nut_thickness = NUT_SPECS["square"]["M4"]["thickness"]
 
         # Bundle: install face (native z=0) on joint top at extra_hole2;
         # shoulder/idler stack along world -Y (outboard).
@@ -68,11 +71,15 @@ class LI47IdlerRj2(BaseAssembly):
             bundle_origin[1] - BUNDLE_EXPLODE if self.exploded else bundle_origin[1]
         )
         bundle = LI46IdlerRj2(exploded=False).build()
-        bundle.move(Location(Plane(
-            origin=(bundle_origin[0], bundle_y, bundle_origin[2]),
-            x_dir=(1, 0, 0),
-            z_dir=(0, -1, 0),     # bundle native +Z (shoulder-up) → world -Y
-        )))
+        bundle.move(
+            Location(
+                Plane(
+                    origin=(bundle_origin[0], bundle_y, bundle_origin[2]),
+                    x_dir=(1, 0, 0),
+                    z_dir=(0, -1, 0),  # bundle native +Z (shoulder-up) → world -Y
+                )
+            )
+        )
 
         # M4 square nut in the slant pocket — same orientation as the
         # LJ2 nut (see linear_43_idler_lj2 for the full read of the
@@ -91,15 +98,24 @@ class LI47IdlerRj2(BaseAssembly):
             nut_origin[2] += NUT_EXPLODE * slant_z_w[2]
 
         nut = Nut("square", "M4").build()
-        nut.move(Location(Plane(
-            origin=tuple(nut_origin),
-            x_dir=slant_x_w,
-            z_dir=(0, 1, 0),
-        )))
+        nut.move(
+            Location(
+                Plane(
+                    origin=tuple(nut_origin),
+                    x_dir=slant_x_w,
+                    z_dir=(0, 1, 0),
+                )
+            )
+        )
 
-        return Compound(label="linear_47_idler_rj2", children=[
-            base_compound, bundle, nut,
-        ])
+        return Compound(
+            label="linear_47_idler_rj2",
+            children=[
+                base_compound,
+                bundle,
+                nut,
+            ],
+        )
 
 
 if __name__ == "__main__":

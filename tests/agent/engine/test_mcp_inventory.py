@@ -6,6 +6,7 @@ The module AST-parses `core/server/tools.py` to enumerate
 Tests use `monkeypatch.setattr` to point `_TOOLS_PY` at synthetic
 fixture files, so we don't depend on the actual tools.py contents.
 """
+
 from __future__ import annotations
 
 import logging
@@ -54,7 +55,10 @@ def test_discover_returns_empty_and_logs_on_syntax_error(
 def test_discover_returns_decorated_functions_with_docstring(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    p = _write(tmp_path, "tools.py", '''
+    p = _write(
+        tmp_path,
+        "tools.py",
+        '''
 @mcp.tool()
 def tap(bbox: list) -> str:
     """Tap a coordinate on the phone screen."""
@@ -64,7 +68,8 @@ def tap(bbox: list) -> str:
 def peek() -> str:
     """Capture an annotated camera frame."""
     return ""
-''')
+''',
+    )
     monkeypatch.setattr(mcp_inventory, "_TOOLS_PY", p)
 
     out = mcp_inventory.discover_mcp_tools()
@@ -78,7 +83,10 @@ def peek() -> str:
 def test_discover_skips_functions_without_mcp_tool_decorator(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    p = _write(tmp_path, "tools.py", '''
+    p = _write(
+        tmp_path,
+        "tools.py",
+        '''
 def helper() -> None:
     """Internal helper, not a tool."""
     pass
@@ -92,7 +100,8 @@ def real_tool() -> str:
 def wrong_decorator() -> str:
     """Has a decorator but not @mcp.tool."""
     return ""
-''')
+''',
+    )
     monkeypatch.setattr(mcp_inventory, "_TOOLS_PY", p)
 
     out = mcp_inventory.discover_mcp_tools()
@@ -103,12 +112,16 @@ def wrong_decorator() -> str:
 def test_discover_recognizes_async_def_decorated_with_mcp_tool(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    p = _write(tmp_path, "tools.py", '''
+    p = _write(
+        tmp_path,
+        "tools.py",
+        '''
 @mcp.tool()
 async def async_tool() -> str:
     """An async tool."""
     return ""
-''')
+''',
+    )
     monkeypatch.setattr(mcp_inventory, "_TOOLS_PY", p)
 
     out = mcp_inventory.discover_mcp_tools()
@@ -119,11 +132,15 @@ async def async_tool() -> str:
 def test_discover_returns_empty_string_when_function_has_no_docstring(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    p = _write(tmp_path, "tools.py", '''
+    p = _write(
+        tmp_path,
+        "tools.py",
+        """
 @mcp.tool()
 def no_docs() -> str:
     return ""
-''')
+""",
+    )
     monkeypatch.setattr(mcp_inventory, "_TOOLS_PY", p)
 
     out = mcp_inventory.discover_mcp_tools()
@@ -135,28 +152,38 @@ def test_discover_recognizes_decorator_without_call_parens(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # `@mcp.tool` (no parens) also counts.
-    p = _write(tmp_path, "tools.py", '''
+    p = _write(
+        tmp_path,
+        "tools.py",
+        '''
 @mcp.tool
 def bare_decorator() -> str:
     """Decorator without parens."""
     return ""
-''')
+''',
+    )
     monkeypatch.setattr(mcp_inventory, "_TOOLS_PY", p)
 
     out = mcp_inventory.discover_mcp_tools()
 
-    assert out == [{"name": "bare_decorator", "description": "Decorator without parens."}]
+    assert out == [
+        {"name": "bare_decorator", "description": "Decorator without parens."}
+    ]
 
 
 def test_discover_ignores_decorator_named_tool_on_other_module(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    p = _write(tmp_path, "tools.py", '''
+    p = _write(
+        tmp_path,
+        "tools.py",
+        '''
 @other.tool()
 def fake_tool() -> str:
     """Different `tool` attr, not on `mcp`."""
     return ""
-''')
+''',
+    )
     monkeypatch.setattr(mcp_inventory, "_TOOLS_PY", p)
 
     assert mcp_inventory.discover_mcp_tools() == []
@@ -166,12 +193,16 @@ def test_discover_ignores_function_named_tool_called_directly(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # `@tool()` (just `tool`, no `mcp.` prefix) doesn't count.
-    p = _write(tmp_path, "tools.py", '''
+    p = _write(
+        tmp_path,
+        "tools.py",
+        '''
 @tool()
 def looks_like_tool() -> str:
     """Bare `@tool()` without mcp prefix."""
     return ""
-''')
+''',
+    )
     monkeypatch.setattr(mcp_inventory, "_TOOLS_PY", p)
 
     assert mcp_inventory.discover_mcp_tools() == []

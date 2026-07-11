@@ -4,6 +4,7 @@
 directly here (and end-to-end by the download-path tests in
 setup/test_vision and test_sync_official_skills).
 """
+
 from __future__ import annotations
 
 import io
@@ -33,7 +34,8 @@ def _resp(payload: dict | bytes) -> MagicMock:
 
 def test_api_get_no_body(mocker) -> None:
     spy = mocker.patch.object(
-        _http._OPENER, "open",
+        _http._OPENER,
+        "open",
         return_value=_resp({"x": 1}),
     )
 
@@ -47,7 +49,8 @@ def test_api_get_no_body(mocker) -> None:
 
 def test_api_post_with_body(mocker) -> None:
     spy = mocker.patch.object(
-        _http._OPENER, "open",
+        _http._OPENER,
+        "open",
         return_value=_resp({"status": "ok"}),
     )
 
@@ -60,7 +63,8 @@ def test_api_post_with_body(mocker) -> None:
 
 def test_api_post_no_body_sends_empty_bytes(mocker) -> None:
     spy = mocker.patch.object(
-        _http._OPENER, "open",
+        _http._OPENER,
+        "open",
         return_value=_resp({"status": "ok"}),
     )
 
@@ -73,7 +77,11 @@ def test_api_post_no_body_sends_empty_bytes(mocker) -> None:
 
 def test_api_returns_parsed_error_body_on_http_error(mocker) -> None:
     err = urllib.error.HTTPError(
-        url="x", code=500, msg="boom", hdrs=None, fp=None,
+        url="x",
+        code=500,
+        msg="boom",
+        hdrs=None,
+        fp=None,
     )
     err.read = lambda: b'{"status": "error", "message": "x"}'
     mocker.patch.object(_http._OPENER, "open", side_effect=err)
@@ -85,7 +93,11 @@ def test_api_returns_parsed_error_body_on_http_error(mocker) -> None:
 
 def test_api_returns_none_on_unparseable_error_body(mocker) -> None:
     err = urllib.error.HTTPError(
-        url="x", code=500, msg="boom", hdrs=None, fp=None,
+        url="x",
+        code=500,
+        msg="boom",
+        hdrs=None,
+        fp=None,
     )
     err.read = lambda: b"not json"
     mocker.patch.object(_http._OPENER, "open", side_effect=err)
@@ -95,7 +107,8 @@ def test_api_returns_none_on_unparseable_error_body(mocker) -> None:
 
 def test_api_returns_none_on_connection_error(mocker) -> None:
     mocker.patch.object(
-        _http._OPENER, "open",
+        _http._OPENER,
+        "open",
         side_effect=ConnectionError("refused"),
     )
 
@@ -107,7 +120,8 @@ def test_api_returns_none_on_connection_error(mocker) -> None:
 
 def test_fetch_json_returns_parsed_body(mocker) -> None:
     mocker.patch.object(
-        _http._OPENER, "open",
+        _http._OPENER,
+        "open",
         return_value=_resp({"connected": True}),
     )
 
@@ -117,7 +131,8 @@ def test_fetch_json_returns_parsed_body(mocker) -> None:
 def test_fetch_json_raises_on_transport_error(mocker) -> None:
     # Unlike `api`, callers see the failure detail.
     mocker.patch.object(
-        _http._OPENER, "open",
+        _http._OPENER,
+        "open",
         side_effect=urllib.error.URLError("refused"),
     )
 
@@ -167,9 +182,7 @@ def test_stream_writes_all_bytes_with_known_length() -> None:
     data = b"x" * 5000
     out = bytearray()
 
-    _http.stream(
-        _StreamResp(data, content_length=str(len(data))), out.extend, "test"
-    )
+    _http.stream(_StreamResp(data, content_length=str(len(data))), out.extend, "test")
 
     assert bytes(out) == data
 
@@ -199,5 +212,7 @@ def test_stream_raises_on_truncation_in_quiet_mode_too() -> None:
     with pytest.raises(urllib.error.ContentTooShortError):
         _http.stream(
             _StreamResp(b"z" * 10, content_length="5000"),
-            bytearray().extend, "test", progress=False,
+            bytearray().extend,
+            "test",
+            progress=False,
         )

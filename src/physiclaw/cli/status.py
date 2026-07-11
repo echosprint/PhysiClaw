@@ -21,15 +21,11 @@ def status() -> None:
             + f"ok  ({size_mb:.0f} MB)"
         )
     else:
-        typer.echo(
-            typer.style("  vision model  ", fg=typer.colors.YELLOW) + "missing"
-        )
+        typer.echo(typer.style("  vision model  ", fg=typer.colors.YELLOW) + "missing")
 
     data = paths.load_calibration_bundle()
     if data is None:
-        typer.echo(
-            typer.style("  calibration   ", fg=typer.colors.YELLOW) + "missing"
-        )
+        typer.echo(typer.style("  calibration   ", fg=typer.colors.YELLOW) + "missing")
     else:
         complete = bool(data.get("complete"))
         tag = "complete" if complete else "partial"
@@ -38,9 +34,7 @@ def status() -> None:
 
     jobs = paths.jobs_file()
     if jobs.exists():
-        typer.echo(
-            typer.style("  jobs file     ", fg=typer.colors.GREEN) + str(jobs)
-        )
+        typer.echo(typer.style("  jobs file     ", fg=typer.colors.GREEN) + str(jobs))
     else:
         typer.echo(
             typer.style("  jobs file     ", fg=typer.colors.YELLOW)
@@ -50,8 +44,10 @@ def status() -> None:
     # Suppress on pipe — `status` is a quick snapshot meant for grep/jq.
     if sys.stdout.isatty():
         typer.echo()
-        typer.echo(next_hint(
-            "physiclaw doctor  (for deeper checks — server, hardware, provider)"
-        ))
+        typer.echo(
+            next_hint(
+                "physiclaw doctor  (for deeper checks — server, hardware, provider)"
+            )
+        )
 
     maybe_print_update_banner()

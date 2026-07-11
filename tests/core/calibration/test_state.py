@@ -20,6 +20,7 @@ Accepted equivalent mutants: dataclass field annotations of the shape
 never evaluated at runtime. The dataclass machinery treats them as
 opaque strings, and Python doesn't care about the operator.
 """
+
 from __future__ import annotations
 
 import json
@@ -95,14 +96,19 @@ def test_transforms_ready_true_when_all_three_mapping_fields_set() -> None:
 def test_complete_property_is_false_until_every_required_field_set() -> None:
     affine = np.eye(2, 3)
     vs = ViewportShift(
-        offset_x=0, offset_y=0, dpr=1.0,
-        screenshot_width=100, screenshot_height=200,
+        offset_x=0,
+        offset_y=0,
+        dpr=1.0,
+        screenshot_width=100,
+        screenshot_height=200,
     )
 
     # transforms_ready alone isn't enough — need viewport_shift,
     # cam_rotation, screen_dimension on top.
     c = Calibration(
-        pct_to_grbl=affine, pct_to_cam=affine, cam_size=(1920, 1080),
+        pct_to_grbl=affine,
+        pct_to_cam=affine,
+        cam_size=(1920, 1080),
     )
     assert c.complete is False
 
@@ -164,8 +170,11 @@ def test_summary_returns_empty_dict_for_empty_calibration() -> None:
 
 def test_summary_includes_filled_fields_with_per_field_formatting() -> None:
     vs = ViewportShift(
-        offset_x=10, offset_y=20, dpr=2.0,
-        screenshot_width=200, screenshot_height=400,
+        offset_x=10,
+        offset_y=20,
+        dpr=2.0,
+        screenshot_width=200,
+        screenshot_height=400,
     )
     c = Calibration(
         viewport_shift=vs,
@@ -248,8 +257,11 @@ def test_from_dict_round_trips_a_full_bundle() -> None:
     pct_to_grbl = np.array([[100.0, 0.0, 5.0], [0.0, 200.0, 10.0]])
     pct_to_cam = np.eye(2, 3)
     vs = ViewportShift(
-        offset_x=10, offset_y=20, dpr=2.0,
-        screenshot_width=200, screenshot_height=400,
+        offset_x=10,
+        offset_y=20,
+        dpr=2.0,
+        screenshot_width=200,
+        screenshot_height=400,
     )
     original = Calibration(
         viewport_shift=vs,
@@ -299,9 +311,12 @@ def test_from_dict_ignores_unknown_keys() -> None:
 
 def test_from_dict_reconstructs_pct_to_grbl_as_float64_ndarray() -> None:
     payload = {
-        "viewport_shift": None, "cam_rotation": None,
+        "viewport_shift": None,
+        "cam_rotation": None,
         "pct_to_grbl": [[1, 0, 0], [0, 1, 0]],
-        "pct_to_cam": None, "cam_size": None, "cam_index": None,
+        "pct_to_cam": None,
+        "cam_size": None,
+        "cam_index": None,
         "screen_dimension": None,
     }
 

@@ -1,4 +1,5 @@
 """Tests for `physiclaw.core.vision.ocr`."""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -43,8 +44,11 @@ def _new_reader(mocker, ocr_callable):
 
 def test_ocr_reader_raises_when_rapidocr_missing(mocker) -> None:
     # Ensure import raises ImportError.
-    real_import = __builtins__["__import__"] if isinstance(
-        __builtins__, dict) else __builtins__.__import__
+    real_import = (
+        __builtins__["__import__"]
+        if isinstance(__builtins__, dict)
+        else __builtins__.__import__
+    )
 
     def fake_import(name, *a, **kw):
         if name == "rapidocr":
@@ -69,13 +73,17 @@ def test_read_returns_empty_when_boxes_none(mocker) -> None:
 def test_read_returns_text_results_sorted(mocker) -> None:
     boxes = [
         # Top-bottom, then left-right after sorting.
-        [(50, 100), (60, 100), (60, 110), (50, 110)],   # bbox (50,100,60,110)
-        [(10, 10), (20, 10), (20, 20), (10, 20)],       # bbox (10,10,20,20) — top-most
-        [(15, 100), (25, 100), (25, 110), (15, 110)],   # same row as first, lefter
+        [(50, 100), (60, 100), (60, 110), (50, 110)],  # bbox (50,100,60,110)
+        [(10, 10), (20, 10), (20, 20), (10, 20)],  # bbox (10,10,20,20) — top-most
+        [(15, 100), (25, 100), (25, 110), (15, 110)],  # same row as first, lefter
     ]
-    fake_ocr = MagicMock(return_value=_ocr_result(
-        boxes, ["A", "B", "C"], [0.9, 0.8, 0.7],
-    ))
+    fake_ocr = MagicMock(
+        return_value=_ocr_result(
+            boxes,
+            ["A", "B", "C"],
+            [0.9, 0.8, 0.7],
+        )
+    )
     reader = _new_reader(mocker, fake_ocr)
 
     out = reader.read(np.zeros((200, 200, 3), dtype=np.uint8))
@@ -101,14 +109,21 @@ def test_read_with_crop_box_offsets_bbox(mocker) -> None:
 
 
 def test_read_crop_clamps_to_frame(mocker) -> None:
-    fake_ocr = MagicMock(return_value=_ocr_result(
-        [[(0, 0), (5, 0), (5, 5), (0, 5)]], ["X"], [0.9],
-    ))
+    fake_ocr = MagicMock(
+        return_value=_ocr_result(
+            [[(0, 0), (5, 0), (5, 5), (0, 5)]],
+            ["X"],
+            [0.9],
+        )
+    )
     reader = _new_reader(mocker, fake_ocr)
 
     out = reader.read_crop(
         np.zeros((50, 50, 3), dtype=np.uint8),
-        x1=-10, y1=-10, x2=100, y2=100,
+        x1=-10,
+        y1=-10,
+        x2=100,
+        y2=100,
     )
 
     assert out == "X"
@@ -120,7 +135,10 @@ def test_read_crop_returns_empty_string_for_zero_area(mocker) -> None:
 
     out = reader.read_crop(
         np.zeros((50, 50, 3), dtype=np.uint8),
-        x1=10, y1=10, x2=10, y2=10,
+        x1=10,
+        y1=10,
+        x2=10,
+        y2=10,
     )
 
     assert out == ""
@@ -131,14 +149,21 @@ def test_read_crop_concatenates_multiple_regions(mocker) -> None:
         [(0, 0), (10, 0), (10, 10), (0, 10)],
         [(0, 20), (10, 20), (10, 30), (0, 30)],
     ]
-    fake_ocr = MagicMock(return_value=_ocr_result(
-        boxes, ["foo", "bar"], [1.0, 1.0],
-    ))
+    fake_ocr = MagicMock(
+        return_value=_ocr_result(
+            boxes,
+            ["foo", "bar"],
+            [1.0, 1.0],
+        )
+    )
     reader = _new_reader(mocker, fake_ocr)
 
     out = reader.read_crop(
         np.zeros((100, 100, 3), dtype=np.uint8),
-        x1=0, y1=0, x2=50, y2=50,
+        x1=0,
+        y1=0,
+        x2=50,
+        y2=50,
     )
 
     assert out == "foo bar"
@@ -160,11 +185,15 @@ def test_results_to_elements_maps_pixels_to_pct() -> None:
 
     elements = results_to_elements(results, _fake_transforms_pixel_to_pct())
 
-    assert elements == [{
-        "id": 0, "kind": "text", "label": "hi",
-        "bbox": [0.1, 0.2, 0.3, 0.4],
-        "conf": 0.92,
-    }]
+    assert elements == [
+        {
+            "id": 0,
+            "kind": "text",
+            "label": "hi",
+            "bbox": [0.1, 0.2, 0.3, 0.4],
+            "conf": 0.92,
+        }
+    ]
 
 
 def test_results_to_elements_assigns_sequential_ids() -> None:

@@ -4,6 +4,7 @@ PageState wraps a BridgeState + CalibrationState pair behind a lock.
 Tests use mock objects for both deps so we can assert delegation
 without exercising the (still untested) state classes.
 """
+
 from __future__ import annotations
 
 import logging

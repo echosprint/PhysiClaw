@@ -2,6 +2,7 @@
 
 `fake_mcp` and `async_request` fixtures live in `conftest.py`.
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -16,8 +17,11 @@ pytestmark = [pytest.mark.integration]
 
 def test_bridge_register_wires_all_routes(fake_mcp) -> None:
     bridge_reg.register(
-        fake_mcp, physiclaw=MagicMock(), bridge=MagicMock(),
-        calib=MagicMock(), phone=MagicMock(),
+        fake_mcp,
+        physiclaw=MagicMock(),
+        bridge=MagicMock(),
+        calib=MagicMock(),
+        phone=MagicMock(),
     )
 
     expected = {
@@ -38,7 +42,9 @@ def test_bridge_register_wires_all_routes(fake_mcp) -> None:
 
 @pytest.mark.asyncio
 async def test_bridge_routes_forward_to_handlers(
-    fake_mcp, async_request, mocker,
+    fake_mcp,
+    async_request,
+    mocker,
 ) -> None:
     """Each route, when called, must delegate to the matching handler
     with the right positional args."""
@@ -47,26 +53,32 @@ async def test_bridge_routes_forward_to_handlers(
         "serve_qr_page": mocker.patch.object(bridge_reg, "serve_qr_page"),
         "handle_phone_state": mocker.patch.object(bridge_reg, "handle_phone_state"),
         "handle_clipboard_copied": mocker.patch.object(
-            bridge_reg, "handle_clipboard_copied",
+            bridge_reg,
+            "handle_clipboard_copied",
         ),
         "handle_clipboard_fetch": mocker.patch.object(
-            bridge_reg, "handle_clipboard_fetch",
+            bridge_reg,
+            "handle_clipboard_fetch",
         ),
         "handle_mode_switch": mocker.patch.object(bridge_reg, "handle_mode_switch"),
         "handle_screen_dimension": mocker.patch.object(
-            bridge_reg, "handle_screen_dimension",
+            bridge_reg,
+            "handle_screen_dimension",
         ),
         "handle_screenshot_upload": mocker.patch.object(
-            bridge_reg, "handle_screenshot_upload",
+            bridge_reg,
+            "handle_screenshot_upload",
         ),
         "handle_recent_screenshots": mocker.patch.object(
-            bridge_reg, "handle_recent_screenshots",
+            bridge_reg,
+            "handle_recent_screenshots",
         ),
         "handle_calib_touch": mocker.patch.object(bridge_reg, "handle_calib_touch"),
     }
 
     async def _ok(*a, **kw):
         return "ok"
+
     for s in spies.values():
         s.side_effect = _ok
 

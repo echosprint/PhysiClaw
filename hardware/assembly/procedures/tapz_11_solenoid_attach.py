@@ -64,16 +64,18 @@ from hardware.parts.standard.solenoid import (
     outer_w as solenoid_outer_w,
 )
 
-BHCS_LENGTH    = 6     # mm — M3 BHCS underhead length
-MOUNT_EXPLODE  = 30    # mm — exploded: mount pulled outboard along world -X
-SCREW_EXPLODE  = 30    # mm — exploded: each BHCS shank-tip floats this far
-                       #      further outboard along -X, so screws read as
-                       #      separate parts that drop into the wall holes
+BHCS_LENGTH = 6  # mm — M3 BHCS underhead length
+MOUNT_EXPLODE = 30  # mm — exploded: mount pulled outboard along world -X
+SCREW_EXPLODE = 30  # mm — exploded: each BHCS shank-tip floats this far
+#      further outboard along -X, so screws read as
+#      separate parts that drop into the wall holes
 
 # ── Middle-column 15 mm-pitch pair in mount native frame ─────────────────────
 _MIDDLE_IDX = 2
 _face_x = screen_pattern_base_from_left + _MIDDLE_IDX * screen_pattern_spacing
-_face_y_lo = screen_pattern_base_from_bottom + screen_pattern_y_offsets[_MIDDLE_IDX] * MM
+_face_y_lo = (
+    screen_pattern_base_from_bottom + screen_pattern_y_offsets[_MIDDLE_IDX] * MM
+)
 _face_y_hi = _face_y_lo + screen_pattern_pair_offset
 _hole_native_z_lo = mount_thickness / 2 + _face_y_lo
 _hole_native_z_hi = mount_thickness / 2 + _face_y_hi
@@ -89,7 +91,7 @@ MOUNT_ORIGIN_Y = +solenoid_depth / 2
 MOUNT_ORIGIN_Z = +_hole_native_z_mid
 
 # Screen-face world X in the assembled state — where each BHCS underhead seats.
-SCREEN_FACE_X  = MOUNT_ORIGIN_X + (mount_width / 2 - wall_thickness)
+SCREEN_FACE_X = MOUNT_ORIGIN_X + (mount_width / 2 - wall_thickness)
 
 
 class TZ11SolenoidAttach(BaseAssembly):
@@ -111,11 +113,15 @@ class TZ11SolenoidAttach(BaseAssembly):
             screw_underhead_x = SCREEN_FACE_X
 
         mount = SolenoidMount().build()
-        mount.move(Location(Plane(
-            origin=(mount_origin_x, MOUNT_ORIGIN_Y, MOUNT_ORIGIN_Z),
-            x_dir=(0, 1, 0),    # native +X → world +Y
-            z_dir=(0, 0, -1),   # native +Z → world -Z (wall hangs down)
-        )))                     # → derived native +Y → world +X
+        mount.move(
+            Location(
+                Plane(
+                    origin=(mount_origin_x, MOUNT_ORIGIN_Y, MOUNT_ORIGIN_Z),
+                    x_dir=(0, 1, 0),  # native +X → world +Y
+                    z_dir=(0, 0, -1),  # native +Z → world -Z (wall hangs down)
+                )
+            )
+        )  # → derived native +Y → world +X
 
         # 2 × BHCS M3 × 6 — head bottoms on the screen face; shank drives
         # world +X through the wall and into the solenoid's left-face M3
@@ -123,18 +129,29 @@ class TZ11SolenoidAttach(BaseAssembly):
         screws = []
         for hole_native_z in (_hole_native_z_lo, _hole_native_z_hi):
             screw = Screw("BHCS", "M3", BHCS_LENGTH).build()
-            screw.move(Location(Plane(
-                origin=(screw_underhead_x,
-                        MOUNT_ORIGIN_Y,
-                        MOUNT_ORIGIN_Z - hole_native_z),
-                x_dir=(0, 0, 1),    # round screw — x_dir choice cosmetic
-                z_dir=(-1, 0, 0),   # native +Z (head) → world -X (screen side)
-            )))
+            screw.move(
+                Location(
+                    Plane(
+                        origin=(
+                            screw_underhead_x,
+                            MOUNT_ORIGIN_Y,
+                            MOUNT_ORIGIN_Z - hole_native_z,
+                        ),
+                        x_dir=(0, 0, 1),  # round screw — x_dir choice cosmetic
+                        z_dir=(-1, 0, 0),  # native +Z (head) → world -X (screen side)
+                    )
+                )
+            )
             screws.append(screw)
 
-        return Compound(label="tapz_11_solenoid_attach", children=[
-            base_compound, mount, *screws,
-        ])
+        return Compound(
+            label="tapz_11_solenoid_attach",
+            children=[
+                base_compound,
+                mount,
+                *screws,
+            ],
+        )
 
 
 if __name__ == "__main__":

@@ -34,15 +34,17 @@ from hardware.assembly.travel_ranges import PHONE_BED_BEAM_LENGTH
 from hardware.parts.standard.extrusion import (
     Extrusion1020,
     end_hole_offset,
-    half_x_1020 as BEAM_TOP_Y,   # section height (native Y of the top face)
+    half_x_1020 as BEAM_TOP_Y,  # section height (native Y of the top face)
 )
 from hardware.parts.standard.screw import Screw
 from hardware.parts.standard.t_nut import HAMMER_TOTAL_HEIGHT, LENGTHS, TNut
 
-BEAM_LENGTH   = PHONE_BED_BEAM_LENGTH   # mm — Extrusion1020 length — see assembly/travel_ranges.py
-BHCS_LENGTH   = 16    # mm — BHCS M5 underhead length
-SCREW_EXPLODE = 55    # mm — exploded: screw drops below the beam
-NUT_EXPLODE   = 25    # mm — exploded: nut lifts above the beam
+BEAM_LENGTH = (
+    PHONE_BED_BEAM_LENGTH  # mm — Extrusion1020 length — see assembly/travel_ranges.py
+)
+BHCS_LENGTH = 16  # mm — BHCS M5 underhead length
+SCREW_EXPLODE = 55  # mm — exploded: screw drops below the beam
+NUT_EXPLODE = 25  # mm — exploded: nut lifts above the beam
 
 # Native Z of the two end holes (Extrusion1020 drills them at end_hole_offset
 # from each end face).
@@ -71,12 +73,13 @@ class PH10Extrusion(BaseAssembly):
             # beam. Translate so the mouth sits on the top face and the bore
             # lands on the screw axis (native bore at z = length / 2).
             nut = TNut("hammer", "M5").build()
-            nut_y = BEAM_TOP_Y + HAMMER_TOTAL_HEIGHT + (NUT_EXPLODE if self.exploded else 0)
+            nut_y = (
+                BEAM_TOP_Y + HAMMER_TOTAL_HEIGHT + (NUT_EXPLODE if self.exploded else 0)
+            )
             nut.move(Location((0, nut_y, hole_z + hammer_len / 2), (180, 0, 0)))
             nuts.append(nut)
 
-        return Compound(label="phone_10_extrusion",
-                        children=[beam, *screws, *nuts])
+        return Compound(label="phone_10_extrusion", children=[beam, *screws, *nuts])
 
 
 if __name__ == "__main__":

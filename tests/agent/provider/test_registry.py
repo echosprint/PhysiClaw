@@ -4,6 +4,7 @@ The registry is a tiny dispatch table; tests pin the membership and
 exercise each lookup branch including the `claude-code` subprocess
 engine which is intentionally NOT in the in-process table.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -34,7 +35,12 @@ def test_claude_code_id_constant_pinned() -> None:
 
 def test_provider_classes_dict_has_exactly_six_known_ids() -> None:
     assert set(registry._PROVIDER_CLASSES) == {
-        "qwen", "moonshot", "openai", "anthropic", "google", "deepseek"
+        "qwen",
+        "moonshot",
+        "openai",
+        "anthropic",
+        "google",
+        "deepseek",
     }
 
 

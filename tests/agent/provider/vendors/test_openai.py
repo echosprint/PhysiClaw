@@ -4,6 +4,7 @@ Native OpenAI endpoint. Reasoning models surface chain-of-thought via
 API field, not a prompt wrapper — so unlike Qwen, no declared
 `SYSTEM_PROMPT_FRAGMENT`.
 """
+
 from __future__ import annotations
 
 from physiclaw.agent.provider.vendors.openai import OpenAIProvider

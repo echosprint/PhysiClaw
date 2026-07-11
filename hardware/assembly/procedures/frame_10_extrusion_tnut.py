@@ -42,13 +42,13 @@ from hardware.parts.standard.extrusion import (
 )
 from hardware.parts.standard.t_nut import LENGTHS as TNUT_LENGTHS, TNut
 
-LONG_LENGTH      = Y_EXTRUSION_LENGTH    # Y-axis frame span — see assembly/travel_ranges.py
-SHORT_LENGTH     = X_EXTRUSION_LENGTH    # frame width — see assembly/travel_ranges.py
-EXT_THICKNESS    = 2 * leg   # 2040 narrow cross-section (= 20 mm)
+LONG_LENGTH = Y_EXTRUSION_LENGTH  # Y-axis frame span — see assembly/travel_ranges.py
+SHORT_LENGTH = X_EXTRUSION_LENGTH  # frame width — see assembly/travel_ranges.py
+EXT_THICKNESS = 2 * leg  # 2040 narrow cross-section (= 20 mm)
 
-ROW_SPACING      = 60    # mm — exploded: between extrusion centerlines along Y
-PREP_START_GAP   = 5     # mm — clearance between extrusion +Z end and first prep nut
-PREP_PITCH       = 15    # mm — Z pitch between adjacent prep nuts in the queue
+ROW_SPACING = 60  # mm — exploded: between extrusion centerlines along Y
+PREP_START_GAP = 5  # mm — clearance between extrusion +Z end and first prep nut
+PREP_PITCH = 15  # mm — Z pitch between adjacent prep nuts in the queue
 
 # 4 nuts on the top short, arranged as two motor-bracket pairs:
 #   positions [0, 1] (left pair)  — motor A bracket M5 holes
@@ -59,8 +59,8 @@ PREP_PITCH       = 15    # mm — Z pitch between adjacent prep nuts in the queu
 # the extrusion; the gap between the inner nuts of the two pairs
 # leaves room for the motors' bodies hanging down inside the frame
 # rect (see motor_11_frame / motor_21_frame).
-SHORT_TOP_END_GAP    = 35
-SHORT_TOP_INNER_GAP  = 25
+SHORT_TOP_END_GAP = 35
+SHORT_TOP_INNER_GAP = 25
 SHORT_TOP_POSITIONS = [
     SHORT_TOP_END_GAP,
     SHORT_TOP_END_GAP + SHORT_TOP_INNER_GAP,
@@ -88,9 +88,9 @@ SHORT_TOP_POSITIONS = [
 # to drop 10 (76->67); split so neither the rail-end clearance nor
 # either block's clearance to its corner joining plate (frame_31) goes
 # to zero: span 241 (rail +0.5 mm/side), both brackets +2 mm.
-LONG_TOP_GAP         = 42
-LONG_BOT_GAP         = 25
-LONG_POSITIONS_LEFT  = [LONG_TOP_GAP, LONG_LENGTH - LONG_BOT_GAP]
+LONG_TOP_GAP = 42
+LONG_BOT_GAP = 25
+LONG_POSITIONS_LEFT = [LONG_TOP_GAP, LONG_LENGTH - LONG_BOT_GAP]
 LONG_POSITIONS_RIGHT = [LONG_BOT_GAP, LONG_LENGTH - LONG_TOP_GAP]
 
 
@@ -99,7 +99,8 @@ def _seat_nuts(ext, positions: list[float]) -> list:
     nuts = [TNut("standard", "M5").build() for _ in positions]
     for nut, pos in zip(nuts, positions):
         ext.joints["slot_right"].connect_to(
-            nut.joints["slot_mount"], position=pos,
+            nut.joints["slot_mount"],
+            position=pos,
         )
     return nuts
 
@@ -134,7 +135,6 @@ def ext_with_nuts(
 
 
 class FR10ExtrusionTnut(BaseAssembly):
-
     def __init__(self, *, separation: float = 30, exploded: bool = False):
         """``separation`` (mm) — horizontal gap between each long and
         the short ends in the assembled view. Default 30 leaves the
@@ -157,8 +157,11 @@ class FR10ExtrusionTnut(BaseAssembly):
         self.frame_parts: dict = {}
 
     def _build(self) -> Compound:
-        return (self._build_exploded_rows() if self.exploded
-                else self._build_assembled_frame())
+        return (
+            self._build_exploded_rows()
+            if self.exploded
+            else self._build_assembled_frame()
+        )
 
     def _build_exploded_rows(self) -> Compound:
         specs = [
@@ -166,16 +169,18 @@ class FR10ExtrusionTnut(BaseAssembly):
             # LONG_POSITIONS_RIGHT for visual symmetry; the actual
             # chirality is baked in by the assembled-frame plane (one
             # side flips local Z). short_bot has no nuts → [].
-            (LONG_LENGTH,  True,  LONG_POSITIONS_RIGHT),
-            (LONG_LENGTH,  True,  LONG_POSITIONS_RIGHT),
+            (LONG_LENGTH, True, LONG_POSITIONS_RIGHT),
+            (LONG_LENGTH, True, LONG_POSITIONS_RIGHT),
             (SHORT_LENGTH, False, SHORT_TOP_POSITIONS),
             (SHORT_LENGTH, False, []),
         ]
-        solid_shapes = []    # extrusion + loose prep nuts
-        ghost_shapes = []    # destination silhouettes inside the slot
+        solid_shapes = []  # extrusion + loose prep nuts
+        ghost_shapes = []  # destination silhouettes inside the slot
         for i, (length, cb, positions) in enumerate(specs):
             ext, destinations, prep = ext_with_nuts(
-                length, positions, cb=cb,
+                length,
+                positions,
+                cb=cb,
             )
             # Bake row offset into each leaf — the solid/ghost wrappers
             # below sit at identity, so projection treats leaf locations
@@ -186,10 +191,13 @@ class FR10ExtrusionTnut(BaseAssembly):
             solid_shapes.append(ext)
             solid_shapes.extend(prep)
             ghost_shapes.extend(destinations)
-        return Compound(label="frame_10_extrusion_tnut", children=[
-            Compound(label=SOLID_LABEL, children=solid_shapes),
-            Compound(label=GHOST_LABEL, children=ghost_shapes),
-        ])
+        return Compound(
+            label="frame_10_extrusion_tnut",
+            children=[
+                Compound(label=SOLID_LABEL, children=solid_shapes),
+                Compound(label=GHOST_LABEL, children=ghost_shapes),
+            ],
+        )
 
     def _build_assembled_frame(self) -> Compound:
         # self.separation pulls each long outboard from the short ends
@@ -201,28 +209,49 @@ class FR10ExtrusionTnut(BaseAssembly):
         # flipped end-to-end: long_left uses z_dir=(0,0,-1) with origin
         # at Z=LONG_LENGTH; long_right uses z_dir=(0,0,1).
         half_w = SHORT_LENGTH / 2 + EXT_THICKNESS / 2 + self.separation
-        top_z  = LONG_LENGTH - cb_end_offset
-        bot_z  = cb_end_offset
+        top_z = LONG_LENGTH - cb_end_offset
+        bot_z = cb_end_offset
 
         members = [
             # name, (length, cb, positions), placement
-            ("long_left",  (LONG_LENGTH,  True,  LONG_POSITIONS_LEFT),
-             Plane(origin=(-half_w, 0, LONG_LENGTH),
-                   x_dir=(0, -1, 0), z_dir=(0, 0, -1))),   # CB → world -X
-            ("long_right", (LONG_LENGTH,  True,  LONG_POSITIONS_RIGHT),
-             Plane(origin=(half_w, 0, 0),
-                   x_dir=(0, -1, 0), z_dir=(0, 0, 1))),    # CB → world +X
-            ("short_top",  (SHORT_LENGTH, False, SHORT_TOP_POSITIONS),
-             Plane(origin=(-SHORT_LENGTH / 2, 0, top_z),
-                   x_dir=(0, -1, 0), z_dir=(1, 0, 0))),
-            ("short_bot",  (SHORT_LENGTH, False, []),       # no nuts
-             Plane(origin=(-SHORT_LENGTH / 2, 0, bot_z),
-                   x_dir=(0, -1, 0), z_dir=(1, 0, 0))),
+            (
+                "long_left",
+                (LONG_LENGTH, True, LONG_POSITIONS_LEFT),
+                Plane(
+                    origin=(-half_w, 0, LONG_LENGTH), x_dir=(0, -1, 0), z_dir=(0, 0, -1)
+                ),
+            ),  # CB → world -X
+            (
+                "long_right",
+                (LONG_LENGTH, True, LONG_POSITIONS_RIGHT),
+                Plane(origin=(half_w, 0, 0), x_dir=(0, -1, 0), z_dir=(0, 0, 1)),
+            ),  # CB → world +X
+            (
+                "short_top",
+                (SHORT_LENGTH, False, SHORT_TOP_POSITIONS),
+                Plane(
+                    origin=(-SHORT_LENGTH / 2, 0, top_z),
+                    x_dir=(0, -1, 0),
+                    z_dir=(1, 0, 0),
+                ),
+            ),
+            (
+                "short_bot",
+                (SHORT_LENGTH, False, []),  # no nuts
+                Plane(
+                    origin=(-SHORT_LENGTH / 2, 0, bot_z),
+                    x_dir=(0, -1, 0),
+                    z_dir=(1, 0, 0),
+                ),
+            ),
         ]
         shapes = []
         for name, (length, cb, positions), plane in members:
             ext, destinations, _ = ext_with_nuts(
-                length, positions, cb=cb, with_prep=False,
+                length,
+                positions,
+                cb=cb,
+                with_prep=False,
             )
             loc = Location(plane)
             for s in (ext, *destinations):

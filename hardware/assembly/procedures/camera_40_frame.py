@@ -39,12 +39,12 @@ from hardware.parts.standard.t_nut import HAMMER_TOTAL_HEIGHT
 # magic 95/105) so it tracks the frame width — a stale literal had the bracket
 # seating 10 mm inside the extrusion. The long is 20 mm along X (two legs); its
 # outward +X side face is the 40 mm face, carrying two slots at world Y = ±10.
-LONG_CENTER_X = X_EXTRUSION_LENGTH / 2 + leg   # = 105 (inner face at 95, +leg)
-FACE_X        = LONG_CENTER_X + leg            # = 115, outward +X side face
-SLOT_Y        = 10                     # the second (lower, +Y / bed-side) slot
-MOUNT_Z       = 147.5                  # along the long, at the bed's mid-length
-DECK_HOLE_X   = 15                     # bracket-local X of the deck hole
-EXPLODE       = 70                     # mm — exploded: arm pulled out +X off the face
+LONG_CENTER_X = X_EXTRUSION_LENGTH / 2 + leg  # = 105 (inner face at 95, +leg)
+FACE_X = LONG_CENTER_X + leg  # = 115, outward +X side face
+SLOT_Y = 10  # the second (lower, +Y / bed-side) slot
+MOUNT_Z = 147.5  # along the long, at the bed's mid-length
+DECK_HOLE_X = 15  # bracket-local X of the deck hole
+EXPLODE = 70  # mm — exploded: arm pulled out +X off the face
 
 # Bracket frame → extrusion face. x_dir = image of bracket +X, z_dir = image of
 # bracket +Z; the origin offsets bracket x=DECK_HOLE_X onto the slot (Y=SLOT_Y)
@@ -57,8 +57,8 @@ EXPLODE       = 70                     # mm — exploded: arm pulled out +X off 
 # the T-nuts drop INTO the slot (X < FACE_X) instead of standing proud of it.
 CAMERA_PLACEMENT = Plane(
     origin=(FACE_X - HAMMER_TOTAL_HEIGHT, SLOT_Y - DECK_HOLE_X, MOUNT_Z),
-    x_dir=(0, 1, 0),    # bracket +X → world +Y
-    z_dir=(1, 0, 0),    # bracket +Z → world +X
+    x_dir=(0, 1, 0),  # bracket +X → world +Y
+    z_dir=(1, 0, 0),  # bracket +Z → world +X
 )
 
 

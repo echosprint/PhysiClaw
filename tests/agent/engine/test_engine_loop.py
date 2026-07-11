@@ -7,6 +7,7 @@ FakeProvider and FakeMcpClient. Existing pure-helper tests live in
 (gates / guards / observers) are exercised through the loop here — their
 judgment is engine-visible behavior.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -89,8 +90,9 @@ class FakeMcpClient:
         return [{"type": "text", "text": "mcp-ok"}]
 
 
-def _asst(*, content="", tool_calls=None, finish=FinishReason.TOOL_CALLS,
-          usage=None) -> AssistantMessage:
+def _asst(
+    *, content="", tool_calls=None, finish=FinishReason.TOOL_CALLS, usage=None
+) -> AssistantMessage:
     return AssistantMessage(
         content=content,
         tool_calls=tool_calls or [],
@@ -101,6 +103,7 @@ def _asst(*, content="", tool_calls=None, finish=FinishReason.TOOL_CALLS,
 
 def _tc(name: str, args: dict | None = None, *, tcid: str = None) -> ToolCall:
     import uuid
+
     return ToolCall(
         id=tcid or f"tc_{uuid.uuid4().hex[:8]}",
         name=name,
@@ -110,23 +113,37 @@ def _tc(name: str, args: dict | None = None, *, tcid: str = None) -> ToolCall:
 
 def _settings(**over) -> engine_mod.Settings:
     base = dict(
-        max_turns=300, max_session_attempts=3, provider_retry_attempts=3,
-        retry_backoff_seconds=0.0, wait_default_minutes=15,
+        max_turns=300,
+        max_session_attempts=3,
+        provider_retry_attempts=3,
+        retry_backoff_seconds=0.0,
+        wait_default_minutes=15,
     )
     base.update(over)
     return engine_mod.Settings(**base)
 
 
-def _mk_run(provider=None, *, mcp=None, tool_schemas=None, schema_by_name=None,
-            local_registry=None, tr=None, rlog=None, layout_incomplete=False,
-            policies=None, settings=None) -> engine_mod.EngineRun:
+def _mk_run(
+    provider=None,
+    *,
+    mcp=None,
+    tool_schemas=None,
+    schema_by_name=None,
+    local_registry=None,
+    tr=None,
+    rlog=None,
+    layout_incomplete=False,
+    policies=None,
+    settings=None,
+) -> engine_mod.EngineRun:
     tool_schemas = tool_schemas if tool_schemas is not None else []
     return engine_mod.EngineRun(
         provider=provider,
         mcp=mcp if mcp is not None else FakeMcpClient(),
         tool_schemas=tool_schemas,
         schema_by_name=(
-            schema_by_name if schema_by_name is not None
+            schema_by_name
+            if schema_by_name is not None
             else {s["name"]: s for s in tool_schemas}
         ),
         local_registry=local_registry if local_registry is not None else {},
@@ -134,7 +151,8 @@ def _mk_run(provider=None, *, mcp=None, tool_schemas=None, schema_by_name=None,
         rlog=rlog if rlog is not None else MagicMock(),
         settings=settings or _settings(),
         policies=(
-            policies if policies is not None
+            policies
+            if policies is not None
             else policy_mod.default_policies(layout_incomplete=layout_incomplete)
         ),
         layout_incomplete=layout_incomplete,
@@ -169,7 +187,10 @@ async def test_dispatch_invalid_args_returns_error() -> None:
     run = _mk_run(schema_by_name={"ping": schema})
 
     result = await engine_mod._dispatch(
-        run, Session(), _tc("ping", {}), 0,  # missing required "x"
+        run,
+        Session(),
+        _tc("ping", {}),
+        0,  # missing required "x"
     )
 
     assert result.is_error is True
@@ -242,8 +263,9 @@ class VerdictMcpClient:
     the input that drives the stuck guard's counters. `listing` adds a
     second text block (the fused view's OCR listing)."""
 
-    def __init__(self, text="Tapped at bbox [...] | screen: no visible change",
-                 listing=None):
+    def __init__(
+        self, text="Tapped at bbox [...] | screen: no visible change", listing=None
+    ):
         self.text = text
         self.listing = listing
         self.tool_calls: list[tuple] = []
@@ -279,9 +301,14 @@ async def _tap_n(session, mcp, n: int):
     run = _mk_run(mcp=mcp, schema_by_name={"tap": _TAP_SCHEMA})
     results = []
     for _ in range(n):
-        results.append(await engine_mod._dispatch(
-            run, session, _tc("tap", {"bbox": list(_STEPPER)}), 0,
-        ))
+        results.append(
+            await engine_mod._dispatch(
+                run,
+                session,
+                _tc("tap", {"bbox": list(_STEPPER)}),
+                0,
+            )
+        )
     return results
 
 
@@ -391,7 +418,10 @@ async def test_dispatch_mcp_failure_feeds_error_counter_not_misses() -> None:
     run = _mk_run(mcp=JammedMcp(), schema_by_name={"tap": _TAP_SCHEMA})
     for _ in range(2):
         result = await engine_mod._dispatch(
-            run, session, _tc("tap", {"bbox": list(_STEPPER)}), 0,
+            run,
+            session,
+            _tc("tap", {"bbox": list(_STEPPER)}),
+            0,
         )
         assert result.is_error is True and "arm jammed" in result.content
 
@@ -413,7 +443,9 @@ async def test_plan_gate_block_does_not_feed_guard() -> None:
 
     for _ in range(10):
         result = await engine_mod._dispatch(
-            run, session, _tc("tap", {"bbox": list(_STEPPER)}),
+            run,
+            session,
+            _tc("tap", {"bbox": list(_STEPPER)}),
             CONFIG.engine.plan_required_after,
         )
         assert result.content.startswith("BLOCKED")
@@ -437,14 +469,22 @@ async def test_dispatch_error_repeat_warns_and_blocks() -> None:
     run = _mk_run(mcp=OverlapMcp(), schema_by_name={"tap": _TAP_SCHEMA})
     results = []
     for _ in range(BLOCK_AT - 1):
-        results.append(await engine_mod._dispatch(
-            run, session, _tc("tap", {"bbox": list(_STEPPER)}), 0,
-        ))
+        results.append(
+            await engine_mod._dispatch(
+                run,
+                session,
+                _tc("tap", {"bbox": list(_STEPPER)}),
+                0,
+            )
+        )
     assert all(r.is_error for r in results)
     assert "⚠" in results[WARN_AT - 1].content  # warning on the WARN_AT-th
 
     blocked = await engine_mod._dispatch(
-        run, session, _tc("tap", {"bbox": list(_STEPPER)}), 0,
+        run,
+        session,
+        _tc("tap", {"bbox": list(_STEPPER)}),
+        0,
     )
     assert blocked.content.startswith("BLOCKED")
     assert "failed" in blocked.content
@@ -467,7 +507,8 @@ async def test_plan_gate_blocks_action_tools_when_overdue() -> None:
     session = Session()
 
     result = await _gated_dispatch(
-        session, _tc("tap", {"bbox": list(_STEPPER)}),
+        session,
+        _tc("tap", {"bbox": list(_STEPPER)}),
         turn=CONFIG.engine.plan_required_after,
     )
 
@@ -484,7 +525,9 @@ async def test_plan_gate_exempts_the_way_out(name: str) -> None:
     session = Session()
 
     result = await _gated_dispatch(
-        session, _tc(name), turn=CONFIG.engine.plan_required_after,
+        session,
+        _tc(name),
+        turn=CONFIG.engine.plan_required_after,
     )
 
     assert not str(result.content).startswith("BLOCKED")
@@ -495,7 +538,9 @@ async def test_plan_gate_open_when_not_overdue() -> None:
     session = Session()
 
     result = await _gated_dispatch(
-        session, _tc("tap", {"bbox": list(_STEPPER)}), turn=0,
+        session,
+        _tc("tap", {"bbox": list(_STEPPER)}),
+        turn=0,
     )
 
     assert result.is_error is False
@@ -518,7 +563,9 @@ def test_plan_gate_overdue_predicate() -> None:
     assert not gate.overdue(drafted, n)
 
     steps_only = Session()
-    steps_only.plan.update(steps=[{"content": "reply to user", "status": "in_progress"}])
+    steps_only.plan.update(
+        steps=[{"content": "reply to user", "status": "in_progress"}]
+    )
     assert not gate.overdue(steps_only, n)
 
 
@@ -571,8 +618,7 @@ def _registry() -> dict[str, LocalTool]:
 
 def _schemas(registry: dict[str, LocalTool]) -> list[dict]:
     return [
-        {"name": t.name, "description": t.description,
-         "input_schema": t.input_schema}
+        {"name": t.name, "description": t.description, "input_schema": t.input_schema}
         for t in registry.values()
     ]
 
@@ -580,7 +626,10 @@ def _schemas(registry: dict[str, LocalTool]) -> list[dict]:
 def _loop_run(provider, registry, **over) -> engine_mod.EngineRun:
     schemas = _schemas(registry)
     return _mk_run(
-        provider=provider, tool_schemas=schemas, local_registry=registry, **over,
+        provider=provider,
+        tool_schemas=schemas,
+        local_registry=registry,
+        **over,
     )
 
 
@@ -588,12 +637,11 @@ def _loop_run(provider, registry, **over) -> engine_mod.EngineRun:
 def patched_loop_deps(mocker):
     """Stub out compact / scratchpad / plan tail injection so _loop runs
     in isolation."""
-    mocker.patch.object(scratchpad_mod, "inject_tail",
-                        side_effect=lambda msgs, _sp: msgs)
-    mocker.patch.object(plan_mod, "inject_tail",
-                        side_effect=lambda msgs, _p: msgs)
-    mocker.patch.object(screen_layout_mod, "inject_tail",
-                        side_effect=lambda msgs: msgs)
+    mocker.patch.object(
+        scratchpad_mod, "inject_tail", side_effect=lambda msgs, _sp: msgs
+    )
+    mocker.patch.object(plan_mod, "inject_tail", side_effect=lambda msgs, _p: msgs)
+    mocker.patch.object(screen_layout_mod, "inject_tail", side_effect=lambda msgs: msgs)
     mocker.patch.object(compact_mod, "drop_stale_screens")
     mocker.patch.object(compact_mod, "collapse_old_turns")
 
@@ -631,25 +679,29 @@ async def test_loop_closes_cleanly_on_end_session(patched_loop_deps) -> None:
 async def test_loop_skips_layout_reminder_when_complete(mocker) -> None:
     # Default (layout_incomplete=False) must NOT call screen_layout.inject_tail
     # — that avoids a per-turn disk read once setup is done.
-    mocker.patch.object(scratchpad_mod, "inject_tail",
-                        side_effect=lambda msgs, _sp: msgs)
-    mocker.patch.object(plan_mod, "inject_tail",
-                        side_effect=lambda msgs, _p: msgs)
+    mocker.patch.object(
+        scratchpad_mod, "inject_tail", side_effect=lambda msgs, _sp: msgs
+    )
+    mocker.patch.object(plan_mod, "inject_tail", side_effect=lambda msgs, _p: msgs)
     mocker.patch.object(compact_mod, "drop_stale_screens")
     mocker.patch.object(compact_mod, "collapse_old_turns")
-    spy = mocker.patch.object(screen_layout_mod, "inject_tail",
-                              side_effect=lambda msgs: msgs)
+    spy = mocker.patch.object(
+        screen_layout_mod, "inject_tail", side_effect=lambda msgs: msgs
+    )
 
     registry = _registry()
-    asst = _asst(tool_calls=[
-        _tc("note", {"summary": "x"}),
-        _tc("end_session", {"status": DONE, "recap": "done"}),
-    ])
+    asst = _asst(
+        tool_calls=[
+            _tc("note", {"summary": "x"}),
+            _tc("end_session", {"status": DONE, "recap": "done"}),
+        ]
+    )
     session = Session()
 
     await engine_mod._loop(
         _loop_run(FakeProvider([asst]), registry),  # layout_incomplete defaults False
-        session, [SystemMessage(content="s")],
+        session,
+        [SystemMessage(content="s")],
     )
     spy.assert_not_called()
 
@@ -657,7 +709,8 @@ async def test_loop_skips_layout_reminder_when_complete(mocker) -> None:
     session2 = Session()
     await engine_mod._loop(
         _loop_run(FakeProvider([asst]), registry, layout_incomplete=True),
-        session2, [SystemMessage(content="s")],
+        session2,
+        [SystemMessage(content="s")],
     )
     spy.assert_called()
 
@@ -669,12 +722,15 @@ async def test_loop_stucks_after_consecutive_correctives(patched_loop_deps) -> N
     # burning max_turns of round-trips.
     registry = _registry()
 
-    bad = [_asst(tool_calls=[_tc("peek")]) for _ in range(engine_mod.CORRECTIVE_LIMIT + 3)]
+    bad = [
+        _asst(tool_calls=[_tc("peek")]) for _ in range(engine_mod.CORRECTIVE_LIMIT + 3)
+    ]
     provider = FakeProvider(bad)
     session = Session()
 
     await engine_mod._loop(
-        _loop_run(provider, registry), session,
+        _loop_run(provider, registry),
+        session,
         [SystemMessage(content="sys"), UserMessage(content="trig")],
     )
 
@@ -689,6 +745,7 @@ async def test_loop_stucks_after_consecutive_correctives(patched_loop_deps) -> N
 class CheckpointProvider(FakeProvider):
     """Collapse knobs small enough to hit the checkpoint turn in a short
     scripted session; records every request for tail assertions."""
+
     COLLAPSE_FIRST_AT_TURN = 2
     COLLAPSE_INTERVAL_TURNS = 100
     KEEP_RECENT_TURNS = 1
@@ -715,7 +772,8 @@ def _scaffold_messages() -> list:
 
 def _req_texts(request: list) -> str:
     return "\n".join(
-        m.content for m in request
+        m.content
+        for m in request
         if isinstance(m, UserMessage) and isinstance(m.content, str)
     )
 
@@ -734,18 +792,24 @@ async def test_checkpoint_requires_scratchpad_then_collapses() -> None:
     # Turn before the first collapse: the request carries the ⚠ tail; a
     # scratchpad-less note is rejected once; the compliant retry passes
     # and the collapse folds turn 0 to its summary line.
-    provider, session, messages = await _run_checkpoint_session([
-        _asst(tool_calls=[_tc("note", {"summary": "a"}), _tc("peek")]),
-        _asst(tool_calls=[_tc("note", {"summary": "b"}), _tc("peek")]),
-        _asst(tool_calls=[
-            _tc("note", {"summary": "b", "scratchpad": "cart=3; addr saved"}),
-            _tc("peek"),
-        ]),
-        _asst(tool_calls=[
-            _tc("note", {"summary": "closing"}),
-            _tc("end_session", {"status": DONE, "recap": "done"}),
-        ]),
-    ])
+    provider, session, messages = await _run_checkpoint_session(
+        [
+            _asst(tool_calls=[_tc("note", {"summary": "a"}), _tc("peek")]),
+            _asst(tool_calls=[_tc("note", {"summary": "b"}), _tc("peek")]),
+            _asst(
+                tool_calls=[
+                    _tc("note", {"summary": "b", "scratchpad": "cart=3; addr saved"}),
+                    _tc("peek"),
+                ]
+            ),
+            _asst(
+                tool_calls=[
+                    _tc("note", {"summary": "closing"}),
+                    _tc("end_session", {"status": DONE, "recap": "done"}),
+                ]
+            ),
+        ]
+    )
 
     assert session.sentinel_status == DONE
     assert len(provider.calls) == 4
@@ -764,15 +828,21 @@ async def test_checkpoint_fails_open_when_reminder_ignored() -> None:
     # A model that never adds the scratchpad is corrected ONCE, then its
     # summary-only note is accepted — compression proceeds on summaries
     # alone rather than stalling the session.
-    provider, session, messages = await _run_checkpoint_session([
-        _asst(tool_calls=[_tc("note", {"summary": "a"}), _tc("peek")]),
-        _asst(tool_calls=[_tc("note", {"summary": "b"}), _tc("peek")]),
-        _asst(tool_calls=[_tc("note", {"summary": "b"}), _tc("peek")]),  # still none
-        _asst(tool_calls=[
-            _tc("note", {"summary": "closing"}),
-            _tc("end_session", {"status": DONE, "recap": "done"}),
-        ]),
-    ])
+    provider, session, messages = await _run_checkpoint_session(
+        [
+            _asst(tool_calls=[_tc("note", {"summary": "a"}), _tc("peek")]),
+            _asst(tool_calls=[_tc("note", {"summary": "b"}), _tc("peek")]),
+            _asst(
+                tool_calls=[_tc("note", {"summary": "b"}), _tc("peek")]
+            ),  # still none
+            _asst(
+                tool_calls=[
+                    _tc("note", {"summary": "closing"}),
+                    _tc("end_session", {"status": DONE, "recap": "done"}),
+                ]
+            ),
+        ]
+    )
 
     assert session.sentinel_status == DONE
     assert len(provider.calls) == 4
@@ -794,17 +864,22 @@ async def test_checkpoint_corrective_renews_per_collapse_event() -> None:
     def _plain_turn():
         return _asst(tool_calls=[_tc("note", {"summary": "s"}), _tc("peek")])
 
-    provider, session, _ = await _run_checkpoint_session([
-        _plain_turn(),  # t0: not pending
-        _plain_turn(),  # t1: pending → corrective #1
-        _plain_turn(),  # t1 retry: fail open → collapse #1
-        _plain_turn(),  # t2: pending again → corrective #2
-        _plain_turn(),  # t2 retry: fail open → collapse #2
-        _asst(tool_calls=[
-            _tc("note", {"summary": "closing"}),
-            _tc("end_session", {"status": DONE, "recap": "done"}),
-        ]),             # t3: pending but end_session-exempt
-    ], provider_cls=TightProvider)
+    provider, session, _ = await _run_checkpoint_session(
+        [
+            _plain_turn(),  # t0: not pending
+            _plain_turn(),  # t1: pending → corrective #1
+            _plain_turn(),  # t1 retry: fail open → collapse #1
+            _plain_turn(),  # t2: pending again → corrective #2
+            _plain_turn(),  # t2 retry: fail open → collapse #2
+            _asst(
+                tool_calls=[
+                    _tc("note", {"summary": "closing"}),
+                    _tc("end_session", {"status": DONE, "recap": "done"}),
+                ]
+            ),  # t3: pending but end_session-exempt
+        ],
+        provider_cls=TightProvider,
+    )
 
     assert session.sentinel_status == DONE
     assert len(provider.calls) == 6
@@ -817,13 +892,17 @@ async def test_checkpoint_corrective_renews_per_collapse_event() -> None:
 @pytest.mark.asyncio
 async def test_checkpoint_skipped_on_end_session_turn() -> None:
     # Closing on the checkpoint turn: nothing to preserve — no corrective.
-    provider, session, _ = await _run_checkpoint_session([
-        _asst(tool_calls=[_tc("note", {"summary": "a"}), _tc("peek")]),
-        _asst(tool_calls=[
-            _tc("note", {"summary": "closing"}),
-            _tc("end_session", {"status": DONE, "recap": "done"}),
-        ]),
-    ])
+    provider, session, _ = await _run_checkpoint_session(
+        [
+            _asst(tool_calls=[_tc("note", {"summary": "a"}), _tc("peek")]),
+            _asst(
+                tool_calls=[
+                    _tc("note", {"summary": "closing"}),
+                    _tc("end_session", {"status": DONE, "recap": "done"}),
+                ]
+            ),
+        ]
+    )
 
     assert session.sentinel_status == DONE
     assert len(provider.calls) == 2
@@ -836,9 +915,12 @@ async def test_loop_corrective_counter_resets_on_good_turn(patched_loop_deps) ->
     registry = _registry()
 
     def good(i):
-        return _asst(tool_calls=[
-            _tc("note", {"summary": f"turn {i}"}), _tc("peek"),
-        ])
+        return _asst(
+            tool_calls=[
+                _tc("note", {"summary": f"turn {i}"}),
+                _tc("peek"),
+            ]
+        )
 
     responses = []
     for i in range(engine_mod.CORRECTIVE_LIMIT - 1):
@@ -846,15 +928,20 @@ async def test_loop_corrective_counter_resets_on_good_turn(patched_loop_deps) ->
     responses.append(good(0))  # resets the counter
     for i in range(engine_mod.CORRECTIVE_LIMIT - 1):
         responses.append(_asst(tool_calls=[_tc("peek")]))  # bad again
-    responses.append(_asst(tool_calls=[
-        _tc("note", {"summary": "closing"}),
-        _tc("end_session", {"status": DONE, "recap": "ok"}),
-    ]))
+    responses.append(
+        _asst(
+            tool_calls=[
+                _tc("note", {"summary": "closing"}),
+                _tc("end_session", {"status": DONE, "recap": "ok"}),
+            ]
+        )
+    )
     provider = FakeProvider(responses)
     session = Session()
 
     await engine_mod._loop(
-        _loop_run(provider, registry), session,
+        _loop_run(provider, registry),
+        session,
         [SystemMessage(content="sys"), UserMessage(content="trig")],
     )
 
@@ -869,7 +956,9 @@ async def test_loop_routes_content_filter_to_fail(patched_loop_deps) -> None:
     session = Session()
 
     await engine_mod._loop(
-        _loop_run(provider, registry), session, [SystemMessage(content="s")],
+        _loop_run(provider, registry),
+        session,
+        [SystemMessage(content="s")],
     )
 
     assert session.sentinel_status == FAIL
@@ -883,7 +972,9 @@ async def test_loop_provider_failure_marks_stuck(patched_loop_deps) -> None:
     session = Session()
 
     await engine_mod._loop(
-        _loop_run(provider, registry), session, [SystemMessage(content="s")],
+        _loop_run(provider, registry),
+        session,
+        [SystemMessage(content="s")],
     )
 
     assert session.sentinel_status == STUCK
@@ -894,10 +985,12 @@ async def test_loop_provider_failure_marks_stuck(patched_loop_deps) -> None:
 async def test_loop_no_tool_calls_injects_corrective(patched_loop_deps) -> None:
     registry = _registry()
     asst_no_calls = _asst(content="just talking")
-    asst_close = _asst(tool_calls=[
-        _tc("note", {"summary": "x"}),
-        _tc("end_session", {"status": IDLE, "recap": "nothing"}),
-    ])
+    asst_close = _asst(
+        tool_calls=[
+            _tc("note", {"summary": "x"}),
+            _tc("end_session", {"status": IDLE, "recap": "nothing"}),
+        ]
+    )
     provider = FakeProvider([asst_no_calls, asst_close])
     session = Session()
     messages: list = [SystemMessage(content="s")]
@@ -905,7 +998,8 @@ async def test_loop_no_tool_calls_injects_corrective(patched_loop_deps) -> None:
     await engine_mod._loop(_loop_run(provider, registry), session, messages)
 
     correctives = [
-        m for m in messages
+        m
+        for m in messages
         if isinstance(m, UserMessage) and "no tool_calls" in str(m.content)
     ]
     assert len(correctives) == 1
@@ -918,10 +1012,12 @@ async def test_loop_bad_turn_shape_injects_corrective(
 ) -> None:
     registry = _registry()
     bad = _asst(tool_calls=[_tc("peek")])
-    good = _asst(tool_calls=[
-        _tc("note", {"summary": "y"}),
-        _tc("end_session", {"status": DONE, "recap": "ok"}),
-    ])
+    good = _asst(
+        tool_calls=[
+            _tc("note", {"summary": "y"}),
+            _tc("end_session", {"status": DONE, "recap": "ok"}),
+        ]
+    )
     provider = FakeProvider([bad, good])
     session = Session()
     messages: list = [SystemMessage(content="s")]
@@ -929,7 +1025,8 @@ async def test_loop_bad_turn_shape_injects_corrective(
     await engine_mod._loop(_loop_run(provider, registry), session, messages)
 
     correctives = [
-        m for m in messages
+        m
+        for m in messages
         if isinstance(m, UserMessage) and "without `note`" in str(m.content)
     ]
     assert len(correctives) == 1
@@ -944,7 +1041,8 @@ async def test_loop_max_turns_marks_stuck(patched_loop_deps) -> None:
 
     await engine_mod._loop(
         _loop_run(provider, registry, settings=_settings(max_turns=2)),
-        session, [SystemMessage(content="s")],
+        session,
+        [SystemMessage(content="s")],
     )
 
     assert session.sentinel_status == STUCK
@@ -966,7 +1064,9 @@ async def test_loop_finish_length_logs_warning(patched_loop_deps) -> None:
     tr = MagicMock()
 
     await engine_mod._loop(
-        _loop_run(provider, registry, tr=tr), session, [SystemMessage(content="s")],
+        _loop_run(provider, registry, tr=tr),
+        session,
+        [SystemMessage(content="s")],
     )
 
     events = [c.args[0].get("event") for c in tr.write.call_args_list]
@@ -999,17 +1099,21 @@ def _registry_with_pitfall() -> dict[str, LocalTool]:
 
 
 def _close(status: str) -> AssistantMessage:
-    return _asst(tool_calls=[
-        _tc("note", {"summary": "closing"}),
-        _tc("end_session", {"status": status, "recap": "r"}),
-    ])
+    return _asst(
+        tool_calls=[
+            _tc("note", {"summary": "closing"}),
+            _tc("end_session", {"status": status, "recap": "r"}),
+        ]
+    )
 
 
 def _pitfall_asst() -> AssistantMessage:
-    return _asst(tool_calls=[
-        _tc("note", {"summary": "banking traps"}),
-        _tc("add_pitfall", {"items": ["京东: avoid Ai搜索"]}),
-    ])
+    return _asst(
+        tool_calls=[
+            _tc("note", {"summary": "banking traps"}),
+            _tc("add_pitfall", {"items": ["京东: avoid Ai搜索"]}),
+        ]
+    )
 
 
 async def _run_close_loop(provider, session, registry):
@@ -1019,13 +1123,17 @@ async def _run_close_loop(provider, session, registry):
 
 
 def _pitfall_correctives(messages) -> list:
-    return [m for m in messages
-            if isinstance(m, UserMessage) and "add_pitfall(" in str(m.content)]
+    return [
+        m
+        for m in messages
+        if isinstance(m, UserMessage) and "add_pitfall(" in str(m.content)
+    ]
 
 
 def _floor0(monkeypatch) -> None:
     # Drop capture_turn_floor to 0 so a short scripted DONE (turn 0) trips the gate.
     from physiclaw import config
+
     monkeypatch.setattr(config.CONFIG.pitfalls, "capture_turn_floor", 0)
 
 
@@ -1048,7 +1156,9 @@ async def test_loop_forces_pitfall_on_long_done(patched_loop_deps, monkeypatch) 
 
 
 @pytest.mark.asyncio
-async def test_loop_pitfall_corrective_carries_trajectory(patched_loop_deps, monkeypatch) -> None:
+async def test_loop_pitfall_corrective_carries_trajectory(
+    patched_loop_deps, monkeypatch
+) -> None:
     # The turn-marked trajectory rides the corrective so the agent mines the
     # real turn-wasters even after compaction folds early turns.
     _floor0(monkeypatch)
@@ -1068,7 +1178,9 @@ async def test_loop_pitfall_corrective_carries_trajectory(patched_loop_deps, mon
 
 
 @pytest.mark.asyncio
-async def test_loop_pitfall_gate_fails_open_after_one_retry(patched_loop_deps, monkeypatch) -> None:
+async def test_loop_pitfall_gate_fails_open_after_one_retry(
+    patched_loop_deps, monkeypatch
+) -> None:
     # Agent ignores the corrective and re-issues end_session — closes on the
     # second attempt (one-shot), never adding.
     _floor0(monkeypatch)
@@ -1136,7 +1248,7 @@ def test_should_capture_matrix() -> None:
     assert should_capture(FAIL, floor + 5, s)[0] is False
     # DONE captures only past the turn floor.
     assert should_capture(DONE, floor - 1, s)[0] is False  # short DONE
-    do, seed = should_capture(DONE, floor, s)               # long DONE
+    do, seed = should_capture(DONE, floor, s)  # long DONE
     assert do is True
     assert f"{floor} turns" in seed and "DONE" in seed
     # stuck_events only enriches the seed, doesn't gate.
@@ -1160,10 +1272,15 @@ def _save_memory_tool() -> LocalTool:
     async def _h(session, _args):
         session.saved_memory = True
         return "saved"
+
     return LocalTool(
-        name="save_memory", description="save",
-        input_schema={"type": "object", "properties": {"text": {"type": "string"}},
-                      "required": ["text"]},
+        name="save_memory",
+        description="save",
+        input_schema={
+            "type": "object",
+            "properties": {"text": {"type": "string"}},
+            "required": ["text"],
+        },
         handler=_h,
     )
 
@@ -1175,27 +1292,41 @@ def _registry_with_save() -> dict[str, LocalTool]:
     return reg
 
 
-def _note(summary: str, other_name: str, other_args: dict | None = None) -> AssistantMessage:
-    return _asst(tool_calls=[_tc("note", {"summary": summary}),
-                             _tc(other_name, other_args or {})])
+def _note(
+    summary: str, other_name: str, other_args: dict | None = None
+) -> AssistantMessage:
+    return _asst(
+        tool_calls=[
+            _tc("note", {"summary": summary}),
+            _tc(other_name, other_args or {}),
+        ]
+    )
 
 
 def _memory_correctives(messages) -> list:
-    return [m for m in messages
-            if isinstance(m, UserMessage) and "flagged something to remember" in str(m.content)]
+    return [
+        m
+        for m in messages
+        if isinstance(m, UserMessage)
+        and "flagged something to remember" in str(m.content)
+    ]
 
 
 @pytest.mark.asyncio
-async def test_loop_scans_cue_each_turn_and_forces_save_before_close(patched_loop_deps) -> None:
+async def test_loop_scans_cue_each_turn_and_forces_save_before_close(
+    patched_loop_deps,
+) -> None:
     registry = _registry_with_save()
     # turn 0 banks a cue (note summary) alongside an action; close is IDLE so
     # the pitfalls gate stays out of the way — only the memory gate fires.
-    provider = FakeProvider([
-        _note("记住 user hates cilantro", "peek"),
-        _note("closing", "end_session", {"status": IDLE, "recap": "r"}),
-        _note("saving", "save_memory", {"text": "no cilantro"}),
-        _note("closing", "end_session", {"status": IDLE, "recap": "r"}),
-    ])
+    provider = FakeProvider(
+        [
+            _note("记住 user hates cilantro", "peek"),
+            _note("closing", "end_session", {"status": IDLE, "recap": "r"}),
+            _note("saving", "save_memory", {"text": "no cilantro"}),
+            _note("closing", "end_session", {"status": IDLE, "recap": "r"}),
+        ]
+    )
     session = Session()
     messages = await _run_close_loop(provider, session, registry)
 
@@ -1208,10 +1339,12 @@ async def test_loop_scans_cue_each_turn_and_forces_save_before_close(patched_loo
 @pytest.mark.asyncio
 async def test_loop_no_memory_gate_when_already_saved(patched_loop_deps) -> None:
     registry = _registry_with_save()
-    provider = FakeProvider([
-        _note("记住 no cilantro", "save_memory", {"text": "no cilantro"}),
-        _note("closing", "end_session", {"status": IDLE, "recap": "r"}),
-    ])
+    provider = FakeProvider(
+        [
+            _note("记住 no cilantro", "save_memory", {"text": "no cilantro"}),
+            _note("closing", "end_session", {"status": IDLE, "recap": "r"}),
+        ]
+    )
     session = Session()
     messages = await _run_close_loop(provider, session, registry)
 
@@ -1222,8 +1355,9 @@ async def test_loop_no_memory_gate_when_already_saved(patched_loop_deps) -> None
 @pytest.mark.asyncio
 async def test_loop_no_memory_gate_without_a_cue(patched_loop_deps) -> None:
     registry = _registry_with_save()
-    provider = FakeProvider([_note("tapped the button", "end_session",
-                                    {"status": IDLE, "recap": "r"})])
+    provider = FakeProvider(
+        [_note("tapped the button", "end_session", {"status": IDLE, "recap": "r"})]
+    )
     session = Session()
     messages = await _run_close_loop(provider, session, registry)
 
@@ -1235,11 +1369,13 @@ async def test_loop_no_memory_gate_without_a_cue(patched_loop_deps) -> None:
 @pytest.mark.asyncio
 async def test_loop_memory_gate_fails_open_after_one_retry(patched_loop_deps) -> None:
     registry = _registry_with_save()
-    provider = FakeProvider([
-        _note("记住 the gate code 4021", "peek"),
-        _note("closing", "end_session", {"status": IDLE, "recap": "r"}),
-        _note("closing anyway", "end_session", {"status": IDLE, "recap": "r"}),
-    ])
+    provider = FakeProvider(
+        [
+            _note("记住 the gate code 4021", "peek"),
+            _note("closing", "end_session", {"status": IDLE, "recap": "r"}),
+            _note("closing anyway", "end_session", {"status": IDLE, "recap": "r"}),
+        ]
+    )
     session = Session()
     messages = await _run_close_loop(provider, session, registry)
 
@@ -1254,42 +1390,54 @@ async def test_loop_memory_gate_fails_open_after_one_retry(patched_loop_deps) ->
 def _async_returning(value):
     async def _coro(*a, **kw):
         return value
+
     return _coro
 
 
 def _patch_session_deps(mocker):
     """Stub everything _run_session pulls beyond the loop."""
-    mocker.patch("physiclaw.config.parse_model_ref",
-                 return_value=("fake", "fake-model"))
-    mocker.patch.object(engine_mod, "get_mcp",
-                        side_effect=_async_returning(FakeMcpClient()))
-    mocker.patch.object(engine_mod, "list_tools_cached",
-                        side_effect=_async_returning([]))
+    mocker.patch(
+        "physiclaw.config.parse_model_ref", return_value=("fake", "fake-model")
+    )
+    mocker.patch.object(
+        engine_mod, "get_mcp", side_effect=_async_returning(FakeMcpClient())
+    )
+    mocker.patch.object(
+        engine_mod, "list_tools_cached", side_effect=_async_returning([])
+    )
     mocker.patch.object(skill_mod, "discover_builtin_skills", return_value={})
     mocker.patch.object(skill_mod, "discover_user_skills", return_value={})
     mocker.patch.object(
-        builtin_tool_mod, "build_registry", return_value=_registry(),
+        builtin_tool_mod,
+        "build_registry",
+        return_value=_registry(),
     )
     mocker.patch.object(
-        builtin_tool_mod, "schemas", return_value=_schemas(_registry()),
+        builtin_tool_mod,
+        "schemas",
+        return_value=_schemas(_registry()),
     )
     mocker.patch.object(memory_mod, "load_persistent", return_value="")
     mocker.patch.object(skill_mod, "render_builtin", return_value="")
     mocker.patch.object(skill_mod, "render_section", return_value="")
     mocker.patch.object(prompt_mod, "render_system_prompts", return_value="SYSTEM")
     mocker.patch.object(prompt_mod, "prefix_hash", return_value="hashX")
-    mocker.patch.object(compact_mod, "new_summary_placeholder",
-                        return_value=UserMessage(content="<sum>"))
-    mocker.patch.object(compact_mod, "new_memory_placeholder",
-                        return_value=UserMessage(content="<mem>"))
-    mocker.patch.object(compact_mod, "new_skills_placeholder",
-                        return_value=UserMessage(content="<skl>"))
-    mocker.patch.object(scratchpad_mod, "inject_tail",
-                        side_effect=lambda msgs, _sp: msgs)
-    mocker.patch.object(plan_mod, "inject_tail",
-                        side_effect=lambda msgs, _p: msgs)
-    mocker.patch.object(screen_layout_mod, "inject_tail",
-                        side_effect=lambda msgs: msgs)
+    mocker.patch.object(
+        compact_mod,
+        "new_summary_placeholder",
+        return_value=UserMessage(content="<sum>"),
+    )
+    mocker.patch.object(
+        compact_mod, "new_memory_placeholder", return_value=UserMessage(content="<mem>")
+    )
+    mocker.patch.object(
+        compact_mod, "new_skills_placeholder", return_value=UserMessage(content="<skl>")
+    )
+    mocker.patch.object(
+        scratchpad_mod, "inject_tail", side_effect=lambda msgs, _sp: msgs
+    )
+    mocker.patch.object(plan_mod, "inject_tail", side_effect=lambda msgs, _p: msgs)
+    mocker.patch.object(screen_layout_mod, "inject_tail", side_effect=lambda msgs: msgs)
     mocker.patch.object(compact_mod, "drop_stale_screens")
     mocker.patch.object(compact_mod, "collapse_old_turns")
     mocker.patch.object(jobs_mod, "format_fired", return_value="")
@@ -1304,16 +1452,20 @@ def _patch_session_deps(mocker):
 @pytest.mark.asyncio
 async def test_run_session_closes_provider_in_finally(mocker) -> None:
     deps = _patch_session_deps(mocker)
-    asst = _asst(tool_calls=[
-        _tc("note", {"summary": "x"}),
-        _tc("end_session", {"status": DONE, "recap": "fin"}),
-    ])
+    asst = _asst(
+        tool_calls=[
+            _tc("note", {"summary": "x"}),
+            _tc("end_session", {"status": DONE, "recap": "fin"}),
+        ]
+    )
     fake_provider = FakeProvider([asst])
     mocker.patch.object(engine_mod, "make_provider", return_value=fake_provider)
 
     session = Session()
     await engine_mod._run_session(
-        [Trigger(description="t")], model_ref="fake/fake-model", session=session,
+        [Trigger(description="t")],
+        model_ref="fake/fake-model",
+        session=session,
     )
 
     assert session.sentinel_status == DONE
@@ -1326,12 +1478,16 @@ async def test_run_session_closes_provider_in_finally(mocker) -> None:
 async def test_run_session_crash_marks_stuck(mocker) -> None:
     _patch_session_deps(mocker)
     mocker.patch.object(
-        engine_mod, "make_provider", side_effect=RuntimeError("bad provider"),
+        engine_mod,
+        "make_provider",
+        side_effect=RuntimeError("bad provider"),
     )
 
     session = Session()
     await engine_mod._run_session(
-        [Trigger(description="t")], model_ref="fake/fake-model", session=session,
+        [Trigger(description="t")],
+        model_ref="fake/fake-model",
+        session=session,
     )
 
     assert session.sentinel_status == STUCK
@@ -1342,12 +1498,15 @@ async def test_run_session_crash_marks_stuck(mocker) -> None:
 async def test_run_session_cancellation_propagates(mocker) -> None:
     _patch_session_deps(mocker)
     mocker.patch.object(
-        engine_mod, "make_provider", side_effect=asyncio.CancelledError,
+        engine_mod,
+        "make_provider",
+        side_effect=asyncio.CancelledError,
     )
 
     with pytest.raises(asyncio.CancelledError):
         await engine_mod._run_session(
-            [Trigger(description="t")], model_ref="fake/fake-model",
+            [Trigger(description="t")],
+            model_ref="fake/fake-model",
             session=Session(),
         )
 
@@ -1357,17 +1516,20 @@ async def test_run_session_wait_without_create_job_auto_schedules(
     mocker,
 ) -> None:
     _patch_session_deps(mocker)
-    asst = _asst(tool_calls=[
-        _tc("note", {"summary": "x"}),
-        _tc("end_session", {"status": WAIT, "recap": "waiting"}),
-    ])
-    mocker.patch.object(engine_mod, "make_provider",
-                        return_value=FakeProvider([asst]))
+    asst = _asst(
+        tool_calls=[
+            _tc("note", {"summary": "x"}),
+            _tc("end_session", {"status": WAIT, "recap": "waiting"}),
+        ]
+    )
+    mocker.patch.object(engine_mod, "make_provider", return_value=FakeProvider([asst]))
     schedule_spy = mocker.patch.object(engine_mod, "_auto_schedule_wait_check")
 
     session = Session()
     await engine_mod._run_session(
-        [Trigger(description="t")], model_ref="fake/fake-model", session=session,
+        [Trigger(description="t")],
+        model_ref="fake/fake-model",
+        session=session,
     )
 
     assert session.sentinel_status == WAIT
@@ -1387,29 +1549,38 @@ async def test_run_session_wait_with_create_job_skips_auto_schedule(
         return "ok"
 
     custom = LocalTool(
-        "end_session", "x",
-        {"type": "object", "additionalProperties": True}, _end,
+        "end_session",
+        "x",
+        {"type": "object", "additionalProperties": True},
+        _end,
     )
     registry = {**_registry(), "end_session": custom}
     schemas = _schemas(registry)
     mocker.patch.object(
-        builtin_tool_mod, "build_registry", return_value=registry,
+        builtin_tool_mod,
+        "build_registry",
+        return_value=registry,
     )
     mocker.patch.object(
-        builtin_tool_mod, "schemas", return_value=schemas,
+        builtin_tool_mod,
+        "schemas",
+        return_value=schemas,
     )
 
-    asst = _asst(tool_calls=[
-        _tc("note", {"summary": "x"}),
-        _tc("end_session", {"status": WAIT, "recap": "scheduled"}),
-    ])
-    mocker.patch.object(engine_mod, "make_provider",
-                        return_value=FakeProvider([asst]))
+    asst = _asst(
+        tool_calls=[
+            _tc("note", {"summary": "x"}),
+            _tc("end_session", {"status": WAIT, "recap": "scheduled"}),
+        ]
+    )
+    mocker.patch.object(engine_mod, "make_provider", return_value=FakeProvider([asst]))
     schedule_spy = mocker.patch.object(engine_mod, "_auto_schedule_wait_check")
 
     session = Session()
     await engine_mod._run_session(
-        [Trigger(description="t")], model_ref="fake/fake-model", session=session,
+        [Trigger(description="t")],
+        model_ref="fake/fake-model",
+        session=session,
     )
 
     schedule_spy.assert_not_called()
@@ -1428,7 +1599,9 @@ async def test_run_retries_on_stuck(mocker) -> None:
         session.sentinel_recap = "x"
 
     spy = mocker.patch.object(
-        engine_mod, "_run_session", side_effect=fake_session,
+        engine_mod,
+        "_run_session",
+        side_effect=fake_session,
     )
 
     await engine_mod.run([Trigger(description="t")], model_ref="x/y")
@@ -1444,7 +1617,9 @@ async def test_run_stops_after_done(mocker) -> None:
         session.sentinel_status = DONE
 
     spy = mocker.patch.object(
-        engine_mod, "_run_session", side_effect=fake_session,
+        engine_mod,
+        "_run_session",
+        side_effect=fake_session,
     )
 
     await engine_mod.run([Trigger(description="t")], model_ref="x/y")
@@ -1461,7 +1636,9 @@ async def test_run_gives_up_after_max_stucks(mocker) -> None:
         session.sentinel_recap = "always stuck"
 
     spy = mocker.patch.object(
-        engine_mod, "_run_session", side_effect=fake_session,
+        engine_mod,
+        "_run_session",
+        side_effect=fake_session,
     )
 
     await engine_mod.run([Trigger(description="t")], model_ref="x/y")
@@ -1575,15 +1752,20 @@ _SEQ_SCHEMA = {"name": "sequence", "input_schema": {"type": "object"}}
 @pytest.mark.asyncio
 async def test_dispatch_blocks_sequence_on_layout_lint(mocker) -> None:
     mocker.patch.object(
-        screen_layout_mod, "lint_gesture",
+        screen_layout_mod,
+        "lint_gesture",
         return_value="BLOCKED — not executed: wrong box",
     )
     mcp = FakeMcpClient()
     run = _mk_run(mcp=mcp, schema_by_name={"sequence": _SEQ_SCHEMA})
 
     result = await engine_mod._dispatch(
-        run, Session(),
-        _tc("sequence", {"actions": [{"tool_name": "long_press", "arg": [0, 0.9, 1, 1]}]}),
+        run,
+        Session(),
+        _tc(
+            "sequence",
+            {"actions": [{"tool_name": "long_press", "arg": [0, 0.9, 1, 1]}]},
+        ),
         0,
     )
 
@@ -1596,14 +1778,18 @@ async def test_dispatch_blocks_sequence_on_layout_lint(mocker) -> None:
 async def test_dispatch_lint_failure_is_fail_open(mocker) -> None:
     # A lint crash must never take down dispatch — the batch runs.
     mocker.patch.object(
-        screen_layout_mod, "lint_gesture",
+        screen_layout_mod,
+        "lint_gesture",
         side_effect=RuntimeError("lint bug"),
     )
     mcp = FakeMcpClient()
     run = _mk_run(mcp=mcp, schema_by_name={"sequence": _SEQ_SCHEMA})
 
     result = await engine_mod._dispatch(
-        run, Session(), _tc("sequence", {"actions": []}), 0,
+        run,
+        Session(),
+        _tc("sequence", {"actions": []}),
+        0,
     )
 
     assert result.is_error is not True
@@ -1619,7 +1805,10 @@ async def test_dispatch_feeds_keyboard_tracker_the_verdict(mocker) -> None:
     run = _mk_run(mcp=VerdictMcpClient(), schema_by_name={"tap": schema})
 
     await engine_mod._dispatch(
-        run, session, _tc("tap", {"bbox": [0.1, 0.9, 0.7, 0.95]}), 0,
+        run,
+        session,
+        _tc("tap", {"bbox": [0.1, 0.9, 0.7, 0.95]}),
+        0,
     )
 
     kb_spy.assert_called_once()

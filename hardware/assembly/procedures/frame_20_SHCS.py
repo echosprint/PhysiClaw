@@ -27,13 +27,14 @@ from hardware.assembly.projection import MAIN_FRAME_VIEW
 from hardware.parts.standard.extrusion import CB_LABELS, cb_head_depth
 from hardware.parts.standard.screw import Screw
 
-FRAME_GAP     = 30      # mm — exploded: horizontal gap between long and short
-SCREW_EXPLODE = -35     # mm — exploded: negative LinearJoint position = outboard
-SHCS_LENGTH  = 20      # mm — SHCS M6 underhead length
+FRAME_GAP = 30  # mm — exploded: horizontal gap between long and short
+SCREW_EXPLODE = -35  # mm — exploded: negative LinearJoint position = outboard
+SHCS_LENGTH = 20  # mm — SHCS M6 underhead length
 
 
 class FR20SHCS(BaseAssembly):
     camera = MAIN_FRAME_VIEW
+
     def _build(self) -> Compound:
         # Frame geometry (extrusions + seated nuts) comes from the
         # preload step. separation chooses the explode amount;
@@ -45,7 +46,7 @@ class FR20SHCS(BaseAssembly):
 
         preload = FR10ExtrusionTnut(separation=separation)
         preload_compound = preload.build()
-        long_left_ext, _  = preload.frame_parts["long_left"]
+        long_left_ext, _ = preload.frame_parts["long_left"]
         long_right_ext, _ = preload.frame_parts["long_right"]
 
         # 8 SHCS M6 — one per counterbore on each long. The longs have
@@ -56,14 +57,18 @@ class FR20SHCS(BaseAssembly):
             for cb in CB_LABELS:
                 screw = Screw("SHCS", "M6", SHCS_LENGTH).build()
                 long_ext.joints[cb].connect_to(
-                    screw.joints["head"], position=screw_position,
+                    screw.joints["head"],
+                    position=screw_position,
                 )
                 screws.append(screw)
 
-        return Compound(label="frame_20_SHCS", children=[
-            preload_compound,
-            *screws,
-        ])
+        return Compound(
+            label="frame_20_SHCS",
+            children=[
+                preload_compound,
+                *screws,
+            ],
+        )
 
 
 if __name__ == "__main__":

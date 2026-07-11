@@ -40,9 +40,16 @@ SKILL_NAME = "screen-layout"
 # nice-cases a few common ones for the layout card; unknown apps are used
 # verbatim (the agent may pass proper casing itself).
 _APP_LABELS = {
-    "wechat": "WeChat", "whatsapp": "WhatsApp", "telegram": "Telegram",
-    "signal": "Signal", "messenger": "Messenger", "imessage": "iMessage",
-    "line": "LINE", "wcom": "WeCom", "qq": "QQ", "kakaotalk": "KakaoTalk",
+    "wechat": "WeChat",
+    "whatsapp": "WhatsApp",
+    "telegram": "Telegram",
+    "signal": "Signal",
+    "messenger": "Messenger",
+    "imessage": "iMessage",
+    "line": "LINE",
+    "wcom": "WeCom",
+    "qq": "QQ",
+    "kakaotalk": "KakaoTalk",
 }
 
 
@@ -156,8 +163,14 @@ _NAV_TOOLS = ("go_back", "home_screen", "force_quit")
 # Boxes that are only ever pressed while typing/pasting — a press there
 # neither raises nor dismisses the keyboard.
 _KEYBOARD_REGION_FIELDS = (
-    "chat_input_kb_visible", "send", "chat_paste",
-    "backspace", "return", "space", "spotlight_input", "spotlight_paste",
+    "chat_input_kb_visible",
+    "send",
+    "chat_paste",
+    "backspace",
+    "return",
+    "space",
+    "spotlight_input",
+    "spotlight_paste",
 )
 
 
@@ -408,9 +421,7 @@ def tail_reminder() -> str:
     what to do — pinned at the request tail so it's fresh and reflects capture
     progress. '' once every field is captured (nothing to append)."""
     d = _load()
-    missing = {
-        p: [f for f in _PAGE_FIELDS[p] if f not in d] for p in PAGES
-    }
+    missing = {p: [f for f in _PAGE_FIELDS[p] if f not in d] for p in PAGES}
     missing = {p: fs for p, fs in missing.items() if fs}
     if not missing:
         return ""
@@ -514,45 +525,47 @@ def _render_md(layout: dict) -> str:
     Partial-aware — uncaptured boxes show `(not captured yet)`."""
     im_app = layout.get("im_app")
     app = f"{im_app}'s" if im_app else "per-IM-app"
-    return "\n".join([
-        "Key input boxes and keyboard landmarks, measured from your phone — "
-        "`[left, top, right, bottom]`, 0–1. Trust these over generic priors; "
-        "re-ground from the current view if a tap misses.",
-        "",
-        f"**Chat input + Send below are {app}.** For any other IM app, ignore "
-        "them and ground live. Spotlight + keyboard keys are system-wide.",
-        "",
-        "### Input boxes",
-        "",
-        "| Box | Position | Use |",
-        "| --- | --- | --- |",
-        f"| Spotlight search | {_fmt(layout.get('spotlight_input'))} | paste an app name to open it |",
-        f"| Chat input (keyboard hidden) | {_fmt(layout.get('chat_input_kb_hidden'))} | tap to raise the keyboard |",
-        f"| Chat input (keyboard visible) | {_fmt(layout.get('chat_input_kb_visible'))} | long-press to Paste |",
-        f"| Send | {_fmt(layout.get('send'))} | tap to send an IM |",
-        "",
-        "### Paste buttons",
-        "",
-        "Paste is two steps — the button only exists AFTER a long-press: "
-        "**long-press** the input box, then **tap Paste** below.",
-        "",
-        "| Long-press this input box | Then tap Paste here |",
-        "| --- | --- |",
-        f"| Spotlight search {_fmt(layout.get('spotlight_input'))} | {_fmt(layout.get('spotlight_paste'))} |",
-        f"| Chat input {_fmt(layout.get('chat_input_kb_visible'))} | {_fmt(layout.get('chat_paste'))} |",
-        "",
-        "### Keyboard keys",
-        "",
-        "| Key | Position |",
-        "| --- | --- |",
-        f"| backspace ⌫ | {_fmt(layout.get('backspace'))} |",
-        f"| return / search / send | {_fmt(layout.get('return'))} |",
-        f"| space | {_fmt(layout.get('space'))} |",
-        "",
-        "Bottom-right key: label varies (`Send` / `Return` / `Search` / `搜索` / "
-        "`前往`), bbox stable. Tap not registering → check the current view: is "
-        "the keyboard actually visible?",
-    ])
+    return "\n".join(
+        [
+            "Key input boxes and keyboard landmarks, measured from your phone — "
+            "`[left, top, right, bottom]`, 0–1. Trust these over generic priors; "
+            "re-ground from the current view if a tap misses.",
+            "",
+            f"**Chat input + Send below are {app}.** For any other IM app, ignore "
+            "them and ground live. Spotlight + keyboard keys are system-wide.",
+            "",
+            "### Input boxes",
+            "",
+            "| Box | Position | Use |",
+            "| --- | --- | --- |",
+            f"| Spotlight search | {_fmt(layout.get('spotlight_input'))} | paste an app name to open it |",
+            f"| Chat input (keyboard hidden) | {_fmt(layout.get('chat_input_kb_hidden'))} | tap to raise the keyboard |",
+            f"| Chat input (keyboard visible) | {_fmt(layout.get('chat_input_kb_visible'))} | long-press to Paste |",
+            f"| Send | {_fmt(layout.get('send'))} | tap to send an IM |",
+            "",
+            "### Paste buttons",
+            "",
+            "Paste is two steps — the button only exists AFTER a long-press: "
+            "**long-press** the input box, then **tap Paste** below.",
+            "",
+            "| Long-press this input box | Then tap Paste here |",
+            "| --- | --- |",
+            f"| Spotlight search {_fmt(layout.get('spotlight_input'))} | {_fmt(layout.get('spotlight_paste'))} |",
+            f"| Chat input {_fmt(layout.get('chat_input_kb_visible'))} | {_fmt(layout.get('chat_paste'))} |",
+            "",
+            "### Keyboard keys",
+            "",
+            "| Key | Position |",
+            "| --- | --- |",
+            f"| backspace ⌫ | {_fmt(layout.get('backspace'))} |",
+            f"| return / search / send | {_fmt(layout.get('return'))} |",
+            f"| space | {_fmt(layout.get('space'))} |",
+            "",
+            "Bottom-right key: label varies (`Send` / `Return` / `Search` / `搜索` / "
+            "`前往`), bbox stable. Tap not registering → check the current view: is "
+            "the keyboard actually visible?",
+        ]
+    )
 
 
 # ─── Record (the tool entry point) ────────────────────────────
@@ -570,8 +583,7 @@ def record(page: str, field: str, bbox, app: str | None = None) -> str:
     allowed = _PAGE_FIELDS[page]
     if field not in allowed:
         return (
-            f"{field!r} is not a {page} field; expected one of: "
-            f"{', '.join(allowed)}."
+            f"{field!r} is not a {page} field; expected one of: {', '.join(allowed)}."
         )
     if _is_chat_page(page) and not (app and app.strip()):
         return (

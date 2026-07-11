@@ -4,6 +4,7 @@ Module-level `CONTEXT_DIR` points at `agent/context/` in the repo;
 tests redirect it to a per-test tmp dir so doctrine slot rendering
 is deterministic.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -14,9 +15,7 @@ from physiclaw.agent.engine import memory, prompt
 
 
 @pytest.fixture(autouse=True)
-def _isolate_context_dir(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Path:
+def _isolate_context_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     ctx = tmp_path / "context"
     ctx.mkdir()
     monkeypatch.setattr(prompt, "CONTEXT_DIR", ctx)
@@ -52,8 +51,14 @@ def _stub_screen_layout(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_doctrine_file_order_pinned() -> None:
     assert prompt.DOCTRINE_FILE_ORDER == (
-        "IDENTITY.md", "USER.md", "SOUL.md", "AGENT.md",
-        "PHYSICLAW.md", "TOOLS.md", "PERSISTENCE.md", "JOBS.md",
+        "IDENTITY.md",
+        "USER.md",
+        "SOUL.md",
+        "AGENT.md",
+        "PHYSICLAW.md",
+        "TOOLS.md",
+        "PERSISTENCE.md",
+        "JOBS.md",
         "CONVENTION.md",
     )
 
@@ -206,7 +211,8 @@ def test_render_tooling_includes_mcp_inventory_tools(
     from physiclaw.agent.engine import mcp_inventory
 
     monkeypatch.setattr(
-        mcp_inventory, "discover_mcp_tools",
+        mcp_inventory,
+        "discover_mcp_tools",
         lambda: [{"name": "peek", "description": "Annotated camera frame."}],
     )
 
@@ -408,7 +414,7 @@ def test_render_system_assembles_all_present_sections(
     assert "user profile" in out
     assert "## Tooling" in out
     assert "## Built-in Skills" in out
-    assert "im body" in out          # built-in body inlined
+    assert "im body" in out  # built-in body inlined
     assert "## Available skills" in out
     assert "**taobao** — shop" in out  # user index entry
     assert "## Examples" in out

@@ -1,4 +1,5 @@
 """Tests for `physiclaw.cli.config` — config CLI subcommands."""
+
 from __future__ import annotations
 
 import importlib
@@ -47,7 +48,8 @@ def test_show_dumps_toml_with_redacted_secrets(mocker) -> None:
 
 def test_show_exits_1_on_config_error(mocker) -> None:
     mocker.patch.object(
-        config_mod._config, "load",
+        config_mod._config,
+        "load",
         side_effect=_config.ConfigError("bad"),
     )
 
@@ -85,7 +87,8 @@ def test_get_renders_bool_as_lowercase(mocker) -> None:
 
 def test_get_exit_1_on_load_error(mocker) -> None:
     mocker.patch.object(
-        config_mod._config, "load",
+        config_mod._config,
+        "load",
         side_effect=_config.ConfigError("bad"),
     )
 
@@ -97,7 +100,8 @@ def test_get_exit_1_on_load_error(mocker) -> None:
 def test_get_exit_1_on_unknown_key(mocker) -> None:
     mocker.patch.object(config_mod._config, "load", return_value=_config.Config())
     mocker.patch.object(
-        config_mod._config, "get",
+        config_mod._config,
+        "get",
         side_effect=_config.ConfigError("unknown key"),
     )
 
@@ -122,7 +126,8 @@ def test_set_calls_set_dotted_and_prints_restart_hint(mocker) -> None:
 
 def test_set_exit_1_on_invalid_value(mocker) -> None:
     mocker.patch.object(
-        config_mod._config, "set_dotted",
+        config_mod._config,
+        "set_dotted",
         side_effect=_config.ConfigError("not an int"),
     )
 
@@ -154,7 +159,8 @@ def test_unset_when_already_default(mocker) -> None:
 
 def test_unset_exit_1_on_error(mocker) -> None:
     mocker.patch.object(
-        config_mod._config, "unset_dotted",
+        config_mod._config,
+        "unset_dotted",
         side_effect=_config.ConfigError("bad key"),
     )
 
@@ -167,7 +173,9 @@ def test_unset_exit_1_on_error(mocker) -> None:
 
 
 def test_edit_uses_editor_env(mocker, monkeypatch: pytest.MonkeyPatch) -> None:
-    mocker.patch.object(config_mod._config, "write_default", return_value="/tmp/cfg.toml")
+    mocker.patch.object(
+        config_mod._config, "write_default", return_value="/tmp/cfg.toml"
+    )
     mocker.patch.object(config_mod._config, "load", return_value=_config.Config())
     monkeypatch.setenv("EDITOR", "myeditor")
     spy = mocker.patch.object(config_mod.subprocess, "run")
@@ -180,7 +188,9 @@ def test_edit_uses_editor_env(mocker, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_edit_falls_back_to_visual(mocker, monkeypatch: pytest.MonkeyPatch) -> None:
-    mocker.patch.object(config_mod._config, "write_default", return_value="/tmp/cfg.toml")
+    mocker.patch.object(
+        config_mod._config, "write_default", return_value="/tmp/cfg.toml"
+    )
     mocker.patch.object(config_mod._config, "load", return_value=_config.Config())
     monkeypatch.delenv("EDITOR", raising=False)
     monkeypatch.setenv("VISUAL", "subl")
@@ -191,13 +201,18 @@ def test_edit_falls_back_to_visual(mocker, monkeypatch: pytest.MonkeyPatch) -> N
     assert spy.call_args.args[0] == ["subl", "/tmp/cfg.toml"]
 
 
-def test_edit_falls_back_to_path_search(mocker, monkeypatch: pytest.MonkeyPatch) -> None:
-    mocker.patch.object(config_mod._config, "write_default", return_value="/tmp/cfg.toml")
+def test_edit_falls_back_to_path_search(
+    mocker, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mocker.patch.object(
+        config_mod._config, "write_default", return_value="/tmp/cfg.toml"
+    )
     mocker.patch.object(config_mod._config, "load", return_value=_config.Config())
     monkeypatch.delenv("EDITOR", raising=False)
     monkeypatch.delenv("VISUAL", raising=False)
     mocker.patch.object(
-        config_mod.shutil, "which",
+        config_mod.shutil,
+        "which",
         side_effect=lambda c: "/usr/bin/vim" if c == "vim" else None,
     )
     spy = mocker.patch.object(config_mod.subprocess, "run")
@@ -207,8 +222,12 @@ def test_edit_falls_back_to_path_search(mocker, monkeypatch: pytest.MonkeyPatch)
     assert spy.call_args.args[0] == ["vim", "/tmp/cfg.toml"]
 
 
-def test_edit_exit_1_when_no_editor_found(mocker, monkeypatch: pytest.MonkeyPatch) -> None:
-    mocker.patch.object(config_mod._config, "write_default", return_value="/tmp/cfg.toml")
+def test_edit_exit_1_when_no_editor_found(
+    mocker, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mocker.patch.object(
+        config_mod._config, "write_default", return_value="/tmp/cfg.toml"
+    )
     monkeypatch.delenv("EDITOR", raising=False)
     monkeypatch.delenv("VISUAL", raising=False)
     mocker.patch.object(config_mod.shutil, "which", return_value=None)
@@ -219,11 +238,14 @@ def test_edit_exit_1_when_no_editor_found(mocker, monkeypatch: pytest.MonkeyPatc
 
 
 def test_edit_validates_after_save(mocker, monkeypatch: pytest.MonkeyPatch) -> None:
-    mocker.patch.object(config_mod._config, "write_default", return_value="/tmp/cfg.toml")
+    mocker.patch.object(
+        config_mod._config, "write_default", return_value="/tmp/cfg.toml"
+    )
     monkeypatch.setenv("EDITOR", "ed")
     mocker.patch.object(config_mod.subprocess, "run")
     mocker.patch.object(
-        config_mod._config, "load",
+        config_mod._config,
+        "load",
         side_effect=_config.ConfigError("post-edit invalid"),
     )
 

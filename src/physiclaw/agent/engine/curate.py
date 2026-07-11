@@ -16,6 +16,7 @@ lines are the ones dropped. It also snapshots history, so a prune is recoverable
 Reuses the session's still-open provider, makes NO tool calls, and is fully
 fail-open: a parse error or empty result leaves the list untouched.
 """
+
 import json
 import logging
 
@@ -73,8 +74,10 @@ async def curate(provider, *, tr=None) -> bool:
         return False
     try:
         asst = await provider.chat(
-            [SystemMessage(content=_system()),
-             UserMessage(content="\n".join(f"- {x}" for x in current))],
+            [
+                SystemMessage(content=_system()),
+                UserMessage(content="\n".join(f"- {x}" for x in current)),
+            ],
             [],
         )
         items = _parse(asst.content or "")
@@ -86,11 +89,19 @@ async def curate(provider, *, tr=None) -> bool:
         # history entry back, so a lossy consolidation is recoverable.
         log.info(
             "curate pitfalls: %d → %d (%d dropped over cap)",
-            len(current), res["total"], res["dropped"],
+            len(current),
+            res["total"],
+            res["dropped"],
         )
         if tr is not None:
-            tr.write({"event": "curated_pitfalls", "before": len(current),
-                      "after": res["total"], "dropped": res["dropped"]})
+            tr.write(
+                {
+                    "event": "curated_pitfalls",
+                    "before": len(current),
+                    "after": res["total"],
+                    "dropped": res["dropped"],
+                }
+            )
         return True
     except Exception:
         log.exception("curate: pitfalls pass failed (non-fatal)")

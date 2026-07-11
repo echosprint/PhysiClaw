@@ -1,5 +1,6 @@
 """Tests for `physiclaw.core.orchestration.gestures` — typed gesture
 values and GestureValidator."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -35,7 +36,8 @@ def validator(at: MagicMock) -> GestureValidator:
         (bbox[1] + bbox[3]) / 2,
     )
     return GestureValidator(
-        assistive_touch=lambda: at, transforms=lambda: transforms,
+        assistive_touch=lambda: at,
+        transforms=lambda: transforms,
     )
 
 
@@ -83,7 +85,9 @@ def test_parse_step_rejects_bad_bbox(validator: GestureValidator) -> None:
 
 def test_parse_step_swipe_requires_dict_with_keys(validator: GestureValidator) -> None:
     # No repr of the raw arg: the message joins verdict-scanned action text.
-    with pytest.raises(ValueError, match="swipe arg needs a dict with bbox \\+ direction, got str"):
+    with pytest.raises(
+        ValueError, match="swipe arg needs a dict with bbox \\+ direction, got str"
+    ):
         validator.parse_step("swipe", "not-a-dict")
     with pytest.raises(ValueError, match="swipe arg needs a dict"):
         validator.parse_step("swipe", {"bbox": [0, 0, 1, 1]})
@@ -95,7 +99,9 @@ def test_parse_step_swipe_range_checks(validator: GestureValidator) -> None:
 
 
 def test_parse_step_clipboard_requires_string(validator: GestureValidator) -> None:
-    with pytest.raises(ValueError, match="send_to_clipboard arg must be a string, got int"):
+    with pytest.raises(
+        ValueError, match="send_to_clipboard arg must be a string, got int"
+    ):
         validator.parse_step("send_to_clipboard", 42)
 
 
@@ -133,21 +139,27 @@ def test_require_no_at_overlap_passes(validator: GestureValidator) -> None:
     validator.require_no_at_overlap(BBOX, "tap")  # no raise
 
 
-def test_require_no_at_overlap_raises(validator: GestureValidator, at: MagicMock) -> None:
+def test_require_no_at_overlap_raises(
+    validator: GestureValidator, at: MagicMock
+) -> None:
     at.overlaps_at.return_value = True
 
     with pytest.raises(ValueError, match="overlaps AssistiveTouch button — aim aside"):
         validator.require_no_at_overlap(BBOX, "tap")
 
 
-def test_require_no_at_crossing_raises(validator: GestureValidator, at: MagicMock) -> None:
+def test_require_no_at_crossing_raises(
+    validator: GestureValidator, at: MagicMock
+) -> None:
     at.swipe_crosses_at.return_value = True
 
     with pytest.raises(ValueError, match="crosses AssistiveTouch button — aim aside"):
         validator.require_no_at_crossing(BBOX, "up")
 
 
-def test_guards_check_the_bbox_center(validator: GestureValidator, at: MagicMock) -> None:
+def test_guards_check_the_bbox_center(
+    validator: GestureValidator, at: MagicMock
+) -> None:
     validator.require_no_at_overlap([0.1, 0.1, 0.3, 0.3], "tap")
 
     at.overlaps_at.assert_called_once()
@@ -164,7 +176,8 @@ def test_guards_read_current_assistive_touch() -> None:
     transforms = MagicMock()
     transforms.bbox_center_pct.return_value = (0.5, 0.5)
     v = GestureValidator(
-        assistive_touch=lambda: holder["at"], transforms=lambda: transforms,
+        assistive_touch=lambda: holder["at"],
+        transforms=lambda: transforms,
     )
     v.require_no_at_overlap(BBOX, "tap")
 

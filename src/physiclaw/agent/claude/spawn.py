@@ -122,7 +122,9 @@ def _mcp_tools() -> list[dict]:
 
 def _mcp_config() -> str:
     url = os.environ.get("PHYSICLAW_SERVER", "http://127.0.0.1:8048")
-    return json.dumps({"mcpServers": {"physiclaw": {"type": "http", "url": f"{url}/mcp"}}})
+    return json.dumps(
+        {"mcpServers": {"physiclaw": {"type": "http", "url": f"{url}/mcp"}}}
+    )
 
 
 def _render_system_prompt(mcp_tools: list[dict], skills: dict[str, Skill]) -> str:
@@ -205,9 +207,11 @@ class _SessionLog:
         self._last_text = ""  # most recent assistant text block, for sentinel check
         self._f = open(
             LOG_DIR / f"claude-{self._date}.log",
-            "a", encoding="utf-8", newline="\n",
+            "a",
+            encoding="utf-8",
+            newline="\n",
         )
-        self._f.write(f"\n{'='*60}\n")
+        self._f.write(f"\n{'=' * 60}\n")
         self._write(f"WAKE triggers={sources}")
 
     def event(self, data: dict) -> dict | None:
@@ -234,7 +238,8 @@ class _SessionLog:
         otherwise the run crashed even if the agent claimed DONE earlier.
         """
         last_line = next(
-            (line for line in reversed(self._last_text.splitlines()) if line.strip()), ""
+            (line for line in reversed(self._last_text.splitlines()) if line.strip()),
+            "",
         )
         status, recap = parse_sentinel(last_line) if returncode == 0 else (None, "")
         if not status:
@@ -242,7 +247,7 @@ class _SessionLog:
             recap = (last_line or "(no text)").strip()[:200]
         self._write(f"OUTCOME: {status} - {recap}")
         self._write(f"EXIT code={returncode}")
-        self._f.write(f"{'='*60}\n\n")
+        self._f.write(f"{'=' * 60}\n\n")
         return status
 
     def close(self) -> None:
@@ -260,9 +265,13 @@ class _SessionLog:
             self._date = today
             self._f = open(
                 LOG_DIR / f"claude-{today}.log",
-                "a", encoding="utf-8", newline="\n",
+                "a",
+                encoding="utf-8",
+                newline="\n",
             )
-            self._f.write(f"\n[{now:%H:%M:%S}] ROLLOVER ← continued from previous day\n")
+            self._f.write(
+                f"\n[{now:%H:%M:%S}] ROLLOVER ← continued from previous day\n"
+            )
         self._f.write(f"[{now:%H:%M:%S}] {msg}\n")
         self._f.flush()
 
@@ -289,7 +298,9 @@ class _SessionLog:
             parts = []
             for b in data.get("message", {}).get("content", []):
                 if b.get("type") == "tool_use":
-                    parts.append(f"tool_use: {b['name']} {str(b.get('input', ''))[:1000]}")
+                    parts.append(
+                        f"tool_use: {b['name']} {str(b.get('input', ''))[:1000]}"
+                    )
                 elif b.get("type") == "text" and b.get("text", "").strip():
                     self._last_text = b["text"]  # for sentinel check in done()
                     parts.append(f"text: {b['text'][:1000]}")
@@ -331,7 +342,8 @@ def _child_env() -> dict[str, str]:
     (Claude Code itself uses getcwd, but this is a cheap hedge).
     """
     env = {
-        k: v for k, v in os.environ.items()
+        k: v
+        for k, v in os.environ.items()
         if not any(k.startswith(p) for p in _ENV_STRIP_PREFIXES)
     }
     env["PWD"] = str(PROJECT_ROOT)
@@ -398,19 +410,29 @@ def _build_cmd(
     allowed = [t["name"] for t in mcp_tools] + _ALLOWED_STATIC
     return [
         "claude",
-        "-p", _build_trigger_prompt(triggers),
-        "--model", _normalize_claude_model_id(model_id),
-        "--append-system-prompt", system_prompt,
-        "--plugin-dir", str(plugin_dir),
-        "--setting-sources", "user",
-        "--permission-mode", "acceptEdits",
-        "--output-format", "stream-json",
+        "-p",
+        _build_trigger_prompt(triggers),
+        "--model",
+        _normalize_claude_model_id(model_id),
+        "--append-system-prompt",
+        system_prompt,
+        "--plugin-dir",
+        str(plugin_dir),
+        "--setting-sources",
+        "user",
+        "--permission-mode",
+        "acceptEdits",
+        "--output-format",
+        "stream-json",
         "--verbose",
         "--no-session-persistence",
         "--strict-mcp-config",
-        "--mcp-config", _mcp_config(),
-        "--allowedTools", ",".join(allowed),
-        "--disallowedTools", ",".join(_DISALLOWED),
+        "--mcp-config",
+        _mcp_config(),
+        "--allowedTools",
+        ",".join(allowed),
+        "--disallowedTools",
+        ",".join(_DISALLOWED),
     ]
 
 
@@ -445,7 +467,9 @@ async def spawn_claude(triggers: list[Trigger], *, model_id: str) -> None:
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
         if attempt > 1:
-            log.warning("retry %d/%d after %.0fs backoff", attempt, MAX_ATTEMPTS, RETRY_BACKOFF)
+            log.warning(
+                "retry %d/%d after %.0fs backoff", attempt, MAX_ATTEMPTS, RETRY_BACKOFF
+            )
             await asyncio.sleep(RETRY_BACKOFF)
 
         # Plugin dir is the only per-attempt artifact. Fresh sid keeps
@@ -464,7 +488,9 @@ async def spawn_claude(triggers: list[Trigger], *, model_id: str) -> None:
 
         log.info(
             "spawning claude (attempt=%d/%d, triggers=%s) — detail log: %s",
-            attempt, MAX_ATTEMPTS, sources,
+            attempt,
+            MAX_ATTEMPTS,
+            sources,
             LOG_DIR / f"claude-{dt.datetime.now():%Y-%m-%d}.log",
         )
         status = "UNDONE"
@@ -485,9 +511,11 @@ async def spawn_claude(triggers: list[Trigger], *, model_id: str) -> None:
                 if proc.returncode != 0:
                     log.error("claude exited %s (see log for details)", proc.returncode)
                 elif result_data:
-                    log.info("claude done (turns=%s): %s",
-                             result_data.get("num_turns", "?"),
-                             str(result_data.get("result", ""))[:200])
+                    log.info(
+                        "claude done (turns=%s): %s",
+                        result_data.get("num_turns", "?"),
+                        str(result_data.get("result", ""))[:200],
+                    )
                 status = slog.done(proc.returncode)
             except asyncio.TimeoutError:
                 proc.kill()

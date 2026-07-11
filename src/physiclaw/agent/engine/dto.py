@@ -29,6 +29,7 @@ provider from its native usage block. The engine reads it via
 provider response is preserved on `AssistantMessage.raw` for trace
 replay / debugging.
 """
+
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Union
@@ -41,9 +42,9 @@ class FinishReason(StrEnum):
 
     TOOL_CALLS = "tool_calls"
     STOP = "stop"
-    LENGTH = "length"             # truncated — arguments may be incomplete
+    LENGTH = "length"  # truncated — arguments may be incomplete
     CONTENT_FILTER = "content_filter"
-    ERROR = "error"               # our own: parse / transport failures
+    ERROR = "error"  # our own: parse / transport failures
 
 
 # ---------- content blocks ----------
@@ -53,6 +54,7 @@ class FinishReason(StrEnum):
 class TextBlock:
     """Plain text content. Used inside `UserMessage.content` and
     `ToolResultMessage.content` when multipart."""
+
     text: str
 
 
@@ -63,8 +65,9 @@ class ImageBlock:
     with a `data:` URL, Anthropic emits `image` with `source.base64`,
     etc. Engine code (compaction, cache markers) stores `ImageBlock`
     directly; the encoding lives entirely in the provider."""
-    media_type: str    # e.g. "image/jpeg", "image/png"
-    data_b64: str      # base64-encoded image bytes
+
+    media_type: str  # e.g. "image/jpeg", "image/png"
+    data_b64: str  # base64-encoded image bytes
 
 
 ContentBlock = Union[TextBlock, ImageBlock]
@@ -76,6 +79,7 @@ ContentBlock = Union[TextBlock, ImageBlock]
 @dataclass(frozen=True)
 class ToolCall:
     """One call the model made. Arguments already parsed from JSON."""
+
     id: str
     name: str
     arguments: dict[str, Any]
@@ -102,10 +106,11 @@ class Usage:
     responses). The engine treats zeros as "no data" rather than 0%
     cache hit.
     """
+
     prompt_tokens: int = 0
     completion_tokens: int = 0
-    cached_tokens: int = 0           # cache hit (read)
-    cache_creation_tokens: int = 0   # cache write (first-time)
+    cached_tokens: int = 0  # cache hit (read)
+    cache_creation_tokens: int = 0  # cache write (first-time)
 
 
 # ---------- messages (engine history entries) ----------
@@ -114,6 +119,7 @@ class Usage:
 @dataclass(frozen=True)
 class SystemMessage:
     """The system prompt. One per session, always at index 0."""
+
     content: str
 
 
@@ -123,6 +129,7 @@ class UserMessage:
     of content blocks (when carrying images, e.g. tool-call corrective
     messages don't have images, but plan-tail messages might in the
     future)."""
+
     content: str | list[ContentBlock]
 
 
@@ -142,6 +149,7 @@ class AssistantMessage:
     coexist in mixed-history scenarios. Engine code never reads this;
     only the originating provider does, on serialize.
     """
+
     content: str
     tool_calls: list[ToolCall]
     finish_reason: FinishReason
@@ -164,12 +172,11 @@ class ToolResultMessage:
     not content parsing, to find the deepest byte-stable point for the
     second cache-control marker.
     """
+
     tool_call_id: str
     content: str | list[ContentBlock]
     is_error: bool = False
     is_superseded: bool = False
-
-
 
 
 Message = Union[SystemMessage, UserMessage, AssistantMessage, ToolResultMessage]
@@ -193,6 +200,6 @@ __all__ = [
     "UserMessage",
     "AssistantMessage",
     "ToolResultMessage",
-    "ToolResult",            # alias — see note above
+    "ToolResult",  # alias — see note above
     "Message",
 ]

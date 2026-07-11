@@ -6,6 +6,7 @@ quirk is handled by the base `_parse_usage` fallback (exercised in
 `test_openai_compat.py`), and the load-bearing cache markers are the
 inherited `OpenAICacheMarkers`.
 """
+
 from __future__ import annotations
 
 from physiclaw.agent.provider.openai_compat import OpenAICompatibleProvider

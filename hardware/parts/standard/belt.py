@@ -59,10 +59,10 @@ from hardware.parts.standard.pulley import (
 from hardware.parts.standard.ring import SPECS as RING_SPECS
 
 # ── GT2 belt parameters ───────────────────────────────────────────────────────
-belt_width      = pulley_belt_width                  # along pulley / idler axes
-belt_thickness  = 1.38 * MM                          # GT2 total thickness (backing + tooth)
-idler_pitch_r   = pulley_pitch_diameter / 2          # ≈ 6.37 mm
-wrap_r          = idler_pitch_r + belt_thickness / 2  # belt centerline radius at wrap
+belt_width = pulley_belt_width  # along pulley / idler axes
+belt_thickness = 1.38 * MM  # GT2 total thickness (backing + tooth)
+idler_pitch_r = pulley_pitch_diameter / 2  # ≈ 6.37 mm
+wrap_r = idler_pitch_r + belt_thickness / 2  # belt centerline radius at wrap
 
 
 def _expand_wraps(waypoints, step_deg=10):
@@ -79,6 +79,7 @@ def _expand_wraps(waypoints, step_deg=10):
     Y is preserved per waypoint; the connecting segments carry any
     Y-twist between waypoints.
     """
+
     def _norm_xz(vx, vz):
         n = math.sqrt(vx * vx + vz * vz)
         return (vx / n, vz / n) if n > 1e-9 else (0.0, 0.0)
@@ -92,18 +93,18 @@ def _expand_wraps(waypoints, step_deg=10):
         A = waypoints[i - 1][0]
         C, r = waypoints[i]
         B = waypoints[i + 1][0]
-        D_in_x,  D_in_z  = _norm_xz(C[0] - A[0], C[2] - A[2])
+        D_in_x, D_in_z = _norm_xz(C[0] - A[0], C[2] - A[2])
         D_out_x, D_out_z = _norm_xz(B[0] - C[0], B[2] - C[2])
         cross = D_in_x * D_out_z - D_in_z * D_out_x
-        ccw = cross >= 0   # default CCW for the 180° (cross ≈ 0) case
+        ccw = cross >= 0  # default CCW for the 180° (cross ≈ 0) case
         if ccw:
-            in_rx, in_rz   = ( D_in_z,  -D_in_x)
-            out_rx, out_rz = ( D_out_z, -D_out_x)
+            in_rx, in_rz = (D_in_z, -D_in_x)
+            out_rx, out_rz = (D_out_z, -D_out_x)
         else:
-            in_rx, in_rz   = (-D_in_z,   D_in_x)
-            out_rx, out_rz = (-D_out_z,  D_out_x)
+            in_rx, in_rz = (-D_in_z, D_in_x)
+            out_rx, out_rz = (-D_out_z, D_out_x)
 
-        theta_in  = math.atan2(in_rz,  in_rx)
+        theta_in = math.atan2(in_rz, in_rx)
         theta_out = math.atan2(out_rz, out_rx)
         if ccw:
             sweep = theta_out - theta_in
@@ -183,10 +184,8 @@ class Belt(BaseStandardPart):
             # Motor A rides Y = _lower_belt_y (LU.down1 / down2, LD, LJ2,
             # RJ1, motor A pulley); motor B rides Y = _upper_belt_y
             # (LU.top1, RU.top1, LJ1, RJ2, motor B pulley).
-            y_shift = _upper_belt_y - _lower_belt_y   # -9 mm
-            path = [
-                ((-p[0], p[1] + y_shift, p[2]), r) for p, r in path
-            ]
+            y_shift = _upper_belt_y - _lower_belt_y  # -9 mm
+            path = [((-p[0], p[1] + y_shift, p[2]), r) for p, r in path]
         self.path = path
         self.name = name
         self.motor = motor
@@ -244,10 +243,10 @@ class Belt(BaseStandardPart):
 # hand-tuned numbers. See the docstrings on each block for the chain
 # of derivations.
 
-_half_w           = SHORT_LENGTH / 2 + EXT_THICKNESS / 2
-_pulley_flange_h  = (flange_belt_h - pulley_belt_width) / 2
-_lower_ring_h     = RING_SPECS["M5x8x0.5"]["height"]
-_motor_ring_h     = RING_SPECS[MO10Bracket.RING_SPEC]["height"]   # Motor A spacer
+_half_w = SHORT_LENGTH / 2 + EXT_THICKNESS / 2
+_pulley_flange_h = (flange_belt_h - pulley_belt_width) / 2
+_lower_ring_h = RING_SPECS["M5x8x0.5"]["height"]
+_motor_ring_h = RING_SPECS[MO10Bracket.RING_SPEC]["height"]  # Motor A spacer
 
 # Idler belt-band center offset (along the shoulder bolt) from the block
 # top face. The corner-idler stack on each block is ring (M5×8×0.5) +
@@ -261,29 +260,27 @@ _idler_band_offset_upper = _idler_band_offset_lower + flange_belt_h + _lower_rin
 # Y = -EXT_THICKNESS - block_thickness/2 (block bottom flush on slot);
 # block top face Y = block_centerline_y - block_thickness/2 (native +Z →
 # world -Y); idler band Y subtracts the stack offset.
-_lower_belt_y = (
-    -EXT_THICKNESS - lu_block_thickness - _idler_band_offset_lower
-)
+_lower_belt_y = -EXT_THICKNESS - lu_block_thickness - _idler_band_offset_lower
 _upper_belt_y = _lower_belt_y - flange_belt_h - _lower_ring_h
 
 # LU block placement (idler_12_lu): origin Z on long_left's top t-nut;
 # native +X → world -Z so the column at native x=-outer_hole_offset
 # lands at world z = LU_block_z + outer_hole_offset.
-_lu_block_z       = LONG_LENGTH - LONG_TOP_GAP
-_lu_left_col_z    = _lu_block_z + outer_hole_offset    # 2-stack column
-_lu_right_col_z   = _lu_block_z - outer_hole_offset    # 1-idler column
+_lu_block_z = LONG_LENGTH - LONG_TOP_GAP
+_lu_left_col_z = _lu_block_z + outer_hole_offset  # 2-stack column
+_lu_right_col_z = _lu_block_z - outer_hole_offset  # 1-idler column
 
 # RU mirrors: native +X → world +Z (idler_22_ru), so the columns swap
 # world-Z assignment relative to LU.
-_ru_left_col_z    = _lu_block_z - outer_hole_offset    # 2-stack column
-_ru_right_col_z   = _lu_block_z + outer_hole_offset    # 1-idler column
+_ru_left_col_z = _lu_block_z - outer_hole_offset  # 2-stack column
+_ru_right_col_z = _lu_block_z + outer_hole_offset  # 1-idler column
 
 LU_down1 = (-_half_w, _lower_belt_y, _lu_left_col_z)
-LU_top1  = (-_half_w, _upper_belt_y, _lu_left_col_z)
+LU_top1 = (-_half_w, _upper_belt_y, _lu_left_col_z)
 LU_down2 = (-_half_w, _lower_belt_y, _lu_right_col_z)
 
 RU_down1 = (+_half_w, _lower_belt_y, _ru_left_col_z)
-RU_top1  = (+_half_w, _upper_belt_y, _ru_left_col_z)
+RU_top1 = (+_half_w, _upper_belt_y, _ru_left_col_z)
 RU_down2 = (+_half_w, _lower_belt_y, _ru_right_col_z)
 
 # LD / RD: IdlerMountFront block at the bottom t-nut; idler sits on the
@@ -297,43 +294,47 @@ RD = (+_half_w, _lower_belt_y, _ld_idler_z)
 # Motor A pulley — left motor on short_top, LEFT_PULLEY_GAP above the
 # bracket pad. Walk the placement chain (motor_10_bracket / motor_11_frame
 # / motor_30_pulley) to land the belt-band center.
-_left_t1_x      = -SHORT_LENGTH / 2 + SHORT_TOP_END_GAP
-_left_t2_x      = _left_t1_x + SHORT_TOP_INNER_GAP
-_motor_a_x      = (_left_t1_x + _left_t2_x) / 2
-_motor_top_z_n  = motor_default_height / 2
-_bracket_top_n  = _motor_top_z_n + motor_plate_thick
-_bracket_dx     = motor_plate_length / 2 - motor_shaft_x_offset
-_motor_m5_x_n   = _bracket_dx + motor_plate_length / 2 - motor_m5_x_inset
-_motor_a_z      = (LONG_LENGTH - cb_end_offset) - _motor_m5_x_n
+_left_t1_x = -SHORT_LENGTH / 2 + SHORT_TOP_END_GAP
+_left_t2_x = _left_t1_x + SHORT_TOP_INNER_GAP
+_motor_a_x = (_left_t1_x + _left_t2_x) / 2
+_motor_top_z_n = motor_default_height / 2
+_bracket_top_n = _motor_top_z_n + motor_plate_thick
+_bracket_dx = motor_plate_length / 2 - motor_shaft_x_offset
+_motor_m5_x_n = _bracket_dx + motor_plate_length / 2 - motor_m5_x_inset
+_motor_a_z = (LONG_LENGTH - cb_end_offset) - _motor_m5_x_n
 # Motor placement origin Y (motor_11_frame) → pulley_plane origin Y by
 # stepping over the bracket thickness; pulley belt-band sits one
 # LEFT_PULLEY_GAP + hub + flange + belt/2 further along world -Y.
 _motor_origin_y = -EXT_THICKNESS - _motor_ring_h + _motor_top_z_n
 _pulley_plane_y = _motor_origin_y - _bracket_top_n
-_pulley_band_n  = pulley_hub_height + _pulley_flange_h + pulley_belt_width / 2
-_motor_a_y      = _pulley_plane_y - LEFT_PULLEY_GAP - _pulley_band_n
-MOTOR_A         = (_motor_a_x, _motor_a_y, _motor_a_z)
+_pulley_band_n = pulley_hub_height + _pulley_flange_h + pulley_belt_width / 2
+_motor_a_y = _pulley_plane_y - LEFT_PULLEY_GAP - _pulley_band_n
+MOTOR_A = (_motor_a_x, _motor_a_y, _motor_a_z)
 
 # Joint idlers (LJ2, RJ1) — both bundles are LI4x_idler_lj/rj, no spacer,
 # so the belt-band center sits _idler_band_offset_lower above the joint
 # top face (along world -Y after the bundle's z_dir=(0,-1,0) placement).
 # Walk linear_11_y → linear_20_joint to land the joint top hole world XYZ.
-_joint_csk_ll_x   = -joint_length / 2 + joint_csk_hole_from_left
-_joint_csk_ur_x   = _joint_csk_ll_x + joint_csk_x_spacing
-_joint_csk_ll_y   = -joint_width / 2 + joint_csk_hole_from_bottom
-_joint_csk_ur_y   = _joint_csk_ll_y + joint_csk_y_spacing
-_joint_grid_y     = (_joint_csk_ll_y + _joint_csk_ur_y) / 2
+_joint_csk_ll_x = -joint_length / 2 + joint_csk_hole_from_left
+_joint_csk_ur_x = _joint_csk_ll_x + joint_csk_x_spacing
+_joint_csk_ll_y = -joint_width / 2 + joint_csk_hole_from_bottom
+_joint_csk_ur_y = _joint_csk_ll_y + joint_csk_y_spacing
+_joint_grid_y = (_joint_csk_ll_y + _joint_csk_ur_y) / 2
 _joint_grid_x_abs = abs((_joint_csk_ll_x + _joint_csk_ur_x) / 2)
 # (mirrored joint contributes +abs to origin X, non-mirrored contributes -abs)
 
 # Slider mount center (linear_11_y) — depends on rail-center Z (sandwiched
 # between LU bottom edge and LD top edge) plus slider_position along the
 # 220 mm rail.
-_rail_center_z   = ((LONG_LENGTH - LONG_TOP_GAP) - lu_block_length / 2
-                    + _ld_block_z + ld_block_width / 2) / 2
+_rail_center_z = (
+    (LONG_LENGTH - LONG_TOP_GAP)
+    - lu_block_length / 2
+    + _ld_block_z
+    + ld_block_width / 2
+) / 2
 _slider_x_offset = -RAIL_LENGTH / 2 + slider_position * RAIL_LENGTH
-_slider_z        = _rail_center_z + _slider_x_offset
-_slider_y        = -EXT_THICKNESS - slider_top_z
+_slider_z = _rail_center_z + _slider_x_offset
+_slider_y = -EXT_THICKNESS - slider_top_z
 
 # LEFT joint (mirrored): native +X flips, so grid_center_x = +abs.
 # native_to_world for mirrored: world = (origin_x + nx, origin_y - nz, origin_z - ny).
@@ -381,27 +382,27 @@ clamp_pin_r = 2 * MM
 # ABOVE the pin so the U bends up in top view), and pin Z - clamp_pin_r
 # = adjacent idler's tangent Z (= LJ2.z + wrap_r on the left / RJ1.z -
 # wrap_r on the right). Solve → pin Z = idler_tangent_z + r.
-_pin_left_z  = LJ2[2] + wrap_r + clamp_pin_r
+_pin_left_z = LJ2[2] + wrap_r + clamp_pin_r
 _pin_right_z = RJ1[2] - wrap_r + clamp_pin_r
 
-PIN_LEFT     = (-4.0, _lower_belt_y, _pin_left_z)
-PIN_RIGHT    = (+4.0, _lower_belt_y, _pin_right_z)
+PIN_LEFT = (-4.0, _lower_belt_y, _pin_left_z)
+PIN_RIGHT = (+4.0, _lower_belt_y, _pin_right_z)
 
-CLAMP_LEFT   = (-20.0, _lower_belt_y, _pin_left_z  + clamp_pin_r)
-CLAMP_RIGHT  = (+20.0, _lower_belt_y, _pin_right_z + clamp_pin_r)
+CLAMP_LEFT = (-20.0, _lower_belt_y, _pin_left_z + clamp_pin_r)
+CLAMP_RIGHT = (+20.0, _lower_belt_y, _pin_right_z + clamp_pin_r)
 
 # Path: list of (position, wrap_radius) tuples. radius=None for endpoints.
 motor_a_path = [
     (CLAMP_LEFT, None),
-    (PIN_LEFT,   clamp_pin_r),
-    (LJ2,        wrap_r),
-    (LD,         wrap_r),
-    (LU_down2,   wrap_r),
-    (MOTOR_A,    wrap_r),
-    (LU_down1,   wrap_r),
-    (RU_down2,   wrap_r),
-    (RJ1,        wrap_r),
-    (PIN_RIGHT,  clamp_pin_r),
+    (PIN_LEFT, clamp_pin_r),
+    (LJ2, wrap_r),
+    (LD, wrap_r),
+    (LU_down2, wrap_r),
+    (MOTOR_A, wrap_r),
+    (LU_down1, wrap_r),
+    (RU_down2, wrap_r),
+    (RJ1, wrap_r),
+    (PIN_RIGHT, clamp_pin_r),
     (CLAMP_RIGHT, None),
 ]
 

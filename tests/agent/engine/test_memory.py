@@ -21,6 +21,7 @@ Accepted equivalent mutants:
     behavior matches `break` because `continue` re-checks the guard
     immediately; only the iteration count differs.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -33,9 +34,7 @@ from physiclaw.agent.engine import memory
 
 
 @pytest.fixture(autouse=True)
-def _memory_paths(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Path:
+def _memory_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Per-test memory dir under `tmp_path`. Module-level constants get
     monkeypatched to point here for the duration of the test."""
     mem = tmp_path / "memory"
@@ -52,6 +51,7 @@ def test_memory_file_basename_is_memory_md(tmp_path: Path) -> None:
     # Reload to recompute against a known parent so the basename is
     # observable; my autouse fixture otherwise overrides MEMORY_FILE.
     import os
+
     os.environ["PHYSICLAW_HOME"] = str(tmp_path)
     importlib.reload(memory)
 
@@ -61,6 +61,7 @@ def test_memory_file_basename_is_memory_md(tmp_path: Path) -> None:
 
 def test_user_file_basename_is_USER_md(tmp_path: Path) -> None:
     import os
+
     os.environ["PHYSICLAW_HOME"] = str(tmp_path)
     importlib.reload(memory)
 
@@ -128,10 +129,7 @@ def test_load_recent_entries_reads_today_with_most_recent_first(
 ) -> None:
     _memory_paths.mkdir(parents=True)
     (_memory_paths / "2026-04-28.md").write_text(
-        "# 2026-04-28\n\n"
-        "[09:00] first\n"
-        "[10:00] second\n"
-        "[11:00] third\n"
+        "# 2026-04-28\n\n[09:00] first\n[10:00] second\n[11:00] third\n"
     )
 
     with freeze_time("2026-04-28"):
@@ -139,9 +137,7 @@ def test_load_recent_entries_reads_today_with_most_recent_first(
 
     # Reversed within file — most recent first.
     assert out == (
-        "[2026-04-28 11:00] third\n"
-        "[2026-04-28 10:00] second\n"
-        "[2026-04-28 09:00] first"
+        "[2026-04-28 11:00] third\n[2026-04-28 10:00] second\n[2026-04-28 09:00] first"
     )
 
 
@@ -205,8 +201,7 @@ def test_load_recent_entries_stops_at_n_even_with_more_available(
 ) -> None:
     _memory_paths.mkdir(parents=True)
     (_memory_paths / "2026-04-28.md").write_text(
-        "# 2026-04-28\n"
-        + "".join(f"[09:0{i}] entry-{i}\n" for i in range(5))
+        "# 2026-04-28\n" + "".join(f"[09:0{i}] entry-{i}\n" for i in range(5))
     )
 
     with freeze_time("2026-04-28"):
@@ -263,9 +258,7 @@ def test_load_recent_entries_uses_default_n_when_omitted(
     # Default is `DEFAULT_LOG_ENTRIES`. Just verify the path is reachable
     # — exact value depends on user config.
     _memory_paths.mkdir(parents=True)
-    (_memory_paths / "2026-04-28.md").write_text(
-        "# 2026-04-28\n[09:00] entry\n"
-    )
+    (_memory_paths / "2026-04-28.md").write_text("# 2026-04-28\n[09:00] entry\n")
 
     with freeze_time("2026-04-28"):
         out = memory.load_recent_entries()
@@ -409,9 +402,7 @@ def test_update_fact_with_empty_new_deletes_the_containing_line(
     _memory_paths: Path,
 ) -> None:
     _memory_paths.mkdir(parents=True)
-    (_memory_paths / "memory.md").write_text(
-        "fact-one\nfact-to-remove\nfact-three\n"
-    )
+    (_memory_paths / "memory.md").write_text("fact-one\nfact-to-remove\nfact-three\n")
 
     memory.update_fact("fact-to-remove", "")
 
@@ -419,9 +410,7 @@ def test_update_fact_with_empty_new_deletes_the_containing_line(
 
 
 def test_update_fact_raises_FileNotFoundError_when_memory_md_missing() -> None:
-    with pytest.raises(
-        FileNotFoundError, match=r"^.+/memory\.md does not exist$"
-    ):
+    with pytest.raises(FileNotFoundError, match=r"^.+/memory\.md does not exist$"):
         memory.update_fact("anything", "anything")
 
 
@@ -443,9 +432,7 @@ def test_update_fact_raises_ValueError_when_old_text_matches_exactly_two_places(
     # `count > 1` boundary — exactly 2 occurrences must raise. Mutating
     # to `count > 2` would incorrectly let this case through.
     _memory_paths.mkdir(parents=True)
-    (_memory_paths / "memory.md").write_text(
-        "user uses bot\nuser trusts bot\n"
-    )
+    (_memory_paths / "memory.md").write_text("user uses bot\nuser trusts bot\n")
 
     with pytest.raises(
         ValueError,
@@ -512,8 +499,12 @@ def test_scan_cues_none_when_no_signal() -> None:
 
 
 def test_scan_cues_variants_match() -> None:
-    for t in ("don't forget the gate code", "keep in mind she prefers oat milk",
-              "别忘了买牛奶", "for next time: use the side door"):
+    for t in (
+        "don't forget the gate code",
+        "keep in mind she prefers oat milk",
+        "别忘了买牛奶",
+        "for next time: use the side door",
+    ):
         assert memory.scan_cues(t), t
 
 

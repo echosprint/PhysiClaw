@@ -47,21 +47,24 @@ from hardware.assembly.procedures.linear_40_idler_lj1 import LI40IdlerLj1
 from hardware.assembly.projection import Camera, MAIN_FRAME_VIEW
 from hardware.parts.standard.nut import SPECS as NUT_SPECS, Nut
 
-BUNDLE_EXPLODE = 35    # mm — exploded: bundle lifted along world -Y (outboard)
-NUT_EXPLODE    = 25    # mm — exploded: nut lifted along world +Z (pocket opening)
+BUNDLE_EXPLODE = 35  # mm — exploded: bundle lifted along world -Y (outboard)
+NUT_EXPLODE = 25  # mm — exploded: nut lifted along world +Z (pocket opening)
 
 
 class LI41IdlerLj1(BaseAssembly):
     camera = [MAIN_FRAME_VIEW, Camera(-67.41, 31.24, -99.63)]
+
     def _build(self) -> Compound:
         base = LI33X(exploded=False)
         base_compound = base.build()
 
-        joint          = base.joint_base
-        self.joint_base = joint   # forwarded for downstream idler procedures.
-        bundle_origin  = joint.extra_hole_world_centers[0]    # LEFT joint top, on extra_hole
-        pocket_center  = joint.front_pocket_world_centers[0]  # LEFT joint front pocket
-        nut_thickness  = NUT_SPECS["square"]["M4"]["thickness"]
+        joint = base.joint_base
+        self.joint_base = joint  # forwarded for downstream idler procedures.
+        bundle_origin = joint.extra_hole_world_centers[
+            0
+        ]  # LEFT joint top, on extra_hole
+        pocket_center = joint.front_pocket_world_centers[0]  # LEFT joint front pocket
+        nut_thickness = NUT_SPECS["square"]["M4"]["thickness"]
 
         # Bundle: install face (native z=0) on joint top at extra_hole;
         # shoulder/idler stack along world -Y (outboard).
@@ -69,11 +72,15 @@ class LI41IdlerLj1(BaseAssembly):
             bundle_origin[1] - BUNDLE_EXPLODE if self.exploded else bundle_origin[1]
         )
         bundle = LI40IdlerLj1(exploded=False).build()
-        bundle.move(Location(Plane(
-            origin=(bundle_origin[0], bundle_y, bundle_origin[2]),
-            x_dir=(1, 0, 0),
-            z_dir=(0, -1, 0),     # bundle native +Z (shoulder-up) → world -Y
-        )))
+        bundle.move(
+            Location(
+                Plane(
+                    origin=(bundle_origin[0], bundle_y, bundle_origin[2]),
+                    x_dir=(1, 0, 0),
+                    z_dir=(0, -1, 0),  # bundle native +Z (shoulder-up) → world -Y
+                )
+            )
+        )
 
         # M4 square nut in the front pocket. Nut native frame: bore on
         # +Z, bottom face (z=0) is the full square, top face
@@ -86,15 +93,28 @@ class LI41IdlerLj1(BaseAssembly):
         # so the nut centers in the pocket along the bore axis.
         nut_z = pocket_center[2] + NUT_EXPLODE if self.exploded else pocket_center[2]
         nut = Nut("square", "M4").build()
-        nut.move(Location(Plane(
-            origin=(pocket_center[0], pocket_center[1] - nut_thickness / 2, nut_z),
-            x_dir=(1, 0, 0),
-            z_dir=(0, 1, 0),
-        )))
+        nut.move(
+            Location(
+                Plane(
+                    origin=(
+                        pocket_center[0],
+                        pocket_center[1] - nut_thickness / 2,
+                        nut_z,
+                    ),
+                    x_dir=(1, 0, 0),
+                    z_dir=(0, 1, 0),
+                )
+            )
+        )
 
-        return Compound(label="linear_41_idler_lj1", children=[
-            base_compound, bundle, nut,
-        ])
+        return Compound(
+            label="linear_41_idler_lj1",
+            children=[
+                base_compound,
+                bundle,
+                nut,
+            ],
+        )
 
 
 if __name__ == "__main__":

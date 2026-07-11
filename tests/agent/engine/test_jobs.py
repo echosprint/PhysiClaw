@@ -7,6 +7,7 @@ modules so file I/O lands in tmp_path.
 `freezegun` is used wherever the function reads `dt.datetime.now()`
 internally (create_job, upsert_auto_wait_check, finish_job).
 """
+
 from __future__ import annotations
 
 import datetime as dt
@@ -166,7 +167,9 @@ def test_create_job_invalid_id_raises() -> None:
         ValueError, match=r"^invalid job id 'BadId' \(lowercase \+ digits \+ hyphens\)$"
     ):
         jobs.create_job(
-            id="BadId", description="d", schedule="* * * * *",
+            id="BadId",
+            description="d",
+            schedule="* * * * *",
             context="ten char minimum context",
         )
 
@@ -176,25 +179,30 @@ def test_create_job_invalid_kind_raises() -> None:
         ValueError, match=r"^kind must be one-time or periodic, got 'hourly'$"
     ):
         jobs.create_job(
-            id="x", description="d", schedule="* * * * *",
-            context="ten char minimum context", kind="hourly",
+            id="x",
+            description="d",
+            schedule="* * * * *",
+            context="ten char minimum context",
+            kind="hourly",
         )
 
 
 def test_create_job_invalid_schedule_raises() -> None:
     with pytest.raises(ValueError, match=r"^invalid cron expression"):
         jobs.create_job(
-            id="x", description="d", schedule="not cron",
+            id="x",
+            description="d",
+            schedule="not cron",
             context="ten char minimum context",
         )
 
 
 def test_create_job_short_context_raises() -> None:
-    with pytest.raises(
-        ValueError, match=r"^context must be at least 10 characters$"
-    ):
+    with pytest.raises(ValueError, match=r"^context must be at least 10 characters$"):
         jobs.create_job(
-            id="x", description="d", schedule="* * * * *",
+            id="x",
+            description="d",
+            schedule="* * * * *",
             context="short",
         )
 
@@ -202,7 +210,9 @@ def test_create_job_short_context_raises() -> None:
 def test_create_job_empty_description_raises() -> None:
     with pytest.raises(ValueError, match=r"^description is required$"):
         jobs.create_job(
-            id="x", description="   ", schedule="* * * * *",
+            id="x",
+            description="   ",
+            schedule="* * * * *",
             context="ten char minimum context",
         )
 
@@ -212,23 +222,31 @@ def test_create_job_duplicate_id_raises(_jobs_path: Path) -> None:
 
     with pytest.raises(ValueError, match=r"^job id already exists: 'dup-id'$"):
         jobs.create_job(
-            id="dup-id", description="d", schedule="* * * * *",
+            id="dup-id",
+            description="d",
+            schedule="* * * * *",
             context="ten char minimum context",
         )
 
 
 def test_create_job_terminal_duplicate_id_still_raises(_jobs_path: Path) -> None:
     # Even a terminal entry blocks the id — the agent must pick fresh.
-    _write_jobs(_jobs_path, _job_text(
-        job_id="closed-id", status="done",
-        next_fire_time=NEVER,
-        execution_time="2026-04-28T07:30",
-        last_fire_time="2026-04-28T07:00",
-    ))
+    _write_jobs(
+        _jobs_path,
+        _job_text(
+            job_id="closed-id",
+            status="done",
+            next_fire_time=NEVER,
+            execution_time="2026-04-28T07:30",
+            last_fire_time="2026-04-28T07:00",
+        ),
+    )
 
     with pytest.raises(ValueError, match=r"already exists"):
         jobs.create_job(
-            id="closed-id", description="d", schedule="* * * * *",
+            id="closed-id",
+            description="d",
+            schedule="* * * * *",
             context="ten char minimum context",
         )
 
@@ -307,8 +325,9 @@ def test_create_job_periodic_rejects_high_frequency_schedule(
 ) -> None:
     # A */5 periodic "reply watcher" loops forever at full-agent cost
     # (done re-arms it) — refused with a pointer to one-time.
-    with freeze_time("2026-04-28T07:00:00"), pytest.raises(
-        ValueError, match="ONE-TIME"
+    with (
+        freeze_time("2026-04-28T07:00:00"),
+        pytest.raises(ValueError, match="ONE-TIME"),
     ):
         jobs.create_job(
             id="watcher",
@@ -376,15 +395,18 @@ def test_upsert_auto_wait_updates_existing_to_pend_with_new_schedule(
     _jobs_path: Path,
 ) -> None:
     # Pre-populate a stale auto-wait entry in done state.
-    _write_jobs(_jobs_path, _job_text(
-        job_id=jobs.AUTO_WAIT_JOB_ID,
-        status="done",
-        schedule="0 0 1 1 *",
-        next_fire_time=NEVER,
-        last_fire_time="2026-04-27T12:00",
-        execution_time="2026-04-27T12:30",
-        execution_result="prior run",
-    ))
+    _write_jobs(
+        _jobs_path,
+        _job_text(
+            job_id=jobs.AUTO_WAIT_JOB_ID,
+            status="done",
+            schedule="0 0 1 1 *",
+            next_fire_time=NEVER,
+            last_fire_time="2026-04-27T12:00",
+            execution_time="2026-04-27T12:30",
+            execution_result="prior run",
+        ),
+    )
     target = dt.datetime(2026, 4, 28, 14, 30)
 
     with freeze_time("2026-04-28T14:00:00"):
@@ -422,9 +444,7 @@ def test_get_job_raises_for_unknown_id(_jobs_path: Path) -> None:
 
 
 @pytest.mark.parametrize("bad_status", ["pend", "fired", "running", "started"])
-def test_finish_job_invalid_status_raises(
-    _jobs_path: Path, bad_status: str
-) -> None:
+def test_finish_job_invalid_status_raises(_jobs_path: Path, bad_status: str) -> None:
     _write_jobs(_jobs_path, _job_text(job_id="x", status="fired"))
 
     with pytest.raises(
@@ -442,12 +462,16 @@ def test_finish_job_unknown_id_raises(_jobs_path: Path) -> None:
 
 
 def test_finish_job_already_terminal_raises(_jobs_path: Path) -> None:
-    _write_jobs(_jobs_path, _job_text(
-        job_id="closed", status="done",
-        next_fire_time=NEVER,
-        execution_time="2026-04-28T07:30",
-        last_fire_time="2026-04-28T07:00",
-    ))
+    _write_jobs(
+        _jobs_path,
+        _job_text(
+            job_id="closed",
+            status="done",
+            next_fire_time=NEVER,
+            execution_time="2026-04-28T07:30",
+            last_fire_time="2026-04-28T07:00",
+        ),
+    )
 
     with pytest.raises(
         ValueError, match=r"^job 'closed' is already in terminal status 'done'$"
@@ -456,9 +480,14 @@ def test_finish_job_already_terminal_raises(_jobs_path: Path) -> None:
 
 
 def test_finish_job_one_time_done_marks_done(_jobs_path: Path) -> None:
-    _write_jobs(_jobs_path, _job_text(
-        job_id="one-time", kind="one-time", status="fired",
-    ))
+    _write_jobs(
+        _jobs_path,
+        _job_text(
+            job_id="one-time",
+            kind="one-time",
+            status="fired",
+        ),
+    )
 
     with freeze_time("2026-04-28T08:00:00"):
         jobs.finish_job(id="one-time", status=STATUS_DONE, recap="all good")
@@ -470,9 +499,14 @@ def test_finish_job_one_time_done_marks_done(_jobs_path: Path) -> None:
 
 
 def test_finish_job_periodic_done_resets_to_pend(_jobs_path: Path) -> None:
-    _write_jobs(_jobs_path, _job_text(
-        job_id="periodic", kind="periodic", status="fired",
-    ))
+    _write_jobs(
+        _jobs_path,
+        _job_text(
+            job_id="periodic",
+            kind="periodic",
+            status="fired",
+        ),
+    )
 
     with freeze_time("2026-04-28T08:00:00"):
         jobs.finish_job(id="periodic", status=STATUS_DONE, recap="ok")
@@ -485,10 +519,15 @@ def test_finish_job_periodic_done_reply_flags_rearm(_jobs_path: Path) -> None:
     # The re-fire trap: an agent reads "done" as "over" while the
     # periodic job re-arms and fires again minutes later. The tool
     # reply must state the re-arm and the permanent way out (cancel).
-    _write_jobs(_jobs_path, _job_text(
-        job_id="periodic", kind="periodic", status="fired",
-        next_fire_time="2026-04-29T07:00",
-    ))
+    _write_jobs(
+        _jobs_path,
+        _job_text(
+            job_id="periodic",
+            kind="periodic",
+            status="fired",
+            next_fire_time="2026-04-29T07:00",
+        ),
+    )
 
     with freeze_time("2026-04-28T08:00:00"):
         out = jobs.finish_job(id="periodic", status=STATUS_DONE, recap="ok")
@@ -499,9 +538,14 @@ def test_finish_job_periodic_done_reply_flags_rearm(_jobs_path: Path) -> None:
 
 
 def test_finish_job_one_time_reply_is_plain(_jobs_path: Path) -> None:
-    _write_jobs(_jobs_path, _job_text(
-        job_id="one-shot", kind="one-time", status="fired",
-    ))
+    _write_jobs(
+        _jobs_path,
+        _job_text(
+            job_id="one-shot",
+            kind="one-time",
+            status="fired",
+        ),
+    )
 
     with freeze_time("2026-04-28T08:00:00"):
         out = jobs.finish_job(id="one-shot", status=STATUS_DONE, recap="ok")
@@ -510,9 +554,14 @@ def test_finish_job_one_time_reply_is_plain(_jobs_path: Path) -> None:
 
 
 def test_finish_job_periodic_fail_also_resets_to_pend(_jobs_path: Path) -> None:
-    _write_jobs(_jobs_path, _job_text(
-        job_id="periodic", kind="periodic", status="fired",
-    ))
+    _write_jobs(
+        _jobs_path,
+        _job_text(
+            job_id="periodic",
+            kind="periodic",
+            status="fired",
+        ),
+    )
 
     with freeze_time("2026-04-28T08:00:00"):
         jobs.finish_job(id="periodic", status=STATUS_FAIL, recap="boom")
@@ -523,9 +572,14 @@ def test_finish_job_periodic_fail_also_resets_to_pend(_jobs_path: Path) -> None:
 
 def test_finish_job_periodic_cancel_stays_canceled(_jobs_path: Path) -> None:
     # cancel is permanent even on periodic jobs.
-    _write_jobs(_jobs_path, _job_text(
-        job_id="periodic", kind="periodic", status="fired",
-    ))
+    _write_jobs(
+        _jobs_path,
+        _job_text(
+            job_id="periodic",
+            kind="periodic",
+            status="fired",
+        ),
+    )
 
     with freeze_time("2026-04-28T08:00:00"):
         jobs.finish_job(id="periodic", status=STATUS_CANCEL, recap="stop")
@@ -537,9 +591,14 @@ def test_finish_job_periodic_cancel_stays_canceled(_jobs_path: Path) -> None:
 def test_finish_job_uses_status_as_recap_when_recap_blank(
     _jobs_path: Path,
 ) -> None:
-    _write_jobs(_jobs_path, _job_text(
-        job_id="x", kind="one-time", status="fired",
-    ))
+    _write_jobs(
+        _jobs_path,
+        _job_text(
+            job_id="x",
+            kind="one-time",
+            status="fired",
+        ),
+    )
 
     with freeze_time("2026-04-28T08:00:00"):
         jobs.finish_job(id="x", status=STATUS_DONE, recap="   ")

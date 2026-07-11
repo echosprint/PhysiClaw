@@ -39,12 +39,12 @@ from hardware.parts.standard.t_nut import (
     TNut,
 )
 
-BHCS_LENGTH    = 10     # mm — BHCS M5 underhead length
-BRACKET_GAP     = 20     # mm — exploded: visual gap between t-nut top and bracket bottom
-SCREW_GAP       = 8      # mm — exploded: visual gap between bracket top and screw shank tip
-TNUT_LIFT       = 5      # mm — assembled: nut slid up the shank toward the bracket
-                         #      (closes the 6 mm shank-protrusion gap to ~1 mm,
-                         #      reads as "screw threaded most of the way in")
+BHCS_LENGTH = 10  # mm — BHCS M5 underhead length
+BRACKET_GAP = 20  # mm — exploded: visual gap between t-nut top and bracket bottom
+SCREW_GAP = 8  # mm — exploded: visual gap between bracket top and screw shank tip
+TNUT_LIFT = 5  # mm — assembled: nut slid up the shank toward the bracket
+#      (closes the 6 mm shank-protrusion gap to ~1 mm,
+#      reads as "screw threaded most of the way in")
 
 
 class FR30BracketTnut(BaseAssembly):
@@ -75,7 +75,7 @@ class FR30BracketTnut(BaseAssembly):
             Plane(
                 origin=(half_hole - hammer_half_length, 0, tnut_lift),
                 x_dir=(0, 1, 0),
-                z_dir=(1, 0, 0),   # slide axis along world +X
+                z_dir=(1, 0, 0),  # slide axis along world +X
             ),
         )
         for nut, plane in zip(nuts, nut_planes):
@@ -91,9 +91,9 @@ class FR30BracketTnut(BaseAssembly):
         #              the shank protrusion (BHCS_LENGTH − plate_thick).
         if self.exploded:
             bracket_z = HAMMER_TOTAL_HEIGHT + BRACKET_GAP + plate_thick / 2
-            screw_z   = bracket_z + plate_thick / 2 + SCREW_GAP + BHCS_LENGTH
+            screw_z = bracket_z + plate_thick / 2 + SCREW_GAP + BHCS_LENGTH
         else:
-            screw_z   = HAMMER_TOTAL_HEIGHT + BHCS_LENGTH
+            screw_z = HAMMER_TOTAL_HEIGHT + BHCS_LENGTH
             bracket_z = screw_z - plate_thick / 2
 
         bracket.move(Location((0, 0, bracket_z)))
@@ -105,9 +105,14 @@ class FR30BracketTnut(BaseAssembly):
         # e.g. frame_31_bracket puts bracket_bottom_z on the slot face.
         self.bracket_bottom_z = bracket_z - plate_thick / 2
 
-        return Compound(label="frame_30_bracket_tnut", children=[
-            bracket, *nuts, *screws,
-        ])
+        return Compound(
+            label="frame_30_bracket_tnut",
+            children=[
+                bracket,
+                *nuts,
+                *screws,
+            ],
+        )
 
 
 if __name__ == "__main__":

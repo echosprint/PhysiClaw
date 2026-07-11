@@ -1,4 +1,5 @@
 """Tests for `physiclaw.agent.runtime.launcher`."""
+
 from __future__ import annotations
 
 import pytest
@@ -93,7 +94,8 @@ def test_resolve_succeeds_for_claude_code_when_available(
 
 @pytest.mark.integration
 def test_launch_runs_engine_path_for_in_process_provider(
-    mocker, monkeypatch: pytest.MonkeyPatch,
+    mocker,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("PHYSICLAW_MODEL", "qwen/qwen3-plus")
     monkeypatch.setattr("sys.argv", ["runtime", "--server", "http://x:9000"])
@@ -103,14 +105,18 @@ def test_launch_runs_engine_path_for_in_process_provider(
 
     async def _start():
         return None
+
     fake_runtime.start.side_effect = _start
 
     runtime_cls = mocker.patch.object(
-        launcher, "Runtime", return_value=fake_runtime,
+        launcher,
+        "Runtime",
+        return_value=fake_runtime,
     )
 
     async def _close():
         return None
+
     mocker.patch.object(launcher, "close_mcp", side_effect=_close)
 
     fake_engine_run = mocker.MagicMock()
@@ -129,7 +135,8 @@ def test_launch_runs_engine_path_for_in_process_provider(
 
 @pytest.mark.integration
 def test_launch_runs_claude_path_for_claude_code(
-    mocker, monkeypatch: pytest.MonkeyPatch,
+    mocker,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("PHYSICLAW_MODEL", "claude-code/claude-test")
     monkeypatch.setattr("sys.argv", ["runtime"])
@@ -140,13 +147,17 @@ def test_launch_runs_claude_path_for_claude_code(
 
     async def _start():
         return None
+
     fake_runtime.start.side_effect = _start
     runtime_cls = mocker.patch.object(
-        launcher, "Runtime", return_value=fake_runtime,
+        launcher,
+        "Runtime",
+        return_value=fake_runtime,
     )
 
     async def _close():
         return None
+
     mocker.patch.object(launcher, "close_mcp", side_effect=_close)
 
     fake_spawn = mocker.MagicMock()
@@ -163,7 +174,8 @@ def test_launch_runs_claude_path_for_claude_code(
 
 @pytest.mark.integration
 def test_launch_normalizes_proxy_env_first(
-    mocker, monkeypatch: pytest.MonkeyPatch,
+    mocker,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A direct `python -m physiclaw.agent.runtime` skips the CLI root
     callback, so launch() must normalize `socks://` proxy env itself —
@@ -176,6 +188,7 @@ def test_launch_normalizes_proxy_env_first(
     monkeypatch.setenv("all_proxy", "socks://127.0.0.1:7897")
     monkeypatch.delenv("PHYSICLAW_MODEL", raising=False)
     from physiclaw import config as _cfg
+
     monkeypatch.setattr(_cfg.CONFIG.agent, "model", "")
     monkeypatch.setattr("sys.argv", ["runtime"])
 
@@ -201,7 +214,9 @@ def _stub_asyncio_run(mocker, *, raise_kbd_interrupt: bool = False):
 
 @pytest.mark.integration
 def test_launch_exits_cleanly_when_no_model_configured(
-    mocker, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture,
+    mocker,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
 ) -> None:
     """First-run UX: runtime subprocess shouldn't dump a Python stack
     trace into the parent shell when no model is set — print a friendly
@@ -209,6 +224,7 @@ def test_launch_exits_cleanly_when_no_model_configured(
     monkeypatch.delenv("PHYSICLAW_MODEL", raising=False)
     # Ensure the in-config default is also empty.
     from physiclaw import config as _cfg
+
     monkeypatch.setattr(_cfg.CONFIG.agent, "model", "")
     monkeypatch.setattr("sys.argv", ["runtime"])
 
@@ -223,7 +239,8 @@ def test_launch_exits_cleanly_when_no_model_configured(
 
 @pytest.mark.integration
 def test_launch_swallows_keyboard_interrupt(
-    mocker, monkeypatch: pytest.MonkeyPatch,
+    mocker,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("PHYSICLAW_MODEL", "qwen/qwen3-plus")
     monkeypatch.setattr("sys.argv", ["runtime"])
@@ -240,7 +257,8 @@ def test_launch_swallows_keyboard_interrupt(
 
 @pytest.mark.integration
 def test_launch_seeds_physiclaw_server_env(
-    mocker, monkeypatch: pytest.MonkeyPatch,
+    mocker,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("PHYSICLAW_MODEL", "qwen/qwen3-plus")
     monkeypatch.delenv("PHYSICLAW_SERVER", raising=False)
@@ -255,14 +273,17 @@ def test_launch_seeds_physiclaw_server_env(
     launcher.launch()
 
     import os
+
     assert os.environ.get("PHYSICLAW_SERVER") == "http://h:42"
 
 
 @pytest.mark.integration
 def test_launch_verbose_flag_sets_debug_level(
-    mocker, monkeypatch: pytest.MonkeyPatch,
+    mocker,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import logging as _logging
+
     monkeypatch.setenv("PHYSICLAW_MODEL", "qwen/qwen3-plus")
     monkeypatch.setattr("sys.argv", ["runtime", "--verbose"])
     setup_spy = mocker.patch.object(launcher, "setup_logging")
@@ -275,6 +296,9 @@ def test_launch_verbose_flag_sets_debug_level(
     launcher.launch()
 
     from physiclaw import paths
+
     setup_spy.assert_called_once_with(
-        "runtime", _logging.DEBUG, file_dir=paths.runtime_log_dir(),
+        "runtime",
+        _logging.DEBUG,
+        file_dir=paths.runtime_log_dir(),
     )

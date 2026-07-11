@@ -5,6 +5,7 @@ exercise it with a tiny recorder that captures the exact command sequence —
 no serial port, no GRBL. Wire-level integration (solenoid G-code reaching the
 serial port through StylusArm) is covered by the gesture tests in test_arm.py.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -81,9 +82,7 @@ def test_press_strikes_settles_then_holds(rec: Recorder, sol: Solenoid) -> None:
     ]
 
 
-def test_release_cuts_then_waits_for_rebound(
-    rec: Recorder, sol: Solenoid
-) -> None:
+def test_release_cuts_then_waits_for_rebound(rec: Recorder, sol: Solenoid) -> None:
     sol.release()
 
     assert rec.calls == [
@@ -117,7 +116,10 @@ def test_double_tap_uses_short_gap_then_full_release(
         ("send", "M3 S1000", False),  # first strike
         ("dwell", 0.08),  # contact duration
         ("send", "M5", False),  # lift
-        ("dwell", Solenoid.DOUBLE_TAP_GAP_MS / 1000.0),  # brief gap — break contact only
+        (
+            "dwell",
+            Solenoid.DOUBLE_TAP_GAP_MS / 1000.0,
+        ),  # brief gap — break contact only
         ("send", "M3 S1000", False),  # second strike
         ("dwell", 0.08),  # contact duration
         ("send", "M5", False),  # release
@@ -241,7 +243,9 @@ def test_held_releases_normally_on_clean_exit(rec: Recorder) -> None:
     assert ("dwell", Solenoid.RELEASE_MS / 1000.0) in rec.calls
 
 
-def test_force_off_failure_is_swallowed_and_original_error_survives(rec: Recorder) -> None:
+def test_force_off_failure_is_swallowed_and_original_error_survives(
+    rec: Recorder,
+) -> None:
     # The tap dwell fails AND the emergency M5 also fails: the original error
     # must still propagate (not be masked by the release failure).
     rec._fail_on = lambda op, p: op == "dwell" or (op == "send" and p == "M5")

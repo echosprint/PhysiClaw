@@ -28,6 +28,7 @@ Accepted equivalent / unreachable mutmut survivors:
     — discriminator only fires when monotonic equals deadline to the
     nanosecond, which the time-mocking harness can't reliably hit.
 """
+
 from __future__ import annotations
 
 import itertools
@@ -71,9 +72,7 @@ def test_connected_false_at_init() -> None:
     assert bs.connected is False
 
 
-def test_connected_true_when_polled_within_500ms(
-    bs: BridgeState, mocker
-) -> None:
+def test_connected_true_when_polled_within_500ms(bs: BridgeState, mocker) -> None:
     fake_time = mocker.patch.object(state_mod.time, "time")
     fake_time.return_value = 1000.0
     bs.poll()  # writes last_seen = 1000.0
@@ -93,9 +92,7 @@ def test_connected_false_when_last_poll_was_over_500ms_ago(
     assert bs.connected is False
 
 
-def test_connected_false_at_exactly_500ms_boundary(
-    bs: BridgeState, mocker
-) -> None:
+def test_connected_false_at_exactly_500ms_boundary(bs: BridgeState, mocker) -> None:
     # `< 0.5` (strict). Exactly 0.5s difference must NOT count as
     # connected — mutating to `<= 0.5` would flip this case.
     fake_time = mocker.patch.object(state_mod.time, "time")
@@ -140,9 +137,7 @@ def test_wait_for_connection_resets_settle_timer_on_dropout(
     # connected sequence: True, False (drops), True, True, True...
     # With dropout, stable_since resets to None — settle timer restarts.
     mocker.patch.object(state_mod.time, "sleep")
-    connected_seq = itertools.chain(
-        [True, False], itertools.repeat(True)
-    )
+    connected_seq = itertools.chain([True, False], itertools.repeat(True))
 
     class _Prop:
         def __get__(self, instance, owner=None):
@@ -194,9 +189,7 @@ def test_wait_for_connection_returns_true_at_exact_settle_boundary(
     sleep = mocker.patch.object(state_mod.time, "sleep")
     mocker.patch.object(BridgeState, "connected", new=True)
     times = iter([0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
-    mocker.patch.object(
-        state_mod.time, "monotonic", side_effect=lambda: next(times)
-    )
+    mocker.patch.object(state_mod.time, "monotonic", side_effect=lambda: next(times))
 
     bs.wait_for_connection(timeout=10.0, settle_seconds=0.2)
 
@@ -319,9 +312,7 @@ def test_wait_clipboard_default_timeout_is_30_seconds() -> None:
 # ---------- poll ----------
 
 
-def test_poll_updates_last_seen_to_current_time(
-    bs: BridgeState, mocker
-) -> None:
+def test_poll_updates_last_seen_to_current_time(bs: BridgeState, mocker) -> None:
     mocker.patch.object(state_mod.time, "time", return_value=12345.0)
 
     bs.poll()

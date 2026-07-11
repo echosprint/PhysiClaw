@@ -153,8 +153,7 @@ def _reject_physiclaw_home_source(source: str) -> None:
 def _validate_name(name: str) -> None:
     if not _NAME_RE.fullmatch(name):
         exit_error(
-            f"invalid skill name {name!r}. Allowed: "
-            "letters, digits, '.', '_', '-'."
+            f"invalid skill name {name!r}. Allowed: letters, digits, '.', '_', '-'."
         )
 
 
@@ -241,24 +240,30 @@ def _atomic_replace(src: Path, dst: Path) -> None:
 )
 def _install(
     name: Annotated[
-        str, typer.Argument(help="Skill name (matches a skills/<name>/ dir in the source repo)."),
+        str,
+        typer.Argument(
+            help="Skill name (matches a skills/<name>/ dir in the source repo)."
+        ),
     ],
     from_: Annotated[
         str | None,
         typer.Option(
-            "--from", help="Git repo to install from. Overrides skills.default_source.",
+            "--from",
+            help="Git repo to install from. Overrides skills.default_source.",
         ),
     ] = None,
     ref: Annotated[
         str | None,
         typer.Option(
-            "--ref", help="Branch or tag to check out. Defaults to the repo's default branch.",
+            "--ref",
+            help="Branch or tag to check out. Defaults to the repo's default branch.",
         ),
     ] = None,
     force: Annotated[
         bool,
         typer.Option(
-            "--force", help="Overwrite an existing install of this skill.",
+            "--force",
+            help="Overwrite an existing install of this skill.",
         ),
     ] = False,
 ) -> None:
@@ -300,9 +305,7 @@ def _install(
 
         skill_md = src_skill / "SKILL.md"
         if not skill_md.is_file():
-            exit_error(
-                f"skills/{name}/ is missing SKILL.md — not a valid skill."
-            )
+            exit_error(f"skills/{name}/ is missing SKILL.md — not a valid skill.")
 
         declared_name = _read_skill_name(skill_md, fallback=name)
         if declared_name != name:
@@ -341,7 +344,13 @@ def _install(
 
         _atomic_replace(staging, target)
 
-    typer.echo(ok(f"installed {name} (from {source}" + (f" @ {ref}" if ref else "") + f", sha {sha[:7]})"))
+    typer.echo(
+        ok(
+            f"installed {name} (from {source}"
+            + (f" @ {ref}" if ref else "")
+            + f", sha {sha[:7]})"
+        )
+    )
     typer.echo(f"  → {target}")
 
 
@@ -412,12 +421,14 @@ def _list() -> None:
 )
 def _uninstall(
     name: Annotated[
-        str, typer.Argument(help="Skill name to remove."),
+        str,
+        typer.Argument(help="Skill name to remove."),
     ],
     force: Annotated[
         bool,
         typer.Option(
-            "--force", help="Remove even if the skill has no provenance marker (user-authored).",
+            "--force",
+            help="Remove even if the skill has no provenance marker (user-authored).",
         ),
     ] = False,
 ) -> None:

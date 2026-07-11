@@ -5,6 +5,7 @@ so PhysiClaw can't drive its observation→action loop with it.
 `__init__` raises `NotImplementedError` immediately so misconfiguration
 fails loud.
 """
+
 from __future__ import annotations
 
 import pytest

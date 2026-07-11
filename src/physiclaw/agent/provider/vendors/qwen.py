@@ -9,6 +9,7 @@ system-prompt fragment declared below.
 Auth: `QWEN_API_KEY` / `DASHSCOPE_API_KEY` env, or
 `[provider] qwen_api_key` in `~/.physiclaw/config.toml`.
 """
+
 from physiclaw.agent.provider.openai_compat import OpenAICompatibleProvider
 
 

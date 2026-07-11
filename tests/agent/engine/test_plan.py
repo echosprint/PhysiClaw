@@ -16,6 +16,7 @@ Accepted equivalent mutants:
     a local-variable annotation, never evaluated at runtime; the
     mutation is invisible.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -42,7 +43,11 @@ from physiclaw.agent.engine.plan import (
 
 @pytest.mark.parametrize(
     "name, expected",
-    [("PENDING", "pending"), ("IN_PROGRESS", "in_progress"), ("COMPLETED", "completed")],
+    [
+        ("PENDING", "pending"),
+        ("IN_PROGRESS", "in_progress"),
+        ("COMPLETED", "completed"),
+    ],
 )
 def test_status_constant_pinned(name: str, expected: str) -> None:
     assert getattr(plan_mod, name) == expected
@@ -414,10 +419,12 @@ def test_step_stuck_tip_silent_below_threshold() -> None:
 
 def test_step_turns_reset_when_in_progress_step_changes() -> None:
     p = _stuck_plan(plan_mod.STEP_STUCK_WARN)
-    p.update(steps=[
-        {"content": "update quantity to 4", "status": "completed"},
-        {"content": "pay for the order", "status": "in_progress"},
-    ])
+    p.update(
+        steps=[
+            {"content": "update quantity to 4", "status": "completed"},
+            {"content": "pay for the order", "status": "in_progress"},
+        ]
+    )
 
     assert p.step_turns == 0
     assert "stuck" not in p.render()
@@ -434,10 +441,12 @@ def test_step_turns_survive_unrelated_updates() -> None:
 def test_current_step_returns_in_progress_content() -> None:
     p = Plan()
     assert p.current_step() is None  # the seed step is pending
-    p.update(steps=[
-        {"content": "a", "status": "completed"},
-        {"content": "b", "status": "in_progress"},
-    ])
+    p.update(
+        steps=[
+            {"content": "a", "status": "completed"},
+            {"content": "b", "status": "in_progress"},
+        ]
+    )
     assert p.current_step() == "b"
 
 
@@ -495,10 +504,12 @@ def test_step_turns_survive_same_steps_reemit() -> None:
     p.update(steps=[{"content": "update qty", "status": "in_progress"}])
     for _ in range(5):
         p.tick_turn()
-    p.update(steps=[
-        {"content": "update qty", "status": "in_progress"},
-        {"content": "pay", "status": "pending"},
-    ])
+    p.update(
+        steps=[
+            {"content": "update qty", "status": "in_progress"},
+            {"content": "pay", "status": "pending"},
+        ]
+    )
     assert p.step_turns == 5
 
 

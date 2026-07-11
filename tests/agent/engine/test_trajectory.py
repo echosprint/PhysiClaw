@@ -1,6 +1,7 @@
 """Tests for `physiclaw.agent.engine.trajectory` — the turn-tagged history of
 plan + scratchpad states that the reflect corrective feeds the agent.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -122,10 +123,16 @@ def test_render_merges_into_one_ascending_timeline() -> None:
     trajectory.record(s, turn=9, scratchpad_written=True)  # scratchpad @ t10
 
     out = trajectory.render(s)
-    assert out.startswith("<session-trajectory>") and out.endswith("</session-trajectory>")
+    assert out.startswith("<session-trajectory>") and out.endswith(
+        "</session-trajectory>"
+    )
     # One merged timeline, ascending by turn regardless of kind; every entry is
     # `[tN] <kind>\n<content>`.
-    assert out.index("[t1] plan\n") < out.index("[t10] plan\n") < out.index("[t10] scratchpad\n")
+    assert (
+        out.index("[t1] plan\n")
+        < out.index("[t10] plan\n")
+        < out.index("[t10] scratchpad\n")
+    )
     assert out.index("u1") < out.index("u2")  # oldest→newest
 
 

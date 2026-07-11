@@ -5,6 +5,7 @@ Named with the `server_` prefix to avoid a basename collision with
 
 `fake_mcp` and `async_request` fixtures live in `conftest.py`.
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -33,7 +34,9 @@ def test_hardware_register_wires_all_routes(fake_mcp) -> None:
 
 @pytest.mark.asyncio
 async def test_hardware_routes_forward_to_handlers(
-    fake_mcp, async_request, mocker,
+    fake_mcp,
+    async_request,
+    mocker,
 ) -> None:
     spies = {
         "handle_setup_page": mocker.patch.object(hw_reg, "handle_setup_page"),
@@ -45,6 +48,7 @@ async def test_hardware_routes_forward_to_handlers(
 
     async def _ok(*a, **kw):
         return "ok"
+
     for s in spies.values():
         s.side_effect = _ok
 

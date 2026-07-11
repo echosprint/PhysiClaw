@@ -28,8 +28,7 @@ from physiclaw.cli._http import http_get, stream
 from physiclaw.cli._format import ok
 
 _PT_URL = (
-    "https://huggingface.co/microsoft/OmniParser-v2.0/"
-    "resolve/main/icon_detect/model.pt"
+    "https://huggingface.co/microsoft/OmniParser-v2.0/resolve/main/icon_detect/model.pt"
 )
 
 # physiclaw.ai serves the prebuilt zip as base64 parts: Cloudflare Pages caps
@@ -76,10 +75,13 @@ YOLO("{_PT_NAME}").export(format="onnx", imgsz=1280)
 
 
 def _abort_kept_scratch(convert_dir: Path, reason: str) -> None:
-    typer.echo(typer.style(
-        f"{reason} Scratch dir kept for debugging: {convert_dir}",
-        fg=typer.colors.RED, bold=True,
-    ))
+    typer.echo(
+        typer.style(
+            f"{reason} Scratch dir kept for debugging: {convert_dir}",
+            fg=typer.colors.RED,
+            bold=True,
+        )
+    )
     raise typer.Abort()
 
 
@@ -118,20 +120,24 @@ def _download_prebuilt_zip(dest: Path) -> bool:
     try:
         b64 = bytearray()
         for i in range(_PREBUILT_PARTS):
-            b64.extend(_fetch_part(
-                _PREBUILT_PARTS_URL.format(i=i),
-                f"  vision model part {i + 1}/{_PREBUILT_PARTS}",
-            ))
+            b64.extend(
+                _fetch_part(
+                    _PREBUILT_PARTS_URL.format(i=i),
+                    f"  vision model part {i + 1}/{_PREBUILT_PARTS}",
+                )
+            )
         dest.write_bytes(base64.b64decode(b64))
         return True
     # ValueError covers binascii.Error from b64decode — belt-and-braces
     # behind stream()'s truncation check, so corrupt parts fall through to
     # the release instead of crashing the installer with a traceback.
     except (OSError, ValueError) as e:
-        typer.echo(typer.style(
-            f"  CDN parts unavailable ({e}) — trying the release.",
-            fg=typer.colors.YELLOW,
-        ))
+        typer.echo(
+            typer.style(
+                f"  CDN parts unavailable ({e}) — trying the release.",
+                fg=typer.colors.YELLOW,
+            )
+        )
     try:
         with http_get(_PREBUILT_ZIP_URL) as r, open(dest, "wb") as f:
             stream(r, f.write, "  vision model")
@@ -157,18 +163,22 @@ def _try_prebuilt(onnx: Path) -> bool:
             with zipfile.ZipFile(tmp / "model.zip") as z:
                 z.extract(_ONNX_NAME, tmp)
         except (zipfile.BadZipFile, KeyError) as e:
-            typer.echo(typer.style(
-                f"  bad archive ({e}) — skipping prebuilt.",
-                fg=typer.colors.YELLOW,
-            ))
+            typer.echo(
+                typer.style(
+                    f"  bad archive ({e}) — skipping prebuilt.",
+                    fg=typer.colors.YELLOW,
+                )
+            )
             return False
         extracted = tmp / _ONNX_NAME
         digest = _sha256(extracted)
         if digest != _PREBUILT_ONNX_SHA256:
-            typer.echo(typer.style(
-                f"  checksum mismatch ({digest[:12]}…) — skipping prebuilt.",
-                fg=typer.colors.YELLOW,
-            ))
+            typer.echo(
+                typer.style(
+                    f"  checksum mismatch ({digest[:12]}…) — skipping prebuilt.",
+                    fg=typer.colors.YELLOW,
+                )
+            )
             return False
         onnx.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(extracted), onnx)
@@ -188,10 +198,13 @@ def _abort_download(exc: OSError) -> None:
     ``OSError`` subclasses) on a 403/blocked-host/offline fetch; surface the
     reason plus the likely fix instead of a stack trace.
     """
-    typer.echo(typer.style(
-        "Couldn't download the OmniParser vision model.",
-        fg=typer.colors.RED, bold=True,
-    ))
+    typer.echo(
+        typer.style(
+            "Couldn't download the OmniParser vision model.",
+            fg=typer.colors.RED,
+            bold=True,
+        )
+    )
     typer.echo(f"  Reason: {exc}")
     typer.echo(
         f"\n  The weights are hosted on Hugging Face:\n    {_PT_URL}\n"
@@ -208,9 +221,7 @@ def _abort_download(exc: OSError) -> None:
 def vision(
     force: Annotated[
         bool,
-        typer.Option(
-            "--force", help="Re-install even if the ONNX already exists."
-        ),
+        typer.Option("--force", help="Re-install even if the ONNX already exists."),
     ] = False,
     build: Annotated[
         bool,
@@ -237,10 +248,13 @@ def vision(
         typer.echo("Prebuilt model unavailable — converting from source …")
 
     if shutil.which("uv") is None:
-        typer.echo(typer.style(
-            "`uv` is required to convert the vision model.",
-            fg=typer.colors.YELLOW, bold=True,
-        ))
+        typer.echo(
+            typer.style(
+                "`uv` is required to convert the vision model.",
+                fg=typer.colors.YELLOW,
+                bold=True,
+            )
+        )
         typer.echo(
             "The conversion runs the heavy deps (ultralytics + onnx + onnxslim, "
             "~500 MB) in an ephemeral uv environment so they never enter the "
@@ -275,20 +289,25 @@ def vision(
 
     typer.echo("Converting to ONNX in ephemeral uv env …")
     cmd = [
-        "uv", "run",
-        "--python", "3.12",
+        "uv",
+        "run",
+        "--python",
+        "3.12",
         "--no-project",
         *(arg for dep in _CONVERT_DEPS for arg in ("--with", dep)),
-        "python", _SCRIPT_NAME,
+        "python",
+        _SCRIPT_NAME,
     ]
     result = subprocess.run(cmd, cwd=convert_dir)
     if result.returncode != 0:
         _abort_kept_scratch(
-            convert_dir, f"Conversion failed (uv exit {result.returncode}).",
+            convert_dir,
+            f"Conversion failed (uv exit {result.returncode}).",
         )
     if not onnx_in_scratch.exists():
         _abort_kept_scratch(
-            convert_dir, f"Conversion finished but {onnx_in_scratch} not found.",
+            convert_dir,
+            f"Conversion finished but {onnx_in_scratch} not found.",
         )
 
     shutil.move(onnx_in_scratch, onnx)

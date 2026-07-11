@@ -1,4 +1,5 @@
 """Tests for `physiclaw.agent.hooks.first_run`."""
+
 from __future__ import annotations
 
 import pytest

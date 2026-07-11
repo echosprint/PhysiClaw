@@ -1,4 +1,5 @@
 """Tests for `physiclaw.cli.models` — model selection / discovery CLI."""
+
 from __future__ import annotations
 
 import importlib
@@ -47,15 +48,19 @@ def test_known_provider_ids_includes_aliases(mocker) -> None:
 
 def test_bare_models_shows_active_when_set(mocker) -> None:
     mocker.patch.object(
-        models_mod._config, "model_ref_with_source",
+        models_mod._config,
+        "model_ref_with_source",
         return_value=("openai/gpt-5", "config"),
     )
     mocker.patch.object(
-        models_mod._config, "parse_model_ref",
+        models_mod._config,
+        "parse_model_ref",
         return_value=("openai", "gpt-5"),
     )
     mocker.patch.object(
-        models_mod, "_format_key_row", return_value="  openai api key: <set>",
+        models_mod,
+        "_format_key_row",
+        return_value="  openai api key: <set>",
     )
 
     result = runner.invoke(models_app, [])
@@ -67,7 +72,8 @@ def test_bare_models_shows_active_when_set(mocker) -> None:
 
 def test_bare_models_warns_when_unset(mocker) -> None:
     mocker.patch.object(
-        models_mod._config, "model_ref_with_source",
+        models_mod._config,
+        "model_ref_with_source",
         side_effect=RuntimeError("unset"),
     )
 
@@ -79,11 +85,13 @@ def test_bare_models_warns_when_unset(mocker) -> None:
 
 def test_bare_models_warns_on_invalid_ref(mocker) -> None:
     mocker.patch.object(
-        models_mod._config, "model_ref_with_source",
+        models_mod._config,
+        "model_ref_with_source",
         return_value=("garbage", "config"),
     )
     mocker.patch.object(
-        models_mod._config, "parse_model_ref",
+        models_mod._config,
+        "parse_model_ref",
         side_effect=ValueError("bad ref"),
     )
 
@@ -98,7 +106,8 @@ def test_bare_models_warns_on_invalid_ref(mocker) -> None:
 
 def test_list_unknown_provider_exits_1(mocker) -> None:
     mocker.patch.object(
-        models_mod, "_known_provider_ids",
+        models_mod,
+        "_known_provider_ids",
         return_value=("openai", "anthropic"),
     )
 
@@ -110,7 +119,9 @@ def test_list_unknown_provider_exits_1(mocker) -> None:
 
 def test_list_specific_provider_shows_models(mocker) -> None:
     mocker.patch.object(
-        models_mod, "_known_provider_ids", return_value=("openai",),
+        models_mod,
+        "_known_provider_ids",
+        return_value=("openai",),
     )
     fake_discovered = mocker.patch(
         "physiclaw.agent.provider.discovered",
@@ -125,7 +136,9 @@ def test_list_specific_provider_shows_models(mocker) -> None:
 
 def test_list_empty_cache_prints_hint(mocker) -> None:
     mocker.patch.object(
-        models_mod, "_known_provider_ids", return_value=("openai",),
+        models_mod,
+        "_known_provider_ids",
+        return_value=("openai",),
     )
     fake_discovered = mocker.patch(
         "physiclaw.agent.provider.discovered",
@@ -139,7 +152,8 @@ def test_list_empty_cache_prints_hint(mocker) -> None:
 
 def test_list_all_iterates_known_providers(mocker) -> None:
     mocker.patch.object(
-        models_mod, "_known_provider_ids",
+        models_mod,
+        "_known_provider_ids",
         return_value=("openai", "anthropic"),
     )
     fake_discovered = mocker.patch(
@@ -165,7 +179,8 @@ def test_use_rejects_ref_without_slash() -> None:
 
 def test_use_exits_1_on_parse_error(mocker) -> None:
     mocker.patch.object(
-        models_mod._config, "parse_model_ref",
+        models_mod._config,
+        "parse_model_ref",
         side_effect=ValueError("bad form"),
     )
 
@@ -176,11 +191,13 @@ def test_use_exits_1_on_parse_error(mocker) -> None:
 
 def test_use_unknown_provider_exits_1(mocker) -> None:
     mocker.patch.object(
-        models_mod._config, "parse_model_ref",
+        models_mod._config,
+        "parse_model_ref",
         return_value=("nopeprovider", "model"),
     )
     mocker.patch.object(
-        models_mod, "_known_provider_ids",
+        models_mod,
+        "_known_provider_ids",
         return_value=("openai",),
     )
 
@@ -192,11 +209,14 @@ def test_use_unknown_provider_exits_1(mocker) -> None:
 
 def test_use_model_not_in_cache_exits_1(mocker) -> None:
     mocker.patch.object(
-        models_mod._config, "parse_model_ref",
+        models_mod._config,
+        "parse_model_ref",
         return_value=("openai", "ghost"),
     )
     mocker.patch.object(
-        models_mod, "_known_provider_ids", return_value=("openai",),
+        models_mod,
+        "_known_provider_ids",
+        return_value=("openai",),
     )
     fake_disc = mocker.patch("physiclaw.agent.provider.discovered")
     fake_disc.is_cached.return_value = False
@@ -212,11 +232,14 @@ def test_use_claude_code_with_empty_cache_writes_config(mocker) -> None:
     empty — claude-code refs skip cache validation (the `claude` CLI
     validates model ids itself)."""
     mocker.patch.object(
-        models_mod._config, "parse_model_ref",
+        models_mod._config,
+        "parse_model_ref",
         return_value=("claude-code", "claude-sonnet-4-6"),
     )
     mocker.patch.object(
-        models_mod, "_known_provider_ids", return_value=("claude-code",),
+        models_mod,
+        "_known_provider_ids",
+        return_value=("claude-code",),
     )
     fake_disc = mocker.patch("physiclaw.agent.provider.discovered")
     fake_disc.is_cached.return_value = False
@@ -231,11 +254,14 @@ def test_use_claude_code_with_empty_cache_writes_config(mocker) -> None:
 
 def test_use_claude_code_with_populated_cache_still_validates(mocker) -> None:
     mocker.patch.object(
-        models_mod._config, "parse_model_ref",
+        models_mod._config,
+        "parse_model_ref",
         return_value=("claude-code", "ghost"),
     )
     mocker.patch.object(
-        models_mod, "_known_provider_ids", return_value=("claude-code",),
+        models_mod,
+        "_known_provider_ids",
+        return_value=("claude-code",),
     )
     fake_disc = mocker.patch("physiclaw.agent.provider.discovered")
     fake_disc.is_cached.return_value = False
@@ -249,11 +275,14 @@ def test_use_claude_code_with_populated_cache_still_validates(mocker) -> None:
 
 def test_use_happy_path_writes_config(mocker) -> None:
     mocker.patch.object(
-        models_mod._config, "parse_model_ref",
+        models_mod._config,
+        "parse_model_ref",
         return_value=("openai", "gpt-5"),
     )
     mocker.patch.object(
-        models_mod, "_known_provider_ids", return_value=("openai",),
+        models_mod,
+        "_known_provider_ids",
+        return_value=("openai",),
     )
     fake_disc = mocker.patch("physiclaw.agent.provider.discovered")
     fake_disc.is_cached.return_value = True
@@ -269,11 +298,14 @@ def test_use_happy_path_writes_config(mocker) -> None:
 def test_use_alias_set_works_too(mocker) -> None:
     """`models set` is a hidden alias for `use`."""
     mocker.patch.object(
-        models_mod._config, "parse_model_ref",
+        models_mod._config,
+        "parse_model_ref",
         return_value=("openai", "gpt-5"),
     )
     mocker.patch.object(
-        models_mod, "_known_provider_ids", return_value=("openai",),
+        models_mod,
+        "_known_provider_ids",
+        return_value=("openai",),
     )
     fake_disc = mocker.patch("physiclaw.agent.provider.discovered")
     fake_disc.is_cached.return_value = True
@@ -286,16 +318,20 @@ def test_use_alias_set_works_too(mocker) -> None:
 
 def test_use_config_error_exits_1(mocker) -> None:
     mocker.patch.object(
-        models_mod._config, "parse_model_ref",
+        models_mod._config,
+        "parse_model_ref",
         return_value=("openai", "gpt-5"),
     )
     mocker.patch.object(
-        models_mod, "_known_provider_ids", return_value=("openai",),
+        models_mod,
+        "_known_provider_ids",
+        return_value=("openai",),
     )
     fake_disc = mocker.patch("physiclaw.agent.provider.discovered")
     fake_disc.is_cached.return_value = True
     mocker.patch.object(
-        models_mod._config, "set_dotted",
+        models_mod._config,
+        "set_dotted",
         side_effect=_config.ConfigError("write failed"),
     )
 
@@ -316,7 +352,9 @@ def test_key_alias_redirects_to_target(mocker) -> None:
 
 def test_key_unknown_provider_exits_1(mocker) -> None:
     mocker.patch.object(
-        models_mod, "_known_provider_ids", return_value=("openai",),
+        models_mod,
+        "_known_provider_ids",
+        return_value=("openai",),
     )
 
     result = runner.invoke(models_app, ["key", "nope", "k"])
@@ -327,11 +365,14 @@ def test_key_unknown_provider_exits_1(mocker) -> None:
 
 def test_key_with_value_writes_and_fetches(mocker) -> None:
     mocker.patch.object(
-        models_mod, "_known_provider_ids", return_value=("openai",),
+        models_mod,
+        "_known_provider_ids",
+        return_value=("openai",),
     )
     set_spy = mocker.patch.object(models_mod._config, "set_dotted")
     mocker.patch.object(
-        models_mod, "_fetch_live_models",
+        models_mod,
+        "_fetch_live_models",
         return_value=[{"id": "gpt-5"}, {"id": "gpt-4o"}],
     )
     print_spy = mocker.patch.object(models_mod, "_print_live_models_table")
@@ -345,11 +386,14 @@ def test_key_with_value_writes_and_fetches(mocker) -> None:
 
 def test_key_warns_when_fetch_fails(mocker) -> None:
     mocker.patch.object(
-        models_mod, "_known_provider_ids", return_value=("openai",),
+        models_mod,
+        "_known_provider_ids",
+        return_value=("openai",),
     )
     mocker.patch.object(models_mod._config, "set_dotted")
     mocker.patch.object(
-        models_mod, "_fetch_live_models",
+        models_mod,
+        "_fetch_live_models",
         side_effect=RuntimeError("network down"),
     )
 
@@ -362,10 +406,13 @@ def test_key_warns_when_fetch_fails(mocker) -> None:
 
 def test_key_set_dotted_error_exits_1(mocker) -> None:
     mocker.patch.object(
-        models_mod, "_known_provider_ids", return_value=("openai",),
+        models_mod,
+        "_known_provider_ids",
+        return_value=("openai",),
     )
     mocker.patch.object(
-        models_mod._config, "set_dotted",
+        models_mod._config,
+        "set_dotted",
         side_effect=_config.ConfigError("readonly"),
     )
 
@@ -376,14 +423,19 @@ def test_key_set_dotted_error_exits_1(mocker) -> None:
 
 def test_key_prompts_when_value_omitted(mocker) -> None:
     mocker.patch.object(
-        models_mod, "_known_provider_ids", return_value=("openai",),
+        models_mod,
+        "_known_provider_ids",
+        return_value=("openai",),
     )
     mocker.patch.object(models_mod._config, "set_dotted")
     mocker.patch.object(
-        models_mod.typer, "prompt", return_value="prompted-key",
+        models_mod.typer,
+        "prompt",
+        return_value="prompted-key",
     )
     mocker.patch.object(
-        models_mod, "_fetch_live_models",
+        models_mod,
+        "_fetch_live_models",
         side_effect=RuntimeError("skip"),
     )
 
@@ -401,7 +453,8 @@ def test_keys_lists_all_providers(mocker) -> None:
         return_value=("openai", "anthropic"),
     )
     mocker.patch.object(
-        models_mod, "_format_key_row",
+        models_mod,
+        "_format_key_row",
         side_effect=lambda pid, indent=2: f"{' ' * indent}{pid}: <row>",
     )
 
@@ -417,7 +470,9 @@ def test_keys_lists_all_providers(mocker) -> None:
 
 def test_discover_unknown_provider_exits_1(mocker) -> None:
     mocker.patch.object(
-        models_mod, "_known_provider_ids", return_value=("openai",),
+        models_mod,
+        "_known_provider_ids",
+        return_value=("openai",),
     )
 
     result = runner.invoke(models_app, ["discover", "nope"])
@@ -427,10 +482,13 @@ def test_discover_unknown_provider_exits_1(mocker) -> None:
 
 def test_discover_fetch_failure_exits_1(mocker) -> None:
     mocker.patch.object(
-        models_mod, "_known_provider_ids", return_value=("openai",),
+        models_mod,
+        "_known_provider_ids",
+        return_value=("openai",),
     )
     mocker.patch.object(
-        models_mod, "_fetch_live_models",
+        models_mod,
+        "_fetch_live_models",
         side_effect=RuntimeError("network"),
     )
 
@@ -442,11 +500,13 @@ def test_discover_fetch_failure_exits_1(mocker) -> None:
 
 def test_discover_happy_path(mocker) -> None:
     mocker.patch.object(
-        models_mod, "_known_provider_ids",
+        models_mod,
+        "_known_provider_ids",
         return_value=("openai", "claude-code"),
     )
     mocker.patch.object(
-        models_mod, "_fetch_live_models",
+        models_mod,
+        "_fetch_live_models",
         return_value=[{"id": "gpt-5"}],
     )
     print_spy = mocker.patch.object(models_mod, "_print_live_models_table")
@@ -461,11 +521,13 @@ def test_discover_happy_path(mocker) -> None:
 
 def test_discover_alias_uses_target_cache(mocker) -> None:
     mocker.patch.object(
-        models_mod, "_known_provider_ids",
+        models_mod,
+        "_known_provider_ids",
         return_value=("anthropic", "claude-code"),
     )
     fetch_spy = mocker.patch.object(
-        models_mod, "_fetch_live_models",
+        models_mod,
+        "_fetch_live_models",
         return_value=[],
     )
     print_spy = mocker.patch.object(models_mod, "_print_live_models_table")
@@ -548,7 +610,9 @@ def test_print_live_models_table_uses_display_label(mocker, capsys) -> None:
     mocker.patch("physiclaw.agent.provider.discovered")
 
     models_mod._print_live_models_table(
-        "anthropic", [{"id": "x"}], display="claude-code",
+        "anthropic",
+        [{"id": "x"}],
+        display="claude-code",
     )
     out = capsys.readouterr().out
 

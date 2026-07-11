@@ -43,11 +43,11 @@ from hardware.assembly.projection import MAIN_FRAME_VIEW, Camera
 from hardware.parts.custom.xy_joint_left import thickness as joint_thickness
 from hardware.parts.standard.screw import FHCS_DIMS, Screw, head_skirt
 
-FHCS_LENGTH    = 12    # mm — M5 FHCS overall length
-X_BEAM_EXPLODE = 35    # mm — exploded: 1020 sub-assembly shifts along world +Y
-                       #       (deeper into the frame, away from the joint bottoms)
-FHCS_EXPLODE   = 35    # mm — exploded: each FHCS lifts along world -Y
-                       #       (outward, away from the joint top faces)
+FHCS_LENGTH = 12  # mm — M5 FHCS overall length
+X_BEAM_EXPLODE = 35  # mm — exploded: 1020 sub-assembly shifts along world +Y
+#       (deeper into the frame, away from the joint bottoms)
+FHCS_EXPLODE = 35  # mm — exploded: each FHCS lifts along world -Y
+#       (outward, away from the joint top faces)
 
 # 1020 slot face Y in its native frame (from extrusion.half_vertices_1020).
 BEAM_SLOT_FACE_Y_NATIVE = 9.9
@@ -55,13 +55,14 @@ BEAM_SLOT_FACE_Y_NATIVE = 9.9
 
 class LI31X(BaseAssembly):
     camera = [MAIN_FRAME_VIEW, Camera(-1.95, -64.14, -1.85)]
+
     def _build(self) -> Compound:
         base = LI20Joint(exploded=False)
         base_compound = base.build()
 
         # The two joints' big-CSK world centers (joint mid-thickness).
         big_csk_centers = base.big_csk_world_centers
-        joint_top_world_y    = big_csk_centers[0][1] - joint_thickness / 2
+        joint_top_world_y = big_csk_centers[0][1] - joint_thickness / 2
         joint_bottom_world_y = big_csk_centers[0][1] + joint_thickness / 2
 
         # Hooks for downstream consumers (linear_33_x, linear_41_idler_lj1):
@@ -73,8 +74,8 @@ class LI31X(BaseAssembly):
         #     downstream steps can read its joint-feature world centers
         #     (extra_hole_world_centers, front_pocket_world_centers, …).
         self.beam_slot_face_world_y = joint_bottom_world_y
-        self.beam_center_world_z    = big_csk_centers[0][2]
-        self.joint_base             = base
+        self.beam_center_world_z = big_csk_centers[0][2]
+        self.joint_base = base
 
         # ── 1020 sub-assembly (1020 + 2 standard M5 t-nuts) ─────────
         # Slot face touches joint bottom; cross-section centered on
@@ -88,33 +89,46 @@ class LI31X(BaseAssembly):
             beam_origin_y += X_BEAM_EXPLODE
 
         beam_sub = LI30X(exploded=False).build()
-        beam_sub.move(Location(Plane(
-            origin=(beam_origin_x, beam_origin_y, beam_origin_z),
-            x_dir=(0, 0, +1),    # 1020 native +X → world +Z
-            z_dir=(+1, 0, 0),    # 1020 native +Z (length) → world +X
-        )))                      # → native +Y (slot face) → world -Y
+        beam_sub.move(
+            Location(
+                Plane(
+                    origin=(beam_origin_x, beam_origin_y, beam_origin_z),
+                    x_dir=(0, 0, +1),  # 1020 native +X → world +Z
+                    z_dir=(+1, 0, 0),  # 1020 native +Z (length) → world +X
+                )
+            )
+        )  # → native +Y (slot face) → world -Y
 
         # ── 1 FHCS per joint, head flush with joint top ─────────────
         # Exploded: each FHCS lifts along world -Y (outward, the
         # direction it would be inserted from).
         fhcs_head_height = FHCS_DIMS["M5"]["k"] + head_skirt
-        fhcs_under_y     = joint_top_world_y + fhcs_head_height
+        fhcs_under_y = joint_top_world_y + fhcs_head_height
         if self.exploded:
             fhcs_under_y -= FHCS_EXPLODE
 
         screws = []
         for csk_x, _, csk_z in big_csk_centers:
             screw = Screw("FHCS", "M5", FHCS_LENGTH).build()
-            screw.move(Location(Plane(
-                origin=(csk_x, fhcs_under_y, csk_z),
-                x_dir=(1, 0, 0),
-                z_dir=(0, -1, 0),   # native +Z (head) → world -Y
-            )))
+            screw.move(
+                Location(
+                    Plane(
+                        origin=(csk_x, fhcs_under_y, csk_z),
+                        x_dir=(1, 0, 0),
+                        z_dir=(0, -1, 0),  # native +Z (head) → world -Y
+                    )
+                )
+            )
             screws.append(screw)
 
-        return Compound(label="linear_31_x", children=[
-            base_compound, beam_sub, *screws,
-        ])
+        return Compound(
+            label="linear_31_x",
+            children=[
+                base_compound,
+                beam_sub,
+                *screws,
+            ],
+        )
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ never at runtime, so behavior is unaffected. Killing the mutant would
 require importing it for `typing.get_args` introspection — not worth
 the test for a type alias.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -74,9 +75,7 @@ def test_dto_frozen_dataclass_rejects_mutation(instance, attr, value) -> None:
 
 
 def test_assistant_message_is_not_frozen() -> None:
-    msg = AssistantMessage(
-        content="x", tool_calls=[], finish_reason=FinishReason.STOP
-    )
+    msg = AssistantMessage(content="x", tool_calls=[], finish_reason=FinishReason.STOP)
 
     msg.content = "y"
 
@@ -95,20 +94,14 @@ def test_usage_default_is_all_zero() -> None:
 
 
 def test_assistant_message_default_usage_is_zero_filled() -> None:
-    msg = AssistantMessage(
-        content="x", tool_calls=[], finish_reason=FinishReason.STOP
-    )
+    msg = AssistantMessage(content="x", tool_calls=[], finish_reason=FinishReason.STOP)
 
     assert msg.usage == Usage()
 
 
 def test_assistant_message_default_factories_not_shared_between_instances() -> None:
-    a = AssistantMessage(
-        content="", tool_calls=[], finish_reason=FinishReason.STOP
-    )
-    b = AssistantMessage(
-        content="", tool_calls=[], finish_reason=FinishReason.STOP
-    )
+    a = AssistantMessage(content="", tool_calls=[], finish_reason=FinishReason.STOP)
+    b = AssistantMessage(content="", tool_calls=[], finish_reason=FinishReason.STOP)
 
     a.raw["mutated"] = True
     a.vendor_extra["x"] = 1
@@ -131,9 +124,7 @@ def test_assistant_message_tool_names_returns_names_in_call_order() -> None:
 
 
 def test_assistant_message_tool_names_empty_when_no_tool_calls() -> None:
-    msg = AssistantMessage(
-        content="x", tool_calls=[], finish_reason=FinishReason.STOP
-    )
+    msg = AssistantMessage(content="x", tool_calls=[], finish_reason=FinishReason.STOP)
 
     assert msg.tool_names() == []
 

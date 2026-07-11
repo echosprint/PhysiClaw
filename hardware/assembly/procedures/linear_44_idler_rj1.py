@@ -23,9 +23,9 @@ from hardware.assembly.procedures.linear_40_idler_lj1 import LI40IdlerLj1
 
 class LI44IdlerRj1(LI40IdlerLj1):
     compound_label = "linear_44_idler_rj1"
-    toothed        = False
+    toothed = False
     include_spacer = False
-    shoulder_len   = 10    # mm — pairs with the 9 mm washer + idler stack
+    shoulder_len = 10  # mm — pairs with the 9 mm washer + idler stack
 
 
 if __name__ == "__main__":

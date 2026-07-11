@@ -24,7 +24,7 @@ from hardware.assembly.projection import Camera, FRONT_LEFT_LOW_R70
 from hardware.parts.standard.solenoid import Solenoid
 from hardware.parts.standard.tip import Tip
 
-PREP_OFFSET_Z = -25   # mm — prep tip dropped below the seated position
+PREP_OFFSET_Z = -25  # mm — prep tip dropped below the seated position
 
 
 class TZ10SolenoidTip(BaseAssembly):
@@ -43,10 +43,13 @@ class TZ10SolenoidTip(BaseAssembly):
         prep = Tip().build()
         solenoid.joints["tip_mount"].connect_to(prep.joints["solenoid_mount"])
         prep.move(Location((0, 0, PREP_OFFSET_Z)))
-        return Compound(label="tapz_10_solenoid_tip", children=[
-            Compound(label=SOLID_LABEL, children=[solenoid, prep]),
-            Compound(label=GHOST_LABEL, children=[seated]),
-        ])
+        return Compound(
+            label="tapz_10_solenoid_tip",
+            children=[
+                Compound(label=SOLID_LABEL, children=[solenoid, prep]),
+                Compound(label=GHOST_LABEL, children=[seated]),
+            ],
+        )
 
 
 if __name__ == "__main__":

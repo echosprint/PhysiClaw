@@ -4,6 +4,7 @@ Distinct from the `claude-code` engine. This vendor calls Anthropic's
 `/v1/messages` endpoint via the `AsyncAnthropic` SDK; wire-format flow
 lives in `provider/anthropic_compat.py` and is exercised separately.
 """
+
 from __future__ import annotations
 
 from physiclaw.agent.provider.vendors.anthropic import AnthropicProvider

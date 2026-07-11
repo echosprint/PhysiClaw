@@ -27,6 +27,7 @@ the problem has persisted: transient hits (one AF hunt, one bright
 animation) warn softly; a streak means the rig itself needs attention,
 so the line escalates to "report this to your user".
 """
+
 from dataclasses import dataclass
 
 import cv2
@@ -92,8 +93,8 @@ PERSIST_REMINDER = (
 class QualityReport:
     """Measured quality of one cropped phone-screen frame."""
 
-    sharpness: float    # variance of Laplacian — higher = sharper
-    clip_pct: float     # fraction of pixels >= CLIP_LUMA
+    sharpness: float  # variance of Laplacian — higher = sharper
+    clip_pct: float  # fraction of pixels >= CLIP_LUMA
     median_luma: float  # median gray level, 0-255
 
     @property
@@ -102,10 +103,7 @@ class QualityReport:
 
     @property
     def blown(self) -> bool:
-        return (
-            self.clip_pct > BLOWN_CLIP_PCT
-            and self.median_luma < BLOWN_MEDIAN_LUMA
-        )
+        return self.clip_pct > BLOWN_CLIP_PCT and self.median_luma < BLOWN_MEDIAN_LUMA
 
 
 def assess(frame: np.ndarray) -> QualityReport:
@@ -143,8 +141,7 @@ class QualityMonitor:
         issues: list[str] = []
         if report.blurry:
             issues.append(
-                f"{BLUR_NOTE} (sharpness {report.sharpness:.0f} "
-                f"< {BLUR_THRESHOLD:.0f})"
+                f"{BLUR_NOTE} (sharpness {report.sharpness:.0f} < {BLUR_THRESHOLD:.0f})"
             )
         if report.blown:
             issues.append(f"{report.clip_pct:.0%} of the view {BLOWN_NOTE}")

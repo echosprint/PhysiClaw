@@ -5,9 +5,8 @@ PhysiClaw + bridge state, attaches the bridge, and wires every
 register_* function onto the FastMCP instance. These tests verify the
 wiring without re-importing (which would fight pytest's import cache).
 """
+
 from __future__ import annotations
-
-
 
 
 # ---------- module-level singletons ----------
@@ -18,6 +17,7 @@ def test_physiclaw_singleton_constructed_at_import() -> None:
     from physiclaw.core.server import app
 
     from physiclaw.core import PhysiClaw
+
     assert isinstance(app.physiclaw, PhysiClaw)
 
 

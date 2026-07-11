@@ -5,6 +5,7 @@ quirks: image_url isn't allowed in role:tool, and tool_calls require
 a thought_signature. Tests exercise both wire-level transformations
 without going through the network.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -128,9 +129,13 @@ def test_encode_user_message_delegates_to_super(
 def test_encode_assistant_with_no_tool_calls_delegates_to_super(
     provider: GoogleProvider,
 ) -> None:
-    out = provider._encode_message(AssistantMessage(
-        content="ack", tool_calls=[], finish_reason=FinishReason.STOP,
-    ))
+    out = provider._encode_message(
+        AssistantMessage(
+            content="ack",
+            tool_calls=[],
+            finish_reason=FinishReason.STOP,
+        )
+    )
 
     assert out == {"role": "assistant", "content": "ack"}
 
@@ -181,15 +186,16 @@ def test_encode_assistant_falls_back_to_bypass_when_sig_value_empty(
 
     out = provider._encode_message(msg)
 
-    assert out["tool_calls"][0]["extra_content"]["google"]["thought_signature"] == _SIG_BYPASS
+    assert (
+        out["tool_calls"][0]["extra_content"]["google"]["thought_signature"]
+        == _SIG_BYPASS
+    )
 
 
 def test_encode_tool_result_message_routes_to_helper(
     provider: GoogleProvider,
 ) -> None:
-    out = provider._encode_message(
-        ToolResultMessage(tool_call_id="t1", content="ok")
-    )
+    out = provider._encode_message(ToolResultMessage(tool_call_id="t1", content="ok"))
 
     # Helper returns a list (single entry for text-only).
     assert out == [{"role": "tool", "tool_call_id": "t1", "content": "ok"}]
@@ -202,18 +208,20 @@ def test_parse_response_captures_signature_from_tool_call_extra_content(
     provider: GoogleProvider,
 ) -> None:
     raw = {
-        "choices": [{
-            "message": {
-                "tool_calls": [{
-                    "id": "c1",
-                    "function": {"name": "tap", "arguments": "{}"},
-                    "extra_content": {
-                        "google": {"thought_signature": "sig-A"}
-                    },
-                }],
-            },
-            "finish_reason": "tool_calls",
-        }],
+        "choices": [
+            {
+                "message": {
+                    "tool_calls": [
+                        {
+                            "id": "c1",
+                            "function": {"name": "tap", "arguments": "{}"},
+                            "extra_content": {"google": {"thought_signature": "sig-A"}},
+                        }
+                    ],
+                },
+                "finish_reason": "tool_calls",
+            }
+        ],
     }
 
     out = provider._parse_response(raw)
@@ -226,13 +234,15 @@ def test_parse_response_captures_signature_from_message_extra_content(
 ) -> None:
     # Text-only response — signature on the message rather than tool_call.
     raw = {
-        "choices": [{
-            "message": {
-                "content": "thinking out loud",
-                "extra_content": {"google": {"thought_signature": "sig-B"}},
-            },
-            "finish_reason": "stop",
-        }],
+        "choices": [
+            {
+                "message": {
+                    "content": "thinking out loud",
+                    "extra_content": {"google": {"thought_signature": "sig-B"}},
+                },
+                "finish_reason": "stop",
+            }
+        ],
     }
 
     out = provider._parse_response(raw)
@@ -244,10 +254,12 @@ def test_parse_response_no_signature_leaves_vendor_extra_empty(
     provider: GoogleProvider,
 ) -> None:
     raw = {
-        "choices": [{
-            "message": {"content": "x"},
-            "finish_reason": "stop",
-        }],
+        "choices": [
+            {
+                "message": {"content": "x"},
+                "finish_reason": "stop",
+            }
+        ],
     }
 
     out = provider._parse_response(raw)
@@ -262,18 +274,22 @@ def test_parse_response_preserves_existing_google_vendor_extra(
     # verify our override only overlays "thought_signature" without
     # clobbering other vendor_extra keys.
     raw = {
-        "choices": [{
-            "message": {
-                "content": "x",
-                "extra_content": {"google": {"thought_signature": "sig-C"}},
-            },
-            "finish_reason": "stop",
-        }],
+        "choices": [
+            {
+                "message": {
+                    "content": "x",
+                    "extra_content": {"google": {"thought_signature": "sig-C"}},
+                },
+                "finish_reason": "stop",
+            }
+        ],
     }
     # Patch base parse to inject pre-existing vendor_extra so we can
     # check that setdefault preserves it.
     base_msg = AssistantMessage(
-        content="x", tool_calls=[], finish_reason=FinishReason.STOP,
+        content="x",
+        tool_calls=[],
+        finish_reason=FinishReason.STOP,
         vendor_extra={"google": {"other_key": "kept"}},
     )
     mocker.patch(
@@ -330,8 +346,7 @@ def test_encode_tool_result_with_image_splits_into_two_entries() -> None:
     assert out[1]["content"][0]["type"] == "image_url"
 
 
-def test_encode_tool_result_image_only_uses_placeholder_text(
-) -> None:
+def test_encode_tool_result_image_only_uses_placeholder_text() -> None:
     # When there are images but NO text blocks, the role:tool entry
     # gets a placeholder text instead of an empty content list.
     result = ToolResultMessage(
@@ -351,15 +366,19 @@ def test_encode_tool_result_image_only_uses_placeholder_text(
 
 def test_extract_signature_from_tool_call_extra_content() -> None:
     raw = {
-        "choices": [{
-            "message": {
-                "tool_calls": [{
-                    "extra_content": {
-                        "google": {"thought_signature": "sig-extra"}
-                    },
-                }],
-            },
-        }],
+        "choices": [
+            {
+                "message": {
+                    "tool_calls": [
+                        {
+                            "extra_content": {
+                                "google": {"thought_signature": "sig-extra"}
+                            },
+                        }
+                    ],
+                },
+            }
+        ],
     }
 
     assert _extract_thought_signature(raw) == "sig-extra"
@@ -368,13 +387,17 @@ def test_extract_signature_from_tool_call_extra_content() -> None:
 def test_extract_signature_from_tool_call_function_fallback() -> None:
     # Defensive — some shim variants nest under function.
     raw = {
-        "choices": [{
-            "message": {
-                "tool_calls": [{
-                    "function": {"thought_signature": "sig-from-fn"},
-                }],
-            },
-        }],
+        "choices": [
+            {
+                "message": {
+                    "tool_calls": [
+                        {
+                            "function": {"thought_signature": "sig-from-fn"},
+                        }
+                    ],
+                },
+            }
+        ],
     }
 
     assert _extract_thought_signature(raw) == "sig-from-fn"
@@ -382,11 +405,13 @@ def test_extract_signature_from_tool_call_function_fallback() -> None:
 
 def test_extract_signature_from_message_level_when_no_tool_calls() -> None:
     raw = {
-        "choices": [{
-            "message": {
-                "extra_content": {"google": {"thought_signature": "sig-msg"}},
-            },
-        }],
+        "choices": [
+            {
+                "message": {
+                    "extra_content": {"google": {"thought_signature": "sig-msg"}},
+                },
+            }
+        ],
     }
 
     assert _extract_thought_signature(raw) == "sig-msg"
@@ -402,16 +427,20 @@ def test_extract_signature_returns_none_for_empty_choices() -> None:
     assert _extract_thought_signature({}) is None
 
 
-def test_extract_signature_falls_through_to_message_level_when_tool_call_paths_empty() -> None:
+def test_extract_signature_falls_through_to_message_level_when_tool_call_paths_empty() -> (
+    None
+):
     # tool_calls present but neither extra_content nor function carry
     # the signature — falls through to message.extra_content.
     raw = {
-        "choices": [{
-            "message": {
-                "tool_calls": [{"function": {"name": "tap"}}],
-                "extra_content": {"google": {"thought_signature": "msg-sig"}},
-            },
-        }],
+        "choices": [
+            {
+                "message": {
+                    "tool_calls": [{"function": {"name": "tap"}}],
+                    "extra_content": {"google": {"thought_signature": "msg-sig"}},
+                },
+            }
+        ],
     }
 
     assert _extract_thought_signature(raw) == "msg-sig"
@@ -420,14 +449,20 @@ def test_extract_signature_falls_through_to_message_level_when_tool_call_paths_e
 def test_extract_signature_prefers_extra_content_over_function_fallback() -> None:
     # Both paths populated — extra_content wins.
     raw = {
-        "choices": [{
-            "message": {
-                "tool_calls": [{
-                    "extra_content": {"google": {"thought_signature": "primary"}},
-                    "function": {"thought_signature": "fallback"},
-                }],
-            },
-        }],
+        "choices": [
+            {
+                "message": {
+                    "tool_calls": [
+                        {
+                            "extra_content": {
+                                "google": {"thought_signature": "primary"}
+                            },
+                            "function": {"thought_signature": "fallback"},
+                        }
+                    ],
+                },
+            }
+        ],
     }
 
     assert _extract_thought_signature(raw) == "primary"

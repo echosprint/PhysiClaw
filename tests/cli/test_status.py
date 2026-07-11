@@ -1,4 +1,5 @@
 """Tests for `physiclaw.cli.status`."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -12,7 +13,9 @@ status = status_mod.status
 
 
 def test_status_reports_vision_model_ok(
-    tmp_path: Path, mocker, capsys: pytest.CaptureFixture,
+    tmp_path: Path,
+    mocker,
+    capsys: pytest.CaptureFixture,
 ) -> None:
     model = tmp_path / "model.onnx"
     model.write_bytes(b"x" * 1024 * 1024)  # 1 MB
@@ -29,10 +32,13 @@ def test_status_reports_vision_model_ok(
 
 
 def test_status_reports_vision_model_missing(
-    tmp_path: Path, mocker, capsys: pytest.CaptureFixture,
+    tmp_path: Path,
+    mocker,
+    capsys: pytest.CaptureFixture,
 ) -> None:
     mocker.patch.object(
-        status_mod.paths, "omniparser_onnx",
+        status_mod.paths,
+        "omniparser_onnx",
         return_value=tmp_path / "missing.onnx",
     )
     mocker.patch.object(status_mod.paths, "load_calibration_bundle", return_value=None)
@@ -46,14 +52,18 @@ def test_status_reports_vision_model_missing(
 
 
 def test_status_reports_calibration_complete(
-    tmp_path: Path, mocker, capsys: pytest.CaptureFixture,
+    tmp_path: Path,
+    mocker,
+    capsys: pytest.CaptureFixture,
 ) -> None:
     mocker.patch.object(
-        status_mod.paths, "omniparser_onnx",
+        status_mod.paths,
+        "omniparser_onnx",
         return_value=tmp_path / "missing.onnx",
     )
     mocker.patch.object(
-        status_mod.paths, "load_calibration_bundle",
+        status_mod.paths,
+        "load_calibration_bundle",
         return_value={"complete": True},
     )
     mocker.patch.object(status_mod.paths, "jobs_file", return_value=tmp_path / "no.md")
@@ -66,14 +76,18 @@ def test_status_reports_calibration_complete(
 
 
 def test_status_reports_calibration_partial(
-    tmp_path: Path, mocker, capsys: pytest.CaptureFixture,
+    tmp_path: Path,
+    mocker,
+    capsys: pytest.CaptureFixture,
 ) -> None:
     mocker.patch.object(
-        status_mod.paths, "omniparser_onnx",
+        status_mod.paths,
+        "omniparser_onnx",
         return_value=tmp_path / "missing.onnx",
     )
     mocker.patch.object(
-        status_mod.paths, "load_calibration_bundle",
+        status_mod.paths,
+        "load_calibration_bundle",
         return_value={"complete": False},
     )
     mocker.patch.object(status_mod.paths, "jobs_file", return_value=tmp_path / "no.md")
@@ -85,10 +99,13 @@ def test_status_reports_calibration_partial(
 
 
 def test_status_reports_calibration_missing(
-    tmp_path: Path, mocker, capsys: pytest.CaptureFixture,
+    tmp_path: Path,
+    mocker,
+    capsys: pytest.CaptureFixture,
 ) -> None:
     mocker.patch.object(
-        status_mod.paths, "omniparser_onnx",
+        status_mod.paths,
+        "omniparser_onnx",
         return_value=tmp_path / "missing.onnx",
     )
     mocker.patch.object(status_mod.paths, "load_calibration_bundle", return_value=None)
@@ -102,12 +119,15 @@ def test_status_reports_calibration_missing(
 
 
 def test_status_reports_jobs_file_present(
-    tmp_path: Path, mocker, capsys: pytest.CaptureFixture,
+    tmp_path: Path,
+    mocker,
+    capsys: pytest.CaptureFixture,
 ) -> None:
     jobs = tmp_path / "jobs.md"
     jobs.write_text("")
     mocker.patch.object(
-        status_mod.paths, "omniparser_onnx",
+        status_mod.paths,
+        "omniparser_onnx",
         return_value=tmp_path / "missing.onnx",
     )
     mocker.patch.object(status_mod.paths, "load_calibration_bundle", return_value=None)
@@ -121,11 +141,14 @@ def test_status_reports_jobs_file_present(
 
 
 def test_status_reports_jobs_file_missing(
-    tmp_path: Path, mocker, capsys: pytest.CaptureFixture,
+    tmp_path: Path,
+    mocker,
+    capsys: pytest.CaptureFixture,
 ) -> None:
     jobs = tmp_path / "jobs.md"
     mocker.patch.object(
-        status_mod.paths, "omniparser_onnx",
+        status_mod.paths,
+        "omniparser_onnx",
         return_value=tmp_path / "missing.onnx",
     )
     mocker.patch.object(status_mod.paths, "load_calibration_bundle", return_value=None)
@@ -138,10 +161,13 @@ def test_status_reports_jobs_file_missing(
 
 
 def test_status_shows_doctor_hint_on_tty(
-    tmp_path: Path, mocker, capsys: pytest.CaptureFixture,
+    tmp_path: Path,
+    mocker,
+    capsys: pytest.CaptureFixture,
 ) -> None:
     mocker.patch.object(
-        status_mod.paths, "omniparser_onnx",
+        status_mod.paths,
+        "omniparser_onnx",
         return_value=tmp_path / "missing.onnx",
     )
     mocker.patch.object(status_mod.paths, "load_calibration_bundle", return_value=None)
@@ -155,10 +181,13 @@ def test_status_shows_doctor_hint_on_tty(
 
 
 def test_status_suppresses_doctor_hint_on_pipe(
-    tmp_path: Path, mocker, capsys: pytest.CaptureFixture,
+    tmp_path: Path,
+    mocker,
+    capsys: pytest.CaptureFixture,
 ) -> None:
     mocker.patch.object(
-        status_mod.paths, "omniparser_onnx",
+        status_mod.paths,
+        "omniparser_onnx",
         return_value=tmp_path / "missing.onnx",
     )
     mocker.patch.object(status_mod.paths, "load_calibration_bundle", return_value=None)

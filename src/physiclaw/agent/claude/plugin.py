@@ -43,6 +43,7 @@ Isolation — what this module prevents and what it doesn't:
       (~/.physiclaw). `spawn._warn_stray_context()` logs at WARN so
       the operator notices drift.
 """
+
 import json
 import logging
 import shutil
@@ -93,7 +94,8 @@ def prepare_plugin_dir(
         json.dumps(
             {"name": f"{_PLUGIN_NAME_PREFIX}-{sid}", "skills": "./skills"},
             indent=2,
-        ) + "\n",
+        )
+        + "\n",
     )
     skills_dir = root / "skills"
     skills_dir.mkdir()
@@ -141,10 +143,7 @@ def prepare_plugin_dir(
 def _reconstruct_skill_md(sk: Skill) -> str:
     """Rebuild a `SKILL.md` from a flat built-in skill's snapshot so Claude
     Code's plugin loader (which wants skills/<name>/SKILL.md) can read it."""
-    return (
-        f"---\nname: {sk.name}\ndescription: {sk.description}\n---\n\n"
-        f"{sk.body}\n"
-    )
+    return f"---\nname: {sk.name}\ndescription: {sk.description}\n---\n\n{sk.body}\n"
 
 
 def _has_context_pollution(skill_dir: Path) -> bool:

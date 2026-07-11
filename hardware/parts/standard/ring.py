@@ -10,11 +10,11 @@ from hardware.parts.base import BaseStandardPart
 # the same annular-cylinder geometry. Inner bores follow DIN-125-style
 # clearance for the named screw (M3 → 3.2, M5 → 5.3, M6 → 6.4).
 SPECS = {
-    "M3x10x1":  {"kind": "washer", "inner_d": 3.2, "outer_d": 10.0, "height":  1.0},
-    "M5x8x0.5": {"kind": "washer", "inner_d": 5.3, "outer_d":  8.0, "height":  0.5},
-    "M5x10x9":  {"kind": "spacer", "inner_d": 5.3, "outer_d": 10.0, "height":  9.0},
+    "M3x10x1": {"kind": "washer", "inner_d": 3.2, "outer_d": 10.0, "height": 1.0},
+    "M5x8x0.5": {"kind": "washer", "inner_d": 5.3, "outer_d": 8.0, "height": 0.5},
+    "M5x10x9": {"kind": "spacer", "inner_d": 5.3, "outer_d": 10.0, "height": 9.0},
     "M5x15x12": {"kind": "spacer", "inner_d": 5.3, "outer_d": 15.0, "height": 12.0},
-    "M6x12x8":  {"kind": "spacer", "inner_d": 6.4, "outer_d": 12.0, "height":  8.0},
+    "M6x12x8": {"kind": "spacer", "inner_d": 6.4, "outer_d": 12.0, "height": 8.0},
     "M6x12x12": {"kind": "spacer", "inner_d": 6.4, "outer_d": 12.0, "height": 12.0},
 }
 
@@ -30,9 +30,7 @@ class Ring(BaseStandardPart):
     def __init__(self, spec: str, qty: int = 1):
         super().__init__(qty=qty)
         if spec not in SPECS:
-            raise ValueError(
-                f"Ring has no spec {spec!r}; available: {sorted(SPECS)}"
-            )
+            raise ValueError(f"Ring has no spec {spec!r}; available: {sorted(SPECS)}")
         s = SPECS[spec]
         self.spec = spec
         self.kind = s["kind"]

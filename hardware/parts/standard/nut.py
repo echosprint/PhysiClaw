@@ -60,9 +60,7 @@ class Nut(BaseStandardPart):
     def __init__(self, shape: str, size: str, qty: int = 1):
         super().__init__(qty=qty)
         if shape not in SPECS:
-            raise ValueError(
-                f"Nut shape must be one of {sorted(SPECS)}; got {shape!r}"
-            )
+            raise ValueError(f"Nut shape must be one of {sorted(SPECS)}; got {shape!r}")
         if size not in SPECS[shape]:
             raise ValueError(
                 f"{shape} nut has no entry for size {size!r}; "
@@ -108,17 +106,15 @@ class Nut(BaseStandardPart):
             # with the prism only clips corners — the side flats stay
             # full-height up to their tangent line at the top face.
             bearing_r = af / 2
-            ch_h = (corner_r - bearing_r) * math.tan(
-                math.radians(CHAMFER_ANGLE_DEG)
-            )
+            ch_h = (corner_r - bearing_r) * math.tan(math.radians(CHAMFER_ANGLE_DEG))
             with BuildSketch(Plane.XZ):
                 with BuildLine():
                     Polyline(
-                        (0,         0),
-                        (corner_r,  0),
-                        (corner_r,  m - ch_h),
+                        (0, 0),
+                        (corner_r, 0),
+                        (corner_r, m - ch_h),
                         (bearing_r, m),
-                        (0,         m),
+                        (0, m),
                         close=True,
                     )
                 make_face()

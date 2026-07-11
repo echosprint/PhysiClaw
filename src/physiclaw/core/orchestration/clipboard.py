@@ -53,16 +53,9 @@ class ClipboardSyncState:
     def begin(self) -> float:
         """Start a sync attempt: decay stale miss state, then return the
         confirm window to wait on the bridge."""
-        if (
-            self._misses
-            and self._now() - self._miss_at > self.MISS_DECAY_SECONDS
-        ):
+        if self._misses and self._now() - self._miss_at > self.MISS_DECAY_SECONDS:
             self._misses = 0
-        return (
-            self.CONFIRM_SECONDS
-            if self._misses == 0
-            else self.RETRY_CONFIRM_SECONDS
-        )
+        return self.CONFIRM_SECONDS if self._misses == 0 else self.RETRY_CONFIRM_SECONDS
 
     def confirm(self) -> None:
         """The phone fetched the text — any miss streak is over."""

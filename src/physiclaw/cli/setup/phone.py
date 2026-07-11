@@ -25,9 +25,7 @@ def phone(
     ],
     bbox_dir: Annotated[
         Path,
-        typer.Option(
-            "--bbox-dir", help="Directory for bounding-box preview images."
-        ),
+        typer.Option("--bbox-dir", help="Directory for bounding-box preview images."),
     ] = Path("keyboard-bbox"),
     preset: Annotated[
         Path,

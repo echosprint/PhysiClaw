@@ -4,6 +4,7 @@
 internal `auto_calibrate` flag set — the server's own tested branch drives
 the rest. We assert the prompt/confirm gate and the delegation here.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -14,9 +15,12 @@ import typer
 auto_mod = importlib.import_module("physiclaw.cli.auto")
 
 
-def _patch_urls(mocker, primary="http://mac.local:9000", fallback="http://1.2.3.4:9000"):
+def _patch_urls(
+    mocker, primary="http://mac.local:9000", fallback="http://1.2.3.4:9000"
+):
     return mocker.patch(
-        "physiclaw.core.bridge.bridge_base_urls", return_value=(primary, fallback),
+        "physiclaw.core.bridge.bridge_base_urls",
+        return_value=(primary, fallback),
     )
 
 
@@ -30,7 +34,10 @@ def test_auto_prompts_then_invokes_server_with_auto_calibrate(mocker) -> None:
     # Operator is asked to confirm the phone is up BEFORE the server starts.
     input_spy.assert_called_once()
     server_spy.assert_called_once_with(
-        port=9000, host="127.0.0.1", verbose=True, auto_calibrate=True,
+        port=9000,
+        host="127.0.0.1",
+        verbose=True,
+        auto_calibrate=True,
     )
 
 
@@ -91,5 +98,8 @@ def test_auto_proceeds_when_stdin_closed(mocker) -> None:
     auto_mod.auto(port=9000, host="127.0.0.1", verbose=True)
 
     server_spy.assert_called_once_with(
-        port=9000, host="127.0.0.1", verbose=True, auto_calibrate=True,
+        port=9000,
+        host="127.0.0.1",
+        verbose=True,
+        auto_calibrate=True,
     )

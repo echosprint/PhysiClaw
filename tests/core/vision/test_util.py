@@ -6,6 +6,7 @@ required. `check_phone_in_frame` writes a debug JPEG under
 `tempfile.gettempdir()` as a side effect; tests mock `cv2.imwrite` to
 keep the host clean.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -60,9 +61,7 @@ def test_validate_bbox_wrong_shape_raises(bbox: Any) -> None:
     [["a", 0.5, 0.6, 0.7], [0.1, None, 0.6, 0.7], [0.1, 0.2, 0.3, [0.4]]],
 )
 def test_validate_bbox_non_number_coord_raises(bbox: list) -> None:
-    with pytest.raises(
-        ValueError, match=r"^bbox: each coord must be a number;"
-    ):
+    with pytest.raises(ValueError, match=r"^bbox: each coord must be a number;"):
         validate_bbox(bbox)
 
 
@@ -71,9 +70,7 @@ def test_validate_bbox_non_number_coord_raises(bbox: list) -> None:
     [[-0.1, 0, 0.5, 0.5], [0, 0, 1.1, 0.5]],
 )
 def test_validate_bbox_out_of_unit_range_raises(bbox: list[float]) -> None:
-    with pytest.raises(
-        ValueError, match=r"^bbox: each coord must be in \[0, 1\];"
-    ):
+    with pytest.raises(ValueError, match=r"^bbox: each coord must be in \[0, 1\];"):
         validate_bbox(bbox)
 
 
@@ -82,9 +79,7 @@ def test_validate_bbox_out_of_unit_range_raises(bbox: list[float]) -> None:
     [[0.5, 0, 0.4, 1], [0, 0.5, 1, 0.4], [0.5, 0, 0.5, 1], [0, 0.5, 1, 0.5]],
 )
 def test_validate_bbox_inverted_or_degenerate_raises(bbox: list[float]) -> None:
-    with pytest.raises(
-        ValueError, match=r"^bbox: left < right, top < bottom;"
-    ):
+    with pytest.raises(ValueError, match=r"^bbox: left < right, top < bottom;"):
         validate_bbox(bbox)
 
 
@@ -105,10 +100,10 @@ def test_bbox_on_screen_true_for_valid_bbox() -> None:
 @pytest.mark.parametrize(
     "bad_bbox",
     [
-        [0, 0, 1],          # wrong shape
-        ["x", 0, 1, 1],     # non-number
-        [-0.1, 0, 1, 1],    # out of range
-        [0.5, 0, 0.4, 1],   # inverted
+        [0, 0, 1],  # wrong shape
+        ["x", 0, 1, 1],  # non-number
+        [-0.1, 0, 1, 1],  # out of range
+        [0.5, 0, 0.4, 1],  # inverted
     ],
 )
 def test_bbox_on_screen_false_for_invalid_bbox(bad_bbox: Any) -> None:
@@ -145,7 +140,9 @@ def test_compact_json_uses_ensure_ascii_false_for_non_ascii() -> None:
 
 
 def test_format_elements_header_always_present() -> None:
-    assert format_elements([]).startswith('id [kind] "label" [left,top,right,bottom] conf')
+    assert format_elements([]).startswith(
+        'id [kind] "label" [left,top,right,bottom] conf'
+    )
 
 
 def test_format_elements_renders_one_line_per_item_with_3_decimal_bbox() -> None:
@@ -166,8 +163,7 @@ def test_format_elements_renders_one_line_per_item_with_3_decimal_bbox() -> None
 
 def test_format_elements_handles_missing_or_none_label_as_empty_string() -> None:
     items = [
-        {"id": 2, "kind": "icon", "label": None,
-         "bbox": [0, 0, 1, 1], "conf": 0.9},
+        {"id": 2, "kind": "icon", "label": None, "bbox": [0, 0, 1, 1], "conf": 0.9},
     ]
 
     out = format_elements(items)
@@ -198,8 +194,12 @@ def test_decode_image_raises_on_invalid_bytes() -> None:
 
 
 def _phone_like_frame(
-    img_w: int, img_h: int, phone_w: int, phone_h: int,
-    cx: int | None = None, cy: int | None = None,
+    img_w: int,
+    img_h: int,
+    phone_w: int,
+    phone_h: int,
+    cx: int | None = None,
+    cy: int | None = None,
 ) -> np.ndarray:
     img = np.zeros((img_h, img_w, 3), dtype=np.uint8)
     if cx is None:
@@ -207,8 +207,12 @@ def _phone_like_frame(
     if cy is None:
         cy = img_h // 2
     _draw_rect(
-        img, cx - phone_w // 2, cy - phone_h // 2,
-        cx + phone_w // 2, cy + phone_h // 2, (255, 255, 255),
+        img,
+        cx - phone_w // 2,
+        cy - phone_h // 2,
+        cx + phone_w // 2,
+        cy + phone_h // 2,
+        (255, 255, 255),
     )
     return img
 
@@ -217,9 +221,7 @@ def test_check_phone_in_frame_raises_when_no_bright_region(mocker) -> None:
     mocker.patch.object(cv2, "imwrite")
     img = np.zeros((480, 640, 3), dtype=np.uint8)
 
-    with pytest.raises(
-        RuntimeError, match=r"^No bright region in camera frame"
-    ):
+    with pytest.raises(RuntimeError, match=r"^No bright region in camera frame"):
         check_phone_in_frame(img)
 
 

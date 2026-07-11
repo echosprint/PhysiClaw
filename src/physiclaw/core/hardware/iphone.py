@@ -71,9 +71,7 @@ class AssistiveTouch:
             return abs(cy - ay) < ry
         return False
 
-    def compute_at_screen_pos(
-        self, t: ViewportShift
-    ) -> tuple[float, float]:
+    def compute_at_screen_pos(self, t: ViewportShift) -> tuple[float, float]:
         """Convert AT CSS position to screenshot 0-1 using the viewport shift.
 
         Must be called after the measure-viewport-shift pre-cal step has set
@@ -144,5 +142,3 @@ class AssistiveTouch:
         if data is None:
             log.warning("Screenshot upload timed out")
         return data
-
-

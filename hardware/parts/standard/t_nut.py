@@ -21,27 +21,27 @@ from hardware.parts.base import BaseStandardPart
 # slot mouth, then rotated flat to lock the 10 mm width behind the lip.
 HALF_PROFILES = {
     "standard": (
-        (0,    0),
+        (0, 0),
         (3.25, 0),
-        (4.5,  2.8),
-        (4.5,  3.3),
-        (3,    3.3),
-        (3,    4.5),
-        (0,    4.5),
+        (4.5, 2.8),
+        (4.5, 3.3),
+        (3, 3.3),
+        (3, 4.5),
+        (0, 4.5),
     ),
     "hammer": (
-        (0,   0),
+        (0, 0),
         (4.3, 0),
-        (5,   0.7),
-        (5,   1.5),
-        (0,   1.5),
+        (5, 0.7),
+        (5, 1.5),
+        (0, 1.5),
     ),
 }
 
 # Length along the extrusion axis (Z).
 LENGTHS = {
     "standard": 9.5,
-    "hammer":   6.0,
+    "hammer": 6.0,
 }
 
 # Through-bore diameter. Threads aren't modeled — the bore is the nominal
@@ -56,7 +56,7 @@ BORE = {
 # with an extrusion slot LinearJoint. Standard: wing top. Hammer: plate top.
 ENGAGEMENT_Y = {
     "standard": 3.3,
-    "hammer":   1.5,
+    "hammer": 1.5,
 }
 
 # Hammer t-nut boss — 6×6 mm pad extruded 3 mm above the plate top
@@ -115,8 +115,7 @@ class TNut(BaseStandardPart):
 
                 def diag(edges):
                     return [
-                        e for e in edges
-                        if (e.center().X > 0) == (e.center().Z > mid_z)
+                        e for e in edges if (e.center().X > 0) == (e.center().Z > mid_z)
                     ]
 
                 # Fillet the (+X,+Z) / (-X,-Z) plate corners. Gives the
@@ -141,8 +140,7 @@ class TNut(BaseStandardPart):
                 # curved diagonal from plate to boss reads as a visual
                 # key for the tilt-insert orientation.
                 boss_edges = [
-                    e for e in p.edges().filter_by(Axis.Y)
-                    if e.center().Y > height
+                    e for e in p.edges().filter_by(Axis.Y) if e.center().Y > height
                 ]
                 fillet(diag(boss_edges), radius=2 * MM)
 
@@ -196,4 +194,4 @@ class TNut(BaseStandardPart):
 
 if __name__ == "__main__":
     TNut("standard", "M5").export()
-    TNut("hammer",   "M5").export()
+    TNut("hammer", "M5").export()

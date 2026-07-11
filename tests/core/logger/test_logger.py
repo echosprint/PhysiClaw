@@ -1,4 +1,5 @@
 """Tests for `physiclaw.core.logger.logger`."""
+
 from __future__ import annotations
 
 import logging
@@ -22,7 +23,8 @@ from physiclaw.core.logger.logger import (
 
 
 def test_colorize_true_when_tty_and_no_color_unset(
-    mocker, monkeypatch: pytest.MonkeyPatch,
+    mocker,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("NO_COLOR", raising=False)
     mocker.patch.object(logger_mod.sys.stderr, "isatty", return_value=True)
@@ -37,7 +39,8 @@ def test_colorize_false_when_not_tty(mocker) -> None:
 
 
 def test_colorize_false_when_no_color_env_set(
-    mocker, monkeypatch: pytest.MonkeyPatch,
+    mocker,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     mocker.patch.object(logger_mod.sys.stderr, "isatty", return_value=True)
     monkeypatch.setenv("NO_COLOR", "1")
@@ -50,8 +53,13 @@ def test_colorize_false_when_no_color_env_set(
 
 def _record(msg: str = "hi", level: int = logging.INFO) -> logging.LogRecord:
     return logging.LogRecord(
-        name="x", level=level, pathname="x.py", lineno=1,
-        msg=msg, args=(), exc_info=None,
+        name="x",
+        level=level,
+        pathname="x.py",
+        lineno=1,
+        msg=msg,
+        args=(),
+        exc_info=None,
     )
 
 
@@ -113,9 +121,7 @@ def test_setup_logging_force_replaces_handlers(mocker) -> None:
     root = logging.getLogger()
     assert root.level == logging.WARNING
     # Last handler is the one we just added with our formatter.
-    assert any(
-        isinstance(h.formatter, _TaggedFormatter) for h in root.handlers
-    )
+    assert any(isinstance(h.formatter, _TaggedFormatter) for h in root.handlers)
 
 
 # ---------- make_tagged_logger ----------
@@ -199,13 +205,16 @@ def test_format_args_sequence_summarizes_tool_names() -> None:
     # Real FastMCP shape: ONE kwarg holding the list of step dicts. The
     # old test passed steps as separate kwargs — an encoding the tool
     # never receives — which let every live batch log as "0 steps".
-    out = _format_args("sequence", {
-        "actions": [
-            {"tool_name": "tap", "arg": [0, 0, 1, 1]},
-            {"tool_name": "send_to_clipboard", "arg": "secret text"},
-            "garbage",
-        ],
-    })
+    out = _format_args(
+        "sequence",
+        {
+            "actions": [
+                {"tool_name": "tap", "arg": [0, 0, 1, 1]},
+                {"tool_name": "send_to_clipboard", "arg": "secret text"},
+                "garbage",
+            ],
+        },
+    )
 
     assert "3 steps:" in out
     assert "tap" in out
@@ -248,14 +257,14 @@ async def test_logged_calls_wrapped_function(
 
     assert out == "tapped [0, 0, 1, 1]"
     assert any(
-        "my_tool" in r.getMessage() and "—" in r.getMessage()
-        for r in caplog.records
+        "my_tool" in r.getMessage() and "—" in r.getMessage() for r in caplog.records
     )
 
 
 @pytest.mark.asyncio
 async def test_logged_skips_logging_when_info_disabled(
-    mocker, caplog: pytest.LogCaptureFixture,
+    mocker,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     @logged
     async def my_tool():
@@ -263,7 +272,9 @@ async def test_logged_skips_logging_when_info_disabled(
 
     # Disable info-level logging.
     mocker.patch.object(
-        logger_mod.log, "isEnabledFor", return_value=False,
+        logger_mod.log,
+        "isEnabledFor",
+        return_value=False,
     )
 
     with caplog.at_level(logging.INFO, logger="physiclaw.tools"):
@@ -359,7 +370,9 @@ def test_daily_file_handler_purges_old_dailies_at_construction(tmp_path) -> None
 
     old = tmp_path / "runtime-2026-01-01.log"
     old.write_text("x")
-    ago = (dt.datetime.now() - dt.timedelta(days=CONFIG.retention.log_days + 1)).timestamp()
+    ago = (
+        dt.datetime.now() - dt.timedelta(days=CONFIG.retention.log_days + 1)
+    ).timestamp()
     os.utime(old, (ago, ago))
 
     _, handler = _file_logger(tmp_path, "t.daily.purge")

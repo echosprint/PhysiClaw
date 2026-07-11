@@ -8,6 +8,7 @@ vision on every `peek`, so the provider can't drive the loop. The
 Auth: `DEEPSEEK_API_KEY` env, or `[provider] deepseek_api_key` in
 `~/.physiclaw/config.toml`.
 """
+
 from physiclaw.agent.provider.openai_compat import OpenAICompatibleProvider
 
 

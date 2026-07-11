@@ -55,13 +55,13 @@ from hardware.parts.standard.t_nut import (
     TNut,
 )
 
-RAIL_LENGTH           = Y_RAIL_LENGTH   # mm — MGN9H rail length — see assembly/travel_ranges.py
-FHCS_LENGTH           = 10     # mm — M3 FHCS overall length
-TNUT_LOOSE_ENGAGEMENT = 1      # mm — assembled: shank depth inside the bore at
-                               #      loose hang (a few threads — the bundle is
-                               #      ready to drop onto an extrusion slot)
-SCREW_EXPLODE         = 20     # mm — exploded: screws lifted above rail top
-TNUT_EXPLODE          = 15     # mm — exploded: t-nuts dropped below loose hang
+RAIL_LENGTH = Y_RAIL_LENGTH  # mm — MGN9H rail length — see assembly/travel_ranges.py
+FHCS_LENGTH = 10  # mm — M3 FHCS overall length
+TNUT_LOOSE_ENGAGEMENT = 1  # mm — assembled: shank depth inside the bore at
+#      loose hang (a few threads — the bundle is
+#      ready to drop onto an extrusion slot)
+SCREW_EXPLODE = 20  # mm — exploded: screws lifted above rail top
+TNUT_EXPLODE = 15  # mm — exploded: t-nuts dropped below loose hang
 
 # 1-indexed rail-hole positions that receive a screw — both ends plus
 # interior, symmetric about the centre (12-hole / 240 mm rail).
@@ -99,7 +99,7 @@ class LI10Y(BaseAssembly):
         # FHCS head total height (cone + skirt rim) — used to seat the
         # head top flush with the rail top face.
         fhcs_head_height = FHCS_DIMS["M3"]["k"] + head_skirt
-        tnut_length      = TNUT_LENGTHS["hammer"]
+        tnut_length = TNUT_LENGTHS["hammer"]
 
         # T-nut hangs loosely from the shank tip with only
         # TNUT_LOOSE_ENGAGEMENT mm of shank inside the bore. The
@@ -107,16 +107,15 @@ class LI10Y(BaseAssembly):
         # HAMMER_TOTAL_HEIGHT) maps to rail Z = origin.z +
         # HAMMER_TOTAL_HEIGHT via the placement plane (native +Y →
         # rail +Z); solving for origin.z gives the loose-hang z.
-        screw_z_seated  = rail_height - fhcs_head_height
-        shank_tip_z     = screw_z_seated - (FHCS_LENGTH - fhcs_head_height)
-        tnut_z_loose    = (shank_tip_z + TNUT_LOOSE_ENGAGEMENT
-                           - HAMMER_TOTAL_HEIGHT)
+        screw_z_seated = rail_height - fhcs_head_height
+        shank_tip_z = screw_z_seated - (FHCS_LENGTH - fhcs_head_height)
+        tnut_z_loose = shank_tip_z + TNUT_LOOSE_ENGAGEMENT - HAMMER_TOTAL_HEIGHT
         if self.exploded:
             screw_z = screw_z_seated + SCREW_EXPLODE
-            tnut_z  = tnut_z_loose - TNUT_EXPLODE
+            tnut_z = tnut_z_loose - TNUT_EXPLODE
         else:
             screw_z = screw_z_seated
-            tnut_z  = tnut_z_loose
+            tnut_z = tnut_z_loose
 
         attachments = []
         for sx in screw_xs:
@@ -125,11 +124,15 @@ class LI10Y(BaseAssembly):
             attachments.append(screw)
 
             nut = TNut("hammer", "M3").build()
-            nut.move(Location(Plane(
-                origin=(sx - tnut_length / 2, 0, tnut_z),
-                x_dir=(0, 1, 0),
-                z_dir=(1, 0, 0),
-            )))
+            nut.move(
+                Location(
+                    Plane(
+                        origin=(sx - tnut_length / 2, 0, tnut_z),
+                        x_dir=(0, 1, 0),
+                        z_dir=(1, 0, 0),
+                    )
+                )
+            )
             attachments.append(nut)
 
         return Compound(label=self.compound_label, children=[mgn, *attachments])

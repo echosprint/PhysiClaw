@@ -3,25 +3,25 @@ from build123d import *
 from hardware.parts.base import BaseStandardPart
 
 # ── Shared 2020-cell parameters ───────────────────────────────────────────────
-leg            =  10 * MM    # outer half-extent of one 2020 cell
-default_length = 200 * MM    # default extrusion length (override per-instance)
-bore_diameter  =   5 * MM    # center through-hole of each cell
-corner_fillet  = 1.5 * MM    # outer vertical corner edges
-rib_fillet     =   2 * MM    # inner rib vertical edges near the slot/diagonal joint
+leg = 10 * MM  # outer half-extent of one 2020 cell
+default_length = 200 * MM  # default extrusion length (override per-instance)
+bore_diameter = 5 * MM  # center through-hole of each cell
+corner_fillet = 1.5 * MM  # outer vertical corner edges
+rib_fillet = 2 * MM  # inner rib vertical edges near the slot/diagonal joint
 
 # 1/8 cross-section outline (one slot in profile). Traces, in order:
 # center → bottom edge → slot notch → right edge → top corner → hypotenuse back.
 wedge_vertices = (
-    (0,         0),
-    (3.9  * MM, 0),
-    (3.9  * MM, 2.84 * MM),
-    (6.56 * MM, 5.5  * MM),
-    (8.2  * MM, 5.5  * MM),
-    (8.2  * MM, 3.1  * MM),
-    (9.5  * MM, 3.1  * MM),
-    (9.5  * MM, 3.6  * MM),
-    (10   * MM, 3.6  * MM),
-    (10   * MM, 10   * MM),
+    (0, 0),
+    (3.9 * MM, 0),
+    (3.9 * MM, 2.84 * MM),
+    (6.56 * MM, 5.5 * MM),
+    (8.2 * MM, 5.5 * MM),
+    (8.2 * MM, 3.1 * MM),
+    (9.5 * MM, 3.1 * MM),
+    (9.5 * MM, 3.6 * MM),
+    (10 * MM, 3.6 * MM),
+    (10 * MM, 10 * MM),
 )
 
 # Mirror plane through the hypotenuse (line y = x in the XY plane), extending
@@ -29,18 +29,18 @@ wedge_vertices = (
 hypotenuse_plane = Plane(origin=(0, 0, 0), x_dir=(1, 1, 0), z_dir=(1, -1, 0))
 
 # ── 2040-specific parameters ──────────────────────────────────────────────────
-cell_offset       = leg          # 2040 cell centers at ±10 mm along X
-slot_w            =   6   * MM   # central through-channel width (X)
-slot_h            =  16.4 * MM   # central through-channel height (Y)
-slot_lip_under_y  =   8.2 * MM   # cavity belly top, cell-local — T-nut wings
-                                 # seat here against the slot lip underside
+cell_offset = leg  # 2040 cell centers at ±10 mm along X
+slot_w = 6 * MM  # central through-channel width (X)
+slot_h = 16.4 * MM  # central through-channel height (Y)
+slot_lip_under_y = 8.2 * MM  # cavity belly top, cell-local — T-nut wings
+# seat here against the slot lip underside
 
 # End-counterbore screw access on the +Y (front) face, mirrored on each
 # Z end. Two per end, aligned in X with the bores at ±cell_offset.
-cb_end_offset  = 10  * MM    # axial offset of CB from each end face
-cb_head_d      = 11  * MM    # counterbore (head pocket) diameter
-cb_head_depth  = 5.5  * MM    # counterbore depth
-cb_shaft_d     = 5.5 * MM    # through-hole diameter
+cb_end_offset = 10 * MM  # axial offset of CB from each end face
+cb_head_d = 11 * MM  # counterbore (head pocket) diameter
+cb_head_depth = 5.5 * MM  # counterbore depth
+cb_shaft_d = 5.5 * MM  # through-hole diameter
 
 # Joint labels for the four end counterbores on a 2040 with cb=True.
 # Shared so callers can iterate without restating the names (typo risk).
@@ -57,28 +57,28 @@ CB_LABELS = (
 # centerline bottom → bottom-right → top-right → top edge to slot lip →
 # lip underside → cavity belly → rib slope → centerline → close.
 half_vertices_1020 = (
-    (0,         0),
-    (9.9 * MM,  0),
-    (9.9 * MM,  9.9 * MM),
-    (3.5 * MM,  9.9 * MM),
-    (3.5 * MM,  9.4 * MM),
-    (3.2 * MM,  9.4 * MM),
-    (3.2 * MM,  8   * MM),
-    (5.6 * MM,  8   * MM),
-    (5.6 * MM,  6.4 * MM),
-    (2.4 * MM,  3.6 * MM),
-    (0,         3.6 * MM),
+    (0, 0),
+    (9.9 * MM, 0),
+    (9.9 * MM, 9.9 * MM),
+    (3.5 * MM, 9.9 * MM),
+    (3.5 * MM, 9.4 * MM),
+    (3.2 * MM, 9.4 * MM),
+    (3.2 * MM, 8 * MM),
+    (5.6 * MM, 8 * MM),
+    (5.6 * MM, 6.4 * MM),
+    (2.4 * MM, 3.6 * MM),
+    (0, 3.6 * MM),
 )
-half_x_1020       = 9.9 * MM    # half cross-section width (= section height too)
-hole_1020_d       = 4.2 * MM    # through-hole diameter
-hole_1020_x_inset = 3   * MM    # hole center inset from right edge
-hole_1020_y_inset = 3   * MM    # hole center inset from bottom edge
+half_x_1020 = 9.9 * MM  # half cross-section width (= section height too)
+hole_1020_d = 4.2 * MM  # through-hole diameter
+hole_1020_x_inset = 3 * MM  # hole center inset from right edge
+hole_1020_y_inset = 3 * MM  # hole center inset from bottom edge
 
 # Optional end-mounting holes (Extrusion1020(hole=True)): one M5 clearance
 # hole drilled vertically (through Y) at the section center, set in from each
 # end face — a bolt passes up through the bottom into the T-slot.
-end_hole_d      = 5.5 * MM      # M5 clearance
-end_hole_offset = 10  * MM      # hole center from each end face, along Z
+end_hole_d = 5.5 * MM  # M5 clearance
+end_hole_offset = 10 * MM  # hole center from each end face, along Z
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -103,8 +103,7 @@ def _near(a, b):
 def _outer_corner_edges(z_edges, half_x):
     """Z-parallel edges at (±half_x, ±leg) — the 4 true outer corners."""
     return [
-        e for e in z_edges
-        if _near(e.center().X, half_x) and _near(e.center().Y, leg)
+        e for e in z_edges if _near(e.center().X, half_x) and _near(e.center().Y, leg)
     ]
 
 
@@ -117,7 +116,7 @@ def _rib_edges(z_edges, cell_offsets):
     for ox in cell_offsets:
         for e in z_edges:
             dx = e.center().X - ox
-            y  = e.center().Y
+            y = e.center().Y
             if (_near(dx, rx) and _near(y, ry)) or (_near(dx, ry) and _near(y, rx)):
                 edges.append(e)
     return edges
@@ -198,12 +197,17 @@ class Extrusion2040(BaseStandardPart):
                     x_dir=(1, 0, 0),
                     z_dir=(0, -1, 0),
                 )
-                cb_named = dict(zip(CB_LABELS, [
-                    (-cell_offset, cb_end_offset),
-                    ( cell_offset, cb_end_offset),
-                    (-cell_offset, self.length - cb_end_offset),
-                    ( cell_offset, self.length - cb_end_offset),
-                ]))
+                cb_named = dict(
+                    zip(
+                        CB_LABELS,
+                        [
+                            (-cell_offset, cb_end_offset),
+                            (cell_offset, cb_end_offset),
+                            (-cell_offset, self.length - cb_end_offset),
+                            (cell_offset, self.length - cb_end_offset),
+                        ],
+                    )
+                )
                 cb_centers = list(cb_named.values())
                 # Through shaft + head pocket — sketched on the same plane,
                 # two separate extrudes so depths can differ.
@@ -287,7 +291,8 @@ class Extrusion1020(BaseStandardPart):
             # equals half-width, so both axes use the same constant.
             z_edges = p.edges().filter_by(Axis.Z)
             outer = [
-                e for e in z_edges
+                e
+                for e in z_edges
                 if _near(e.center().X, half_x_1020)
                 and (_near(e.center().Y, 0) or _near(e.center().Y, half_x_1020))
             ]
@@ -295,7 +300,7 @@ class Extrusion1020(BaseStandardPart):
 
             # Two through-holes on the bottom rim, mirrored across the Y axis.
             hole_centers = [
-                ( half_x_1020 - hole_1020_x_inset, hole_1020_y_inset),
+                (half_x_1020 - hole_1020_x_inset, hole_1020_y_inset),
                 (-half_x_1020 + hole_1020_x_inset, hole_1020_y_inset),
             ]
             with BuildSketch():
@@ -306,7 +311,7 @@ class Extrusion1020(BaseStandardPart):
             # Optional vertical M5 holes, set in 10 mm from each end face,
             # centered in width (axis along Y, through the full section).
             if self.hole:
-                hole_h = half_x_1020 + 4 * MM   # > section height + overshoot
+                hole_h = half_x_1020 + 4 * MM  # > section height + overshoot
                 for z in (end_hole_offset, self.length - end_hole_offset):
                     with Locations(Location((0, half_x_1020 / 2, z), (90, 0, 0))):
                         Cylinder(end_hole_d / 2, hole_h, mode=Mode.SUBTRACT)

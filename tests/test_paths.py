@@ -16,6 +16,7 @@ fixture's monkeypatch.
 None; tests exercise each branch explicitly so a `raise` ↔ `return`
 mutation can't slip past.
 """
+
 from __future__ import annotations
 
 import importlib

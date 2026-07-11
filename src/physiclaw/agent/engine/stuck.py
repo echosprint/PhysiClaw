@@ -46,6 +46,7 @@ False positives stay cheap by design (SWE-agent abandoned stuck
 detection over them): tier 1 is advisory, and tier 2 needs four
 camera-verified no-ops / four full cycles / four identical errors.
 """
+
 from dataclasses import dataclass, field
 
 from physiclaw.agent.engine import screen_layout
@@ -137,7 +138,7 @@ def _trailing_cycles(history: list[tuple]) -> int:
             continue
         n = 0
         i = len(history)
-        while i >= period and history[i - period:i] == block:
+        while i >= period and history[i - period : i] == block:
             n += 1
             i -= period
         best = max(best, n)
@@ -160,7 +161,9 @@ class StuckGuard:
     _targets: list[_Target] = field(default_factory=list)
     _history: list[tuple] = field(default_factory=list)  # action signatures
     _error_counts: dict[tuple, int] = field(default_factory=dict)
-    _presses: list[tuple[int, int]] = field(default_factory=list)  # quantized press positions
+    _presses: list[tuple[int, int]] = field(
+        default_factory=list
+    )  # quantized press positions
     _orbit_warned: set[tuple[int, int]] = field(default_factory=set)
     _step_identity: str | None = None
     # Lazily read on the first press (None = not loaded yet) so Session
@@ -312,15 +315,18 @@ class StuckGuard:
             "one element — change method (CONVENTION § Stuck)."
         )
 
-    def _press_centers_counted(self, name: str, arguments: dict) -> list[tuple[float, float]]:
+    def _press_centers_counted(
+        self, name: str, arguments: dict
+    ) -> list[tuple[float, float]]:
         if self._exempt is None:
             self._exempt = [
-                c for c in (
-                    _center(b) for b in screen_layout.repeatable_key_boxes()
-                ) if c
+                c
+                for c in (_center(b) for b in screen_layout.repeatable_key_boxes())
+                if c
             ]
         return [
-            c for c in _press_centers(name, arguments)
+            c
+            for c in _press_centers(name, arguments)
             if not any(_near(c, e) for e in self._exempt)
         ]
 

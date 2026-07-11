@@ -25,9 +25,11 @@ from hardware.assembly.projection import FRONT_LEFT_HIGH, Camera
 
 class MO20Bracket(MO10Bracket):
     compound_label = "motor_20_bracket"
-    RING_SPEC = "M6x12x12"  # single 12 mm spacer → Motor B pulley on the UPPER belt plane
-    BHCS_M5_LENGTH = 20     # mm — longer screw spans the 12 mm spacer
-    motor_z_rotation = 0    # plug on native -Y → world +X (RIGHT) when frame-mounted
+    RING_SPEC = (
+        "M6x12x12"  # single 12 mm spacer → Motor B pulley on the UPPER belt plane
+    )
+    BHCS_M5_LENGTH = 20  # mm — longer screw spans the 12 mm spacer
+    motor_z_rotation = 0  # plug on native -Y → world +X (RIGHT) when frame-mounted
     camera = [FRONT_LEFT_HIGH, Camera(-16.50, 15.07, 1.95)]
 
 

@@ -44,14 +44,14 @@ from hardware.parts.standard.t_nut import (
     TNut,
 )
 
-BHCS_LENGTH = 10     # mm — BHCS M5 underhead length (frame side)
-CAM_LENGTH  = 16     # mm — SHCS 1/4-20 underhead length (camera side)
-BRACKET_GAP = 20     # mm — exploded: gap between T-nut tops and the deck bottom
-SCREW_GAP   = 8      # mm — exploded: gap between deck top and BHCS shank tips
-CAM_GAP     = 14     # mm — exploded: camera nut slid off along −X (gooseneck side)
-CAM_SCREW_GAP = 32   # mm — exploded: SHCS pulled further off the +X install face
+BHCS_LENGTH = 10  # mm — BHCS M5 underhead length (frame side)
+CAM_LENGTH = 16  # mm — SHCS 1/4-20 underhead length (camera side)
+BRACKET_GAP = 20  # mm — exploded: gap between T-nut tops and the deck bottom
+SCREW_GAP = 8  # mm — exploded: gap between deck top and BHCS shank tips
+CAM_GAP = 14  # mm — exploded: camera nut slid off along −X (gooseneck side)
+CAM_SCREW_GAP = 32  # mm — exploded: SHCS pulled further off the +X install face
 HAMMER_LOOSE_ENGAGE = 3  # mm — assembled: BHCS tip threads this far into the
-                         #      hanging T-nut (no extrusion here yet to clamp it)
+#      hanging T-nut (no extrusion here yet to clamp it)
 
 
 class Camera10Bracket(BaseAssembly):
@@ -68,13 +68,15 @@ class Camera10Bracket(BaseAssembly):
         this assembly and read those anchors to mount onto the 1/4-20
         stud."""
         bracket = CornerBracket().build()
-        bhcs    = Screw("BHCS", "M5", BHCS_LENGTH).build()
-        tnut    = TNut("hammer", "M5").build()
+        bhcs = Screw("BHCS", "M5", BHCS_LENGTH).build()
+        tnut = TNut("hammer", "M5").build()
         cam_screw = Screw("SHCS", "1/4-20", CAM_LENGTH).build()
-        cam_nut   = Nut("hex", "1/4-20").build()
+        cam_nut = Nut("hex", "1/4-20").build()
 
-        hx          = face_depth / 2                 # horizontal-hole X (centered in depth)
-        hammer_half = TNUT_LENGTHS["hammer"] / 2     # centres the T-nut bore under the hole
+        hx = face_depth / 2  # horizontal-hole X (centered in depth)
+        hammer_half = (
+            TNUT_LENGTHS["hammer"] / 2
+        )  # centres the T-nut bore under the hole
 
         # Vertical placement: assembled is the base pose, exploding just adds
         # gaps. ``bracket_z`` lifts the deck (horizontal face, local z
@@ -82,10 +84,12 @@ class Camera10Bracket(BaseAssembly):
         # the (notional) slot face, where the boss would seat it once dropped
         # into a 2020 slot at camera_40. BHCS underheads seat on the deck top;
         # ``cam_offset`` slides the camera screw / nut apart along ±X.
-        bracket_z  = HAMMER_TOTAL_HEIGHT + (BRACKET_GAP if self.exploded else 0)
-        screw_z    = bracket_z + plate_thick + (SCREW_GAP + BHCS_LENGTH if self.exploded else 0)
-        cam_offset = CAM_GAP if self.exploded else 0          # nut / gooseneck side (−X)
-        cam_screw_offset = CAM_SCREW_GAP if self.exploded else 0   # SHCS side (+X)
+        bracket_z = HAMMER_TOTAL_HEIGHT + (BRACKET_GAP if self.exploded else 0)
+        screw_z = (
+            bracket_z + plate_thick + (SCREW_GAP + BHCS_LENGTH if self.exploded else 0)
+        )
+        cam_offset = CAM_GAP if self.exploded else 0  # nut / gooseneck side (−X)
+        cam_screw_offset = CAM_SCREW_GAP if self.exploded else 0  # SHCS side (+X)
 
         bracket.move(Location((0, 0, bracket_z)))
         bhcs.move(Location((hx, 0, screw_z)))
@@ -106,27 +110,39 @@ class Camera10Bracket(BaseAssembly):
         else:
             screw_tip_z = screw_z - BHCS_LENGTH
             tnut_z = screw_tip_z + HAMMER_LOOSE_ENGAGE - HAMMER_TOTAL_HEIGHT
-        tnut.move(Location(Plane(
-            origin=(hx, hammer_half, tnut_z),
-            x_dir=(1, 0, 0),
-            z_dir=(0, -1, 0),
-        )))
+        tnut.move(
+            Location(
+                Plane(
+                    origin=(hx, hammer_half, tnut_z),
+                    x_dir=(1, 0, 0),
+                    z_dir=(0, -1, 0),
+                )
+            )
+        )
 
         # ── Camera side: 1/4-20 SHCS + hex nut through the centered hole ──────
         # The vertical-face hole sits at world (x 0..plate_thick, y = 0,
         # z = face_depth/2). The screw axis is along X with its head on the
         # +X face and the hex nut clamping the −X face.
         cam_z = bracket_z + face_depth / 2
-        cam_screw.move(Location(Plane(
-            origin=(plate_thick + cam_screw_offset, 0, cam_z),
-            x_dir=(0, 1, 0),
-            z_dir=(1, 0, 0),          # head along +X, shank into the plate (−X)
-        )))
-        cam_nut.move(Location(Plane(
-            origin=(-cam_offset, 0, cam_z),
-            x_dir=(0, 1, 0),
-            z_dir=(-1, 0, 0),         # bore coaxial with the screw, on the −X face
-        )))
+        cam_screw.move(
+            Location(
+                Plane(
+                    origin=(plate_thick + cam_screw_offset, 0, cam_z),
+                    x_dir=(0, 1, 0),
+                    z_dir=(1, 0, 0),  # head along +X, shank into the plate (−X)
+                )
+            )
+        )
+        cam_nut.move(
+            Location(
+                Plane(
+                    origin=(-cam_offset, 0, cam_z),
+                    x_dir=(0, 1, 0),
+                    z_dir=(-1, 0, 0),  # bore coaxial with the screw, on the −X face
+                )
+            )
+        )
 
         # Camera-screw anchors for downstream steps: the stud axis is world
         # −X through (cam_y, cam_z) with its head on the +X face; cam_offset

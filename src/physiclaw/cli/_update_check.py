@@ -49,10 +49,15 @@ def _write_cache(latest_version: str) -> None:
     p = _cache_file()
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
-        write_text(p, json.dumps({
-            "checked_at": datetime.now(timezone.utc).isoformat(),
-            "latest_version": latest_version,
-        }))
+        write_text(
+            p,
+            json.dumps(
+                {
+                    "checked_at": datetime.now(timezone.utc).isoformat(),
+                    "latest_version": latest_version,
+                }
+            ),
+        )
     except OSError:
         pass  # cache write failure is non-fatal — we'll re-fetch next time
 

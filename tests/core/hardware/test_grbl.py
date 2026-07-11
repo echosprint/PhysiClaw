@@ -3,6 +3,7 @@
 `serial.tools.list_ports.comports()` and `serial.Serial` are mocked
 so tests don't touch real hardware.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -43,7 +44,9 @@ def test_candidate_ports_filters_out_skip_keywords(mocker) -> None:
         _port_info("/dev/cu.usbserial-CH340", "CH340 USB Serial"),
         _port_info("/dev/cu.AirPods-WirelessiAP", "AirPods"),
     ]
-    mocker.patch.object(grbl.serial.tools.list_ports, "comports", return_value=fake_ports)
+    mocker.patch.object(
+        grbl.serial.tools.list_ports, "comports", return_value=fake_ports
+    )
 
     out = candidate_ports()
 
@@ -57,9 +60,11 @@ def test_candidate_ports_prioritizes_known_usb_serial_vid(mocker) -> None:
     # names vary by OS/driver, the VID is the same everywhere.
     fake_ports = [
         _port_info("/dev/cu.someUSBthing", "", vid=0x9999),  # generic USB device
-        _port_info("/dev/cu.blankname", "", vid=0x1A86),     # CH340, by VID only
+        _port_info("/dev/cu.blankname", "", vid=0x1A86),  # CH340, by VID only
     ]
-    mocker.patch.object(grbl.serial.tools.list_ports, "comports", return_value=fake_ports)
+    mocker.patch.object(
+        grbl.serial.tools.list_ports, "comports", return_value=fake_ports
+    )
 
     assert candidate_ports()[0] == "/dev/cu.blankname"
 
@@ -70,7 +75,9 @@ def test_candidate_ports_excludes_builtin_uart_without_vid(mocker) -> None:
         _port_info("/dev/ttyS0", "", vid=None),
         _port_info("/dev/ttyUSB0", "USB Serial"),
     ]
-    mocker.patch.object(grbl.serial.tools.list_ports, "comports", return_value=fake_ports)
+    mocker.patch.object(
+        grbl.serial.tools.list_ports, "comports", return_value=fake_ports
+    )
 
     assert candidate_ports() == ["/dev/ttyUSB0"]
 
@@ -79,7 +86,9 @@ def test_candidate_ports_empty_when_only_builtin_uart(mocker) -> None:
     # Board not connected → only /dev/ttyS0 present → report nothing, so flash
     # says "No board found" instead of auto-picking the phantom port.
     fake_ports = [_port_info("/dev/ttyS0", "", vid=None)]
-    mocker.patch.object(grbl.serial.tools.list_ports, "comports", return_value=fake_ports)
+    mocker.patch.object(
+        grbl.serial.tools.list_ports, "comports", return_value=fake_ports
+    )
 
     assert candidate_ports() == []
 
@@ -90,7 +99,9 @@ def test_candidate_ports_sorts_likely_first(mocker) -> None:
         _port_info("/dev/cu.usbserial-CP210", "CP2102 USB UART"),
         _port_info("/dev/cu.unknown2", "Random"),
     ]
-    mocker.patch.object(grbl.serial.tools.list_ports, "comports", return_value=fake_ports)
+    mocker.patch.object(
+        grbl.serial.tools.list_ports, "comports", return_value=fake_ports
+    )
 
     out = candidate_ports()
 
@@ -115,7 +126,9 @@ def test_detect_grbl_returns_none_when_no_candidates(mocker) -> None:
 
 def test_detect_grbl_returns_port_on_successful_probe(mocker) -> None:
     fake_ports = [_port_info("/dev/cu.usbserial-X", "CH340")]
-    mocker.patch.object(grbl.serial.tools.list_ports, "comports", return_value=fake_ports)
+    mocker.patch.object(
+        grbl.serial.tools.list_ports, "comports", return_value=fake_ports
+    )
 
     fake_serial = MagicMock()
     fake_serial.in_waiting = 64
@@ -132,7 +145,9 @@ def test_detect_grbl_returns_port_on_successful_probe(mocker) -> None:
 
 def test_detect_grbl_returns_port_when_response_contains_ver_marker(mocker) -> None:
     fake_ports = [_port_info("/dev/cu.usbserial-Y", "FTDI USB Serial")]
-    mocker.patch.object(grbl.serial.tools.list_ports, "comports", return_value=fake_ports)
+    mocker.patch.object(
+        grbl.serial.tools.list_ports, "comports", return_value=fake_ports
+    )
 
     fake_serial = MagicMock()
     fake_serial.in_waiting = 64
@@ -152,7 +167,9 @@ def test_detect_grbl_skips_port_when_response_is_not_grbl(mocker) -> None:
         _port_info("/dev/cu.fake", "FTDI"),
         _port_info("/dev/cu.real", "CH340"),
     ]
-    mocker.patch.object(grbl.serial.tools.list_ports, "comports", return_value=fake_ports)
+    mocker.patch.object(
+        grbl.serial.tools.list_ports, "comports", return_value=fake_ports
+    )
 
     # First port returns junk; second returns Grbl banner.
     fake_first = MagicMock()
@@ -167,9 +184,7 @@ def test_detect_grbl_skips_port_when_response_is_not_grbl(mocker) -> None:
     fake_second.__enter__ = MagicMock(return_value=fake_second)
     fake_second.__exit__ = MagicMock(return_value=None)
 
-    mocker.patch.object(
-        grbl.serial, "Serial", side_effect=[fake_first, fake_second]
-    )
+    mocker.patch.object(grbl.serial, "Serial", side_effect=[fake_first, fake_second])
     mocker.patch.object(grbl.time, "sleep")
 
     out = detect_grbl()
@@ -184,7 +199,9 @@ def test_detect_grbl_continues_after_serial_exception_on_a_port(mocker) -> None:
         _port_info("/dev/cu.dead", "FTDI"),
         _port_info("/dev/cu.live", "CH340"),
     ]
-    mocker.patch.object(grbl.serial.tools.list_ports, "comports", return_value=fake_ports)
+    mocker.patch.object(
+        grbl.serial.tools.list_ports, "comports", return_value=fake_ports
+    )
 
     fake_live = MagicMock()
     fake_live.in_waiting = 32
@@ -193,7 +210,8 @@ def test_detect_grbl_continues_after_serial_exception_on_a_port(mocker) -> None:
     fake_live.__exit__ = MagicMock(return_value=None)
 
     mocker.patch.object(
-        grbl.serial, "Serial",
+        grbl.serial,
+        "Serial",
         side_effect=[pyserial.SerialException("port busy"), fake_live],
     )
     mocker.patch.object(grbl.time, "sleep")
@@ -205,7 +223,9 @@ def test_detect_grbl_continues_after_serial_exception_on_a_port(mocker) -> None:
 
 def test_detect_grbl_returns_none_when_all_probes_fail(mocker) -> None:
     fake_ports = [_port_info("/dev/cu.x", "CH340")]
-    mocker.patch.object(grbl.serial.tools.list_ports, "comports", return_value=fake_ports)
+    mocker.patch.object(
+        grbl.serial.tools.list_ports, "comports", return_value=fake_ports
+    )
 
     fake_serial = MagicMock()
     fake_serial.in_waiting = 8

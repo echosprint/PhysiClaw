@@ -18,6 +18,7 @@ to refuse a call, what to warn about — lives in `policy.py` as policy
 objects on `EngineRun.policies`; request assembly (prompt bundle, initial
 messages, tails) lives in `assemble.py`, shared with the CLI dump.
 """
+
 import asyncio
 import datetime as dt
 import enum
@@ -47,7 +48,14 @@ from physiclaw.agent.provider import (
     make_provider,
     mcp_blocks_to_content_blocks,
 )
-from physiclaw.agent.engine.trace import RawLog, Trace, brief_content, format_call_args, format_call_result, new_sid
+from physiclaw.agent.engine.trace import (
+    RawLog,
+    Trace,
+    brief_content,
+    format_call_args,
+    format_call_result,
+    new_sid,
+)
 from physiclaw.agent.engine.validator import ValidationError, validate_arguments
 from physiclaw.agent.runtime.hook import Trigger
 from physiclaw.agent.runtime.sentinel import FAIL, STUCK, WAIT
@@ -74,6 +82,7 @@ class Settings:
     `provider_retry_attempts` is per-call transient-error retries — two
     different knobs, deliberately not shared.
     """
+
     max_turns: int
     max_session_attempts: int
     provider_retry_attempts: int
@@ -97,6 +106,7 @@ class EngineRun:
     """One session's immutable wiring: provider, MCP client, tool surface,
     logging sinks, settings, and the policy set. Threaded through the loop
     instead of a parameter list so adding a dependency is a one-line change."""
+
     provider: Provider
     mcp: McpClient
     tool_schemas: list[dict]
@@ -109,9 +119,7 @@ class EngineRun:
     layout_incomplete: bool = False
 
 
-async def run(
-    triggers: list[Trigger], *, model_ref: str
-) -> None:
+async def run(triggers: list[Trigger], *, model_ref: str) -> None:
     """Run an engine session for `triggers`, retrying on STUCK.
 
     STUCK happens when the loop hit max_turns without a clean close, the
@@ -141,7 +149,10 @@ async def run(
         attempt += 1
         session = Session()
         await _run_session(
-            triggers, model_ref=model_ref, session=session, settings=settings,
+            triggers,
+            model_ref=model_ref,
+            session=session,
+            settings=settings,
         )
         if session.restart_for_setup and not setup_restart_used:
             setup_restart_used = True
@@ -160,7 +171,9 @@ async def run(
         if attempt < settings.max_session_attempts:
             log.warning(
                 "session STUCK (attempt %d/%d): %r — retrying",
-                attempt, settings.max_session_attempts, session.sentinel_recap,
+                attempt,
+                settings.max_session_attempts,
+                session.sentinel_recap,
             )
 
 
@@ -175,6 +188,7 @@ async def _run_session(
     policy set per call. Writes outcome to `session.sentinel_*`; never
     raises."""
     from physiclaw.config import parse_model_ref
+
     provider_id, model_id = parse_model_ref(model_ref)
     settings = settings or Settings.from_config()
 
@@ -187,15 +201,21 @@ async def _run_session(
         # if construction fails midway (disk full, perms, etc.).
         tr = Trace(sid)
         rlog = RawLog(sid)
-        tr.write({
-            "event": "wake", "session": sid, "model_ref": model_ref,
-            "triggers": [
-                {"source": t.source, "description": t.description} for t in triggers
-            ],
-        })
+        tr.write(
+            {
+                "event": "wake",
+                "session": sid,
+                "model_ref": model_ref,
+                "triggers": [
+                    {"source": t.source, "description": t.description} for t in triggers
+                ],
+            }
+        )
         log.info(
             "wake session=%s model=%s triggers=%s",
-            sid, model_ref, [t.source or "?" for t in triggers],
+            sid,
+            model_ref,
+            [t.source or "?" for t in triggers],
         )
         mcp = await get_mcp()
         mcp_tools = await list_tools_cached()
@@ -211,21 +231,26 @@ async def _run_session(
         # stays complete even offline. Each source has one consumer.
         tool_schemas = list(mcp_tools) + bundle.local_schemas
         schema_by_name = {s["name"]: s for s in tool_schemas}
-        tr.write({
-            "event": "tools_loaded",
-            "mcp": [s["name"] for s in mcp_tools],
-            "local": sorted(bundle.local_registry.keys()),
-        })
+        tr.write(
+            {
+                "event": "tools_loaded",
+                "mcp": [s["name"] for s in mcp_tools],
+                "local": sorted(bundle.local_registry.keys()),
+            }
+        )
         log.info(
             "tools loaded: %d MCP + %d local + %d built-in + %d user skills "
             "+ %d pitfalls",
-            len(mcp_tools), len(bundle.local_registry),
-            bundle.builtin_skill_count, bundle.user_skill_count,
+            len(mcp_tools),
+            len(bundle.local_registry),
+            bundle.builtin_skill_count,
+            bundle.user_skill_count,
             bundle.pitfall_count,
         )
 
         messages: list[Message] = assemble.build_initial_messages(
-            triggers, bundle.system_prompt,
+            triggers,
+            bundle.system_prompt,
         )
 
         provider = make_provider(provider_id, model_id)
@@ -253,7 +278,8 @@ async def _run_session(
 
         log.info(
             "session done: status=%s recap=%r",
-            session.sentinel_status, session.sentinel_recap,
+            session.sentinel_status,
+            session.sentinel_recap,
         )
         # Post-session pitfalls curation: a separate LLM pass (still-open
         # provider) that consolidates the list + enforces the cap when the agent
@@ -267,11 +293,13 @@ async def _run_session(
             )
             _auto_schedule_wait_check(tr, minutes=settings.wait_default_minutes)
 
-        tr.write({
-            "event": "done",
-            "sentinel": session.sentinel_status,
-            "recap": session.sentinel_recap,
-        })
+        tr.write(
+            {
+                "event": "done",
+                "sentinel": session.sentinel_status,
+                "recap": session.sentinel_recap,
+            }
+        )
     except asyncio.CancelledError:
         raise
     except Exception as e:
@@ -295,9 +323,10 @@ async def _run_session(
 
 class _Turn(enum.Enum):
     """What `_loop` does after a turn's finish_reason + shape checks."""
+
     PROCEED = enum.auto()  # well-formed — go run the turn's tools
-    RETRY = enum.auto()    # rejected, corrective injected — re-loop this index
-    ABORT = enum.auto()    # terminal sentinel set — return from `_loop`
+    RETRY = enum.auto()  # rejected, corrective injected — re-loop this index
+    ABORT = enum.auto()  # terminal sentinel set — return from `_loop`
 
 
 @dataclass
@@ -307,6 +336,7 @@ class _LoopState:
     consecutive_correctives: malformed turns in a row — STUCK past the cap.
     (Per-gate one-shot state lives on the gate objects in `run.policies`.)
     """
+
     consecutive_correctives: int = 0
 
 
@@ -326,7 +356,10 @@ async def _loop(run: EngineRun, session: Session, messages: list[Message]) -> No
     state = _LoopState()
     for turn in range(run.settings.max_turns):
         request_messages, compaction_imminent = _prepare_request(
-            run, session, messages, turn,
+            run,
+            session,
+            messages,
+            turn,
         )
 
         asst = await _call_provider(run, session, request_messages, turn)
@@ -338,7 +371,9 @@ async def _loop(run: EngineRun, session: Session, messages: list[Message]) -> No
         messages.append(asst)
         called = asst.tool_names()
 
-        shape = _enforce_shape(messages, asst, called, state, session=session, turn=turn, tr=run.tr)
+        shape = _enforce_shape(
+            messages, asst, called, state, session=session, turn=turn, tr=run.tr
+        )
         if shape is _Turn.ABORT:
             return
         if shape is _Turn.RETRY:
@@ -348,8 +383,13 @@ async def _loop(run: EngineRun, session: Session, messages: list[Message]) -> No
             gate.observe_turn(session, asst)
 
         if _apply_turn_gates(
-            run, session, messages, asst, called,
-            turn=turn, compaction_imminent=compaction_imminent,
+            run,
+            session,
+            messages,
+            asst,
+            called,
+            turn=turn,
+            compaction_imminent=compaction_imminent,
         ):
             continue
 
@@ -368,7 +408,10 @@ async def _loop(run: EngineRun, session: Session, messages: list[Message]) -> No
 
 
 def _prepare_request(
-    run: EngineRun, session: Session, messages: list[Message], turn: int,
+    run: EngineRun,
+    session: Session,
+    messages: list[Message],
+    turn: int,
 ) -> tuple[list[Message], bool]:
     """Assemble and log this turn's request; return the wire-ready message list
     and whether a collapse is imminent this turn.
@@ -396,7 +439,9 @@ def _prepare_request(
     # learned stays learned — so the per-turn disk read is skipped entirely
     # unless setup was still pending at session start (`layout_incomplete`).
     request_messages = assemble.apply_request_tails(
-        messages, session, layout_incomplete=run.layout_incomplete,
+        messages,
+        session,
+        layout_incomplete=run.layout_incomplete,
         compaction_keep=(
             run.provider.KEEP_RECENT_TURNS if compaction_imminent else None
         ),
@@ -404,14 +449,19 @@ def _prepare_request(
     # Cache markers + the actual wire format are the provider's business now;
     # log the wire form for debugging by asking the provider to serialize once.
     wire_for_log = run.provider.serialize_history(request_messages)
-    run.tr.write({"event": "request", "turn": turn, "message_count": len(request_messages)})
+    run.tr.write(
+        {"event": "request", "turn": turn, "message_count": len(request_messages)}
+    )
     run.rlog.write_request(turn, wire_for_log)
     log.info("turn %d: %d messages → provider", turn + 1, len(request_messages))
     return request_messages, compaction_imminent
 
 
 async def _call_provider(
-    run: EngineRun, session: Session, request_messages: list[Message], turn: int,
+    run: EngineRun,
+    session: Session,
+    request_messages: list[Message],
+    turn: int,
 ) -> AssistantMessage | None:
     """Call the provider (transient-retry), log the response, and return the
     AssistantMessage. When the provider exhausts its retries: mark the session
@@ -419,7 +469,9 @@ async def _call_provider(
     t0 = time.perf_counter()
     try:
         asst = await _chat_with_retry(
-            run.provider, request_messages, run.tool_schemas,
+            run.provider,
+            request_messages,
+            run.tool_schemas,
             attempts=run.settings.provider_retry_attempts,
             backoff=run.settings.retry_backoff_seconds,
         )
@@ -432,19 +484,21 @@ async def _call_provider(
 
     elapsed_ms = int((time.perf_counter() - t0) * 1000)
     run.rlog.write_response(turn, asst.raw, elapsed_ms=elapsed_ms)
-    run.tr.write({
-        "event": "response",
-        "turn": turn,
-        "finish_reason": asst.finish_reason,
-        "content_len": len(asst.content or ""),
-        # Provider round-trip time — the session summary sums these
-        # into provider_time_ms.
-        "elapsed_ms": elapsed_ms,
-        "tool_calls": [
-            {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
-            for tc in asst.tool_calls
-        ],
-    })
+    run.tr.write(
+        {
+            "event": "response",
+            "turn": turn,
+            "finish_reason": asst.finish_reason,
+            "content_len": len(asst.content or ""),
+            # Provider round-trip time — the session summary sums these
+            # into provider_time_ms.
+            "elapsed_ms": elapsed_ms,
+            "tool_calls": [
+                {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
+                for tc in asst.tool_calls
+            ],
+        }
+    )
     cache_summary = _log_usage(turn, asst, run.tr)
     # Provider round-trip time first, then token/cache — all provider-call
     # metrics grouped in the trailing segment.
@@ -453,14 +507,23 @@ async def _call_provider(
         metrics += f", {cache_summary}"
     log.info(
         "turn %d: finish=%s calls=%s — %s",
-        turn + 1, asst.finish_reason, asst.tool_names() or None, metrics,
+        turn + 1,
+        asst.finish_reason,
+        asst.tool_names() or None,
+        metrics,
     )
     return asst
 
 
 def _enforce_shape(
-    messages: list[Message], asst: AssistantMessage, called: list[str],
-    state: _LoopState, *, session: Session, turn: int, tr: Trace,
+    messages: list[Message],
+    asst: AssistantMessage,
+    called: list[str],
+    state: _LoopState,
+    *,
+    session: Session,
+    turn: int,
+    tr: Trace,
 ) -> _Turn:
     """Route finish_reason and enforce the [note, one-other] turn shape.
 
@@ -483,27 +546,41 @@ def _enforce_shape(
         # Trace it like the other shape violation below, so the session
         # summary's corrective count stays honest.
         tr.write({"event": "bad_turn_shape", "turn": turn, "tool_calls": []})
-        return _reject_shape(messages, state, session, (
-            "Your last turn had no tool_calls. Every turn must "
-            "either call tools or call end_session(status, recap) "
-            "to close. Reply again as a tool call — and include "
-            "note(summary=...) alongside."
-        ))
+        return _reject_shape(
+            messages,
+            state,
+            session,
+            (
+                "Your last turn had no tool_calls. Every turn must "
+                "either call tools or call end_session(status, recap) "
+                "to close. Reply again as a tool call — and include "
+                "note(summary=...) alongside."
+            ),
+        )
 
     # Turn shape: exactly [note, one-other]. `note` keeps a permanent trace
     # even after image tool_results are compacted away; the one-other cap
     # forces one action per turn.
     if len(called) != 2 or called.count("note") != 1:
-        log.warning("turn %d: bad turn shape tool_calls=%s — injecting corrective", turn + 1, called)
+        log.warning(
+            "turn %d: bad turn shape tool_calls=%s — injecting corrective",
+            turn + 1,
+            called,
+        )
         tr.write({"event": "bad_turn_shape", "turn": turn, "tool_calls": called})
-        return _reject_shape(messages, state, session, _corrective_for_bad_shape(called))
+        return _reject_shape(
+            messages, state, session, _corrective_for_bad_shape(called)
+        )
 
     state.consecutive_correctives = 0
     return _Turn.PROCEED
 
 
 def _reject_shape(
-    messages: list[Message], state: _LoopState, session: Session, corrective: str,
+    messages: list[Message],
+    state: _LoopState,
+    session: Session,
+    corrective: str,
 ) -> _Turn:
     """Count one malformed turn and RETRY it: past CORRECTIVE_LIMIT in a row,
     give up STUCK; otherwise pop the rejected assistant turn (leaving orphan
@@ -534,9 +611,14 @@ def _give_up_on_shape(session: Session, state: _LoopState) -> _Turn:
 
 
 def _apply_turn_gates(
-    run: EngineRun, session: Session, messages: list[Message],
-    asst: AssistantMessage, called: list[str],
-    *, turn: int, compaction_imminent: bool,
+    run: EngineRun,
+    session: Session,
+    messages: list[Message],
+    asst: AssistantMessage,
+    called: list[str],
+    *,
+    turn: int,
+    compaction_imminent: bool,
 ) -> bool:
     """Run the policy turn gates in declared order; the first Rejection wins.
     The gate owns the judgment and its one-shot state; this owns the shared
@@ -545,8 +627,11 @@ def _apply_turn_gates(
     re-loops), False to proceed to dispatch."""
     for gate in run.policies.turn_gates:
         rej = gate.check(
-            session, asst, called,
-            turn=turn, compaction_imminent=compaction_imminent,
+            session,
+            asst,
+            called,
+            turn=turn,
+            compaction_imminent=compaction_imminent,
         )
         if rej is None:
             continue
@@ -559,8 +644,11 @@ def _apply_turn_gates(
 
 
 async def _dispatch_turn(
-    run: EngineRun, session: Session, messages: list[Message],
-    asst: AssistantMessage, turn: int,
+    run: EngineRun,
+    session: Session,
+    messages: list[Message],
+    asst: AssistantMessage,
+    turn: int,
 ) -> None:
     """Run the turn's tool_calls — principle 6: exactly one ToolResult per
     ToolCall, in order, in the very next messages. Flags a length-truncation
@@ -568,7 +656,9 @@ async def _dispatch_turn(
     off — the validator catches it and pairs an error result, same path as any
     bad args."""
     if asst.finish_reason == FinishReason.LENGTH:
-        log.warning("turn %d: finish=length; last tool_call args may be truncated", turn + 1)
+        log.warning(
+            "turn %d: finish=length; last tool_call args may be truncated", turn + 1
+        )
         run.tr.write({"event": "finish_length_warning", "turn": turn})
 
     for call in asst.tool_calls:
@@ -577,8 +667,12 @@ async def _dispatch_turn(
 
 
 def _finalize_turn(
-    run: EngineRun, session: Session, messages: list[Message],
-    asst: AssistantMessage, called: list[str], turn: int,
+    run: EngineRun,
+    session: Session,
+    messages: list[Message],
+    asst: AssistantMessage,
+    called: list[str],
+    turn: int,
 ) -> None:
     """Post-dispatch bookkeeping. Snapshot this turn's plan/scratchpad so a hard
     close can reflect on the whole run's evolution, not just the final state —
@@ -593,7 +687,8 @@ def _finalize_turn(
         and note_call.arguments.get("scratchpad") is not None
     )
     trajectory.record(
-        session, turn,
+        session,
+        turn,
         plan_updated="update_progress" in called,
         scratchpad_written=scratchpad_written,
     )
@@ -612,7 +707,10 @@ def _finalize_turn(
 
 
 async def _dispatch(
-    run: EngineRun, session: Session, call: ToolCall, turn: int,
+    run: EngineRun,
+    session: Session,
+    call: ToolCall,
+    turn: int,
 ) -> ToolResultMessage:
     """Guards, validate, execute, observe. Always returns a ToolResultMessage —
     never raises (principle 5 + principle 6 require that every ToolCall is
@@ -625,7 +723,9 @@ async def _dispatch(
 
     schema = run.schema_by_name.get(call.name)
     if schema is None:
-        run.tr.write({"event": "tool_unknown", "turn": turn, "name": call.name, "id": call.id})
+        run.tr.write(
+            {"event": "tool_unknown", "turn": turn, "name": call.name, "id": call.id}
+        )
         log.warning("  ✗ %s: unknown tool", call.name)
         return ToolResultMessage(
             tool_call_id=call.id,
@@ -637,11 +737,16 @@ async def _dispatch(
     try:
         validate_arguments(call.arguments, schema.get("input_schema") or {})
     except ValidationError as e:
-        run.tr.write({
-            "event": "tool_invalid_args", "turn": turn,
-            "name": call.name, "id": call.id,
-            "arguments": call.arguments, "error": str(e),
-        })
+        run.tr.write(
+            {
+                "event": "tool_invalid_args",
+                "turn": turn,
+                "name": call.name,
+                "id": call.id,
+                "arguments": call.arguments,
+                "error": str(e),
+            }
+        )
         log.warning("  ✗ %s: invalid args — %s", call.name, e)
         return ToolResultMessage(
             tool_call_id=call.id,
@@ -657,11 +762,16 @@ async def _dispatch(
     try:
         if local is not None:
             text = await local.handler(session, call.arguments)
-            run.tr.write({
-                "event": "tool_result", "turn": turn,
-                "name": call.name, "id": call.id,
-                "arguments": call.arguments, "text": text,
-            })
+            run.tr.write(
+                {
+                    "event": "tool_result",
+                    "turn": turn,
+                    "name": call.name,
+                    "id": call.id,
+                    "arguments": call.arguments,
+                    "text": text,
+                }
+            )
             log.info("  ✓ %s → %s", call.name, format_call_result(call.name, text))
             return ToolResultMessage(tool_call_id=call.id, content=text)
 
@@ -669,22 +779,40 @@ async def _dispatch(
         content = mcp_blocks_to_content_blocks(blocks)
         changed = verdict.parse(_action_text(blocks))
         content = _observe_result(
-            run, session, call, content, turn=turn, changed=changed, failed=False,
+            run,
+            session,
+            call,
+            content,
+            turn=turn,
+            changed=changed,
+            failed=False,
         )
-        run.tr.write({
-            "event": "tool_result", "turn": turn,
-            "name": call.name, "id": call.id,
-            "arguments": call.arguments, "blocks": blocks,
-        })
+        run.tr.write(
+            {
+                "event": "tool_result",
+                "turn": turn,
+                "name": call.name,
+                "id": call.id,
+                "arguments": call.arguments,
+                "blocks": blocks,
+            }
+        )
         log.info("  ✓ %s → %s", call.name, brief_content(content))
         return ToolResultMessage(tool_call_id=call.id, content=content)
 
     except Exception as e:
         log.error("  ✗ %s failed: %s", call.name, e)
-        run.tr.write({"event": "tool_error", "turn": turn, "name": call.name, "error": str(e)})
+        run.tr.write(
+            {"event": "tool_error", "turn": turn, "name": call.name, "error": str(e)}
+        )
         content = _observe_result(
-            run, session, call, f"{call.name} failed: {e}",
-            turn=turn, changed=None, failed=True,
+            run,
+            session,
+            call,
+            f"{call.name} failed: {e}",
+            turn=turn,
+            changed=None,
+            failed=True,
         )
         return ToolResultMessage(
             tool_call_id=call.id,
@@ -694,7 +822,10 @@ async def _dispatch(
 
 
 def _run_guards(
-    run: EngineRun, session: Session, call: ToolCall, turn: int,
+    run: EngineRun,
+    session: Session,
+    call: ToolCall,
+    turn: int,
     guards: tuple[DispatchGuard, ...],
 ) -> ToolResultMessage | None:
     """Run one phase's dispatch guards (pre- or post-validation, split once
@@ -704,21 +835,33 @@ def _run_guards(
         block = guard.check(session, call, turn=turn)
         if block is None:
             continue
-        run.tr.write({
-            "event": block.event, "turn": turn,
-            "name": call.name, "id": call.id, "arguments": call.arguments,
-        })
+        run.tr.write(
+            {
+                "event": block.event,
+                "turn": turn,
+                "name": call.name,
+                "id": call.id,
+                "arguments": call.arguments,
+            }
+        )
         log.warning("  ✗ %s: %s", call.name, block.log_msg)
         return ToolResultMessage(
-            tool_call_id=call.id, content=block.content, is_error=True,
+            tool_call_id=call.id,
+            content=block.content,
+            is_error=True,
         )
     return None
 
 
 def _observe_result(
-    run: EngineRun, session: Session, call: ToolCall,
-    content: str | list[ContentBlock], *, turn: int,
-    changed: bool | None, failed: bool,
+    run: EngineRun,
+    session: Session,
+    call: ToolCall,
+    content: str | list[ContentBlock],
+    *,
+    turn: int,
+    changed: bool | None,
+    failed: bool,
 ) -> str | list[ContentBlock]:
     """Run the result observers in declared order; each may append one
     advisory line to the tool-result content (traced under its event)."""
@@ -726,10 +869,14 @@ def _observe_result(
         advisory = obs.observe(session, call, changed=changed, failed=failed)
         if advisory is None:
             continue
-        run.tr.write({
-            "event": advisory.event, "turn": turn,
-            "name": call.name, "id": call.id,
-        })
+        run.tr.write(
+            {
+                "event": advisory.event,
+                "turn": turn,
+                "name": call.name,
+                "id": call.id,
+            }
+        )
         content = _append_text(content, advisory.text)
     return content
 
@@ -762,8 +909,12 @@ def _append_text(
 
 
 async def _chat_with_retry(
-    provider: Provider, messages: list[Message], tools: list[dict],
-    *, attempts: int, backoff: float,
+    provider: Provider,
+    messages: list[Message],
+    tools: list[dict],
+    *,
+    attempts: int,
+    backoff: float,
 ) -> AssistantMessage:
     """Retry transient errors only (principle 3: permanent 4xx fails fast)."""
     last_err: Exception | None = None
@@ -773,7 +924,9 @@ async def _chat_with_retry(
         except ProviderTransientError as e:
             last_err = e
             if attempt < attempts:
-                log.warning("provider transient (attempt %d/%d): %s", attempt, attempts, e)
+                log.warning(
+                    "provider transient (attempt %d/%d): %s", attempt, attempts, e
+                )
                 await asyncio.sleep(backoff)
     raise RuntimeError(f"provider failed after {attempts} attempts: {last_err}")
 
@@ -789,17 +942,19 @@ def _log_usage(turn: int, asst: AssistantMessage, tr: Trace) -> str:
     u = asst.usage
     total = u.prompt_tokens
     new = max(0, total - u.cached_tokens - u.cache_creation_tokens)
-    tr.write({
-        "event": "cache",
-        "turn": turn,
-        "hit": u.cached_tokens,
-        "create": u.cache_creation_tokens,
-        "new": new,
-        "total": total,
-        # Output tokens — the session summary sums these into
-        # usage.output_tokens.
-        "out": u.completion_tokens,
-    })
+    tr.write(
+        {
+            "event": "cache",
+            "turn": turn,
+            "hit": u.cached_tokens,
+            "create": u.cache_creation_tokens,
+            "new": new,
+            "total": total,
+            # Output tokens — the session summary sums these into
+            # usage.output_tokens.
+            "out": u.completion_tokens,
+        }
+    )
     if not total:
         return ""
     return f"token: {total / 1000:.1f}k, cache: {100 * u.cached_tokens / total:.0f}%"
@@ -878,11 +1033,13 @@ def _auto_schedule_wait_check(tr: Trace, *, minutes: int) -> None:
     at = dt.datetime.now() + dt.timedelta(minutes=minutes)
     try:
         jobs.upsert_auto_wait_check(at)
-        tr.write({
-            "event": "wait_auto_scheduled",
-            "job_id": jobs.AUTO_WAIT_JOB_ID,
-            "at": at.isoformat(timespec="minutes"),
-        })
+        tr.write(
+            {
+                "event": "wait_auto_scheduled",
+                "job_id": jobs.AUTO_WAIT_JOB_ID,
+                "at": at.isoformat(timespec="minutes"),
+            }
+        )
     except Exception as e:
         log.exception("failed to auto-schedule WAIT follow-up")
         tr.write({"event": "wait_auto_schedule_failed", "error": str(e)})

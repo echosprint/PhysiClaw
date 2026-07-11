@@ -248,7 +248,10 @@ def detect_screen_corners(
         for j in range(i + 1, len(pts)):
             if used[j]:
                 continue
-            if abs(pts[j][0] - sx) <= max_cluster_span and abs(pts[j][1] - sy) <= max_cluster_span:
+            if (
+                abs(pts[j][0] - sx) <= max_cluster_span
+                and abs(pts[j][1] - sy) <= max_cluster_span
+            ):
                 group.append(j)
                 used[j] = True
         if len({pts[k][2] for k in group}) >= 2:
@@ -329,9 +332,7 @@ def detect_orange_dot(
         return find_largest_hsv_blob(
             frame, *ORANGE_HSV_RANGE, min_area=_ORANGE_MIN_AREA
         )
-    blobs = find_all_hsv_blobs(
-        frame, *ORANGE_HSV_RANGE, min_area=_ORANGE_MIN_AREA
-    )
+    blobs = find_all_hsv_blobs(frame, *ORANGE_HSV_RANGE, min_area=_ORANGE_MIN_AREA)
     if not blobs:
         return None
     ex, ey = near

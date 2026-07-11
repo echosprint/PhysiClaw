@@ -129,7 +129,7 @@ def camera_set_manual_exposure(cap, exposure: int) -> None:
     values are the driver's to clamp."""
     import cv2
 
-    ticks = max(1, round((2.0 ** exposure) * 10_000))
+    ticks = max(1, round((2.0**exposure) * 10_000))
     cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
     cap.set(cv2.CAP_PROP_EXPOSURE, ticks)
 
@@ -188,9 +188,7 @@ def hardware_permission_hints() -> list[str]:
         )
     serial_nodes = glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*")
     # dialout on Debian/Ubuntu, uucp on Arch — flag whichever exists.
-    serial_group = next(
-        (g for g in ("dialout", "uucp") if _group_exists(g)), None
-    )
+    serial_group = next((g for g in ("dialout", "uucp") if _group_exists(g)), None)
     if serial_nodes and serial_group and not _in_group(serial_group):
         hints.append(
             f"serial: you're not in the '{serial_group}' group — arm access is "

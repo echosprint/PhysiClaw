@@ -3,6 +3,7 @@
 The state machine takes an injectable clock, so the decay rules are
 tested with a plain fake instead of mocking `time.monotonic`.
 """
+
 from __future__ import annotations
 
 from physiclaw.core.orchestration.clipboard import ClipboardSyncState

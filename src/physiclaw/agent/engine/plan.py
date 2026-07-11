@@ -13,6 +13,7 @@ Mutation funnels through the `update_progress` tool (handler in
 / completed); Plan.update() enforces the invariant that at most ONE
 step is `in_progress` at a time — matching Claude Code's TodoWrite rule.
 """
+
 from dataclasses import dataclass, field
 
 from physiclaw.agent.engine.dto import Message, UserMessage
@@ -72,9 +73,7 @@ PLAN_REQUIRED_AFTER = CONFIG.engine.plan_required_after
 class Plan:
     user_said: str = DEFAULT_USER_SAID
     understanding: str = DEFAULT_UNDERSTANDING
-    steps: list[Step] = field(
-        default_factory=lambda: [Step(DEFAULT_SEED_STEP)]
-    )
+    steps: list[Step] = field(default_factory=lambda: [Step(DEFAULT_SEED_STEP)])
     turns_since_update: int = 0
     step_turns: int = 0  # turns the current in_progress step has run
 
@@ -105,9 +104,7 @@ class Plan:
             return True
         if not self.steps:
             return False
-        return not (
-            len(self.steps) == 1 and self.steps[0].content == DEFAULT_SEED_STEP
-        )
+        return not (len(self.steps) == 1 and self.steps[0].content == DEFAULT_SEED_STEP)
 
     def tick_turn(self) -> None:
         """Engine calls this once per turn (before `inject_tail`) so
@@ -135,7 +132,9 @@ class Plan:
         # leave the plan in a confusing mixed state.
         parsed_steps: list[Step] | None = None
         if steps is not None:
-            parsed_steps = [Step(content=s["content"], status=s["status"]) for s in steps]
+            parsed_steps = [
+                Step(content=s["content"], status=s["status"]) for s in steps
+            ]
             active = [s for s in parsed_steps if s.status == IN_PROGRESS]
             if len(active) > 1:
                 names = ", ".join(repr(s.content) for s in active)

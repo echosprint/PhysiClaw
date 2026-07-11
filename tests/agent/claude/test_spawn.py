@@ -5,6 +5,7 @@ leaning; covered by exercising helper functions and `_SessionLog` in
 detail. Full integration deferred — async subprocess + streaming json
 + retry logic is brittle to mock cleanly.
 """
+
 from __future__ import annotations
 
 import json
@@ -39,11 +40,15 @@ from physiclaw.agent.runtime.hook import Trigger
 
 
 def test_mcp_tools_prefixes_names_and_takes_first_line(mocker) -> None:
-    mocker.patch.object(spawn, "discover_mcp_tools", return_value=[
-        {"name": "peek", "description": "Take a peek\n  multi-line"},
-        {"name": "tap", "description": "Tap target"},
-        {"name": "noop", "description": None},
-    ])
+    mocker.patch.object(
+        spawn,
+        "discover_mcp_tools",
+        return_value=[
+            {"name": "peek", "description": "Take a peek\n  multi-line"},
+            {"name": "tap", "description": "Tap target"},
+            {"name": "noop", "description": None},
+        ],
+    )
 
     out = _mcp_tools()
 
@@ -68,9 +73,14 @@ def test_mcp_config_uses_env_when_set(monkeypatch: pytest.MonkeyPatch) -> None:
 
     cfg = json.loads(_mcp_config())
 
-    assert cfg == {"mcpServers": {"physiclaw": {
-        "type": "http", "url": "http://example.com:9000/mcp",
-    }}}
+    assert cfg == {
+        "mcpServers": {
+            "physiclaw": {
+                "type": "http",
+                "url": "http://example.com:9000/mcp",
+            }
+        }
+    }
 
 
 def test_mcp_config_default_when_env_unset(
@@ -91,10 +101,12 @@ def test_tooling_card_empty_list_returns_empty_string() -> None:
 
 
 def test_tooling_card_lists_tools_as_markdown() -> None:
-    out = _tooling_card([
-        {"name": "mcp__physiclaw__peek", "description": "see screen"},
-        {"name": "mcp__physiclaw__tap", "description": "tap target"},
-    ])
+    out = _tooling_card(
+        [
+            {"name": "mcp__physiclaw__peek", "description": "see screen"},
+            {"name": "mcp__physiclaw__tap", "description": "tap target"},
+        ]
+    )
 
     assert "## Tooling" in out
     assert "mcp__physiclaw__" in out
@@ -109,7 +121,9 @@ def test_render_system_prompt_combines_parts(mocker, tmp_path: Path) -> None:
     fake_md = tmp_path / "CLAUDE.md"
     fake_md.write_text("# Doctrine\nbody\n\n")
     mocker.patch.object(spawn, "CLAUDE_MD", fake_md)
-    mocker.patch.object(spawn.skill, "render_section", return_value="## Available skills\nfoo")
+    mocker.patch.object(
+        spawn.skill, "render_section", return_value="## Available skills\nfoo"
+    )
     tools = [{"name": "mcp__physiclaw__peek", "description": "see"}]
 
     out = _render_system_prompt(tools, {})
@@ -120,7 +134,8 @@ def test_render_system_prompt_combines_parts(mocker, tmp_path: Path) -> None:
 
 
 def test_render_system_prompt_skips_empty_card_and_section(
-    mocker, tmp_path: Path,
+    mocker,
+    tmp_path: Path,
 ) -> None:
     fake_md = tmp_path / "CLAUDE.md"
     fake_md.write_text("body")
@@ -210,10 +225,12 @@ def test_session_log_event_assistant_text_returns_none(
     _isolated_log_dir: Path,
 ) -> None:
     slog = _SessionLog([])
-    out = slog.event({
-        "type": "assistant",
-        "message": {"content": [{"type": "text", "text": "hello"}]},
-    })
+    out = slog.event(
+        {
+            "type": "assistant",
+            "message": {"content": [{"type": "text", "text": "hello"}]},
+        }
+    )
     slog.close()
 
     assert out is None
@@ -230,12 +247,16 @@ def test_session_log_event_result_returns_data(_isolated_log_dir: Path) -> None:
 
 def test_session_log_summarizes_tool_use(_isolated_log_dir: Path) -> None:
     slog = _SessionLog([])
-    slog.event({
-        "type": "assistant",
-        "message": {"content": [
-            {"type": "tool_use", "name": "Read", "input": {"path": "x"}},
-        ]},
-    })
+    slog.event(
+        {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {"type": "tool_use", "name": "Read", "input": {"path": "x"}},
+                ]
+            },
+        }
+    )
     slog.close()
 
     text = list(_isolated_log_dir.glob("claude-*.log"))[0].read_text()
@@ -244,12 +265,16 @@ def test_session_log_summarizes_tool_use(_isolated_log_dir: Path) -> None:
 
 def test_session_log_summarizes_thinking(_isolated_log_dir: Path) -> None:
     slog = _SessionLog([])
-    slog.event({
-        "type": "assistant",
-        "message": {"content": [
-            {"type": "thinking", "thinking": "let me think"},
-        ]},
-    })
+    slog.event(
+        {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {"type": "thinking", "thinking": "let me think"},
+                ]
+            },
+        }
+    )
     slog.close()
 
     text = list(_isolated_log_dir.glob("claude-*.log"))[0].read_text()
@@ -260,10 +285,12 @@ def test_session_log_user_event_without_tool_result_no_summary(
     _isolated_log_dir: Path,
 ) -> None:
     slog = _SessionLog([])
-    slog.event({
-        "type": "user",
-        "message": {"content": [{"type": "text", "text": "ack"}]},
-    })
+    slog.event(
+        {
+            "type": "user",
+            "message": {"content": [{"type": "text", "text": "ack"}]},
+        }
+    )
     slog.close()
 
     # No crash; no tool_result line written.
@@ -273,12 +300,16 @@ def test_session_log_user_event_without_tool_result_no_summary(
 
 def test_session_log_summarizes_user_tool_result(_isolated_log_dir: Path) -> None:
     slog = _SessionLog([])
-    slog.event({
-        "type": "user",
-        "message": {"content": [
-            {"type": "tool_result", "content": "result value"},
-        ]},
-    })
+    slog.event(
+        {
+            "type": "user",
+            "message": {
+                "content": [
+                    {"type": "tool_result", "content": "result value"},
+                ]
+            },
+        }
+    )
     slog.close()
 
     text = list(_isolated_log_dir.glob("claude-*.log"))[0].read_text()
@@ -305,24 +336,31 @@ def test_session_log_unknown_event_type_no_summary(_isolated_log_dir: Path) -> N
 def test_session_log_assistant_no_text_no_summary(_isolated_log_dir: Path) -> None:
     slog = _SessionLog([])
     # Empty text block — falsy strip.
-    slog.event({
-        "type": "assistant",
-        "message": {"content": [{"type": "text", "text": "  "}]},
-    })
+    slog.event(
+        {
+            "type": "assistant",
+            "message": {"content": [{"type": "text", "text": "  "}]},
+        }
+    )
     slog.close()
 
 
 def test_session_log_forward_to_runtime_only_logs_first_line(
-    _isolated_log_dir: Path, caplog: pytest.LogCaptureFixture,
+    _isolated_log_dir: Path,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     with caplog.at_level(logging.INFO, logger="physiclaw.agent.claude.spawn"):
         slog = _SessionLog([])
-        slog.event({
-            "type": "assistant",
-            "message": {"content": [
-                {"type": "text", "text": "first line\nsecond line"},
-            ]},
-        })
+        slog.event(
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {"type": "text", "text": "first line\nsecond line"},
+                    ]
+                },
+            }
+        )
         slog.close()
 
     runtime_lines = [r for r in caplog.records if "claude:" in r.getMessage()]
@@ -348,12 +386,16 @@ def test_session_log_done_parses_sentinel_on_clean_exit(
     _isolated_log_dir: Path,
 ) -> None:
     slog = _SessionLog([])
-    slog.event({
-        "type": "assistant",
-        "message": {"content": [
-            {"type": "text", "text": "wrapping up\n>> DONE - all good"},
-        ]},
-    })
+    slog.event(
+        {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {"type": "text", "text": "wrapping up\n>> DONE - all good"},
+                ]
+            },
+        }
+    )
 
     status = slog.done(0)
     slog.close()
@@ -366,12 +408,16 @@ def test_session_log_done_parses_sentinel_on_clean_exit(
 
 def test_session_log_done_undone_on_nonzero_exit(_isolated_log_dir: Path) -> None:
     slog = _SessionLog([])
-    slog.event({
-        "type": "assistant",
-        "message": {"content": [
-            {"type": "text", "text": ">> DONE - claimed but crashed"},
-        ]},
-    })
+    slog.event(
+        {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {"type": "text", "text": ">> DONE - claimed but crashed"},
+                ]
+            },
+        }
+    )
 
     status = slog.done(1)
     slog.close()
@@ -391,21 +437,23 @@ def test_session_log_done_undone_when_no_text(_isolated_log_dir: Path) -> None:
 
 def test_session_log_done_truncates_recap_to_200_chars(_isolated_log_dir: Path) -> None:
     slog = _SessionLog([])
-    slog.event({
-        "type": "assistant",
-        "message": {"content": [
-            {"type": "text", "text": "x" * 500},
-        ]},
-    })
+    slog.event(
+        {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {"type": "text", "text": "x" * 500},
+                ]
+            },
+        }
+    )
 
     slog.done(0)
     slog.close()
 
     text = list(_isolated_log_dir.glob("claude-*.log"))[0].read_text()
     # OUTCOME line specifically — text summary line above contains 500 x's.
-    outcome_line = next(
-        line for line in text.splitlines() if "OUTCOME" in line
-    )
+    outcome_line = next(line for line in text.splitlines() if "OUTCOME" in line)
     assert "OUTCOME: UNDONE" in outcome_line
     # Recap is exactly 200 x's, no more.
     assert "x" * 200 in outcome_line
@@ -442,8 +490,7 @@ def test_child_env_strips_anthropic_claude_otel(
 
     env = _child_env()
 
-    for k in ("ANTHROPIC_API_KEY", "CLAUDE_CONFIG_DIR",
-              "OTEL_EXPORTER_OTLP_ENDPOINT"):
+    for k in ("ANTHROPIC_API_KEY", "CLAUDE_CONFIG_DIR", "OTEL_EXPORTER_OTLP_ENDPOINT"):
         assert k not in env
     assert env.get("HOME") == "/home/test"
     assert env.get("PHYSICLAW_HOME") == "/home/test/.physiclaw"
@@ -466,7 +513,8 @@ def test_env_strip_prefixes_constants() -> None:
 
 
 def test_warn_stray_context_logs_when_claude_md_present(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     monkeypatch.setattr(spawn, "PROJECT_ROOT", tmp_path)
@@ -475,12 +523,15 @@ def test_warn_stray_context_logs_when_claude_md_present(
     with caplog.at_level(logging.WARNING, logger="physiclaw.agent.claude.spawn"):
         _warn_stray_context()
 
-    assert any("CLAUDE.md" in r.getMessage() and "stray" in r.getMessage()
-               for r in caplog.records)
+    assert any(
+        "CLAUDE.md" in r.getMessage() and "stray" in r.getMessage()
+        for r in caplog.records
+    )
 
 
 def test_warn_stray_context_logs_when_dot_claude_present(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     monkeypatch.setattr(spawn, "PROJECT_ROOT", tmp_path)
@@ -493,7 +544,8 @@ def test_warn_stray_context_logs_when_dot_claude_present(
 
 
 def test_warn_stray_context_silent_when_clean(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     monkeypatch.setattr(spawn, "PROJECT_ROOT", tmp_path)
@@ -518,7 +570,9 @@ def test_normalize_claude_model_already_prefixed_passes_through() -> None:
 
 def test_normalize_claude_model_adds_prefix_to_bare_id() -> None:
     assert _normalize_claude_model_id("opus-4-7") == "claude-opus-4-7"
-    assert _normalize_claude_model_id("haiku-4-5-20251001") == "claude-haiku-4-5-20251001"
+    assert (
+        _normalize_claude_model_id("haiku-4-5-20251001") == "claude-haiku-4-5-20251001"
+    )
 
 
 # ---------- _build_cmd ----------
@@ -560,7 +614,8 @@ def test_build_cmd_includes_required_flags(mocker, tmp_path: Path) -> None:
 
 
 def test_build_cmd_raises_when_claude_md_missing(
-    mocker, tmp_path: Path,
+    mocker,
+    tmp_path: Path,
 ) -> None:
     mocker.patch.object(spawn, "CLAUDE_MD", tmp_path / "missing.md")
 
@@ -591,11 +646,17 @@ class _FakeStdout:
 
 @pytest.mark.asyncio
 async def test_stream_collects_result_event(_isolated_log_dir: Path) -> None:
-    proc = SimpleNamespace(stdout=_FakeStdout([
-        json.dumps({"type": "assistant", "message": {"content": []}}).encode() + b"\n",
-        json.dumps({"type": "result", "num_turns": 1, "result": "ok"}).encode() + b"\n",
-        b"",  # EOF
-    ]))
+    proc = SimpleNamespace(
+        stdout=_FakeStdout(
+            [
+                json.dumps({"type": "assistant", "message": {"content": []}}).encode()
+                + b"\n",
+                json.dumps({"type": "result", "num_turns": 1, "result": "ok"}).encode()
+                + b"\n",
+                b"",  # EOF
+            ]
+        )
+    )
     slog = _SessionLog([])
 
     out = await _stream(proc, slog)
@@ -606,12 +667,16 @@ async def test_stream_collects_result_event(_isolated_log_dir: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_stream_skips_blank_lines(_isolated_log_dir: Path) -> None:
-    proc = SimpleNamespace(stdout=_FakeStdout([
-        b"\n",
-        b"   \n",
-        json.dumps({"type": "result", "result": "x"}).encode() + b"\n",
-        b"",
-    ]))
+    proc = SimpleNamespace(
+        stdout=_FakeStdout(
+            [
+                b"\n",
+                b"   \n",
+                json.dumps({"type": "result", "result": "x"}).encode() + b"\n",
+                b"",
+            ]
+        )
+    )
     slog = _SessionLog([])
 
     out = await _stream(proc, slog)
@@ -624,10 +689,14 @@ async def test_stream_skips_blank_lines(_isolated_log_dir: Path) -> None:
 async def test_stream_logs_raw_on_json_decode_error(
     _isolated_log_dir: Path,
 ) -> None:
-    proc = SimpleNamespace(stdout=_FakeStdout([
-        b"not valid json\n",
-        b"",
-    ]))
+    proc = SimpleNamespace(
+        stdout=_FakeStdout(
+            [
+                b"not valid json\n",
+                b"",
+            ]
+        )
+    )
     slog = _SessionLog([])
 
     out = await _stream(proc, slog)
@@ -642,10 +711,15 @@ async def test_stream_logs_raw_on_json_decode_error(
 async def test_stream_returns_none_when_no_result_event(
     _isolated_log_dir: Path,
 ) -> None:
-    proc = SimpleNamespace(stdout=_FakeStdout([
-        json.dumps({"type": "assistant", "message": {"content": []}}).encode() + b"\n",
-        b"",
-    ]))
+    proc = SimpleNamespace(
+        stdout=_FakeStdout(
+            [
+                json.dumps({"type": "assistant", "message": {"content": []}}).encode()
+                + b"\n",
+                b"",
+            ]
+        )
+    )
     slog = _SessionLog([])
 
     out = await _stream(proc, slog)

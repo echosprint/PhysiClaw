@@ -44,6 +44,7 @@ and routes on the provider id — `claude-code` goes to the subprocess
 engine, anything else here goes to the in-process engine via
 `make_provider(provider_id, model_id)`.
 """
+
 from physiclaw.agent.provider.anthropic_compat import AnthropicCompatibleProvider
 from physiclaw.agent.provider.openai_compat import OpenAICompatibleProvider
 from physiclaw.agent.provider.provider_base import (

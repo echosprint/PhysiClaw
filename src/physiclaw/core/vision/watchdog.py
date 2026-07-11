@@ -44,7 +44,10 @@ BADGE_MIN_AREA = 30
 # well-lit red window that misses it off-white-balance. Keying on the increase
 # vs the baseline keeps it specific — static dock colours cancel, only a newly
 # appeared vivid mark counts.
-BADGE_HUE_RANGES = [(0, 25), (155, 180)]  # red→orange (warm cast) and red→pink (cool cast)
+BADGE_HUE_RANGES = [
+    (0, 25),
+    (155, 180),
+]  # red→orange (warm cast) and red→pink (cool cast)
 BADGE_S_MIN = 70
 BADGE_V_MIN = 70
 # Illumination-adaptive mean threshold: in a dim scene the same event (a screen
@@ -65,7 +68,7 @@ REL_FLOOR = 6.0  # keeps the proportional threshold off ~0 on a near-black frame
 MEAN_DROP_GUARD = 15.0
 
 # --- EMA parameters ---
-EMA_FAST = 1 - math.exp(-1 / 5)   # ~0.18, 5s memory
+EMA_FAST = 1 - math.exp(-1 / 5)  # ~0.18, 5s memory
 EMA_SLOW = 1 - math.exp(-1 / 20)  # ~0.05, 20s memory
 EMA_STALE = 5.0  # re-init if no poll for this long (covers react cooldown)
 
@@ -82,6 +85,7 @@ ZONES = [(0.0, 0.1), (0.5, 1.0), (0.80, 1.0)]
 
 
 # --- Helpers ---
+
 
 def _check_content(slow: np.ndarray, fast: np.ndarray) -> dict:
     """Detect new visual content via std/mean divergence. The mean threshold
@@ -108,11 +112,13 @@ def _check_badge(slow: np.ndarray, fast: np.ndarray) -> dict:
     widened warm hue band + relaxed S/V so the badge is still caught when warm
     or dim room light shifts the camera's red toward orange/pink or desaturates
     it (see BADGE_HUE_RANGES / BADGE_S_MIN / BADGE_V_MIN)."""
-    ranges = [([lo, BADGE_S_MIN, BADGE_V_MIN], [hi, 255, 255])
-              for lo, hi in BADGE_HUE_RANGES]
+    ranges = [
+        ([lo, BADGE_S_MIN, BADGE_V_MIN], [hi, 255, 255]) for lo, hi in BADGE_HUE_RANGES
+    ]
 
     def warm(f):
         return int(np.count_nonzero(hsv_mask(to_hsv(f), ranges)))
+
     delta = warm(fast) - warm(slow)
     return {"warm_delta": delta, "wake": delta > BADGE_MIN_AREA}
 
@@ -129,8 +135,8 @@ def _crop_zones(frame, transforms) -> list[np.ndarray] | None:
         tl = transforms.pct_to_cam_pixel(0.0, y0)
         br = transforms.pct_to_cam_pixel(1.0, y1)
         crop = frame[
-            max(0, min(tl[1], h)):max(0, min(br[1], h)),
-            max(0, min(tl[0], w)):max(0, min(br[0], w)),
+            max(0, min(tl[1], h)) : max(0, min(br[1], h)),
+            max(0, min(tl[0], w)) : max(0, min(br[0], w)),
         ]
         if not crop.size:
             return None
@@ -140,11 +146,12 @@ def _crop_zones(frame, transforms) -> list[np.ndarray] | None:
 
 # --- Watchdog ---
 
+
 class Watchdog:
     """EMA-based wake detector. Thread-safe, 1 Hz polling."""
 
     def __init__(self):
-        self._ema = None          # ((fast, slow), ...) per zone, float32
+        self._ema = None  # ((fast, slow), ...) per zone, float32
         self._poll_time = 0.0
         self._last_wake = time.monotonic()
         self._lock = threading.Lock()
@@ -186,11 +193,18 @@ class Watchdog:
         # against the slow baseline it stays specific to a newly appeared mark.
         dock_d = _check_badge(ds.astype(np.uint8), crops[2])
 
-        result = {"wake": False, "reason": "",
-                  "banner": banner_d, "bottom": bottom_d, "dock": dock_d}
+        result = {
+            "wake": False,
+            "reason": "",
+            "banner": banner_d,
+            "bottom": bottom_d,
+            "dock": dock_d,
+        }
 
         if banner_d["wake"]:
-            result.update(wake=True, reason="notification banner appeared at top of screen")
+            result.update(
+                wake=True, reason="notification banner appeared at top of screen"
+            )
         elif bottom_d["wake"]:
             result.update(wake=True, reason="screen content changed in lower half")
         elif dock_d["wake"]:
@@ -210,7 +224,10 @@ class Watchdog:
             # the rest of the server stream.
             log.info(
                 "watchdog WAKE — %s | banner=%s bottom=%s dock=%s",
-                result["reason"], banner_d, bottom_d, dock_d,
+                result["reason"],
+                banner_d,
+                bottom_d,
+                dock_d,
             )
 
         return result

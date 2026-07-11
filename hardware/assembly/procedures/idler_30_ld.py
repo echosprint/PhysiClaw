@@ -54,13 +54,13 @@ from hardware.parts.standard.pulley import Pulley2GT20T, flange_belt_h
 from hardware.parts.standard.ring import SPECS as RING_SPECS, Ring
 from hardware.parts.standard.screw import SHOULDER_DIMS, Screw
 
-RING_SPEC          = "M5x8x0.5"
-SHOULDER_LEN       = 10    # mm — covers ring + idler (9 mm), 1 mm play
-FRAME_BHCS_LEN     = 10    # mm — BHCS M5 underhead length (stadium-slot frame mount)
-EXPLODE_SEPARATION =  5    # mm — exploded: air between adjacent parts in the stack
-SCREW_GAP          = 12    # mm — exploded: stack top → shoulder thread tip
-BHCS_GAP           = 21    # mm — exploded: block top → BHCS shank tip
-NUT_GAP            = 15    # mm — exploded: back face → nut center along +Y install axis
+RING_SPEC = "M5x8x0.5"
+SHOULDER_LEN = 10  # mm — covers ring + idler (9 mm), 1 mm play
+FRAME_BHCS_LEN = 10  # mm — BHCS M5 underhead length (stadium-slot frame mount)
+EXPLODE_SEPARATION = 5  # mm — exploded: air between adjacent parts in the stack
+SCREW_GAP = 12  # mm — exploded: stack top → shoulder thread tip
+BHCS_GAP = 21  # mm — exploded: block top → BHCS shank tip
+NUT_GAP = 15  # mm — exploded: back face → nut center along +Y install axis
 
 
 class ID30Ld(BaseAssembly):
@@ -68,15 +68,15 @@ class ID30Ld(BaseAssembly):
 
     def _build(self) -> Compound:
         block = IdlerMountFront().build()
-        ring_h        = RING_SPECS[RING_SPEC]["height"]
+        ring_h = RING_SPECS[RING_SPEC]["height"]
         nut_thickness = NUT_SPECS["square"]["M4"]["thickness"]
-        block_top_z   = block_thickness / 2
-        back_face_y   = block_width / 2
-        thread_len    = SHOULDER_DIMS["M4"]["thread_len"]
+        block_top_z = block_thickness / 2
+        back_face_y = block_width / 2
+        thread_len = SHOULDER_DIMS["M4"]["thread_len"]
 
         # Stack on the screw axis (x=0, y=top_hole_y), bottom → top.
         stack = [
-            (Ring(RING_SPEC).build(),                           ring_h),
+            (Ring(RING_SPEC).build(), ring_h),
             (Pulley2GT20T(kind="idler", toothed=False).build(), flange_belt_h),
         ]
 

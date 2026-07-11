@@ -24,6 +24,7 @@ Each underlying module also stays runnable on its own (e.g.
 ``uv run --group cad python -m hardware.assembly.build_procedures``) — the
 subcommands are a convenience wrapper, not a replacement.
 """
+
 import argparse
 import subprocess
 import sys
@@ -35,12 +36,12 @@ HARDWARE = Path(__file__).resolve().parent
 # with ``-m``; the manual builders run by file path because they use
 # script-relative imports (``import icon_svg``) and are not a package.
 _DELEGATED: dict[str, list[str]] = {
-    "build":    ["-m", "hardware.assembly.build_procedures"],
-    "print":    ["-m", "hardware.parts.build_custom_parts"],
-    "mark":     ["-m", "hardware.assembly.mark"],
-    "replay":   ["-m", "hardware.assembly.mark.replay"],
-    "camera":   ["-m", "hardware.assembly.projection"],
-    "manual":   [str(HARDWARE / "manual" / "build_manual.py")],
+    "build": ["-m", "hardware.assembly.build_procedures"],
+    "print": ["-m", "hardware.parts.build_custom_parts"],
+    "mark": ["-m", "hardware.assembly.mark"],
+    "replay": ["-m", "hardware.assembly.mark.replay"],
+    "camera": ["-m", "hardware.assembly.projection"],
+    "manual": [str(HARDWARE / "manual" / "build_manual.py")],
     "sourcing": [str(HARDWARE / "manual" / "build_sourcing_guide.py")],
 }
 
@@ -55,7 +56,9 @@ def _parts(argv: list[str]) -> int:
     from hardware.parts.export_standard import ALL_PARTS as STANDARD_PARTS
 
     parser = argparse.ArgumentParser(prog="python -m hardware")
-    parser.add_argument("--custom", action="store_true", help="export custom parts (default)")
+    parser.add_argument(
+        "--custom", action="store_true", help="export custom parts (default)"
+    )
     parser.add_argument("--standard", action="store_true", help="export standard parts")
     args = parser.parse_args(argv)
     export_custom = args.custom or not args.standard

@@ -42,9 +42,9 @@ from hardware.parts.standard.t_nut import (
     TNut,
 )
 
-BHCS_LENGTH = 16     # mm — BHCS M5 underhead length
-TNUT_GAP    = 20     # mm — exploded: vertical gap, bumper top → t-nut boss top
-SCREW_GAP   = 8      # mm — exploded: vertical gap, bumper bottom → shank tip
+BHCS_LENGTH = 16  # mm — BHCS M5 underhead length
+TNUT_GAP = 20  # mm — exploded: vertical gap, bumper top → t-nut boss top
+SCREW_GAP = 8  # mm — exploded: vertical gap, bumper bottom → shank tip
 
 
 class FR40BumperTnut(BaseAssembly):
@@ -79,10 +79,12 @@ class FR40BumperTnut(BaseAssembly):
         # then translate so the shank tip lands at shank_tip_z. In the
         # flipped frame the shank tip is +length above the seating plane,
         # so the seating plane (= translation Z) is shank_tip_z − length.
-        screw.move(Location(
-            (0, 0, shank_tip_z - BHCS_LENGTH),
-            (180, 0, 0),
-        ))
+        screw.move(
+            Location(
+                (0, 0, shank_tip_z - BHCS_LENGTH),
+                (180, 0, 0),
+            )
+        )
 
         # T-nut local: +Y is bore/boss axis, +Z is slide length. The
         # plane below sends local +Z → world +Y (slide axis along world
@@ -91,15 +93,24 @@ class FR40BumperTnut(BaseAssembly):
         # lands on the world Z axis and the boss top (local
         # y=HAMMER_TOTAL_HEIGHT) lands at boss_top_z.
         slide_half = TNUT_LENGTHS["hammer"] / 2
-        nut.move(Location(Plane(
-            origin=(0, -slide_half, boss_top_z + HAMMER_TOTAL_HEIGHT),
-            x_dir=(1, 0, 0),
-            z_dir=(0, 1, 0),
-        )))
+        nut.move(
+            Location(
+                Plane(
+                    origin=(0, -slide_half, boss_top_z + HAMMER_TOTAL_HEIGHT),
+                    x_dir=(1, 0, 0),
+                    z_dir=(0, 1, 0),
+                )
+            )
+        )
 
-        return Compound(label="frame_40_bumper_tnut", children=[
-            bumper, nut, screw,
-        ])
+        return Compound(
+            label="frame_40_bumper_tnut",
+            children=[
+                bumper,
+                nut,
+                screw,
+            ],
+        )
 
 
 if __name__ == "__main__":

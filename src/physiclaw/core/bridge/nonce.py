@@ -30,6 +30,8 @@ NONCE_SQUARE_SIZE = 15  # CSS pixels per square
 def nonce_css_x(viewport_width: float) -> int:
     """Left edge (CSS px) that centers the grid on the viewport's x axis."""
     return round(viewport_width / 2 - NONCE_GRID_COLS * NONCE_SQUARE_SIZE / 2)
+
+
 NONCE_DARK = 40  # bit 0 — dark grey
 NONCE_LIGHT = 220  # bit 1 — light grey
 NONCE_THRESHOLD = 130  # luminance midpoint between dark and light

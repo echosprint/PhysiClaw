@@ -1,4 +1,5 @@
 """Tests for `physiclaw.core.logger.dumps`."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -79,7 +80,8 @@ def test_mkdir_idempotent(tmp_path: Path) -> None:
 
 
 def test_save_tool_call_no_op_when_env_unset(
-    fake_dirs, monkeypatch: pytest.MonkeyPatch,
+    fake_dirs,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("PHYSICLAW_SAVE_TOOL_CALLS", raising=False)
 
@@ -89,7 +91,8 @@ def test_save_tool_call_no_op_when_env_unset(
 
 
 def test_save_tool_call_writes_listing(
-    fake_dirs, monkeypatch: pytest.MonkeyPatch,
+    fake_dirs,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("PHYSICLAW_SAVE_TOOL_CALLS", "1")
 
@@ -103,7 +106,8 @@ def test_save_tool_call_writes_listing(
 
 
 def test_save_tool_call_writes_jpeg_when_provided(
-    fake_dirs, monkeypatch: pytest.MonkeyPatch,
+    fake_dirs,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("PHYSICLAW_SAVE_TOOL_CALLS", "1")
 
@@ -116,7 +120,8 @@ def test_save_tool_call_writes_jpeg_when_provided(
 
 
 def test_save_tool_call_skips_jpeg_when_none(
-    fake_dirs, monkeypatch: pytest.MonkeyPatch,
+    fake_dirs,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("PHYSICLAW_SAVE_TOOL_CALLS", "1")
 
@@ -130,7 +135,8 @@ def test_save_tool_call_skips_jpeg_when_none(
 
 
 def test_save_snapshot_no_op_when_env_unset(
-    fake_dirs, monkeypatch: pytest.MonkeyPatch,
+    fake_dirs,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("PHYSICLAW_SAVE_SNAPSHOTS", raising=False)
     frame = np.zeros((10, 10, 3), dtype=np.uint8)
@@ -141,7 +147,8 @@ def test_save_snapshot_no_op_when_env_unset(
 
 
 def test_save_snapshot_writes_jpeg(
-    fake_dirs, monkeypatch: pytest.MonkeyPatch,
+    fake_dirs,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("PHYSICLAW_SAVE_SNAPSHOTS", "1")
     frame = np.zeros((20, 20, 3), dtype=np.uint8)
@@ -158,7 +165,8 @@ def test_save_snapshot_writes_jpeg(
 
 
 def test_save_screenshot_no_op_when_env_unset(
-    fake_dirs, monkeypatch: pytest.MonkeyPatch,
+    fake_dirs,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("PHYSICLAW_SAVE_SCREENSHOTS", raising=False)
 
@@ -168,7 +176,8 @@ def test_save_screenshot_no_op_when_env_unset(
 
 
 def test_save_screenshot_writes_bytes(
-    fake_dirs, monkeypatch: pytest.MonkeyPatch,
+    fake_dirs,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("PHYSICLAW_SAVE_SCREENSHOTS", "1")
 
@@ -181,7 +190,9 @@ def test_save_screenshot_writes_bytes(
 
 
 def test_save_screenshot_filenames_unique_per_call(
-    fake_dirs, monkeypatch: pytest.MonkeyPatch, mocker,
+    fake_dirs,
+    monkeypatch: pytest.MonkeyPatch,
+    mocker,
 ) -> None:
     """Stamps differ across rapid-fire calls. Without ms precision, two
     calls in the same second would collide; mock _stamp to verify each

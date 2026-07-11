@@ -38,15 +38,15 @@ ZIP_PATH = OUT_DIR / "physiclaw_custom_parts.zip"
 # BOM's "Custom parts" line (11 pieces across 9 designs). The STEP filename comes
 # from the part itself (BasePart.output_path()), so it isn't restated here.
 CUSTOM_PARTS: list[tuple[type, int, str, str]] = [
-    (BeltClamp,       1, "Belt clamp",           "同步带夹具"),
-    (IdlerMountFront, 2, "Idler mount (front)",  "惰轮支座（前）"),
-    (IdlerMountMotor, 2, "Idler mount (motor)",  "惰轮支座（电机侧）"),
-    (PcbHolder,       1, "Control board holder", "控制板支架"),
-    (PhoneBed,        1, "Phone bed",            "手机托架"),
-    (SolenoidMount,   1, "Solenoid mount",       "电磁铁支架"),
-    (TubeHolder,      1, "Tube holder",          "导管支架"),
-    (XyJointLeft,     1, "XY joint (left)",      "XY 连接件（左）"),
-    (XyJointRight,    1, "XY joint (right)",     "XY 连接件（右）"),
+    (BeltClamp, 1, "Belt clamp", "同步带夹具"),
+    (IdlerMountFront, 2, "Idler mount (front)", "惰轮支座（前）"),
+    (IdlerMountMotor, 2, "Idler mount (motor)", "惰轮支座（电机侧）"),
+    (PcbHolder, 1, "Control board holder", "控制板支架"),
+    (PhoneBed, 1, "Phone bed", "手机托架"),
+    (SolenoidMount, 1, "Solenoid mount", "电磁铁支架"),
+    (TubeHolder, 1, "Tube holder", "导管支架"),
+    (XyJointLeft, 1, "XY joint (left)", "XY 连接件（左）"),
+    (XyJointRight, 1, "XY joint (right)", "XY 连接件（右）"),
 ]
 
 
@@ -86,8 +86,20 @@ def _manifest(rows: list[tuple[str, int, str, str]], lang: str) -> str:
     c_file, c_qty, c_name = m["cols"]
     fw = max(len(c_file), *(len(f) for f, *_ in rows))
     head = f"{c_file:<{fw}}  {c_qty:>3}  {c_name}"
-    out = [m["title"], "", m["process"], m["material"], m["color"], m["units"], "",
-           m["intro"], m["qty_note"], "", head, "-" * len(head)]
+    out = [
+        m["title"],
+        "",
+        m["process"],
+        m["material"],
+        m["color"],
+        m["units"],
+        "",
+        m["intro"],
+        m["qty_note"],
+        "",
+        head,
+        "-" * len(head),
+    ]
     total = 0
     for fname, qty, en, zh in rows:
         out.append(f"{fname:<{fw}}  {qty:>3}  {en if lang == 'en' else zh}")
@@ -104,8 +116,10 @@ def build() -> Path:
         shutil.rmtree(OUT_DIR)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     rows: list[tuple[str, int, str, str]] = []
-    with tempfile.TemporaryDirectory() as tmp, \
-            zipfile.ZipFile(ZIP_PATH, "w", zipfile.ZIP_DEFLATED) as zf:
+    with (
+        tempfile.TemporaryDirectory() as tmp,
+        zipfile.ZipFile(ZIP_PATH, "w", zipfile.ZIP_DEFLATED) as zf,
+    ):
         for cls, qty, en, zh in CUSTOM_PARTS:
             part = cls(qty=qty)
             shape = part.build()

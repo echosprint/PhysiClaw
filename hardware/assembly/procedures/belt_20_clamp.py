@@ -62,12 +62,12 @@ from hardware.parts.standard.mgn9h import (
 )
 from hardware.parts.standard.screw import Screw
 
-BHCS_LENGTH    = 8     # mm — M3 BHCS underhead length
-CLAMP_EXPLODE  = 30    # mm — exploded: clamp pulled outboard along world -Y
-SCREW_EXPLODE  = 30    # mm — exploded: each BHCS shank tip floats this far
-                       #      further outboard than the clamp top face, so
-                       #      the screws read as separate parts that drop
-                       #      into the stadium-slot floors
+BHCS_LENGTH = 8  # mm — M3 BHCS underhead length
+CLAMP_EXPLODE = 30  # mm — exploded: clamp pulled outboard along world -Y
+SCREW_EXPLODE = 30  # mm — exploded: each BHCS shank tip floats this far
+#      further outboard than the clamp top face, so
+#      the screws read as separate parts that drop
+#      into the stadium-slot floors
 
 # ── Slider mount-grid center (X-rail's MGN9H slider top face) ─────────────────
 # Chain: 1020 beam slot face at world Y = joint_bottom = -EXT - slider_top_z
@@ -102,18 +102,21 @@ from hardware.parts.custom.xy_joint_left import (
 )
 from hardware.parts.standard.mgn9h import slider_position
 
-_y_rail_center_z      = (
-    (LONG_LENGTH - LONG_TOP_GAP) - lu_block_length / 2
-    + (LONG_BOT_GAP - ld_slot_center_y) + ld_block_width / 2
+_y_rail_center_z = (
+    (LONG_LENGTH - LONG_TOP_GAP)
+    - lu_block_length / 2
+    + (LONG_BOT_GAP - ld_slot_center_y)
+    + ld_block_width / 2
 ) / 2
-_y_carriage_slider_z  = _y_rail_center_z + (slider_position - 0.5) * RAIL_LENGTH
-_joint_grid_y         = -joint_width / 2 + joint_csk_hole_from_bottom + joint_csk_y_spacing / 2
-_left_joint_origin_z  = _y_carriage_slider_z + _joint_grid_y
-SLIDER_MOUNT_Z        = _left_joint_origin_z - joint_big_csk_y_n
+_y_carriage_slider_z = _y_rail_center_z + (slider_position - 0.5) * RAIL_LENGTH
+_joint_grid_y = -joint_width / 2 + joint_csk_hole_from_bottom + joint_csk_y_spacing / 2
+_left_joint_origin_z = _y_carriage_slider_z + _joint_grid_y
+SLIDER_MOUNT_Z = _left_joint_origin_z - joint_big_csk_y_n
 
 
 class BE20Clamp(BaseAssembly):
     camera = [MAIN_FRAME_VIEW, Camera(-9.68, -51.45, -8.14)]
+
     def _build(self) -> Compound:
         base_compound = BE10MotorA(exploded=False).build()
 
@@ -134,11 +137,15 @@ class BE20Clamp(BaseAssembly):
             clamp_origin_y -= CLAMP_EXPLODE
 
         clamp = BeltClamp().build()
-        clamp.move(Location(Plane(
-            origin=(clamp_origin_x, clamp_origin_y, clamp_origin_z),
-            x_dir=(1, 0, 0),    # native +X (length / mirror axis) → world +X
-            z_dir=(0, -1, 0),   # native +Z (top face)             → world -Y
-        )))                     # → derived native +Y → world +Z
+        clamp.move(
+            Location(
+                Plane(
+                    origin=(clamp_origin_x, clamp_origin_y, clamp_origin_z),
+                    x_dir=(1, 0, 0),  # native +X (length / mirror axis) → world +X
+                    z_dir=(0, -1, 0),  # native +Z (top face)             → world -Y
+                )
+            )
+        )  # → derived native +Y → world +Z
 
         # 4 × BHCS M3 × 8 — one per stadium-slot round end. Underhead
         # bottoms in the slot floor at world Y = SLIDER_MOUNT_Y -
@@ -154,18 +161,29 @@ class BE20Clamp(BaseAssembly):
         for hole_dx in (-mount_pitch_x / 2, +mount_pitch_x / 2):
             for hole_dz in (-mount_pitch_y / 2, +mount_pitch_y / 2):
                 screw = Screw("BHCS", "M3", BHCS_LENGTH).build()
-                screw.move(Location(Plane(
-                    origin=(SLIDER_MOUNT_X + hole_dx,
-                            screw_underhead_y,
-                            SLIDER_MOUNT_Z + hole_dz),
-                    x_dir=(1, 0, 0),
-                    z_dir=(0, -1, 0),    # native +Z (head) → world -Y
-                )))
+                screw.move(
+                    Location(
+                        Plane(
+                            origin=(
+                                SLIDER_MOUNT_X + hole_dx,
+                                screw_underhead_y,
+                                SLIDER_MOUNT_Z + hole_dz,
+                            ),
+                            x_dir=(1, 0, 0),
+                            z_dir=(0, -1, 0),  # native +Z (head) → world -Y
+                        )
+                    )
+                )
                 screws.append(screw)
 
-        return Compound(label="belt_20_clamp", children=[
-            base_compound, clamp, *screws,
-        ])
+        return Compound(
+            label="belt_20_clamp",
+            children=[
+                base_compound,
+                clamp,
+                *screws,
+            ],
+        )
 
 
 if __name__ == "__main__":

@@ -70,7 +70,10 @@ def hsv_blob_centroids(
     return [
         c
         for _, c in _hsv_blobs(
-            hsv, ranges, min_area=min_area, morph_op=morph_op,
+            hsv,
+            ranges,
+            min_area=min_area,
+            morph_op=morph_op,
             morph_kernel=morph_kernel,
         )
     ]

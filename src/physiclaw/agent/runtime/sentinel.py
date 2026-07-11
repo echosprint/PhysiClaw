@@ -4,6 +4,7 @@ Both agent runtimes close each session with a sentinel line of the form
 `>> DONE - <recap>`. `parse_sentinel` recovers the status word + recap from
 the assistant's final text; `STATUSES` is the canonical set.
 """
+
 import re
 
 DONE = "DONE"
@@ -13,7 +14,9 @@ IDLE = "IDLE"
 WAIT = "WAIT"
 STATUSES: frozenset[str] = frozenset({DONE, STUCK, FAIL, IDLE, WAIT})
 
-_SENTINEL_RE = re.compile(r">+\s*(DONE|STUCK|FAIL|IDLE|WAIT)\s*-?\s*(.*)", re.IGNORECASE)
+_SENTINEL_RE = re.compile(
+    r">+\s*(DONE|STUCK|FAIL|IDLE|WAIT)\s*-?\s*(.*)", re.IGNORECASE
+)
 
 
 def parse_sentinel(text: str | None) -> tuple[str | None, str]:

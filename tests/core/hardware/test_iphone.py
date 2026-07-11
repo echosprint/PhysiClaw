@@ -1,4 +1,5 @@
 """Tests for `physiclaw.core.hardware.iphone` — AssistiveTouch driver."""
+
 from __future__ import annotations
 
 import logging
@@ -14,11 +15,20 @@ from physiclaw.core.hardware.iphone import AssistiveTouch
 # ---------- Helpers ----------
 
 
-def _shift(*, dpr: float = 3.0, offset_x: float = 0.0, offset_y: float = 0.0,
-           w: int = 1170, h: int = 2532) -> ViewportShift:
+def _shift(
+    *,
+    dpr: float = 3.0,
+    offset_x: float = 0.0,
+    offset_y: float = 0.0,
+    w: int = 1170,
+    h: int = 2532,
+) -> ViewportShift:
     return ViewportShift(
-        offset_x=offset_x, offset_y=offset_y, dpr=dpr,
-        screenshot_width=w, screenshot_height=h,
+        offset_x=offset_x,
+        offset_y=offset_y,
+        dpr=dpr,
+        screenshot_width=w,
+        screenshot_height=h,
     )
 
 
@@ -77,9 +87,7 @@ def test_compute_at_screen_pos_logs(caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level(logging.INFO, logger="physiclaw.core.hardware.iphone"):
         at.compute_at_screen_pos(_shift())
 
-    assert any(
-        "AT screen position" in r.getMessage() for r in caplog.records
-    )
+    assert any("AT screen position" in r.getMessage() for r in caplog.records)
 
 
 # ---------- overlaps_at ----------
@@ -187,11 +195,13 @@ def test_move_to_at_calls_fast_move_with_grbl_coordinates() -> None:
     at = AssistiveTouch()
     at.compute_at_screen_pos(_shift())
     arm = MagicMock()
-    pct_to_grbl = np.array([
-        [10.0, 0.0, 1.0],
-        [0.0, 20.0, 2.0],
-        [0.0, 0.0, 1.0],
-    ])
+    pct_to_grbl = np.array(
+        [
+            [10.0, 0.0, 1.0],
+            [0.0, 20.0, 2.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
     sx, sy = at.at_screen
     expected_x = 10.0 * sx + 1.0
     expected_y = 20.0 * sy + 2.0

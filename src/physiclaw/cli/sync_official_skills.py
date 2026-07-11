@@ -27,6 +27,7 @@ so the mount takes effect at the next session/wake — a running server picks up
 a change without a restart, and the atomic swap means a session always reads
 either the whole old or whole new tree.
 """
+
 import datetime as dt
 import hashlib
 import json
@@ -203,9 +204,7 @@ def _hash_skill(skill_dir: Path) -> str:
     skill dir, then a NUL, then the file bytes — files sorted by that relpath.
     Prefixed ``sha256:`` so the algorithm can migrate later."""
     files = sorted(
-        p.relative_to(skill_dir).as_posix()
-        for p in skill_dir.rglob("*")
-        if p.is_file()
+        p.relative_to(skill_dir).as_posix() for p in skill_dir.rglob("*") if p.is_file()
     )
     h = hashlib.sha256()
     for rel in files:
@@ -289,7 +288,11 @@ def sync(
             tail = "; --force would re-sync." if force else " — no sync needed."
             emit(info(f"up to date at {remote_commit[:7]}{tail}"))
         elif local_commit:
-            emit(info(f"sync would run: update {local_commit[:7]} → {remote_commit[:7]}."))
+            emit(
+                info(
+                    f"sync would run: update {local_commit[:7]} → {remote_commit[:7]}."
+                )
+            )
         else:
             emit(info(f"sync would run: install {remote_commit[:7]} (none installed)."))
         return
@@ -305,12 +308,14 @@ def sync(
     #    whole pack never sits in memory. Quiet (no progress bar / announce
     #    line) — the pack is small; only the final synced result is shown.
     zip_path, actual = _download_to_temp(urls["zip"])
-    src: dict = {}          # the pack's manifest, parsed once from staging
+    src: dict = {}  # the pack's manifest, parsed once from staging
     hash_notes: list[str] = []
     try:
         # 3. Integrity — compare our digest to the published .sha256 BEFORE we
         #    touch the install. Mismatch = corrupt/tampered → abort untouched.
-        expected = _parse_sha256(_fetch_bytes(urls["sha256"]).decode("utf-8", "replace"))
+        expected = _parse_sha256(
+            _fetch_bytes(urls["sha256"]).decode("utf-8", "replace")
+        )
         if expected is None:
             exit_error(f"{urls['sha256']} is not a valid sha256sum line.")
         if actual != expected:
@@ -368,9 +373,7 @@ def sync(
         emit(warn(f"skill hash mismatch — {note}"))
     declared = len(src.get("skills", [])) if isinstance(src.get("skills"), list) else 0
     if declared and declared != landed:
-        emit(
-            warn(f"manifest lists {declared} skill(s) but {landed} landed on disk.")
-        )
+        emit(warn(f"manifest lists {declared} skill(s) but {landed} landed on disk."))
 
 
 def _read_source_json(p: Path) -> dict:

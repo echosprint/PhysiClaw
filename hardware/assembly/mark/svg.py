@@ -16,8 +16,9 @@ FILL_GROUP_ID = "manual-fill"
 
 class Color(TypedDict):
     """Polygon style — one of the six palette presets in the UI."""
-    fill:    str   # e.g. "#1e88ff"
-    opacity: float # 0.0 .. 1.0
+
+    fill: str  # e.g. "#1e88ff"
+    opacity: float  # 0.0 .. 1.0
 
 
 DEFAULT_COLOR: Color = {"fill": "#1e88ff", "opacity": 0.35}
@@ -35,8 +36,8 @@ _LINE_LIKE = ("line", "arrow")
 # cap on head length so it stays proportional to the line on short
 # arrows and doesn't grow unbounded on long ones.
 _ARROW_HEAD_HALF_ANGLE = math.radians(20)
-_ARROW_HEAD_LEN_MAX    = 12.0
-_ARROW_HEAD_FRACTION   = 0.25
+_ARROW_HEAD_LEN_MAX = 12.0
+_ARROW_HEAD_FRACTION = 0.25
 
 
 def _arrow_geometry(x1: float, y1: float, x2: float, y2: float):
@@ -53,15 +54,20 @@ def _arrow_geometry(x1: float, y1: float, x2: float, y2: float):
     L = math.hypot(dx, dy)
     if L == 0:
         return None
-    ang  = math.atan2(dy, dx)
-    hl   = min(L * _ARROW_HEAD_FRACTION, _ARROW_HEAD_LEN_MAX)
+    ang = math.atan2(dy, dx)
+    hl = min(L * _ARROW_HEAD_FRACTION, _ARROW_HEAD_LEN_MAX)
     back = hl * math.cos(_ARROW_HEAD_HALF_ANGLE)
     stem_end = (x2 - back * math.cos(ang), y2 - back * math.sin(ang))
-    base1 = (x2 - hl * math.cos(ang - _ARROW_HEAD_HALF_ANGLE),
-             y2 - hl * math.sin(ang - _ARROW_HEAD_HALF_ANGLE))
-    base2 = (x2 - hl * math.cos(ang + _ARROW_HEAD_HALF_ANGLE),
-             y2 - hl * math.sin(ang + _ARROW_HEAD_HALF_ANGLE))
+    base1 = (
+        x2 - hl * math.cos(ang - _ARROW_HEAD_HALF_ANGLE),
+        y2 - hl * math.sin(ang - _ARROW_HEAD_HALF_ANGLE),
+    )
+    base2 = (
+        x2 - hl * math.cos(ang + _ARROW_HEAD_HALF_ANGLE),
+        y2 - hl * math.sin(ang + _ARROW_HEAD_HALF_ANGLE),
+    )
     return stem_end, [(x2, y2), base1, base2]
+
 
 def _shape_bbox(s: dict) -> tuple[float, float, float, float] | None:
     """Tight bounding box of one shape in source-SVG units, or ``None``
@@ -78,10 +84,19 @@ def _shape_bbox(s: dict) -> tuple[float, float, float, float] | None:
     if t == "circle":
         return c["cx"] - c["r"], c["cy"] - c["r"], c["cx"] + c["r"], c["cy"] + c["r"]
     if t == "ellipse":
-        return c["cx"] - c["rx"], c["cy"] - c["ry"], c["cx"] + c["rx"], c["cy"] + c["ry"]
+        return (
+            c["cx"] - c["rx"],
+            c["cy"] - c["ry"],
+            c["cx"] + c["rx"],
+            c["cy"] + c["ry"],
+        )
     if t == "line":
-        return (min(c["x1"], c["x2"]), min(c["y1"], c["y2"]),
-                max(c["x1"], c["x2"]), max(c["y1"], c["y2"]))
+        return (
+            min(c["x1"], c["x2"]),
+            min(c["y1"], c["y2"]),
+            max(c["x1"], c["x2"]),
+            max(c["y1"], c["y2"]),
+        )
     if t == "arrow":
         geo = _arrow_geometry(c["x1"], c["y1"], c["x2"], c["y2"])
         if geo is None:
@@ -98,8 +113,12 @@ def _shapes_bbox(shapes) -> tuple[float, float, float, float] | None:
     bboxes = [b for b in (_shape_bbox(s) for s in shapes) if b is not None]
     if not bboxes:
         return None
-    return (min(b[0] for b in bboxes), min(b[1] for b in bboxes),
-            max(b[2] for b in bboxes), max(b[3] for b in bboxes))
+    return (
+        min(b[0] for b in bboxes),
+        min(b[1] for b in bboxes),
+        max(b[2] for b in bboxes),
+        max(b[3] for b in bboxes),
+    )
 
 
 def _expand_viewbox(vb: str | None, bb: tuple[float, float, float, float]) -> str:
@@ -125,7 +144,7 @@ _SVG_CLOSE_RE = re.compile(r"</\s*svg\s*>", re.IGNORECASE)
 def _style_key(s: dict) -> tuple:
     """Group key: shapes sharing this tuple can sit inside one wrapper
     ``<g>`` and skip declaring their own style attrs."""
-    color    = s.get("color") or DEFAULT_COLOR
+    color = s.get("color") or DEFAULT_COLOR
     outlined = bool(s.get("outlined")) or s["type"] in _LINE_LIKE
     return (color["fill"], color["opacity"], outlined)
 
@@ -230,7 +249,7 @@ def build_shapes_svg(
         if key != run_key:
             if run_key is not None:
                 lines.append("    </g>")
-            lines.append(f'    <g {_group_attrs(key)}>')
+            lines.append(f"    <g {_group_attrs(key)}>")
             run_key = key
         lines.append(f"      {_shape_tag(s)}")
     if run_key is not None:

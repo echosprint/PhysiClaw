@@ -1,4 +1,5 @@
 """Tests for `physiclaw logs` — session listing and inspection."""
+
 from __future__ import annotations
 
 import json
@@ -14,15 +15,30 @@ runner = CliRunner()
 
 def _summary(sid: str, sentinel: str = "DONE", recap: str = "ok") -> dict:
     return {
-        "schema": 1, "sid": sid, "started_at": "x", "ended_at": "y",
-        "duration_s": 313.0, "model_ref": "moonshot/kimi-k2.6",
-        "provider": "moonshot", "prompt_hash": "h", "triggers": [],
+        "schema": 1,
+        "sid": sid,
+        "started_at": "x",
+        "ended_at": "y",
+        "duration_s": 313.0,
+        "model_ref": "moonshot/kimi-k2.6",
+        "provider": "moonshot",
+        "prompt_hash": "h",
+        "triggers": [],
         "outcome": {"sentinel": sentinel, "recap": recap, "crashed": False},
-        "turns": 42, "provider_calls": 47, "provider_time_ms": 1,
-        "usage": {"input_tokens": 1_200_000, "output_tokens": 9_800,
-                  "cache_read_tokens": 0, "cache_creation_tokens": 0,
-                  "cache_hit_pct": 87.5},
-        "tool_calls": {"note": 42}, "errors": {}, "stuck_events": 0, "images": 3,
+        "turns": 42,
+        "provider_calls": 47,
+        "provider_time_ms": 1,
+        "usage": {
+            "input_tokens": 1_200_000,
+            "output_tokens": 9_800,
+            "cache_read_tokens": 0,
+            "cache_creation_tokens": 0,
+            "cache_hit_pct": 87.5,
+        },
+        "tool_calls": {"note": 42},
+        "errors": {},
+        "stuck_events": 0,
+        "images": 3,
     }
 
 
@@ -85,14 +101,21 @@ def test_logs_json_list_round_trips(sessions: Path) -> None:
 def test_logs_detail_prints_summary_and_narrative(sessions: Path) -> None:
     sd = _write_session(sessions, "20260710_090000")
     events = [
-        {"t": "2026-07-10T09:00:01.000", "event": "wake", "session": "s",
-         "model_ref": "m/x", "triggers": [{"source": "phone"}]},
-        {"t": "2026-07-10T09:00:05.000", "event": "done",
-         "sentinel": "DONE", "recap": "finished"},
+        {
+            "t": "2026-07-10T09:00:01.000",
+            "event": "wake",
+            "session": "s",
+            "model_ref": "m/x",
+            "triggers": [{"source": "phone"}],
+        },
+        {
+            "t": "2026-07-10T09:00:05.000",
+            "event": "done",
+            "sentinel": "DONE",
+            "recap": "finished",
+        },
     ]
-    (sd / "events.jsonl").write_text(
-        "\n".join(json.dumps(e) for e in events) + "\n"
-    )
+    (sd / "events.jsonl").write_text("\n".join(json.dumps(e) for e in events) + "\n")
 
     result = runner.invoke(app, ["logs", "20260710_090000"])
 
@@ -159,11 +182,17 @@ def _populate(sd: Path) -> None:
     (img / "00001_t0.jpg").write_bytes(b"jpeg")
 
 
-def test_save_packs_session_zip_with_privacy_notice(sessions: Path, tmp_path, monkeypatch) -> None:
+def test_save_packs_session_zip_with_privacy_notice(
+    sessions: Path, tmp_path, monkeypatch
+) -> None:
     import zipfile
 
-    sd = _write_session(sessions, "20260710_090000_ab12cd", sentinel="STUCK",
-                        recap="lost on home screen")
+    sd = _write_session(
+        sessions,
+        "20260710_090000_ab12cd",
+        sentinel="STUCK",
+        recap="lost on home screen",
+    )
     _populate(sd)
     monkeypatch.chdir(tmp_path)
 

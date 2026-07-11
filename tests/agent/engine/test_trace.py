@@ -8,6 +8,7 @@ emit + image scrubbing for both OpenAI (image_url) and Anthropic
 Module-level `_LOG_DIR` / `_RAW_DIR` / `_SESSIONS_DIR` are bound at
 import; the autouse fixture re-points them to per-test dirs.
 """
+
 from __future__ import annotations
 
 import base64
@@ -124,9 +125,9 @@ def test_brief_content_dict_image_form() -> None:
 
 
 def test_brief_content_dict_image_url_extracts_data_length() -> None:
-    out = brief_content([
-        {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,abcdef"}}
-    ])
+    out = brief_content(
+        [{"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,abcdef"}}]
+    )
 
     # The "data" portion (after the comma) is "abcdef" = 6 chars.
     assert out == "<image 6b>"
@@ -151,10 +152,12 @@ def test_brief_content_non_list_non_str_uses_repr() -> None:
 
 
 def test_brief_content_multiple_blocks_joined_by_plus() -> None:
-    out = brief_content([
-        TextBlock(text="a"),
-        ImageBlock(media_type="image/jpeg", data_b64="aGk="),
-    ])
+    out = brief_content(
+        [
+            TextBlock(text="a"),
+            ImageBlock(media_type="image/jpeg", data_b64="aGk="),
+        ]
+    )
 
     assert out == "a + <image 4b>"
 
@@ -165,24 +168,93 @@ def test_brief_content_multiple_blocks_joined_by_plus() -> None:
 @pytest.mark.parametrize(
     "event, expected_substr",
     [
-        ({"event": "wake", "session": "s1", "model_ref": "openai/gpt-x", "triggers": [{"source": "phone"}]}, "WAKE session=s1 model=openai/gpt-x"),
-        ({"event": "tools_loaded", "mcp": [1, 2], "local": [1]}, "tools: 2 MCP + 1 local"),
-        ({"event": "request", "turn": 3, "message_count": 7}, "turn 3: request (7 messages)"),
-        ({"event": "response", "turn": 1, "finish_reason": "stop", "tool_calls": [{"name": "tap"}]}, "turn 1: response finish=stop calls=['tap']"),
-        ({"event": "cache", "turn": 2, "hit": 100, "create": 5, "new": 50, "total": 155}, "cache hit=100 create=5 new=50 / total=155"),
-        ({"event": "tool_invalid_args", "turn": 4, "name": "tap", "error": "missing bbox"}, "tap invalid args: missing bbox"),
+        (
+            {
+                "event": "wake",
+                "session": "s1",
+                "model_ref": "openai/gpt-x",
+                "triggers": [{"source": "phone"}],
+            },
+            "WAKE session=s1 model=openai/gpt-x",
+        ),
+        (
+            {"event": "tools_loaded", "mcp": [1, 2], "local": [1]},
+            "tools: 2 MCP + 1 local",
+        ),
+        (
+            {"event": "request", "turn": 3, "message_count": 7},
+            "turn 3: request (7 messages)",
+        ),
+        (
+            {
+                "event": "response",
+                "turn": 1,
+                "finish_reason": "stop",
+                "tool_calls": [{"name": "tap"}],
+            },
+            "turn 1: response finish=stop calls=['tap']",
+        ),
+        (
+            {
+                "event": "cache",
+                "turn": 2,
+                "hit": 100,
+                "create": 5,
+                "new": 50,
+                "total": 155,
+            },
+            "cache hit=100 create=5 new=50 / total=155",
+        ),
+        (
+            {
+                "event": "tool_invalid_args",
+                "turn": 4,
+                "name": "tap",
+                "error": "missing bbox",
+            },
+            "tap invalid args: missing bbox",
+        ),
         ({"event": "tool_unknown", "turn": 4, "name": "ghost"}, "ghost unknown tool"),
-        ({"event": "tool_error", "turn": 5, "name": "tap", "error": "boom"}, "tap failed: boom"),
-        ({"event": "violations", "turn": 6, "codes": ["V1", "V2"]}, "violations ['V1', 'V2']"),
+        (
+            {"event": "tool_error", "turn": 5, "name": "tap", "error": "boom"},
+            "tap failed: boom",
+        ),
+        (
+            {"event": "violations", "turn": 6, "codes": ["V1", "V2"]},
+            "violations ['V1', 'V2']",
+        ),
         ({"event": "log_append", "turn": 1, "entry": "did stuff"}, "log: did stuff"),
-        ({"event": "memory_save", "turn": 1, "text": "user likes X"}, "memory: user likes X"),
-        ({"event": "sentinel", "turn": 9, "name": "DONE", "recap": "task complete"}, "SENTINEL DONE — task complete"),
-        ({"event": "wait_auto_scheduled", "job_id": "wait-check", "at": "10:00"}, "WAIT auto-scheduled: wait-check at 10:00"),
-        ({"event": "wait_auto_schedule_failed", "error": "x"}, "WAIT auto-schedule failed: x"),
+        (
+            {"event": "memory_save", "turn": 1, "text": "user likes X"},
+            "memory: user likes X",
+        ),
+        (
+            {"event": "sentinel", "turn": 9, "name": "DONE", "recap": "task complete"},
+            "SENTINEL DONE — task complete",
+        ),
+        (
+            {"event": "wait_auto_scheduled", "job_id": "wait-check", "at": "10:00"},
+            "WAIT auto-scheduled: wait-check at 10:00",
+        ),
+        (
+            {"event": "wait_auto_schedule_failed", "error": "x"},
+            "WAIT auto-schedule failed: x",
+        ),
         ({"event": "done", "sentinel": "DONE", "recap": "ok"}, "OUTCOME: DONE — ok"),
         ({"event": "crashed"}, "CRASHED"),
-        ({"event": "provider_failed", "turn": 2, "error": "rate limited"}, "provider failed: rate limited"),
-        ({"event": "prefix_drift", "turn": 3, "expected": "abcdefghijklmnop", "actual": "zyxwvutsrqponmlk"}, "PREFIX DRIFT"),
+        (
+            {"event": "provider_failed", "turn": 2, "error": "rate limited"},
+            "provider failed: rate limited",
+        ),
+        (
+            {
+                "event": "prefix_drift",
+                "turn": 3,
+                "expected": "abcdefghijklmnop",
+                "actual": "zyxwvutsrqponmlk",
+            },
+            "PREFIX DRIFT",
+        ),
     ],
 )
 def test_summarize_event_dispatch(event: dict, expected_substr: str) -> None:
@@ -211,20 +283,30 @@ def test_summarize_done_with_no_sentinel_uses_none_placeholder() -> None:
 
 
 def test_summarize_tool_result_with_text_uses_format_call_result() -> None:
-    out = trace._summarize({
-        "event": "tool_result", "turn": 1, "name": "note",
-        "arguments": {}, "text": "x" * 100,
-    })
+    out = trace._summarize(
+        {
+            "event": "tool_result",
+            "turn": 1,
+            "name": "note",
+            "arguments": {},
+            "text": "x" * 100,
+        }
+    )
 
     # `note` doesn't truncate at 80 — full text passes through.
     assert "x" * 100 in out
 
 
 def test_summarize_tool_result_without_text_uses_brief_content_on_blocks() -> None:
-    out = trace._summarize({
-        "event": "tool_result", "turn": 1, "name": "tap",
-        "arguments": {}, "blocks": [{"type": "text", "text": "ok"}],
-    })
+    out = trace._summarize(
+        {
+            "event": "tool_result",
+            "turn": 1,
+            "name": "tap",
+            "arguments": {},
+            "blocks": [{"type": "text", "text": "ok"}],
+        }
+    )
 
     assert "→ ok" in out
 
@@ -295,12 +377,16 @@ def test_trace_rolls_over_to_new_day_when_midnight_crossed(
 def test_rawlog_writes_session_start_line(_trace_dirs: Path) -> None:
     log = RawLog("sess-A")
     log.write_session_start(
-        provider="anthropic", model="claude-test",
-        prompt_hash="abc123", tools=[{"name": "tap"}],
+        provider="anthropic",
+        model="claude-test",
+        prompt_hash="abc123",
+        tools=[{"name": "tap"}],
     )
     log.close()
 
-    line = (_trace_dirs / "sessions" / "sess-A" / "wire.jsonl").read_text().splitlines()[0]
+    line = (
+        (_trace_dirs / "sessions" / "sess-A" / "wire.jsonl").read_text().splitlines()[0]
+    )
     obj = json.loads(line)
     assert obj["kind"] == "session_start"
     assert obj["provider"] == "anthropic"
@@ -312,7 +398,9 @@ def test_rawlog_writes_request_with_turn_index(_trace_dirs: Path) -> None:
     log.write_request(turn=3, messages=[{"role": "user", "content": "hi"}])
     log.close()
 
-    line = (_trace_dirs / "sessions" / "sess-B" / "wire.jsonl").read_text().splitlines()[0]
+    line = (
+        (_trace_dirs / "sessions" / "sess-B" / "wire.jsonl").read_text().splitlines()[0]
+    )
     obj = json.loads(line)
     assert obj["kind"] == "request"
     assert obj["turn"] == 3
@@ -324,7 +412,9 @@ def test_rawlog_writes_response_with_elapsed(_trace_dirs: Path) -> None:
     log.write_response(turn=1, raw={"id": "r1"}, elapsed_ms=42)
     log.close()
 
-    line = (_trace_dirs / "sessions" / "sess-C" / "wire.jsonl").read_text().splitlines()[0]
+    line = (
+        (_trace_dirs / "sessions" / "sess-C" / "wire.jsonl").read_text().splitlines()[0]
+    )
     obj = json.loads(line)
     assert obj["kind"] == "response"
     assert obj["elapsed_ms"] == 42
@@ -343,13 +433,18 @@ def test_rawlog_scrubs_openai_image_url_data_to_disk(_trace_dirs: Path) -> None:
     log = RawLog("sess-IMG")
     raw_bytes = b"fake jpeg bytes"
     b64 = base64.b64encode(raw_bytes).decode()
-    messages = [{
-        "role": "user",
-        "content": [
-            {"type": "text", "text": "look"},
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
-        ],
-    }]
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "look"},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+                },
+            ],
+        }
+    ]
 
     out = log._scrub_images(messages)
 
@@ -365,13 +460,21 @@ def test_rawlog_scrubs_anthropic_image_block_to_ref(_trace_dirs: Path) -> None:
     log = RawLog("sess-A")
     raw_bytes = b"png data"
     b64 = base64.b64encode(raw_bytes).decode()
-    messages = [{
-        "role": "user",
-        "content": [{
-            "type": "image",
-            "source": {"type": "base64", "media_type": "image/png", "data": b64},
-        }],
-    }]
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": b64,
+                    },
+                }
+            ],
+        }
+    ]
 
     out = log._scrub_images(messages)
 
@@ -385,20 +488,28 @@ def test_rawlog_scrubs_anthropic_tool_result_inner_content(_trace_dirs: Path) ->
     log = RawLog("sess-T")
     raw_bytes = b"img"
     b64 = base64.b64encode(raw_bytes).decode()
-    messages = [{
-        "role": "user",
-        "content": [{
-            "type": "tool_result",
-            "tool_use_id": "t1",
+    messages = [
+        {
+            "role": "user",
             "content": [
-                {"type": "text", "text": "caption"},
                 {
-                    "type": "image",
-                    "source": {"type": "base64", "media_type": "image/jpeg", "data": b64},
-                },
+                    "type": "tool_result",
+                    "tool_use_id": "t1",
+                    "content": [
+                        {"type": "text", "text": "caption"},
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/jpeg",
+                                "data": b64,
+                            },
+                        },
+                    ],
+                }
             ],
-        }],
-    }]
+        }
+    ]
 
     out = log._scrub_images(messages)
 
@@ -409,9 +520,12 @@ def test_rawlog_scrubs_anthropic_tool_result_inner_content(_trace_dirs: Path) ->
 
 def test_rawlog_passes_through_non_data_image_url(_trace_dirs: Path) -> None:
     log = RawLog("s")
-    msg = {"role": "user", "content": [
-        {"type": "image_url", "image_url": {"url": "https://x/img.jpg"}},
-    ]}
+    msg = {
+        "role": "user",
+        "content": [
+            {"type": "image_url", "image_url": {"url": "https://x/img.jpg"}},
+        ],
+    }
 
     out = log._scrub_images([msg])
 
@@ -422,9 +536,12 @@ def test_rawlog_passes_through_non_base64_anthropic_image(
     _trace_dirs: Path,
 ) -> None:
     log = RawLog("s")
-    msg = {"role": "user", "content": [
-        {"type": "image", "source": {"type": "url", "url": "https://x/img"}},
-    ]}
+    msg = {
+        "role": "user",
+        "content": [
+            {"type": "image", "source": {"type": "url", "url": "https://x/img"}},
+        ],
+    }
 
     out = log._scrub_images([msg])
 
@@ -435,11 +552,19 @@ def test_rawlog_falls_back_to_byte_count_stub_on_decode_failure(
     _trace_dirs: Path,
 ) -> None:
     log = RawLog("s")
-    msg = {"role": "user", "content": [
-        {"type": "image", "source": {
-            "type": "base64", "media_type": "image/jpeg", "data": "%%not base64%%"
-        }},
-    ]}
+    msg = {
+        "role": "user",
+        "content": [
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/jpeg",
+                    "data": "%%not base64%%",
+                },
+            },
+        ],
+    }
 
     out = log._scrub_images([msg])
 
@@ -476,9 +601,12 @@ def test_rawlog_empty_data_field_returns_unreadable_stub(
     _trace_dirs: Path,
 ) -> None:
     log = RawLog("s")
-    msg = {"role": "user", "content": [
-        {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,"}},
-    ]}
+    msg = {
+        "role": "user",
+        "content": [
+            {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,"}},
+        ],
+    }
 
     out = log._scrub_images([msg])
 
@@ -500,8 +628,11 @@ def test_purge_old_removes_files_older_than_retention_days(
     young.write_text("y")
 
     import os
+
     cutoff_seconds = trace._RETENTION_DAYS * 86400
-    long_ago = (dt.datetime.now() - dt.timedelta(seconds=cutoff_seconds + 100)).timestamp()
+    long_ago = (
+        dt.datetime.now() - dt.timedelta(seconds=cutoff_seconds + 100)
+    ).timestamp()
     os.utime(old, (long_ago, long_ago))
 
     trace._purge_old()
@@ -543,11 +674,19 @@ def test_trace_events_jsonl_summarizes_tool_result_blocks(_trace_dirs: Path) -> 
     # blocks may carry base64 screens whose bytes already live in
     # wire.jsonl — events.jsonl keeps a summary, not a second copy.
     t = Trace("s1")
-    t.write({
-        "event": "tool_result", "turn": 1, "name": "tap", "id": "c1",
-        "arguments": {"bbox": [0, 0, 1, 1]},
-        "blocks": [{"type": "text", "text": "ok"}, {"type": "image", "data": "aGk="}],
-    })
+    t.write(
+        {
+            "event": "tool_result",
+            "turn": 1,
+            "name": "tap",
+            "id": "c1",
+            "arguments": {"bbox": [0, 0, 1, 1]},
+            "blocks": [
+                {"type": "text", "text": "ok"},
+                {"type": "image", "data": "aGk="},
+            ],
+        }
+    )
     t.close()
 
     e = _events(_trace_dirs, "s1")[1]  # [0] is the env snapshot
@@ -572,21 +711,68 @@ def test_trace_events_jsonl_degrades_on_non_serializable_values(
 
 def _feed_session(t: Trace) -> None:
     """A synthetic event stream exercising every summary field."""
-    t.write({"event": "wake", "session": "s1", "model_ref": "moonshot/kimi-k2.6",
-             "triggers": [{"source": "phone", "description": "screen changed"}]})
+    t.write(
+        {
+            "event": "wake",
+            "session": "s1",
+            "model_ref": "moonshot/kimi-k2.6",
+            "triggers": [{"source": "phone", "description": "screen changed"}],
+        }
+    )
     t.write({"event": "prefix_pinned", "hash": "deadbeef"})
-    t.write({"event": "response", "turn": 0, "finish_reason": "tool_calls",
-             "content_len": 0, "elapsed_ms": 1500, "tool_calls": []})
-    t.write({"event": "cache", "turn": 0, "hit": 800, "create": 100,
-             "new": 100, "total": 1000, "out": 50})
-    t.write({"event": "tool_result", "turn": 0, "name": "note", "id": "a",
-             "arguments": {}, "text": "noted"})
-    t.write({"event": "tool_result", "turn": 1, "name": "tap", "id": "b",
-             "arguments": {}, "text": "tapped"})
+    t.write(
+        {
+            "event": "response",
+            "turn": 0,
+            "finish_reason": "tool_calls",
+            "content_len": 0,
+            "elapsed_ms": 1500,
+            "tool_calls": [],
+        }
+    )
+    t.write(
+        {
+            "event": "cache",
+            "turn": 0,
+            "hit": 800,
+            "create": 100,
+            "new": 100,
+            "total": 1000,
+            "out": 50,
+        }
+    )
+    t.write(
+        {
+            "event": "tool_result",
+            "turn": 0,
+            "name": "note",
+            "id": "a",
+            "arguments": {},
+            "text": "noted",
+        }
+    )
+    t.write(
+        {
+            "event": "tool_result",
+            "turn": 1,
+            "name": "tap",
+            "id": "b",
+            "arguments": {},
+            "text": "tapped",
+        }
+    )
     t.write({"event": "tool_blocked_stuck", "turn": 1, "name": "tap", "id": "c"})
     t.write({"event": "stuck_warning", "turn": 2, "name": "tap", "id": "d"})
-    t.write({"event": "tool_invalid_args", "turn": 2, "name": "tap", "id": "e",
-             "arguments": {}, "error": "bad bbox"})
+    t.write(
+        {
+            "event": "tool_invalid_args",
+            "turn": 2,
+            "name": "tap",
+            "id": "e",
+            "arguments": {},
+            "error": "bad bbox",
+        }
+    )
     t.write({"event": "bad_turn_shape", "turn": 3, "tool_calls": []})
     t.write({"event": "done", "sentinel": "DONE", "recap": "all good"})
 
@@ -676,15 +862,25 @@ def test_fmt_tokens_scales() -> None:
 def test_write_request_tags_images_with_turn(_trace_dirs: Path) -> None:
     log = RawLog("sess-T")
     b64 = base64.b64encode(b"img").decode()
-    log.write_request(turn=7, messages=[{
-        "role": "user",
-        "content": [
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+    log.write_request(
+        turn=7,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+                    },
+                ],
+            }
         ],
-    }])
+    )
     log.close()
 
-    line = (_trace_dirs / "sessions" / "sess-T" / "wire.jsonl").read_text().splitlines()[0]
+    line = (
+        (_trace_dirs / "sessions" / "sess-T" / "wire.jsonl").read_text().splitlines()[0]
+    )
     url = json.loads(line)["messages"][0]["content"][0]["image_url"]["url"]
     assert url == "images/00001_t7.jpg"
     assert (_trace_dirs / "sessions" / "sess-T" / url).read_bytes() == b"img"
@@ -695,6 +891,7 @@ def test_write_request_tags_images_with_turn(_trace_dirs: Path) -> None:
 
 def _age(path: Path, days: float) -> None:
     import os
+
     ago = (dt.datetime.now() - dt.timedelta(days=days)).timestamp()
     os.utime(path, (ago, ago))
 

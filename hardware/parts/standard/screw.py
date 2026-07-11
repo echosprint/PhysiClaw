@@ -7,13 +7,13 @@ from hardware.parts.base import BaseStandardPart
 # ── Dimension tables (mm) ─────────────────────────────────────────────────────
 # d = nominal Ø, P = coarse pitch.
 COMMON = {
-    "M2":   {"d": 2.0, "P": 0.40},
+    "M2": {"d": 2.0, "P": 0.40},
     "M2.5": {"d": 2.5, "P": 0.45},
-    "M3":   {"d": 3.0, "P": 0.50},
-    "M4":   {"d": 4.0, "P": 0.70},
-    "M5":   {"d": 5.0, "P": 0.80},
-    "M6":   {"d": 6.0, "P": 1.00},
-    "M8":   {"d": 8.0, "P": 1.25},
+    "M3": {"d": 3.0, "P": 0.50},
+    "M4": {"d": 4.0, "P": 0.70},
+    "M5": {"d": 5.0, "P": 0.80},
+    "M6": {"d": 6.0, "P": 1.00},
+    "M8": {"d": 8.0, "P": 1.25},
     # 1/4"-20 UNC: d = 1/4", P = 25.4/20 mm. Mates the Gooseneck female socket.
     "1/4-20": {"d": 6.35, "P": 1.27},
 }
@@ -21,21 +21,21 @@ COMMON = {
 # dk = max head Ø, k = head height, s = hex socket across-flats (Allen key).
 # SHCS — ISO 4762 / DIN 912 (head height ≈ d).
 SHCS_DIMS = {
-    "M2":   {"dk":  3.8, "k": 2.0, "s": 1.5},
-    "M2.5": {"dk":  4.5, "k": 2.5, "s": 2.0},
-    "M3":   {"dk":  5.5, "k": 3.0, "s": 2.5},
-    "M4":   {"dk":  7.0, "k": 4.0, "s": 3.0},
-    "M5":   {"dk":  8.5, "k": 5.0, "s": 4.0},
-    "M6":   {"dk": 10.0, "k": 6.0, "s": 5.0},
-    "M8":   {"dk": 13.0, "k": 8.0, "s": 6.0},
+    "M2": {"dk": 3.8, "k": 2.0, "s": 1.5},
+    "M2.5": {"dk": 4.5, "k": 2.5, "s": 2.0},
+    "M3": {"dk": 5.5, "k": 3.0, "s": 2.5},
+    "M4": {"dk": 7.0, "k": 4.0, "s": 3.0},
+    "M5": {"dk": 8.5, "k": 5.0, "s": 4.0},
+    "M6": {"dk": 10.0, "k": 6.0, "s": 5.0},
+    "M8": {"dk": 13.0, "k": 8.0, "s": 6.0},
     # 1/4"-20 UNC SHCS (ASME B18.3): dk = 3/8", k = 1/4", s = 3/16" hex.
     "1/4-20": {"dk": 9.53, "k": 6.35, "s": 4.76},
 }
 
 # FHCS — ISO 10642 / DIN 7991 (90° countersunk).
 FHCS_DIMS = {
-    "M3": {"dk":  6.0, "k": 1.86, "s": 2.0},
-    "M4": {"dk":  8.0, "k": 2.48, "s": 2.5},
+    "M3": {"dk": 6.0, "k": 1.86, "s": 2.0},
+    "M4": {"dk": 8.0, "k": 2.48, "s": 2.5},
     "M5": {"dk": 10.0, "k": 3.10, "s": 3.0},
     "M6": {"dk": 12.0, "k": 3.72, "s": 4.0},
     "M8": {"dk": 16.0, "k": 4.96, "s": 5.0},
@@ -45,9 +45,9 @@ FHCS_DIMS = {
 # shallowest socket of the three (lowest torque ceiling). Not a drop-in for
 # SHCS in clamp-critical joints (CoreXY corners, NEMA17 mounts).
 BHCS_DIMS = {
-    "M3": {"dk":  5.7, "k": 1.65, "s": 2.0},
-    "M4": {"dk":  7.6, "k": 2.20, "s": 2.5},
-    "M5": {"dk":  9.5, "k": 2.75, "s": 3.0},
+    "M3": {"dk": 5.7, "k": 1.65, "s": 2.0},
+    "M4": {"dk": 7.6, "k": 2.20, "s": 2.5},
+    "M5": {"dk": 9.5, "k": 2.75, "s": 3.0},
     "M6": {"dk": 10.5, "k": 3.30, "s": 4.0},
     "M8": {"dk": 14.0, "k": 4.40, "s": 5.0},
 }
@@ -58,9 +58,9 @@ BHCS_DIMS = {
 # is the shoulder length (the smooth rod).
 SHOULDER_DIMS = {
     "M4": {
-        "dk": 9.0,          # head diameter
-        "k": 3.5,           # head height
-        "s": 3.0,           # hex socket across-flats
+        "dk": 9.0,  # head diameter
+        "k": 3.5,  # head height
+        "s": 3.0,  # hex socket across-flats
         "shoulder_d": 5.0,  # smooth shoulder diameter
         "thread_len": 7.2,  # threaded section axial length
     },
@@ -90,7 +90,7 @@ head_top_chamfer = 0.2 * MM
 # hex by `pocket_rim_margin` (giving a visible flat ring around the hex);
 # its depth is the minimum that keeps the floor inside the dome material
 # plus `pocket_depth_margin` of slack.
-pocket_rim_margin   = 0.2  * MM
+pocket_rim_margin = 0.2 * MM
 pocket_depth_margin = 0.05 * MM
 
 
@@ -99,12 +99,12 @@ def _shcs_profile(d, length, dim):
     # Cylindrical shank + cylindrical cap head.
     dk, k = dim["dk"], dim["k"]
     Polyline(
-        (0,      -length),
-        (d / 2,  -length),
-        (d / 2,   0),
-        (dk / 2,  0),
-        (dk / 2,  k),
-        (0,       k),
+        (0, -length),
+        (d / 2, -length),
+        (d / 2, 0),
+        (dk / 2, 0),
+        (dk / 2, k),
+        (0, k),
         close=True,
     )
 
@@ -117,12 +117,12 @@ def _fhcs_profile(d, length, dim):
     top_z = k + head_skirt
     shank = length - top_z
     Polyline(
-        (0,      -shank),
-        (d / 2,  -shank),
-        (d / 2,   0),
-        (dk / 2,  k),         # cone
-        (dk / 2,  top_z),     # rim cylinder
-        (0,       top_z),     # flat top
+        (0, -shank),
+        (d / 2, -shank),
+        (d / 2, 0),
+        (dk / 2, k),  # cone
+        (dk / 2, top_z),  # rim cylinder
+        (0, top_z),  # flat top
         close=True,
     )
 
@@ -140,13 +140,13 @@ def _bhcs_profile(d, length, dim):
     dk, k = dim["dk"], dim["k"]
     rim_z = head_skirt
     apex_z = k + head_skirt
-    R = ((dk / 2) ** 2 + k ** 2) / (2 * k)
+    R = ((dk / 2) ** 2 + k**2) / (2 * k)
     Polyline(
-        (0,      -length),
-        (d / 2,  -length),
-        (d / 2,   0),
-        (dk / 2,  0),
-        (dk / 2,  rim_z),    # rim cylinder before the dome
+        (0, -length),
+        (d / 2, -length),
+        (d / 2, 0),
+        (dk / 2, 0),
+        (dk / 2, rim_z),  # rim cylinder before the dome
     )
     try:
         RadiusArc((dk / 2, rim_z), (0, apex_z), -R)
@@ -167,14 +167,14 @@ def _shoulder_profile(d, length, dim):
     dk, k = dim["dk"], dim["k"]
     sd, tl = dim["shoulder_d"], dim["thread_len"]
     Polyline(
-        (0,      -length - tl),
-        (d / 2,  -length - tl),
-        (d / 2,  -length),
+        (0, -length - tl),
+        (d / 2, -length - tl),
+        (d / 2, -length),
         (sd / 2, -length),
-        (sd / 2,  0),
-        (dk / 2,  0),
-        (dk / 2,  k),
-        (0,       k),
+        (sd / 2, 0),
+        (dk / 2, 0),
+        (dk / 2, k),
+        (0, k),
         close=True,
     )
 
@@ -267,9 +267,9 @@ class Screw(BaseStandardPart):
             # below still gets the full sock_depth.
             hex_top_z = head_top
             if self.screw_type == "BHCS":
-                R = ((dk / 2) ** 2 + k ** 2) / (2 * k)
+                R = ((dk / 2) ** 2 + k**2) / (2 * k)
                 pocket_r = hex_circumradius + pocket_rim_margin
-                pocket_depth = R - math.sqrt(R ** 2 - pocket_r ** 2) + pocket_depth_margin
+                pocket_depth = R - math.sqrt(R**2 - pocket_r**2) + pocket_depth_margin
                 with BuildSketch(Plane.XY.offset(head_top)):
                     Circle(pocket_r)
                 extrude(amount=-pocket_depth, mode=Mode.SUBTRACT)
@@ -284,9 +284,9 @@ class Screw(BaseStandardPart):
             # Break the sharp outer rim on flat-topped heads.
             if self.screw_type in ("SHCS", "SHOULDER"):
                 top_rim = [
-                    e for e in p.edges().filter_by(GeomType.CIRCLE)
-                    if abs(e.radius - dk / 2) < 0.01
-                    and abs(e.center().Z - k) < 0.01
+                    e
+                    for e in p.edges().filter_by(GeomType.CIRCLE)
+                    if abs(e.radius - dk / 2) < 0.01 and abs(e.center().Z - k) < 0.01
                 ]
                 chamfer(top_rim, length=head_top_chamfer)
 
@@ -306,8 +306,8 @@ class Screw(BaseStandardPart):
 
 
 if __name__ == "__main__":
-    Screw("SHCS",     "M3", 12 * MM).export()
-    Screw("FHCS",     "M3",  8 * MM).export()
-    Screw("BHCS",     "M3",  8 * MM).export()
+    Screw("SHCS", "M3", 12 * MM).export()
+    Screw("FHCS", "M3", 8 * MM).export()
+    Screw("BHCS", "M3", 8 * MM).export()
     Screw("SHOULDER", "M4", 20 * MM).export()
-    Screw("SHCS",     "1/4-20", 16 * MM).export()
+    Screw("SHCS", "1/4-20", 16 * MM).export()

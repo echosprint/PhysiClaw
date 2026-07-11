@@ -4,6 +4,7 @@ Network is mocked at the ``urllib.request.urlopen`` boundary; the
 ``physiclaw_home`` autouse fixture (see ``tests/conftest.py``) gives
 each test a clean ``paths.HOME`` so the cache file is per-test.
 """
+
 from __future__ import annotations
 
 import io
@@ -25,7 +26,7 @@ from physiclaw.cli import _update_check as uc
     "current,latest,expected",
     [
         ("0.0.5", "0.1.0", True),
-        ("0.0.5", "0.0.10", True),     # numeric, not lexical
+        ("0.0.5", "0.0.10", True),  # numeric, not lexical
         ("0.0.5", "0.0.5", False),
         ("0.1.0", "0.0.9", False),
         ("1.0.0", "1.0.0", False),
@@ -39,8 +40,8 @@ def test_is_newer_dotted_versions(current: str, latest: str, expected: bool) -> 
 @pytest.mark.parametrize(
     "current,latest",
     [
-        ("0.0.5", "0.1.0a1"),       # pre-release suffix → bail
-        ("0.0.5", "0.1.0+local"),   # local version → bail
+        ("0.0.5", "0.1.0a1"),  # pre-release suffix → bail
+        ("0.0.5", "0.1.0+local"),  # local version → bail
         ("0.0.5", ""),
     ],
 )
@@ -60,14 +61,16 @@ def test_env_disable_skips_check(val: str, monkeypatch: pytest.MonkeyPatch) -> N
 
 @pytest.mark.parametrize("val", ["", "0", "false", "no", " "])
 def test_env_disable_inactive_for_other_values(
-    val: str, monkeypatch: pytest.MonkeyPatch,
+    val: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("PHYSICLAW_DISABLE_UPDATE_CHECK", val)
     assert uc._disabled_via_env() is False
 
 
 def test_env_disable_short_circuits_banner(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
 ) -> None:
     monkeypatch.setenv("PHYSICLAW_DISABLE_UPDATE_CHECK", "1")
     # Even if PyPI would say "newer", the env disable wins before any I/O.
@@ -154,7 +157,8 @@ def test_read_cache_returns_none_when_top_level_is_not_object(
 
 
 def test_write_cache_swallows_oserror(
-    physiclaw_home: Path, mocker,
+    physiclaw_home: Path,
+    mocker,
 ) -> None:
     mocker.patch.object(Path, "write_text", side_effect=OSError("read-only"))
     # Must not raise.
@@ -165,7 +169,8 @@ def test_write_cache_swallows_oserror(
 
 
 def test_resolve_latest_uses_fresh_cache(
-    physiclaw_home: Path, mocker,
+    physiclaw_home: Path,
+    mocker,
 ) -> None:
     uc._write_cache("0.0.7")
     fetch_spy = mocker.patch.object(uc, "_fetch_pypi_version")
@@ -175,15 +180,22 @@ def test_resolve_latest_uses_fresh_cache(
 
 
 def test_resolve_latest_refetches_when_stale(
-    physiclaw_home: Path, mocker,
+    physiclaw_home: Path,
+    mocker,
 ) -> None:
     # Manually plant a stale cache.
     cache_file = physiclaw_home / "run" / "version-check.json"
     cache_file.parent.mkdir(parents=True, exist_ok=True)
-    cache_file.write_text(json.dumps({
-        "checked_at": (datetime.now(timezone.utc) - timedelta(days=30)).isoformat(),
-        "latest_version": "0.0.4",
-    }))
+    cache_file.write_text(
+        json.dumps(
+            {
+                "checked_at": (
+                    datetime.now(timezone.utc) - timedelta(days=30)
+                ).isoformat(),
+                "latest_version": "0.0.4",
+            }
+        )
+    )
     mocker.patch.object(uc, "_fetch_pypi_version", return_value="0.0.9")
 
     assert uc._resolve_latest() == "0.0.9"
@@ -193,14 +205,16 @@ def test_resolve_latest_refetches_when_stale(
 
 
 def test_resolve_latest_returns_none_when_pypi_unreachable(
-    physiclaw_home: Path, mocker,
+    physiclaw_home: Path,
+    mocker,
 ) -> None:
     mocker.patch.object(uc, "_fetch_pypi_version", return_value=None)
     assert uc._resolve_latest() is None
 
 
 def test_resolve_latest_falls_back_to_network_on_corrupt_cache(
-    physiclaw_home: Path, mocker,
+    physiclaw_home: Path,
+    mocker,
 ) -> None:
     cache_file = physiclaw_home / "run" / "version-check.json"
     cache_file.parent.mkdir(parents=True, exist_ok=True)
@@ -262,7 +276,8 @@ def banner_env(monkeypatch: pytest.MonkeyPatch, mocker) -> MagicMock:
 
 
 def test_banner_prints_when_newer(
-    banner_env: MagicMock, monkeypatch: pytest.MonkeyPatch,
+    banner_env: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(uc, "_pkg_version", "0.0.5")
     monkeypatch.setattr(uc, "_resolve_latest", lambda: "1.2.3")
@@ -276,7 +291,8 @@ def test_banner_prints_when_newer(
 
 
 def test_banner_silent_when_at_latest(
-    banner_env: MagicMock, monkeypatch: pytest.MonkeyPatch,
+    banner_env: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(uc, "_pkg_version", "1.2.3")
     monkeypatch.setattr(uc, "_resolve_latest", lambda: "1.2.3")
@@ -287,7 +303,8 @@ def test_banner_silent_when_at_latest(
 
 
 def test_banner_silent_when_pypi_unreachable(
-    banner_env: MagicMock, monkeypatch: pytest.MonkeyPatch,
+    banner_env: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(uc, "_resolve_latest", lambda: None)
 
@@ -297,7 +314,8 @@ def test_banner_silent_when_pypi_unreachable(
 
 
 def test_banner_silent_when_local_is_newer_than_pypi(
-    banner_env: MagicMock, monkeypatch: pytest.MonkeyPatch,
+    banner_env: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Dev install or pre-release ahead of public PyPI.
     monkeypatch.setattr(uc, "_pkg_version", "9.9.9")

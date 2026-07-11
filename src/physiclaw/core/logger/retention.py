@@ -4,6 +4,7 @@ Session artifacts have their own purge (`agent.engine.trace._purge_old`);
 this covers only the `<prefix>-YYYY-MM-DD.log` dailies, which are tiny by
 comparison and so keep a longer window (CONFIG.retention.log_days).
 """
+
 import logging
 import time
 from pathlib import Path
@@ -32,5 +33,8 @@ def purge_daily_logs(dir: Path, prefix: str, days: int) -> None:
             pass
     if removed:
         log.info(
-            "purged %d %s daily log(s) older than %d days", removed, prefix, days,
+            "purged %d %s daily log(s) older than %d days",
+            removed,
+            prefix,
+            days,
         )

@@ -220,6 +220,7 @@ async def handle_disconnect_camera(request, physiclaw):
     claim the device while the user adjusts the camera angle. Idempotent
     — returns ``released=False`` if no camera was connected.
     """
+
     def _do() -> bool:
         physiclaw.acquire()
         try:

@@ -10,6 +10,7 @@ The durable data model (Job dataclass, parser, field updates) lives in
   - the `@register`'d hook that does the ticking
   - the CLI used by the `/cron` skill and runtime
 """
+
 import datetime as dt
 import logging
 
@@ -49,10 +50,12 @@ def _build_trigger_description(due: list[Job]) -> str:
 
     body = "\n\n".join(blocks)
     done_lines = "\n".join(
-        f"  uv run python -m physiclaw.agent.hooks.cron done {j.id} <one-line result summary>" for j in due
+        f"  uv run python -m physiclaw.agent.hooks.cron done {j.id} <one-line result summary>"
+        for j in due
     )
     fail_lines = "\n".join(
-        f"  uv run python -m physiclaw.agent.hooks.cron fail {j.id} <what went wrong>" for j in due
+        f"  uv run python -m physiclaw.agent.hooks.cron fail {j.id} <what went wrong>"
+        for j in due
     )
     return (
         f"{body}\n\n"
@@ -174,7 +177,9 @@ def _cli() -> int:
 
     if cmd in ("done", "fail", "cancel"):
         if len(args) < 2:
-            print(f"usage: python -m physiclaw.agent.hooks.cron {cmd} <job-id> [result description]")
+            print(
+                f"usage: python -m physiclaw.agent.hooks.cron {cmd} <job-id> [result description]"
+            )
             return 2
         job_id = args[1]
         try:
@@ -227,7 +232,9 @@ def _cli() -> int:
             print(f"purged {len(purged)} stale job(s): {', '.join(purged)}")
         return 0
 
-    print("usage: python -m physiclaw.agent.hooks.cron [verify|jobs-to-do|purge|done|fail|cancel] [<id>]")
+    print(
+        "usage: python -m physiclaw.agent.hooks.cron [verify|jobs-to-do|purge|done|fail|cancel] [<id>]"
+    )
     return 2
 
 

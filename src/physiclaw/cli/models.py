@@ -33,6 +33,7 @@ Subcommands:
   - ``physiclaw models discover <provider>``
                                         — re-fetch the live model list
 """
+
 from typing import Annotated
 
 import typer
@@ -65,6 +66,7 @@ def _known_provider_ids() -> tuple[str, ...]:
     """All provider ids the CLI accepts — in-process + alias keys.
     Lazy-imports `agent.provider` so `physiclaw --help` stays fast."""
     from physiclaw.agent.provider import in_process_provider_ids
+
     return (*in_process_provider_ids(), *_PROVIDER_ALIAS.keys())
 
 
@@ -86,6 +88,7 @@ def _format_key_row(provider_id: str, *, indent: int = 2) -> str:
     """One-line key status for a provider, masked. Resolution lives in
     `provider.provider_key_status` — same source the runtime uses."""
     from physiclaw.agent.provider import provider_key_status
+
     pad = " " * indent
     masked, source = provider_key_status(provider_id)
     if masked is None:
@@ -102,10 +105,12 @@ def _root(ctx: typer.Context) -> None:
     try:
         ref, source = _config.model_ref_with_source()
     except RuntimeError:
-        typer.echo(warn(
-            "none — run `physiclaw models key <provider>`, "
-            "then `physiclaw models use <provider/model>`"
-        ))
+        typer.echo(
+            warn(
+                "none — run `physiclaw models key <provider>`, "
+                "then `physiclaw models use <provider/model>`"
+            )
+        )
         typer.echo()
         typer.echo(next_hint("physiclaw models list"))
         return
@@ -139,8 +144,9 @@ def _list(
 
     known_all = _known_provider_ids()
     if provider is not None and provider not in known_all:
-        typer.echo(warn(f"unknown provider {provider!r} "
-                        f"(known: {', '.join(known_all)})"))
+        typer.echo(
+            warn(f"unknown provider {provider!r} (known: {', '.join(known_all)})")
+        )
         raise typer.Exit(code=1)
 
     targets = (provider,) if provider else known_all
@@ -149,7 +155,9 @@ def _list(
         typer.echo(section(pid))
         ids = sorted(discovered.model_ids(source))
         if not ids:
-            typer.echo(f"  (no discovery cache — run `physiclaw models discover {pid}`)")
+            typer.echo(
+                f"  (no discovery cache — run `physiclaw models discover {pid}`)"
+            )
         else:
             for mid in ids:
                 typer.echo(f"  {pid}/{mid}")
@@ -176,9 +184,7 @@ def _use_impl(ref: str) -> None:
 
     known_all = _known_provider_ids()
     if provider_id not in known_all:
-        exit_error(
-            f"unknown provider {provider_id!r} (known: {', '.join(known_all)})"
-        )
+        exit_error(f"unknown provider {provider_id!r} (known: {', '.join(known_all)})")
 
     source = _discovery_source(provider_id)
     if not discovered.is_cached(source, model_id):
@@ -208,7 +214,7 @@ def _use(
         str,
         typer.Argument(
             help="Exact `provider/model` ref, e.g. `openai/gpt-5.4` "
-                 "or `claude-code/claude-sonnet-4-6`.",
+            "or `claude-code/claude-sonnet-4-6`.",
         ),
     ],
 ) -> None:
@@ -230,7 +236,7 @@ def _key(
         str | None,
         typer.Argument(
             help="Key value. Omit for an interactive hidden prompt "
-                 "(keeps the secret out of shell history).",
+            "(keeps the secret out of shell history).",
         ),
     ] = None,
 ) -> None:
@@ -247,9 +253,7 @@ def _key(
         )
     known_all = _known_provider_ids()
     if provider not in known_all:
-        exit_error(
-            f"unknown provider {provider!r} (known: {', '.join(known_all)})"
-        )
+        exit_error(f"unknown provider {provider!r} (known: {', '.join(known_all)})")
     if value is None:
         value = typer.prompt(f"{provider} api key", hide_input=True)
     path = _key_config_path(provider)
@@ -274,6 +278,7 @@ def _fetch_live_models(provider: str) -> list[dict]:
     import asyncio
 
     from physiclaw.agent.provider import provider_class
+
     cls = provider_class(provider)
     p = cls(model="")
 
@@ -300,6 +305,7 @@ def _print_live_models_table(
     user typed `claude-code` and should see that name echoed back.
     """
     from physiclaw.agent.provider import discovered
+
     discovered.save(provider, models)
     label = display or provider
 
@@ -308,9 +314,11 @@ def _print_live_models_table(
         typer.echo(f"    {m.get('id', '')}")
     typer.echo()
     typer.echo(next_hint(f"physiclaw models use {label}/<id>           # pick one"))
-    typer.echo(next_hint(
-        f"physiclaw models discover {label}     # re-fetch later for new releases"
-    ))
+    typer.echo(
+        next_hint(
+            f"physiclaw models discover {label}     # re-fetch later for new releases"
+        )
+    )
 
 
 @models_app.command("keys")
@@ -319,6 +327,7 @@ def _keys() -> None:
     env var or config file). Mirrors `BaseProvider._api_key()`
     resolution so what's shown is what the server will use."""
     from physiclaw.agent.provider import in_process_provider_ids
+
     typer.echo(section("Provider API keys"))
     for pid in in_process_provider_ids():
         typer.echo(_format_key_row(pid, indent=2))
@@ -328,8 +337,10 @@ def _keys() -> None:
 def _discover(
     provider: Annotated[
         str,
-        typer.Argument(help="Provider id, e.g. `openai`, `qwen`, `anthropic`. "
-                            "`claude-code` aliases `anthropic` (shared catalog)."),
+        typer.Argument(
+            help="Provider id, e.g. `openai`, `qwen`, `anthropic`. "
+            "`claude-code` aliases `anthropic` (shared catalog)."
+        ),
     ],
 ) -> None:
     """Fetch the live model list from <provider>'s API.
@@ -341,10 +352,7 @@ def _discover(
     """
     known_all = _known_provider_ids()
     if provider not in known_all:
-        exit_error(
-            f"unknown provider {provider!r} "
-            f"(known: {', '.join(known_all)})"
-        )
+        exit_error(f"unknown provider {provider!r} (known: {', '.join(known_all)})")
 
     source = _discovery_source(provider)
     try:

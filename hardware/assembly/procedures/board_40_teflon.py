@@ -36,14 +36,14 @@ from hardware.parts.custom import belt_clamp as BC
 from hardware.parts.custom import tube_holder as TH
 from hardware.parts.standard.teflon import Teflon
 
-TUBE_OD        = 4      # mm — OD4 PTFE (plugs the 4 mm sockets)
-TUBE_ID        = 2      # mm
-TANGENT_SCALAR = 2.0    # Bézier-handle length — full enough for the ∩ apex to sweep
-EXPLODE        = 40     # mm — exploded: tube lifted off along +Z
+TUBE_OD = 4  # mm — OD4 PTFE (plugs the 4 mm sockets)
+TUBE_ID = 2  # mm
+TANGENT_SCALAR = 2.0  # Bézier-handle length — full enough for the ∩ apex to sweep
+EXPLODE = 40  # mm — exploded: tube lifted off along +Z
 
 # Socket mouth + boss axis in the TubeHolder native frame (placed by board_32).
 _SOCKET_NATIVE = TH.socket_mouth
-_SOCKET_BACK   = tuple(m - a for m, a in zip(TH.socket_mouth, TH.socket_axis))
+_SOCKET_BACK = tuple(m - a for m, a in zip(TH.socket_mouth, TH.socket_axis))
 
 
 def _gloc(node, label, acc=None):
@@ -82,14 +82,17 @@ class BO40Teflon(BaseAssembly):
         # clamp; the opposing end tangents make Teflon raise the ∩ apex between.
         clamp = _gloc(base, "BeltClamp")
         hole_mouth = (BC.length / 2, BC.tube_hole_y, BC.thickness / 2)
-        hole_in    = (BC.length / 2, BC.tube_hole_y, BC.thickness / 2 - 1)
+        hole_in = (BC.length / 2, BC.tube_hole_y, BC.thickness / 2 - 1)
         p2 = _wpt(clamp, hole_mouth)
-        d2 = _wdir(clamp, hole_mouth, hole_in)     # down into the clamp
+        d2 = _wdir(clamp, hole_mouth, hole_in)  # down into the clamp
 
         tube = Teflon(
-            point1=tuple(p1), direction1=tuple(d1),
-            point2=tuple(p2), direction2=tuple(d2),    # drop down into the clamp
-            od=TUBE_OD, id=TUBE_ID,
+            point1=tuple(p1),
+            direction1=tuple(d1),
+            point2=tuple(p2),
+            direction2=tuple(d2),  # drop down into the clamp
+            od=TUBE_OD,
+            id=TUBE_ID,
             tangent_scalars=(TANGENT_SCALAR, TANGENT_SCALAR),
         ).build()
         if self.exploded:

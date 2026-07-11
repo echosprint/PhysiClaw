@@ -15,6 +15,7 @@ Schedule syntax: standard 5-field cron (min hour dom mon dow). Supports `*`,
 `N`, `N,M`, `*/N`, `A-B`. Day-of-week: 0=Sun, 6=Sat. All times are naive
 local time, ISO 8601 truncated to minute.
 """
+
 import datetime as dt
 import logging
 import re
@@ -113,9 +114,7 @@ def load_jobs(path: Path | None = None) -> list[Job]:
             raise ValueError(f"duplicate job id: {heading!r}")
 
         if not description:
-            raise ValueError(
-                f"{heading}: missing description line below the heading"
-            )
+            raise ValueError(f"{heading}: missing description line below the heading")
 
         kind = fields["Type"].strip().lower()
         if kind not in _VALID_KINDS:
@@ -152,9 +151,7 @@ def load_jobs(path: Path | None = None) -> list[Job]:
         # Validate Next fire time based on status.
         if status == STATUS_PEND:
             if not next_fire_time:
-                raise ValueError(
-                    f"{heading}: Next fire time is required for pend jobs"
-                )
+                raise ValueError(f"{heading}: Next fire time is required for pend jobs")
             try:
                 nft = dt.datetime.fromisoformat(next_fire_time)
             except (ValueError, TypeError) as e:
@@ -194,9 +191,17 @@ def load_jobs(path: Path | None = None) -> list[Job]:
     return jobs
 
 
-_REQUIRED_FIELDS = {"Type", "Schedule", "Context", "Create time",
-                     "Next fire time", "Last fire time", "Execution time",
-                     "Execution result", "Status"}
+_REQUIRED_FIELDS = {
+    "Type",
+    "Schedule",
+    "Context",
+    "Create time",
+    "Next fire time",
+    "Last fire time",
+    "Execution time",
+    "Execution result",
+    "Status",
+}
 
 
 def _parse_section(heading: str, body: str) -> tuple[str, dict[str, str]]:
@@ -340,9 +345,7 @@ def _update_field(text: str, job_id: str, field_name: str, value: str) -> str:
         count=1,
     )
     if count == 0:
-        raise ValueError(
-            f"{job_id}: field '- {field_name}:' not found in jobs.md"
-        )
+        raise ValueError(f"{job_id}: field '- {field_name}:' not found in jobs.md")
     return new_text
 
 
@@ -431,8 +434,7 @@ def expire_stale_fired(
                 "Status": new_status,
                 "Execution time": format_minute(now),
                 "Execution result": (
-                    f"auto-{verdict}: fired {j.last_fire_time} "
-                    "but never finished"
+                    f"auto-{verdict}: fired {j.last_fire_time} but never finished"
                 ),
             }
 
@@ -440,7 +442,8 @@ def expire_stale_fired(
         update_fields(path, updates)
         log.warning(
             "jobs: auto-closed %d zombie fired job(s): %s",
-            len(updates), sorted(updates),
+            len(updates),
+            sorted(updates),
         )
     return sorted(updates)
 

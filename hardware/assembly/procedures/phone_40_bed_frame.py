@@ -27,7 +27,10 @@ Run from the repo root:
 from build123d import Axis, Compound, Location
 
 from hardware.assembly.base import BaseAssembly
-from hardware.assembly.procedures.frame_10_extrusion_tnut import EXT_THICKNESS, LONG_LENGTH
+from hardware.assembly.procedures.frame_10_extrusion_tnut import (
+    EXT_THICKNESS,
+    LONG_LENGTH,
+)
 from hardware.assembly.procedures.phone_30_bed_extrusion import PH30BedExtrusion
 from hardware.assembly.procedures.tapz_20_solenoid_mount import TZ20SolenoidMount
 from hardware.assembly.projection import MAIN_FRAME_VIEW
@@ -36,9 +39,9 @@ from hardware.assembly.projection import MAIN_FRAME_VIEW
 # (solenoid mount, tip) lives on the +Y side, so the frame's underside / bottom
 # face is the +Y face at Y = +EXT_THICKNESS (= +20). The beam tops seat there
 # and the bed hangs on the +Y side, phone facing back toward the mechanism.
-LONG_BOTTOM_Y = +EXT_THICKNESS       # mm — long 2040 bottom (+Y) face, = +20
-BED_Z         = LONG_LENGTH / 2 - 20     # mm — 20 mm toward the Z=0 end of mid-length (= 147.5)
-EXPLODE       = 60                   # mm — exploded: bed dropped along +Y off the face
+LONG_BOTTOM_Y = +EXT_THICKNESS  # mm — long 2040 bottom (+Y) face, = +20
+BED_Z = LONG_LENGTH / 2 - 20  # mm — 20 mm toward the Z=0 end of mid-length (= 147.5)
+EXPLODE = 60  # mm — exploded: bed dropped along +Y off the face
 
 
 class PH40BedFrame(BaseAssembly):

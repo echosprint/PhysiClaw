@@ -76,7 +76,9 @@ class Handler(BaseHTTPRequestHandler):
         if urlparse(self.path).path == "/base":
             upto = parse_qs(urlparse(self.path).query).get("upto", [ORIG_SENTINEL])[0]
             try:
-                out = apply_upto(load_patch(self.src_path), self.src_path.read_bytes(), upto)
+                out = apply_upto(
+                    load_patch(self.src_path), self.src_path.read_bytes(), upto
+                )
             except (OSError, ValueError) as exc:
                 self._send_json(400, {"error": f"{type(exc).__name__}: {exc}"})
                 return
@@ -92,9 +94,9 @@ class Handler(BaseHTTPRequestHandler):
         body = self.rfile.read(length) if length else b""
         try:
             payload = json.loads(body.decode("utf-8") or "{}")
-            shapes  = validate_shapes(payload.get("shapes", []))
+            shapes = validate_shapes(payload.get("shapes", []))
             viewbox = validate_viewbox(payload.get("viewBox"))
-            preop   = validate_preop(payload.get("preop", ORIG_SENTINEL))
+            preop = validate_preop(payload.get("preop", ORIG_SENTINEL))
             if not shapes and viewbox is None:
                 raise ValueError("no shapes or viewBox to save")
         except (ValueError, json.JSONDecodeError) as exc:
@@ -112,7 +114,9 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError(f"preop {preop!r} not found in patch")
             if edit_id is not None:
                 if not (isinstance(edit_id, str) and ID_RE.match(edit_id)):
-                    raise ValueError(f"id must be four lowercase letters; got {edit_id!r}")
+                    raise ValueError(
+                        f"id must be four lowercase letters; got {edit_id!r}"
+                    )
                 if edit_id not in existing_ids:
                     raise ValueError(f"id {edit_id!r} not found in patch")
                 if edit_id == preop:
@@ -123,7 +127,8 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             op_id, entries = upsert_entry(
-                self.src_path, entries, edit_id, preop, shapes, viewbox)
+                self.src_path, entries, edit_id, preop, shapes, viewbox
+            )
             # Replay first; only persist the patch + snapshot once the
             # chain has successfully produced bytes, so a build failure
             # can't corrupt the patch file with a dangling entry.
@@ -137,11 +142,13 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         self._send(
-            200, "image/svg+xml", new_bytes,
+            200,
+            "image/svg+xml",
+            new_bytes,
             extra_headers={
-                "X-Op-Id":    op_id,
+                "X-Op-Id": op_id,
                 "X-Op-Preop": preop,
-                "X-Op-Path":  str(out_path),
+                "X-Op-Path": str(out_path),
                 "X-Op-Patch": str(patch_file),
             },
         )
@@ -149,8 +156,9 @@ class Handler(BaseHTTPRequestHandler):
     def _send_json(self, code: int, payload: dict):
         self._send(code, "application/json", json.dumps(payload).encode("utf-8"))
 
-    def _send(self, code: int, ctype: str, body: bytes,
-              extra_headers: dict | None = None):
+    def _send(
+        self, code: int, ctype: str, body: bytes, extra_headers: dict | None = None
+    ):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
@@ -164,6 +172,8 @@ class Handler(BaseHTTPRequestHandler):
 DEFAULT_PORT = 52281
 
 
-def make_server(src: Path, host: str = "127.0.0.1", port: int = DEFAULT_PORT) -> ThreadingHTTPServer:
+def make_server(
+    src: Path, host: str = "127.0.0.1", port: int = DEFAULT_PORT
+) -> ThreadingHTTPServer:
     Handler.src_path = src
     return ThreadingHTTPServer((host, port), Handler)

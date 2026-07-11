@@ -35,8 +35,8 @@ from hardware.parts.standard.board import (
 )
 from hardware.parts.standard.tmc2209 import Tmc2209
 
-SOCKET_TOP     = pcb_th + HDR_HEIGHT   # driver-socket top (carrier bottom seats here)
-MODULE_EXPLODE = 30                    # mm — exploded: modules lifted off their slots along +Z
+SOCKET_TOP = pcb_th + HDR_HEIGHT  # driver-socket top (carrier bottom seats here)
+MODULE_EXPLODE = 30  # mm — exploded: modules lifted off their slots along +Z
 
 
 class WI10Tmc2209(BaseAssembly):
@@ -46,7 +46,7 @@ class WI10Tmc2209(BaseAssembly):
         board = MksBoard().build()
 
         modules = []
-        for dx in DRIVER_X[:2]:   # two modules, in the first two driver slots
+        for dx in DRIVER_X[:2]:  # two modules, in the first two driver slots
             # +90° about Z aligns the module's 2×8 pins with the slot's two
             # 1×8 sockets; carrier bottom seats on the socket tops.
             module = Tmc2209().build()

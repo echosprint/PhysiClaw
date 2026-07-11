@@ -55,6 +55,7 @@ def _claude_available() -> bool:
     package, so a missing plugin dir or other side-effect failure is
     surfaced later when `spawn_claude` actually imports it."""
     from importlib.util import find_spec
+
     return find_spec("physiclaw.agent.claude") is not None
 
 
@@ -85,7 +86,9 @@ def resolve() -> tuple[str, str]:
                 "but agent/claude/ is not installed."
             )
     elif provider_id not in known_in_process:
-        choices = (*known_in_process,) + ((CLAUDE_CODE_ID,) if _claude_available() else ())
+        choices = (*known_in_process,) + (
+            (CLAUDE_CODE_ID,) if _claude_available() else ()
+        )
         raise RuntimeError(
             f"unknown provider {provider_id!r} in ref {ref!r} (from {source}); "
             f"known: {choices}"
@@ -121,7 +124,8 @@ def launch() -> None:
     # Mirror to a daily file so wake decisions / poll errors survive for
     # post-mortems — the runtime's stderr is gone once the terminal is.
     setup_logging(
-        "runtime", logging.DEBUG if args.verbose else logging.INFO,
+        "runtime",
+        logging.DEBUG if args.verbose else logging.INFO,
         file_dir=paths.runtime_log_dir(),
     )
     # Silence noisy per-request logs from httpx/httpcore.
@@ -130,9 +134,11 @@ def launch() -> None:
 
     if provider_id == CLAUDE_CODE_ID:
         from physiclaw.agent.claude import spawn_claude
+
         react = partial(spawn_claude, model_id=model_id)
     else:
         from physiclaw.agent.engine.engine import run as engine_run
+
         react = partial(engine_run, model_ref=ref)
 
     label = engine_label(ref)
@@ -141,7 +147,9 @@ def launch() -> None:
     async def _main():
         try:
             await Runtime(
-                react=react, interval=args.interval, label=label,
+                react=react,
+                interval=args.interval,
+                label=label,
             ).start()
         finally:
             await close_mcp()

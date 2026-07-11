@@ -1,4 +1,5 @@
 """Tests for `physiclaw.core.orchestration.orchestrator` — PhysiClaw class."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -15,11 +16,13 @@ from physiclaw.core.orchestration.orchestrator import PhysiClaw
 
 
 def _identity_pct_to_grbl() -> np.ndarray:
-    return np.array([
-        [10.0, 0.0, 0.0],
-        [0.0, 20.0, 0.0],
-        [0.0, 0.0, 1.0],
-    ])
+    return np.array(
+        [
+            [10.0, 0.0, 0.0],
+            [0.0, 20.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
 
 
 def _fake_transforms(*, swipe_end=(0.5, 0.6)):
@@ -544,12 +547,17 @@ def test_scan_text_filters_offscreen(mocker, pc: PhysiClaw) -> None:
     pc._ocr_reader = MagicMock()
     pc._cam.snapshot.return_value = np.zeros((4, 4, 3), dtype=np.uint8)
     mocker.patch.object(orchestrator, "phone_screen_crop_box", return_value=None)
-    mocker.patch.object(orchestrator, "results_to_elements", return_value=[
-        {"bbox": [0.1, 0.1, 0.2, 0.2]},
-        {"bbox": [-1.0, -1.0, -0.5, -0.5]},
-    ])
     mocker.patch.object(
-        orchestrator, "bbox_on_screen",
+        orchestrator,
+        "results_to_elements",
+        return_value=[
+            {"bbox": [0.1, 0.1, 0.2, 0.2]},
+            {"bbox": [-1.0, -1.0, -0.5, -0.5]},
+        ],
+    )
+    mocker.patch.object(
+        orchestrator,
+        "bbox_on_screen",
         side_effect=lambda b: b[0] >= 0,
     )
 
@@ -568,7 +576,9 @@ def test_detect_calls_ui_pipeline(mocker, pc: PhysiClaw) -> None:
     elements = [{"id": 0}]
     annotated = np.zeros((4, 4, 3), dtype=np.uint8)
     mocker.patch.object(
-        orchestrator, "detect_ui_elements", return_value=(elements, annotated),
+        orchestrator,
+        "detect_ui_elements",
+        return_value=(elements, annotated),
     )
     mocker.patch.object(orchestrator, "elements_to_json", return_value=[{"id": 0}])
     mocker.patch.object(orchestrator, "format_elements", return_value="LISTING")
@@ -591,20 +601,26 @@ def _wire_peek(mocker, pc: PhysiClaw, *, listing: str = "ok", sharpness=200.0):
     pc._ocr_reader = MagicMock()
     pc._icon_detector = MagicMock()
     pc._cam.snapshot.return_value = np.zeros((10, 10, 3), dtype=np.uint8)
-    mocker.patch.object(orchestrator, "crop_to_phone_screen", side_effect=lambda f, t: f)
+    mocker.patch.object(
+        orchestrator, "crop_to_phone_screen", side_effect=lambda f, t: f
+    )
     if isinstance(sharpness, list):
         blur_values = iter(sharpness)
         mocker.patch.object(
-            observation, "laplacian_variance",
+            observation,
+            "laplacian_variance",
             side_effect=lambda *_: next(blur_values),
         )
     else:
         mocker.patch.object(
-            observation, "laplacian_variance", return_value=sharpness,
+            observation,
+            "laplacian_variance",
+            return_value=sharpness,
         )
     sleep_spy = mocker.patch.object(observation.time, "sleep")
     mocker.patch.object(
-        orchestrator, "detect_ui_elements",
+        orchestrator,
+        "detect_ui_elements",
         return_value=([], np.zeros((4, 4, 3), dtype=np.uint8)),
     )
     mocker.patch.object(orchestrator, "elements_to_json", return_value=[])
@@ -653,7 +669,8 @@ def test_screenshot_decodes_and_detects(mocker, pc: PhysiClaw) -> None:
     pc._assistive_touch.take_screenshot.return_value = b"PNG"
     mocker.patch.object(orchestrator, "decode_image", return_value=np.zeros((4, 4, 3)))
     mocker.patch.object(
-        orchestrator, "detect_ui_elements",
+        orchestrator,
+        "detect_ui_elements",
         return_value=([], np.zeros((4, 4, 3), dtype=np.uint8)),
     )
     mocker.patch.object(orchestrator, "elements_to_json", return_value=[])
@@ -749,9 +766,7 @@ def test_send_to_clipboard_unconfirmed_raises(pc: PhysiClaw) -> None:
     with pytest.raises(ClipboardSyncError, match="do NOT paste"):
         pc.send_to_clipboard("x")
 
-    bridge.wait_clipboard.assert_called_once_with(
-        timeout=pc._clipboard.CONFIRM_SECONDS
-    )
+    bridge.wait_clipboard.assert_called_once_with(timeout=pc._clipboard.CONFIRM_SECONDS)
 
 
 def test_send_to_clipboard_miss_clears_queued_text(pc: PhysiClaw) -> None:
@@ -801,9 +816,13 @@ def test_run_step_dispatches_each_tool(pc: PhysiClaw) -> None:
 def test_run_step_swipe_happy_path(pc: PhysiClaw) -> None:
     _wire_hardware(pc)
 
-    out = pc._run_step("swipe", {
-        "bbox": [0.1, 0.1, 0.2, 0.2], "direction": "up",
-    })
+    out = pc._run_step(
+        "swipe",
+        {
+            "bbox": [0.1, 0.1, 0.2, 0.2],
+            "direction": "up",
+        },
+    )
 
     assert "Swiped up m" in out
 
@@ -830,10 +849,12 @@ def test_run_step_unknown_tool_raises(pc: PhysiClaw) -> None:
 def test_sequence_runs_steps_in_order(pc: PhysiClaw) -> None:
     _wire_hardware(pc)
 
-    out = pc.sequence([
-        {"tool_name": "tap", "arg": [0.1, 0.1, 0.2, 0.2]},
-        {"tool_name": "double_tap", "arg": [0.3, 0.3, 0.4, 0.4]},
-    ])
+    out = pc.sequence(
+        [
+            {"tool_name": "tap", "arg": [0.1, 0.1, 0.2, 0.2]},
+            {"tool_name": "double_tap", "arg": [0.3, 0.3, 0.4, 0.4]},
+        ]
+    )
 
     lines = out.text.splitlines()
     assert lines[0].startswith("1 tap ok")
@@ -844,11 +865,13 @@ def test_sequence_stops_on_first_failure(pc: PhysiClaw) -> None:
     _wire_hardware(pc)
     pc._arm.tap.side_effect = [None, RuntimeError("arm jammed")]
 
-    out = pc.sequence([
-        {"tool_name": "tap", "arg": [0.1, 0.1, 0.2, 0.2]},
-        {"tool_name": "tap", "arg": [0.3, 0.3, 0.4, 0.4]},
-        {"tool_name": "tap", "arg": [0.5, 0.5, 0.6, 0.6]},
-    ])
+    out = pc.sequence(
+        [
+            {"tool_name": "tap", "arg": [0.1, 0.1, 0.2, 0.2]},
+            {"tool_name": "tap", "arg": [0.3, 0.3, 0.4, 0.4]},
+            {"tool_name": "tap", "arg": [0.5, 0.5, 0.6, 0.6]},
+        ]
+    )
 
     lines = out.text.splitlines()
     assert lines[0].startswith("1 tap ok")
@@ -864,11 +887,13 @@ def test_sequence_aborts_before_paste_on_unconfirmed_clipboard(
     # clipboard is never pasted and sent.
     _wire_failing_bridge(pc)
 
-    out = pc.sequence([
-        {"tool_name": "send_to_clipboard", "arg": "新消息"},
-        {"tool_name": "long_press", "arg": [0.1, 0.9, 0.7, 0.95]},
-        {"tool_name": "tap", "arg": [0.1, 0.1, 0.2, 0.2]},
-    ])
+    out = pc.sequence(
+        [
+            {"tool_name": "send_to_clipboard", "arg": "新消息"},
+            {"tool_name": "long_press", "arg": [0.1, 0.9, 0.7, 0.95]},
+            {"tool_name": "tap", "arg": [0.1, 0.1, 0.2, 0.2]},
+        ]
+    )
 
     lines = out.text.splitlines()
     assert lines[0].startswith("1 send_to_clipboard FAIL")
@@ -956,7 +981,9 @@ def test_grab_screen_wiring_retries_through_orchestrator(mocker, pc: PhysiClaw) 
     rng = np.random.default_rng(7)
     sharp = rng.integers(0, 255, size=(200, 100, 3), dtype=np.uint8)
     blurry = np.full((200, 100, 3), 128, dtype=np.uint8)
-    mocker.patch.object(orchestrator, "crop_to_phone_screen", side_effect=[blurry, sharp])
+    mocker.patch.object(
+        orchestrator, "crop_to_phone_screen", side_effect=[blurry, sharp]
+    )
     mocker.patch.object(observation.time, "sleep")
 
     frame, sharp_flag = pc._observer.grab_screen()
@@ -966,7 +993,9 @@ def test_grab_screen_wiring_retries_through_orchestrator(mocker, pc: PhysiClaw) 
     assert orchestrator.crop_to_phone_screen.call_count == 2
 
 
-def test_blurry_after_frame_withholds_verdict_but_keeps_view(mocker, pc: PhysiClaw) -> None:
+def test_blurry_after_frame_withholds_verdict_but_keeps_view(
+    mocker, pc: PhysiClaw
+) -> None:
     # Sharp-vs-blurry frames diff as a full-screen change — the verdict
     # must fail open (no marker), while the view still attaches.
     _wire_hardware(pc)
@@ -1006,7 +1035,9 @@ def test_gesture_view_fails_open_when_detection_raises(mocker, pc: PhysiClaw) ->
     before = np.full((200, 100, 3), 128, dtype=np.uint8)
     after = np.full((200, 100, 3), 30, dtype=np.uint8)
     pc._cam.snapshot.return_value = np.zeros((4, 4, 3), dtype=np.uint8)
-    mocker.patch.object(orchestrator, "crop_to_phone_screen", side_effect=[before, after])
+    mocker.patch.object(
+        orchestrator, "crop_to_phone_screen", side_effect=[before, after]
+    )
     mocker.patch.object(pc, "_detect", side_effect=RuntimeError("model missing"))
 
     out = pc.tap([0.1, 0.1, 0.2, 0.2])
@@ -1078,7 +1109,9 @@ def test_unlock_phone_taps_six_times_when_keypad_found(mocker, pc: PhysiClaw) ->
     mocker.patch.object(orchestrator.time, "sleep")
     mocker.patch.object(pc, "_scan_text", return_value=[])
     mocker.patch.object(
-        orchestrator, "find_numpad_digit", return_value=[0.1, 0.1, 0.2, 0.2],
+        orchestrator,
+        "find_numpad_digit",
+        return_value=[0.1, 0.1, 0.2, 0.2],
     )
 
     out = pc.unlock_phone()
@@ -1187,7 +1220,9 @@ def test_gesture_view_carries_quality_warning(mocker, pc: PhysiClaw) -> None:
     assert out.text.endswith("| screen: changed")  # verdict untouched
 
 
-def test_gesture_warning_rides_action_text_when_detect_fails(mocker, pc: PhysiClaw) -> None:
+def test_gesture_warning_rides_action_text_when_detect_fails(
+    mocker, pc: PhysiClaw
+) -> None:
     # Detection crashing must not silence the observation: a blurry/blown
     # frame is a plausible CAUSE of the failed view, so with no listing to
     # carry the ⚠ line it rides the action text instead.
@@ -1261,7 +1296,9 @@ def test_tune_exposure_runs_converge_and_releases_lock(mocker, pc: PhysiClaw) ->
     _wire_hardware(pc)
     pc._cam.exposure_tunable = True
     conv = mocker.patch.object(
-        orchestrator.exposure, "converge", return_value=_tune_ok(),
+        orchestrator.exposure,
+        "converge",
+        return_value=_tune_ok(),
     )
 
     pc.tune_exposure()
@@ -1269,6 +1306,7 @@ def test_tune_exposure_runs_converge_and_releases_lock(mocker, pc: PhysiClaw) ->
     conv.assert_called_once()
     kwargs = conv.call_args.kwargs
     from physiclaw.config import CONFIG
+
     assert kwargs["start"] == CONFIG.camera.exposure
     assert kwargs["prefer_auto"] == CONFIG.camera.auto_exposure
     # Setters are the camera's own bound methods.
@@ -1289,7 +1327,9 @@ def test_tune_exposure_meter_crops_and_assesses(mocker, pc: PhysiClaw) -> None:
     mocker.patch.object(orchestrator, "crop_to_phone_screen", return_value=cropped)
     assess = mocker.patch.object(orchestrator.quality, "assess")
     conv = mocker.patch.object(
-        orchestrator.exposure, "converge", return_value=_tune_ok(),
+        orchestrator.exposure,
+        "converge",
+        return_value=_tune_ok(),
     )
 
     pc.tune_exposure()
@@ -1300,12 +1340,16 @@ def test_tune_exposure_meter_crops_and_assesses(mocker, pc: PhysiClaw) -> None:
     assert report is assess.return_value
 
 
-def test_tune_exposure_meter_fails_open_on_stalled_reader(mocker, pc: PhysiClaw) -> None:
+def test_tune_exposure_meter_fails_open_on_stalled_reader(
+    mocker, pc: PhysiClaw
+) -> None:
     _wire_hardware(pc)
     pc._cam.exposure_tunable = True
     pc._cam.wait_frames.return_value = False  # reader stalled
     conv = mocker.patch.object(
-        orchestrator.exposure, "converge", return_value=_tune_ok(),
+        orchestrator.exposure,
+        "converge",
+        return_value=_tune_ok(),
     )
 
     pc.tune_exposure()
@@ -1317,7 +1361,9 @@ def test_tune_exposure_swallows_converge_crash(mocker, pc: PhysiClaw) -> None:
     _wire_hardware(pc)
     pc._cam.exposure_tunable = True
     mocker.patch.object(
-        orchestrator.exposure, "converge", side_effect=RuntimeError("boom"),
+        orchestrator.exposure,
+        "converge",
+        side_effect=RuntimeError("boom"),
     )
 
     pc.tune_exposure()  # no raise

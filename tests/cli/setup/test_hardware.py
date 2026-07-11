@@ -6,6 +6,7 @@ ask / _done / _fail / _camera_aim_adjust) and the early-exit
 branches of `run` (server down, already ready, already calibrated)
 plus the `hardware` typer entry point.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -108,7 +109,10 @@ def test_calibrate_calls_api(mocker) -> None:
     hw_mod.calibrate("arm", timeout=120, body={"fresh": True})
 
     spy.assert_called_once_with(
-        "POST", "/api/calibrate/arm", body={"fresh": True}, timeout=120,
+        "POST",
+        "/api/calibrate/arm",
+        body={"fresh": True},
+        timeout=120,
     )
 
 
@@ -116,7 +120,10 @@ def test_calibrate_retry_returns_on_success(mocker) -> None:
     mocker.patch.object(hw_mod, "calibrate", return_value={"status": "ok"})
 
     out = hw_mod.calibrate_retry(
-        "arm", "fail", "retry?", auto=True,
+        "arm",
+        "fail",
+        "retry?",
+        auto=True,
     )
 
     assert out == {"status": "ok"}
@@ -124,16 +131,22 @@ def test_calibrate_retry_returns_on_success(mocker) -> None:
 
 def test_calibrate_retry_auto_exits_on_failure(mocker) -> None:
     mocker.patch.object(
-        hw_mod, "calibrate", return_value={"status": "error", "message": "bad"},
+        hw_mod,
+        "calibrate",
+        return_value={"status": "error", "message": "bad"},
     )
 
     with pytest.raises(SystemExit):
-        hw_mod.calibrate_retry("arm", lambda r: f"x {r['message']}", "retry?", auto=True)
+        hw_mod.calibrate_retry(
+            "arm", lambda r: f"x {r['message']}", "retry?", auto=True
+        )
 
 
 def test_calibrate_retry_manual_q_exits(mocker) -> None:
     mocker.patch.object(
-        hw_mod, "calibrate", return_value={"status": "error"},
+        hw_mod,
+        "calibrate",
+        return_value={"status": "error"},
     )
     mocker.patch.object(hw_mod, "ask", return_value=False)
 
@@ -142,12 +155,15 @@ def test_calibrate_retry_manual_q_exits(mocker) -> None:
 
 
 def test_calibrate_retry_manual_retries_until_success(mocker) -> None:
-    responses = iter([
-        {"status": "error"},
-        {"status": "ok"},
-    ])
+    responses = iter(
+        [
+            {"status": "error"},
+            {"status": "ok"},
+        ]
+    )
     mocker.patch.object(
-        hw_mod, "calibrate",
+        hw_mod,
+        "calibrate",
         side_effect=lambda *a, **kw: next(responses),
     )
     mocker.patch.object(hw_mod, "ask", return_value=True)
@@ -159,13 +175,17 @@ def test_calibrate_retry_manual_retries_until_success(mocker) -> None:
 
 def test_calibrate_retry_uses_custom_predicate(mocker) -> None:
     mocker.patch.object(
-        hw_mod, "calibrate",
+        hw_mod,
+        "calibrate",
         return_value={"status": "ok", "passed": False},
     )
 
     with pytest.raises(SystemExit):
         hw_mod.calibrate_retry(
-            "arm", "fail", "retry?", auto=True,
+            "arm",
+            "fail",
+            "retry?",
+            auto=True,
             predicate=lambda r: bool(r and r.get("passed")),
         )
 
@@ -235,14 +255,16 @@ def test_run_returns_when_already_ready(mocker, capsys: pytest.CaptureFixture) -
 
 
 def test_run_finalizes_when_already_calibrated(
-    mocker, capsys: pytest.CaptureFixture,
+    mocker,
+    capsys: pytest.CaptureFixture,
 ) -> None:
     mocker.patch.object(
-        hw_mod, "api",
+        hw_mod,
+        "api",
         side_effect=[
             {"ready": False, "calibrated": True},  # GET /api/status
-            {"status": "ok"},                       # POST /api/phone/home
-            {"status": "ok"},                       # POST /api/ready
+            {"status": "ok"},  # POST /api/phone/home
+            {"status": "ok"},  # POST /api/ready
         ],
     )
     mocker.patch.object(hw_mod.time, "sleep")
@@ -283,7 +305,8 @@ def test_run_full_auto_path(mocker, tmp_path) -> None:
     mocker.patch.object(hw_mod.time, "sleep")
     mocker.patch.object(hw_mod, "_camera_aim_adjust")
     mocker.patch.object(
-        hw_mod, "_viewport_cache_candidates",
+        hw_mod,
+        "_viewport_cache_candidates",
         return_value=[],  # no cache → fresh measurement.
     )
 
@@ -291,7 +314,9 @@ def test_run_full_auto_path(mocker, tmp_path) -> None:
     def fake_api(method, path, body=None, timeout=60):
         if path == "/api/status":
             return {
-                "ready": False, "calibrated": False, "bridge": False,
+                "ready": False,
+                "calibrated": False,
+                "bridge": False,
             }
         if path == "/api/connect-arm":
             return {"status": "ok"}
@@ -310,12 +335,16 @@ def test_run_full_auto_path(mocker, tmp_path) -> None:
     def fake_calibrate(step, timeout=60, body=None):
         if step == "arm":
             return {
-                "status": "ok", "pairs": 18,
-                "tilt_ratio": 0.001, "aligned": True,
+                "status": "ok",
+                "pairs": 18,
+                "tilt_ratio": 0.001,
+                "aligned": True,
             }
         if step == "camera":
             return {
-                "status": "ok", "rotation_name": "0°", "coverage": 0.95,
+                "status": "ok",
+                "rotation_name": "0°",
+                "coverage": 0.95,
                 "issues": [],
             }
         if step == "validate":
@@ -348,19 +377,24 @@ def test_run_full_auto_with_warn_issues(mocker) -> None:
     def fake_calibrate(step, timeout=60, body=None):
         if step == "arm":
             return {
-                "status": "ok", "pairs": 18,
-                "tilt_ratio": 0.5, "aligned": False,
+                "status": "ok",
+                "pairs": 18,
+                "tilt_ratio": 0.5,
+                "aligned": False,
             }
         if step == "camera":
             return {
-                "status": "ok", "rotation_name": "0°", "coverage": 0.5,
+                "status": "ok",
+                "rotation_name": "0°",
+                "coverage": 0.5,
                 "issues": ["phone partially out of frame"],
             }
         if step == "validate":
             return {"status": "ok", "calibrated": True}
         if step == "assistive-touch/verify":
             return {
-                "status": "ok", "passed": True,
+                "status": "ok",
+                "passed": True,
                 "clipboard": {"fetched": True, "text": "PhysiClaw OK"},
             }
         return {"status": "ok"}
@@ -417,10 +451,15 @@ def test_run_camera_auto_pick_falls_back_to_manual(mocker, tmp_path) -> None:
 
     def fake_calibrate(step, timeout=60, body=None):
         return {
-            "status": "ok", "pairs": 18,
-            "tilt_ratio": 0.001, "aligned": True,
-            "rotation_name": "0°", "coverage": 0.95, "issues": [],
-            "calibrated": True, "passed": True,
+            "status": "ok",
+            "pairs": 18,
+            "tilt_ratio": 0.001,
+            "aligned": True,
+            "rotation_name": "0°",
+            "coverage": 0.95,
+            "issues": [],
+            "calibrated": True,
+            "passed": True,
             "clipboard": {"fetched": False},
         }
 
@@ -431,7 +470,9 @@ def test_run_camera_auto_pick_falls_back_to_manual(mocker, tmp_path) -> None:
 
 
 def test_run_uses_cached_viewport_in_auto_mode(
-    mocker, tmp_path, capsys: pytest.CaptureFixture,
+    mocker,
+    tmp_path,
+    capsys: pytest.CaptureFixture,
 ) -> None:
     cache = tmp_path / "viewport.png"
     cache.write_bytes(b"x")
@@ -450,10 +491,15 @@ def test_run_uses_cached_viewport_in_auto_mode(
 
     def fake_calibrate(step, timeout=60, body=None):
         return {
-            "status": "ok", "pairs": 18,
-            "tilt_ratio": 0.001, "aligned": True,
-            "rotation_name": "0°", "coverage": 0.95, "issues": [],
-            "calibrated": True, "passed": True,
+            "status": "ok",
+            "pairs": 18,
+            "tilt_ratio": 0.001,
+            "aligned": True,
+            "rotation_name": "0°",
+            "coverage": 0.95,
+            "issues": [],
+            "calibrated": True,
+            "passed": True,
             "clipboard": {"fetched": False},
         }
 
@@ -478,10 +524,13 @@ def _patch_auto_worker(mocker, *, port_ok=True):
     fake_net = MagicMock()
     fake_net.wait_for_port.return_value = port_ok
     mocker.patch.dict(
-        "sys.modules", {"physiclaw.core.server.net": fake_net},
+        "sys.modules",
+        {"physiclaw.core.server.net": fake_net},
     )
     mocker.patch("physiclaw.core.logger.make_tagged_logger", return_value=MagicMock())
-    mocker.patch.object(hw_mod, "BASE", hw_mod.BASE)  # restore after (worker mutates it)
+    mocker.patch.object(
+        hw_mod, "BASE", hw_mod.BASE
+    )  # restore after (worker mutates it)
     return {
         "api": mocker.patch.object(hw_mod, "api", return_value={"bridge": True}),
         "sleep": mocker.patch.object(hw_mod.time, "sleep"),
