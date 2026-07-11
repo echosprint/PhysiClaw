@@ -1,6 +1,6 @@
 ---
 title: Get an API key
-description: Pick a model provider, grab an API key, and add it to PhysiClaw — OpenAI, Anthropic, Google, Qwen, or Moonshot.
+description: Pick a model provider, grab an API key, and add it to PhysiClaw — OpenAI, Anthropic, Google, Qwen, or Moonshot — or run on your Claude subscription instead.
 ---
 
 PhysiClaw works with many LLM providers. Pick one, create an account, and generate an API key. Then add the key to PhysiClaw and choose a `provider/model`.
@@ -24,4 +24,18 @@ physiclaw models use <provider/model>
 PhysiClaw looks at the phone screen on every step, so it needs a **multimodal model that takes both images and text** — a text-only model won't work.
 :::
 
-For example, run `physiclaw models key anthropic`, paste your API key, then run `physiclaw models use anthropic/claude-sonnet-4-6` to start using Claude.
+For example, run `physiclaw models key anthropic`, paste your API key, then run `physiclaw models use anthropic/claude-sonnet-5` to start using Claude.
+
+## Use a Claude subscription
+
+If you subscribe to Claude (Pro or Max) and have [Claude Code](https://claude.com/claude-code) installed and logged in, you can skip the API key: PhysiClaw runs the agent through `claude -p` under the hood, on your subscription quota:
+
+```bash
+physiclaw models use claude-code/claude-sonnet-5
+```
+
+Model names are the same as `anthropic` (e.g. `claude-opus-4-8`); if you've set an anthropic API key, `physiclaw models discover claude-code` shows the full list.
+
+:::caution[Subscription policy may change]
+Anthropic's subscription policy may change, and PhysiClaw could be barred from using the subscription through `claude -p`. If that happens, switch to an `anthropic` API key, billed by token usage.
+:::
