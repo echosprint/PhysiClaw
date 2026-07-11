@@ -734,10 +734,14 @@ class PhysiClaw:
         """
 
         def act() -> str:
+            # Warm the OCR model before waking the phone — a cold RapidOCR
+            # load (seconds) inside the keypad's ~8s lifetime lets the
+            # numpad sleep again before the first tap lands.
+            self._get_ocr_reader()
             self._tap([0.4, 0.4, 0.6, 0.6])
             self._swipe([0.4, 0.96, 0.6, 0.98], "up", "l", speed="fast")
             self.park()
-            time.sleep(4)  # Face ID starts
+            time.sleep(2)  # Face ID starts; the poll below absorbs the rest
 
             # Poll for passcode keypad (Face ID fails after a few seconds)
             digit_bbox = None

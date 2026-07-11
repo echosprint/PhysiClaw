@@ -1062,6 +1062,7 @@ def test_force_quit_runs_four_gestures(pc: PhysiClaw) -> None:
 
 def test_unlock_phone_returns_when_keypad_not_found(mocker, pc: PhysiClaw) -> None:
     _wire_hardware(pc)
+    pc._ocr_reader = MagicMock()
     mocker.patch.object(orchestrator.time, "sleep")
     mocker.patch.object(pc, "_scan_text", return_value=[])
     mocker.patch.object(orchestrator, "find_numpad_digit", return_value=None)
@@ -1073,6 +1074,7 @@ def test_unlock_phone_returns_when_keypad_not_found(mocker, pc: PhysiClaw) -> No
 
 def test_unlock_phone_taps_six_times_when_keypad_found(mocker, pc: PhysiClaw) -> None:
     _wire_hardware(pc)
+    pc._ocr_reader = MagicMock()
     mocker.patch.object(orchestrator.time, "sleep")
     mocker.patch.object(pc, "_scan_text", return_value=[])
     mocker.patch.object(
