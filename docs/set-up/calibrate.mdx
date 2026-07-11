@@ -33,9 +33,41 @@ The phone's rear camera bump keeps it from lying flat. Put something shaped to f
 
 Start the server:
 
+<Tabs syncKey="os">
+<TabItem label="macOS">
+
 ```bash
 physiclaw
 ```
+
+The first time it reads the camera, macOS asks for permission — click **Allow**. You can also change it later under **System Settings → Privacy & Security → Camera**.
+
+</TabItem>
+<TabItem label="Windows">
+
+```powershell
+physiclaw
+```
+
+</TabItem>
+<TabItem label="Linux">
+
+Reading the camera and accessing the serial port require the `video` and `dialout` groups. Add yourself to both, then **log out and back in**:
+
+```bash
+sudo usermod -aG dialout,video $USER
+```
+
+(On Arch-based distros the serial group is `uucp` instead of `dialout`.)
+
+Then start the server:
+
+```bash
+physiclaw
+```
+
+</TabItem>
+</Tabs>
 
 It automatically opens a setup wizard in your browser that walks you through calibration step by step.
 
