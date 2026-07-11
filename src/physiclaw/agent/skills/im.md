@@ -57,4 +57,12 @@ sequence(actions=[
 
 With the keyboard up, `{{input-hidden}}` is the keyboard itself — never press it.
 
-Then steps 6–7. Layout shifts (banners, unread badges) → re-ground from the current view; anchors are the header name + learned boxes.
+Then steps 6–7.
+
+### Recovery
+
+Layout shifts (banners, unread badges) → re-ground from the current view; anchors are the header name + learned boxes. Batch failed → single steps, never the same bundle again.
+
+### WeChat: accidental quote
+
+A mis-aimed long-press can quote a message — quoted text under the input shifts every box: layout bboxes invalid, no `sequence`, ground live. Don't chase the tiny ✕; paste and send, the next input is quote-free.

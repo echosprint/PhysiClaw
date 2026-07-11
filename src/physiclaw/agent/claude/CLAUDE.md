@@ -181,7 +181,8 @@ Inside the Wake loop's Work phase, every individual action is:
 2. If target missing, `screenshot` once → `peek` again (refresh
    after the mutating screenshot).
 3. Gesture tool with the grounded bbox; a fully-grounded run of
-   gestures is ONE `sequence` call.
+   gestures is ONE `sequence` call. A failed batch is never rerun
+   as-is — drop to single steps, one gesture per turn.
 4. Verify from the gesture's attached view — read the value you
    tried to change and the `screen:` verdict. No visible change +
    value unmoved = missed (retry once) or refused (stop; find the

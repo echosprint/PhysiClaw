@@ -43,6 +43,7 @@ Every action bbox comes verbatim — every digit — from a grounded source: the
 - A popover born mid-batch (Paste after a `long_press`) is NOT grounded — split there. **Exception:** Paste boxes pinned in SYSTEM § Screen layout may bundle.
 - Anything after a mid-batch scroll `swipe` must be layout-pinned — scrolling moves everything else.
 - **Never bundle a payment / order-confirm tap** — it gets its own turn, off a fresh view. Sending your user an already-confirmed IM is fine to bundle.
+- **A failed batch is never rerun as-is** — the same bundle repeats the same miss blind. Drop to single steps: one gesture per turn, verify each attached view before the next.
 
 ## Stuck
 
