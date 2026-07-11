@@ -55,10 +55,9 @@ def test_non_proxy_vars_left_untouched(monkeypatch):
 def test_httpx_accepts_normalized_env(monkeypatch):
     """End-to-end guard: the exact failing setup builds a client after
     normalization (socksio ships as a dependency, so the socks5
-    transport mounts instead of raising ImportError)."""
+    transport mounts instead of raising ImportError). The shell's own
+    proxy vars are already stripped by conftest's `scrub_proxy_env`."""
     monkeypatch.setenv("all_proxy", "socks://127.0.0.1:7897")
-    for var in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"):
-        monkeypatch.delenv(var, raising=False)
     normalize_proxy_env()
     client = httpx.Client(trust_env=True)  # raised ValueError before the fix
     client.close()

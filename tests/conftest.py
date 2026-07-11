@@ -50,6 +50,22 @@ def physiclaw_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return home
 
 
+@pytest.fixture(autouse=True)
+def scrub_proxy_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Strip proxy env vars so the suite is hermetic on proxied shells.
+
+    A VPN client's `all_proxy=socks://…` leaking in from the developer's
+    shell once produced 97 bogus failures: every test constructing a
+    `trust_env=True` httpx client (providers, mcp_tool, poll) died in
+    the constructor on the unsupported scheme. Tests that exercise proxy
+    behavior set the vars they need via monkeypatch, which runs after
+    this scrub.
+    """
+    for key in list(os.environ):
+        if key.lower() in ("all_proxy", "http_proxy", "https_proxy", "no_proxy"):
+            monkeypatch.delenv(key)
+
+
 @pytest.fixture
 def silenced_log() -> None:
     """Suppress all `physiclaw.*` logger output for the duration of a test.

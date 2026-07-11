@@ -9,9 +9,12 @@ only speaks ``socks5://``, so rewrite the scheme in place; the
 ``socksio`` dependency (httpx's ``[socks]`` extra) makes the rewritten
 proxy actually usable.
 
-Called once from the CLI root callback — before any command builds a
-client — so every env-honouring httpx client (provider clients, the
-Anthropic SDK's internal one) sees only schemes it understands.
+Called from the two process entry points — the CLI root callback and
+the runtime launcher (which covers a direct ``python -m
+physiclaw.agent.runtime``) — before anything builds a client, so every
+env-honouring httpx client (provider clients, the Anthropic SDK's
+internal one, the loopback poll/MCP clients on Linux/macOS) sees only
+schemes it understands.
 Schemeless values (``127.0.0.1:7897``) need no help: httpx already
 assumes ``http://`` for those. The urllib paths (CLI downloads, PyPI
 update check) ignore ``all_proxy`` entirely, so the rewrite is
