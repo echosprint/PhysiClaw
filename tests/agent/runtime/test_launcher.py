@@ -274,4 +274,7 @@ def test_launch_verbose_flag_sets_debug_level(
 
     launcher.launch()
 
-    setup_spy.assert_called_once_with("runtime", _logging.DEBUG)
+    from physiclaw import paths
+    setup_spy.assert_called_once_with(
+        "runtime", _logging.DEBUG, file_dir=paths.runtime_log_dir(),
+    )
