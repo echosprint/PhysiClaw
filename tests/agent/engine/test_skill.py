@@ -379,6 +379,33 @@ def test_dispatch_lists_none_when_no_skills_available() -> None:
         dispatch({}, {"name": "x"})
 
 
+def test_dispatch_redirects_builtin_name_to_inline_section() -> None:
+    """Wake triggers name built-in skills (e.g. `screen-layout`), and
+    models take the bait and Skill()-load them. The error must redirect
+    to the inline `## Built-in Skills` section instead of the generic
+    unknown-skill message — the generic one derailed a real first run
+    (two burned turns + a corrective before the model recovered)."""
+    _write_flat("screen-layout", description="first-run capture")
+
+    with pytest.raises(
+        ValueError,
+        match=r"built-in skill.*## Built-in Skills",
+    ):
+        dispatch({}, {"name": "screen-layout"})
+
+
+def test_dispatch_folder_skill_shadows_builtin_redirect(_skill_roots) -> None:
+    """A folder skill that happens to share a built-in's name still
+    serves its body — the redirect only fires on a registry miss."""
+    home, _ = _skill_roots
+    _write_flat("screen-layout", description="first-run capture")
+    _write_skill(home, "screen-layout", body="folder body")
+
+    out = dispatch(discover_user_skills(), {"name": "screen-layout"})
+
+    assert out == "folder body"
+
+
 def test_dispatch_loads_reference_when_reference_arg_present(
     _skill_roots,
 ) -> None:

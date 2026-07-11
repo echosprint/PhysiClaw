@@ -33,7 +33,9 @@ def first_run_layout() -> Trigger | None:
     return Trigger(
         description=(
             "First run: learn the screen layout (input boxes, keyboard, Paste) "
-            "before handling any request — follow the `screen-layout` skill."
+            "before handling any request — follow the `screen-layout` skill "
+            "(in `## Built-in Skills`; already in your system prompt, no "
+            "Skill() load needed)."
         ),
         source="first-run",
     )

@@ -37,6 +37,9 @@ Loading differs by kind — the two render into SEPARATE prompt sections, so
 they never merge or override each other:
   * Built-in — the full body is always inlined by `render_builtin` under
     `## Built-in Skills`. No Skill() call; the model always has the steps.
+    (A Skill() call naming one anyway — models take the bait when a wake
+    trigger mentions it by name — gets an error redirecting to the inline
+    section, not the generic unknown-skill error.)
   * User — only name+description go in, via `render_section` under
     `## Available skills`. The description is the ONLY relevance signal, so it
     must name triggers. The model then loads the body on demand:
@@ -180,12 +183,25 @@ def _scan_root(root: Path, out: dict[str, Skill], *, source: str = "user") -> No
 def dispatch(skills: dict[str, Skill], args: dict) -> str:
     """Route a Skill() invocation by exact name. Raises ValueError /
     FileNotFoundError on bad input so the engine's _dispatch marks the
-    tool_result as is_error=True (principle 5)."""
+    tool_result as is_error=True (principle 5).
+
+    A miss that names a BUILT-IN skill gets a redirecting error instead
+    of the generic one: built-in bodies are never served here (they ride
+    inline in SYSTEM), but wake triggers refer to them by skill name
+    (e.g. "follow the `screen-layout` skill") and models take the bait —
+    observed on a real first run, where the generic error cost two turns
+    and a corrective before the model found the inline section."""
     name = (args.get("name") or "").strip()
     if not name:
         raise ValueError("Skill call requires a 'name' argument")
     skill = skills.get(name)
     if skill is None:
+        if name in discover_builtin_skills():
+            raise ValueError(
+                f"{name!r} is a built-in skill — not loadable via Skill(). "
+                "Its full steps are already in your system prompt under "
+                "`## Built-in Skills`; follow them directly."
+            )
         available = ", ".join(sorted(skills.keys())) or "(none)"
         raise ValueError(f"unknown skill {name!r}. Available: {available}")
 
@@ -278,9 +294,10 @@ def render_section(skills: dict[str, Skill]) -> str:
 
 def render_builtin(builtin: dict[str, Skill]) -> str:
     """The built-in skills' FULL bodies, inlined under `## Built-in Skills`. Always
-    present in the SYSTEM prompt, so the model never calls Skill() for these
-    — the steps and bboxes are already in front of it. Own section, so a
-    user skill can never shadow or collide with a built-in workflow."""
+    present in the SYSTEM prompt, so the model never needs Skill() for these
+    — the steps and bboxes are already in front of it (`dispatch` redirects
+    the call here if it tries). Own section, so a user skill can never
+    shadow or collide with a built-in workflow."""
     if not builtin:
         return ""
     lines = [
