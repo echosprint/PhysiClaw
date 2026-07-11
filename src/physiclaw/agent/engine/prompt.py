@@ -125,7 +125,9 @@ def render_system_prompts(
         *_render_reasoning_format(provider_id),
         *_render_memory(memory_ctx),
     ]
-    return "\n".join(lines)
+    # No trailing newline: sections end with a separator blank, and the
+    # CLI dump asserts byte-equality with this exact string.
+    return "\n".join(lines).rstrip("\n")
 
 
 # ---------- section builders ----------
