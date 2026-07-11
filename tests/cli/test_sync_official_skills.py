@@ -12,6 +12,7 @@ import hashlib
 import importlib
 import io
 import json
+import logging
 import urllib.error
 import zipfile
 from pathlib import Path
@@ -517,10 +518,19 @@ def test_auto_sync_skipped_when_server_live(auto_env, mocker) -> None:
 # ---------- _run_sync_quiet (the daemon-thread body, fail-soft) ----------
 
 
-def test_run_sync_quiet_calls_sync(mocker) -> None:
+def test_run_sync_quiet_calls_sync_with_log_emitter(mocker) -> None:
     called = mocker.patch.object(osk, "sync")
     osk._run_sync_quiet()
-    called.assert_called_once_with()
+    # The background sync must speak through the logger, not typer.echo —
+    # raw ✓ lines interleaving mid-log-stream broke the startup voice.
+    called.assert_called_once_with(emit=osk._log_emit)
+
+
+def test_log_emit_logs_unstyled(caplog) -> None:
+    styled = typer.style("✓ ", fg=typer.colors.GREEN) + "synced 1 skill @ abc1234."
+    with caplog.at_level(logging.INFO, logger=osk.__name__):
+        osk._log_emit(styled)
+    assert caplog.records[-1].getMessage() == "✓ synced 1 skill @ abc1234."
 
 
 def test_run_sync_quiet_swallows_typer_exit(mocker) -> None:

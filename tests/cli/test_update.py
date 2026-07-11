@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import logging
 import os
 import subprocess
 from pathlib import Path
@@ -148,29 +149,32 @@ def test_notify_clears_stale_marker_when_not_newer(
 
 
 def test_notify_stays_silent_for_dev_and_pip_installs(
-    staged_ready, mocker, capsys,
+    staged_ready, mocker, caplog,
 ) -> None:
     # Not a uv-tool install → nothing to point the user at; say nothing, and
     # leave the marker (a real uv-tool run elsewhere may still want it).
     mocker.patch.object(up, "_tool_version", return_value=None)
 
-    up.notify_staged_update()
+    with caplog.at_level(logging.INFO, logger=up.__name__):
+        up.notify_staged_update()
 
-    assert capsys.readouterr().out == ""
+    assert caplog.records == []
     assert up._read_staged() == "1.1.0"
 
 
-def test_notify_prints_ready_notice_and_keeps_marker(
-    staged_ready, mocker, capsys,
+def test_notify_logs_ready_notice_and_keeps_marker(
+    staged_ready, mocker, caplog,
 ) -> None:
     # The real case: a newer version is staged and we're a uv-tool install.
-    # Print a one-line notice pointing at `uv tool upgrade physiclaw`; install
-    # nothing, raise nothing, and keep the marker so it repeats until applied.
+    # Log a one-line notice pointing at `uv tool upgrade physiclaw` (logged,
+    # not echoed — it rides the server's timestamped stream); install nothing,
+    # raise nothing, and keep the marker so it repeats until applied.
     mocker.patch.object(up, "_tool_version", return_value="1.0.0")
 
-    up.notify_staged_update()  # must NOT raise
+    with caplog.at_level(logging.INFO, logger=up.__name__):
+        up.notify_staged_update()  # must NOT raise
 
-    out = capsys.readouterr().out
+    out = " ".join(r.getMessage() for r in caplog.records)
     assert "1.1.0" in out
     assert "uv tool upgrade physiclaw" in out
     assert up._read_staged() == "1.1.0"

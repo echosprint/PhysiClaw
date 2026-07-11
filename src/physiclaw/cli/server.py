@@ -105,15 +105,25 @@ def server(
     loop) start daemon threads / a subprocess so `mcp.run()` serves first.
     """
     from physiclaw import __version__
-
-    typer.echo(f"PhysiClaw {__version__}")
-    _run_startup_maintenance()
-    _apply_save_flags(save_tool_calls, save_snapshots, save_screenshots, save_raw_camera)
-
     from physiclaw.core.logger import setup_logging
 
+    # Logging first: everything from here on — including the version line and
+    # the background auto-sync's outcome — speaks in one voice, the
+    # timestamped `[physiclaw]` stream.
     setup_logging("physiclaw", logging.DEBUG if verbose else logging.INFO)
     logging.getLogger("mcp").setLevel(logging.WARNING)
+    # Phones opening the bridge URL probe https:// first (Safari's HTTPS
+    # upgrade, VPN apps); the TLS bytes hitting our plaintext port make
+    # uvicorn warn "Invalid HTTP request received." once per attempt —
+    # noise with no action for the user. Drop that one message; every
+    # other uvicorn warning still surfaces.
+    logging.getLogger("uvicorn.error").addFilter(
+        lambda record: "Invalid HTTP request received" not in record.getMessage()
+    )
+    log = logging.getLogger(__name__)
+    log.info("PhysiClaw %s", __version__)
+    _run_startup_maintenance()
+    _apply_save_flags(save_tool_calls, save_snapshots, save_screenshots, save_raw_camera)
 
     from physiclaw.core.server import mcp, shutdown
 

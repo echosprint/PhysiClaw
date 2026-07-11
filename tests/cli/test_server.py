@@ -161,7 +161,32 @@ def test_server_no_setup_hardware_skips_wizard(
     assert "physiclaw setup hardware" in msgs
 
 
-def test_server_prints_version_first(mocker, capsys) -> None:
+def test_server_logs_version_first(mocker, caplog) -> None:
+    # The version rides the same timestamped `[physiclaw]` log stream as
+    # every other startup line (was a bare typer.echo, which rendered in a
+    # different voice than the rest of the output).
+    _patch_server_runtime_deps(mocker)
+
+    with caplog.at_level(logging.INFO, logger="physiclaw.cli.server"):
+        server_mod.server(
+            port=8048, host="127.0.0.1", verbose=False,
+            no_runtime=True, warm_start=False, cam_index=None,
+            save_tool_calls=False, save_snapshots=False, save_screenshots=False,
+        )
+
+    from physiclaw import __version__
+    messages = [r.getMessage() for r in caplog.records]
+    assert f"PhysiClaw {__version__}" in messages
+
+
+def test_server_drops_uvicorn_invalid_http_noise(mocker) -> None:
+    # Phones opening the bridge URL probe https:// first; the TLS bytes
+    # against the plaintext port make uvicorn warn "Invalid HTTP request
+    # received." per attempt. server() installs a message-targeted filter
+    # on uvicorn.error — the noise is dropped, real warnings pass.
+    uvicorn_logger = logging.getLogger("uvicorn.error")
+    for f in list(uvicorn_logger.filters):  # isolate from prior test runs
+        uvicorn_logger.removeFilter(f)
     _patch_server_runtime_deps(mocker)
 
     server_mod.server(
@@ -170,9 +195,13 @@ def test_server_prints_version_first(mocker, capsys) -> None:
         save_tool_calls=False, save_snapshots=False, save_screenshots=False,
     )
 
-    from physiclaw import __version__
-    first_line = capsys.readouterr().out.splitlines()[0]
-    assert first_line == f"PhysiClaw {__version__}"
+    def record(msg: str) -> logging.LogRecord:
+        return logging.LogRecord(
+            "uvicorn.error", logging.WARNING, __file__, 0, msg, None, None,
+        )
+
+    assert not uvicorn_logger.filter(record("Invalid HTTP request received."))
+    assert uvicorn_logger.filter(record("ASGI application error"))
 
 
 def test_server_default_invocation_runs_mcp(mocker) -> None:

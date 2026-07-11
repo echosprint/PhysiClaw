@@ -25,7 +25,7 @@ The two phases:
     (so the user's later ``uv tool upgrade`` links from cache in ms) and drop a
     ``cache/update.json`` marker.
   - Phase A (:func:`notify_staged_update`) — synchronous at startup: if the
-    marker names a newer version, print a one-line "run ``uv tool upgrade
+    marker names a newer version, log a one-line "run ``uv tool upgrade
     physiclaw``" notice and keep serving. No install.
 
 A notice thus appears one boot after a release is published (stage on boot N,
@@ -51,7 +51,6 @@ import typer
 
 from physiclaw import __version__ as _pkg_version
 from physiclaw import paths
-from physiclaw.cli import _format as fmt
 from physiclaw.cli._update_check import (
     _disabled_via_env,
     _fetch_pypi_version,
@@ -140,7 +139,7 @@ def update() -> None:
 #       `cache/update.json` marker. No install; touches only the shared uv cache
 #       + the marker, so it's safe mid-serve.
 #   Phase A (`notify_staged_update`) — synchronous, at startup: if the marker
-#       names a newer version, print a "run `uv tool upgrade physiclaw`" notice
+#       names a newer version, log a "run `uv tool upgrade physiclaw`" notice
 #       and keep serving. No install.
 #
 # Net: a notice appears one boot after a release is published (stage on boot N,
@@ -199,7 +198,7 @@ def notify_staged_update() -> None:
     staged and ready, without touching the install.
 
     The server never self-installs (reinstalling the venv under a live physiclaw
-    corrupts it on Windows — see the module docstring), so we print a one-line
+    corrupts it on Windows — see the module docstring), so we log a one-line
     notice and keep serving. The user applies it with ``uv tool upgrade
     physiclaw`` once the server is stopped (the server has the native-extension
     DLLs mapped, so the upgrade must run with it stopped).
@@ -219,10 +218,14 @@ def notify_staged_update() -> None:
     if uv is None or _tool_version(uv) is None:
         return  # dev checkout / pip install — nothing to point them at
 
-    typer.echo(fmt.info(
-        f"physiclaw {staged} available (you're on {_pkg_version}) — "
-        "stop the server and run `uv tool upgrade physiclaw`."
-    ))
+    # Logged, not echoed: this runs inside `physiclaw server` startup, where
+    # every line rides the timestamped `[physiclaw]` stream (a bare echo
+    # would break the voice — and skip the daily log file).
+    log.info(
+        "physiclaw %s available (you're on %s) — "
+        "stop the server and run `uv tool upgrade physiclaw`.",
+        staged, _pkg_version,
+    )
 
 
 def maybe_stage_update() -> None:

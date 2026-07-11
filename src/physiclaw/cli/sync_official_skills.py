@@ -38,7 +38,9 @@ import threading
 import urllib.error
 import zipfile
 from pathlib import Path
+from typing import Callable
 
+import click
 import typer
 
 from physiclaw import paths
@@ -251,10 +253,20 @@ def _write_sync_state(url: str, zip_hex: str, commit: str, count: int) -> None:
     )
 
 
-def sync(*, force: bool = False, dry_run: bool = False) -> None:
+def sync(
+    *,
+    force: bool = False,
+    dry_run: bool = False,
+    emit: Callable[[str], None] = typer.echo,
+) -> None:
     """Sync the official skill pack. Idempotent: a matching commit is a no-op
     unless ``--force``. ``--dry-run`` does the freshness check only and downloads
-    nothing."""
+    nothing.
+
+    ``emit`` is the outcome printer: the interactive CLI keeps the default
+    (styled ``✓``/``i`` lines on stdout); the server's background auto-sync
+    passes a logger-backed emitter so its lines land in the timestamped
+    ``[physiclaw]`` stream instead of interleaving raw mid-log."""
     base = _load_config().skills.official_base_url
     urls = _urls(base)
 
@@ -262,7 +274,7 @@ def sync(*, force: bool = False, dry_run: bool = False) -> None:
     try:
         latest = _fetch_json(urls["latest"])
     except _NotPublished:
-        typer.echo(info("no official skills published yet — nothing to sync."))
+        emit(info("no official skills published yet — nothing to sync."))
         return
 
     remote_commit = str(latest.get("commit") or "")
@@ -275,15 +287,15 @@ def sync(*, force: bool = False, dry_run: bool = False) -> None:
     if dry_run:
         if up_to_date:
             tail = "; --force would re-sync." if force else " — no sync needed."
-            typer.echo(info(f"up to date at {remote_commit[:7]}{tail}"))
+            emit(info(f"up to date at {remote_commit[:7]}{tail}"))
         elif local_commit:
-            typer.echo(info(f"sync would run: update {local_commit[:7]} → {remote_commit[:7]}."))
+            emit(info(f"sync would run: update {local_commit[:7]} → {remote_commit[:7]}."))
         else:
-            typer.echo(info(f"sync would run: install {remote_commit[:7]} (none installed)."))
+            emit(info(f"sync would run: install {remote_commit[:7]} (none installed)."))
         return
 
     if up_to_date and not force:
-        typer.echo(ok(f"official skills already up to date ({remote_commit[:7]})."))
+        emit(ok(f"official skills already up to date ({remote_commit[:7]})."))
         return
 
     official = paths.official_dir()
@@ -351,12 +363,12 @@ def sync(*, force: bool = False, dry_run: bool = False) -> None:
     landed = _count_skills(paths.official_skills_dir())
     _write_sync_state(urls["zip"], actual, commit, landed)
 
-    typer.echo(ok(f"synced {landed} official skill(s) @ {commit[:7]}."))
+    emit(ok(f"synced {landed} official skill(s) @ {commit[:7]}."))
     for note in hash_notes:
-        typer.echo(warn(f"skill hash mismatch — {note}"))
+        emit(warn(f"skill hash mismatch — {note}"))
     declared = len(src.get("skills", [])) if isinstance(src.get("skills"), list) else 0
     if declared and declared != landed:
-        typer.echo(
+        emit(
             warn(f"manifest lists {declared} skill(s) but {landed} landed on disk.")
         )
 
@@ -406,11 +418,18 @@ def _run_sync_quiet() -> None:
     (``typer.Exit``, already on stderr) or any unexpected error is swallowed so
     the daemon thread dies quietly and the server is never affected."""
     try:
-        sync()
+        sync(emit=_log_emit)
     except typer.Exit:
         pass
     except Exception:
         log.exception("auto-sync: official skills sync failed (non-fatal)")
+
+
+def _log_emit(msg: str) -> None:
+    """Outcome printer for the background sync: unstyle (no ANSI codes in
+    the daily log file) and route through the server's logger so the line
+    gets the ``HH:MM [physiclaw]`` shape like every other startup message."""
+    log.info("%s", click.unstyle(msg))
 
 
 __all__ = ["sync", "maybe_auto_sync"]
