@@ -205,6 +205,43 @@ def test_render_tooling_handles_tool_without_description() -> None:
     assert "—" not in text.split("- **noop**")[1].split("\n")[0]
 
 
+def test_render_tooling_skipped_for_provider_that_opts_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _NativeOnly:
+        INLINE_TOOL_INDEX = False
+
+    from physiclaw.agent import provider as provider_pkg
+
+    monkeypatch.setattr(provider_pkg, "provider_class", lambda pid: _NativeOnly)
+
+    assert prompt._render_tooling([{"name": "tap", "description": "Tap."}], "x") == []
+
+
+def test_render_tooling_kept_for_unknown_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from physiclaw.agent import provider as provider_pkg
+
+    monkeypatch.setattr(provider_pkg, "provider_class", lambda pid: None)
+
+    out = "\n".join(
+        prompt._render_tooling([{"name": "tap", "description": "Tap."}], "mystery")
+    )
+
+    assert "## Tooling" in out
+
+
+def test_render_tooling_kept_via_real_anthropic_provider() -> None:
+    # Deliberate: AnthropicProvider keeps the default INLINE_TOOL_INDEX=True —
+    # the card is cheap insurance even though Claude reads the tools= schema.
+    out = "\n".join(
+        prompt._render_tooling([{"name": "tap", "description": "Tap."}], "anthropic")
+    )
+
+    assert "## Tooling" in out
+
+
 def test_render_tooling_includes_mcp_inventory_tools(
     _isolate_context_dir, monkeypatch: pytest.MonkeyPatch
 ) -> None:

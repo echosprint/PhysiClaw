@@ -13,7 +13,9 @@ structure that gets cross-session hits.
 
 The inline `## Tooling` index card duplicates the schema sent via the
 provider's `tools=` API — open-weight models often miss tools that appear
-only in the schema, so the card is a redundant anchor.
+only in the schema, so the card is a redundant anchor. Providers whose
+models read the schema reliably opt out via `INLINE_TOOL_INDEX = False`
+(see `BaseProvider`) and skip the card entirely.
 """
 
 import hashlib
@@ -91,7 +93,9 @@ def render_system_prompts(
                            PERSISTENCE, JOBS, CONVENTION — each rendered as a
                            `## <name>` block; missing = skipped. USER reads
                            from memory/.
-      ## Tooling           inline tool index card (Qwen reliability)
+      ## Tooling           inline tool index card — a redundant anchor for
+                           models that miss schema-only tools; skipped when
+                           the provider sets INLINE_TOOL_INDEX = False
       ## Built-in Skills   built-in skills, FULL bodies (always active)
       ## Screen layout     learned input/keyboard bboxes the skills above use
       ## Available skills  official + user skills (### subsections),
@@ -112,7 +116,7 @@ def render_system_prompts(
     """
     lines: list[str] = [
         *_render_doctrine(),
-        *_render_tooling(local_tool_schemas or []),
+        *_render_tooling(local_tool_schemas or [], provider_id),
         *_render_section(builtin_skills_ctx),
         *_render_screen_layout(),
         *_render_section(user_skills_ctx),
@@ -164,7 +168,7 @@ def _load_doctrine_files() -> list[tuple[str, str]]:
     return out
 
 
-def _render_tooling(local_tool_schemas: list[dict]) -> list[str]:
+def _render_tooling(local_tool_schemas: list[dict], provider_id: str = "") -> list[str]:
     """Inline tool index card. Each tool gets one line: `- **name** — first
     sentence`.
 
@@ -174,14 +178,20 @@ def _render_tooling(local_tool_schemas: list[dict]) -> list[str]:
     name, so the merge is a simple concat.
 
     Why the inline card at all: open-weight models (Qwen, Moonshot)
-    routinely forget tools that appear only in the native `tools=` payload."""
+    routinely forget tools that appear only in the native `tools=` payload.
+    Providers that don't need the anchor (`INLINE_TOOL_INDEX = False`, e.g.
+    Anthropic) skip the whole card; unknown/empty provider keeps it — the
+    safe default for dumps and new vendors."""
+    if not _wants_tool_index(provider_id):
+        return []
     all_tools = mcp_inventory.discover_mcp_tools() + (local_tool_schemas or [])
     if not all_tools:
         return []
     out: list[str] = [
         "## Tooling",
-        "Tools below are also available via the native tool-call API. "
-        "Names are case-sensitive; call them exactly as listed.",
+        "",
+        "All available via the native tool-call API; names are "
+        "case-sensitive — call them exactly as listed.",
         "",
     ]
     for s in all_tools:
@@ -192,6 +202,16 @@ def _render_tooling(local_tool_schemas: list[dict]) -> list[str]:
         out.append(f"- **{name}** — {desc}" if desc else f"- **{name}**")
     out.append("")
     return out
+
+
+def _wants_tool_index(provider_id: str) -> bool:
+    """Whether the active provider needs the inline `## Tooling` card.
+    Unknown or unset provider → True (dumps and new vendors keep the
+    redundant anchor; only vendors that opt out lose it)."""
+    from physiclaw.agent.provider import provider_class
+
+    cls = provider_class(provider_id)
+    return cls is None or cls.INLINE_TOOL_INDEX
 
 
 def _render_section(ctx: str) -> list[str]:
@@ -219,51 +239,29 @@ def _render_screen_layout() -> list[str]:
 
 
 def _render_examples() -> list[str]:
-    """Concrete ❌ Wrong / ✅ Right patterns for the failure modes Qwen
-    hits most often. Each pattern restates a rule already in AGENT.md or
-    CONVENTION.md, paired with a worked example.
-
-    OpenClaw scatters this style throughout (Silent Replies, Reply Tags,
-    etc.); we collect it into one section because our failure surface
-    is small enough to enumerate."""
+    """Concrete ❌ Wrong / ✅ Right patterns for the most common per-turn
+    failure modes. Each pairs a doctrine rule with a worked example; rules
+    the engine already corrects mid-run (turn shape aside) aren't repeated
+    here — AGENT.md / CONVENTION.md carry them once."""
     return [
         "## Examples",
         "",
-        "**Turn shape** — exactly `[note, one-other]`; summary = last result + this action.",
-        "❌ `[peek]` alone · `[note, append_log, end_session]`.",
-        '✅ `[note(summary="chats list visible — opening QiaoQian\'s thread"), tap(bbox=[0.055, 0.171, 0.945, 0.243])]`.',
-        "",
         "**Bbox transcription** — verbatim from the listing's bracket contents.",
-        '❌ Listing row `45 [icon] "" [0.520,0.662,0.717,0.775] 0.56` → `tap(bbox=[0.518, 0.662, 0.717, 0.775])` — `0.518` is a regeneration; 0.002 drift lands on the neighbor.',
-        "✅ Transcribe the four numbers exactly — `0.520` stays `0.520`. Target not in any grounded source → `screenshot`, never fabricate.",
+        '❌ Row `45 [icon] "" [0.520,0.662,0.717,0.775] 0.56` → `tap(bbox=[0.518, …])` — the regenerated `0.518` lands on the neighbor.',
+        "✅ All four numbers exactly — `0.520` stays `0.520`. Not in any grounded source → `screenshot`, never fabricate.",
         "",
-        "**Screenshot escalation** — when `peek` misses a target, re-peeking returns the same gap.",
-        '❌ `peek` home, no JD icon → `peek` again → tap a Safari link labeled "JD" → wrong page, STUCK loop.',
-        "✅ `peek` home, no JD icon → `screenshot` next turn, scratchpad the icon's bbox, `peek`, tap the copy. The icon was always there; the camera couldn't resolve it.",
+        "**Screenshot escalation** — re-peeking a missed target returns the same gap.",
+        '❌ `peek` home, no JD icon → `peek` again → tap a Safari link labeled "JD" → wrong page, STUCK.',
+        "✅ `screenshot` next turn → scratchpad the icon's bbox → `peek` → tap the copy. The icon was always there; the camera couldn't resolve it.",
         "",
-        "**Silent refusal** — toasts vanish before you can look; a value unmoved through two presses is the app saying no.",
-        "❌ qty stays 2 → assume the tap missed → 20 tap/double_tap/nudged-bbox retries across cart and checkout.",
-        '✅ tap `+` → `no visible change` → read qty in the attached view: still 2 → retry once → still 2 → refusal. Find the evidence (a "limit 2 per order" label, greyed `+`), scratchpad `TRIED: + stepper ×2, qty stuck at 2`, then ask the user: "Store caps this at 2 — take 2, or switch brands?" and WAIT.',
-        "",
-        "**Batch grounded runs** — all boxes known up front = one `sequence`, not five turns.",
-        "❌ On the chat page: tap input → send_to_clipboard → long_press input → tap Paste → tap Send as five single-action turns for one message.",
-        "✅ One `sequence(actions=[tap input, send_to_clipboard, long_press input, tap Paste, tap Send])` — its attached view shows the sent bubble, zero extra turns. Every box is pinned in SYSTEM § Screen layout.",
-        "",
-        "**Verify from the attached view, not a fresh peek** — every gesture returns the new screen.",
-        "❌ tap → `peek` → tap → `peek` — the peeks double your turns and say nothing the attached views didn't.",
-        "✅ tap → read the attached view (value, verdict, next target's bbox) → next gesture. `peek` only in the no-current-view cases (PHYSICLAW § Views).",
-        "",
-        "**Add to cart** — success shows only in the small top-right cart badge; the page stays put.",
-        "❌ Screen unchanged → tap again → duplicates. Or `screenshot` → shopping apps pop share panels.",
-        "✅ Tap once → read the badge in the attached view (2 → 3 = landed); unreadable → open the cart and check.",
+        "**Unchanged screen** — read the value: a small change (top-right cart badge 2 → 3, page stays put) means landed; a value unmoved through two presses is the app saying no (the toast already vanished).",
+        "❌ Cart badge unread → tap again → duplicates. Or qty stays 2 → 20 tap/double_tap/nudged-bbox retries across cart and checkout.",
+        '✅ tap `+` → qty still 2 in the attached view → retry once → still 2 = refusal. Find the evidence ("limit 2 per order", greyed `+`), scratchpad `TRIED: + stepper ×2, qty stuck at 2`, ask the user: "Store caps this at 2 — take 2, or switch brands?" and WAIT. Badge unreadable → open the cart and check.',
         "",
         "**Scratchpad accumulates** — plan-relevant payloads go in as you see them; navigation doesn't.",
         "❌ Scroll 2 orders across 4 pages, scratchpad nothing → views stubbed by compaction, items lost, re-scrape.",
-        '✅ Order 1 visible → `note(..., scratchpad="order 1: cable ¥45, clips ¥17")` → scroll → `note(..., scratchpad="order 1: cable ¥45, clips ¥17, tape ¥22")` → order 2 → append its lines. Reaching WeChat, the scratchpad is the full answer.',
+        '✅ `note(..., scratchpad="order 1: cable ¥45, clips ¥17")` → scroll → reissue with `tape ¥22` appended → order 2 → append its lines. Reaching WeChat, the scratchpad is the full reply.',
         "",
-        "**Plan ticking** — tick on intent-confirmed, not per tap.",
-        "❌ Complete step 1, never `update_progress` again · tick after every tap.",
-        "✅ After reading the IM, one `update_progress` with the full step list (first `in_progress`, rest `pending`); flip on each screen-confirmed intent (cart toast, results loaded).",
     ]
 
 

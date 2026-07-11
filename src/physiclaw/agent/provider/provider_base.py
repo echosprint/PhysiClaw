@@ -160,6 +160,13 @@ class BaseProvider:
     # Per-vendor system-prompt addendum; see `system_prompt_fragment()`.
     SYSTEM_PROMPT_FRAGMENT: str = ""
 
+    # Whether the SYSTEM prompt carries the inline `## Tooling` index card.
+    # Open-weight models (Qwen, Moonshot) routinely miss tools that appear
+    # only in the native `tools=` schema, so the card is a redundant anchor
+    # for them — default on. Vendors whose models reliably read the schema
+    # set False and save the duplication (~700 tokens per request).
+    INLINE_TOOL_INDEX: bool = True
+
     # Cache-marker factory for this provider's wire shape. Each
     # wire-shape base sets its own (`OpenAICacheMarkers` /
     # `AnthropicCacheMarkers`); a vendor whose endpoint ignores markers

@@ -7,7 +7,7 @@ description: Use when typing a query into a search box / search field inside any
 
 ## The search box
 
-A rounded bar: magnifier icon left, gray placeholder text in the middle, camera / mic / Search button right. **The placeholder text's row IS the field — target its bbox**; the edge icons are decoys (camera = photo-search, right-edge button = submit).
+A rounded bar: magnifier left, gray placeholder text in the middle, camera / mic / Search right. **The placeholder's row IS the field — target its bbox**; the edge icons are decoys (camera = photo-search, right edge = submit).
 
 - **Home-page bars are buttons** (most shopping apps): the first tap opens the real search page — re-ground the input there (the placeholder word repeats as a chip below; take the topmost row).
 - **The placeholder is a live, rotating ad query**: submitting an empty field searches it — never tap search/return until YOUR text is in the box.
