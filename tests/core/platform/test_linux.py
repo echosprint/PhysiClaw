@@ -130,13 +130,32 @@ def test_set_auto_exposure_v4l2_encoding() -> None:
     assert cap.set.call_args_list == [call(cv2.CAP_PROP_AUTO_EXPOSURE, 3)]
 
 
-def test_set_manual_exposure_v4l2_encoding() -> None:
+def test_set_manual_exposure_converts_log2_seconds_to_v4l2_ticks() -> None:
+    # `set_manual` receives the shared log2-seconds scale (exposure.py's
+    # -11..-2 band); V4L2 wants ~100µs ticks. Passing the raw negative
+    # through (old behavior) got driver-clamped, so converge()'s luma
+    # stall check read "driver ignores exposure writes" and every tune
+    # on Linux reverted to blown-out auto (observed on a real session).
     import cv2
 
     cap = MagicMock()
-    linux.camera_set_manual_exposure(cap, 200)
+    linux.camera_set_manual_exposure(cap, -6)  # 2**-6 s = 15.6ms → 156 ticks
 
     assert cap.set.call_args_list == [
         call(cv2.CAP_PROP_AUTO_EXPOSURE, 1),
-        call(cv2.CAP_PROP_EXPOSURE, 200),
+        call(cv2.CAP_PROP_EXPOSURE, 156),
     ]
+
+
+def test_set_manual_exposure_tick_conversion_bounds() -> None:
+    import cv2
+
+    for log2_value, ticks in [
+        (-11, 5),     # band floor: 0.49ms
+        (-2, 2500),   # band ceiling: 250ms
+        (-20, 1),     # far out of band: clamps to the 1-tick floor, not 0
+    ]:
+        cap = MagicMock()
+        linux.camera_set_manual_exposure(cap, log2_value)
+
+        assert call(cv2.CAP_PROP_EXPOSURE, ticks) in cap.set.call_args_list

@@ -118,15 +118,20 @@ def camera_set_auto_exposure(cap) -> None:
 
 
 def camera_set_manual_exposure(cap, exposure: int) -> None:
-    """Hold a fixed exposure. V4L2 exposure units are device-specific
-    (often 100µs ticks), NOT the Windows log2-seconds scale — small
-    integer steps may measure as no change, which the caller's stall
-    check treats as "driver ignores sets" and correctly reverts to
-    auto."""
+    """Hold a fixed exposure. `exposure` arrives on the shared
+    log2-seconds scale (-11 ≈ 0.5ms … -2 = 250ms, exposure.py's bounds);
+    V4L2's EXPOSURE control wants ~100µs ticks, so convert — one log2
+    stop is one halving of ticks, keeping `converge`'s integer stepping
+    a real one-stop move on Linux. (Passing the raw negative through —
+    the old behavior — got clamped by the driver, which the luma stall
+    check read as "driver ignores exposure writes", reverting every
+    tune to blown-out auto.) Tick ranges vary per device; out-of-range
+    values are the driver's to clamp."""
     import cv2
 
+    ticks = max(1, round((2.0 ** exposure) * 10_000))
     cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
-    cap.set(cv2.CAP_PROP_EXPOSURE, exposure)
+    cap.set(cv2.CAP_PROP_EXPOSURE, ticks)
 
 
 # ─── doctor diagnostics ─────────────────────────────────────

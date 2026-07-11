@@ -30,8 +30,11 @@ log = logging.getLogger(__name__)
 # frame would misread every step.
 SETTLE_FRAMES = 5
 
-# Manual-stepping bounds, Windows log2-seconds scale (-11 ≈ 0.5ms,
-# -2 = 250ms). Values outside are dark noise / motion-blur territory.
+# Manual-stepping bounds, log2-seconds scale (-11 ≈ 0.5ms, -2 = 250ms).
+# This is the shared contract for `set_manual` values: Windows passes it
+# raw (the DirectShow CameraControl_Exposure unit); Linux converts to
+# V4L2 ~100µs ticks (one stop = one halving). Values outside are dark
+# noise / motion-blur territory.
 MIN_EXPOSURE = -11
 MAX_EXPOSURE = -2
 MAX_STEPS = 6

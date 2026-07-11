@@ -346,7 +346,7 @@ _FIELD_COMMENTS: dict[tuple[str, str], str] = {
     ("memory", "default_log_entries"): "on-demand `read_logs` default size (max 200)",
     ("memory", "bootstrap_log_entries"): "auto-preloaded into the memory slot at every wake",
     ("camera", "auto_exposure"): "false = hold `exposure` manually (Windows/Linux; macOS ignores)",
-    ("camera", "exposure"): "log2 seconds on Windows (-6 = 1/64s, indoors -4..-8); manual-fallback start",
+    ("camera", "exposure"): "log2 seconds (-6 = 1/64s, indoors -4..-8); manual-fallback start",
 }
 
 
