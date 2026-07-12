@@ -177,6 +177,13 @@ def claude_log_dir() -> Path:
     return LOG_DIR / "claude"
 
 
+def claude_sessions_dir() -> Path:
+    """Per-session artifact dirs for the `claude -p` engine — same layout
+    as ``engine_sessions_dir`` (summary.json, images/), so both engines'
+    sessions read with one tool."""
+    return claude_log_dir() / "sessions"
+
+
 def engine_log_dir() -> Path:
     return LOG_DIR / "engine"
 

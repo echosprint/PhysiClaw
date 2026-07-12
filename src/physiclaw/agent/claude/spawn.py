@@ -12,23 +12,36 @@ about Claude Code. Deleting agent/claude/ leaves the engine intact.
 """
 
 import asyncio
+import base64
 import datetime as dt
+import hashlib
 import json
 import logging
 import os
 import shutil
 import sys
+import time
+from collections import Counter
 from pathlib import Path
 
 from physiclaw.common import paths
 from physiclaw.agent.claude.plugin import prepare_plugin_dir
 from physiclaw.agent.engine import screen_layout, skill
 from physiclaw.agent.engine.trace import new_sid
+# Shared session-artifact helpers — reused verbatim so the claude sessions'
+# summary.json + images/ stay byte-compatible with the engine's (one
+# `physiclaw logs` / `jq` reads both).
+from physiclaw.agent.engine.trace import (
+    _MIME_EXT,
+    _env_snapshot,
+    _write_json_atomic,
+    purge_old_sessions,
+)
 from physiclaw.agent.engine.mcp_inventory import discover_mcp_tools
 from physiclaw.common.text import read_text
 from physiclaw.agent.engine.skill import Skill
 from physiclaw.agent.runtime.hook import Trigger
-from physiclaw.agent.runtime.sentinel import parse_sentinel
+from physiclaw.agent.runtime.sentinel import STATUSES, parse_sentinel
 from physiclaw.common.config import CONFIG
 from physiclaw.common.logger.retention import purge_daily_logs
 
@@ -208,10 +221,167 @@ def _redact_images(content):
     return out
 
 
-class _SessionLog:
-    """Append-only log for a single claude session to a daily file."""
+# Per-session artifact dir docs — a claude-specific README (the engine's
+# `SESSIONS_README` also documents events.jsonl / wire.jsonl, which this
+# engine doesn't emit). summary.json shares the engine's schema v1, so the
+# same `physiclaw logs` / `jq` reads both engines' sessions.
+_CLAUDE_SESSIONS_README = """\
+# PhysiClaw claude-code session logs
 
-    def __init__(self, sources: list[str]):
+One directory per `claude -p` wake, `YYYYMMDD_HHMMSS_<6-char id>`. The
+human-readable narrative for all wakes of a day lives alongside, in
+`../claude-YYYY-MM-DD.log`.
+
+- `summary.json` — session metrics, schema v1 (shared with the engine's
+  sessions): sid, started/ended, duration_s, model_ref, provider, triggers,
+  outcome{sentinel,recap,crashed}, turns, usage{tokens,cache_hit_pct},
+  cost_usd, tool_calls{name:count}, errors, images, env. Missing = the
+  session was killed. Cross-session: `jq .usage.cache_hit_pct */summary.json`.
+- `images/NNNNN_t<turn>.jpg` — screenshots the model saw, turn-tagged.
+
+Privacy: images/ are phone screenshots. Treat a session dir as sensitive.
+"""
+
+
+def _ensure_claude_sessions_readme() -> None:
+    """Drop the format doc once — idempotent, fail-open, cheap."""
+    path = paths.claude_sessions_dir() / "README.md"
+    try:
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(_CLAUDE_SESSIONS_README, encoding="utf-8", newline="\n")
+    except OSError:
+        log.debug("claude sessions README write failed", exc_info=True)
+
+
+class _ClaudeSummary:
+    """Accumulate a wake's metrics from the stream-json into the engine's
+    summary.json schema (v1), so both engines' sessions read with one tool.
+    Token fields sum the per-assistant `usage` — matching the engine's
+    per-turn accumulation — and `cost_usd` (claude-only) rides along."""
+
+    def __init__(
+        self,
+        sid: str,
+        triggers: list[Trigger],
+        *,
+        model_ref: str,
+        prompt_hash: str,
+    ):
+        self.sid = sid
+        self.started_at = dt.datetime.now().isoformat(timespec="milliseconds")
+        self._start_mono = time.monotonic()
+        self.model_ref = model_ref
+        self.prompt_hash = prompt_hash
+        self.triggers = [
+            {"source": t.source, "description": t.description} for t in triggers
+        ]
+        self.sentinel: str | None = None
+        self.recap = ""
+        self.crashed = False
+        # Tokens/cost/time come from the `result` event — the single
+        # authoritative cumulative record. Per-`assistant`-event `usage` is
+        # PARTIAL (streamed) and REPEATS the same `message.id` across a
+        # message's content-block events, so summing it double-counts.
+        self.provider_time_ms = 0
+        self.cost_usd = 0.0
+        self.usage: dict = {}
+        self._msg_ids: set[str] = set()  # distinct assistant messages = calls
+        self.tool_calls: Counter[str] = Counter()
+        self.tool_errors = 0
+        self.env = _env_snapshot()
+
+    def observe(self, data: dict) -> None:
+        t = data.get("type")
+        if t == "assistant":
+            msg = data.get("message", {})
+            mid = msg.get("id")
+            if mid:
+                self._msg_ids.add(mid)
+            # Each content block appears in exactly one assistant event, so
+            # counting tool_use across events doesn't double-count.
+            for b in msg.get("content", []):
+                if b.get("type") == "tool_use":
+                    self.tool_calls[b.get("name") or "?"] += 1
+        elif t == "user":
+            for b in data.get("message", {}).get("content", []):
+                if b.get("type") == "tool_result" and b.get("is_error"):
+                    self.tool_errors += 1
+        elif t == "result":
+            self.provider_time_ms = int(data.get("duration_api_ms") or 0)
+            self.cost_usd = float(data.get("total_cost_usd") or 0.0)
+            self.usage = data.get("usage") or {}
+
+    def finalize(self, *, images: int) -> dict:
+        u = self.usage
+        cr = int(u.get("cache_read_input_tokens") or 0)
+        cc = int(u.get("cache_creation_input_tokens") or 0)
+        total_in = int(u.get("input_tokens") or 0) + cr + cc
+        calls = len(self._msg_ids)
+        return {
+            "schema": 1,
+            "sid": self.sid,
+            "started_at": self.started_at,
+            "ended_at": dt.datetime.now().isoformat(timespec="milliseconds"),
+            "duration_s": round(time.monotonic() - self._start_mono, 1),
+            "model_ref": self.model_ref,
+            "provider": self.model_ref.partition("/")[0],
+            "prompt_hash": self.prompt_hash,
+            "triggers": self.triggers,
+            "outcome": {
+                "sentinel": self.sentinel,
+                "recap": self.recap,
+                "crashed": self.crashed,
+            },
+            # Distinct assistant messages = provider round-trips; on the
+            # claude path one turn == one call, so both keys carry the same
+            # value (engine parity — there a turn can span calls).
+            "turns": calls,
+            "provider_calls": calls,
+            "provider_time_ms": self.provider_time_ms,
+            "usage": {
+                "input_tokens": total_in,
+                "output_tokens": int(u.get("output_tokens") or 0),
+                "cache_read_tokens": cr,
+                "cache_creation_tokens": cc,
+                "cache_hit_pct": (
+                    round(100 * cr / total_in, 1) if total_in else 0.0
+                ),
+            },
+            "cost_usd": round(self.cost_usd, 4),
+            "tool_calls": dict(self.tool_calls),
+            "errors": {
+                # Engine-internal refusal counters don't apply to the claude
+                # path (Claude Code owns its own loop); keep the keys for
+                # schema parity, populate the two that are observable here.
+                "blocked_plan": 0,
+                "blocked_layout": 0,
+                "blocked_stuck": 0,
+                "invalid_args": 0,
+                "unknown_tool": 0,
+                "tool_errors": self.tool_errors,
+                "correctives": 0,
+                "provider_failures": 0,
+            },
+            "stuck_events": 0,
+            "images": images,
+            "env": self.env,
+        }
+
+
+class _SessionLog:
+    """One claude wake's logs: the daily human narrative
+    (`claude-YYYY-MM-DD.log`) plus a per-session artifact dir
+    (`sessions/<sid>/summary.json` + `images/`), mirroring the engine."""
+
+    def __init__(
+        self,
+        sid: str,
+        triggers: list[Trigger],
+        *,
+        model_ref: str,
+        prompt_hash: str,
+    ):
         LOG_DIR.mkdir(parents=True, exist_ok=True)
         purge_daily_logs(LOG_DIR, "claude", CONFIG.retention.log_days)
         self._date = dt.datetime.now().strftime("%Y-%m-%d")
@@ -223,19 +393,39 @@ class _SessionLog:
             newline="\n",
         )
         self._f.write(f"\n{'=' * 60}\n")
+
+        # Per-session artifact dir + running metrics.
+        self._sdir = paths.claude_sessions_dir() / sid
+        self._img_dir = self._sdir / "images"
+        self._img_dir.mkdir(parents=True, exist_ok=True)
+        _ensure_claude_sessions_readme()
+        purge_old_sessions(
+            paths.claude_sessions_dir(), days=CONFIG.retention.trace_days
+        )
+        self._summary = _ClaudeSummary(
+            sid, triggers, model_ref=model_ref, prompt_hash=prompt_hash
+        )
+        self._turn = 0  # advanced per assistant response; tags extracted images
+        self._image_counter = 0
+        self._closed = False
+
+        sources = [t.source or "?" for t in triggers]
         self._write(f"WAKE triggers={sources}")
 
     def event(self, data: dict) -> dict | None:
         """Log a stream-json event. Returns the data if it's a result.
 
-        Every event is summarized to the daily file. Assistant text
-        chunks additionally forward a one-line narration to the runtime
-        logger so the operator sees Claude's reasoning / intent live
-        without tailing the detail log.
+        Every event is summarized to the daily file, feeds the session
+        summary, and (for tool-result screenshots) is extracted to
+        images/. Assistant text additionally narrates to the runtime log.
         """
+        if data.get("type") == "assistant":
+            self._turn += 1
         summary = self._summarize(data)
         if summary:
             self._write(summary)
+        self._summary.observe(data)
+        self._extract_images(data)
         self._forward_to_runtime(data)
         return data if data.get("type") == "result" else None
 
@@ -243,7 +433,8 @@ class _SessionLog:
         self._write(f"raw: {text[:500]}")
 
     def done(self, returncode: int | str) -> str:
-        """Write OUTCOME + EXIT bookends. Returns the OUTCOME status.
+        """Write OUTCOME + EXIT bookends, record them on the summary, and
+        return the OUTCOME status.
 
         Trust the sentinel only when the process exited cleanly (code 0);
         otherwise the run crashed even if the agent claimed DONE earlier.
@@ -256,13 +447,62 @@ class _SessionLog:
         if not status:
             status = "UNDONE"
             recap = (last_line or "(no text)").strip()[:200]
+        self._summary.sentinel = status if status in STATUSES else None
+        self._summary.recap = recap
+        self._summary.crashed = returncode != 0
         self._write(f"OUTCOME: {status} - {recap}")
         self._write(f"EXIT code={returncode}")
         self._f.write(f"{'=' * 60}\n\n")
         return status
 
     def close(self) -> None:
-        self._f.close()
+        """Finalize summary.json, then close the daily-log handle. Idempotent
+        and OSError-safe — a full disk must not turn a DONE wake into a crash."""
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            _write_json_atomic(
+                self._sdir / "summary.json",
+                self._summary.finalize(images=self._image_counter),
+            )
+        except OSError:
+            log.warning("claude session summary write failed", exc_info=True)
+        finally:
+            if not self._f.closed:
+                self._f.close()
+
+    def _extract_images(self, data: dict) -> None:
+        """Decode base64 screenshots from tool_result blocks to
+        images/NNNNN_t<turn>.<ext> — the screenshots the model actually saw,
+        the biggest post-mortem win over the elided daily log."""
+        if data.get("type") != "user":
+            return
+        for b in data.get("message", {}).get("content", []):
+            if b.get("type") != "tool_result":
+                continue
+            content = b.get("content")
+            if not isinstance(content, list):
+                continue
+            for c in content:
+                if not isinstance(c, dict) or c.get("type") != "image":
+                    continue
+                src = c.get("source") or {}
+                if src.get("type") == "base64" and src.get("data"):
+                    self._save_image(src.get("media_type") or "image/jpeg", src["data"])
+
+    def _save_image(self, mime: str, b64: str) -> None:
+        try:
+            raw = base64.b64decode(b64, validate=False)
+        except (ValueError, TypeError):
+            return
+        n = self._image_counter + 1
+        name = f"{n:05d}_t{self._turn}{_MIME_EXT.get(mime, '.bin')}"
+        try:
+            (self._img_dir / name).write_bytes(raw)
+        except OSError:
+            return  # don't advance the counter for a write that didn't land
+        self._image_counter = n
 
     def _write(self, msg: str) -> None:
         now = dt.datetime.now()
@@ -489,6 +729,8 @@ async def spawn_claude(triggers: list[Trigger], *, model_id: str) -> None:
     discovered.pop(screen_layout.SKILL_NAME, None)
     skills = screen_layout.fill_builtin_boxes(discovered)
     system_prompt = _render_system_prompt(mcp_tools, skills)
+    prompt_hash = hashlib.sha256(system_prompt.encode("utf-8")).hexdigest()
+    model_ref = f"claude-code/{model_id}"
     env = _child_env()
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
@@ -530,7 +772,9 @@ async def spawn_claude(triggers: list[Trigger], *, model_id: str) -> None:
                 # Default 64KB readline limit blows up on screenshot base64 lines.
                 limit=CONFIG.claude.stream_buffer_mb * 1024 * 1024,
             )
-            slog = _SessionLog(sources)
+            slog = _SessionLog(
+                sid, triggers, model_ref=model_ref, prompt_hash=prompt_hash
+            )
             try:
                 result_data = await _stream(proc, slog)
                 await proc.wait()

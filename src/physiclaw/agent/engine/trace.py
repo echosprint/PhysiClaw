@@ -852,14 +852,27 @@ def _purge_old(
     if removed:
         log.info("purged %d legacy raw log file(s) older than %d days", removed, days)
 
-    removed = 0
+    removed = purge_old_sessions(_SESSIONS_DIR, days=days)
+    if removed:
+        log.info("purged %d session dir(s) older than %d days", removed, days)
+
+    purge_daily_logs(_LOG_DIR, "engine", log_days)
+
+
+def purge_old_sessions(sessions_dir: Path, *, days: int) -> int:
+    """Remove session dirs under `sessions_dir` whose newest file is older
+    than `days` (mtime, not filename — tolerant of clock skew + files
+    appended long after creation). Fail-open; returns the count removed.
+    Shared by the engine (`_purge_old`) and the claude session writer."""
+    cutoff = time.time() - days * 86400
     try:
-        session_dirs = [
-            d for d in _SESSIONS_DIR.iterdir() if d.is_dir() and not d.is_symlink()
+        dirs = [
+            d for d in sessions_dir.iterdir() if d.is_dir() and not d.is_symlink()
         ]
     except OSError:
-        session_dirs = []
-    for d in session_dirs:
+        return 0
+    removed = 0
+    for d in dirs:
         try:
             newest = max(
                 (p.stat().st_mtime for p in d.rglob("*") if p.is_file()),
@@ -870,7 +883,4 @@ def _purge_old(
                 removed += 1
         except OSError:
             pass
-    if removed:
-        log.info("purged %d session dir(s) older than %d days", removed, days)
-
-    purge_daily_logs(_LOG_DIR, "engine", log_days)
+    return removed

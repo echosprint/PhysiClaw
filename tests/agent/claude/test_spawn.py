@@ -252,8 +252,21 @@ def _isolated_log_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return log_dir
 
 
+def _slog(sources: list[str]) -> _SessionLog:
+    """Build a `_SessionLog` from bare source strings. Fixed sid/model/prompt
+    so the artifact dir is deterministic; the session dir lands under the
+    autouse `physiclaw_home` tmp via `paths.claude_sessions_dir()`."""
+    triggers = [Trigger(source=s, description=s) for s in sources]
+    return _SessionLog(
+        "20260101_120000_test00",
+        triggers,
+        model_ref="claude-code/test-model",
+        prompt_hash="0" * 64,
+    )
+
+
 def test_session_log_init_writes_wake_header(_isolated_log_dir: Path) -> None:
-    slog = _SessionLog(["cron:a", "phone"])
+    slog = _slog(["cron:a", "phone"])
     slog.close()
 
     files = list(_isolated_log_dir.glob("claude-*.log"))
@@ -263,10 +276,122 @@ def test_session_log_init_writes_wake_header(_isolated_log_dir: Path) -> None:
     assert "=" * 60 in text
 
 
+def test_session_log_writes_summary_json(_isolated_log_dir: Path) -> None:
+    import json
+
+    from physiclaw.common import paths
+
+    slog = _slog(["phone"])
+    # Two assistant events sharing ONE message id — the content-block streaming
+    # of a single API response. Must count as ONE provider call, not two, and
+    # their (partial, repeated) usage must NOT be summed.
+    slog.event(
+        {
+            "type": "assistant",
+            "message": {
+                "id": "msg_1",
+                "content": [{"type": "tool_use", "name": "peek", "input": {}}],
+                "usage": {"input_tokens": 100, "output_tokens": 4},
+            },
+        }
+    )
+    slog.event(
+        {
+            "type": "assistant",
+            "message": {
+                "id": "msg_1",
+                "content": [{"type": "text", "text": ">> DONE - bought it"}],
+                "usage": {"input_tokens": 100, "output_tokens": 4},
+            },
+        }
+    )
+    # The result event is the authoritative cumulative token/cost/time record.
+    slog.event(
+        {
+            "type": "result",
+            "num_turns": 1,
+            "total_cost_usd": 0.0123,
+            "duration_api_ms": 4200,
+            "usage": {
+                "input_tokens": 100,
+                "output_tokens": 30,
+                "cache_read_input_tokens": 400,
+                "cache_creation_input_tokens": 0,
+            },
+        }
+    )
+    slog.done(0)
+    slog.close()
+
+    s = json.loads(
+        (paths.claude_sessions_dir() / "20260101_120000_test00" / "summary.json")
+        .read_text()
+    )
+    assert s["schema"] == 1
+    assert s["provider"] == "claude-code"
+    assert s["model_ref"] == "claude-code/test-model"
+    assert s["outcome"] == {"sentinel": "DONE", "recap": "bought it", "crashed": False}
+    assert s["turns"] == 1  # one distinct message, despite two stream events
+    assert s["provider_calls"] == 1
+    assert s["tool_calls"] == {"peek": 1}
+    # Tokens from result.usage (authoritative), not summed per-assistant.
+    assert s["usage"]["input_tokens"] == 100 + 400  # input + cache_read
+    assert s["usage"]["output_tokens"] == 30
+    assert s["usage"]["cache_read_tokens"] == 400
+    assert s["cost_usd"] == 0.0123
+    assert s["provider_time_ms"] == 4200
+
+
+def test_session_log_extracts_screenshot(_isolated_log_dir: Path) -> None:
+    import base64
+
+    from physiclaw.common import paths
+
+    slog = _slog(["phone"])
+    slog.event(
+        {
+            "type": "assistant",
+            "message": {"content": [{"type": "tool_use", "name": "peek", "input": {}}]},
+        }
+    )
+    b64 = base64.b64encode(b"\xff\xd8fake-jpeg").decode()
+    slog.event(
+        {
+            "type": "user",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "image/jpeg",
+                                    "data": b64,
+                                },
+                            },
+                            {"type": "text", "text": "elements..."},
+                        ],
+                    }
+                ]
+            },
+        }
+    )
+    slog.close()
+
+    imgs = list(
+        (paths.claude_sessions_dir() / "20260101_120000_test00" / "images").glob("*")
+    )
+    assert len(imgs) == 1
+    assert imgs[0].name == "00001_t1.jpg"  # turn 1 (one assistant seen), first image
+    assert imgs[0].read_bytes() == b"\xff\xd8fake-jpeg"
+
+
 def test_session_log_event_assistant_text_returns_none(
     _isolated_log_dir: Path,
 ) -> None:
-    slog = _SessionLog([])
+    slog = _slog([])
     out = slog.event(
         {
             "type": "assistant",
@@ -279,7 +404,7 @@ def test_session_log_event_assistant_text_returns_none(
 
 
 def test_session_log_event_result_returns_data(_isolated_log_dir: Path) -> None:
-    slog = _SessionLog([])
+    slog = _slog([])
     data = {"type": "result", "num_turns": 5, "result": "all done"}
     out = slog.event(data)
     slog.close()
@@ -288,7 +413,7 @@ def test_session_log_event_result_returns_data(_isolated_log_dir: Path) -> None:
 
 
 def test_session_log_summarizes_tool_use(_isolated_log_dir: Path) -> None:
-    slog = _SessionLog([])
+    slog = _slog([])
     slog.event(
         {
             "type": "assistant",
@@ -306,7 +431,7 @@ def test_session_log_summarizes_tool_use(_isolated_log_dir: Path) -> None:
 
 
 def test_session_log_summarizes_thinking(_isolated_log_dir: Path) -> None:
-    slog = _SessionLog([])
+    slog = _slog([])
     slog.event(
         {
             "type": "assistant",
@@ -326,7 +451,7 @@ def test_session_log_summarizes_thinking(_isolated_log_dir: Path) -> None:
 def test_session_log_user_event_without_tool_result_no_summary(
     _isolated_log_dir: Path,
 ) -> None:
-    slog = _SessionLog([])
+    slog = _slog([])
     slog.event(
         {
             "type": "user",
@@ -341,7 +466,7 @@ def test_session_log_user_event_without_tool_result_no_summary(
 
 
 def test_session_log_summarizes_user_tool_result(_isolated_log_dir: Path) -> None:
-    slog = _SessionLog([])
+    slog = _slog([])
     slog.event(
         {
             "type": "user",
@@ -359,7 +484,7 @@ def test_session_log_summarizes_user_tool_result(_isolated_log_dir: Path) -> Non
 
 
 def test_session_log_summarizes_result(_isolated_log_dir: Path) -> None:
-    slog = _SessionLog([])
+    slog = _slog([])
     slog.event({"type": "result", "num_turns": 3, "result": "ok"})
     slog.close()
 
@@ -368,7 +493,7 @@ def test_session_log_summarizes_result(_isolated_log_dir: Path) -> None:
 
 
 def test_session_log_unknown_event_type_no_summary(_isolated_log_dir: Path) -> None:
-    slog = _SessionLog([])
+    slog = _slog([])
     slog.event({"type": "system_init"})  # not assistant/user/result
     slog.close()
 
@@ -376,7 +501,7 @@ def test_session_log_unknown_event_type_no_summary(_isolated_log_dir: Path) -> N
 
 
 def test_session_log_assistant_no_text_no_summary(_isolated_log_dir: Path) -> None:
-    slog = _SessionLog([])
+    slog = _slog([])
     # Empty text block — falsy strip.
     slog.event(
         {
@@ -392,7 +517,7 @@ def test_session_log_forward_to_runtime_only_logs_first_line(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     with caplog.at_level(logging.INFO, logger="physiclaw.agent.claude.spawn"):
-        slog = _SessionLog([])
+        slog = _slog([])
         slog.event(
             {
                 "type": "assistant",
@@ -412,7 +537,7 @@ def test_session_log_forward_to_runtime_only_logs_first_line(
 
 
 def test_session_log_raw_writes_truncated_text(_isolated_log_dir: Path) -> None:
-    slog = _SessionLog([])
+    slog = _slog([])
     long = "z" * 1000
     slog.raw(long)
     slog.close()
@@ -427,7 +552,7 @@ def test_session_log_raw_writes_truncated_text(_isolated_log_dir: Path) -> None:
 def test_session_log_done_parses_sentinel_on_clean_exit(
     _isolated_log_dir: Path,
 ) -> None:
-    slog = _SessionLog([])
+    slog = _slog([])
     slog.event(
         {
             "type": "assistant",
@@ -449,7 +574,7 @@ def test_session_log_done_parses_sentinel_on_clean_exit(
 
 
 def test_session_log_done_undone_on_nonzero_exit(_isolated_log_dir: Path) -> None:
-    slog = _SessionLog([])
+    slog = _slog([])
     slog.event(
         {
             "type": "assistant",
@@ -468,7 +593,7 @@ def test_session_log_done_undone_on_nonzero_exit(_isolated_log_dir: Path) -> Non
 
 
 def test_session_log_done_undone_when_no_text(_isolated_log_dir: Path) -> None:
-    slog = _SessionLog([])
+    slog = _slog([])
     status = slog.done(0)
     slog.close()
 
@@ -478,7 +603,7 @@ def test_session_log_done_undone_when_no_text(_isolated_log_dir: Path) -> None:
 
 
 def test_session_log_done_truncates_recap_to_200_chars(_isolated_log_dir: Path) -> None:
-    slog = _SessionLog([])
+    slog = _slog([])
     slog.event(
         {
             "type": "assistant",
@@ -506,7 +631,7 @@ def test_session_log_rollover_at_midnight(_isolated_log_dir: Path) -> None:
     from freezegun import freeze_time
 
     with freeze_time("2026-04-28 23:59:59") as frozen:
-        slog = _SessionLog([])
+        slog = _slog([])
         # Cross midnight before the next write.
         frozen.move_to("2026-04-29 00:00:01")
         slog.event({"type": "result", "num_turns": 1, "result": "ok"})
@@ -712,7 +837,7 @@ async def test_stream_collects_result_event(_isolated_log_dir: Path) -> None:
             ]
         )
     )
-    slog = _SessionLog([])
+    slog = _slog([])
 
     out = await _stream(proc, slog)
     slog.close()
@@ -732,7 +857,7 @@ async def test_stream_skips_blank_lines(_isolated_log_dir: Path) -> None:
             ]
         )
     )
-    slog = _SessionLog([])
+    slog = _slog([])
 
     out = await _stream(proc, slog)
     slog.close()
@@ -752,7 +877,7 @@ async def test_stream_logs_raw_on_json_decode_error(
             ]
         )
     )
-    slog = _SessionLog([])
+    slog = _slog([])
 
     out = await _stream(proc, slog)
     slog.close()
@@ -775,7 +900,7 @@ async def test_stream_returns_none_when_no_result_event(
             ]
         )
     )
-    slog = _SessionLog([])
+    slog = _slog([])
 
     out = await _stream(proc, slog)
     slog.close()
