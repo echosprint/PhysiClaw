@@ -279,10 +279,7 @@ def _log_endpoints(host: str, port: int) -> None:
         log.info(f"Fallback:   {fallback}/bridge  (if mDNS blocked)")
     else:
         log.info(f"Phone page: {fallback}/bridge")
-        log.info(
-            "Tip: set a stable LocalHostName for <name>.local URLs — "
-            "see `physiclaw setup phone` (coming soon)."
-        )
+        log.info("Tip: set a stable LocalHostName for <name>.local URLs.")
 
 
 def _start_hardware_bringup(

@@ -16,5 +16,5 @@ def test_setup_help_lists_all_subcommands() -> None:
     result = runner.invoke(setup_app, ["--help"])
 
     assert result.exit_code == 0
-    for sub in ("hardware", "local-vision-model", "phone"):
+    for sub in ("hardware", "local-vision-model"):
         assert sub in result.stdout

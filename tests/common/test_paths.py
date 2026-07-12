@@ -106,7 +106,6 @@ def test_ensure_dirs_creates_intermediate_parents_for_LOG_DIR(
         ("tool_calls_dir", "tool_calls"),
         ("memory_dir", "memory"),
         ("skills_dir", "skills"),
-        ("ui_presets_dir", "ui-presets"),
     ],
 )
 def test_home_rooted_helpers_resolve_under_HOME(

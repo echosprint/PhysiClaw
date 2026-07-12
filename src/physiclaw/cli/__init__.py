@@ -43,7 +43,7 @@ app.command()(uninstall)
 app.add_typer(
     setup_app,
     name="setup",
-    help="One-time configuration: hardware, local models, phone.",
+    help="One-time configuration: hardware, local models.",
 )
 app.add_typer(
     config_app,
