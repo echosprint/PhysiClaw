@@ -8,6 +8,7 @@ detail. Full integration deferred — async subprocess + streaming json
 
 from __future__ import annotations
 
+import sys
 import json
 import logging
 from pathlib import Path
@@ -141,10 +142,51 @@ def test_render_system_prompt_skips_empty_card_and_section(
     fake_md.write_text("body")
     mocker.patch.object(spawn, "CLAUDE_MD", fake_md)
     mocker.patch.object(spawn.skill, "render_section", return_value="")
+    # Learned + empty layout md → no `## Screen layout` block and no first-run
+    # notice, so only the card/section skipping is under test here.
+    mocker.patch.object(spawn.screen_layout, "is_learned", return_value=True)
+    mocker.patch.object(spawn.screen_layout, "load_layout_md", return_value="")
 
     out = _render_system_prompt([], {})
 
     assert out == "body"
+
+
+def test_render_system_prompt_injects_screen_layout_when_learned(
+    mocker,
+    tmp_path: Path,
+) -> None:
+    fake_md = tmp_path / "CLAUDE.md"
+    fake_md.write_text("body")
+    mocker.patch.object(spawn, "CLAUDE_MD", fake_md)
+    mocker.patch.object(spawn.skill, "render_section", return_value="")
+    mocker.patch.object(spawn.screen_layout, "is_learned", return_value=True)
+    mocker.patch.object(
+        spawn.screen_layout, "load_layout_md", return_value="- backspace [0.1,0.2,0.3,0.4]"
+    )
+
+    out = _render_system_prompt([], {})
+
+    assert "## Screen layout" in out
+    assert "- backspace [0.1,0.2,0.3,0.4]" in out
+
+
+def test_render_system_prompt_injects_first_run_notice_when_unlearned(
+    mocker,
+    tmp_path: Path,
+) -> None:
+    fake_md = tmp_path / "CLAUDE.md"
+    fake_md.write_text("body")
+    mocker.patch.object(spawn, "CLAUDE_MD", fake_md)
+    mocker.patch.object(spawn.skill, "render_section", return_value="")
+    mocker.patch.object(spawn.screen_layout, "is_learned", return_value=False)
+    mocker.patch.object(
+        spawn.screen_layout, "tail_reminder", return_value="[First-run setup needed]"
+    )
+
+    out = _render_system_prompt([], {})
+
+    assert "[First-run setup needed]" in out
 
 
 # ---------- _build_trigger_prompt ----------
@@ -500,6 +542,19 @@ def test_child_env_pins_pwd(monkeypatch: pytest.MonkeyPatch) -> None:
     env = _child_env()
 
     assert env["PWD"] == str(spawn.PROJECT_ROOT)
+
+
+def test_child_env_sets_virtual_env_to_this_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The child's `uv run` (jobs / screen-layout CLIs) must resolve physiclaw;
+    # it does so via VIRTUAL_ENV, overridden to this process's venv even if the
+    # parent shell had a different one active.
+    monkeypatch.setenv("VIRTUAL_ENV", "/some/other/venv")
+
+    env = _child_env()
+
+    assert env["VIRTUAL_ENV"] == sys.prefix
 
 
 def test_env_strip_prefixes_constants() -> None:

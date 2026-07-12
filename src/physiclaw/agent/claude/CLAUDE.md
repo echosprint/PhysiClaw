@@ -159,19 +159,6 @@ If the target isn't in any current listing, escalate
 `peek` → `screenshot`. Re-running `peek` hoping for a better listing
 is how loops happen.
 
-### iPhone keyboard
-
-Stable physical positions. Label languages vary (`Send` / `Search`
-/ `Return` / `Go` / `搜索` / `前往`) but the bbox doesn't.
-
-| Key           | Bbox                             |
-|---------------|----------------------------------|
-| backspace `⌫` | `[0.867, 0.804, 0.994, 0.857]`   |
-| return / send | `[0.752, 0.864, 0.992, 0.917]`   |
-
-App-specific input fields (text-input bbox, paste popover location)
-live in each app's skill.
-
 ### Per-action loop
 
 Inside the Wake loop's Work phase, every individual action is:
@@ -191,9 +178,7 @@ Inside the Wake loop's Work phase, every individual action is:
 ### Safety
 
 Wrong taps are irreversible. A bad coordinate can send a message,
-transfer money, or trigger an action you can't undo. If a tool
-returns "Hardware not set up", tell the user to run `/setup` — do
-NOT attempt to recover.
+transfer money, or trigger an action you can't undo.
 
 ## Filesystem scope
 

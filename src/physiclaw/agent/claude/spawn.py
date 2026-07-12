@@ -17,11 +17,12 @@ import json
 import logging
 import os
 import shutil
+import sys
 from pathlib import Path
 
 from physiclaw.common import paths
 from physiclaw.agent.claude.plugin import prepare_plugin_dir
-from physiclaw.agent.engine import skill
+from physiclaw.agent.engine import screen_layout, skill
 from physiclaw.agent.engine.trace import new_sid
 from physiclaw.agent.engine.mcp_inventory import discover_mcp_tools
 from physiclaw.common.text import read_text
@@ -95,11 +96,6 @@ _DISALLOWED = [
     # breaks every scheduled job.
     "Write(jobs/**)",
     "Edit(jobs/**)",
-    # Hardware setup skills are interactive — not something to run
-    # inside an autonomous wake.
-    "Skill(setup)",
-    "Skill(phone-setup)",
-    "Skill(setup-vision-models)",
 ]
 
 
@@ -139,6 +135,10 @@ def _render_system_prompt(mcp_tools: list[dict], skills: dict[str, Skill]) -> st
       3. ## Available skills — merged metadata from the plugin dir's
          content; written as Tier-1 triggers so Claude knows which
          skill to invoke before acting in which app.
+      4. ## Screen layout — learned input/keyboard bboxes, once first-run
+         capture is complete. The `{{box}}` tokens in the built-in skill
+         templates and any `§ Screen layout` reference resolve against it;
+         empty (section omitted) until learned. Mirrors the native engine.
     """
     parts = [read_text(CLAUDE_MD).rstrip()]
     card = _tooling_card(mcp_tools)
@@ -147,6 +147,18 @@ def _render_system_prompt(mcp_tools: list[dict], skills: dict[str, Skill]) -> st
     cat = skill.render_section(skills)
     if cat:
         parts.append(cat)
+    if screen_layout.is_learned():
+        layout = screen_layout.load_layout_md()
+        if layout:
+            parts.append(f"## Screen layout\n\n{layout}")
+    else:
+        # First run: no layout yet. Surface the same "[First-run setup needed]"
+        # notice the native engine pins, so Claude knows to run the
+        # `screen-layout` skill (which saves boxes via its screen_layout.py CLI)
+        # before it tries to open apps by search or send messages.
+        reminder = screen_layout.tail_reminder()
+        if reminder:
+            parts.append(reminder)
     return "\n\n".join(parts)
 
 
@@ -346,6 +358,13 @@ def _child_env() -> dict[str, str]:
         if not any(k.startswith(p) for p in _ENV_STRIP_PREFIXES)
     }
     env["PWD"] = str(PROJECT_ROOT)
+    # Point the child's `uv run` (the jobs + screen-layout skill CLIs) at the
+    # venv PhysiClaw is installed in — this process's own prefix. cwd is
+    # ~/.physiclaw with no project, and a `uv tool install` launch sets no
+    # VIRTUAL_ENV, so without this `uv run python …` builds an empty ephemeral
+    # env and `import physiclaw` fails. Overriding (not just inheriting) also
+    # steers the child away from any unrelated venv active in the parent shell.
+    env["VIRTUAL_ENV"] = sys.prefix
     return env
 
 
@@ -460,7 +479,15 @@ async def spawn_claude(triggers: list[Trigger], *, model_id: str) -> None:
     # Skills and MCP tools are scanned once; the rendered prompt + env
     # are identical across UNDONE retries.
     mcp_tools = _mcp_tools()
-    skills = skill.discover()
+    # The native `screen-layout` skill saves boxes via `report_screen_layout` —
+    # a local engine tool Claude doesn't have. Drop it so the claude-only
+    # `screen-layout` skill (agent/claude/skills/, which saves through its
+    # screen_layout.py CLI under `Bash(uv run)`) is the only one Claude sees.
+    # Then fill the `{{box}}` tokens in the remaining built-in skill code
+    # templates with the learned per-device bboxes (no-op until capture done).
+    discovered = skill.discover()
+    discovered.pop(screen_layout.SKILL_NAME, None)
+    skills = screen_layout.fill_builtin_boxes(discovered)
     system_prompt = _render_system_prompt(mcp_tools, skills)
     env = _child_env()
 
