@@ -99,7 +99,6 @@ _DISALLOWED = [
     # inside an autonomous wake.
     "Skill(setup)",
     "Skill(phone-setup)",
-    "Skill(calibrate-keyboard)",
     "Skill(setup-vision-models)",
 ]
 
