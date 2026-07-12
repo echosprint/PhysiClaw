@@ -95,6 +95,24 @@ def test_set_phase_invalid_raises_value_error() -> None:
         cs.set_phase("bogus")
 
 
+def test_set_phase_stamps_entry_time_only_on_change() -> None:
+    # Re-setting the current phase must keep the original entry time —
+    # measure_viewport_shift re-sets screenshot_cal after the wizard already
+    # switched to it, and the pending-upload cutoff relies on the earlier
+    # timestamp.
+    cs = CalibrationState()
+
+    cs.set_phase("screenshot_cal")
+    since = cs.phase_since
+    assert since > 0.0
+
+    cs.set_phase("screenshot_cal")
+    assert cs.phase_since == since
+
+    cs.set_phase("center")
+    assert cs.phase_since > since
+
+
 def test_set_phase_clears_dot_touches_and_event() -> None:
     cs = CalibrationState()
     cs.dot_position = (0.1, 0.2)

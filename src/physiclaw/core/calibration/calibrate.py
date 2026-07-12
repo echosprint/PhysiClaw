@@ -83,6 +83,42 @@ def _tap_once(arm: StylusArm):
 
 # ─── Pre-cal: Screenshot coordinate mapping ──────────────────
 
+# Known CSS position of the pre-cal square drawn by bridge.html:
+# top-left (100, 200), size 50px → center (125, 225).
+SQUARE_CSS_X, SQUARE_CSS_Y, SQUARE_CSS_SIZE = 100, 200, 50
+
+
+def _decode_screenshot_square(data: bytes) -> tuple[np.ndarray, tuple[int, int, int, int]]:
+    """Decode screenshot bytes and locate the orange pre-cal square.
+
+    Returns (image, bounding rect). Raises RuntimeError when the data
+    doesn't decode or shows no square — callers holding a maybe-stale
+    upload catch that and fall back to waiting for a fresh one.
+    """
+    arr = np.frombuffer(data, dtype=np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if img is None:
+        raise RuntimeError("Failed to decode screenshot image")
+
+    sh, sw = img.shape[:2]
+    log.info(f"  Screenshot decoded: {sw}×{sh}px")
+
+    # Detect orange square — ORANGE_HSV_RANGE is the same table
+    # _detect_orange_dot matches against, so the two can't drift.
+    mask = hsv_mask(to_hsv(img), [ORANGE_HSV_RANGE])
+    mask = cv2.morphologyEx(
+        mask, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+    )
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        raise RuntimeError(
+            "Could not detect orange square in screenshot. "
+            "Make sure the phone shows the orange square."
+        )
+
+    largest = max(contours, key=cv2.contourArea)
+    return img, cv2.boundingRect(largest)
+
 
 def measure_viewport_shift(
     cal: CalibrationState,
@@ -120,7 +156,9 @@ def measure_viewport_shift(
         )
     log.info(f"  Phone viewport: {dim['viewport_width']}×{dim['viewport_height']}pt")
 
-    # Show orange square at viewport center
+    # Show orange square at viewport center. If the phone was already in
+    # this phase (the wizard switches as soon as the step opens), the
+    # phase-entry clock keeps ticking from that earlier switch.
     cal.set_phase("screenshot_cal")
     time.sleep(0.5)
     log.info("  Phase: screenshot_cal — showing orange square at CSS (100, 200)")
@@ -129,42 +167,34 @@ def measure_viewport_shift(
     if cached is not None:
         data = cached.read_bytes()
         log.info(f"  Using cached screenshot: {cached} ({len(data)} bytes)")
+        img, rect = _decode_screenshot_square(data)
     else:
-        log.info("  Waiting for phone screenshot (double-tap AssistiveTouch)...")
-        data = bridge.wait_screenshot(timeout=30.0)
-        if data is None:
-            raise RuntimeError(
-                "Timeout — no screenshot received. Double-tap AssistiveTouch to upload."
-            )
-        log.info(f"  Screenshot received: {len(data)} bytes")
-
-    # Decode screenshot
-    arr = np.frombuffer(data, dtype=np.uint8)
-    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-    if img is None:
-        raise RuntimeError("Failed to decode screenshot image")
+        # Best case: the user already double-tapped while the square was on
+        # screen (the wizard says to upload before pressing Measure) — use
+        # that shot straight away. The phase-entry cutoff excludes uploads
+        # that predate the square; a shot that decodes but shows no square
+        # (tapped mid-render) falls through to a fresh wait.
+        img = rect = None
+        data = bridge.take_pending_screenshot(received_after=cal.phase_since)
+        if data is not None:
+            try:
+                img, rect = _decode_screenshot_square(data)
+                log.info(f"  Using already-uploaded screenshot: {len(data)} bytes")
+            except RuntimeError as e:
+                log.info(f"  Pending upload unusable ({e}) — waiting for a fresh one")
+        if img is None:
+            bridge.clear_screenshot()
+            log.info("  Waiting for phone screenshot (double-tap AssistiveTouch)...")
+            data = bridge.wait_screenshot(timeout=30.0)
+            if data is None:
+                raise RuntimeError(
+                    "Timeout — no screenshot received. Double-tap AssistiveTouch to upload."
+                )
+            log.info(f"  Screenshot received: {len(data)} bytes")
+            img, rect = _decode_screenshot_square(data)
 
     sh, sw = img.shape[:2]
-    log.info(f"  Screenshot decoded: {sw}×{sh}px")
-
-    # Detect orange square — ORANGE_HSV_RANGE is the same table
-    # _detect_orange_dot matches against, so the two can't drift.
-    # Known CSS position: top-left (100, 200), size 50px → center (125, 225)
-    SQUARE_CSS_X, SQUARE_CSS_Y, SQUARE_CSS_SIZE = 100, 200, 50
-
-    mask = hsv_mask(to_hsv(img), [ORANGE_HSV_RANGE])
-    mask = cv2.morphologyEx(
-        mask, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-    )
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
-        raise RuntimeError(
-            "Could not detect orange square in screenshot. "
-            "Make sure the phone shows the orange square."
-        )
-
-    largest = max(contours, key=cv2.contourArea)
-    x, y, w, h = cv2.boundingRect(largest)
+    x, y, w, h = rect
     detected_cx = x + w / 2
     detected_cy = y + h / 2
     log.info(

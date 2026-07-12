@@ -19,6 +19,8 @@ def _bridge_stub(text: str = "default text", copied: bool = False) -> object:
     obj = type("BridgeStub", (), {})()
     obj.current_text = lambda: text
     obj.is_copied = lambda: copied
+    obj.arm_upload_calls: list[float] = []
+    obj.arm_upload = lambda seconds: obj.arm_upload_calls.append(seconds)
     return obj
 
 
@@ -101,6 +103,28 @@ def test_set_mode_calibrate_without_phase_does_not_call_set_phase() -> None:
     p.set_mode("calibrate")
 
     assert cal.set_phase_calls == []
+
+
+def test_set_mode_calibrate_arms_upload_window() -> None:
+    # The user may double-tap before pressing the step's button — entering
+    # calibrate mode must open the upload window right away.
+    from physiclaw.core.bridge.state import CAL_UPLOAD_WINDOW_SECONDS
+
+    bridge = _bridge_stub()
+    p = PageState(bridge, _cal_stub())
+
+    p.set_mode("calibrate", phase="screenshot_cal")
+
+    assert bridge.arm_upload_calls == [CAL_UPLOAD_WINDOW_SECONDS]
+
+
+def test_set_mode_bridge_does_not_arm_upload_window() -> None:
+    bridge = _bridge_stub()
+    p = PageState(bridge, _cal_stub())
+
+    p.set_mode("bridge")
+
+    assert bridge.arm_upload_calls == []
 
 
 def test_set_mode_bridge_with_phase_does_not_call_set_phase() -> None:

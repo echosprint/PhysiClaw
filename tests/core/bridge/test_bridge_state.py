@@ -32,6 +32,7 @@ Accepted equivalent / unreachable mutmut survivors:
 from __future__ import annotations
 
 import itertools
+import time
 
 import pytest
 
@@ -437,6 +438,51 @@ def test_clear_screenshot_arms_and_receive_consumes(bs: BridgeState) -> None:
     assert bs.upload_armed()
     bs.receive_screenshot(b"png")
     assert not bs.upload_armed()  # one window, one upload
+
+
+def test_arm_upload_opens_window_without_touching_pending(bs: BridgeState) -> None:
+    # Calibrate steps arm ahead of the user's manual double-tap; a pending
+    # screenshot must survive (arming is not a consume/clear).
+    bs.receive_screenshot(b"pending")
+    bs.arm_upload()
+    assert bs.upload_armed()
+    assert bs._screenshot_data == b"pending"
+    assert bs._screenshot_ready.is_set()
+
+
+def test_arm_upload_extends_never_shrinks(bs: BridgeState) -> None:
+    bs.arm_upload(100.0)
+    deadline = bs._upload_armed_until
+    bs.arm_upload(1.0)
+    assert bs._upload_armed_until == deadline
+
+
+def test_take_pending_screenshot_returns_none_when_nothing_pending(
+    bs: BridgeState,
+) -> None:
+    assert bs.take_pending_screenshot() is None
+
+
+def test_take_pending_screenshot_consumes_recent_upload(bs: BridgeState) -> None:
+    cutoff = time.monotonic()
+    bs.receive_screenshot(b"early-upload")
+
+    assert bs.take_pending_screenshot(received_after=cutoff) == b"early-upload"
+    # Consumed — a second take (or a wait) must not see it again.
+    assert bs.take_pending_screenshot(received_after=cutoff) is None
+    assert bs._screenshot_ready.is_set() is False
+
+
+def test_take_pending_screenshot_rejects_upload_before_cutoff(
+    bs: BridgeState,
+) -> None:
+    bs.receive_screenshot(b"stale")
+    cutoff = time.monotonic()
+
+    # Received before the cutoff (e.g. before the square was shown) —
+    # left pending, not consumed.
+    assert bs.take_pending_screenshot(received_after=cutoff) is None
+    assert bs._screenshot_ready.is_set() is True
 
 
 def test_wait_screenshot_arms_for_its_own_duration(bs: BridgeState) -> None:

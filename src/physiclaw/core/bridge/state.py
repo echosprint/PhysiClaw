@@ -24,6 +24,10 @@ UPLOAD_WINDOW_SECONDS = 60.0
 # Slack past a waiter's timeout: an upload racing the waiter's last poll
 # should still land rather than 403.
 UPLOAD_WINDOW_GRACE_SECONDS = 5.0
+# Calibration asks the user to double-tap AssistiveTouch themselves; eager
+# taps land before wait_screenshot() arms, so entering calibrate mode opens
+# a wider window up front (see PageState.set_mode).
+CAL_UPLOAD_WINDOW_SECONDS = 120.0
 # IP pin staleness: if the pinned phone IP hasn't been seen (poll or upload)
 # for this long, an armed upload from a NEW IP re-pins instead of 403ing —
 # that's how a DHCP lease change heals without a server restart. While the
@@ -89,6 +93,7 @@ class BridgeState:
             None  # PNG/JPEG bytes from iOS Shortcut upload
         )
         self._screenshot_ready = threading.Event()  # set when screenshot upload arrives
+        self._screenshot_received_at: float = 0.0  # monotonic, last upload arrival
         # Recent raw uploads, oldest→newest. Independent of the consume path
         # above (wait/clear never touch it), so a reader can't disturb it.
         self._recent_screens: deque[bytes] = deque(maxlen=RECENT_SCREENSHOTS_MAX)
@@ -198,6 +203,7 @@ class BridgeState:
         save_screenshot(data)
         with self.lock:
             self._screenshot_data = data
+            self._screenshot_received_at = time.monotonic()
             self._recent_screens.append(data)
             self._upload_armed_until = 0.0
         self._screenshot_ready.set()
@@ -223,6 +229,31 @@ class BridgeState:
         self._upload_armed_until = max(
             self._upload_armed_until, time.monotonic() + seconds
         )
+
+    def arm_upload(self, seconds: float = UPLOAD_WINDOW_SECONDS):
+        """Open the upload window ahead of an expected manual upload,
+        without touching any pending screenshot. Entering calibrate mode
+        calls this so a user's eager double-tap isn't 403'd."""
+        with self.lock:
+            self._arm_upload_locked(seconds)
+
+    def take_pending_screenshot(self, received_after: float = 0.0) -> bytes | None:
+        """Consume the pending screenshot if it arrived after `received_after`
+        (monotonic), else return None and leave state untouched.
+
+        Lets a step use an upload the user already sent — e.g. double-tapping
+        while the calibrate page shows the orange square, before pressing
+        Measure — instead of making them upload again. The cutoff excludes
+        shots that predate whatever the step needs on screen."""
+        if not self._screenshot_ready.is_set():
+            return None
+        with self.lock:
+            if self._screenshot_data is None:
+                return None
+            if self._screenshot_received_at <= received_after:
+                return None
+            self._screenshot_ready.clear()
+            return self._screenshot_data
 
     def upload_armed(self) -> bool:
         """True while an upload is expected — a `clear_screenshot()` or a

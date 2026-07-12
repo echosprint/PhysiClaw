@@ -7,6 +7,7 @@ what interactions trigger a green flash.
 
 import logging
 import threading
+import time
 
 from physiclaw.core.bridge.nonce import (
     NONCE_CSS_X,
@@ -52,6 +53,10 @@ class CalibrationState:
     def __init__(self):
         self.lock = threading.Lock()  # protects shared fields across threads
         self.phase: str = "idle"  # current display phase (one of PHASES)
+        # Monotonic time the CURRENT phase was entered (re-setting the same
+        # phase keeps it). Lets a consumer tell whether an upload arrived
+        # while its visual target was already on screen.
+        self.phase_since: float = 0.0
         self.dot_position: tuple[float, float] | None = (
             None  # (x, y) as 0-1 for "dot" phase
         )
@@ -76,6 +81,8 @@ class CalibrationState:
         if phase not in self.PHASES:
             raise ValueError(f"Unknown phase: {phase}. Must be one of {self.PHASES}")
         with self.lock:
+            if phase != self.phase:
+                self.phase_since = time.monotonic()
             self.phase = phase
             self.dot_position = None
             self.touches = []

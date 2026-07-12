@@ -416,6 +416,7 @@ def test_measure_viewport_shift_raises_when_screenshot_timeout(
     cal = MagicMock()
     cal.screen_dimension = {"viewport_width": 390, "viewport_height": 844}
     bridge = MagicMock()
+    bridge.take_pending_screenshot.return_value = None
     bridge.wait_screenshot.return_value = None
 
     with pytest.raises(RuntimeError, match="Timeout"):
@@ -435,6 +436,7 @@ def test_measure_viewport_shift_raises_on_decode_failure(
     cal = MagicMock()
     cal.screen_dimension = {"viewport_width": 390, "viewport_height": 844}
     bridge = MagicMock()
+    bridge.take_pending_screenshot.return_value = None
     bridge.wait_screenshot.return_value = b"not an image"
 
     with pytest.raises(RuntimeError, match="Failed to decode"):
@@ -457,6 +459,7 @@ def test_measure_viewport_shift_raises_when_no_orange_detected(
     img = np.zeros((400, 400, 3), dtype=np.uint8)
     ok, buf = cv2.imencode(".jpg", img)
     bridge = MagicMock()
+    bridge.take_pending_screenshot.return_value = None
     bridge.wait_screenshot.return_value = buf.tobytes()
 
     with pytest.raises(RuntimeError, match="Could not detect orange square"):
@@ -473,6 +476,7 @@ def test_measure_viewport_shift_succeeds_and_caches(
     cal = MagicMock()
     cal.screen_dimension = {"viewport_width": 390, "viewport_height": 844}
     bridge = MagicMock()
+    bridge.take_pending_screenshot.return_value = None
     bridge.wait_screenshot.return_value = _orange_square_image()
 
     transform = measure_viewport_shift(cal, bridge, fresh=True)
@@ -482,6 +486,52 @@ def test_measure_viewport_shift_succeeds_and_caches(
     assert cal.viewport_shift is transform
     # Cache was written.
     assert cache_stem.with_suffix(".jpg").exists()
+    # No usable pending upload → any stale shot is discarded before the
+    # wait, so it only sees post-square uploads.
+    bridge.clear_screenshot.assert_called_once()
+
+
+def test_measure_viewport_shift_uses_pending_upload_without_waiting(
+    mocker,
+    tmp_path: Path,
+) -> None:
+    # Best-UX path: the user double-tapped while the square was showing,
+    # before pressing Measure — that shot is used straight away.
+    mocker.patch.object(cal_mod.time, "sleep")
+    mocker.patch.object(cal_mod, "VIEWPORT_CACHE_STEM", tmp_path / "viewport")
+    cal = MagicMock()
+    cal.screen_dimension = {"viewport_width": 390, "viewport_height": 844}
+    cal.phase_since = 123.0
+    bridge = MagicMock()
+    bridge.take_pending_screenshot.return_value = _orange_square_image()
+
+    transform = measure_viewport_shift(cal, bridge, fresh=True)
+
+    assert isinstance(transform, ViewportShift)
+    bridge.take_pending_screenshot.assert_called_once_with(received_after=123.0)
+    bridge.wait_screenshot.assert_not_called()
+    bridge.clear_screenshot.assert_not_called()
+
+
+def test_measure_viewport_shift_falls_back_when_pending_upload_unusable(
+    mocker,
+    tmp_path: Path,
+) -> None:
+    # A pending shot without the square (tapped mid-render) must not fail
+    # the step — it falls back to waiting for a fresh upload.
+    mocker.patch.object(cal_mod.time, "sleep")
+    mocker.patch.object(cal_mod, "VIEWPORT_CACHE_STEM", tmp_path / "viewport")
+    cal = MagicMock()
+    cal.screen_dimension = {"viewport_width": 390, "viewport_height": 844}
+    bridge = MagicMock()
+    bridge.take_pending_screenshot.return_value = b"not an image"
+    bridge.wait_screenshot.return_value = _orange_square_image()
+
+    transform = measure_viewport_shift(cal, bridge, fresh=True)
+
+    assert isinstance(transform, ViewportShift)
+    bridge.clear_screenshot.assert_called_once()
+    bridge.wait_screenshot.assert_called_once()
 
 
 def test_measure_viewport_shift_uses_cache_when_not_fresh(

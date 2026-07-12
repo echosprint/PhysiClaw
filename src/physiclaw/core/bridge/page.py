@@ -3,7 +3,7 @@
 import logging
 import threading
 
-from physiclaw.core.bridge.state import BridgeState
+from physiclaw.core.bridge.state import CAL_UPLOAD_WINDOW_SECONDS, BridgeState
 from physiclaw.core.bridge.calib import CalibrationState
 
 log = logging.getLogger(__name__)
@@ -27,8 +27,14 @@ class PageState:
             if self.mode != mode:
                 self.mode = mode
                 log.info(f"Phone mode → {mode}")
-            if mode == "calibrate" and phase:
-                self.cal.set_phase(phase, **phase_kwargs)
+            if mode == "calibrate":
+                if phase:
+                    self.cal.set_phase(phase, **phase_kwargs)
+                # Calibration asks the user to double-tap AssistiveTouch;
+                # open the upload window right away so an eager upload —
+                # even one sent before the step's button is pressed —
+                # is accepted instead of 403'd.
+                self.bridge.arm_upload(CAL_UPLOAD_WINDOW_SECONDS)
 
     def get_state(self) -> dict:
         """Unified state for the phone page poll."""
