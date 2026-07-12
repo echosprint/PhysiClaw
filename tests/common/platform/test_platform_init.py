@@ -1,4 +1,4 @@
-"""Tests for `physiclaw.core.platform.__init__` — import-time dispatch.
+"""Tests for `physiclaw.common.platform.__init__` — import-time dispatch.
 
 The right backend is bound at import time based on ``sys.platform``;
 the package re-exports a flat API that callers use without checking
@@ -9,16 +9,16 @@ from __future__ import annotations
 
 import sys
 
-from physiclaw.core import platform
+from physiclaw.common import platform
 
 
 def test_dispatch_binds_correct_backend_for_this_os() -> None:
     if sys.platform == "darwin":
-        from physiclaw.core.platform import darwin as expected
+        from physiclaw.common.platform import darwin as expected
     elif sys.platform == "win32":
-        from physiclaw.core.platform import windows as expected
+        from physiclaw.common.platform import windows as expected
     elif sys.platform.startswith("linux"):
-        from physiclaw.core.platform import linux as expected
+        from physiclaw.common.platform import linux as expected
     else:  # pragma: no cover — package import would already have raised
         return
     assert platform.ensure_camera_permission is expected.ensure_camera_permission
@@ -36,7 +36,7 @@ def test_public_api_surface_is_exhaustive() -> None:
 
 
 def test_all_backends_export_the_same_api() -> None:
-    from physiclaw.core.platform import darwin, linux, windows
+    from physiclaw.common.platform import darwin, linux, windows
 
     public = set(platform.__all__)
     for module in (darwin, linux, windows):

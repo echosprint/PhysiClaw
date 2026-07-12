@@ -18,8 +18,8 @@ from typing import Annotated
 
 import typer
 
-from physiclaw import config as _config
-from physiclaw import paths
+from physiclaw.common import config as _config
+from physiclaw.common import paths
 
 
 def _delete(target: Path) -> None:

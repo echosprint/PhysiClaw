@@ -527,7 +527,7 @@ def _patch_auto_worker(mocker, *, port_ok=True):
         "sys.modules",
         {"physiclaw.core.server.net": fake_net},
     )
-    mocker.patch("physiclaw.core.logger.make_tagged_logger", return_value=MagicMock())
+    mocker.patch("physiclaw.common.logger.make_tagged_logger", return_value=MagicMock())
     mocker.patch.object(
         hw_mod, "BASE", hw_mod.BASE
     )  # restore after (worker mutates it)
@@ -593,7 +593,7 @@ def test_await_bridge_and_calibrate_routes_wizard_output_through_logger(mocker) 
     m = _patch_auto_worker(mocker)
     lines: list[str] = []
     mocker.patch(
-        "physiclaw.core.logger.make_tagged_logger",
+        "physiclaw.common.logger.make_tagged_logger",
         return_value=MagicMock(info=lambda x: lines.append(x)),
     )
     m["run"].side_effect = lambda auto: print("  ✓ Phone connected")

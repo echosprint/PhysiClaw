@@ -29,9 +29,10 @@ Layout::
 
 import json
 import os
+from importlib.resources import files as _pkg_files
 from pathlib import Path
 
-from physiclaw.text import read_text
+from physiclaw.common.text import read_text
 
 HOME: Path = Path(os.environ.get("PHYSICLAW_HOME", "~/.physiclaw")).expanduser()
 LOG_DIR: Path = HOME / "log"
@@ -147,7 +148,10 @@ def builtin_skills_dir() -> Path:
     """Flat-``.md`` skills shipped inside the wheel — the out-of-the-box
     baseline every install gets. Discovery layers ``skills_dir()`` (user)
     on top, so a home skill of the same name overrides a built-in one."""
-    return Path(__file__).resolve().parent / "agent" / "skills"
+    # Locate the shipped `physiclaw/agent/skills/` resource dir the same
+    # way vision does for its bundled templates (see `core.vision.keyboard`)
+    # — resilient to where this module lives in the package tree.
+    return Path(str(_pkg_files("physiclaw.agent") / "skills"))
 
 
 def screen_layout_dir() -> Path:

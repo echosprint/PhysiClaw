@@ -17,10 +17,10 @@ from typing import Annotated
 
 import typer
 
-from physiclaw import paths
+from physiclaw.common import paths
 from physiclaw.cli import _http
 from physiclaw.cli._format import step_fail, step_ok, step_warn
-from physiclaw.core import platform
+from physiclaw.common import platform
 
 BASE = os.environ.get("PHYSICLAW_SERVER", "http://localhost:8048")
 
@@ -65,7 +65,7 @@ def _camera_aim_adjust(prompt: str) -> None:
     """Release the server's camera, open the OS camera-preview app for
     aim, wait for the user, then quit the aim app so the next
     ``/api/connect-camera`` can reacquire. Platform-specific app
-    choices live in ``physiclaw.core.platform``.
+    choices live in ``physiclaw.common.platform``.
 
     Used by the camera-calibration step to re-aim before reading the
     frame. The leading disconnect releases the camera the server has
@@ -412,7 +412,7 @@ def await_bridge_and_calibrate(host: str, port: int) -> None:
         time.sleep(1.0)
 
     log.info("auto: phone bridge connected — starting calibration.")
-    from physiclaw.core.logger import LineLogStream, make_tagged_logger
+    from physiclaw.common.logger import LineLogStream, make_tagged_logger
 
     wizard_log = make_tagged_logger("physiclaw.setup_wizard", "setup wizard")
     try:

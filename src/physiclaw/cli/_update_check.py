@@ -21,8 +21,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from physiclaw import __version__ as _pkg_version
-from physiclaw import paths
-from physiclaw.text import read_text, write_text
+from physiclaw.common import paths
+from physiclaw.common.text import read_text, write_text
 
 _PYPI_URL = "https://pypi.org/pypi/physiclaw/json"
 _HTTP_TIMEOUT_SECONDS = 2.0

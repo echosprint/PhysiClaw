@@ -1,7 +1,7 @@
 """macOS implementations of platform-specific helpers.
 
-Imported by ``physiclaw.core.platform`` on Darwin only. Callers should
-never import this module directly — go through ``physiclaw.core.platform``.
+Imported by ``physiclaw.common.platform`` on Darwin only. Callers should
+never import this module directly — go through ``physiclaw.common.platform``.
 """
 
 import socket

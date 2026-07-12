@@ -9,7 +9,7 @@ import threading
 import time
 from collections import deque
 
-from physiclaw.core.logger import save_screenshot
+from physiclaw.common.dumps import save_screenshot
 
 log = logging.getLogger(__name__)
 

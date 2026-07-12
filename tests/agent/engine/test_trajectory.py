@@ -95,7 +95,7 @@ def test_record_logs_every_scratchpad_write_even_if_unchanged() -> None:
 
 
 def test_record_caps_retained_snapshots(monkeypatch: pytest.MonkeyPatch) -> None:
-    from physiclaw import config
+    from physiclaw.common import config
 
     monkeypatch.setattr(config.CONFIG.engine, "trajectory_max_snapshots", 3)
     s = Session()

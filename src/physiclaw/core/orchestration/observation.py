@@ -11,7 +11,7 @@ The observer doesn't touch hardware directly — it takes `park`, `grab`,
 and `detect` callables from the orchestrator, so its logic is testable
 without an arm or camera.
 
-Careful: the verdict marker text (`physiclaw.verdict`) is a shared
+Careful: the verdict marker text (`physiclaw.common.verdict`) is a shared
 vocabulary with the agent engine's stuck guard — byte-stable.
 """
 
@@ -20,7 +20,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from physiclaw import verdict
+from physiclaw.common import verdict
 from physiclaw.core.vision import quality
 from physiclaw.core.vision.change import frames_changed
 from physiclaw.core.vision.quality import laplacian_variance

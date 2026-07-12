@@ -2,7 +2,7 @@
 
 Two non-obvious pieces:
 
-1. **`PHYSICLAW_HOME` is read once at `physiclaw.paths` import time** (line:
+1. **`PHYSICLAW_HOME` is read once at `physiclaw.common.paths` import time** (line:
    `HOME = Path(os.environ.get("PHYSICLAW_HOME", "~/.physiclaw")).expanduser()`).
    We set it at module load, before any test or fixture runs, so the first
    `import physiclaw` resolves `paths.HOME` to a session-scoped tmp dir
@@ -44,7 +44,7 @@ def physiclaw_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     # `paths` was imported once at session start with the session tmp dir;
     # patch the live module attributes so callers in this test see the
     # per-test path.
-    from physiclaw import paths as _paths
+    from physiclaw.common import paths as _paths
 
     monkeypatch.setattr(_paths, "HOME", home)
     monkeypatch.setattr(_paths, "LOG_DIR", home / "log")

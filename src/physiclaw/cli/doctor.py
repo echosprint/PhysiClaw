@@ -15,7 +15,8 @@ from typing import Annotated
 
 import typer
 
-from physiclaw import __version__, paths, runtime_state
+from physiclaw import __version__
+from physiclaw.common import paths, runtime_state
 from physiclaw.cli import _http
 from physiclaw.cli._format import info as _fmt_info
 from physiclaw.cli._format import ok as _fmt_ok
@@ -33,7 +34,7 @@ def _opencv_import_error() -> str | None:
     try:
         import cv2  # noqa: F401
     except ImportError as e:
-        from physiclaw.core import platform as os_platform
+        from physiclaw.common import platform as os_platform
 
         line = f"OpenCV (cv2) import failed — {e}"
         extra = os_platform.opencv_import_hint(e)
@@ -81,7 +82,7 @@ def _probe_server(live: dict | None) -> tuple[str, int, bool, dict | None]:
     if live:
         host, port = live["host"], live["port"]
     else:
-        from physiclaw.config import CONFIG
+        from physiclaw.common.config import CONFIG
 
         host, port = CONFIG.server.host, CONFIG.server.port
     bind_all = host == "0.0.0.0"
@@ -119,8 +120,8 @@ def _probe_camera_frame(index: int) -> str:
     catching a blown/blurry rig at doctor time instead of mid-task."""
     import cv2
 
-    from physiclaw.config import CONFIG
-    from physiclaw.core import platform as os_platform
+    from physiclaw.common.config import CONFIG
+    from physiclaw.common import platform as os_platform
     from physiclaw.core.hardware.camera import configure_capture, silenced_stderr
 
     with silenced_stderr():
@@ -397,10 +398,10 @@ def doctor(
 
     typer.echo()
     typer.echo(_fmt_section("Config"))
-    # If config.toml failed to parse, importing physiclaw.config at the top
+    # If config.toml failed to parse, importing physiclaw.common.config at the top
     # of this module would have raised — so reaching here means the file is
     # either absent or valid.
-    from physiclaw import config as _cfg
+    from physiclaw.common import config as _cfg
 
     cp = _cfg.config_path()
     if cp.exists():
@@ -485,7 +486,7 @@ def doctor(
                 typer.echo(
                     _fmt_warn("no serial ports detected — connect the arm and re-run.")
                 )
-        from physiclaw.core import platform as os_platform
+        from physiclaw.common import platform as os_platform
 
         cv2_err = _opencv_import_error()
         if cv2_err is not None:
@@ -529,7 +530,7 @@ def doctor(
     # even when the server has it set. Fall back to a fresh resolve when no
     # server is running.
     from physiclaw.agent.runtime.launcher import engine_label, resolve
-    from physiclaw.config import parse_model_ref
+    from physiclaw.common.config import parse_model_ref
 
     live_ref = live.get("model_ref") if live else None
     active_ref: str | None = None

@@ -79,7 +79,7 @@ def _patch_server_runtime_deps(
 ):
     """Stub out everything heavy `server()` touches once it starts up."""
     mocker.patch.object(server_mod, "_spawn_runtime", return_value=MagicMock())
-    mocker.patch("physiclaw.core.logger.setup_logging")
+    mocker.patch("physiclaw.common.logger.setup_logging")
     # The startup auto-update / skills-sync hooks have their own tests and would
     # otherwise shell out / hit the network here — stub them to no-ops.
     mocker.patch("physiclaw.cli.update.notify_staged_update")
@@ -111,9 +111,9 @@ def _patch_server_runtime_deps(
     fake_bridge.bridge_base_urls.return_value = (primary, fallback)
 
     # Patch directly on parent packages so attribute lookups resolve to fakes.
-    import physiclaw
+    import physiclaw.common
 
-    mocker.patch.object(physiclaw, "runtime_state", fake_state, create=True)
+    mocker.patch.object(physiclaw.common, "runtime_state", fake_state, create=True)
     fake_control_app, fake_bridge_app = MagicMock(), MagicMock()
     fake_core_server = MagicMock(
         mcp=fake_mcp,

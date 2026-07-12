@@ -14,7 +14,7 @@ from physiclaw.core.bridge.lan import bridge_base_urls
 from physiclaw.core.bridge.state import BridgeState
 from physiclaw.core.bridge.calib import CalibrationState
 from physiclaw.core.bridge.page import PageState
-from physiclaw.text import read_text
+from physiclaw.common.text import read_text
 
 log = logging.getLogger(__name__)
 

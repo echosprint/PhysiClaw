@@ -1,4 +1,4 @@
-"""Tests for `physiclaw.proxy` — proxy env normalization.
+"""Tests for `physiclaw.common.proxy` — proxy env normalization.
 
 The regression under guard: on Linux with a VPN on, `all_proxy=
 socks://127.0.0.1:7897` (GNOME / Clash Verge convention) made httpx
@@ -12,7 +12,7 @@ import os
 import httpx
 import pytest
 
-from physiclaw.proxy import normalize_proxy_env
+from physiclaw.common.proxy import normalize_proxy_env
 
 
 @pytest.mark.parametrize("var", ["all_proxy", "ALL_PROXY", "http_proxy", "HTTPS_PROXY"])

@@ -10,8 +10,8 @@ from typing import Annotated
 
 import typer
 
-from physiclaw import paths
-from physiclaw.text import write_text
+from physiclaw.common import paths
+from physiclaw.common.text import write_text
 
 
 def phone(

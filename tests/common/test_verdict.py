@@ -1,10 +1,10 @@
-"""Tests for `physiclaw.verdict` — the screen-change marker vocabulary."""
+"""Tests for `physiclaw.common.verdict` — the screen-change marker vocabulary."""
 
 from __future__ import annotations
 
 import pytest
 
-from physiclaw import verdict
+from physiclaw.common import verdict
 
 
 # ---------- attach ----------

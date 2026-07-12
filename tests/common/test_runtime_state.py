@@ -1,4 +1,4 @@
-"""Tests for `physiclaw.runtime_state` — server pid/host/port file.
+"""Tests for `physiclaw.common.runtime_state` — server pid/host/port file.
 
 The autouse `physiclaw_home` fixture handles per-test home isolation,
 so `paths.runtime_state_file()` lands under tmp_path automatically.
@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from physiclaw import paths, runtime_state
+from physiclaw.common import paths, runtime_state
 
 
 # ---------- write ----------

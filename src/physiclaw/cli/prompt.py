@@ -29,7 +29,7 @@ _SaveAs = Annotated[
 def _provider_id() -> str:
     """The active provider id, or '' when no model is configured (the SYSTEM
     prompt only uses it to pick the provider's reasoning-format fragment)."""
-    from physiclaw.config import model_ref, parse_model_ref
+    from physiclaw.common.config import model_ref, parse_model_ref
 
     try:
         return parse_model_ref(model_ref())[0]
@@ -51,7 +51,7 @@ def _emit(text: str, save_as: Path | None) -> None:
     """Write `text` to `save_as` (with a confirmation line), else print it to
     stdout verbatim (no added newline, so `request` output stays byte-exact)."""
     if save_as is not None:
-        from physiclaw.text import write_text
+        from physiclaw.common.text import write_text
 
         write_text(save_as, text.rstrip("\n") + "\n")
         typer.echo(f"Wrote {len(text)} chars to {save_as}")

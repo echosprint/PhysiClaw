@@ -405,7 +405,7 @@ def _patch_doctor_environment(
     cp = MagicMock(spec=Path)
     cp.exists.return_value = True
     cp.__str__ = lambda s: "/fake/config.toml"
-    mocker.patch("physiclaw.config.config_path", return_value=cp)
+    mocker.patch("physiclaw.common.config.config_path", return_value=cp)
 
     onnx = MagicMock(spec=Path)
     onnx.exists.return_value = model_exists
@@ -608,7 +608,7 @@ def test_doctor_no_config_warns(mocker) -> None:
     _patch_doctor_environment(mocker, server_status=None)
     cp = MagicMock(spec=Path)
     cp.exists.return_value = False
-    mocker.patch("physiclaw.config.config_path", return_value=cp)
+    mocker.patch("physiclaw.common.config.config_path", return_value=cp)
 
     result = runner.invoke(app, [])
 
@@ -821,7 +821,7 @@ def test_doctor_invalid_active_model_ref(mocker) -> None:
     )
     fake_cfg = MagicMock()
     fake_cfg.parse_model_ref.side_effect = ValueError("bad ref")
-    mocker.patch.dict("sys.modules", {"physiclaw.config": fake_cfg})
+    mocker.patch.dict("sys.modules", {"physiclaw.common.config": fake_cfg})
 
     result = runner.invoke(app, [])
 

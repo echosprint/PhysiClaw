@@ -52,7 +52,7 @@ from pathlib import Path
 
 from physiclaw.agent.engine import skill
 from physiclaw.agent.engine.skill import Skill
-from physiclaw.text import write_text
+from physiclaw.common.text import write_text
 
 log = logging.getLogger(__name__)
 

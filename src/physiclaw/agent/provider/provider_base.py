@@ -231,7 +231,7 @@ class BaseProvider:
     def _resolved_base_url(cls) -> str:
         """Class `BASE_URL` unless the user has set
         `[providers.<id>] base_url = "..."` in `~/.physiclaw/config.toml`."""
-        from physiclaw.config import provider_base_url_override
+        from physiclaw.common.config import provider_base_url_override
 
         return provider_base_url_override(cls.PROVIDER_ID) or cls.BASE_URL
 
@@ -252,7 +252,7 @@ class BaseProvider:
         to `<ID>_API_KEY` by convention) → config.toml `[provider]
         <PROVIDER_ID>_api_key`. Override for non-standard auth (OAuth,
         sigv4, etc.)."""
-        from physiclaw.config import resolve_provider_key
+        from physiclaw.common.config import resolve_provider_key
 
         return resolve_provider_key(self._env_vars(), self._config_key())[0]
 

@@ -1,4 +1,4 @@
-"""Tests for `physiclaw.core.platform.windows` — Windows-specific helpers.
+"""Tests for `physiclaw.common.platform.windows` — Windows-specific helpers.
 
 These run on every platform: subprocess, socket, and os.startfile are
 mocked, so the windows module's dispatch logic is exercised regardless
@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, call
 
 import pytest
 
-from physiclaw.core.platform import windows
+from physiclaw.common.platform import windows
 
 
 # ---------- TRUST_PROXY_ENV ----------

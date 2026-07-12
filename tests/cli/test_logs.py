@@ -44,7 +44,7 @@ def _summary(sid: str, sentinel: str = "DONE", recap: str = "ok") -> dict:
 
 @pytest.fixture
 def sessions(physiclaw_home) -> Path:
-    from physiclaw import paths
+    from physiclaw.common import paths
 
     d = paths.engine_sessions_dir()
     d.mkdir(parents=True, exist_ok=True)

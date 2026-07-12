@@ -14,7 +14,7 @@ from typing import Annotated
 
 import typer
 
-from physiclaw import config as _config
+from physiclaw.common import config as _config
 from physiclaw.cli._format import exit_error, ok
 
 config_app = typer.Typer(

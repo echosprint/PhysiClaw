@@ -187,7 +187,7 @@ def test_launch_normalizes_proxy_env_first(
 
     monkeypatch.setenv("all_proxy", "socks://127.0.0.1:7897")
     monkeypatch.delenv("PHYSICLAW_MODEL", raising=False)
-    from physiclaw import config as _cfg
+    from physiclaw.common import config as _cfg
 
     monkeypatch.setattr(_cfg.CONFIG.agent, "model", "")
     monkeypatch.setattr("sys.argv", ["runtime"])
@@ -223,7 +223,7 @@ def test_launch_exits_cleanly_when_no_model_configured(
     message to stderr and exit 1."""
     monkeypatch.delenv("PHYSICLAW_MODEL", raising=False)
     # Ensure the in-config default is also empty.
-    from physiclaw import config as _cfg
+    from physiclaw.common import config as _cfg
 
     monkeypatch.setattr(_cfg.CONFIG.agent, "model", "")
     monkeypatch.setattr("sys.argv", ["runtime"])
@@ -295,7 +295,7 @@ def test_launch_verbose_flag_sets_debug_level(
 
     launcher.launch()
 
-    from physiclaw import paths
+    from physiclaw.common import paths
 
     setup_spy.assert_called_once_with(
         "runtime",

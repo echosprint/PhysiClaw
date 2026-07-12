@@ -25,10 +25,10 @@ import json
 import re
 from typing import TYPE_CHECKING
 
-from physiclaw import paths
+from physiclaw.common import paths
 from physiclaw.agent.runtime.sentinel import DONE
-from physiclaw.config import CONFIG
-from physiclaw.text import append_text, read_text, write_text
+from physiclaw.common.config import CONFIG
+from physiclaw.common.text import append_text, read_text, write_text
 
 if TYPE_CHECKING:
     from physiclaw.agent.engine.session import Session

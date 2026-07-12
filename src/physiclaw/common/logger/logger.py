@@ -88,8 +88,8 @@ class _DailyFileHandler(logging.Handler):
 
     def __init__(self, dir: Path, prefix: str, tag: str):
         super().__init__()
-        from physiclaw.config import CONFIG
-        from physiclaw.core.logger.retention import purge_daily_logs
+        from physiclaw.common.config import CONFIG
+        from physiclaw.common.logger.retention import purge_daily_logs
 
         self._dir = dir
         self._prefix = prefix

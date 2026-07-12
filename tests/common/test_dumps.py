@@ -1,4 +1,4 @@
-"""Tests for `physiclaw.core.logger.dumps`."""
+"""Tests for `physiclaw.common.dumps`."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from physiclaw.core.logger import dumps
+from physiclaw.common import dumps
 
 
 @pytest.fixture(autouse=True)

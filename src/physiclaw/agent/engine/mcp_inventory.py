@@ -12,7 +12,7 @@ import ast
 import logging
 from pathlib import Path
 
-from physiclaw.text import read_text
+from physiclaw.common.text import read_text
 
 log = logging.getLogger(__name__)
 

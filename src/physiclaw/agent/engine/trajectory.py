@@ -22,7 +22,7 @@ rendered char count are capped (`CONFIG.engine`), so a long session with a
 full (8KB) scratchpad stays bounded in memory and in the prompt.
 """
 
-from physiclaw.config import CONFIG
+from physiclaw.common.config import CONFIG
 
 # Per-entry framing charged against the render budget (the `[tNN] <kind>\n`
 # header line) so `_select` accounts for framing, not just the payload text.

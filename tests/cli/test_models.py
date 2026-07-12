@@ -6,7 +6,7 @@ import importlib
 
 from typer.testing import CliRunner
 
-from physiclaw import config as _config
+from physiclaw.common import config as _config
 
 models_mod = importlib.import_module("physiclaw.cli.models")
 models_app = models_mod.models_app

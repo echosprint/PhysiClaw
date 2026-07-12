@@ -19,8 +19,8 @@ from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
-from physiclaw import paths
-from physiclaw.text import read_text, write_text
+from physiclaw.common import paths
+from physiclaw.common.text import read_text, write_text
 
 
 class ConfigError(ValueError):

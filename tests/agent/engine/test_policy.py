@@ -132,7 +132,7 @@ def test_memory_cue_scan_reads_update_progress_fields() -> None:
 
 
 def test_memory_cue_scan_skipped_when_disabled(monkeypatch) -> None:
-    from physiclaw import config
+    from physiclaw.common import config
 
     # The knob is wired through default_policies (the single CONFIG read).
     monkeypatch.setattr(config.CONFIG.engine, "memory_cue_enabled", False)

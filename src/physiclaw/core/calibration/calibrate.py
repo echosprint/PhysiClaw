@@ -25,7 +25,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from physiclaw import paths
+from physiclaw.common import paths
 from physiclaw.core.bridge import BridgeState, CalibrationState, PageState
 from physiclaw.core.bridge.nonce import NONCE_COUNT, verify_nonce
 from physiclaw.core.calibration.transforms import (

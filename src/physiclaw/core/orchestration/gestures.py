@@ -11,7 +11,7 @@ checker can see, instead of per-tool dict unpacking.
 Error texts here are agent-facing and byte-pinned by tests. The
 sequence-path messages deliberately avoid `repr()`-ing raw args: they
 join the batch action text the engine scans for the screen-change
-verdict marker (`physiclaw.verdict`), and echoed free-form content
+verdict marker (`physiclaw.common.verdict`), and echoed free-form content
 could carry marker-like text.
 """
 

@@ -13,7 +13,7 @@ The note handler delegates to `write()` here.
 """
 
 from physiclaw.agent.engine.dto import Message, UserMessage
-from physiclaw.config import CONFIG
+from physiclaw.common.config import CONFIG
 
 
 # Scratchpad ships in every prompt for the rest of the session, so its size is

@@ -20,7 +20,7 @@ from physiclaw.cli.skills import skills_app
 from physiclaw.cli.status import status
 from physiclaw.cli.uninstall import uninstall
 from physiclaw.cli.update import update
-from physiclaw.proxy import normalize_proxy_env
+from physiclaw.common.proxy import normalize_proxy_env
 
 app = typer.Typer(
     help=f"PhysiClaw {_pkg_version} — let AI agents physically operate a phone.",

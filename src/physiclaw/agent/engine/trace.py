@@ -50,9 +50,9 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from physiclaw import paths
-from physiclaw.config import CONFIG
-from physiclaw.core.logger.retention import purge_daily_logs
+from physiclaw.common import paths
+from physiclaw.common.config import CONFIG
+from physiclaw.common.logger.retention import purge_daily_logs
 
 log = logging.getLogger(__name__)
 

@@ -12,7 +12,7 @@ from typing import Annotated
 
 import typer
 
-from physiclaw import paths
+from physiclaw.common import paths
 
 
 def clear(

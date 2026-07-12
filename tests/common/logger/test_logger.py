@@ -1,4 +1,4 @@
-"""Tests for `physiclaw.core.logger.logger`."""
+"""Tests for `physiclaw.common.logger.logger`."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from physiclaw.core.logger import logger as logger_mod
-from physiclaw.core.logger.logger import (
+from physiclaw.common.logger import logger as logger_mod
+from physiclaw.common.logger.logger import (
     _colorize,
     _format_args,
     _TaggedFormatter,
@@ -325,7 +325,7 @@ async def test_logged_success_line_has_no_failed_marker(
 def _file_logger(tmp_path, name: str):
     import logging
 
-    from physiclaw.core.logger.logger import _DailyFileHandler
+    from physiclaw.common.logger.logger import _DailyFileHandler
 
     handler = _DailyFileHandler(tmp_path, "runtime", "runtime")
     logger = logging.getLogger(name)
@@ -366,7 +366,7 @@ def test_daily_file_handler_purges_old_dailies_at_construction(tmp_path) -> None
     import datetime as dt
     import os
 
-    from physiclaw.config import CONFIG
+    from physiclaw.common.config import CONFIG
 
     old = tmp_path / "runtime-2026-01-01.log"
     old.write_text("x")
@@ -384,7 +384,7 @@ def test_daily_file_handler_purges_old_dailies_at_construction(tmp_path) -> None
 def test_setup_logging_with_unwritable_dir_falls_back_to_stderr(tmp_path) -> None:
     import logging
 
-    from physiclaw.core.logger.logger import setup_logging
+    from physiclaw.common.logger.logger import setup_logging
 
     blocker = tmp_path / "blocked"
     blocker.write_text("a file where a dir must go")

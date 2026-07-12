@@ -19,17 +19,17 @@ import os
 import shutil
 from pathlib import Path
 
-from physiclaw import paths
+from physiclaw.common import paths
 from physiclaw.agent.claude.plugin import prepare_plugin_dir
 from physiclaw.agent.engine import skill
 from physiclaw.agent.engine.trace import new_sid
 from physiclaw.agent.engine.mcp_inventory import discover_mcp_tools
-from physiclaw.text import read_text
+from physiclaw.common.text import read_text
 from physiclaw.agent.engine.skill import Skill
 from physiclaw.agent.runtime.hook import Trigger
 from physiclaw.agent.runtime.sentinel import parse_sentinel
-from physiclaw.config import CONFIG
-from physiclaw.core.logger.retention import purge_daily_logs
+from physiclaw.common.config import CONFIG
+from physiclaw.common.logger.retention import purge_daily_logs
 
 log = logging.getLogger(__name__)
 

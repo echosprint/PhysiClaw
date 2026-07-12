@@ -21,7 +21,7 @@ import cv2
 import numpy as np
 
 from physiclaw.core.vision.preprocess import grayscale
-from physiclaw.text import read_text
+from physiclaw.common.text import read_text
 
 log = logging.getLogger(__name__)
 

@@ -1,4 +1,4 @@
-"""Tests for `physiclaw.paths` — the data-root resolver.
+"""Tests for `physiclaw.common.paths` — the data-root resolver.
 
 Per-test isolation comes from conftest's autouse `physiclaw_home`
 fixture, which monkeypatches `paths.HOME` and `paths.LOG_DIR` to a
@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-from physiclaw import paths
+from physiclaw.common import paths
 
 
 # ---------- module-level invariants ----------

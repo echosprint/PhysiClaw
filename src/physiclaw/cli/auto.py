@@ -11,7 +11,7 @@ from typing import Annotated
 import typer
 
 from physiclaw.cli.server import server
-from physiclaw.config import CONFIG
+from physiclaw.common.config import CONFIG
 
 
 def auto(

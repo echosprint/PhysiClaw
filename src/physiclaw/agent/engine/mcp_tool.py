@@ -16,7 +16,7 @@ import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
-from physiclaw.core import platform
+from physiclaw.common import platform
 
 log = logging.getLogger(__name__)
 

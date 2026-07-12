@@ -53,7 +53,7 @@ def provider_key_status(provider_id: str) -> tuple[str | None, str | None]:
 
     Both fields are `None` if the key is unset OR `provider_id` isn't
     a known in-process provider."""
-    from physiclaw.config import resolve_provider_key
+    from physiclaw.common.config import resolve_provider_key
 
     cls = _PROVIDER_CLASSES.get(provider_id)
     if cls is None:

@@ -1,4 +1,4 @@
-"""Tests for `physiclaw.core.platform.darwin` — macOS-specific helpers.
+"""Tests for `physiclaw.common.platform.darwin` — macOS-specific helpers.
 
 Tests run on every platform: subprocess and socket calls are mocked, so
 we exercise the dispatch logic regardless of where the suite is run.
@@ -10,7 +10,7 @@ import socket
 import subprocess
 from unittest.mock import MagicMock
 
-from physiclaw.core.platform import darwin
+from physiclaw.common.platform import darwin
 
 
 # ---------- TRUST_PROXY_ENV ----------

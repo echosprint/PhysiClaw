@@ -4,7 +4,7 @@ import sys
 
 import typer
 
-from physiclaw import paths
+from physiclaw.common import paths
 from physiclaw.cli._format import next_hint, section
 from physiclaw.cli._update_check import maybe_print_update_banner
 

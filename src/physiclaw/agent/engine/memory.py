@@ -18,9 +18,9 @@ updated memory, since the injected snapshot goes stale mid-session).
 import datetime as dt
 import re
 
-from physiclaw import paths
-from physiclaw.config import CONFIG
-from physiclaw.text import append_text, read_text, write_text
+from physiclaw.common import paths
+from physiclaw.common.config import CONFIG
+from physiclaw.common.text import append_text, read_text, write_text
 
 MEMORY_DIR = paths.memory_dir()
 MEMORY_FILE = MEMORY_DIR / "memory.md"

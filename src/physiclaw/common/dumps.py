@@ -18,10 +18,8 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-import cv2
-
-from physiclaw import paths
-from physiclaw.text import write_text
+from physiclaw.common import paths
+from physiclaw.common.text import write_text
 
 _ENSURED: set[Path] = set()
 
@@ -55,6 +53,8 @@ def save_tool_call(kind: ToolKind, listing: str, jpeg: bytes | None = None) -> N
 def save_snapshot(frame) -> None:
     if not os.environ.get("PHYSICLAW_SAVE_SNAPSHOTS"):
         return
+    import cv2
+
     d = _mkdir(paths.snapshots_dir())
     cv2.imwrite(str(d / f"{_stamp()}.jpg"), frame)
 
@@ -69,5 +69,7 @@ def save_screenshot(data: bytes) -> None:
 def save_raw_camera(frame) -> None:
     if not os.environ.get("PHYSICLAW_SAVE_RAW_CAMERA"):
         return
+    import cv2
+
     d = _mkdir(paths.raw_camera_dir())
     cv2.imwrite(str(d / f"{_stamp()}.jpg"), frame)

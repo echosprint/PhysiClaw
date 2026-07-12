@@ -13,9 +13,9 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from physiclaw import paths
+from physiclaw.common import paths
 from physiclaw.core.vision.render import annotate_elements
-from physiclaw.text import write_text
+from physiclaw.common.text import write_text
 
 log = logging.getLogger(__name__)
 

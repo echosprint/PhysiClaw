@@ -121,7 +121,7 @@ def test_camera_init_warms_up_and_starts_reader(mocker) -> None:
         # _open set FOURCC + width/height from CONFIG.camera, in that order.
         # FOURCC must precede width/height — Windows MSMF re-negotiates on
         # format change, so width/height set before FOURCC gets discarded.
-        from physiclaw.config import CONFIG
+        from physiclaw.common.config import CONFIG
 
         props = [p for p, _ in vc.set_calls]
         fourcc_idx = props.index(cv2.CAP_PROP_FOURCC)

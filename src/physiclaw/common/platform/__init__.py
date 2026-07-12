@@ -1,7 +1,7 @@
 """Platform-specific helpers — single source of truth for OS branching.
 
 Imports the right backend at import time and re-exports a flat API.
-Callers do ``from physiclaw.core import platform`` and call
+Callers do ``from physiclaw.common import platform`` and call
 ``platform.local_hostname()`` etc.; they never check ``sys.platform``
 themselves. New helpers go in ``darwin.py`` + ``windows.py`` (matching
 ``sys.platform`` literals) and get re-exported here.

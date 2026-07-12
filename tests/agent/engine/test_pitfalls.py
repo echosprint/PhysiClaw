@@ -11,7 +11,7 @@ import json
 
 import pytest
 
-from physiclaw import config, paths
+from physiclaw.common import config, paths
 from physiclaw.agent.engine import pitfalls
 
 

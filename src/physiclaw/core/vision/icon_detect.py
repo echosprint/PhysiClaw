@@ -30,7 +30,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from physiclaw import paths
+from physiclaw.common import paths
 
 log = logging.getLogger(__name__)
 

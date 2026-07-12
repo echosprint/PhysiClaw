@@ -44,11 +44,11 @@ from typing import Callable
 import click
 import typer
 
-from physiclaw import paths
+from physiclaw.common import paths
 from physiclaw.cli._http import http_get, stream
 from physiclaw.cli._format import exit_error, info, ok, warn
-from physiclaw.config import load as _load_config
-from physiclaw.text import read_text, write_text
+from physiclaw.common.config import load as _load_config
+from physiclaw.common.text import read_text, write_text
 
 log = logging.getLogger(__name__)
 
@@ -407,7 +407,7 @@ def maybe_auto_sync() -> None:
     if os.environ.get("CI", "").strip().lower() in ("1", "true", "yes"):
         return
     # Imported lazily — keeps this module import-light for the plain CLI path.
-    from physiclaw import runtime_state
+    from physiclaw.common import runtime_state
 
     if runtime_state.read_live():
         return  # another instance owns official/ — don't race its swap

@@ -50,7 +50,7 @@ def logs(
     ] = None,
 ) -> None:
     """List recent agent sessions, or inspect one session's log artifacts."""
-    from physiclaw import paths
+    from physiclaw.common import paths
 
     sessions_dir = paths.engine_sessions_dir()
     if sid is None:

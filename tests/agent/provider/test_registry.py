@@ -142,7 +142,7 @@ def test_provider_key_status_returns_none_source_when_unset(
     for var in ["OPENAI_API_KEY", "OPENAI_KEY"]:
         monkeypatch.delenv(var, raising=False)
 
-    from physiclaw import config
+    from physiclaw.common import config
 
     monkeypatch.setattr(config, "CONFIG", config.Config())
 

@@ -150,7 +150,7 @@ async def test_cli_request_matches_engine_turn0(monkeypatch) -> None:
     monkeypatch.setattr(engine_mod, "Trace", lambda *_a, **_k: MagicMock())
     monkeypatch.setattr(engine_mod, "RawLog", lambda *_a, **_k: MagicMock())
     # CLI resolves the provider id from config; align it with the engine's.
-    monkeypatch.setattr("physiclaw.config.model_ref", lambda: "fake/fake-model")
+    monkeypatch.setattr("physiclaw.common.config.model_ref", lambda: "fake/fake-model")
 
     trigger = Trigger(description="phone screen changed", source="phone")
     await engine_mod._run_session(

@@ -193,7 +193,7 @@ def test_status_reports_layout_not_learned(pc: PhysiClaw, mocker) -> None:
 
 
 def _write_layout(physiclaw_home, payload: str) -> None:
-    from physiclaw import paths
+    from physiclaw.common import paths
 
     paths.screen_layout_dir().mkdir(parents=True, exist_ok=True)
     paths.screen_layout_json().write_text(payload, encoding="utf-8")
@@ -1305,7 +1305,7 @@ def test_tune_exposure_runs_converge_and_releases_lock(mocker, pc: PhysiClaw) ->
 
     conv.assert_called_once()
     kwargs = conv.call_args.kwargs
-    from physiclaw.config import CONFIG
+    from physiclaw.common.config import CONFIG
 
     assert kwargs["start"] == CONFIG.camera.exposure
     assert kwargs["prefer_auto"] == CONFIG.camera.auto_exposure

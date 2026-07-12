@@ -13,7 +13,7 @@ from typing import Annotated
 
 import typer
 
-from physiclaw import paths
+from physiclaw.common import paths
 
 
 def _file_count(d: Path) -> int:

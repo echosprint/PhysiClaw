@@ -2,7 +2,7 @@
 
 import socket
 
-from physiclaw.core import platform
+from physiclaw.common import platform
 
 
 def get_lan_ip() -> str:

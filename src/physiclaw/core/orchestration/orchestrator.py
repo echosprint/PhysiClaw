@@ -19,9 +19,9 @@ import time
 from contextlib import contextmanager
 from typing import Any, assert_never
 
-from physiclaw import paths
-from physiclaw.config import CONFIG
-from physiclaw.text import read_text
+from physiclaw.common import paths
+from physiclaw.common.config import CONFIG
+from physiclaw.common.text import read_text
 from physiclaw.core.bridge import BridgeState
 from physiclaw.core.calibration import PARK_PCT, Calibration, ScreenTransforms
 from physiclaw.core.hardware import exposure
@@ -623,7 +623,7 @@ class PhysiClaw:
         sees it in its own tool_call args, and inside a `sequence` this
         string joins the action text the engine scans for the screen
         verdict — echoed free-form content (often quoted from an IM or
-        the screen) could carry marker-like text (`physiclaw.verdict`)."""
+        the screen) could carry marker-like text (`physiclaw.common.verdict`)."""
         self._require_assistive_touch()
         timeout = self._clipboard.begin()
         self._bridge.send_text(text)

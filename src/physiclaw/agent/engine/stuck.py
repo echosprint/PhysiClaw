@@ -17,7 +17,7 @@ The detectors, by the loop they catch:
   1. SAME TARGET  press-family gestures (tap / double_tap / long_press
      — switching gesture type on a dead element is not "changing
      method") whose results carry `screen: no visible change`
-     (`physiclaw.verdict`). A silent refusal — stock-limit toast the
+     (`physiclaw.common.verdict`). A silent refusal — stock-limit toast the
      camera never sees — looks exactly like this.
   2. ACTION CYCLES  repeating the same 2–3-action cycle (checkout ↔
      cart, tab ↔ tab ↔ back) — each action CHANGES the screen, so
@@ -50,7 +50,7 @@ camera-verified no-ops / four full cycles / four identical errors.
 from dataclasses import dataclass, field
 
 from physiclaw.agent.engine import screen_layout
-from physiclaw.config import CONFIG
+from physiclaw.common.config import CONFIG
 
 # Gestures that count toward same-target tiers. Swipes are deliberately
 # absent (see module docstring).

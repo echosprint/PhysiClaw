@@ -23,7 +23,7 @@ from typing import Annotated
 
 import typer
 
-from physiclaw import paths
+from physiclaw.common import paths
 from physiclaw.cli._http import http_get, stream
 from physiclaw.cli._format import ok
 

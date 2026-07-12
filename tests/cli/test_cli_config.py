@@ -7,7 +7,7 @@ import importlib
 import pytest
 from typer.testing import CliRunner
 
-from physiclaw import config as _config
+from physiclaw.common import config as _config
 
 config_mod = importlib.import_module("physiclaw.cli.config")
 config_app = config_mod.config_app

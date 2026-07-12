@@ -27,10 +27,10 @@ from typing import Annotated
 
 import typer
 
-from physiclaw import paths
+from physiclaw.common import paths
 from physiclaw.cli._format import exit_error, ok, warn
-from physiclaw.config import load as _load_config
-from physiclaw.text import read_text, write_text
+from physiclaw.common.config import load as _load_config
+from physiclaw.common.text import read_text, write_text
 
 skills_app = typer.Typer(
     help="Install, list, and remove skills from a git-repo source.",

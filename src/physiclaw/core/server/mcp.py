@@ -17,7 +17,7 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-from physiclaw.text import read_text
+from physiclaw.common.text import read_text
 
 _PKG_ROOT = Path(__file__).resolve().parents[2]
 _INSTRUCTIONS = read_text(_PKG_ROOT / "agent" / "context" / "PHYSICLAW.md")

@@ -40,10 +40,10 @@ from physiclaw.agent.provider import (
     in_process_provider_ids,
 )
 from physiclaw.agent.runtime import Runtime
-from physiclaw.config import model_ref_with_source, parse_model_ref
-from physiclaw import paths
-from physiclaw.proxy import normalize_proxy_env
-from physiclaw.core.logger import setup_logging
+from physiclaw.common.config import model_ref_with_source, parse_model_ref
+from physiclaw.common import paths
+from physiclaw.common.proxy import normalize_proxy_env
+from physiclaw.common.logger import setup_logging
 
 log = logging.getLogger(__name__)
 

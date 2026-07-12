@@ -24,8 +24,8 @@ import re
 from pathlib import Path
 
 from physiclaw.agent.engine import memory, mcp_inventory, screen_layout
-from physiclaw.config import CONFIG
-from physiclaw.text import read_text
+from physiclaw.common.config import CONFIG
+from physiclaw.common.text import read_text
 
 log = logging.getLogger(__name__)
 

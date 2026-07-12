@@ -1,4 +1,4 @@
-"""Tests for `physiclaw.core.platform.linux`.
+"""Tests for `physiclaw.common.platform.linux`.
 
 The module only imports stdlib, so it imports and runs on any host — the
 OS calls (`shutil.which`, `subprocess`) are mocked so nothing actually
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, call
 
-from physiclaw.core.platform import linux
+from physiclaw.common.platform import linux
 
 
 def test_trust_proxy_env_is_true() -> None:

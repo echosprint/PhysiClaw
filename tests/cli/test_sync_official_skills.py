@@ -484,7 +484,7 @@ def auto_env(mocker, monkeypatch):
         "_load_config",
         return_value=SimpleNamespace(skills=SimpleNamespace(sync_auto=True)),
     )
-    mocker.patch("physiclaw.runtime_state.read_live", return_value=None)
+    mocker.patch("physiclaw.common.runtime_state.read_live", return_value=None)
     return mocker.patch.object(osk.threading, "Thread")
 
 
@@ -520,7 +520,7 @@ def test_auto_sync_skipped_under_ci(auto_env, monkeypatch) -> None:
 
 
 def test_auto_sync_skipped_when_server_live(auto_env, mocker) -> None:
-    mocker.patch("physiclaw.runtime_state.read_live", return_value={"pid": 123})
+    mocker.patch("physiclaw.common.runtime_state.read_live", return_value={"pid": 123})
 
     osk.maybe_auto_sync()
 

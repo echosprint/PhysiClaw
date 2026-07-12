@@ -42,7 +42,7 @@ from physiclaw.agent.engine.dto import (
 from physiclaw.agent.engine.session import Session
 from physiclaw.agent.runtime.hook import Trigger
 from physiclaw.agent.runtime.sentinel import DONE, FAIL, IDLE, STUCK, WAIT
-from physiclaw.config import CONFIG
+from physiclaw.common.config import CONFIG
 
 
 pytestmark = [pytest.mark.slow]
@@ -1132,7 +1132,7 @@ def _pitfall_correctives(messages) -> list:
 
 def _floor0(monkeypatch) -> None:
     # Drop capture_turn_floor to 0 so a short scripted DONE (turn 0) trips the gate.
-    from physiclaw import config
+    from physiclaw.common import config
 
     monkeypatch.setattr(config.CONFIG.pitfalls, "capture_turn_floor", 0)
 
@@ -1258,7 +1258,7 @@ def test_should_capture_matrix() -> None:
 
 
 def test_should_capture_disabled(monkeypatch) -> None:
-    from physiclaw import config
+    from physiclaw.common import config
     from physiclaw.agent.engine.pitfalls import should_capture
 
     monkeypatch.setattr(config.CONFIG.pitfalls, "capture_enabled", False)
@@ -1397,7 +1397,7 @@ def _async_returning(value):
 def _patch_session_deps(mocker):
     """Stub everything _run_session pulls beyond the loop."""
     mocker.patch(
-        "physiclaw.config.parse_model_ref", return_value=("fake", "fake-model")
+        "physiclaw.common.config.parse_model_ref", return_value=("fake", "fake-model")
     )
     mocker.patch.object(
         engine_mod, "get_mcp", side_effect=_async_returning(FakeMcpClient())

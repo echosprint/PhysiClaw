@@ -48,7 +48,7 @@ from physiclaw.agent.engine.dto import (
     ToolResultMessage,
     UserMessage,
 )
-from physiclaw.config import CONFIG
+from physiclaw.common.config import CONFIG
 
 log = logging.getLogger(__name__)
 

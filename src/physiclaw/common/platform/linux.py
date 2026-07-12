@@ -1,7 +1,7 @@
 """Linux implementations of platform-specific helpers.
 
-Imported by ``physiclaw.core.platform`` on linux only. Callers should
-never import this module directly — go through ``physiclaw.core.platform``.
+Imported by ``physiclaw.common.platform`` on linux only. Callers should
+never import this module directly — go through ``physiclaw.common.platform``.
 
 The browser setup wizard (``/setup-hardware``) drives Linux entirely over
 HTTP and needs none of the GUI helpers below — only ``ensure_camera_permission``

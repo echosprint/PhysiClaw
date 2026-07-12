@@ -114,7 +114,7 @@ def test_render_doctrine_substitutes_config_tokens(
 ) -> None:
     # Doctrine quotes engine-enforced thresholds via {{token}} placeholders
     # so the prompt can never drift from the config the engine enforces.
-    from physiclaw.config import CONFIG
+    from physiclaw.common.config import CONFIG
 
     (_isolate_context_dir / "CONVENTION.md").write_text(
         "Blocked after {{plan_required_after}} turns; "
@@ -135,7 +135,7 @@ def test_shipped_doctrine_has_no_unresolved_tokens(
     # autouse isolation): a typo'd {{token}} in shipped doctrine must
     # fail CI, not just log at runtime. Also pins that the substituted
     # thresholds actually appear where doctrine quotes them.
-    from physiclaw.config import CONFIG
+    from physiclaw.common.config import CONFIG
 
     real_ctx = Path(prompt.__file__).resolve().parent.parent / "context"
     monkeypatch.setattr(prompt, "CONTEXT_DIR", real_ctx)

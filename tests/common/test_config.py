@@ -1,4 +1,4 @@
-"""Tests for `physiclaw.config` — TOML loader, write, set/unset, model
+"""Tests for `physiclaw.common.config` — TOML loader, write, set/unset, model
 ref resolution, provider credential resolution.
 
 Module-level `CONFIG` is loaded once at import and refreshed by
@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pytest
 
-from physiclaw import config
+from physiclaw.common import config
 
 
 @pytest.fixture(autouse=True)

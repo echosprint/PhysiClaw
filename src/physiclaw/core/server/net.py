@@ -11,7 +11,7 @@ import it lazily.
 import socket
 import time
 
-from physiclaw.config import CONFIG
+from physiclaw.common.config import CONFIG
 
 # How long to wait for uvicorn's listening socket to accept connections, in
 # seconds. IPv4 only — if --host is IPv6 this times out; today all callers

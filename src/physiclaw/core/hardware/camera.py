@@ -27,9 +27,9 @@ import time
 
 import cv2
 
-from physiclaw.config import CONFIG
-from physiclaw.core import platform
-from physiclaw.core.logger import save_raw_camera, save_snapshot
+from physiclaw.common.config import CONFIG
+from physiclaw.common import platform
+from physiclaw.common.dumps import save_raw_camera, save_snapshot
 
 log = logging.getLogger(__name__)
 

@@ -15,7 +15,7 @@ import os
 import httpx
 
 from physiclaw.agent.runtime.hook import Trigger, register
-from physiclaw.core import platform
+from physiclaw.common import platform
 
 log = logging.getLogger(__name__)
 

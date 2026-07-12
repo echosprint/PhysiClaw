@@ -20,7 +20,7 @@ bumped — anything that leaves the tip somewhere other than the park spot).
 import logging
 import sys
 
-from physiclaw.config import CONFIG
+from physiclaw.common.config import CONFIG
 
 # Re-exported from core.server.net (its true home) so existing callers —
 # `warm_start.wait_for_port`, `from ...warm_start import wait_for_port` —

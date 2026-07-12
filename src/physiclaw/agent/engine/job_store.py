@@ -24,9 +24,9 @@ from pathlib import Path
 
 from croniter import croniter
 
-from physiclaw import paths
-from physiclaw.config import CONFIG
-from physiclaw.text import read_text, write_text
+from physiclaw.common import paths
+from physiclaw.common.config import CONFIG
+from physiclaw.common.text import read_text, write_text
 
 log = logging.getLogger(__name__)
 

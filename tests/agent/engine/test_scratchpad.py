@@ -17,7 +17,7 @@ import pytest
 
 from physiclaw.agent.engine.dto import UserMessage
 from physiclaw.agent.engine.scratchpad import MAX_CHARS, inject_tail, write
-from physiclaw.config import CONFIG
+from physiclaw.common.config import CONFIG
 
 
 def test_max_chars_tracks_config() -> None:

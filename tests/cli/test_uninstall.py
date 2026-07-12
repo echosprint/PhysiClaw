@@ -13,7 +13,7 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from physiclaw import config as _config
+from physiclaw.common import config as _config
 from physiclaw.cli.uninstall import uninstall
 
 

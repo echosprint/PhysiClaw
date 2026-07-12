@@ -18,7 +18,7 @@ from physiclaw.core.vision.render import watermark_index
 from physiclaw.core.vision.grid_detect import detect_bridge_corners
 from physiclaw.core.vision.util import encode_jpeg
 
-from physiclaw.config import CONFIG
+from physiclaw.common.config import CONFIG
 
 log = logging.getLogger(__name__)
 

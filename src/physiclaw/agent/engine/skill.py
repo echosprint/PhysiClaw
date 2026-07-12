@@ -56,8 +56,8 @@ import logging
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from physiclaw import paths
-from physiclaw.text import read_text
+from physiclaw.common import paths
+from physiclaw.common.text import read_text
 
 log = logging.getLogger(__name__)
 

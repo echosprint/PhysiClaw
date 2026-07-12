@@ -26,7 +26,7 @@ import logging
 import time
 from dataclasses import dataclass
 
-from physiclaw import verdict
+from physiclaw.common import verdict
 from physiclaw.agent.engine import assemble, compact, curate, jobs, prompt, trajectory
 from physiclaw.agent.engine.builtin_tool import LocalTool
 from physiclaw.agent.engine.mcp_tool import McpClient, get_mcp, list_tools_cached
@@ -59,7 +59,7 @@ from physiclaw.agent.engine.trace import (
 from physiclaw.agent.engine.validator import ValidationError, validate_arguments
 from physiclaw.agent.runtime.hook import Trigger
 from physiclaw.agent.runtime.sentinel import FAIL, STUCK, WAIT
-from physiclaw.config import CONFIG
+from physiclaw.common.config import CONFIG
 
 log = logging.getLogger(__name__)
 
@@ -187,7 +187,7 @@ async def _run_session(
     """One session attempt. Fresh sid / Trace / RawLog / MCP / Provider /
     policy set per call. Writes outcome to `session.sentinel_*`; never
     raises."""
-    from physiclaw.config import parse_model_ref
+    from physiclaw.common.config import parse_model_ref
 
     provider_id, model_id = parse_model_ref(model_ref)
     settings = settings or Settings.from_config()

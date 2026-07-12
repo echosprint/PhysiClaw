@@ -178,7 +178,7 @@ def test_init_raises_with_missing_key_message_when_no_credential(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("STUB_API_KEY", raising=False)
-    from physiclaw import config
+    from physiclaw.common import config
 
     monkeypatch.setattr(config, "CONFIG", config.Config())
 
@@ -268,7 +268,7 @@ def test_build_client_honours_system_proxy() -> None:
 def test_resolved_base_url_returns_class_default_when_no_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from physiclaw import config
+    from physiclaw.common import config
 
     monkeypatch.setattr(config, "provider_base_url_override", lambda pid: None)
 
@@ -278,7 +278,7 @@ def test_resolved_base_url_returns_class_default_when_no_override(
 def test_resolved_base_url_uses_config_override_when_present(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from physiclaw import config
+    from physiclaw.common import config
 
     monkeypatch.setattr(
         config, "provider_base_url_override", lambda pid: "https://proxy/v3"

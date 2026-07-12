@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING
 
 from physiclaw.agent.engine import memory, pitfalls, screen_layout, trajectory
 from physiclaw.agent.engine.dto import AssistantMessage, ToolCall
-from physiclaw.config import CONFIG
+from physiclaw.common.config import CONFIG
 
 if TYPE_CHECKING:
     from physiclaw.agent.engine.session import Session

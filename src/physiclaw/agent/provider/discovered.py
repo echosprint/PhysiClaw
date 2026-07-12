@@ -24,8 +24,8 @@ import json
 import logging
 from pathlib import Path
 
-from physiclaw import paths
-from physiclaw.text import read_text, write_text
+from physiclaw.common import paths
+from physiclaw.common.text import read_text, write_text
 
 log = logging.getLogger(__name__)
 

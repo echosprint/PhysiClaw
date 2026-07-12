@@ -23,7 +23,7 @@ import urllib.request
 
 import typer
 
-from physiclaw.core import platform
+from physiclaw.common import platform
 
 # Cloudflare's WAF 403s the default Python-urllib User-Agent, so every request
 # to the physiclaw.ai mirror must set one. Applied to all CLI downloads for
@@ -31,7 +31,7 @@ from physiclaw.core import platform
 USER_AGENT = "physiclaw"
 
 # Trust the system proxy for loopback only on platforms where the bypass
-# list reliably excludes localhost (see physiclaw.core.platform).
+# list reliably excludes localhost (see physiclaw.common.platform).
 _OPENER = (
     urllib.request.build_opener()
     if platform.TRUST_PROXY_ENV

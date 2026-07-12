@@ -11,7 +11,7 @@ from typing import Annotated, Optional
 
 import typer
 
-from physiclaw.config import CONFIG
+from physiclaw.common.config import CONFIG
 
 
 def server(
@@ -115,7 +115,7 @@ def server(
     loop) start daemon threads / a subprocess so `_serve` can start first.
     """
     from physiclaw import __version__
-    from physiclaw.core.logger import setup_logging
+    from physiclaw.common.logger import setup_logging
 
     # Logging first: everything from here on — including the version line and
     # the background auto-sync's outcome — speaks in one voice, the
@@ -249,7 +249,7 @@ def _resolve_and_record_model(host: str, port: int) -> tuple[Optional[str], str]
 
     Returns (model_ref, runtime_label); model_ref is None when no model is set.
     """
-    from physiclaw import runtime_state
+    from physiclaw.common import runtime_state
     from physiclaw.agent.runtime.launcher import engine_label, resolve as _resolve_model
 
     try:
@@ -396,7 +396,7 @@ def _start_runtime_loop(
         # rather than letting the subprocess crash with a stack trace.
         # Reuse `_NO_MODEL_MSG` so this hint stays in sync with the
         # RuntimeError raised elsewhere — single source of truth.
-        from physiclaw.config import _NO_MODEL_MSG
+        from physiclaw.common.config import _NO_MODEL_MSG
 
         log.warning(
             "Runtime loop NOT started — %s\n"

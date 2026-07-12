@@ -1,7 +1,7 @@
 """Before/after gesture frame diff — did the screen visibly change?
 
 Feeds the `screen: changed` / `screen: no visible change` verdict that
-the orchestrator appends to every gesture result (`physiclaw.verdict`).
+the orchestrator appends to every gesture result (`physiclaw.common.verdict`).
 The point is catching SILENT REFUSALS: an app that rejects a tap with a
 1–2s toast looks, by the time the arm parks and the camera looks, exactly
 like a tap that never landed. The agent can't see the toast — but it can

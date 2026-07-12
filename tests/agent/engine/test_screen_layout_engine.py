@@ -13,7 +13,7 @@ import pytest
 
 from physiclaw.agent.engine import screen_layout as sl
 from physiclaw.agent.engine.skill import Skill
-from physiclaw import paths
+from physiclaw.common import paths
 
 
 @pytest.fixture(autouse=True)
