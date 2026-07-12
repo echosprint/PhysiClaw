@@ -145,7 +145,10 @@ def run(auto: bool = False, trace: bool = False) -> None:
     if status.get("bridge"):
         _done("Phone connected")
     else:
-        print(f"  Phone URL: http://{lan_ip()}:8048/bridge")
+        from physiclaw.core.bridge.lan import bridge_port
+
+        lan_port = bridge_port(int(BASE.rsplit(":", 1)[-1]))
+        print(f"  Phone URL: http://{lan_ip()}:{lan_port}/bridge")
         if not auto:
             webbrowser.open(f"{BASE}/api/bridge/qr")
             wait("Scan the QR on your phone — the page should say 'PhysiClaw'")

@@ -29,8 +29,12 @@ class ConfigError(ValueError):
 
 @dataclass
 class ServerConfig:
+    """``port``/``host`` bind the CONTROL plane (MCP + setup + calibrate) —
+    loopback by default so the arm-driving surface is unreachable from the
+    LAN. The phone bridge always binds ``0.0.0.0`` on ``port``+1."""
+
     port: int = 8048
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"
     save_tool_calls: bool = False
     save_snapshots: bool = False
     save_screenshots: bool = False

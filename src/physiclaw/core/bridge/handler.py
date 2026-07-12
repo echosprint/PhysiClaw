@@ -20,14 +20,22 @@ log = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent.parent / "static"
 
+# Upload guard rails (see handle_screenshot_upload). An iPhone screenshot
+# PNG is 2–8 MiB; 10 MiB is generous headroom, small enough that a
+# malicious poster can't balloon the process.
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+_IMAGE_MAGICS = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff")  # PNG, JPEG
+
 
 def render_phone_page_html(filename: str, port: int) -> str:
     """Read a static page and substitute the phone bridge URLs into it.
 
-    Shared by every page that embeds the bridge URL (the QR page and the
-    setup wizard) so the ``__PHONE_URL__`` placeholder convention lives in
-    one place. Callers wrap the result in their own ``HTMLResponse`` (so
-    each picks its own cache headers).
+    ``port`` is the CONTROL port serving the page; the substituted URLs
+    point at the LAN bridge listener (`bridge_port`). Shared by every
+    page that embeds the bridge URL (the QR page and the setup wizard)
+    so the placeholder convention lives in one place. Callers wrap the
+    result in their own ``HTMLResponse`` (so each picks its own cache
+    headers).
     """
     primary, fallback = bridge_base_urls(port)
     return (
@@ -53,6 +61,10 @@ async def serve_bridge_page(request):
 async def handle_phone_state(request, phone: PageState):
     """GET /api/bridge/state — unified poll endpoint for the phone page."""
     phone.bridge.poll()  # keep connected status alive in both modes
+    if request.client:
+        # A live poll is the freshest "this is the phone" signal — lets
+        # the upload IP pin follow a DHCP change.
+        phone.bridge.note_phone_ip(request.client.host)
     return JSONResponse(phone.get_state())
 
 
@@ -86,10 +98,41 @@ async def handle_screenshot_upload(request, bridge: BridgeState):
 
     Accepts raw image body (PNG or JPEG). The iOS Shortcut action is:
     "Get Contents of URL" with method POST, body = screenshot image.
+
+    Guarded three ways (defence for the one LAN route that injects data
+    into the vision pipeline):
+      - arming window — only accepted while a consumer is expecting an
+        upload (`BridgeState.upload_armed`), so an idle server ignores it;
+      - TOFU IP pin — must come from the pinned phone IP (loopback exempt);
+      - size cap + magic bytes — streamed with a hard cap so an oversized
+        body is cut off instead of buffered, and must look like PNG/JPEG.
     """
-    data = await request.body()
+    ip = request.client.host if request.client else None
+    if not bridge.upload_armed():
+        log.warning(f"Bridge: screenshot upload rejected — not armed (from {ip})")
+        return JSONResponse({"error": "no screenshot expected"}, status_code=403)
+    if not bridge.upload_ip_allowed(ip):
+        log.warning(f"Bridge: screenshot upload rejected — unpinned IP {ip}")
+        return JSONResponse({"error": "unrecognized sender"}, status_code=403)
+
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > MAX_UPLOAD_BYTES:
+        return JSONResponse({"error": "body too large"}, status_code=413)
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > MAX_UPLOAD_BYTES:
+            log.warning(f"Bridge: screenshot upload rejected — >{MAX_UPLOAD_BYTES}B")
+            return JSONResponse({"error": "body too large"}, status_code=413)
+        chunks.append(chunk)
+    data = b"".join(chunks)
+
     if not data:
         return JSONResponse({"error": "empty body"}, status_code=400)
+    if not data.startswith(_IMAGE_MAGICS):
+        log.warning("Bridge: screenshot upload rejected — not PNG/JPEG")
+        return JSONResponse({"error": "not a PNG/JPEG image"}, status_code=415)
     bridge.receive_screenshot(data)
     return JSONResponse({"ok": True, "size": len(data)})
 

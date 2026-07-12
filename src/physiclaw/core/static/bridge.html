@@ -409,7 +409,7 @@ body.mode-bridge #bridge-layer{
   // in touchstart async callbacks)
   document.body.addEventListener('click', function(){
     if(state.mode !== 'bridge' || state.text === null) return;
-    var ok = copyToClipboard(state.text);
+    copyToClipboard(state.text);
     bridgeFlash();
     notifyBridgeTap();
   });

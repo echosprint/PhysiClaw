@@ -10,7 +10,9 @@ import logging
 
 from physiclaw.core.bridge import BridgeState, CalibrationState, PageState
 from physiclaw.core import PhysiClaw
+from physiclaw.core.server.planes import PhoneApp, build_bridge_app, build_control_app
 from physiclaw.core.server.bridge import register as _register_bridge
+from physiclaw.core.server.bridge import register_phone as _register_bridge_phone
 from physiclaw.core.server.calibration import register as _register_calibration
 from physiclaw.core.server.hardware import register as _register_hardware
 from physiclaw.core.server.mcp import mcp
@@ -42,9 +44,21 @@ def shutdown():
 
 
 # ─── Wire tools and routes ──────────────────────────────────
+# Control plane on `mcp` (loopback), phone-facing routes on `_phone_app`
+# (LAN) — see core/server/planes.py for the split and its gates.
+
+_phone_app = PhoneApp()
 
 _register_tools(mcp, physiclaw)
 _register_bridge(mcp, physiclaw, _bridge, _calib, _phone)
+_register_bridge_phone(_phone_app, physiclaw, _bridge, _calib, _phone)
 _register_hardware(mcp, physiclaw, _phone)
 _register_calibration(mcp, physiclaw, _bridge, _calib, _phone)
 _register_watch(mcp, physiclaw)
+
+
+def build_apps(host: str = "127.0.0.1"):
+    """(control_asgi, bridge_asgi) — built on demand by `cli/server.py`.
+    `streamable_http_app()` is lazy-init inside FastMCP, so this is safe
+    to call once serving is about to start. `host` is the control bind."""
+    return build_control_app(mcp, host), build_bridge_app(_phone_app)

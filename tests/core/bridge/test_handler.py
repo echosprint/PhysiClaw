@@ -45,13 +45,30 @@ def _async_returning(value: Any):
 
 
 def _fake_request(
-    body_bytes: bytes | None = None, json_obj: Any = None, url_port: int | None = 8048
+    body_bytes: bytes | None = None,
+    json_obj: Any = None,
+    url_port: int | None = 8048,
+    client_host: str = "127.0.0.1",
+    headers: dict[str, str] | None = None,
 ):
     req = SimpleNamespace()
-    req.body = _async_returning(body_bytes if body_bytes is not None else b"")
+    data = body_bytes if body_bytes is not None else b""
+    req.body = _async_returning(data)
     req.json = _async_returning(json_obj)
     req.url = SimpleNamespace(port=url_port)
+    req.client = SimpleNamespace(host=client_host)
+    req.headers = headers or {}
+
+    async def _stream():
+        if data:
+            yield data
+
+    req.stream = _stream
     return req
+
+
+# A minimal body that passes the upload magic-byte check.
+PNG = b"\x89PNG\r\n\x1a\n" + b"fake png payload"
 
 
 # ---------- serve_bridge_page ----------
@@ -157,24 +174,105 @@ async def test_handle_screen_dimension_defaults_missing_fields_to_zero() -> None
 @pytest.mark.asyncio
 async def test_handle_screenshot_upload_stores_data_and_returns_size() -> None:
     bridge = BridgeState()
-    payload = b"fake image bytes"
+    bridge.clear_screenshot()  # arms the upload window
 
-    resp = await handle_screenshot_upload(_fake_request(body_bytes=payload), bridge)
+    resp = await handle_screenshot_upload(_fake_request(body_bytes=PNG), bridge)
 
     import json
 
     body = json.loads(resp.body)
-    assert body == {"ok": True, "size": len(payload)}
-    assert bridge._screenshot_data == payload
+    assert body == {"ok": True, "size": len(PNG)}
+    assert bridge._screenshot_data == PNG
 
 
 @pytest.mark.asyncio
 async def test_handle_screenshot_upload_400_on_empty_body() -> None:
     bridge = BridgeState()
+    bridge.clear_screenshot()
 
     resp = await handle_screenshot_upload(_fake_request(body_bytes=b""), bridge)
 
     assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_handle_screenshot_upload_403_when_not_armed(silenced_log) -> None:
+    """No consumer expects an upload → an unsolicited POST is rejected."""
+    bridge = BridgeState()
+
+    resp = await handle_screenshot_upload(_fake_request(body_bytes=PNG), bridge)
+
+    assert resp.status_code == 403
+    assert bridge._screenshot_data is None
+
+
+@pytest.mark.asyncio
+async def test_handle_screenshot_upload_consumes_the_armed_window(
+    silenced_log,
+) -> None:
+    """One armed window admits one upload — the second is rejected."""
+    bridge = BridgeState()
+    bridge.clear_screenshot()
+
+    first = await handle_screenshot_upload(_fake_request(body_bytes=PNG), bridge)
+    second = await handle_screenshot_upload(_fake_request(body_bytes=PNG), bridge)
+
+    assert first.status_code == 200
+    assert second.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_handle_screenshot_upload_pins_first_lan_ip(silenced_log) -> None:
+    """TOFU: the first LAN uploader pins its IP; a different IP is rejected."""
+    bridge = BridgeState()
+    bridge.clear_screenshot()
+    first = await handle_screenshot_upload(
+        _fake_request(body_bytes=PNG, client_host="192.168.1.30"), bridge
+    )
+    assert first.status_code == 200
+
+    bridge.clear_screenshot()
+    other = await handle_screenshot_upload(
+        _fake_request(body_bytes=PNG, client_host="192.168.1.66"), bridge
+    )
+    assert other.status_code == 403
+
+    bridge.clear_screenshot()
+    same = await handle_screenshot_upload(
+        _fake_request(body_bytes=PNG, client_host="192.168.1.30"), bridge
+    )
+    assert same.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_handle_screenshot_upload_415_on_non_image(silenced_log) -> None:
+    bridge = BridgeState()
+    bridge.clear_screenshot()
+
+    resp = await handle_screenshot_upload(
+        _fake_request(body_bytes=b"<html>not an image</html>"), bridge
+    )
+
+    assert resp.status_code == 415
+    assert bridge._screenshot_data is None
+
+
+@pytest.mark.asyncio
+async def test_handle_screenshot_upload_413_on_oversized_body(
+    monkeypatch: pytest.MonkeyPatch, silenced_log
+) -> None:
+    monkeypatch.setattr(handler, "MAX_UPLOAD_BYTES", 8)
+    bridge = BridgeState()
+    bridge.clear_screenshot()
+
+    streamed = await handle_screenshot_upload(_fake_request(body_bytes=PNG), bridge)
+    declared = await handle_screenshot_upload(
+        _fake_request(body_bytes=PNG, headers={"content-length": "999999"}), bridge
+    )
+
+    assert streamed.status_code == 413
+    assert declared.status_code == 413
+    assert bridge._screenshot_data is None
 
 
 # ---------- handle_recent_screenshots ----------
@@ -368,8 +466,7 @@ async def test_serve_qr_page_substitutes_phone_url(
     resp = await serve_qr_page(_fake_request(url_port=8048))
 
     body = resp.body.decode()
-    assert "http://mac.local:8048/bridge" in body
-    assert "http://192.168.1.1:8048/bridge" in body
+    assert "http://mac.local:8048/bridge / http://192.168.1.1:8048/bridge" in body
 
 
 @pytest.mark.asyncio

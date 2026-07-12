@@ -16,6 +16,25 @@ log = logging.getLogger(__name__)
 # Bounded rolling window of recent raw uploads the layout tool can fetch.
 RECENT_SCREENSHOTS_MAX = 3
 
+# Upload arming: POST /api/bridge/screenshot is only accepted while a
+# consumer is expecting one. `clear_screenshot()` (the tap-AT choke point)
+# opens this window; `wait_screenshot()` extends it past its own timeout so
+# manual flows (viewport pre-cal's "double-tap AT yourself") stay covered.
+UPLOAD_WINDOW_SECONDS = 60.0
+# Slack past a waiter's timeout: an upload racing the waiter's last poll
+# should still land rather than 403.
+UPLOAD_WINDOW_GRACE_SECONDS = 5.0
+# IP pin staleness: if the pinned phone IP hasn't been seen (poll or upload)
+# for this long, an armed upload from a NEW IP re-pins instead of 403ing —
+# that's how a DHCP lease change heals without a server restart. While the
+# phone is active its pin stays fresh, so a hijack needs the phone silent
+# this long AND an armed window — the off-path attacker the pin targets
+# doesn't get both.
+PIN_STALE_SECONDS = 600.0
+
+# Callers on the host itself bypass the phone IP pin entirely.
+_LOOPBACK_IPS = frozenset({"127.0.0.1", "::1"})
+
 
 class BridgeState:
     """Shared state for the LAN bridge between server and phone browser.
@@ -73,6 +92,12 @@ class BridgeState:
         # Recent raw uploads, oldest→newest. Independent of the consume path
         # above (wait/clear never touch it), so a reader can't disturb it.
         self._recent_screens: deque[bytes] = deque(maxlen=RECENT_SCREENSHOTS_MAX)
+        # Upload gate: monotonic deadline until which an upload is expected
+        # (0.0 = disarmed), the TOFU-pinned phone IP (None = unpinned), and
+        # when that IP was last seen (drives the DHCP-change re-pin).
+        self._upload_armed_until: float = 0.0
+        self._phone_ip: str | None = None
+        self._phone_ip_seen: float = 0.0
 
     @property
     def connected(self) -> bool:
@@ -165,7 +190,8 @@ class BridgeState:
 
         Called from the async route handler when the iOS Shortcut POSTs
         the image. Writes data under lock, then signals the event so
-        ``wait_screenshot()`` sees consistent data. When
+        ``wait_screenshot()`` sees consistent data. Disarms the upload
+        window — one armed window admits one upload. When
         ``PHYSICLAW_SAVE_SCREENSHOTS`` is set, also dumps the raw bytes
         to ``data/screenshots/``.
         """
@@ -173,10 +199,15 @@ class BridgeState:
         with self.lock:
             self._screenshot_data = data
             self._recent_screens.append(data)
+            self._upload_armed_until = 0.0
         self._screenshot_ready.set()
 
     def clear_screenshot(self):
         """Clear any pending screenshot so wait_screenshot blocks for a fresh one.
+
+        Also arms the upload window: this is called exactly when a consumer
+        is about to trigger an upload (tap AT / start a verify), so it is
+        the natural "expect an upload now" signal.
 
         Only touches the consume path — the `_recent_screens` window is
         deliberately left intact so a fetch after the MCP tool consumed a
@@ -185,6 +216,64 @@ class BridgeState:
         self._screenshot_ready.clear()
         with self.lock:
             self._screenshot_data = None
+            self._arm_upload_locked(UPLOAD_WINDOW_SECONDS)
+
+    def _arm_upload_locked(self, seconds: float):
+        """Extend (never shrink) the upload window. Caller holds the lock."""
+        self._upload_armed_until = max(
+            self._upload_armed_until, time.monotonic() + seconds
+        )
+
+    def upload_armed(self) -> bool:
+        """True while an upload is expected — a `clear_screenshot()` or a
+        live `wait_screenshot()` opened the window and it hasn't expired
+        or been consumed."""
+        with self.lock:
+            return time.monotonic() < self._upload_armed_until
+
+    # ─── Phone IP pin (trust-on-first-use) ────────────────────
+
+    def upload_ip_allowed(self, ip: str | None) -> bool:
+        """Gate an upload by source IP. First non-loopback uploader pins the
+        phone's IP; later uploads must match — unless the pinned IP has gone
+        quiet for `PIN_STALE_SECONDS`, in which case the new IP re-pins
+        (the phone came back from a DHCP lease change). Loopback is always
+        allowed (the host itself is trusted). The pin is risk reduction,
+        not authentication: it excludes only the *off-path* LAN sender
+        (e.g. a compromised IoT device) — an on-path attacker on the same
+        Wi-Fi can spoof the pinned address.
+        """
+        if ip is None or ip in _LOOPBACK_IPS:
+            return True
+        now = time.monotonic()
+        with self.lock:
+            if ip == self._phone_ip:
+                self._phone_ip_seen = now
+                return True
+            if (
+                self._phone_ip is not None
+                and now - self._phone_ip_seen <= PIN_STALE_SECONDS
+            ):
+                return False
+            stale = self._phone_ip
+            self._phone_ip, self._phone_ip_seen = ip, now
+        if stale is not None:
+            log.info(f"Bridge: phone IP {stale} went quiet — re-pinned to {ip}")
+        else:
+            log.info(f"Bridge: pinned phone IP {ip}")
+        return True
+
+    def note_phone_ip(self, ip: str | None):
+        """Refresh the pin from a live bridge-page poll — the freshest
+        "this is the phone" signal, so it may re-pin immediately after a
+        DHCP change without waiting out the staleness window."""
+        if ip is None or ip in _LOOPBACK_IPS:
+            return
+        with self.lock:
+            changed = self._phone_ip != ip
+            self._phone_ip, self._phone_ip_seen = ip, time.monotonic()
+        if changed:
+            log.info(f"Bridge: pinned phone IP {ip}")
 
     def recent_screenshots(self, n: int = RECENT_SCREENSHOTS_MAX) -> list[bytes]:
         """Snapshot of the last `n` raw uploads, oldest→newest. Read-only
@@ -196,11 +285,15 @@ class BridgeState:
     def wait_screenshot(self, timeout: float = 10.0) -> bytes | None:
         """Block until a screenshot arrives, or timeout. Returns PNG/JPEG bytes.
 
-        Called from the blocking MCP tool thread. Waits on the event
-        without holding the lock (otherwise receive_screenshot couldn't
-        acquire it to store data). Once signaled, grabs the lock briefly
-        to read the data safely.
+        Called from the blocking MCP tool thread. Arms the upload window
+        for its own duration (some flows wait without a prior
+        `clear_screenshot`, e.g. viewport pre-cal's manual double-tap).
+        Waits on the event without holding the lock (otherwise
+        receive_screenshot couldn't acquire it to store data). Once
+        signaled, grabs the lock briefly to read the data safely.
         """
+        with self.lock:
+            self._arm_upload_locked(timeout + UPLOAD_WINDOW_GRACE_SECONDS)
         if self._screenshot_ready.wait(timeout=timeout):
             self._screenshot_ready.clear()
             with self.lock:

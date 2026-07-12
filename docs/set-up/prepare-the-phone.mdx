@@ -64,7 +64,7 @@ hostname
 </TabItem>
 </Tabs>
 
-With the host name, the PhysiClaw server address is `<hostname>.local:8048`. You can also reach it by the computer's LAN IP (e.g. `192.168.1.20:8048`), but the IP is assigned dynamically by DHCP and may change after a reboot, so `.local` is preferred.
+With the host name, the phone bridge address is `<hostname>.local:8049` (the control port + 1). You can also reach it by the computer's LAN IP (e.g. `192.168.1.20:8049`), but the IP is assigned dynamically by DHCP and may change after a reboot, so `.local` is preferred.
 
 :::note[If `.local` doesn't resolve]
 `.local` relies on mDNS (built in on macOS). If the iPhone still can't connect, use the LAN IP instead.
@@ -99,7 +99,7 @@ Used when the camera's view isn't sharp enough and the agent needs a higher-reso
 2. Add **Get Latest Screenshots**.
 
 3. Add **Get Contents of URL**:
-   - URL: `http://<hostname>.local:8048/api/bridge/screenshot`
+   - URL: `http://<hostname>.local:8049/api/bridge/screenshot`
    - **Show More** → Method **POST**, Request Body **File**, File → the **Screenshots** variable
 
 4. Rename it to `PhysiClaw Upload Screenshot`.
@@ -114,7 +114,7 @@ The agent sends text to the phone's clipboard and pastes it — faster and more 
 
 1. In the **Shortcuts** app, tap **+** to create a new one.
 
-2. Add **Get Contents of URL**, with URL `http://<hostname>.local:8048/api/bridge/clipboard` and Method **GET**.
+2. Add **Get Contents of URL**, with URL `http://<hostname>.local:8049/api/bridge/clipboard` and Method **GET**.
 
 3. Add **Copy to Clipboard**, with its input set to the previous step's **Contents of URL**.
 

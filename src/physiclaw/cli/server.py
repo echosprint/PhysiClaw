@@ -16,10 +16,20 @@ from physiclaw.config import CONFIG
 
 def server(
     port: Annotated[
-        int, typer.Option("--port", help="MCP server port.")
+        int,
+        typer.Option(
+            "--port",
+            help="Control-plane port (MCP + setup). The "
+            "LAN phone bridge always listens on port+1.",
+        ),
     ] = CONFIG.server.port,
     host: Annotated[
-        str, typer.Option("--host", help="Bind address.")
+        str,
+        typer.Option(
+            "--host",
+            help="Control-plane bind address. Loopback "
+            "by default — the phone bridge is the only plane that binds 0.0.0.0.",
+        ),
     ] = CONFIG.server.host,
     verbose: Annotated[
         bool,
@@ -102,7 +112,7 @@ def server(
     `_*` helpers below: banner + maintenance → save-flag env → logging → MCP
     init → model resolution → endpoint log → hardware bring-up → runtime
     subprocess → serve. The two background flows (hardware bring-up, runtime
-    loop) start daemon threads / a subprocess so `mcp.run()` serves first.
+    loop) start daemon threads / a subprocess so `_serve` can start first.
     """
     from physiclaw import __version__
     from physiclaw.core.logger import setup_logging
@@ -127,12 +137,9 @@ def server(
         save_tool_calls, save_snapshots, save_screenshots, save_raw_camera
     )
 
-    from physiclaw.core.server import mcp, shutdown
+    from physiclaw.core.server import build_apps, shutdown
 
     atexit.register(shutdown)
-    mcp.settings.host = host
-    mcp.settings.port = port
-    mcp.settings.log_level = "WARNING"
 
     model_ref, runtime_label = _resolve_and_record_model(host, port)
     _log_endpoints(host, port)
@@ -153,9 +160,38 @@ def server(
     )
 
     try:
-        mcp.run(transport="streamable-http")
+        _serve(host, port, *build_apps(host))
     except KeyboardInterrupt:
         pass
+
+
+def _serve(host: str, port: int, control_app, bridge_app) -> None:
+    """Serve the two planes from one process, two listeners.
+
+    Control (MCP + setup + calibrate) binds `host` (loopback by default) on
+    `port`; the phone bridge binds 0.0.0.0 on `port`+1 so ONLY those seven
+    routes are reachable from the LAN — the arm-driving surface can't be.
+    Two listeners because a wildcard and a specific bind on one port don't
+    coexist on Linux.
+
+    The bridge runs in a daemon thread (uvicorn skips signal handling off
+    the main thread); the control server keeps the main thread, so Ctrl-C
+    behaves exactly as it did under `mcp.run()` — uvicorn catches SIGINT,
+    shuts down gracefully, then re-raises so atexit handlers still fire.
+    """
+    import uvicorn
+
+    from physiclaw.core.bridge.lan import bridge_port
+
+    bridge_server = uvicorn.Server(
+        uvicorn.Config(
+            bridge_app, host="0.0.0.0", port=bridge_port(port), log_level="warning"
+        )
+    )
+    threading.Thread(target=bridge_server.run, name="bridge-http", daemon=True).start()
+    uvicorn.Server(
+        uvicorn.Config(control_app, host=host, port=port, log_level="warning")
+    ).run()
 
 
 def _run_startup_maintenance() -> None:

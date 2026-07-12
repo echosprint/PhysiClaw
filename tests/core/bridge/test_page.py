@@ -120,6 +120,8 @@ def test_set_mode_bridge_with_phase_does_not_call_set_phase() -> None:
 
 
 def test_get_state_in_bridge_mode_includes_text_from_bridge() -> None:
+    # The text rides the poll deliberately — the phone must DISPLAY it so
+    # the operator sees what's about to be pasted (see PageState.get_state).
     bridge = _bridge_stub("hello user")
     p = PageState(bridge, _cal_stub())
 

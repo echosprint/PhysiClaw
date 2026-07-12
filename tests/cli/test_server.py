@@ -91,6 +91,10 @@ def _patch_server_runtime_deps(
     mocker.patch.object(server_mod.threading, "Thread")
     mocker.patch("webbrowser.open")
 
+    # `_serve` is the process's serving boundary (two uvicorn servers) —
+    # always mocked; tests assert against it instead of running sockets.
+    fake_serve = mocker.patch.object(server_mod, "_serve")
+
     fake_mcp = MagicMock()
     fake_shutdown = MagicMock()
     fake_warm = MagicMock()
@@ -110,11 +114,13 @@ def _patch_server_runtime_deps(
     import physiclaw
 
     mocker.patch.object(physiclaw, "runtime_state", fake_state, create=True)
+    fake_control_app, fake_bridge_app = MagicMock(), MagicMock()
     fake_core_server = MagicMock(
         mcp=fake_mcp,
         shutdown=fake_shutdown,
         warm_start=fake_warm,
     )
+    fake_core_server.build_apps.return_value = (fake_control_app, fake_bridge_app)
     import physiclaw.core
 
     mocker.patch.object(physiclaw.core, "server", fake_core_server, create=True)
@@ -135,6 +141,9 @@ def _patch_server_runtime_deps(
         "launcher": fake_launcher,
         "bridge": fake_bridge,
         "warm_start": fake_warm,
+        "serve": fake_serve,
+        "core_server": fake_core_server,
+        "apps": (fake_control_app, fake_bridge_app),
     }
 
 
@@ -257,7 +266,7 @@ def test_server_drops_uvicorn_invalid_http_noise(mocker) -> None:
     assert uvicorn_logger.filter(record("ASGI application error"))
 
 
-def test_server_default_invocation_runs_mcp(mocker) -> None:
+def test_server_default_invocation_serves_both_planes(mocker) -> None:
     deps = _patch_server_runtime_deps(mocker)
 
     server_mod.server(
@@ -272,7 +281,9 @@ def test_server_default_invocation_runs_mcp(mocker) -> None:
         save_screenshots=False,
     )
 
-    deps["mcp"].run.assert_called_once_with(transport="streamable-http")
+    # Both ASGI apps built for the control bind and handed to _serve.
+    deps["core_server"].build_apps.assert_called_once_with("127.0.0.1")
+    deps["serve"].assert_called_once_with("127.0.0.1", 8048, *deps["apps"])
     # State recorded with resolved model.
     deps["state"].write.assert_called_once()
 
@@ -358,7 +369,7 @@ def test_server_skips_runtime_spawn_when_no_model_configured(
 
 def test_server_keyboard_interrupt_is_swallowed(mocker) -> None:
     deps = _patch_server_runtime_deps(mocker)
-    deps["mcp"].run.side_effect = KeyboardInterrupt
+    deps["serve"].side_effect = KeyboardInterrupt
 
     # Should NOT raise.
     server_mod.server(

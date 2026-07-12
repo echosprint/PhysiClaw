@@ -211,8 +211,15 @@ def _probe_calibration_deep() -> str:
 
 
 def _probe_bridge_deep(host: str, port: int) -> str:
+    """``port`` is the control port; the bridge listens on port+1 (see
+    ``core/bridge/lan.bridge_port``). The bridge plane is ungated, so a
+    plain loopback GET works here."""
+    from physiclaw.core.bridge.lan import bridge_port
+
     try:
-        state = _http.fetch_json(f"http://{host}:{port}/api/bridge/state", timeout=1.0)
+        state = _http.fetch_json(
+            f"http://{host}:{bridge_port(port)}/api/bridge/state", timeout=1.0
+        )
         connected = state.get("connected", False)
     except (OSError, ValueError) as e:
         # Network/parse failure is a real problem — keep the warn.
@@ -431,12 +438,15 @@ def doctor(
         # Server is up — its view of arm/camera/calibration is authoritative.
         typer.echo(_fmt_ok(f"server: running on {host}:{port}"))
         if bind_all:
-            # Bind mode is a config decision the user already made; surface
-            # the fact without the yellow `!` since a healthy server isn't
-            # a warning state. Security notes live in the README.
+            # Since the plane split the phone bridge has its own 0.0.0.0
+            # listener on port+1 — the CONTROL plane (MCP, setup, calibrate)
+            # should stay loopback. A wildcard bind here means someone
+            # overrode that, exposing the arm-driving surface to the LAN.
             typer.echo(
-                _fmt_info(
-                    "bind: 0.0.0.0 (LAN-reachable; intended for the phone bridge)"
+                _fmt_warn(
+                    "bind: control plane on 0.0.0.0 — LAN-reachable. The phone "
+                    "bridge has its own port+1 listener; use host=127.0.0.1 "
+                    "unless you meant to expose MCP/setup."
                 )
             )
         for label in ("arm", "camera", "calibrated", "ready"):

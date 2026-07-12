@@ -56,7 +56,9 @@ def test_config_error_is_value_error_subclass() -> None:
     [
         # ServerConfig
         ("server", "port", 8048),
-        ("server", "host", "0.0.0.0"),
+        # Loopback: the control plane must not be LAN-reachable — only the
+        # bridge listener (port+1) binds 0.0.0.0 (see core/server/planes.py).
+        ("server", "host", "127.0.0.1"),
         ("server", "save_tool_calls", False),
         ("server", "save_snapshots", False),
         ("server", "save_screenshots", False),

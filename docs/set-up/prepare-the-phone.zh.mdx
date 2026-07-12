@@ -66,7 +66,7 @@ hostname
 </TabItem>
 </Tabs>
 
-得到主机名后，PhysiClaw 服务器的地址就是 `<hostname>.local:8048`。也可以用电脑的局域网 IP 访问（例如 `192.168.1.20:8048`），但 IP 由 DHCP 动态分配，电脑重启后可能改变，所以更推荐用 `.local`。
+得到主机名后，手机桥接页的地址就是 `<hostname>.local:8049`（控制端口 + 1）。也可以用电脑的局域网 IP 访问（例如 `192.168.1.20:8049`），但 IP 由 DHCP 动态分配，电脑重启后可能改变，所以更推荐用 `.local`。
 
 :::note[如果 `.local` 无法解析]
 `.local` 依赖 mDNS（macOS 原生支持）。若 iPhone 始终连不上，就改用局域网 IP 连接。
@@ -101,7 +101,7 @@ hostname
 2. 添加「**获取最新的截屏**」。
 
 3. 添加「**获取 URL 内容**」：
-   - URL：`http://<hostname>.local:8048/api/bridge/screenshot`
+   - URL：`http://<hostname>.local:8049/api/bridge/screenshot`
    - **显示更多** → 方法 **POST**，请求体 **文件**，文件 →「**截屏**」变量
 
 4. 重命名为 `PhysiClaw Upload Screenshot`。
@@ -116,7 +116,7 @@ hostname
 
 1. 在**快捷指令** App 里，点 **+** 新建。
 
-2. 添加「**获取 URL 内容**」，URL 填 `http://<hostname>.local:8048/api/bridge/clipboard`，方法选 **GET**。
+2. 添加「**获取 URL 内容**」，URL 填 `http://<hostname>.local:8049/api/bridge/clipboard`，方法选 **GET**。
 
 3. 添加「**拷贝到剪贴板**」，输入设为上一步的「**URL 内容**」。
 

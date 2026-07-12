@@ -41,6 +41,11 @@ class PageState:
         if mode == "calibrate":
             state.update(self.cal.get_state())
         else:
+            # The queued text rides the poll ON PURPOSE: the phone must
+            # display it so the operator can see what's about to be pasted
+            # and verify the paste matches. It's the agent reporting its
+            # own activity, not a secret — same trust model as the
+            # clipboard-fetch endpoint (see core/server/planes.py).
             state["text"] = self.bridge.current_text()
             state["copied"] = self.bridge.is_copied()
 

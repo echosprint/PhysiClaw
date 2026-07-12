@@ -426,3 +426,51 @@ def test_wait_screenshot_default_timeout_is_10_seconds() -> None:
 
     sig = inspect.signature(BridgeState.wait_screenshot)
     assert sig.parameters["timeout"].default == 10.0
+
+
+# ---------- upload arming + phone IP pin ----------
+
+
+def test_clear_screenshot_arms_and_receive_consumes(bs: BridgeState) -> None:
+    assert not bs.upload_armed()
+    bs.clear_screenshot()
+    assert bs.upload_armed()
+    bs.receive_screenshot(b"png")
+    assert not bs.upload_armed()  # one window, one upload
+
+
+def test_wait_screenshot_arms_for_its_own_duration(bs: BridgeState) -> None:
+    # Manual flows (viewport pre-cal) wait without a prior clear — the
+    # wait itself must open the window.
+    bs.wait_screenshot(timeout=0.0)
+    assert bs.upload_armed()
+
+
+def test_upload_ip_pin_tofu_then_match(bs: BridgeState) -> None:
+    assert bs.upload_ip_allowed("192.168.1.30")  # first LAN sender pins
+    assert not bs.upload_ip_allowed("192.168.1.66")  # fresh pin → reject
+    assert bs.upload_ip_allowed("192.168.1.30")  # pinned IP stays fine
+
+
+def test_upload_ip_pin_always_allows_loopback(bs: BridgeState) -> None:
+    assert bs.upload_ip_allowed("127.0.0.1")
+    assert bs.upload_ip_allowed(None)
+
+
+def test_upload_ip_pin_repins_when_stale(
+    bs: BridgeState, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # DHCP heal: the pinned IP going quiet past the staleness window lets
+    # the next sender re-pin instead of being locked out until restart.
+    assert bs.upload_ip_allowed("192.168.1.30")
+    monkeypatch.setattr(state_mod, "PIN_STALE_SECONDS", 0.0)
+    assert bs.upload_ip_allowed("192.168.1.66")
+
+
+def test_note_phone_ip_repins_immediately(bs: BridgeState) -> None:
+    # A live bridge-page poll IS the phone — it may move the pin at once,
+    # no staleness wait (the page reload after an IP change).
+    assert bs.upload_ip_allowed("192.168.1.30")
+    bs.note_phone_ip("192.168.1.66")
+    assert bs.upload_ip_allowed("192.168.1.66")
+    assert not bs.upload_ip_allowed("192.168.1.30")

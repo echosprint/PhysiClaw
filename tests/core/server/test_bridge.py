@@ -1,6 +1,11 @@
 """Tests for `physiclaw.core.server.bridge` — bridge HTTP route registration.
 
-`fake_mcp` and `async_request` fixtures live in `conftest.py`.
+Routes are split across the two planes (see core/server/planes.py):
+`register` wires the control-plane routes onto the MCP app (loopback);
+`register_phone` wires the phone-facing routes onto the LAN bridge app.
+`fake_mcp` and `async_request` fixtures live in `conftest.py` — the same
+`FakeMcp` recorder works for both since the registrar interface
+(`custom_route`) is shared.
 """
 
 from __future__ import annotations
@@ -15,8 +20,26 @@ from physiclaw.core.server import bridge as bridge_reg
 pytestmark = [pytest.mark.integration]
 
 
-def test_bridge_register_wires_all_routes(fake_mcp) -> None:
+def test_bridge_register_wires_control_routes_only(fake_mcp) -> None:
     bridge_reg.register(
+        fake_mcp,
+        physiclaw=MagicMock(),
+        bridge=MagicMock(),
+        calib=MagicMock(),
+        phone=MagicMock(),
+    )
+
+    expected = {
+        ("/api/bridge/qr", "GET"),
+        ("/api/bridge/recent-screenshots", "GET"),
+        ("/api/bridge/switch", "POST"),
+    }
+    actual = {(p, ms[0]) for p, ms, _ in fake_mcp.routes}
+    assert expected == actual
+
+
+def test_bridge_register_phone_wires_lan_routes_only(fake_mcp) -> None:
+    bridge_reg.register_phone(
         fake_mcp,
         physiclaw=MagicMock(),
         bridge=MagicMock(),
@@ -27,13 +50,10 @@ def test_bridge_register_wires_all_routes(fake_mcp) -> None:
     expected = {
         ("/bridge", "GET"),
         ("/api/bridge/state", "GET"),
-        ("/api/bridge/qr", "GET"),
         ("/api/bridge/tapped", "POST"),
         ("/api/bridge/screen-dimension", "POST"),
         ("/api/bridge/screenshot", "POST"),
-        ("/api/bridge/recent-screenshots", "GET"),
         ("/api/bridge/clipboard", "GET"),
-        ("/api/bridge/switch", "POST"),
         ("/api/bridge/touch", "POST"),
     }
     actual = {(p, ms[0]) for p, ms, _ in fake_mcp.routes}
@@ -84,6 +104,7 @@ async def test_bridge_routes_forward_to_handlers(
 
     pl, br, cb, ph = MagicMock(), MagicMock(), MagicMock(), MagicMock()
     bridge_reg.register(fake_mcp, pl, br, cb, ph)
+    bridge_reg.register_phone(fake_mcp, pl, br, cb, ph)
 
     req = async_request()
 

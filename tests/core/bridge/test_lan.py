@@ -84,6 +84,12 @@ def test_get_mdns_host_restores_default_socket_timeout(mocker) -> None:
 
 
 # ---------- bridge_base_urls ----------
+# Input is the CONTROL port; the URLs point at the LAN bridge listener
+# one port up (`bridge_port`).
+
+
+def test_bridge_port_is_control_port_plus_one() -> None:
+    assert lan.bridge_port(8048) == 8049
 
 
 def test_bridge_base_urls_uses_mdns_when_available(mocker) -> None:
@@ -92,8 +98,8 @@ def test_bridge_base_urls_uses_mdns_when_available(mocker) -> None:
 
     primary, fallback = lan.bridge_base_urls(8048)
 
-    assert primary == "http://mac.local:8048"
-    assert fallback == "http://192.168.1.10:8048"
+    assert primary == "http://mac.local:8049"
+    assert fallback == "http://192.168.1.10:8049"
 
 
 def test_bridge_base_urls_primary_equals_fallback_when_no_mdns(mocker) -> None:
@@ -102,7 +108,7 @@ def test_bridge_base_urls_primary_equals_fallback_when_no_mdns(mocker) -> None:
 
     primary, fallback = lan.bridge_base_urls(8048)
 
-    assert primary == fallback == "http://10.0.0.1:8048"
+    assert primary == fallback == "http://10.0.0.1:8049"
 
 
 def test_bridge_base_urls_default_port_is_8048() -> None:
@@ -118,4 +124,4 @@ def test_bridge_base_urls_uses_custom_port(mocker) -> None:
 
     primary, _ = lan.bridge_base_urls(9999)
 
-    assert primary == "http://10.0.0.1:9999"
+    assert primary == "http://10.0.0.1:10000"

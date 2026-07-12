@@ -43,16 +43,24 @@ def get_mdns_host() -> str | None:
     return host
 
 
+def bridge_port(control_port: int) -> int:
+    """The LAN bridge listens next to the control port. One source of truth
+    for the +1 convention (`cli/server.py` bind, URL templating, doctor)."""
+    return control_port + 1
+
+
 def bridge_base_urls(port: int = 8048) -> tuple[str, str]:
     """Return (primary, fallback) base URLs for the LAN bridge.
 
-    Primary is `http://<host>.local:<port>` when mDNS resolves, else equal
-    to fallback. Fallback is `http://<lan-ip>:<port>`. No trailing slash.
-    One source of truth for the startup banner, the QR page, and the
-    repair page.
+    ``port`` is the CONTROL port; the returned URLs point at the bridge
+    listener (`bridge_port`). Primary is `http://<host>.local:<port>` when
+    mDNS resolves, else equal to fallback. Fallback is
+    `http://<lan-ip>:<port>`. No trailing slash. One source of truth for
+    the startup banner, the QR page, and the setup wizard.
     """
     ip = get_lan_ip()
     mdns = get_mdns_host()
-    fallback = f"http://{ip}:{port}"
-    primary = f"http://{mdns}:{port}" if mdns else fallback
+    lan_port = bridge_port(port)
+    fallback = f"http://{ip}:{lan_port}"
+    primary = f"http://{mdns}:{lan_port}" if mdns else fallback
     return primary, fallback
