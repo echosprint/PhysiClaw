@@ -54,7 +54,8 @@ class IconDetector:
     def __init__(self, model_path: Path = MODEL_PATH):
         if not model_path.exists():
             raise FileNotFoundError(
-                f"Model not found at {model_path}\nRun: /setup-vision-models"
+                f"Model not found at {model_path}\n"
+                "Run: physiclaw setup local-vision-model"
             )
         self.net = cv2.dnn.readNetFromONNX(str(model_path))
 

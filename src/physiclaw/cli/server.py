@@ -132,6 +132,7 @@ def server(
     )
     log = logging.getLogger(__name__)
     log.info("PhysiClaw %s", __version__)
+    _require_vision_model()
     _run_startup_maintenance()
     _apply_save_flags(
         save_tool_calls, save_snapshots, save_screenshots, save_raw_camera
@@ -192,6 +193,24 @@ def _serve(host: str, port: int, control_app, bridge_app) -> None:
     uvicorn.Server(
         uvicorn.Config(control_app, host=host, port=port, log_level="warning")
     ).run()
+
+
+def _require_vision_model() -> None:
+    """Exit at startup if the OmniParser icon-detection model isn't installed.
+
+    `screenshot()` — which every screen-reading wake relies on — raises without
+    it (see ``core.vision.icon_detect``). It's a hard requirement for the server
+    to be useful, so fail fast here with the one-line fix rather than letting the
+    runtime boot and die on its first screenshot mid-task."""
+    from physiclaw.cli._format import exit_error
+    from physiclaw.common import paths
+
+    model = paths.omniparser_onnx()
+    if not model.exists():
+        exit_error(
+            f"vision model not installed — {model} is missing.\n"
+            "Run: physiclaw setup local-vision-model"
+        )
 
 
 def _run_startup_maintenance() -> None:

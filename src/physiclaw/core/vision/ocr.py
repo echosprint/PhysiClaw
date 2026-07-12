@@ -42,7 +42,10 @@ class OCRReader:
         try:
             from rapidocr import RapidOCR
         except ImportError:
-            raise ImportError("rapidocr is required.\nRun: /setup-vision-models")
+            raise ImportError(
+                "rapidocr is required but couldn't be imported — it ships as a "
+                "physiclaw dependency, so reinstall physiclaw to restore it."
+            ) from None
         logging.disable(logging.INFO)
         self._ocr = RapidOCR()
         logging.disable(logging.NOTSET)

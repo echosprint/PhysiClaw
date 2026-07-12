@@ -13,6 +13,7 @@ import logging
 from unittest.mock import MagicMock
 
 import pytest
+import typer
 from typer.testing import CliRunner
 
 server_mod = importlib.import_module("physiclaw.cli.server")
@@ -79,6 +80,9 @@ def _patch_server_runtime_deps(
 ):
     """Stub out everything heavy `server()` touches once it starts up."""
     mocker.patch.object(server_mod, "_spawn_runtime", return_value=MagicMock())
+    # The vision-model preflight would exit() — tests run without the model
+    # installed. Its own behaviour is covered by the _require_vision_model tests.
+    mocker.patch.object(server_mod, "_require_vision_model")
     mocker.patch("physiclaw.common.logger.setup_logging")
     # The startup auto-update / skills-sync hooks have their own tests and would
     # otherwise shell out / hit the network here — stub them to no-ops.
@@ -657,3 +661,42 @@ def test_server_auto_calibrate_starts_thread_and_skips_wizard(mocker) -> None:
     open_spy.assert_not_called()  # no desktop wizard in auto mode
     captured["target"]()  # run the daemon-thread body
     worker_spy.assert_called_once_with("127.0.0.1", 8048)
+
+
+# ---------- _require_vision_model ----------
+
+
+def test_require_vision_model_exits_when_model_missing() -> None:
+    # The autouse physiclaw_home fixture gives a fresh tmp HOME — no model file.
+    with pytest.raises(typer.Exit):
+        server_mod._require_vision_model()
+
+
+def test_require_vision_model_passes_when_model_installed() -> None:
+    from physiclaw.common import paths
+
+    model = paths.omniparser_onnx()
+    model.parent.mkdir(parents=True, exist_ok=True)
+    model.write_bytes(b"onnx")
+
+    server_mod._require_vision_model()  # no exit
+
+
+def test_server_preflights_vision_model_regardless_of_runtime(mocker) -> None:
+    # The preflight is unconditional — it runs even under --no-runtime.
+    _patch_server_runtime_deps(mocker)  # mocks _require_vision_model
+
+    for no_runtime in (True, False):
+        server_mod._require_vision_model.reset_mock()
+        server_mod.server(
+            port=8048,
+            host="127.0.0.1",
+            verbose=False,
+            no_runtime=no_runtime,
+            warm_start=False,
+            cam_index=None,
+            save_tool_calls=False,
+            save_snapshots=False,
+            save_screenshots=False,
+        )
+        server_mod._require_vision_model.assert_called_once()
