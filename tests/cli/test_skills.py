@@ -561,3 +561,20 @@ def test_clone_no_branch_when_ref_omitted(mocker, tmp_path: Path) -> None:
     skills_mod._clone("o/r", None, tmp_path / "dest")
 
     assert "--branch" not in spy.call_args_list[0].args
+
+
+# ---------- sync official (CLI surface) ----------
+
+
+def test_sync_official_converts_sync_error_to_exit_1(mocker) -> None:
+    """The interactive command surfaces a SyncError as a clean stderr
+    message + exit 1, never a traceback."""
+    from physiclaw.cli import sync_official_skills as osk
+
+    mocker.patch.object(osk, "sync", side_effect=osk.SyncError("checksum mismatch"))
+
+    result = runner.invoke(skills_app, ["sync", "official"])
+
+    assert result.exit_code == 1
+    assert "checksum mismatch" in result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit)

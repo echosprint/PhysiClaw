@@ -389,7 +389,10 @@ def _sync_official(
     # when this command actually runs, keeping `physiclaw skills` startup lean.
     from physiclaw.cli import sync_official_skills
 
-    sync_official_skills.sync(force=force, dry_run=dry_run)
+    try:
+        sync_official_skills.sync(force=force, dry_run=dry_run)
+    except sync_official_skills.SyncError as e:
+        exit_error(str(e))
 
 
 skills_app.add_typer(sync_app, name="sync")

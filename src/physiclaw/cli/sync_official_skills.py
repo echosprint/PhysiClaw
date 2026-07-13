@@ -44,7 +44,7 @@ from typing import Callable
 import click
 import typer
 
-from physiclaw.cli._format import exit_error, info, ok, warn
+from physiclaw.cli._format import info, ok, warn
 from physiclaw.cli._http import http_get, stream
 from physiclaw.common import paths
 from physiclaw.common.config import load as _load_config
@@ -63,9 +63,16 @@ class _NotPublished(Exception):
     error the caller should surface as a failure."""
 
 
+class SyncError(RuntimeError):
+    """A sync failure with a human-readable message. Raised by the helpers
+    so each front end picks its own surface: the CLI command converts to
+    ``exit_error`` (stderr + exit 1); the server's background auto-sync
+    logs it — a daemon thread's stderr is invisible, the daily log isn't."""
+
+
 def _require_https(url: str) -> None:
     if not url.startswith("https://"):
-        exit_error(f"refusing non-HTTPS official-skills URL: {url}")
+        raise SyncError(f"refusing non-HTTPS official-skills URL: {url}")
 
 
 def _urls(base: str) -> dict[str, str]:
@@ -87,18 +94,18 @@ def _fetch_bytes(url: str) -> bytes:
     except urllib.error.HTTPError as e:
         if e.code == 404:
             raise _NotPublished from e
-        exit_error(f"GET {url} failed: HTTP {e.code}")
+        raise SyncError(f"GET {url} failed: HTTP {e.code}") from e
     except urllib.error.URLError as e:
-        exit_error(f"GET {url} failed: {e.reason}")
+        raise SyncError(f"GET {url} failed: {e.reason}") from e
 
 
 def _fetch_json(url: str) -> dict:
     try:
         data = json.loads(_fetch_bytes(url).decode("utf-8"))
     except (ValueError, UnicodeDecodeError) as e:
-        exit_error(f"{url} did not return valid JSON: {e}")
+        raise SyncError(f"{url} did not return valid JSON: {e}") from e
     if not isinstance(data, dict):
-        exit_error(f"{url} did not return a JSON object.")
+        raise SyncError(f"{url} did not return a JSON object.")
     return data
 
 
@@ -150,7 +157,7 @@ def _download_to_temp(url: str) -> tuple[Path, str]:
     except urllib.error.URLError as e:
         tmp.unlink(missing_ok=True)
         reason = f"HTTP {e.code}" if isinstance(e, urllib.error.HTTPError) else e.reason
-        exit_error(f"GET {url} failed: {reason}")
+        raise SyncError(f"GET {url} failed: {reason}") from e
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
@@ -167,13 +174,13 @@ def _extract_zip(zip_path: Path, dest: Path) -> None:
             for member in zf.namelist():
                 target = (dest / member).resolve()
                 if target != dest_real and not target.is_relative_to(dest_real):
-                    exit_error(
+                    raise SyncError(
                         f"zip entry escapes staging dir: {member!r} — "
                         "aborting (possible zip-slip)."
                     )
             zf.extractall(dest)
     except zipfile.BadZipFile as e:
-        exit_error(f"downloaded pack is not a valid zip: {e}")
+        raise SyncError(f"downloaded pack is not a valid zip: {e}") from e
 
 
 def _sanity_check_layout(staging: Path) -> None:
@@ -182,7 +189,7 @@ def _sanity_check_layout(staging: Path) -> None:
     malformed pack — refuse rather than mount it."""
     entries = {p.name for p in staging.iterdir()}
     if entries != {"source.json", "skills"} or not (staging / "skills").is_dir():
-        exit_error(
+        raise SyncError(
             f"unexpected package layout {sorted(entries)} — expected "
             "exactly source.json + skills/."
         )
@@ -278,7 +285,7 @@ def sync(
 
     remote_commit = str(latest.get("commit") or "")
     if not remote_commit:
-        exit_error(f"{urls['latest']} is missing 'commit'.")
+        raise SyncError(f"{urls['latest']} is missing 'commit'.")
 
     local_commit = str((_read_sync_state() or {}).get("commit") or "")
     up_to_date = bool(local_commit) and local_commit == remote_commit
@@ -317,9 +324,9 @@ def sync(
             _fetch_bytes(urls["sha256"]).decode("utf-8", "replace")
         )
         if expected is None:
-            exit_error(f"{urls['sha256']} is not a valid sha256sum line.")
+            raise SyncError(f"{urls['sha256']} is not a valid sha256sum line.")
         if actual != expected:
-            exit_error(
+            raise SyncError(
                 f"checksum mismatch — expected {expected[:12]}…, got "
                 f"{actual[:12]}…. Aborting; the install was not touched."
             )
@@ -417,13 +424,14 @@ def maybe_auto_sync() -> None:
 
 
 def _run_sync_quiet() -> None:
-    """The background-thread body: run ``sync`` fully fail-soft — a hard abort
-    (``typer.Exit``, already on stderr) or any unexpected error is swallowed so
-    the daemon thread dies quietly and the server is never affected."""
+    """The background-thread body: run ``sync`` fully fail-soft — a clean
+    ``SyncError`` lands in the daily log as a warning (a daemon thread's
+    stderr is invisible); any unexpected error is logged with traceback.
+    Either way the thread dies quietly and the server is never affected."""
     try:
         sync(emit=_log_emit)
-    except typer.Exit:
-        pass
+    except SyncError as e:
+        log.warning("auto-sync: official skills sync failed (non-fatal): %s", e)
     except Exception:
         log.exception("auto-sync: official skills sync failed (non-fatal)")
 
@@ -435,4 +443,4 @@ def _log_emit(msg: str) -> None:
     log.info("%s", click.unstyle(msg))
 
 
-__all__ = ["sync", "maybe_auto_sync"]
+__all__ = ["SyncError", "sync", "maybe_auto_sync"]

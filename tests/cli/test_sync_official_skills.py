@@ -190,11 +190,8 @@ def test_not_published_is_not_an_error(official_home: Path, mocker, capsys) -> N
 def test_latest_missing_commit_errors(official_home: Path, mocker, capsys) -> None:
     _patch_net(mocker, {LATEST_URL: json.dumps({"schemaVersion": 1}).encode()})
 
-    with pytest.raises(typer.Exit) as e:
+    with pytest.raises(osk.SyncError, match="missing 'commit'"):
         osk.sync()
-
-    assert e.value.exit_code == 1
-    assert "missing 'commit'" in capsys.readouterr().err
 
 
 # ---------- fresh install ----------
@@ -308,11 +305,9 @@ def test_checksum_mismatch_aborts_untouched(
     routes[SHA_URL] = f"{'f' * 64}  physiclaw_official_skills.zip\n".encode()  # wrong
     _patch_net(mocker, routes)
 
-    with pytest.raises(typer.Exit) as e:
+    with pytest.raises(osk.SyncError, match="checksum mismatch"):
         osk.sync()
 
-    assert e.value.exit_code == 1
-    assert "checksum mismatch" in capsys.readouterr().err
     assert not (official_home / "skills").exists()
     assert not (official_home / osk.SYNC_STATE_FILE).exists()
 
@@ -322,10 +317,8 @@ def test_malformed_sha256_line_aborts(official_home: Path, mocker, capsys) -> No
     routes[SHA_URL] = b"not-a-checksum\n"
     _patch_net(mocker, routes)
 
-    with pytest.raises(typer.Exit):
+    with pytest.raises(osk.SyncError, match="not a valid sha256sum"):
         osk.sync()
-
-    assert "not a valid sha256sum" in capsys.readouterr().err
 
 
 # ---------- zip-slip / layout ----------
@@ -344,10 +337,9 @@ def test_zip_slip_entry_is_rejected(official_home: Path, mocker, capsys) -> None
     }
     _patch_net(mocker, routes)
 
-    with pytest.raises(typer.Exit):
+    with pytest.raises(osk.SyncError, match="zip-slip"):
         osk.sync()
 
-    assert "zip-slip" in capsys.readouterr().err.lower()
     assert not (official_home / "skills").exists()
 
 
@@ -365,10 +357,8 @@ def test_unexpected_layout_rejected(official_home: Path, mocker, capsys) -> None
     }
     _patch_net(mocker, routes)
 
-    with pytest.raises(typer.Exit):
+    with pytest.raises(osk.SyncError, match="unexpected package layout"):
         osk.sync()
-
-    assert "unexpected package layout" in capsys.readouterr().err
 
 
 # ---------- per-skill hash verification ----------
@@ -545,9 +535,18 @@ def test_log_emit_logs_unstyled(caplog) -> None:
     assert caplog.records[-1].getMessage() == "✓ synced 1 skill @ abc1234."
 
 
-def test_run_sync_quiet_swallows_typer_exit(mocker) -> None:
-    mocker.patch.object(osk, "sync", side_effect=typer.Exit(code=1))
-    osk._run_sync_quiet()  # a hard sync abort must never escape the thread
+def test_run_sync_quiet_logs_sync_error_as_warning(mocker, caplog) -> None:
+    """A background sync failure must reach the daily log — the daemon
+    thread has no visible stderr."""
+    mocker.patch.object(osk, "sync", side_effect=osk.SyncError("GET x failed"))
+
+    with caplog.at_level(logging.WARNING, logger=osk.__name__):
+        osk._run_sync_quiet()  # must never escape the thread
+
+    assert any(
+        "GET x failed" in r.getMessage() and r.levelno == logging.WARNING
+        for r in caplog.records
+    )
 
 
 def test_run_sync_quiet_swallows_unexpected_error(mocker) -> None:
