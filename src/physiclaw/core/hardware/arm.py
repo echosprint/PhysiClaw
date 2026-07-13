@@ -8,7 +8,7 @@ actuator lives in :class:`physiclaw.core.hardware.solenoid.Solenoid`, which
 this class composes and drives. There is no stepper Z axis and no Z depth to
 calibrate — the solenoid stroke is mechanical.
 
-IMPORTANT: The arm must be calibrated before use (run calibrate.py).
+IMPORTANT: The arm must be calibrated before use (`physiclaw setup hardware`).
 Calibration determines only the X/Y mapping: which arm axis maps to
 which phone axis (e.g. arm X+ = phone right, arm Y+ = phone down).
 Place the phone aligned with the arm axes, no rotation — portrait or

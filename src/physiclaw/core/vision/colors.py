@@ -56,8 +56,8 @@ def red_ranges(s_min: int = 100, v_min: int = 100):
 
 
 # Orange validation dot #f97316 ≈ HSV H=20°, S=90%, V=97% → OpenCV H≈10.
-# One range, shared by grid_detect's dot paths AND calibrate.py's
-# screenshot-square detection so the two can't drift.
+# One range, shared by grid_detect's dot paths AND the calibration
+# viewport.py screenshot-square detection so the two can't drift.
 ORANGE_HSV_RANGE = ([5, 100, 100], [25, 255, 255])
 
 # S/V floor for the corner blocks. On a dim rig the captured blocks sit at

@@ -25,8 +25,8 @@ log = logging.getLogger(__name__)
 
 # Pre-cal square (phase "screenshot_cal"): CSS top-left + size. Served to
 # bridge.html through get_state (the page draws exactly what it's told)
-# and consumed by calibrate.py's screenshot mapping (which expects the
-# square there) — one source for both sides of the camera.
+# and consumed by the calibration viewport.py screenshot mapping (which
+# expects the square there) — one source for both sides of the camera.
 SQUARE_CSS_X, SQUARE_CSS_Y, SQUARE_CSS_SIZE = 100, 200, 50
 
 

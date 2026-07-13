@@ -223,9 +223,9 @@ body.mode-bridge #bridge-layer{
         break;
       case 'screenshot_cal':
         // Position/size come from the server (calib.py SQUARE_CSS_*) so
-        // the page draws the square exactly where calibrate.py's
-        // screenshot mapping expects it. Fallback mirrors those values
-        // for one stale-cache poll at most.
+        // the page draws the square exactly where the calibration
+        // viewport.py screenshot mapping expects it. Fallback mirrors
+        // those values for one stale-cache poll at most.
         var sq = data.square || {x: 100, y: 200, size: 50};
         rect(sq.x, sq.y, sq.size, sq.size, '#f97316', 0);
         break;
