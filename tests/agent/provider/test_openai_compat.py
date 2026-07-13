@@ -769,3 +769,42 @@ def test_parse_usage_handles_string_top_level_cached_tokens(
     out = provider._parse_usage(raw)
 
     assert out.cached_tokens == 42
+
+
+@pytest.mark.asyncio
+async def test_chat_non_json_200_maps_to_transient(
+    provider: _TestOpenAI, respx_mock: respx.MockRouter
+) -> None:
+    """A gateway can 200 with an HTML body mid-restart — retryable."""
+    respx_mock.post("https://api.openai.test/v1/chat/completions").respond(
+        content=b"<html>Bad gateway page</html>", content_type="text/html"
+    )
+
+    with pytest.raises(ProviderTransientError, match=r"^non-JSON response: "):
+        await provider.chat([UserMessage(content="x")], [])
+
+
+@pytest.mark.asyncio
+async def test_chat_empty_choices_returns_empty_assistant_message(
+    provider: _TestOpenAI, respx_mock: respx.MockRouter
+) -> None:
+    respx_mock.post("https://api.openai.test/v1/chat/completions").respond(
+        json={"choices": [], "usage": {}}
+    )
+
+    out = await provider.chat([UserMessage(content="x")], [])
+
+    assert out.content == ""
+    assert out.tool_calls == []
+
+
+@pytest.mark.asyncio
+async def test_list_models_non_json_200_maps_to_transient(
+    provider: _TestOpenAI, respx_mock: respx.MockRouter
+) -> None:
+    respx_mock.get("https://api.openai.test/v1/models").respond(
+        content=b"<html>proxy</html>", content_type="text/html"
+    )
+
+    with pytest.raises(ProviderTransientError, match=r"^non-JSON response: "):
+        await provider.list_models()

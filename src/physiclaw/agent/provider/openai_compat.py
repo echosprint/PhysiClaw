@@ -117,7 +117,14 @@ class OpenAICompatibleProvider(BaseProvider):
             log.error("provider HTTP %s (permanent): %s", r.status_code, r.text[:500])
             raise ProviderPermanentError(f"HTTP {r.status_code}: {r.text[:500]}")
 
-        return self._parse_response(r.json())
+        try:
+            raw = r.json()
+        except ValueError as e:
+            # A 200 with a non-JSON body (gateway/proxy page mid-restart)
+            # is a retryable provider hiccup, not an engine crash.
+            log.warning("provider 200 with non-JSON body: %s", r.text[:200])
+            raise ProviderTransientError(f"non-JSON response: {r.text[:200]}") from e
+        return self._parse_response(raw)
 
     async def list_models(self) -> list[dict]:
         """OpenAI-compatible providers all expose `GET /models`. Returns
@@ -129,7 +136,10 @@ class OpenAICompatibleProvider(BaseProvider):
             raise ProviderTransientError(f"transport: {e}") from e
         if r.status_code >= 400:
             raise ProviderPermanentError(f"HTTP {r.status_code}: {r.text[:300]}")
-        body = r.json()
+        try:
+            body = r.json()
+        except ValueError as e:
+            raise ProviderTransientError(f"non-JSON response: {r.text[:200]}") from e
         return body.get("data") or []
 
     # ---------- serialize_history hooks (called by BaseProvider) ----------
@@ -155,7 +165,8 @@ class OpenAICompatibleProvider(BaseProvider):
         they never leak into engine history; the raw dict is preserved
         on `.raw` for log-side inspection. Vendors with non-standard
         usage shapes override `_parse_usage`, not this method."""
-        choice = raw.get("choices", [{}])[0]
+        # `or [{}]`: some gateways send `"choices": []` on a 200.
+        choice = (raw.get("choices") or [{}])[0]
         message = choice.get("message") or {}
         finish_raw = choice.get("finish_reason") or "stop"
 
