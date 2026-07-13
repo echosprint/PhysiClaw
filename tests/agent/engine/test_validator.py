@@ -40,7 +40,6 @@ from hypothesis import strategies as st
 
 from physiclaw.agent.engine.validator import ValidationError, validate_arguments
 
-
 # ---------- top-level shape ----------
 
 

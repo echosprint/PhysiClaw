@@ -19,7 +19,6 @@ from dataclasses import dataclass, field
 from physiclaw.agent.engine.dto import Message, UserMessage
 from physiclaw.common.config import CONFIG
 
-
 PENDING = "pending"
 IN_PROGRESS = "in_progress"
 COMPLETED = "completed"

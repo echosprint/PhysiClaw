@@ -7,7 +7,6 @@ import pytest
 from physiclaw.agent.engine import stuck
 from physiclaw.agent.engine.stuck import BLOCK_AT, WARN_AT, StuckGuard
 
-
 BOX = [0.908, 0.526, 0.983, 0.562]  # the log's dead + stepper
 NEAR_BOX = [0.911, 0.527, 0.983, 0.562]  # re-transcription jitter, same target
 FAR_BOX = [0.100, 0.100, 0.200, 0.200]

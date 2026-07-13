@@ -79,8 +79,9 @@ async def test_phone_watch_returns_none_on_transport_error(
 async def test_phone_watch_logs_warning_only_on_first_failure(
     respx_mock: respx.MockRouter, caplog: pytest.LogCaptureFixture
 ) -> None:
-    import httpx
     import logging
+
+    import httpx
 
     respx_mock.get("http://test.host:8048/api/phone/watch").mock(
         side_effect=httpx.ConnectError("boom")
@@ -100,8 +101,9 @@ async def test_phone_watch_logs_warning_only_on_first_failure(
 async def test_phone_watch_resets_blip_state_on_recovery(
     respx_mock: respx.MockRouter, caplog: pytest.LogCaptureFixture
 ) -> None:
-    import httpx
     import logging
+
+    import httpx
 
     respx_mock.get("http://test.host:8048/api/phone/watch").mock(
         side_effect=[

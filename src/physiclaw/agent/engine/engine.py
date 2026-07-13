@@ -26,7 +26,6 @@ import logging
 import time
 from dataclasses import dataclass
 
-from physiclaw.common import verdict
 from physiclaw.agent.engine import (
     assemble,
     compact,
@@ -37,7 +36,6 @@ from physiclaw.agent.engine import (
     trajectory,
 )
 from physiclaw.agent.engine.builtin_tool import LocalTool
-from physiclaw.agent.engine.mcp_tool import McpClient, get_mcp, list_tools_cached
 from physiclaw.agent.engine.dto import (
     AssistantMessage,
     ContentBlock,
@@ -48,14 +46,9 @@ from physiclaw.agent.engine.dto import (
     ToolResultMessage,
     UserMessage,
 )
+from physiclaw.agent.engine.mcp_tool import McpClient, get_mcp, list_tools_cached
 from physiclaw.agent.engine.policy import DispatchGuard, Policies, default_policies
 from physiclaw.agent.engine.session import Session
-from physiclaw.agent.provider import (
-    Provider,
-    ProviderTransientError,
-    make_provider,
-    mcp_blocks_to_content_blocks,
-)
 from physiclaw.agent.engine.trace import (
     RawLog,
     Trace,
@@ -65,8 +58,15 @@ from physiclaw.agent.engine.trace import (
     new_sid,
 )
 from physiclaw.agent.engine.validator import ValidationError, validate_arguments
+from physiclaw.agent.provider import (
+    Provider,
+    ProviderTransientError,
+    make_provider,
+    mcp_blocks_to_content_blocks,
+)
 from physiclaw.agent.runtime.hook import Trigger
 from physiclaw.agent.runtime.sentinel import FAIL, STUCK, WAIT
+from physiclaw.common import verdict
 from physiclaw.common.config import CONFIG
 
 log = logging.getLogger(__name__)

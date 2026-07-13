@@ -9,15 +9,14 @@ import pytest
 
 from physiclaw.common.logger import logger as logger_mod
 from physiclaw.common.logger.logger import (
+    LineLogStream,
     _colorize,
     _format_args,
     _TaggedFormatter,
-    LineLogStream,
     logged,
     make_tagged_logger,
     setup_logging,
 )
-
 
 # ---------- _colorize ----------
 

@@ -20,7 +20,6 @@ import numpy as np
 
 from physiclaw.core.vision.render import annotate_elements, watermark_index
 
-
 # ---------- watermark_index ----------
 
 

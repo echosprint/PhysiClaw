@@ -17,10 +17,9 @@ from typing import Annotated
 
 import typer
 
-from physiclaw.common import paths
 from physiclaw.cli import _http
 from physiclaw.cli._format import step_fail, step_ok, step_warn
-from physiclaw.common import platform
+from physiclaw.common import paths, platform
 
 BASE = os.environ.get("PHYSICLAW_SERVER", "http://localhost:8048")
 

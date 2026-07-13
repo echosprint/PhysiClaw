@@ -3,12 +3,12 @@
 import logging
 
 from physiclaw.core.hardware.handler import (
-    handle_status,
+    handle_camera_preview,
     handle_connect_arm,
     handle_connect_camera,
     handle_disconnect_camera,
-    handle_camera_preview,
     handle_setup_page,
+    handle_status,
 )
 
 log = logging.getLogger(__name__)

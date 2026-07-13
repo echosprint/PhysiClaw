@@ -9,12 +9,6 @@ import pytest
 from freezegun import freeze_time
 
 from physiclaw.agent.engine import job_store
-from physiclaw.agent.hooks import cron
-from physiclaw.agent.hooks.cron import (
-    _build_trigger_description,
-    _cli,
-    cron as cron_hook,
-)
 from physiclaw.agent.engine.job_store import (
     KIND_ONE_TIME,
     KIND_PERIODIC,
@@ -22,6 +16,14 @@ from physiclaw.agent.engine.job_store import (
     STATUS_FIRED,
     STATUS_PEND,
     Job,
+)
+from physiclaw.agent.hooks import cron
+from physiclaw.agent.hooks.cron import (
+    _build_trigger_description,
+    _cli,
+)
+from physiclaw.agent.hooks.cron import (
+    cron as cron_hook,
 )
 
 

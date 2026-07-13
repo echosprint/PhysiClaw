@@ -6,7 +6,6 @@ import pytest
 
 from physiclaw.common import verdict
 
-
 # ---------- attach ----------
 
 

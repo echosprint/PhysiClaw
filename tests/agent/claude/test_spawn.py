@@ -8,9 +8,9 @@ detail. Full integration deferred — async subprocess + streaming json
 
 from __future__ import annotations
 
-import sys
 import json
 import logging
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -20,22 +20,21 @@ from physiclaw.agent.claude import spawn
 from physiclaw.agent.claude.spawn import (
     _ALLOWED_STATIC,
     _DISALLOWED,
-    _SessionLog,
+    _ENV_STRIP_PREFIXES,
     _build_cmd,
     _build_trigger_prompt,
     _child_env,
-    _ENV_STRIP_PREFIXES,
     _mcp_config,
     _mcp_tools,
     _normalize_claude_model_id,
     _redact_images,
     _render_system_prompt,
+    _SessionLog,
     _stream,
     _tooling_card,
     _warn_stray_context,
 )
 from physiclaw.agent.runtime.hook import Trigger
-
 
 # ---------- _mcp_tools ----------
 

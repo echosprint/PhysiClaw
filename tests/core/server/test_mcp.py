@@ -18,7 +18,6 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-
 mcp_mod = importlib.import_module("physiclaw.core.server.mcp")
 
 

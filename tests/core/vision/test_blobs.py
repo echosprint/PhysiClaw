@@ -16,7 +16,6 @@ from physiclaw.core.vision.blobs import (
     find_largest_hsv_blob,
 )
 
-
 # ---------- contour_centroid ----------
 
 

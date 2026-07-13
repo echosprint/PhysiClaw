@@ -32,12 +32,11 @@ from typing import Literal
 
 from mcp.server.fastmcp import FastMCP, Image
 
-from physiclaw.core import PhysiClaw
 from physiclaw.common.dumps import save_tool_call
 from physiclaw.common.logger import logged
+from physiclaw.core import PhysiClaw
 from physiclaw.core.orchestration import GestureResult
 from physiclaw.core.server.types import Bbox, ClipboardText, SequenceActions
-
 
 # ─── Trailing hints ───────────────────────────────────────────
 #

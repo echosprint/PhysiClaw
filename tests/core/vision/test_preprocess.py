@@ -18,7 +18,6 @@ from physiclaw.core.vision.preprocess import (
     to_hsv,
 )
 
-
 # ---------- grayscale / to_hsv ----------
 
 

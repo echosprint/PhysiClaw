@@ -8,36 +8,34 @@ wiring without re-importing (which would fight pytest's import cache).
 
 from __future__ import annotations
 
-
 # ---------- module-level singletons ----------
 
 
 def test_physiclaw_singleton_constructed_at_import() -> None:
     """Importing app.py must construct the orchestrator singleton."""
-    from physiclaw.core.server import app
-
     from physiclaw.core import PhysiClaw
+    from physiclaw.core.server import app
 
     assert isinstance(app.physiclaw, PhysiClaw)
 
 
 def test_bridge_state_singleton_constructed() -> None:
-    from physiclaw.core.server import app
     from physiclaw.core.bridge import BridgeState
+    from physiclaw.core.server import app
 
     assert isinstance(app._bridge, BridgeState)
 
 
 def test_calibration_state_singleton_constructed() -> None:
-    from physiclaw.core.server import app
     from physiclaw.core.bridge import CalibrationState
+    from physiclaw.core.server import app
 
     assert isinstance(app._calib, CalibrationState)
 
 
 def test_phone_page_state_singleton_constructed() -> None:
-    from physiclaw.core.server import app
     from physiclaw.core.bridge import PageState
+    from physiclaw.core.server import app
 
     assert isinstance(app._phone, PageState)
 

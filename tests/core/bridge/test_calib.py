@@ -37,7 +37,6 @@ from physiclaw.core.bridge.nonce import (
 from physiclaw.core.calibration.transforms import ViewportShift
 from physiclaw.core.hardware.iphone import AssistiveTouch
 
-
 # ---------- class-level constants ----------
 
 

@@ -26,8 +26,8 @@ import json
 import logging
 from dataclasses import dataclass, replace
 
-from physiclaw.common import paths
 from physiclaw.agent.engine.dto import Message, UserMessage
+from physiclaw.common import paths
 from physiclaw.common.text import read_text, write_text
 
 log = logging.getLogger(__name__)

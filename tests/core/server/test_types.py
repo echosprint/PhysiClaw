@@ -15,7 +15,6 @@ from pydantic import TypeAdapter, ValidationError
 
 from physiclaw.core.server.types import Bbox, ClipboardText
 
-
 # ---------- Bbox ----------
 
 

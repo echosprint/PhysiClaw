@@ -8,14 +8,14 @@ server — `physiclaw.core.server.__init__` re-exports the public surface.
 
 import logging
 
-from physiclaw.core.bridge import BridgeState, CalibrationState, PageState
 from physiclaw.core import PhysiClaw
-from physiclaw.core.server.planes import PhoneApp, build_bridge_app, build_control_app
+from physiclaw.core.bridge import BridgeState, CalibrationState, PageState
 from physiclaw.core.server.bridge import register as _register_bridge
 from physiclaw.core.server.bridge import register_phone as _register_bridge_phone
 from physiclaw.core.server.calibration import register as _register_calibration
 from physiclaw.core.server.hardware import register as _register_hardware
 from physiclaw.core.server.mcp import mcp
+from physiclaw.core.server.planes import PhoneApp, build_bridge_app, build_control_app
 from physiclaw.core.server.tools import register as _register_tools
 from physiclaw.core.server.watch import register as _register_watch
 

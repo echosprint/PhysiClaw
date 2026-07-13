@@ -14,9 +14,11 @@ from pathlib import Path
 
 import pytest
 
+from physiclaw.agent.engine import memory, scratchpad
 from physiclaw.agent.engine.builtin_tool import (
     LocalTool,
     Session,
+    _handle_add_pitfall,
     _handle_append_log,
     _handle_create_job,
     _handle_end_session,
@@ -26,7 +28,6 @@ from physiclaw.agent.engine.builtin_tool import (
     _handle_note,
     _handle_read_logs,
     _handle_read_memory,
-    _handle_add_pitfall,
     _handle_save_memory,
     _handle_skill_factory,
     _handle_update_memory,
@@ -35,10 +36,8 @@ from physiclaw.agent.engine.builtin_tool import (
     build_registry,
     schemas,
 )
-from physiclaw.agent.engine import memory, scratchpad
 from physiclaw.agent.engine.plan import Plan
 from physiclaw.agent.engine.skill import Skill
-
 
 # ---------- Session ----------
 
@@ -501,10 +500,10 @@ async def test_report_screen_layout_handler_delegates(mocker) -> None:
 
 
 async def test_report_screen_layout_handler_restarts_on_completion(mocker) -> None:
-    from physiclaw.agent.runtime.sentinel import IDLE
     from physiclaw.agent.engine.builtin_tool import (
         _handle_report_screen_layout,
     )
+    from physiclaw.agent.runtime.sentinel import IDLE
 
     mocker.patch(
         "physiclaw.agent.engine.screen_layout.record",

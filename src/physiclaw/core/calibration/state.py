@@ -19,8 +19,8 @@ import cv2
 import numpy as np
 
 from physiclaw.common import paths
-from physiclaw.core.calibration.transforms import ScreenTransforms, ViewportShift
 from physiclaw.common.text import read_text, write_text
+from physiclaw.core.calibration.transforms import ScreenTransforms, ViewportShift
 
 log = logging.getLogger(__name__)
 

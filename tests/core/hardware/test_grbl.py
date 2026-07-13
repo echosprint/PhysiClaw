@@ -9,7 +9,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-
 from physiclaw.core.hardware import grbl
 from physiclaw.core.hardware.grbl import (
     GRBL_BAUDRATE,

@@ -50,13 +50,13 @@ from pathlib import Path
 import typer
 
 from physiclaw import __version__ as _pkg_version
-from physiclaw.common import paths
 from physiclaw.cli._update_check import (
     _disabled_via_env,
     _fetch_pypi_version,
     _is_newer,
     _write_cache,
 )
+from physiclaw.common import paths
 from physiclaw.common.config import CONFIG
 from physiclaw.common.text import read_text, write_text
 

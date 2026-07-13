@@ -22,15 +22,14 @@ from physiclaw.core.vision.watchdog import (
     MEAN_DROP_GUARD,
     MEAN_INCREASE,
     STD_INCREASE,
-    Watchdog,
     WORK_HOURS,
     ZONES,
+    Watchdog,
     _check_badge,
     _check_content,
     _crop_zones,
     _ema_update,
 )
-
 
 # ---------- _check_content ----------
 

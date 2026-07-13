@@ -22,8 +22,8 @@ from typing import Awaitable, Callable, Union
 import httpx
 
 from physiclaw.agent.runtime.hook import Trigger, check_hooks, load_hooks
-from physiclaw.common.config import CONFIG
 from physiclaw.common import platform
+from physiclaw.common.config import CONFIG
 
 log = logging.getLogger(__name__)
 

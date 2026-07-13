@@ -15,7 +15,6 @@ The note handler delegates to `write()` here.
 from physiclaw.agent.engine.dto import Message, UserMessage
 from physiclaw.common.config import CONFIG
 
-
 # Scratchpad ships in every prompt for the rest of the session, so its size is
 # a per-turn token cost — this cap is a working-memory ceiling, not a dumping
 # ground (a cart list, target bboxes, a short draft fit; a whole screen dump

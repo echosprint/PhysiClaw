@@ -48,7 +48,6 @@ from physiclaw.agent.provider.wire import (
     user_content_to_openai,
 )
 
-
 # Documented escape hatch from Google's thought-signatures doc. Used
 # when no captured signature is available for an outbound tool_call.
 _SIG_BYPASS = "skip_thought_signature_validator"

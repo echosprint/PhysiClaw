@@ -12,7 +12,6 @@ from unittest.mock import MagicMock
 
 from physiclaw.common.platform import darwin
 
-
 # ---------- TRUST_PROXY_ENV ----------
 
 

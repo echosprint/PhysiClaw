@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import importlib
+import urllib.error
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import urllib.error
 import typer
 from typer.testing import CliRunner
 

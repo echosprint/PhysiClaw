@@ -16,13 +16,13 @@ from typing import Annotated
 import typer
 
 from physiclaw import __version__
-from physiclaw.common import paths, runtime_state
 from physiclaw.cli import _http
 from physiclaw.cli._format import info as _fmt_info
 from physiclaw.cli._format import ok as _fmt_ok
 from physiclaw.cli._format import section as _fmt_section
 from physiclaw.cli._format import warn as _fmt_warn
 from physiclaw.cli._update_check import maybe_print_update_banner
+from physiclaw.common import paths, runtime_state
 
 
 def _opencv_import_error() -> str | None:
@@ -120,8 +120,8 @@ def _probe_camera_frame(index: int) -> str:
     catching a blown/blurry rig at doctor time instead of mid-task."""
     import cv2
 
-    from physiclaw.common.config import CONFIG
     from physiclaw.common import platform as os_platform
+    from physiclaw.common.config import CONFIG
     from physiclaw.core.hardware.camera import configure_capture, silenced_stderr
 
     with silenced_stderr():

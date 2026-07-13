@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 from physiclaw.cli._format import info, next_hint, ok, section, warn
 
 

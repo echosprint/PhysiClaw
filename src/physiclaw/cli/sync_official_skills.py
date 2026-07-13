@@ -44,9 +44,9 @@ from typing import Callable
 import click
 import typer
 
-from physiclaw.common import paths
-from physiclaw.cli._http import http_get, stream
 from physiclaw.cli._format import exit_error, info, ok, warn
+from physiclaw.cli._http import http_get, stream
+from physiclaw.common import paths
 from physiclaw.common.config import load as _load_config
 from physiclaw.common.text import read_text, write_text
 

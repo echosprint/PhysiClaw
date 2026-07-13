@@ -16,16 +16,16 @@ import logging
 
 from physiclaw.core.bridge import BridgeState, CalibrationState, PageState
 from physiclaw.core.bridge.handler import (
-    serve_bridge_page,
-    serve_qr_page,
+    handle_calib_touch,
     handle_clipboard_copied,
     handle_clipboard_fetch,
     handle_mode_switch,
+    handle_phone_state,
+    handle_recent_screenshots,
     handle_screen_dimension,
     handle_screenshot_upload,
-    handle_recent_screenshots,
-    handle_phone_state,
-    handle_calib_touch,
+    serve_bridge_page,
+    serve_qr_page,
 )
 
 log = logging.getLogger(__name__)

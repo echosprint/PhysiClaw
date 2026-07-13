@@ -94,7 +94,7 @@ def try_resume(cam_index_override: int | None) -> bool:
     ``uv run physiclaw`` + ``setup.py``.
     """
     from physiclaw.core.calibration.state import Calibration
-    from physiclaw.core.server.app import physiclaw, _calib, _phone
+    from physiclaw.core.server.app import _calib, _phone, physiclaw
 
     loaded = Calibration.load()
     if loaded is None:

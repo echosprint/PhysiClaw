@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from physiclaw.agent.provider.vendors.qwen import QwenProvider
 
-
 # ---------- class metadata ----------
 
 

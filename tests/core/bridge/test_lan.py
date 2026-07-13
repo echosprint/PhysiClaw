@@ -11,7 +11,6 @@ from unittest.mock import MagicMock
 
 from physiclaw.core.bridge import lan
 
-
 # ---------- get_lan_ip ----------
 
 

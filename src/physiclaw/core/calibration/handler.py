@@ -8,22 +8,21 @@ because the blocking step functions run off-thread.
 """
 
 import asyncio
-import logging
-
 import dataclasses
+import logging
 
 from starlette.responses import JSONResponse
 
 from physiclaw.core.bridge import BridgeState, CalibrationState, PageState
 from physiclaw.core.bridge.nonce import generate_nonce
 from physiclaw.core.calibration.calibrate import (
-    measure_viewport_shift,
+    TILT_ALIGNED_THRESHOLD,
     calibrate_arm,
     calibrate_camera_frame,
     compute_camera_mapping,
+    measure_viewport_shift,
     validate_calibration,
     verify_assistive_touch,
-    TILT_ALIGNED_THRESHOLD,
 )
 from physiclaw.core.calibration.state import Calibration
 

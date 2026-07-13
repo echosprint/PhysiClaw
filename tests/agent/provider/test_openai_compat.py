@@ -10,7 +10,6 @@ throughout; an autouse fixture supplies the API key.
 
 from __future__ import annotations
 
-
 import httpx
 import pytest
 import respx
@@ -36,7 +35,6 @@ from physiclaw.agent.provider.provider_base import (
     ProviderPermanentError,
     ProviderTransientError,
 )
-
 
 # ---------- a concrete subclass for testing ----------
 

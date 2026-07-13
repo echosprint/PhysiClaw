@@ -20,7 +20,6 @@ from physiclaw.core.vision.grid_detect import (
     sort_dots_to_grid,
 )
 
-
 # ---------- detect_red_dots ----------
 
 

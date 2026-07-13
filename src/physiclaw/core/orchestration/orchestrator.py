@@ -25,15 +25,15 @@ from physiclaw.common.text import read_text
 from physiclaw.core.bridge import BridgeState
 from physiclaw.core.calibration import PARK_PCT, Calibration, ScreenTransforms
 from physiclaw.core.hardware import exposure
+from physiclaw.core.hardware.arm import StylusArm
+from physiclaw.core.hardware.camera import Camera
+from physiclaw.core.hardware.iphone import AssistiveTouch
 from physiclaw.core.orchestration import gestures
 from physiclaw.core.orchestration.clipboard import (
     ClipboardSyncError,
     ClipboardSyncState,
 )
 from physiclaw.core.orchestration.observation import GestureObserver, GestureResult
-from physiclaw.core.hardware.arm import StylusArm
-from physiclaw.core.hardware.camera import Camera
-from physiclaw.core.hardware.iphone import AssistiveTouch
 from physiclaw.core.vision import quality
 from physiclaw.core.vision.icon_detect import IconDetector
 from physiclaw.core.vision.ocr import OCRReader, results_to_elements
@@ -41,15 +41,15 @@ from physiclaw.core.vision.preprocess import (
     crop_to_phone_screen,
     phone_screen_crop_box,
 )
+from physiclaw.core.vision.ui_elements import detect_ui_elements, elements_to_json
 from physiclaw.core.vision.util import (
     bbox_on_screen,
     decode_image,
     encode_view_jpeg,
-    format_elements,
     find_numpad_digit,
+    format_elements,
     validate_bbox,
 )
-from physiclaw.core.vision.ui_elements import detect_ui_elements, elements_to_json
 from physiclaw.core.vision.watchdog import Watchdog
 
 log = logging.getLogger(__name__)

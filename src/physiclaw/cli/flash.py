@@ -41,8 +41,8 @@ from urllib.error import URLError
 
 import typer
 
-from physiclaw.cli._http import http_get, stream
 from physiclaw.cli._format import ok
+from physiclaw.cli._http import http_get, stream
 
 FIRMWARE_URL = "https://physiclaw.ai/downloads/firmware/fluidnc_4_0_3.zip"
 CHIP = "esp32"  # MKS DLC32 V2.1

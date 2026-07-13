@@ -13,8 +13,8 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from physiclaw.common import config as _config
 from physiclaw.cli.uninstall import uninstall
+from physiclaw.common import config as _config
 
 
 def _make_app() -> typer.Typer:

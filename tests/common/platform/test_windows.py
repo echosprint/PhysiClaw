@@ -15,7 +15,6 @@ import pytest
 
 from physiclaw.common.platform import windows
 
-
 # ---------- TRUST_PROXY_ENV ----------
 
 

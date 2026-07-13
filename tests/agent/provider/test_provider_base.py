@@ -17,7 +17,6 @@ Accepted equivalent mutmut survivors:
 
 from __future__ import annotations
 
-
 import httpx
 import pytest
 
@@ -39,7 +38,6 @@ from physiclaw.agent.provider.provider_base import (
     ProviderPermanentError,
     ProviderTransientError,
 )
-
 
 # ---------- a minimal concrete stub for inherited-behavior tests ----------
 

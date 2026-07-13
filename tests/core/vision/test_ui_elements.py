@@ -20,7 +20,6 @@ from physiclaw.core.vision.ui_elements import (
     elements_to_json,
 )
 
-
 # ---------- UIElement ----------
 
 

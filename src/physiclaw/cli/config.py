@@ -14,8 +14,8 @@ from typing import Annotated
 
 import typer
 
-from physiclaw.common import config as _config
 from physiclaw.cli._format import exit_error, ok
+from physiclaw.common import config as _config
 
 config_app = typer.Typer(
     help="Show or edit the user config file.",

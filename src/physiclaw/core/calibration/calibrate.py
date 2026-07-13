@@ -33,18 +33,20 @@ from physiclaw.core.calibration.transforms import (
     ScreenTransforms,
     ViewportShift,
 )
-from physiclaw.core.hardware.camera import Camera
 from physiclaw.core.hardware.arm import StylusArm
+from physiclaw.core.hardware.camera import Camera
 from physiclaw.core.hardware.iphone import AssistiveTouch
+from physiclaw.core.vision.blobs import find_largest_hsv_blob
+from physiclaw.core.vision.colors import ORANGE_HSV_RANGE, hsv_mask, red_ranges
+from physiclaw.core.vision.grid_detect import (
+    detect_orange_dot as _detect_orange_dot,
+)
 from physiclaw.core.vision.grid_detect import (
     detect_red_dots,
     detect_screen_corners,
     screen_polygon,
     sort_dots_to_grid,
-    detect_orange_dot as _detect_orange_dot,
 )
-from physiclaw.core.vision.blobs import find_largest_hsv_blob
-from physiclaw.core.vision.colors import ORANGE_HSV_RANGE, hsv_mask, red_ranges
 from physiclaw.core.vision.preprocess import to_hsv
 from physiclaw.core.vision.util import check_phone_in_frame
 

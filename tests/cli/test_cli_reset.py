@@ -10,8 +10,8 @@ from __future__ import annotations
 import typer
 from typer.testing import CliRunner
 
-from physiclaw.common import paths
 from physiclaw.cli.reset import reset
+from physiclaw.common import paths
 
 runner = CliRunner()
 

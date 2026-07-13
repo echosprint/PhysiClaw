@@ -14,7 +14,6 @@ from physiclaw.agent.provider.vendors.moonshot import MoonshotProvider
 from physiclaw.agent.provider.vendors.openai import OpenAIProvider
 from physiclaw.agent.provider.vendors.qwen import QwenProvider
 
-
 # Subprocess engine; routed by launcher, not via _PROVIDER_CLASSES.
 CLAUDE_CODE_ID = "claude-code"
 

@@ -27,8 +27,8 @@ from typing import Annotated
 
 import typer
 
-from physiclaw.common import paths
 from physiclaw.cli._format import exit_error, ok, warn
+from physiclaw.common import paths
 from physiclaw.common.config import load as _load_config
 from physiclaw.common.text import read_text, write_text
 

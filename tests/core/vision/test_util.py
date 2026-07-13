@@ -26,7 +26,6 @@ from physiclaw.core.vision.util import (
     validate_bbox,
 )
 
-
 # ---------- helpers ----------
 
 

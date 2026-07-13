@@ -13,10 +13,11 @@ Covers:
 
 from __future__ import annotations
 
-
 import cv2
 import numpy as np
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from physiclaw.agent.engine import compact
 from physiclaw.agent.engine.compact import (
@@ -52,7 +53,6 @@ from physiclaw.agent.engine.dto import (
     ToolResultMessage,
     UserMessage,
 )
-
 
 # ---------- placeholder constructors ----------
 
@@ -773,8 +773,6 @@ def test_stub_body_real_formatter_icon_only_listing_drops_header() -> None:
 
 # ---------- robustness: _stub_body properties (hypothesis) ----------
 
-
-from hypothesis import given, strategies as st  # noqa: E402
 
 # Lines that are NOT element rows and NOT the listing header — action
 # results, hints, warnings, sequence step lines, arbitrary text. The

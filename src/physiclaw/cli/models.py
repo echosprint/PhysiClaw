@@ -38,8 +38,8 @@ from typing import Annotated
 
 import typer
 
-from physiclaw.common import config as _config
 from physiclaw.cli._format import exit_error, next_hint, ok, section, warn
+from physiclaw.common import config as _config
 
 # Provider package imports happen inside command bodies — pulling
 # `agent.provider` at module load drags httpx (~80ms) into every

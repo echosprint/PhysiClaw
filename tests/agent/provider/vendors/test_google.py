@@ -23,8 +23,8 @@ from physiclaw.agent.engine.dto import (
 )
 from physiclaw.agent.provider.provider_base import NO_CACHE_MARKERS
 from physiclaw.agent.provider.vendors.google import (
-    GoogleProvider,
     _SIG_BYPASS,
+    GoogleProvider,
     _encode_tool_result,
     _extract_thought_signature,
 )

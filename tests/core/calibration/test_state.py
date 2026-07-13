@@ -37,7 +37,6 @@ from physiclaw.core.calibration.state import (
 )
 from physiclaw.core.calibration.transforms import ScreenTransforms, ViewportShift
 
-
 # ---------- constants ----------
 
 

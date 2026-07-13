@@ -23,9 +23,9 @@ from typing import Annotated
 
 import typer
 
-from physiclaw.common import paths
-from physiclaw.cli._http import http_get, stream
 from physiclaw.cli._format import ok
+from physiclaw.cli._http import http_get, stream
+from physiclaw.common import paths
 
 _PT_URL = (
     "https://huggingface.co/microsoft/OmniParser-v2.0/resolve/main/icon_detect/model.pt"

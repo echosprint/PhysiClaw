@@ -21,8 +21,9 @@ to arm axes automatically.
 """
 
 import logging
-import serial
 import time
+
+import serial
 
 from physiclaw.core.hardware.grbl import detect_grbl
 from physiclaw.core.hardware.solenoid import Solenoid

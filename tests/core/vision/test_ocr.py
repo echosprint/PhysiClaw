@@ -15,7 +15,6 @@ from physiclaw.core.vision.ocr import (
     results_to_elements,
 )
 
-
 # ---------- TextResult dataclass ----------
 
 

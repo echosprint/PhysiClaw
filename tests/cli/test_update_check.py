@@ -18,7 +18,6 @@ import pytest
 
 from physiclaw.cli import _update_check as uc
 
-
 # ---------- _is_newer comparator ----------
 
 

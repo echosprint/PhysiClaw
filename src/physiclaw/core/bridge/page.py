@@ -3,8 +3,8 @@
 import logging
 import threading
 
-from physiclaw.core.bridge.state import CAL_UPLOAD_WINDOW_SECONDS, BridgeState
 from physiclaw.core.bridge.calib import CalibrationState
+from physiclaw.core.bridge.state import CAL_UPLOAD_WINDOW_SECONDS, BridgeState
 
 log = logging.getLogger(__name__)
 

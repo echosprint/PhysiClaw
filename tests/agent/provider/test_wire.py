@@ -49,7 +49,6 @@ from physiclaw.agent.provider.wire import (
     user_content_to_openai,
 )
 
-
 # ---------- tool_to_wire ----------
 
 

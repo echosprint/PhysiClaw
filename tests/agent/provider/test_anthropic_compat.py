@@ -17,7 +17,6 @@ from typing import Any
 
 import httpx
 import pytest
-
 from anthropic import (
     APIConnectionError,
     APIStatusError,
@@ -37,10 +36,10 @@ from physiclaw.agent.engine.dto import (
     UserMessage,
 )
 from physiclaw.agent.provider.anthropic_compat import (
-    AnthropicCacheMarkers,
-    AnthropicCompatibleProvider,
     _DEFAULT_MAX_TOKENS,
     _STOP_REASON_MAP,
+    AnthropicCacheMarkers,
+    AnthropicCompatibleProvider,
     _assistant_blocks,
     _content_to_anthropic,
     _extract_system_text,
@@ -53,7 +52,6 @@ from physiclaw.agent.provider.provider_base import (
     ProviderPermanentError,
     ProviderTransientError,
 )
-
 
 # ---------- a concrete subclass for testing ----------
 

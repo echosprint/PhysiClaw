@@ -4,13 +4,13 @@ import logging
 
 from physiclaw.core.bridge import BridgeState, CalibrationState, PageState
 from physiclaw.core.calibration.handler import (
-    handle_measure_viewport_shift,
     handle_calibrate_arm,
     handle_calibrate_camera_frame,
     handle_compute_camera_mapping,
-    handle_validate_calibration,
-    handle_trace_edge,
+    handle_measure_viewport_shift,
     handle_show_assistive_touch,
+    handle_trace_edge,
+    handle_validate_calibration,
     handle_verify_assistive_touch,
 )
 

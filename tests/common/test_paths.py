@@ -27,7 +27,6 @@ import pytest
 
 from physiclaw.common import paths
 
-
 # ---------- module-level invariants ----------
 
 

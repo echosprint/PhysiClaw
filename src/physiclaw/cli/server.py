@@ -268,8 +268,9 @@ def _resolve_and_record_model(host: str, port: int) -> tuple[Optional[str], str]
 
     Returns (model_ref, runtime_label); model_ref is None when no model is set.
     """
+    from physiclaw.agent.runtime.launcher import engine_label
+    from physiclaw.agent.runtime.launcher import resolve as _resolve_model
     from physiclaw.common import runtime_state
-    from physiclaw.agent.runtime.launcher import engine_label, resolve as _resolve_model
 
     try:
         model_ref, model_source = _resolve_model()

@@ -25,7 +25,6 @@ from physiclaw.agent.provider.vendors.moonshot import MoonshotProvider
 from physiclaw.agent.provider.vendors.openai import OpenAIProvider
 from physiclaw.agent.provider.vendors.qwen import QwenProvider
 
-
 # ---------- constants ----------
 
 

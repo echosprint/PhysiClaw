@@ -24,10 +24,11 @@ import time
 from collections import Counter
 from pathlib import Path
 
-from physiclaw.common import paths
 from physiclaw.agent.claude.plugin import prepare_plugin_dir
 from physiclaw.agent.engine import screen_layout, skill
-from physiclaw.agent.engine.trace import new_sid
+from physiclaw.agent.engine.mcp_inventory import discover_mcp_tools
+from physiclaw.agent.engine.skill import Skill
+
 # Shared session-artifact helpers — reused verbatim so the claude sessions'
 # summary.json + images/ stay byte-compatible with the engine's (one
 # `physiclaw logs` / `jq` reads both).
@@ -35,15 +36,15 @@ from physiclaw.agent.engine.trace import (
     _MIME_EXT,
     _env_snapshot,
     _write_json_atomic,
+    new_sid,
     purge_old_sessions,
 )
-from physiclaw.agent.engine.mcp_inventory import discover_mcp_tools
-from physiclaw.common.text import read_text
-from physiclaw.agent.engine.skill import Skill
 from physiclaw.agent.runtime.hook import Trigger
 from physiclaw.agent.runtime.sentinel import STATUSES, parse_sentinel
+from physiclaw.common import paths
 from physiclaw.common.config import CONFIG
 from physiclaw.common.logger.retention import purge_daily_logs
+from physiclaw.common.text import read_text
 
 log = logging.getLogger(__name__)
 

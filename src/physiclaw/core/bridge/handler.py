@@ -10,11 +10,11 @@ from pathlib import Path
 
 from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
-from physiclaw.core.bridge.lan import bridge_base_urls
-from physiclaw.core.bridge.state import BridgeState
-from physiclaw.core.bridge.calib import CalibrationState
-from physiclaw.core.bridge.page import PageState
 from physiclaw.common.text import read_text
+from physiclaw.core.bridge.calib import CalibrationState
+from physiclaw.core.bridge.lan import bridge_base_urls
+from physiclaw.core.bridge.page import PageState
+from physiclaw.core.bridge.state import BridgeState
 
 log = logging.getLogger(__name__)
 

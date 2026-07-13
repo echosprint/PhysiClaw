@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
 
 import pytest
-
-import importlib
 
 status_mod = importlib.import_module("physiclaw.cli.status")
 status = status_mod.status

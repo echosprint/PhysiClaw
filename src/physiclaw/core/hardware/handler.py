@@ -12,13 +12,12 @@ import time
 
 from starlette.responses import HTMLResponse, JSONResponse
 
+from physiclaw.common.config import CONFIG
 from physiclaw.core.bridge.handler import render_phone_page_html
 from physiclaw.core.hardware.camera import Camera
-from physiclaw.core.vision.render import watermark_index
 from physiclaw.core.vision.grid_detect import detect_bridge_corners
+from physiclaw.core.vision.render import watermark_index
 from physiclaw.core.vision.util import encode_jpeg
-
-from physiclaw.common.config import CONFIG
 
 log = logging.getLogger(__name__)
 
