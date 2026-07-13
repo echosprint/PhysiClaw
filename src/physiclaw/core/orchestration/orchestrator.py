@@ -347,11 +347,26 @@ class PhysiClaw:
     # ─── Hardware accessors ───────────────────────────────────
 
     @property
-    def arm(self) -> StylusArm:
+    def arm(self) -> StylusArm | None:
+        """The connected arm, or None — honest about pre-setup state.
+        Callers that must actuate use ``require_arm()``."""
         return self._arm
 
     @property
-    def cam(self) -> Camera:
+    def cam(self) -> Camera | None:
+        """The connected camera, or None. See ``require_cam()``."""
+        return self._cam
+
+    def require_arm(self) -> StylusArm:
+        """The connected arm, or raise — for callers that must actuate."""
+        if self._arm is None:
+            raise RuntimeError("Arm not connected. Run /setup to connect it.")
+        return self._arm
+
+    def require_cam(self) -> Camera:
+        """The connected camera, or raise — for callers that must see."""
+        if self._cam is None:
+            raise RuntimeError("Camera not connected. Run /setup to connect it.")
         return self._cam
 
     @property

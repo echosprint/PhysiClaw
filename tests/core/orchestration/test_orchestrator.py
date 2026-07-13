@@ -264,6 +264,22 @@ def test_require_hardware_passes_when_ready(pc: PhysiClaw) -> None:
     pc.require_hardware()  # no raise
 
 
+def test_require_arm_and_cam_raise_before_setup() -> None:
+    p = PhysiClaw()
+
+    with pytest.raises(RuntimeError, match="Arm not connected"):
+        p.require_arm()
+    with pytest.raises(RuntimeError, match="Camera not connected"):
+        p.require_cam()
+
+
+def test_require_arm_and_cam_return_connected_hardware(pc: PhysiClaw) -> None:
+    _wire_hardware(pc)
+
+    assert pc.require_arm() is pc.arm
+    assert pc.require_cam() is pc.cam
+
+
 # ---------- acquire / release / locked ----------
 
 
