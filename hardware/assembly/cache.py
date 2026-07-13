@@ -12,8 +12,8 @@ Three output kinds, two invalidation layers (their "subtly different logic"):
     annotations composited in) carries an extra **patch key** on top: the
     stem's patch JSON(s) plus the replay engine's own source. Edit only a
     patch and the source key still matches — so we keep the cached ``.step``
-    and raw ``.svg`` and just re-run the (cheap, build123d-free) replay,
-    with no geometry rebuild.
+    and raw ``.svg`` and just re-run the replay — no geometry rebuild, though
+    the replay itself still imports build123d (via ``assembly.base``).
 
 No stale cache, three ways:
   * stale HIT — the keys fold in every input file (import closure, kernel
