@@ -54,6 +54,7 @@ its root is rejected so third-party skill installs can't path-traverse.
 
 import logging
 from dataclasses import dataclass, replace
+from importlib.resources import files as _pkg_files
 from pathlib import Path
 
 from physiclaw.common import paths
@@ -61,7 +62,19 @@ from physiclaw.common.text import read_text
 
 log = logging.getLogger(__name__)
 
-BUILTIN_SKILLS_DIR = paths.builtin_skills_dir()
+
+def _builtin_skills_dir() -> Path:
+    """Flat-``.md`` skills shipped inside the wheel — the out-of-the-box
+    baseline every install gets. Discovery layers the home dir (user)
+    on top, so a home skill of the same name overrides a built-in one.
+
+    Lives here (sole consumer), not in `common.paths`: resolving it
+    imports `physiclaw.agent` via the import system, an agent-layer
+    edge the common leaf must not carry."""
+    return Path(str(_pkg_files("physiclaw.agent") / "skills"))
+
+
+BUILTIN_SKILLS_DIR = _builtin_skills_dir()
 OFFICIAL_SKILLS_DIR = paths.official_skills_dir()
 HOME_SKILLS_DIR = paths.skills_dir()
 

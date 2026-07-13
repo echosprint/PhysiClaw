@@ -28,7 +28,6 @@ Layout::
 
 import json
 import os
-from importlib.resources import files as _pkg_files
 from pathlib import Path
 
 from physiclaw.common.text import read_text
@@ -141,16 +140,6 @@ def pitfalls_dir() -> Path:
     Pitfalls-only (no how-to) sidesteps the self-praise that poisons an
     agent-authored 'working flow'."""
     return HOME / "learned" / "pitfalls"
-
-
-def builtin_skills_dir() -> Path:
-    """Flat-``.md`` skills shipped inside the wheel — the out-of-the-box
-    baseline every install gets. Discovery layers ``skills_dir()`` (user)
-    on top, so a home skill of the same name overrides a built-in one."""
-    # Locate the shipped `physiclaw/agent/skills/` resource dir via the
-    # import system, so it resolves regardless of where this module lives
-    # in the package tree or how the wheel is installed.
-    return Path(str(_pkg_files("physiclaw.agent") / "skills"))
 
 
 def screen_layout_dir() -> Path:
