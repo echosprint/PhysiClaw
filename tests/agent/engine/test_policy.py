@@ -298,3 +298,41 @@ def test_default_policies_builds_fresh_gate_state_per_call() -> None:
     b = policy_mod.default_policies(layout_incomplete=False)
 
     assert a.turn_gates[0] is not b.turn_gates[0]
+
+
+# ---------- KeyboardBelief ----------
+
+
+def test_keyboard_belief_failed_gesture_degrades_to_unknown() -> None:
+    session = Session()
+    session.kb.state = "up"
+
+    policy_mod.KeyboardBelief().observe(
+        session, _tc("tap", {"bbox": [0.1, 0.1, 0.2, 0.2]}), changed=None, failed=True
+    )
+
+    assert session.kb.state == "unknown"
+
+
+def test_keyboard_belief_failed_local_tool_preserves_belief() -> None:
+    """A failed note/Skill/jobs call never touched the screen — it must
+    not demote the keyboard belief the layout lint depends on."""
+    session = Session()
+    session.kb.state = "up"
+
+    policy_mod.KeyboardBelief().observe(
+        session, _tc("note", {"summary": "x"}), changed=None, failed=True
+    )
+
+    assert session.kb.state == "up"
+
+
+def test_keyboard_belief_success_routes_to_tracker(mocker) -> None:
+    session = Session()
+    spy = mocker.patch.object(session.kb, "observe")
+
+    policy_mod.KeyboardBelief().observe(
+        session, _tc("tap", {"bbox": [0.1, 0.1, 0.2, 0.2]}), changed=True, failed=False
+    )
+
+    spy.assert_called_once_with("tap", {"bbox": [0.1, 0.1, 0.2, 0.2]}, True)

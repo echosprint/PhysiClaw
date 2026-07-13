@@ -440,6 +440,13 @@ class StuckBlock(DispatchGuard):
 # ---------- result observers ----------
 
 
+# Tools that physically touch the screen — only their failures leave the
+# keyboard state unproven. A failed local tool (note, Skill, jobs) says
+# nothing about the phone, and demoting belief on it would disarm the
+# layout lint mid-typing.
+_SCREEN_TOOLS = _GESTURES | {"go_back", "home_screen", "force_quit", "unlock_phone"}
+
+
 class KeyboardBelief(ResultObserver):
     """Feed each gesture outcome into the session's KeyboardTracker — the
     belief the layout lint reads on LATER dispatches. A failed gesture
@@ -447,7 +454,8 @@ class KeyboardBelief(ResultObserver):
 
     def observe(self, session, call, *, changed, failed):
         if failed:
-            session.kb.state = "unknown"
+            if call.name in _SCREEN_TOOLS:
+                session.kb.state = "unknown"
         else:
             session.kb.observe(call.name, call.arguments, changed)
         return None
