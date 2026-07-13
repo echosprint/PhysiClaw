@@ -4,7 +4,7 @@ Calibration results — `ScreenTransforms` and `ViewportShift`.
 Two dataclasses live here, both pure data + coordinate math:
 
 - `ViewportShift` is produced by the pre-calibration step
-  (`measure_viewport_shift()` in `calibrate.py`). It maps viewport CSS
+  (`measure_viewport_shift()` in `viewport.py`). It maps viewport CSS
   pixels to screenshot 0-1 coordinates, accounting for device pixel
   ratio and the iOS status-bar / safe-area offset.
 
@@ -13,7 +13,8 @@ Two dataclasses live here, both pure data + coordinate math:
   camera 0-1. These enable coordinate-based tapping.
 
 Hardware-orchestration helpers that *use* these transforms (like
-edge-trace verification) live in `calibrate.py`.
+edge-trace verification) live in the calibration step modules —
+see the `calibrate.py` facade for the map.
 """
 
 import dataclasses
