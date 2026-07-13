@@ -88,16 +88,34 @@ def test_ask_auto_returns_true_without_prompt() -> None:
     assert hw_mod.ask("anything", auto=True) is True
 
 
-def test_ask_q_returns_false(mocker) -> None:
+def test_ask_q_quits_the_wizard(mocker, capsys: pytest.CaptureFixture) -> None:
+    """Every ask() gates a mandatory step — 'q' must abort the wizard,
+    not skip the step and fall through to a false OK."""
     mocker.patch("builtins.input", return_value="q")
 
-    assert hw_mod.ask("really?", auto=False) is False
+    with pytest.raises(SystemExit):
+        hw_mod.ask("really?", auto=False)
+
+    assert "aborted" in capsys.readouterr().out
 
 
 def test_ask_other_returns_true(mocker) -> None:
     mocker.patch("builtins.input", return_value="")
 
     assert hw_mod.ask("really?", auto=False) is True
+
+
+def test_base_port_parses_explicit_port(monkeypatch) -> None:
+    monkeypatch.setattr(hw_mod, "BASE", "http://localhost:9000")
+
+    assert hw_mod._base_port() == 9000
+
+
+def test_base_port_defaults_when_port_omitted(monkeypatch) -> None:
+    """PHYSICLAW_SERVER without a port must not crash the wizard."""
+    monkeypatch.setattr(hw_mod, "BASE", "http://myhost")
+
+    assert hw_mod._base_port() == 8048
 
 
 # ---------- calibrate / calibrate_retry ----------

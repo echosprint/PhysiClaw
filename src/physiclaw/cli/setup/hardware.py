@@ -14,6 +14,7 @@ import time
 import webbrowser
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import urlsplit
 
 import typer
 
@@ -33,6 +34,12 @@ def api(method, path, body=None, timeout=60):
     """This wizard's server call — `_http.api` bound to the (mutable)
     module-global BASE."""
     return _http.api(BASE, method, path, body=body, timeout=timeout)
+
+
+def _base_port() -> int:
+    """Control port from BASE. urlsplit, not rsplit(":") — BASE may omit
+    the port entirely (e.g. PHYSICLAW_SERVER=http://myhost)."""
+    return urlsplit(BASE).port or 8048
 
 
 def ok(r):
@@ -85,8 +92,14 @@ def _camera_aim_adjust(prompt: str) -> None:
 
 def ask(msg, auto):
     # Prompt label matches `wait()`'s `[Enter]` for visual consistency.
-    # `q` still quits — kept as a silent safety affordance, not advertised.
-    return True if auto else input(f"  {msg} [Enter] ").strip().lower() != "q"
+    # `q` quits the whole wizard — every ask() gates a mandatory step, so
+    # declining one and continuing would only print a false "OK".
+    if auto:
+        return True
+    if input(f"  {msg} [Enter] ").strip().lower() == "q":
+        print("Setup aborted.")
+        sys.exit(1)
+    return True
 
 
 def calibrate(step, timeout=60, body=None):
@@ -146,7 +159,7 @@ def run(auto: bool = False, trace: bool = False) -> None:
     else:
         from physiclaw.core.bridge.lan import bridge_port
 
-        lan_port = bridge_port(int(BASE.rsplit(":", 1)[-1]))
+        lan_port = bridge_port(_base_port())
         print(f"  Phone URL: http://{lan_ip()}:{lan_port}/bridge")
         if not auto:
             webbrowser.open(f"{BASE}/api/bridge/qr")
