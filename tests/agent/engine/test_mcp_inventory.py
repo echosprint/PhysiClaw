@@ -216,3 +216,35 @@ def test_tools_py_path_resolves_under_core_server() -> None:
     assert mcp_inventory._TOOLS_PY.name == "tools.py"
     assert mcp_inventory._TOOLS_PY.parent.name == "server"
     assert mcp_inventory._TOOLS_PY.parent.parent.name == "core"
+
+
+# ---------- contract: static inventory vs live registration ----------
+
+
+def test_discovered_names_equal_the_actually_registered_tool_set(mocker) -> None:
+    """`discover_mcp_tools` AST-parses core's tools.py by hardcoded path and
+    returns [] silently if that path or shape drifts — this contract turns
+    the fail-open into a red test by comparing against the @mcp.tool set a
+    real `register()` call produces. Tests may import both layers."""
+    from unittest.mock import MagicMock
+
+    from physiclaw.core.server import tools as tools_mod
+
+    class RecorderMcp:
+        def __init__(self) -> None:
+            self.names: set[str] = set()
+
+        def tool(self, **kwargs):
+            def deco(fn):
+                self.names.add(fn.__name__)
+                return fn
+
+            return deco
+
+    mcp = RecorderMcp()
+    mocker.patch.object(tools_mod, "save_tool_call")
+    tools_mod.register(mcp, MagicMock())
+
+    discovered = {t["name"] for t in mcp_inventory.discover_mcp_tools()}
+    assert discovered == mcp.names
+    assert discovered  # not the silent-[] failure mode
