@@ -80,7 +80,7 @@ class StylusArm:
         "fast": 10000,  # fling, page switch
     }
 
-    def __init__(self, port=None, baudrate=115200):
+    def __init__(self, port: str | None = None, baudrate: int = 115200) -> None:
         if port is None:
             port = detect_grbl()
         if port is None:
@@ -96,7 +96,7 @@ class StylusArm:
 
     # ─── Low-level communication ─────────────────────────────
 
-    def _send(self, cmd, wait_ok=True, optional=False):
+    def _send(self, cmd: str, wait_ok: bool = True, optional: bool = False) -> None:
         """Send a single command, block until 'ok'.
 
         optional=True swallows the "setting not accepted at runtime" error
@@ -139,7 +139,7 @@ class StylusArm:
             if line.startswith("ALARM"):
                 raise Exception(f"GRBL alarm: {line}, call unlock() first")
 
-    def _query_status(self):
+    def _query_status(self) -> str:
         """Query current status, return status string."""
         self.ser.write(b"?")
         time.sleep(0.1)
@@ -150,7 +150,7 @@ class StylusArm:
                 return line
         return ""
 
-    def wait_idle(self, timeout=10):
+    def wait_idle(self, timeout: float = 10) -> None:
         """Poll until GRBL reports Idle status."""
         time.sleep(0.01)  # let GRBL transition from Idle→Run after buffering
         deadline = time.time() + timeout
@@ -198,7 +198,7 @@ class StylusArm:
 
     # ─── Initialization ──────────────────────────────────────
 
-    def setup(self):
+    def setup(self) -> None:
         """
         1. Wait for startup message
         2. Query version to confirm connection
@@ -234,7 +234,7 @@ class StylusArm:
 
         log.info("Arm setup complete")
 
-    def set_direction_mapping(self, right_vec: tuple, down_vec: tuple):
+    def set_direction_mapping(self, right_vec: tuple, down_vec: tuple) -> None:
         """Build MOVE_DIRECTIONS from calibrated right/down vectors."""
         rx, ry = right_vec
         dx, dy = down_vec
@@ -249,7 +249,7 @@ class StylusArm:
             "bottom-right": (rx + dx, ry + dy),
         }
 
-    def unlock(self):
+    def unlock(self) -> None:
         """Clear alarm lock.
 
         Uses $X (kill alarm) instead of $H (homing cycle) because
@@ -258,12 +258,12 @@ class StylusArm:
         """
         self._send(GCODE_UNLOCK)
 
-    def set_origin(self):
+    def set_origin(self) -> None:
         """Set current position as coordinate origin (move stylus to target first)."""
         self._send(GCODE_SET_ORIGIN)
         log.debug("Origin set to current position")
 
-    def set_work_position(self, x, y):
+    def set_work_position(self, x: float, y: float) -> None:
         """Declare the current physical position to be work coordinate (x, y).
 
         G92 shifts the work coordinate system without moving the arm. Used on
@@ -273,32 +273,32 @@ class StylusArm:
         self._send(GCODE_SET_WORK_POS.format(x=x, y=y))
         log.debug("Work position set to (%.3f, %.3f)", x, y)
 
-    def return_to_origin(self):
+    def return_to_origin(self) -> None:
         """Fast-move back to (0, 0) and wait for motion to settle."""
         self._fast_move(0, 0)
         self.wait_idle()
 
     # ─── Basic motions ──
 
-    def _dwell(self, seconds):
+    def _dwell(self, seconds: float) -> None:
         """Hold position for duration (GRBL-side timing, 50ms granularity).
         G4 is a sync barrier: drains the planner first, then dwells.
         _send() blocks until the dwell completes.
         """
         self._send(GCODE_DWELL.format(s=seconds))
 
-    def _fast_move(self, x, y, speed=8000):
+    def _fast_move(self, x: float, y: float, speed: int = 8000) -> None:
         """Rapid move without touching screen (G0). Pen must be up first."""
         self._send(GCODE_FAST_MOVE.format(x=x, y=y, f=speed))
 
-    def _linear_move(self, x, y, speed=8000):
+    def _linear_move(self, x: float, y: float, speed: int = 8000) -> None:
         """Linear move at controlled speed (G1) — used for a swipe slide while
         the solenoid holds the tip down."""
         self._send(GCODE_LINEAR_MOVE.format(x=x, y=y, f=speed))
 
     # ─── Public API (for AI agent) ─────────────────────────
 
-    def move(self, direction, distance="medium"):
+    def move(self, direction: str, distance: str = "medium") -> None:
         """Move stylus relative to current position.
         direction: 'top', 'bottom', 'left', 'right',
                    'top-left', 'top-right', 'bottom-left', 'bottom-right'
@@ -314,12 +314,12 @@ class StylusArm:
         self._send(GCODE_ABSOLUTE)
         self.wait_idle()
 
-    def tap(self):
+    def tap(self) -> None:
         """Single tap at current position."""
         self.solenoid.tap(self.TAP_DURATION)
         self.wait_idle()
 
-    def double_tap(self):
+    def double_tap(self) -> None:
         """Double tap at current position.
 
         One solenoid double-tap: two strikes separated only by a brief
@@ -330,12 +330,12 @@ class StylusArm:
         self.solenoid.double_tap(self.TAP_DURATION)
         self.wait_idle()
 
-    def long_press(self):
+    def long_press(self) -> None:
         """Long press at current position."""
         self.solenoid.press_and_hold(self.LONG_PRESS_DURATION)
         self.wait_idle()
 
-    def swipe(self, direction, speed="medium"):
+    def swipe(self, direction: str, speed: str = "medium") -> None:
         """Swipe from current position in a cardinal direction.
         direction: 'top', 'bottom', 'left', 'right'
         speed: 'slow', 'medium', 'fast'
@@ -354,7 +354,9 @@ class StylusArm:
             self._send(GCODE_REL_LINEAR.format(x=dx, y=dy, f=f))  # XY slide
             self._send(GCODE_ABSOLUTE)  # restore absolute mode
 
-    def swipe_to(self, x, y, speed="medium", start_dwell=0.0):
+    def swipe_to(
+        self, x: float, y: float, speed: str = "medium", start_dwell: float = 0.0
+    ) -> None:
         """Swipe to an absolute work-coordinate (x, y) in mm: press, slide,
         release. Unlike :meth:`swipe` (relative cardinal direction), this
         slides to a caller-computed endpoint — used by the orchestrator with
@@ -371,7 +373,7 @@ class StylusArm:
             self._linear_move(x, y, speed=self.SWIPE_SPEEDS[speed])
         self.wait_idle()
 
-    def lift_stylus(self):
+    def lift_stylus(self) -> None:
         """Lift the stylus tip off the screen (release the Z actuator).
 
         The arm-level name for "release contact" — callers don't need to know
@@ -379,7 +381,7 @@ class StylusArm:
         """
         self.solenoid.release()
 
-    def close(self):
+    def close(self) -> None:
         """Release the solenoid and close serial port."""
         try:
             self.solenoid.release()

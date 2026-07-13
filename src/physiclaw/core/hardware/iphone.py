@@ -9,10 +9,15 @@ screenshot-pipeline verification logic live in `physiclaw.core.calibration`.
 
 import logging
 import time
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from physiclaw.core.calibration.transforms import ViewportShift
+from physiclaw.core.hardware.arm import StylusArm
+
+if TYPE_CHECKING:
+    from physiclaw.core.bridge import BridgeState
 
 log = logging.getLogger(__name__)
 
@@ -37,7 +42,7 @@ class AssistiveTouch:
     AT_CSS_Y = 260  # hardcoded vertical position
     AT_RADIUS = 28  # 56pt diameter
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.at_screen: tuple[float, float] | None = None  # screenshot 0-1
         self.at_radius_screen: tuple[float, float] | None = None  # (rx, ry) in 0-1
 
@@ -91,7 +96,7 @@ class AssistiveTouch:
         )
         return self.at_screen
 
-    def _move_to_at(self, arm, pct_to_grbl: np.ndarray):
+    def _move_to_at(self, arm: StylusArm, pct_to_grbl: np.ndarray) -> None:
         """Move arm to AT button position."""
         if self.at_screen is None:
             raise RuntimeError("AT position not set — call compute_at_screen_pos first")
@@ -100,7 +105,7 @@ class AssistiveTouch:
         arm._fast_move(float(grbl[0]), float(grbl[1]))
         arm.wait_idle()
 
-    def tap(self, arm, pct_to_grbl: np.ndarray):
+    def tap(self, arm: StylusArm, pct_to_grbl: np.ndarray) -> None:
         """Single-tap AT — iOS takes a screenshot (saved to Photos)."""
         if self.at_screen is None:
             raise RuntimeError("AT position not set — call compute_at_screen_pos first")
@@ -110,7 +115,7 @@ class AssistiveTouch:
             f"AT single-tap at screen ({self.at_screen[0]:.3f}, {self.at_screen[1]:.3f})"
         )
 
-    def double_tap(self, arm, pct_to_grbl: np.ndarray):
+    def double_tap(self, arm: StylusArm, pct_to_grbl: np.ndarray) -> None:
         """Double-tap AT — iOS Shortcut gets latest screenshot and uploads it."""
         if self.at_screen is None:
             raise RuntimeError("AT position not set — call compute_at_screen_pos first")
@@ -120,7 +125,7 @@ class AssistiveTouch:
             f"AT double-tap at screen ({self.at_screen[0]:.3f}, {self.at_screen[1]:.3f})"
         )
 
-    def long_press(self, arm, pct_to_grbl: np.ndarray):
+    def long_press(self, arm: StylusArm, pct_to_grbl: np.ndarray) -> None:
         """Long-press AT — iOS Shortcut fetches bridge text to clipboard."""
         if self.at_screen is None:
             raise RuntimeError("AT position not set — call compute_at_screen_pos first")
@@ -131,7 +136,11 @@ class AssistiveTouch:
         )
 
     def take_screenshot(
-        self, arm, bridge, pct_to_grbl: np.ndarray, timeout: float = 10.0
+        self,
+        arm: StylusArm,
+        bridge: "BridgeState",
+        pct_to_grbl: np.ndarray,
+        timeout: float = 10.0,
     ) -> bytes | None:
         """Single-tap (take screenshot) + double-tap (upload latest), return image bytes."""
         bridge.clear_screenshot()

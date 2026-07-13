@@ -8,6 +8,8 @@ server — `physiclaw.core.server.__init__` re-exports the public surface.
 
 import logging
 
+from starlette.applications import Starlette
+
 from physiclaw.core import PhysiClaw
 from physiclaw.core.bridge import BridgeState, CalibrationState, PageState
 from physiclaw.core.server.bridge import register as _register_bridge
@@ -15,7 +17,12 @@ from physiclaw.core.server.bridge import register_phone as _register_bridge_phon
 from physiclaw.core.server.calibration import register as _register_calibration
 from physiclaw.core.server.hardware import register as _register_hardware
 from physiclaw.core.server.mcp import mcp
-from physiclaw.core.server.planes import PhoneApp, build_bridge_app, build_control_app
+from physiclaw.core.server.planes import (
+    ControlGate,
+    PhoneApp,
+    build_bridge_app,
+    build_control_app,
+)
 from physiclaw.core.server.tools import register as _register_tools
 from physiclaw.core.server.watch import register as _register_watch
 
@@ -38,7 +45,7 @@ physiclaw.attach_bridge(_bridge)
 # purposes — that's unaffected by this change.
 
 
-def shutdown():
+def shutdown() -> None:
     """Clean up hardware resources."""
     physiclaw.shutdown()
 
@@ -57,7 +64,7 @@ _register_calibration(mcp, physiclaw, _bridge, _calib, _phone)
 _register_watch(mcp, physiclaw)
 
 
-def build_apps(host: str = "127.0.0.1"):
+def build_apps(host: str = "127.0.0.1") -> tuple[ControlGate, Starlette]:
     """(control_asgi, bridge_asgi) — built on demand by `cli/server.py`.
     `streamable_http_app()` is lazy-init inside FastMCP, so this is safe
     to call once serving is about to start. `host` is the control bind."""

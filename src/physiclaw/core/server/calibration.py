@@ -1,6 +1,10 @@
 """Calibration HTTP routes — register thin wrappers around calibration/handler.py."""
 
 import logging
+from typing import TYPE_CHECKING
+
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from physiclaw.core.bridge import BridgeState, CalibrationState, PageState
 from physiclaw.core.calibration.handler import (
@@ -14,46 +18,55 @@ from physiclaw.core.calibration.handler import (
     handle_verify_assistive_touch,
 )
 
+if TYPE_CHECKING:
+    from mcp.server.fastmcp import FastMCP
+
+    from physiclaw.core.orchestration import PhysiClaw
+
 log = logging.getLogger(__name__)
 
 
 def register(
-    mcp, physiclaw, bridge: BridgeState, calib: CalibrationState, phone: PageState
-):
+    mcp: "FastMCP",
+    physiclaw: "PhysiClaw",
+    bridge: BridgeState,
+    calib: CalibrationState,
+    phone: PageState,
+) -> None:
     """Register the calibration routes."""
 
     @mcp.custom_route("/api/calibrate/viewport-shift", methods=["POST"])
-    async def _viewport_shift(request):
+    async def _viewport_shift(request: Request) -> JSONResponse:
         return await handle_measure_viewport_shift(
             request, physiclaw, calib, bridge, phone
         )
 
     @mcp.custom_route("/api/calibrate/arm", methods=["POST"])
-    async def _arm(request):
+    async def _arm(request: Request) -> JSONResponse:
         return await handle_calibrate_arm(request, physiclaw, calib, phone)
 
     @mcp.custom_route("/api/calibrate/camera", methods=["POST"])
-    async def _camera(request):
+    async def _camera(request: Request) -> JSONResponse:
         return await handle_calibrate_camera_frame(request, physiclaw, calib)
 
     @mcp.custom_route("/api/calibrate/camera-mapping", methods=["POST"])
-    async def _camera_mapping(request):
+    async def _camera_mapping(request: Request) -> JSONResponse:
         return await handle_compute_camera_mapping(request, physiclaw, calib)
 
     @mcp.custom_route("/api/calibrate/validate", methods=["POST"])
-    async def _validate(request):
+    async def _validate(request: Request) -> JSONResponse:
         return await handle_validate_calibration(request, physiclaw, calib, phone)
 
     @mcp.custom_route("/api/calibrate/trace-edge", methods=["POST"])
-    async def _trace_edge(request):
+    async def _trace_edge(request: Request) -> JSONResponse:
         return await handle_trace_edge(request, physiclaw, phone)
 
     @mcp.custom_route("/api/calibrate/assistive-touch/show", methods=["POST"])
-    async def _at_show(request):
+    async def _at_show(request: Request) -> JSONResponse:
         return await handle_show_assistive_touch(request, physiclaw, calib, phone)
 
     @mcp.custom_route("/api/calibrate/assistive-touch/verify", methods=["POST"])
-    async def _at_verify(request):
+    async def _at_verify(request: Request) -> JSONResponse:
         return await handle_verify_assistive_touch(
             request, physiclaw, calib, bridge, phone
         )

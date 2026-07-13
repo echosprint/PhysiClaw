@@ -246,7 +246,7 @@ def validate_calibration(
     return results
 
 
-def trace_screen_edge(arm: StylusArm, cal: ScreenTransforms):
+def trace_screen_edge(arm: StylusArm, cal: ScreenTransforms) -> None:
     """Trace the phone screen border clockwise for visual verification.
 
     Moves the arm to 8 edge points (top-center → top-right → right-center

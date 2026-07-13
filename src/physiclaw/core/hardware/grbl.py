@@ -68,7 +68,7 @@ def _probe_port(port: str, baudrate: int = GRBL_BAUDRATE) -> str | None:
     return None
 
 
-def _port_priority(port_info) -> int:
+def _port_priority(port_info: ListPortInfo) -> int:
     """Lower value = probe first. Likely USB-serial chips first, unlikely ports last."""
     vid = getattr(port_info, "vid", None)
     # Built-in / virtual UARTs (Linux /dev/ttyS*, Pi /dev/ttyAMA*, motherboard

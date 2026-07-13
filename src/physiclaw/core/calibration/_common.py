@@ -14,6 +14,7 @@ solenoid — there is no Z depth to find or bump.
 
 import logging
 import time
+from collections.abc import Iterator
 
 from physiclaw.core.bridge import CalibrationState
 from physiclaw.core.hardware.arm import StylusArm
@@ -25,7 +26,7 @@ log = logging.getLogger(__name__)
 CAL_STRIKE_DURATION = 0.15
 
 
-def grid_positions(cal: "CalibrationState"):
+def grid_positions(cal: "CalibrationState") -> Iterator[tuple[float, float]]:
     """Yield (col_pct, row_pct) for each of the 15 grid positions in
     canonical outer-rows / inner-cols order. Used by arm calibration,
     camera mapping, and any downstream code that rebuilds the same grid."""
@@ -34,7 +35,7 @@ def grid_positions(cal: "CalibrationState"):
             yield col, row
 
 
-def _tap_once(arm: StylusArm):
+def _tap_once(arm: StylusArm) -> None:
     """Single calibration tap: fire the solenoid for CAL_STRIKE_DURATION."""
     arm.solenoid.tap(CAL_STRIKE_DURATION)
     arm.wait_idle()

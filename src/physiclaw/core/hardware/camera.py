@@ -24,8 +24,10 @@ import os
 import sys
 import threading
 import time
+from collections.abc import Iterator
 
 import cv2
+import numpy as np
 
 from physiclaw.common import platform
 from physiclaw.common.config import CONFIG
@@ -35,7 +37,7 @@ log = logging.getLogger(__name__)
 
 
 @contextlib.contextmanager
-def silenced_stderr():
+def silenced_stderr() -> Iterator[None]:
     """Redirect OS-level stderr (fd 2) to /dev/null for the block.
 
     OpenCV/AVFoundation/ffmpeg print things like ``out device of bound``
@@ -63,7 +65,7 @@ def silenced_stderr():
 
 
 def configure_capture(
-    cap,
+    cap: cv2.VideoCapture,
     *,
     exposure_auto: bool,
     exposure: int,
@@ -168,7 +170,7 @@ class Camera:
     CLOSE_JOIN_TIMEOUT_SECONDS = 3.0
     CLOSE_LOCK_TIMEOUT_SECONDS = 2.0
 
-    def __init__(self, index=0):
+    def __init__(self, index: int = 0) -> None:
         self.index = index
         self.rotation: int = -1  # no rotation until calibration step 3 sets it
         self._frame = None
@@ -212,7 +214,7 @@ class Camera:
 
     # ─── cv2 lifecycle ──────────────────────────────────────────
 
-    def _open(self):
+    def _open(self) -> None:
         """Open the underlying ``cv2.VideoCapture``. Retries with macOS perm
         prompt. Caller must hold ``_cap_lock`` or run before the reader
         thread starts (``__init__``/``_warmup``)."""
@@ -241,7 +243,7 @@ class Camera:
             s for s in RESOLUTION_FALLBACKS if s[0] * s[1] < first[0] * first[1]
         ]
 
-    def _acquire_first_frame(self):
+    def _acquire_first_frame(self) -> np.ndarray | None:
         """Discard initial auto-exposure frames and read one; on failure
         release + perm-prompt + reopen once. Returns the frame or None."""
         for _ in range(2):
@@ -256,7 +258,7 @@ class Camera:
             self._open()
         return None
 
-    def _warmup(self):
+    def _warmup(self) -> None:
         """Verify reads work, stepping the resolution request down when
         the negotiation misbehaves.
 
@@ -298,7 +300,7 @@ class Camera:
             return
         raise RuntimeError(f"Camera {self.index}: read failed")
 
-    def _reopen(self):
+    def _reopen(self) -> None:
         """Close and reopen the cap. Called by the reader on stale frames.
         `_open` re-applies the remembered exposure state, so a converged
         manual exposure survives the reconnect."""
@@ -318,7 +320,7 @@ class Camera:
 
     # ─── Background reader ──────────────────────────────────────
 
-    def _reader_loop(self):
+    def _reader_loop(self) -> None:
         """Pull frames continuously so AVFoundation never goes idle.
 
         ``cap.read()`` blocks for the next native-FPS frame, so the loop
@@ -406,7 +408,7 @@ class Camera:
 
     # ─── Frame accessors ────────────────────────────────────────
 
-    def _fresh_frame(self):
+    def _fresh_frame(self) -> np.ndarray | None:
         """Return the latest raw (unrotated) BGR frame, or ``None``.
 
         Waits up to ``FRAME_WAIT_SECONDS`` for the reader to publish a
@@ -430,7 +432,7 @@ class Camera:
         save_raw_camera(out)  # no-op unless --save-raw-camera
         return out
 
-    def raw_frame(self):
+    def raw_frame(self) -> np.ndarray | None:
         """Return a fresh BGR frame without applying calibration rotation.
 
         Used during camera identification (warm-start auto-pick) where
@@ -439,13 +441,13 @@ class Camera:
         """
         return self._fresh_frame()
 
-    def _rotate(self, frame):
+    def _rotate(self, frame: np.ndarray) -> np.ndarray:
         """Apply ``self.rotation`` to a raw frame. No-op when rotation is -1."""
         if self.rotation == -1:
             return frame
         return cv2.rotate(frame, self.rotation)
 
-    def peek(self):
+    def peek(self) -> np.ndarray | None:
         """Return a fresh BGR frame with the calibrated rotation applied.
 
         Used for high-frequency polling (e.g. the phone-watch runtime) where
@@ -456,7 +458,9 @@ class Camera:
             return None
         return self._rotate(frame)
 
-    def snapshot(self, bbox=None):
+    def snapshot(
+        self, bbox: tuple[tuple[int, int], tuple[int, int]] | None = None
+    ) -> np.ndarray | None:
         """Return a fresh BGR frame with the calibrated rotation applied.
 
         If ``bbox`` is provided as ``((x1,y1), (x2,y2))``, a green rectangle
@@ -471,7 +475,7 @@ class Camera:
         save_snapshot(frame)
         return frame
 
-    def close(self):
+    def close(self) -> None:
         self._stopped.set()
         if self._thread.is_alive():
             self._thread.join(timeout=self.CLOSE_JOIN_TIMEOUT_SECONDS)

@@ -76,7 +76,7 @@ class ScreenTransforms:
         pct_to_grbl: np.ndarray,
         pct_to_cam: np.ndarray,
         cam_size: tuple[int, int] = (1920, 1080),
-    ):
+    ) -> None:
         self.pct_to_grbl = pct_to_grbl
         self.pct_to_cam = pct_to_cam
         self.cam_size = cam_size

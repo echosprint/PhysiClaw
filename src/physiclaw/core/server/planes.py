@@ -24,10 +24,16 @@ but presents the attacker's hostname, so it is refused before routing.
 """
 
 import logging
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.routing import Route
+from starlette.types import ASGIApp, Receive, Scope, Send
+
+if TYPE_CHECKING:
+    from mcp.server.fastmcp import FastMCP
 
 log = logging.getLogger(__name__)
 
@@ -43,11 +49,11 @@ class PhoneApp:
     LAN-facing Starlette app.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._routes: list[Route] = []
 
-    def custom_route(self, path: str, methods: list[str]):
-        def deco(fn):
+    def custom_route(self, path: str, methods: list[str]) -> Callable:
+        def deco(fn: Callable) -> Callable:
             self._routes.append(Route(path, endpoint=fn, methods=methods))
             return fn
 
@@ -57,7 +63,7 @@ class PhoneApp:
         return Starlette(routes=self._routes)
 
 
-def _host_name(scope) -> str:
+def _host_name(scope: Scope) -> str:
     """Hostname from the Host header, port stripped (IPv6-bracket aware)."""
     raw = ""
     for k, v in scope.get("headers", []):
@@ -76,11 +82,11 @@ class ControlGate:
     exposing the control plane via a non-default ``--host`` still passes.
     """
 
-    def __init__(self, app, host: str = "127.0.0.1"):
+    def __init__(self, app: ASGIApp, host: str = "127.0.0.1") -> None:
         self.app = app
         self._allowed = _LOCAL_HOSTNAMES | {host}
 
-    async def __call__(self, scope, receive, send):
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
         if _host_name(scope) not in self._allowed:
@@ -89,7 +95,7 @@ class ControlGate:
         return await self.app(scope, receive, send)
 
 
-def build_control_app(mcp, host: str = "127.0.0.1") -> ControlGate:
+def build_control_app(mcp: "FastMCP", host: str = "127.0.0.1") -> ControlGate:
     """The loopback ASGI app: FastMCP's Starlette app (``/mcp`` + every
     ``custom_route``) behind the ControlGate."""
     return ControlGate(mcp.streamable_http_app(), host)

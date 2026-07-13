@@ -98,7 +98,7 @@ def _gesture_reply(name: str, res: GestureResult, hint: str) -> str | list:
     return [text, *_view_reply(name, res.jpeg, res.listing)]
 
 
-def register(mcp: FastMCP, physiclaw: PhysiClaw):
+def register(mcp: FastMCP, physiclaw: PhysiClaw) -> None:
     """Register every MCP tool on the given FastMCP instance."""
 
     # ─── See ─────────────────────────────────────────────────

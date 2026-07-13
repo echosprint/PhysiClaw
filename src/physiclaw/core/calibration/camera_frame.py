@@ -32,7 +32,9 @@ def _pick_rotation_from_markers(frame: np.ndarray) -> tuple[int, str]:
     marker is missing.
     """
 
-    def _blob(lower, upper=None):
+    def _blob(
+        lower: list[int], upper: list[int] | None = None
+    ) -> tuple[float, float] | None:
         return find_largest_hsv_blob(
             frame,
             lower,

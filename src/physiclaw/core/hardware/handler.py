@@ -9,15 +9,22 @@ import asyncio
 import base64
 import logging
 import time
+from typing import TYPE_CHECKING
 
+import numpy as np
+from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse
 
 from physiclaw.common.config import CONFIG
+from physiclaw.core.bridge import PageState
 from physiclaw.core.bridge.handler import render_phone_page_html
 from physiclaw.core.hardware.camera import Camera
 from physiclaw.core.vision.grid_detect import detect_bridge_corners
 from physiclaw.core.vision.render import watermark_index
 from physiclaw.core.vision.util import encode_jpeg
+
+if TYPE_CHECKING:
+    from physiclaw.core.orchestration import PhysiClaw
 
 log = logging.getLogger(__name__)
 
@@ -25,7 +32,7 @@ log = logging.getLogger(__name__)
 # ─── Setup wizard page ──────────────────────────────────────
 
 
-async def handle_setup_page(request):
+async def handle_setup_page(request: Request) -> HTMLResponse:
     """GET /setup-hardware — serve the browser-based hardware-setup wizard.
 
     A single-file app that drives the same ``/api/*`` endpoints as
@@ -51,7 +58,7 @@ AUTO_PICK_BRIDGE_SETTLE = CONFIG.auto_pick.bridge_settle_seconds
 # ─── Status ─────────────────────────────────────────────────
 
 
-async def handle_status(request, physiclaw):
+async def handle_status(request: Request, physiclaw: "PhysiClaw") -> JSONResponse:
     """GET /api/status — current hardware + calibration status.
 
     Returns whether the arm and camera are connected, intermediate
@@ -66,10 +73,10 @@ async def handle_status(request, physiclaw):
 # ─── Stylus arm ─────────────────────────────────────────────
 
 
-async def handle_connect_arm(request, physiclaw):
+async def handle_connect_arm(request: Request, physiclaw: "PhysiClaw") -> JSONResponse:
     """POST /api/connect-arm — auto-detect and connect the GRBL arm."""
 
-    def _do():
+    def _do() -> None:
         physiclaw.acquire()
         try:
             physiclaw.connect_arm()
@@ -107,7 +114,7 @@ def camera_preview(index: int, watermark: bool = False) -> bytes:
     return encode_jpeg(frame, quality=80)
 
 
-def _capture_raw(idx: int):
+def _capture_raw(idx: int) -> np.ndarray | None:
     """Open camera ``idx``, return one raw unrotated frame or None.
 
     Logs the reason on failure so a silent None doesn't mask a real issue.
@@ -152,7 +159,9 @@ def _auto_pick_camera_index() -> int | None:
     return None
 
 
-async def handle_connect_camera(request, physiclaw, phone):
+async def handle_connect_camera(
+    request: Request, physiclaw: "PhysiClaw", phone: PageState
+) -> JSONResponse:
     """POST /api/connect-camera — open a camera by index.
 
     Body: ``{"index": int}`` — connect that camera directly.
@@ -167,7 +176,7 @@ async def handle_connect_camera(request, physiclaw, phone):
         body = {}
     index = body.get("index")
 
-    def _do():
+    def _do() -> None:
         nonlocal index
         if index is None or index == "auto":
             # Wait for the phone /bridge tab to be actively polling
@@ -216,7 +225,9 @@ async def handle_connect_camera(request, physiclaw, phone):
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 
-async def handle_disconnect_camera(request, physiclaw):
+async def handle_disconnect_camera(
+    request: Request, physiclaw: "PhysiClaw"
+) -> JSONResponse:
     """POST /api/disconnect-camera — release the camera device handle.
 
     Used by `setup hardware` step 8 so the OS camera-preview app can
@@ -238,7 +249,7 @@ async def handle_disconnect_camera(request, physiclaw):
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 
-async def handle_camera_preview(request):
+async def handle_camera_preview(request: Request) -> JSONResponse:
     """GET /api/camera-preview/{index} — capture one frame from a camera index."""
     index = int(request.path_params["index"])
     watermark = request.query_params.get("watermark", "0") == "1"

@@ -9,17 +9,24 @@ the client-side loop.
 
 import asyncio
 import logging
+from typing import TYPE_CHECKING
 
+from starlette.requests import Request
 from starlette.responses import JSONResponse
+
+if TYPE_CHECKING:
+    from mcp.server.fastmcp import FastMCP
+
+    from physiclaw.core.orchestration import PhysiClaw
 
 log = logging.getLogger(__name__)
 
 
-def register(mcp, physiclaw):
+def register(mcp: "FastMCP", physiclaw: "PhysiClaw") -> None:
     """Wire the /api/phone/watch route onto the FastMCP server."""
 
     @mcp.custom_route("/api/phone/watch", methods=["GET"])
-    async def _watch(request):  # noqa: ARG001
+    async def _watch(request: Request) -> JSONResponse:  # noqa: ARG001
         try:
             result = await asyncio.get_event_loop().run_in_executor(
                 None, physiclaw.watch
@@ -33,7 +40,7 @@ def register(mcp, physiclaw):
             return JSONResponse({"error": str(e)}, status_code=503)
 
     @mcp.custom_route("/api/phone/home", methods=["POST"])
-    async def _home(request):  # noqa: ARG001
+    async def _home(request: Request) -> JSONResponse:  # noqa: ARG001
         try:
             await asyncio.get_event_loop().run_in_executor(None, physiclaw.home_screen)
             return JSONResponse({"ok": True})
@@ -42,7 +49,7 @@ def register(mcp, physiclaw):
             return JSONResponse({"error": str(e)}, status_code=503)
 
     @mcp.custom_route("/api/ready", methods=["POST"])
-    async def _mark_ready(request):  # noqa: ARG001
+    async def _mark_ready(request: Request) -> JSONResponse:  # noqa: ARG001
         physiclaw.mark_ready()
         # Fire-and-forget: setup just parked the phone on the home screen
         # (the dark scene that exposes AE failure), so verify/converge

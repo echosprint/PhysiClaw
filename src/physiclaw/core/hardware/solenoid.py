@@ -82,7 +82,7 @@ class Solenoid:
     GCODE_ON = "M3 S{s}"  # energize at PWM duty S
     GCODE_OFF = "M5"  # release (coil off)
 
-    def __init__(self, send: SendFn, dwell: DwellFn):
+    def __init__(self, send: SendFn, dwell: DwellFn) -> None:
         # The hold current is sustained, so it must stay below the strike
         # current — a hold at/above HIT_S would cook the coil.
         if not 0 < self.HOLD_S < self.HIT_S:

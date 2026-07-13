@@ -19,6 +19,7 @@ bumped — anything that leaves the tip somewhere other than the park spot).
 
 import logging
 import sys
+from typing import TYPE_CHECKING
 
 from physiclaw.common.config import CONFIG
 
@@ -26,6 +27,10 @@ from physiclaw.common.config import CONFIG
 # `warm_start.wait_for_port`, `from ...warm_start import wait_for_port` —
 # keep working. The redundant alias marks it an intentional re-export.
 from physiclaw.core.server.net import wait_for_port as wait_for_port
+
+if TYPE_CHECKING:
+    from physiclaw.core.bridge import CalibrationState, PageState
+    from physiclaw.core.orchestration import PhysiClaw
 
 log = logging.getLogger(__name__)
 
@@ -36,7 +41,9 @@ BRIDGE_WAIT_TIMEOUT = CONFIG.warm_start.bridge_wait_timeout_seconds
 BRIDGE_SETTLE_SECONDS = CONFIG.warm_start.bridge_settle_seconds
 
 
-def _sanity(physiclaw, calib, phone) -> bool:
+def _sanity(
+    physiclaw: "PhysiClaw", calib: "CalibrationState", phone: "PageState"
+) -> bool:
     """Run a compact end-to-end tap verification. Returns True iff every
     tap landed within tolerance. No-touches counts as failure — warm-start
     only succeeds when we've proven the calibration still holds.
