@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, create_autospec
 
 import numpy as np
 import pytest
 
+from physiclaw.core.bridge.state import BridgeState
+from physiclaw.core.hardware.arm import StylusArm
+from physiclaw.core.hardware.camera import Camera
 from physiclaw.core.orchestration import observation, orchestrator
 from physiclaw.core.orchestration.clipboard import ClipboardSyncError
 from physiclaw.core.orchestration.orchestrator import PhysiClaw
@@ -22,6 +25,26 @@ def _identity_pct_to_grbl() -> np.ndarray:
             [0.0, 0.0, 1.0],
         ]
     )
+
+
+def _bridge_double():
+    """Autospec'd BridgeState double — nonexistent attribute access or a
+    wrong-signature call fails loudly instead of silently passing."""
+    return create_autospec(BridgeState, instance=True)
+
+
+def _arm_double():
+    """Spec'd StylusArm double — nonexistent attribute access fails loudly."""
+    return MagicMock(spec=StylusArm)
+
+
+def _cam_double():
+    """Spec'd Camera double. ``rotation`` is set in ``Camera.__init__``, so
+    it's not in the class spec — seed it here so every double exposes the
+    real attribute (at its real initial value)."""
+    cam = MagicMock(spec=Camera)
+    cam.rotation = -1
+    return cam
 
 
 def _fake_transforms(*, swipe_end=(0.5, 0.6)):
@@ -60,10 +83,10 @@ def pc(mocker) -> PhysiClaw:
 
 
 def _wire_hardware(pc: PhysiClaw, *, transforms=None):
-    pc._arm = MagicMock()
+    pc._arm = _arm_double()
     pc._arm.MOVE_DIRECTIONS = {"up": "x"}
     pc._arm.SWIPE_SPEEDS = {"slow": 100, "medium": 500, "fast": 1500}
-    pc._cam = MagicMock()
+    pc._cam = _cam_double()
     t = transforms or _fake_transforms()
     pc.calibration = MagicMock()
     pc.calibration.transforms_ready = True
@@ -92,7 +115,7 @@ def test_init_default_state() -> None:
 
 def test_attach_bridge() -> None:
     p = PhysiClaw()
-    bridge = MagicMock()
+    bridge = _bridge_double()
 
     p.attach_bridge(bridge)
 
@@ -119,10 +142,23 @@ def test_ready_false_when_marked_but_hardware_down() -> None:
 def test_hardware_ready_requires_arm_cam_and_transforms(pc: PhysiClaw) -> None:
     pc.calibration = MagicMock()
     pc.calibration.transforms_ready = False
-    pc._arm = MagicMock()
-    pc._cam = MagicMock()
+    pc._arm = _arm_double()
+    pc._cam = _cam_double()
 
     assert pc.hardware_ready is False
+
+
+# ---------- spec'd doubles ----------
+
+
+def test_arm_double_rejects_nonexistent_methods(pc: PhysiClaw) -> None:
+    # Pins the drift guarantee this suite relies on: the hardware doubles
+    # are spec'd, so production code calling a method StylusArm doesn't
+    # have (the `frombuffer` rot) fails loudly instead of passing silently.
+    _wire_hardware(pc)
+
+    with pytest.raises(AttributeError):
+        pc._arm.frombuffer(b"\x00")
 
 
 # ---------- status ----------
@@ -161,7 +197,7 @@ def test_status_includes_assistive_touch_when_ready(pc: PhysiClaw) -> None:
 
 
 def test_status_includes_bridge_connected(pc: PhysiClaw) -> None:
-    bridge = MagicMock()
+    bridge = _bridge_double()
     bridge.connected = True
     pc.attach_bridge(bridge)
 
@@ -344,9 +380,9 @@ def test_watch_polls_watchdog_with_frame(pc: PhysiClaw) -> None:
 
 
 def test_connect_arm_closes_existing(mocker, pc: PhysiClaw) -> None:
-    old = MagicMock()
+    old = _arm_double()
     pc._arm = old
-    new = MagicMock()
+    new = _arm_double()
     new.MOVE_DIRECTIONS = None
     mocker.patch.object(orchestrator, "StylusArm", return_value=new)
 
@@ -360,7 +396,7 @@ def test_connect_arm_closes_existing(mocker, pc: PhysiClaw) -> None:
 def test_connect_arm_applies_cached_mapping(mocker) -> None:
     p = PhysiClaw()
     p.calibration.pct_to_grbl = _identity_pct_to_grbl()
-    new = MagicMock()
+    new = _arm_double()
     mocker.patch.object(orchestrator, "StylusArm", return_value=new)
 
     p.connect_arm()
@@ -370,7 +406,7 @@ def test_connect_arm_applies_cached_mapping(mocker) -> None:
 
 def test_restore_park_origin_repins_from_park_spot(pc: PhysiClaw) -> None:
     # diag(10, 20) affine → park (-0.1, -0.05) maps to GRBL (-1.0, -1.0).
-    pc._arm = MagicMock()
+    pc._arm = _arm_double()
     pc.calibration.pct_to_grbl = _identity_pct_to_grbl()
 
     assert pc.restore_park_origin() is True
@@ -385,7 +421,7 @@ def test_restore_park_origin_noop_without_arm() -> None:
 
 
 def test_restore_park_origin_noop_without_calibration(pc: PhysiClaw) -> None:
-    pc._arm = MagicMock()
+    pc._arm = _arm_double()
     # pct_to_grbl is None on a fresh bundle → no target to re-pin.
 
     assert pc.restore_park_origin() is False
@@ -394,9 +430,9 @@ def test_restore_park_origin_noop_without_calibration(pc: PhysiClaw) -> None:
 
 def test_connect_camera_closes_existing(mocker) -> None:
     p = PhysiClaw()
-    old = MagicMock()
+    old = _cam_double()
     p._cam = old
-    new = MagicMock()
+    new = _cam_double()
     mocker.patch.object(orchestrator, "Camera", return_value=new)
 
     p.connect_camera(2)
@@ -408,8 +444,7 @@ def test_connect_camera_closes_existing(mocker) -> None:
 def test_connect_camera_propagates_rotation(mocker) -> None:
     p = PhysiClaw()
     p.calibration.cam_rotation = 90
-    new = MagicMock()
-    new.rotation = None
+    new = _cam_double()
     mocker.patch.object(orchestrator, "Camera", return_value=new)
 
     p.connect_camera(0)
@@ -548,7 +583,7 @@ def test_get_icon_detector_lazy_caches(mocker, pc: PhysiClaw) -> None:
 
 
 def test_arm_and_assistive_touch_properties(pc: PhysiClaw) -> None:
-    pc._arm = MagicMock()
+    pc._arm = _arm_double()
 
     assert pc.arm is pc._arm
     assert pc.assistive_touch is pc._assistive_touch
@@ -669,7 +704,7 @@ def test_peek_does_not_retry_on_sharp_frame(mocker, pc: PhysiClaw) -> None:
 
 def test_screenshot_raises_on_timeout(mocker, pc: PhysiClaw) -> None:
     _wire_hardware(pc)
-    pc.attach_bridge(MagicMock())
+    pc.attach_bridge(_bridge_double())
     pc._assistive_touch.take_screenshot.return_value = None
 
     with pytest.raises(TimeoutError, match="Screenshot upload timed out"):
@@ -680,7 +715,7 @@ def test_screenshot_decodes_and_detects(mocker, pc: PhysiClaw) -> None:
     _wire_hardware(pc)
     pc._ocr_reader = MagicMock()
     pc._icon_detector = MagicMock()
-    pc.attach_bridge(MagicMock())
+    pc.attach_bridge(_bridge_double())
     pc._assistive_touch.take_screenshot.return_value = b"PNG"
     mocker.patch.object(orchestrator, "decode_image", return_value=np.zeros((4, 4, 3)))
     mocker.patch.object(
@@ -747,10 +782,10 @@ def test_swipe_dispatches(pc: PhysiClaw) -> None:
 # ---------- send_to_clipboard ----------
 
 
-def _wire_failing_bridge(pc: PhysiClaw) -> MagicMock:
+def _wire_failing_bridge(pc: PhysiClaw):
     """Wire hardware + a bridge whose clipboard sync never confirms."""
     _wire_hardware(pc)
-    bridge = MagicMock()
+    bridge = _bridge_double()
     bridge.wait_clipboard.return_value = False
     pc.attach_bridge(bridge)
     return bridge
@@ -758,7 +793,7 @@ def _wire_failing_bridge(pc: PhysiClaw) -> MagicMock:
 
 def test_send_to_clipboard_happy_path(pc: PhysiClaw) -> None:
     _wire_hardware(pc)
-    bridge = MagicMock()
+    bridge = _bridge_double()
     bridge.wait_clipboard.return_value = True
     pc.attach_bridge(bridge)
 
@@ -800,7 +835,7 @@ def test_send_to_clipboard_success_resets_miss_counter(pc: PhysiClaw) -> None:
     # this pins the wiring: a miss is recorded, a confirmed sync resets it,
     # and the state's window reaches wait_clipboard on every call.
     _wire_hardware(pc)
-    bridge = MagicMock()
+    bridge = _bridge_double()
     bridge.wait_clipboard.side_effect = [False, True, False]
     pc.attach_bridge(bridge)
 
@@ -844,7 +879,7 @@ def test_run_step_swipe_happy_path(pc: PhysiClaw) -> None:
 
 def test_run_step_send_to_clipboard_dispatches(pc: PhysiClaw) -> None:
     _wire_hardware(pc)
-    bridge = MagicMock()
+    bridge = _bridge_double()
     bridge.wait_clipboard.return_value = True
     pc.attach_bridge(bridge)
 
@@ -1142,8 +1177,8 @@ def test_unlock_phone_taps_six_times_when_keypad_found(mocker, pc: PhysiClaw) ->
 def test_shutdown_closes_arm_and_camera(pc: PhysiClaw) -> None:
     # Uncalibrated fixture (pct_to_grbl is None) → park has no target, so
     # teardown falls back to homing.
-    pc._arm = MagicMock()
-    pc._cam = MagicMock()
+    pc._arm = _arm_double()
+    pc._cam = _cam_double()
 
     pc.shutdown()
 
@@ -1157,8 +1192,8 @@ def test_shutdown_parks_off_screen_when_calibrated(pc: PhysiClaw) -> None:
     # With calibration loaded, teardown rests the tip at the same off-screen
     # park spot used between taps — not the machine origin — so the phone
     # stays clear for placement / removal.
-    pc._arm = MagicMock()
-    pc._cam = MagicMock()
+    pc._arm = _arm_double()
+    pc._cam = _cam_double()
     pc.calibration.pct_to_grbl = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
 
     pc.shutdown()
@@ -1179,9 +1214,9 @@ def test_shutdown_handles_no_hardware() -> None:
 
 def test_shutdown_continues_when_coil_release_fails(pc: PhysiClaw) -> None:
     # A failed stylus lift must not strand the serial/camera handles.
-    pc._arm = MagicMock()
+    pc._arm = _arm_double()
     pc._arm.lift_stylus.side_effect = RuntimeError("serial timeout")
-    pc._cam = MagicMock()
+    pc._cam = _cam_double()
 
     pc.shutdown()  # swallows the error
 
@@ -1192,10 +1227,10 @@ def test_shutdown_continues_when_coil_release_fails(pc: PhysiClaw) -> None:
 
 def test_shutdown_continues_when_arm_close_fails(pc: PhysiClaw) -> None:
     # Camera must still close even if the arm teardown raises.
-    pc._arm = MagicMock()
+    pc._arm = _arm_double()
     pc._arm.return_to_origin.side_effect = RuntimeError("GRBL alarm")
     pc._arm.close.side_effect = RuntimeError("port gone")
-    pc._cam = MagicMock()
+    pc._cam = _cam_double()
 
     pc.shutdown()
 
@@ -1204,7 +1239,7 @@ def test_shutdown_continues_when_arm_close_fails(pc: PhysiClaw) -> None:
 
 
 def test_shutdown_swallows_camera_close_failure(pc: PhysiClaw) -> None:
-    pc._cam = MagicMock()
+    pc._cam = _cam_double()
     pc._cam.close.side_effect = RuntimeError("camera busy")
 
     pc.shutdown()  # no raise
