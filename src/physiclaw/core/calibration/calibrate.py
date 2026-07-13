@@ -27,6 +27,7 @@ import numpy as np
 
 from physiclaw.common import paths
 from physiclaw.core.bridge import BridgeState, CalibrationState, PageState
+from physiclaw.core.bridge.calib import SQUARE_CSS_SIZE, SQUARE_CSS_X, SQUARE_CSS_Y
 from physiclaw.core.bridge.nonce import NONCE_COUNT, verify_nonce
 from physiclaw.core.calibration.transforms import (
     PARK_PCT,
@@ -85,12 +86,14 @@ def _tap_once(arm: StylusArm):
 
 # ─── Pre-cal: Screenshot coordinate mapping ──────────────────
 
-# Known CSS position of the pre-cal square drawn by bridge.html:
-# top-left (100, 200), size 50px → center (125, 225).
-SQUARE_CSS_X, SQUARE_CSS_Y, SQUARE_CSS_SIZE = 100, 200, 50
+# The pre-cal square's CSS position is single-sourced in bridge/calib.py
+# (imported at top): the page draws it exactly where this module's
+# screenshot mapping expects to find it.
 
 
-def _decode_screenshot_square(data: bytes) -> tuple[np.ndarray, tuple[int, int, int, int]]:
+def _decode_screenshot_square(
+    data: bytes,
+) -> tuple[np.ndarray, tuple[int, int, int, int]]:
     """Decode screenshot bytes and locate the orange pre-cal square.
 
     Returns (image, bounding rect). Raises RuntimeError when the data
@@ -163,7 +166,10 @@ def measure_viewport_shift(
     # phase-entry clock keeps ticking from that earlier switch.
     cal.set_phase("screenshot_cal")
     time.sleep(0.5)
-    log.info("  Phase: screenshot_cal — showing orange square at CSS (100, 200)")
+    log.info(
+        "  Phase: screenshot_cal — showing orange square at CSS "
+        f"({SQUARE_CSS_X}, {SQUARE_CSS_Y})"
+    )
 
     cached = None if fresh else _find_viewport_cache()
     if cached is not None:
@@ -848,22 +854,9 @@ def validate_calibration(
             f"arm ({gx:.1f}, {gy:.1f})mm"
         )
 
-        # 5. Arm taps (re-fire the solenoid on miss — no depth to bump)
-        arm._fast_move(gx, gy)
-        arm.wait_idle()
-        touch = None
-        for attempt in range(4):
-            cal.flush_touches()
-            _tap_once(arm)
-            time.sleep(0.3)
-            got = cal.flush_touches()
-            if got:
-                touch = got[-1]
-                break
-            log.warning(
-                f"    5. Tap: missed at arm ({gx:.1f}, {gy:.1f})mm, "
-                f"retry {attempt + 1}/3"
-            )
+        # 5. Arm taps — the same move/flush/tap/retry cycle every other
+        # step uses (re-fire the solenoid on miss; no depth to bump).
+        touch = _tap_and_read(arm, cal, gx, gy)
 
         if touch is None:
             results.append(
