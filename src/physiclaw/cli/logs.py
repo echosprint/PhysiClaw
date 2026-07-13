@@ -24,7 +24,7 @@ def logs(
     sid: Annotated[
         str | None,
         typer.Argument(
-            help="Session id, or just its 6-char suffix; omit to list recent sessions.",
+            help="Session id, or just its 6-hex-digit suffix; omit to list recent sessions.",
         ),
     ] = None,
     n: Annotated[
@@ -73,7 +73,7 @@ def logs(
 
 def _resolve(sessions_dir: Path, query: str) -> Path:
     """Resolve a session by full id, or by any unique trailing fragment —
-    the sid's 6-char random suffix is the intended short handle. Exits
+    the sid's 6-hex-digit random suffix is the intended short handle. Exits
     with the candidates when the fragment is ambiguous."""
     exact = sessions_dir / query
     if exact.is_dir():

@@ -59,7 +59,7 @@ def _redact_images(content):
 _CLAUDE_SESSIONS_README = """\
 # PhysiClaw claude-code session logs
 
-One directory per `claude -p` wake, `YYYYMMDD_HHMMSS_<6-char id>`. The
+One directory per `claude -p` wake, `YYYYMMDD_HHMMSS_<6 hex digits>`. The
 human-readable narrative for all wakes of a day lives alongside, in
 `../claude-YYYY-MM-DD.log`.
 

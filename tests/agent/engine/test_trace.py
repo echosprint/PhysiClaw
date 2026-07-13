@@ -955,7 +955,7 @@ def test_new_sid_shape_and_uniqueness() -> None:
     # is what makes instant-crash retries safe.
     assert len(sids) == 50
     for sid in sids:
-        assert re.fullmatch(r"\d{8}_\d{6}_[a-z0-9]{6}", sid)
+        assert re.fullmatch(r"\d{8}_\d{6}_[0-9a-f]{6}", sid)
 
 
 def test_new_sid_sorts_chronologically() -> None:

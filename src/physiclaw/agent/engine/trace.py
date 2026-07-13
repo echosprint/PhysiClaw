@@ -100,25 +100,18 @@ def _env_snapshot() -> dict[str, Any]:
     }
 
 
-# Session-id suffix alphabet: lowercase base36 — denser than hex (36^6 ≈
-# 2.2B vs 16.7M), filesystem/URL-safe, and never reads as a partial word
-# of the timestamp.
-_SID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
-
-
 def new_sid() -> str:
-    """Mint a session id: `YYYYMMDD_HHMMSS_<6 chars a-z0-9>`.
+    """Mint a session id: `YYYYMMDD_HHMMSS_<6 hex digits>`.
 
     The timestamp prefix keeps ids human-readable and lexicographically
-    chronological; the random suffix (36^6 ≈ 2.2B) makes them unique —
+    chronological; the random suffix (16^6 ≈ 16.7M) makes them unique —
     the STUCK-retry loop can start a new session within the same
     wall-clock second as an instantly-crashed one, and a bare-timestamp
     id would silently merge the two sessions' artifacts. The suffix
     doubles as a short handle: `physiclaw logs <suffix>` resolves a
     session by it.
     """
-    suffix = "".join(secrets.choice(_SID_ALPHABET) for _ in range(6))
-    return f"{dt.datetime.now():%Y%m%d_%H%M%S}_{suffix}"
+    return f"{dt.datetime.now():%Y%m%d_%H%M%S}_{secrets.token_hex(3)}"
 
 
 # mime → filename suffix for images extracted from data-URLs. Everything
@@ -143,7 +136,7 @@ _SILENT_EVENTS = frozenset({"prefix_pinned", "finish_length_warning"})
 SESSIONS_README = """\
 # PhysiClaw agent session logs
 
-One directory per agent session, named `YYYYMMDD_HHMMSS_<6-char id>`
+One directory per agent session, named `YYYYMMDD_HHMMSS_<6 hex digits>`
 (sorts chronologically; the id suffix is a unique short handle). All
 files are UTF-8 with LF newlines on every platform. Timestamps (`t`)
 are LOCAL time with millisecond precision — the session's UTC offset is
