@@ -89,6 +89,17 @@ tests) passes in <30s.
 
 ## Phase 2 — Failure-path correctness on the live-hardware paths
 
+**Status: completed 2026-07-13** — all 13 fixes landed; every src/ fix
+has pinned regression tests (23 new tests). The `cache.py` `_imports()`
+fix is verified by direct execution only — its test lands with Phase 5's
+`tests/hardware/`. 3139 passed, 95.86% branch coverage, `ruff check`
+clean; touched files are format-clean (pre-existing `ruff format` drift
+remains in screen_layout.py, calibrate.py, test_spawn.py — out of scope
+here). Notes: camera close() got tunable CLOSE_JOIN/LOCK timeout
+constants; spawn.py got EXIT_WAIT_SECONDS for the post-EOF bound; the
+wizard's 'q' now aborts inside ask() itself (every ask gates a mandatory
+step); sync_official_skills exports SyncError.
+
 **High leverage, small independent diffs. Effort: ~3 person-days.**
 
 **Goal:** eliminate the confirmed bugs where a one-off glitch orphans a
