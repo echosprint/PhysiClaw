@@ -338,3 +338,101 @@ async def test_spawn_claude_first_attempt_no_backoff(
     )
 
     sleep_spy.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_spawn_claude_kills_proc_when_stream_raises_unexpectedly(
+    mocker,
+    patch_environment,
+) -> None:
+    """An unexpected error mid-stream must never orphan a live claude
+    subprocess driving the phone — kill before propagating."""
+
+    class _LiveProc(_FakeProc):
+        def __init__(self):
+            super().__init__(lines=[b""])
+            self.returncode = None  # still running
+
+        async def wait(self) -> int:
+            self.returncode = -9
+            return self.returncode
+
+    proc = _LiveProc()
+
+    async def _exec(*args, **kwargs):
+        return proc
+
+    mocker.patch.object(spawn_mod.asyncio, "create_subprocess_exec", side_effect=_exec)
+    mocker.patch.object(spawn_mod, "_stream", side_effect=RuntimeError("boom"))
+    mocker.patch.object(spawn_mod, "MAX_ATTEMPTS", 1)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await spawn_mod.spawn_claude([Trigger(description="t")], model_id="opus")
+
+    assert proc.killed is True
+
+
+@pytest.mark.asyncio
+async def test_spawn_claude_kills_on_oversized_output_line(
+    mocker,
+    patch_environment,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """readline raises ValueError past the buffer limit — treated like a
+    timeout: kill + 'killed' status, not a crash."""
+    import logging
+
+    proc = _FakeProc(lines=[b""])
+
+    async def _exec(*args, **kwargs):
+        return proc
+
+    mocker.patch.object(spawn_mod.asyncio, "create_subprocess_exec", side_effect=_exec)
+    mocker.patch.object(
+        spawn_mod, "_stream", side_effect=ValueError("Separator is not found")
+    )
+    mocker.patch.object(spawn_mod, "MAX_ATTEMPTS", 1)
+
+    with caplog.at_level(logging.ERROR, logger="physiclaw.agent.claude.spawn"):
+        await spawn_mod.spawn_claude([Trigger(description="t")], model_id="opus")
+
+    assert proc.killed is True
+    assert any("stream buffer" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_spawn_claude_bounds_post_eof_wait(
+    mocker,
+    patch_environment,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A child that closes stdout but never exits must be killed after
+    the EXIT_WAIT_SECONDS grace, not awaited forever."""
+    import logging
+
+    class _HangingProc(_FakeProc):
+        def __init__(self):
+            super().__init__(lines=[b""])
+            self.returncode = None
+            self._waits = 0
+
+        async def wait(self) -> int:
+            self._waits += 1
+            if self.killed:
+                self.returncode = -9
+                return self.returncode
+            await asyncio.sleep(3600)  # never exits on its own
+
+    proc = _HangingProc()
+
+    async def _exec(*args, **kwargs):
+        return proc
+
+    mocker.patch.object(spawn_mod.asyncio, "create_subprocess_exec", side_effect=_exec)
+    mocker.patch.object(spawn_mod, "EXIT_WAIT_SECONDS", 0.01)
+    mocker.patch.object(spawn_mod, "MAX_ATTEMPTS", 1)
+
+    with caplog.at_level(logging.ERROR, logger="physiclaw.agent.claude.spawn"):
+        await spawn_mod.spawn_claude([Trigger(description="t")], model_id="opus")
+
+    assert proc.killed is True

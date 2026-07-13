@@ -65,6 +65,9 @@ PROJECT_ROOT = paths.HOME
 TIMEOUT = CONFIG.claude.timeout_seconds  # per-line inactivity timeout
 MAX_ATTEMPTS = CONFIG.claude.max_attempts
 RETRY_BACKOFF = CONFIG.claude.retry_backoff_seconds
+# Post-EOF grace: a child that closed stdout but won't exit must not
+# hang the runtime forever — past this, it's killed like a timeout.
+EXIT_WAIT_SECONDS = 30
 
 # --- Tool permissions ---
 #
@@ -345,9 +348,7 @@ class _ClaudeSummary:
                 "output_tokens": int(u.get("output_tokens") or 0),
                 "cache_read_tokens": cr,
                 "cache_creation_tokens": cc,
-                "cache_hit_pct": (
-                    round(100 * cr / total_in, 1) if total_in else 0.0
-                ),
+                "cache_hit_pct": (round(100 * cr / total_in, 1) if total_in else 0.0),
             },
             "cost_usd": round(self.cost_usd, 4),
             "tool_calls": dict(self.tool_calls),
@@ -763,22 +764,27 @@ async def spawn_claude(triggers: list[Trigger], *, model_id: str) -> None:
             LOG_DIR / f"claude-{dt.datetime.now():%Y-%m-%d}.log",
         )
         status = "UNDONE"
+        proc = None
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-                cwd=str(PROJECT_ROOT),
-                env=env,
-                # Default 64KB readline limit blows up on screenshot base64 lines.
-                limit=CONFIG.claude.stream_buffer_mb * 1024 * 1024,
-            )
+            # Log construction BEFORE the spawn: if it raises, there is
+            # no live claude subprocess left driving the phone unwatched.
             slog = _SessionLog(
                 sid, triggers, model_ref=model_ref, prompt_hash=prompt_hash
             )
             try:
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                    cwd=str(PROJECT_ROOT),
+                    env=env,
+                    # Default 64KB readline limit blows up on screenshot base64 lines.
+                    limit=CONFIG.claude.stream_buffer_mb * 1024 * 1024,
+                )
                 result_data = await _stream(proc, slog)
-                await proc.wait()
+                # Bounded: stdout EOF usually means exit, but a child
+                # that closed stdout while alive must not hang us.
+                await asyncio.wait_for(proc.wait(), timeout=EXIT_WAIT_SECONDS)
                 if proc.returncode != 0:
                     log.error("claude exited %s (see log for details)", proc.returncode)
                 elif result_data:
@@ -789,11 +795,28 @@ async def spawn_claude(triggers: list[Trigger], *, model_id: str) -> None:
                     )
                 status = slog.done(proc.returncode)
             except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
+                if proc is not None:
+                    proc.kill()
+                    await proc.wait()
                 status = slog.done("killed")
                 log.error("claude killed after %ds timeout", TIMEOUT)
+            except ValueError:
+                # readline raises ValueError when one stream-json line
+                # exceeds the buffer limit — kill rather than orphan.
+                if proc is not None:
+                    proc.kill()
+                    await proc.wait()
+                status = slog.done("killed")
+                log.error(
+                    "claude killed — output line exceeded the %dMB stream buffer",
+                    CONFIG.claude.stream_buffer_mb,
+                )
             finally:
+                # Any OTHER escape route (unexpected error, cancellation):
+                # never leave a live claude with nobody reading it.
+                if proc is not None and proc.returncode is None:
+                    proc.kill()
+                    await proc.wait()
                 slog.close()
         finally:
             # Plugin dir holds only symlinks + one JSON file — no user
