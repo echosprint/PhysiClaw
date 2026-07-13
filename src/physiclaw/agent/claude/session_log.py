@@ -70,6 +70,10 @@ human-readable narrative for all wakes of a day lives alongside, in
   session was killed. Cross-session: `jq .usage.cache_hit_pct */summary.json`.
 - `images/NNNNN_t<turn>.jpg` — screenshots the model saw, turn-tagged.
 
+Underperforming wake? Check `images/` first — bad runs usually trace to
+what the model actually saw, not how it reasoned. Look for blur, glare,
+or a cropped/off-frame screen before blaming the prompt or the model.
+
 Privacy: images/ are phone screenshots. Treat a session dir as sensitive.
 """
 

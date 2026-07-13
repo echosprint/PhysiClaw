@@ -186,6 +186,10 @@ in the `env` event / `summary.json.env.utc_offset`.
 
 ## Analysis tips
 
+- Underperforming session? Check `images/` first — bad runs usually
+  trace to what the model actually saw, not how it reasoned. Look for
+  blur, glare, or a cropped/off-frame screen before blaming the
+  prompt or the model.
 - Failure post-mortem: `summary.json` outcome + errors first, then grep
   `events.jsonl` for `tool_blocked`/`stuck_warning`/`bad_turn_shape`
   around the last turns, then view the matching `images/`.
