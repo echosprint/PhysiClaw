@@ -64,7 +64,7 @@ physiclaw = "physiclaw.cli:app"
 [tool.ruff.lint]
 # Ruff's defaults (pycodestyle errors + pyflakes) made explicit, plus
 # import sorting. Wider rule sets (ANN/ARG/BLE/C901) are deliberately
-# not enabled — see REFACTOR_PLAN.md Phase 1.
+# not enabled: ~435 findings, mostly deliberate patterns and pytest noise.
 select = ["E4", "E7", "E9", "F", "I"]
 
 [tool.pytest.ini_options]
