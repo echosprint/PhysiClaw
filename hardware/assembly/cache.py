@@ -97,6 +97,11 @@ def _imports(path: Path) -> set[str]:
         if isinstance(node, ast.ImportFrom):
             if node.level == 0 and node.module and node.module.startswith("hardware"):
                 mods.add(node.module)
+                # `from hardware.parts import custom` names the SUBMODULE
+                # hardware/parts/custom.py — record the package-qualified
+                # name per alias too. Non-module names (functions, classes)
+                # resolve to no file in _module_to_path and drop out.
+                mods.update(f"{node.module}.{a.name}" for a in node.names)
         elif isinstance(node, ast.Import):
             mods.update(a.name for a in node.names if a.name.startswith("hardware"))
     return mods
