@@ -7,6 +7,9 @@ import numpy as np
 import pytest
 
 from physiclaw.core.vision.grid_detect import (
+    DOT_MAX_AREA,
+    DOT_MIN_AREA,
+    _dot_area_bounds,
     compute_affine_transforms,
     detect_bridge_corners,
     detect_orange_dot,
@@ -378,3 +381,37 @@ def test_detect_bridge_corners_rejects_clusters_exceeding_max_span() -> None:
 
     # Default max_span = 25% of min(side) = 100 — these are 400 apart.
     assert detect_bridge_corners(img) is None
+
+
+# ---------- _dot_area_bounds ----------
+
+
+def test_dot_area_bounds_unscaled_at_reference_resolution() -> None:
+    frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+
+    assert _dot_area_bounds(frame) == (DOT_MIN_AREA, DOT_MAX_AREA)
+
+
+def test_dot_area_bounds_scale_with_4k_frame_area() -> None:
+    frame = np.zeros((2160, 3840, 3), dtype=np.uint8)
+
+    assert _dot_area_bounds(frame) == (DOT_MIN_AREA * 4, DOT_MAX_AREA * 4)
+
+
+def test_dot_area_bounds_never_shrink_below_tuned_values() -> None:
+    frame = np.zeros((200, 200, 3), dtype=np.uint8)
+
+    assert _dot_area_bounds(frame) == (DOT_MIN_AREA, DOT_MAX_AREA)
+
+
+def test_detect_red_dots_accepts_4k_scale_dot_over_1080p_max_area() -> None:
+    # A calibration dot on a 4K frame covers ~4× the 1080p pixel area —
+    # radius 62 ≈ 12k px², over the unscaled DOT_MAX_AREA but a real dot
+    # at this resolution.
+    frame = np.zeros((2160, 3840, 3), dtype=np.uint8)
+    _draw_dot(frame, 400, 400, (0, 0, 255), radius=62)
+
+    dots = detect_red_dots(frame)
+
+    assert len(dots) == 1
+    assert abs(dots[0][0] - 400) < 3 and abs(dots[0][1] - 400) < 3

@@ -419,3 +419,49 @@ def test_save_logs_info_message_with_path(
         r.getMessage() == f"Saved calibration bundle → {bundle_path}"
         for r in caplog.records
     )
+
+
+# ---------- reconcile_cam_size ----------
+
+
+def test_reconcile_cam_size_true_when_sizes_equal() -> None:
+    cal = Calibration(cam_size=(1920, 1080))
+
+    assert cal.reconcile_cam_size((1920, 1080)) is True
+    assert cal.cam_size == (1920, 1080)
+
+
+@pytest.mark.parametrize(
+    "live_size",
+    [(3840, 2160), (2560, 1440)],  # 4K and 2K, both 16:9 like the calibrated size
+)
+def test_reconcile_cam_size_adopts_live_size_on_same_aspect(
+    live_size: tuple[int, int],
+) -> None:
+    cal = Calibration(cam_size=(1920, 1080))
+
+    assert cal.reconcile_cam_size(live_size) is True
+    assert cal.cam_size == live_size
+
+
+def test_reconcile_cam_size_rejects_aspect_change() -> None:
+    cal = Calibration(cam_size=(1920, 1080))
+
+    assert cal.reconcile_cam_size((1920, 1440)) is False
+    assert cal.cam_size == (1920, 1080)
+
+
+def test_reconcile_cam_size_true_when_unset() -> None:
+    cal = Calibration()
+
+    assert cal.reconcile_cam_size((1920, 1080)) is True
+    assert cal.cam_size is None
+
+
+def test_reconcile_cam_size_handles_rotated_portrait_sizes() -> None:
+    # cam_size lives in ROTATED frame space; a portrait bundle scales the
+    # same way.
+    cal = Calibration(cam_size=(1080, 1920))
+
+    assert cal.reconcile_cam_size((2160, 3840)) is True
+    assert cal.cam_size == (2160, 3840)

@@ -1027,3 +1027,31 @@ def test_drop_stale_screens_composes_with_collapse_old_turns() -> None:
     assert isinstance(summary, UserMessage)
     assert SUMMARY_HEADER in str(summary.content)
     assert "- s0" in str(summary.content)  # folded turns' notes harvested
+
+
+def test_scale_image_bytes_jpeg_within_cap_passes_through_byte_identical(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The server already sized this view to the shared knob — a re-encode
+    # would only stack a second generation of JPEG loss onto screen text.
+    monkeypatch.setattr(compact, "MAX_IMAGE_EDGE", 1000)
+    raw = _encode_jpg(np.full((300, 200, 3), 128, dtype=np.uint8))
+
+    out_bytes, mime = scale_image_bytes(raw)
+
+    assert out_bytes is raw
+    assert mime == "image/jpeg"
+
+
+def test_scale_image_bytes_png_within_cap_reencoded_to_jpeg(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(compact, "MAX_IMAGE_EDGE", 1000)
+    ok, buf = cv2.imencode(".png", np.full((300, 200, 3), 128, dtype=np.uint8))
+    assert ok
+    raw = buf.tobytes()
+
+    out_bytes, mime = scale_image_bytes(raw)
+
+    assert mime == "image/jpeg"
+    assert out_bytes.startswith(b"\xff\xd8\xff")

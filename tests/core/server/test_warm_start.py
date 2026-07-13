@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 
 from physiclaw.core.server import net, warm_start
@@ -124,7 +125,23 @@ def _ready_app(cal) -> MagicMock:
     app = MagicMock()
     app.calibration = cal
     app.assistive_touch = MagicMock()
+    # A rotated live frame whose (w, h) matches the bundle's cam_size, so
+    # the resolution reconcile step sees "same size" on the clean path.
+    app.cam.peek.return_value = np.zeros((1080, 1920, 3), dtype=np.uint8)
     return app
+
+
+def _patch_resume_env(mocker, cal, app, sanity: bool = True) -> MagicMock:
+    """Install the try_resume environment patches; returns the _sanity mock."""
+    mocker.patch(
+        "physiclaw.core.calibration.state.Calibration.load",
+        return_value=cal,
+    )
+    mocker.patch("physiclaw.core.server.app.physiclaw", app)
+    mocker.patch("physiclaw.core.server.app._calib", MagicMock())
+    mocker.patch("physiclaw.core.server.app._phone", MagicMock())
+    mocker.patch.object(warm_start.sys.stdin, "isatty", return_value=False)
+    return mocker.patch.object(warm_start, "_sanity", return_value=sanity)
 
 
 @pytest.mark.integration
@@ -240,6 +257,49 @@ def test_try_resume_returns_false_when_sanity_fails(mocker) -> None:
     mocker.patch("physiclaw.core.server.app._phone", MagicMock())
     mocker.patch.object(warm_start, "_sanity", return_value=False)
     mocker.patch.object(warm_start.sys.stdin, "isatty", return_value=False)
+
+    result = warm_start.try_resume(cam_index_override=None)
+
+    assert result is False
+    app.mark_ready.assert_not_called()
+
+
+@pytest.mark.integration
+def test_try_resume_reconciles_live_resolution_with_bundle(mocker) -> None:
+    # The camera negotiated 4K but the bundle was calibrated at 1080p —
+    # try_resume must offer the live ROTATED (w, h) to the bundle's
+    # reconcile before running sanity.
+    cal = _ready_bundle()
+    app = _ready_app(cal)
+    app.cam.peek.return_value = np.zeros((2160, 3840, 3), dtype=np.uint8)
+    _patch_resume_env(mocker, cal, app)
+
+    result = warm_start.try_resume(cam_index_override=None)
+
+    assert result is True
+    cal.reconcile_cam_size.assert_called_once_with((3840, 2160))
+
+
+@pytest.mark.integration
+def test_try_resume_returns_false_when_aspect_changed(mocker) -> None:
+    cal = _ready_bundle()
+    cal.reconcile_cam_size.return_value = False
+    app = _ready_app(cal)
+    sanity = _patch_resume_env(mocker, cal, app)
+
+    result = warm_start.try_resume(cam_index_override=None)
+
+    assert result is False
+    sanity.assert_not_called()
+    app.mark_ready.assert_not_called()
+
+
+@pytest.mark.integration
+def test_try_resume_returns_false_when_camera_has_no_frame(mocker) -> None:
+    cal = _ready_bundle()
+    app = _ready_app(cal)
+    app.cam.peek.return_value = None
+    _patch_resume_env(mocker, cal, app)
 
     result = warm_start.try_resume(cam_index_override=None)
 

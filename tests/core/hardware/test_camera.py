@@ -176,10 +176,12 @@ def test_camera_warmup_retries_on_bad_read(mocker) -> None:
 
 
 def test_camera_warmup_raises_after_repeated_read_failures(mocker) -> None:
-    # _open is called once at __init__ + once per warmup retry attempt.
-    # Warmup loops 2 attempts and reopens after the first → 3 caps total.
+    # _open is called once at __init__ + once per failed acquire attempt.
+    # Each of the 3 resolution-ladder rungs (4K default → 2560 → 1920)
+    # runs a 2-attempt acquire that reopens after each failure →
+    # 1 + 3×2 = 7 caps total before warmup gives up.
     bad_caps = [
-        FakeVideoCapture(index=0, read_results=[(False, None)] * 200) for _ in range(3)
+        FakeVideoCapture(index=0, read_results=[(False, None)] * 200) for _ in range(7)
     ]
     mocker.patch.object(cv2, "VideoCapture", side_effect=bad_caps)
     mocker.patch.object(camera_mod.platform, "ensure_camera_permission")
@@ -463,7 +465,9 @@ def test_open_applies_manual_exposure_when_config_disables_auto(mocker) -> None:
         camera_mod.platform,
         "camera_set_manual_exposure",
     )
-    vc = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 200)
+    # Baseline-sized frames so warmup accepts the first rung — exactly
+    # one negotiation, exactly one exposure application.
+    vc = FakeVideoCapture(index=0, read_results=[(True, _frame(2160, 3840))] * 200)
 
     _open_camera_no_thread(mocker, vc=vc)
 
@@ -550,3 +554,72 @@ def test_wait_frames_times_out_without_publisher(mocker) -> None:
     cam = _open_camera_no_thread(mocker, vc=vc)
 
     assert cam.wait_frames(1, timeout=0.05) is False
+
+
+# ---------- resolution fallback ladder ----------
+
+
+def _width_requests(vc: FakeVideoCapture) -> list[int]:
+    return [int(v) for p, v in vc.set_calls if p == cv2.CAP_PROP_FRAME_WIDTH]
+
+
+def test_warmup_accepts_first_rung_when_frame_meets_baseline(mocker) -> None:
+    # A real 4K camera: the over-ask negotiates cleanly, no ladder walk.
+    vc = FakeVideoCapture(index=0, read_results=[(True, _frame(2160, 3840))] * 200)
+
+    cam = _open_camera_no_thread(mocker, vc=vc)
+
+    assert _width_requests(vc) == [3840]
+    assert cam._request_size == (3840, 2160)
+
+
+def test_warmup_accepts_first_rung_for_well_behaved_1080p_camera(mocker) -> None:
+    # A 1080p camera whose driver snaps the 4K ask to its max mode
+    # (V4L2 / AVFoundation behavior) — the 1920-long-edge frame meets
+    # the baseline, so no renegotiation happens.
+    vc = FakeVideoCapture(index=0, read_results=[(True, _frame(1080, 1920))] * 200)
+
+    cam = _open_camera_no_thread(mocker, vc=vc)
+
+    assert _width_requests(vc) == [3840]
+    assert cam._request_size == (3840, 2160)
+
+
+def test_warmup_steps_down_ladder_on_undersized_frames(mocker) -> None:
+    # The MSMF failure mode: the over-ask falls back to 640×480. Warmup
+    # renegotiates down the ladder and accepts the last rung's frame —
+    # the same outcome the old fixed 1920×1080 request produced.
+    vc = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 200)
+
+    cam = _open_camera_no_thread(mocker, vc=vc)
+
+    assert _width_requests(vc) == [3840, 2560, 1920]
+    assert cam._request_size == (1920, 1080)
+    assert cam._frame is not None
+
+
+def test_request_ladder_is_single_rung_when_config_pins_1080p(mocker) -> None:
+    # A user who pins [camera] width/height gets exactly that request —
+    # no fallbacks below it, identical to the pre-ladder behavior.
+    mocker.patch.object(camera_mod.CONFIG.camera, "width", 1920)
+    mocker.patch.object(camera_mod.CONFIG.camera, "height", 1080)
+    vc = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 200)
+
+    cam = _open_camera_no_thread(mocker, vc=vc)
+
+    assert _width_requests(vc) == [1920]
+    assert cam._request_size == (1920, 1080)
+
+
+def test_reopen_reuses_settled_ladder_rung(mocker) -> None:
+    # After warmup settles on 1920×1080, a reader-loop reconnect must
+    # re-request that rung, not restart the ladder at 4K.
+    vc1 = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 200)
+    cam = _open_camera_no_thread(mocker, vc=vc1)
+    assert cam._request_size == (1920, 1080)
+    vc2 = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 200)
+    mocker.patch.object(cv2, "VideoCapture", return_value=vc2)
+
+    cam._reopen()
+
+    assert _width_requests(vc2) == [1920]

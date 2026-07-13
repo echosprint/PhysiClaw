@@ -24,7 +24,7 @@ from physiclaw.common import verdict
 from physiclaw.core.vision import quality
 from physiclaw.core.vision.change import frames_changed
 from physiclaw.core.vision.quality import laplacian_variance
-from physiclaw.core.vision.util import encode_jpeg
+from physiclaw.core.vision.util import encode_view_jpeg
 
 log = logging.getLogger(__name__)
 
@@ -187,7 +187,7 @@ class GestureObserver:
                     log.debug("screen-verdict diff failed", exc_info=True)
             try:
                 listing, annotated = self._detect(after)
-                jpeg = encode_jpeg(annotated)
+                jpeg = encode_view_jpeg(annotated)
             except Exception:
                 log.warning("post-gesture view failed", exc_info=True)
             warning = self.observe_quality("gesture view", after)

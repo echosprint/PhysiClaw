@@ -154,7 +154,9 @@ def _probe_camera_frame(index: int) -> str:
 def _frame_quality_verdict(frame) -> tuple[bool, str]:
     """One quality clause for the camera line, cropped to the phone screen
     when the calibration bundle allows it (rotated-frame size must match
-    the bundle's cam_size, else the crop coords don't apply)."""
+    the bundle's cam_size aspect — a same-aspect size difference is a
+    renegotiated capture mode and rescales cleanly, mirroring the
+    server's warm-start reconcile; an aspect change breaks the crop)."""
     import cv2
 
     from physiclaw.core.calibration.state import Calibration
@@ -167,13 +169,16 @@ def _frame_quality_verdict(frame) -> tuple[bool, str]:
         if cal.effective_rotation() != -1:
             frame = cv2.rotate(frame, cal.effective_rotation())
         h, w = frame.shape[:2]
-        if (w, h) == tuple(cal.cam_size):
+        cal_w, cal_h = cal.cam_size
+        if cal.reconcile_cam_size((w, h)):
             frame = crop_to_phone_screen(frame, cal.transforms())
             scope = "phone-screen crop"
+            if (w, h) != (cal_w, cal_h):
+                scope += f" (calibrated {cal_w}x{cal_h}, rescaled to {w}x{h})"
         else:
             scope = (
-                f"whole frame — size {w}x{h} != calibrated "
-                f"{cal.cam_size[0]}x{cal.cam_size[1]}"
+                f"whole frame — aspect {w}x{h} != calibrated "
+                f"{cal_w}x{cal_h}; recalibrate"
             )
     r = quality.assess(frame)
     stats = (

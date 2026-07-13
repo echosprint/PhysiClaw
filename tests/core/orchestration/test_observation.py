@@ -172,7 +172,7 @@ def test_peek_frame_propagates_grab_failure() -> None:
 
 
 def test_with_view_appends_changed_verdict(mocker) -> None:
-    mocker.patch.object(observation, "encode_jpeg", return_value=b"VIEW_JPG")
+    mocker.patch.object(observation, "encode_view_jpeg", return_value=b"VIEW_JPG")
     obs = _observer([_flat(128), _flat(30)])
 
     out = obs.with_view(lambda: "Acted")
@@ -181,7 +181,7 @@ def test_with_view_appends_changed_verdict(mocker) -> None:
 
 
 def test_with_view_appends_unchanged_verdict(mocker) -> None:
-    mocker.patch.object(observation, "encode_jpeg", return_value=b"VIEW_JPG")
+    mocker.patch.object(observation, "encode_view_jpeg", return_value=b"VIEW_JPG")
     frame = _flat(128)
     obs = _observer([frame, frame.copy()])
 
@@ -206,7 +206,7 @@ def test_with_view_withholds_verdict_when_side_blurry(mocker) -> None:
     # A blurry side diffs as "changed everywhere" (false `changed`, the
     # harmful direction) — verdict skipped, view still attached.
     mocker.patch.object(observation.time, "sleep")
-    mocker.patch.object(observation, "encode_jpeg", return_value=b"VIEW_JPG")
+    mocker.patch.object(observation, "encode_view_jpeg", return_value=b"VIEW_JPG")
     # Every grab reads blurry → each grab_screen consumes two frames.
     obs = _observer([_flat(128), _flat(128), _flat(30), _flat(30)])
     obs.GRAB_BLUR_THRESHOLD = float("inf")
@@ -219,7 +219,7 @@ def test_with_view_withholds_verdict_when_side_blurry(mocker) -> None:
 
 
 def test_with_view_verdict_diff_failure_fails_open(mocker) -> None:
-    mocker.patch.object(observation, "encode_jpeg", return_value=b"VIEW_JPG")
+    mocker.patch.object(observation, "encode_view_jpeg", return_value=b"VIEW_JPG")
     mocker.patch.object(
         observation,
         "frames_changed",
@@ -238,7 +238,7 @@ def test_with_view_verdict_diff_failure_fails_open(mocker) -> None:
 
 def test_with_view_returns_fused_view(mocker) -> None:
     # The after-frame that feeds the verdict also feeds detection.
-    mocker.patch.object(observation, "encode_jpeg", return_value=b"VIEW_JPG")
+    mocker.patch.object(observation, "encode_view_jpeg", return_value=b"VIEW_JPG")
     after = _flat(30)
     detect = MagicMock(return_value=("LISTING", _flat()))
     obs = _observer([_flat(128), after], detect=detect)
@@ -265,7 +265,7 @@ def test_with_view_fails_open_when_detection_raises(mocker) -> None:
 
 
 def test_with_view_warning_joins_listing(mocker) -> None:
-    mocker.patch.object(observation, "encode_jpeg", return_value=b"VIEW_JPG")
+    mocker.patch.object(observation, "encode_view_jpeg", return_value=b"VIEW_JPG")
     obs = _observer([_flat(128), _flat(30)])
     obs._quality.observe.return_value = "⚠ camera: bad"
 

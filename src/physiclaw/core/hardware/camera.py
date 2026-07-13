@@ -62,30 +62,60 @@ def silenced_stderr():
         os.close(devnull)
 
 
-def configure_capture(cap, *, exposure_auto: bool, exposure: int) -> None:
+def configure_capture(
+    cap,
+    *,
+    exposure_auto: bool,
+    exposure: int,
+    size: tuple[int, int] | None = None,
+) -> None:
     """Apply PhysiClaw's capture properties to an open cv2.VideoCapture.
 
     Order is load-bearing: FOURCC must be set before width/height —
     Windows MSMF re-negotiates on format change, and YUY2 (the default)
     caps at 640×480 over USB even for 4K cameras; MJPG-compressed makes
-    1920×1080 actually reachable. Exposure comes AFTER the size
+    high resolutions actually reachable. Exposure comes AFTER the size
     negotiation, because renegotiation is exactly what can leave the
     driver's auto-exposure off/misconfigured (the Windows blown-frames
     root cause). Drivers snap to the nearest supported mode; the caller
     logs the truth after the first frame.
 
+    ``size`` overrides the CONFIG request — `Camera._warmup` uses it to
+    walk `RESOLUTION_FALLBACKS` when a negotiation misbehaves.
+
     Shared by `Camera._open` and the doctor's deep camera probe so the
     probe meters the same negotiation the server runs.
     """
+    width, height = (
+        size
+        if size is not None
+        else (
+            CONFIG.camera.width,
+            CONFIG.camera.height,
+        )
+    )
     # AVFoundation (macOS) ignores this; V4L (Linux) honors it.
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*CONFIG.camera.fourcc))
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, CONFIG.camera.width)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CONFIG.camera.height)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
     if exposure_auto:
         platform.camera_set_auto_exposure(cap)
     else:
         platform.camera_set_manual_exposure(cap, exposure)
+
+
+# Fallback requests when a high-resolution negotiation misbehaves.
+# Linux V4L2 guarantees nearest-match adjustment (VIDIOC_S_FMT rounds
+# down and reports back) and macOS AVFoundation snaps to the closest
+# supported mode, but Windows MSMF can fail stream selection outright
+# or fall back to 640×480 when asked for a mode the camera lacks
+# (opencv/opencv#25243, #12822). `Camera._warmup` steps down this
+# ladder until a frame arrives at ≥ BASELINE_LONG_EDGE; the last rung
+# equals the pre-4K-default fixed request, so no camera negotiates
+# worse than it did before the default moved.
+RESOLUTION_FALLBACKS = [(2560, 1440), (1920, 1080)]
+BASELINE_LONG_EDGE = 1920
 
 
 # ─── Reusable Camera class ──────────────────────────────────────
@@ -155,6 +185,13 @@ class Camera:
         # a converged manual value instead of silently reverting to auto.
         self._exposure_auto: bool = CONFIG.camera.auto_exposure
         self._exposure_value: int = CONFIG.camera.exposure
+        # The resolution request, remembered so _reopen() re-applies the
+        # rung _warmup settled on instead of re-failing at the top of the
+        # ladder on every reconnect.
+        self._request_size: tuple[int, int] = (
+            CONFIG.camera.width,
+            CONFIG.camera.height,
+        )
 
         self._open()
         self._warmup()
@@ -187,26 +224,71 @@ class Camera:
             self.cap,
             exposure_auto=self._exposure_auto,
             exposure=self._exposure_value,
+            size=self._request_size,
         )
 
-    def _warmup(self):
-        """Discard initial auto-exposure frames and verify reads work."""
+    def _request_ladder(self) -> list[tuple[int, int]]:
+        """The configured request first, then each strictly-smaller fallback."""
+        first = self._request_size
+        return [first] + [
+            s for s in RESOLUTION_FALLBACKS if s[0] * s[1] < first[0] * first[1]
+        ]
+
+    def _acquire_first_frame(self):
+        """Discard initial auto-exposure frames and read one; on failure
+        release + perm-prompt + reopen once. Returns the frame or None."""
         for _ in range(2):
             for _ in range(15):
                 self.cap.read()
             ret, frame = self.cap.read()
             if ret and frame is not None:
-                h, w = frame.shape[:2]
-                log.info(f"Camera {self.index} ready  ({w}x{h})")
-                with self._cond:
-                    self._frame = frame
-                    self._frame_time = time.monotonic()
-                    self._frame_seq += 1
-                return
+                return frame
             # Read returned no frame — likely macOS perm denied silently.
             self.cap.release()
             platform.ensure_camera_permission()
             self._open()
+        return None
+
+    def _warmup(self):
+        """Verify reads work, stepping the resolution request down when
+        the negotiation misbehaves.
+
+        A frame smaller than BASELINE_LONG_EDGE while a larger mode was
+        requested — or no frame at all — means the driver mishandled the
+        over-ask (Windows MSMF; see RESOLUTION_FALLBACKS). Renegotiate
+        down the ladder; the last rung accepts whatever arrives, which
+        matches the behavior of the old fixed 1920×1080 request.
+        """
+        ladder = self._request_ladder()
+        for rung, size in enumerate(ladder):
+            if size != self._request_size:
+                log.warning(
+                    f"Camera {self.index}: negotiation misbehaved — "
+                    f"retrying at {size[0]}x{size[1]}"
+                )
+                self._request_size = size
+                configure_capture(
+                    self.cap,
+                    exposure_auto=self._exposure_auto,
+                    exposure=self._exposure_value,
+                    size=size,
+                )
+            frame = self._acquire_first_frame()
+            if frame is None:
+                continue
+            h, w = frame.shape[:2]
+            if max(w, h) < BASELINE_LONG_EDGE and rung < len(ladder) - 1:
+                log.warning(
+                    f"Camera {self.index}: {size[0]}x{size[1]} request "
+                    f"negotiated only {w}x{h}"
+                )
+                continue
+            log.info(f"Camera {self.index} ready  ({w}x{h})")
+            with self._cond:
+                self._frame = frame
+                self._frame_time = time.monotonic()
+                self._frame_seq += 1
+            return
         raise RuntimeError(f"Camera {self.index}: read failed")
 
     def _reopen(self):
@@ -333,8 +415,8 @@ class Camera:
                 timeout=self.FRAME_WAIT_SECONDS,
             )
             frame = self._frame
-        # Copy outside the lock — a 1080p numpy copy is ~1 ms and would
-        # otherwise stall the reader's next publish for that long.
+        # Copy outside the lock — a frame copy (~1 ms at 1080p, ~8 ms at
+        # 4K) would otherwise stall the reader's next publish for that long.
         if frame is None:
             return None
         out = frame.copy()

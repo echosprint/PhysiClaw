@@ -44,7 +44,7 @@ from physiclaw.core.vision.preprocess import (
 from physiclaw.core.vision.util import (
     bbox_on_screen,
     decode_image,
-    encode_jpeg,
+    encode_view_jpeg,
     format_elements,
     find_numpad_digit,
     validate_bbox,
@@ -469,7 +469,7 @@ class PhysiClaw:
             warning = self._observer.observe_quality("peek", cropped)
             if warning is not None:
                 listing = f"{listing}\n{warning}"
-            return encode_jpeg(annotated), listing
+            return encode_view_jpeg(annotated), listing
 
     def screenshot(self) -> tuple[bytes, str]:
         """Pixel-perfect phone screenshot + icon detection + OCR.
@@ -489,8 +489,10 @@ class PhysiClaw:
                 )
 
             frame = decode_image(data)
+            # Detection runs on the native-resolution screenshot;
+            # encode_view_jpeg caps the image the agent sees.
             listing, annotated = self._detect(frame)
-            return encode_jpeg(annotated), listing
+            return encode_view_jpeg(annotated), listing
 
     # ─── Gesture primitives ────────────────────────────────────
 

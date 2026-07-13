@@ -625,7 +625,7 @@ def _wire_peek(mocker, pc: PhysiClaw, *, listing: str = "ok", sharpness=200.0):
     )
     mocker.patch.object(orchestrator, "elements_to_json", return_value=[])
     mocker.patch.object(orchestrator, "format_elements", return_value=listing)
-    mocker.patch.object(orchestrator, "encode_jpeg", return_value=b"JPG")
+    mocker.patch.object(orchestrator, "encode_view_jpeg", return_value=b"JPG")
     return sleep_spy
 
 
@@ -675,7 +675,7 @@ def test_screenshot_decodes_and_detects(mocker, pc: PhysiClaw) -> None:
     )
     mocker.patch.object(orchestrator, "elements_to_json", return_value=[])
     mocker.patch.object(orchestrator, "format_elements", return_value="L")
-    mocker.patch.object(orchestrator, "encode_jpeg", return_value=b"JPG")
+    mocker.patch.object(orchestrator, "encode_view_jpeg", return_value=b"JPG")
 
     jpg, listing = pc.screenshot()
 
@@ -913,7 +913,7 @@ def _wire_verdict_frames(mocker, pc: PhysiClaw, frames: list[np.ndarray]) -> Non
     pc._cam.snapshot.return_value = np.zeros((4, 4, 3), dtype=np.uint8)
     mocker.patch.object(orchestrator, "crop_to_phone_screen", side_effect=frames)
     mocker.patch.object(pc, "_detect", return_value=("LISTING", MagicMock()))
-    mocker.patch.object(observation, "encode_jpeg", return_value=b"VIEW_JPG")
+    mocker.patch.object(observation, "encode_view_jpeg", return_value=b"VIEW_JPG")
 
 
 def test_tap_appends_changed_verdict(mocker, pc: PhysiClaw) -> None:

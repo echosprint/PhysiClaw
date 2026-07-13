@@ -78,15 +78,17 @@ class AutoPickConfig:
 class CameraConfig:
     """Resolution + pixel format the server requests from cv2.VideoCapture.
 
-    On Windows MSMF the default negotiation picks an uncompressed YUY2
-    mode that fits USB bandwidth, which usually caps at 640×480 even
-    on 4K cameras. Switching to MJPG-compressed lets us actually hit
-    1920×1080 over a single USB cable. cv2.set() is best-effort —
-    drivers snap to their nearest supported mode; the actual size is
-    logged by Camera._warmup after the first frame."""
+    cv2.set() is best-effort — drivers snap to their nearest supported
+    mode, so the 4K default serves 4K/2K/1080p cameras alike;
+    Camera._warmup logs the negotiated size and steps down
+    RESOLUTION_FALLBACKS when a driver mishandles the over-ask (Windows
+    MSMF). Extra capture pixels never reach the LLM (CompactConfig caps
+    every view) — they survive as sharpness in the downscale. MJPG
+    matters on Windows: the YUY2 default caps at 640×480 over USB even
+    on 4K cameras."""
 
-    width: int = 1920
-    height: int = 1080
+    width: int = 3840
+    height: int = 2160
     fourcc: str = "MJPG"
     # Exposure control (Windows/Linux; macOS AVFoundation exposes no
     # exposure props through OpenCV, so both keys are ignored there).
@@ -185,6 +187,13 @@ class ProviderConfig:
 
 @dataclass
 class CompactConfig:
+    """Size/quality of every image the LLM sees — applied server-side at
+    encode (`vision.util.encode_view_jpeg`) and again at the engine's
+    ingress (`compact.scale_image_bytes`) as a safety net. 1566 keeps a
+    portrait phone view at ~1.15 megapixels: Claude's hard-resize sweet
+    spot (1568), well inside Kimi/Qwen budgets — larger only adds
+    tokens + latency, smaller blurs fine print."""
+
     max_image_edge_px: int = 1566
     jpeg_quality: int = 85
 
@@ -314,9 +323,11 @@ _SECTION_COMMENTS: dict[str, str] = {
     "warm_start": "Timeouts for `physiclaw server --warm-start` hardware reconnect.",
     "auto_pick": "Timeouts for the camera auto-pick step in `physiclaw setup hardware`.",
     "camera": (
-        "Resolution + pixel format requested from cv2.VideoCapture. MJPG "
-        "is needed on Windows to hit 1080p — the YUY2 default snaps to "
-        "640×480 over USB. Drivers may round to the nearest supported mode."
+        "Resolution + pixel format requested from cv2.VideoCapture. The "
+        "default asks for 4K; drivers snap to the camera's nearest "
+        "supported mode (2K → 2560×1440, 1080p → 1920×1080), so one "
+        "default fits any camera. MJPG is needed on Windows for high "
+        "resolutions — the YUY2 default snaps to 640×480 over USB."
     ),
     "engine": (
         "Agent tool-call loop: runaway safeguards (turn cap, stuck guard, "
@@ -333,7 +344,13 @@ _SECTION_COMMENTS: dict[str, str] = {
         "MOONSHOT_API_KEY, OPENAI_API_KEY, …) override these. Treat "
         "keys here like ssh keys."
     ),
-    "compact": "Screenshot compression before sending to the LLM.",
+    "compact": (
+        "Size/quality of every image the LLM sees. `max_image_edge_px` caps "
+        "the long edge of camera views and phone screenshots (applied "
+        "server-side at capture and again at the engine's ingress); 1566 ≈ "
+        "the ~1.15-megapixel vision sweet spot — larger wastes tokens, "
+        "smaller blurs fine print."
+    ),
     "memory": "Daily-log loading: bootstrap preload + on-demand `read_logs` defaults.",
     "claude": "Applied when [agent] model = 'claude-code/...' (external CLI subprocess).",
     "retention": "Purge window for on-disk engine trace logs + cron job history.",

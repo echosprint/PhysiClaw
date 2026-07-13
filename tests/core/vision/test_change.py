@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import cv2
 import numpy as np
 import pytest
 
@@ -92,8 +93,6 @@ def test_full_frame_change_detected_regardless_of_crop(frac: float) -> None:
 
 # ---------- robustness: vibration / autofocus / exposure ----------
 
-import cv2  # noqa: E402
-
 
 def _textured(h: int = 200, w: int = 100, seed: int = 0) -> np.ndarray:
     rng = np.random.default_rng(seed)
@@ -172,3 +171,37 @@ def test_periodic_content_with_vibration_not_changed() -> None:
     patt = np.dstack([np.tile(row[:, None], (1, 200))] * 3)
     shaken = np.roll(patt, 3, axis=0)
     assert change.frames_changed(patt, shaken) is False
+
+
+# ---------- capture-scale normalization ----------
+
+
+def test_prepare_normalizes_oversized_frames_to_work_scale() -> None:
+    # Crops now arrive at the configurable view cap (> 1024); every pixel
+    # constant in the module was tuned at the 1024 long edge, so _prepare
+    # must bring larger inputs back to that working scale.
+    before = _frame(h=2048, w=1000)
+    after = _frame(h=2048, w=1000)
+
+    pair = change._prepare(before, after)
+
+    assert pair is not None
+    a, b = pair
+    assert max(a.shape) <= change._WORK_LONG_EDGE
+    assert max(b.shape) <= change._WORK_LONG_EDGE
+
+
+def test_localized_change_verdict_stable_across_capture_scale() -> None:
+    # The same physical badge, seen through a 1080p and a 4K capture,
+    # must produce the same verdict — normalization makes the diff
+    # resolution-independent.
+    before = _frame(h=1000, w=500)
+    after = _frame(h=1000, w=500)
+    after[500:540, 200:240] = 255  # coherent badge-sized region
+
+    assert change.frames_changed(before, after) is True
+
+    before_2x = cv2.resize(before, (1000, 2000), interpolation=cv2.INTER_NEAREST)
+    after_2x = cv2.resize(after, (1000, 2000), interpolation=cv2.INTER_NEAREST)
+
+    assert change.frames_changed(before_2x, after_2x) is True

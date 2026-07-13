@@ -389,3 +389,26 @@ def test_watchdog_constants_unchanged() -> None:
     assert ZONES == [(0.0, 0.1), (0.5, 1.0), (0.80, 1.0)]
     assert 0 < EMA_FAST < 1
     assert 0 < EMA_SLOW < EMA_FAST
+
+
+def test_crop_zones_normalizes_wide_crops_to_work_width() -> None:
+    # A 4K capture yields zone crops ~2× the 1080p pixel scale the badge
+    # area threshold was tuned at — crops are brought back to the tuned
+    # working width.
+    frame = np.zeros((3800, 2000, 3), dtype=np.uint8)
+
+    crops = _crop_zones(frame, _fake_transforms(w=2000, h=3800))
+
+    assert crops is not None
+    assert all(c.shape[1] == watchdog._ZONE_WORK_WIDTH for c in crops)
+
+
+def test_crop_zones_leaves_1080p_scale_crops_untouched() -> None:
+    # 1080p-era rigs sit below the working width — no resize, byte-stable
+    # behavior for existing tuning.
+    frame = np.zeros((200, 100, 3), dtype=np.uint8)
+
+    crops = _crop_zones(frame, _fake_transforms(w=100, h=200))
+
+    assert crops is not None
+    assert all(c.shape[1] == 100 for c in crops)

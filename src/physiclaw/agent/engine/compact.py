@@ -20,9 +20,11 @@
      assistant message and its tool_calls stay intact, so the decision
      history ("I called peek here, tapped there") is preserved.
 
-  2. `scale_image_bytes` — ingress re-encode: normalize every incoming
-     tool-result image to JPEG with long edge ≤ MAX_IMAGE_EDGE. Drops PNG
-     transparency (fine for screenshots), typically cuts payload 3–10×.
+  2. `scale_image_bytes` — ingress cap: every incoming tool-result image
+     leaves as JPEG with long edge ≤ MAX_IMAGE_EDGE. The server sizes
+     its views to the same knob, so the steady state is a byte-identical
+     pass-through; oversized or non-JPEG strays get resized/re-encoded
+     (drops PNG transparency — fine for screenshots).
 
 `drop_stale_screens` operates on `Message` DTOs: it replaces each stale
 `ImageBlock`-bearing `ToolResultMessage`'s content with the stub string
@@ -367,8 +369,15 @@ def _format_artifact_text(name: str, arguments: dict, content: str) -> str:
     return f"{name}({args_str}) →\n{content}"
 
 
+_JPEG_MAGIC = b"\xff\xd8\xff"  # JPEG SOI marker
+
+
 def scale_image_bytes(raw: bytes) -> tuple[bytes, str]:
     """Decode, scale long-edge to MAX_IMAGE_EDGE if larger, re-encode JPEG.
+
+    A JPEG already within the cap (the steady state — the server sizes
+    views to the same knob) passes through byte-identical rather than
+    stacking a second generation of q85 loss onto on-screen text.
 
     Returns (bytes, mime_type). On decode/encode failure returns the input
     unchanged with a generic mime so the caller still has something to
@@ -381,6 +390,8 @@ def scale_image_bytes(raw: bytes) -> tuple[bytes, str]:
         return raw, "application/octet-stream"
     h, w = img.shape[:2]
     long_edge = max(h, w)
+    if long_edge <= MAX_IMAGE_EDGE and raw.startswith(_JPEG_MAGIC):
+        return raw, "image/jpeg"
     if long_edge > MAX_IMAGE_EDGE:
         scale = MAX_IMAGE_EDGE / long_edge
         new_size = (int(round(w * scale)), int(round(h * scale)))

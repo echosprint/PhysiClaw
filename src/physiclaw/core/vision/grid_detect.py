@@ -31,10 +31,21 @@ log = logging.getLogger(__name__)
 # in detect_red_dots then drops the extra glare/noise blobs it lets through.
 RED_DOT_MIN_REDNESS = 30
 
-# Contour filters for a calibration dot (small, round).
+# Contour filters for a calibration dot (small, round). The area bounds
+# were tuned on 1920×1080 capture; they scale with the frame's pixel
+# count relative to that reference (a 4K frame renders the same physical
+# dot with 4× the area — DOT_MAX_AREA would otherwise reject real dots).
+# Never scaled below the tuned values: sub-1080p frames keep them as-is.
 DOT_MIN_AREA = 50
 DOT_MAX_AREA = 10000
 DOT_MIN_CIRCULARITY = 0.5
+_DOT_AREA_REF_PX = 1920 * 1080
+
+
+def _dot_area_bounds(frame: np.ndarray) -> tuple[float, float]:
+    """(min, max) contour area for a dot, scaled to the frame's resolution."""
+    scale = max(1.0, (frame.shape[0] * frame.shape[1]) / _DOT_AREA_REF_PX)
+    return DOT_MIN_AREA * scale, DOT_MAX_AREA * scale
 
 
 # ─── Red dot detection ────────────────────────────────────────
@@ -63,10 +74,11 @@ def detect_red_dots(
 
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
+    min_area, max_area = _dot_area_bounds(frame)
     cands: list[tuple[float, float, float]] = []  # (cx, cy, area)
     for cnt in contours:
         area = cv2.contourArea(cnt)
-        if area < DOT_MIN_AREA or area > DOT_MAX_AREA:
+        if area < min_area or area > max_area:
             continue
         perimeter = cv2.arcLength(cnt, True)
         if perimeter == 0:

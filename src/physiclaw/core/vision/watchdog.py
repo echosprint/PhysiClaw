@@ -23,7 +23,7 @@ import time
 import numpy as np
 
 from physiclaw.core.vision.colors import hsv_mask
-from physiclaw.core.vision.preprocess import grayscale, to_hsv
+from physiclaw.core.vision.preprocess import grayscale, resize_to_width, to_hsv
 
 log = logging.getLogger(__name__)
 
@@ -127,8 +127,20 @@ def _ema_update(ema: np.ndarray, frame: np.ndarray, alpha: float) -> np.ndarray:
     return alpha * frame.astype(np.float32) + (1 - alpha) * ema
 
 
+# Zone crops wider than this are downscaled before the EMAs. The badge
+# check counts pixels against BADGE_MIN_AREA, so its sensitivity is tied
+# to the crop's pixel scale: thresholds were tuned on 1080p captures,
+# where the phone screen spans roughly 500–900 camera pixels — those
+# rigs pass through untouched (resize_to_width never upscales), while
+# 2K/4K captures land back on the tuned scale. Also caps the 1 Hz EMA
+# cost at 1080p-era levels regardless of capture resolution. The
+# std/mean content checks are distribution-shaped and don't care.
+_ZONE_WORK_WIDTH = 900
+
+
 def _crop_zones(frame, transforms) -> list[np.ndarray] | None:
-    """Crop ZONES from camera frame using calibration transforms."""
+    """Crop ZONES from camera frame using calibration transforms,
+    normalized to at most ``_ZONE_WORK_WIDTH`` wide."""
     h, w = frame.shape[:2]
     crops = []
     for y0, y1 in ZONES:
@@ -140,7 +152,7 @@ def _crop_zones(frame, transforms) -> list[np.ndarray] | None:
         ]
         if not crop.size:
             return None
-        crops.append(crop)
+        crops.append(resize_to_width(crop, _ZONE_WORK_WIDTH))
     return crops
 
 

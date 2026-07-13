@@ -76,6 +76,40 @@ class Calibration:
             cam_size=self.cam_size,
         )
 
+    def reconcile_cam_size(self, live_size: tuple[int, int]) -> bool:
+        """Adopt the live camera's frame size when it differs from the
+        calibrated one but keeps the aspect ratio (the same camera
+        negotiated a different mode — e.g. the requested capture
+        resolution changed between calibrations).
+
+        ``pct_to_cam`` maps screen 0-1 to camera 0-1, so it holds across
+        any same-FOV mode switch; only ``cam_size`` (the pixel boundary)
+        needs updating. A camera that crops its FOV at some modes breaks
+        the 0-1 mapping despite matching aspect — warm-start's sanity tap
+        is the end-to-end check that catches that case.
+
+        Returns True when compatible (updated in place, or already
+        equal); False on an aspect mismatch — the mapping can't be
+        salvaged, recalibrate. ``live_size`` is the ROTATED frame size,
+        the same space ``cam_size`` was measured in.
+        """
+        if self.cam_size is None or tuple(live_size) == tuple(self.cam_size):
+            return True
+        cal_w, cal_h = self.cam_size
+        live_w, live_h = live_size
+        if abs(live_w * cal_h - cal_w * live_h) > 0.01 * cal_w * live_h:
+            log.error(
+                f"Camera aspect changed: calibrated {cal_w}x{cal_h}, "
+                f"live {live_w}x{live_h} — recalibration required"
+            )
+            return False
+        log.info(
+            f"Camera resolution changed: calibrated {cal_w}x{cal_h} → "
+            f"live {live_w}x{live_h} (same aspect) — cam_size rescaled"
+        )
+        self.cam_size = (live_w, live_h)
+        return True
+
     def pct_to_grbl_mm(self, x: float, y: float) -> tuple[float, float] | None:
         """Convert screen pct (0-1, x=horizontal, y=vertical) to GRBL mm
         using just `pct_to_grbl`. Returns None until that affine is set

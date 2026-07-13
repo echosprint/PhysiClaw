@@ -14,7 +14,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from physiclaw.core.vision.preprocess import grayscale
+from physiclaw.common.config import CONFIG
+from physiclaw.core.vision.preprocess import grayscale, resize_to_max_edge
 
 log = logging.getLogger(__name__)
 
@@ -27,6 +28,18 @@ def encode_jpeg(frame: np.ndarray, quality: int = 85) -> bytes:
     """Encode a BGR frame to JPEG bytes."""
     _, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
     return jpeg.tobytes()
+
+
+def encode_view_jpeg(frame: np.ndarray) -> bytes:
+    """Encode an LLM-bound view: cap the long edge at the shared
+    ``[compact] max_image_edge_px`` knob, then JPEG-encode.
+
+    Every producer of agent-facing views (peek, screenshot, gesture
+    after-views) routes through this, so the size cap holds by
+    construction — a new producer can't ship an oversized image just
+    because its source frame wasn't pre-cropped.
+    """
+    return encode_jpeg(resize_to_max_edge(frame, CONFIG.compact.max_image_edge_px))
 
 
 def decode_image(data: bytes) -> np.ndarray:

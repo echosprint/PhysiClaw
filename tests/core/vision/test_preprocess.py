@@ -8,6 +8,7 @@ import cv2
 import numpy as np
 
 from physiclaw.core.vision.preprocess import (
+    CONFIG,
     crop_to_phone_screen,
     gaussian_blur,
     grayscale,
@@ -189,3 +190,15 @@ def test_crop_to_phone_screen_downscales_when_long_edge_exceeds_cap() -> None:
     # Long edge 900 → 400; short edge 700 → int(700 * 400/900) = 311.
     assert max(out.shape[:2]) == 400
     assert out.shape == (400, 311, 3)
+
+
+def test_crop_to_phone_screen_default_cap_reads_compact_config(monkeypatch) -> None:
+    # No explicit max_long_edge → the single [compact] max_image_edge_px
+    # knob decides how large a view the LLM sees.
+    monkeypatch.setattr(CONFIG.compact, "max_image_edge_px", 400)
+    frame = np.zeros((900, 700, 3), dtype=np.uint8)
+    transforms = SimpleNamespace(bbox_to_pixel_rect=lambda b: ((0, 0), (700, 900)))
+
+    out = crop_to_phone_screen(frame, transforms)
+
+    assert max(out.shape[:2]) == 400

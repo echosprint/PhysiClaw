@@ -11,7 +11,8 @@ Pipeline (calibrated per the TOCTOU-defense literature: pixel noise
 threshold ~20–25/255, real transitions change >0.2% of pixels while
 benign flicker stays under ~0.05%):
 
-    grayscale → Gaussian blur (kills sensor noise + sub-pixel wobble)
+    normalize to _WORK_LONG_EDGE (the scale the constants were tuned at)
+    → grayscale → Gaussian blur (kills sensor noise + sub-pixel wobble)
     → clamped brightness align → translation align
     → absdiff → threshold → morphological open
     → changed if DISTRIBUTED (ratio > RATIO_THRESHOLD)
@@ -58,7 +59,11 @@ accumulates, never acts on a single verdict.
 import cv2
 import numpy as np
 
-from physiclaw.core.vision.preprocess import gaussian_blur, grayscale
+from physiclaw.core.vision.preprocess import (
+    gaussian_blur,
+    grayscale,
+    resize_to_max_edge,
+)
 
 # Fraction of frame height to drop from the top before diffing — covers
 # the iOS status bar (clock, signal) on the cropped phone-screen frame.
@@ -106,6 +111,14 @@ _MIN_TEXTURE_VAR = 1.0
 _BLUR_KSIZE = 5
 _OPEN_KERNEL = np.ones((3, 3), np.uint8)
 
+# Every pixel constant above (noise floor vs the 5px blur, the 3×3 opening,
+# MAX_ALIGN_SHIFT, LOCAL_BLOB_MIN_PX) was tuned on phone-screen crops capped
+# at a 1024 long edge. The crop cap is now configurable and larger, so pin
+# the diff's working scale here: inputs are normalized down to this long
+# edge before any comparison. Keeps every verdict byte-identical across
+# camera resolutions and view-cap settings.
+_WORK_LONG_EDGE = 1024
+
 
 def _prepare(
     before: np.ndarray, after: np.ndarray
@@ -113,6 +126,8 @@ def _prepare(
     """Crop, gray, blur, brightness-align (clamped), vibration-align.
     Returns the comparable gray pair, or None when the rig moved too far
     to compare honestly."""
+    before = resize_to_max_edge(before, _WORK_LONG_EDGE)
+    after = resize_to_max_edge(after, _WORK_LONG_EDGE)
     if before.shape != after.shape:
         after = cv2.resize(after, (before.shape[1], before.shape[0]))
     top = int(before.shape[0] * STATUS_BAR_FRAC)

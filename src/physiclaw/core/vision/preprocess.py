@@ -5,7 +5,9 @@ is the one home, so a camera- or codec-level change is a one-place
 edit. Parameters deliberately stay per-caller — detection thresholds
 elsewhere (change-diff noise floors, blur gates) are tuned against the
 exact kernel and size their caller passes, so this module deduplicates
-the code, never the tuning.
+the code, never the tuning. The one exception is `crop_to_phone_screen`'s
+view cap, which defaults to ``CONFIG.compact.max_image_edge_px``: that
+number is a global LLM-payload budget, not per-caller algorithm tuning.
 
 Two resize flavors exist because their callers normalize different
 dimensions: `resize_to_max_edge` caps the long edge (vision-token cap on
@@ -15,6 +17,8 @@ only comparable at one working width).
 
 import cv2
 import numpy as np
+
+from physiclaw.common.config import CONFIG
 
 
 def grayscale(frame: np.ndarray) -> np.ndarray:
@@ -77,12 +81,20 @@ def phone_screen_crop_box(
 
 
 def crop_to_phone_screen(
-    frame: np.ndarray, transforms, max_long_edge: int = 1024
+    frame: np.ndarray, transforms, max_long_edge: int | None = None
 ) -> np.ndarray:
     """Crop to the phone-screen region and downscale to cap vision tokens.
 
+    ``max_long_edge`` defaults to ``CONFIG.compact.max_image_edge_px`` —
+    the single knob for how large an image the LLM sees. Higher-resolution
+    captures (2K/4K cameras) still land on the same edge; the extra source
+    pixels survive as sharpness through the INTER_AREA downscale, not as
+    payload.
+
     Returns the frame untouched if calibration is missing.
     """
+    if max_long_edge is None:
+        max_long_edge = CONFIG.compact.max_image_edge_px
     box = phone_screen_crop_box(frame, transforms)
     if box is None:
         return frame

@@ -131,6 +131,22 @@ def try_resume(cam_index_override: int | None) -> bool:
         log.error(f"--warm-start: hardware reconnect failed: {e}")
         return False
 
+    # The camera may have negotiated a different resolution than the
+    # bundle was calibrated at (e.g. the [camera] config changed, or the
+    # default moved). Same aspect → the 0-1 mapping holds, adopt the live
+    # pixel size; different aspect → the mapping is broken, recalibrate.
+    live = physiclaw.cam.peek()
+    if live is None:
+        log.error("--warm-start: camera produced no frame")
+        return False
+    live_h, live_w = live.shape[:2]
+    if not cal.reconcile_cam_size((live_w, live_h)):
+        log.error(
+            "--warm-start: capture aspect ratio changed since calibration "
+            "— run `physiclaw` setup again"
+        )
+        return False
+
     # The tip rests at the park spot, not the calibrated origin that
     # arm.setup() just assumed — re-pin the frame from it (see
     # restore_park_origin). The sanity tap below catches the cases where the

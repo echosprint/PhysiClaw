@@ -357,3 +357,24 @@ def test_find_numpad_digit_skips_two_keys_on_same_row_or_column() -> None:
     ]
 
     assert find_numpad_digit(elements, "5") is None
+
+
+def test_encode_view_jpeg_caps_long_edge_at_compact_config(monkeypatch) -> None:
+    from physiclaw.core.vision.util import CONFIG, decode_image, encode_view_jpeg
+
+    monkeypatch.setattr(CONFIG.compact, "max_image_edge_px", 100)
+    img = np.full((300, 600, 3), 128, dtype=np.uint8)
+
+    out = decode_image(encode_view_jpeg(img))
+
+    assert max(out.shape[:2]) == 100
+
+
+def test_encode_view_jpeg_leaves_small_frames_at_native_size() -> None:
+    from physiclaw.core.vision.util import decode_image, encode_view_jpeg
+
+    img = np.full((300, 200, 3), 128, dtype=np.uint8)
+
+    out = decode_image(encode_view_jpeg(img))
+
+    assert out.shape == (300, 200, 3)
