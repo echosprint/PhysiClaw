@@ -433,6 +433,32 @@ def test_close_stops_thread_and_releases(mocker) -> None:
     assert not cam._thread.is_alive()
 
 
+def test_close_leaks_cap_instead_of_deadlocking_when_lock_held(mocker, caplog) -> None:
+    """A reader wedged inside a blocking cap.read() holds _cap_lock
+    forever; close() must time out and leak the handle, never release
+    the cap lock-free (native race can segfault) and never hang."""
+    import logging
+
+    vc = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 200)
+    mocker.patch.object(cv2, "VideoCapture", return_value=vc)
+    cam = Camera(index=0)
+    mocker.patch.object(cam, "CLOSE_JOIN_TIMEOUT_SECONDS", 0.05)
+    mocker.patch.object(cam, "CLOSE_LOCK_TIMEOUT_SECONDS", 0.05)
+    assert cam._cap_lock.acquire(timeout=1.0)  # simulate the wedged reader
+    try:
+        with caplog.at_level(logging.WARNING, logger="physiclaw.core.hardware.camera"):
+            cam.close()  # must return, not hang
+
+        assert vc.released is False
+        assert any(
+            "leaking the capture handle" in r.getMessage() for r in caplog.records
+        )
+    finally:
+        cam._cap_lock.release()
+        cam.close()  # real cleanup now that the lock is free
+    assert vc.released is True
+
+
 # ---------- exposure control ----------
 
 

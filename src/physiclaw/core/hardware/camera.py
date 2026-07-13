@@ -161,6 +161,13 @@ class Camera:
     # camera doesn't spin-loop the reader thread.
     READER_BACKOFF_SECONDS = 0.5
 
+    # close(): how long to wait for the reader thread, then for the cap
+    # lock. A reader wedged inside a blocking native cap.read() (USB bus
+    # suspend) can hold the lock indefinitely; close() must not hang
+    # the caller on it.
+    CLOSE_JOIN_TIMEOUT_SECONDS = 3.0
+    CLOSE_LOCK_TIMEOUT_SECONDS = 2.0
+
     def __init__(self, index=0):
         self.index = index
         self.rotation: int = -1  # no rotation until calibration step 3 sets it
@@ -467,6 +474,18 @@ class Camera:
     def close(self):
         self._stopped.set()
         if self._thread.is_alive():
-            self._thread.join(timeout=3.0)
-        with self._cap_lock:
-            self.cap.release()
+            self._thread.join(timeout=self.CLOSE_JOIN_TIMEOUT_SECONDS)
+        # Never release the cap without holding the lock — a native
+        # release() concurrent with the reader's cap.read() can segfault
+        # the whole process. If the reader is wedged holding the lock,
+        # leak the handle instead of deadlocking the caller.
+        if self._cap_lock.acquire(timeout=self.CLOSE_LOCK_TIMEOUT_SECONDS):
+            try:
+                self.cap.release()
+            finally:
+                self._cap_lock.release()
+        else:
+            log.warning(
+                f"Camera {self.index}: close() couldn't take the cap lock "
+                "(reader wedged in cap.read()?) — leaking the capture handle"
+            )
