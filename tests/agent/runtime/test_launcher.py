@@ -11,7 +11,6 @@ from physiclaw.agent.runtime.launcher import (
     resolve,
 )
 
-
 # ---------- _claude_available ----------
 
 
@@ -92,7 +91,6 @@ def test_resolve_succeeds_for_claude_code_when_available(
 # ---------- launch() ----------
 
 
-@pytest.mark.integration
 def test_launch_runs_engine_path_for_in_process_provider(
     mocker,
     monkeypatch: pytest.MonkeyPatch,
@@ -133,7 +131,6 @@ def test_launch_runs_engine_path_for_in_process_provider(
     assert kwargs["label"].startswith("engine=physiclaw")
 
 
-@pytest.mark.integration
 def test_launch_runs_claude_path_for_claude_code(
     mocker,
     monkeypatch: pytest.MonkeyPatch,
@@ -172,7 +169,6 @@ def test_launch_runs_claude_path_for_claude_code(
     assert runtime_cls.call_args.kwargs["label"].startswith("engine=claude-code")
 
 
-@pytest.mark.integration
 def test_launch_normalizes_proxy_env_first(
     mocker,
     monkeypatch: pytest.MonkeyPatch,
@@ -212,7 +208,6 @@ def _stub_asyncio_run(mocker, *, raise_kbd_interrupt: bool = False):
     return mocker.patch.object(launcher.asyncio, "run", side_effect=_run)
 
 
-@pytest.mark.integration
 def test_launch_exits_cleanly_when_no_model_configured(
     mocker,
     monkeypatch: pytest.MonkeyPatch,
@@ -237,7 +232,6 @@ def test_launch_exits_cleanly_when_no_model_configured(
     assert "physiclaw models" in captured.err
 
 
-@pytest.mark.integration
 def test_launch_swallows_keyboard_interrupt(
     mocker,
     monkeypatch: pytest.MonkeyPatch,
@@ -255,7 +249,6 @@ def test_launch_swallows_keyboard_interrupt(
     launcher.launch()
 
 
-@pytest.mark.integration
 def test_launch_seeds_physiclaw_server_env(
     mocker,
     monkeypatch: pytest.MonkeyPatch,
@@ -277,7 +270,6 @@ def test_launch_seeds_physiclaw_server_env(
     assert os.environ.get("PHYSICLAW_SERVER") == "http://h:42"
 
 
-@pytest.mark.integration
 def test_launch_verbose_flag_sets_debug_level(
     mocker,
     monkeypatch: pytest.MonkeyPatch,

@@ -1,7 +1,7 @@
-"""Integration tests for `physiclaw.agent.engine.engine` — `_loop`,
+"""Tests for `physiclaw.agent.engine.engine` — `_loop`,
 `_run_session`, `_dispatch`, and `run`.
 
-Phase 5 — exercises the full session lifecycle with a scripted
+Exercises the full session lifecycle with a scripted
 FakeProvider and FakeMcpClient. Existing pure-helper tests live in
 `test_engine.py`; this file owns the loop coverage. Policy-object units
 (gates / guards / observers) are exercised through the loop here — their
@@ -16,17 +16,35 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from physiclaw.agent.engine import engine as engine_mod
 from physiclaw.agent.engine import (
     builtin_tool as builtin_tool_mod,
+)
+from physiclaw.agent.engine import (
     compact as compact_mod,
+)
+from physiclaw.agent.engine import engine as engine_mod
+from physiclaw.agent.engine import (
     jobs as jobs_mod,
+)
+from physiclaw.agent.engine import (
     memory as memory_mod,
+)
+from physiclaw.agent.engine import (
     plan as plan_mod,
+)
+from physiclaw.agent.engine import (
     policy as policy_mod,
+)
+from physiclaw.agent.engine import (
     prompt as prompt_mod,
+)
+from physiclaw.agent.engine import (
     scratchpad as scratchpad_mod,
+)
+from physiclaw.agent.engine import (
     screen_layout as screen_layout_mod,
+)
+from physiclaw.agent.engine import (
     skill as skill_mod,
 )
 from physiclaw.agent.engine.builtin_tool import LocalTool
@@ -43,10 +61,6 @@ from physiclaw.agent.engine.session import Session
 from physiclaw.agent.runtime.hook import Trigger
 from physiclaw.agent.runtime.sentinel import DONE, FAIL, IDLE, STUCK, WAIT
 from physiclaw.common.config import CONFIG
-
-
-pytestmark = [pytest.mark.slow]
-
 
 # ---------- Fakes ----------
 
@@ -1258,8 +1272,8 @@ def test_should_capture_matrix() -> None:
 
 
 def test_should_capture_disabled(monkeypatch) -> None:
-    from physiclaw.common import config
     from physiclaw.agent.engine.pitfalls import should_capture
+    from physiclaw.common import config
 
     monkeypatch.setattr(config.CONFIG.pitfalls, "capture_enabled", False)
     assert should_capture(DONE, 999, Session())[0] is False  # long DONE, but off

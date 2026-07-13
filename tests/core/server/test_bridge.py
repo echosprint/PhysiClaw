@@ -17,9 +17,6 @@ import pytest
 from physiclaw.core.server import bridge as bridge_reg
 
 
-pytestmark = [pytest.mark.integration]
-
-
 def test_bridge_register_wires_control_routes_only(fake_mcp) -> None:
     bridge_reg.register(
         fake_mcp,

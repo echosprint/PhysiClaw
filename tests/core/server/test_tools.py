@@ -16,14 +16,9 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-
 from mcp.server.fastmcp import Image
 
 from physiclaw.core.server import tools as tools_mod
-
-
-pytestmark = [pytest.mark.integration]
-
 
 # ---------- Fake MCP ----------
 

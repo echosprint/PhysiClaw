@@ -12,9 +12,6 @@ import pytest
 from physiclaw.core.server import calibration as calib_reg
 
 
-pytestmark = [pytest.mark.integration]
-
-
 def test_calibration_register_wires_all_routes(fake_mcp) -> None:
     calib_reg.register(
         fake_mcp,

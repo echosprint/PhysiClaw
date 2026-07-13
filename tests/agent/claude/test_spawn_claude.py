@@ -1,4 +1,4 @@
-"""Phase 5 integration tests for `spawn_claude` — async subprocess + retry loop.
+"""Tests for `spawn_claude` — async subprocess + retry loop.
 
 Helper coverage lives in `test_spawn.py`; this file owns the
 spawn_claude flow with a fake `asyncio.create_subprocess_exec`.
@@ -14,10 +14,6 @@ import pytest
 
 from physiclaw.agent.claude import spawn as spawn_mod
 from physiclaw.agent.runtime.hook import Trigger
-
-
-pytestmark = [pytest.mark.integration]
-
 
 # ---------- Fakes ----------
 

@@ -15,9 +15,6 @@ import pytest
 from physiclaw.core.server import hardware as hw_reg
 
 
-pytestmark = [pytest.mark.integration]
-
-
 def test_hardware_register_wires_all_routes(fake_mcp) -> None:
     hw_reg.register(fake_mcp, physiclaw=MagicMock(), phone=MagicMock())
 

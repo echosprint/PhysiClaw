@@ -14,7 +14,6 @@ import pytest
 
 from physiclaw.core.server import net, warm_start
 
-
 # ---------- wait_for_port re-export ----------
 
 
@@ -103,9 +102,6 @@ def test_try_resume_returns_false_when_hardware_connect_raises(
 # ---------- try_resume: post-connect flow ----------
 
 
-pytestmark_phase5 = [pytest.mark.integration]
-
-
 def _ready_bundle() -> MagicMock:
     """A complete-and-loaded Calibration mock."""
     cal = MagicMock()
@@ -144,7 +140,6 @@ def _patch_resume_env(mocker, cal, app, sanity: bool = True) -> MagicMock:
     return mocker.patch.object(warm_start, "_sanity", return_value=sanity)
 
 
-@pytest.mark.integration
 def test_try_resume_succeeds_on_clean_path(mocker) -> None:
     cal = _ready_bundle()
     app = _ready_app(cal)
@@ -179,7 +174,6 @@ def test_try_resume_succeeds_on_clean_path(mocker) -> None:
     app.mark_ready.assert_called_once()
 
 
-@pytest.mark.integration
 def test_try_resume_uses_cam_index_override(mocker) -> None:
     cal = _ready_bundle()
     app = _ready_app(cal)
@@ -198,7 +192,6 @@ def test_try_resume_uses_cam_index_override(mocker) -> None:
     app.connect_camera.assert_called_once_with(3)
 
 
-@pytest.mark.integration
 def test_try_resume_falls_back_to_cam_index_zero(mocker) -> None:
     cal = _ready_bundle()
     cal.cam_index = None
@@ -218,7 +211,6 @@ def test_try_resume_falls_back_to_cam_index_zero(mocker) -> None:
     app.connect_camera.assert_called_once_with(0)
 
 
-@pytest.mark.integration
 def test_try_resume_returns_false_when_bridge_never_connects(
     mocker,
     caplog: pytest.LogCaptureFixture,
@@ -244,7 +236,6 @@ def test_try_resume_returns_false_when_bridge_never_connects(
     assert any("/bridge page not polling" in r.getMessage() for r in caplog.records)
 
 
-@pytest.mark.integration
 def test_try_resume_returns_false_when_sanity_fails(mocker) -> None:
     cal = _ready_bundle()
     app = _ready_app(cal)
@@ -264,7 +255,6 @@ def test_try_resume_returns_false_when_sanity_fails(mocker) -> None:
     app.mark_ready.assert_not_called()
 
 
-@pytest.mark.integration
 def test_try_resume_reconciles_live_resolution_with_bundle(mocker) -> None:
     # The camera negotiated 4K but the bundle was calibrated at 1080p —
     # try_resume must offer the live ROTATED (w, h) to the bundle's
@@ -280,7 +270,6 @@ def test_try_resume_reconciles_live_resolution_with_bundle(mocker) -> None:
     cal.reconcile_cam_size.assert_called_once_with((3840, 2160))
 
 
-@pytest.mark.integration
 def test_try_resume_returns_false_when_aspect_changed(mocker) -> None:
     cal = _ready_bundle()
     cal.reconcile_cam_size.return_value = False
@@ -294,7 +283,6 @@ def test_try_resume_returns_false_when_aspect_changed(mocker) -> None:
     app.mark_ready.assert_not_called()
 
 
-@pytest.mark.integration
 def test_try_resume_returns_false_when_camera_has_no_frame(mocker) -> None:
     cal = _ready_bundle()
     app = _ready_app(cal)
@@ -310,7 +298,6 @@ def test_try_resume_returns_false_when_camera_has_no_frame(mocker) -> None:
 # ---------- _sanity ----------
 
 
-@pytest.mark.integration
 def test_sanity_passes_when_all_taps_within_tolerance(mocker) -> None:
     fake_validate = mocker.patch(
         "physiclaw.core.calibration.calibrate.validate_calibration",
@@ -331,7 +318,6 @@ def test_sanity_passes_when_all_taps_within_tolerance(mocker) -> None:
     assert phone.set_mode.call_args_list[-1].args == ("bridge",)
 
 
-@pytest.mark.integration
 def test_sanity_fails_when_no_taps_received(
     mocker,
     caplog: pytest.LogCaptureFixture,
@@ -355,7 +341,6 @@ def test_sanity_fails_when_no_taps_received(
     assert any("no taps registered" in r.getMessage() for r in caplog.records)
 
 
-@pytest.mark.integration
 def test_sanity_fails_when_taps_received_but_off(
     mocker,
     caplog: pytest.LogCaptureFixture,
@@ -379,7 +364,6 @@ def test_sanity_fails_when_taps_received_but_off(
     assert any("looks stale" in r.getMessage() for r in caplog.records)
 
 
-@pytest.mark.integration
 def test_sanity_restores_bridge_mode_on_validate_exception(mocker) -> None:
     mocker.patch(
         "physiclaw.core.calibration.calibrate.validate_calibration",

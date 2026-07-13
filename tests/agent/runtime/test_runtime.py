@@ -107,9 +107,6 @@ def test_runtime_stop_flips_flag() -> None:
 # ---------- Runtime.start integration ----------
 
 
-pytestmark_phase5 = [pytest.mark.integration]
-
-
 def _stop_after_n(rt, n: int):
     """Build an async sleep stub that calls rt.stop() on the Nth call."""
     counter = {"n": 0}
@@ -123,7 +120,6 @@ def _stop_after_n(rt, n: int):
 
 
 @pytest.mark.asyncio
-@pytest.mark.integration
 async def test_start_ready_calls_react_when_triggers_fire(mocker) -> None:
     react_calls: list = []
 
@@ -150,7 +146,6 @@ async def test_start_ready_calls_react_when_triggers_fire(mocker) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.integration
 async def test_start_skips_react_when_not_ready(mocker) -> None:
     react_spy = mocker.MagicMock()
     rt = runtime.Runtime(react=react_spy, interval=0.01)
@@ -167,7 +162,6 @@ async def test_start_skips_react_when_not_ready(mocker) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.integration
 async def test_start_warns_only_once_per_blip(
     mocker,
     caplog: pytest.LogCaptureFixture,
@@ -194,7 +188,6 @@ async def test_start_warns_only_once_per_blip(
 
 
 @pytest.mark.asyncio
-@pytest.mark.integration
 async def test_start_logs_ready_transition(
     mocker,
     caplog: pytest.LogCaptureFixture,
@@ -216,7 +209,6 @@ async def test_start_logs_ready_transition(
 
 
 @pytest.mark.asyncio
-@pytest.mark.integration
 async def test_start_exception_in_tick_logs_and_continues(
     mocker,
     caplog: pytest.LogCaptureFixture,
@@ -246,7 +238,6 @@ async def test_start_exception_in_tick_logs_and_continues(
 
 
 @pytest.mark.asyncio
-@pytest.mark.integration
 async def test_start_cancellation_propagates(mocker) -> None:
     rt = runtime.Runtime(react=lambda t: None, interval=0.01)
 

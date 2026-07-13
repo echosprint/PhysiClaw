@@ -13,9 +13,6 @@ import pytest
 from physiclaw.core.server import watch as watch_reg
 
 
-pytestmark = [pytest.mark.integration]
-
-
 def test_watch_register_wires_all_routes(fake_mcp) -> None:
     watch_reg.register(fake_mcp, physiclaw=MagicMock())
 

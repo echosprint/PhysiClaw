@@ -1,4 +1,4 @@
-"""Tests for `physiclaw.core.hardware.camera` — Phase 5 hardware fakes.
+"""Tests for `physiclaw.core.hardware.camera` — hardware fakes.
 
 `cv2.VideoCapture` is faked via attribute patches so the real
 AVFoundation / V4L stack never opens. Background reader thread is
@@ -23,10 +23,6 @@ from physiclaw.core.hardware.camera import (
     Camera,
     silenced_stderr,
 )
-
-
-pytestmark = [pytest.mark.integration]
-
 
 # ---------- silenced_stderr ----------
 

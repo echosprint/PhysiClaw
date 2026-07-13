@@ -1,4 +1,4 @@
-"""Tests for `physiclaw.core.hardware.arm` — Phase 5 hardware fakes.
+"""Tests for `physiclaw.core.hardware.arm` — hardware fakes.
 
 `serial.Serial` is replaced with a `FakeSerial` that records writes and
 returns scripted replies. GRBL's textual line protocol is small enough
@@ -17,10 +17,6 @@ import pytest
 
 from physiclaw.core.hardware import arm as arm_mod
 from physiclaw.core.hardware.arm import StylusArm
-
-
-pytestmark = [pytest.mark.integration]
-
 
 # ---------- FakeSerial ----------
 

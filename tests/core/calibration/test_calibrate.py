@@ -1,4 +1,4 @@
-"""Tests for `physiclaw.core.calibration.calibrate` — Phase 5 hardware fakes.
+"""Tests for `physiclaw.core.calibration.calibrate` — hardware fakes.
 
 The big top-level orchestrators (`calibrate_arm`, `compute_camera_mapping`,
 `validate_calibration`, `trace_screen_edge`, `verify_assistive_touch`)
@@ -18,6 +18,7 @@ import cv2
 import numpy as np
 import pytest
 
+from physiclaw.core.bridge.calib import CalibrationState
 from physiclaw.core.calibration import calibrate as cal_mod
 from physiclaw.core.calibration.calibrate import (
     _find_viewport_cache,
@@ -29,12 +30,7 @@ from physiclaw.core.calibration.calibrate import (
     grid_positions,
     measure_viewport_shift,
 )
-from physiclaw.core.bridge.calib import CalibrationState
 from physiclaw.core.calibration.transforms import ViewportShift
-
-
-pytestmark = [pytest.mark.integration]
-
 
 # ---------- grid_positions ----------
 
@@ -563,6 +559,8 @@ def test_measure_viewport_shift_png_cache_extension(
     cal = MagicMock()
     cal.screen_dimension = {"viewport_width": 390, "viewport_height": 844}
     bridge = MagicMock()
+    # No pending upload → falls through to the fresh wait_screenshot path.
+    bridge.take_pending_screenshot.return_value = None
     # Build a real PNG with the orange square.
     img = np.zeros((400, 400, 3), dtype=np.uint8)
     cv2.rectangle(img, (75, 175), (175, 275), (0, 165, 255), -1)
