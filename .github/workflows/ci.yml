@@ -1,8 +1,9 @@
-# Lint + test on every push / PR. Runs the fast suite (the default
-# `pytest` addopts exclude @slow and @integration) on Linux and macOS, so
-# the platform backends — including the Linux one — are exercised on a real
-# host of each OS. Windows isn't run here yet (no hosted rig); install.ps1 +
-# the windows backend are validated manually.
+# Lint + test on every push / PR. Runs the full hermetic suite with branch
+# coverage (fail_under gates in pyproject; @integration is reserved for
+# tests needing a real port/camera) on Linux and macOS, so the platform
+# backends — including the Linux one — are exercised on a real host of each
+# OS. Windows isn't run here yet (no hosted rig); install.ps1 + the windows
+# backend are validated manually.
 name: CI
 
 on:
@@ -44,5 +45,7 @@ jobs:
       - name: Lint
         run: uv run ruff check src/ tests/
 
+      # Bare --cov: source + branch come from [tool.coverage.run] in
+      # pyproject, keeping one source of truth.
       - name: Test
-        run: uv run pytest
+        run: uv run pytest --cov
