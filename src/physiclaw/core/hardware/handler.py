@@ -112,14 +112,18 @@ def _capture_raw(idx: int):
 
     Logs the reason on failure so a silent None doesn't mask a real issue.
     """
-    cam = Camera(idx)
+    cam = None
     try:
+        # Constructor inside the try: a missing index raises here, and
+        # the auto-pick loop must move on to the next index, not crash.
+        cam = Camera(idx)
         return cam.raw_frame()
     except (OSError, RuntimeError) as e:
         log.warning(f"  cam {idx}: capture failed — {e}")
         return None
     finally:
-        cam.close()
+        if cam is not None:
+            cam.close()
 
 
 def _auto_pick_camera_index() -> int | None:
@@ -127,7 +131,7 @@ def _auto_pick_camera_index() -> int | None:
 
     Caller must first put the phone page into the ``corners`` phase so
     bridge.html draws the four colored squares. We then iterate USB
-    indices 0..3 and pick the camera whose frame contains all four
+    indices 0..7 and pick the camera whose frame contains all four
     markers arranged clockwise — only the camera actually pointing at
     the phone can possibly see them, so the match is unambiguous.
     """
@@ -153,7 +157,7 @@ async def handle_connect_camera(request, physiclaw, phone):
 
     Body: ``{"index": int}`` — connect that camera directly.
     Body: ``{"index": "auto"}`` (or body omitted) — set the phone page
-    to the ``corners`` phase and iterate 0..3 to find the camera that
+    to the ``corners`` phase and iterate 0..7 to find the camera that
     sees all four RGBM corner markers. The phone is restored to bridge
     mode before returning.
     """

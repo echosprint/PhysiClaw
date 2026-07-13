@@ -215,6 +215,14 @@ def test_capture_raw_returns_none_on_runtime_error(mocker) -> None:
     fake_cam.close.assert_called_once()
 
 
+def test_capture_raw_returns_none_when_constructor_raises(mocker) -> None:
+    """A missing USB index raises from Camera() itself — the auto-pick
+    loop must treat it like any other capture failure, not crash."""
+    mocker.patch.object(handler, "Camera", side_effect=RuntimeError("no device"))
+
+    assert _capture_raw(5) is None
+
+
 # ---------- _auto_pick_camera_index ----------
 
 
