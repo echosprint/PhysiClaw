@@ -132,26 +132,7 @@ def _warn(msg):
     print(step_warn(msg))
 
 
-def run(auto: bool = False, trace: bool = False) -> None:
-    # Step names + wording mirror the browser wizard
-    # (core/static/setup-hardware.html) so the two surfaces stay consistent.
-    t0 = time.time()
-
-    status = api("GET", "/api/status")
-    if not status:
-        sys.exit("Server not running. Start: physiclaw server")
-    if status.get("ready"):
-        print("PhysiClaw is already ready.")
-        return
-    if status.get("calibrated"):
-        print("Already calibrated, finalizing...")
-        api("POST", "/api/phone/home")
-        time.sleep(3)
-        api("POST", "/api/ready")
-        _done("PhysiClaw is ready")
-        return
-
-    # ── 1. Connect phone ──
+def _step_connect_phone(status, auto: bool) -> None:
     print("\n── 1. Connect phone ──")
     if status.get("bridge"):
         _done("Phone connected")
@@ -165,7 +146,8 @@ def run(auto: bool = False, trace: bool = False) -> None:
             wait("Scan the QR on your phone — the page should say 'PhysiClaw'")
         _done("Phone connected")
 
-    # ── 2. Position the rig ──
+
+def _step_position_rig(auto: bool) -> None:
     print("\n── 2. Position the rig ──")
     print("  1. Connect the control board — USB to the computer, plus 12 V power.")
     print("  2. Connect the camera to the computer over USB.")
@@ -178,7 +160,8 @@ def run(auto: bool = False, trace: bool = False) -> None:
         wait("Everything in place?")
     _done("Rig in place")
 
-    # ── 3. Connect the arm ──
+
+def _step_connect_arm(auto: bool) -> None:
     print("\n── 3. Connect the arm ──")
     print("  Control board connected over USB with its 12 V power on — PhysiClaw")
     print("  scans the computer's serial ports to find it (FluidNC firmware).")
@@ -188,7 +171,10 @@ def run(auto: bool = False, trace: bool = False) -> None:
             sys.exit(1)
     _done("Arm connected")
 
-    # ── 4. Connect the camera ──
+
+def _step_connect_camera(auto: bool) -> int:
+    """Returns the connected camera index (used by the camera-calibration
+    step to reopen the same device after re-aiming)."""
     print("\n── 4. Connect the camera ──")
     print("  Camera directly above the phone. PhysiClaw draws colored corner markers")
     print("  on the bridge page, then scans the cameras and picks the one that sees")
@@ -224,8 +210,10 @@ def run(auto: bool = False, trace: bool = False) -> None:
             _fail("Couldn't find the camera — make sure /bridge is open and awake")
             sys.exit(1)
         _done(f"Camera {cam} connected")
+    return cam
 
-    # ── 5. Locate the screen ──
+
+def _step_locate_screen(auto: bool) -> None:
     print("\n── 5. Locate the screen ──")
     print("  Lines up where PhysiClaw draws with the real screen, so taps land right.")
     # Cache policy: interactive setup always re-measures; --auto trusts
@@ -249,7 +237,9 @@ def run(auto: bool = False, trace: bool = False) -> None:
         wait("Couldn't read the screenshot. Tap AT once, then double-tap. Retry?")
     _done("Screen located")
 
-    # ── 6. Calibrate the arm (position stylus, then tap 18 points) ──
+
+def _step_calibrate_arm(auto: bool) -> None:
+    # Position stylus, then tap 18 points.
     print("\n── 6. Calibrate the arm ──")
     r = api("POST", "/api/bridge/switch", {"mode": "calibrate", "phase": "center"})
     if not r or not r.get("ok"):
@@ -287,7 +277,9 @@ def run(auto: bool = False, trace: bool = False) -> None:
             )
         _done(f"Arm calibrated — mapped {r.get('pairs')} points")
 
-    # ── 7. Calibrate the camera (rotation/coverage check, then 15-dot mapping) ──
+
+def _step_calibrate_camera(auto: bool, cam: int) -> None:
+    # Rotation/coverage check, then 15-dot mapping.
     print("\n── 7. Calibrate the camera ──")
     print("  Keep the whole screen in view, evenly lit and free of glare.")
     # Interactive only: aiming with the OS camera app releases the device, so
@@ -318,7 +310,8 @@ def run(auto: bool = False, trace: bool = False) -> None:
     )
     _done(f"Camera calibrated — found all {m.get('dots', 15)} dots")
 
-    # ── 8. Validate ──
+
+def _step_validate(auto: bool) -> None:
     print("\n── 8. Validate ──")
     print("  For each dot: find it with the camera, tap it with the arm, and compare")
     print("  the tap to where the dot was drawn. Passing saves the calibration.")
@@ -335,7 +328,8 @@ def run(auto: bool = False, trace: bool = False) -> None:
             "Calibration saved."
         )
 
-    # ── 9. Verify AssistiveTouch ──
+
+def _step_verify_assistive_touch(auto: bool) -> None:
     print("\n── 9. Verify AssistiveTouch ──")
     print("  Confirms the screenshot + clipboard pipeline works.")
     calibrate("assistive-touch/show")
@@ -366,14 +360,17 @@ def run(auto: bool = False, trace: bool = False) -> None:
             wait("Paste in Notes to verify it matches")
     _done("Screenshot + clipboard verified")
 
-    if trace:
-        print("\n── Edge trace ──")
-        print("  Arm traces phone screen border clockwise, pausing at 8 points.")
-        if ask("Watch for accuracy. Ready?", auto):
-            calibrate("trace-edge", 60)
-        _done("Edge trace complete")
 
-    # ── 10. Finish ──
+def _step_edge_trace(auto: bool) -> None:
+    # Optional (--trace); unnumbered in both surfaces.
+    print("\n── Edge trace ──")
+    print("  Arm traces phone screen border clockwise, pausing at 8 points.")
+    if ask("Watch for accuracy. Ready?", auto):
+        calibrate("trace-edge", 60)
+    _done("Edge trace complete")
+
+
+def _step_finish(t0: float) -> None:
     print("\n── 10. Finish ──")
     api("POST", "/api/phone/home")
     time.sleep(3)
@@ -386,6 +383,39 @@ def run(auto: bool = False, trace: bool = False) -> None:
     print("  The arm, camera, and screen are calibrated and working together.")
     print("  All MCP tools are now available.")
     print(f"{'=' * 40}")
+
+
+def run(auto: bool = False, trace: bool = False) -> None:
+    # Step names + wording mirror the browser wizard
+    # (core/static/setup-hardware.html) so the two surfaces stay consistent.
+    t0 = time.time()
+
+    status = api("GET", "/api/status")
+    if not status:
+        sys.exit("Server not running. Start: physiclaw server")
+    if status.get("ready"):
+        print("PhysiClaw is already ready.")
+        return
+    if status.get("calibrated"):
+        print("Already calibrated, finalizing...")
+        api("POST", "/api/phone/home")
+        time.sleep(3)
+        api("POST", "/api/ready")
+        _done("PhysiClaw is ready")
+        return
+
+    _step_connect_phone(status, auto)
+    _step_position_rig(auto)
+    _step_connect_arm(auto)
+    cam = _step_connect_camera(auto)
+    _step_locate_screen(auto)
+    _step_calibrate_arm(auto)
+    _step_calibrate_camera(auto, cam)
+    _step_validate(auto)
+    _step_verify_assistive_touch(auto)
+    if trace:
+        _step_edge_trace(auto)
+    _step_finish(t0)
 
 
 def await_bridge_and_calibrate(host: str, port: int) -> None:

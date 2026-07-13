@@ -251,6 +251,85 @@ def test_camera_aim_adjust_opens_waits_quits(mocker) -> None:
     assert api_spy.call_args_list[0] == mocker.call("POST", "/api/disconnect-camera")
 
 
+# ---------- _step_connect_camera fallback ----------
+
+
+def _patch_camera_fallback_api(mocker, tmp_path, *, previews, connect_by_index):
+    """Stub api() for the camera step: auto-pick always fails, previews and
+    the by-index connect come from the arguments. Returns the api mock."""
+    mocker.patch.object(hw_mod.tempfile, "gettempdir", return_value=str(tmp_path))
+
+    def fake_api(method, path, body=None, timeout=60):
+        if path == "/api/connect-camera":
+            if body == {"index": "auto"}:
+                return {"status": "error"}
+            return connect_by_index
+        if path.startswith("/api/camera-preview/"):
+            return previews
+        return {"status": "ok"}
+
+    return mocker.patch.object(hw_mod, "api", side_effect=fake_api)
+
+
+def test_step_connect_camera_manual_prompt_picks_index(mocker, tmp_path) -> None:
+    """Auto-pick fails interactively: previews are written and opened, and
+    the typed index is connected."""
+    _patch_camera_fallback_api(
+        mocker,
+        tmp_path,
+        previews={"image": "Zg=="},  # base64 for "f"
+        connect_by_index={"status": "ok", "index": 2},
+    )
+    open_spy = mocker.patch.object(hw_mod.platform, "open_image_files")
+    mocker.patch("builtins.input", return_value="2")
+
+    cam = hw_mod._step_connect_camera(auto=False)
+
+    assert cam == 2
+    written = sorted(p.name for p in tmp_path.glob("physiclaw_cam*.jpg"))
+    assert written == [f"physiclaw_cam{i}.jpg" for i in range(4)]
+    open_spy.assert_called_once_with([str(tmp_path / f) for f in written])
+
+
+def test_step_connect_camera_manual_invalid_input_defaults_to_zero(
+    mocker, tmp_path
+) -> None:
+    """A non-numeric answer at the manual prompt falls back to camera 0,
+    and blank preview frames are not written or opened."""
+    _patch_camera_fallback_api(
+        mocker,
+        tmp_path,
+        previews=None,  # preview endpoint has nothing to show
+        connect_by_index={"status": "ok", "index": 0},
+    )
+    open_spy = mocker.patch.object(hw_mod.platform, "open_image_files")
+    mocker.patch("builtins.input", return_value="not a number")
+
+    cam = hw_mod._step_connect_camera(auto=False)
+
+    assert cam == 0
+    assert list(tmp_path.glob("physiclaw_cam*.jpg")) == []
+    open_spy.assert_called_once_with([])
+
+
+def test_step_connect_camera_fallback_connect_failure_exits(mocker, tmp_path) -> None:
+    """When the by-index connect also fails, the wizard aborts — and stale
+    previews from a previous run are cleaned up first."""
+    stale = tmp_path / "physiclaw_cam9.jpg"
+    stale.write_bytes(b"old")
+    _patch_camera_fallback_api(
+        mocker,
+        tmp_path,
+        previews={"image": ""},  # response without a usable frame
+        connect_by_index={"status": "error"},
+    )
+
+    with pytest.raises(SystemExit):
+        hw_mod._step_connect_camera(auto=True)
+
+    assert not stale.exists()
+
+
 # ---------- run() early-exit branches ----------
 
 
