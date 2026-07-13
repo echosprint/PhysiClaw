@@ -16,14 +16,13 @@ while a reaction is in progress.
 import asyncio
 import inspect
 import logging
-import os
 from typing import Awaitable, Callable, Union
 
 import httpx
 
 from physiclaw.agent.runtime.hook import Trigger, check_hooks, load_hooks
 from physiclaw.common import platform
-from physiclaw.common.config import CONFIG
+from physiclaw.common.config import CONFIG, server_url
 
 log = logging.getLogger(__name__)
 
@@ -42,9 +41,8 @@ _client: httpx.AsyncClient | None = None
 def _get_client() -> httpx.AsyncClient:
     global _client
     if _client is None:
-        base_url = os.environ.get("PHYSICLAW_SERVER", "http://127.0.0.1:8048")
         _client = httpx.AsyncClient(
-            base_url=base_url, timeout=5.0, trust_env=platform.TRUST_PROXY_ENV
+            base_url=server_url(), timeout=5.0, trust_env=platform.TRUST_PROXY_ENV
         )
     return _client
 

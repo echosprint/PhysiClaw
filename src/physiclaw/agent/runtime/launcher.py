@@ -41,7 +41,12 @@ from physiclaw.agent.provider import (
 )
 from physiclaw.agent.runtime import Runtime
 from physiclaw.common import paths
-from physiclaw.common.config import model_ref_with_source, parse_model_ref
+from physiclaw.common.config import (
+    SERVER_ENV_VAR,
+    model_ref_with_source,
+    parse_model_ref,
+    server_url,
+)
 from physiclaw.common.logger import setup_logging
 from physiclaw.common.proxy import normalize_proxy_env
 
@@ -104,7 +109,10 @@ def launch() -> None:
     # parses the env even though loopback is proxy-bypassed).
     normalize_proxy_env()
     parser = argparse.ArgumentParser(description="PhysiClaw runtime loop")
-    parser.add_argument("--server", default="http://127.0.0.1:8048")
+    # None → resolve via config.server_url() ($PHYSICLAW_SERVER, else
+    # [server] host/port) so a bare `python -m physiclaw.agent.runtime`
+    # dials the same server the CLI would.
+    parser.add_argument("--server", default=None)
     parser.add_argument("--interval", type=float, default=1.0)
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
@@ -119,7 +127,7 @@ def launch() -> None:
 
     # Hooks read this to know where the MCP server lives. Must be set
     # before load_hooks() imports them.
-    os.environ.setdefault("PHYSICLAW_SERVER", args.server)
+    os.environ.setdefault(SERVER_ENV_VAR, args.server or server_url())
 
     # Mirror to a daily file so wake decisions / poll errors survive for
     # post-mortems — the runtime's stderr is gone once the terminal is.

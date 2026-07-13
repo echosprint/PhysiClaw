@@ -8,7 +8,6 @@ down at process exit.
 """
 
 import logging
-import os
 from contextlib import AsyncExitStack
 from typing import Any
 
@@ -17,6 +16,7 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
 from physiclaw.common import platform
+from physiclaw.common.config import server_url
 
 log = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ class McpClient:
     """
 
     def __init__(self, base_url: str | None = None):
-        base = base_url or os.environ.get("PHYSICLAW_SERVER", "http://127.0.0.1:8048")
+        base = base_url or server_url()
         self._url = base.rstrip("/") + "/mcp"
         self._stack = AsyncExitStack()
         self._session: ClientSession | None = None

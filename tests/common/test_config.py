@@ -887,3 +887,40 @@ def test_camera_exposure_keys_default_and_render() -> None:
     out = config.to_toml(cfg, with_comments=True)
     assert "auto_exposure = true" in out
     assert "exposure = -6" in out
+
+
+# ---------- server_url ----------
+
+
+def test_server_url_env_override_wins(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(config.SERVER_ENV_VAR, "http://other.host:9999")
+
+    assert config.server_url() == "http://other.host:9999"
+
+
+def test_server_url_defaults_to_config_host_port(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(config.SERVER_ENV_VAR, raising=False)
+
+    assert config.server_url() == "http://127.0.0.1:8048"
+
+
+def test_server_url_normalizes_wildcard_binds_to_loopback(
+    monkeypatch: pytest.MonkeyPatch, mocker
+) -> None:
+    # A server can listen on 0.0.0.0/:: but a client can't dial them.
+    monkeypatch.delenv(config.SERVER_ENV_VAR, raising=False)
+    for wildcard in ("0.0.0.0", "::"):
+        mocker.patch.object(config.CONFIG.server, "host", wildcard)
+        assert config.server_url() == "http://127.0.0.1:8048"
+
+
+def test_server_url_respects_custom_host_and_port(
+    monkeypatch: pytest.MonkeyPatch, mocker
+) -> None:
+    monkeypatch.delenv(config.SERVER_ENV_VAR, raising=False)
+    mocker.patch.object(config.CONFIG.server, "host", "192.168.1.7")
+    mocker.patch.object(config.CONFIG.server, "port", 9000)
+
+    assert config.server_url() == "http://192.168.1.7:9000"

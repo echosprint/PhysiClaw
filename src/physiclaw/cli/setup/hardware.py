@@ -6,7 +6,6 @@ Talks to a running ``physiclaw server`` over HTTP.
 import base64
 import contextlib
 import logging
-import os
 import socket
 import sys
 import tempfile
@@ -20,9 +19,9 @@ import typer
 
 from physiclaw.cli import _http
 from physiclaw.cli._format import step_fail, step_ok, step_warn
-from physiclaw.common import paths, platform
+from physiclaw.common import config, paths, platform
 
-BASE = os.environ.get("PHYSICLAW_SERVER", "http://localhost:8048")
+BASE = config.server_url()
 
 
 def _viewport_cache_candidates() -> list:
@@ -449,8 +448,8 @@ def hardware(
         str,
         typer.Option(
             "--server-url",
-            help="Running MCP server URL. Defaults to $PHYSICLAW_SERVER or "
-            "http://localhost:8048.",
+            help="Running MCP server URL. Defaults to $PHYSICLAW_SERVER, "
+            "else [server] host/port from config.toml.",
         ),
     ] = BASE,
 ) -> None:

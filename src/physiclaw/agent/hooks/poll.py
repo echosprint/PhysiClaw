@@ -1,8 +1,8 @@
 """Phone watchdog hook — fires when /api/phone/watch reports an event.
 
-Auto-discovered by `physiclaw.agent.runtime.hook.load_hooks()`. Reads the MCP
-server URL from the `PHYSICLAW_SERVER` env var, which `__main__` sets
-from the `--server` flag before hooks are loaded.
+Auto-discovered by `physiclaw.agent.runtime.hook.load_hooks()`. Dials
+`config.server_url()` — the launcher pins `PHYSICLAW_SERVER` from the
+`--server` flag before hooks are loaded, and that env var wins there.
 
 Later siblings (e.g. a cron hook) live next to this one and return the
 same `Trigger` shape, so the runtime loop treats all event sources
@@ -10,12 +10,12 @@ uniformly.
 """
 
 import logging
-import os
 
 import httpx
 
 from physiclaw.agent.runtime.hook import Trigger, register
 from physiclaw.common import platform
+from physiclaw.common.config import server_url
 
 log = logging.getLogger(__name__)
 
@@ -26,9 +26,8 @@ _in_blip = False
 def _get_client() -> httpx.AsyncClient:
     global _client
     if _client is None:
-        base_url = os.environ.get("PHYSICLAW_SERVER", "http://127.0.0.1:8048")
         _client = httpx.AsyncClient(
-            base_url=base_url, timeout=10.0, trust_env=platform.TRUST_PROXY_ENV
+            base_url=server_url(), timeout=10.0, trust_env=platform.TRUST_PROXY_ENV
         )
     return _client
 

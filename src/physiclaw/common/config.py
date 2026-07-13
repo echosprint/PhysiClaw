@@ -603,6 +603,29 @@ def provider_base_url_override(provider_id: str) -> str | None:
     return val if isinstance(val, str) else None
 
 
+SERVER_ENV_VAR = "PHYSICLAW_SERVER"
+
+
+def server_url() -> str:
+    """The control-plane base URL agent-side clients dial.
+
+    `$PHYSICLAW_SERVER` wins (the launcher pins it for its subprocess
+    tree); otherwise built from ``[server] host``/``port``, with the
+    wildcard binds normalized to loopback — a server can listen on
+    0.0.0.0/:: but a client can't dial them. Every hop that talks to
+    the control plane resolves through here; the phone-bridge and QR
+    URLs are built from the LIVE bound port instead and deliberately
+    don't use this.
+    """
+    env = os.environ.get(SERVER_ENV_VAR)
+    if env:
+        return env
+    host = CONFIG.server.host
+    if host in ("0.0.0.0", "::"):
+        host = "127.0.0.1"
+    return f"http://{host}:{CONFIG.server.port}"
+
+
 def unset_dotted(dotted: str, path: Path | None = None) -> bool:
     """Remove one ``section.field`` from ``config.toml`` so the built-in
     default applies. Returns True if a key was actually removed.
@@ -733,6 +756,7 @@ __all__ = [
     "Config",
     "ConfigError",
     "MODEL_ENV_VAR",
+    "SERVER_ENV_VAR",
     "config_path",
     "get",
     "load",
@@ -741,6 +765,7 @@ __all__ = [
     "parse_model_ref",
     "provider_base_url_override",
     "resolve_provider_key",
+    "server_url",
     "set_dotted",
     "to_toml",
     "unset_dotted",

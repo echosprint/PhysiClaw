@@ -42,7 +42,7 @@ from physiclaw.agent.engine.trace import (
 from physiclaw.agent.runtime.hook import Trigger
 from physiclaw.agent.runtime.sentinel import STATUSES, parse_sentinel
 from physiclaw.common import paths
-from physiclaw.common.config import CONFIG
+from physiclaw.common.config import CONFIG, server_url
 from physiclaw.common.logger.retention import purge_daily_logs
 from physiclaw.common.text import read_text
 
@@ -133,7 +133,7 @@ def _mcp_tools() -> list[dict]:
 
 
 def _mcp_config() -> str:
-    url = os.environ.get("PHYSICLAW_SERVER", "http://127.0.0.1:8048")
+    url = server_url()
     return json.dumps(
         {"mcpServers": {"physiclaw": {"type": "http", "url": f"{url}/mcp"}}}
     )
