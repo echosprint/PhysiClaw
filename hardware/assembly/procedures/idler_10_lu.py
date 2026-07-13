@@ -50,6 +50,8 @@ Run from the repo root:
     uv run --group cad python -m hardware.assembly.procedures.idler_10_lu
 """
 
+from collections.abc import Callable
+
 from build123d import Axis, Compound, Location
 
 from hardware.assembly.base import BaseAssembly
@@ -79,29 +81,42 @@ NUT_GAP = 15  # mm — exploded: block side face → side-pocket nut center, alo
 TOP_NUT_LIFT = 44  # mm — exploded: block top face → top-pocket nut center, along +Z
 #      (clears the idler stacks so the nut reads as a separate step)
 
+# One shoulder-screw column: ``(x, shoulder_len, stack)``, with ``stack``
+# the bottom→top build recipe as ``(part_factory, axial_height)`` pairs.
+Column = tuple[float, float, list[tuple[Callable, float]]]
+
 
 class ID10Lu(BaseAssembly):
+    # Subclasses reuse this build by overriding ``compound_label`` and the
+    # ``_columns()`` hook (e.g. ID20Ru); ``_module_stem()`` already derives
+    # the STEP/SVG filename from the subclass's own module, so no other
+    # override is needed.
+    compound_label: str = "idler_10_lu"
     camera = FRONT_LEFT_HIGH
 
-    def _build(self) -> Compound:
-        block = IdlerMountMotor().build()
-        ring_h = RING_SPECS[RING_SPEC]["height"]
-        nut_thickness = NUT_SPECS["square"]["M4"]["thickness"]
-        block_top_z = block_thickness / 2
-        block_side_x = block_length / 2
-        thread_len = SHOULDER_DIMS["M4"]["thread_len"]
+    @staticmethod
+    def _idler():
+        """Smooth (untoothed) idler pulley — stacked by every column recipe."""
+        return Pulley2GT20T(kind="idler", toothed=False).build()
 
-        idler = lambda: Pulley2GT20T(kind="idler", toothed=False).build()
-        ring = lambda: Ring(RING_SPEC).build()
-        columns = [
+    def _columns(self) -> list[Column]:
+        """The shoulder-screw columns to stack; everything else in
+        ``_build`` (screw placement, captive nuts, explode conventions)
+        is shared."""
+
+        def ring():
+            return Ring(RING_SPEC).build()
+
+        ring_h = RING_SPECS[RING_SPEC]["height"]
+        return [
             (
                 -outer_hole_offset,
                 LEFT_SHOULDER_LEN,
                 [
                     (ring, ring_h),
-                    (idler, flange_belt_h),
+                    (self._idler, flange_belt_h),
                     (ring, ring_h),
-                    (idler, flange_belt_h),
+                    (self._idler, flange_belt_h),
                 ],
             ),
             (
@@ -109,10 +124,18 @@ class ID10Lu(BaseAssembly):
                 RIGHT_SHOULDER_LEN,
                 [
                     (ring, ring_h),
-                    (idler, flange_belt_h),
+                    (self._idler, flange_belt_h),
                 ],
             ),
         ]
+
+    def _build(self) -> Compound:
+        block = IdlerMountMotor().build()
+        nut_thickness = NUT_SPECS["square"]["M4"]["thickness"]
+        block_top_z = block_thickness / 2
+        block_side_x = block_length / 2
+        thread_len = SHOULDER_DIMS["M4"]["thread_len"]
+        columns = self._columns()
 
         sep = EXPLODE_SEPARATION if self.exploded else 0
 
@@ -191,7 +214,7 @@ class ID10Lu(BaseAssembly):
         top_nut.move(Location((0, top_nut_y, top_nut_z)))
         placed.append(top_nut)
 
-        return Compound(label="idler_10_lu", children=[block, *placed])
+        return Compound(label=self.compound_label, children=[block, *placed])
 
 
 if __name__ == "__main__":
