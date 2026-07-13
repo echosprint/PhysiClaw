@@ -10,13 +10,6 @@ import pytest
 from physiclaw.common import dumps
 
 
-@pytest.fixture(autouse=True)
-def _clear_ensured_cache() -> None:
-    """The module memoizes which directories it has mkdir'd. Reset
-    between tests so each one tests its own creation logic."""
-    dumps._ENSURED.clear()
-
-
 @pytest.fixture
 def fake_dirs(tmp_path: Path, mocker) -> dict[str, Path]:
     tc = tmp_path / "tool_calls"
@@ -61,11 +54,16 @@ def test_mkdir_creates_directory(tmp_path: Path) -> None:
     assert d.is_dir()
 
 
-def test_mkdir_caches_ensured_dirs(tmp_path: Path) -> None:
+def test_mkdir_recreates_dir_deleted_externally(tmp_path: Path) -> None:
+    """`physiclaw clear` rmtrees dump dirs from another process while a
+    server is live — the next save must recreate them."""
     d = tmp_path / "x"
     dumps._mkdir(d)
+    d.rmdir()
 
-    assert d in dumps._ENSURED
+    dumps._mkdir(d)
+
+    assert d.is_dir()
 
 
 def test_mkdir_idempotent(tmp_path: Path) -> None:
@@ -73,7 +71,7 @@ def test_mkdir_idempotent(tmp_path: Path) -> None:
     dumps._mkdir(d)
     dumps._mkdir(d)  # second call must not raise
 
-    assert d in dumps._ENSURED
+    assert d.is_dir()
 
 
 # ---------- save_tool_call ----------

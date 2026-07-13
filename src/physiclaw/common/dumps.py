@@ -21,17 +21,15 @@ from pathlib import Path
 from physiclaw.common import paths
 from physiclaw.common.text import write_text
 
-_ENSURED: set[Path] = set()
-
 
 def _stamp() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
 
 
 def _mkdir(d: Path) -> Path:
-    if d not in _ENSURED:
-        d.mkdir(parents=True, exist_ok=True)
-        _ENSURED.add(d)
+    # Unconditional: `physiclaw clear` may rmtree these dirs while a
+    # server is live, and promises they're recreated on the next save.
+    d.mkdir(parents=True, exist_ok=True)
     return d
 
 
