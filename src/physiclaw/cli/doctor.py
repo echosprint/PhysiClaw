@@ -403,14 +403,18 @@ def doctor(
 
     typer.echo()
     typer.echo(_fmt_section("Config"))
-    # If config.toml failed to parse, importing physiclaw.common.config at the top
-    # of this module would have raised — so reaching here means the file is
-    # either absent or valid.
+    # Parse the file NOW rather than trusting that the import-time load
+    # succeeded — the user may have edited config.toml since this process
+    # (or the server it queries) started.
     from physiclaw.common import config as _cfg
 
     cp = _cfg.config_path()
     if cp.exists():
-        typer.echo(_fmt_ok(f"config.toml: {cp}"))
+        try:
+            _cfg.load()
+            typer.echo(_fmt_ok(f"config.toml: {cp}"))
+        except _cfg.ConfigError as e:
+            typer.echo(_fmt_warn(f"config.toml invalid: {e}"))
     else:
         typer.echo(
             _fmt_warn(

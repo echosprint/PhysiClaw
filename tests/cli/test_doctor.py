@@ -406,6 +406,8 @@ def _patch_doctor_environment(
     cp.exists.return_value = True
     cp.__str__ = lambda s: "/fake/config.toml"
     mocker.patch("physiclaw.common.config.config_path", return_value=cp)
+    # doctor re-parses the file for freshness; the fake path has no body.
+    mocker.patch("physiclaw.common.config.load")
 
     onnx = MagicMock(spec=Path)
     onnx.exists.return_value = model_exists
@@ -827,3 +829,20 @@ def test_doctor_invalid_active_model_ref(mocker) -> None:
 
     # Doesn't crash even with unparseable ref.
     assert result.exit_code == 0
+
+
+def test_doctor_warns_when_config_invalid(mocker) -> None:
+    """doctor must re-parse config.toml — the file may have been edited
+    since any import-time load — and surface a parse error, not crash."""
+    from physiclaw.common.config import ConfigError
+
+    _patch_doctor_environment(mocker, server_status=None)
+    mocker.patch(
+        "physiclaw.common.config.load", side_effect=ConfigError("unknown key: portt")
+    )
+
+    result = runner.invoke(app, [])
+
+    assert result.exit_code == 0
+    assert "config.toml invalid" in result.output
+    assert "portt" in result.output
