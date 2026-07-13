@@ -36,3 +36,7 @@ Toasts live 1–2s; views capture at ~2s — **toast feedback is structurally in
 - **Silent refusal** — the app said no in a toast you never saw: stock limit, purchase cap, sold out, error.
 
 Value unmoved after the one retry = refusal. Stop pressing (the engine hard-blocks press #{{same_target_block}}); find the persistent evidence — a stock/limit label ("limit 2 per order", "only 2 left", sold out), a greyed control, the product page — or put the choice to the user.
+
+## Changed the wrong way — contain, don't retry
+
+A value moving AGAINST intent (qty 3 → 13 after typing "1") = the method is harmful; retrying compounds it (→ 131). Contain (delete / uncheck), rebuild another way. Fields APPEND at the cursor: clear to empty, type, read, then confirm.
