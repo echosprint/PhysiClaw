@@ -23,6 +23,12 @@ from physiclaw.core.hardware.iphone import AssistiveTouch
 
 log = logging.getLogger(__name__)
 
+# Pre-cal square (phase "screenshot_cal"): CSS top-left + size. Served to
+# bridge.html through get_state (the page draws exactly what it's told)
+# and consumed by calibrate.py's screenshot mapping (which expects the
+# square there) — one source for both sides of the camera.
+SQUARE_CSS_X, SQUARE_CSS_Y, SQUARE_CSS_SIZE = 100, 200, 50
+
 
 class CalibrationState:
     """Server-controlled calibration page state.
@@ -167,10 +173,11 @@ class CalibrationState:
         is self-documenting:
             {
               phase, screen_dimension,
-              grid:  {cols, rows},
-              dot:   {x, y},                       # only when phase=="dot"
-              at:    {x, y, r},                    # only when phase=="assistive_touch"
-              nonce: {colors, x, y, size, cols},   # only when phase=="assistive_touch"
+              grid:   {cols, rows},
+              square: {x, y, size},                # only when phase=="screenshot_cal"
+              dot:    {x, y},                      # only when phase=="dot"
+              at:     {x, y, r},                   # only when phase=="assistive_touch"
+              nonce:  {colors, x, y, size, cols},  # only when phase=="assistive_touch"
             }
         """
         with self.lock:
@@ -182,6 +189,12 @@ class CalibrationState:
                     "rows": self.GRID_ROWS_PCT,
                 },
             }
+            if self.phase == "screenshot_cal":
+                d["square"] = {
+                    "x": SQUARE_CSS_X,
+                    "y": SQUARE_CSS_Y,
+                    "size": SQUARE_CSS_SIZE,
+                }
             if self.dot_position:
                 d["dot"] = {"x": self.dot_position[0], "y": self.dot_position[1]}
             if self.phase == "assistive_touch" and self._screenshot_nonce is not None:

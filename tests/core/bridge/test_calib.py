@@ -308,6 +308,25 @@ def test_get_state_idle_returns_phase_screen_dim_and_grid_only() -> None:
     }
 
 
+def test_get_state_screenshot_cal_serves_the_square_block() -> None:
+    # The page draws the pre-cal square from this block; calibrate.py's
+    # screenshot mapping expects it at the same constants — the values
+    # are pinned so neither side can drift alone.
+    cs = CalibrationState()
+    cs.set_phase("screenshot_cal")
+
+    state = cs.get_state()
+
+    assert state["square"] == {"x": 100, "y": 200, "size": 50}
+
+
+def test_get_state_omits_square_outside_screenshot_cal() -> None:
+    cs = CalibrationState()
+    cs.set_phase("center")
+
+    assert "square" not in cs.get_state()
+
+
 def test_get_state_includes_screen_dimension_when_set() -> None:
     cs = CalibrationState()
     cs.screen_dimension = {"width": 1170, "height": 2532}

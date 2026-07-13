@@ -222,8 +222,12 @@ body.mode-bridge #bridge-layer{
         text(W/2, H/2+30, 'Waiting for calibration...', 14, '#ccc');
         break;
       case 'screenshot_cal':
-        var sqSize = 50;
-        rect(100, 200, sqSize, sqSize, '#f97316', 0);
+        // Position/size come from the server (calib.py SQUARE_CSS_*) so
+        // the page draws the square exactly where calibrate.py's
+        // screenshot mapping expects it. Fallback mirrors those values
+        // for one stale-cache poll at most.
+        var sq = data.square || {x: 100, y: 200, size: 50};
+        rect(sq.x, sq.y, sq.size, sq.size, '#f97316', 0);
         break;
       case 'center':
         circle(W*0.5, H*0.5, r, '#f97316');
@@ -278,11 +282,15 @@ body.mode-bridge #bridge-layer{
         circle(dot.x * W, dot.y * H, r*0.6, '#f97316');
         break;
       case 'assistive_touch':
-        // Orange circle showing where to place AT button
-        var at = data.at || {x: 36, y: 200, r: 28};
+        // Orange circle showing where to place AT button. Fallback
+        // mirrors iphone.py's AT_CSS_X/AT_CSS_Y/AT_RADIUS — get_state
+        // omits `at` only when the nonce isn't set yet.
+        var at = data.at || {x: 39, y: 260, r: 28};
         circle(at.x, at.y, at.r, '#f97316');
-        // Grey nonce grid — squares laid out row-major, `cols` per row
-        var nonce = data.nonce || {colors: [], x: 180, y: 300, size: 3, cols: 8};
+        // Grey nonce grid — squares laid out row-major, `cols` per row.
+        // Fallback mirrors nonce.py's NONCE_* constants; with no colors
+        // it draws nothing, so it only shapes a one-poll stale render.
+        var nonce = data.nonce || {colors: [], x: 180, y: 300, size: 15, cols: 8};
         var ncols = nonce.cols || 8;
         for(var ni=0; ni<nonce.colors.length; ni++){
           var c = nonce.colors[ni];
@@ -371,7 +379,8 @@ body.mode-bridge #bridge-layer{
   // Updated every 250ms from GET /api/bridge/state. Touch handlers read this.
   // Bridge mode:    {mode, text, copied}
   // Calibrate mode: {mode, phase, screen_dimension, grid:{cols,rows},
-  //                   dot?:{x,y}, at?:{x,y,r}, nonce?:{colors,x,y,size,cols}}
+  //                   square?:{x,y,size}, dot?:{x,y}, at?:{x,y,r},
+  //                   nonce?:{colors,x,y,size,cols}}
   var state = {
     mode: 'bridge',
     text: null,
