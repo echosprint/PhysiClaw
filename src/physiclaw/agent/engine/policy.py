@@ -199,8 +199,7 @@ _GESTURES = stuck.PRESS_TOOLS | {"swipe", "sequence"}
 class StuckReflection(TurnGate):
     """Forced re-plan when a step is stuck past the urgent threshold.
 
-    The plan tail's step-stuck ⚠ is advisory and models ignore it (the
-    2026-07-13 kimi session flailed through five urgent tips). Research
+    The plan tail's step-stuck ⚠ is advisory and models ignore it. Research
     (MobileUse's trajectory reflector, VeriSafe's hard feedback) says the
     trajectory-level signal must escalate to enforcement: reject the next
     gesture turn once and demand a re-plan. One rejection per step
