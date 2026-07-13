@@ -30,7 +30,14 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from physiclaw.agent.engine import memory, pitfalls, screen_layout, trajectory
+from physiclaw.agent.engine import (
+    memory,
+    pitfalls,
+    screen_layout,
+    stuck,
+    trace,
+    trajectory,
+)
 from physiclaw.agent.engine.dto import AssistantMessage, ToolCall
 from physiclaw.common.config import CONFIG
 
@@ -181,6 +188,57 @@ class CompactionCheckpoint(TurnGate):
         # pending, which would otherwise burn the single retry on the first
         # event forever.
         self._retried = False
+
+
+# Phone gestures — the calls StuckReflection treats as "still pressing".
+# swipe/sequence extend the press family: a stuck step continued by a
+# scroll or a batched run is the same loop.
+_GESTURES = stuck.PRESS_TOOLS | {"swipe", "sequence"}
+
+
+class StuckReflection(TurnGate):
+    """Forced re-plan when a step is stuck past the urgent threshold.
+
+    The plan tail's step-stuck ⚠ is advisory and models ignore it (the
+    2026-07-13 kimi session flailed through five urgent tips). Research
+    (MobileUse's trajectory reflector, VeriSafe's hard feedback) says the
+    trajectory-level signal must escalate to enforcement: reject the next
+    gesture turn once and demand a re-plan. One rejection per step
+    identity, then fail open — same conservative shape as the other
+    gates. Non-gesture turns pass untouched — the `[note, one-other]`
+    shape (enforced before gates run) means a gesture turn can never
+    also carry the update_progress / end_session way out."""
+
+    def __init__(self, *, urgent: int) -> None:
+        self._urgent = urgent
+        self._rejected_step: str | None = None
+
+    def check(self, session, asst, called, *, turn, compaction_imminent):
+        p = session.plan
+        if p.step_turns < self._urgent:
+            return None
+        step = p.current_step()  # None on an undrafted plan — seed step is pending
+        if (
+            step is None
+            or step == self._rejected_step
+            or not any(c in _GESTURES for c in called)
+        ):
+            return None
+        self._rejected_step = step
+        shown = trace.brief(step)
+        return Rejection(
+            corrective=(
+                f"Rejected — step ▸ {shown!r} has run {p.step_turns} turns "
+                "with no tick; another gesture continues the loop. Re-issue "
+                "as [note, update_progress]: split the step or insert a "
+                "recovery step — change METHOD, not coordinates. Truly "
+                "blocked → message the user + close WAIT, or "
+                "end_session(STUCK) (CONVENTION § Stuck)."
+            ),
+            event="stuck_reflection",
+            log_msg=f"step stuck {p.step_turns} turns — forced re-plan",
+            extra={"step": shown, "step_turns": p.step_turns},
+        )
 
 
 class PitfallCheckpoint(TurnGate):
@@ -441,9 +499,10 @@ def default_policies(*, layout_incomplete: bool) -> Policies:
     are read from CONFIG (constructors take plain values, so unit tests
     never monkeypatch config). Ordering is load-bearing:
 
-    - turn gates: compaction checkpoint before the close gates (bank state
-      before arguing about the close), pitfalls before memory cues (both
-      one-shot; a rejected close re-enters the list from the top).
+    - turn gates: compaction checkpoint first (bank state before anything
+      else argues), stuck reflection before the close gates (a stuck close
+      turn is still a close), pitfalls before memory cues (both one-shot;
+      a rejected close re-enters the list from the top).
     - dispatch guards: plan gate first (and pre-validation), lint before
       the stuck block (a linted call must not feed loop counters).
     - observers: keyboard belief updates before the stuck guard records.
@@ -451,6 +510,7 @@ def default_policies(*, layout_incomplete: bool) -> Policies:
     return Policies(
         turn_gates=[
             CompactionCheckpoint(),
+            StuckReflection(urgent=CONFIG.engine.step_stuck_urgent),
             PitfallCheckpoint(),
             MemoryCueCheckpoint(enabled=CONFIG.engine.memory_cue_enabled),
         ],

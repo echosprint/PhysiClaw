@@ -103,6 +103,83 @@ def test_compaction_checkpoint_rejects_once_then_renews_on_turn_complete() -> No
     assert third is not None  # renewed for the next collapse event
 
 
+# ---------- StuckReflection ----------
+
+
+def _stuck_session(step_turns: int) -> Session:
+    session = Session()
+    session.plan.update(
+        user_said="buy tape",
+        steps=[{"content": "add tape to cart", "status": "in_progress"}],
+    )
+    session.plan.step_turns = step_turns
+    return session
+
+
+def test_stuck_reflection_rejects_gesture_turn_at_urgent() -> None:
+    gate = policy_mod.StuckReflection(urgent=12)
+    asst = _asst([_tc("note", {"summary": "x"}), _tc("tap")])
+
+    rej = gate.check(
+        _stuck_session(12), asst, ["note", "tap"], turn=20, compaction_imminent=False
+    )
+
+    assert rej is not None and rej.event == "stuck_reflection"
+    assert "add tape to cart" in rej.corrective
+
+
+def test_stuck_reflection_passes_replan_close_and_non_gesture_turns() -> None:
+    gate = policy_mod.StuckReflection(urgent=12)
+    session = _stuck_session(12)
+
+    for called in (
+        ["note", "update_progress"],  # the demanded way out
+        ["note", "end_session"],  # closing is escalation, not looping
+        ["note", "peek"],  # not a gesture — already changing method
+    ):
+        asst = _asst([_tc(n) for n in called])
+        assert (
+            gate.check(session, asst, called, turn=20, compaction_imminent=False)
+            is None
+        )
+
+
+def test_stuck_reflection_one_shot_per_step_identity() -> None:
+    gate = policy_mod.StuckReflection(urgent=12)
+    session = _stuck_session(12)
+    asst = _asst([_tc("note"), _tc("tap")])
+    called = ["note", "tap"]
+
+    first = gate.check(session, asst, called, turn=20, compaction_imminent=False)
+    second = gate.check(session, asst, called, turn=21, compaction_imminent=False)
+    assert first is not None
+    assert second is None  # fail open on the same step
+
+    # A different step that gets stuck re-arms the gate.
+    session.plan.update(steps=[{"content": "search for glue", "status": "in_progress"}])
+    session.plan.step_turns = 12
+    assert (
+        gate.check(session, asst, called, turn=40, compaction_imminent=False)
+        is not None
+    )
+
+
+def test_stuck_reflection_silent_below_urgent_and_on_undrafted_plan() -> None:
+    gate = policy_mod.StuckReflection(urgent=12)
+    asst = _asst([_tc("note"), _tc("tap")])
+    called = ["note", "tap"]
+
+    assert (
+        gate.check(_stuck_session(11), asst, called, turn=20, compaction_imminent=False)
+        is None
+    )
+    undrafted = Session()  # default seed plan — no in_progress step
+    undrafted.plan.step_turns = 30
+    assert (
+        gate.check(undrafted, asst, called, turn=20, compaction_imminent=False) is None
+    )
+
+
 # ---------- MemoryCueCheckpoint ----------
 
 
@@ -195,6 +272,7 @@ def test_default_policies_declares_the_documented_order() -> None:
 
     assert [type(g).__name__ for g in p.turn_gates] == [
         "CompactionCheckpoint",
+        "StuckReflection",
         "PitfallCheckpoint",
         "MemoryCueCheckpoint",
     ]

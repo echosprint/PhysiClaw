@@ -121,10 +121,12 @@ class EngineConfig:
     same_target_warn: int = 3
     same_target_block: int = 5
     # Plan step watchdog (agent.engine.plan): one in_progress step running
-    # this many turns raises the stuck tip (warn), then the report-to-user
-    # escalation (urgent).
-    step_stuck_warn: int = 12
-    step_stuck_urgent: int = 18
+    # this many turns raises the stuck tip (warn), then the forced re-plan
+    # rejection (urgent — policy.StuckReflection). A real 11-turn flail sat
+    # under the old warn=12; steps are sized at ~5+ calls (CONVENTION) and
+    # the counter resets on every tick, so 8 stays quiet on healthy steps.
+    step_stuck_warn: int = 8
+    step_stuck_urgent: int = 12
     # Plan gate (agent.engine.engine._dispatch): after this many turns a
     # session with no drafted plan has every tool blocked except
     # note / update_progress / end_session. Must exceed a legitimate

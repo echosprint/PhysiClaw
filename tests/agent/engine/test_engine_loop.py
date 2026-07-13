@@ -1815,3 +1815,51 @@ async def test_dispatch_feeds_keyboard_tracker_the_verdict(mocker) -> None:
     name, args, changed = kb_spy.call_args.args
     assert name == "tap"
     assert changed in (True, False)  # the parsed verdict, not None
+
+
+# ---------- _log_external_stop ----------
+
+
+def test_log_external_stop_writes_recovery_line(mem_paths) -> None:
+    import datetime as dt
+
+    session = Session()
+    session.plan.update(
+        user_said="buy oil",
+        steps=[
+            {"content": "open JD", "status": "completed"},
+            {"content": "fix cart qty", "status": "in_progress"},
+        ],
+    )
+
+    engine_mod._log_external_stop(session, None)
+
+    text = (mem_paths / f"{dt.date.today().isoformat()}.md").read_text(encoding="utf-8")
+    assert "stopped externally mid-task" in text
+    assert "fix cart qty" in text
+    assert "(1/2 steps done)" in text
+
+
+def test_log_external_stop_skips_closed_and_undrafted_sessions(mem_paths) -> None:
+    closed = Session()
+    closed.plan.update(user_said="buy oil")
+    closed.sentinel_status = DONE
+    engine_mod._log_external_stop(closed, None)
+
+    undrafted = Session()  # default seed plan — nothing recoverable
+    engine_mod._log_external_stop(undrafted, None)
+
+    assert not mem_paths.exists()  # neither wrote a daily log
+
+
+def test_log_external_stop_never_raises(mem_paths, monkeypatch) -> None:
+    monkeypatch.setattr(
+        memory_mod, "append_log", MagicMock(side_effect=OSError("disk full"))
+    )
+    session = Session()
+    session.plan.update(
+        user_said="buy oil",
+        steps=[{"content": "open JD", "status": "in_progress"}],
+    )
+
+    engine_mod._log_external_stop(session, None)  # must not raise

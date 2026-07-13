@@ -82,8 +82,8 @@ def test_config_error_is_value_error_subclass() -> None:
         ("engine", "state_decay_turns", 4),
         ("engine", "same_target_warn", 3),
         ("engine", "same_target_block", 5),
-        ("engine", "step_stuck_warn", 12),
-        ("engine", "step_stuck_urgent", 18),
+        ("engine", "step_stuck_warn", 8),
+        ("engine", "step_stuck_urgent", 12),
         ("engine", "plan_required_after", 8),
         # AgentConfig
         ("agent", "model", ""),
@@ -288,7 +288,14 @@ def test_to_toml_emits_header_and_section_comments_when_with_comments() -> None:
             "Agent tool-call loop: runaway safeguards (turn cap, stuck guard, "
             "plan gate) + retry + pacing.",
         ),
-        ("compact", "Screenshot compression before sending to the LLM."),
+        (
+            "compact",
+            "Size/quality of every image the LLM sees. `max_image_edge_px` caps "
+            "the long edge of camera views and phone screenshots (applied "
+            "server-side at capture and again at the engine's ingress); 1566 ≈ "
+            "the ~1.15-megapixel vision sweet spot — larger wastes tokens, "
+            "smaller blurs fine print.",
+        ),
         (
             "memory",
             "Daily-log loading: bootstrap preload + on-demand `read_logs` defaults.",

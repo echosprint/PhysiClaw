@@ -305,12 +305,11 @@ def lint_sequence(actions, *, keyboard_up: bool = False) -> str | None:
         else:
             why = "the batch then taps the Paste box, which only appears above the RISEN input"
         return (
-            f"BLOCKED — not executed: step {i} long-presses the chat input's "
-            f"KEYBOARD-HIDDEN box {hidden}, but {why}. With the keyboard up "
-            "that region is the keyboard itself, so no Paste popover can "
-            f"appear there. Long-press the chat input's KEYBOARD-VISIBLE box "
-            f"{visible} instead (SYSTEM § Screen layout) and keep the rest "
-            "of the batch."
+            f"BLOCKED — no step ran: step {i} long-presses the chat input's "
+            f"KEYBOARD-HIDDEN box {hidden}, but {why} — that region is now "
+            "the keyboard, so no Paste popover can appear. Re-issue the "
+            f"batch with the long-press on the KEYBOARD-VISIBLE box "
+            f"{visible} (SYSTEM § Screen layout)."
         )
 
     # Reused-paste-box guard: the batch taps the learned chat Paste box but
@@ -326,11 +325,12 @@ def lint_sequence(actions, *, keyboard_up: bool = False) -> str | None:
             c = _step_center(step, "long_press")
             if c is not None and not _inside(c, visible):
                 return (
-                    f"BLOCKED — not executed: reuses IM chat Paste box "
-                    f"{paste} after long-pressing a different field. Its Paste "
-                    "popover is elsewhere: long-press the field ALONE (own turn), "
-                    "then read Paste from that view (`search-in-app`). Don't "
-                    "reuse chat_paste."
+                    f"BLOCKED — no step ran (clipboard unchanged): reuses IM "
+                    f"chat Paste box {paste} after long-pressing a different "
+                    "field — its Paste popover is elsewhere. Redo every "
+                    "step: long-press the field ALONE (own turn), read Paste "
+                    "from that view (`search-in-app`). Don't reuse "
+                    "chat_paste."
                 )
     return None
 

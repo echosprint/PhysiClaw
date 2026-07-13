@@ -154,9 +154,12 @@ class Plan:
             self.step_turns = 0
         self.turns_since_update = 0
 
+    def progress(self) -> tuple[int, int]:
+        """(completed, total) step counts."""
+        return sum(1 for s in self.steps if s.status == COMPLETED), len(self.steps)
+
     def render(self) -> str:
-        done = sum(1 for s in self.steps if s.status == COMPLETED)
-        total = len(self.steps)
+        done, total = self.progress()
         step_lines = [f"  {STATUS_ICON[s.status]}{s.content}" for s in self.steps]
         if not step_lines:
             step_lines = ["  (none)"]
@@ -186,7 +189,7 @@ class Plan:
         """Contextual reminder line appended to render() when a signal
         fires. Silent when the plan is fresh — the model learns to ignore
         messages that always appear. One tip at a time, most urgent
-        first: a step stuck for 18 turns matters more than a stale tick."""
+        first: a stuck step matters more than a stale tick."""
         is_default = not self.is_drafted()
         step = self.current_step()
         if not is_default and step is not None:

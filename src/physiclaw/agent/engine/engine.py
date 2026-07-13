@@ -27,7 +27,15 @@ import time
 from dataclasses import dataclass
 
 from physiclaw.common import verdict
-from physiclaw.agent.engine import assemble, compact, curate, jobs, prompt, trajectory
+from physiclaw.agent.engine import (
+    assemble,
+    compact,
+    curate,
+    jobs,
+    memory,
+    prompt,
+    trajectory,
+)
 from physiclaw.agent.engine.builtin_tool import LocalTool
 from physiclaw.agent.engine.mcp_tool import McpClient, get_mcp, list_tools_cached
 from physiclaw.agent.engine.dto import (
@@ -301,6 +309,7 @@ async def _run_session(
             }
         )
     except asyncio.CancelledError:
+        _log_external_stop(session, tr)
         raise
     except Exception as e:
         # Crashes count as STUCK so the retry loop gives it another shot.
@@ -316,6 +325,29 @@ async def _run_session(
             tr.close()
         if rlog is not None:
             rlog.close()
+
+
+def _log_external_stop(session: Session, tr: Trace | None) -> None:
+    """Deterministic mid-task checkpoint on external stop (Ctrl-C, runtime
+    shutdown). The model gets no final turn, so the harness writes the
+    daily-log line the doctrine would have required — the auto-injected
+    recovery breadcrumb for the next wake. Sync file I/O only (this runs
+    on the cancellation path); best effort, never raises."""
+    if session.sentinel_status is not None or not session.plan.is_drafted():
+        return  # closed cleanly, or nothing recoverable yet
+    try:
+        step = session.plan.current_step() or "(none in_progress)"
+        done, total = session.plan.progress()
+        memory.append_log(
+            f"[{dt.datetime.now():%H:%M}] engine: stopped externally mid-task "
+            f"({done}/{total} steps done) — in-progress: "
+            f"{step}. Verify app state before resuming."
+        )
+        if tr is not None:
+            tr.write({"event": "stopped_externally"})
+        log.warning("external stop mid-task — recovery line logged")
+    except Exception:
+        log.exception("external-stop log failed")
 
 
 # ---------- core loop ----------

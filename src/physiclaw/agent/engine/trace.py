@@ -399,6 +399,7 @@ _CORRECTIVE_EVENTS = frozenset(
     {
         "bad_turn_shape",
         "checkpoint_corrective",
+        "stuck_reflection",
         "pitfall_checkpoint",
         "memory_cue_checkpoint",
     }
@@ -866,9 +867,7 @@ def purge_old_sessions(sessions_dir: Path, *, days: int) -> int:
     Shared by the engine (`_purge_old`) and the claude session writer."""
     cutoff = time.time() - days * 86400
     try:
-        dirs = [
-            d for d in sessions_dir.iterdir() if d.is_dir() and not d.is_symlink()
-        ]
+        dirs = [d for d in sessions_dir.iterdir() if d.is_dir() and not d.is_symlink()]
     except OSError:
         return 0
     removed = 0
