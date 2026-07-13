@@ -27,6 +27,24 @@ MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 _IMAGE_MAGICS = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff")  # PNG, JPEG
 
 
+async def _json_or_none(request) -> dict | None:
+    """Parse the request body as a JSON object, or None on anything else.
+
+    LAN clients (Safari, iOS Shortcuts) can send junk; a malformed body
+    is the caller's error (400 at the call site), never a handler crash
+    that surfaces as a 500.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return None
+    return body if isinstance(body, dict) else None
+
+
+def _bad_request(msg: str) -> JSONResponse:
+    return JSONResponse({"error": msg}, status_code=400)
+
+
 def render_phone_page_html(filename: str, port: int) -> str:
     """Read a static page and substitute the phone bridge URLs into it.
 
@@ -77,14 +95,20 @@ async def handle_clipboard_copied(request, bridge: BridgeState):
 
 async def handle_screen_dimension(request, cal: CalibrationState):
     """POST /api/bridge/screen-dimension — phone sends screen dimensions on load."""
-    body = await request.json()
-    with cal.lock:
-        cal.screen_dimension = {
+    body = await _json_or_none(request)
+    if body is None:
+        return _bad_request("invalid JSON body")
+    try:
+        dim = {
             "width": int(body.get("screen_width", 0)),
             "height": int(body.get("screen_height", 0)),
             "viewport_width": int(body.get("viewport_width", 0)),
             "viewport_height": int(body.get("viewport_height", 0)),
         }
+    except (TypeError, ValueError):
+        return _bad_request("dimension fields must be numbers")
+    with cal.lock:
+        cal.screen_dimension = dim
     dim = cal.screen_dimension
     log.info(
         f"Bridge device: {dim['width']}×{dim['height']}pt, "
@@ -176,7 +200,9 @@ async def handle_mode_switch(request, phone: PageState):
 
     Body: {"mode": "bridge"} or {"mode": "calibrate", "phase": "<phase>", ...phase_kwargs}
     """
-    body = await request.json()
+    body = await _json_or_none(request)
+    if body is None:
+        return _bad_request("invalid JSON body")
     mode = body.get("mode")
     if mode not in ("bridge", "calibrate"):
         return JSONResponse(
@@ -211,9 +237,18 @@ async def handle_calib_touch(request, cal: CalibrationState):
     always runs before any touch-driven step), so we convert directly to
     screenshot 0-1 coords and attach them as x, y.
     """
-    body = await request.json()
-    body["x"], body["y"] = cal.viewport_to_screenshot_pct(
-        body["clientX"], body["clientY"]
-    )
+    body = await _json_or_none(request)
+    if body is None:
+        return _bad_request("invalid JSON body")
+    try:
+        cx, cy = float(body["clientX"]), float(body["clientY"])
+    except (KeyError, TypeError, ValueError):
+        return _bad_request("clientX/clientY must be numbers")
+    try:
+        body["x"], body["y"] = cal.viewport_to_screenshot_pct(cx, cy)
+    except RuntimeError as e:
+        # Touch arrived before pre-cal measured the shift — a state
+        # conflict, not a malformed request.
+        return JSONResponse({"error": str(e)}, status_code=409)
     cal.report_touch(body)
     return JSONResponse({"ok": True})

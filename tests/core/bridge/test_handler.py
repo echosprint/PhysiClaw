@@ -514,3 +514,65 @@ async def test_handle_calib_touch_records_touch_with_screenshot_pcts() -> None:
     touch = cal.touches[0]
     assert touch["x"] == 0.5  # 100/200
     assert touch["y"] == 0.5  # 200/400
+
+
+# ---------- malformed-input guards (400/409, never 500) ----------
+
+
+def _raising_json_request():
+    req = _fake_request()
+
+    async def _bad_json():
+        raise ValueError("not json")
+
+    req.json = _bad_json
+    return req
+
+
+@pytest.mark.asyncio
+async def test_handle_screen_dimension_400_on_malformed_json() -> None:
+    resp = await handle_screen_dimension(_raising_json_request(), CalibrationState())
+
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_handle_screen_dimension_400_on_non_numeric_fields() -> None:
+    resp = await handle_screen_dimension(
+        _fake_request(json_obj={"screen_width": "wide"}), CalibrationState()
+    )
+
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_mode_switch_400_on_malformed_json() -> None:
+    bridge = BridgeState()
+    cal = CalibrationState()
+
+    resp = await handle_mode_switch(_raising_json_request(), PageState(bridge, cal))
+
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_handle_calib_touch_400_on_missing_coords() -> None:
+    resp = await handle_calib_touch(
+        _fake_request(json_obj={"clientX": 100}), CalibrationState()
+    )
+
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_handle_calib_touch_409_before_viewport_shift_measured() -> None:
+    """A touch that lands before pre-cal has measured the shift is a
+    state conflict — the phone page is ahead of the server, not broken."""
+    cal = CalibrationState()  # viewport_shift is None
+
+    resp = await handle_calib_touch(
+        _fake_request(json_obj={"clientX": 100, "clientY": 200}), cal
+    )
+
+    assert resp.status_code == 409
+    assert cal.touches == []
