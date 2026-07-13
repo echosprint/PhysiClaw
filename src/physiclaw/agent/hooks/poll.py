@@ -39,13 +39,15 @@ async def phone_watch() -> Trigger | None:
     try:
         r = await _get_client().get("/api/phone/watch")
         r.raise_for_status()
+        # Parse inside the try: a 200 with a non-JSON body (server
+        # mid-restart, proxy page) is a blip, not a crash per tick.
+        data = r.json()
         _in_blip = False
     except Exception as e:
         if not _in_blip:
             log.warning("phone watch poll failed: %s", e)
         _in_blip = True
         return None
-    data = r.json()
     if not data.get("wake"):
         return None
     return Trigger(

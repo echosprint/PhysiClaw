@@ -130,3 +130,23 @@ async def test_phone_watch_returns_none_on_4xx(
     respx_mock.get("http://test.host:8048/api/phone/watch").respond(404)
 
     assert await phone_watch() is None
+
+
+@pytest.mark.asyncio
+async def test_phone_watch_non_json_200_is_a_blip_not_a_crash(
+    respx_mock: respx.MockRouter, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A 200 with a non-JSON body (server mid-restart, proxy interception)
+    must follow the warn-once blip path, not raise out of the hook."""
+    import logging
+
+    respx_mock.get("http://test.host:8048/api/phone/watch").respond(
+        content=b"<html>Service restarting</html>", content_type="text/html"
+    )
+
+    with caplog.at_level(logging.WARNING, logger="physiclaw.agent.hooks.poll"):
+        assert await phone_watch() is None
+        assert await phone_watch() is None
+
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1  # warn-once, like any other blip
