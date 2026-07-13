@@ -34,12 +34,12 @@ from physiclaw.agent.engine import (
     memory,
     pitfalls,
     screen_layout,
-    stuck,
     trace,
     trajectory,
 )
 from physiclaw.agent.engine.dto import AssistantMessage, ToolCall
 from physiclaw.common.config import CONFIG
+from physiclaw.common.gesture_vocab import NAV_TOOLS, PRESS_TOOLS, SEQUENCE, SWIPE
 
 if TYPE_CHECKING:
     from physiclaw.agent.engine.session import Session
@@ -193,7 +193,7 @@ class CompactionCheckpoint(TurnGate):
 # Phone gestures — the calls StuckReflection treats as "still pressing".
 # swipe/sequence extend the press family: a stuck step continued by a
 # scroll or a batched run is the same loop.
-_GESTURES = stuck.PRESS_TOOLS | {"swipe", "sequence"}
+_GESTURES = PRESS_TOOLS | {SWIPE, SEQUENCE}
 
 
 class StuckReflection(TurnGate):
@@ -399,7 +399,7 @@ class LayoutLint(DispatchGuard):
     any internal error."""
 
     def check(self, session, call, *, turn):
-        if call.name not in ("sequence", "long_press"):
+        if call.name not in (SEQUENCE, "long_press"):
             return None
         try:
             lint = screen_layout.lint_gesture(
@@ -444,7 +444,7 @@ class StuckBlock(DispatchGuard):
 # keyboard state unproven. A failed local tool (note, Skill, jobs) says
 # nothing about the phone, and demoting belief on it would disarm the
 # layout lint mid-typing.
-_SCREEN_TOOLS = _GESTURES | {"go_back", "home_screen", "force_quit", "unlock_phone"}
+_SCREEN_TOOLS = _GESTURES | NAV_TOOLS | {"unlock_phone"}
 
 
 class KeyboardBelief(ResultObserver):

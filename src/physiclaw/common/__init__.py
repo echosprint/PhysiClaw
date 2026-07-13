@@ -13,6 +13,8 @@ Members:
     proxy          — proxy env-var normalization for httpx
     runtime_state  — live-server state file (host/port)
     verdict        — screen-change markers shared by core and agent
+    bbox           — bbox validation shared by core and agent
+    gesture_vocab  — gesture tool names + sequence step keys
     platform       — OS-specific branching (single source of truth)
     logger         — log formatting, tagging, and daily-file retention
     dumps          — image/artifact dumps (screenshots, tool calls)

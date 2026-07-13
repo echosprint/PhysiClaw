@@ -21,6 +21,7 @@ from typing import Any, assert_never
 
 from physiclaw.common import paths
 from physiclaw.common.config import CONFIG
+from physiclaw.common.gesture_vocab import STEP_ARG, STEP_TOOL
 from physiclaw.common.text import read_text
 from physiclaw.core.bridge import BridgeState
 from physiclaw.core.calibration import PARK_PCT, Calibration, ScreenTransforms
@@ -669,9 +670,9 @@ class PhysiClaw:
         def act() -> str:
             lines = []
             for i, s in enumerate(steps, 1):
-                tool = s["tool_name"]
+                tool = s[STEP_TOOL]
                 try:
-                    result = self._run_step(tool, s.get("arg"))
+                    result = self._run_step(tool, s.get(STEP_ARG))
                     lines.append(f"{i} {tool} ok — {result}")
                 except Exception as e:
                     lines.append(f"{i} {tool} FAIL ({e})")

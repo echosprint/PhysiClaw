@@ -27,7 +27,17 @@ import logging
 from dataclasses import dataclass, replace
 
 from physiclaw.agent.engine.dto import Message, UserMessage
+from physiclaw.agent.engine.geometry import center_of, inside
 from physiclaw.common import paths
+from physiclaw.common.gesture_vocab import (
+    NAV_TOOLS,
+    PRESS_TOOLS,
+    SEQUENCE,
+    STEP_ACTIONS,
+    STEP_ARG,
+    STEP_TOOL,
+    SWIPE,
+)
 from physiclaw.common.text import read_text, write_text
 
 log = logging.getLogger(__name__)
@@ -115,33 +125,11 @@ def repeatable_key_boxes() -> list[list[float]]:
     return [d[f] for f in REPEATABLE_KEY_FIELDS if isinstance(d.get(f), list)]
 
 
-# Geometry for the sequence lint. The margin mirrors the stuck guard's
-# MATCH_TOLERANCE but lives here — stuck.py imports this module, so the
-# constant can't be shared without a cycle.
-_LINT_MARGIN = 0.02
-
-
-def _center_of(bbox) -> tuple[float, float] | None:
-    try:
-        left, top, right, bottom = (float(v) for v in bbox)
-    except (TypeError, ValueError):
-        return None
-    return (left + right) / 2, (top + bottom) / 2
-
-
-def _inside(center: tuple[float, float], bbox: list) -> bool:
-    left, top, right, bottom = bbox
-    return (
-        left - _LINT_MARGIN <= center[0] <= right + _LINT_MARGIN
-        and top - _LINT_MARGIN <= center[1] <= bottom + _LINT_MARGIN
-    )
-
-
 def _step_center(step, tool: str) -> tuple[float, float] | None:
     """Center of a sequence step's bbox if it's the given press tool."""
-    if not isinstance(step, dict) or step.get("tool_name") != tool:
+    if not isinstance(step, dict) or step.get(STEP_TOOL) != tool:
         return None
-    return _center_of(step.get("arg") or [])
+    return center_of(step.get(STEP_ARG) or [])
 
 
 def _taps_box(steps, box) -> bool:
@@ -150,16 +138,11 @@ def _taps_box(steps, box) -> bool:
         return False
     for s in steps:
         c = _step_center(s, "tap")
-        if c is not None and _inside(c, box):
+        if c is not None and inside(c, box):
             return True
     return False
 
 
-# Gesture families the keyboard tracker interprets. Local copies — stuck.py
-# imports this module, so its identical constants can't be shared without a
-# cycle.
-_PRESS_TOOLS = ("tap", "double_tap", "long_press")
-_NAV_TOOLS = ("go_back", "home_screen", "force_quit")
 # Boxes that are only ever pressed while typing/pasting — a press there
 # neither raises nor dismisses the keyboard.
 _KEYBOARD_REGION_FIELDS = (
@@ -190,39 +173,39 @@ class KeyboardTracker:
     state: str = "unknown"  # "up" | "down" | "unknown"
 
     def observe(self, name: str, arguments: dict, changed: bool | None) -> None:
-        if name in _NAV_TOOLS:
+        if name in NAV_TOOLS:
             self.state = "down"
             return
-        if name == "swipe":
+        if name == SWIPE:
             self.state = "unknown"
             return
-        if name == "sequence":
-            actions = arguments.get("actions")
+        if name == SEQUENCE:
+            actions = arguments.get(STEP_ACTIONS)
             steps = actions if isinstance(actions, list) else []
             if any(
-                isinstance(x, dict) and x.get("tool_name") in (*_PRESS_TOOLS, "swipe")
+                isinstance(x, dict) and x.get(STEP_TOOL) in (*PRESS_TOOLS, SWIPE)
                 for x in steps
             ):
                 # A batch verdict can't be attributed per step — any press
                 # or swipe inside may have moved the keyboard.
                 self.state = "unknown"
             return
-        if name not in _PRESS_TOOLS:
+        if name not in PRESS_TOOLS:
             return  # views / local tools / clipboard — screen untouched
-        c = _center_of(arguments.get("bbox") or [])
+        c = center_of(arguments.get("bbox") or [])
         if c is None:
             self.state = "unknown"
             return
         d = _load()
         hidden = d.get("chat_input_kb_hidden")
-        if isinstance(hidden, list) and _inside(c, hidden):
+        if isinstance(hidden, list) and inside(c, hidden):
             # The raising press — but only the camera proves the keyboard
             # actually rose (a dead press must not claim "up").
             self.state = "up" if changed is True else "unknown"
             return
         for f in _KEYBOARD_REGION_FIELDS:
             box = d.get(f)
-            if isinstance(box, list) and _inside(c, box):
+            if isinstance(box, list) and inside(c, box):
                 return  # typing/pasting — keyboard state preserved
         self.state = "unknown"  # a press elsewhere may have dismissed it
 
@@ -236,8 +219,8 @@ def lint_gesture(name: str, arguments: dict, *, keyboard_up: bool) -> str | None
     up: the raising tap happened in an earlier call, so no in-batch
     evidence can exist).
     """
-    if name == "sequence":
-        return lint_sequence(arguments.get("actions"), keyboard_up=keyboard_up)
+    if name == SEQUENCE:
+        return lint_sequence(arguments.get(STEP_ACTIONS), keyboard_up=keyboard_up)
     if name != "long_press" or not keyboard_up:
         return None
     d = _load()
@@ -245,8 +228,8 @@ def lint_gesture(name: str, arguments: dict, *, keyboard_up: bool) -> str | None
     visible = d.get("chat_input_kb_visible")
     if not (isinstance(hidden, list) and isinstance(visible, list)):
         return None
-    c = _center_of(arguments.get("bbox") or [])
-    if c is None or not _inside(c, hidden):
+    c = center_of(arguments.get("bbox") or [])
+    if c is None or not inside(c, hidden):
         return None
     return (
         f"BLOCKED — not executed: this long-press targets the chat input's "
@@ -288,12 +271,12 @@ def lint_sequence(actions, *, keyboard_up: bool = False) -> str | None:
     input_tapped_at: int | None = None
     for i, step in enumerate(actions, 1):
         tap_c = _step_center(step, "tap")
-        if tap_c is not None and _inside(tap_c, hidden):
+        if tap_c is not None and inside(tap_c, hidden):
             if input_tapped_at is None:
                 input_tapped_at = i
             continue
         lp_c = _step_center(step, "long_press")
-        if lp_c is None or not _inside(lp_c, hidden):
+        if lp_c is None or not inside(lp_c, hidden):
             continue
         pastes_after = _taps_box(actions[i:], paste)
         if input_tapped_at is None and not keyboard_up and not pastes_after:
@@ -323,7 +306,7 @@ def lint_sequence(actions, *, keyboard_up: bool = False) -> str | None:
     if isinstance(paste, list) and _taps_box(actions, paste):
         for step in actions:
             c = _step_center(step, "long_press")
-            if c is not None and not _inside(c, visible):
+            if c is not None and not inside(c, visible):
                 return (
                     f"BLOCKED — no step ran (clipboard unchanged): reuses IM "
                     f"chat Paste box {paste} after long-pressing a different "

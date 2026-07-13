@@ -50,31 +50,24 @@ camera-verified no-ops / four full cycles / four identical errors.
 from dataclasses import dataclass, field
 
 from physiclaw.agent.engine import screen_layout
+from physiclaw.agent.engine.geometry import MATCH_TOLERANCE, center_of, near
 from physiclaw.common.config import CONFIG
 
-# Gestures that count toward same-target tiers. Swipes are deliberately
-# absent (see module docstring).
-PRESS_TOOLS = frozenset({"tap", "double_tap", "long_press"})
-
-# Two press centers within this L∞ distance are the same target —
-# covers the coordinate jitter of re-transcribed bboxes without
-# swallowing a genuinely different neighbor element.
-MATCH_TOLERANCE = 0.02
+# Only presses count toward same-target tiers (PRESS_TOOLS from the
+# shared vocabulary). Swipes are deliberately absent (see module
+# docstring).
+from physiclaw.common.gesture_vocab import (
+    NAV_TOOLS,
+    PRESS_TOOLS,
+    SEQUENCE,
+    STEP_ACTIONS,
+    STEP_ARG,
+    STEP_TOOL,
+    SWIPE,
+)
 
 WARN_AT = CONFIG.engine.same_target_warn
 BLOCK_AT = CONFIG.engine.same_target_block
-
-
-def _center(bbox: list) -> tuple[float, float] | None:
-    try:
-        left, top, right, bottom = (float(v) for v in bbox)
-    except (TypeError, ValueError):
-        return None
-    return (left + right) / 2, (top + bottom) / 2
-
-
-def _near(a: tuple[float, float], b: tuple[float, float]) -> bool:
-    return abs(a[0] - b[0]) <= MATCH_TOLERANCE and abs(a[1] - b[1]) <= MATCH_TOLERANCE
 
 
 def _press_centers(name: str, arguments: dict) -> list[tuple[float, float]]:
@@ -85,17 +78,17 @@ def _press_centers(name: str, arguments: dict) -> list[tuple[float, float]]:
     batch); anything else yields none.
     """
     if name in PRESS_TOOLS:
-        c = _center(arguments.get("bbox") or [])
+        c = center_of(arguments.get("bbox") or [])
         return [c] if c else []
-    if name == "sequence":
-        actions = arguments.get("actions")
+    if name == SEQUENCE:
+        actions = arguments.get(STEP_ACTIONS)
         if not isinstance(actions, list):
             return []
         centers = []
         for step in actions:
-            if not isinstance(step, dict) or step.get("tool_name") not in PRESS_TOOLS:
+            if not isinstance(step, dict) or step.get(STEP_TOOL) not in PRESS_TOOLS:
                 continue
-            c = _center(step.get("arg") or [])
+            c = center_of(step.get(STEP_ARG) or [])
             if c:
                 centers.append(c)
         return centers
@@ -107,7 +100,6 @@ def _press_centers(name: str, arguments: dict) -> list[tuple[float, float]]:
 # local tools, and exempt keyboard keys have NO signature — they
 # neither extend nor break a cycle.
 
-_NAV_TOOLS = frozenset({"go_back", "home_screen", "force_quit"})
 # Longest lookback any detection needs: BLOCK_AT repeats of a period-3
 # cycle (+1 headroom for the pre-append should_block probe). Derived so
 # a config change can't silently outgrow the history.
@@ -321,13 +313,13 @@ class StuckGuard:
         if self._exempt is None:
             self._exempt = [
                 c
-                for c in (_center(b) for b in screen_layout.repeatable_key_boxes())
+                for c in (center_of(b) for b in screen_layout.repeatable_key_boxes())
                 if c
             ]
         return [
             c
             for c in _press_centers(name, arguments)
-            if not any(_near(c, e) for e in self._exempt)
+            if not any(near(c, e) for e in self._exempt)
         ]
 
     def _signature(self, name: str, arguments: dict) -> tuple | None:
@@ -337,18 +329,18 @@ class StuckGuard:
         if name in PRESS_TOOLS:
             counted = self._press_centers_counted(name, arguments)
             return (name, _quant(counted[0])) if counted else None
-        if name == "swipe":
+        if name == SWIPE:
             direction = arguments.get("direction")
-            return ("swipe", direction) if direction else None
-        if name in _NAV_TOOLS:
+            return (SWIPE, direction) if direction else None
+        if name in NAV_TOOLS:
             return (name,)
-        if name == "sequence":
+        if name == SEQUENCE:
             counted = self._press_centers_counted(name, arguments)
-            return ("sequence", _quant(counted[0]) if counted else None)
+            return (SEQUENCE, _quant(counted[0]) if counted else None)
         return None
 
     def _find(self, center: tuple[float, float]) -> _Target | None:
         for t in self._targets:
-            if _near(center, t.center):
+            if near(center, t.center):
                 return t
         return None
