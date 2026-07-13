@@ -9,6 +9,7 @@ import pytest
 from freezegun import freeze_time
 
 from physiclaw.agent.engine import job_store
+from physiclaw.agent.engine import jobs as engine_jobs
 from physiclaw.agent.engine.job_store import (
     KIND_ONE_TIME,
     KIND_PERIODIC,
@@ -32,6 +33,9 @@ def _jobs_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     p = tmp_path / "jobs.md"
     monkeypatch.setattr(cron, "JOBS_PATH", p)
     monkeypatch.setattr(job_store, "JOBS_PATH", p)
+    # The CLI's done/fail/cancel now route through engine.jobs.finish_job,
+    # whose module captured its own JOBS_PATH name at import.
+    monkeypatch.setattr(engine_jobs, "JOBS_PATH", p)
     return p
 
 
@@ -77,9 +81,11 @@ def test_build_trigger_description_includes_job_block_and_done_fail_lines() -> N
     assert "job: x" in out
     assert "description: Do thing" in out
     assert "context: some context" in out
+    # Engine-neutral close instruction — no concrete CLI syntax; each
+    # engine path routes through its own jobs surface.
     assert "When you finish each job" in out
-    assert "physiclaw.agent.hooks.cron done x" in out
-    assert "physiclaw.agent.hooks.cron fail x" in out
+    assert "finish_job" in out
+    assert "explicit close: x" in out
 
 
 def test_build_trigger_description_handles_multiple_jobs() -> None:
@@ -466,8 +472,9 @@ def test_cli_done_periodic_resets_to_pend(
     assert rc == 0
     text = _jobs_path.read_text()
     assert "- Status: pend" in text
-    # The claude-code engine marks jobs through this CLI — it must get
-    # the same re-arm warning the in-process finish_job tool gives.
+    # The CLI wraps finish_job, so a periodic close must surface the
+    # same re-arm warning finish_job's callers get — agents read "done"
+    # as "over" while the job re-arms and fires again minutes later.
     out = capsys.readouterr().out
     assert "PERIODIC" in out
     assert "2026-04-28T08:00" in out
@@ -529,7 +536,9 @@ def test_cli_done_write_error(
             next_fire_time=NEVER,
         )
     )
-    mocker.patch.object(cron, "update_fields", side_effect=OSError("boom"))
+    # The CLI's mutation now lives in engine.jobs.finish_job — patch the
+    # update_fields IT calls, not the hook's own (used only for fire times).
+    mocker.patch.object(engine_jobs, "update_fields", side_effect=OSError("boom"))
 
     rc = _run_cli(monkeypatch, "done", "x")
 

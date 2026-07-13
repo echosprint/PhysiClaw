@@ -2,27 +2,26 @@
 
 Each tick: load jobs.md → find jobs whose `Next fire time` has arrived →
 fire one Trigger → update the status/timing fields in place. The agent
-marks completion via `done <id>` or `fail <id>` through the CLI below.
-Terminal jobs (cancel/done/fail) auto-purge after 7 days.
+marks completion through `engine.jobs.finish_job` — via the engine's
+finish_job tool or the claude path's jobs skill; the CLI below wraps
+the same function for manual maintenance. Terminal jobs
+(cancel/done/fail) auto-purge after 7 days.
 
 The durable data model (Job dataclass, parser, field updates) lives in
 `physiclaw.agent.engine.job_store`. This file only owns:
   - the `@register`'d hook that does the ticking
-  - the CLI used by the `/cron` skill and runtime
+  - the maintenance CLI (verify / jobs-to-do / purge / done / fail / cancel)
 """
 
 import datetime as dt
 import logging
 
+from physiclaw.agent.engine import jobs as engine_jobs
 from physiclaw.agent.engine.job_store import (
     JOBS_PATH,
     KIND_ONE_TIME,
     NEVER,
-    STATUS_CANCEL,
-    STATUS_DONE,
-    STATUS_FAIL,
     STATUS_FIRED,
-    STATUS_PEND,
     Job,
     expire_stale_fired,
     find_due,
@@ -49,19 +48,16 @@ def _build_trigger_description(due: list[Job]) -> str:
         blocks.append("\n".join(block))
 
     body = "\n\n".join(blocks)
-    done_lines = "\n".join(
-        f"  uv run python -m physiclaw.agent.hooks.cron done {j.id} <one-line result summary>"
-        for j in due
-    )
-    fail_lines = "\n".join(
-        f"  uv run python -m physiclaw.agent.hooks.cron fail {j.id} <what went wrong>"
-        for j in due
-    )
+    # Engine-neutral close instruction: the in-process engine exposes a
+    # `finish_job` tool, the claude path a `jobs` skill — both route to
+    # the same engine.jobs.finish_job this hook's CLI wraps.
+    ids = ", ".join(j.id for j in due)
     return (
         f"{body}\n\n"
-        f"When you finish each job, mark it:\n"
-        f"  success:\n{done_lines}\n"
-        f"  failure:\n{fail_lines}"
+        "When you finish each job, close it with your jobs facility "
+        "(the finish_job tool, or the jobs skill): mark done with a "
+        "one-line result summary, or fail with what went wrong. Every "
+        f"fired job needs an explicit close: {ids}"
     )
 
 
@@ -192,27 +188,20 @@ def _cli() -> int:
             print(f"ERROR: no job named {job_id!r} in {JOBS_PATH}")
             return 1
 
-        now = dt.datetime.now()
-        updates: dict[str, str] = {}
-
-        if cmd in ("done", "fail"):
-            result_desc = " ".join(args[2:]) if len(args) > 2 else ""
-            updates["Execution time"] = format_minute(now)
-            updates["Execution result"] = result_desc or cmd
-            if job.kind == KIND_ONE_TIME:
-                updates["Status"] = STATUS_DONE if cmd == "done" else STATUS_FAIL
-            else:
-                updates["Status"] = STATUS_PEND
-        elif cmd == "cancel":
-            updates["Status"] = STATUS_CANCEL
-
+        # The status/reset/stamp policy is single-sourced in
+        # engine.jobs.finish_job — this CLI only owns argv parsing and
+        # its pinned printed surface.
+        result_desc = " ".join(args[2:]) if len(args) > 2 else ""
         try:
-            update_fields(JOBS_PATH, {job_id: updates})
+            engine_jobs.finish_job(id=job_id, status=cmd, recap=result_desc)
+        except ValueError as e:
+            print(f"ERROR: {e}")
+            return 1
         except Exception as e:
             print(f"WRITE ERROR: {e}")
             return 1
         print(f"OK: {cmd} {job_id}")
-        if updates.get("Status") == STATUS_PEND:
+        if cmd in ("done", "fail") and job.kind != KIND_ONE_TIME:
             # Same warning the in-process finish_job tool gives: agents
             # read "done" as "over" while the periodic job re-arms and
             # fires again minutes later.
