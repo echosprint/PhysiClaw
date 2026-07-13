@@ -82,3 +82,12 @@ def test_parse_sentinel_finds_match_in_multiline_text() -> None:
 
 def test_parse_sentinel_unknown_status_word_falls_through() -> None:
     assert parse_sentinel("MAYBE") == (None, "MAYBE")
+
+
+def test_parse_sentinel_status_prefix_word_is_not_a_match() -> None:
+    """`DONEDEAL` must not parse as DONE — the status needs a word boundary."""
+    assert parse_sentinel(">> DONEDEAL - shipped") == (None, ">> DONEDEAL - shipped")
+
+
+def test_parse_sentinel_waiting_prose_is_not_wait() -> None:
+    assert parse_sentinel("> waiting on user") == (None, "> waiting on user")

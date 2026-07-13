@@ -15,7 +15,7 @@ WAIT = "WAIT"
 STATUSES: frozenset[str] = frozenset({DONE, STUCK, FAIL, IDLE, WAIT})
 
 _SENTINEL_RE = re.compile(
-    r">+\s*(DONE|STUCK|FAIL|IDLE|WAIT)\s*-?\s*(.*)", re.IGNORECASE
+    r">+\s*(DONE|STUCK|FAIL|IDLE|WAIT)\b\s*-?\s*(.*)", re.IGNORECASE
 )
 
 
