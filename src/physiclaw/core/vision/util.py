@@ -14,8 +14,14 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from physiclaw.common.bbox import validate_bbox
 from physiclaw.common.config import CONFIG
 from physiclaw.core.vision.preprocess import grayscale, resize_to_max_edge
+
+# `validate_bbox` comes from `physiclaw.common.bbox` (the shared
+# core/agent contract) and is deliberately re-exported here:
+# orchestration keeps importing it from this module, and
+# `bbox_on_screen` below builds on it.
 
 log = logging.getLogger(__name__)
 
@@ -140,32 +146,6 @@ def check_phone_in_frame(frame: np.ndarray) -> dict:
         "aspect_ratio": round(phone_ratio, 2),
         "coverage": round(coverage, 2),
     }
-
-
-def validate_bbox(bbox: list[float]) -> list[float]:
-    """Raise ValueError if bbox is malformed; return `bbox` unchanged.
-
-    Defense-in-depth runtime check before any GRBL move. IDENTICAL
-    LOGIC to the engine validator's bbox check (in
-    `src/physiclaw/agent/engine/validator.py`) — same checks, same
-    order, same messages — so the agent sees the same diagnostic
-    regardless of which layer catches the violation. Keep the two in
-    sync.
-    """
-    if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
-        raise ValueError(f"bbox: must be [left, top, right, bottom]; got {bbox!r}")
-    if not all(isinstance(v, (int, float)) for v in bbox):
-        raise ValueError(f"bbox: each coord must be a number; got {bbox!r}")
-    left, top, right, bottom = bbox
-    if any(v < 0 or v > 1 for v in bbox):
-        raise ValueError(
-            f"bbox: each coord must be in [0, 1]; got [{left}, {top}, {right}, {bottom}]"
-        )
-    if left >= right or top >= bottom:
-        raise ValueError(
-            f"bbox: left < right, top < bottom; got [{left}, {top}, {right}, {bottom}]"
-        )
-    return bbox
 
 
 def bbox_on_screen(bbox: list[float]) -> bool:

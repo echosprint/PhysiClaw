@@ -16,6 +16,8 @@ MCP tools and our local synthetic tools use. No external dep.
 
 from typing import Any
 
+from physiclaw.common.bbox import validate_bbox
+
 
 class ValidationError(Exception):
     """Raised when arguments don't match the schema. Caller converts this
@@ -67,29 +69,17 @@ def validate_arguments(args: Any, schema: dict[str, Any]) -> None:
             f"missing required argument(s): {', '.join(sorted(missing))}"
         )
 
-    # Bbox shape — IDENTICAL LOGIC to `validate_bbox` in
-    # core/vision/util.py (same checks, same order, same messages). Keep
-    # the two in sync. Runs before the per-key `_check_value` loop so
-    # the bbox-specific error fires before the generic schema type
-    # check. The orchestrator calls validate_bbox at gesture time as
-    # defense-in-depth.
+    # Bbox shape — the shared `common.bbox` contract, wrapped into this
+    # layer's ValidationError. Runs before the per-key `_check_value`
+    # loop so the bbox-specific error fires before the generic schema
+    # type check. The orchestrator calls validate_bbox again at gesture
+    # time as defense-in-depth.
     bbox = args.get("bbox")
     if bbox is not None:
-        if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
-            raise ValidationError(
-                f"bbox: must be [left, top, right, bottom]; got {bbox!r}"
-            )
-        if not all(isinstance(v, (int, float)) for v in bbox):
-            raise ValidationError(f"bbox: each coord must be a number; got {bbox!r}")
-        left, top, right, bottom = bbox
-        if any(v < 0 or v > 1 for v in bbox):
-            raise ValidationError(
-                f"bbox: each coord must be in [0, 1]; got [{left}, {top}, {right}, {bottom}]"
-            )
-        if left >= right or top >= bottom:
-            raise ValidationError(
-                f"bbox: left < right, top < bottom; got [{left}, {top}, {right}, {bottom}]"
-            )
+        try:
+            validate_bbox(bbox)
+        except ValueError as e:
+            raise ValidationError(str(e)) from e
 
     for key, value in args.items():
         prop = properties.get(key)
