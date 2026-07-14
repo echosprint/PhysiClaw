@@ -20,7 +20,6 @@ from physiclaw.core.server import bridge as bridge_reg
 def test_bridge_register_wires_control_routes_only(fake_mcp) -> None:
     bridge_reg.register(
         fake_mcp,
-        physiclaw=MagicMock(),
         bridge=MagicMock(),
         calib=MagicMock(),
         phone=MagicMock(),
@@ -38,7 +37,6 @@ def test_bridge_register_wires_control_routes_only(fake_mcp) -> None:
 def test_bridge_register_phone_wires_lan_routes_only(fake_mcp) -> None:
     bridge_reg.register_phone(
         fake_mcp,
-        physiclaw=MagicMock(),
         bridge=MagicMock(),
         calib=MagicMock(),
         phone=MagicMock(),
@@ -99,9 +97,9 @@ async def test_bridge_routes_forward_to_handlers(
     for s in spies.values():
         s.side_effect = _ok
 
-    pl, br, cb, ph = MagicMock(), MagicMock(), MagicMock(), MagicMock()
-    bridge_reg.register(fake_mcp, pl, br, cb, ph)
-    bridge_reg.register_phone(fake_mcp, pl, br, cb, ph)
+    br, cb, ph = MagicMock(), MagicMock(), MagicMock()
+    bridge_reg.register(fake_mcp, br, cb, ph)
+    bridge_reg.register_phone(fake_mcp, br, cb, ph)
 
     req = async_request()
 

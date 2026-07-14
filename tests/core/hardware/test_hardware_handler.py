@@ -92,10 +92,10 @@ def _read_json(response) -> dict:
 
 @pytest.mark.asyncio
 async def test_handle_status_returns_status_dict() -> None:
-    physiclaw = SimpleNamespace(status=lambda: {"arm": True, "cam": False})
+    rig = SimpleNamespace(status=lambda: {"arm": True, "cam": False})
     req = _fake_request()
 
-    resp = await handle_status(req, physiclaw)
+    resp = await handle_status(req, rig)
 
     assert _read_json(resp) == {"arm": True, "cam": False}
 
@@ -105,30 +105,30 @@ async def test_handle_status_returns_status_dict() -> None:
 
 @pytest.mark.asyncio
 async def test_handle_connect_arm_happy_path() -> None:
-    physiclaw = MagicMock()
+    rig = MagicMock()
 
-    resp = await handle_connect_arm(_fake_request(), physiclaw)
+    resp = await handle_connect_arm(_fake_request(), rig)
 
     body = _read_json(resp)
     assert body["status"] == "ok"
     assert "Arm connected" in body["message"]
-    physiclaw.acquire.assert_called_once()
-    physiclaw.connect_arm.assert_called_once()
-    physiclaw.release.assert_called_once()
+    rig.acquire.assert_called_once()
+    rig.connect_arm.assert_called_once()
+    rig.release.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_handle_connect_arm_releases_even_on_failure() -> None:
-    physiclaw = MagicMock()
-    physiclaw.connect_arm.side_effect = RuntimeError("no port")
+    rig = MagicMock()
+    rig.connect_arm.side_effect = RuntimeError("no port")
 
-    resp = await handle_connect_arm(_fake_request(), physiclaw)
+    resp = await handle_connect_arm(_fake_request(), rig)
 
     assert resp.status_code == 500
     body = _read_json(resp)
     assert body["status"] == "error"
     assert "no port" in body["message"]
-    physiclaw.release.assert_called_once()
+    rig.release.assert_called_once()
 
 
 # ---------- camera_preview ----------
@@ -271,71 +271,71 @@ def test_auto_pick_camera_skips_when_corners_not_detected(
 # ---------- handle_connect_camera ----------
 
 
-def _fake_physiclaw_cam_index(idx: int = 5) -> SimpleNamespace:
-    """Build a fake physiclaw with .cam.index and required methods."""
-    physiclaw = MagicMock()
-    physiclaw.cam.index = idx
-    return physiclaw
+def _fake_rig_cam_index(idx: int = 5) -> SimpleNamespace:
+    """Build a fake rig with .cam.index and required methods."""
+    rig = MagicMock()
+    rig.cam.index = idx
+    return rig
 
 
 @pytest.mark.asyncio
 async def test_handle_connect_camera_explicit_index(mocker) -> None:
-    physiclaw = _fake_physiclaw_cam_index(idx=2)
+    rig = _fake_rig_cam_index(idx=2)
     phone = MagicMock()
 
     resp = await handle_connect_camera(
         _fake_request(json_obj={"index": 2}),
-        physiclaw,
+        rig,
         phone,
     )
 
     body = _read_json(resp)
     assert body["status"] == "ok"
     assert body["index"] == 2
-    physiclaw.connect_camera.assert_called_once_with(2)
+    rig.connect_camera.assert_called_once_with(2)
     # No auto-pick → no phase set.
     phone.set_mode.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_handle_connect_camera_auto_pick_happy_path(mocker) -> None:
-    physiclaw = _fake_physiclaw_cam_index(idx=4)
-    physiclaw._bridge.wait_for_connection.return_value = True
+    rig = _fake_rig_cam_index(idx=4)
+    rig.bridge.wait_for_connection.return_value = True
     phone = MagicMock()
     mocker.patch.object(handler, "_auto_pick_camera_index", return_value=4)
     mocker.patch.object(handler.time, "sleep")
 
     resp = await handle_connect_camera(
         _fake_request(json_obj={"index": "auto"}),
-        physiclaw,
+        rig,
         phone,
     )
 
     body = _read_json(resp)
     assert body["status"] == "ok"
     assert body["index"] == 4
-    physiclaw._bridge.wait_for_connection.assert_called_once()
+    rig.bridge.wait_for_connection.assert_called_once()
     # Sets corners then restores bridge.
     calls = phone.set_mode.call_args_list
     assert calls[0].args == ("calibrate",)
     assert calls[0].kwargs == {"phase": "corners"}
     assert calls[-1].args == ("bridge",)
-    physiclaw.connect_camera.assert_called_once_with(4)
+    rig.connect_camera.assert_called_once_with(4)
 
 
 @pytest.mark.asyncio
 async def test_handle_connect_camera_auto_pick_treats_missing_body_as_auto(
     mocker,
 ) -> None:
-    physiclaw = _fake_physiclaw_cam_index(idx=1)
-    physiclaw._bridge.wait_for_connection.return_value = True
+    rig = _fake_rig_cam_index(idx=1)
+    rig.bridge.wait_for_connection.return_value = True
     phone = MagicMock()
     mocker.patch.object(handler, "_auto_pick_camera_index", return_value=1)
     mocker.patch.object(handler.time, "sleep")
 
     resp = await handle_connect_camera(
         _fake_request(raise_on_json=True),
-        physiclaw,
+        rig,
         phone,
     )
 
@@ -346,13 +346,13 @@ async def test_handle_connect_camera_auto_pick_treats_missing_body_as_auto(
 async def test_handle_connect_camera_auto_pick_fails_when_bridge_not_polling(
     mocker,
 ) -> None:
-    physiclaw = _fake_physiclaw_cam_index()
-    physiclaw._bridge.wait_for_connection.return_value = False
+    rig = _fake_rig_cam_index()
+    rig.bridge.wait_for_connection.return_value = False
     phone = MagicMock()
 
     resp = await handle_connect_camera(
         _fake_request(json_obj={"index": "auto"}),
-        physiclaw,
+        rig,
         phone,
     )
 
@@ -366,15 +366,15 @@ async def test_handle_connect_camera_auto_pick_fails_when_bridge_not_polling(
 
 @pytest.mark.asyncio
 async def test_handle_connect_camera_auto_pick_no_match(mocker) -> None:
-    physiclaw = _fake_physiclaw_cam_index()
-    physiclaw._bridge.wait_for_connection.return_value = True
+    rig = _fake_rig_cam_index()
+    rig.bridge.wait_for_connection.return_value = True
     phone = MagicMock()
     mocker.patch.object(handler, "_auto_pick_camera_index", return_value=None)
     mocker.patch.object(handler.time, "sleep")
 
     resp = await handle_connect_camera(
         _fake_request(json_obj={"index": "auto"}),
-        physiclaw,
+        rig,
         phone,
     )
 
@@ -387,33 +387,33 @@ async def test_handle_connect_camera_auto_pick_no_match(mocker) -> None:
 
 @pytest.mark.asyncio
 async def test_handle_connect_camera_releases_on_connect_failure(mocker) -> None:
-    physiclaw = _fake_physiclaw_cam_index()
-    physiclaw.connect_camera.side_effect = RuntimeError("usb error")
+    rig = _fake_rig_cam_index()
+    rig.connect_camera.side_effect = RuntimeError("usb error")
     phone = MagicMock()
 
     resp = await handle_connect_camera(
         _fake_request(json_obj={"index": 0}),
-        physiclaw,
+        rig,
         phone,
     )
 
     assert resp.status_code == 500
-    physiclaw.release.assert_called_once()
+    rig.release.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_handle_connect_camera_stores_index_in_calibration(mocker) -> None:
-    physiclaw = _fake_physiclaw_cam_index(idx=2)
+    rig = _fake_rig_cam_index(idx=2)
     phone = MagicMock()
 
     await handle_connect_camera(
         _fake_request(json_obj={"index": 2}),
-        physiclaw,
+        rig,
         phone,
     )
 
     # Stored on the calibration namespace as int.
-    assert physiclaw.calibration.cam_index == 2
+    assert rig.calibration.cam_index == 2
 
 
 # ---------- handle_disconnect_camera ----------
@@ -421,23 +421,23 @@ async def test_handle_connect_camera_stores_index_in_calibration(mocker) -> None
 
 @pytest.mark.asyncio
 async def test_handle_disconnect_camera_releases_when_connected() -> None:
-    physiclaw = MagicMock()
-    physiclaw.disconnect_camera.return_value = True
+    rig = MagicMock()
+    rig.disconnect_camera.return_value = True
 
-    resp = await handle_disconnect_camera(_fake_request(), physiclaw)
+    resp = await handle_disconnect_camera(_fake_request(), rig)
 
     body = _read_json(resp)
     assert body == {"status": "ok", "released": True}
-    physiclaw.disconnect_camera.assert_called_once()
-    physiclaw.release.assert_called_once()
+    rig.disconnect_camera.assert_called_once()
+    rig.release.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_handle_disconnect_camera_idempotent_when_no_camera() -> None:
-    physiclaw = MagicMock()
-    physiclaw.disconnect_camera.return_value = False
+    rig = MagicMock()
+    rig.disconnect_camera.return_value = False
 
-    resp = await handle_disconnect_camera(_fake_request(), physiclaw)
+    resp = await handle_disconnect_camera(_fake_request(), rig)
 
     body = _read_json(resp)
     assert body == {"status": "ok", "released": False}
@@ -445,13 +445,13 @@ async def test_handle_disconnect_camera_idempotent_when_no_camera() -> None:
 
 @pytest.mark.asyncio
 async def test_handle_disconnect_camera_releases_lock_on_failure() -> None:
-    physiclaw = MagicMock()
-    physiclaw.disconnect_camera.side_effect = RuntimeError("close failed")
+    rig = MagicMock()
+    rig.disconnect_camera.side_effect = RuntimeError("close failed")
 
-    resp = await handle_disconnect_camera(_fake_request(), physiclaw)
+    resp = await handle_disconnect_camera(_fake_request(), rig)
 
     assert resp.status_code == 500
-    physiclaw.release.assert_called_once()
+    rig.release.assert_called_once()
 
 
 # ---------- handle_camera_preview ----------

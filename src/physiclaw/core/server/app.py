@@ -34,7 +34,7 @@ physiclaw = PhysiClaw()
 _bridge = BridgeState()
 _calib = CalibrationState()
 _phone = PageState(_bridge, _calib)
-physiclaw.attach_bridge(_bridge)
+physiclaw.rig.attach_bridge(_bridge)
 
 # Calibration starts empty. The on-disk bundle at
 # `~/.physiclaw/calibration/bundle.json` is loaded ONLY by
@@ -57,10 +57,10 @@ def shutdown() -> None:
 _phone_app = PhoneApp()
 
 _register_tools(mcp, physiclaw)
-_register_bridge(mcp, physiclaw, _bridge, _calib, _phone)
-_register_bridge_phone(_phone_app, physiclaw, _bridge, _calib, _phone)
-_register_hardware(mcp, physiclaw, _phone)
-_register_calibration(mcp, physiclaw, _bridge, _calib, _phone)
+_register_bridge(mcp, _bridge, _calib, _phone)
+_register_bridge_phone(_phone_app, _bridge, _calib, _phone)
+_register_hardware(mcp, physiclaw.rig, _phone)
+_register_calibration(mcp, physiclaw.rig, _bridge, _calib, _phone)
 _register_watch(mcp, physiclaw)
 
 

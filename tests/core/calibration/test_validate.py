@@ -209,5 +209,5 @@ def test_trace_screen_edge_visits_all_check_points(mocker) -> None:
     validate_mod.trace_screen_edge(arm, transforms)
 
     # 9 check points + 2 return_to_origin → 9 fast moves + 2 origin returns.
-    assert arm._fast_move.call_count == 9
+    assert arm.rapid_to.call_count == 9
     assert arm.return_to_origin.call_count == 2

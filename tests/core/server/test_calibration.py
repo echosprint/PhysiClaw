@@ -15,7 +15,7 @@ from physiclaw.core.server import calibration as calib_reg
 def test_calibration_register_wires_all_routes(fake_mcp) -> None:
     calib_reg.register(
         fake_mcp,
-        physiclaw=MagicMock(),
+        rig=MagicMock(),
         bridge=MagicMock(),
         calib=MagicMock(),
         phone=MagicMock(),

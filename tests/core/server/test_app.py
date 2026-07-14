@@ -41,11 +41,11 @@ def test_phone_page_state_singleton_constructed() -> None:
 
 
 def test_bridge_attached_to_orchestrator() -> None:
-    """`physiclaw.attach_bridge(_bridge)` must run at module load —
+    """`physiclaw.rig.attach_bridge(_bridge)` must run at module load —
     screenshot and clipboard tools depend on it."""
     from physiclaw.core.server import app
 
-    assert app.physiclaw._bridge is app._bridge
+    assert app.physiclaw.rig.bridge is app._bridge
 
 
 def test_calibration_starts_empty_at_import() -> None:
@@ -55,7 +55,7 @@ def test_calibration_starts_empty_at_import() -> None:
     construction starts with an empty calibration."""
     from physiclaw.core.server import app
 
-    cal = app.physiclaw.calibration
+    cal = app.physiclaw.rig.calibration
     assert cal.pct_to_grbl is None
     assert cal.cam_rotation is None
 

@@ -268,14 +268,14 @@ class StylusArm:
 
         G92 shifts the work coordinate system without moving the arm. Used on
         warm-start reconnect to re-pin the calibrated frame from the known
-        park-spot resting position (see ``PhysiClaw.restore_park_origin``).
+        park-spot resting position (see ``HardwareRig.restore_park_origin``).
         """
         self._send(GCODE_SET_WORK_POS.format(x=x, y=y))
         log.debug("Work position set to (%.3f, %.3f)", x, y)
 
     def return_to_origin(self) -> None:
         """Fast-move back to (0, 0) and wait for motion to settle."""
-        self._fast_move(0, 0)
+        self.rapid_to(0, 0)
         self.wait_idle()
 
     # ─── Basic motions ──
@@ -287,8 +287,10 @@ class StylusArm:
         """
         self._send(GCODE_DWELL.format(s=seconds))
 
-    def _fast_move(self, x: float, y: float, speed: int = 8000) -> None:
-        """Rapid move without touching screen (G0). Pen must be up first."""
+    def rapid_to(self, x: float, y: float, speed: int = 8000) -> None:
+        """Rapid move to a work coordinate without touching the screen (G0).
+        Pen must be up first. Public: the orchestration and calibration
+        layers drive every calibrated-coordinate positioning move with it."""
         self._send(GCODE_FAST_MOVE.format(x=x, y=y, f=speed))
 
     def _linear_move(self, x: float, y: float, speed: int = 8000) -> None:

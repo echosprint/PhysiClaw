@@ -1,7 +1,9 @@
 """/api/phone/watch — HTTP route for phone-screen wake detection.
 
-Thin wiring layer: detection logic lives in `PhysiClaw.watch()`,
-backed by `physiclaw.core.vision.watchdog.Watchdog`.
+Thin wiring layer: detection logic lives in `Perception.watch()`,
+backed by `physiclaw.core.vision.watchdog.Watchdog`. These routes cut
+across the orchestration slices (perception polls, rig flips ready,
+the facade sends the phone home), so they take the facade.
 
 Designed to be polled by `physiclaw.agent.runtime.Runtime`. See that module for
 the client-side loop.
@@ -29,7 +31,7 @@ def register(mcp: "FastMCP", physiclaw: "PhysiClaw") -> None:
     async def _watch(request: Request) -> JSONResponse:  # noqa: ARG001
         try:
             result = await asyncio.get_event_loop().run_in_executor(
-                None, physiclaw.watch
+                None, physiclaw.perception.watch
             )
             return JSONResponse(result)
         except RuntimeError as e:
@@ -50,11 +52,13 @@ def register(mcp: "FastMCP", physiclaw: "PhysiClaw") -> None:
 
     @mcp.custom_route("/api/ready", methods=["POST"])
     async def _mark_ready(request: Request) -> JSONResponse:  # noqa: ARG001
-        physiclaw.mark_ready()
+        physiclaw.rig.mark_ready()
         # Fire-and-forget: setup just parked the phone on the home screen
         # (the dark scene that exposes AE failure), so verify/converge
         # exposure now — without stalling the wizard's finish screen.
         # tune_exposure is internally fail-open, so the future can't
         # carry an exception that matters.
-        asyncio.get_event_loop().run_in_executor(None, physiclaw.tune_exposure)
-        return JSONResponse({"ok": True, "ready": physiclaw.ready})
+        asyncio.get_event_loop().run_in_executor(
+            None, physiclaw.perception.tune_exposure
+        )
+        return JSONResponse({"ok": True, "ready": physiclaw.rig.ready})

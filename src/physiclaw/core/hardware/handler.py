@@ -24,7 +24,7 @@ from physiclaw.core.vision.render import watermark_index
 from physiclaw.core.vision.util import encode_jpeg
 
 if TYPE_CHECKING:
-    from physiclaw.core.orchestration import PhysiClaw
+    from physiclaw.core.orchestration import HardwareRig
 
 log = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ AUTO_PICK_BRIDGE_SETTLE = CONFIG.auto_pick.bridge_settle_seconds
 # ─── Status ─────────────────────────────────────────────────
 
 
-async def handle_status(request: Request, physiclaw: "PhysiClaw") -> JSONResponse:
+async def handle_status(request: Request, rig: "HardwareRig") -> JSONResponse:
     """GET /api/status — current hardware + calibration status.
 
     Returns whether the arm and camera are connected, intermediate
@@ -67,21 +67,21 @@ async def handle_status(request: Request, physiclaw: "PhysiClaw") -> JSONRespons
     first-run screen layout has already been learned (so the setup page
     can skip the learning note on a recalibration).
     """
-    return JSONResponse(physiclaw.status())
+    return JSONResponse(rig.status())
 
 
 # ─── Stylus arm ─────────────────────────────────────────────
 
 
-async def handle_connect_arm(request: Request, physiclaw: "PhysiClaw") -> JSONResponse:
+async def handle_connect_arm(request: Request, rig: "HardwareRig") -> JSONResponse:
     """POST /api/connect-arm — auto-detect and connect the GRBL arm."""
 
     def _do() -> None:
-        physiclaw.acquire()
+        rig.acquire()
         try:
-            physiclaw.connect_arm()
+            rig.connect_arm()
         finally:
-            physiclaw.release()
+            rig.release()
 
     try:
         await asyncio.get_event_loop().run_in_executor(None, _do)
@@ -160,7 +160,7 @@ def _auto_pick_camera_index() -> int | None:
 
 
 async def handle_connect_camera(
-    request: Request, physiclaw: "PhysiClaw", phone: PageState
+    request: Request, rig: "HardwareRig", phone: PageState
 ) -> JSONResponse:
     """POST /api/connect-camera — open a camera by index.
 
@@ -185,7 +185,7 @@ async def handle_connect_camera(
             # server state but the canvas would never paint the RGBM
             # markers — and auto-pick would always fail. (warm-start
             # uses the same gate.)
-            if not physiclaw._bridge.wait_for_connection(
+            if not rig.bridge.wait_for_connection(
                 AUTO_PICK_BRIDGE_TIMEOUT, AUTO_PICK_BRIDGE_SETTLE
             ):
                 raise RuntimeError(
@@ -205,20 +205,20 @@ async def handle_connect_camera(
                     "is /bridge open on the phone? Pass an explicit index to fall back."
                 )
             index = picked
-        physiclaw.acquire()
+        rig.acquire()
         try:
-            physiclaw.connect_camera(int(index))
-            physiclaw.calibration.cam_index = int(index)
+            rig.connect_camera(int(index))
+            rig.calibration.cam_index = int(index)
         finally:
-            physiclaw.release()
+            rig.release()
 
     try:
         await asyncio.get_event_loop().run_in_executor(None, _do)
         return JSONResponse(
             {
                 "status": "ok",
-                "message": f"Camera {physiclaw.cam.index} connected",
-                "index": physiclaw.cam.index,
+                "message": f"Camera {rig.cam.index} connected",
+                "index": rig.cam.index,
             }
         )
     except Exception as e:
@@ -226,7 +226,7 @@ async def handle_connect_camera(
 
 
 async def handle_disconnect_camera(
-    request: Request, physiclaw: "PhysiClaw"
+    request: Request, rig: "HardwareRig"
 ) -> JSONResponse:
     """POST /api/disconnect-camera — release the camera device handle.
 
@@ -236,11 +236,11 @@ async def handle_disconnect_camera(
     """
 
     def _do() -> bool:
-        physiclaw.acquire()
+        rig.acquire()
         try:
-            return physiclaw.disconnect_camera()
+            return rig.disconnect_camera()
         finally:
-            physiclaw.release()
+            rig.release()
 
     try:
         released = await asyncio.get_event_loop().run_in_executor(None, _do)

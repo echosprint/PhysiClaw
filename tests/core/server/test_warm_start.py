@@ -84,7 +84,7 @@ def test_try_resume_returns_false_when_hardware_connect_raises(
         return_value=fake_cal,
     )
     fake_app = MagicMock()
-    fake_app.connect_arm.side_effect = RuntimeError("port unavailable")
+    fake_app.rig.connect_arm.side_effect = RuntimeError("port unavailable")
     mocker.patch("physiclaw.core.server.app.physiclaw", fake_app)
     mocker.patch("physiclaw.core.server.app._calib", MagicMock())
     mocker.patch("physiclaw.core.server.app._phone", MagicMock())
@@ -119,11 +119,11 @@ def _ready_bundle() -> MagicMock:
 
 def _ready_app(cal) -> MagicMock:
     app = MagicMock()
-    app.calibration = cal
-    app.assistive_touch = MagicMock()
+    app.rig.calibration = cal
+    app.rig.assistive_touch = MagicMock()
     # A rotated live frame whose (w, h) matches the bundle's cam_size, so
     # the resolution reconcile step sees "same size" on the clean path.
-    app.cam.peek.return_value = np.zeros((1080, 1920, 3), dtype=np.uint8)
+    app.rig.cam.peek.return_value = np.zeros((1080, 1920, 3), dtype=np.uint8)
     return app
 
 
@@ -158,20 +158,20 @@ def test_try_resume_succeeds_on_clean_path(mocker) -> None:
 
     assert result is True
     # Bundle replaced into the app + viewport_shift mirrored to bridge state.
-    assert app.calibration is cal
+    assert app.rig.calibration is cal
     assert fake_calib_state.viewport_shift is cal.viewport_shift
     assert fake_calib_state.screen_dimension == (390, 844)
-    app.assistive_touch.compute_at_screen_pos.assert_called_once_with(
+    app.rig.assistive_touch.compute_at_screen_pos.assert_called_once_with(
         cal.viewport_shift,
     )
-    app.connect_arm.assert_called_once()
-    app.connect_camera.assert_called_once_with(1)
+    app.rig.connect_arm.assert_called_once()
+    app.rig.connect_camera.assert_called_once_with(1)
     # Origin re-pinned from the park spot so the bundle's affine stays valid.
-    app.restore_park_origin.assert_called_once()
+    app.rig.restore_park_origin.assert_called_once()
     app.home_screen.assert_called_once()
     # Exposure tune runs between home (dark scene showing) and ready.
-    app.tune_exposure.assert_called_once()
-    app.mark_ready.assert_called_once()
+    app.perception.tune_exposure.assert_called_once()
+    app.rig.mark_ready.assert_called_once()
 
 
 def test_try_resume_uses_cam_index_override(mocker) -> None:
@@ -189,7 +189,7 @@ def test_try_resume_uses_cam_index_override(mocker) -> None:
 
     warm_start.try_resume(cam_index_override=3)
 
-    app.connect_camera.assert_called_once_with(3)
+    app.rig.connect_camera.assert_called_once_with(3)
 
 
 def test_try_resume_falls_back_to_cam_index_zero(mocker) -> None:
@@ -208,7 +208,7 @@ def test_try_resume_falls_back_to_cam_index_zero(mocker) -> None:
 
     warm_start.try_resume(cam_index_override=None)
 
-    app.connect_camera.assert_called_once_with(0)
+    app.rig.connect_camera.assert_called_once_with(0)
 
 
 def test_try_resume_returns_false_when_bridge_never_connects(
@@ -219,7 +219,7 @@ def test_try_resume_returns_false_when_bridge_never_connects(
 
     cal = _ready_bundle()
     app = _ready_app(cal)
-    app._bridge.wait_for_connection.return_value = False
+    app.rig.bridge.wait_for_connection.return_value = False
     mocker.patch(
         "physiclaw.core.calibration.state.Calibration.load",
         return_value=cal,
@@ -252,7 +252,7 @@ def test_try_resume_returns_false_when_sanity_fails(mocker) -> None:
     result = warm_start.try_resume(cam_index_override=None)
 
     assert result is False
-    app.mark_ready.assert_not_called()
+    app.rig.mark_ready.assert_not_called()
 
 
 def test_try_resume_reconciles_live_resolution_with_bundle(mocker) -> None:
@@ -261,7 +261,7 @@ def test_try_resume_reconciles_live_resolution_with_bundle(mocker) -> None:
     # reconcile before running sanity.
     cal = _ready_bundle()
     app = _ready_app(cal)
-    app.cam.peek.return_value = np.zeros((2160, 3840, 3), dtype=np.uint8)
+    app.rig.cam.peek.return_value = np.zeros((2160, 3840, 3), dtype=np.uint8)
     _patch_resume_env(mocker, cal, app)
 
     result = warm_start.try_resume(cam_index_override=None)
@@ -280,19 +280,19 @@ def test_try_resume_returns_false_when_aspect_changed(mocker) -> None:
 
     assert result is False
     sanity.assert_not_called()
-    app.mark_ready.assert_not_called()
+    app.rig.mark_ready.assert_not_called()
 
 
 def test_try_resume_returns_false_when_camera_has_no_frame(mocker) -> None:
     cal = _ready_bundle()
     app = _ready_app(cal)
-    app.cam.peek.return_value = None
+    app.rig.cam.peek.return_value = None
     _patch_resume_env(mocker, cal, app)
 
     result = warm_start.try_resume(cam_index_override=None)
 
     assert result is False
-    app.mark_ready.assert_not_called()
+    app.rig.mark_ready.assert_not_called()
 
 
 # ---------- _sanity ----------
@@ -307,7 +307,7 @@ def test_sanity_passes_when_all_taps_within_tolerance(mocker) -> None:
         ],
     )
     pl = MagicMock()
-    pl.calibration = _ready_bundle()
+    pl.rig.calibration = _ready_bundle()
     phone = MagicMock()
 
     out = warm_start._sanity(pl, MagicMock(), phone)
@@ -332,7 +332,7 @@ def test_sanity_fails_when_no_taps_received(
         ],
     )
     pl = MagicMock()
-    pl.calibration = _ready_bundle()
+    pl.rig.calibration = _ready_bundle()
 
     with caplog.at_level(logging.ERROR, logger="physiclaw.core.server.warm_start"):
         out = warm_start._sanity(pl, MagicMock(), MagicMock())
@@ -355,7 +355,7 @@ def test_sanity_fails_when_taps_received_but_off(
         ],
     )
     pl = MagicMock()
-    pl.calibration = _ready_bundle()
+    pl.rig.calibration = _ready_bundle()
 
     with caplog.at_level(logging.ERROR, logger="physiclaw.core.server.warm_start"):
         out = warm_start._sanity(pl, MagicMock(), MagicMock())
@@ -370,7 +370,7 @@ def test_sanity_restores_bridge_mode_on_validate_exception(mocker) -> None:
         side_effect=RuntimeError("hardware down"),
     )
     pl = MagicMock()
-    pl.calibration = _ready_bundle()
+    pl.rig.calibration = _ready_bundle()
     phone = MagicMock()
 
     with pytest.raises(RuntimeError):

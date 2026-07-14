@@ -471,10 +471,10 @@ def test_dwell_emits_G4(mocker) -> None:
     assert any(b"G4 P0.5" in w for w in fake.writes)
 
 
-def test_fast_move_emits_G0(mocker) -> None:
+def test_rapid_to_emits_G0(mocker) -> None:
     arm, fake = _arm(mocker, responses=[b"ok\n"])
 
-    arm._fast_move(1.5, 2.5, speed=5000)
+    arm.rapid_to(1.5, 2.5, speed=5000)
 
     cmd = next(w for w in fake.writes if b"G0" in w)
     assert b"X1.500" in cmd

@@ -1,0 +1,298 @@
+"""Tests for `physiclaw.core.orchestration.perception` — Perception.
+
+Lazy detectors, frame acquisition, the watchdog poll, and the exposure
+tune. Uses a real HardwareRig with mocked devices (conftest `wire_rig`)
+so the lock semantics (tune skips when busy, releases after) are
+exercised for real.
+"""
+
+from __future__ import annotations
+
+from unittest.mock import MagicMock
+
+import numpy as np
+import pytest
+
+from physiclaw.core.orchestration import perception as perception_mod
+from physiclaw.core.orchestration.perception import Perception
+from physiclaw.core.orchestration.rig import HardwareRig
+
+# ---------- Fixtures ----------
+
+
+@pytest.fixture
+def rig(wire_rig) -> HardwareRig:
+    r = HardwareRig()
+    wire_rig(r)
+    return r
+
+
+@pytest.fixture
+def per(rig: HardwareRig) -> Perception:
+    return Perception(rig)
+
+
+# ---------- lazy detectors ----------
+
+
+def test_ocr_reader_lazy_caches(mocker, per: Perception) -> None:
+    fake = MagicMock()
+    spy = mocker.patch.object(perception_mod, "OCRReader", return_value=fake)
+
+    a = per.ocr_reader()
+    b = per.ocr_reader()
+
+    assert a is fake
+    assert b is fake
+    spy.assert_called_once()
+
+
+def test_icon_detector_lazy_caches(mocker, per: Perception) -> None:
+    fake = MagicMock()
+    spy = mocker.patch.object(perception_mod, "IconDetector", return_value=fake)
+
+    a = per.icon_detector()
+    b = per.icon_detector()
+
+    assert a is fake
+    assert b is fake
+    spy.assert_called_once()
+
+
+# ---------- camera_view ----------
+
+
+def test_camera_view_raises_when_snapshot_none(rig, per: Perception) -> None:
+    rig._cam.snapshot.return_value = None
+
+    with pytest.raises(RuntimeError, match="Camera capture failed"):
+        per.camera_view()
+
+
+def test_camera_view_raises_before_camera_connect(per: Perception, rig) -> None:
+    # The rig's honest accessor speaks, not an AttributeError on None.
+    rig._cam = None
+
+    with pytest.raises(RuntimeError, match="Camera not connected"):
+        per.camera_view()
+
+
+def test_camera_view_returns_frame(rig, per: Perception) -> None:
+    frame = np.zeros((1, 1, 3), dtype=np.uint8)
+    rig._cam.snapshot.return_value = frame
+
+    assert per.camera_view() is frame
+
+
+def test_cropped_view_crops_with_current_transforms(
+    mocker, rig, per: Perception
+) -> None:
+    frame = np.zeros((4, 4, 3), dtype=np.uint8)
+    cropped = np.zeros((2, 2, 3), dtype=np.uint8)
+    rig._cam.snapshot.return_value = frame
+    crop = mocker.patch.object(
+        perception_mod, "crop_to_phone_screen", return_value=cropped
+    )
+
+    assert per.cropped_view() is cropped
+    crop.assert_called_once_with(frame, rig.transforms)
+
+
+# ---------- detect / scan_text ----------
+
+
+def test_detect_calls_ui_pipeline(mocker, per: Perception) -> None:
+    per._ocr_reader = MagicMock()
+    per._icon_detector = MagicMock()
+    elements = [{"id": 0}]
+    annotated = np.zeros((4, 4, 3), dtype=np.uint8)
+    mocker.patch.object(
+        perception_mod,
+        "detect_ui_elements",
+        return_value=(elements, annotated),
+    )
+    mocker.patch.object(perception_mod, "elements_to_json", return_value=[{"id": 0}])
+    mocker.patch.object(perception_mod, "format_elements", return_value="LISTING")
+
+    listing, ann = per.detect(np.zeros((4, 4, 3), dtype=np.uint8))
+
+    assert listing == "LISTING"
+    assert ann is annotated
+
+
+def test_scan_text_filters_offscreen(mocker, rig, per: Perception) -> None:
+    per._ocr_reader = MagicMock()
+    rig._cam.snapshot.return_value = np.zeros((4, 4, 3), dtype=np.uint8)
+    mocker.patch.object(perception_mod, "phone_screen_crop_box", return_value=None)
+    mocker.patch.object(
+        perception_mod,
+        "results_to_elements",
+        return_value=[
+            {"bbox": [0.1, 0.1, 0.2, 0.2]},
+            {"bbox": [-1.0, -1.0, -0.5, -0.5]},
+        ],
+    )
+    mocker.patch.object(
+        perception_mod,
+        "bbox_on_screen",
+        side_effect=lambda b: b[0] >= 0,
+    )
+
+    out = per.scan_text()
+
+    assert len(out) == 1
+    assert out[0]["bbox"][0] == 0.1
+
+
+def test_scan_text_parks_first(mocker, rig, per: Perception) -> None:
+    # The stylus must be off the glass before the OCR frame is grabbed.
+    per._ocr_reader = MagicMock()
+    rig._cam.snapshot.return_value = np.zeros((4, 4, 3), dtype=np.uint8)
+    mocker.patch.object(perception_mod, "phone_screen_crop_box", return_value=None)
+    mocker.patch.object(perception_mod, "results_to_elements", return_value=[])
+
+    per.scan_text()
+
+    rig._arm.rapid_to.assert_called_once_with(5.0, 6.0)
+
+
+# ---------- watch ----------
+
+
+def test_watch_returns_no_wake_when_frame_none(rig, per: Perception) -> None:
+    rig._cam.peek.return_value = None
+
+    out = per.watch()
+
+    assert out == {"wake": False, "reason": ""}
+
+
+def test_watch_polls_watchdog_with_frame(rig, per: Perception) -> None:
+    frame = np.zeros((4, 4, 3), dtype=np.uint8)
+    rig._cam.peek.return_value = frame
+    per._watchdog = MagicMock()
+    per._watchdog.poll.return_value = {"wake": True, "reason": "screen change"}
+
+    out = per.watch()
+
+    assert out == {"wake": True, "reason": "screen change"}
+    per._watchdog.poll.assert_called_once()
+
+
+# ---------- tune_exposure ----------
+
+
+def _tune_ok() -> object:
+    from physiclaw.core.hardware.exposure import TuneResult
+
+    return TuneResult(mode="auto", exposure=None, ok=True, detail="in band")
+
+
+def test_tune_exposure_noop_without_camera(mocker, rig, per: Perception) -> None:
+    rig._cam = None
+    conv = mocker.patch.object(perception_mod.exposure, "converge")
+
+    per.tune_exposure()  # no camera — silently returns
+
+    conv.assert_not_called()
+
+
+def test_tune_exposure_noop_when_platform_not_tunable(
+    mocker, rig, per: Perception
+) -> None:
+    rig._cam.exposure_tunable = False
+    conv = mocker.patch.object(perception_mod.exposure, "converge")
+
+    per.tune_exposure()  # the macOS path
+
+    conv.assert_not_called()
+
+
+def test_tune_exposure_skips_when_busy(mocker, rig, per: Perception) -> None:
+    rig._cam.exposure_tunable = True
+    conv = mocker.patch.object(perception_mod.exposure, "converge")
+    rig.acquire()
+    try:
+        per.tune_exposure()
+    finally:
+        rig.release()
+
+    conv.assert_not_called()
+
+
+def test_tune_exposure_runs_converge_and_releases_lock(
+    mocker, rig, per: Perception
+) -> None:
+    rig._cam.exposure_tunable = True
+    conv = mocker.patch.object(
+        perception_mod.exposure,
+        "converge",
+        return_value=_tune_ok(),
+    )
+
+    per.tune_exposure()
+
+    conv.assert_called_once()
+    kwargs = conv.call_args.kwargs
+    from physiclaw.common.config import CONFIG
+
+    assert kwargs["start"] == CONFIG.camera.exposure
+    assert kwargs["prefer_auto"] == CONFIG.camera.auto_exposure
+    # Setters are the camera's own bound methods.
+    args = conv.call_args.args
+    assert args[1] == rig._cam.set_auto_exposure
+    assert args[2] == rig._cam.set_manual_exposure
+    rig.acquire()  # lock released after the tune
+    rig.release()
+
+
+def test_tune_exposure_meter_crops_and_assesses(mocker, rig, per: Perception) -> None:
+    rig._cam.exposure_tunable = True
+    frame = np.full((200, 100, 3), 128, dtype=np.uint8)
+    rig._cam.wait_frames.return_value = True
+    rig._cam.peek.return_value = frame
+    cropped = np.full((100, 50, 3), 128, dtype=np.uint8)
+    mocker.patch.object(perception_mod, "crop_to_phone_screen", return_value=cropped)
+    assess = mocker.patch.object(perception_mod.quality, "assess")
+    conv = mocker.patch.object(
+        perception_mod.exposure,
+        "converge",
+        return_value=_tune_ok(),
+    )
+
+    per.tune_exposure()
+
+    meter = conv.call_args.args[0]
+    report = meter()
+    assess.assert_called_once_with(cropped)
+    assert report is assess.return_value
+
+
+def test_tune_exposure_meter_fails_open_on_stalled_reader(
+    mocker, rig, per: Perception
+) -> None:
+    rig._cam.exposure_tunable = True
+    rig._cam.wait_frames.return_value = False  # reader stalled
+    conv = mocker.patch.object(
+        perception_mod.exposure,
+        "converge",
+        return_value=_tune_ok(),
+    )
+
+    per.tune_exposure()
+
+    assert conv.call_args.args[0]() is None
+
+
+def test_tune_exposure_swallows_converge_crash(mocker, rig, per: Perception) -> None:
+    rig._cam.exposure_tunable = True
+    mocker.patch.object(
+        perception_mod.exposure,
+        "converge",
+        side_effect=RuntimeError("boom"),
+    )
+
+    per.tune_exposure()  # no raise
+
+    rig.acquire()  # and the lock is not leaked
+    rig.release()

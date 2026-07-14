@@ -166,7 +166,7 @@ def calibrate_arm(
         f"  Re-origin: screen center is at arm "
         f"({center_grbl[0]:.2f}, {center_grbl[1]:.2f})mm → setting as (0, 0)"
     )
-    arm._fast_move(center_grbl[0], center_grbl[1])
+    arm.rapid_to(center_grbl[0], center_grbl[1])
     arm.wait_idle()
     arm.set_origin()
     pct_to_grbl[0, 2] -= center_grbl[0]

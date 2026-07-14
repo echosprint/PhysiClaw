@@ -54,7 +54,7 @@ def _tap_and_read(
     stroke is fixed, so there's no depth to deepen; misses are just flaky
     contact or a brief unresponsive screen.
     """
-    arm._fast_move(gx, gy)
+    arm.rapid_to(gx, gy)
     arm.wait_idle()
     for attempt in range(max_retries + 1):
         cal.flush_touches()

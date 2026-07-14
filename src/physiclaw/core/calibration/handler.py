@@ -1,7 +1,7 @@
 """HTTP route handlers for the 7-step calibration plan.
 
 Each handler runs the corresponding `calibrate` step in a thread
-executor, writes the result into ``physiclaw.calibration`` (a typed
+executor, writes the result into ``rig.calibration`` (a typed
 :class:`Calibration` dataclass — the single source of truth), and
 returns a JSON response. The Starlette event loop stays responsive
 because the blocking step functions run off-thread.
@@ -31,7 +31,7 @@ from physiclaw.core.calibration.state import Calibration
 from physiclaw.core.calibration.transforms import ViewportShift
 
 if TYPE_CHECKING:
-    from physiclaw.core.orchestration import PhysiClaw
+    from physiclaw.core.orchestration import HardwareRig
 
 log = logging.getLogger(__name__)
 
@@ -64,7 +64,7 @@ def _err(message: str, status_code: int = 500) -> JSONResponse:
 
 
 async def _run_locked_step(
-    physiclaw: "PhysiClaw",
+    rig: "HardwareRig",
     do: Callable[[], dict],
     *,
     precheck: Callable[[], None] | None = None,
@@ -82,11 +82,11 @@ async def _run_locked_step(
     def _step() -> dict:
         if precheck is not None:
             precheck()
-        physiclaw.acquire()
+        rig.acquire()
         try:
             return do()
         finally:
-            physiclaw.release()
+            rig.release()
 
     try:
         result = await _run_blocking(_step)
@@ -100,7 +100,7 @@ async def _run_locked_step(
 
 async def handle_measure_viewport_shift(
     request: Request,
-    physiclaw: "PhysiClaw",
+    rig: "HardwareRig",
     calib: CalibrationState,
     bridge: BridgeState,
     phone: PageState,
@@ -116,7 +116,7 @@ async def handle_measure_viewport_shift(
     def _do() -> ViewportShift:
         phone.set_mode("calibrate", phase="screenshot_cal")
         result = measure_viewport_shift(calib, bridge, fresh=fresh)
-        physiclaw.calibration.viewport_shift = result
+        rig.calibration.viewport_shift = result
         return result
 
     try:
@@ -129,12 +129,12 @@ async def handle_measure_viewport_shift(
 # ─── Arm-side unified calibration ───────────────────────────
 
 
-def _center_parked_stylus(physiclaw: "PhysiClaw") -> None:
+def _center_parked_stylus(rig: "HardwareRig") -> None:
     """Drive the parked stylus onto the screen center using the saved
     calibration, so auto mode needs no hand-positioning. Assumes the tip
     rests at ``PARK_PCT`` (the off-screen spot every run parks at). Requires
     a prior bundle; raises a clear error if none exists. Caller holds the lock."""
-    cal = physiclaw.calibration
+    cal = rig.calibration
     if cal.pct_to_grbl is None:  # plain server boot doesn't load the bundle
         prior = Calibration.load()
         if prior is None or prior.pct_to_grbl is None:
@@ -143,16 +143,16 @@ def _center_parked_stylus(physiclaw: "PhysiClaw") -> None:
                 "position the stylus over the circle and calibrate manually."
             )
         cal.pct_to_grbl = prior.pct_to_grbl
-    physiclaw.restore_park_origin()  # re-pin the frame: current pos = PARK_PCT
+    rig.restore_park_origin()  # re-pin the frame: current pos = PARK_PCT
     gx, gy = cal.pct_to_grbl_mm(0.5, 0.5)
-    physiclaw.arm._fast_move(gx, gy)
-    physiclaw.arm.wait_idle()
-    physiclaw.arm.set_origin()  # screen center is now arm (0, 0) for the probe
+    rig.arm.rapid_to(gx, gy)
+    rig.arm.wait_idle()
+    rig.arm.set_origin()  # screen center is now arm (0, 0) for the probe
 
 
 async def handle_calibrate_arm(
     request: Request,
-    physiclaw: "PhysiClaw",
+    rig: "HardwareRig",
     calib: CalibrationState,
     phone: PageState,
 ) -> JSONResponse:
@@ -171,38 +171,38 @@ async def handle_calibrate_arm(
     from_park = bool((await _read_body(request)).get("from_park"))
 
     def _precheck() -> None:
-        if physiclaw.arm is None:
+        if rig.arm is None:
             raise RuntimeError("Arm not connected")
         phone.set_mode("calibrate", phase="center")
 
     def _do() -> dict:
         if from_park:
-            _center_parked_stylus(physiclaw)
-        pct_to_grbl, tilt, touches = calibrate_arm(physiclaw.arm, calib)
-        physiclaw.calibration.pct_to_grbl = pct_to_grbl
+            _center_parked_stylus(rig)
+        pct_to_grbl, tilt, touches = calibrate_arm(rig.arm, calib)
+        rig.calibration.pct_to_grbl = pct_to_grbl
         right_vec = (float(pct_to_grbl[0, 0]), float(pct_to_grbl[1, 0]))
         down_vec = (float(pct_to_grbl[0, 1]), float(pct_to_grbl[1, 1]))
-        physiclaw.arm.set_direction_mapping(right_vec, down_vec)
+        rig.arm.set_direction_mapping(right_vec, down_vec)
         # Park off-phone before returning so step 8's Photo Booth
         # adjustment shows an unobstructed phone (the stylus would
         # otherwise sit at the last grid-tap position over the
-        # screen). `physiclaw.park()` is defensive — it works as
+        # screen). `rig.park()` is defensive — it works as
         # soon as `pct_to_grbl` is set, which happens above.
-        physiclaw.park()
+        rig.park()
         return {
             "pairs": len(touches) + 3,
             "tilt_ratio": round(tilt, 4),
             "aligned": tilt < TILT_ALIGNED_THRESHOLD,
         }
 
-    return await _run_locked_step(physiclaw, _do, precheck=_precheck)
+    return await _run_locked_step(rig, _do, precheck=_precheck)
 
 
 # ─── Camera frame calibration — setup check + rotation ──────
 
 
 async def handle_calibrate_camera_frame(
-    request: Request, physiclaw: "PhysiClaw", calib: CalibrationState
+    request: Request, rig: "HardwareRig", calib: CalibrationState
 ) -> JSONResponse:
     """POST /api/calibrate/camera — one-frame camera setup + rotation.
 
@@ -216,40 +216,40 @@ async def handle_calibrate_camera_frame(
     """
 
     def _precheck() -> None:
-        if physiclaw.cam is None:
+        if rig.cam is None:
             raise RuntimeError("Camera not connected")
 
     def _do() -> dict:
-        physiclaw.park()
-        result = calibrate_camera_frame(physiclaw.cam, calib)
-        physiclaw.calibration.cam_rotation = result["rotation"]
-        physiclaw.cam.rotation = result["rotation"]
+        rig.park()
+        result = calibrate_camera_frame(rig.cam, calib)
+        rig.calibration.cam_rotation = result["rotation"]
+        rig.cam.rotation = result["rotation"]
         return result
 
-    return await _run_locked_step(physiclaw, _do, precheck=_precheck)
+    return await _run_locked_step(rig, _do, precheck=_precheck)
 
 
 # ─── Camera mapping: screen → camera affine (Mapping B) ─────
 
 
 async def handle_compute_camera_mapping(
-    request: Request, physiclaw: "PhysiClaw", calib: CalibrationState
+    request: Request, rig: "HardwareRig", calib: CalibrationState
 ) -> JSONResponse:
     """POST /api/calibrate/camera-mapping — compute screen 0-1 → camera 0-1 affine."""
 
     def _precheck() -> None:
-        if physiclaw.cam is None:
+        if rig.cam is None:
             raise RuntimeError("Camera not connected")
 
     def _do() -> dict:
-        rotation = physiclaw.calibration.effective_rotation()
-        physiclaw.park()
-        pct_to_cam, cam_size = compute_camera_mapping(physiclaw.cam, calib, rotation)
-        physiclaw.calibration.pct_to_cam = pct_to_cam
-        physiclaw.calibration.cam_size = cam_size
+        rotation = rig.calibration.effective_rotation()
+        rig.park()
+        pct_to_cam, cam_size = compute_camera_mapping(rig.cam, calib, rotation)
+        rig.calibration.pct_to_cam = pct_to_cam
+        rig.calibration.cam_size = cam_size
         return {"ok": True, "dots": 15, "cam_size": list(cam_size)}
 
-    return await _run_locked_step(physiclaw, _do, precheck=_precheck)
+    return await _run_locked_step(rig, _do, precheck=_precheck)
 
 
 # ─── Full-chain validation ──────────────────────────────────
@@ -257,23 +257,23 @@ async def handle_compute_camera_mapping(
 
 async def handle_validate_calibration(
     request: Request,
-    physiclaw: "PhysiClaw",
+    rig: "HardwareRig",
     calib: CalibrationState,
     phone: PageState,
 ) -> JSONResponse:
     """POST /api/calibrate/validate — round-trip validate the calibration chain."""
 
     def _precheck() -> None:
-        if physiclaw.arm is None:
+        if rig.arm is None:
             raise RuntimeError("Arm not connected")
-        if not physiclaw.calibration.transforms_ready:
+        if not rig.calibration.transforms_ready:
             raise RuntimeError("Run arm calibration and camera-mapping first")
 
     def _do() -> dict:
-        cal_state = physiclaw.calibration
+        cal_state = rig.calibration
         results = validate_calibration(
-            physiclaw.arm,
-            physiclaw.cam,
+            rig.arm,
+            rig.cam,
             calib,
             cal_state.effective_rotation(),
             cal_state.pct_to_grbl,
@@ -285,11 +285,11 @@ async def handle_validate_calibration(
             phone.set_mode("bridge")
             # Capture the phone's current screen_dimension so warm-start
             # doesn't have to wait for a fresh /bridge page load.
-            physiclaw.calibration.screen_dimension = calib.screen_dimension
-            physiclaw.calibration.save()
+            rig.calibration.screen_dimension = calib.screen_dimension
+            rig.calibration.save()
         # Park off-phone after the validation taps so step 11's
         # AssistiveTouch interaction shows an unobstructed phone.
-        physiclaw.park()
+        rig.park()
         return {
             "results": results,
             "passed": passed,
@@ -297,31 +297,31 @@ async def handle_validate_calibration(
             "calibrated": passed >= 2,
         }
 
-    return await _run_locked_step(physiclaw, _do, precheck=_precheck)
+    return await _run_locked_step(rig, _do, precheck=_precheck)
 
 
 # ─── Edge-trace verification ────────────────────────────────
 
 
 async def handle_trace_edge(
-    request: Request, physiclaw: "PhysiClaw", phone: PageState
+    request: Request, rig: "HardwareRig", phone: PageState
 ) -> JSONResponse:
     """POST /api/calibrate/trace-edge — arm traces phone screen border for visual check."""
     from physiclaw.core.calibration.calibrate import trace_screen_edge
 
     def _precheck() -> None:
-        if physiclaw.transforms is None:
+        if rig.transforms is None:
             raise RuntimeError("Not calibrated — run /setup first")
 
     def _do() -> dict:
-        trace_screen_edge(physiclaw.arm, physiclaw.transforms)
+        trace_screen_edge(rig.arm, rig.transforms)
         phone.set_mode("bridge")
         # Park off-phone after tracing so the rig ends in a clean
         # state — same convention as steps 7, 8, 9, 10.
-        physiclaw.park()
+        rig.park()
         return {"ok": True}
 
-    return await _run_locked_step(physiclaw, _do, precheck=_precheck)
+    return await _run_locked_step(rig, _do, precheck=_precheck)
 
 
 # ─── AssistiveTouch screenshot verification ─────────────────
@@ -329,7 +329,7 @@ async def handle_trace_edge(
 
 async def handle_show_assistive_touch(
     request: Request,
-    physiclaw: "PhysiClaw",
+    rig: "HardwareRig",
     calib: CalibrationState,
     phone: PageState,
 ) -> JSONResponse:
@@ -338,12 +338,12 @@ async def handle_show_assistive_touch(
     if calib.viewport_shift is None:
         return _err("Run viewport-shift first", status_code=400)
     nonce = generate_nonce()
-    physiclaw.assistive_touch.compute_at_screen_pos(calib.viewport_shift)
+    rig.assistive_touch.compute_at_screen_pos(calib.viewport_shift)
     phone.set_mode("calibrate", phase="assistive_touch", nonce_bits=nonce)
     return JSONResponse(
         {
             "status": "ok",
-            "at_screen": list(physiclaw.assistive_touch.at_screen),
+            "at_screen": list(rig.assistive_touch.at_screen),
             "nonce_count": len(nonce),
         }
     )
@@ -351,7 +351,7 @@ async def handle_show_assistive_touch(
 
 async def handle_verify_assistive_touch(
     request: Request,
-    physiclaw: "PhysiClaw",
+    rig: "HardwareRig",
     calib: CalibrationState,
     bridge: BridgeState,
     phone: PageState,
@@ -359,21 +359,21 @@ async def handle_verify_assistive_touch(
     """POST /api/calibrate/assistive-touch/verify — tap AT, verify screenshot upload via the grey nonce grid."""
 
     def _precheck() -> None:
-        if physiclaw.arm is None:
+        if rig.arm is None:
             raise RuntimeError("Arm not connected")
-        if physiclaw.calibration.pct_to_grbl is None:
+        if rig.calibration.pct_to_grbl is None:
             raise RuntimeError("Run arm calibration first")
-        if not physiclaw.assistive_touch.at_screen:
+        if not rig.assistive_touch.at_screen:
             raise RuntimeError("Run assistive-touch/show first")
 
     def _do() -> dict:
         return verify_assistive_touch(
-            physiclaw.arm,
-            physiclaw.assistive_touch,
+            rig.arm,
+            rig.assistive_touch,
             bridge,
             calib,
-            physiclaw.calibration.pct_to_grbl,
+            rig.calibration.pct_to_grbl,
             phone,
         )
 
-    return await _run_locked_step(physiclaw, _do, precheck=_precheck)
+    return await _run_locked_step(rig, _do, precheck=_precheck)

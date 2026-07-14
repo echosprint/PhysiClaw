@@ -190,7 +190,7 @@ def test_move_to_at_raises_when_position_unset() -> None:
         at._move_to_at(arm, _identity_pct_to_grbl())
 
 
-def test_move_to_at_calls_fast_move_with_grbl_coordinates() -> None:
+def test_move_to_at_calls_rapid_to_with_grbl_coordinates() -> None:
     at = AssistiveTouch()
     at.compute_at_screen_pos(_shift())
     arm = MagicMock()
@@ -207,8 +207,8 @@ def test_move_to_at_calls_fast_move_with_grbl_coordinates() -> None:
 
     at._move_to_at(arm, pct_to_grbl)
 
-    arm._fast_move.assert_called_once()
-    args = arm._fast_move.call_args.args
+    arm.rapid_to.assert_called_once()
+    args = arm.rapid_to.call_args.args
     assert args[0] == pytest.approx(expected_x)
     assert args[1] == pytest.approx(expected_y)
     arm.wait_idle.assert_called_once()
@@ -230,7 +230,7 @@ def test_tap_moves_then_taps(caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level(logging.INFO, logger="physiclaw.core.hardware.iphone"):
         at.tap(arm, _identity_pct_to_grbl())
 
-    arm._fast_move.assert_called_once()
+    arm.rapid_to.assert_called_once()
     arm.tap.assert_called_once()
     assert any("single-tap" in r.getMessage() for r in caplog.records)
 

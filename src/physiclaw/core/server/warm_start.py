@@ -1,7 +1,7 @@
 """Warm-start: resume from the saved Calibration bundle.
 
 ``try_resume`` (called only when ``physiclaw server --warm-start`` is
-passed) loads the bundle from disk into ``physiclaw.calibration``,
+passed) loads the bundle from disk into ``rig.calibration``,
 reconnects hardware, runs an end-to-end sanity tap, and flips the ready
 flag only if every test passes. A plain ``physiclaw server`` boot
 ignores the bundle entirely — see ``core/server/app.py``.
@@ -53,12 +53,13 @@ def _sanity(
     """
     from physiclaw.core.calibration.calibrate import validate_calibration
 
-    cal = physiclaw.calibration
+    rig = physiclaw.rig
+    cal = rig.calibration
     phone.set_mode("calibrate")
     try:
         results = validate_calibration(
-            physiclaw.arm,
-            physiclaw.cam,
+            rig.arm,
+            rig.cam,
             calib,
             cal.effective_rotation(),
             cal.pct_to_grbl,
@@ -103,16 +104,17 @@ def try_resume(cam_index_override: int | None) -> bool:
     from physiclaw.core.calibration.state import Calibration
     from physiclaw.core.server.app import _calib, _phone, physiclaw
 
+    rig = physiclaw.rig
     loaded = Calibration.load()
     if loaded is None:
         log.error("--warm-start: no calibration bundle on disk")
         return False
-    physiclaw.calibration = loaded
+    rig.calibration = loaded
     if loaded.viewport_shift is not None:
         # Mirror into the bridge-side state so calibration handlers that
         # read `calib.viewport_shift` (e.g. show_assistive_touch) see it.
         _calib.viewport_shift = loaded.viewport_shift
-        physiclaw.assistive_touch.compute_at_screen_pos(loaded.viewport_shift)
+        rig.assistive_touch.compute_at_screen_pos(loaded.viewport_shift)
     if loaded.screen_dimension is not None:
         # Restore the CSS-pt dimensions so warm-start's validate can run
         # without waiting for the phone's /bridge page to POST them again.
@@ -122,7 +124,7 @@ def try_resume(cam_index_override: int | None) -> bool:
         f"complete={loaded.complete})"
     )
 
-    cal = physiclaw.calibration
+    cal = rig.calibration
     if not cal.complete:
         log.error("--warm-start: bundle on disk is incomplete")
         return False
@@ -132,8 +134,8 @@ def try_resume(cam_index_override: int | None) -> bool:
         else (cal.cam_index if cal.cam_index is not None else 0)
     )
     try:
-        physiclaw.connect_arm()
-        physiclaw.connect_camera(cam_index)
+        rig.connect_arm()
+        rig.connect_camera(cam_index)
     except Exception as e:
         log.error(f"--warm-start: hardware reconnect failed: {e}")
         return False
@@ -142,7 +144,7 @@ def try_resume(cam_index_override: int | None) -> bool:
     # bundle was calibrated at (e.g. the [camera] config changed, or the
     # default moved). Same aspect → the 0-1 mapping holds, adopt the live
     # pixel size; different aspect → the mapping is broken, recalibrate.
-    live = physiclaw.cam.peek()
+    live = rig.cam.peek()
     if live is None:
         log.error("--warm-start: camera produced no frame")
         return False
@@ -158,11 +160,11 @@ def try_resume(cam_index_override: int | None) -> bool:
     # arm.setup() just assumed — re-pin the frame from it (see
     # restore_park_origin). The sanity tap below catches the cases where the
     # tip didn't hold that spot (killed mid-move, power yank, arm bumped).
-    physiclaw.restore_park_origin()
+    rig.restore_park_origin()
 
     # Confirm `locked()` works and the tip is settled off-phone before sanity
     # (already parked post-restore, so the auto-park on exit is a no-op move).
-    with physiclaw.locked():
+    with rig.locked():
         pass
     if sys.stdin.isatty():
         print()
@@ -171,7 +173,7 @@ def try_resume(cam_index_override: int | None) -> bool:
         print("  Open or refresh /bridge on the phone (foreground, not locked).")
         print(f"  Server waits up to {BRIDGE_WAIT_TIMEOUT}s for steady polling.")
         print("━" * 60)
-        if not physiclaw._bridge.wait_for_connection(
+        if not rig.bridge.wait_for_connection(
             BRIDGE_WAIT_TIMEOUT, BRIDGE_SETTLE_SECONDS
         ):
             log.error(
@@ -194,7 +196,7 @@ def try_resume(cam_index_override: int | None) -> bool:
     # right moment to verify/converge exposure. Synchronous is fine:
     # try_resume already runs on a background thread, and tune_exposure
     # is fail-open + bounded by frame-wait timeouts.
-    physiclaw.tune_exposure()
-    physiclaw.mark_ready()
+    physiclaw.perception.tune_exposure()
+    rig.mark_ready()
     log.info(f"--warm-start: resumed from bundle (cam={cam_index}) — MCP tools ready")
     return True

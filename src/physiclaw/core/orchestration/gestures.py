@@ -64,6 +64,10 @@ class Swipe:
     direction: Direction
     size: Size = "m"
     speed: Speed = "medium"
+    # Hold the tip stationary this long AFTER contact, before the slide —
+    # see arm.swipe_to. Only the iOS edge-pan macros below need it; the
+    # agent-facing swipe paths always leave it 0.
+    start_dwell: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -74,12 +78,62 @@ class SendToClipboard:
 Gesture = Tap | DoubleTap | LongPress | Swipe | SendToClipboard
 
 
+# ─── iOS macro recipes ─────────────────────────────────────────
+#
+# The system-gesture step lists the orchestrator's macro tools replay.
+# They are iOS policy (edge zones, switcher choreography), kept here as
+# data so the orchestrator stays a coordinator: a different phone bed
+# someday means a new recipe set, not orchestrator surgery. Each step
+# runs through the same validated dispatch as an agent gesture.
+
+# Hold the tip at the very edge this long after contact, before the slide,
+# so iOS registers a touch-down inside the narrow interactive-pop zone —
+# without it, a fast slide starting on contact skips past the edge and the
+# gesture reads as a content scroll (no back). ~9 display frames; 0.08
+# (~1.5 frames) was too tight and intermittently missed the arming window.
+BACK_EDGE_DWELL_SECONDS = 0.15
+
+# Shared anchor zones — every recipe that touches the same screen region
+# names the same bbox, so a phone-bed change edits one line.
+BOTTOM_EDGE = [0.4, 0.96, 0.6, 0.98]
+LEFT_EDGE = [0.0, 0.4, 0.01, 0.6]
+SCREEN_CENTER = [0.4, 0.4, 0.6, 0.6]
+
+# Home: bottom-edge swipe up.
+HOME_SCREEN: tuple[Gesture, ...] = (Swipe(BOTTOM_EDGE, "up", "xl", "fast"),)
+
+# Back: left-edge swipe right. Starts at the true left edge (x≈0) and
+# dwells briefly on contact so the touch is seen inside iOS's edge-pan
+# zone before the slide arms the interactive pop.
+GO_BACK: tuple[Gesture, ...] = (
+    Swipe(LEFT_EDGE, "right", "xxl", "fast", BACK_EDGE_DWELL_SECONDS),
+)
+
+# Force-quit: open the app switcher, center the card, fling it away, then
+# tap the home area. Step 1's swipe is short on purpose — a longer upward
+# swipe from the bottom edge would go home instead of opening the switcher.
+FORCE_QUIT: tuple[Gesture, ...] = (
+    Swipe(BOTTOM_EDGE, "up", "s", "slow"),
+    Swipe([0.4, 0.45, 0.6, 0.55], "left", "m", "medium"),
+    Swipe([0.4, 0.70, 0.6, 0.80], "up", "xl", "fast"),
+    Tap([0.4, 0.92, 0.6, 0.96]),
+)
+
+# Unlock, mechanical prefix: wake the screen, then swipe up from the
+# bottom edge to leave the lock-screen cover. The passcode entry that
+# follows is imperative (OCR poll loop) and stays in the orchestrator.
+UNLOCK_WAKE: tuple[Gesture, ...] = (
+    Tap(SCREEN_CENTER),
+    Swipe(BOTTOM_EDGE, "up", "l", "fast"),
+)
+
+
 class GestureValidator:
     """Argument validation + AssistiveTouch geometry for every gesture path.
 
     Holds accessor callables rather than the objects themselves: the
-    orchestrator replaces its AssistiveTouch and transforms at
-    calibration time, so each check must read the current one.
+    rig's AssistiveTouch and transforms are replaced at calibration
+    time, so each check must read the current one.
     """
 
     def __init__(

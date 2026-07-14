@@ -19,12 +19,12 @@ from physiclaw.core.hardware.handler import (
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
-    from physiclaw.core.orchestration import PhysiClaw
+    from physiclaw.core.orchestration import HardwareRig
 
 log = logging.getLogger(__name__)
 
 
-def register(mcp: "FastMCP", physiclaw: "PhysiClaw", phone: PageState) -> None:
+def register(mcp: "FastMCP", rig: "HardwareRig", phone: PageState) -> None:
     """Register hardware setup routes."""
 
     @mcp.custom_route("/setup-hardware", methods=["GET"])
@@ -33,19 +33,19 @@ def register(mcp: "FastMCP", physiclaw: "PhysiClaw", phone: PageState) -> None:
 
     @mcp.custom_route("/api/status", methods=["GET"])
     async def _status(request: Request) -> JSONResponse:
-        return await handle_status(request, physiclaw)
+        return await handle_status(request, rig)
 
     @mcp.custom_route("/api/connect-arm", methods=["POST"])
     async def _connect_arm(request: Request) -> JSONResponse:
-        return await handle_connect_arm(request, physiclaw)
+        return await handle_connect_arm(request, rig)
 
     @mcp.custom_route("/api/connect-camera", methods=["POST"])
     async def _connect_camera(request: Request) -> JSONResponse:
-        return await handle_connect_camera(request, physiclaw, phone)
+        return await handle_connect_camera(request, rig, phone)
 
     @mcp.custom_route("/api/disconnect-camera", methods=["POST"])
     async def _disconnect_camera(request: Request) -> JSONResponse:
-        return await handle_disconnect_camera(request, physiclaw)
+        return await handle_disconnect_camera(request, rig)
 
     @mcp.custom_route("/api/camera-preview/{index}", methods=["GET"])
     async def _camera_preview(request: Request) -> JSONResponse:

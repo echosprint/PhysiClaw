@@ -36,14 +36,11 @@ from physiclaw.core.server.planes import PhoneApp
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
-    from physiclaw.core.orchestration import PhysiClaw
-
 log = logging.getLogger(__name__)
 
 
 def register(
     mcp: "FastMCP",
-    physiclaw: "PhysiClaw",
     bridge: BridgeState,
     calib: CalibrationState,
     phone: PageState,
@@ -65,7 +62,6 @@ def register(
 
 def register_phone(
     app: PhoneApp,
-    physiclaw: "PhysiClaw",
     bridge: BridgeState,
     calib: CalibrationState,
     phone: PageState,

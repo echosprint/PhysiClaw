@@ -8,8 +8,9 @@ miss state is forgotten. Keeping it separate from the hardware call
 makes the timing rules testable with an injected clock instead of
 mocking `time.monotonic`.
 
-State is guarded by the orchestrator's gesture lock — begin/confirm/
-record_miss are only ever called with it held, so no locking here.
+State is guarded by the rig's hardware lock (the orchestrator holds it
+around every gesture) — begin/confirm/record_miss are only ever called
+with it held, so no locking here.
 """
 
 import time

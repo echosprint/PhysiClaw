@@ -90,7 +90,7 @@ def _run_validation_test(
     # 2. Camera detects orange dot
     # Park arm first so it doesn't occlude — the canonical off-phone spot.
     park_gx, park_gy = pct_to_grbl @ np.array([*PARK_PCT, 1.0])
-    arm._fast_move(float(park_gx), float(park_gy))
+    arm.rapid_to(float(park_gx), float(park_gy))
     arm.wait_idle()
     time.sleep(0.3)
 
@@ -271,7 +271,7 @@ def trace_screen_edge(arm: StylusArm, cal: ScreenTransforms) -> None:
     for x_pct, y_pct, label in check_points:
         gx, gy = cal.pct_to_grbl_mm(x_pct, y_pct)
         log.info(f"  → {label} ({x_pct}, {y_pct}) = GRBL ({gx:.2f}, {gy:.2f})")
-        arm._fast_move(gx, gy)
+        arm.rapid_to(gx, gy)
         arm.wait_idle()
         time.sleep(2)
 

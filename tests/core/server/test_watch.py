@@ -30,7 +30,7 @@ def test_watch_register_wires_all_routes(fake_mcp) -> None:
 @pytest.mark.asyncio
 async def test_watch_route_returns_watchdog_result(fake_mcp, async_request) -> None:
     pl = MagicMock()
-    pl.watch.return_value = {"wake": True, "reason": "x"}
+    pl.perception.watch.return_value = {"wake": True, "reason": "x"}
     watch_reg.register(fake_mcp, pl)
 
     resp = await fake_mcp.get("/api/phone/watch")(async_request())
@@ -44,7 +44,7 @@ async def test_watch_route_runtime_error_returns_no_wake(
     async_request,
 ) -> None:
     pl = MagicMock()
-    pl.watch.side_effect = RuntimeError("not calibrated")
+    pl.perception.watch.side_effect = RuntimeError("not calibrated")
     watch_reg.register(fake_mcp, pl)
 
     resp = await fake_mcp.get("/api/phone/watch")(async_request())
@@ -58,7 +58,7 @@ async def test_watch_route_unexpected_exception_returns_503(
     async_request,
 ) -> None:
     pl = MagicMock()
-    pl.watch.side_effect = Exception("kaboom")
+    pl.perception.watch.side_effect = Exception("kaboom")
     watch_reg.register(fake_mcp, pl)
 
     resp = await fake_mcp.get("/api/phone/watch")(async_request())
@@ -103,12 +103,12 @@ async def test_ready_route_marks_and_returns_ready_state(
     async_request,
 ) -> None:
     pl = MagicMock()
-    pl.ready = True
+    pl.rig.ready = True
     watch_reg.register(fake_mcp, pl)
 
     resp = await fake_mcp.get("/api/ready", "POST")(async_request())
 
-    pl.mark_ready.assert_called_once()
+    pl.rig.mark_ready.assert_called_once()
     assert json.loads(bytes(resp.body).decode()) == {"ok": True, "ready": True}
 
 
@@ -119,13 +119,13 @@ async def test_ready_route_fires_exposure_tune(fake_mcp, async_request) -> None:
     import asyncio
 
     pl = MagicMock()
-    pl.ready = True
+    pl.rig.ready = True
     watch_reg.register(fake_mcp, pl)
 
     await fake_mcp.get("/api/ready", "POST")(async_request())
 
     for _ in range(100):
-        if pl.tune_exposure.called:
+        if pl.perception.tune_exposure.called:
             break
         await asyncio.sleep(0.01)
-    pl.tune_exposure.assert_called_once()
+    pl.perception.tune_exposure.assert_called_once()

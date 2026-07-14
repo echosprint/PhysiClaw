@@ -16,7 +16,7 @@ from physiclaw.core.server import hardware as hw_reg
 
 
 def test_hardware_register_wires_all_routes(fake_mcp) -> None:
-    hw_reg.register(fake_mcp, physiclaw=MagicMock(), phone=MagicMock())
+    hw_reg.register(fake_mcp, rig=MagicMock(), phone=MagicMock())
 
     by_path = {(p, ms[0]) for p, ms, _ in fake_mcp.routes}
     assert by_path == {

@@ -102,7 +102,7 @@ class AssistiveTouch:
             raise RuntimeError("AT position not set — call compute_at_screen_pos first")
         sx, sy = self.at_screen
         grbl = pct_to_grbl @ np.array([sx, sy, 1.0])
-        arm._fast_move(float(grbl[0]), float(grbl[1]))
+        arm.rapid_to(float(grbl[0]), float(grbl[1]))
         arm.wait_idle()
 
     def tap(self, arm: StylusArm, pct_to_grbl: np.ndarray) -> None:
