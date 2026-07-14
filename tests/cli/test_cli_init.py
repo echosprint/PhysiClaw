@@ -16,7 +16,17 @@ runner = CliRunner()
 
 @pytest.mark.parametrize(
     "subcommand",
-    ["doctor", "server", "auto", "status", "setup", "config", "models", "skills"],
+    [
+        "doctor",
+        "server",
+        "now",
+        "auto",
+        "status",
+        "setup",
+        "config",
+        "models",
+        "skills",
+    ],
 )
 def test_top_level_help_lists_subcommand(subcommand: str) -> None:
     result = runner.invoke(app, ["--help"])
@@ -55,4 +65,4 @@ def test_no_subcommand_runs_server(mocker) -> None:
     result = runner.invoke(app, [])
 
     assert result.exit_code == 0
-    mock_server.assert_called_once()
+    mock_server.assert_called_once_with()

@@ -1,10 +1,13 @@
 """Warm-start: resume from the saved Calibration bundle.
 
-``try_resume`` (called only when ``physiclaw server --warm-start`` is
-passed) loads the bundle from disk into ``rig.calibration``,
-reconnects hardware, runs an end-to-end sanity tap, and flips the ready
-flag only if every test passes. A plain ``physiclaw server`` boot
-ignores the bundle entirely — see ``core/server/app.py``.
+``try_resume`` (called only when ``physiclaw server --warm-start`` or
+``--hot-start`` is passed) loads the bundle from disk into
+``rig.calibration``, reconnects hardware, runs an end-to-end sanity tap,
+and flips the ready flag only if every test passes. ``--hot-start``
+(``verify=False``) is the same resume minus every step that touches the
+phone: no bridge wait, no sanity tap, no home-screen swipe — the user
+vouches that nothing moved. A plain ``physiclaw server`` boot ignores
+the bundle entirely — see ``core/server/app.py``.
 
 The resting-position invariant is what makes warm-start work at all. The
 arm parks at the off-screen spot (``PARK_PCT``) between every operation
@@ -14,7 +17,9 @@ declare the park spot to be ``(0, 0)`` and shift the whole frame, so
 ``restore_park_origin`` re-pins the origin from the park coordinate to
 keep ``pct_to_grbl`` valid. The sanity tap is the only mechanism that
 catches violations of this invariant (crash mid-move, power cut, arm
-bumped — anything that leaves the tip somewhere other than the park spot).
+bumped — anything that leaves the tip somewhere other than the park
+spot). Under ``--hot-start`` nothing catches them: the first symptom of
+a violated invariant is a gesture landing off-target.
 """
 
 import logging
@@ -33,6 +38,14 @@ if TYPE_CHECKING:
     from physiclaw.core.orchestration import PhysiClaw
 
 log = logging.getLogger(__name__)
+
+
+def resume_flag(verify: bool) -> str:
+    """User-facing CLI flag for a resume mode — the single source of the
+    verify → ``--warm-start`` / ``--hot-start`` mapping, shared with
+    ``cli/server.py``'s log messages."""
+    return "--warm-start" if verify else "--hot-start"
+
 
 # How long to wait for the phone to (re)load /bridge, in seconds.
 BRIDGE_WAIT_TIMEOUT = CONFIG.warm_start.bridge_wait_timeout_seconds
@@ -90,11 +103,16 @@ def _sanity(
     return False
 
 
-def try_resume(cam_index_override: int | None) -> bool:
+def try_resume(cam_index_override: int | None, *, verify: bool = True) -> bool:
     """Connect hardware, run sanity, flip ready if everything holds.
 
     Camera index comes from ``--cam-index`` if provided, else from
     ``bundle.cam_index``, else 0.
+
+    ``verify=False`` (``--hot-start``) trusts the resting-position
+    invariant outright: the bridge wait, the sanity tap, and the final
+    home-screen swipe are all skipped, so the phone is never touched and
+    the server is ready as soon as hardware reconnects.
 
     Returns True on success; False (with a logged reason) if the bundle
     is incomplete, hardware reconnect fails, or sanity doesn't pass.
@@ -104,10 +122,11 @@ def try_resume(cam_index_override: int | None) -> bool:
     from physiclaw.core.calibration.state import Calibration
     from physiclaw.core.server.app import _calib, _phone, physiclaw
 
+    flag = resume_flag(verify)
     rig = physiclaw.rig
     loaded = Calibration.load()
     if loaded is None:
-        log.error("--warm-start: no calibration bundle on disk")
+        log.error(f"{flag}: no calibration bundle on disk")
         return False
     rig.calibration = loaded
     if loaded.viewport_shift is not None:
@@ -120,13 +139,13 @@ def try_resume(cam_index_override: int | None) -> bool:
         # without waiting for the phone's /bridge page to POST them again.
         _calib.screen_dimension = loaded.screen_dimension
     log.info(
-        f"--warm-start: loaded bundle (rotation={loaded.cam_rotation}, "
+        f"{flag}: loaded bundle (rotation={loaded.cam_rotation}, "
         f"complete={loaded.complete})"
     )
 
     cal = rig.calibration
     if not cal.complete:
-        log.error("--warm-start: bundle on disk is incomplete")
+        log.error(f"{flag}: bundle on disk is incomplete")
         return False
     cam_index = (
         cam_index_override
@@ -137,7 +156,7 @@ def try_resume(cam_index_override: int | None) -> bool:
         rig.connect_arm()
         rig.connect_camera(cam_index)
     except Exception as e:
-        log.error(f"--warm-start: hardware reconnect failed: {e}")
+        log.error(f"{flag}: hardware reconnect failed: {e}")
         return False
 
     # The camera may have negotiated a different resolution than the
@@ -146,12 +165,12 @@ def try_resume(cam_index_override: int | None) -> bool:
     # pixel size; different aspect → the mapping is broken, recalibrate.
     live = rig.cam.peek()
     if live is None:
-        log.error("--warm-start: camera produced no frame")
+        log.error(f"{flag}: camera produced no frame")
         return False
     live_h, live_w = live.shape[:2]
     if not cal.reconcile_cam_size((live_w, live_h)):
         log.error(
-            "--warm-start: capture aspect ratio changed since calibration "
+            f"{flag}: capture aspect ratio changed since calibration "
             "— run `physiclaw` setup again"
         )
         return False
@@ -166,37 +185,45 @@ def try_resume(cam_index_override: int | None) -> bool:
     # (already parked post-restore, so the auto-park on exit is a no-op move).
     with rig.locked():
         pass
-    if sys.stdin.isatty():
-        print()
-        print("━" * 60)
-        print("Warm-start")
-        print("  Open or refresh /bridge on the phone (foreground, not locked).")
-        print(f"  Server waits up to {BRIDGE_WAIT_TIMEOUT}s for steady polling.")
-        print("━" * 60)
-        if not rig.bridge.wait_for_connection(
-            BRIDGE_WAIT_TIMEOUT, BRIDGE_SETTLE_SECONDS
-        ):
-            log.error(
-                f"--warm-start: /bridge page not polling within "
-                f"{BRIDGE_WAIT_TIMEOUT}s — open or refresh /bridge on the phone."
-            )
+    if verify:
+        if sys.stdin.isatty():
+            print()
+            print("━" * 60)
+            print("Warm-start")
+            print("  Open or refresh /bridge on the phone (foreground, not locked).")
+            print(f"  Server waits up to {BRIDGE_WAIT_TIMEOUT}s for steady polling.")
+            print("━" * 60)
+            if not rig.bridge.wait_for_connection(
+                BRIDGE_WAIT_TIMEOUT, BRIDGE_SETTLE_SECONDS
+            ):
+                log.error(
+                    f"{flag}: /bridge page not polling within "
+                    f"{BRIDGE_WAIT_TIMEOUT}s — open or refresh /bridge on the phone."
+                )
+                return False
+        else:
+            log.info(f"{flag}: non-interactive; running sanity immediately")
+
+        if not _sanity(physiclaw, _calib, _phone):
+            # _sanity logged the specific diagnosis.
             return False
+
+        # Match setup.py's final step: send the phone home (swipe from
+        # bottom), then flip ready. home_screen's locked() context auto-parks
+        # the arm off-screen on exit, so nothing is hovering over the glass
+        # afterward.
+        physiclaw.home_screen()
     else:
-        log.info("--warm-start: non-interactive; running sanity immediately")
-
-    if not _sanity(physiclaw, _calib, _phone):
-        # _sanity logged the specific diagnosis.
-        return False
-
-    # Match setup.py's final step: send the phone home (swipe from bottom),
-    # then flip ready. home_screen's locked() context auto-parks the arm
-    # off-screen on exit, so nothing is hovering over the glass afterward.
-    physiclaw.home_screen()
-    # Home screen showing = the dark scene that exposes AE failure — the
-    # right moment to verify/converge exposure. Synchronous is fine:
-    # try_resume already runs on a background thread, and tune_exposure
-    # is fail-open + bounded by frame-wait timeouts.
+        log.info(
+            f"{flag}: trusting the parked arm — skipping bridge wait, "
+            "sanity tap, and home-screen swipe"
+        )
+    # Verify/converge exposure before flipping ready (under --warm-start the
+    # home screen is showing — the dark scene that exposes AE failure; under
+    # --hot-start whatever's on screen still beats not checking at all).
+    # Synchronous is fine: try_resume already runs on a background thread,
+    # and tune_exposure is fail-open + bounded by frame-wait timeouts.
     physiclaw.perception.tune_exposure()
     rig.mark_ready()
-    log.info(f"--warm-start: resumed from bundle (cam={cam_index}) — MCP tools ready")
+    log.info(f"{flag}: resumed from bundle (cam={cam_index}) — MCP tools ready")
     return True

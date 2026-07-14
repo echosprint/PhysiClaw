@@ -50,12 +50,24 @@ def server(
             "bundle is incomplete or hardware connect fails.",
         ),
     ] = False,
+    hot_start: Annotated[
+        bool,
+        typer.Option(
+            "-H",
+            "--hot-start",
+            help="Like --warm-start, but skip every check that touches the "
+            "phone (bridge wait, sanity tap): trust that the arm still sits "
+            "where it parked and mark ready as soon as hardware reconnects. "
+            "Use only when nothing moved since the last run. "
+            "Shortcut: `physiclaw now`.",
+        ),
+    ] = False,
     cam_index: Annotated[
         Optional[int],
         typer.Option(
             "--cam-index",
-            help="Camera index override for --warm-start (default: value "
-            "stored in the bundle, falling back to 0).",
+            help="Camera index override for --warm-start / --hot-start "
+            "(default: value stored in the bundle, falling back to 0).",
         ),
     ] = None,
     no_setup_hardware: Annotated[
@@ -148,6 +160,7 @@ def server(
         host,
         port,
         warm_start=warm_start,
+        hot_start=hot_start,
         cam_index=cam_index,
         auto_calibrate=auto_calibrate,
         no_setup_hardware=no_setup_hardware,
@@ -307,16 +320,18 @@ def _start_hardware_bringup(
     port: int,
     *,
     warm_start: bool,
+    hot_start: bool,
     cam_index: Optional[int],
     auto_calibrate: bool,
     no_setup_hardware: bool,
 ) -> None:
-    """Dispatch hardware bring-up to one of four mutually exclusive modes. Each
+    """Dispatch hardware bring-up to one of five mutually exclusive modes. Each
     (except --no-setup-hardware, which just waits) runs in a daemon thread so
     `mcp.run()` can serve first — the phone needs the server already listening
-    to load /bridge."""
-    if warm_start:
-        _warm_start_hardware(host, port, cam_index)
+    to load /bridge. --hot-start is --warm-start minus the verification; when
+    both are passed the verifying mode wins."""
+    if warm_start or hot_start:
+        _warm_start_hardware(host, port, cam_index, verify=warm_start)
     elif auto_calibrate:
         _auto_calibrate_hardware(host, port)
     elif no_setup_hardware:
@@ -328,25 +343,31 @@ def _start_hardware_bringup(
         _open_hardware_wizard(host, port)
 
 
-def _warm_start_hardware(host: str, port: int, cam_index: Optional[int]) -> None:
-    """--warm-start: resume from the saved calibration bundle in a background
-    thread. On failure, raise KeyboardInterrupt in the main thread (via
-    _thread.interrupt_main — cross-platform; os.kill(SIGINT) on Windows would
-    TerminateProcess and skip atexit) so `mcp.run()` exits and the atexit
-    handlers (shutdown, arm park-off-screen) still fire cleanly."""
+def _warm_start_hardware(
+    host: str, port: int, cam_index: Optional[int], *, verify: bool
+) -> None:
+    """--warm-start / --hot-start: resume from the saved calibration bundle in
+    a background thread (`verify=False` = --hot-start, which skips the bridge
+    wait and sanity tap). On failure, raise KeyboardInterrupt in the main
+    thread (via _thread.interrupt_main — cross-platform; os.kill(SIGINT) on
+    Windows would TerminateProcess and skip atexit) so `mcp.run()` exits and
+    the atexit handlers (shutdown, arm park-off-screen) still fire cleanly."""
     log = logging.getLogger(__name__)
     from physiclaw.core.server import warm_start as ws
 
+    flag = ws.resume_flag(verify)
+
     def _warm_start_thread() -> None:
         if not ws.wait_for_port(host, port):
-            log.error(
-                "warm-start: server never started accepting connections; exiting."
-            )
+            log.error("%s: server never started accepting connections; exiting.", flag)
             _thread.interrupt_main()
             return
-        if not ws.try_resume(cam_index):
+        if not ws.try_resume(cam_index, verify=verify):
+            # Mode-neutral hint: the user may have typed `physiclaw now`,
+            # `physiclaw server -H`, or `--warm-start` — try_resume already
+            # named the failing mode in its diagnosis.
             log.error(
-                "Exiting. Re-run without --warm-start, then "
+                "Exiting. Re-run plain `physiclaw server`, then "
                 "`physiclaw setup hardware` to recalibrate."
             )
             _thread.interrupt_main()

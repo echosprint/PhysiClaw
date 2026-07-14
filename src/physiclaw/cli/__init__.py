@@ -12,6 +12,7 @@ from physiclaw.cli.doctor import doctor
 from physiclaw.cli.flash import flash
 from physiclaw.cli.logs import logs
 from physiclaw.cli.models import models_app
+from physiclaw.cli.now import now
 from physiclaw.cli.prompt import prompt_app
 from physiclaw.cli.reset import reset
 from physiclaw.cli.server import server
@@ -31,6 +32,7 @@ app = typer.Typer(
 
 app.command()(doctor)
 app.command()(server)
+app.command()(now)
 app.command()(auto)
 app.command()(status)
 app.command()(update)

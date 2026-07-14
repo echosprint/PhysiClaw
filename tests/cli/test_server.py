@@ -578,6 +578,48 @@ def test_warm_start_thread_exits_on_resume_failure(mocker) -> None:
     interrupt_spy.assert_called_once_with()
 
 
+@pytest.mark.parametrize(
+    ("warm_start", "hot_start", "expected_verify"),
+    [
+        pytest.param(True, False, True, id="warm-start-verifies"),
+        pytest.param(False, True, False, id="hot-start-skips-verify"),
+        pytest.param(True, True, True, id="both-flags-verifying-mode-wins"),
+    ],
+)
+def test_resume_thread_verify_mode(
+    mocker, warm_start: bool, hot_start: bool, expected_verify: bool
+) -> None:
+    """--warm-start resumes with verify, --hot-start without; when both are
+    passed the verifying mode wins."""
+    deps = _patch_server_runtime_deps(mocker)
+    captured = {}
+
+    def fake_thread(target, daemon=False):
+        captured["target"] = target
+        return MagicMock()
+
+    mocker.patch.object(server_mod.threading, "Thread", side_effect=fake_thread)
+    interrupt_spy = mocker.patch.object(server_mod._thread, "interrupt_main")
+
+    server_mod.server(
+        port=8048,
+        host="127.0.0.1",
+        verbose=False,
+        no_runtime=True,
+        warm_start=warm_start,
+        hot_start=hot_start,
+        cam_index=None,
+        save_tool_calls=False,
+        save_snapshots=False,
+        save_screenshots=False,
+    )
+
+    captured["target"]()
+
+    deps["warm_start"].try_resume.assert_called_once_with(None, verify=expected_verify)
+    interrupt_spy.assert_not_called()
+
+
 def test_warm_start_thread_exits_silently_when_resume_succeeds(mocker) -> None:
     deps = _patch_server_runtime_deps(mocker)
     deps["warm_start"].try_resume.return_value = True

@@ -255,6 +255,49 @@ def test_try_resume_returns_false_when_sanity_fails(mocker) -> None:
     app.rig.mark_ready.assert_not_called()
 
 
+def test_try_resume_no_verify_skips_everything_that_touches_the_phone(
+    mocker,
+) -> None:
+    # --hot-start: even on an interactive tty there is no bridge wait, no
+    # sanity tap, and no home-screen swipe — hardware reconnects, the origin
+    # is re-pinned from the park spot, and ready flips immediately.
+    cal = _ready_bundle()
+    app = _ready_app(cal)
+    sanity = _patch_resume_env(mocker, cal, app)
+    mocker.patch.object(warm_start.sys.stdin, "isatty", return_value=True)
+
+    result = warm_start.try_resume(cam_index_override=None, verify=False)
+
+    assert result is True
+    sanity.assert_not_called()
+    app.rig.bridge.wait_for_connection.assert_not_called()
+    app.home_screen.assert_not_called()
+    app.rig.restore_park_origin.assert_called_once()
+    app.perception.tune_exposure.assert_called_once()
+    app.rig.mark_ready.assert_called_once()
+
+
+def test_try_resume_no_verify_still_requires_a_complete_bundle(
+    mocker, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+
+    cal = _ready_bundle()
+    cal.complete = False
+    app = _ready_app(cal)
+    _patch_resume_env(mocker, cal, app)
+
+    with caplog.at_level(logging.ERROR, logger="physiclaw.core.server.warm_start"):
+        result = warm_start.try_resume(cam_index_override=None, verify=False)
+
+    assert result is False
+    app.rig.mark_ready.assert_not_called()
+    assert any(
+        "--hot-start: bundle on disk is incomplete" in r.getMessage()
+        for r in caplog.records
+    )
+
+
 def test_try_resume_reconciles_live_resolution_with_bundle(mocker) -> None:
     # The camera negotiated 4K but the bundle was calibrated at 1080p —
     # try_resume must offer the live ROTATED (w, h) to the bundle's
