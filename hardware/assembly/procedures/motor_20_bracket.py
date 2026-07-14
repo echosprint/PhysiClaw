@@ -16,9 +16,10 @@ placement math.
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.motor_20_bracket
+    uv run --group cad python -m hardware step motor_20_bracket
 """
 
+from hardware.assembly.base import ASSEMBLED_CAM0, EXPLODED_CAM1
 from hardware.assembly.procedures.motor_10_bracket import MO10Bracket
 from hardware.assembly.projection import FRONT_LEFT_HIGH, Camera
 
@@ -31,10 +32,4 @@ class MO20Bracket(MO10Bracket):
     BHCS_M5_LENGTH = 20  # mm — longer screw spans the 12 mm spacer
     motor_z_rotation = 0  # plug on native -Y → world +X (RIGHT) when frame-mounted
     camera = [FRONT_LEFT_HIGH, Camera(-16.50, 15.07, 1.95)]
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = MO20Bracket(exploded=exploded)
-        asm.export()
-        asm.render()
+    views = [EXPLODED_CAM1, ASSEMBLED_CAM0]

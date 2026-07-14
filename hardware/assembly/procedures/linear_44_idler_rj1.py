@@ -15,21 +15,16 @@ descriptions, and exploded-view conventions.
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.linear_44_idler_rj1
+    uv run --group cad python -m hardware step linear_44_idler_rj1
 """
 
+from hardware.assembly.base import ASSEMBLED_CAM0, EXPLODED_CAM0
 from hardware.assembly.procedures.linear_40_idler_lj1 import LI40IdlerLj1
 
 
 class LI44IdlerRj1(LI40IdlerLj1):
     compound_label = "linear_44_idler_rj1"
+    views = [EXPLODED_CAM0, ASSEMBLED_CAM0]
     toothed = False
     include_spacer = False
     shoulder_len = 10  # mm — pairs with the 9 mm washer + idler stack
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = LI44IdlerRj1(exploded=exploded)
-        asm.export()
-        asm.render()

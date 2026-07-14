@@ -16,12 +16,12 @@ Two variants:
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.frame_20_SHCS
+    uv run --group cad python -m hardware step frame_20_SHCS
 """
 
 from build123d import Compound
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import BaseAssembly, EXPLODED_CAM0
 from hardware.assembly.procedures.frame_10_extrusion_tnut import FR10ExtrusionTnut
 from hardware.assembly.projection import MAIN_FRAME_VIEW
 from hardware.parts.standard.extrusion import CB_LABELS, cb_head_depth
@@ -34,6 +34,7 @@ SHCS_LENGTH = 20  # mm — SHCS M6 underhead length
 
 class FR20SHCS(BaseAssembly):
     camera = MAIN_FRAME_VIEW
+    views = [EXPLODED_CAM0]
 
     def _build(self) -> Compound:
         # Frame geometry (extrusions + seated nuts) comes from the
@@ -69,10 +70,3 @@ class FR20SHCS(BaseAssembly):
                 *screws,
             ],
         )
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = FR20SHCS(exploded=exploded)
-        asm.export()
-        asm.render()

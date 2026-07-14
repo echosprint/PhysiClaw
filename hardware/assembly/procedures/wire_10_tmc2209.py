@@ -19,12 +19,17 @@ Two variants:
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.wire_10_tmc2209
+    uv run --group cad python -m hardware step wire_10_tmc2209
 """
 
 from build123d import Compound, Location
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import (
+    ASSEMBLED_CAM0,
+    ASSEMBLED_CAM1,
+    BaseAssembly,
+    EXPLODED_CAM1,
+)
 from hardware.assembly.projection import Camera, ISO
 from hardware.parts.standard.board import (
     DRIVER_X,
@@ -41,6 +46,7 @@ MODULE_EXPLODE = 30  # mm — exploded: modules lifted off their slots along +Z
 
 class WI10Tmc2209(BaseAssembly):
     camera = [ISO, Camera(-21.21, 40.26, 7.02)]
+    views = [EXPLODED_CAM1, ASSEMBLED_CAM0, ASSEMBLED_CAM1]
 
     def _build(self) -> Compound:
         board = MksBoard().build()
@@ -55,10 +61,3 @@ class WI10Tmc2209(BaseAssembly):
             modules.append(module)
 
         return Compound(label="wire_10_tmc2209", children=[board, *modules])
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = WI10Tmc2209(exploded=exploded)
-        asm.export()
-        asm.render()

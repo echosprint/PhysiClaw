@@ -221,8 +221,12 @@ def _snapshot_outputs(stem: str) -> list[Path]:
 
 def clear_outputs(stem: str) -> None:
     """Remove ``stem``'s output files (.step / .svg / .md), so a rebuild that
-    now emits fewer cameras/variants doesn't leave a stale file behind."""
-    for f in _source_outputs(stem) + _snapshot_outputs(stem):
+    now emits fewer cameras/variants doesn't leave a stale file behind.
+    Sweeps the stem's in-progress .tmp files too (a SIGSEGV'd render or
+    export can leave one)."""
+    tmps = list(SVG_DIR.glob(f"{stem}_*_cam*.tmp"))
+    tmps += STEP_DIR.glob(f"{stem}_*.tmp")
+    for f in _source_outputs(stem) + _snapshot_outputs(stem) + tmps:
         f.unlink()
 
 

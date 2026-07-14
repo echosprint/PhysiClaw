@@ -34,12 +34,12 @@ step's finished state that this composition builds onto.
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.idler_41_rd
+    uv run --group cad python -m hardware step idler_41_rd
 """
 
 from build123d import Compound, Location, Plane
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM1
 from hardware.assembly.procedures.frame_10_extrusion_tnut import (
     EXT_THICKNESS,
     LONG_BOT_GAP,
@@ -58,6 +58,7 @@ RD_EXPLODE = 40  # mm — exploded: outboard air gap, slot face → rd block bot
 
 class ID41Rd(BaseAssembly):
     camera = [MAIN_FRAME_VIEW, Camera(40.06, -53.35, 47.58)]
+    views = [EXPLODED_CAM1, ASSEMBLED_CAM0]
 
     def _build(self) -> Compound:
         # Base layer — always assembled. Bundles frame + LU/RU/LD
@@ -110,10 +111,3 @@ class ID41Rd(BaseAssembly):
                 rd_compound,
             ],
         )
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = ID41Rd(exploded=exploded)
-        asm.export()
-        asm.render()

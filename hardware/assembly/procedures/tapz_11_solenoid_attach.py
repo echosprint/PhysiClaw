@@ -39,12 +39,12 @@ Two variants:
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.tapz_11_solenoid_attach
+    uv run --group cad python -m hardware step tapz_11_solenoid_attach
 """
 
 from build123d import MM, Compound, Location, Plane
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM1
 from hardware.assembly.procedures.tapz_10_solenoid_tip import TZ10SolenoidTip
 from hardware.assembly.projection import Camera
 from hardware.parts.custom.solenoid_mount import (
@@ -96,6 +96,7 @@ SCREEN_FACE_X = MOUNT_ORIGIN_X + (mount_width / 2 - wall_thickness)
 
 class TZ11SolenoidAttach(BaseAssembly):
     camera = [Camera(50.69, 32.63, 0.47), Camera(-36.53, 5.28, 3.80)]
+    views = [EXPLODED_CAM1, ASSEMBLED_CAM0]
 
     def _build(self) -> Compound:
         base_compound = TZ10SolenoidTip(exploded=False).build()
@@ -152,10 +153,3 @@ class TZ11SolenoidAttach(BaseAssembly):
                 *screws,
             ],
         )
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = TZ11SolenoidAttach(exploded=exploded)
-        asm.export()
-        asm.render()

@@ -21,12 +21,12 @@ Two variants:
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.board_40_teflon
+    uv run --group cad python -m hardware step board_40_teflon
 """
 
 from build123d import Compound, Location, Vector
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly
 from hardware.assembly.procedures.board_32_tube_holder import (
     BO32TubeHolder,
     TUBE_HOLDER_PLACEMENT,
@@ -69,6 +69,7 @@ def _wdir(loc: Location, p, q) -> Vector:
 
 class BO40Teflon(BaseAssembly):
     camera = MAIN_FRAME_VIEW
+    views = [ASSEMBLED_CAM0]
 
     def _build(self) -> Compound:
         base = BO32TubeHolder(exploded=False).build()
@@ -99,10 +100,3 @@ class BO40Teflon(BaseAssembly):
             tube.move(Location((0, 0, EXPLODE)))
 
         return Compound(label="board_40_teflon", children=[base, tube])
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = BO40Teflon(exploded=exploded)
-        asm.export()
-        asm.render()

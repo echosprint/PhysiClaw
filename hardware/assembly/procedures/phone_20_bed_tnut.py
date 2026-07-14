@@ -22,12 +22,12 @@ Two variants:
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.phone_20_bed_tnut
+    uv run --group cad python -m hardware step phone_20_bed_tnut
 """
 
 from build123d import Compound, Location
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM1
 from hardware.assembly.projection import FRONT_LEFT_HIGH, Camera
 from hardware.parts.custom.phone_bed import (
     PhoneBed,
@@ -54,6 +54,7 @@ SCREW_SEAT_Z = thickness - (FHCS_DIMS["M3"]["k"] + head_skirt)
 
 class PH20BedTnut(BaseAssembly):
     camera = [FRONT_LEFT_HIGH, Camera(-5.56, 49.21, 4.80)]
+    views = [EXPLODED_CAM1, ASSEMBLED_CAM0]
 
     def _build(self) -> Compound:
         bed = PhoneBed().build()
@@ -78,10 +79,3 @@ class PH20BedTnut(BaseAssembly):
             nuts.append(nut)
 
         return Compound(label="phone_20_bed_tnut", children=[bed, *screws, *nuts])
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = PH20BedTnut(exploded=exploded)
-        asm.export()
-        asm.render()

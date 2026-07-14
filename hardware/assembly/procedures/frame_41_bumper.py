@@ -29,12 +29,12 @@ face (where the bumpers live) is the one facing the camera.
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.frame_41_bumper
+    uv run --group cad python -m hardware step frame_41_bumper
 """
 
 from build123d import Compound, Location, Plane
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly
 from hardware.assembly.procedures.frame_10_extrusion_tnut import (
     EXT_THICKNESS,
     LONG_LENGTH,
@@ -51,6 +51,7 @@ BUMPER_EXPLODE = 25  # mm — exploded: outboard air gap, +Y slot face → bumpe
 
 class FR41Bumper(BaseAssembly):
     camera = MAIN_FRAME_VIEW
+    views = [ASSEMBLED_CAM0]
 
     def _build(self) -> Compound:
         # Frame layer — always assembled (it's the prior step's result).
@@ -99,10 +100,3 @@ class FR41Bumper(BaseAssembly):
                 *bumpers,
             ],
         )
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = FR41Bumper(exploded=exploded)
-        asm.export()
-        asm.render()

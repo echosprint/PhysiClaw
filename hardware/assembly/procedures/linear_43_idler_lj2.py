@@ -37,12 +37,12 @@ The base (linear_41_idler_lj1) is always shown assembled.
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.linear_43_idler_lj2
+    uv run --group cad python -m hardware step linear_43_idler_lj2
 """
 
 from build123d import Compound, Location, Plane
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM1
 from hardware.assembly.procedures.linear_41_idler_lj1 import LI41IdlerLj1
 from hardware.assembly.procedures.linear_42_idler_lj2 import LI42IdlerLj2
 from hardware.assembly.projection import Camera, MAIN_FRAME_VIEW
@@ -54,6 +54,7 @@ NUT_EXPLODE = 25  # mm — exploded: nut slid along +slant_z_dir (pocket opening
 
 class LI43IdlerLj2(BaseAssembly):
     camera = [MAIN_FRAME_VIEW, Camera(49.74, -63.86, 54.41)]
+    views = [EXPLODED_CAM1, ASSEMBLED_CAM0]
 
     def _build(self) -> Compound:
         base = LI41IdlerLj1(exploded=False)
@@ -127,10 +128,3 @@ class LI43IdlerLj2(BaseAssembly):
                 nut,
             ],
         )
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = LI43IdlerLj2(exploded=exploded)
-        asm.export()
-        asm.render()

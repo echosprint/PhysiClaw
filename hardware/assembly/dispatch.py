@@ -10,8 +10,9 @@ base, so there's no import cycle.
 
 A worker can crash (SIGSEGV) mid-batch: an intermittent OCCT hazard
 (geometry kernel, or exact HLR in the render pipeline), not an OOM. It's
-nondeterministic, so a crashed stem almost always succeeds when re-run in a
-fresh process — hence ``retry_stems``.
+nondeterministic, so re-running a crashed stem in a fresh process
+eventually succeeds — but the worst stems fail most attempts, hence
+``retry_stems`` and the deep ``MAX_STEM_RETRIES`` budget.
 """
 
 from __future__ import annotations
@@ -46,7 +47,11 @@ _FAMILIES = (
 )
 _FAMILY_PRIORITY = {name: i for i, name in enumerate(_FAMILIES)}
 DEFAULT_BATCH_SIZE = 5
-MAX_STEM_RETRIES = 3
+# Exact-HLR crashes hit up to ~80% per attempt on the worst stem
+# (board_30_pcb assembled). A failed retry costs ~15s — only the missing
+# outputs re-run — so a deep budget is cheap; 12 tries keeps the residual
+# per-stem failure rate near 1%.
+MAX_STEM_RETRIES = 12
 
 
 # ── Discovery & loading ───────────────────────────────────────────────────────

@@ -26,12 +26,12 @@ Two variants:
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.motor_30_pulley
+    uv run --group cad python -m hardware step motor_30_pulley
 """
 
 from build123d import Compound, Location
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM1
 from hardware.assembly.procedures.motor_21_frame import MO21Frame
 from hardware.assembly.projection import MAIN_FRAME_VIEW, Camera
 from hardware.parts.standard.pulley import Pulley2GT20T
@@ -59,6 +59,7 @@ PULLEY_EXPLODE = 30  # mm — exploded: pull each pulley outboard along world
 
 class MO30Pulley(BaseAssembly):
     camera = [MAIN_FRAME_VIEW, Camera(-64.27, 40.48, -110.78)]
+    views = [EXPLODED_CAM1, ASSEMBLED_CAM0]
 
     def _build(self) -> Compound:
         # Build the prior step and keep the instance so we can read
@@ -93,10 +94,3 @@ class MO30Pulley(BaseAssembly):
                 *pulleys,
             ],
         )
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = MO30Pulley(exploded=exploded)
-        asm.export()
-        asm.render()

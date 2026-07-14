@@ -20,12 +20,12 @@ Two variants:
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.camera_40_frame
+    uv run --group cad python -m hardware step camera_40_frame
 """
 
 from build123d import Compound, Location, Plane
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import ASSEMBLED_CAM0, ASSEMBLED_CAM1, BaseAssembly
 from hardware.assembly.procedures.board_40_teflon import BO40Teflon
 from hardware.assembly.procedures.camera_30_mount import Camera30Mount
 from hardware.assembly.projection import Camera, MAIN_FRAME_VIEW
@@ -65,6 +65,7 @@ CAMERA_PLACEMENT = Plane(
 class Camera40Frame(BaseAssembly):
     compound_label = "camera_40_frame"
     camera = [MAIN_FRAME_VIEW, Camera(35.39, -56.69, 45.46)]
+    views = [ASSEMBLED_CAM0, ASSEMBLED_CAM1]
 
     def _build(self) -> Compound:
         base = BO40Teflon(exploded=False).build()
@@ -75,10 +76,3 @@ class Camera40Frame(BaseAssembly):
             cam.move(Location((EXPLODE, 0, 0)))
 
         return Compound(label=self.compound_label, children=[base, cam])
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = Camera40Frame(exploded=exploded)
-        asm.export()
-        asm.render()

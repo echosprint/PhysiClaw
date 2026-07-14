@@ -27,12 +27,12 @@ The two variants use intentionally different layouts:
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.frame_10_extrusion_tnut
+    uv run --group cad python -m hardware step frame_10_extrusion_tnut
 """
 
 from build123d import Compound, Location, Plane
 
-from hardware.assembly.base import GHOST_LABEL, SOLID_LABEL, BaseAssembly
+from hardware.assembly.base import BaseAssembly, EXPLODED_CAM0, GHOST_LABEL, SOLID_LABEL
 from hardware.assembly.projection import BACK_RIGHT_LOW_R90, MAIN_FRAME_VIEW
 from hardware.assembly.travel_ranges import Y_EXTRUSION_LENGTH, X_EXTRUSION_LENGTH
 from hardware.parts.standard.extrusion import (
@@ -135,6 +135,8 @@ def ext_with_nuts(
 
 
 class FR10ExtrusionTnut(BaseAssembly):
+    views = [EXPLODED_CAM0]
+
     def __init__(self, *, separation: float = 30, exploded: bool = False):
         """``separation`` (mm) — horizontal gap between each long and
         the short ends in the assembled view. Default 30 leaves the
@@ -145,7 +147,8 @@ class FR10ExtrusionTnut(BaseAssembly):
         self.separation = separation
 
         # Two layouts → two cameras. Exploded looks down the rows from
-        # the side; assembled views the frame head-on from the front.
+        # the side; assembled views the frame head-on from the front —
+        # though only the exploded view renders (see ``views``).
         self.camera = BACK_RIGHT_LOW_R90 if exploded else MAIN_FRAME_VIEW
 
         # Populated by _build_assembled_frame after .build(): keyed by
@@ -261,10 +264,3 @@ class FR10ExtrusionTnut(BaseAssembly):
             shapes.extend(destinations)
 
         return Compound(label="frame_10_extrusion_tnut", children=shapes)
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = FR10ExtrusionTnut(exploded=exploded)
-        asm.export()
-        asm.render()

@@ -33,12 +33,12 @@ the rings hang and the M5 screws drop through.
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.motor_10_bracket
+    uv run --group cad python -m hardware step motor_10_bracket
 """
 
 from build123d import Axis, Compound, Location
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import ASSEMBLED_CAM1, BaseAssembly, EXPLODED_CAM1
 from hardware.assembly.projection import FRONT_LEFT_HIGH, Camera
 from hardware.parts.standard.bracket import (
     MotorBracket as MotorBracketPart,
@@ -82,6 +82,7 @@ class MO10Bracket(BaseAssembly):
     # -X (LEFT side from top view) when
     # placed via motor_11_frame's mapping.
     camera = [FRONT_LEFT_HIGH, Camera(-155.66, 16.36, 1.12)]
+    views = [EXPLODED_CAM1, ASSEMBLED_CAM1]
 
     def _build(self) -> Compound:
         motor = Nema17Motor().build().rotate(Axis.Z, self.motor_z_rotation)
@@ -187,10 +188,3 @@ class MO10Bracket(BaseAssembly):
                 *rings,
             ],
         )
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = MO10Bracket(exploded=exploded)
-        asm.export()
-        asm.render()

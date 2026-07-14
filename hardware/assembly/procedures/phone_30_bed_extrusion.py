@@ -20,12 +20,12 @@ Sub-assemblies are embedded in their assembled form. Two variants:
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.phone_30_bed_extrusion
+    uv run --group cad python -m hardware step phone_30_bed_extrusion
 """
 
 from build123d import Axis, Compound, Location
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly
 from hardware.assembly.procedures.phone_10_extrusion import (
     BEAM_LENGTH,
     BEAM_TOP_Y,
@@ -40,6 +40,7 @@ BED_EXPLODE = 40  # mm — exploded: bed assembly lifted off the beams in +Z
 
 class PH30BedExtrusion(BaseAssembly):
     camera = [FRONT_LEFT_HIGH, Camera(-5.56, 49.21, 4.80)]
+    views = [ASSEMBLED_CAM0]
 
     def _build(self) -> Compound:
         # Two cross-beams: length along X (centered on X = 0), top face at
@@ -58,10 +59,3 @@ class PH30BedExtrusion(BaseAssembly):
             bed.move(Location((0, 0, BED_EXPLODE)))
 
         return Compound(label="phone_30_bed_extrusion", children=[*beams, bed])
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = PH30BedExtrusion(exploded=exploded)
-        asm.export()
-        asm.render()

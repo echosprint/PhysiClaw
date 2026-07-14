@@ -6,30 +6,25 @@ hardware reference icon for the manual's HARDWARE — REFERENCE page
 and so sees the most use in the build.
 
 An exhibit, not an install step — no install motion, so the exploded
-and assembled variants are identical; ``__main__`` renders only the
-assembled one (cf. belt_11_clamp_show).
+and assembled variants are identical; ``views`` keeps only the
+assembled drawing (cf. belt_11_clamp_show).
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.fastener_50_hex_driver
+    uv run --group cad python -m hardware step fastener_50_hex_driver
 """
 
 from build123d import Compound
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import ASSEMBLED_CAM1, BaseAssembly
 from hardware.assembly.projection import ISO, Camera
 from hardware.parts.standard.driver import HexDriver
 
 
 class FA50HexDriver(BaseAssembly):
     camera = [ISO, Camera(127.11, -31.05, 57.85)]
+    views = [ASSEMBLED_CAM1]
 
     def _build(self) -> Compound:
         driver = HexDriver(size="2mm").build()
         return Compound(label="fastener_50_hex_driver", children=[driver])
-
-
-if __name__ == "__main__":
-    asm = FA50HexDriver(exploded=False)
-    asm.export()
-    asm.render()

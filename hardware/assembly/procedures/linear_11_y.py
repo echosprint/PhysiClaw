@@ -29,12 +29,12 @@ The base (motor_30_pulley) is always shown assembled.
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.linear_11_y
+    uv run --group cad python -m hardware step linear_11_y
 """
 
 from build123d import Compound, Location, Plane
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import BaseAssembly, EXPLODED_CAM1
 from hardware.assembly.procedures.frame_10_extrusion_tnut import (
     EXT_THICKNESS,
     LONG_BOT_GAP,
@@ -60,6 +60,7 @@ RAIL_EXPLODE = 40  # mm — exploded: outboard air gap, slot face → rail botto
 
 class LI11Y(BaseAssembly):
     camera = [MAIN_FRAME_VIEW, Camera(-57.02, 34.80, -114.34)]
+    views = [EXPLODED_CAM1]
 
     def _build(self) -> Compound:
         # Base layer — always assembled.
@@ -115,10 +116,3 @@ class LI11Y(BaseAssembly):
             )
 
         return Compound(label="linear_11_y", children=[base_compound, *rails])
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = LI11Y(exploded=exploded)
-        asm.export()
-        asm.render()

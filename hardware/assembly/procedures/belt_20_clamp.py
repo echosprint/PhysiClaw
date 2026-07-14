@@ -38,12 +38,12 @@ slider and the belt are already in place from that step.
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.belt_20_clamp
+    uv run --group cad python -m hardware step belt_20_clamp
 """
 
 from build123d import Compound, Location, Plane
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM1
 from hardware.assembly.procedures.belt_10_motor_a import BE10MotorA
 from hardware.assembly.procedures.frame_10_extrusion_tnut import EXT_THICKNESS
 from hardware.assembly.projection import Camera, MAIN_FRAME_VIEW
@@ -116,6 +116,7 @@ SLIDER_MOUNT_Z = _left_joint_origin_z - joint_big_csk_y_n
 
 class BE20Clamp(BaseAssembly):
     camera = [MAIN_FRAME_VIEW, Camera(-9.68, -51.45, -8.14)]
+    views = [EXPLODED_CAM1, ASSEMBLED_CAM0]
 
     def _build(self) -> Compound:
         base_compound = BE10MotorA(exploded=False).build()
@@ -184,10 +185,3 @@ class BE20Clamp(BaseAssembly):
                 *screws,
             ],
         )
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = BE20Clamp(exploded=exploded)
-        asm.export()
-        asm.render()

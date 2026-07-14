@@ -20,12 +20,12 @@ Two variants:
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.frame_30_bracket_tnut
+    uv run --group cad python -m hardware step frame_30_bracket_tnut
 """
 
 from build123d import Compound, Location, Plane
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import BaseAssembly, EXPLODED_CAM0
 from hardware.assembly.projection import FRONT_HIGH_L10
 from hardware.parts.standard.bracket import (
     FlatBracket,
@@ -49,6 +49,7 @@ TNUT_LIFT = 5  # mm — assembled: nut slid up the shank toward the bracket
 
 class FR30BracketTnut(BaseAssembly):
     camera = FRONT_HIGH_L10
+    views = [EXPLODED_CAM0]
 
     def _build(self) -> Compound:
         bracket = FlatBracket().build()
@@ -113,10 +114,3 @@ class FR30BracketTnut(BaseAssembly):
                 *screws,
             ],
         )
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = FR30BracketTnut(exploded=exploded)
-        asm.export()
-        asm.render()

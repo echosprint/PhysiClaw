@@ -34,12 +34,12 @@ Two variants:
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.linear_10_y
+    uv run --group cad python -m hardware step linear_10_y
 """
 
 from build123d import Compound, Location, Plane
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM0
 from hardware.assembly.projection import FRONT_LEFT_HIGH
 from hardware.assembly.travel_ranges import Y_RAIL_LENGTH
 from hardware.parts.standard.mgn9h import (
@@ -82,6 +82,7 @@ class LI10Y(BaseAssembly):
     screw_hole_indices: tuple = SCREW_HOLE_INDICES
     slider_position: float = default_slider_position
     camera = FRONT_LEFT_HIGH
+    views = [EXPLODED_CAM0, ASSEMBLED_CAM0]
 
     def _build(self) -> Compound:
         mgn = MGN9H(
@@ -136,10 +137,3 @@ class LI10Y(BaseAssembly):
             attachments.append(nut)
 
         return Compound(label=self.compound_label, children=[mgn, *attachments])
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = LI10Y(exploded=exploded)
-        asm.export()
-        asm.render()

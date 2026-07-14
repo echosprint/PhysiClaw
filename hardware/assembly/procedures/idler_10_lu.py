@@ -47,14 +47,14 @@ the top -Y-edge pocket — the nut is added here so it ships pre-seated.
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.idler_10_lu
+    uv run --group cad python -m hardware step idler_10_lu
 """
 
 from collections.abc import Callable
 
 from build123d import Axis, Compound, Location
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM0
 from hardware.assembly.projection import FRONT_LEFT_HIGH
 from hardware.parts.custom.idler_mount_motor import (
     IdlerMountMotor,
@@ -93,6 +93,7 @@ class ID10Lu(BaseAssembly):
     # override is needed.
     compound_label: str = "idler_10_lu"
     camera = FRONT_LEFT_HIGH
+    views = [EXPLODED_CAM0, ASSEMBLED_CAM0]
 
     @staticmethod
     def _idler():
@@ -215,10 +216,3 @@ class ID10Lu(BaseAssembly):
         placed.append(top_nut)
 
         return Compound(label=self.compound_label, children=[block, *placed])
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = ID10Lu(exploded=exploded)
-        asm.export()
-        asm.render()

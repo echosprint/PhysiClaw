@@ -20,12 +20,12 @@ Two variants:
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.board_32_tube_holder
+    uv run --group cad python -m hardware step board_32_tube_holder
 """
 
 from build123d import MM, Compound, Location
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import ASSEMBLED_CAM0, ASSEMBLED_CAM1, BaseAssembly
 from hardware.assembly.procedures.board_20_frame import SHORT_FACE_Z
 from hardware.assembly.procedures.board_30_pcb import BO30Pcb
 from hardware.assembly.procedures.board_31_tube_tnut import BO31TubeTnut
@@ -46,6 +46,7 @@ TUBE_HOLDER_PLACEMENT = Location((TH_X, 0, SHORT_FACE_Z + TH.tab_thick), (0, 0, 
 
 class BO32TubeHolder(BaseAssembly):
     camera = [MAIN_FRAME_VIEW, Camera(-53.22, 43.33, -109.69)]
+    views = [ASSEMBLED_CAM0, ASSEMBLED_CAM1]
 
     def _build(self) -> Compound:
         base = BO30Pcb(exploded=False).build()
@@ -56,10 +57,3 @@ class BO32TubeHolder(BaseAssembly):
             sub.move(Location((0, 0, EXPLODE)))
 
         return Compound(label="board_32_tube_holder", children=[base, sub])
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = BO32TubeHolder(exploded=exploded)
-        asm.export()
-        asm.render()

@@ -15,12 +15,12 @@ Two variants:
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.board_30_pcb
+    uv run --group cad python -m hardware step board_30_pcb
 """
 
 from build123d import Compound, Location
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM1
 from hardware.assembly.procedures.board_20_frame import BO20Frame, BOARD_PLACEMENT
 from hardware.assembly.projection import Camera, MAIN_FRAME_VIEW
 from hardware.parts.custom.pcb_holder import cyl_h, standoff_xy, thickness
@@ -40,6 +40,7 @@ NUT_EXPLODE = 25  # mm — exploded: square nuts dropped below the plate
 
 class BO30Pcb(BaseAssembly):
     camera = [MAIN_FRAME_VIEW, Camera(55.44, 46.44, 119.69)]
+    views = [EXPLODED_CAM1, ASSEMBLED_CAM0]
 
     def _build(self) -> Compound:
         base = BO20Frame(exploded=False).build()
@@ -73,10 +74,3 @@ class BO30Pcb(BaseAssembly):
             part.move(BOARD_PLACEMENT)
 
         return Compound(label="board_30_pcb", children=[base, pcb, *screws, *nuts])
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = BO30Pcb(exploded=exploded)
-        asm.export()
-        asm.render()

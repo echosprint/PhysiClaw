@@ -24,12 +24,12 @@ Parts:
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.camera_10_bracket
+    uv run --group cad python -m hardware step camera_10_bracket
 """
 
 from build123d import Compound, Location, Plane
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM1
 from hardware.assembly.projection import Camera
 from hardware.parts.standard.bracket import (
     CornerBracket,
@@ -57,6 +57,7 @@ HAMMER_LOOSE_ENGAGE = 3  # mm — assembled: BHCS tip threads this far into the
 class Camera10Bracket(BaseAssembly):
     compound_label: str = "camera_10_bracket"
     camera = [Camera(-14.11, -7.34, 88.02), Camera(-10.74, 22.98, 88.54)]
+    views = [EXPLODED_CAM1, ASSEMBLED_CAM0]
 
     def _build(self) -> Compound:
         return Compound(label=self.compound_label, children=self._parts())
@@ -152,10 +153,3 @@ class Camera10Bracket(BaseAssembly):
         self.cam_offset = cam_offset
 
         return [bracket, bhcs, tnut, cam_screw, cam_nut]
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = Camera10Bracket(exploded=exploded)
-        asm.export()
-        asm.render()

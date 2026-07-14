@@ -31,12 +31,12 @@ The base (linear_20_joint) is always shown assembled.
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.linear_31_x
+    uv run --group cad python -m hardware step linear_31_x
 """
 
 from build123d import Compound, Location, Plane
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import BaseAssembly, EXPLODED_CAM1
 from hardware.assembly.procedures.linear_20_joint import LI20Joint
 from hardware.assembly.procedures.linear_30_x import LI30X, X_BEAM_LENGTH
 from hardware.assembly.projection import MAIN_FRAME_VIEW, Camera
@@ -55,6 +55,7 @@ BEAM_SLOT_FACE_Y_NATIVE = 9.9
 
 class LI31X(BaseAssembly):
     camera = [MAIN_FRAME_VIEW, Camera(-1.95, -64.14, -1.85)]
+    views = [EXPLODED_CAM1]
 
     def _build(self) -> Compound:
         base = LI20Joint(exploded=False)
@@ -129,10 +130,3 @@ class LI31X(BaseAssembly):
                 *screws,
             ],
         )
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = LI31X(exploded=exploded)
-        asm.export()
-        asm.render()

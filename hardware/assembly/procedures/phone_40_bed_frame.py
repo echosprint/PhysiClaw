@@ -21,12 +21,12 @@ Two variants:
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.phone_40_bed_frame
+    uv run --group cad python -m hardware step phone_40_bed_frame
 """
 
 from build123d import Axis, Compound, Location
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly
 from hardware.assembly.procedures.frame_10_extrusion_tnut import (
     EXT_THICKNESS,
     LONG_LENGTH,
@@ -46,6 +46,7 @@ EXPLODE = 60  # mm — exploded: bed dropped along +Y off the face
 
 class PH40BedFrame(BaseAssembly):
     camera = MAIN_FRAME_VIEW
+    views = [ASSEMBLED_CAM0]
 
     def _build(self) -> Compound:
         base = TZ20SolenoidMount(exploded=False).build()
@@ -60,10 +61,3 @@ class PH40BedFrame(BaseAssembly):
             bed.move(Location((0, EXPLODE, 0)))
 
         return Compound(label="phone_40_bed_frame", children=[base, bed])
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = PH40BedFrame(exploded=exploded)
-        asm.export()
-        asm.render()

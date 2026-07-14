@@ -11,18 +11,13 @@ placement math.
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.idler_21_ru
+    uv run --group cad python -m hardware step idler_21_ru
 """
 
+from hardware.assembly.base import ASSEMBLED_CAM0, EXPLODED_CAM0
 from hardware.assembly.procedures.idler_11_lu import ID11Lu
 
 
 class ID21Ru(ID11Lu):
     compound_label = "idler_21_ru"
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = ID21Ru(exploded=exploded)
-        asm.export()
-        asm.render()
+    views = [EXPLODED_CAM0, ASSEMBLED_CAM0]

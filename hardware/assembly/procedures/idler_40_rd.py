@@ -32,12 +32,12 @@ in the frame extrusion slot below (frame not modelled here).
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.idler_40_rd
+    uv run --group cad python -m hardware step idler_40_rd
 """
 
 from build123d import Axis, Compound, Location
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM0
 from hardware.assembly.projection import FRONT_LEFT_HIGH
 from hardware.parts.custom.idler_mount_front import (
     IdlerMountFront,
@@ -66,6 +66,7 @@ NUT_GAP = 15  # mm — exploded: back face → nut center along +Y install axis
 
 class ID40Rd(BaseAssembly):
     camera = FRONT_LEFT_HIGH
+    views = [EXPLODED_CAM0, ASSEMBLED_CAM0]
 
     def _build(self) -> Compound:
         block = IdlerMountFront().build()
@@ -132,10 +133,3 @@ class ID40Rd(BaseAssembly):
         placed.append(nut)
 
         return Compound(label="idler_40_rd", children=[block, *placed])
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = ID40Rd(exploded=exploded)
-        asm.export()
-        asm.render()

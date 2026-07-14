@@ -21,12 +21,12 @@ Two variants:
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.board_10_holder_tnut
+    uv run --group cad python -m hardware step board_10_holder_tnut
 """
 
 from build123d import Compound, Location
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM1
 from hardware.assembly.projection import Camera, FRONT_LEFT_HIGH
 from hardware.parts.custom.pcb_holder import (
     PcbHolder,
@@ -53,6 +53,7 @@ HOLE_X = (rib_cx - mount_hole_pitch / 2, rib_cx + mount_hole_pitch / 2)
 
 class BO10HolderTnut(BaseAssembly):
     camera = [FRONT_LEFT_HIGH, Camera(-174.71, 33.92, -91.31)]
+    views = [EXPLODED_CAM1, ASSEMBLED_CAM0]
 
     def _build(self) -> Compound:
         holder = PcbHolder().build()
@@ -79,10 +80,3 @@ class BO10HolderTnut(BaseAssembly):
             nuts.append(nut)
 
         return Compound(label="board_10_holder_tnut", children=[holder, *screws, *nuts])
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = BO10HolderTnut(exploded=exploded)
-        asm.export()
-        asm.render()

@@ -146,7 +146,12 @@ class BasePart:
         shape = self.build()
         path = self.output_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        export_step(shape, str(path))
+        # Write via a temp name and rename into place so the final path
+        # only ever holds a complete STEP — the build pipeline's crash
+        # retries trust an existing file as done.
+        tmp = path.with_suffix(".tmp")
+        export_step(shape, str(tmp))
+        tmp.replace(path)
         return shape
 
 

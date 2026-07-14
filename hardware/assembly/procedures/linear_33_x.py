@@ -24,12 +24,12 @@ The base (linear_31_x) is always shown assembled.
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.linear_33_x
+    uv run --group cad python -m hardware step linear_33_x
 """
 
 from build123d import Compound, Location, Plane
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import BaseAssembly, EXPLODED_CAM1
 from hardware.assembly.procedures.linear_31_x import LI31X
 from hardware.assembly.procedures.linear_32_x import LI32X
 from hardware.assembly.projection import MAIN_FRAME_VIEW, Camera
@@ -39,6 +39,7 @@ RAIL_EXPLODE = 30  # mm — exploded: rail lifted outward along world -Y
 
 class LI33X(BaseAssembly):
     camera = [MAIN_FRAME_VIEW, Camera(-1.95, -64.14, -1.85)]
+    views = [EXPLODED_CAM1]
 
     def _build(self) -> Compound:
         base = LI31X(exploded=False)
@@ -70,10 +71,3 @@ class LI33X(BaseAssembly):
         )
 
         return Compound(label="linear_33_x", children=[base_compound, rail])
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = LI33X(exploded=exploded)
-        asm.export()
-        asm.render()

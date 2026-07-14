@@ -23,12 +23,12 @@ Two variants:
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.phone_10_extrusion
+    uv run --group cad python -m hardware step phone_10_extrusion
 """
 
 from build123d import Compound, Location
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import ASSEMBLED_CAM1, BaseAssembly, EXPLODED_CAM1
 from hardware.assembly.projection import FRONT_LEFT_HIGH, Camera
 from hardware.assembly.travel_ranges import PHONE_BED_BEAM_LENGTH
 from hardware.parts.standard.extrusion import (
@@ -53,6 +53,7 @@ HOLE_POSITIONS = (end_hole_offset, BEAM_LENGTH - end_hole_offset)
 
 class PH10Extrusion(BaseAssembly):
     camera = [FRONT_LEFT_HIGH, Camera(138.99, 20.09, -98.56)]
+    views = [EXPLODED_CAM1, ASSEMBLED_CAM1]
 
     def _build(self) -> Compound:
         beam = Extrusion1020(length=BEAM_LENGTH, hole=True).build()
@@ -80,10 +81,3 @@ class PH10Extrusion(BaseAssembly):
             nuts.append(nut)
 
         return Compound(label="phone_10_extrusion", children=[beam, *screws, *nuts])
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = PH10Extrusion(exploded=exploded)
-        asm.export()
-        asm.render()

@@ -45,12 +45,12 @@ step's finished state that this composition builds onto.
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.motor_11_frame
+    uv run --group cad python -m hardware step motor_11_frame
 """
 
 from build123d import Compound, Location, Plane
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM1
 from hardware.assembly.procedures.frame_10_extrusion_tnut import (
     EXT_THICKNESS,
     LONG_LENGTH,
@@ -68,6 +68,7 @@ MOTOR_EXPLODE = 40  # mm — exploded: outboard air gap, slot face → bracket b
 
 class MO11Frame(BaseAssembly):
     camera = [MAIN_FRAME_VIEW, Camera(-32.50, 48.55, -133.86)]
+    views = [EXPLODED_CAM1, ASSEMBLED_CAM0]
 
     def _build(self) -> Compound:
         # Base layer — always assembled. Bundles frame + all 4 idler
@@ -137,10 +138,3 @@ class MO11Frame(BaseAssembly):
                 motor_compound,
             ],
         )
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = MO11Frame(exploded=exploded)
-        asm.export()
-        asm.render()

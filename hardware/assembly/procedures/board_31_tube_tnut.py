@@ -26,12 +26,12 @@ Two variants:
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.board_31_tube_tnut
+    uv run --group cad python -m hardware step board_31_tube_tnut
 """
 
 from build123d import Compound, Location
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM1
 from hardware.assembly.projection import Camera
 from hardware.parts.custom import tube_holder as TH
 from hardware.parts.custom.tube_holder import TubeHolder
@@ -61,6 +61,7 @@ NUT_ROT = Location((0, 0, 0), (0, 0, 90)) * Location((0, 0, 0), (90, 0, 0))
 
 class BO31TubeTnut(BaseAssembly):
     camera = [Camera(103.68, 34.46, -94.66), Camera(115.65, 54.89, -96.42)]
+    views = [EXPLODED_CAM1, ASSEMBLED_CAM0]
 
     def _build(self) -> Compound:
         holder = TubeHolder().build()
@@ -90,10 +91,3 @@ class BO31TubeTnut(BaseAssembly):
             nuts.append(nut)
 
         return Compound(label="board_31_tube_tnut", children=[holder, *screws, *nuts])
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = BO31TubeTnut(exploded=exploded)
-        asm.export()
-        asm.render()

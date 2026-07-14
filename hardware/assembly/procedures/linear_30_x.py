@@ -25,12 +25,12 @@ Two variants:
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.linear_30_x
+    uv run --group cad python -m hardware step linear_30_x
 """
 
 from build123d import Compound, Location
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import ASSEMBLED_CAM1, BaseAssembly, EXPLODED_CAM1
 from hardware.assembly.procedures.frame_10_extrusion_tnut import (
     EXT_THICKNESS,
     SHORT_LENGTH,
@@ -78,6 +78,7 @@ TNUT_POSITIONS = (_end_gap, X_BEAM_LENGTH - _end_gap)
 
 class LI30X(BaseAssembly):
     camera = [FRONT_LEFT_HIGH, Camera(138.99, 20.09, -98.56)]
+    views = [EXPLODED_CAM1, ASSEMBLED_CAM1]
 
     def _build(self) -> Compound:
         beam = Extrusion1020(length=X_BEAM_LENGTH).build()
@@ -105,10 +106,3 @@ class LI30X(BaseAssembly):
             tnuts.append(nut)
 
         return Compound(label="linear_30_x", children=[beam, *tnuts])
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = LI30X(exploded=exploded)
-        asm.export()
-        asm.render()

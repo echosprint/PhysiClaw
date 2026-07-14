@@ -55,12 +55,12 @@ step's finished state that this composition builds onto.
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.idler_22_ru
+    uv run --group cad python -m hardware step idler_22_ru
 """
 
 from build123d import Compound, Location, Plane
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM1
 from hardware.assembly.procedures.frame_10_extrusion_tnut import (
     EXT_THICKNESS,
     LONG_LENGTH,
@@ -84,6 +84,7 @@ BRACKET_EXPLODE = 30  # mm — exploded: +X air gap, ru block front face → bra
 
 class ID22Ru(BaseAssembly):
     camera = [MAIN_FRAME_VIEW, Camera(61.32, -54.86, 67.24)]
+    views = [EXPLODED_CAM1, ASSEMBLED_CAM0]
 
     def _build(self) -> Compound:
         # Base layer — always assembled. Bundles frame + LU mount + LU
@@ -166,10 +167,3 @@ class ID22Ru(BaseAssembly):
                 bracket_compound,
             ],
         )
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = ID22Ru(exploded=exploded)
-        asm.export()
-        asm.render()

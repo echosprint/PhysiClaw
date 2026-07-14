@@ -17,12 +17,12 @@ Parts (adds to camera_20_gooseneck):
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.camera_30_mount
+    uv run --group cad python -m hardware step camera_30_mount
 """
 
 from build123d import Axis, Compound, Location, Plane
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM0
 from hardware.assembly.procedures.camera_20_gooseneck import Camera20Gooseneck
 from hardware.assembly.projection import Camera
 from hardware.parts.standard.camera import (
@@ -37,6 +37,7 @@ CAM_MOUNT_GAP = 20  # mm — exploded: camera slid off the stud along the mount 
 class Camera30Mount(BaseAssembly):
     compound_label = "camera_30_mount"
     camera = [Camera(-14.11, -7.34, 88.02), Camera(-10.74, 22.98, 88.54)]
+    views = [EXPLODED_CAM0, ASSEMBLED_CAM0]
 
     def _build(self) -> Compound:
         # Embed the camera_20 gooseneck sub-assembly in its assembled form (only
@@ -65,10 +66,3 @@ class Camera30Mount(BaseAssembly):
         cam = cam.rotate(Axis(origin, ax), 90)
 
         return Compound(label=self.compound_label, children=[base, cam])
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = Camera30Mount(exploded=exploded)
-        asm.export()
-        asm.render()

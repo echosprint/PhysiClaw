@@ -14,12 +14,18 @@ hole bore until the rod tip bottoms in the hole.
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.tapz_10_solenoid_tip
+    uv run --group cad python -m hardware step tapz_10_solenoid_tip
 """
 
 from build123d import Compound, Location
 
-from hardware.assembly.base import GHOST_LABEL, SOLID_LABEL, BaseAssembly
+from hardware.assembly.base import (
+    ASSEMBLED_CAM1,
+    BaseAssembly,
+    EXPLODED_CAM1,
+    GHOST_LABEL,
+    SOLID_LABEL,
+)
 from hardware.assembly.projection import Camera, FRONT_LEFT_LOW_R70
 from hardware.parts.standard.solenoid import Solenoid
 from hardware.parts.standard.tip import Tip
@@ -29,6 +35,7 @@ PREP_OFFSET_Z = -25  # mm — prep tip dropped below the seated position
 
 class TZ10SolenoidTip(BaseAssembly):
     camera = [FRONT_LEFT_LOW_R70, Camera(-36.53, 5.28, 3.80)]
+    views = [EXPLODED_CAM1, ASSEMBLED_CAM1]
 
     def _build(self) -> Compound:
         solenoid = Solenoid().build()
@@ -50,10 +57,3 @@ class TZ10SolenoidTip(BaseAssembly):
                 Compound(label=GHOST_LABEL, children=[seated]),
             ],
         )
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = TZ10SolenoidTip(exploded=exploded)
-        asm.export()
-        asm.render()

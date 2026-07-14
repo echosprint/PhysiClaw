@@ -19,12 +19,12 @@ Two variants:
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.board_20_frame
+    uv run --group cad python -m hardware step board_20_frame
 """
 
 from build123d import Compound, Location
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import ASSEMBLED_CAM0, ASSEMBLED_CAM1, BaseAssembly
 from hardware.assembly.procedures.board_10_holder_tnut import BO10HolderTnut
 from hardware.assembly.procedures.frame_10_extrusion_tnut import LONG_LENGTH
 from hardware.assembly.procedures.phone_40_bed_frame import PH40BedFrame
@@ -44,6 +44,7 @@ BOARD_PLACEMENT = Location((HOLDER_X, -rib_cx, SHORT_FACE_Z + tab_thick), (0, 0,
 
 class BO20Frame(BaseAssembly):
     camera = [MAIN_FRAME_VIEW, Camera(39.94, 62.62, 133.88)]
+    views = [ASSEMBLED_CAM0, ASSEMBLED_CAM1]
 
     def _build(self) -> Compound:
         base = PH40BedFrame(exploded=False).build()
@@ -54,10 +55,3 @@ class BO20Frame(BaseAssembly):
             board.move(Location((0, 0, EXPLODE)))
 
         return Compound(label="board_20_frame", children=[base, board])
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = BO20Frame(exploded=exploded)
-        asm.export()
-        asm.render()

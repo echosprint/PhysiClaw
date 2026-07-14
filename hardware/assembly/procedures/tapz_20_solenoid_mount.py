@@ -53,12 +53,12 @@ Two variants:
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.tapz_20_solenoid_mount
+    uv run --group cad python -m hardware step tapz_20_solenoid_mount
 """
 
 from build123d import Compound, Location, Plane
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM1
 from hardware.assembly.procedures.belt_20_clamp import (
     SLIDER_MOUNT_X,
     SLIDER_MOUNT_Y,
@@ -210,6 +210,7 @@ TAPZ11_TO_TAPZ20 = Location(
 
 class TZ20SolenoidMount(BaseAssembly):
     camera = [MAIN_FRAME_VIEW, Camera(-13.83, -31.54, -31.35)]
+    views = [EXPLODED_CAM1, ASSEMBLED_CAM0]
 
     def _build(self) -> Compound:
         base_compound = BE30MotorB(exploded=False).build()
@@ -351,10 +352,3 @@ class TZ20SolenoidMount(BaseAssembly):
                 *vertical_nuts,
             ],
         )
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = TZ20SolenoidMount(exploded=exploded)
-        asm.export()
-        asm.render()

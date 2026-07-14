@@ -35,12 +35,12 @@ this reads as the "block-tying twin" of that step:
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.idler_11_lu
+    uv run --group cad python -m hardware step idler_11_lu
 """
 
 from build123d import Compound, Location, Plane
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM0
 from hardware.assembly.projection import FRONT_LEFT_LOW
 from hardware.parts.standard.bracket import (
     FlatBracket,
@@ -72,6 +72,7 @@ class ID11Lu(BaseAssembly):
     # needed.
     compound_label: str = "idler_11_lu"
     camera = FRONT_LEFT_LOW
+    views = [EXPLODED_CAM0, ASSEMBLED_CAM0]
 
     def _build(self) -> Compound:
         bracket = FlatBracket().build()
@@ -135,10 +136,3 @@ class ID11Lu(BaseAssembly):
                 *screws,
             ],
         )
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = ID11Lu(exploded=exploded)
-        asm.export()
-        asm.render()

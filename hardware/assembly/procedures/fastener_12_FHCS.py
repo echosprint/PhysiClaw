@@ -5,30 +5,25 @@ a hardware reference icon for the manual's HARDWARE — REFERENCE page
 (page 4).
 
 An exhibit, not an install step — no install motion, so the exploded
-and assembled variants are identical; ``__main__`` renders only the
-assembled one (cf. belt_11_clamp_show).
+and assembled variants are identical; ``views`` keeps only the
+assembled drawing (cf. belt_11_clamp_show).
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.fastener_12_FHCS
+    uv run --group cad python -m hardware step fastener_12_FHCS
 """
 
 from build123d import Compound
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import ASSEMBLED_CAM1, BaseAssembly
 from hardware.assembly.projection import ISO, Camera
 from hardware.parts.standard.screw import Screw
 
 
 class FA12FHCS(BaseAssembly):
     camera = [ISO, Camera(96.55, 39.21, -120.96)]
+    views = [ASSEMBLED_CAM1]
 
     def _build(self) -> Compound:
         screw = Screw("FHCS", "M3", 8).build()
         return Compound(label="fastener_12_FHCS", children=[screw])
-
-
-if __name__ == "__main__":
-    asm = FA12FHCS(exploded=False)
-    asm.export()
-    asm.render()

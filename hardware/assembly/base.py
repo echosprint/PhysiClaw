@@ -33,6 +33,17 @@ def variant_suffix(exploded: bool) -> str:
     return "_exploded" if exploded else "_assembled"
 
 
+# View tags for the ``views`` declaration — (variant, camera index) pairs
+# named after the SVG they produce, so a declaration reads like the output
+# filenames: ``views = [EXPLODED_CAM1, ASSEMBLED_CAM0]`` renders
+# ``<stem>_exploded_cam1.svg`` and ``<stem>_assembled_cam0.svg``. A stem
+# with a third camera can tag it inline as ``("exploded", 2)``.
+EXPLODED_CAM0 = ("exploded", 0)
+EXPLODED_CAM1 = ("exploded", 1)
+ASSEMBLED_CAM0 = ("assembled", 0)
+ASSEMBLED_CAM1 = ("assembled", 1)
+
+
 def svg_path_for(stem: str, exploded: bool, index: int | None = None) -> Path:
     """Output path for a rendered SVG. Single-camera assemblies use
     ``_cam0`` so the filename scheme is uniform with multi-camera ones."""
@@ -62,6 +73,16 @@ class BaseAssembly(BasePart):
     # One camera → one SVG per variant; a list of cameras → one SVG per
     # camera per variant, filenames suffixed ``_cam0``, ``_cam1``, ….
     camera: "Camera | list[Camera]" = ISO
+    # Which views actually get rendered — a list of the view tags above,
+    # e.g. ``views = [EXPLODED_CAM1, ASSEMBLED_CAM0]``. None (default)
+    # renders every camera for both variants; a variant with no tag in the
+    # list renders no SVG at all (its STEP still exports — kept for CAD
+    # inspection). Declare only the views a consumer (the manual) needs:
+    # every skipped view saves an exact-HLR pass, which is both the
+    # dominant render cost and the crash surface. Indices refer to
+    # positions in ``cameras`` and stay stable in filenames, so manual
+    # references and patch JSONs never rename when views are trimmed.
+    views: "list[tuple[str, int]] | None" = None
     # With `vector-effect: non-scaling-stroke` baked into every render,
     # these values are interpreted as ~device pixels (not millimetres) —
     # sub-pixel widths still render via anti-aliasing. 0.8 / 0.4 chosen
@@ -106,13 +127,50 @@ class BaseAssembly(BasePart):
 
     @property
     def cameras(self) -> "list[Camera]":
-        """``camera`` normalized to a list — one rendered view (and so one
-        ``_cam<i>`` SVG) per entry. Single source of truth for the per-variant
-        camera count, shared by ``render()`` (producer) and the build
-        dispatcher's completeness check (verifier) so they cannot drift."""
+        """``camera`` normalized to a list; ``_cam<i>`` filenames index
+        into it. Which entries actually render is ``view_indices``."""
         return self.camera if isinstance(self.camera, list) else [self.camera]
 
-    def render(self) -> None:
+    @property
+    def view_indices(self) -> "list[int]":
+        """Camera indices rendered for THIS variant (``self.exploded``) —
+        the single source of truth shared by ``render()`` (producer) and
+        the build dispatcher's completeness check (verifier) so they
+        cannot drift. ``views`` unset → every camera. Validates the
+        declaration so a typo'd variant name or out-of-range index fails
+        the build instead of silently rendering nothing."""
+        n = len(self.cameras)
+        if self.views is None:
+            return list(range(n))
+        name = type(self).__name__
+        if unknown := {v for v, _ in self.views} - {"exploded", "assembled"}:
+            raise ValueError(
+                f"{name}.views has unknown variant(s) {sorted(unknown)}; "
+                f"use the EXPLODED_CAM* / ASSEMBLED_CAM* tags"
+            )
+        if len(set(self.views)) != len(self.views):
+            raise ValueError(f"{name}.views has duplicate view tags")
+        variant = "exploded" if self.exploded else "assembled"
+        indices = [i for v, i in self.views if v == variant]
+        if bad := [i for i in indices if not 0 <= i < n]:
+            raise ValueError(
+                f"{name}.views: camera indices {bad} out of range for {n} camera(s)"
+            )
+        return indices
+
+    def render(self, *, only_missing: bool = False) -> None:
+        """Project every declared view (``view_indices``) to its SVG. With
+        ``only_missing``, skip cameras whose SVG already exists — the
+        crash-retry path uses this
+        so a re-run never repeats an HLR projection that already landed
+        (each exact-HLR pass is another roll of the OCCT SIGSEGV dice).
+        Callers own the staleness guarantee: an existing SVG must be from
+        the current build cycle (the build dispatcher ensures this by
+        clearing a stem's outputs before its first attempt) — and the
+        whole-variant skip that avoids ``build()`` entirely lives with
+        them too, since only they can also skip the STEP export."""
+        if not self.view_indices:  # variant renders no views — skip the build
+            return
         assembly = self.build()
         solid, ghost = _split_solid_ghost(assembly)
 
@@ -125,7 +183,10 @@ class BaseAssembly(BasePart):
             warnings.filterwarnings(
                 "ignore", message="Skipping ellipse that is too small"
             )
-            for i, cam in enumerate(self.cameras):
+            for i in self.view_indices:
+                cam = self.cameras[i]
+                if only_missing and self.svg_path(index=i).exists():
+                    continue
                 # Camera + look_at derived from the FULL assembly bbox so
                 # solid and ghost layers align pixel-for-pixel. Without a
                 # shared look_at, project_to_viewport defaults to each
@@ -152,12 +213,17 @@ class BaseAssembly(BasePart):
                     )
                     exporter.add_shape(ShapeList(ghost_visible), layer=GHOST_LABEL)
 
+                # Write via a temp name and rename into place so the final
+                # path only ever holds a fully post-processed SVG — the
+                # crash-retry's only_missing skip trusts any existing file.
                 path = self.svg_path(index=i)
                 path.parent.mkdir(parents=True, exist_ok=True)
-                exporter.write(str(path))
-                path.write_text(
-                    inject_non_scaling_strokes(strip_root_dims(path.read_text()))
+                tmp = path.with_suffix(".tmp")
+                exporter.write(str(tmp))
+                tmp.write_text(
+                    inject_non_scaling_strokes(strip_root_dims(tmp.read_text()))
                 )
+                tmp.replace(path)
 
 
 def _split_solid_ghost(assembly):

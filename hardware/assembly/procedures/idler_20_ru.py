@@ -20,9 +20,10 @@ descriptions, nut placement, and the rest of the placement math.
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.idler_20_ru
+    uv run --group cad python -m hardware step idler_20_ru
 """
 
+from hardware.assembly.base import ASSEMBLED_CAM0, EXPLODED_CAM0
 from hardware.assembly.procedures.idler_10_lu import Column, ID10Lu
 from hardware.parts.custom.idler_mount_motor import outer_hole_offset
 from hardware.parts.standard.pulley import flange_belt_h
@@ -36,6 +37,7 @@ RIGHT_SHOULDER_LEN = 20  # mm — covers washer + idler + washer + idler (18 mm)
 
 class ID20Ru(ID10Lu):
     compound_label = "idler_20_ru"
+    views = [EXPLODED_CAM0, ASSEMBLED_CAM0]
 
     def _columns(self) -> list[Column]:
         def washer():
@@ -67,10 +69,3 @@ class ID20Ru(ID10Lu):
                 ],
             ),
         ]
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = ID20Ru(exploded=exploded)
-        asm.export()
-        asm.render()

@@ -36,12 +36,12 @@ short-side nut slides along world X (the short's axis).
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.frame_31_bracket
+    uv run --group cad python -m hardware step frame_31_bracket
 """
 
 from build123d import Compound, Location, Plane
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly
 from hardware.assembly.procedures.frame_10_extrusion_tnut import (
     EXT_THICKNESS,
     LONG_LENGTH,
@@ -57,6 +57,7 @@ BRACKET_EXPLODE = 20  # mm — exploded: air gap, slot face → FR30BracketTnut 
 
 class FR31Bracket(BaseAssembly):
     camera = MAIN_FRAME_VIEW
+    views = [ASSEMBLED_CAM0]
 
     def _build(self) -> Compound:
         # Frame layer — always assembled (it's the prior step's result).
@@ -100,10 +101,3 @@ class FR31Bracket(BaseAssembly):
                 *bracket_groups,
             ],
         )
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = FR31Bracket(exploded=exploded)
-        asm.export()
-        asm.render()

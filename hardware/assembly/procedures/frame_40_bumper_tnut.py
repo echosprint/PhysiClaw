@@ -23,12 +23,12 @@ Two variants:
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.frame_40_bumper_tnut
+    uv run --group cad python -m hardware step frame_40_bumper_tnut
 """
 
 from build123d import Compound, Location, Plane
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import BaseAssembly, EXPLODED_CAM0
 from hardware.assembly.projection import FRONT_LEFT_HIGH
 from hardware.parts.standard.bumper import (
     Bumper,
@@ -49,6 +49,7 @@ SCREW_GAP = 8  # mm — exploded: vertical gap, bumper bottom → shank tip
 
 class FR40BumperTnut(BaseAssembly):
     camera = FRONT_LEFT_HIGH
+    views = [EXPLODED_CAM0]
 
     def _build(self) -> Compound:
         bumper = Bumper().build()
@@ -111,10 +112,3 @@ class FR40BumperTnut(BaseAssembly):
                 screw,
             ],
         )
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = FR40BumperTnut(exploded=exploded)
-        asm.export()
-        asm.render()

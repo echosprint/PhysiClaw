@@ -18,12 +18,12 @@ Parts (adds to camera_10_bracket):
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.camera_20_gooseneck
+    uv run --group cad python -m hardware step camera_20_gooseneck
 """
 
 from build123d import Axis, Compound
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM0
 from hardware.assembly.procedures.camera_10_bracket import Camera10Bracket
 from hardware.assembly.projection import Camera
 from hardware.parts.standard.gooseneck import (
@@ -47,6 +47,7 @@ GOOSE_GAP = 16  # mm — exploded: gooseneck slid off the stud along −X
 class Camera20Gooseneck(BaseAssembly):
     compound_label = "camera_20_gooseneck"
     camera = [Camera(-14.11, -7.34, 88.02), Camera(-10.74, 22.98, 88.54)]
+    views = [EXPLODED_CAM0, ASSEMBLED_CAM0]
 
     def _build(self) -> Compound:
         # Embed the camera_10 bracket sub-assembly in its assembled form (only
@@ -87,10 +88,3 @@ class Camera20Gooseneck(BaseAssembly):
         self.stud_axis = (0.0, 0.0, -1.0)
 
         return Compound(label=self.compound_label, children=[base, goose])
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = Camera20Gooseneck(exploded=exploded)
-        asm.export()
-        asm.render()

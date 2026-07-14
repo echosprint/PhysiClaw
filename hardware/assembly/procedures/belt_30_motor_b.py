@@ -14,12 +14,12 @@ world -Y so its routing reads cleanly above the assembled stack.
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.belt_30_motor_b
+    uv run --group cad python -m hardware step belt_30_motor_b
 """
 
 from build123d import Compound, Location
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM0
 from hardware.assembly.procedures.belt_20_clamp import BE20Clamp
 from hardware.assembly.projection import FRONT
 from hardware.parts.standard.belt import Belt, motor_a_path
@@ -31,6 +31,7 @@ BELT_EXPLODE = 30  # mm — exploded: shift motor B's belt further outboard
 
 class BE30MotorB(BaseAssembly):
     camera = FRONT
+    views = [EXPLODED_CAM0, ASSEMBLED_CAM0]
 
     def _build(self) -> Compound:
         base_compound = BE20Clamp(exploded=False).build()
@@ -44,10 +45,3 @@ class BE30MotorB(BaseAssembly):
                 belt,
             ],
         )
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = BE30MotorB(exploded=exploded)
-        asm.export()
-        asm.render()

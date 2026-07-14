@@ -41,12 +41,12 @@ Two variants:
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.linear_40_idler_lj1
+    uv run --group cad python -m hardware step linear_40_idler_lj1
 """
 
 from build123d import Compound, Location
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM0
 from hardware.assembly.projection import FRONT_LEFT_HIGH
 from hardware.parts.standard.pulley import Pulley2GT20T, flange_belt_h
 from hardware.parts.standard.ring import SPECS as RING_SPECS, Ring
@@ -64,6 +64,7 @@ class LI40IdlerLj1(BaseAssembly):
     include_spacer: bool = True
     shoulder_len: int = 20  # mm — pairs with the 18 mm spacer+washer+idler stack
     camera = FRONT_LEFT_HIGH
+    views = [EXPLODED_CAM0, ASSEMBLED_CAM0]
 
     def _build(self) -> Compound:
         washer_h = RING_SPECS[WASHER_SPEC]["height"]
@@ -104,10 +105,3 @@ class LI40IdlerLj1(BaseAssembly):
         placed.append(screw)
 
         return Compound(label=self.compound_label, children=placed)
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = LI40IdlerLj1(exploded=exploded)
-        asm.export()
-        asm.render()

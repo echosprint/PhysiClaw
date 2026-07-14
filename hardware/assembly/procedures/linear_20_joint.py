@@ -34,12 +34,12 @@ The base (linear_11_y) is always shown assembled.
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.linear_20_joint
+    uv run --group cad python -m hardware step linear_20_joint
 """
 
 from build123d import Compound, Location, Plane
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM1
 from hardware.assembly.procedures.linear_11_y import LI11Y
 from hardware.assembly.projection import MAIN_FRAME_VIEW, Camera
 from hardware.parts.custom.xy_joint_left import (
@@ -96,6 +96,7 @@ def _csk_positions(mirrored: bool) -> list[tuple[float, float]]:
 
 class LI20Joint(BaseAssembly):
     camera = [MAIN_FRAME_VIEW, Camera(-69.27, 20.49, -97.29)]
+    views = [EXPLODED_CAM1, ASSEMBLED_CAM0]
 
     def _build(self) -> Compound:
         self.base = LI11Y(exploded=False)
@@ -247,10 +248,3 @@ class LI20Joint(BaseAssembly):
             )
 
         return Compound(label="linear_20_joint", children=[base_compound, *joints])
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = LI20Joint(exploded=exploded)
-        asm.export()
-        asm.render()

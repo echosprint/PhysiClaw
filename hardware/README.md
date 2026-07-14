@@ -93,15 +93,21 @@ Assemblies deliberately opt **out** of the geometry cache (caching a whole
 compound deep-copies the entire tree); they are recomposed from cached leaves
 instead.
 
-**Two variants per step.** Every step renders both `_exploded` (install motion,
-with ghost layers) and `_assembled` (finished state), under one or more camera
-angles. Outputs are named `<step>_<variant>_cam<i>.svg`.
+**Two variants per step.** Every step builds both `_exploded` (install motion,
+with ghost layers) and `_assembled` (finished state) and exports a STEP for
+each; SVGs are named `<step>_<variant>_cam<i>.svg`. A class-level `views`
+declaration marks which (variant, camera) drawings the manual actually uses —
+only those render (each skipped view saves an exact-HLR pass, the dominant
+cost and the crash surface). No `views` means render every camera for both
+variants. Camera indices stay stable, so trimming never renames files.
 
 **Built in subprocesses.** OpenCASCADE never returns freed memory to the OS, so
 building all steps in one process is OOM-killed. `build_procedures` groups steps
 by family in dependency order, runs each batch in its own subprocess, and
 **retries crashed steps solo** (the hidden-line renderer intermittently
-segfaults — re-running in a fresh process almost always succeeds).
+segfaults — up to ~80% per attempt on the heaviest steps). A retry passes
+`--only-missing`, re-rendering just the SVGs that are absent, so finished
+work is never re-exposed to the crash and the retries converge.
 
 **Naming convention.** Procedure and part files follow
 `<family>_<NN>_<descriptor>.py`, where `NN` orders steps within a family in
@@ -154,7 +160,8 @@ standard-library only. Each stage module is also runnable on its own (e.g.
 parts + predecessors), the build123d version, and its patch JSON. Unchanged
 steps are restored instead of rebuilt+re-rendered — and a patch-only edit
 just re-runs the cheap annotation replay. Pass `--no-cache` to force a full
-rebuild. (`step` always rebuilds its one stem.)
+rebuild — the rebuilt outputs still refresh the cache. (`step` always
+rebuilds its one stem.)
 
 For shorter typing, the repo `Makefile` wraps each subcommand as a `hw-*`
 target (flags via `ARGS`):

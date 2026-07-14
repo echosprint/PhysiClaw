@@ -27,12 +27,12 @@ with no fasteners.
 
 Run from the repo root:
 
-    uv run --group cad python -m hardware.assembly.procedures.belt_10_motor_a
+    uv run --group cad python -m hardware step belt_10_motor_a
 """
 
 from build123d import Compound, Location
 
-from hardware.assembly.base import BaseAssembly
+from hardware.assembly.base import BaseAssembly, EXPLODED_CAM0
 from hardware.assembly.procedures.linear_47_idler_rj2 import LI47IdlerRj2
 from hardware.assembly.projection import FRONT
 from hardware.parts.standard.belt import Belt, motor_a_path
@@ -44,6 +44,7 @@ BELT_EXPLODE = 30  # mm — exploded: shift the belt outboard along world -Y
 
 class BE10MotorA(BaseAssembly):
     camera = FRONT
+    views = [EXPLODED_CAM0]
 
     def _build(self) -> Compound:
         base_compound = LI47IdlerRj2(exploded=False).build()
@@ -57,10 +58,3 @@ class BE10MotorA(BaseAssembly):
                 belt,
             ],
         )
-
-
-if __name__ == "__main__":
-    for exploded in (True, False):
-        asm = BE10MotorA(exploded=exploded)
-        asm.export()
-        asm.render()
