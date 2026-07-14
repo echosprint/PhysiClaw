@@ -23,7 +23,8 @@ else:
 
 ensure_camera_permission = _impl.ensure_camera_permission
 local_hostname = _impl.local_hostname
-CAMERA_EXPOSURE_TUNABLE = _impl.CAMERA_EXPOSURE_TUNABLE
+camera_exposure_tunable = _impl.camera_exposure_tunable
+camera_size_cap = _impl.camera_size_cap
 camera_backend = _impl.camera_backend
 camera_set_auto_exposure = _impl.camera_set_auto_exposure
 camera_set_manual_exposure = _impl.camera_set_manual_exposure
@@ -39,7 +40,8 @@ TRUST_PROXY_ENV = _impl.TRUST_PROXY_ENV
 __all__ = [
     "ensure_camera_permission",
     "local_hostname",
-    "CAMERA_EXPOSURE_TUNABLE",
+    "camera_exposure_tunable",
+    "camera_size_cap",
     "camera_backend",
     "camera_set_auto_exposure",
     "camera_set_manual_exposure",

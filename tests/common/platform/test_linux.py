@@ -111,7 +111,12 @@ def test_hardware_permission_hints_silent_when_in_group(monkeypatch) -> None:
 
 
 def test_camera_exposure_tunable_on_linux() -> None:
-    assert linux.CAMERA_EXPOSURE_TUNABLE is True
+    assert linux.camera_exposure_tunable() is True
+
+
+def test_no_camera_size_cap_on_linux() -> None:
+    # Exposure is always correctable here, so no mode is unsafe.
+    assert linux.camera_size_cap() is None
 
 
 def test_camera_backend_is_v4l2() -> None:

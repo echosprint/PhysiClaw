@@ -459,6 +459,35 @@ def test_close_leaks_cap_instead_of_deadlocking_when_lock_held(mocker, caplog) -
     assert vc.released is True
 
 
+# ---------- platform size cap ----------
+
+
+def test_open_clamps_request_to_platform_size_cap(mocker) -> None:
+    # macOS without a UVC exposure channel: 4K firmware AE can overexpose
+    # with no correction lever, so the request must drop to the cap.
+    mocker.patch.object(
+        camera_mod.platform, "camera_size_cap", return_value=(1920, 1080)
+    )
+    vc = FakeVideoCapture(index=0, read_results=[(True, _frame(1080, 1920))] * 200)
+
+    _open_camera_no_thread(mocker, vc=vc)
+
+    negotiated = dict(vc.set_calls)
+    assert negotiated[cv2.CAP_PROP_FRAME_WIDTH] == 1920
+    assert negotiated[cv2.CAP_PROP_FRAME_HEIGHT] == 1080
+
+
+def test_open_uses_config_request_without_size_cap(mocker) -> None:
+    mocker.patch.object(camera_mod.platform, "camera_size_cap", return_value=None)
+    vc = FakeVideoCapture(index=0, read_results=[(True, _frame(2160, 3840))] * 200)
+
+    _open_camera_no_thread(mocker, vc=vc)
+
+    negotiated = dict(vc.set_calls)
+    assert negotiated[cv2.CAP_PROP_FRAME_WIDTH] == camera_mod.CONFIG.camera.width
+    assert negotiated[cv2.CAP_PROP_FRAME_HEIGHT] == camera_mod.CONFIG.camera.height
+
+
 # ---------- exposure control ----------
 
 

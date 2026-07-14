@@ -71,9 +71,17 @@ def open_image_files(paths: list[str]) -> None:
 # package on its cv2-import-failure path, so a top-level import would mask
 # the very error it reports.
 
-# MSMF exposes AE toggling via IAMCameraControl; DSHOW can't re-enable AE
-# once off (opencv#17019).
-CAMERA_EXPOSURE_TUNABLE = True
+
+def camera_exposure_tunable() -> bool:
+    """MSMF exposes AE toggling via IAMCameraControl — always tunable.
+    (DSHOW couldn't re-enable AE once off, opencv#17019 — we pin MSMF.)"""
+    return True
+
+
+def camera_size_cap() -> tuple[int, int] | None:
+    """No cap — exposure is always tunable here, so any capture mode a
+    bad firmware AE picks can be corrected by `exposure.converge`."""
+    return None
 
 
 def camera_backend() -> int:

@@ -64,6 +64,28 @@ def silenced_stderr() -> Iterator[None]:
         os.close(devnull)
 
 
+def apply_size_cap(size: tuple[int, int]) -> tuple[int, int]:
+    """Clamp a capture request to the platform's safe maximum, if any.
+
+    On macOS without a UVC exposure channel, high-res modes risk a
+    firmware AE that overexposes with no way to correct it, so requests
+    drop to the largest mode whose AE behaves. Called both where
+    `Camera._request_size` is seeded (so remembered state and warmup
+    logs stay honest) and inside `configure_capture` (the choke point,
+    so the fallback ladder and reconnects can't sneak past it)."""
+    size_cap = platform.camera_size_cap()
+    if size_cap is None or size[0] * size[1] <= size_cap[0] * size_cap[1]:
+        return size
+    log.info(
+        "capture request %dx%d capped to %dx%d — exposure is not "
+        "tunable on this rig and higher modes risk uncorrectable "
+        "overexposure",
+        *size,
+        *size_cap,
+    )
+    return size_cap
+
+
 def configure_capture(
     cap: cv2.VideoCapture,
     *,
@@ -85,10 +107,13 @@ def configure_capture(
     ``size`` overrides the CONFIG request — `Camera._warmup` uses it to
     walk `RESOLUTION_FALLBACKS` when a negotiation misbehaves.
 
+    The request passes through `apply_size_cap` — see its docstring
+    for the macOS exposure-safety rationale.
+
     Shared by `Camera._open` and the doctor's deep camera probe so the
     probe meters the same negotiation the server runs.
     """
-    width, height = (
+    width, height = apply_size_cap(
         size
         if size is not None
         else (
@@ -197,9 +222,8 @@ class Camera:
         # The resolution request, remembered so _reopen() re-applies the
         # rung _warmup settled on instead of re-failing at the top of the
         # ladder on every reconnect.
-        self._request_size: tuple[int, int] = (
-            CONFIG.camera.width,
-            CONFIG.camera.height,
+        self._request_size: tuple[int, int] = apply_size_cap(
+            (CONFIG.camera.width, CONFIG.camera.height)
         )
 
         self._open()
@@ -372,9 +396,11 @@ class Camera:
 
     @property
     def exposure_tunable(self) -> bool:
-        """Whether this OS backend honors exposure properties at all
-        (False on macOS — AVFoundation ignores them)."""
-        return platform.CAMERA_EXPOSURE_TUNABLE
+        """Whether exposure can be controlled on this rig. Always true on
+        Linux/Windows (V4L2/MSMF); on macOS true only when the vendored
+        UVC helper compiled and unambiguously controls the camera —
+        AVFoundation itself ignores exposure properties."""
+        return platform.camera_exposure_tunable()
 
     def set_auto_exposure(self) -> None:
         """Hand exposure back to the camera firmware. Remembered, so a

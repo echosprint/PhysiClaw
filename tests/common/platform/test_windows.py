@@ -115,7 +115,12 @@ def test_open_image_files_noop_on_empty_list(mocker) -> None:
 
 
 def test_camera_exposure_tunable_on_windows() -> None:
-    assert windows.CAMERA_EXPOSURE_TUNABLE is True
+    assert windows.camera_exposure_tunable() is True
+
+
+def test_no_camera_size_cap_on_windows() -> None:
+    # Exposure is always correctable here, so no mode is unsafe.
+    assert windows.camera_size_cap() is None
 
 
 def test_camera_backend_is_msmf() -> None:

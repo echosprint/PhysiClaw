@@ -32,6 +32,30 @@ os.environ["PHYSICLAW_HOME"] = str(_SESSION_HOME)
 
 
 @pytest.fixture(autouse=True)
+def _no_real_uvc(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep unit tests off the physical camera and host-independent.
+
+    On macOS the darwin exposure setters reach the real camera over USB
+    (IOKit control requests), and `camera_size_cap` depends on what the
+    probe finds on the host. Pin the probe to "unavailable" and the cap
+    to None so camera tests behave identically on every machine. The
+    combination is deliberately unrealistic (on a real darwin rig
+    "not tunable" implies the 1080p cap): "unavailable" is the hardware
+    guard, "no cap" is the resolution default that keeps CONFIG-sized
+    tests platform-independent. Tests of the probe/cap logic patch
+    their own state on top."""
+    import sys
+
+    if sys.platform == "darwin":
+        from physiclaw.common.platform import darwin
+
+        monkeypatch.setattr(darwin, "_uvc_channel", False)
+    from physiclaw.common import platform as _platform
+
+    monkeypatch.setattr(_platform, "camera_size_cap", lambda: None)
+
+
+@pytest.fixture(autouse=True)
 def physiclaw_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Per-test isolated `~/.physiclaw`. Re-points `paths.HOME` / `paths.LOG_DIR`.
 

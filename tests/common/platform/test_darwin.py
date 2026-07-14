@@ -10,6 +10,8 @@ import socket
 import subprocess
 from unittest.mock import MagicMock
 
+import pytest
+
 from physiclaw.common.platform import darwin
 
 # ---------- TRUST_PROXY_ENV ----------
@@ -149,23 +151,122 @@ def test_open_image_files_noop_on_empty_list(mocker) -> None:
 
 
 # ---------- camera exposure ----------
+#
+# Exposure control on macOS rides the pure-ctypes `uvc` module (IOKit ->
+# USB control requests), never OpenCV. Tests pin the probe/degrade logic
+# and the shared log2-seconds -> 100µs-ticks contract; the IOKit layer
+# itself is always mocked so the suite runs on every platform.
 
 
-def test_camera_exposure_not_tunable_on_macos() -> None:
-    # AVFoundation ignores exposure props through OpenCV entirely.
-    assert darwin.CAMERA_EXPOSURE_TUNABLE is False
+class _FakeChannel:
+    def __init__(self, ok: bool = True) -> None:
+        self.ok = ok
+        self.auto_calls = 0
+        self.manual_ticks: list[int] = []
+
+    def set_auto(self) -> bool:
+        self.auto_calls += 1
+        return self.ok
+
+    def set_manual(self, ticks: int) -> bool:
+        self.manual_ticks.append(ticks)
+        return self.ok
 
 
-def test_camera_backend_lets_opencv_pick() -> None:
-    import cv2
+def _reset_probe(monkeypatch, channel) -> None:
+    from physiclaw.common.platform import uvc
 
-    assert darwin.camera_backend() == cv2.CAP_ANY
+    monkeypatch.setattr(darwin, "_uvc_channel", None)
+    monkeypatch.setattr(uvc, "exposure_channel", lambda: channel)
 
 
-def test_exposure_setters_are_noops() -> None:
+def test_exposure_not_tunable_without_uvc_channel(monkeypatch) -> None:
+    # No UVC device / ambiguous bus / silent camera -> degrade to the old
+    # firmware-AE behavior.
+    _reset_probe(monkeypatch, None)
+
+    assert darwin.camera_exposure_tunable() is False
+
+
+@pytest.mark.parametrize(
+    "channel, tunable",
+    [(_FakeChannel(), True), (None, False)],
+    ids=["live-channel", "failed-probe"],
+)
+def test_probe_verdict_is_cached_either_way(monkeypatch, channel, tunable) -> None:
+    from physiclaw.common.platform import uvc
+
+    calls = 0
+
+    def probe():
+        nonlocal calls
+        calls += 1
+        return channel
+
+    monkeypatch.setattr(darwin, "_uvc_channel", None)
+    monkeypatch.setattr(uvc, "exposure_channel", probe)
+
+    assert darwin.camera_exposure_tunable() is tunable
+    assert darwin.camera_exposure_tunable() is tunable
+    assert calls == 1
+
+
+def test_manual_exposure_converts_log2_seconds_to_uvc_ticks(monkeypatch) -> None:
+    # Same contract as linux.py: 2^e seconds in 100µs ticks, so one
+    # integer step of `converge` stays one real stop.
+    channel = _FakeChannel()
+    _reset_probe(monkeypatch, channel)
+
+    darwin.camera_set_manual_exposure(MagicMock(), -6)  # 2^-6 s ≈ 15.6 ms
+
+    assert channel.manual_ticks == [156]
+
+
+def test_manual_exposure_never_sends_zero_ticks(monkeypatch) -> None:
+    channel = _FakeChannel()
+    _reset_probe(monkeypatch, channel)
+
+    darwin.camera_set_manual_exposure(MagicMock(), -20)  # 2^-20 s ≈ 1 µs
+
+    assert channel.manual_ticks == [1]
+
+
+def test_auto_exposure_delegates_to_channel(monkeypatch) -> None:
+    channel = _FakeChannel()
+    _reset_probe(monkeypatch, channel)
+
+    darwin.camera_set_auto_exposure(MagicMock())
+
+    assert channel.auto_calls == 1
+
+
+def test_exposure_setters_never_touch_the_capture_handle(monkeypatch) -> None:
+    # The UVC channel is USB — AVFoundation's cap object stays untouched
+    # (and when not tunable, the setters are complete no-ops).
+    _reset_probe(monkeypatch, None)
     cap = MagicMock()
 
     darwin.camera_set_auto_exposure(cap)
     darwin.camera_set_manual_exposure(cap, -6)
 
     cap.set.assert_not_called()
+
+
+def test_size_cap_1080p_when_exposure_not_tunable(monkeypatch) -> None:
+    # No UVC channel -> high-res firmware AE can overexpose with no
+    # correction lever -> stay in the sane <=1080p mode family.
+    _reset_probe(monkeypatch, None)
+
+    assert darwin.camera_size_cap() == (1920, 1080)
+
+
+def test_no_size_cap_when_exposure_tunable(monkeypatch) -> None:
+    _reset_probe(monkeypatch, _FakeChannel())
+
+    assert darwin.camera_size_cap() is None
+
+
+def test_camera_backend_lets_opencv_pick() -> None:
+    import cv2
+
+    assert darwin.camera_backend() == cv2.CAP_ANY

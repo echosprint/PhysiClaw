@@ -78,7 +78,7 @@ def converge(
 
     Phases:
       1. Meter as-is — in band means firmware AE is doing its job
-         (the macOS path, and the healthy-Windows path): touch nothing.
+         (the healthy-rig path on every OS): touch nothing.
       2. (`prefer_auto` only) re-assert AE and re-meter — recovers the
          driver-left-AE-off-after-renegotiation case without going manual.
       3. Integer-step a manual exposure from `start`: darker while

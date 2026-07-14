@@ -4,9 +4,12 @@ Imported by ``physiclaw.common.platform`` on Darwin only. Callers should
 never import this module directly — go through ``physiclaw.common.platform``.
 """
 
+import logging
 import socket
 import subprocess
 import time
+
+log = logging.getLogger(__name__)
 
 # urllib's ProxyHandler / httpx's `trust_env` consult the system proxy
 # config for loopback HTTP. macOS exposes its bypass list (which usually
@@ -87,11 +90,61 @@ def open_image_files(paths: list[str]) -> None:
 
 
 # ─── camera exposure ────────────────────────────────────────
-
+#
 # AVFoundation exposes no exposure properties through OpenCV — set() is
-# ignored / returns False on macOS, so there is nothing to tune. The
-# camera firmware's own auto-exposure runs untouched (and works well).
-CAMERA_EXPOSURE_TUNABLE = False
+# ignored / returns False on macOS — and Apple's manual-exposure API
+# doesn't apply to external UVC webcams. But the camera itself honors
+# standard UVC control requests over USB, a channel Apple's driver
+# doesn't block: the sibling `uvc` module sends them through IOKit in
+# pure ctypes (no compiler, no privileges, works mid-stream). Everything
+# is probed, never assumed: no UVC device, an ambiguous multi-device
+# bus, or a camera that won't answer all degrade to exactly the old
+# behavior (firmware AE untouched, tuning skipped).
+#
+# Why this matters: some cameras' firmware AE overexposes in high-res
+# modes (stretching shutter past the frame interval — brighter frames
+# AND a lower fps than the mode advertises). The UVC path is the only
+# macOS lever that lets exposure.py's `converge` correct that.
+
+# Probe result cache: None = not probed yet, False = unavailable this
+# process, else the live ExposureChannel. One verdict per process — a
+# camera hot-plugged mid-session picks it up on the next restart.
+_uvc_channel = None
+
+
+def _exposure_channel():
+    global _uvc_channel
+    if _uvc_channel is None:
+        from physiclaw.common.platform import uvc
+
+        _uvc_channel = uvc.exposure_channel() or False
+        if _uvc_channel:
+            log.info("UVC exposure control live (IOKit, in-process)")
+    return _uvc_channel or None
+
+
+def camera_exposure_tunable() -> bool:
+    """Whether UVC exposure control is live (probed once per process).
+
+    True only when exactly one UVC device is on the bus and it answers
+    for its exposure controls — see `uvc.exposure_channel` for why the
+    single-device rule exists. (Built-in FaceTime/Continuity cameras are
+    not UVC and don't count.)"""
+    return _exposure_channel() is not None
+
+
+def camera_size_cap() -> tuple[int, int] | None:
+    """Largest safe capture request, or None for no cap.
+
+    Without a live UVC channel, high-resolution modes are dangerous on
+    macOS: some cameras' firmware AE stretches shutter there — frames
+    ~2× too bright at a fraction of the advertised fps — and with
+    AVFoundation exposing no exposure API there is nothing to correct
+    it with. The same cameras' ≤1080p modes meter sanely, and 1080p is
+    the pre-4K default the vision quality thresholds were calibrated
+    on. With a live channel there is no cap: `exposure.converge` can
+    pull any mode back into band."""
+    return None if camera_exposure_tunable() else (1920, 1080)
 
 
 def camera_backend() -> int:
@@ -102,13 +155,33 @@ def camera_backend() -> int:
 
 
 def camera_set_auto_exposure(cap) -> None:
-    """No-op — AVFoundation ignores CAP_PROP_AUTO_EXPOSURE; firmware AE
-    is always in charge on macOS."""
+    """Hand exposure back to the camera firmware, via UVC (`cap` unused —
+    the control channel is USB, not the capture session; it takes effect
+    mid-stream). No-op when the probe found no usable UVC channel —
+    firmware AE was already in charge."""
+    channel = _exposure_channel()
+    if channel is None:
+        return
+    if not channel.set_auto():
+        log.warning("UVC: could not set auto-exposure mode")
 
 
 def camera_set_manual_exposure(cap, exposure: int) -> None:
-    """No-op — AVFoundation ignores CAP_PROP_EXPOSURE; manual exposure
-    cannot be set through OpenCV on macOS."""
+    """Hold a fixed exposure via UVC (`cap` unused — see above).
+
+    `exposure` arrives on the shared log2-seconds scale; the tick
+    conversion lives in `uvc.ticks_from_log2_seconds` (shared with
+    linux.py). The channel clamps to the device's published range; a
+    refused write is logged and `converge`'s luma-stall check reverts
+    to auto, so it degrades, never wedges."""
+    from physiclaw.common.platform import uvc
+
+    channel = _exposure_channel()
+    if channel is None:
+        return
+    ticks = uvc.ticks_from_log2_seconds(exposure)
+    if not channel.set_manual(ticks):
+        log.warning("UVC: could not set exposure-time-abs=%d", ticks)
 
 
 # ─── doctor diagnostics ─────────────────────────────────────

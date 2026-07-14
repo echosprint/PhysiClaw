@@ -124,8 +124,9 @@ class Perception:
         scene that exposed the Windows AE failure. Meters the PHONE-SCREEN
         crop, never the whole frame: the dark desk around the phone would
         otherwise dominate the scene and drive AE to blow out the screen.
-        macOS exits at `exposure_tunable` (AVFoundation ignores exposure
-        props; its firmware AE works). Worst case a few seconds, bounded
+        macOS is tunable only when the UVC helper controls the camera
+        (AVFoundation ignores exposure props); otherwise it exits at
+        `exposure_tunable` and firmware AE stays in charge. Worst case a few seconds, bounded
         by `wait_frames` timeouts; skipped entirely if the hardware is
         busy. A failed tune reverts to auto — the runtime quality monitor
         keeps warning the agent, so nothing is lost."""
