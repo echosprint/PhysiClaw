@@ -22,20 +22,20 @@ d_cut_length = 18 * MM  # length of the flat, from rod tip downward
 d_cut_flat_dist = 2 * MM  # perpendicular distance from rod center to flat
 # (5 mm rod with 0.5 mm flat → 4.5 mm across-flats)
 
-# Cable connector on the -Y face: JST-XH-style U-channel shroud with
+# Cable connector on the -Y face: JST-PH-style U-channel shroud with
 # header pins inside, anchored directly to the body face.
 plug_z_offset = 3.4 * MM  # bottom of shroud above the body bottom
 
 # Plastic shroud (U-channel: bottom + 2 sides + body as back wall).
-plug_shroud_outer_w = 11 * MM  # X
+plug_shroud_outer_w = 14 * MM  # X — clears the 10 mm 6-pin row + walls
 plug_shroud_outer_h = 5 * MM  # Z
 plug_shroud_depth = 4 * MM  # protrusion from the -Y face
 plug_shroud_wall = 1 * MM
 
-# Header pins (JST-XH 4-pin bipolar wiring).
-plug_pin_count = 4
-plug_pin_pitch = 2.54 * MM
-plug_pin_side = 0.64 * MM  # square cross-section
+# Header pins (JST PH2.0, 6-pin — bipolar wiring uses 4 of them).
+plug_pin_count = 6
+plug_pin_pitch = 2.0 * MM
+plug_pin_side = 0.5 * MM  # square cross-section
 plug_pin_length = 3 * MM  # protrusion from the -Y face
 
 # Chamfer on the 4 outer vertical corners of the body.
@@ -108,7 +108,7 @@ class Nema17Motor(BaseStandardPart):
                     mode=Mode.SUBTRACT,
                 )
 
-            # Header pins: 4 in a row, anchored to the body face.
+            # Header pins: 6 in a row, anchored to the body face.
             pin_y_center = -(body_side / 2 + plug_pin_length / 2)
             with Locations((0, pin_y_center, plug_z_center)):
                 with GridLocations(plug_pin_pitch, 0, plug_pin_count, 1):
