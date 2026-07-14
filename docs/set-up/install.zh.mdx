@@ -24,7 +24,7 @@ iwr -useb https://physiclaw.ai/install.ps1 | iex
 </TabItem>
 </Tabs>
 
-这会安装 [`uv`](https://docs.astral.sh/uv/)、Python 3.12 和 `physiclaw` CLI。
+这会安装 [`uv`](https://docs.astral.sh/uv/)、Python 3.12 和 `physiclaw` CLI，随后下载本地视觉模型。若模型下载失败，可用 `physiclaw setup local-vision-model` 重新下载。
 
 ## 2. 确认安装成功
 
@@ -32,7 +32,7 @@ iwr -useb https://physiclaw.ai/install.ps1 | iex
 physiclaw --version
 ```
 
-如果终端提示找不到该命令，请关闭当前**终端**窗口，重新打开后再试一次。
+如果终端提示找不到该命令，请打开一个**新的终端**窗口，让更新后的 `PATH` 生效，再试一次。
 
 ## 3. 运行健康检查
 
@@ -44,7 +44,7 @@ physiclaw doctor
 
 ## 更新
 
-PhysiClaw 以 `uv` 工具形式安装。先停止服务，再用 uv 更新：
+PhysiClaw 以 `uv` 工具形式安装。先停止服务器，再用 uv 更新：
 
 ```bash
 uv tool upgrade physiclaw

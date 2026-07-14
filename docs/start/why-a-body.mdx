@@ -7,7 +7,7 @@ PhysiClaw is an agent that operates a phone—it watches the screen with a camer
 
 ## Most everyday apps have no API
 
-The obvious approach is to let the agent call an app's public API. But the services that actually matter are closed off. Amazon, Instacart, DoorDash, Uber, WhatsApp—what they want is for you to stay inside their interface: spend more time, spend more money, see more ads, and keep a direct relationship with you. An open API runs against all of that—the agent does everything in your place, the interface gets skipped, ads never get shown, and the platform is reduced to a backend supplier that can be swapped out at any time, losing both the engagement and ad revenue and its direct line to the user. So they have no incentive to open up to a third-party agent, and every reason to keep outside access locked out; many of the apps you'd most want to use simply have no public API at all.
+The obvious approach is to let the agent call an app's public API. But the services that actually matter are closed off. Amazon, Instacart, DoorDash, Uber, WhatsApp—what they want is for you to stay inside their interface: spend more time, spend more money, see more ads, and keep a direct relationship with you. An open API runs against all of that. The agent does everything in your place: the interface gets skipped, ads never get shown, and the platform is reduced to a backend supplier that can be swapped out at any time. It loses the engagement, the ad revenue, and its direct line to the user. So they have no incentive to open up to a third-party agent, and every reason to keep outside access locked out; many of the apps you'd most want to use simply have no public API at all.
 
 For the foreseeable future, no one is going to hand the services that run your daily life over to your agent, free and open. That route is closed from the start.
 
@@ -25,6 +25,6 @@ The bottom line: anything issued from the software layer can be identified. The 
 
 With both the API and simulated input ruled out, only the most basic path is left: do it like a person—touch the screen with a hand.
 
-That's exactly what PhysiClaw does—it treats the phone screen itself as the API: a camera reads the screen, a stylus performs the gestures, interacting with apps directly. No ADB, nothing installed, zero footprint. To the phone, this is indistinguishable from a real person's finger, so there's nothing to detect—and it can reach virtually any app reliably.
+That's exactly what PhysiClaw does—it treats the phone screen itself as the API: a camera reads the screen, a stylus performs the gestures, interacting with apps directly. No ADB, nothing injected into the apps, zero footprint inside them. Setup uses only stock iOS features: AssistiveTouch and a few Shortcuts. To the phone, this is indistinguishable from a real person's finger, so there's nothing to detect—and it can reach virtually any app reliably.
 
 The cost is speed. A tap or a swipe takes a few seconds, nowhere near the milliseconds of a software call. It's a deliberate trade-off: giving up speed for universality and reliability. For an agent handling your everyday errands, a little slowness doesn't matter—what matters is getting the job done, dependably.

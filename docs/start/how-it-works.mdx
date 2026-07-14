@@ -3,7 +3,7 @@ title: How it works
 description: How PhysiClaw's agent handles a request end to end — wake, read the message, execute the task, respond, and exit.
 ---
 
-Interacting with PhysiClaw is remarkably intuitive: it has its own dedicated phone running its own WhatsApp account. Just add it as a contact, and you can chat with it exactly like you would with a real person.
+Interacting with PhysiClaw is intuitive: it has its own dedicated phone running its own WhatsApp account. Just add it as a contact, and you can chat with it exactly like you would with a real person.
 
 <svg viewBox="0 0 700 290" role="img" aria-label="A user and PhysiClaw communicate through the phone" style="max-width:560px;width:100%;height:auto;margin:1.5rem auto;display:block" xmlns="http://www.w3.org/2000/svg" font-family="'Inter','Segoe UI',system-ui,sans-serif">
   <defs>
@@ -26,13 +26,13 @@ Interacting with PhysiClaw is remarkably intuitive: it has its own dedicated pho
 
 ## Wake
 
-PhysiClaw's runtime continuously runs a loop, checking for two things: whether any scheduled task is due to run, and whether the phone screen has lit up with a new message. As soon as either condition is met, it wakes the agent.
+PhysiClaw's runtime continuously runs a loop, checking for two things: whether any scheduled task is due to run, and whether the phone screen has lit up with a new notification. As soon as either condition is met, it wakes the agent.
 
-## Read Messages
+## Read messages
 
 Once awakened, the agent unlocks the phone with a passcode, opens WhatsApp, reads the user's latest message, and interprets their intent.
 
-## Execute Task
+## Execute task
 
 Based on the user's intent, the agent picks the right app to carry out the task. If the task requires user confirmation, it waits for the user to confirm before proceeding.
 

@@ -15,7 +15,7 @@ Make sure the computer running PhysiClaw won't lock the screen or go to sleep.
 
 The camera looks fine when you check it in a video or camera app, yet calibration fails as soon as you run it. This is usually a lighting issue: the room is too dark, a light is shining directly onto the phone screen and causing glare, or the screen brightness is too low.
 
-:::tip[Solution]
+:::tip[Fix]
 Make sure the room is evenly lit, avoid glare on the screen, and set the phone's screen brightness to a suitable level.
 :::
 
@@ -24,7 +24,7 @@ Make sure the room is evenly lit, avoid glare on the screen, and set the phone's
 Tasks that used to run reliably start failing — the agent mis-taps, gets lost, or gives up — yet nothing in software changed. The cause is almost always physical: the camera got bumped and no longer points straight at the phone screen, or a light is now hitting the screen directly, blowing out the image so the agent can barely see it.
 
 :::tip[Fix]
-Check what the model actually saw: `physiclaw logs` lists recent sessions, and `physiclaw logs <id>` prints the session's `images/` folder — the exact frames sent to the LLM. Tilted, blurry, or washed-out frames confirm it. Re-aim the camera (recalibrate if it moved) and light the screen evenly with no direct glare.
+Check what the model actually saw: `physiclaw logs` lists recent sessions, and `physiclaw logs <id>` prints the path to the session's `images/` folder — the exact frames sent to the LLM. Tilted, blurry, or washed-out frames confirm it. Re-aim the camera (recalibrate if it moved) and light the screen evenly with no direct glare.
 :::
 
 ## Solenoid clicks sometimes, unresponsive other times
