@@ -25,6 +25,14 @@ def _flat(value: int = 128) -> np.ndarray:
     return np.full((200, 100, 3), value, dtype=np.uint8)
 
 
+def _blown() -> np.ndarray:
+    """Washed-out frame: a large clipped block on a dark screen — the
+    two-factor blown rule fires (clip 30%, median 50)."""
+    frame = np.full((200, 100, 3), 50, dtype=np.uint8)
+    frame[:60, :] = 255
+    return frame
+
+
 def _observer(frames: list, *, detect=None) -> GestureObserver:
     """Observer over a scripted frame sequence; quality is neutralized
     via the injectable monitor (re-armed per test through `_quality`),
@@ -68,7 +76,7 @@ def test_grab_screen_returns_sharp_frame_without_retry(mocker) -> None:
     obs = _observer([_sharp()])
     obs.GRAB_BLUR_THRESHOLD = 50.0
 
-    frame, sharp_flag = obs.grab_screen()
+    frame, sharp_flag, _report = obs.grab_screen()
 
     assert sharp_flag is True
     sleep.assert_not_called()
@@ -92,11 +100,25 @@ def test_grab_screen_retries_once_when_blurry(mocker) -> None:
     obs = _observer([_flat(), sharp])
     obs.GRAB_BLUR_THRESHOLD = 50.0
 
-    frame, sharp_flag = obs.grab_screen()
+    frame, sharp_flag, _report = obs.grab_screen()
 
     assert frame is sharp
     assert sharp_flag is True
-    sleep.assert_called_once_with(obs.GRAB_BLUR_RETRY_SECONDS)
+    sleep.assert_called_once_with(obs.GRAB_RETRY_SECONDS)
+
+
+def test_grab_screen_retries_once_when_blown(mocker) -> None:
+    # A washed-out frame (auto-exposure still re-converging after the
+    # screen flipped dark→bright) gets the same wait-and-regrab as blur.
+    sleep = mocker.patch.object(observation.time, "sleep")
+    sharp = _sharp()
+    obs = _observer([_blown(), sharp])  # blur disabled by _observer
+
+    frame, sharp_flag, _report = obs.grab_screen()
+
+    assert frame is sharp
+    assert sharp_flag is True
+    sleep.assert_called_once_with(obs.GRAB_RETRY_SECONDS)
 
 
 def test_grab_screen_flags_frame_still_blurry_after_retry(mocker) -> None:
@@ -107,7 +129,7 @@ def test_grab_screen_flags_frame_still_blurry_after_retry(mocker) -> None:
     obs = _observer([blurry, blurry])
     obs.GRAB_BLUR_THRESHOLD = 50.0
 
-    frame, sharp_flag = obs.grab_screen()
+    frame, sharp_flag, _report = obs.grab_screen()
 
     assert frame is blurry
     assert sharp_flag is False
@@ -120,7 +142,7 @@ def test_grab_screen_fails_open_when_grab_raises() -> None:
 
     obs = GestureObserver(park=MagicMock(), grab=grab, detect=MagicMock())
 
-    assert obs.grab_screen() == (None, False)
+    assert obs.grab_screen() == (None, False, None)
 
 
 def test_grab_screen_fails_open_when_park_raises() -> None:
@@ -130,7 +152,7 @@ def test_grab_screen_fails_open_when_park_raises() -> None:
         detect=MagicMock(),
     )
 
-    assert obs.grab_screen() == (None, False)
+    assert obs.grab_screen() == (None, False, None)
 
 
 # ---------- peek_frame ----------
@@ -141,19 +163,34 @@ def test_peek_frame_returns_sharp_frame_without_retry(mocker) -> None:
     frame = _sharp()
     obs = _observer([frame])
 
-    assert obs.peek_frame() is frame
+    frame_out, _report = obs.peek_frame()
+    assert frame_out is frame
     sleep.assert_not_called()
 
 
 def test_peek_frame_retries_once_and_keeps_retry_frame(mocker) -> None:
     # Unlike grab_screen there's no verdict to protect: the retry frame
-    # is used as-is, with no second sharpness check.
+    # is used as-is, with no second retry gate.
     sleep = mocker.patch.object(observation.time, "sleep")
     retry = _flat()
     obs = _observer([_flat(), retry])
 
-    assert obs.peek_frame() is retry
-    sleep.assert_called_once_with(obs.PEEK_BLUR_RETRY_SECONDS)
+    frame_out, _report = obs.peek_frame()
+    assert frame_out is retry
+    sleep.assert_called_once_with(obs.PEEK_RETRY_SECONDS)
+
+
+def test_peek_frame_retries_once_when_blown(mocker) -> None:
+    # Blown covers the AE-lag transient; blur is disabled here so the
+    # washout is what triggers the retry.
+    sleep = mocker.patch.object(observation.time, "sleep")
+    retry = _flat()
+    obs = _observer([_blown(), retry])
+    obs.PEEK_BLUR_THRESHOLD = 0
+
+    frame_out, _report = obs.peek_frame()
+    assert frame_out is retry
+    sleep.assert_called_once_with(obs.PEEK_RETRY_SECONDS)
 
 
 def test_peek_frame_propagates_grab_failure() -> None:
@@ -303,17 +340,23 @@ def test_with_view_no_quality_check_without_after_frame() -> None:
 # ---------- observe_quality ----------
 
 
+def _report_of(frame: np.ndarray) -> observation.quality.QualityReport:
+    """The acquisition paths hand observe_quality an already-computed
+    report — mirror that contract here."""
+    return observation.quality.assess(frame)
+
+
 def test_observe_quality_returns_warning_line() -> None:
     obs = _observer([])
     obs._quality.observe.return_value = "⚠ camera: bad"
 
-    assert obs.observe_quality("peek", _flat()) == "⚠ camera: bad"
+    assert obs.observe_quality("peek", _report_of(_flat())) == "⚠ camera: bad"
 
 
 def test_observe_quality_none_on_good_view() -> None:
     obs = _observer([])
 
-    assert obs.observe_quality("peek", _flat()) is None
+    assert obs.observe_quality("peek", _report_of(_flat())) is None
 
 
 def test_observe_quality_fails_open_on_crash() -> None:
@@ -321,14 +364,49 @@ def test_observe_quality_fails_open_on_crash() -> None:
     obs = _observer([])
     obs._quality.observe.side_effect = RuntimeError("boom")
 
-    assert obs.observe_quality("peek", _flat()) is None
+    assert obs.observe_quality("peek", _report_of(_flat())) is None
 
 
-def test_observe_quality_uses_real_assessment() -> None:
-    # Un-mocked path: a flat frame reads blurry to the real monitor.
+def test_observe_quality_feeds_report_and_streak_to_on_quality() -> None:
+    calls = []
+    monitor = MagicMock()
+    monitor.observe.return_value = None
+    monitor.streak = 2
+    obs = GestureObserver(
+        park=MagicMock(),
+        grab=MagicMock(),
+        detect=MagicMock(),
+        monitor=monitor,
+        on_quality=lambda report, streak: calls.append((report, streak)),
+    )
+
+    obs.observe_quality("peek", _report_of(_flat()))
+
+    assert len(calls) == 1
+    report, streak = calls[0]
+    assert streak == 2 and report.median_luma == 128.0
+
+
+def test_observe_quality_callback_crash_never_costs_the_view() -> None:
+    monitor = MagicMock()
+    monitor.observe.return_value = "⚠ camera: bad"
+    monitor.streak = 1
+    obs = GestureObserver(
+        park=MagicMock(),
+        grab=MagicMock(),
+        detect=MagicMock(),
+        monitor=monitor,
+        on_quality=MagicMock(side_effect=RuntimeError("boom")),
+    )
+
+    assert obs.observe_quality("peek", _report_of(_flat())) == "⚠ camera: bad"
+
+
+def test_observe_quality_uses_real_monitor() -> None:
+    # Un-mocked path: a flat frame's report reads blurry to the real monitor.
     obs = GestureObserver(park=MagicMock(), grab=MagicMock(), detect=MagicMock())
 
-    line = obs.observe_quality("peek", _flat())
+    line = obs.observe_quality("peek", _report_of(_flat()))
 
     assert line is not None and "⚠ camera" in line
 

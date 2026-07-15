@@ -53,7 +53,9 @@ def test_in_band_as_is_touches_nothing() -> None:
 
 
 def test_ae_reassert_recovers_without_manual() -> None:
-    reports = iter([BLOWN, GOOD])  # bad as-is, good after re-assert
+    # Bad as-is; good after re-assert (the settled meter reads twice to
+    # confirm the firmware AE loop has stopped moving).
+    reports = iter([BLOWN, GOOD, GOOD])
     rig = Rig(GOOD, {})
 
     res = converge(
@@ -65,6 +67,24 @@ def test_ae_reassert_recovers_without_manual() -> None:
 
     assert res.ok and res.mode == "auto"
     assert rig.auto_calls == 1 and rig.manual_calls == []
+    assert "re-assert" in res.detail
+
+
+def test_ae_reassert_meters_until_luma_settles() -> None:
+    # The firmware AE re-converges over frames: consecutive reads that
+    # still disagree are re-metered (bounded), and the settled value is
+    # the one judged.
+    reports = iter([BLOWN, _r(40.0), _r(110.0), _r(112.0)])
+    rig = Rig(GOOD, {})
+
+    res = converge(
+        lambda: next(reports),
+        rig.set_auto,
+        rig.set_manual,
+        start=-6,
+    )
+
+    assert res.ok and res.mode == "auto"
     assert "re-assert" in res.detail
 
 
@@ -91,20 +111,34 @@ def test_driver_ignoring_sets_reverts_to_auto() -> None:
     assert "ignores" in res.detail
 
 
-def test_oscillation_holds_darkest_non_blown_step() -> None:
-    # Band lies between -7 (crushed dark) and -6 (still blown): after two
-    # direction flips the loop stops and holds the darkest non-blown try.
+def test_oscillation_holds_darkest_usable_step() -> None:
+    # Band lies between -7 (crushed dark) and -6 (some clip, but under
+    # the warning threshold and bright enough): after two direction
+    # flips the loop stops and holds the darkest usable try.
+    rig = Rig(BLOWN, {-6: _r(160.0, clip=0.08), -7: _r(18.0)})
+
+    res = converge(rig.meter, rig.set_auto, rig.set_manual, start=-6)
+
+    assert not res.ok and res.mode == "manual" and res.exposure == -6
+    assert rig.manual_calls[-1] == -6  # re-applied as the held value
+    assert "between steps" in res.detail
+
+
+def test_oscillation_with_no_usable_step_reverts_to_auto() -> None:
+    # -6 is heavily clipped and -7 is crushed to black: neither may be
+    # held (a black frame passes "not blown" but is useless — the old
+    # rule froze exactly such frames). With nothing usable, auto it is.
     rig = Rig(BLOWN, {-6: _r(180.0, clip=0.2), -7: _r(15.0)})
 
     res = converge(rig.meter, rig.set_auto, rig.set_manual, start=-6)
 
-    assert not res.ok and res.mode == "manual" and res.exposure == -7
-    assert rig.manual_calls[-1] == -7  # re-applied as the held value
-    assert "between steps" in res.detail
+    assert not res.ok and res.mode == "auto"
+    assert "no usable step" in res.detail
 
 
 def test_meter_losing_frames_mid_stepping_fails_open() -> None:
-    reports = iter([BLOWN, BLOWN, None])  # as-is, post-re-assert, step 1
+    # as-is, settled post-re-assert pair, then step 1 loses the frame
+    reports = iter([BLOWN, BLOWN, BLOWN, None])
     rig = Rig(BLOWN, {})
 
     res = converge(
@@ -147,8 +181,11 @@ def test_range_exhaustion_reverts_to_auto() -> None:
 
 def test_prefer_auto_false_skips_reassert_and_keeps_best_manual() -> None:
     # User pinned manual in config: no AE re-assert, and on failure the
-    # best (darkest non-blown) step is held instead of reverting.
-    rig = Rig(BLOWN, {-6: _r(190.0, clip=0.2), -7: _r(185.0, clip=0.2), -8: _r(15.0)})
+    # best (darkest usable) step is held instead of reverting.
+    rig = Rig(
+        BLOWN,
+        {-6: _r(190.0, clip=0.2), -7: _r(185.0, clip=0.2), -8: _r(40.0, clip=0.05)},
+    )
 
     res = converge(
         rig.meter,
@@ -162,6 +199,38 @@ def test_prefer_auto_false_skips_reassert_and_keeps_best_manual() -> None:
     assert not res.ok and res.mode == "manual" and res.exposure == -8
     assert rig.auto_calls == 0
     assert "auto disabled" in res.detail
+
+
+def test_dark_screen_defers_instead_of_converging() -> None:
+    # The screen is dark (asleep / resting lock screen) even under AE:
+    # there is no white level to expose for. Converging here is how a
+    # frozen value blows out the screen once it lights up — defer, leave
+    # firmware AE in charge, and let the caller retry on a bright view.
+    rig = Rig(_r(5.0), {})
+
+    res = converge(rig.meter, rig.set_auto, rig.set_manual, start=-6)
+
+    assert res.deferred and not res.ok and res.mode == "auto"
+    assert rig.manual_calls == []
+    assert rig.auto_calls == 1  # the phase-2 re-assert, nothing else
+    assert "deferred" in res.detail
+
+
+def test_dark_screen_defers_without_touching_pinned_manual() -> None:
+    # User pinned manual in config: the dark-screen deferral must not
+    # flip the camera to auto behind their back.
+    rig = Rig(_r(5.0), {})
+
+    res = converge(
+        rig.meter,
+        rig.set_auto,
+        rig.set_manual,
+        start=-6,
+        prefer_auto=False,
+    )
+
+    assert res.deferred and not res.ok
+    assert rig.auto_calls == 0 and rig.manual_calls == []
 
 
 def test_max_steps_bounds_the_search() -> None:

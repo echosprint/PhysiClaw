@@ -433,6 +433,41 @@ def test_close_stops_thread_and_releases(mocker) -> None:
     assert not cam._thread.is_alive()
 
 
+def test_close_hands_held_manual_exposure_back_to_auto(mocker) -> None:
+    # A held manual value lives in the camera's volatile RAM and would
+    # outlive the process — close() must hand exposure back to firmware
+    # auto so the next run (or another app) doesn't inherit a stale hold.
+    cam, _ = _ready_camera(mocker)
+    cam.set_manual_exposure(-5)
+    set_auto = mocker.patch.object(camera_mod.platform, "camera_set_auto_exposure")
+
+    cam.close()
+
+    set_auto.assert_called_once_with(cam.cap)
+
+
+def test_close_does_not_touch_exposure_when_auto(mocker) -> None:
+    # Nothing held → nothing to reset.
+    cam, _ = _ready_camera(mocker)
+    set_auto = mocker.patch.object(camera_mod.platform, "camera_set_auto_exposure")
+
+    cam.close()
+
+    set_auto.assert_not_called()
+
+
+def test_close_keeps_manual_when_user_pinned_it_in_config(mocker) -> None:
+    # auto_exposure=false in config is the user's pin — exit must not
+    # flip the camera back to auto behind their back.
+    mocker.patch.object(camera_mod.CONFIG.camera, "auto_exposure", False)
+    cam, _ = _ready_camera(mocker)
+    set_auto = mocker.patch.object(camera_mod.platform, "camera_set_auto_exposure")
+
+    cam.close()
+
+    set_auto.assert_not_called()
+
+
 def test_close_leaks_cap_instead_of_deadlocking_when_lock_held(mocker, caplog) -> None:
     """A reader wedged inside a blocking cap.read() holds _cap_lock
     forever; close() must time out and leak the handle, never release

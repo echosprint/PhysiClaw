@@ -107,18 +107,26 @@ def _wire_peek(mocker, pc, wire_rig, *, listing: str = "ok", sharpness=200.0):
     pc.perception._icon_detector = MagicMock()
     pc.rig._cam.snapshot.return_value = np.zeros((10, 10, 3), dtype=np.uint8)
     mocker.patch.object(perception, "crop_to_phone_screen", side_effect=lambda f, t: f)
+
+    def _report(score: float):
+        # peek's retry decision reads a full QualityReport now; only
+        # sharpness matters to these tests (clip 0 = never blown).
+        return observation.quality.QualityReport(
+            sharpness=score, clip_pct=0.0, median_luma=100.0
+        )
+
     if isinstance(sharpness, list):
         blur_values = iter(sharpness)
         mocker.patch.object(
-            observation,
-            "laplacian_variance",
-            side_effect=lambda *_: next(blur_values),
+            observation.quality,
+            "assess",
+            side_effect=lambda *_: _report(next(blur_values)),
         )
     else:
         mocker.patch.object(
-            observation,
-            "laplacian_variance",
-            return_value=sharpness,
+            observation.quality,
+            "assess",
+            return_value=_report(sharpness),
         )
     sleep_spy = mocker.patch.object(observation.time, "sleep")
     mocker.patch.object(
@@ -501,7 +509,7 @@ def test_grab_screen_wiring_retries_through_orchestrator(
     mocker.patch.object(perception, "crop_to_phone_screen", side_effect=[blurry, sharp])
     mocker.patch.object(observation.time, "sleep")
 
-    frame, sharp_flag = pc._observer.grab_screen()
+    frame, sharp_flag, _report = pc._observer.grab_screen()
 
     assert frame is sharp
     assert sharp_flag is True

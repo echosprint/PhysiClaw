@@ -12,6 +12,8 @@ only coordinates it.
 """
 
 import logging
+import threading
+import time
 
 from physiclaw.common.config import CONFIG
 from physiclaw.core.hardware import exposure
@@ -33,11 +35,19 @@ log = logging.getLogger(__name__)
 class Perception:
     """Detectors + frame acquisition over a borrowed rig."""
 
+    # Delay before a scheduled re-tune contends for the hardware: the
+    # view that triggered it still holds the rig lock while its gesture
+    # finishes parking.
+    RETUNE_DELAY_SECONDS = 2.0
+
     def __init__(self, rig: HardwareRig):
         self._rig = rig
         self._ocr_reader: OCRReader | None = None
         self._icon_detector: IconDetector | None = None
         self._watchdog = Watchdog()
+        self._last_tune: exposure.TuneResult | None = None
+        self._retune_lock = threading.Lock()
+        self._retune_pending = False
 
     # ─── Lazy detectors ───────────────────────────────────────
 
@@ -156,8 +166,56 @@ class Perception:
                 start=CONFIG.camera.exposure,
                 prefer_auto=CONFIG.camera.auto_exposure,
             )
+            self._last_tune = result
             log.info("exposure tune: %s", result.detail)
         except Exception:
             log.exception("exposure tune failed — leaving camera as-is")
         finally:
             self._rig.release()
+
+    def on_quality_report(self, report: quality.QualityReport, streak: int) -> None:
+        """Re-tune policy, fed every judged view by the GestureObserver.
+
+        Two triggers, both evidence-driven:
+        - a washout streak: the held exposure (or firmware AE) is blowing
+          views out repeatedly — re-converge rather than warn forever.
+          Fires on every PERSIST_AFTER-th consecutive bad view, which
+          rate-limits retries while the streak lasts;
+        - a bright view after a deferred tune: startup metered a dark
+          screen (lock screen / asleep) and skipped — the reference the
+          tune needs has now arrived.
+
+        Never blocks the view that reported: the tune runs on a detached
+        thread and skips itself if the hardware is busy."""
+        cam = self._rig.cam
+        if cam is None or not cam.exposure_tunable:
+            return
+        if report.blown and streak > 0 and streak % quality.PERSIST_AFTER == 0:
+            self._schedule_retune(f"washed-out views {streak} in a row")
+        elif (
+            self._last_tune is not None
+            and self._last_tune.deferred
+            and exposure.is_reference(report)
+        ):
+            self._schedule_retune("bright view arrived after a deferred tune")
+
+    def _schedule_retune(self, reason: str) -> None:
+        """Run `tune_exposure` on a detached daemon thread, at most one in
+        flight. The delay lets the triggering view's gesture release the
+        rig lock first; a still-busy rig makes the tune skip harmlessly
+        (the trigger conditions persist, so it will be re-scheduled)."""
+        with self._retune_lock:
+            if self._retune_pending:
+                return
+            self._retune_pending = True
+        log.info("exposure re-tune scheduled: %s", reason)
+
+        def run() -> None:
+            try:
+                time.sleep(self.RETUNE_DELAY_SECONDS)
+                self.tune_exposure()
+            finally:
+                with self._retune_lock:
+                    self._retune_pending = False
+
+        threading.Thread(target=run, name="exposure-retune", daemon=True).start()

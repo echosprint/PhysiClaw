@@ -296,3 +296,125 @@ def test_tune_exposure_swallows_converge_crash(mocker, rig, per: Perception) -> 
 
     rig.acquire()  # and the lock is not leaked
     rig.release()
+
+
+# ---------- re-tune policy (on_quality_report) ----------
+
+
+def _report(median: float = 120.0, clip: float = 0.0) -> object:
+    from physiclaw.core.vision.quality import QualityReport
+
+    return QualityReport(sharpness=500.0, clip_pct=clip, median_luma=median)
+
+
+def _deferred() -> object:
+    from physiclaw.core.hardware.exposure import TuneResult
+
+    return TuneResult(
+        mode="auto", exposure=None, ok=False, detail="deferred", deferred=True
+    )
+
+
+BLOWN_REPORT = _report(median=150.0, clip=0.3)
+
+
+def test_on_quality_noop_when_not_tunable(mocker, rig, per: Perception) -> None:
+    rig._cam.exposure_tunable = False
+    sched = mocker.patch.object(per, "_schedule_retune")
+
+    per.on_quality_report(BLOWN_REPORT, streak=3)
+
+    sched.assert_not_called()
+
+
+def test_blown_streak_schedules_retune(mocker, rig, per: Perception) -> None:
+    rig._cam.exposure_tunable = True
+    sched = mocker.patch.object(per, "_schedule_retune")
+
+    per.on_quality_report(BLOWN_REPORT, streak=perception_mod.quality.PERSIST_AFTER)
+
+    sched.assert_called_once()
+
+
+def test_blown_streak_is_rate_limited_between_multiples(
+    mocker, rig, per: Perception
+) -> None:
+    # Fires on every PERSIST_AFTER-th bad view, not every bad view.
+    rig._cam.exposure_tunable = True
+    sched = mocker.patch.object(per, "_schedule_retune")
+    n = perception_mod.quality.PERSIST_AFTER
+
+    per.on_quality_report(BLOWN_REPORT, streak=n + 1)
+    sched.assert_not_called()
+
+    per.on_quality_report(BLOWN_REPORT, streak=2 * n)
+    sched.assert_called_once()
+
+
+def test_bright_view_after_deferred_tune_schedules_retune(
+    mocker, rig, per: Perception
+) -> None:
+    rig._cam.exposure_tunable = True
+    per._last_tune = _deferred()
+    sched = mocker.patch.object(per, "_schedule_retune")
+
+    per.on_quality_report(_report(median=120.0), streak=0)
+
+    sched.assert_called_once()
+
+
+def test_dark_view_after_deferred_tune_keeps_waiting(
+    mocker, rig, per: Perception
+) -> None:
+    # Still no reference — the lock screen is what deferred the tune.
+    rig._cam.exposure_tunable = True
+    per._last_tune = _deferred()
+    sched = mocker.patch.object(per, "_schedule_retune")
+
+    per.on_quality_report(_report(median=5.0), streak=0)
+
+    sched.assert_not_called()
+
+
+def test_good_view_after_completed_tune_schedules_nothing(
+    mocker, rig, per: Perception
+) -> None:
+    rig._cam.exposure_tunable = True
+    per._last_tune = _tune_ok()
+    sched = mocker.patch.object(per, "_schedule_retune")
+
+    per.on_quality_report(_report(median=120.0), streak=0)
+
+    sched.assert_not_called()
+
+
+def test_schedule_retune_runs_tune_on_a_thread_once(
+    mocker, rig, per: Perception
+) -> None:
+    mocker.patch.object(perception_mod.time, "sleep")
+    tune = mocker.patch.object(per, "tune_exposure")
+    thread = mocker.patch.object(perception_mod.threading, "Thread")
+
+    per._schedule_retune("test")
+    per._schedule_retune("test again")  # single-flight: second is a no-op
+
+    thread.assert_called_once()
+    thread.return_value.start.assert_called_once()
+    body = thread.call_args.kwargs["target"]
+    body()  # the thread body: runs the tune, then clears the pending flag
+    tune.assert_called_once()
+
+    per._schedule_retune("after completion")  # pending flag was cleared
+    assert thread.call_count == 2
+
+
+def test_tune_exposure_records_result_for_the_retune_policy(
+    mocker, rig, per: Perception
+) -> None:
+    rig._cam.exposure_tunable = True
+    result = _deferred()
+    mocker.patch.object(perception_mod.exposure, "converge", return_value=result)
+
+    per.tune_exposure()
+
+    assert per._last_tune is result

@@ -23,7 +23,6 @@ from typing import Any, Callable
 from physiclaw.common import verdict
 from physiclaw.core.vision import quality
 from physiclaw.core.vision.change import frames_changed
-from physiclaw.core.vision.quality import laplacian_variance
 from physiclaw.core.vision.util import encode_view_jpeg
 
 log = logging.getLogger(__name__)
@@ -55,19 +54,20 @@ class GestureObserver:
     # ~1s of stylus retract + park, total ≈ 2s — enough for most page
     # transitions (Anthropic's computer-use reference uses a 2.0s delay).
     GESTURE_SETTLE_SECONDS = 1.0
-    # The arm crossing the lens re-triggers autofocus; a frame captured
-    # mid-hunt is blurry and poisons both the verdict and the fused view.
-    # Below this Laplacian variance, wait and re-grab once. Same number
-    # and scale as the quality monitor's blur verdict.
+    # The arm crossing the lens re-triggers autofocus, and a screen-content
+    # flip (dark lock screen → bright home) sends firmware auto-exposure
+    # re-converging; a frame captured mid-hunt is blurry or blown and
+    # poisons both the verdict and the fused view. On either verdict,
+    # wait and re-grab once. Blur uses the same number and scale as the
+    # quality monitor's verdict.
     GRAB_BLUR_THRESHOLD = quality.BLUR_THRESHOLD
-    GRAB_BLUR_RETRY_SECONDS = 1.5
+    GRAB_RETRY_SECONDS = 1.5
 
-    # Blur-retry gate for peeks — same measurement and scale as the
-    # gesture grabs above and the quality monitor's verdict
-    # (laplacian_variance normalizes internally): one number, defined
-    # once. Peek waits longer but re-grabs only once, without a re-check.
+    # Retry gate for peeks — same measurements as the gesture grabs above
+    # and the quality monitor's verdict: one number, defined once. Peek
+    # waits longer but re-grabs only once, without a re-check.
     PEEK_BLUR_THRESHOLD = quality.BLUR_THRESHOLD
-    PEEK_BLUR_RETRY_SECONDS = 2.0
+    PEEK_RETRY_SECONDS = 2.0
 
     def __init__(
         self,
@@ -75,48 +75,72 @@ class GestureObserver:
         grab: Callable[[], Any],
         detect: Callable[[Any], tuple[str, Any]],
         monitor: quality.QualityMonitor | None = None,
+        on_quality: Callable[[quality.QualityReport, int], None] | None = None,
     ):
         self._park = park
         self._grab = grab  # () -> cropped phone-screen BGR frame
         self._detect = detect  # frame -> (element listing, annotated frame)
         self._quality = monitor if monitor is not None else quality.QualityMonitor()
+        # (report, streak) after every judged view — perception hangs its
+        # re-tune policy here without observation knowing about tuning.
+        self._on_quality = on_quality
 
-    def observe_quality(self, source: str, frame) -> str | None:
-        """Judge a camera view for AF/AE failure; on a bad one, warn in the
-        log and return the agent-facing ⚠ line for the caller to attach.
+    def observe_quality(self, source: str, report: quality.QualityReport) -> str | None:
+        """Judge an already-assessed camera view for AF/AE failure; on a
+        bad one, warn in the log and return the agent-facing ⚠ line for
+        the caller to attach.
 
-        Runs AFTER the blur-retry grabs, so a frame still failing here means
-        the retry didn't recover it. Fail-open: a crash in the check never
-        costs the view."""
+        Takes the `QualityReport` the acquisition path (`peek_frame` /
+        `grab_screen`) already computed for its retry decision — the
+        frame is never re-measured here. Runs AFTER the retry grabs, so
+        a report still failing means the retry didn't recover it. Every
+        judged view is also reported to `on_quality` (with the running
+        bad-view streak) so the owner can react — e.g. re-tune exposure
+        on a washout streak. Fail-open: a crash in the check never costs
+        the view."""
         try:
-            warning = self._quality.observe(quality.assess(frame))
+            warning = self._quality.observe(report)
         except Exception:
             log.exception("camera-quality check failed — skipping")
             return None
         if warning is not None:
             log.warning("%s: %s", source, warning)
+        if self._on_quality is not None:
+            try:
+                self._on_quality(report, self._quality.streak)
+            except Exception:
+                log.exception("quality-report callback failed — ignoring")
         return warning
 
     def peek_frame(self):
         """Park, grab the cropped phone-screen frame, and re-grab once
-        after a settle if it's too blurry — peek's acquisition path.
+        after a settle if it's too blurry or blown — peek's acquisition
+        path. Blown covers the AE-lag transient: the screen just flipped
+        dark→bright and firmware auto-exposure hasn't re-converged yet.
+
+        Returns `(frame, report)` — the report always describes the
+        returned frame, so the caller's quality judgment
+        (`observe_quality`) reuses it instead of re-measuring.
 
         Unlike `grab_screen`, failures propagate (a peek with no frame is
         a tool error, not a withheld verdict) and the retry frame is used
-        as-is: peek has no verdict to protect, so a still-soft frame is
+        as-is: peek has no verdict to protect, so a still-bad frame is
         better shown than dropped. Caller must hold the lock."""
         self._park()
         frame = self._grab()
-        sharpness = laplacian_variance(frame)
-        if sharpness < self.PEEK_BLUR_THRESHOLD:
+        report = quality.assess(frame)
+        blurry = report.sharpness < self.PEEK_BLUR_THRESHOLD
+        if blurry or report.blown:
             log.warning(
-                "peek: blurry frame (laplacian var=%.1f < %.0f) — retrying",
-                sharpness,
-                self.PEEK_BLUR_THRESHOLD,
+                "peek: %s frame (sharpness %.1f, clip %.0f%%) — retrying",
+                "blurry" if blurry else "blown",
+                report.sharpness,
+                report.clip_pct * 100,
             )
-            time.sleep(self.PEEK_BLUR_RETRY_SECONDS)
+            time.sleep(self.PEEK_RETRY_SECONDS)
             frame = self._grab()
-        return frame
+            report = quality.assess(frame)
+        return frame, report
 
     def grab_screen(self, settle: float = 0.0):
         """Park (clearing the arm from the lens), let the screen and
@@ -126,12 +150,18 @@ class GestureObserver:
         triggered, so the capture is usually sharp; a still-blurry frame
         is re-grabbed once as a fallback.
 
-        Returns `(frame, sharp)`: frame is None on any failure (the view
-        is best-effort, never a reason to fail a gesture); sharp is False
-        when even the retry stayed below GRAB_BLUR_THRESHOLD — such a
-        frame still serves the fused view, but blur erases edges so it
-        diffs as "changed everywhere": the caller must skip the verdict
-        (None, the fail-open direction) rather than emit a false
+        A blown frame (auto-exposure still re-converging after the screen
+        content flipped dark→bright) triggers the same wait-and-regrab as
+        blur — highlight clipping erases icon detail the fused view needs.
+
+        Returns `(frame, sharp, report)`: frame is None on any failure
+        (the view is best-effort, never a reason to fail a gesture) and
+        the report — always describing the returned frame — feeds the
+        caller's `observe_quality` so nothing is re-measured. sharp is
+        False when even the retry stayed below GRAB_BLUR_THRESHOLD —
+        such a frame still serves the fused view, but blur erases edges
+        so it diffs as "changed everywhere": the caller must skip the
+        verdict (None, the fail-open direction) rather than emit a false
         `changed` that would reset the stuck guard. Caller must hold the
         lock."""
         try:
@@ -139,19 +169,25 @@ class GestureObserver:
             if settle:
                 time.sleep(settle)
             frame = self._grab()
-            if laplacian_variance(frame) < self.GRAB_BLUR_THRESHOLD:
-                log.debug("gesture frame blurry — waiting for autofocus")
-                time.sleep(self.GRAB_BLUR_RETRY_SECONDS)
+            report = quality.assess(frame)
+            blurry = report.sharpness < self.GRAB_BLUR_THRESHOLD
+            if blurry or report.blown:
+                log.debug(
+                    "gesture frame %s — waiting for AF/AE",
+                    "blurry" if blurry else "blown",
+                )
+                time.sleep(self.GRAB_RETRY_SECONDS)
                 frame = self._grab()
-                if laplacian_variance(frame) < self.GRAB_BLUR_THRESHOLD:
+                report = quality.assess(frame)
+                if report.sharpness < self.GRAB_BLUR_THRESHOLD:
                     log.warning(
                         "gesture frame still blurry after retry — verdict withheld"
                     )
-                    return frame, False
-            return frame, True
+                    return frame, False, report
+            return frame, True, report
         except Exception:
             log.warning("screen frame grab failed", exc_info=True)
-            return None, False
+            return None, False, None
 
     def with_view(self, action) -> GestureResult:
         """Run a gesture body bracketed by before/after frames; return
@@ -171,9 +207,11 @@ class GestureObserver:
         after-grab settles so the transition completes and AF recovers
         from the gesture's arm move before capture.
         """
-        before, before_sharp = self.grab_screen()
+        before, before_sharp, _ = self.grab_screen()
         result = action()
-        after, after_sharp = self.grab_screen(settle=self.GESTURE_SETTLE_SECONDS)
+        after, after_sharp, after_report = self.grab_screen(
+            settle=self.GESTURE_SETTLE_SECONDS
+        )
         changed = None
         jpeg = listing = None
         if after is not None:
@@ -190,7 +228,7 @@ class GestureObserver:
                 jpeg = encode_view_jpeg(annotated)
             except Exception:
                 log.warning("post-gesture view failed", exc_info=True)
-            warning = self.observe_quality("gesture view", after)
+            warning = self.observe_quality("gesture view", after_report)
         else:
             warning = None
         text = verdict.attach(result, changed)

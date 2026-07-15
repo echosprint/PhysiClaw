@@ -179,3 +179,14 @@ def test_good_view_resets_the_streak() -> None:
     assert m.observe(_good()) is None
     # Streak restarted — the next bad view warns softly again.
     assert "report it to your user" not in m.observe(_bad())
+
+
+def test_streak_property_mirrors_consecutive_bad_views() -> None:
+    # Read by the orchestration layer's re-tune policy.
+    m = QualityMonitor()
+    assert m.streak == 0
+    m.observe(_blown())
+    m.observe(_blown())
+    assert m.streak == 2
+    m.observe(_good())
+    assert m.streak == 0

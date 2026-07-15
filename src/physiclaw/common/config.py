@@ -90,10 +90,13 @@ class CameraConfig:
     width: int = 3840
     height: int = 2160
     fourcc: str = "MJPG"
-    # Exposure control (Windows/Linux; macOS AVFoundation exposes no
-    # exposure props through OpenCV, so both keys are ignored there).
-    # The startup tune verifies with measured brightness and falls back
-    # to manual stepping when firmware auto-exposure misbehaves.
+    # Exposure control. Windows/Linux go through OpenCV capture props;
+    # macOS AVFoundation exposes none, so there the keys apply only when
+    # the UVC/IOKit channel controls the camera (see platform.uvc) and
+    # are ignored otherwise. The startup tune verifies with measured
+    # brightness and falls back to manual stepping when firmware
+    # auto-exposure misbehaves; `exposure` is the stepping start, on the
+    # shared log2-seconds scale within exposure.py's -8..-5 band.
     auto_exposure: bool = True
     exposure: int = -6
 

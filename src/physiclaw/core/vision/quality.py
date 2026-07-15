@@ -136,6 +136,12 @@ class QualityMonitor:
     def __init__(self) -> None:
         self._streak = 0
 
+    @property
+    def streak(self) -> int:
+        """Consecutive bad views so far (0 after any good view) — read by
+        the orchestration layer to decide when to re-tune exposure."""
+        return self._streak
+
     def observe(self, report: QualityReport) -> str | None:
         """Return the ⚠ warning line for a bad view, else None."""
         issues: list[str] = []

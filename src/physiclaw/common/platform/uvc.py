@@ -33,6 +33,25 @@ Fail-soft contract: `exposure_channel()` returns None unless exactly one
 VideoControl-capable device is on the bus AND it answers a GET_CUR for
 its exposure controls. Callers treat None as "not tunable" and leave the
 firmware auto-exposure alone.
+
+Firmware quirks, measured on real hardware (2026-07) — trust pixels,
+never control-request readbacks:
+
+- Registers can be write-through but functionally dead: AE mode 4
+  (shutter priority) and the UVC 1.5 ROI control (0x14) both accepted
+  writes and echoed them back verbatim, while the image proved them
+  ignored (a 32× exposure sweep in mode 4 left brightness flat; an AE
+  ROI pointed at a dark corner moved nothing). Some entities answer
+  GET_CUR for *any* selector with junk, so a successful read is not
+  evidence of support either.
+- Auto and manual modes need not share an effective scale: the tested
+  camera reported "156 ticks" under auto but delivered ~6× the
+  brightness of manual mode at those same 156 ticks (hidden AE gain).
+  Never seed a manual value from auto's GET_CUR — `converge` meters its
+  way from the configured start instead.
+- The AE mode register can flip on stream renegotiation (a held manual
+  mode reverting to auto on the next capture open), so held state must
+  be re-asserted, not assumed.
 """
 
 import ctypes as C
@@ -66,7 +85,8 @@ _CAMERA_TERMINAL_CANDIDATES = (1, 2, 3, 4)
 
 
 def ticks_from_log2_seconds(exposure: int) -> int:
-    """exposure.py's shared log2-seconds scale (-11 ≈ 0.5ms … -2 = 250ms)
+    """exposure.py's shared log2-seconds scale (-8 ≈ 3.9ms … -5 = 31.2ms
+    within its stepping bounds; the mapping itself takes any stop)
     → EXPOSURE_TIME_ABSOLUTE 100µs ticks, floored at 1. One log2 stop
     stays one halving of ticks, keeping `converge`'s integer stepping a
     real one-stop move. Used by darwin (UVC over IOKit) and linux —

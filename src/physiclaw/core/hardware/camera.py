@@ -511,6 +511,17 @@ class Camera:
         # leak the handle instead of deadlocking the caller.
         if self._cap_lock.acquire(timeout=self.CLOSE_LOCK_TIMEOUT_SECONDS):
             try:
+                # Hand a held manual exposure back to firmware auto on the
+                # way out: the value lives in the camera's volatile RAM, so
+                # it would outlive this process and poison the next run (or
+                # any other app) until a re-tune or a USB power cycle.
+                # Skipped when the user pinned manual in config — that pin
+                # is theirs to keep. Best-effort: never blocks the close.
+                if CONFIG.camera.auto_exposure and not self._exposure_auto:
+                    try:
+                        platform.camera_set_auto_exposure(self.cap)
+                    except Exception:
+                        log.warning("exposure hand-back on close failed", exc_info=True)
                 self.cap.release()
             finally:
                 self._cap_lock.release()

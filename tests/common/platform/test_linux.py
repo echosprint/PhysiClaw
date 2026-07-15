@@ -139,7 +139,7 @@ def test_set_auto_exposure_v4l2_encoding() -> None:
 
 def test_set_manual_exposure_converts_log2_seconds_to_v4l2_ticks() -> None:
     # `set_manual` receives the shared log2-seconds scale (exposure.py's
-    # -11..-2 band); V4L2 wants ~100µs ticks. Passing the raw negative
+    # -8..-5 band); V4L2 wants ~100µs ticks. Passing the raw negative
     # through (old behavior) got driver-clamped, so converge()'s luma
     # stall check read "driver ignores exposure writes" and every tune
     # on Linux reverted to blown-out auto (observed on a real session).
@@ -158,8 +158,9 @@ def test_set_manual_exposure_tick_conversion_bounds() -> None:
     import cv2
 
     for log2_value, ticks in [
-        (-11, 5),  # band floor: 0.49ms
-        (-2, 2500),  # band ceiling: 250ms
+        (-8, 39),  # band floor: 3.9ms
+        (-5, 312),  # band ceiling: 31.2ms
+        (-2, 2500),  # out of band: the mapping itself is total
         (-20, 1),  # far out of band: clamps to the 1-tick floor, not 0
     ]:
         cap = MagicMock()

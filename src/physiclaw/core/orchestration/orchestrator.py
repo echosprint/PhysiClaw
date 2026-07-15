@@ -61,6 +61,9 @@ class PhysiClaw:
             park=self.rig.park,
             grab=lambda: self.perception.cropped_view(),
             detect=lambda frame: self.perception.detect(frame),
+            on_quality=lambda report, streak: self.perception.on_quality_report(
+                report, streak
+            ),
         )
 
     # ─── Lifecycle ─────────────────────────────────────────────
@@ -85,9 +88,9 @@ class PhysiClaw:
         screenshot.
         """
         with self.rig.locked():
-            cropped = self._observer.peek_frame()
+            cropped, report = self._observer.peek_frame()
             listing, annotated = self.perception.detect(cropped)
-            warning = self._observer.observe_quality("peek", cropped)
+            warning = self._observer.observe_quality("peek", report)
             if warning is not None:
                 listing = f"{listing}\n{warning}"
             return encode_view_jpeg(annotated), listing
