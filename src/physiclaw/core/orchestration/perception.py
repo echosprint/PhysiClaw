@@ -150,6 +150,20 @@ class Perception:
             return
         try:
             self._rig.park()  # stylus off the glass — it would pollute the crop
+            self.tune_now()
+        finally:
+            self._rig.release()
+
+    def tune_now(self) -> None:
+        """Verify-and-converge with the rig lock ALREADY HELD and the arm
+        parked — the synchronous path: the observer calls this mid-grab
+        to fix a washed-out frame before the view ships to the agent,
+        instead of sending garbage and warning about it. Fail-open:
+        never raises, no-op when the rig can't tune."""
+        cam, t = self._rig.cam, self._rig.transforms
+        if cam is None or t is None or not cam.exposure_tunable:
+            return
+        try:
 
             def meter():
                 if not cam.wait_frames(exposure.SETTLE_FRAMES, timeout=5.0):
@@ -170,8 +184,6 @@ class Perception:
             log.info("exposure tune: %s", result.detail)
         except Exception:
             log.exception("exposure tune failed — leaving camera as-is")
-        finally:
-            self._rig.release()
 
     def on_quality_report(self, report: quality.QualityReport, streak: int) -> None:
         """Re-tune policy, fed every judged view by the GestureObserver.

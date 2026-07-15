@@ -64,6 +64,9 @@ class PhysiClaw:
             on_quality=lambda report, streak: self.perception.on_quality_report(
                 report, streak
             ),
+            # Synchronous: grab paths run inside rig.locked(), so the
+            # inline fix must not re-acquire — tune_now assumes the lock.
+            fix_exposure=lambda: self.perception.tune_now(),
         )
 
     # ─── Lifecycle ─────────────────────────────────────────────
@@ -79,8 +82,10 @@ class PhysiClaw:
     def peek(self) -> tuple[bytes, str]:
         """Overhead camera snapshot + icon detection + OCR.
 
-        If the first frame is too blurry, waits 2s and re-grabs once
-        (``GestureObserver.peek_frame`` owns that acquisition policy).
+        A blurry or blown first frame waits 2s and re-grabs once, and a
+        persistently blown one gets an inline exposure re-tune before
+        the view ships (``GestureObserver.peek_frame`` owns that
+        acquisition policy).
 
         Returns an annotated JPEG (icon bboxes drawn on the cropped
         camera view) and the matching element listing — same shape as

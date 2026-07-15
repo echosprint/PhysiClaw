@@ -509,7 +509,7 @@ def test_grab_screen_wiring_retries_through_orchestrator(
     mocker.patch.object(perception, "crop_to_phone_screen", side_effect=[blurry, sharp])
     mocker.patch.object(observation.time, "sleep")
 
-    frame, sharp_flag, _report = pc._observer.grab_screen()
+    frame, sharp_flag, _report, _retuned = pc._observer.grab_screen()
 
     assert frame is sharp
     assert sharp_flag is True

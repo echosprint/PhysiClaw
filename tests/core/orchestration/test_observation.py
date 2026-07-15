@@ -33,7 +33,7 @@ def _blown() -> np.ndarray:
     return frame
 
 
-def _observer(frames: list, *, detect=None) -> GestureObserver:
+def _observer(frames: list, *, detect=None, fix=None) -> GestureObserver:
     """Observer over a scripted frame sequence; quality is neutralized
     via the injectable monitor (re-armed per test through `_quality`),
     settle sleeps are zeroed, and the gesture blur-retry is disabled —
@@ -48,6 +48,7 @@ def _observer(frames: list, *, detect=None) -> GestureObserver:
         grab=lambda: next(it),
         detect=detect or MagicMock(return_value=("LISTING", _flat())),
         monitor=monitor,
+        fix_exposure=fix,
     )
     obs.GESTURE_SETTLE_SECONDS = 0
     obs.GRAB_BLUR_THRESHOLD = 0
@@ -76,7 +77,7 @@ def test_grab_screen_returns_sharp_frame_without_retry(mocker) -> None:
     obs = _observer([_sharp()])
     obs.GRAB_BLUR_THRESHOLD = 50.0
 
-    frame, sharp_flag, _report = obs.grab_screen()
+    frame, sharp_flag, _report, _retuned = obs.grab_screen()
 
     assert sharp_flag is True
     sleep.assert_not_called()
@@ -100,7 +101,7 @@ def test_grab_screen_retries_once_when_blurry(mocker) -> None:
     obs = _observer([_flat(), sharp])
     obs.GRAB_BLUR_THRESHOLD = 50.0
 
-    frame, sharp_flag, _report = obs.grab_screen()
+    frame, sharp_flag, _report, _retuned = obs.grab_screen()
 
     assert frame is sharp
     assert sharp_flag is True
@@ -114,7 +115,7 @@ def test_grab_screen_retries_once_when_blown(mocker) -> None:
     sharp = _sharp()
     obs = _observer([_blown(), sharp])  # blur disabled by _observer
 
-    frame, sharp_flag, _report = obs.grab_screen()
+    frame, sharp_flag, _report, _retuned = obs.grab_screen()
 
     assert frame is sharp
     assert sharp_flag is True
@@ -129,10 +130,55 @@ def test_grab_screen_flags_frame_still_blurry_after_retry(mocker) -> None:
     obs = _observer([blurry, blurry])
     obs.GRAB_BLUR_THRESHOLD = 50.0
 
-    frame, sharp_flag, _report = obs.grab_screen()
+    frame, sharp_flag, _report, _retuned = obs.grab_screen()
 
     assert frame is blurry
     assert sharp_flag is False
+
+
+def test_grab_screen_fixes_exposure_when_retry_stays_blown(mocker) -> None:
+    # Still blown after the settle-retry = the exposure itself is wrong,
+    # not settling: the injected tune runs and the corrected frame ships
+    # instead of a washed-out one. The retuned flag tells with_view to
+    # withhold the verdict (exposure changed mid-pair).
+    mocker.patch.object(observation.time, "sleep")
+    fix = MagicMock()
+    good = _sharp()
+    obs = _observer([_blown(), _blown(), good], fix=fix)
+
+    frame, sharp_flag, report, retuned = obs.grab_screen()
+
+    fix.assert_called_once()
+    assert frame is good
+    assert retuned is True
+    assert not report.blown
+
+
+def test_grab_screen_keeps_blown_frame_without_a_fixer(mocker) -> None:
+    # No fix_exposure injected → old behavior: the blown retry frame
+    # ships (with the ⚠ warning attached downstream).
+    mocker.patch.object(observation.time, "sleep")
+    blown = _blown()
+    obs = _observer([_blown(), blown])
+
+    frame, sharp_flag, report, retuned = obs.grab_screen()
+
+    assert frame is blown
+    assert retuned is False
+    assert report.blown
+
+
+def test_grab_screen_fix_crash_keeps_blown_frame(mocker) -> None:
+    # Fail-open: a crashing tune never costs the view.
+    mocker.patch.object(observation.time, "sleep")
+    blown = _blown()
+    obs = _observer([_blown(), blown], fix=MagicMock(side_effect=RuntimeError("boom")))
+
+    frame, sharp_flag, report, retuned = obs.grab_screen()
+
+    assert frame is blown
+    assert retuned is False
+    assert report.blown
 
 
 def test_grab_screen_fails_open_when_grab_raises() -> None:
@@ -142,7 +188,7 @@ def test_grab_screen_fails_open_when_grab_raises() -> None:
 
     obs = GestureObserver(park=MagicMock(), grab=grab, detect=MagicMock())
 
-    assert obs.grab_screen() == (None, False, None)
+    assert obs.grab_screen() == (None, False, None, False)
 
 
 def test_grab_screen_fails_open_when_park_raises() -> None:
@@ -152,7 +198,7 @@ def test_grab_screen_fails_open_when_park_raises() -> None:
         detect=MagicMock(),
     )
 
-    assert obs.grab_screen() == (None, False, None)
+    assert obs.grab_screen() == (None, False, None, False)
 
 
 # ---------- peek_frame ----------
@@ -169,8 +215,9 @@ def test_peek_frame_returns_sharp_frame_without_retry(mocker) -> None:
 
 
 def test_peek_frame_retries_once_and_keeps_retry_frame(mocker) -> None:
-    # Unlike grab_screen there's no verdict to protect: the retry frame
-    # is used as-is, with no second retry gate.
+    # Unlike grab_screen there's no verdict to protect: a still-blurry
+    # retry frame is used as-is, with no second blur gate (only a
+    # still-BLOWN one escalates further, to the exposure fix).
     sleep = mocker.patch.object(observation.time, "sleep")
     retry = _flat()
     obs = _observer([_flat(), retry])
@@ -191,6 +238,20 @@ def test_peek_frame_retries_once_when_blown(mocker) -> None:
     frame_out, _report = obs.peek_frame()
     assert frame_out is retry
     sleep.assert_called_once_with(obs.PEEK_RETRY_SECONDS)
+
+
+def test_peek_frame_fixes_exposure_when_retry_stays_blown(mocker) -> None:
+    mocker.patch.object(observation.time, "sleep")
+    fix = MagicMock()
+    good = _flat()
+    obs = _observer([_blown(), _blown(), good], fix=fix)
+    obs.PEEK_BLUR_THRESHOLD = 0
+
+    frame_out, report = obs.peek_frame()
+
+    fix.assert_called_once()
+    assert frame_out is good
+    assert not report.blown
 
 
 def test_peek_frame_propagates_grab_failure() -> None:
@@ -225,6 +286,22 @@ def test_with_view_appends_unchanged_verdict(mocker) -> None:
     out = obs.with_view(lambda: "Acted")
 
     assert out.text == "Acted | screen: no visible change"
+
+
+def test_with_view_withholds_verdict_when_after_grab_retuned(mocker) -> None:
+    # An inline exposure fix during the AFTER grab means the pair was
+    # captured under different exposures — the diff would read "changed
+    # everywhere", so the verdict is withheld (no marker), but the
+    # corrected view still ships.
+    mocker.patch.object(observation.time, "sleep")
+    mocker.patch.object(observation, "encode_view_jpeg", return_value=b"VIEW_JPG")
+    frames = [_flat(128), _blown(), _blown(), _flat(30)]
+    obs = _observer(frames, fix=MagicMock())
+
+    out = obs.with_view(lambda: "Acted")
+
+    assert out.text == "Acted"  # no verdict marker
+    assert out.jpeg == b"VIEW_JPG"
 
 
 def test_with_view_unmarked_when_grabs_fail() -> None:
