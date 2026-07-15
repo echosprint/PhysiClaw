@@ -16,6 +16,14 @@ failure except from the pixels. So this module judges the frames:
   icons/dock burned to white blobs on a dark home screen or Spotlight
   overlay, which is exactly the failure that strands the agent.
 
+  Known blind spot, by construction: a CATASTROPHIC white-out whose
+  median itself crosses 200 (AE caught mid-swing right after a
+  dark→bright screen flip) reads as a legit white page — and no luma
+  statistic can separate the two (measured 2026-07: a readable chat
+  page clips MORE than a nuked home screen). Acquisition handles that
+  case instead: `GestureObserver.with_view` detects the flip from the
+  before/after median jump and re-settles the grab.
+
 Thresholds were calibrated on real session frames (2026-07): a bad-rig
 corpus (Windows, overexposed + glare) vs a good-rig corpus (macOS). At
 `clip > 12% and median < 200` the rule flagged ~25% of bad-rig frames —

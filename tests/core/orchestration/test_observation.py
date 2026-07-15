@@ -328,6 +328,33 @@ def test_with_view_withholds_verdict_when_after_grab_retuned(mocker) -> None:
     assert out.jpeg == b"VIEW_JPG"
 
 
+def test_with_view_regrabs_after_brightness_flip(mocker) -> None:
+    # A dark→bright flip between the pair (unlock: lock screen → home)
+    # means the after frame was likely grabbed mid-AE-swing — one extra
+    # settle + regrab replaces it; the verdict still stands (both the
+    # mid-swing and settled frames diff as changed).
+    sleep = mocker.patch.object(observation.time, "sleep")
+    mocker.patch.object(observation, "encode_view_jpeg", return_value=b"VIEW_JPG")
+    settled = _flat(210)
+    obs = _observer([_flat(30), _flat(220), settled])
+
+    out = obs.with_view(lambda: "Acted")
+
+    sleep.assert_called_once_with(obs.FLIP_SETTLE_SECONDS)
+    assert out.text == "Acted | screen: changed"
+
+
+def test_with_view_no_flip_means_no_extra_grab(mocker) -> None:
+    # Same-page delta stays under FLIP_MEDIAN_DELTA — exactly two grabs.
+    sleep = mocker.patch.object(observation.time, "sleep")
+    mocker.patch.object(observation, "encode_view_jpeg", return_value=b"VIEW_JPG")
+    obs = _observer([_flat(128), _flat(150)])  # would StopIteration on a 3rd grab
+
+    obs.with_view(lambda: "Acted")
+
+    sleep.assert_not_called()
+
+
 def test_with_view_unmarked_when_grabs_fail() -> None:
     # Fail open: no frames → no marker, gesture result intact.
     def grab():
