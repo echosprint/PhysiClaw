@@ -181,6 +181,30 @@ def test_grab_screen_fix_crash_keeps_blown_frame(mocker) -> None:
     assert report.blown
 
 
+def test_grab_screen_fixes_deferred_tune_on_clean_bright_frame(mocker) -> None:
+    # The injected predicate can demand a fix on a CLEAN frame too — the
+    # deferred-tune case: the first bright reference after a cold start
+    # gets tuned inline, without a settle-retry (nothing is settling).
+    sleep = mocker.patch.object(observation.time, "sleep")
+    fix = MagicMock()
+    first, corrected = _sharp(), _sharp()
+    calls = []
+
+    def needs_fix(report):
+        calls.append(report)
+        return len(calls) == 1  # fix the first grab, accept the regrab
+
+    obs = _observer([first, corrected], fix=fix)
+    obs._needs_fix = needs_fix
+
+    frame, sharp_flag, report, retuned = obs.grab_screen()
+
+    fix.assert_called_once()
+    assert frame is corrected
+    assert retuned is True
+    sleep.assert_not_called()  # no blur/blown retry preceded the fix
+
+
 def test_grab_screen_fails_open_when_grab_raises() -> None:
     # The view is best-effort — a camera failure must never fail a gesture.
     def grab():

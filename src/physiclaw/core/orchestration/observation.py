@@ -3,9 +3,10 @@
 `GestureObserver` owns the observation pipeline that brackets a gesture:
 park (clearing the arm from the lens) → grab the cropped phone-screen
 frame with a blur/blown-retry (autofocus and auto-exposure settle after
-the arm's move and screen flips), escalating a persistently blown grab
-to an inline exposure re-tune so the agent gets a corrected view, not a
-warning → detect UI on the after-frame → assess camera quality → attach
+the arm's move and screen flips), escalating a persistently blown grab —
+or a deferred tune's first bright reference — to an inline exposure
+re-tune so the agent gets a corrected view, not a warning → detect UI
+on the after-frame → assess camera quality → attach
 the screen-change verdict. Gesture bodies stay thin callables; a new
 diagnostic plugs in here without touching gesture code.
 
@@ -79,6 +80,7 @@ class GestureObserver:
         monitor: quality.QualityMonitor | None = None,
         on_quality: Callable[[quality.QualityReport, int], None] | None = None,
         fix_exposure: Callable[[], None] | None = None,
+        needs_fix: Callable[[quality.QualityReport], bool] | None = None,
     ):
         self._park = park
         self._grab = grab  # () -> cropped phone-screen BGR frame
@@ -87,24 +89,27 @@ class GestureObserver:
         # (report, streak) after every judged view — perception hangs its
         # re-tune policy here without observation knowing about tuning.
         self._on_quality = on_quality
-        # Synchronous exposure fix (perception.tune_now), invoked when a
-        # grab is still blown after the settle-retry: the exposure itself
-        # is wrong, and fixing it BEFORE the view ships beats sending the
-        # agent a washed-out frame with a warning attached.
+        # Synchronous exposure fix (perception.tune_now) and the
+        # predicate deciding when a grab warrants it
+        # (perception.needs_inline_fix: washed out, or a deferred tune
+        # owed its bright reference). Fixing BEFORE the view ships beats
+        # sending the agent a mis-exposed frame with a warning attached.
         self._fix_exposure = fix_exposure
+        self._needs_fix = needs_fix if needs_fix is not None else lambda r: r.blown
 
-    def _fix_blown_grab(self, source: str, report: quality.QualityReport):
-        """A frame still blown after the settle-retry means the held
-        exposure (or blinded firmware AE) is wrong, not settling — run
-        the injected synchronous tune and grab the corrected frame.
-        Returns `(frame, report, fixed)`; on any failure the original
-        report is kept and `fixed` is False (fail-open)."""
+    def _fix_exposure_grab(self, source: str, report: quality.QualityReport):
+        """The injected predicate says this grab's exposure is wrong
+        (still blown after the settle-retry, or a deferred tune just met
+        its bright reference) — run the synchronous tune and grab the
+        corrected frame. Returns `(frame, report, fixed)`; on any
+        failure the original report is kept and `fixed` is False
+        (fail-open)."""
         if self._fix_exposure is None:
             return None, report, False
         log.info(
-            "%s: frame still blown after retry (clip %.0f%%) — tuning "
-            "exposure before the view ships",
+            "%s: %s (clip %.0f%%) — tuning exposure before the view ships",
             source,
+            "frame still blown after retry" if report.blown else "deferred tune",
             report.clip_pct * 100,
         )
         try:
@@ -155,9 +160,10 @@ class GestureObserver:
         Unlike `grab_screen`, failures propagate (a peek with no frame is
         a tool error, not a withheld verdict). A still-blurry retry frame
         is used as-is (no verdict to protect — better shown than
-        dropped); a still-BLOWN one escalates to the inline exposure fix,
-        since a washed-out frame is correctable, not just observable.
-        Caller must hold the lock."""
+        dropped); a frame the `needs_fix` predicate flags (still blown,
+        or a deferred tune just met its bright reference) escalates to
+        the inline exposure fix, since a mis-exposed frame is
+        correctable, not just observable. Caller must hold the lock."""
         self._park()
         frame = self._grab()
         report = quality.assess(frame)
@@ -172,10 +178,10 @@ class GestureObserver:
             time.sleep(self.PEEK_RETRY_SECONDS)
             frame = self._grab()
             report = quality.assess(frame)
-            if report.blown:
-                fixed_frame, report, fixed = self._fix_blown_grab("peek", report)
-                if fixed:
-                    frame = fixed_frame
+        if self._needs_fix(report):
+            fixed_frame, report, fixed = self._fix_exposure_grab("peek", report)
+            if fixed:
+                frame = fixed_frame
         return frame, report
 
     def grab_screen(self, settle: float = 0.0):
@@ -188,10 +194,11 @@ class GestureObserver:
 
         A blown frame (auto-exposure still re-converging after the screen
         content flipped dark→bright) triggers the same wait-and-regrab as
-        blur; if the regrab is STILL blown the exposure itself is wrong,
-        so the injected `fix_exposure` tune runs and the corrected frame
-        replaces the washed-out one — the agent gets a readable view
-        instead of a warning.
+        blur; when the `needs_fix` predicate then says the exposure
+        itself is wrong (still blown, or a deferred tune just met its
+        bright reference), the injected `fix_exposure` tune runs and the
+        corrected frame replaces the mis-exposed one — the agent gets a
+        readable view instead of a warning.
 
         Returns `(frame, sharp, report, retuned)`: frame is None on any
         failure (the view is best-effort, never a reason to fail a
@@ -222,17 +229,15 @@ class GestureObserver:
                 time.sleep(self.GRAB_RETRY_SECONDS)
                 frame = self._grab()
                 report = quality.assess(frame)
-                if report.blown:
-                    fixed_frame, report, retuned = self._fix_blown_grab(
-                        "gesture view", report
-                    )
-                    if retuned:
-                        frame = fixed_frame
-                if report.sharpness < self.GRAB_BLUR_THRESHOLD:
-                    log.warning(
-                        "gesture frame still blurry after retry — verdict withheld"
-                    )
-                    return frame, False, report, retuned
+            if self._needs_fix(report):
+                fixed_frame, report, retuned = self._fix_exposure_grab(
+                    "gesture view", report
+                )
+                if retuned:
+                    frame = fixed_frame
+            if report.sharpness < self.GRAB_BLUR_THRESHOLD:
+                log.warning("gesture frame blurry — verdict withheld")
+                return frame, False, report, retuned
             return frame, True, report, retuned
         except Exception:
             log.warning("screen frame grab failed", exc_info=True)

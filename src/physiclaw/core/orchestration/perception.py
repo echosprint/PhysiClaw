@@ -157,9 +157,11 @@ class Perception:
     def tune_now(self) -> None:
         """Verify-and-converge with the rig lock ALREADY HELD and the arm
         parked — the synchronous path: the observer calls this mid-grab
-        to fix a washed-out frame before the view ships to the agent,
-        instead of sending garbage and warning about it. Fail-open:
-        never raises, no-op when the rig can't tune."""
+        whenever `needs_inline_fix` flags a view (washed out, or the
+        first bright reference after a deferred cold-start tune), so the
+        corrected frame ships to the agent instead of a mis-exposed one
+        with a warning. Fail-open: never raises, no-op when the rig
+        can't tune."""
         cam, t = self._rig.cam, self._rig.transforms
         if cam is None or t is None or not cam.exposure_tunable:
             return
@@ -185,34 +187,45 @@ class Perception:
         except Exception:
             log.exception("exposure tune failed — leaving camera as-is")
 
-    def on_quality_report(self, report: quality.QualityReport, streak: int) -> None:
-        """Re-tune policy, fed every judged view by the GestureObserver.
+    def needs_inline_fix(self, report: quality.QualityReport) -> bool:
+        """Should this view's exposure be fixed before it ships?
 
-        Two triggers, both evidence-driven:
-        - any washed-out view: whatever is holding exposure (firmware AE
-          or a stale manual value) just proved wrong for the current
-          screen — re-converge immediately rather than warn. Auto's
-          failure mode alternates with screen content, so waiting for a
-          consecutive streak lets intermittent washouts run all session;
-          the single-flight guard in `_schedule_retune` is the rate limit;
-        - a bright view after a deferred tune: startup metered a dark
-          screen (lock screen / asleep) and skipped — the reference the
-          tune needs has now arrived.
-
-        Never blocks the view that reported: the tune runs on a detached
-        thread and skips itself if the hardware is busy."""
+        The single predicate behind both the observer's inline fix and
+        the background safety net. Two evidence-driven cases:
+        - a washed-out view: whatever holds exposure (firmware AE or a
+          stale manual value) just proved wrong for the current screen;
+        - a bright view while a deferred tune is owed its reference:
+          startup metered a dark screen (lock screen / asleep) and
+          skipped — tuning on the first bright view, before it ships,
+          spares the agent the blinded-firmware-auto interim entirely
+          (views that are visibly hot yet under the warning threshold)."""
         cam = self._rig.cam
         if cam is None or not cam.exposure_tunable:
+            return False
+        if report.blown:
+            return True
+        return (
+            self._last_tune is not None
+            and self._last_tune.deferred
+            and exposure.is_reference(report)
+        )
+
+    def on_quality_report(self, report: quality.QualityReport, streak: int) -> None:
+        """Background re-tune, fed every judged view by the GestureObserver.
+
+        Safety net behind the observer's inline fix (same
+        `needs_inline_fix` predicate): the inline path normally corrects
+        the view before it ships, so this fires only when that fix
+        crashed, was skipped, or didn't recover the frame. Never blocks
+        the view that reported: the tune runs on a detached thread
+        (single-flight) and skips itself if the hardware is busy."""
+        if not self.needs_inline_fix(report):
             return
         if report.blown:
             self._schedule_retune(
                 f"washed-out view ({report.clip_pct:.0%} clip, streak {streak})"
             )
-        elif (
-            self._last_tune is not None
-            and self._last_tune.deferred
-            and exposure.is_reference(report)
-        ):
+        else:
             self._schedule_retune("bright view arrived after a deferred tune")
 
     def _schedule_retune(self, reason: str) -> None:

@@ -327,6 +327,46 @@ def test_on_quality_noop_when_not_tunable(mocker, rig, per: Perception) -> None:
     sched.assert_not_called()
 
 
+def test_needs_inline_fix_true_on_blown_view(rig, per: Perception) -> None:
+    rig._cam.exposure_tunable = True
+
+    assert per.needs_inline_fix(BLOWN_REPORT) is True
+
+
+def test_needs_inline_fix_true_on_bright_view_after_deferred_tune(
+    rig, per: Perception
+) -> None:
+    rig._cam.exposure_tunable = True
+    per._last_tune = _deferred()
+
+    assert per.needs_inline_fix(_report(median=120.0)) is True
+
+
+def test_needs_inline_fix_false_on_dark_view_after_deferred_tune(
+    rig, per: Perception
+) -> None:
+    # Still no reference — the lock screen is what deferred the tune.
+    rig._cam.exposure_tunable = True
+    per._last_tune = _deferred()
+
+    assert per.needs_inline_fix(_report(median=5.0)) is False
+
+
+def test_needs_inline_fix_false_on_clean_view_after_completed_tune(
+    rig, per: Perception
+) -> None:
+    rig._cam.exposure_tunable = True
+    per._last_tune = _tune_ok()
+
+    assert per.needs_inline_fix(_report(median=120.0)) is False
+
+
+def test_needs_inline_fix_false_when_not_tunable(rig, per: Perception) -> None:
+    rig._cam.exposure_tunable = False
+
+    assert per.needs_inline_fix(BLOWN_REPORT) is False
+
+
 def test_single_blown_view_schedules_retune(mocker, rig, per: Perception) -> None:
     # One washed-out view is already proof the held exposure is wrong for
     # the current screen — no streak required (auto's failure mode
