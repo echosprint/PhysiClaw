@@ -78,6 +78,51 @@ def test_legit_white_page_is_not_blown() -> None:
     assert not r.blown
 
 
+def _burned_icon_grid(background: int) -> np.ndarray:
+    """3x4 grid of solid clipped squares — burned app icons — on the
+    given background. Icon area fraction ~2% (inside the blob band)."""
+    frame = np.full((400, 200, 3), background, dtype=np.uint8)
+    for row in range(3):
+        for col in range(4):
+            y, x = 40 + row * 100, 10 + col * 48
+            frame[y : y + 40, x : x + 40] = 255
+    return frame
+
+
+def test_icon_grid_white_out_blown_despite_white_median() -> None:
+    # The failure the histogram rule cannot see (2026-07 sessions):
+    # burned icons on a bright page — median >= 200 reads as a legit
+    # white page, but the blob signature catches the grid.
+    r = assess(_burned_icon_grid(background=210))
+    assert r.median_luma >= quality.BLOWN_MEDIAN_LUMA  # histogram rule blind
+    assert r.white_blobs >= quality.BLOWN_BLOB_COUNT
+    assert r.blown
+
+
+def test_icon_grid_white_out_blown_on_dark_background_too() -> None:
+    r = assess(_burned_icon_grid(background=30))
+    assert r.white_blobs >= quality.BLOWN_BLOB_COUNT
+    assert r.blown
+
+
+def test_icon_blob_filter_rejects_bars_and_page_sized_regions() -> None:
+    # A clipped long bar (wrong aspect) and a clipped half-page (above
+    # the area band) are not icon blobs — and with a white median the
+    # frame stays un-blown, mirroring a legit bright page.
+    frame = np.full((400, 200, 3), 30, dtype=np.uint8)
+    frame[50:70, 10:190] = 255  # bar: aspect 9
+    frame[200:400, :] = 255  # half page: area fraction 0.5
+    r = assess(frame)
+    assert r.white_blobs == 0
+    assert not r.blown
+
+
+def test_legit_white_page_has_no_icon_blobs() -> None:
+    frame = _flat(value=255)
+    frame[80:120, :, :] = _checkerboard(40, 100)[:, :, :]
+    assert assess(frame).white_blobs < quality.BLOWN_BLOB_COUNT
+
+
 def test_assess_matches_report_fields() -> None:
     frame = _flat(value=30)
     r = assess(frame)

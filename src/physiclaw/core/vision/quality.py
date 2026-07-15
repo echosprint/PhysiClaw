@@ -16,13 +16,16 @@ failure except from the pixels. So this module judges the frames:
   icons/dock burned to white blobs on a dark home screen or Spotlight
   overlay, which is exactly the failure that strands the agent.
 
-  Known blind spot, by construction: a CATASTROPHIC white-out whose
-  median itself crosses 200 (AE caught mid-swing right after a
-  dark→bright screen flip) reads as a legit white page — and no luma
-  statistic can separate the two (measured 2026-07: a readable chat
-  page clips MORE than a nuked home screen). Acquisition handles that
-  case instead: `GestureObserver.with_view` detects the flip from the
-  before/after median jump and re-settles the grab.
+  A white-out whose median itself crosses 200 (AE caught mid-swing
+  right after a dark→bright screen flip) evades the histogram rule —
+  and no luma statistic can separate it from a legit white page
+  (measured 2026-07: a readable chat page clips MORE than a nuked home
+  screen). Two complementary defenses: STRUCTURE — the icon-grid
+  variant is many icon-sized solid clipped blobs (`clipped_icon_blobs`)
+  where a white page is one page-sized component, so it folds into
+  `blown`; and ACQUISITION — `GestureObserver.with_view` detects the
+  brightness flip from the before/after median jump and re-settles the
+  grab, covering white-outs with no icon structure at all.
 
 Thresholds were calibrated on real session frames (2026-07): a bad-rig
 corpus (Windows, overexposed + glare) vs a good-rig corpus (macOS). At
@@ -82,6 +85,19 @@ CLIP_LUMA = 250
 BLOWN_CLIP_PCT = 0.12
 BLOWN_MEDIAN_LUMA = 200.0
 
+# Icon-grid white-out: many disconnected, icon-sized, solid, roughly
+# square clipped blobs — burned app icons. A legit white page is ONE
+# page-sized component (excluded by the area band) and its fragments
+# between bubbles/cards are irregular (excluded by fill/aspect).
+# Calibrated on real session frames (2026-07): blown home screens
+# scored 14 qualifying blobs, every good frame (chat pages, clean
+# homes, lock screen) ≤ 2 — threshold 6 sits in that gap.
+BLOB_MIN_AREA_FRAC = 0.002  # of the crop, ~half an app icon
+BLOB_MAX_AREA_FRAC = 0.08  # ~a 2x2 widget; a white page is far bigger
+BLOB_MIN_FILL = 0.8  # solid rounded square, not a ragged fragment
+BLOB_ASPECT = (0.6, 1.6)  # roughly square
+BLOWN_BLOB_COUNT = 6
+
 # Bad views in a row before the warning escalates from "this view is
 # unreliable" to "tell your user the rig needs attention".
 PERSIST_AFTER = 3
@@ -97,6 +113,33 @@ PERSIST_REMINDER = (
 )
 
 
+def clipped_icon_blobs(gray: np.ndarray) -> int:
+    """Count icon-like clipped blobs — the icon-grid white-out signature.
+
+    Connected components of the >= CLIP_LUMA mask, kept when icon-sized
+    (area within the BLOB_*_AREA_FRAC band), solid (bbox fill >=
+    BLOB_MIN_FILL) and roughly square (BLOB_ASPECT). See the constants
+    above for the calibration. Runs on the grayscale crop."""
+    h, w = gray.shape[:2]
+    total = h * w
+    mask = (gray >= CLIP_LUMA).astype(np.uint8)
+    n, _, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    count = 0
+    for i in range(1, n):
+        area = int(stats[i, cv2.CC_STAT_AREA])
+        frac = area / total
+        if not (BLOB_MIN_AREA_FRAC <= frac <= BLOB_MAX_AREA_FRAC):
+            continue
+        bw = int(stats[i, cv2.CC_STAT_WIDTH])
+        bh = int(stats[i, cv2.CC_STAT_HEIGHT])
+        if area / max(1, bw * bh) < BLOB_MIN_FILL:
+            continue
+        aspect = bw / max(1, bh)
+        if BLOB_ASPECT[0] <= aspect <= BLOB_ASPECT[1]:
+            count += 1
+    return count
+
+
 @dataclass(frozen=True)
 class QualityReport:
     """Measured quality of one cropped phone-screen frame."""
@@ -104,6 +147,7 @@ class QualityReport:
     sharpness: float  # variance of Laplacian — higher = sharper
     clip_pct: float  # fraction of pixels >= CLIP_LUMA
     median_luma: float  # median gray level, 0-255
+    white_blobs: int = 0  # icon-like clipped blobs (clipped_icon_blobs)
 
     @property
     def blurry(self) -> bool:
@@ -111,7 +155,15 @@ class QualityReport:
 
     @property
     def blown(self) -> bool:
-        return self.clip_pct > BLOWN_CLIP_PCT and self.median_luma < BLOWN_MEDIAN_LUMA
+        """Two failure signatures, either one:
+        - the two-factor histogram rule (clipped pixels on a non-white
+          median), which a white-median frame evades by construction;
+        - the icon-grid white-out (many icon-sized clipped blobs), which
+          catches exactly those white-median catastrophes when the
+          burned content is icon-shaped."""
+        if self.clip_pct > BLOWN_CLIP_PCT and self.median_luma < BLOWN_MEDIAN_LUMA:
+            return True
+        return self.white_blobs >= BLOWN_BLOB_COUNT
 
 
 def assess(frame: np.ndarray) -> QualityReport:
@@ -131,6 +183,7 @@ def assess(frame: np.ndarray) -> QualityReport:
         sharpness=laplacian_variance(gray),
         clip_pct=float((gray >= CLIP_LUMA).mean()),
         median_luma=float(np.median(gray)),
+        white_blobs=clipped_icon_blobs(gray),
     )
 
 

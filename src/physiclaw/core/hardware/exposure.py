@@ -30,7 +30,11 @@ import logging
 from dataclasses import dataclass
 from typing import Callable, Literal
 
-from physiclaw.core.vision.quality import BLOWN_CLIP_PCT, QualityReport
+from physiclaw.core.vision.quality import (
+    BLOWN_BLOB_COUNT,
+    BLOWN_CLIP_PCT,
+    QualityReport,
+)
 
 log = logging.getLogger(__name__)
 
@@ -102,15 +106,27 @@ class TuneResult:
 
 
 def _good(r: QualityReport) -> bool:
-    """In band: highlight headroom (near-zero clip) + readable shadows."""
-    return r.clip_pct <= TUNE_CLIP_PCT and r.median_luma >= DARK_MEDIAN_LUMA
+    """In band: highlight headroom (near-zero clip) + readable shadows.
+    `not blown` folds in every failure signature quality.py knows
+    (including the icon-grid blob axis) — the tune must never accept a
+    frame the runtime QualityMonitor would flag, or each such view
+    triggers a re-tune that changes nothing."""
+    return (
+        not r.blown
+        and r.clip_pct <= TUNE_CLIP_PCT
+        and r.median_luma >= DARK_MEDIAN_LUMA
+    )
 
 
 def _usable(r: QualityReport) -> bool:
     """Fallback-holdable: bright enough to read and under the runtime
     warning threshold — worse than `_good` (some highlights clip) but
     strictly better than a frame the QualityMonitor would flag."""
-    return r.clip_pct <= BLOWN_CLIP_PCT and r.median_luma >= DARK_MEDIAN_LUMA
+    return (
+        not r.blown
+        and r.clip_pct <= BLOWN_CLIP_PCT
+        and r.median_luma >= DARK_MEDIAN_LUMA
+    )
 
 
 def is_reference(r: QualityReport) -> bool:
@@ -239,7 +255,11 @@ def converge(
             )
         if _usable(r) and (best is None or exp < best):
             best = exp
-        direction = -1 if r.clip_pct > TUNE_CLIP_PCT else 1
+        # Darker while highlights clip — globally (clip fraction) or as
+        # burned icon blobs (which can ride on a low global clip);
+        # brighter only when neither says overexposed.
+        overexposed = r.clip_pct > TUNE_CLIP_PCT or r.white_blobs >= BLOWN_BLOB_COUNT
+        direction = -1 if overexposed else 1
         if last_dir and direction != last_dir:
             flips += 1
             if flips >= 2:

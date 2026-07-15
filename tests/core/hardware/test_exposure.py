@@ -201,6 +201,30 @@ def test_prefer_auto_false_skips_reassert_and_keeps_best_manual() -> None:
     assert "auto disabled" in res.detail
 
 
+def test_blob_blown_frame_steps_darker_to_a_clean_hold() -> None:
+    # Low global clip but a burned icon grid: not acceptable as-is (the
+    # QualityMonitor would flag it — a no-op re-tune loop otherwise),
+    # and the step direction must be DARKER — the icons are clipped even
+    # though the clip fraction alone reads "fine, go brighter".
+    blob_blown = QualityReport(
+        sharpness=500.0, clip_pct=0.015, median_luma=210.0, white_blobs=14
+    )
+    rig = Rig(
+        blob_blown,
+        {
+            -6: QualityReport(
+                sharpness=500.0, clip_pct=0.01, median_luma=180.0, white_blobs=14
+            ),
+            -7: _r(120.0),
+        },
+    )
+
+    res = converge(rig.meter, rig.set_auto, rig.set_manual, start=-6)
+
+    assert res.ok and res.mode == "manual" and res.exposure == -7
+    assert rig.manual_calls == [-6, -7]
+
+
 def test_dark_screen_defers_instead_of_converging() -> None:
     # The screen is dark (asleep / resting lock screen) even under AE:
     # there is no white level to expose for. Converging here is how a

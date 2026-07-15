@@ -183,7 +183,7 @@ def _frame_quality_verdict(frame) -> tuple[bool, str]:
     r = quality.assess(frame)
     stats = (
         f"sharpness {r.sharpness:.0f}, clip {r.clip_pct:.0%}, "
-        f"median {r.median_luma:.0f} ({scope})"
+        f"median {r.median_luma:.0f}, burned-icon blobs {r.white_blobs} ({scope})"
     )
     if r.blown:
         return False, f"quality BLOWN — overexposed/glare: {stats}"
