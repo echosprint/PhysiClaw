@@ -96,7 +96,7 @@ class GestureObserver:
         a report still failing means the retry didn't recover it. Every
         judged view is also reported to `on_quality` (with the running
         bad-view streak) so the owner can react — e.g. re-tune exposure
-        on a washout streak. Fail-open: a crash in the check never costs
+        on a washed-out view. Fail-open: a crash in the check never costs
         the view."""
         try:
             warning = self._quality.observe(report)

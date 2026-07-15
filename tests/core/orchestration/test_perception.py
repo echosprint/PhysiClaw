@@ -327,27 +327,16 @@ def test_on_quality_noop_when_not_tunable(mocker, rig, per: Perception) -> None:
     sched.assert_not_called()
 
 
-def test_blown_streak_schedules_retune(mocker, rig, per: Perception) -> None:
+def test_single_blown_view_schedules_retune(mocker, rig, per: Perception) -> None:
+    # One washed-out view is already proof the held exposure is wrong for
+    # the current screen — no streak required (auto's failure mode
+    # alternates with content, so a streak may never form). Thrash is
+    # bounded by _schedule_retune's single-flight guard, not by counting.
     rig._cam.exposure_tunable = True
     sched = mocker.patch.object(per, "_schedule_retune")
 
-    per.on_quality_report(BLOWN_REPORT, streak=perception_mod.quality.PERSIST_AFTER)
+    per.on_quality_report(BLOWN_REPORT, streak=1)
 
-    sched.assert_called_once()
-
-
-def test_blown_streak_is_rate_limited_between_multiples(
-    mocker, rig, per: Perception
-) -> None:
-    # Fires on every PERSIST_AFTER-th bad view, not every bad view.
-    rig._cam.exposure_tunable = True
-    sched = mocker.patch.object(per, "_schedule_retune")
-    n = perception_mod.quality.PERSIST_AFTER
-
-    per.on_quality_report(BLOWN_REPORT, streak=n + 1)
-    sched.assert_not_called()
-
-    per.on_quality_report(BLOWN_REPORT, streak=2 * n)
     sched.assert_called_once()
 
 

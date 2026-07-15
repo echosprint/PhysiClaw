@@ -177,10 +177,12 @@ class Perception:
         """Re-tune policy, fed every judged view by the GestureObserver.
 
         Two triggers, both evidence-driven:
-        - a washout streak: the held exposure (or firmware AE) is blowing
-          views out repeatedly — re-converge rather than warn forever.
-          Fires on every PERSIST_AFTER-th consecutive bad view, which
-          rate-limits retries while the streak lasts;
+        - any washed-out view: whatever is holding exposure (firmware AE
+          or a stale manual value) just proved wrong for the current
+          screen — re-converge immediately rather than warn. Auto's
+          failure mode alternates with screen content, so waiting for a
+          consecutive streak lets intermittent washouts run all session;
+          the single-flight guard in `_schedule_retune` is the rate limit;
         - a bright view after a deferred tune: startup metered a dark
           screen (lock screen / asleep) and skipped — the reference the
           tune needs has now arrived.
@@ -190,8 +192,10 @@ class Perception:
         cam = self._rig.cam
         if cam is None or not cam.exposure_tunable:
             return
-        if report.blown and streak > 0 and streak % quality.PERSIST_AFTER == 0:
-            self._schedule_retune(f"washed-out views {streak} in a row")
+        if report.blown:
+            self._schedule_retune(
+                f"washed-out view ({report.clip_pct:.0%} clip, streak {streak})"
+            )
         elif (
             self._last_tune is not None
             and self._last_tune.deferred

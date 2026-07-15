@@ -138,8 +138,9 @@ class QualityMonitor:
 
     @property
     def streak(self) -> int:
-        """Consecutive bad views so far (0 after any good view) — read by
-        the orchestration layer to decide when to re-tune exposure."""
+        """Consecutive bad views so far (0 after any good view) — handed
+        to the orchestration layer's quality callback as context for its
+        re-tune decisions and logs."""
         return self._streak
 
     def observe(self, report: QualityReport) -> str | None:
