@@ -68,7 +68,8 @@ def main() -> None:
     pr = sub.add_parser("record", help="Validate + persist boxes read off a page")
     pr.add_argument("--page", required=True, choices=list(screen_layout.PAGES))
     pr.add_argument(
-        "--app", help="chat app for the chat pages (wechat, whatsapp, …); omit for spotlight"
+        "--app",
+        help="chat app for the chat pages (wechat, whatsapp, …); omit for spotlight",
     )
     pr.add_argument(
         "--box",
