@@ -65,7 +65,8 @@ HINT_VIEW_AFTER_HOME = (
 )
 HINT_VIEW_AFTER_BACK = "— check the attached view: did navigation pop?"
 HINT_VIEW_AFTER_FORCE_QUIT = (
-    "— the attached view shows the home screen; reopen the app fresh"
+    "— check the attached view: home screen means done, reopen the app "
+    "fresh; anything else means the gesture missed — recover from there"
 )
 HINT_VIEW_AFTER_UNLOCK = "— the attached view should show the home screen"
 HINT_AFTER_CLIPBOARD = (
@@ -260,10 +261,11 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw) -> None:
     @mcp.tool(structured_output=False)
     @logged
     async def force_quit() -> list | str:
-        """Force-quit the current app via the iOS app-switcher gesture (~7s) — hard reset when you're stuck on the wrong app page and can't find the entry you need from here.
+        """Force-quit the current app via the iOS app-switcher gesture (~8s) — hard reset when you're stuck on the wrong app page and can't find the entry you need from here.
 
-        Lands on home screen (the attached view confirms). Reopen the
-        app fresh from there.
+        Normally lands on the home screen — CHECK the attached view
+        before reopening the app: if it shows the app switcher or the
+        same app page, the gesture missed; recover from what you see.
 
         Use after `go_back` hasn't gotten you to the right entry point —
         when popups won't dismiss, the back stack loops, or the wrong

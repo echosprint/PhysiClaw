@@ -132,15 +132,19 @@ class PhysiClaw:
         size: gestures.Size = "m",
         speed: gestures.Speed = "medium",
         start_dwell: float = 0.0,
+        end_dwell: float = 0.0,
     ):
         """Swipe from bbox center. Caller must hold the lock. `start_dwell` (s)
-        anchors the touch-down at the start before sliding (see arm.swipe_to)."""
+        anchors the touch-down at the start before sliding; `end_dwell` (s)
+        holds the endpoint before release (see arm.swipe_to)."""
         self._validator.require_no_at_crossing(bbox, direction)
         t = self.rig.transforms
         ex, ey = t.swipe_end_pct(bbox, direction, gestures.SWIPE_DISTANCES[size])
         ex_mm, ey_mm = t.pct_to_grbl_mm(ex, ey)
         self.rig.move_to_bbox_center(bbox)
-        self.rig.require_arm().swipe_to(ex_mm, ey_mm, speed, start_dwell=start_dwell)
+        self.rig.require_arm().swipe_to(
+            ex_mm, ey_mm, speed, start_dwell=start_dwell, end_dwell=end_dwell
+        )
 
     # ─── Screen-change verdict ────────────────────────────────
 
@@ -166,8 +170,8 @@ class PhysiClaw:
             case gestures.LongPress(bbox):
                 self._press(bbox, "long_press")
                 return f"Long pressed at bbox {bbox}"
-            case gestures.Swipe(bbox, direction, size, speed, start_dwell):
-                self._swipe(bbox, direction, size, speed, start_dwell)
+            case gestures.Swipe(bbox, direction, size, speed, start_dwell, end_dwell):
+                self._swipe(bbox, direction, size, speed, start_dwell, end_dwell)
                 return f"Swiped {direction} {size} at bbox {bbox}"
             case gestures.SendToClipboard(text):
                 return self._send_to_clipboard(text)
@@ -309,7 +313,10 @@ class PhysiClaw:
         return self._run_macro(gestures.GO_BACK, "Went back")
 
     def force_quit(self) -> "GestureResult":
-        """Force-quit current app via the iOS app-switcher gesture."""
+        """Force-quit current app via the iOS app-switcher recipe
+        (gestures.FORCE_QUIT): open with swipe-up-and-hold, drag the
+        clipped current-app card to center, fling it, dismiss the
+        switcher. The attached view shows where you landed."""
         return self._run_macro(gestures.FORCE_QUIT, "Force-quit current app")
 
     def unlock_phone(self) -> "GestureResult":

@@ -607,6 +607,24 @@ def test_swipe_to_start_dwell_anchors_touch_before_slide(mocker) -> None:
     assert written.find(b"G4 P0.08") < written.rfind(b"G1 X12.500")
 
 
+def test_swipe_to_end_dwell_holds_endpoint_before_release(mocker) -> None:
+    # press(3) + G1 linear(1) + end-dwell G4(1) + release(2) = 7 ok's.
+    arm, fake = _arm(
+        mocker,
+        responses=[b"ok\n"] * 7,
+        status_replies=[b"<Idle|WPos:0,0>\n"],
+    )
+
+    arm.swipe_to(12.5, -4.0, speed="medium", end_dwell=0.6)
+
+    written = b"".join(fake.writes)
+    # The endpoint hold sits between the slide and the release — the
+    # pause iOS reads as "open the app switcher" instead of "go home".
+    assert b"G4 P0.6" in written
+    assert written.find(b"G4 P0.6") > written.find(b"G1 X12.500")
+    assert written.find(b"G4 P0.6") < written.rfind(b"M5")
+
+
 # ---------- move ----------
 
 

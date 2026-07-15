@@ -357,7 +357,12 @@ class StylusArm:
             self._send(GCODE_ABSOLUTE)  # restore absolute mode
 
     def swipe_to(
-        self, x: float, y: float, speed: str = "medium", start_dwell: float = 0.0
+        self,
+        x: float,
+        y: float,
+        speed: str = "medium",
+        start_dwell: float = 0.0,
+        end_dwell: float = 0.0,
     ) -> None:
         """Swipe to an absolute work-coordinate (x, y) in mm: press, slide,
         release. Unlike :meth:`swipe` (relative cardinal direction), this
@@ -368,11 +373,19 @@ class StylusArm:
         before the slide — so iOS registers a touch-down at that point before
         the drag. Needed for the left-edge back gesture: the interactive-pop
         recognizer only arms if the touch is seen at the edge first; a fast
-        slide that starts moving on contact skips past the narrow edge zone."""
+        slide that starts moving on contact skips past the narrow edge zone.
+
+        `end_dwell` (s) holds the tip pressed at the endpoint AFTER the slide,
+        before release — iOS reads a bottom swipe-up-and-hold as "open the app
+        switcher", while releasing on arrival reads as "go home". G4 is a sync
+        barrier, so the dwell runs after the slide finishes and the release
+        M-code queues after the dwell."""
         with self.solenoid.held():
             if start_dwell:
                 self._dwell(start_dwell)
             self._linear_move(x, y, speed=self.SWIPE_SPEEDS[speed])
+            if end_dwell:
+                self._dwell(end_dwell)
         self.wait_idle()
 
     def lift_stylus(self) -> None:

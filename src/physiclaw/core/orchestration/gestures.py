@@ -68,6 +68,9 @@ class Swipe:
     # see arm.swipe_to. Only the iOS edge-pan macros below need it; the
     # agent-facing swipe paths always leave it 0.
     start_dwell: float = 0.0
+    # Hold the tip pressed this long at the endpoint, before release —
+    # see arm.swipe_to. Only the switcher-open macro below needs it.
+    end_dwell: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -109,13 +112,31 @@ GO_BACK: tuple[Gesture, ...] = (
     Swipe(LEFT_EDGE, "right", "xxl", "fast", BACK_EDGE_DWELL_SECONDS),
 )
 
-# Force-quit: open the app switcher, center the card, fling it away, then
-# tap the home area. Step 1's swipe is short on purpose — a longer upward
-# swipe from the bottom edge would go home instead of opening the switcher.
+# Force-quit, four steps. The switcher opens with the current app's
+# card clipped at the RIGHT edge and the previous app centered — so:
+# open, drag the clipped card itself to center (the card follows the
+# stylus; a center-anchored momentum scroll scatters and used to quit
+# the wrong app), fling it, tap the wallpaper below the cards to
+# dismiss (flinging the last card lands home by itself).
+
+# Hold at the open-swipe's end this long before lifting — the pause is
+# what iOS reads as "open the app switcher"; releasing on arrival reads
+# as "go home". (start_dwell anchors the touch-down; this anchors the
+# stop.)
+SWITCHER_HOLD_SECONDS = 0.6
+
+# Where the current app's clipped card sits when the switcher opens.
+RIGHT_CENTER = [0.8, 0.4, 0.9, 0.6]
+
 FORCE_QUIT: tuple[Gesture, ...] = (
-    Swipe(BOTTOM_EDGE, "up", "s", "slow"),
-    Swipe([0.4, 0.45, 0.6, 0.55], "left", "m", "medium"),
-    Swipe([0.4, 0.70, 0.6, 0.80], "up", "xl", "fast"),
+    # Short slow swipe-up-and-hold: the hold does the talking, the
+    # slide stays small and gentle to keep go-home momentum out.
+    Swipe(BOTTOM_EDGE, "up", "s", "slow", end_dwell=SWITCHER_HOLD_SECONDS),
+    # Drag the clipped current-app card from the right edge to center.
+    Swipe(RIGHT_CENTER, "left", "l", "medium"),
+    # Fling it: start on the centered card's lower half for max travel.
+    Swipe([0.4, 0.7, 0.6, 0.8], "up", "xl", "fast"),
+    # Dismiss the switcher via the wallpaper strip below the cards.
     Tap([0.4, 0.92, 0.6, 0.96]),
 )
 

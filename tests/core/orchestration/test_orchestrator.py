@@ -608,15 +608,27 @@ def test_go_back_dwells_at_the_edge(pc: PhysiClaw, wire_rig) -> None:
     assert kwargs["start_dwell"] == gestures.BACK_EDGE_DWELL_SECONDS
 
 
-def test_force_quit_runs_four_gestures(pc: PhysiClaw, wire_rig) -> None:
+def test_force_quit_runs_the_four_step_recipe(pc: PhysiClaw, wire_rig) -> None:
     wire_rig(pc.rig)
 
     out = pc.force_quit()
 
     assert "Force-quit" in out.text
-    # Three swipes + one tap.
+    # open + card drag + fling, then the dismiss tap.
     assert pc.rig._arm.swipe_to.call_count == 3
     assert pc.rig._arm.tap.call_count == 1
+
+
+def test_force_quit_open_swipe_holds_before_lift(pc: PhysiClaw, wire_rig) -> None:
+    # The pause before the lift is what iOS reads as "switcher" — the
+    # recipe's end_dwell must reach arm.swipe_to on the OPEN swipe only.
+    wire_rig(pc.rig)
+
+    pc.force_quit()
+
+    dwells = [c.kwargs["end_dwell"] for c in pc.rig._arm.swipe_to.call_args_list]
+    assert dwells[0] == gestures.SWITCHER_HOLD_SECONDS
+    assert dwells[1:] == [0.0, 0.0]
 
 
 # ---------- unlock_phone ----------
