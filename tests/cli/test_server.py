@@ -616,7 +616,11 @@ def test_resume_thread_verify_mode(
 
     captured["target"]()
 
-    deps["warm_start"].try_resume.assert_called_once_with(None, verify=expected_verify)
+    call = deps["warm_start"].try_resume.call_args
+    assert call.args == (None,)
+    assert call.kwargs["verify"] is expected_verify
+    # The default assembly's state objects ride along as parameters.
+    assert {"physiclaw", "calib", "phone"} <= set(call.kwargs)
     interrupt_spy.assert_not_called()
 
 

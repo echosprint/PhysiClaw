@@ -18,6 +18,7 @@ orchestrator never touches pixels.
 """
 
 import logging
+import threading
 import time
 from typing import assert_never
 
@@ -33,7 +34,6 @@ from physiclaw.core.orchestration.rig import HardwareRig
 from physiclaw.core.vision.util import (
     decode_image,
     encode_view_jpeg,
-    find_numpad_digit,
     validate_bbox,
 )
 
@@ -54,6 +54,7 @@ class PhysiClaw:
             transforms=lambda: self.rig.transforms,
         )
         self._clipboard = ClipboardSyncState()
+        self._become_ready_lock = threading.Lock()  # see become_ready
         # Lambdas, not bound methods: they look `grab`/`detect` up on the
         # perception object at call time, so a replaced (or test-patched)
         # implementation is honored for the observer too.
@@ -71,6 +72,29 @@ class PhysiClaw:
         )
 
     # ─── Lifecycle ─────────────────────────────────────────────
+
+    def become_ready(self):
+        """Settle the camera (exposure tune + focus lock), THEN flip the
+        ready flag — the single ready-flipping path. Ordering matters:
+        the agent runtime polls `ready` and peeks immediately, so
+        flipping first would let the first view of a session ship from
+        an unsettled camera. `settle_camera` is fail-open; the finally
+        is the backstop that keeps "ready always flips" true even if
+        that claim ever grows a hole — a failed settle must cost the
+        settle, never readiness.
+
+        Single-flight: a duplicate call (wizard page refreshed during
+        the settle window re-fires /api/ready) waits for the in-flight
+        settle instead of busy-skipping its own and flipping ready on a
+        still-unsettled camera; once ready, later calls no-op.
+        Callers: warm-start, /api/ready."""
+        with self._become_ready_lock:
+            if self.rig.ready:
+                return
+            try:
+                self.perception.settle_camera()
+            finally:
+                self.rig.mark_ready()
 
     def shutdown(self):
         """Release the coil, park, and close every device handle.
@@ -144,16 +168,19 @@ class PhysiClaw:
         start_dwell: float = 0.0,
         end_dwell: float = 0.0,
     ):
-        """Swipe from bbox center. Caller must hold the lock. `start_dwell` (s)
-        anchors the touch-down at the start before sliding; `end_dwell` (s)
-        holds the endpoint before release (see arm.swipe_to)."""
+        """Swipe from bbox center: AT-crossing guard, then the rig's swipe
+        primitive — resolving the size keyword to a screen-fraction
+        distance is the facade's only geometry job here. `start_dwell` /
+        `end_dwell` (s) anchor the touch-down / hold the endpoint (see
+        arm.swipe_to). Caller must hold the lock."""
         self._validator.require_no_at_crossing(bbox, direction)
-        t = self.rig.transforms
-        ex, ey = t.swipe_end_pct(bbox, direction, gestures.SWIPE_DISTANCES[size])
-        ex_mm, ey_mm = t.pct_to_grbl_mm(ex, ey)
-        self.rig.move_to_bbox_center(bbox)
-        self.rig.require_arm().swipe_to(
-            ex_mm, ey_mm, speed, start_dwell=start_dwell, end_dwell=end_dwell
+        self.rig.swipe_from_bbox(
+            bbox,
+            direction,
+            gestures.SWIPE_DISTANCES[size],
+            speed,
+            start_dwell=start_dwell,
+            end_dwell=end_dwell,
         )
 
     # ─── Screen-change verdict ────────────────────────────────
@@ -170,6 +197,7 @@ class PhysiClaw:
         action text — the single dispatch point shared by the public
         gesture methods, `sequence` steps, and the macro recipes.
         Caller must hold the lock."""
+        self.rig.assert_locked()
         match step:
             case gestures.Tap(bbox):
                 self._press(bbox, "tap")
@@ -256,16 +284,11 @@ class PhysiClaw:
         # AT setup would sit on the bridge for a late Shortcut run to fetch.
         self.rig.require_assistive_touch()
         timeout = self._clipboard.begin()
-        bridge = self.rig.bridge
-        bridge.send_text(text)
-        self.rig.at_long_press()
-        if bridge.wait_clipboard(timeout=timeout):
+        # The queue/long-press/wait/un-queue choreography is the rig's
+        # (`sync_clipboard`); the facade owns only the retry/miss policy.
+        if self.rig.sync_clipboard(text, timeout):
             self._clipboard.confirm()
             return f"Copied {len(text)} chars to phone clipboard"
-        # Un-queue the text so a LATE Shortcut run can't fetch it after
-        # this timeout — the error below promises the phone clipboard
-        # still holds the previous content; keep that true, not racy.
-        bridge.clear_text()
         raise ClipboardSyncError(self._clipboard.record_miss())
 
     def send_to_clipboard(self, text: str) -> str:
@@ -345,17 +368,9 @@ class PhysiClaw:
             for step in gestures.UNLOCK_WAKE:
                 self._execute(step)
             self.rig.park()
-            time.sleep(2)  # Face ID starts; the poll below absorbs the rest
+            time.sleep(2)  # Face ID starts; the keypad poll absorbs the rest
 
-            # Poll for passcode keypad (Face ID fails after a few seconds)
-            digit_bbox = None
-            for _ in range(8):
-                elements = self.perception.scan_text()
-                digit_bbox = find_numpad_digit(elements, "1")
-                if digit_bbox is not None:
-                    break
-                time.sleep(1)
-
+            digit_bbox = self.perception.wait_for_numpad_digit("1")
             if digit_bbox is None:
                 return "Failed to find passcode keypad — phone may already be unlocked"
 

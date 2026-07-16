@@ -27,7 +27,11 @@ from physiclaw.core.vision.preprocess import (
     phone_screen_crop_box,
 )
 from physiclaw.core.vision.ui_elements import detect_ui_elements, elements_to_json
-from physiclaw.core.vision.util import bbox_on_screen, format_elements
+from physiclaw.core.vision.util import (
+    bbox_on_screen,
+    find_numpad_digit,
+    format_elements,
+)
 from physiclaw.core.vision.watchdog import Watchdog
 
 log = logging.getLogger(__name__)
@@ -43,6 +47,12 @@ class Perception:
 
     def __init__(self, rig: HardwareRig):
         self._rig = rig
+        # Serialize first-use model construction (the watch route and a
+        # concurrent tool op could otherwise double-load a heavy model).
+        # One lock per detector so loading one model never blocks a
+        # caller that wants the other, already-cached one.
+        self._ocr_init_lock = threading.Lock()
+        self._icon_init_lock = threading.Lock()
         self._ocr_reader: OCRReader | None = None
         self._icon_detector: IconDetector | None = None
         self._watchdog = Watchdog()
@@ -56,15 +66,20 @@ class Perception:
     # ─── Lazy detectors ───────────────────────────────────────
 
     def ocr_reader(self) -> OCRReader:
-        """Lazy-load and cache the OCR reader."""
+        """Lazy-load and cache the OCR reader. Double-checked: the warm
+        path returns the cached instance without touching the lock."""
         if self._ocr_reader is None:
-            self._ocr_reader = OCRReader()
+            with self._ocr_init_lock:
+                if self._ocr_reader is None:
+                    self._ocr_reader = OCRReader()
         return self._ocr_reader
 
     def icon_detector(self) -> IconDetector:
-        """Lazy-load and cache the icon detector."""
+        """Lazy-load and cache the icon detector (see ocr_reader)."""
         if self._icon_detector is None:
-            self._icon_detector = IconDetector()
+            with self._icon_init_lock:
+                if self._icon_detector is None:
+                    self._icon_detector = IconDetector()
         return self._icon_detector
 
     # ─── Frame acquisition ────────────────────────────────────
@@ -109,6 +124,7 @@ class Perception:
         The agent-facing tools go through ``detect`` instead, which also
         runs icon detection.
         """
+        self._rig.assert_locked()
         self._rig.park()
         frame = self.camera_view()
         results = self.ocr_reader().read(
@@ -116,6 +132,21 @@ class Perception:
         )
         elements = results_to_elements(results, self._rig.transforms)
         return [e for e in elements if bbox_on_screen(e["bbox"])]
+
+    def wait_for_numpad_digit(
+        self, digit: str, attempts: int = 8, interval: float = 1.0
+    ) -> list[float] | None:
+        """Poll ``scan_text`` until the passcode keypad shows `digit`;
+        return its bbox, or None after `attempts` polls. Caller must hold
+        the lock. Used by unlock: Face ID takes a few seconds to fail
+        before the keypad appears, so one scan isn't enough."""
+        for _ in range(attempts):
+            elements = self.scan_text()
+            bbox = find_numpad_digit(elements, digit)
+            if bbox is not None:
+                return bbox
+            time.sleep(interval)
+        return None
 
     # ─── Watchdog ────────────────────────────────────────────
 
@@ -150,8 +181,11 @@ class Perception:
     def _with_rig_parked(self, name: str, body) -> bool:
         """Acquire the rig, park the arm (a stylus in frame would
         pollute any meter), run `body`, always release. Returns False
-        on a busy skip — the rig-lock discipline for every settle
-        entry point, defined once."""
+        on a busy skip OR a failure — the rig-lock discipline for every
+        settle entry point, defined once. The catch below is what makes
+        the settle paths' "fail-open, never raises" claim actually true:
+        `park()` is a serial arm move that can raise (timeout, alarm),
+        and a settle must never take readiness or a session down with it."""
         try:
             self._rig.acquire()
         except RuntimeError:
@@ -161,6 +195,9 @@ class Perception:
             self._rig.park()
             body()
             return True
+        except Exception:
+            log.exception("%s: failed — leaving camera as-is", name)
+            return False
         finally:
             self._rig.release()
 
@@ -172,20 +209,26 @@ class Perception:
         means nothing) and lives here instead of in each caller.
         Fail-open: never raises, never blocks a session.
 
-        A busy skip seeds a DEFERRED lock result so the re-lock policy
-        retries on the next sharp view — otherwise a skipped startup
-        would leave the lens hunting for the whole session."""
+        A skipped settle (rig busy, or the park/meter failed) seeds a
+        DEFERRED lock result so the re-lock policy retries on the next
+        sharp view — otherwise a skipped startup would leave the lens
+        hunting for the whole session."""
         cam, t = self._rig.cam, self._rig.transforms
         if cam is None or t is None:
             return
+        # Probe BEFORE the settle: if the settle fails because the camera
+        # channel is momentarily wedged, a post-failure probe could read
+        # False and skip the seed, disabling the re-lock policy for the
+        # whole session.
+        lockable = cam.focus_lockable
 
         def body() -> None:
             self.tune_now()
             self.lock_focus_now()
 
-        if not self._with_rig_parked("camera settle", body) and cam.focus_lockable:
+        if not self._with_rig_parked("camera settle", body) and lockable:
             self._last_lock = focus.LockResult(
-                False, "startup lock skipped (hardware busy)", deferred=True
+                False, "startup lock skipped (busy or failed)", deferred=True
             )
 
     def tune_exposure(self) -> None:
@@ -214,6 +257,7 @@ class Perception:
         corrected frame ships to the agent instead of a mis-exposed one
         with a warning. Fail-open: never raises, no-op when the rig
         can't tune."""
+        self._rig.assert_locked()
         cam, t = self._rig.cam, self._rig.transforms
         if cam is None or t is None or not cam.exposure_tunable:
             return
@@ -264,6 +308,7 @@ class Perception:
         parked. Fail-open: never raises, no-op when the rig can't lock.
         The meter scores only sharpness (`laplacian_variance`), skipping
         the histogram/blob statistics `assess` would also compute."""
+        self._rig.assert_locked()
         cam, t = self._rig.cam, self._rig.transforms
         if cam is None or t is None or not cam.focus_lockable:
             return

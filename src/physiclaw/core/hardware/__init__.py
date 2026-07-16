@@ -1,7 +1,11 @@
 """Physical device control for PhysiClaw.
 
 GRBL stylus arm, OpenCV camera, and AssistiveTouch screenshot pipeline.
-Knows nothing about computer vision or calibration.
+Knows nothing about the bridge, calibration, orchestration, or server
+layers (enforced by tests/test_architecture.py). Two leaf dependencies
+are deliberate: the exposure/focus policies consume ``core.vision``'s
+pure quality metrics, and coordinate contracts come from
+``core.geometry``.
 """
 
 from physiclaw.core.hardware.arm import StylusArm

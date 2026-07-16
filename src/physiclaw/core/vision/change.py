@@ -59,6 +59,7 @@ accumulates, never acts on a single verdict.
 import cv2
 import numpy as np
 
+from physiclaw.common.config import CONFIG
 from physiclaw.core.vision.preprocess import (
     gaussian_blur,
     grayscale,
@@ -78,7 +79,8 @@ NOISE_THRESHOLD = 25
 # popping, a page turning; camera flicker on a static screen is well
 # under 0.05%. Small localized changes (a badge, a toast, one digit)
 # sit below this — the LOCALIZED trigger below catches those.
-RATIO_THRESHOLD = 0.003
+# Seeded from `[vision]` config — see quality.py for the rationale.
+RATIO_THRESHOLD = CONFIG.vision.change_ratio_threshold
 
 # LOCALIZED-change trigger: after morphological opening removes scattered
 # noise + thin alignment-residue edges, one connected changed region this

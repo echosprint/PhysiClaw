@@ -21,7 +21,6 @@ def test_bridge_register_wires_control_routes_only(fake_mcp) -> None:
     bridge_reg.register(
         fake_mcp,
         bridge=MagicMock(),
-        calib=MagicMock(),
         phone=MagicMock(),
     )
 
@@ -98,7 +97,7 @@ async def test_bridge_routes_forward_to_handlers(
         s.side_effect = _ok
 
     br, cb, ph = MagicMock(), MagicMock(), MagicMock()
-    bridge_reg.register(fake_mcp, br, cb, ph)
+    bridge_reg.register(fake_mcp, br, ph)
     bridge_reg.register_phone(fake_mcp, br, cb, ph)
 
     req = async_request()

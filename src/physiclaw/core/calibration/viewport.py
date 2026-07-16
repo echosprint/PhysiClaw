@@ -22,8 +22,12 @@ import numpy as np
 
 from physiclaw.common import paths
 from physiclaw.core.bridge import BridgeState, CalibrationState
-from physiclaw.core.bridge.calib import SQUARE_CSS_SIZE, SQUARE_CSS_X, SQUARE_CSS_Y
-from physiclaw.core.calibration.transforms import ViewportShift
+from physiclaw.core.geometry import (
+    SQUARE_CSS_SIZE,
+    SQUARE_CSS_X,
+    SQUARE_CSS_Y,
+    ViewportShift,
+)
 from physiclaw.core.vision.colors import ORANGE_HSV_RANGE, hsv_mask
 from physiclaw.core.vision.preprocess import to_hsv
 
@@ -31,9 +35,9 @@ log = logging.getLogger(__name__)
 
 VIEWPORT_CACHE_STEM = paths.calibration_cache_dir() / "viewport"
 
-# The pre-cal square's CSS position is single-sourced in bridge/calib.py
-# (imported at top): the page draws it exactly where this module's
-# screenshot mapping expects to find it.
+# The pre-cal square's CSS position is single-sourced in
+# core/geometry/screen.py (imported at top): the page draws it exactly
+# where this module's screenshot mapping expects to find it.
 
 
 def _find_viewport_cache() -> Path | None:

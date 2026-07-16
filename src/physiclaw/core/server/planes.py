@@ -10,10 +10,12 @@ crosses the bridge — screenshots and clipboard text are the agent
 reporting its own activity, and calibration is routine rig work — so a
 token would only add setup friction (hand-typing it into iOS Shortcut
 URLs) without moving the threat model: the bind split keeps the
-arm-driving surface off the LAN, the upload guards gate the one
-data-injecting route (arming window, IP pin, size cap, magic bytes —
-see ``bridge/handler.py``), and hostile-Wi-Fi safety is a transport
-problem (Tailscale/WireGuard), not a token problem.
+arm-driving surface off the LAN (structurally — see
+``PHONE_PLANE_PATHS``), the data-injecting routes are gated (screenshot
+upload: arming window + IP pin + size cap + magic bytes; touch
+reports: phase gate — accepted only while a calibration step has a
+visual on screen; see ``bridge/handler.py``), and hostile-Wi-Fi safety
+is a transport problem (Tailscale/WireGuard), not a token problem.
 
 FastMCP's own ``transport_security`` covers only the ``/mcp`` route —
 ``@mcp.custom_route`` routes are explicitly exempt from SDK auth. So
@@ -40,19 +42,44 @@ log = logging.getLogger(__name__)
 # Host values a local browser/client legitimately sends to a loopback bind.
 _LOCAL_HOSTNAMES = frozenset({"localhost", "127.0.0.1", "::1", "[::1]"})
 
+# The complete set of LAN-exposed paths — the phone page's XHRs and the
+# two iOS Shortcut endpoints, nothing else. ``PhoneApp.custom_route``
+# REFUSES any path not listed here, so a copy-paste error that would
+# put a control route (arm-driving, setup, calibrate) on the LAN plane
+# fails at assembly time instead of silently exposing it. Adding a
+# phone route is a deliberate two-step: register it AND list it here.
+PHONE_PLANE_PATHS = frozenset(
+    {
+        "/bridge",
+        "/api/bridge/state",
+        "/api/bridge/tapped",
+        "/api/bridge/screen-dimension",
+        "/api/bridge/screenshot",
+        "/api/bridge/clipboard",
+        "/api/bridge/touch",
+    }
+)
+
 
 class PhoneApp:
     """Route collector with FastMCP's ``custom_route`` decorator shape.
 
     Lets ``register_phone`` in each feature module read identically to its
     control-plane sibling; ``build()`` turns the collected routes into the
-    LAN-facing Starlette app.
+    LAN-facing Starlette app. Registration is gated by
+    ``PHONE_PLANE_PATHS`` — see that constant for why.
     """
 
     def __init__(self) -> None:
         self._routes: list[Route] = []
 
     def custom_route(self, path: str, methods: list[str]) -> Callable:
+        if path not in PHONE_PLANE_PATHS:
+            raise RuntimeError(
+                f"refusing to expose {path!r} on the LAN phone plane — "
+                "phone routes must be listed in planes.PHONE_PLANE_PATHS"
+            )
+
         def deco(fn: Callable) -> Callable:
             self._routes.append(Route(path, endpoint=fn, methods=methods))
             return fn

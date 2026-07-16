@@ -358,11 +358,26 @@ def _warm_start_hardware(
     flag = ws.resume_flag(verify)
 
     def _warm_start_thread() -> None:
+        from physiclaw.core.server.app import default_bundle
+
         if not ws.wait_for_port(host, port):
             log.error("%s: server never started accepting connections; exiting.", flag)
             _thread.interrupt_main()
             return
-        if not ws.try_resume(cam_index, verify=verify):
+        try:
+            resumed = ws.try_resume(
+                cam_index,
+                verify=verify,
+                physiclaw=default_bundle.physiclaw,
+                calib=default_bundle.calib,
+                phone=default_bundle.phone,
+            )
+        except Exception:
+            # A raise here would otherwise die with the daemon thread,
+            # leaving the server up but never ready and no diagnosis.
+            log.exception("%s: resume crashed", flag)
+            resumed = False
+        if not resumed:
             # Mode-neutral hint: the user may have typed `physiclaw now`,
             # `physiclaw server -H`, or `--warm-start` — try_resume already
             # named the failing mode in its diagnosis.

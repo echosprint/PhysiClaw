@@ -22,4 +22,12 @@ from physiclaw.common.text import read_text
 _PKG_ROOT = Path(__file__).resolve().parents[2]
 _INSTRUCTIONS = read_text(_PKG_ROOT / "agent" / "context" / "PHYSICLAW.md")
 
-mcp = FastMCP("physiclaw", instructions=_INSTRUCTIONS)
+
+def build_mcp() -> FastMCP:
+    """A fresh, unwired FastMCP instance — `app.build_server()` uses this
+    so each assembly gets its own instance (tools/routes registered twice
+    on one instance would collide)."""
+    return FastMCP("physiclaw", instructions=_INSTRUCTIONS)
+
+
+mcp = build_mcp()

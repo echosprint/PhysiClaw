@@ -127,9 +127,10 @@ def test_set_mode_bridge_does_not_arm_upload_window() -> None:
     assert bridge.arm_upload_calls == []
 
 
-def test_set_mode_bridge_with_phase_does_not_call_set_phase() -> None:
-    # Phase forwarding is gated on `mode == "calibrate"` — passing phase
-    # during a switch back to bridge must NOT touch cal.set_phase.
+def test_set_mode_bridge_resets_phase_and_ignores_passed_phase() -> None:
+    # Switching back to bridge re-arms the touch gate by resetting the
+    # phase to "idle"; a phase passed alongside is ignored — phase
+    # forwarding stays gated on `mode == "calibrate"`.
     cal = _cal_stub()
     p = PageState(_bridge_stub(), cal)
     p.set_mode("calibrate")  # populate set_phase_calls baseline
@@ -137,7 +138,7 @@ def test_set_mode_bridge_with_phase_does_not_call_set_phase() -> None:
 
     p.set_mode("bridge", phase="ignored")
 
-    assert cal.set_phase_calls == []
+    assert cal.set_phase_calls == [("idle", {})]
 
 
 # ---------- get_state ----------

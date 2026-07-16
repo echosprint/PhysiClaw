@@ -60,6 +60,35 @@ def test_calibration_starts_empty_at_import() -> None:
     assert cal.cam_rotation is None
 
 
+# ---------- build_server ----------
+
+
+def test_build_server_returns_isolated_assembly() -> None:
+    """Each build_server() call wires a fresh, isolated set of state
+    objects on a fresh FastMCP — nothing shared with the module default."""
+    from physiclaw.core import PhysiClaw
+    from physiclaw.core.server import app
+
+    bundle = app.build_server()
+
+    assert isinstance(bundle.physiclaw, PhysiClaw)
+    assert bundle.physiclaw is not app.physiclaw
+    assert bundle.bridge is not app._bridge
+    assert bundle.mcp is not app.mcp
+    # Wired: the orchestrator's rig holds THIS bundle's bridge.
+    assert bundle.physiclaw.rig.bridge is bundle.bridge
+    assert bundle.phone.bridge is bundle.bridge
+    assert bundle.phone.cal is bundle.calib
+
+
+def test_default_assembly_is_a_build_server_product() -> None:
+    from physiclaw.core.server import app
+
+    assert app.physiclaw is app.default_bundle.physiclaw
+    assert app._bridge is app.default_bundle.bridge
+    assert app._phone_app is app.default_bundle.phone_app
+
+
 # ---------- shutdown ----------
 
 

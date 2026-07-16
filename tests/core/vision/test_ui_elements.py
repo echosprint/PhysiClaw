@@ -276,6 +276,28 @@ def test_detect_texts_handles_import_error(
     assert any("OCR unavailable" in r.getMessage() for r in caplog.records)
 
 
+def test_detect_texts_degrades_on_runtime_failure(
+    mocker,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A broken RapidOCR install fails at read() time with a runtime
+    error, not ImportError — it must degrade to "no text" the same way
+    icons degrade, instead of crashing the whole detection pass."""
+    fake_reader = MagicMock()
+    fake_reader.read.side_effect = RuntimeError("missing recognition model")
+
+    with caplog.at_level(logging.WARNING, logger="physiclaw.core.vision.ui_elements"):
+        out = ui_elements._detect_texts(
+            np.zeros((10, 10, 3), dtype=np.uint8),
+            10,
+            10,
+            fake_reader,
+        )
+
+    assert out == []
+    assert any("OCR unavailable" in r.getMessage() for r in caplog.records)
+
+
 # ---------- detect_ui_elements ----------
 
 

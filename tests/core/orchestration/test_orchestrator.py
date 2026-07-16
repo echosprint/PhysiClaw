@@ -58,6 +58,22 @@ def test_shutdown_delegates_to_rig(mocker, pc: PhysiClaw) -> None:
     spy.assert_called_once_with()
 
 
+def test_become_ready_settles_camera_before_flipping_ready(
+    mocker, pc: PhysiClaw
+) -> None:
+    """The agent polls `ready` and peeks immediately — the flip must not
+    be observable before the camera settle has run."""
+    order: list[str] = []
+    mocker.patch.object(
+        pc.perception, "settle_camera", side_effect=lambda: order.append("settle")
+    )
+    mocker.patch.object(pc.rig, "mark_ready", side_effect=lambda: order.append("ready"))
+
+    pc.become_ready()
+
+    assert order == ["settle", "ready"]
+
+
 def test_validator_reads_current_rig_state(pc: PhysiClaw) -> None:
     # The validator holds accessor lambdas, not objects — replacing the
     # rig's AssistiveTouch after construction must be visible to it.
@@ -327,21 +343,23 @@ def test_send_to_clipboard_success_resets_miss_counter(
 def test_run_step_dispatches_each_tool(pc: PhysiClaw, wire_rig) -> None:
     wire_rig(pc.rig)
 
-    assert "Tapped" in pc._run_step("tap", [0.1, 0.1, 0.2, 0.2])
-    assert "Double tapped" in pc._run_step("double_tap", [0.1, 0.1, 0.2, 0.2])
-    assert "Long pressed" in pc._run_step("long_press", [0.1, 0.1, 0.2, 0.2])
+    with pc.rig.locked():
+        assert "Tapped" in pc._run_step("tap", [0.1, 0.1, 0.2, 0.2])
+        assert "Double tapped" in pc._run_step("double_tap", [0.1, 0.1, 0.2, 0.2])
+        assert "Long pressed" in pc._run_step("long_press", [0.1, 0.1, 0.2, 0.2])
 
 
 def test_run_step_swipe_happy_path(pc: PhysiClaw, wire_rig) -> None:
     wire_rig(pc.rig)
 
-    out = pc._run_step(
-        "swipe",
-        {
-            "bbox": [0.1, 0.1, 0.2, 0.2],
-            "direction": "up",
-        },
-    )
+    with pc.rig.locked():
+        out = pc._run_step(
+            "swipe",
+            {
+                "bbox": [0.1, 0.1, 0.2, 0.2],
+                "direction": "up",
+            },
+        )
 
     assert "Swiped up m" in out
 
@@ -354,7 +372,8 @@ def test_run_step_send_to_clipboard_dispatches(
     bridge.wait_clipboard.return_value = True
     pc.rig.attach_bridge(bridge)
 
-    out = pc._run_step("send_to_clipboard", "hi")
+    with pc.rig.locked():
+        out = pc._run_step("send_to_clipboard", "hi")
 
     assert "Copied 2 chars" in out
 
@@ -648,8 +667,7 @@ def test_unlock_phone_returns_when_keypad_not_found(
     wire_rig(pc.rig)
     pc.perception._ocr_reader = MagicMock()
     mocker.patch.object(orchestrator.time, "sleep")
-    mocker.patch.object(pc.perception, "scan_text", return_value=[])
-    mocker.patch.object(orchestrator, "find_numpad_digit", return_value=None)
+    mocker.patch.object(pc.perception, "wait_for_numpad_digit", return_value=None)
 
     out = pc.unlock_phone()
 
@@ -662,10 +680,9 @@ def test_unlock_phone_taps_six_times_when_keypad_found(
     wire_rig(pc.rig)
     pc.perception._ocr_reader = MagicMock()
     mocker.patch.object(orchestrator.time, "sleep")
-    mocker.patch.object(pc.perception, "scan_text", return_value=[])
     mocker.patch.object(
-        orchestrator,
-        "find_numpad_digit",
+        pc.perception,
+        "wait_for_numpad_digit",
         return_value=[0.1, 0.1, 0.2, 0.2],
     )
 

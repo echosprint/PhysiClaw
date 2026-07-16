@@ -36,7 +36,8 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from physiclaw.core.bridge.nonce import (
+from physiclaw.core.bridge.nonce import generate_nonce, verify_nonce
+from physiclaw.core.geometry import (
     NONCE_COUNT,
     NONCE_CSS_X,
     NONCE_CSS_Y,
@@ -45,11 +46,9 @@ from physiclaw.core.bridge.nonce import (
     NONCE_LIGHT,
     NONCE_SQUARE_SIZE,
     NONCE_THRESHOLD,
-    generate_nonce,
+    ViewportShift,
     nonce_css_x,
-    verify_nonce,
 )
-from physiclaw.core.calibration.transforms import ViewportShift
 
 
 def _viewport(dpr: float = 1.0, offset_x: int = 0, offset_y: int = 0) -> ViewportShift:
@@ -115,7 +114,9 @@ def test_protocol_constant_pinned(name: str, expected: int) -> None:
     # Both the calibration page (renderer) and verify_nonce must agree
     # byte-for-byte on these. A drift in either side breaks every
     # screenshot's nonce — pin them so a bump in one place fails CI.
-    from physiclaw.core.bridge import nonce as mod
+    # The layout now lives in core.geometry (the render↔measure
+    # contract) — pin it at the source.
+    from physiclaw.core import geometry as mod
 
     assert getattr(mod, name) == expected
 

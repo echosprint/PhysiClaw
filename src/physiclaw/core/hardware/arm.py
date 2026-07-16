@@ -21,21 +21,21 @@ to arm axes automatically.
 """
 
 import logging
+import re
 import time
 
 import serial
 
+from physiclaw.core.hardware.device import (
+    DeviceNotFound,
+    DeviceTimeout,
+    ProtocolError,
+)
 from physiclaw.core.hardware.grbl import detect_grbl
 from physiclaw.core.hardware.solenoid import Solenoid
+from physiclaw.core.hardware.transport import SerialTransport
 
 log = logging.getLogger(__name__)
-
-
-# Error codes that mean "this firmware doesn't take this setting at
-# runtime" — the value lives in YAML config (FluidNC) or isn't supported.
-# Swallowed only when a command is sent with optional=True. Matches
-# scripts/grbl_solenoid_test.py.
-_OPTIONAL_ERRORS = frozenset({"error:3", "error:162"})
 
 
 # ─── G-code templates ────────────────────────────────────────
@@ -84,71 +84,36 @@ class StylusArm:
         if port is None:
             port = detect_grbl()
         if port is None:
-            raise Exception("GRBL device not found, please specify port manually")
+            raise DeviceNotFound("GRBL device not found, please specify port manually")
 
         self.ser = serial.Serial(port, baudrate, timeout=3)
+        self.transport = SerialTransport(self.ser)
         self.port = port
         # The Z executor: a solenoid driven over this arm's GRBL channel.
         self.solenoid = Solenoid(send=self._send, dwell=self._dwell)
         time.sleep(2)
-        self.ser.reset_input_buffer()
+        self.transport.reset_input_buffer()
         log.info(f"Arm connected: {port}")
 
     # ─── Low-level communication ─────────────────────────────
+    # Wire mechanics (send/ok handshake, status query, the port lock)
+    # live in SerialTransport; these thin delegates keep the arm's
+    # internal call sites and the solenoid binding unchanged.
 
     def _send(self, cmd: str, wait_ok: bool = True, optional: bool = False) -> None:
-        """Send a single command, block until 'ok'.
-
-        optional=True swallows the "setting not accepted at runtime" error
-        codes (error:3 / error:162) so PWM-config writes ($32/$30) work on
-        FluidNC (which takes them from YAML) and a bare GRBL board alike.
-        """
-        log.debug(f">>> {cmd}")
-        # LF only — NOT CRLF. FluidNC v4 treats the trailing `\r` + `\n` as two
-        # line endings (the command + an empty line) and acks BOTH with `ok`;
-        # that extra `ok` lags every reply by one and desyncs the stream (a
-        # later command then reads a stale error). `\n` is the canonical GRBL
-        # terminator and yields exactly one reply per command.
-        self.ser.write((cmd + "\n").encode())
-
-        if not wait_ok:
-            return
-
-        retries = 0
-        while True:
-            line = self.ser.readline().decode("utf-8", errors="ignore").strip()
-            if line:
-                retries = 0
-                log.debug(f"<<< {line}")
-            else:
-                retries += 1
-                if retries > 3:
-                    raise Exception(f"GRBL not responding, command: {cmd}")
-                continue
-            if line == "ok":
-                break
-            if line.startswith("error"):
-                if optional and line.replace(" ", "") in _OPTIONAL_ERRORS:
-                    # FluidNC follows a rejected setting with a trailing
-                    # `[MSG:ERR: ...]` line (no `ok`). It's a non-terminator,
-                    # so the next command's read loop skips it harmlessly — no
-                    # draining needed now that we send LF (single reply each).
-                    log.debug(f"{cmd}: {line} not supported at runtime — skipping")
-                    break
-                raise Exception(f"GRBL error: {line}  command: {cmd}")
-            if line.startswith("ALARM"):
-                raise Exception(f"GRBL alarm: {line}, call unlock() first")
+        self.transport.send(cmd, wait_ok=wait_ok, optional=optional)
 
     def _query_status(self) -> str:
-        """Query current status, return status string."""
-        self.ser.write(b"?")
-        time.sleep(0.1)
-        resp = self.ser.read(self.ser.in_waiting or 64).decode("utf-8", errors="ignore")
-        for line in resp.splitlines():
-            if line.startswith("<"):
-                log.debug(f"<<< {line}")
-                return line
-        return ""
+        return self.transport.query_status()
+
+    def health(self) -> bool:
+        """Live check: does the board answer a status query right now?
+        Distinguishes a cable pulled mid-session from 'was connected once'
+        (see the Device protocol in ``device.py``)."""
+        try:
+            return self._query_status() != ""
+        except Exception:
+            return False
 
     def wait_idle(self, timeout: float = 10) -> None:
         """Poll until GRBL reports Idle status."""
@@ -159,7 +124,7 @@ class StylusArm:
             if "Idle" in status:
                 return
             time.sleep(0.1)
-        raise RuntimeError(f"Arm not idle after {timeout}s")
+        raise DeviceTimeout(f"Arm not idle after {timeout}s")
 
     def position(self) -> tuple[float, float]:
         """Return current (x, y) in work coordinates (WPos).
@@ -169,8 +134,6 @@ class StylusArm:
         If GRBL reports WPos directly, use it. Otherwise compute from
         MPos - WCO (work coordinate offset).
         """
-        import re
-
         status = self._query_status()
 
         # Try WPos first (GRBL $10=0)
@@ -194,7 +157,7 @@ class StylusArm:
             )
             return float(m_mpos.group(1)), float(m_mpos.group(2))
 
-        raise RuntimeError(f"Cannot parse position from: {status}")
+        raise ProtocolError(f"Cannot parse position from: {status}")
 
     # ─── Initialization ──────────────────────────────────────
 
@@ -206,9 +169,7 @@ class StylusArm:
         """
         # Wait and read startup message
         time.sleep(0.5)
-        startup = self.ser.read(self.ser.in_waiting or 256).decode(
-            "utf-8", errors="ignore"
-        )
+        startup = self.transport.read_startup()
         if startup.strip():
             log.debug(f"<<< {startup.strip()}")
 
@@ -402,5 +363,4 @@ class StylusArm:
             self.solenoid.release()
         except Exception:
             pass
-        self.ser.close()
-        log.debug("Serial port closed")
+        self.transport.close()

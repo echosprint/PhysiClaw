@@ -110,7 +110,11 @@ def _detect_texts(frame, w, h, reader) -> list[UIElement]:
             )
             for t in rdr.read(frame)
         ]
-    except ImportError as ex:
+    except Exception as ex:
+        # Degrade to "no text" like icons degrade to "no icons": a broken
+        # RapidOCR install fails at read() time (missing/corrupt bundled
+        # models raise runtime errors, not ImportError) and must not take
+        # the whole detection pass — and the icons — down with it.
         log.warning("OCR unavailable: %s", ex)
         return []
 

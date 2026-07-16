@@ -35,6 +35,13 @@ class PageState:
                 # even one sent before the step's button is pressed —
                 # is accepted instead of 403'd.
                 self.bridge.arm_upload(CAL_UPLOAD_WINDOW_SECONDS)
+            else:
+                # Returning to bridge mode re-arms the touch gate: the
+                # phase gate on /api/bridge/touch only rejects while
+                # "idle", and without this reset the last step's phase
+                # ("center", "dot", …) would leave the gate open for the
+                # rest of the server's life.
+                self.cal.set_phase("idle")
 
     def get_state(self) -> dict:
         """Unified state for the phone page poll."""

@@ -16,25 +16,17 @@ import random
 
 import numpy as np
 
-from physiclaw.core.calibration.transforms import ViewportShift
+from physiclaw.core.geometry import (
+    NONCE_COUNT,
+    NONCE_CSS_X,
+    NONCE_CSS_Y,
+    NONCE_GRID_COLS,
+    NONCE_SQUARE_SIZE,
+    NONCE_THRESHOLD,
+    ViewportShift,
+)
 
 log = logging.getLogger(__name__)
-
-NONCE_CSS_X = 180  # fallback left edge — used only when viewport width unknown
-NONCE_CSS_Y = 300
-NONCE_GRID_COLS = 8  # squares per row — NONCE_COUNT/NONCE_GRID_COLS rows
-NONCE_COUNT = 64  # 8×8 grid
-NONCE_SQUARE_SIZE = 15  # CSS pixels per square
-
-
-def nonce_css_x(viewport_width: float) -> int:
-    """Left edge (CSS px) that centers the grid on the viewport's x axis."""
-    return round(viewport_width / 2 - NONCE_GRID_COLS * NONCE_SQUARE_SIZE / 2)
-
-
-NONCE_DARK = 40  # bit 0 — dark grey
-NONCE_LIGHT = 220  # bit 1 — light grey
-NONCE_THRESHOLD = 130  # luminance midpoint between dark and light
 
 
 def generate_nonce() -> list[int]:

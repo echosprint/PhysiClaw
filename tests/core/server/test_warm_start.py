@@ -34,7 +34,12 @@ def test_try_resume_returns_false_when_no_bundle(
     mocker.patch("physiclaw.core.calibration.state.Calibration.load", return_value=None)
 
     with caplog.at_level(logging.ERROR, logger="physiclaw.core.server.warm_start"):
-        result = warm_start.try_resume(cam_index_override=None)
+        result = warm_start.try_resume(
+            cam_index_override=None,
+            physiclaw=MagicMock(),
+            calib=MagicMock(),
+            phone=MagicMock(),
+        )
 
     assert result is False
     assert any(
@@ -57,12 +62,14 @@ def test_try_resume_returns_false_when_bundle_incomplete(
         return_value=fake_cal,
     )
     fake_app = MagicMock()
-    mocker.patch("physiclaw.core.server.app.physiclaw", fake_app)
-    mocker.patch("physiclaw.core.server.app._calib", MagicMock())
-    mocker.patch("physiclaw.core.server.app._phone", MagicMock())
 
     with caplog.at_level(logging.ERROR, logger="physiclaw.core.server.warm_start"):
-        result = warm_start.try_resume(cam_index_override=None)
+        result = warm_start.try_resume(
+            cam_index_override=None,
+            physiclaw=fake_app,
+            calib=MagicMock(),
+            phone=MagicMock(),
+        )
 
     assert result is False
     assert any("bundle on disk is incomplete" in r.getMessage() for r in caplog.records)
@@ -85,12 +92,14 @@ def test_try_resume_returns_false_when_hardware_connect_raises(
     )
     fake_app = MagicMock()
     fake_app.rig.connect_arm.side_effect = RuntimeError("port unavailable")
-    mocker.patch("physiclaw.core.server.app.physiclaw", fake_app)
-    mocker.patch("physiclaw.core.server.app._calib", MagicMock())
-    mocker.patch("physiclaw.core.server.app._phone", MagicMock())
 
     with caplog.at_level(logging.ERROR, logger="physiclaw.core.server.warm_start"):
-        result = warm_start.try_resume(cam_index_override=None)
+        result = warm_start.try_resume(
+            cam_index_override=None,
+            physiclaw=fake_app,
+            calib=MagicMock(),
+            phone=MagicMock(),
+        )
 
     assert result is False
     assert any(
@@ -133,11 +142,19 @@ def _patch_resume_env(mocker, cal, app, sanity: bool = True) -> MagicMock:
         "physiclaw.core.calibration.state.Calibration.load",
         return_value=cal,
     )
-    mocker.patch("physiclaw.core.server.app.physiclaw", app)
-    mocker.patch("physiclaw.core.server.app._calib", MagicMock())
-    mocker.patch("physiclaw.core.server.app._phone", MagicMock())
     mocker.patch.object(warm_start.sys.stdin, "isatty", return_value=False)
     return mocker.patch.object(warm_start, "_sanity", return_value=sanity)
+
+
+def _resume(app, cam_index_override=None, calib=None, **kwargs) -> bool:
+    """Call try_resume with the fake assembly's state objects."""
+    return warm_start.try_resume(
+        cam_index_override=cam_index_override,
+        physiclaw=app,
+        calib=calib if calib is not None else MagicMock(),
+        phone=MagicMock(),
+        **kwargs,
+    )
 
 
 def test_try_resume_succeeds_on_clean_path(mocker) -> None:
@@ -147,14 +164,11 @@ def test_try_resume_succeeds_on_clean_path(mocker) -> None:
         "physiclaw.core.calibration.state.Calibration.load",
         return_value=cal,
     )
-    mocker.patch("physiclaw.core.server.app.physiclaw", app)
     fake_calib_state = MagicMock()
-    mocker.patch("physiclaw.core.server.app._calib", fake_calib_state)
-    mocker.patch("physiclaw.core.server.app._phone", MagicMock())
     mocker.patch.object(warm_start, "_sanity", return_value=True)
     mocker.patch.object(warm_start.sys.stdin, "isatty", return_value=False)
 
-    result = warm_start.try_resume(cam_index_override=None)
+    result = _resume(app, calib=fake_calib_state)
 
     assert result is True
     # Bundle replaced into the app + viewport_shift mirrored to bridge state.
@@ -169,10 +183,9 @@ def test_try_resume_succeeds_on_clean_path(mocker) -> None:
     # Origin re-pinned from the park spot so the bundle's affine stays valid.
     app.rig.restore_park_origin.assert_called_once()
     app.home_screen.assert_called_once()
-    # Camera settle (exposure tune + focus lock) runs between home
-    # (dark scene showing) and ready.
-    app.perception.settle_camera.assert_called_once()
-    app.rig.mark_ready.assert_called_once()
+    # become_ready owns the settle-then-mark order (camera settle between
+    # home — dark scene showing — and the ready flip).
+    app.become_ready.assert_called_once()
 
 
 def test_try_resume_uses_cam_index_override(mocker) -> None:
@@ -182,13 +195,10 @@ def test_try_resume_uses_cam_index_override(mocker) -> None:
         "physiclaw.core.calibration.state.Calibration.load",
         return_value=cal,
     )
-    mocker.patch("physiclaw.core.server.app.physiclaw", app)
-    mocker.patch("physiclaw.core.server.app._calib", MagicMock())
-    mocker.patch("physiclaw.core.server.app._phone", MagicMock())
     mocker.patch.object(warm_start, "_sanity", return_value=True)
     mocker.patch.object(warm_start.sys.stdin, "isatty", return_value=False)
 
-    warm_start.try_resume(cam_index_override=3)
+    _resume(app, cam_index_override=3)
 
     app.rig.connect_camera.assert_called_once_with(3)
 
@@ -201,13 +211,10 @@ def test_try_resume_falls_back_to_cam_index_zero(mocker) -> None:
         "physiclaw.core.calibration.state.Calibration.load",
         return_value=cal,
     )
-    mocker.patch("physiclaw.core.server.app.physiclaw", app)
-    mocker.patch("physiclaw.core.server.app._calib", MagicMock())
-    mocker.patch("physiclaw.core.server.app._phone", MagicMock())
     mocker.patch.object(warm_start, "_sanity", return_value=True)
     mocker.patch.object(warm_start.sys.stdin, "isatty", return_value=False)
 
-    warm_start.try_resume(cam_index_override=None)
+    _resume(app)
 
     app.rig.connect_camera.assert_called_once_with(0)
 
@@ -225,13 +232,10 @@ def test_try_resume_returns_false_when_bridge_never_connects(
         "physiclaw.core.calibration.state.Calibration.load",
         return_value=cal,
     )
-    mocker.patch("physiclaw.core.server.app.physiclaw", app)
-    mocker.patch("physiclaw.core.server.app._calib", MagicMock())
-    mocker.patch("physiclaw.core.server.app._phone", MagicMock())
     mocker.patch.object(warm_start.sys.stdin, "isatty", return_value=True)
 
     with caplog.at_level(logging.ERROR, logger="physiclaw.core.server.warm_start"):
-        result = warm_start.try_resume(cam_index_override=None)
+        result = _resume(app)
 
     assert result is False
     assert any("/bridge page not polling" in r.getMessage() for r in caplog.records)
@@ -244,16 +248,13 @@ def test_try_resume_returns_false_when_sanity_fails(mocker) -> None:
         "physiclaw.core.calibration.state.Calibration.load",
         return_value=cal,
     )
-    mocker.patch("physiclaw.core.server.app.physiclaw", app)
-    mocker.patch("physiclaw.core.server.app._calib", MagicMock())
-    mocker.patch("physiclaw.core.server.app._phone", MagicMock())
     mocker.patch.object(warm_start, "_sanity", return_value=False)
     mocker.patch.object(warm_start.sys.stdin, "isatty", return_value=False)
 
-    result = warm_start.try_resume(cam_index_override=None)
+    result = _resume(app)
 
     assert result is False
-    app.rig.mark_ready.assert_not_called()
+    app.become_ready.assert_not_called()
 
 
 def test_try_resume_no_verify_skips_everything_that_touches_the_phone(
@@ -267,15 +268,14 @@ def test_try_resume_no_verify_skips_everything_that_touches_the_phone(
     sanity = _patch_resume_env(mocker, cal, app)
     mocker.patch.object(warm_start.sys.stdin, "isatty", return_value=True)
 
-    result = warm_start.try_resume(cam_index_override=None, verify=False)
+    result = _resume(app, verify=False)
 
     assert result is True
     sanity.assert_not_called()
     app.rig.bridge.wait_for_connection.assert_not_called()
     app.home_screen.assert_not_called()
     app.rig.restore_park_origin.assert_called_once()
-    app.perception.settle_camera.assert_called_once()
-    app.rig.mark_ready.assert_called_once()
+    app.become_ready.assert_called_once()
 
 
 def test_try_resume_no_verify_still_requires_a_complete_bundle(
@@ -289,10 +289,10 @@ def test_try_resume_no_verify_still_requires_a_complete_bundle(
     _patch_resume_env(mocker, cal, app)
 
     with caplog.at_level(logging.ERROR, logger="physiclaw.core.server.warm_start"):
-        result = warm_start.try_resume(cam_index_override=None, verify=False)
+        result = _resume(app, verify=False)
 
     assert result is False
-    app.rig.mark_ready.assert_not_called()
+    app.become_ready.assert_not_called()
     assert any(
         "--hot-start: bundle on disk is incomplete" in r.getMessage()
         for r in caplog.records
@@ -308,7 +308,7 @@ def test_try_resume_reconciles_live_resolution_with_bundle(mocker) -> None:
     app.rig.cam.peek.return_value = np.zeros((2160, 3840, 3), dtype=np.uint8)
     _patch_resume_env(mocker, cal, app)
 
-    result = warm_start.try_resume(cam_index_override=None)
+    result = _resume(app)
 
     assert result is True
     cal.reconcile_cam_size.assert_called_once_with((3840, 2160))
@@ -320,11 +320,11 @@ def test_try_resume_returns_false_when_aspect_changed(mocker) -> None:
     app = _ready_app(cal)
     sanity = _patch_resume_env(mocker, cal, app)
 
-    result = warm_start.try_resume(cam_index_override=None)
+    result = _resume(app)
 
     assert result is False
     sanity.assert_not_called()
-    app.rig.mark_ready.assert_not_called()
+    app.become_ready.assert_not_called()
 
 
 def test_try_resume_returns_false_when_camera_has_no_frame(mocker) -> None:
@@ -333,10 +333,10 @@ def test_try_resume_returns_false_when_camera_has_no_frame(mocker) -> None:
     app.rig.cam.peek.return_value = None
     _patch_resume_env(mocker, cal, app)
 
-    result = warm_start.try_resume(cam_index_override=None)
+    result = _resume(app)
 
     assert result is False
-    app.rig.mark_ready.assert_not_called()
+    app.become_ready.assert_not_called()
 
 
 # ---------- _sanity ----------

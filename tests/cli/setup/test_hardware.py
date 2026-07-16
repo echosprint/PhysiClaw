@@ -362,6 +362,8 @@ def test_run_finalizes_when_already_calibrated(
             {"ready": False, "calibrated": True},  # GET /api/status
             {"status": "ok"},  # POST /api/phone/home
             {"status": "ok"},  # POST /api/ready
+            {"ready": False},  # ready poll: settle still running
+            {"ready": True},  # ready poll: flipped
         ],
     )
     mocker.patch.object(hw_mod.time, "sleep")

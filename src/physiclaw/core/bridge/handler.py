@@ -27,12 +27,14 @@ MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 _IMAGE_MAGICS = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff")  # PNG, JPEG
 
 
-async def _json_or_none(request) -> dict | None:
+async def json_or_none(request) -> dict | None:
     """Parse the request body as a JSON object, or None on anything else.
 
-    LAN clients (Safari, iOS Shortcuts) can send junk; a malformed body
-    is the caller's error (400 at the call site), never a handler crash
-    that surfaces as a 500.
+    LAN clients (Safari, iOS Shortcuts) and CLI wrappers can send junk
+    or empty bodies; a malformed body is the caller's error (a 4xx at
+    the call site), never a handler crash that surfaces as a 500. The
+    one body parser for every handler family — the calibration handlers
+    import it too, so the policy lives here alone.
     """
     try:
         body = await request.json()
@@ -87,7 +89,13 @@ async def handle_phone_state(request, phone: PageState):
 
 
 async def handle_clipboard_copied(request, bridge: BridgeState):
-    """POST /api/bridge/tapped — phone confirms text was copied to clipboard."""
+    """POST /api/bridge/tapped — phone confirms text was copied to clipboard.
+
+    Deliberately NOT gated by the TOFU IP pin: `note_phone_ip` re-pins
+    on every /api/bridge/state poll, so a second open /bridge tab (a
+    leftover laptop tab) flip-flops the pin and would intermittently
+    403 the real phone's confirmations. The trust model for this route
+    is the documented one (planes.py): nothing secret crosses it."""
     bridge.mark_clipboard_copied()
     log.info(f"Bridge: clipboard copied — '{bridge.current_text()}'")
     return JSONResponse({"ok": True})
@@ -95,7 +103,7 @@ async def handle_clipboard_copied(request, bridge: BridgeState):
 
 async def handle_screen_dimension(request, cal: CalibrationState):
     """POST /api/bridge/screen-dimension — phone sends screen dimensions on load."""
-    body = await _json_or_none(request)
+    body = await json_or_none(request)
     if body is None:
         return _bad_request("invalid JSON body")
     try:
@@ -182,6 +190,12 @@ async def handle_clipboard_fetch(request, bridge: BridgeState):
     Returns the text as plain text (so the Shortcut can write it directly to
     the clipboard) and marks the bridge as copied so bridge_tap() unblocks.
     Returns 204 if no text is queued.
+
+    Deliberately NOT gated by the TOFU IP pin (see
+    ``handle_clipboard_copied``): the pin follows the freshest poller,
+    so a second open /bridge tab would starve the phone's Shortcut.
+    The queued text is the agent reporting its own activity —
+    the documented bridge trust model (planes.py).
     """
     text = bridge.fetch_text()
     if text is None:
@@ -200,7 +214,7 @@ async def handle_mode_switch(request, phone: PageState):
 
     Body: {"mode": "bridge"} or {"mode": "calibrate", "phase": "<phase>", ...phase_kwargs}
     """
-    body = await _json_or_none(request)
+    body = await json_or_none(request)
     if body is None:
         return _bad_request("invalid JSON body")
     mode = body.get("mode")
@@ -236,8 +250,22 @@ async def handle_calib_touch(request, cal: CalibrationState):
     bridge.html. The viewport shift is measured during pre-cal (which
     always runs before any touch-driven step), so we convert directly to
     screenshot 0-1 coords and attach them as x, y.
+
+    Phase-gated — touches feed the affine fits that steer the arm, so a
+    poisoned stream would yield a calibration that taps off-panel: a
+    report is only accepted while a calibration visual is on screen
+    (`cal.phase != "idle"`); an idle server has no step collecting
+    touches, so the report is a state conflict. (Deliberately NOT
+    IP-pinned: the pin follows the freshest /api/bridge/state poller,
+    so a second open /bridge tab would flip-flop it and intermittently
+    reject the real phone's touches mid-calibration.)
     """
-    body = await _json_or_none(request)
+    if cal.phase == "idle":
+        log.warning("Bridge: calibration touch rejected — no step waiting (idle)")
+        return JSONResponse(
+            {"error": "no calibration step waiting for touches"}, status_code=409
+        )
+    body = await json_or_none(request)
     if body is None:
         return _bad_request("invalid JSON body")
     try:

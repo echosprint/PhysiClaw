@@ -1,16 +1,14 @@
 """
-Calibration results — `ScreenTransforms` and `ViewportShift`.
-
-Two dataclasses live here, both pure data + coordinate math:
-
-- `ViewportShift` is produced by the pre-calibration step
-  (`measure_viewport_shift()` in `viewport.py`). It maps viewport CSS
-  pixels to screenshot 0-1 coordinates, accounting for device pixel
-  ratio and the iOS status-bar / safe-area offset.
+Calibration results — `ScreenTransforms` (and the `ViewportShift` re-export).
 
 - `ScreenTransforms` holds the final affine matrices produced by the
-  7-step calibration plan: screen 0-1 → GRBL mm and screen 0-1 →
+  calibration plan: screen 0-1 → GRBL mm and screen 0-1 →
   camera 0-1. These enable coordinate-based tapping.
+
+- `ViewportShift` (produced by `measure_viewport_shift()` in
+  `viewport.py`) now lives in `physiclaw.core.geometry` — the
+  shared render↔measure contract both bridge and calibration import —
+  and is re-exported here so existing importers keep working.
 
 Hardware-orchestration helpers that *use* these transforms (like
 edge-trace verification) live in the calibration step modules —
@@ -21,39 +19,17 @@ import dataclasses
 
 import numpy as np
 
+# Re-exported from core.geometry (its true home) so existing
+# importers — `from ...transforms import ViewportShift` — keep working.
+# The redundant alias marks it an intentional re-export.
+from physiclaw.core.geometry import ViewportShift as ViewportShift
+from physiclaw.core.geometry import apply_affine, invert_affine
+
 # The canonical off-phone resting spot, in screen-pct (0-1; off-phone values
 # allowed): left of the screen, slightly above the top edge. The arm parks
 # here between every operation, on clean shutdown, and warm-start re-pins the
 # origin from it on reconnect. Single source of truth for every off-phone park.
 PARK_PCT = (-0.1, -0.05)
-
-
-@dataclasses.dataclass(frozen=True)
-class ViewportShift:
-    """Viewport CSS pixels → screenshot 0-1 coordinates.
-
-    Produced by the pre-calibration step: server shows an orange square at
-    a known CSS position, user uploads a screenshot, server detects the
-    square and derives (dpr, offset_x, offset_y) from the mismatch.
-
-    Fields:
-        offset_x, offset_y: screenshot-pixel offset caused by iOS status
-            bar / safe area (viewport origin is not at screenshot origin).
-        dpr: device pixel ratio — CSS px → screenshot px scale factor.
-        screenshot_width, screenshot_height: screenshot image size in px.
-    """
-
-    offset_x: float
-    offset_y: float
-    dpr: float
-    screenshot_width: int
-    screenshot_height: int
-
-    def css_to_pct(self, css_x: float, css_y: float) -> tuple[float, float]:
-        """Convert viewport CSS pixel coords to screenshot 0-1 coords."""
-        sx = (css_x * self.dpr + self.offset_x) / self.screenshot_width
-        sy = (css_y * self.dpr + self.offset_y) / self.screenshot_height
-        return (sx, sy)
 
 
 @dataclasses.dataclass
@@ -80,6 +56,7 @@ class ScreenTransforms:
         self.pct_to_grbl = pct_to_grbl
         self.pct_to_cam = pct_to_cam
         self.cam_size = cam_size
+        self._cam_to_pct: np.ndarray | None = None  # lazy inverse cache
 
     def bbox_center_pct(self, bbox: list[float]) -> tuple[float, float]:
         """Compute center of a bounding box in screen coordinates (0-1)."""
@@ -109,25 +86,26 @@ class ScreenTransforms:
 
     def pct_to_grbl_mm(self, x: float, y: float) -> tuple[float, float]:
         """Convert screen coordinate (0-1) to GRBL mm."""
-        pt = np.array([x, y, 1.0])
-        result = self.pct_to_grbl @ pt
-        return (float(result[0]), float(result[1]))
+        return apply_affine(self.pct_to_grbl, x, y)
 
     def pct_to_cam_pixel(self, x: float, y: float) -> tuple[int, int]:
         """Convert screen coordinate (0-1) to camera pixel."""
-        pt = np.array([x, y, 1.0])
-        cam_01 = self.pct_to_cam @ pt
+        cx, cy = apply_affine(self.pct_to_cam, x, y)
         w, h = self.cam_size
-        return (int(cam_01[0] * w), int(cam_01[1] * h))
+        return (int(cx * w), int(cy * h))
+
+    def cam_to_pct(self) -> np.ndarray:
+        """The (2, 3) inverse of Mapping B: camera 0-1 → screen 0-1.
+        Cached — the mappings are fixed at construction, and OCR calls
+        `pixel_to_pct` twice per detected text element."""
+        if self._cam_to_pct is None:
+            self._cam_to_pct = invert_affine(self.pct_to_cam)
+        return self._cam_to_pct
 
     def pixel_to_pct(self, px_x: int, px_y: int) -> tuple[float, float]:
         """Convert camera pixel to screen coordinate (0-1)."""
         w, h = self.cam_size
-        cam_01 = np.array([px_x / w, px_y / h])
-        A = self.pct_to_cam[:, :2]  # 2x2
-        b = self.pct_to_cam[:, 2]  # translation
-        pct = np.linalg.solve(A, cam_01 - b)
-        return (float(pct[0]), float(pct[1]))
+        return apply_affine(self.cam_to_pct(), px_x / w, px_y / h)
 
     def bbox_to_pixel_rect(
         self, bbox: list[float]

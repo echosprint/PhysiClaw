@@ -1,9 +1,10 @@
 """Tests for `physiclaw.core.hardware.camera` — hardware fakes.
 
 `cv2.VideoCapture` is faked via attribute patches so the real
-AVFoundation / V4L stack never opens. Background reader thread is
-either stopped immediately after construction or invoked manually
-with `_reader_loop` for thread-internal tests.
+AVFoundation / V4L stack never opens. The background reader (a composed
+`FrameReader`) is stopped immediately after construction; the reader
+loop itself is unit-tested with scripted callables in
+`test_frame_reader.py`.
 """
 
 from __future__ import annotations
@@ -92,9 +93,7 @@ def _open_camera_no_thread(mocker, *, vc: FakeVideoCapture) -> Camera:
     mocker.patch.object(cv2, "VideoCapture", return_value=vc)
     cam = Camera(index=0)
     # Halt the background reader so subsequent attribute pokes are stable.
-    cam._stopped.set()
-    if cam._thread.is_alive():
-        cam._thread.join(timeout=1.0)
+    cam._reader.stop()
     return cam
 
 
@@ -126,11 +125,10 @@ def test_camera_init_warms_up_and_starts_reader(mocker) -> None:
         assert fourcc_idx < width_idx < height_idx
         assert (cv2.CAP_PROP_FRAME_WIDTH, CONFIG.camera.width) in vc.set_calls
         assert (cv2.CAP_PROP_FRAME_HEIGHT, CONFIG.camera.height) in vc.set_calls
-        assert cam._frame is not None
-        assert cam._thread.is_alive()
+        assert cam._reader._frame is not None
+        assert cam._reader.alive
     finally:
-        cam._stopped.set()
-        cam._thread.join(timeout=1.0)
+        cam._reader.stop()
 
 
 def test_camera_init_retries_on_first_open_failure(mocker) -> None:
@@ -143,8 +141,7 @@ def test_camera_init_retries_on_first_open_failure(mocker) -> None:
     try:
         perm_spy.assert_called_once()
     finally:
-        cam._stopped.set()
-        cam._thread.join(timeout=1.0)
+        cam._reader.stop()
 
 
 def test_camera_init_raises_when_open_keeps_failing(mocker) -> None:
@@ -165,10 +162,9 @@ def test_camera_warmup_retries_on_bad_read(mocker) -> None:
 
     cam = Camera(index=0)
     try:
-        assert cam._frame is not None
+        assert cam._reader._frame is not None
     finally:
-        cam._stopped.set()
-        cam._thread.join(timeout=1.0)
+        cam._reader.stop()
 
 
 def test_camera_warmup_raises_after_repeated_read_failures(mocker) -> None:
@@ -186,7 +182,7 @@ def test_camera_warmup_raises_after_repeated_read_failures(mocker) -> None:
         Camera(index=0)
 
 
-# ---------- _reader_loop ----------
+# ---------- fixtures ----------
 
 
 def _ready_camera(mocker) -> tuple[Camera, FakeVideoCapture]:
@@ -197,89 +193,8 @@ def _ready_camera(mocker) -> tuple[Camera, FakeVideoCapture]:
     )
     mocker.patch.object(cv2, "VideoCapture", return_value=vc)
     cam = Camera(index=0)
-    # Halt thread so we drive _reader_loop manually below.
-    cam._stopped.set()
-    cam._thread.join(timeout=1.0)
+    cam._reader.stop()
     return cam, vc
-
-
-def test_reader_loop_publishes_good_frame(mocker) -> None:
-    cam, _ = _ready_camera(mocker)
-    new_frame = _frame(h=720, w=1280)
-    cam.cap = FakeVideoCapture(
-        index=0,
-        read_results=[(True, new_frame), (False, None)],  # second tick exits
-    )
-
-    cam._stopped.clear()
-    # Run a few iterations then halt.
-
-    def _watcher():
-        time.sleep(0.05)
-        cam._stopped.set()
-
-    threading.Thread(target=_watcher, daemon=True).start()
-    # Need a special exit path. Easier: run loop body manually.
-    cam._stopped.set()
-    # Just assert the public surface: a manual call to the loop's good
-    # branch publishes the frame.
-    with cam._cond:
-        cam._frame = new_frame
-        cam._frame_time = time.monotonic()
-    assert cam._frame is new_frame
-
-
-def test_reader_loop_handles_read_exception(mocker) -> None:
-    cam, _ = _ready_camera(mocker)
-
-    # Replace cap with one that raises on read.
-    cam.cap = FakeVideoCapture(
-        index=0,
-        read_results=[(True, _frame())],
-        raise_on_read=True,
-    )
-    cam._stopped.clear()
-    mocker.patch.object(cam._stopped, "wait", side_effect=lambda t: cam._stopped.set())
-
-    cam._reader_loop()
-
-    # Loop exited cleanly without raising.
-    assert cam._stopped.is_set()
-
-
-def test_reader_loop_reconnects_after_stale(mocker) -> None:
-    cam, _ = _ready_camera(mocker)
-    reopen_spy = mocker.patch.object(cam, "_reopen")
-    # Force "no frame" so the stale-reconnect branch fires.
-    cam.cap = FakeVideoCapture(index=0, read_results=[(False, None)])
-    cam._frame_time = 0.0  # very old
-    cam._stopped.clear()
-    mocker.patch.object(
-        cam._stopped,
-        "wait",
-        side_effect=lambda t: cam._stopped.set(),
-    )
-
-    cam._reader_loop()
-
-    reopen_spy.assert_called_once()
-
-
-def test_reader_loop_fatal_after_long_failure(mocker) -> None:
-    cam, _ = _ready_camera(mocker)
-    cam.cap = FakeVideoCapture(index=0, read_results=[(False, None)] * 5)
-    cam._first_fail_time = time.monotonic() - cam.FATAL_AFTER_SECONDS - 1
-    cam._stopped.clear()
-    interrupt_spy = mocker.patch.object(camera_mod._thread, "interrupt_main")
-    mocker.patch.object(
-        cam._stopped,
-        "wait",
-        side_effect=lambda t: cam._stopped.set(),
-    )
-
-    cam._reader_loop()
-
-    interrupt_spy.assert_called_once_with()
 
 
 # ---------- _reopen ----------
@@ -329,15 +244,15 @@ def test_fresh_frame_returns_recent_copy(mocker) -> None:
 
     # Should be a copy of cam._frame.
     assert out is not None
-    assert out is not cam._frame
-    np.testing.assert_array_equal(out, cam._frame)
+    assert out is not cam._reader._frame
+    np.testing.assert_array_equal(out, cam._reader._frame)
 
 
 def test_fresh_frame_returns_none_when_no_frame(mocker) -> None:
     cam, _ = _ready_camera(mocker)
-    cam._frame = None
-    cam._frame_time = 0.0
-    mocker.patch.object(Camera, "FRAME_WAIT_SECONDS", 0.01)
+    cam._reader._frame = None
+    cam._reader._frame_time = 0.0
+    mocker.patch.object(camera_mod.FrameReader, "FRAME_WAIT_SECONDS", 0.01)
 
     out = cam._fresh_frame()
 
@@ -350,13 +265,12 @@ def test_raw_frame_does_not_rotate(mocker) -> None:
 
     out = cam.raw_frame()
 
-    np.testing.assert_array_equal(out, cam._frame)
+    np.testing.assert_array_equal(out, cam._reader._frame)
 
 
 def test_peek_applies_rotation(mocker) -> None:
     cam, _ = _ready_camera(mocker)
-    cam._frame = _frame(h=2, w=4)  # distinct h/w to verify rotation
-    cam._frame_time = time.monotonic()
+    cam._reader.publish(_frame(h=2, w=4))  # distinct h/w to verify rotation
     cam.rotation = cv2.ROTATE_90_CLOCKWISE
 
     out = cam.peek()
@@ -371,22 +285,21 @@ def test_peek_no_rotation_when_minus_one(mocker) -> None:
 
     out = cam.peek()
 
-    np.testing.assert_array_equal(out, cam._frame)
+    np.testing.assert_array_equal(out, cam._reader._frame)
 
 
 def test_peek_returns_none_when_no_frame(mocker) -> None:
     cam, _ = _ready_camera(mocker)
-    cam._frame = None
-    cam._frame_time = 0.0
-    mocker.patch.object(Camera, "FRAME_WAIT_SECONDS", 0.01)
+    cam._reader._frame = None
+    cam._reader._frame_time = 0.0
+    mocker.patch.object(camera_mod.FrameReader, "FRAME_WAIT_SECONDS", 0.01)
 
     assert cam.peek() is None
 
 
 def test_snapshot_draws_bbox_when_provided(mocker) -> None:
     cam, _ = _ready_camera(mocker)
-    cam._frame = _frame(h=100, w=100)
-    cam._frame_time = time.monotonic()
+    cam._reader.publish(_frame(h=100, w=100))
     cam.rotation = -1
     save_spy = mocker.patch.object(camera_mod, "save_snapshot")
 
@@ -399,23 +312,22 @@ def test_snapshot_draws_bbox_when_provided(mocker) -> None:
 
 def test_snapshot_returns_none_when_no_frame(mocker) -> None:
     cam, _ = _ready_camera(mocker)
-    cam._frame = None
-    cam._frame_time = 0.0
-    mocker.patch.object(Camera, "FRAME_WAIT_SECONDS", 0.01)
+    cam._reader._frame = None
+    cam._reader._frame_time = 0.0
+    mocker.patch.object(camera_mod.FrameReader, "FRAME_WAIT_SECONDS", 0.01)
 
     assert cam.snapshot() is None
 
 
 def test_snapshot_no_bbox(mocker) -> None:
     cam, _ = _ready_camera(mocker)
-    cam._frame = _frame()
-    cam._frame_time = time.monotonic()
+    cam._reader.publish(_frame())
     cam.rotation = -1
     mocker.patch.object(camera_mod, "save_snapshot")
 
     out = cam.snapshot()
 
-    np.testing.assert_array_equal(out, cam._frame)
+    np.testing.assert_array_equal(out, cam._reader._frame)
 
 
 # ---------- close ----------
@@ -428,9 +340,8 @@ def test_close_stops_thread_and_releases(mocker) -> None:
 
     cam.close()
 
-    assert cam._stopped.is_set()
+    assert not cam._reader.alive
     assert vc.released is True
-    assert not cam._thread.is_alive()
 
 
 def test_close_hands_held_manual_exposure_back_to_auto(mocker) -> None:
@@ -477,7 +388,7 @@ def test_close_leaks_cap_instead_of_deadlocking_when_lock_held(mocker, caplog) -
     vc = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 200)
     mocker.patch.object(cv2, "VideoCapture", return_value=vc)
     cam = Camera(index=0)
-    mocker.patch.object(cam, "CLOSE_JOIN_TIMEOUT_SECONDS", 0.05)
+    mocker.patch.object(cam._reader, "JOIN_TIMEOUT_SECONDS", 0.05)
     mocker.patch.object(cam, "CLOSE_LOCK_TIMEOUT_SECONDS", 0.05)
     assert cam._cap_lock.acquire(timeout=1.0)  # simulate the wedged reader
     try:
@@ -718,9 +629,7 @@ def test_wait_frames_returns_when_reader_publishes(mocker) -> None:
     def publish(n: int) -> None:
         for _ in range(n):
             time.sleep(0.01)
-            with cam._cond:
-                cam._frame_seq += 1
-                cam._cond.notify_all()
+            cam._reader.publish(_frame())
 
     t = threading.Thread(target=publish, args=(3,))
     t.start()
@@ -776,7 +685,7 @@ def test_warmup_steps_down_ladder_on_undersized_frames(mocker) -> None:
 
     assert _width_requests(vc) == [3840, 2560, 1920]
     assert cam._request_size == (1920, 1080)
-    assert cam._frame is not None
+    assert cam._reader._frame is not None
 
 
 def test_request_ladder_is_single_rung_when_config_pins_1080p(mocker) -> None:

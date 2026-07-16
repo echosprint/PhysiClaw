@@ -18,15 +18,7 @@ import pytest
 from physiclaw.core.bridge.calib import CalibrationState
 from physiclaw.core.calibration import camera_map as camera_map_mod
 from physiclaw.core.calibration.transforms import ViewportShift
-
-
-def _make_cal(*, viewport_shift=None) -> MagicMock:
-    """A CalibrationState mock with the grid constants surfaced."""
-    cal = MagicMock()
-    cal.GRID_COLS_PCT = CalibrationState.GRID_COLS_PCT
-    cal.GRID_ROWS_PCT = CalibrationState.GRID_ROWS_PCT
-    cal.viewport_shift = viewport_shift
-    return cal
+from tests.core.calibration.conftest import make_cal as _make_cal
 
 
 def _grid_dot_image(rows=5, cols=3, w=600, h=900) -> np.ndarray:
@@ -168,3 +160,13 @@ def test_compute_camera_mapping_uses_viewport_shift(mocker) -> None:
     camera_map_mod.compute_camera_mapping(cam, cal, rotation=-1)
 
     assert cal.viewport_pct_to_screenshot_pct.call_count == 15
+
+
+def test_compute_camera_mapping_requires_viewport_shift(mocker) -> None:
+    """Same precondition as the arm fit — Mapping B must land in the
+    canonical screenshot 0-1 space, never raw viewport 0-1."""
+    mocker.patch.object(camera_map_mod.time, "sleep")
+    cal = _make_cal(viewport_shift=None)
+
+    with pytest.raises(RuntimeError, match="Viewport shift not measured"):
+        camera_map_mod.compute_camera_mapping(MagicMock(), cal, rotation=-1)

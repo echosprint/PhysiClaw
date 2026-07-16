@@ -1,4 +1,4 @@
-"""HTTP route handlers for the 7-step calibration plan.
+"""HTTP route handlers for the calibration plan.
 
 Each handler runs the corresponding `calibrate` step in a thread
 executor, writes the result into ``rig.calibration`` (a typed
@@ -17,7 +17,12 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from physiclaw.core.bridge import BridgeState, CalibrationState, PageState
+from physiclaw.core.bridge.handler import json_or_none
 from physiclaw.core.bridge.nonce import generate_nonce
+from physiclaw.core.calibration._common import (
+    PreconditionError,
+    require_viewport_shift,
+)
 from physiclaw.core.calibration.calibrate import (
     TILT_ALIGNED_THRESHOLD,
     calibrate_arm,
@@ -40,8 +45,8 @@ log = logging.getLogger(__name__)
 
 
 async def _run_blocking(do_func: Callable[[], Any]) -> Any:
-    """Run a sync callable in the default executor."""
-    return await asyncio.get_event_loop().run_in_executor(None, do_func)
+    """Run a sync callable off-thread (the repo's awaited-offload idiom)."""
+    return await asyncio.to_thread(do_func)
 
 
 def _ok(payload: dict) -> JSONResponse:
@@ -50,11 +55,10 @@ def _ok(payload: dict) -> JSONResponse:
 
 async def _read_body(request: Request) -> dict:
     """Parse JSON body, returning {} for empty/malformed input. Used by
-    handlers whose body fields are all optional (e.g. `{"fresh": bool}`)."""
-    try:
-        return await request.json()
-    except Exception:
-        return {}
+    handlers whose body fields are ALL optional (e.g. `{"fresh": bool}`)
+    — an empty POST is a legitimate "all defaults" request here, unlike
+    the bridge routes where a body is required."""
+    return (await json_or_none(request)) or {}
 
 
 def _err(message: str, status_code: int = 500) -> JSONResponse:
@@ -76,7 +80,9 @@ async def _run_locked_step(
     the busy error, so the wizard reports the actionable problem, and
     pre-lock page staging (``phone.set_mode``) keeps today's ordering.
     ``do`` runs with the lock held and the lock is always released,
-    even on failure. Any exception becomes the standard ``_err`` JSON.
+    even on failure. A ``PreconditionError`` becomes a 409 (client
+    state — the wizard can act on the message); anything else becomes
+    the standard 500 ``_err`` JSON (a genuine fault).
     """
 
     def _step() -> dict:
@@ -91,6 +97,8 @@ async def _run_locked_step(
     try:
         result = await _run_blocking(_step)
         return _ok(result)
+    except PreconditionError as e:
+        return _err(str(e), status_code=409)
     except Exception as e:
         return _err(str(e))
 
@@ -172,7 +180,7 @@ async def handle_calibrate_arm(
 
     def _precheck() -> None:
         if rig.arm is None:
-            raise RuntimeError("Arm not connected")
+            raise PreconditionError("Arm not connected")
         phone.set_mode("calibrate", phase="center")
 
     def _do() -> dict:
@@ -183,8 +191,8 @@ async def handle_calibrate_arm(
         right_vec = (float(pct_to_grbl[0, 0]), float(pct_to_grbl[1, 0]))
         down_vec = (float(pct_to_grbl[0, 1]), float(pct_to_grbl[1, 1]))
         rig.arm.set_direction_mapping(right_vec, down_vec)
-        # Park off-phone before returning so step 8's Photo Booth
-        # adjustment shows an unobstructed phone (the stylus would
+        # Park off-phone before returning so the camera-aim step's
+        # preview shows an unobstructed phone (the stylus would
         # otherwise sit at the last grid-tap position over the
         # screen). `rig.park()` is defensive — it works as
         # soon as `pct_to_grbl` is set, which happens above.
@@ -217,7 +225,7 @@ async def handle_calibrate_camera_frame(
 
     def _precheck() -> None:
         if rig.cam is None:
-            raise RuntimeError("Camera not connected")
+            raise PreconditionError("Camera not connected")
 
     def _do() -> dict:
         rig.park()
@@ -239,7 +247,7 @@ async def handle_compute_camera_mapping(
 
     def _precheck() -> None:
         if rig.cam is None:
-            raise RuntimeError("Camera not connected")
+            raise PreconditionError("Camera not connected")
 
     def _do() -> dict:
         rotation = rig.calibration.effective_rotation()
@@ -265,9 +273,9 @@ async def handle_validate_calibration(
 
     def _precheck() -> None:
         if rig.arm is None:
-            raise RuntimeError("Arm not connected")
+            raise PreconditionError("Arm not connected")
         if not rig.calibration.transforms_ready:
-            raise RuntimeError("Run arm calibration and camera-mapping first")
+            raise PreconditionError("Run arm calibration and camera-mapping first")
 
     def _do() -> dict:
         cal_state = rig.calibration
@@ -287,8 +295,8 @@ async def handle_validate_calibration(
             # doesn't have to wait for a fresh /bridge page load.
             rig.calibration.screen_dimension = calib.screen_dimension
             rig.calibration.save()
-        # Park off-phone after the validation taps so step 11's
-        # AssistiveTouch interaction shows an unobstructed phone.
+        # Park off-phone after the validation taps so the AssistiveTouch
+        # verification step shows an unobstructed phone.
         rig.park()
         return {
             "results": results,
@@ -311,13 +319,13 @@ async def handle_trace_edge(
 
     def _precheck() -> None:
         if rig.transforms is None:
-            raise RuntimeError("Not calibrated — run /setup first")
+            raise PreconditionError("Not calibrated — run /setup first")
 
     def _do() -> dict:
         trace_screen_edge(rig.arm, rig.transforms)
         phone.set_mode("bridge")
         # Park off-phone after tracing so the rig ends in a clean
-        # state — same convention as steps 7, 8, 9, 10.
+        # state — same convention as the other arm-driving steps.
         rig.park()
         return {"ok": True}
 
@@ -335,8 +343,10 @@ async def handle_show_assistive_touch(
 ) -> JSONResponse:
     """POST /api/calibrate/assistive-touch/show — display AT positioning circle + grey nonce grid."""
 
-    if calib.viewport_shift is None:
-        return _err("Run viewport-shift first", status_code=400)
+    try:
+        require_viewport_shift(calib)
+    except PreconditionError as e:
+        return _err(str(e), status_code=409)
     nonce = generate_nonce()
     rig.assistive_touch.compute_at_screen_pos(calib.viewport_shift)
     phone.set_mode("calibrate", phase="assistive_touch", nonce_bits=nonce)
@@ -360,11 +370,11 @@ async def handle_verify_assistive_touch(
 
     def _precheck() -> None:
         if rig.arm is None:
-            raise RuntimeError("Arm not connected")
+            raise PreconditionError("Arm not connected")
         if rig.calibration.pct_to_grbl is None:
-            raise RuntimeError("Run arm calibration first")
+            raise PreconditionError("Run arm calibration first")
         if not rig.assistive_touch.at_screen:
-            raise RuntimeError("Run assistive-touch/show first")
+            raise PreconditionError("Run assistive-touch/show first")
 
     def _do() -> dict:
         return verify_assistive_touch(

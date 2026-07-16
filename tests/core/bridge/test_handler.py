@@ -491,9 +491,11 @@ async def test_serve_qr_page_uses_default_port_when_url_port_none(
 # ---------- handle_calib_touch ----------
 
 
-@pytest.mark.asyncio
-async def test_handle_calib_touch_records_touch_with_screenshot_pcts() -> None:
+def _touch_ready_cal() -> CalibrationState:
+    """A CalibrationState with a touch-consuming phase on screen and the
+    viewport shift measured — the state every touch-driven step runs in."""
     cal = CalibrationState()
+    cal.set_phase("grid")
     cal.viewport_shift = ViewportShift(
         offset_x=0,
         offset_y=0,
@@ -501,6 +503,12 @@ async def test_handle_calib_touch_records_touch_with_screenshot_pcts() -> None:
         screenshot_width=200,
         screenshot_height=400,
     )
+    return cal
+
+
+@pytest.mark.asyncio
+async def test_handle_calib_touch_records_touch_with_screenshot_pcts() -> None:
+    cal = _touch_ready_cal()
 
     resp = await handle_calib_touch(
         _fake_request(json_obj={"clientX": 100, "clientY": 200}),
@@ -514,6 +522,22 @@ async def test_handle_calib_touch_records_touch_with_screenshot_pcts() -> None:
     touch = cal.touches[0]
     assert touch["x"] == 0.5  # 100/200
     assert touch["y"] == 0.5  # 200/400
+
+
+@pytest.mark.asyncio
+async def test_handle_calib_touch_409_when_no_step_waiting() -> None:
+    """An idle server has no calibration step collecting touches — a
+    report then is rejected before it can reach the touch queue."""
+    cal = _touch_ready_cal()
+    cal.set_phase("idle")
+
+    resp = await handle_calib_touch(
+        _fake_request(json_obj={"clientX": 100, "clientY": 200}),
+        cal,
+    )
+
+    assert resp.status_code == 409
+    assert cal.touches == []
 
 
 # ---------- malformed-input guards (400/409, never 500) ----------
@@ -557,9 +581,10 @@ async def test_mode_switch_400_on_malformed_json() -> None:
 
 @pytest.mark.asyncio
 async def test_handle_calib_touch_400_on_missing_coords() -> None:
-    resp = await handle_calib_touch(
-        _fake_request(json_obj={"clientX": 100}), CalibrationState()
-    )
+    cal = CalibrationState()
+    cal.set_phase("grid")
+
+    resp = await handle_calib_touch(_fake_request(json_obj={"clientX": 100}), cal)
 
     assert resp.status_code == 400
 
@@ -569,6 +594,7 @@ async def test_handle_calib_touch_409_before_viewport_shift_measured() -> None:
     """A touch that lands before pre-cal has measured the shift is a
     state conflict — the phone page is ahead of the server, not broken."""
     cal = CalibrationState()  # viewport_shift is None
+    cal.set_phase("grid")
 
     resp = await handle_calib_touch(
         _fake_request(json_obj={"clientX": 100, "clientY": 200}), cal

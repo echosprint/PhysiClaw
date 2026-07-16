@@ -22,21 +22,25 @@ import time
 
 import numpy as np
 
+from physiclaw.common.config import CONFIG
 from physiclaw.core.vision.colors import hsv_mask
 from physiclaw.core.vision.preprocess import grayscale, resize_to_width, to_hsv
 
 log = logging.getLogger(__name__)
 
 # --- Detection thresholds ---
-STD_INCREASE = 4.0
-MEAN_INCREASE = 4.0
+# Seeded from `[vision]` config (deliberate CONFIG read at import, same
+# tradeoff as preprocess.py) so a rig with a different camera/lighting
+# can re-tune the wake sensitivity without a source edit.
+STD_INCREASE = CONFIG.vision.wake_std_increase
+MEAN_INCREASE = CONFIG.vision.wake_mean_increase
 # Min new warm-pixels for a badge wake. A well-lit badge at a normal camera
 # distance is ~1000+ px, but a farther camera shrinks it (area ~ 1/distance²)
 # and dim light + MJPEG chroma-subsampling desaturate the edges, dropping the
 # count. Kept low (biased to sensitivity): a spurious wake is cheap, a missed
 # message is not. Detection is delta-based (raw vs slow baseline), so static
 # warm content — red icons, pink wallpaper — cancels and doesn't eat the budget.
-BADGE_MIN_AREA = 30
+BADGE_MIN_AREA = CONFIG.vision.badge_min_area
 # The dock badge is red on the phone, but a camera under warm/yellow room light
 # renders it orange/pink, and in the dark it desaturates and dims. So match a
 # widened WARM hue band (covers the white-balance cast both ways across the

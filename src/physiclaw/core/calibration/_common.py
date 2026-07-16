@@ -21,6 +21,38 @@ from physiclaw.core.hardware.arm import StylusArm
 
 log = logging.getLogger(__name__)
 
+
+class PreconditionError(RuntimeError):
+    """A calibration step can't run yet — hardware missing or an earlier
+    step not done. A client-state problem (the HTTP layer maps it to
+    409), not a server fault (500): the wizard shows the message as the
+    actionable fix."""
+
+
+def require_viewport_shift(cal) -> None:
+    """Hard precondition shared by the affine fits and validation:
+    without the shift, a fit would silently land in raw viewport 0-1
+    instead of the canonical screenshot 0-1 space — numerically valid
+    and wrong."""
+    if cal.viewport_shift is None:
+        raise PreconditionError(
+            "Viewport shift not measured — run the pre-cal step first"
+        )
+
+
+def require_screen_dimension(cal) -> None:
+    """Hard precondition for the steps that convert grid positions via
+    ``viewport_pct_to_screenshot_pct`` (the fits and validation) — its
+    mid-step RuntimeError('Screen dimension not set') would surface as a
+    generic 500; checking up front turns it into the actionable 409 the
+    sibling preconditions get. Steps that only need the shift (e.g. the
+    AT positioning) deliberately don't require this."""
+    if cal.screen_dimension is None:
+        raise PreconditionError(
+            "Screen dimension not received — open /bridge on the phone first"
+        )
+
+
 # Slightly longer than a normal tap so flaky first contacts still register
 # during calibration probing.
 CAL_STRIKE_DURATION = 0.15

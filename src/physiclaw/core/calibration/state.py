@@ -21,6 +21,7 @@ import numpy as np
 from physiclaw.common import paths
 from physiclaw.common.text import read_text, write_text
 from physiclaw.core.calibration.transforms import ScreenTransforms, ViewportShift
+from physiclaw.core.geometry import apply_affine
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +36,12 @@ ROTATION_NAMES: dict[int, str] = {
 DEFAULT_ROTATION: int = cv2.ROTATE_90_COUNTERCLOCKWISE
 
 BUNDLE_PATH = paths.calibration_bundle()
+
+# Schema version of the persisted bundle. Bump when a field's meaning or
+# shape changes so an old on-disk bundle fails loudly at load instead of
+# reconstructing wrong (``from_dict`` raises on mismatch). Bundles
+# written before versioning carry no key and count as version 1.
+BUNDLE_VERSION = 1
 
 
 @dataclasses.dataclass
@@ -113,15 +120,14 @@ class Calibration:
     def pct_to_grbl_mm(self, x: float, y: float) -> tuple[float, float] | None:
         """Convert screen pct (0-1, x=horizontal, y=vertical) to GRBL mm
         using just `pct_to_grbl`. Returns None until that affine is set
-        (e.g. before step 7). Unlike `transforms()`, doesn't require the
-        camera mapping — usable between steps 7 and 9. Negative values
+        (e.g. before arm calibration). Unlike `transforms()`, doesn't
+        require the camera mapping — usable after the arm fit but before
+        the camera mapping. Negative values
         and values >1 are valid (off-phone positions in the same
         coordinate frame)."""
         if self.pct_to_grbl is None:
             return None
-        pt = np.array([x, y, 1.0])
-        result = self.pct_to_grbl @ pt
-        return (float(result[0]), float(result[1]))
+        return apply_affine(self.pct_to_grbl, x, y)
 
     def summary(self) -> dict:
         """Per-step status for /api/status — one line per filled field."""
@@ -150,6 +156,7 @@ class Calibration:
     def to_dict(self) -> dict:
         """JSON-safe snapshot of this bundle. numpy arrays become nested lists."""
         return {
+            "version": BUNDLE_VERSION,
             "viewport_shift": (
                 dataclasses.asdict(self.viewport_shift)
                 if self.viewport_shift is not None
@@ -169,7 +176,18 @@ class Calibration:
 
     @classmethod
     def from_dict(cls, payload: dict) -> "Calibration":
-        """Reconstruct from the output of to_dict()."""
+        """Reconstruct from the output of to_dict().
+
+        Raises ``ValueError`` on a schema-version mismatch — a bundle
+        written by an incompatible format must fail loudly, not
+        reconstruct with silently-wrong fields. Pre-versioning bundles
+        (no key) count as version 1."""
+        found = payload.get("version", 1)
+        if found != BUNDLE_VERSION:
+            raise ValueError(
+                f"calibration bundle schema version {found} != "
+                f"expected {BUNDLE_VERSION} — recalibrate"
+            )
         vs = payload.get("viewport_shift")
         pg = payload.get("pct_to_grbl")
         pc = payload.get("pct_to_cam")

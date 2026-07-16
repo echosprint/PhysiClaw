@@ -103,7 +103,14 @@ def _sanity(
     return False
 
 
-def try_resume(cam_index_override: int | None, *, verify: bool = True) -> bool:
+def try_resume(
+    cam_index_override: int | None,
+    *,
+    verify: bool = True,
+    physiclaw: "PhysiClaw",
+    calib: "CalibrationState",
+    phone: "PageState",
+) -> bool:
     """Connect hardware, run sanity, flip ready if everything holds.
 
     Camera index comes from ``--cam-index`` if provided, else from
@@ -114,39 +121,53 @@ def try_resume(cam_index_override: int | None, *, verify: bool = True) -> bool:
     home-screen swipe are all skipped, so the phone is never touched and
     the server is ready as soon as hardware reconnects.
 
+    The assembled state objects come in as parameters (the caller,
+    ``cli/server.py``, passes the default assembly's) — no back-import
+    into ``core.server.app``, so this runs against fakes in tests.
+
     Returns True on success; False (with a logged reason) if the bundle
     is incomplete, hardware reconnect fails, or sanity doesn't pass.
     The caller exits non-zero so the user can fall back to plain
     ``uv run physiclaw`` + ``setup.py``.
     """
-    from physiclaw.core.calibration.state import Calibration
-    from physiclaw.core.server.app import _calib, _phone, physiclaw
+    from physiclaw.core.calibration.state import BUNDLE_PATH, Calibration
 
     flag = resume_flag(verify)
     rig = physiclaw.rig
     loaded = Calibration.load()
     if loaded is None:
-        log.error(f"{flag}: no calibration bundle on disk")
+        if BUNDLE_PATH.exists():
+            # The file is there but didn't parse (corrupt, or an
+            # incompatible schema version) — a different fix than
+            # "run setup for the first time".
+            log.error(
+                f"{flag}: calibration bundle on disk is unreadable or "
+                "incompatible — recalibrate with `physiclaw setup hardware`"
+            )
+        else:
+            log.error(f"{flag}: no calibration bundle on disk")
         return False
-    rig.calibration = loaded
-    if loaded.viewport_shift is not None:
-        # Mirror into the bridge-side state so calibration handlers that
-        # read `calib.viewport_shift` (e.g. show_assistive_touch) see it.
-        _calib.viewport_shift = loaded.viewport_shift
-        rig.assistive_touch.compute_at_screen_pos(loaded.viewport_shift)
-    if loaded.screen_dimension is not None:
-        # Restore the CSS-pt dimensions so warm-start's validate can run
-        # without waiting for the phone's /bridge page to POST them again.
-        _calib.screen_dimension = loaded.screen_dimension
     log.info(
         f"{flag}: loaded bundle (rotation={loaded.cam_rotation}, "
         f"complete={loaded.complete})"
     )
-
-    cal = rig.calibration
-    if not cal.complete:
+    if not loaded.complete:
+        # Gate BEFORE any state lands in the session: an incomplete
+        # bundle must not leak a stale viewport shift / screen dimension
+        # into the live calib state the interactive wizard then runs
+        # against.
         log.error(f"{flag}: bundle on disk is incomplete")
         return False
+    rig.calibration = loaded
+    # Mirror into the bridge-side state so calibration handlers that
+    # read `calib.viewport_shift` (e.g. show_assistive_touch) see it,
+    # and restore the CSS-pt dimensions so warm-start's validate can run
+    # without waiting for the phone's /bridge page to POST them again.
+    calib.viewport_shift = loaded.viewport_shift
+    rig.assistive_touch.compute_at_screen_pos(loaded.viewport_shift)
+    calib.screen_dimension = loaded.screen_dimension
+
+    cal = rig.calibration
     cam_index = (
         cam_index_override
         if cam_index_override is not None
@@ -204,7 +225,7 @@ def try_resume(cam_index_override: int | None, *, verify: bool = True) -> bool:
         else:
             log.info(f"{flag}: non-interactive; running sanity immediately")
 
-        if not _sanity(physiclaw, _calib, _phone):
+        if not _sanity(physiclaw, calib, phone):
             # _sanity logged the specific diagnosis.
             return False
 
@@ -218,14 +239,12 @@ def try_resume(cam_index_override: int | None, *, verify: bool = True) -> bool:
             f"{flag}: trusting the parked arm — skipping bridge wait, "
             "sanity tap, and home-screen swipe"
         )
-    # Settle the camera before flipping ready: verify/converge exposure
+    # Settle the camera, then flip ready — become_ready owns that order
     # (under --warm-start the home screen is showing — the dark scene that
     # exposes AE failure; under --hot-start whatever's on screen still
-    # beats not checking at all), then freeze autofocus on the settled
-    # view. Synchronous is fine: try_resume already runs on a background
-    # thread, and settle_camera is fail-open + bounded by frame-wait
-    # timeouts.
-    physiclaw.perception.settle_camera()
-    rig.mark_ready()
+    # beats not checking at all). Synchronous is fine: try_resume already
+    # runs on a background thread, and the settle half is fail-open +
+    # bounded by frame-wait timeouts.
+    physiclaw.become_ready()
     log.info(f"{flag}: resumed from bundle (cam={cam_index}) — MCP tools ready")
     return True

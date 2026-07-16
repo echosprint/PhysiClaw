@@ -30,9 +30,7 @@ def register(mcp: "FastMCP", physiclaw: "PhysiClaw") -> None:
     @mcp.custom_route("/api/phone/watch", methods=["GET"])
     async def _watch(request: Request) -> JSONResponse:  # noqa: ARG001
         try:
-            result = await asyncio.get_event_loop().run_in_executor(
-                None, physiclaw.perception.watch
-            )
+            result = await asyncio.to_thread(physiclaw.perception.watch)
             return JSONResponse(result)
         except RuntimeError as e:
             log.debug("watch skipped: %s", e)
@@ -44,7 +42,7 @@ def register(mcp: "FastMCP", physiclaw: "PhysiClaw") -> None:
     @mcp.custom_route("/api/phone/home", methods=["POST"])
     async def _home(request: Request) -> JSONResponse:  # noqa: ARG001
         try:
-            await asyncio.get_event_loop().run_in_executor(None, physiclaw.home_screen)
+            await asyncio.to_thread(physiclaw.home_screen)
             return JSONResponse({"ok": True})
         except Exception as e:
             log.exception("home_screen failed")
@@ -52,14 +50,12 @@ def register(mcp: "FastMCP", physiclaw: "PhysiClaw") -> None:
 
     @mcp.custom_route("/api/ready", methods=["POST"])
     async def _mark_ready(request: Request) -> JSONResponse:  # noqa: ARG001
-        physiclaw.rig.mark_ready()
         # Fire-and-forget: setup just parked the phone on the home screen
-        # (the dark scene that exposes AE failure), so settle the camera
-        # now (exposure tune + focus lock, one rig hold) — without
-        # stalling the wizard's finish screen. settle_camera is
-        # internally fail-open, so the future can't carry an exception
-        # that matters.
-        asyncio.get_event_loop().run_in_executor(
-            None, physiclaw.perception.settle_camera
-        )
-        return JSONResponse({"ok": True, "ready": physiclaw.rig.ready})
+        # (the dark scene that exposes AE failure). become_ready settles
+        # the camera FIRST (exposure tune + focus lock, one rig hold) and
+        # flips ready AFTER, so the runtime's status poll can't observe
+        # ready on an unsettled camera — without stalling the wizard's
+        # finish screen. become_ready is internally fail-open, so the
+        # future can't carry an exception that matters.
+        asyncio.get_running_loop().run_in_executor(None, physiclaw.become_ready)
+        return JSONResponse({"ok": True})

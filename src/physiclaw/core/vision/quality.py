@@ -44,6 +44,7 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
+from physiclaw.common.config import CONFIG
 from physiclaw.core.vision.preprocess import grayscale, resize_to_width
 
 # Laplacian variance is not scale-invariant: the same screen captured at
@@ -77,13 +78,16 @@ def laplacian_variance(frame: np.ndarray) -> float:
 # thresholds are defined FROM this constant — this check runs AFTER
 # those retries, so a frame still under it means the retry didn't
 # recover (AF genuinely failing, not just mid-hunt).
-BLUR_THRESHOLD = 80.0
+# Seeded from `[vision]` config (deliberate CONFIG read at import, same
+# tradeoff as preprocess.py) so a rig with different optics/lighting can
+# re-tune without a source edit; the defaults are the calibrated values.
+BLUR_THRESHOLD = CONFIG.vision.blur_threshold
 
 # A pixel this bright is treated as clipped (detail destroyed).
 CLIP_LUMA = 250
 # Two-factor blown-highlights rule — see module docstring for calibration.
-BLOWN_CLIP_PCT = 0.12
-BLOWN_MEDIAN_LUMA = 200.0
+BLOWN_CLIP_PCT = CONFIG.vision.blown_clip_pct
+BLOWN_MEDIAN_LUMA = CONFIG.vision.blown_median_luma
 
 # Icon-grid white-out: many disconnected, icon-sized, solid, roughly
 # square clipped blobs — burned app icons. A legit white page is ONE
@@ -96,7 +100,7 @@ BLOB_MIN_AREA_FRAC = 0.002  # of the crop, ~half an app icon
 BLOB_MAX_AREA_FRAC = 0.08  # ~a 2x2 widget; a white page is far bigger
 BLOB_MIN_FILL = 0.8  # solid rounded square, not a ragged fragment
 BLOB_ASPECT = (0.6, 1.6)  # roughly square
-BLOWN_BLOB_COUNT = 6
+BLOWN_BLOB_COUNT = CONFIG.vision.blown_blob_count
 
 # Bad views in a row before the warning escalates from "this view is
 # unreliable" to "tell your user the rig needs attention".

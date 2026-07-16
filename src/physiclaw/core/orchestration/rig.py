@@ -58,6 +58,7 @@ class HardwareRig:
         self._cam: Camera | None = None
         self.calibration: Calibration = Calibration()
         self._lock = threading.Lock()
+        self._lock_owner: int | None = None  # thread ident; see assert_locked
         self._assistive_touch = AssistiveTouch()
         self._bridge: BridgeState | None = None
         self._ready = False  # set True only after /setup finishes its last step
@@ -78,12 +79,11 @@ class HardwareRig:
         return self._ready and self.hardware_ready
 
     def mark_ready(self) -> None:
-        """Called by /setup after its final step (phone on Home Screen).
+        """Flip the ready flag. Kept pure (tests pin it).
 
-        Kept pure (tests pin it). Any NEW path that flips ready should
-        also schedule `Perception.settle_camera()` — see the two
-        existing callers (`server/watch.py` /api/ready,
-        `server/warm_start.py`)."""
+        Don't call this directly from a new path — go through
+        ``PhysiClaw.become_ready()``, which settles the camera FIRST so
+        the agent can never observe ``ready`` on an unsettled camera."""
         self._ready = True
 
     # ─── State queries ────────────────────────────────────────
@@ -132,10 +132,25 @@ class HardwareRig:
             raise RuntimeError(
                 "PhysiClaw is busy — wait for the current operation to finish, then retry."
             )
+        self._lock_owner = threading.get_ident()
 
     def release(self):
         """Mark hardware as idle."""
+        self._lock_owner = None
         self._lock.release()
+
+    def assert_locked(self):
+        """Loud guard for caller-must-hold-the-lock methods: raise instead
+        of silently touching hardware unserialized. Checks OWNERSHIP, not
+        mere held-ness — another thread legitimately holding the lock is
+        exactly when an unlocked caller would interleave G-code with a
+        gesture in flight, so held-by-anyone would pass right when the
+        guard matters most."""
+        if self._lock_owner != threading.get_ident():
+            raise RuntimeError(
+                "hardware lock not held by this thread — wrap the call in "
+                "rig.locked() or acquire()"
+            )
 
     @contextmanager
     def locked(self):
@@ -148,7 +163,10 @@ class HardwareRig:
             try:
                 self.park()
             except Exception:
-                pass
+                # Best-effort like shutdown's _safe, but never silent: a
+                # persistently failing inter-gesture park leaves the tip
+                # over the glass while gestures keep running.
+                log.exception("locked(): auto-park failed")
             self.release()
 
     # ─── Hardware connection ──────────────────────────────────
@@ -294,6 +312,7 @@ class HardwareRig:
     def take_screenshot(self, timeout: float = 60.0) -> bytes | None:
         """Trigger the iOS screenshot + upload Shortcuts via AssistiveTouch;
         return the uploaded image bytes, or None on upload timeout."""
+        self.assert_locked()
         at = self.require_assistive_touch()
         return at.take_screenshot(
             self._arm, self._bridge, self.transforms.pct_to_grbl, timeout=timeout
@@ -301,8 +320,28 @@ class HardwareRig:
 
     def at_long_press(self) -> None:
         """Long-press the AssistiveTouch button (fires the clipboard Shortcut)."""
+        self.assert_locked()
         at = self.require_assistive_touch()
         at.long_press(self._arm, self.transforms.pct_to_grbl)
+
+    def sync_clipboard(self, text: str, timeout: float) -> bool:
+        """Queue `text` on the bridge, long-press AT (fires the clipboard
+        Shortcut), wait for the phone's fetch confirmation. Returns True
+        on confirm. On timeout the text is un-queued before returning
+        False, so a LATE Shortcut run can't fetch it afterwards — callers
+        report "the phone clipboard still holds the previous content" and
+        that must stay true, not racy. Caller must hold the lock; the
+        retry/miss policy lives in the orchestrator's ClipboardSyncState."""
+        self.assert_locked()
+        bridge = self._bridge
+        if bridge is None:
+            raise RuntimeError("Bridge not attached — server assembly incomplete")
+        bridge.send_text(text)
+        self.at_long_press()
+        if bridge.wait_clipboard(timeout=timeout):
+            return True
+        bridge.clear_text()
+        return False
 
     # ─── Primitive movements ─────────────────────────────────
 
@@ -325,7 +364,9 @@ class HardwareRig:
         self._arm.wait_idle()
 
     def move_to_bbox_center(self, bbox: list[float]):
-        """Move arm to the center of a bbox [left, top, right, bottom] (0-1)."""
+        """Move arm to the center of a bbox [left, top, right, bottom] (0-1).
+        Caller must hold the hardware lock."""
+        self.assert_locked()
         t = self.transforms
         if t is None:
             raise RuntimeError("Screen calibration not done")
@@ -334,6 +375,32 @@ class HardwareRig:
         arm = self.require_arm()
         arm.rapid_to(gx, gy)
         arm.wait_idle()
+
+    def swipe_from_bbox(
+        self,
+        bbox: list[float],
+        direction: str,
+        dist: float,
+        speed: str,
+        start_dwell: float = 0.0,
+        end_dwell: float = 0.0,
+    ):
+        """Swipe from the bbox center by `dist` screen-fraction in
+        `direction` — the swipe sibling of ``move_to_bbox_center``, so
+        both press and swipe primitives resolve their coordinates here.
+        `start_dwell`/`end_dwell` (s) anchor the touch-down / hold the
+        endpoint (see ``StylusArm.swipe_to``). Caller must hold the
+        hardware lock."""
+        self.assert_locked()
+        t = self.transforms
+        if t is None:
+            raise RuntimeError("Screen calibration not done")
+        ex, ey = t.swipe_end_pct(bbox, direction, dist)
+        ex_mm, ey_mm = t.pct_to_grbl_mm(ex, ey)
+        self.move_to_bbox_center(bbox)
+        self.require_arm().swipe_to(
+            ex_mm, ey_mm, speed, start_dwell=start_dwell, end_dwell=end_dwell
+        )
 
     # ─── Lifecycle ─────────────────────────────────────────────
 

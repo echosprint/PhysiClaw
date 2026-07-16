@@ -23,8 +23,13 @@ import cv2
 import numpy as np
 
 from physiclaw.core.bridge import CalibrationState
-from physiclaw.core.calibration._common import _tap_and_read
+from physiclaw.core.calibration._common import (
+    _tap_and_read,
+    require_screen_dimension,
+    require_viewport_shift,
+)
 from physiclaw.core.calibration.transforms import PARK_PCT, ScreenTransforms
+from physiclaw.core.geometry import apply_affine, invert_affine
 from physiclaw.core.hardware.arm import StylusArm
 from physiclaw.core.hardware.camera import Camera
 from physiclaw.core.vision.grid_detect import (
@@ -70,10 +75,7 @@ def _run_validation_test(
     vp_y = round(0.2 + random.random() * 0.6, 3)
 
     # Expected position in screenshot 0-1 (for comparison with touch results)
-    if cal.viewport_shift:
-        expected_x, expected_y = cal.viewport_pct_to_screenshot_pct(vp_x, vp_y)
-    else:
-        expected_x, expected_y = vp_x, vp_y
+    expected_x, expected_y = cal.viewport_pct_to_screenshot_pct(vp_x, vp_y)
 
     def _failed() -> dict:
         """The no-touch failure record — expected position, sentinel error."""
@@ -89,8 +91,8 @@ def _run_validation_test(
 
     # 2. Camera detects orange dot
     # Park arm first so it doesn't occlude — the canonical off-phone spot.
-    park_gx, park_gy = pct_to_grbl @ np.array([*PARK_PCT, 1.0])
-    arm.rapid_to(float(park_gx), float(park_gy))
+    park_gx, park_gy = apply_affine(pct_to_grbl, *PARK_PCT)
+    arm.rapid_to(park_gx, park_gy)
     arm.wait_idle()
     time.sleep(0.3)
 
@@ -104,8 +106,8 @@ def _run_validation_test(
     # largest-blob search would lock onto it and steer the arm off the
     # panel. The distance cap rejects a match too far from the prediction,
     # falling back to the known position instead.
-    exp_cam = pct_to_cam @ np.array([expected_x, expected_y, 1.0])
-    expected_px = (float(exp_cam[0]) * cam_w, float(exp_cam[1]) * cam_h)
+    exp_cam_x, exp_cam_y = apply_affine(pct_to_cam, expected_x, expected_y)
+    expected_px = (exp_cam_x * cam_w, exp_cam_y * cam_h)
     max_dist = DOT_MATCH_MAX_DIST_FRAC * min(cam_w, cam_h)
     detected = (
         _detect_orange_dot(frame, near=expected_px, max_dist=max_dist)
@@ -123,9 +125,7 @@ def _run_validation_test(
         # 3. Mapping B⁻¹: camera 0-1 → screen pct (screenshot 0-1)
         cam_01_x = detected[0] / cam_w
         cam_01_y = detected[1] / cam_h
-        cam_pt = np.array([cam_01_x, cam_01_y, 1.0])
-        screen_pct = cam_to_pct @ cam_pt
-        cam_pct_x, cam_pct_y = float(screen_pct[0]), float(screen_pct[1])
+        cam_pct_x, cam_pct_y = apply_affine(cam_to_pct, cam_01_x, cam_01_y)
         log.info(
             f"    2. Camera: detected dot at pixel ({detected[0]:.0f}, {detected[1]:.0f}) "
             f"→ camera 0-1 ({cam_01_x:.3f}, {cam_01_y:.3f})"
@@ -147,8 +147,7 @@ def _run_validation_test(
             cam_pct_x, cam_pct_y = expected_x, expected_y
 
     # 4. Mapping A: screen pct → GRBL mm
-    grbl_pos = pct_to_grbl @ np.array([cam_pct_x, cam_pct_y, 1.0])
-    gx, gy = float(grbl_pos[0]), float(grbl_pos[1])
+    gx, gy = apply_affine(pct_to_grbl, cam_pct_x, cam_pct_y)
     log.info(
         f"    4. Mapping A: screen ({cam_pct_x:.3f}, {cam_pct_y:.3f}) → "
         f"arm ({gx:.1f}, {gy:.1f})mm"
@@ -216,11 +215,14 @@ def validate_calibration(
         f"(≈{max_error * 390:.0f}px on a 390px-wide screen)"
     )
 
-    # Compute inverse of pct_to_cam for camera 0-1 → screen pct
-    A = pct_to_cam[:, :2]  # 2×2
-    b = pct_to_cam[:, 2]  # translation
-    A_inv = np.linalg.inv(A)
-    cam_to_pct = np.hstack([A_inv, (-A_inv @ b).reshape(2, 1)])
+    # Same precondition as the fits: comparisons must happen in the
+    # canonical screenshot 0-1 space, never raw viewport 0-1.
+    require_viewport_shift(cal)
+    require_screen_dimension(cal)
+
+    # Inverse of Mapping B for camera 0-1 → screen pct — the one
+    # inverse implementation (see geometry.invert_affine).
+    cam_to_pct = invert_affine(pct_to_cam)
 
     results = []
     for i in range(num_tests):

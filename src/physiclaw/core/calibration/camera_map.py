@@ -18,7 +18,12 @@ import cv2
 import numpy as np
 
 from physiclaw.core.bridge import CalibrationState
-from physiclaw.core.calibration._common import grid_positions
+from physiclaw.core.calibration._common import (
+    grid_positions,
+    require_screen_dimension,
+    require_viewport_shift,
+)
+from physiclaw.core.calibration.state import ROTATION_NAMES
 from physiclaw.core.hardware.camera import Camera
 from physiclaw.core.vision.grid_detect import (
     detect_red_dots,
@@ -107,30 +112,19 @@ def compute_camera_mapping(
     log.info("  Goal: compute affine transform from screen 0-1 → camera 0-1")
     expected = len(cal.GRID_COLS_PCT) * len(cal.GRID_ROWS_PCT)
 
-    rot_names = {
-        -1: "none",
-        cv2.ROTATE_90_CLOCKWISE: "90° CW",
-        cv2.ROTATE_180: "180°",
-        cv2.ROTATE_90_COUNTERCLOCKWISE: "90° CCW",
-    }
+    require_viewport_shift(cal)
+    require_screen_dimension(cal)
 
     # Known grid target positions (frame-independent), in the same row-major
-    # order sort_dots_to_grid yields. Convert to screenshot 0-1 when the
-    # viewport shift is known so Mapping B shares Mapping A's coordinate space.
-    coord_space = "screenshot 0-1" if cal.viewport_shift else "viewport 0-1"
-    if cal.viewport_shift:
-        screen_pcts = np.array(
-            [
-                list(cal.viewport_pct_to_screenshot_pct(col, row))
-                for col, row in grid_positions(cal)
-            ],
-            dtype=np.float64,
-        )
-    else:
-        screen_pcts = np.array(
-            [[col, row] for col, row in grid_positions(cal)],
-            dtype=np.float64,
-        )
+    # order sort_dots_to_grid yields, converted to screenshot 0-1 so
+    # Mapping B shares Mapping A's coordinate space.
+    screen_pcts = np.array(
+        [
+            list(cal.viewport_pct_to_screenshot_pct(col, row))
+            for col, row in grid_positions(cal)
+        ],
+        dtype=np.float64,
+    )
 
     # 1. Fence the screen via the corner blocks (camera is static, so one
     #    capture serves the whole grid pass). A separate frame from the grid:
@@ -187,8 +181,8 @@ def compute_camera_mapping(
         ):
             log.info(
                 f"  Camera frame: {frame_w}×{frame_h}px "
-                f"(rotation={rot_names.get(rotation, str(rotation))}); "
-                f"mapping {coord_space} ↔ camera 0-1"
+                f"(rotation={ROTATION_NAMES.get(rotation, str(rotation))}); "
+                f"mapping screenshot 0-1 ↔ camera 0-1"
             )
             best = (pct_to_cam, (frame_w, frame_h))
             break

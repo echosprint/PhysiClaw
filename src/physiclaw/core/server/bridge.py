@@ -42,10 +42,10 @@ log = logging.getLogger(__name__)
 def register(
     mcp: "FastMCP",
     bridge: BridgeState,
-    calib: CalibrationState,
     phone: PageState,
 ) -> None:
-    """Register the control-plane bridge routes (loopback callers only)."""
+    """Register the control-plane bridge routes (loopback callers only).
+    (No ``calib`` here — only the phone-facing routes touch it.)"""
 
     @mcp.custom_route("/api/bridge/qr", methods=["GET"])
     async def _qr(request: Request) -> Response:

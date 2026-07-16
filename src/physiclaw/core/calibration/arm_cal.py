@@ -17,7 +17,13 @@ import cv2
 import numpy as np
 
 from physiclaw.core.bridge import CalibrationState
-from physiclaw.core.calibration._common import _tap_and_read, grid_positions
+from physiclaw.core.calibration._common import (
+    _tap_and_read,
+    grid_positions,
+    require_screen_dimension,
+    require_viewport_shift,
+)
+from physiclaw.core.geometry import apply_affine
 from physiclaw.core.hardware.arm import StylusArm
 
 log = logging.getLogger(__name__)
@@ -68,6 +74,8 @@ def calibrate_arm(
     higher means the phone is rotated relative to arm travel.
     """
     log.info("═══ Arm calibration — screen↔arm mapping ═══")
+    require_viewport_shift(cal)
+    require_screen_dimension(cal)
     cal.set_phase("center")
     time.sleep(0.5)
 
@@ -109,12 +117,8 @@ def calibrate_arm(
     grid_touches: list = []
 
     for idx, (col, row) in enumerate(grid, start=1):
-        if cal.viewport_shift:
-            scr_col, scr_row = cal.viewport_pct_to_screenshot_pct(col, row)
-        else:
-            scr_col, scr_row = col, row
-        predicted = probe_affine @ np.array([scr_col, scr_row, 1.0])
-        gx, gy = float(predicted[0]), float(predicted[1])
+        scr_col, scr_row = cal.viewport_pct_to_screenshot_pct(col, row)
+        gx, gy = apply_affine(probe_affine, scr_col, scr_row)
         log.info(
             f"    Grid {idx}/{len(grid)}: viewport ({col:.2f}, {row:.2f}) → "
             f"arm ({gx:.1f}, {gy:.1f})mm"
@@ -161,16 +165,16 @@ def calibrate_arm(
         )
 
     # Re-origin at screen center.
-    center_grbl = pct_to_grbl @ np.array([0.5, 0.5, 1.0])
+    center_gx, center_gy = apply_affine(pct_to_grbl, 0.5, 0.5)
     log.info(
         f"  Re-origin: screen center is at arm "
-        f"({center_grbl[0]:.2f}, {center_grbl[1]:.2f})mm → setting as (0, 0)"
+        f"({center_gx:.2f}, {center_gy:.2f})mm → setting as (0, 0)"
     )
-    arm.rapid_to(center_grbl[0], center_grbl[1])
+    arm.rapid_to(center_gx, center_gy)
     arm.wait_idle()
     arm.set_origin()
-    pct_to_grbl[0, 2] -= center_grbl[0]
-    pct_to_grbl[1, 2] -= center_grbl[1]
+    pct_to_grbl[0, 2] -= center_gx
+    pct_to_grbl[1, 2] -= center_gy
     cal.set_phase("center")
 
     log.info(f"  ✓ Arm calibration done: {len(grbl_pts)} pairs, tilt={tilt:.4f}")

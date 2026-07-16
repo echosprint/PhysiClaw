@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from physiclaw.core.calibration.transforms import ViewportShift
+from physiclaw.core import geometry
 from physiclaw.core.hardware.arm import StylusArm
 
 if TYPE_CHECKING:
@@ -37,10 +37,11 @@ class AssistiveTouch:
         img_bytes = at.take_screenshot(arm, bridge, pct_to_grbl)
     """
 
-    # AT button position in CSS viewport pixels (iPhone left edge snap).
-    AT_CSS_X = 39  # 11pt edge margin + 28pt button radius
-    AT_CSS_Y = 260  # hardcoded vertical position
-    AT_RADIUS = 28  # 56pt diameter
+    # AT button geometry (CSS viewport px) — from the shared
+    # render↔measure contract, kept as class attrs for callers.
+    AT_CSS_X = geometry.AT_CSS_X
+    AT_CSS_Y = geometry.AT_CSS_Y
+    AT_RADIUS = geometry.AT_RADIUS
 
     def __init__(self) -> None:
         self.at_screen: tuple[float, float] | None = None  # screenshot 0-1
@@ -76,7 +77,7 @@ class AssistiveTouch:
             return abs(cy - ay) < ry
         return False
 
-    def compute_at_screen_pos(self, t: ViewportShift) -> tuple[float, float]:
+    def compute_at_screen_pos(self, t: geometry.ViewportShift) -> tuple[float, float]:
         """Convert AT CSS position to screenshot 0-1 using the viewport shift.
 
         Must be called after the measure-viewport-shift pre-cal step has set
@@ -101,8 +102,8 @@ class AssistiveTouch:
         if self.at_screen is None:
             raise RuntimeError("AT position not set — call compute_at_screen_pos first")
         sx, sy = self.at_screen
-        grbl = pct_to_grbl @ np.array([sx, sy, 1.0])
-        arm.rapid_to(float(grbl[0]), float(grbl[1]))
+        gx, gy = geometry.apply_affine(pct_to_grbl, sx, sy)
+        arm.rapid_to(gx, gy)
         arm.wait_idle()
 
     def tap(self, arm: StylusArm, pct_to_grbl: np.ndarray) -> None:

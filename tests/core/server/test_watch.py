@@ -98,34 +98,33 @@ async def test_home_screen_route_returns_503_on_failure(
 
 
 @pytest.mark.asyncio
-async def test_ready_route_marks_and_returns_ready_state(
+async def test_ready_route_returns_ok_immediately(
     fake_mcp,
     async_request,
 ) -> None:
     pl = MagicMock()
-    pl.rig.ready = True
     watch_reg.register(fake_mcp, pl)
 
     resp = await fake_mcp.get("/api/ready", "POST")(async_request())
 
-    pl.rig.mark_ready.assert_called_once()
-    assert json.loads(bytes(resp.body).decode()) == {"ok": True, "ready": True}
+    assert json.loads(bytes(resp.body).decode()) == {"ok": True}
 
 
 @pytest.mark.asyncio
-async def test_ready_route_fires_camera_settle(fake_mcp, async_request) -> None:
+async def test_ready_route_fires_become_ready_off_thread(
+    fake_mcp, async_request
+) -> None:
     # Fire-and-forget on the default executor: the response must not wait
-    # for the settle, but the settle must run.
+    # for the settle, but become_ready (settle THEN mark) must run.
     import asyncio
 
     pl = MagicMock()
-    pl.rig.ready = True
     watch_reg.register(fake_mcp, pl)
 
     await fake_mcp.get("/api/ready", "POST")(async_request())
 
     for _ in range(100):
-        if pl.perception.settle_camera.called:
+        if pl.become_ready.called:
             break
         await asyncio.sleep(0.01)
-    pl.perception.settle_camera.assert_called_once()
+    pl.become_ready.assert_called_once()

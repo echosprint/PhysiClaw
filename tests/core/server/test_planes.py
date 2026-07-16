@@ -85,6 +85,15 @@ async def test_control_gate_admits_configured_bind_host() -> None:
 # ---------- PhoneApp ----------
 
 
+def test_phone_app_refuses_non_phone_route() -> None:
+    """A control route (arm-driving, setup, calibrate) registered on the
+    LAN plane must fail at assembly time, not silently expose."""
+    app = PhoneApp()
+
+    with pytest.raises(RuntimeError, match="refusing to expose"):
+        app.custom_route("/api/calibrate/arm", methods=["POST"])
+
+
 def test_phone_app_collects_routes_and_builds_starlette() -> None:
     app = PhoneApp()
 

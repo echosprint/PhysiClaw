@@ -370,11 +370,32 @@ def _step_edge_trace(auto: bool) -> None:
     _done("Edge trace complete")
 
 
+def _mark_ready_and_wait(timeout: float = 45.0) -> None:
+    """POST /api/ready, then poll status until the flag flips.
+
+    The ready flip is deliberately asynchronous server-side: become_ready
+    settles the camera (exposure tune + focus lock, a few seconds) BEFORE
+    marking ready, so a script that chains `setup hardware` into an agent
+    command would otherwise race the settle window. Bounded: on timeout
+    we proceed with a note rather than fail — the settle is fail-open and
+    ready still flips.
+    """
+    api("POST", "/api/ready")
+    for _ in range(int(timeout)):
+        status = api("GET", "/api/status")
+        if status is None:  # server gone — the CLI is fail-soft throughout
+            return
+        if status.get("ready"):
+            return
+        time.sleep(1)
+    print("  (camera settle still running — ready will flip shortly)")
+
+
 def _step_finish(t0: float) -> None:
     print("\n── 10. Finish ──")
     api("POST", "/api/phone/home")
     time.sleep(3)
-    api("POST", "/api/ready")
+    _mark_ready_and_wait()
 
     elapsed = time.time() - t0
     mins, secs = int(elapsed // 60), int(elapsed % 60)
@@ -400,7 +421,7 @@ def run(auto: bool = False, trace: bool = False) -> None:
         print("Already calibrated, finalizing...")
         api("POST", "/api/phone/home")
         time.sleep(3)
-        api("POST", "/api/ready")
+        _mark_ready_and_wait()
         _done("PhysiClaw is ready")
         return
 

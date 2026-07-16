@@ -1,22 +1,20 @@
-"""Tests for `physiclaw.core.hardware.handler` — hardware setup HTTP routes."""
+"""Tests for `physiclaw.core.server.hardware_setup` — hardware setup HTTP
+handlers (moved from the old `core.hardware.handler`). The camera
+identification algorithms live in `core.orchestration.camera_pick` and
+are tested in `tests/core/orchestration/test_camera_pick.py`."""
 
 from __future__ import annotations
 
 import base64
 import json
-import logging
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
-import numpy as np
 import pytest
 
-from physiclaw.core.hardware import handler
-from physiclaw.core.hardware.handler import (
-    _auto_pick_camera_index,
-    _capture_raw,
-    camera_preview,
+from physiclaw.core.server import hardware_setup
+from physiclaw.core.server.hardware_setup import (
     handle_camera_preview,
     handle_connect_arm,
     handle_connect_camera,
@@ -28,7 +26,7 @@ from physiclaw.core.hardware.handler import (
 
 @pytest.mark.asyncio
 async def test_handle_setup_page_serves_wizard(mocker) -> None:
-    # Substitution lives in bridge.handler.render_phone_page_html now.
+    # Substitution lives in bridge.handler.render_phone_page_html.
     import physiclaw.core.bridge.handler as bridge_handler
 
     mocker.patch.object(
@@ -118,6 +116,35 @@ async def test_handle_connect_arm_happy_path() -> None:
 
 
 @pytest.mark.asyncio
+async def test_handle_connect_arm_missing_device_is_409() -> None:
+    """A missing GRBL board is the operator's to fix (plug it in) —
+    client state, same 409 convention as the calibration preconditions."""
+    from physiclaw.core.hardware.device import DeviceNotFound
+
+    rig = MagicMock()
+    rig.connect_arm.side_effect = DeviceNotFound("GRBL device not found")
+
+    resp = await handle_connect_arm(_fake_request(), rig)
+
+    assert resp.status_code == 409
+    assert "GRBL device not found" in _read_json(resp)["message"]
+
+
+@pytest.mark.asyncio
+async def test_handle_connect_camera_missing_device_is_409() -> None:
+    from physiclaw.core.hardware.device import DeviceNotFound
+
+    rig = _fake_rig_cam_index()
+    rig.connect_camera.side_effect = DeviceNotFound("Cannot open camera index 3")
+    phone = MagicMock()
+
+    resp = await handle_connect_camera(_fake_request(json_obj={"index": 3}), rig, phone)
+
+    assert resp.status_code == 409
+    rig.release.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_handle_connect_arm_releases_even_on_failure() -> None:
     rig = MagicMock()
     rig.connect_arm.side_effect = RuntimeError("no port")
@@ -129,143 +156,6 @@ async def test_handle_connect_arm_releases_even_on_failure() -> None:
     assert body["status"] == "error"
     assert "no port" in body["message"]
     rig.release.assert_called_once()
-
-
-# ---------- camera_preview ----------
-
-
-def test_camera_preview_returns_jpeg_bytes(mocker) -> None:
-    fake_frame = np.zeros((10, 10, 3), dtype=np.uint8)
-    fake_cam = MagicMock()
-    fake_cam.snapshot.return_value = fake_frame
-    mocker.patch.object(handler, "Camera", return_value=fake_cam)
-    encode_spy = mocker.patch.object(handler, "encode_jpeg", return_value=b"JPEG")
-    wm_spy = mocker.patch.object(handler, "watermark_index")
-
-    out = camera_preview(0, watermark=False)
-
-    assert out == b"JPEG"
-    fake_cam.close.assert_called_once()
-    encode_spy.assert_called_once_with(fake_frame, quality=80)
-    wm_spy.assert_not_called()
-
-
-def test_camera_preview_applies_watermark_when_requested(mocker) -> None:
-    fake_frame = np.zeros((10, 10, 3), dtype=np.uint8)
-    wm_frame = np.ones((10, 10, 3), dtype=np.uint8)
-    fake_cam = MagicMock()
-    fake_cam.snapshot.return_value = fake_frame
-    mocker.patch.object(handler, "Camera", return_value=fake_cam)
-    mocker.patch.object(handler, "watermark_index", return_value=wm_frame)
-    encode_spy = mocker.patch.object(handler, "encode_jpeg", return_value=b"JPEG")
-
-    out = camera_preview(2, watermark=True)
-
-    assert out == b"JPEG"
-    encode_spy.assert_called_once()
-    # Watermarked frame is what gets encoded.
-    assert encode_spy.call_args.args[0] is wm_frame
-
-
-def test_camera_preview_raises_when_snapshot_returns_none(mocker) -> None:
-    fake_cam = MagicMock()
-    fake_cam.snapshot.return_value = None
-    mocker.patch.object(handler, "Camera", return_value=fake_cam)
-
-    with pytest.raises(RuntimeError, match="Camera 0 returned no frame"):
-        camera_preview(0)
-
-    fake_cam.close.assert_called_once()
-
-
-# ---------- _capture_raw ----------
-
-
-def test_capture_raw_returns_frame(mocker) -> None:
-    frame = np.ones((4, 4, 3), dtype=np.uint8)
-    fake_cam = MagicMock()
-    fake_cam.raw_frame.return_value = frame
-    mocker.patch.object(handler, "Camera", return_value=fake_cam)
-
-    assert _capture_raw(1) is frame
-    fake_cam.close.assert_called_once()
-
-
-def test_capture_raw_returns_none_and_logs_on_oserror(
-    mocker, caplog: pytest.LogCaptureFixture
-) -> None:
-    fake_cam = MagicMock()
-    fake_cam.raw_frame.side_effect = OSError("can't open")
-    mocker.patch.object(handler, "Camera", return_value=fake_cam)
-
-    with caplog.at_level(logging.WARNING, logger="physiclaw.core.hardware.handler"):
-        out = _capture_raw(3)
-
-    assert out is None
-    fake_cam.close.assert_called_once()
-    assert any("cam 3: capture failed" in r.getMessage() for r in caplog.records)
-
-
-def test_capture_raw_returns_none_on_runtime_error(mocker) -> None:
-    fake_cam = MagicMock()
-    fake_cam.raw_frame.side_effect = RuntimeError("transient")
-    mocker.patch.object(handler, "Camera", return_value=fake_cam)
-
-    assert _capture_raw(0) is None
-    fake_cam.close.assert_called_once()
-
-
-def test_capture_raw_returns_none_when_constructor_raises(mocker) -> None:
-    """A missing USB index raises from Camera() itself — the auto-pick
-    loop must treat it like any other capture failure, not crash."""
-    mocker.patch.object(handler, "Camera", side_effect=RuntimeError("no device"))
-
-    assert _capture_raw(5) is None
-
-
-# ---------- _auto_pick_camera_index ----------
-
-
-def test_auto_pick_camera_returns_first_match(mocker) -> None:
-    frames = [None, np.zeros((4, 4, 3), dtype=np.uint8), None]
-    capture_spy = mocker.patch.object(
-        handler,
-        "_capture_raw",
-        side_effect=lambda idx: frames[idx] if idx < len(frames) else None,
-    )
-
-    def detect_corners(f):
-        # Only the second frame has corners.
-        return [(0, 0), (1, 0), (1, 1), (0, 1)] if f is not None else None
-
-    mocker.patch.object(handler, "detect_bridge_corners", side_effect=detect_corners)
-
-    out = _auto_pick_camera_index()
-
-    assert out == 1
-    # Probes 0 (None) and 1 (success) — stops there.
-    assert capture_spy.call_count >= 2
-
-
-def test_auto_pick_camera_returns_none_when_no_match(mocker) -> None:
-    mocker.patch.object(handler, "_capture_raw", return_value=None)
-    mocker.patch.object(handler, "detect_bridge_corners", return_value=None)
-
-    assert _auto_pick_camera_index() is None
-
-
-def test_auto_pick_camera_skips_when_corners_not_detected(
-    mocker, caplog: pytest.LogCaptureFixture
-) -> None:
-    frame = np.zeros((4, 4, 3), dtype=np.uint8)
-    mocker.patch.object(handler, "_capture_raw", return_value=frame)
-    mocker.patch.object(handler, "detect_bridge_corners", return_value=None)
-
-    with caplog.at_level(logging.INFO, logger="physiclaw.core.hardware.handler"):
-        out = _auto_pick_camera_index()
-
-    assert out is None
-    assert any("corners not detected" in r.getMessage() for r in caplog.records)
 
 
 # ---------- handle_connect_camera ----------
@@ -282,6 +172,7 @@ def _fake_rig_cam_index(idx: int = 5) -> SimpleNamespace:
 async def test_handle_connect_camera_explicit_index(mocker) -> None:
     rig = _fake_rig_cam_index(idx=2)
     phone = MagicMock()
+    auto_spy = mocker.patch.object(hardware_setup, "resolve_auto_index")
 
     resp = await handle_connect_camera(
         _fake_request(json_obj={"index": 2}),
@@ -293,17 +184,15 @@ async def test_handle_connect_camera_explicit_index(mocker) -> None:
     assert body["status"] == "ok"
     assert body["index"] == 2
     rig.connect_camera.assert_called_once_with(2)
-    # No auto-pick → no phase set.
-    phone.set_mode.assert_not_called()
+    # No auto-pick on an explicit index.
+    auto_spy.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_handle_connect_camera_auto_pick_happy_path(mocker) -> None:
     rig = _fake_rig_cam_index(idx=4)
-    rig.bridge.wait_for_connection.return_value = True
     phone = MagicMock()
-    mocker.patch.object(handler, "_auto_pick_camera_index", return_value=4)
-    mocker.patch.object(handler.time, "sleep")
+    auto_spy = mocker.patch.object(hardware_setup, "resolve_auto_index", return_value=4)
 
     resp = await handle_connect_camera(
         _fake_request(json_obj={"index": "auto"}),
@@ -314,12 +203,7 @@ async def test_handle_connect_camera_auto_pick_happy_path(mocker) -> None:
     body = _read_json(resp)
     assert body["status"] == "ok"
     assert body["index"] == 4
-    rig.bridge.wait_for_connection.assert_called_once()
-    # Sets corners then restores bridge.
-    calls = phone.set_mode.call_args_list
-    assert calls[0].args == ("calibrate",)
-    assert calls[0].kwargs == {"phase": "corners"}
-    assert calls[-1].args == ("bridge",)
+    auto_spy.assert_called_once_with(rig, phone)
     rig.connect_camera.assert_called_once_with(4)
 
 
@@ -328,10 +212,8 @@ async def test_handle_connect_camera_auto_pick_treats_missing_body_as_auto(
     mocker,
 ) -> None:
     rig = _fake_rig_cam_index(idx=1)
-    rig.bridge.wait_for_connection.return_value = True
     phone = MagicMock()
-    mocker.patch.object(handler, "_auto_pick_camera_index", return_value=1)
-    mocker.patch.object(handler.time, "sleep")
+    mocker.patch.object(hardware_setup, "resolve_auto_index", return_value=1)
 
     resp = await handle_connect_camera(
         _fake_request(raise_on_json=True),
@@ -343,12 +225,14 @@ async def test_handle_connect_camera_auto_pick_treats_missing_body_as_auto(
 
 
 @pytest.mark.asyncio
-async def test_handle_connect_camera_auto_pick_fails_when_bridge_not_polling(
-    mocker,
-) -> None:
+async def test_handle_connect_camera_auto_pick_failure_returns_500(mocker) -> None:
     rig = _fake_rig_cam_index()
-    rig.bridge.wait_for_connection.return_value = False
     phone = MagicMock()
+    mocker.patch.object(
+        hardware_setup,
+        "resolve_auto_index",
+        side_effect=RuntimeError("auto-pick: /bridge page not polling"),
+    )
 
     resp = await handle_connect_camera(
         _fake_request(json_obj={"index": "auto"}),
@@ -359,30 +243,8 @@ async def test_handle_connect_camera_auto_pick_fails_when_bridge_not_polling(
     assert resp.status_code == 500
     body = _read_json(resp)
     assert "auto-pick" in body["message"]
-    assert "not polling" in body["message"]
-    # Phone never reaches corners phase.
-    phone.set_mode.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_handle_connect_camera_auto_pick_no_match(mocker) -> None:
-    rig = _fake_rig_cam_index()
-    rig.bridge.wait_for_connection.return_value = True
-    phone = MagicMock()
-    mocker.patch.object(handler, "_auto_pick_camera_index", return_value=None)
-    mocker.patch.object(handler.time, "sleep")
-
-    resp = await handle_connect_camera(
-        _fake_request(json_obj={"index": "auto"}),
-        rig,
-        phone,
-    )
-
-    assert resp.status_code == 500
-    body = _read_json(resp)
-    assert "no camera with all four RGBM corners" in body["message"]
-    # Phone restored to bridge mode even on failure.
-    assert phone.set_mode.call_args_list[-1].args == ("bridge",)
+    # Never reached the connect step.
+    rig.connect_camera.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -459,7 +321,7 @@ async def test_handle_disconnect_camera_releases_lock_on_failure() -> None:
 
 @pytest.mark.asyncio
 async def test_handle_camera_preview_happy_path(mocker) -> None:
-    mocker.patch.object(handler, "camera_preview", return_value=b"JPEG-bytes")
+    mocker.patch.object(hardware_setup, "camera_preview", return_value=b"JPEG-bytes")
 
     resp = await handle_camera_preview(
         _fake_request(path_params={"index": "3"}, query_params={}),
@@ -473,7 +335,7 @@ async def test_handle_camera_preview_happy_path(mocker) -> None:
 
 @pytest.mark.asyncio
 async def test_handle_camera_preview_passes_watermark_query_param(mocker) -> None:
-    spy = mocker.patch.object(handler, "camera_preview", return_value=b"x")
+    spy = mocker.patch.object(hardware_setup, "camera_preview", return_value=b"x")
 
     await handle_camera_preview(
         _fake_request(path_params={"index": "5"}, query_params={"watermark": "1"}),
@@ -484,7 +346,7 @@ async def test_handle_camera_preview_passes_watermark_query_param(mocker) -> Non
 
 @pytest.mark.asyncio
 async def test_handle_camera_preview_default_watermark_is_false(mocker) -> None:
-    spy = mocker.patch.object(handler, "camera_preview", return_value=b"x")
+    spy = mocker.patch.object(hardware_setup, "camera_preview", return_value=b"x")
 
     await handle_camera_preview(
         _fake_request(path_params={"index": "0"}),
@@ -496,7 +358,7 @@ async def test_handle_camera_preview_default_watermark_is_false(mocker) -> None:
 @pytest.mark.asyncio
 async def test_handle_camera_preview_returns_404_on_capture_failure(mocker) -> None:
     mocker.patch.object(
-        handler,
+        hardware_setup,
         "camera_preview",
         side_effect=RuntimeError("no frame"),
     )

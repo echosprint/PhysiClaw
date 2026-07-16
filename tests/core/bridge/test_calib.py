@@ -26,26 +26,26 @@ from __future__ import annotations
 import pytest
 
 from physiclaw.core.bridge.calib import CalibrationState
-from physiclaw.core.bridge.nonce import (
+from physiclaw.core.geometry import (
     NONCE_CSS_X,
     NONCE_CSS_Y,
     NONCE_DARK,
     NONCE_GRID_COLS,
     NONCE_LIGHT,
     NONCE_SQUARE_SIZE,
+    ViewportShift,
 )
-from physiclaw.core.calibration.transforms import ViewportShift
 from physiclaw.core.hardware.iphone import AssistiveTouch
 
 # ---------- class-level constants ----------
 
 
 def test_grid_cols_pct_pinned() -> None:
-    assert CalibrationState.GRID_COLS_PCT == [0.25, 0.50, 0.75]
+    assert CalibrationState.GRID_COLS_PCT == (0.25, 0.50, 0.75)
 
 
 def test_grid_rows_pct_pinned() -> None:
-    assert CalibrationState.GRID_ROWS_PCT == [0.20, 0.40, 0.50, 0.60, 0.80]
+    assert CalibrationState.GRID_ROWS_PCT == (0.20, 0.40, 0.50, 0.60, 0.80)
 
 
 def test_phases_set_pinned_to_known_eight_members() -> None:
@@ -302,8 +302,8 @@ def test_get_state_idle_returns_phase_screen_dim_and_grid_only() -> None:
         "phase": "idle",
         "screen_dimension": None,
         "grid": {
-            "cols": [0.25, 0.50, 0.75],
-            "rows": [0.20, 0.40, 0.50, 0.60, 0.80],
+            "cols": (0.25, 0.50, 0.75),
+            "rows": (0.20, 0.40, 0.50, 0.60, 0.80),
         },
     }
 

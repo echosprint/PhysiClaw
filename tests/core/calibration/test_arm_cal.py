@@ -12,10 +12,10 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from physiclaw.core.bridge.calib import CalibrationState
 from physiclaw.core.calibration import arm_cal as arm_cal_mod
 from physiclaw.core.calibration.arm_cal import _tilt_from_affine
 from physiclaw.core.calibration.transforms import ViewportShift
+from tests.core.calibration.conftest import make_cal as _make_cal
 
 # ---------- _tilt_from_affine ----------
 
@@ -69,15 +69,6 @@ def test_tilt_from_affine_returns_one_when_major_axis_near_zero(
 
 
 # ---------- calibrate_arm ----------
-
-
-def _make_cal(*, viewport_shift=None) -> MagicMock:
-    """A CalibrationState mock with the grid constants surfaced."""
-    cal = MagicMock()
-    cal.GRID_COLS_PCT = CalibrationState.GRID_COLS_PCT
-    cal.GRID_ROWS_PCT = CalibrationState.GRID_ROWS_PCT
-    cal.viewport_shift = viewport_shift
-    return cal
 
 
 def test_calibrate_arm_succeeds(mocker) -> None:
@@ -201,3 +192,13 @@ def test_calibrate_arm_uses_viewport_pct_when_shift_set(mocker) -> None:
 
     # viewport_pct_to_screenshot_pct was used for grid prediction.
     assert cal.viewport_pct_to_screenshot_pct.call_count == 15
+
+
+def test_calibrate_arm_requires_viewport_shift(mocker) -> None:
+    """Without the shift the fit would land in raw viewport 0-1 —
+    numerically valid and wrong — so it must refuse to run."""
+    mocker.patch.object(arm_cal_mod.time, "sleep")
+    cal = _make_cal(viewport_shift=None)
+
+    with pytest.raises(RuntimeError, match="Viewport shift not measured"):
+        arm_cal_mod.calibrate_arm(MagicMock(), cal)

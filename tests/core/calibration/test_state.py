@@ -229,6 +229,7 @@ def test_to_dict_with_empty_calibration_yields_all_nones() -> None:
     payload = Calibration().to_dict()
 
     assert payload == {
+        "version": 1,
         "viewport_shift": None,
         "cam_rotation": None,
         "pct_to_grbl": None,
@@ -297,6 +298,31 @@ def test_from_dict_with_all_nones_returns_empty_calibration() -> None:
     )
 
     assert restored == Calibration()
+
+
+def test_from_dict_rejects_schema_version_mismatch() -> None:
+    """A bundle from an incompatible format must fail loudly, not
+    reconstruct with silently-wrong fields."""
+    import pytest
+
+    with pytest.raises(ValueError, match="schema version 99"):
+        Calibration.from_dict({"version": 99})
+
+
+def test_roundtrip_carries_schema_version() -> None:
+    payload = Calibration().to_dict()
+
+    assert payload["version"] == 1
+    assert Calibration.from_dict(payload) == Calibration()
+
+
+def test_load_returns_none_on_version_mismatch(tmp_path) -> None:
+    import json
+
+    p = tmp_path / "bundle.json"
+    p.write_text(json.dumps({"version": 99}))
+
+    assert Calibration.load(p) is None
 
 
 def test_from_dict_ignores_unknown_keys() -> None:

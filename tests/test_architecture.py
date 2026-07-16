@@ -44,9 +44,34 @@ def _module_name(path: Path) -> str:
     return ".".join(parts)
 
 
+def _strip_type_checking(tree: ast.Module) -> ast.Module:
+    """Drop ``if TYPE_CHECKING:`` blocks — type-only edges create no runtime
+    dependency (and no import cycle), so the layering guards ignore them."""
+
+    class _Strip(ast.NodeTransformer):
+        def visit_If(self, node: ast.If):
+            self.generic_visit(node)
+            test = node.test
+            name = (
+                test.id
+                if isinstance(test, ast.Name)
+                else test.attr
+                if isinstance(test, ast.Attribute)
+                else None
+            )
+            if name == "TYPE_CHECKING":
+                return ast.Module(body=node.orelse, type_ignores=[])
+            return node
+
+    return _Strip().visit(tree)
+
+
 def _imported_modules(path: Path) -> set[str]:
-    """Absolute dotted module names imported by a file (relative imports resolved)."""
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    """Absolute dotted module names imported by a file (relative imports
+    resolved; ``TYPE_CHECKING``-only imports excluded)."""
+    tree = _strip_type_checking(
+        ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    )
     module_name = _module_name(path)
     is_pkg = path.name == "__init__.py"
     out: set[str] = set()
@@ -100,3 +125,48 @@ def test_common_is_a_leaf() -> None:
         "common", "physiclaw.agent"
     )
     assert not bad, "common must not import core or agent:\n" + "\n".join(bad)
+
+
+# ─── Intra-core layering ─────────────────────────────────────
+#
+# Inside ``physiclaw.core`` the layers are:
+#   geometry, vision                            — leaves
+#   hardware                                    — drivers; may consume vision's
+#                                                 pure metrics (exposure/focus
+#                                                 policy meters quality) and
+#                                                 geometry
+#   bridge                                      — page state + LAN routes
+#   calibration                                 — steps that drive the page
+#   orchestration, server                       — composition (import anything)
+#
+# The shared render↔measure contract lives in ``core.geometry`` so
+# bridge and calibration never need each other's constants — that is what
+# keeps the graph below acyclic. TYPE_CHECKING-only imports are exempt
+# (see ``_strip_type_checking``).
+
+CORE_LAYERING = {
+    # from-package (under core/) → packages it must never import (under core/)
+    "vision": ("hardware", "bridge", "calibration", "orchestration", "server"),
+    "hardware": ("bridge", "calibration", "orchestration", "server"),
+    "bridge": ("hardware", "calibration", "orchestration", "server"),
+    "calibration": ("orchestration", "server"),
+}
+
+
+def test_core_internal_layering() -> None:
+    bad: list[str] = []
+    for pkg, forbidden in CORE_LAYERING.items():
+        for target in forbidden:
+            bad += _violations(f"core/{pkg}", f"physiclaw.core.{target}")
+    assert not bad, "core-internal layering violated:\n" + "\n".join(bad)
+
+
+def test_geometry_is_a_leaf() -> None:
+    """The geometry package imports nothing from physiclaw outside itself."""
+    bad = [
+        f"{f.relative_to(SRC_ROOT)} -> {m}"
+        for f in _files("core/geometry")
+        for m in _imported_modules(f)
+        if m.startswith("physiclaw") and not m.startswith("physiclaw.core.geometry")
+    ]
+    assert not bad, "core.geometry must stay a leaf:\n" + "\n".join(bad)

@@ -102,6 +102,31 @@ class CameraConfig:
 
 
 @dataclass
+class VisionConfig:
+    """Field-tunable detection thresholds.
+
+    Defaults are the values calibrated on the reference rigs (2026-07,
+    real session frames — see the docstrings in ``core/vision``). A
+    different camera, distance, or lighting can shift what "blurry",
+    "washed out", or "a badge appeared" look like; these keys let a rig
+    be re-tuned with a config edit instead of a source edit. The vision
+    modules log their measured values, so tune against a live session.
+    """
+
+    # quality.py — is a view usable?
+    blur_threshold: float = 80.0  # Laplacian variance floor (sharp ≥ 300)
+    blown_clip_pct: float = 0.12  # clipped-pixel fraction for the blown rule
+    blown_median_luma: float = 200.0  # ...only when the median is below this
+    blown_blob_count: int = 6  # icon-grid white-out blob count
+    # watchdog.py — did the idle screen wake?
+    wake_std_increase: float = 4.0
+    wake_mean_increase: float = 4.0
+    badge_min_area: int = 30  # warm pixels for a badge wake
+    # change.py — did a gesture change the screen?
+    change_ratio_threshold: float = 0.003
+
+
+@dataclass
 class EngineConfig:
     max_turns: int = 300
     # Session-level STUCK retries (engine.run): fresh session attempts after
@@ -273,6 +298,7 @@ class Config:
     warm_start: WarmStartConfig = field(default_factory=WarmStartConfig)
     auto_pick: AutoPickConfig = field(default_factory=AutoPickConfig)
     camera: CameraConfig = field(default_factory=CameraConfig)
+    vision: VisionConfig = field(default_factory=VisionConfig)
     engine: EngineConfig = field(default_factory=EngineConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)
     provider: ProviderConfig = field(default_factory=ProviderConfig)
@@ -290,6 +316,7 @@ _SECTION_TYPES: dict[str, type] = {
     "warm_start": WarmStartConfig,
     "auto_pick": AutoPickConfig,
     "camera": CameraConfig,
+    "vision": VisionConfig,
     "engine": EngineConfig,
     "agent": AgentConfig,
     "provider": ProviderConfig,
@@ -331,6 +358,12 @@ _SECTION_COMMENTS: dict[str, str] = {
         "supported mode (2K → 2560×1440, 1080p → 1920×1080), so one "
         "default fits any camera. MJPG is needed on Windows for high "
         "resolutions — the YUY2 default snaps to 640×480 over USB."
+    ),
+    "vision": (
+        "Detection thresholds (blur / washed-out / wake / screen-change), "
+        "calibrated on the reference rigs. Re-tune here when a different "
+        "camera, distance, or lighting mis-flags views — the vision "
+        "modules log their measured values."
     ),
     "engine": (
         "Agent tool-call loop: runaway safeguards (turn cap, stuck guard, "

@@ -14,17 +14,8 @@ from unittest.mock import MagicMock
 
 import numpy as np
 
-from physiclaw.core.bridge.calib import CalibrationState
 from physiclaw.core.calibration import validate as validate_mod
-
-
-def _make_cal(*, viewport_shift=None) -> MagicMock:
-    """A CalibrationState mock with the grid constants surfaced."""
-    cal = MagicMock()
-    cal.GRID_COLS_PCT = CalibrationState.GRID_COLS_PCT
-    cal.GRID_ROWS_PCT = CalibrationState.GRID_ROWS_PCT
-    cal.viewport_shift = viewport_shift
-    return cal
+from tests.core.calibration.conftest import make_cal as _make_cal
 
 
 def _identity_pct_to_grbl() -> np.ndarray:

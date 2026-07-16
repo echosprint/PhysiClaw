@@ -138,7 +138,9 @@ def test_scan_text_filters_offscreen(mocker, rig, per: Perception) -> None:
         side_effect=lambda b: b[0] >= 0,
     )
 
+    rig.acquire()
     out = per.scan_text()
+    rig.release()
 
     assert len(out) == 1
     assert out[0]["bbox"][0] == 0.1
@@ -151,9 +153,50 @@ def test_scan_text_parks_first(mocker, rig, per: Perception) -> None:
     mocker.patch.object(perception_mod, "phone_screen_crop_box", return_value=None)
     mocker.patch.object(perception_mod, "results_to_elements", return_value=[])
 
+    rig.acquire()
     per.scan_text()
+    rig.release()
 
     rig._arm.rapid_to.assert_called_once_with(5.0, 6.0)
+
+
+def test_scan_text_raises_when_lock_not_held(rig, per: Perception) -> None:
+    """scan_text parks the arm — an unlocked call is a programming error."""
+    with pytest.raises(RuntimeError, match="hardware lock not held"):
+        per.scan_text()
+
+
+def test_wait_for_numpad_digit_polls_until_found(mocker, rig, per: Perception) -> None:
+    mocker.patch.object(perception_mod.time, "sleep")
+    bbox = [0.1, 0.1, 0.2, 0.2]
+    mocker.patch.object(per, "scan_text", side_effect=[[], [], [{"hit": True}]])
+    mocker.patch.object(
+        perception_mod,
+        "find_numpad_digit",
+        side_effect=lambda els, d: bbox if els else None,
+    )
+
+    rig.acquire()
+    out = per.wait_for_numpad_digit("1")
+    rig.release()
+
+    assert out == bbox
+
+
+def test_wait_for_numpad_digit_gives_up_after_attempts(
+    mocker, rig, per: Perception
+) -> None:
+    sleep = mocker.patch.object(perception_mod.time, "sleep")
+    scan = mocker.patch.object(per, "scan_text", return_value=[])
+    mocker.patch.object(perception_mod, "find_numpad_digit", return_value=None)
+
+    rig.acquire()
+    out = per.wait_for_numpad_digit("1", attempts=3, interval=0.5)
+    rig.release()
+
+    assert out is None
+    assert scan.call_count == 3
+    sleep.assert_called_with(0.5)
 
 
 # ---------- watch ----------

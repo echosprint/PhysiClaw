@@ -293,7 +293,8 @@ async def test_handle_calibrate_arm_arm_not_connected() -> None:
         MagicMock(),
     )
 
-    assert resp.status_code == 500
+    # Precondition failures are client state, not server faults.
+    assert resp.status_code == 409
     assert "Arm not connected" in _read_json(resp)["message"]
 
 
@@ -358,7 +359,8 @@ async def test_handle_calibrate_camera_frame_camera_not_connected() -> None:
         MagicMock(),
     )
 
-    assert resp.status_code == 500
+    # Precondition failures are client state, not server faults.
+    assert resp.status_code == 409
     assert "Camera not connected" in _read_json(resp)["message"]
 
 
@@ -422,7 +424,8 @@ async def test_handle_compute_camera_mapping_camera_not_connected() -> None:
         MagicMock(),
     )
 
-    assert resp.status_code == 500
+    # Precondition failures are client state, not server faults.
+    assert resp.status_code == 409
     assert "Camera not connected" in _read_json(resp)["message"]
 
 
@@ -529,7 +532,8 @@ async def test_handle_validate_calibration_arm_not_connected() -> None:
         MagicMock(),
     )
 
-    assert resp.status_code == 500
+    # Precondition failures are client state, not server faults.
+    assert resp.status_code == 409
     assert "Arm not connected" in _read_json(resp)["message"]
 
 
@@ -548,7 +552,8 @@ async def test_handle_validate_calibration_requires_transforms_ready() -> None:
         MagicMock(),
     )
 
-    assert resp.status_code == 500
+    # Precondition failures are client state, not server faults.
+    assert resp.status_code == 409
     assert "arm calibration" in _read_json(resp)["message"]
 
 
@@ -579,7 +584,8 @@ async def test_handle_trace_edge_uncalibrated_returns_error() -> None:
 
     resp = await handle_trace_edge(_fake_request(), rig, MagicMock())
 
-    assert resp.status_code == 500
+    # Precondition failures are client state, not server faults.
+    assert resp.status_code == 409
     assert "Not calibrated" in _read_json(resp)["message"]
 
 
@@ -642,8 +648,10 @@ async def test_handle_show_assistive_touch_requires_viewport_shift() -> None:
         MagicMock(),
     )
 
-    assert resp.status_code == 400
-    assert "viewport-shift" in _read_json(resp)["message"]
+    # Precondition failures are client state (409) — same contract as
+    # every other calibration precheck.
+    assert resp.status_code == 409
+    assert "Viewport shift not measured" in _read_json(resp)["message"]
 
 
 # ---------- handle_verify_assistive_touch ----------
@@ -687,7 +695,8 @@ async def test_handle_verify_assistive_touch_arm_not_connected() -> None:
         MagicMock(),
     )
 
-    assert resp.status_code == 500
+    # Precondition failures are client state, not server faults.
+    assert resp.status_code == 409
     assert "Arm not connected" in _read_json(resp)["message"]
 
 
@@ -705,7 +714,8 @@ async def test_handle_verify_assistive_touch_requires_pct_to_grbl() -> None:
         MagicMock(),
     )
 
-    assert resp.status_code == 500
+    # Precondition failures are client state, not server faults.
+    assert resp.status_code == 409
     assert "arm calibration" in _read_json(resp)["message"]
 
 
@@ -724,5 +734,6 @@ async def test_handle_verify_assistive_touch_requires_at_show() -> None:
         MagicMock(),
     )
 
-    assert resp.status_code == 500
+    # Precondition failures are client state, not server faults.
+    assert resp.status_code == 409
     assert "assistive-touch/show" in _read_json(resp)["message"]

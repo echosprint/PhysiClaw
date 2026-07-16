@@ -9,25 +9,25 @@ import logging
 import threading
 import time
 
-from physiclaw.core.bridge.nonce import (
+from physiclaw.core import geometry
+from physiclaw.core.geometry import (
+    AT_CSS_X,
+    AT_CSS_Y,
+    AT_RADIUS,
     NONCE_CSS_X,
     NONCE_CSS_Y,
     NONCE_DARK,
     NONCE_GRID_COLS,
     NONCE_LIGHT,
     NONCE_SQUARE_SIZE,
+    SQUARE_CSS_SIZE,
+    SQUARE_CSS_X,
+    SQUARE_CSS_Y,
+    ViewportShift,
     nonce_css_x,
 )
-from physiclaw.core.calibration.transforms import ViewportShift
-from physiclaw.core.hardware.iphone import AssistiveTouch
 
 log = logging.getLogger(__name__)
-
-# Pre-cal square (phase "screenshot_cal"): CSS top-left + size. Served to
-# bridge.html through get_state (the page draws exactly what it's told)
-# and consumed by the calibration viewport.py screenshot mapping (which
-# expects the square there) — one source for both sides of the camera.
-SQUARE_CSS_X, SQUARE_CSS_Y, SQUARE_CSS_SIZE = 100, 200, 50
 
 
 class CalibrationState:
@@ -36,11 +36,17 @@ class CalibrationState:
     The server sets the phase (what the page displays). The page reports
     touch events back. The phase controls which visual targets appear and
     what interactions trigger a green flash.
+
+    All target geometry (square, grid, AT button, nonce layout) comes
+    from ``physiclaw.core.geometry`` — the render↔measure contract
+    shared with the calibration steps.
     """
 
-    # Grid dot positions (must match bridge.html and the calibration plan)
-    GRID_COLS_PCT = [0.25, 0.50, 0.75]
-    GRID_ROWS_PCT = [0.20, 0.40, 0.50, 0.60, 0.80]
+    # Grid dot positions (must match bridge.html and the calibration
+    # plan) — class attrs kept for the step modules and tests that read
+    # them off the state object; the source of truth is geometry.
+    GRID_COLS_PCT = geometry.GRID_COLS_PCT
+    GRID_ROWS_PCT = geometry.GRID_ROWS_PCT
 
     # Valid calibration phases (server → page display commands).
     # Phases are visual primitives — each renders one thing on the
@@ -199,9 +205,9 @@ class CalibrationState:
                 d["dot"] = {"x": self.dot_position[0], "y": self.dot_position[1]}
             if self.phase == "assistive_touch" and self._screenshot_nonce is not None:
                 d["at"] = {
-                    "x": AssistiveTouch.AT_CSS_X,
-                    "y": AssistiveTouch.AT_CSS_Y,
-                    "r": AssistiveTouch.AT_RADIUS,
+                    "x": AT_CSS_X,
+                    "y": AT_CSS_Y,
+                    "r": AT_RADIUS,
                 }
                 d["nonce"] = {
                     "colors": [

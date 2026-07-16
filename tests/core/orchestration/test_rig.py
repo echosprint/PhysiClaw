@@ -269,7 +269,9 @@ def test_take_screenshot_wires_at_with_rig_devices(rig, wire_rig) -> None:
     rig._bridge = MagicMock()
     rig._assistive_touch.take_screenshot.return_value = b"PNG"
 
+    rig.acquire()  # AT operations require the hardware lock
     out = rig.take_screenshot(timeout=7.0)
+    rig.release()
 
     assert out == b"PNG"
     rig._assistive_touch.take_screenshot.assert_called_once_with(
@@ -280,11 +282,32 @@ def test_take_screenshot_wires_at_with_rig_devices(rig, wire_rig) -> None:
 def test_at_long_press_wires_at_with_rig_devices(rig, wire_rig) -> None:
     wire_rig(rig)
 
+    rig.acquire()
     rig.at_long_press()
+    rig.release()
 
     rig._assistive_touch.long_press.assert_called_once_with(
         rig._arm, rig.transforms.pct_to_grbl
     )
+
+
+# ---------- assert_locked ----------
+
+
+def test_assert_locked_raises_when_lock_not_held(rig, wire_rig) -> None:
+    """Caller-must-hold-lock methods fail loudly instead of silently
+    touching hardware unserialized."""
+    wire_rig(rig)
+
+    with pytest.raises(RuntimeError, match="hardware lock not held"):
+        rig.move_to_bbox_center([0.0, 0.0, 1.0, 1.0])
+    with pytest.raises(RuntimeError, match="hardware lock not held"):
+        rig.take_screenshot()
+    with pytest.raises(RuntimeError, match="hardware lock not held"):
+        rig.at_long_press()
+    rig._arm.rapid_to.assert_not_called()
+    rig._assistive_touch.take_screenshot.assert_not_called()
+    rig._assistive_touch.long_press.assert_not_called()
 
 
 # ---------- acquire / release / locked ----------
@@ -440,14 +463,18 @@ def test_park_moves_arm_to_off_screen(rig, wire_rig) -> None:
 def test_move_to_bbox_center_raises_when_uncalibrated() -> None:
     r = HardwareRig()
 
+    r.acquire()
     with pytest.raises(RuntimeError, match="Screen calibration not done"):
         r.move_to_bbox_center([0.1, 0.1, 0.2, 0.2])
+    r.release()
 
 
 def test_move_to_bbox_center_dispatches(rig, wire_rig) -> None:
     wire_rig(rig)
 
+    rig.acquire()
     rig.move_to_bbox_center([0.0, 0.0, 1.0, 1.0])
+    rig.release()
 
     rig._arm.rapid_to.assert_called_once()
 
@@ -458,8 +485,10 @@ def test_move_to_bbox_center_requires_arm(rig, wire_rig) -> None:
     wire_rig(rig)
     rig._arm = None
 
+    rig.acquire()
     with pytest.raises(RuntimeError, match="Arm not connected"):
         rig.move_to_bbox_center([0.0, 0.0, 1.0, 1.0])
+    rig.release()
 
 
 # ---------- accessor properties ----------

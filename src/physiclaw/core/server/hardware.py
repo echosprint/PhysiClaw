@@ -1,4 +1,4 @@
-"""Hardware setup HTTP routes — register thin wrappers around hardware/handler.py."""
+"""Hardware setup HTTP routes — register thin wrappers around hardware_setup.py."""
 
 import logging
 from typing import TYPE_CHECKING
@@ -7,7 +7,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse
 
 from physiclaw.core.bridge import PageState
-from physiclaw.core.hardware.handler import (
+from physiclaw.core.server.hardware_setup import (
     handle_camera_preview,
     handle_connect_arm,
     handle_connect_camera,
