@@ -46,8 +46,12 @@ def camera_preview(index: int, watermark: bool = False) -> bytes:
     Raises RuntimeError if the camera can't be opened or returns no frame.
     """
     cam = Camera(index)
-    frame = cam.snapshot()
-    cam.close()
+    try:
+        frame = cam.snapshot()
+    finally:
+        # Mirror _capture_raw below: a snapshot()/save failure must not
+        # leave the capture handle claimed (exclusive on Windows MF).
+        cam.close()
     if frame is None:
         raise RuntimeError(f"Camera {index} returned no frame")
 

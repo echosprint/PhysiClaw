@@ -200,45 +200,53 @@ def try_resume(
     # arm.setup() just assumed — re-pin the frame from it (see
     # restore_park_origin). The sanity tap below catches the cases where the
     # tip didn't hold that spot (killed mid-move, power yank, arm bumped).
-    rig.restore_park_origin()
-
-    # Confirm `locked()` works and the tip is settled off-phone before sanity
-    # (already parked post-restore, so the auto-park on exit is a no-op move).
+    #
+    # The whole re-pin + sanity span holds the hardware lock: the MCP plane
+    # is already serving and hardware_ready flipped at connect time, so an
+    # unlocked window here would let a concurrent tool call (or a second
+    # `physiclaw setup hardware`) interleave G-code with the resume's own
+    # motion. Concurrent callers fail fast with the busy error instead, and
+    # locked()'s auto-park restores the resting spot on every exit — success
+    # or failure. home_screen() stays outside: it takes locked() itself.
     with rig.locked():
-        pass
-    if verify:
-        if sys.stdin.isatty():
-            print()
-            print("━" * 60)
-            print("Warm-start")
-            print("  Open or refresh /bridge on the phone (foreground, not locked).")
-            print(f"  Server waits up to {BRIDGE_WAIT_TIMEOUT}s for steady polling.")
-            print("━" * 60)
-            if not rig.bridge.wait_for_connection(
-                BRIDGE_WAIT_TIMEOUT, BRIDGE_SETTLE_SECONDS
-            ):
-                log.error(
-                    f"{flag}: /bridge page not polling within "
-                    f"{BRIDGE_WAIT_TIMEOUT}s — open or refresh /bridge on the phone."
+        rig.restore_park_origin()
+        if verify:
+            if sys.stdin.isatty():
+                print()
+                print("━" * 60)
+                print("Warm-start")
+                print(
+                    "  Open or refresh /bridge on the phone (foreground, not locked)."
                 )
+                print(
+                    f"  Server waits up to {BRIDGE_WAIT_TIMEOUT}s for steady polling."
+                )
+                print("━" * 60)
+                if not rig.bridge.wait_for_connection(
+                    BRIDGE_WAIT_TIMEOUT, BRIDGE_SETTLE_SECONDS
+                ):
+                    log.error(
+                        f"{flag}: /bridge page not polling within "
+                        f"{BRIDGE_WAIT_TIMEOUT}s — open or refresh /bridge on the phone."
+                    )
+                    return False
+            else:
+                log.info(f"{flag}: non-interactive; running sanity immediately")
+
+            if not _sanity(physiclaw, calib, phone):
+                # _sanity logged the specific diagnosis.
                 return False
         else:
-            log.info(f"{flag}: non-interactive; running sanity immediately")
-
-        if not _sanity(physiclaw, calib, phone):
-            # _sanity logged the specific diagnosis.
-            return False
-
+            log.info(
+                f"{flag}: trusting the parked arm — skipping bridge wait, "
+                "sanity tap, and home-screen swipe"
+            )
+    if verify:
         # Match setup.py's final step: send the phone home (swipe from
         # bottom), then flip ready. home_screen's locked() context auto-parks
         # the arm off-screen on exit, so nothing is hovering over the glass
         # afterward.
         physiclaw.home_screen()
-    else:
-        log.info(
-            f"{flag}: trusting the parked arm — skipping bridge wait, "
-            "sanity tap, and home-screen swipe"
-        )
     # Settle the camera, then flip ready — become_ready owns that order
     # (under --warm-start the home screen is showing — the dark scene that
     # exposes AE failure; under --hot-start whatever's on screen still

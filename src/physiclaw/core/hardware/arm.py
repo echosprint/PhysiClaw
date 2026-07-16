@@ -87,12 +87,20 @@ class StylusArm:
             raise DeviceNotFound("GRBL device not found, please specify port manually")
 
         self.ser = serial.Serial(port, baudrate, timeout=3)
-        self.transport = SerialTransport(self.ser)
-        self.port = port
-        # The Z executor: a solenoid driven over this arm's GRBL channel.
-        self.solenoid = Solenoid(send=self._send, dwell=self._dwell)
-        time.sleep(2)
-        self.transport.reset_input_buffer()
+        try:
+            self.transport = SerialTransport(self.ser)
+            self.port = port
+            # The Z executor: a solenoid driven over this arm's GRBL channel.
+            self.solenoid = Solenoid(send=self._send, dwell=self._dwell)
+            time.sleep(2)
+            self.transport.reset_input_buffer()
+        except BaseException:
+            # Same rule Camera.__init__ follows: a failure after the open
+            # (cable yanked during the settle) must not leave the port
+            # handle claimed until GC — an immediate reconnect would find
+            # it still held (exclusive on Windows COM).
+            self.ser.close()
+            raise
         log.info(f"Arm connected: {port}")
 
     # ─── Low-level communication ─────────────────────────────

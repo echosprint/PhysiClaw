@@ -184,8 +184,20 @@ class HardwareRig:
         if self._arm is not None:
             self._arm.close()
             self._arm = None
-        self._arm = StylusArm()
-        self._arm.setup()
+        arm = StylusArm()
+        try:
+            arm.setup()
+        except Exception:
+            # A half-configured arm (serial open DTR-reset the board, so no
+            # G92 work origin, no G21/G90, unconfigured solenoid) must not
+            # stay attached: hardware_ready would report it connected and
+            # gestures would land machine-origin-relative — wrong-place taps.
+            try:
+                arm.close()
+            except Exception:
+                log.exception("connect_arm: close after failed setup also failed")
+            raise
+        self._arm = arm
         self._apply_bundle_to_arm()
         log.info("Arm connected")
 

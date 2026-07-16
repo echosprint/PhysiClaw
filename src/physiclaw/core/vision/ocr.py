@@ -46,9 +46,14 @@ class OCRReader:
                 "rapidocr is required but couldn't be imported — it ships as a "
                 "physiclaw dependency, so reinstall physiclaw to restore it."
             ) from None
+        # try/finally: if RapidOCR() raises (missing/corrupt models), the
+        # disable must not leak — it would suppress INFO logging
+        # process-wide for the rest of the server's life.
         logging.disable(logging.INFO)
-        self._ocr = RapidOCR()
-        logging.disable(logging.NOTSET)
+        try:
+            self._ocr = RapidOCR()
+        finally:
+            logging.disable(logging.NOTSET)
         logging.getLogger("RapidOCR").setLevel(logging.WARNING)
 
     def read(

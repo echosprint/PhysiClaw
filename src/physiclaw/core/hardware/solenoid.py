@@ -113,9 +113,15 @@ class Solenoid:
         never mask the original error or, far worse, leave the coil hot. If
         even this ``M5`` fails the transport is likely dead; we log and move on
         (the firmware's ``off_on_alarm`` is the last line of defense).
+
+        The trailing ``RELEASE_MS`` dwell matters here too: the error path
+        unwinds into ``rig.locked()``'s auto-park, and without the dwell the
+        park G0 starts while the spring is still rebounding — ~200 ms of
+        tip-on-glass drag registering phantom touches mid-error-recovery.
         """
         try:
             self._send(self.GCODE_OFF)
+            self._dwell(self.RELEASE_MS / 1000.0)
         except Exception:
             log.exception("solenoid: emergency release (M5) failed")
 

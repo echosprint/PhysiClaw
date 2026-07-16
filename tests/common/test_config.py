@@ -925,3 +925,50 @@ def test_server_url_respects_custom_host_and_port(
     mocker.patch.object(config.CONFIG.server, "port", 9000)
 
     assert config.server_url() == "http://192.168.1.7:9000"
+
+
+# ---------- load(): type validation ----------
+
+
+def test_load_rejects_quoted_number_for_float_field(tmp_path: Path) -> None:
+    p = tmp_path / "config.toml"
+    p.write_text('[vision]\nblur_threshold = "80"\n')
+
+    with pytest.raises(config.ConfigError, match=r"\[vision\] blur_threshold"):
+        config.load(p)
+
+
+def test_load_rejects_string_for_int_field(tmp_path: Path) -> None:
+    p = tmp_path / "config.toml"
+    p.write_text('[server]\nport = "8048"\n')
+
+    with pytest.raises(config.ConfigError, match="expected int, got str"):
+        config.load(p)
+
+
+def test_load_rejects_bool_for_int_field(tmp_path: Path) -> None:
+    # TOML `true` is a Python bool, and bool subclasses int — must not pass.
+    p = tmp_path / "config.toml"
+    p.write_text("[engine]\nmax_turns = true\n")
+
+    with pytest.raises(config.ConfigError, match="expected int, got bool"):
+        config.load(p)
+
+
+def test_load_rejects_int_for_bool_field(tmp_path: Path) -> None:
+    p = tmp_path / "config.toml"
+    p.write_text("[camera]\nauto_exposure = 1\n")
+
+    with pytest.raises(config.ConfigError, match="expected bool, got int"):
+        config.load(p)
+
+
+def test_load_coerces_toml_int_for_float_field(tmp_path: Path) -> None:
+    # `retry_backoff_seconds = 5` is the natural way to write a
+    # whole-number float in TOML — accepted and coerced.
+    p = tmp_path / "config.toml"
+    p.write_text("[engine]\nretry_backoff_seconds = 5\n")
+
+    cfg = config.load(p)
+    assert cfg.engine.retry_backoff_seconds == 5.0
+    assert isinstance(cfg.engine.retry_backoff_seconds, float)

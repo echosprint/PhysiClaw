@@ -646,3 +646,102 @@ def test_created_since_unknown_snapshots_count_as_not_created(
     # After-snapshot failed → same.
     _jobs_path.write_text("## bad-job\nBroken entry\n- Type: bogus\n", encoding="utf-8")
     assert jobs.created_since(set()) is False
+
+
+# ---------- newline sanitation (writers must never corrupt jobs.md) ----------
+
+
+def test_create_job_folds_multiline_context_and_file_still_parses(
+    _jobs_path: Path,
+) -> None:
+    with freeze_time("2026-07-16T09:00:00"):
+        jobs.create_job(
+            id="user-batteries-2026-07-16",
+            description="Resume the battery order",
+            schedule="30 9 17 7 *",
+            context="User asked for AA batteries.\nCart already has 2 items.",
+        )
+
+    loaded = job_store.load_jobs()
+    assert len(loaded) == 1
+    assert loaded[0].context == "User asked for AA batteries. Cart already has 2 items."
+
+
+def test_create_job_folds_multiline_description(_jobs_path: Path) -> None:
+    with freeze_time("2026-07-16T09:00:00"):
+        jobs.create_job(
+            id="user-desc-2026-07-16",
+            description="Check the order\r\nand report back",
+            schedule="30 9 17 7 *",
+            context="Waiting on shipment confirmation.",
+        )
+
+    assert job_store.load_jobs()[0].description == "Check the order and report back"
+
+
+def test_create_job_folds_schedule_with_trailing_newline(_jobs_path: Path) -> None:
+    # croniter.is_valid tolerates the newline; the file must not carry it.
+    with freeze_time("2026-07-16T09:00:00"):
+        jobs.create_job(
+            id="user-sched-2026-07-16",
+            description="Check back",
+            schedule="30 9 17 7 *\n",
+            context="Waiting on shipment confirmation.",
+        )
+
+    assert job_store.load_jobs()[0].schedule == "30 9 17 7 *"
+
+
+def test_create_job_rejects_field_lookalike_description(_jobs_path: Path) -> None:
+    # A '- Status: x' description would silently BECOME the Status field.
+    with pytest.raises(ValueError, match="Field"):
+        jobs.create_job(
+            id="user-bad-2026-07-16",
+            description="- Status: keep checking",
+            schedule="30 9 17 7 *",
+            context="Waiting on shipment confirmation.",
+        )
+    assert job_store.load_jobs() == []
+
+
+def test_create_job_rejects_heading_description(_jobs_path: Path) -> None:
+    # A '## foo' description splits the section — the job silently vanishes.
+    with pytest.raises(ValueError, match="heading"):
+        jobs.create_job(
+            id="user-bad2-2026-07-16",
+            description="## check order",
+            schedule="30 9 17 7 *",
+            context="Waiting on shipment confirmation.",
+        )
+    assert job_store.load_jobs() == []
+
+
+def test_create_job_context_length_checked_after_folding(_jobs_path: Path) -> None:
+    # Newlines must not count toward the 10-char minimum.
+    with pytest.raises(ValueError, match="10 characters"):
+        jobs.create_job(
+            id="user-short-2026-07-16",
+            description="Check back",
+            schedule="30 9 17 7 *",
+            context="a\n\n\n\n\n\n\n\n\nb",
+        )
+
+
+def test_finish_job_folds_multiline_recap_and_file_still_parses(
+    _jobs_path: Path,
+) -> None:
+    _write_jobs(
+        _jobs_path,
+        _job_text(job_id="user-ship", kind="one-time", status="fired"),
+    )
+
+    with freeze_time("2026-07-16T10:00:00"):
+        jobs.finish_job(
+            id="user-ship",
+            status=STATUS_DONE,
+            recap="order shipped\n- tracking: SF123",
+        )
+
+    loaded = job_store.load_jobs()
+    assert loaded[0].execution_result == "order shipped - tracking: SF123"
+    assert loaded[0].status == "done"

@@ -111,7 +111,20 @@ class AnthropicCompatibleProvider(BaseProvider):
         to set that: it would drop the SDK's tuned connection defaults."""
         from anthropic import AsyncAnthropic
 
-        return AsyncAnthropic(api_key=key, base_url=base_url, timeout=timeout)
+        # Explicit arg wins, else the `[providers.anthropic] base_url`
+        # config override — previously ignored (the raw arg is always None
+        # via make_provider). Deliberately NOT _resolved_base_url(): the
+        # class BASE_URL carries a `/v1` suffix (it only satisfies the
+        # base-class non-empty check), and the SDK appends `/v1/...`
+        # itself — feeding it the class default would double the prefix.
+        # None → the SDK's own default endpoint.
+        from physiclaw.common.config import provider_base_url_override
+
+        return AsyncAnthropic(
+            api_key=key,
+            base_url=base_url or provider_base_url_override(self.PROVIDER_ID),
+            timeout=timeout,
+        )
 
     async def aclose(self) -> None:
         # AsyncAnthropic uses .close(), not .aclose() like httpx.

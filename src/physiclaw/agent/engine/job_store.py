@@ -324,6 +324,37 @@ def find_due(jobs: list[Job], now: dt.datetime) -> list[Job]:
     return due
 
 
+# ---------- value sanitation ----------
+
+
+def one_line(value: str) -> str:
+    """Fold free text onto a single line — the format's core invariant.
+
+    jobs.md is line-oriented: one heading, one description line, one
+    `- Field: value` line each. A newline inside a written value becomes
+    a stray line the parser rejects, and one malformed section kills
+    `load_jobs()` for EVERY job — the cron scheduler stays dead until a
+    human repairs the file. Model-supplied strings (context, recap,
+    description) routinely carry newlines, so writers fold instead of
+    reject: intent survives, the file never breaks.
+
+    Uses `str.splitlines()` — the exact line-boundary set (\\n, \\r,
+    \\x85, \\u2028, …) the parser's own `splitlines()` splits on, so the
+    writer and parser can never disagree on what "one line" means.
+    """
+    return " ".join(part.strip() for part in value.splitlines() if part.strip())
+
+
+def parses_as_field(line: str) -> bool:
+    """True when `line` would be consumed as a known `- Field: value`
+    row by the parser. A description with this shape doesn't corrupt the
+    file — worse, it silently becomes the field (``setdefault`` keeps
+    the first occurrence), poisoning e.g. Status for the whole section.
+    `create_job` rejects such descriptions instead of rewriting them."""
+    m = _FIELD_RE.match(line)
+    return bool(m and m.group(1).strip() in _KNOWN_FIELDS)
+
+
 # ---------- in-place field updates ----------
 
 
@@ -331,8 +362,11 @@ def _update_field(text: str, job_id: str, field_name: str, value: str) -> str:
     """Replace a single `- Field name:` list item in a job section.
 
     Raises ValueError if the field line doesn't exist — all fields are
-    required and must be present in the file.
+    required and must be present in the file. `value` is folded to one
+    line (see `one_line`) — this is the single choke point every update
+    path (finish_job recap, cron stamps, zombie expiry) writes through.
     """
+    value = one_line(value)
     # `[^\n]*` for the trailing line — `.*` would be greedy across
     # newlines under DOTALL and eat the rest of the file.
     pattern = re.compile(

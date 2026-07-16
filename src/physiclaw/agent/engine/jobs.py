@@ -32,6 +32,8 @@ from physiclaw.agent.engine.job_store import (
     load_jobs,
     min_fire_gap,
     next_fire,
+    one_line,
+    parses_as_field,
     update_fields,
     validate_schedule,
 )
@@ -102,13 +104,16 @@ def create_job(
     Raises ValueError on duplicate id (even if the existing entry is
     terminal — the agent must pick a fresh id), invalid kind, invalid
     schedule, a periodic schedule firing more often than
-    PERIODIC_MIN_GAP, missing description, or context shorter than
-    10 chars.
+    PERIODIC_MIN_GAP, missing description, a description the parser
+    would misread (a `- Field:` lookalike or a `#` heading), or context
+    shorter than 10 chars. Multi-line description/context/schedule are
+    folded to one line (see `job_store.one_line`) rather than rejected.
     """
     if not ID_RE.match(id):
         raise ValueError(f"invalid job id {id!r} (lowercase + digits + hyphens)")
     if kind not in (KIND_ONE_TIME, KIND_PERIODIC):
         raise ValueError(f"kind must be one-time or periodic, got {kind!r}")
+    schedule = one_line(schedule)  # croniter tolerates trailing newlines
     validate_schedule(schedule)
     if kind == KIND_PERIODIC:
         gap = min_fire_gap(schedule, dt.datetime.now())
@@ -121,11 +126,27 @@ def create_job(
                 "follow-up, create a ONE-TIME job at a specific minute instead, "
                 "and create another one then if it's still unresolved."
             )
-    if len(context.strip()) < 10:
+    context = one_line(context)
+    if len(context) < 10:
         raise ValueError("context must be at least 10 characters")
-    description = description.strip()
+    description = one_line(description)
     if not description:
         raise ValueError("description is required")
+    # The description occupies its own raw line in jobs.md; two shapes
+    # would be misread rather than rejected by the parser — a known-field
+    # lookalike silently BECOMES that field, and a `#` heading splits the
+    # section so the job silently vanishes. Refuse both with a message
+    # the model can act on.
+    if description.startswith("#"):
+        raise ValueError(
+            "description must not start with '#' — it would be parsed "
+            "as a jobs.md heading. Rephrase it as plain text."
+        )
+    if parses_as_field(description):
+        raise ValueError(
+            "description must not look like a '- Field: value' line — "
+            "it would be parsed as that field. Rephrase it as plain text."
+        )
 
     if any(j.id == id for j in load_jobs()):
         raise ValueError(f"job id already exists: {id!r}")
@@ -141,7 +162,7 @@ def create_job(
         f"- Type: {kind}\n"
         f"- Status: {STATUS_PEND}\n"
         f"- Schedule: `{schedule}`\n"
-        f"- Context: {context.strip()}\n"
+        f"- Context: {context}\n"
         f"- Create time: {stamp_now}\n"
         f"- Next fire time: {stamp_next}\n"
         f"- Last fire time: {NEVER}\n"

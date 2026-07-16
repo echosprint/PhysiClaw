@@ -111,6 +111,32 @@ def test_build_client_uses_async_anthropic_sdk(mocker) -> None:
     assert kwargs["base_url"] == "https://override"
 
 
+def test_build_client_applies_config_base_url_override(mocker) -> None:
+    fake = mocker.patch("anthropic.AsyncAnthropic")
+    mocker.patch(
+        "physiclaw.common.config.provider_base_url_override",
+        return_value="https://corp-proxy/anthropic",
+    )
+
+    _TestAnthropic(model="m")
+
+    assert fake.call_args.kwargs["base_url"] == "https://corp-proxy/anthropic"
+
+
+def test_build_client_default_base_url_is_sdk_default_not_class_attr(mocker) -> None:
+    """The class BASE_URL carries a `/v1` suffix (base-class non-empty
+    check only) and the SDK appends `/v1/...` itself — the default must
+    stay None so the SDK uses its own endpoint, never the class attr."""
+    fake = mocker.patch("anthropic.AsyncAnthropic")
+    mocker.patch(
+        "physiclaw.common.config.provider_base_url_override", return_value=None
+    )
+
+    _TestAnthropic(model="m")
+
+    assert fake.call_args.kwargs["base_url"] is None
+
+
 @pytest.mark.asyncio
 async def test_aclose_calls_sdk_close_not_aclose(provider: _TestAnthropic) -> None:
     await provider.aclose()

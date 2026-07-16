@@ -126,8 +126,15 @@ def launch() -> None:
     provider_id, model_id = parse_model_ref(ref)
 
     # Hooks read this to know where the MCP server lives. Must be set
-    # before load_hooks() imports them.
-    os.environ.setdefault(SERVER_ENV_VAR, args.server or server_url())
+    # before load_hooks() imports them. An explicit --server (the server
+    # always passes one when spawning this loop) OVERRIDES an inherited
+    # PHYSICLAW_SERVER — flag beats env, else a shell-exported var would
+    # silently point the runtime at a server nothing is listening on. A
+    # bare launch keeps the env-aware server_url() fallback.
+    if args.server:
+        os.environ[SERVER_ENV_VAR] = args.server
+    else:
+        os.environ.setdefault(SERVER_ENV_VAR, server_url())
 
     # Mirror to a daily file so wake decisions / poll errors survive for
     # post-mortems — the runtime's stderr is gone once the terminal is.

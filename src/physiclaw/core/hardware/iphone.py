@@ -65,17 +65,33 @@ class AssistiveTouch:
         # Ellipse test: ((sx-ax)/rx)^2 + ((sy-ay)/ry)^2 < 1
         return ((sx - ax) / rx) ** 2 + ((sy - ay) / ry) ** 2 < 1.0
 
-    def swipe_crosses_at(self, cx: float, cy: float, direction: str) -> bool:
-        """True if a swipe from (cx, cy) in `direction` would cross AT."""
+    def swipe_crosses_at(self, cx: float, cy: float, ex: float, ey: float) -> bool:
+        """True if the swipe segment (cx, cy) → (ex, ey), screen 0-1, passes
+        over the AssistiveTouch button.
+
+        Segment-vs-ellipse: scaling each axis by the button's radius maps
+        the ellipse to the unit circle (and the segment to a segment), so
+        the test is the segment's closest approach to the circle center.
+        Checking the actual travel span — not just the start's row/column
+        band — is what keeps a legitimate swipe elsewhere in the button's
+        band from being blocked. Returns False if AT position is not set.
+        """
         if self.at_screen is None or self.at_radius_screen is None:
             return False
         ax, ay = self.at_screen
         rx, ry = self.at_radius_screen
-        if direction in ("up", "down"):
-            return abs(cx - ax) < rx
-        if direction in ("left", "right"):
-            return abs(cy - ay) < ry
-        return False
+        if rx <= 0.0 or ry <= 0.0:
+            return False  # degenerate radius — treat like an unset button
+        px, py = (cx - ax) / rx, (cy - ay) / ry
+        qx, qy = (ex - ax) / rx, (ey - ay) / ry
+        dx, dy = qx - px, qy - py
+        seg_len_sq = dx * dx + dy * dy
+        if seg_len_sq == 0.0:
+            return px * px + py * py < 1.0
+        # Closest point on the segment to the (normalized) button center.
+        t = max(0.0, min(1.0, -(px * dx + py * dy) / seg_len_sq))
+        nx, ny = px + t * dx, py + t * dy
+        return nx * nx + ny * ny < 1.0
 
     def compute_at_screen_pos(self, t: geometry.ViewportShift) -> tuple[float, float]:
         """Convert AT CSS position to screenshot 0-1 using the viewport shift.

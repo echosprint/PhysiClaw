@@ -175,10 +175,16 @@ class GestureValidator:
                 f"{gesture} target {bbox} overlaps AssistiveTouch button — aim aside"
             )
 
-    def require_no_at_crossing(self, bbox: list[float], direction: str):
-        """Raise if a swipe from bbox center in `direction` would cross AssistiveTouch."""
-        cx, cy = self._transforms().bbox_center_pct(bbox)
-        if self._assistive_touch().swipe_crosses_at(cx, cy, direction):
+    def require_no_at_crossing(self, bbox: list[float], direction: str, size: Size):
+        """Raise if the swipe's actual travel segment would cross
+        AssistiveTouch — same start/end geometry the rig executes
+        (`swipe_end_pct`, clamped to screen), so a swipe whose bounded
+        path never reaches the button isn't blocked for sharing its
+        row/column band."""
+        t = self._transforms()
+        cx, cy = t.bbox_center_pct(bbox)
+        ex, ey = t.swipe_end_pct(bbox, direction, SWIPE_DISTANCES[size])
+        if self._assistive_touch().swipe_crosses_at(cx, cy, ex, ey):
             raise ValueError(
                 f"swipe {direction} at {bbox} crosses AssistiveTouch button — aim aside"
             )

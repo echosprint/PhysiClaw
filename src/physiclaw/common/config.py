@@ -4,7 +4,8 @@ Defaults live on the ``@dataclass`` sections — ``to_toml()`` + ``write_default
 render the commented template from those same defaults, so bumping a default
 doesn't need two edits.
 
-Unknown top-level sections and unknown keys inside a section raise
+Unknown top-level sections, unknown keys inside a section, and
+wrong-typed values (a quoted number, a bool for an int) raise
 ``ConfigError`` on load. The CLI catches this and points users at
 ``physiclaw config edit``.
 
@@ -17,7 +18,7 @@ import os
 import tomllib
 from dataclasses import dataclass, field, fields
 from pathlib import Path
-from typing import Any
+from typing import Any, get_type_hints
 
 from physiclaw.common import paths
 from physiclaw.common.text import read_text, write_text
@@ -344,7 +345,7 @@ _FREEFORM_SECTIONS: frozenset[str] = frozenset({"providers"})
 _FILE_HEADER = """\
 # PhysiClaw config. Edit with `physiclaw config edit`. Changes apply on
 # next `physiclaw server` start. Delete a key to revert to the built-in
-# default. Unknown keys / sections fail loudly on load.
+# default. Unknown keys / sections / wrong-typed values fail loudly on load.
 """
 
 _SECTION_COMMENTS: dict[str, str] = {
@@ -435,6 +436,38 @@ def config_path() -> Path:
     return paths.HOME / "config.toml"
 
 
+def _check_scalar_type(section: str, key: str, declared: Any, value: Any) -> Any:
+    """Validate one TOML override against the field's declared type — the
+    'type mismatch' half of ConfigError's contract. Without it a quoted
+    number (`blur_threshold = "80"`) loads silently and crashes mid-session
+    at the first comparison instead of erroring at startup.
+
+    tomllib already yields real Python types, so this compares rather than
+    parses. Two scalar subtleties: TOML `true` IS a Python bool and bool
+    subclasses int, so int fields must reject bools explicitly; and a TOML
+    integer for a float field (`exposure = -4`) is natural — coerced. Every
+    config field today is a plain int/float/str/bool; anything else passes
+    through untouched so a future richer field isn't silently rejected.
+    """
+    if declared not in (int, float, str, bool):
+        return value
+    if declared is bool:
+        if isinstance(value, bool):
+            return value
+    elif declared is int:
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+    elif declared is float:
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return float(value)
+    elif isinstance(value, str):
+        return value
+    raise ConfigError(
+        f"[{section}] {key}: expected {declared.__name__}, "
+        f"got {type(value).__name__} ({value!r})"
+    )
+
+
 def _build_section(name: str, cls: type, overrides: dict[str, Any]) -> Any:
     known = {f.name for f in fields(cls)}
     extra = set(overrides) - known
@@ -442,7 +475,12 @@ def _build_section(name: str, cls: type, overrides: dict[str, Any]) -> Any:
         raise ConfigError(
             f"unknown key(s) in [{name}]: {sorted(extra)} — valid keys: {sorted(known)}"
         )
-    return cls(**overrides)
+    hints = get_type_hints(cls)
+    checked = {
+        key: _check_scalar_type(name, key, hints.get(key), value)
+        for key, value in overrides.items()
+    }
+    return cls(**checked)
 
 
 def load(path: Path | None = None) -> Config:

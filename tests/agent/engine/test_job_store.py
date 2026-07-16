@@ -1143,3 +1143,58 @@ def test_purge_stale_uses_preloaded_jobs_list_when_supplied(
         purged = purge_stale(p, jobs=preloaded)
 
     assert purged == ["from-disk"]
+
+
+# ---------- one_line / parses_as_field ----------
+
+
+def test_one_line_folds_all_line_boundaries() -> None:
+    # splitlines() semantics: \n, \r\n, \r, and unicode separators all fold.
+    assert job_store.one_line("a\nb\r\nc\rd e") == "a b c d e"
+
+
+def test_one_line_drops_blank_lines_and_edge_whitespace() -> None:
+    assert job_store.one_line("  first.\n\n   second.  \n") == "first. second."
+
+
+def test_one_line_is_identity_for_single_line() -> None:
+    assert job_store.one_line("already one line") == "already one line"
+    assert job_store.one_line(job_store.one_line("a\nb")) == "a b"  # idempotent
+
+
+def test_parses_as_field_matches_known_fields_only() -> None:
+    assert job_store.parses_as_field("- Status: pend") is True
+    assert job_store.parses_as_field("- Note: buy milk") is False  # unknown field
+    assert job_store.parses_as_field("Status: pend") is False  # no leading dash
+
+
+def test_update_field_folds_multiline_value(tmp_path: Path) -> None:
+    p = tmp_path / "jobs.md"
+    p.write_text(
+        dedent(
+            """\
+            # Jobs
+
+            ## user-x
+            Do the thing
+
+            - Type: one-time
+            - Status: fired
+            - Schedule: `30 9 17 7 *`
+            - Context: something to resume later
+            - Create time: 2026-07-16T09:00
+            - Next fire time: (never)
+            - Last fire time: 2026-07-16T09:30
+            - Execution time: (never)
+            - Execution result: (never)
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    job_store.update_fields(
+        p, {"user-x": {"Execution result": "shipped\n- tracking: SF123"}}
+    )
+
+    loaded = job_store.load_jobs(p)
+    assert loaded[0].execution_result == "shipped - tracking: SF123"

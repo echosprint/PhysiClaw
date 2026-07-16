@@ -101,6 +101,35 @@ def test_cropped_view_crops_with_current_transforms(
 # ---------- detect / scan_text ----------
 
 
+def test_detect_degrades_to_icons_when_ocr_construction_fails(
+    mocker, per: Perception
+) -> None:
+    """A broken OCR install (models raise in __init__, before
+    _detect_texts' guard can run) costs the text channel — icons
+    survive — and the failure is memoized: later frames neither
+    re-attempt the heavy model load nor re-warn."""
+    per._icon_detector = MagicMock()
+    ctor = mocker.patch.object(
+        perception_mod, "OCRReader", side_effect=RuntimeError("corrupt model")
+    )
+    pipeline = mocker.patch.object(
+        perception_mod,
+        "detect_ui_elements",
+        return_value=([], np.zeros((4, 4, 3), dtype=np.uint8)),
+    )
+    mocker.patch.object(perception_mod, "elements_to_json", return_value=[])
+    mocker.patch.object(perception_mod, "format_elements", return_value="")
+
+    frame = np.zeros((4, 4, 3), dtype=np.uint8)
+    per.detect(frame)
+    per.detect(frame)
+
+    assert ctor.call_count == 1  # memoized — no per-frame model reload
+    assert pipeline.call_count == 2  # both passes still detected icons
+    ocr_arg = pipeline.call_args.kwargs["ocr_reader"]
+    assert ocr_arg.read(frame) == []  # the null reader, not None
+
+
 def test_detect_calls_ui_pipeline(mocker, per: Perception) -> None:
     per._ocr_reader = MagicMock()
     per._icon_detector = MagicMock()

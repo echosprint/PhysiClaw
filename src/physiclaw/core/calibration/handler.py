@@ -80,9 +80,11 @@ async def _run_locked_step(
     the busy error, so the wizard reports the actionable problem, and
     pre-lock page staging (``phone.set_mode``) keeps today's ordering.
     ``do`` runs with the lock held and the lock is always released,
-    even on failure. A ``PreconditionError`` becomes a 409 (client
-    state — the wizard can act on the message); anything else becomes
-    the standard 500 ``_err`` JSON (a genuine fault).
+    even on failure; a failing step also parks (best-effort) so the
+    tip never rests mid-screen where a retry would re-pin the frame.
+    A ``PreconditionError`` becomes a 409 (client state — the wizard
+    can act on the message); anything else becomes the standard 500
+    ``_err`` JSON (a genuine fault).
     """
 
     def _step() -> dict:
@@ -91,6 +93,18 @@ async def _run_locked_step(
         rig.acquire()
         try:
             return do()
+        except BaseException:
+            # Every success path parks inside `do` (the resting-position
+            # invariant auto/from_park retries rely on); a mid-step failure
+            # must not leave the tip at the failure position — the retry's
+            # restore_park_origin would declare that spot the park frame.
+            # rig.park() is defensive: it no-ops when the arm or transform
+            # isn't there yet, so this is safe at any calibration stage.
+            try:
+                rig.park()
+            except Exception:
+                log.exception("calibration step failed — auto-park also failed")
+            raise
         finally:
             rig.release()
 
@@ -274,6 +288,8 @@ async def handle_validate_calibration(
     def _precheck() -> None:
         if rig.arm is None:
             raise PreconditionError("Arm not connected")
+        if rig.cam is None:
+            raise PreconditionError("Camera not connected")
         if not rig.calibration.transforms_ready:
             raise PreconditionError("Run arm calibration and camera-mapping first")
 

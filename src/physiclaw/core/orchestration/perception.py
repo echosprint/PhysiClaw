@@ -37,6 +37,16 @@ from physiclaw.core.vision.watchdog import Watchdog
 log = logging.getLogger(__name__)
 
 
+class _NullOCR:
+    """Stand-in reader after OCR construction failed — `detect` keeps its
+    icons channel without re-attempting the heavy model load (and
+    re-warning) on every frame. Deliberately NOT installed in the
+    `_ocr_reader` cache slot: `scan_text` must keep raising loudly."""
+
+    def read(self, frame, crop_box=None) -> list:
+        return []
+
+
 class Perception:
     """Detectors + frame acquisition over a borrowed rig."""
 
@@ -55,6 +65,9 @@ class Perception:
         self._icon_init_lock = threading.Lock()
         self._ocr_reader: OCRReader | None = None
         self._icon_detector: IconDetector | None = None
+        # Set once when OCR construction fails — `detect` degrades to
+        # icons-only from then on instead of re-loading models per frame.
+        self._ocr_error: str | None = None
         self._watchdog = Watchdog()
         self._last_tune: exposure.TuneResult | None = None
         self._last_lock: focus.LockResult | None = None
@@ -110,10 +123,26 @@ class Perception:
         views need to be cropped via ``cropped_view`` first.
         Returns (formatted element listing, annotated frame).
         """
+        # The lazy cache constructs RapidOCR here, BEFORE _detect_texts'
+        # degrade guard can catch a broken install (missing/corrupt models
+        # raise in __init__, not read()). Same contract applies: the text
+        # channel degrades, icons must survive. The failure is memoized —
+        # warned once, then a null reader per frame instead of re-loading
+        # models on every peek. scan_text deliberately keeps raising —
+        # its callers need text or nothing.
+        if self._ocr_error is not None:
+            ocr: OCRReader | _NullOCR = _NullOCR()
+        else:
+            try:
+                ocr = self.ocr_reader()
+            except Exception as ex:
+                self._ocr_error = str(ex)
+                log.warning("OCR reader unavailable — detecting icons only: %s", ex)
+                ocr = _NullOCR()
         elements, annotated = detect_ui_elements(
             frame,
             icon_detector=self.icon_detector(),
-            ocr_reader=self.ocr_reader(),
+            ocr_reader=ocr,
         )
         return format_elements(elements_to_json(elements)), annotated
 

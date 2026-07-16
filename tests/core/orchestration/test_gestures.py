@@ -35,6 +35,7 @@ def validator(at: MagicMock) -> GestureValidator:
         (bbox[0] + bbox[2]) / 2,
         (bbox[1] + bbox[3]) / 2,
     )
+    transforms.swipe_end_pct.return_value = (0.5, 0.6)
     return GestureValidator(
         assistive_touch=lambda: at,
         transforms=lambda: transforms,
@@ -154,7 +155,7 @@ def test_require_no_at_crossing_raises(
     at.swipe_crosses_at.return_value = True
 
     with pytest.raises(ValueError, match="crosses AssistiveTouch button — aim aside"):
-        validator.require_no_at_crossing(BBOX, "up")
+        validator.require_no_at_crossing(BBOX, "up", "m")
 
 
 def test_guards_check_the_bbox_center(

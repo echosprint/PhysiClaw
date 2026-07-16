@@ -173,7 +173,7 @@ class PhysiClaw:
         distance is the facade's only geometry job here. `start_dwell` /
         `end_dwell` (s) anchor the touch-down / hold the endpoint (see
         arm.swipe_to). Caller must hold the lock."""
-        self._validator.require_no_at_crossing(bbox, direction)
+        self._validator.require_no_at_crossing(bbox, direction, size)
         self.rig.swipe_from_bbox(
             bbox,
             direction,

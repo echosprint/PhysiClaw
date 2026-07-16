@@ -138,45 +138,62 @@ def test_overlaps_at_returns_false_when_radius_unset() -> None:
 def test_swipe_crosses_at_unset_returns_false() -> None:
     at = AssistiveTouch()
 
-    assert at.swipe_crosses_at(0.5, 0.5, "up") is False
+    assert at.swipe_crosses_at(0.5, 0.9, 0.5, 0.1) is False
 
 
-def test_swipe_crosses_at_vertical_directions_check_x_overlap() -> None:
+def test_swipe_crosses_at_segment_through_button() -> None:
     at = AssistiveTouch()
     at.compute_at_screen_pos(_shift())
-    ax, _ay = at.at_screen
+    ax, ay = at.at_screen
 
-    # Same column as AT → vertical swipes cross.
-    assert at.swipe_crosses_at(ax, 0.5, "up") is True
-    assert at.swipe_crosses_at(ax, 0.5, "down") is True
-    # Far column.
-    assert at.swipe_crosses_at(0.9, 0.5, "up") is False
-    assert at.swipe_crosses_at(0.9, 0.5, "down") is False
+    # Vertical swipe straight through the button's column and row span.
+    assert at.swipe_crosses_at(ax, ay + 0.3, ax, ay - 0.3) is True
+    # Same column but the segment stays entirely below the button.
+    assert at.swipe_crosses_at(ax, ay + 0.4, ax, ay + 0.2) is False
 
 
-def test_swipe_crosses_at_horizontal_directions_check_y_overlap() -> None:
+def test_swipe_crosses_at_bounded_travel_short_of_button() -> None:
+    # Same row as the button, swiping TOWARD it, but the travel stops far
+    # short — the old row-band test wrongly blocked this (regression).
     at = AssistiveTouch()
     at.compute_at_screen_pos(_shift())
-    _ax, ay = at.at_screen
+    ax, ay = at.at_screen
 
-    assert at.swipe_crosses_at(0.5, ay, "left") is True
-    assert at.swipe_crosses_at(0.5, ay, "right") is True
-    assert at.swipe_crosses_at(0.5, 0.9, "left") is False
-    assert at.swipe_crosses_at(0.5, 0.9, "right") is False
+    assert at.swipe_crosses_at(ax + 0.6, ay, ax + 0.3, ay) is False
 
 
-def test_swipe_crosses_at_unknown_direction_returns_false() -> None:
+def test_swipe_crosses_at_endpoint_reaching_button() -> None:
     at = AssistiveTouch()
     at.compute_at_screen_pos(_shift())
+    ax, ay = at.at_screen
 
-    assert at.swipe_crosses_at(0.5, 0.5, "diagonal") is False
+    # Travel long enough that the endpoint lands inside the button.
+    assert at.swipe_crosses_at(ax + 0.4, ay, ax, ay) is True
+
+
+def test_swipe_crosses_at_moving_away_in_same_band() -> None:
+    at = AssistiveTouch()
+    at.compute_at_screen_pos(_shift())
+    ax, ay = at.at_screen
+
+    # Same row, moving AWAY from the button.
+    assert at.swipe_crosses_at(ax + 0.2, ay, ax + 0.6, ay) is False
+
+
+def test_swipe_crosses_at_zero_length_segment_uses_point_test() -> None:
+    at = AssistiveTouch()
+    at.compute_at_screen_pos(_shift())
+    ax, ay = at.at_screen
+
+    assert at.swipe_crosses_at(ax, ay, ax, ay) is True
+    assert at.swipe_crosses_at(ax + 0.5, ay, ax + 0.5, ay) is False
 
 
 def test_swipe_crosses_at_returns_false_when_radius_unset() -> None:
     at = AssistiveTouch()
     at.at_screen = (0.1, 0.1)
 
-    assert at.swipe_crosses_at(0.1, 0.5, "up") is False
+    assert at.swipe_crosses_at(0.1, 0.5, 0.1, 0.1) is False
 
 
 # ---------- _move_to_at / tap variants ----------
