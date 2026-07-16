@@ -169,7 +169,10 @@ def test_grab_screen_keeps_blown_frame_without_a_fixer(mocker) -> None:
 
 
 def test_grab_screen_fix_crash_keeps_blown_frame(mocker) -> None:
-    # Fail-open: a crashing tune never costs the view.
+    # Fail-open: a crashing tune never costs the view — but it still
+    # counts as retuned: a tune that died mid-run may have moved the
+    # exposure, and a pair diffed across exposures reads as changed
+    # everywhere (a false `changed` would reset the stuck guard).
     mocker.patch.object(observation.time, "sleep")
     blown = _blown()
     obs = _observer([_blown(), blown], fix=MagicMock(side_effect=RuntimeError("boom")))
@@ -177,8 +180,40 @@ def test_grab_screen_fix_crash_keeps_blown_frame(mocker) -> None:
     frame, sharp_flag, report, retuned = obs.grab_screen()
 
     assert frame is blown
-    assert retuned is False
+    assert retuned is True
     assert report.blown
+
+
+def test_grab_screen_regrab_crash_after_tune_still_flags_retuned(mocker) -> None:
+    # The tune succeeded but the corrected regrab failed: the exposure
+    # HAS changed while the kept frame predates it — the caller must
+    # withhold the verdict, so retuned stays True (the old flag conflated
+    # "tune ran" with "regrab succeeded" and reported False here).
+    mocker.patch.object(observation.time, "sleep")
+    blown = _blown()
+    frames = iter([_blown(), blown])
+
+    def grab():
+        try:
+            return next(frames)
+        except StopIteration:
+            raise RuntimeError("camera hiccup") from None
+
+    obs = GestureObserver(
+        park=MagicMock(),
+        grab=grab,
+        detect=MagicMock(),
+        monitor=MagicMock(observe=MagicMock(return_value=None)),
+        fix_exposure=MagicMock(),
+    )
+    obs.GESTURE_SETTLE_SECONDS = 0
+    obs.GRAB_BLUR_THRESHOLD = 0
+
+    frame, sharp_flag, report, retuned = obs.grab_screen()
+
+    assert frame is blown  # the pre-tune frame still serves the view
+    assert retuned is True
+    assert report.blown  # the report describes the returned frame
 
 
 def test_grab_screen_fixes_deferred_tune_on_clean_bright_frame(mocker) -> None:
@@ -321,6 +356,45 @@ def test_with_view_withholds_verdict_when_after_grab_retuned(mocker) -> None:
     mocker.patch.object(observation, "encode_view_jpeg", return_value=b"VIEW_JPG")
     frames = [_flat(128), _blown(), _blown(), _flat(30)]
     obs = _observer(frames, fix=MagicMock())
+
+    out = obs.with_view(lambda: "Acted")
+
+    assert out.text == "Acted"  # no verdict marker
+    assert out.jpeg == b"VIEW_JPG"
+
+
+def test_with_view_withholds_verdict_when_before_grab_tune_regrab_fails(
+    mocker,
+) -> None:
+    # An inline fix during the BEFORE grab whose regrab fails leaves the
+    # kept before-frame on the OLD exposure while the after-grab captures
+    # the new one — the pair is not comparable, so the verdict must be
+    # withheld. (A before-grab fix whose regrab succeeds would be safe —
+    # both frames share the new exposure — but the flag can't prove
+    # which case happened, so both withhold: the fail-open direction.)
+    mocker.patch.object(observation.time, "sleep")
+    mocker.patch.object(observation, "encode_view_jpeg", return_value=b"VIEW_JPG")
+    script = iter(
+        [_blown(), _blown(), RuntimeError("camera hiccup"), _flat(30), _flat(30)]
+    )
+
+    def grab():
+        step = next(script)
+        if isinstance(step, Exception):
+            raise step
+        return step
+
+    monitor = MagicMock()
+    monitor.observe.return_value = None
+    obs = GestureObserver(
+        park=MagicMock(),
+        grab=grab,
+        detect=MagicMock(return_value=("LISTING", _flat())),
+        monitor=monitor,
+        fix_exposure=MagicMock(),
+    )
+    obs.GESTURE_SETTLE_SECONDS = 0
+    obs.GRAB_BLUR_THRESHOLD = 0
 
     out = obs.with_view(lambda: "Acted")
 

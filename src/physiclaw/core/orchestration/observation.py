@@ -118,9 +118,14 @@ class GestureObserver:
         """The injected predicate says this grab's exposure is wrong
         (still blown after the settle-retry, or a deferred tune just met
         its bright reference) — run the synchronous tune and grab the
-        corrected frame. Returns `(frame, report, fixed)`; on any
-        failure the original report is kept and `fixed` is False
-        (fail-open)."""
+        corrected frame. Returns `(frame, report, tuned)`: `frame` is
+        None when the fix or the regrab failed (the original report is
+        kept — fail-open, the view still ships). `tuned` is True whenever
+        the tune was INVOKED, not whether it succeeded: a tune that
+        crashed mid-run, or whose regrab failed, may still have moved the
+        exposure — and a before/after pair diffed across two exposures
+        reads as "changed everywhere", so verdict callers must treat the
+        grab as retuned either way."""
         if self._fix_exposure is None:
             return None, report, False
         log.info(
@@ -135,7 +140,7 @@ class GestureObserver:
             return frame, quality.assess(frame), True
         except Exception:
             log.warning("inline exposure fix failed", exc_info=True)
-            return None, report, False
+            return None, report, True
 
     def observe_quality(self, source: str, report: quality.QualityReport) -> str | None:
         """Judge an already-assessed camera view for AF/AE failure; on a
@@ -196,8 +201,8 @@ class GestureObserver:
             frame = self._grab()
             report = quality.assess(frame)
         if self._needs_fix(report):
-            fixed_frame, report, fixed = self._fix_exposure_grab("peek", report)
-            if fixed:
+            fixed_frame, report, _ = self._fix_exposure_grab("peek", report)
+            if fixed_frame is not None:
                 frame = fixed_frame
         return frame, report
 
@@ -226,10 +231,12 @@ class GestureObserver:
         but blur erases edges so it diffs as "changed everywhere": the
         caller must skip the verdict (None, the fail-open direction)
         rather than emit a false `changed` that would reset the stuck
-        guard. retuned is True when the exposure was changed during THIS
-        grab — a frame captured under a different exposure than its
-        pair-mate diffs as changed everywhere too, so the caller must
-        likewise skip the verdict. Caller must hold the lock."""
+        guard. retuned is True when the exposure MAY have changed during
+        THIS grab — the inline tune was invoked, even if it failed
+        mid-run or its regrab did — because a frame captured under a
+        different exposure than its pair-mate diffs as changed everywhere
+        too, so the caller must likewise skip the verdict. Caller must
+        hold the lock."""
         try:
             self._park()
             if settle:
@@ -250,7 +257,7 @@ class GestureObserver:
                 fixed_frame, report, retuned = self._fix_exposure_grab(
                     "gesture view", report
                 )
-                if retuned:
+                if fixed_frame is not None:
                     frame = fixed_frame
             if report.sharpness < self.GRAB_BLUR_THRESHOLD:
                 log.warning("gesture frame blurry — verdict withheld")
@@ -282,7 +289,7 @@ class GestureObserver:
         seconds to re-converge across such a flip, and luma statistics
         cannot flag the mid-swing white-out after the fact.
         """
-        before, before_sharp, before_report, _ = self.grab_screen()
+        before, before_sharp, before_report, before_retuned = self.grab_screen()
         result = action()
         after, after_sharp, after_report, after_retuned = self.grab_screen(
             settle=self.GESTURE_SETTLE_SECONDS
@@ -311,13 +318,17 @@ class GestureObserver:
             # Verdict only from two comparable sharp frames — a blurry
             # side diffs as "changed everywhere" (false `changed`, the
             # harmful direction), and so does an exposure change between
-            # the pair (an inline re-tune during the after-grab; one
-            # during the BEFORE-grab is fine — both frames then share the
-            # new exposure). The view below is best-effort either way.
+            # the pair. A re-tune during EITHER grab withholds: the flag
+            # means the tune was invoked, not that it succeeded — a
+            # before-grab tune whose regrab failed leaves the kept frame
+            # on the old exposure while the after-grab captures the new
+            # one, so "both share the new exposure" cannot be assumed.
+            # The view below is best-effort either way.
             if (
                 before is not None
                 and before_sharp
                 and after_sharp
+                and not before_retuned
                 and not after_retuned
             ):
                 try:
