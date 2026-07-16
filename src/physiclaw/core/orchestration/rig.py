@@ -81,8 +81,9 @@ class HardwareRig:
         """Called by /setup after its final step (phone on Home Screen).
 
         Kept pure (tests pin it). Any NEW path that flips ready should
-        also schedule `Perception.tune_exposure()` — see the two existing
-        callers (`server/watch.py` /api/ready, `server/warm_start.py`)."""
+        also schedule `Perception.settle_camera()` — see the two
+        existing callers (`server/watch.py` /api/ready,
+        `server/warm_start.py`)."""
         self._ready = True
 
     # ─── State queries ────────────────────────────────────────

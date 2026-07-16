@@ -143,6 +143,42 @@ def camera_set_manual_exposure(cap, exposure: int) -> None:
     cap.set(cv2.CAP_PROP_EXPOSURE, uvc.ticks_from_log2_seconds(exposure))
 
 
+def camera_focus_lockable() -> bool:
+    """V4L2 exposes V4L2_CID_FOCUS_AUTO / FOCUS_ABSOLUTE through the
+    CAP_PROP_AUTOFOCUS / CAP_PROP_FOCUS properties — the lock is always
+    worth ATTEMPTING. Whether this camera honors it is judged at lock
+    time: the set() return, then (as always) measured sharpness."""
+    return True
+
+
+def camera_lock_focus(cap) -> bool:
+    """Freeze autofocus at its current position.
+
+    Order is load-bearing: the kernel defines manual focus writes as
+    undefined/ignored while FOCUS_AUTO is on, so AF goes off FIRST,
+    then the absolute position is pinned back where the driver reports
+    one (disabling AF alone doesn't hold the lens on all cameras).
+    get() returns 0.0 when unsupported and 0 is also a legal focus
+    value — the pin is skipped at <= 0 rather than risk racking an
+    unsupported lens to its stop; the caller's measured-sharpness
+    verify covers whichever way that call goes."""
+    import cv2
+
+    if not cap.set(cv2.CAP_PROP_AUTOFOCUS, 0):
+        return False
+    cur = cap.get(cv2.CAP_PROP_FOCUS)
+    if cur > 0:
+        cap.set(cv2.CAP_PROP_FOCUS, cur)
+    return True
+
+
+def camera_unlock_focus(cap) -> None:
+    """Hand the lens back to continuous autofocus."""
+    import cv2
+
+    cap.set(cv2.CAP_PROP_AUTOFOCUS, 1)
+
+
 # ─── doctor diagnostics ─────────────────────────────────────
 
 

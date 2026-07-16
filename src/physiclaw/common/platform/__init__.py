@@ -28,6 +28,9 @@ camera_size_cap = _impl.camera_size_cap
 camera_backend = _impl.camera_backend
 camera_set_auto_exposure = _impl.camera_set_auto_exposure
 camera_set_manual_exposure = _impl.camera_set_manual_exposure
+camera_focus_lockable = _impl.camera_focus_lockable
+camera_lock_focus = _impl.camera_lock_focus
+camera_unlock_focus = _impl.camera_unlock_focus
 open_camera_aim_app = _impl.open_camera_aim_app
 quit_camera_aim_app = _impl.quit_camera_aim_app
 open_image_files = _impl.open_image_files
@@ -45,6 +48,9 @@ __all__ = [
     "camera_backend",
     "camera_set_auto_exposure",
     "camera_set_manual_exposure",
+    "camera_focus_lockable",
+    "camera_lock_focus",
+    "camera_unlock_focus",
     "open_camera_aim_app",
     "quit_camera_aim_app",
     "open_image_files",

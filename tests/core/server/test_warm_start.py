@@ -169,8 +169,9 @@ def test_try_resume_succeeds_on_clean_path(mocker) -> None:
     # Origin re-pinned from the park spot so the bundle's affine stays valid.
     app.rig.restore_park_origin.assert_called_once()
     app.home_screen.assert_called_once()
-    # Exposure tune runs between home (dark scene showing) and ready.
-    app.perception.tune_exposure.assert_called_once()
+    # Camera settle (exposure tune + focus lock) runs between home
+    # (dark scene showing) and ready.
+    app.perception.settle_camera.assert_called_once()
     app.rig.mark_ready.assert_called_once()
 
 
@@ -273,7 +274,7 @@ def test_try_resume_no_verify_skips_everything_that_touches_the_phone(
     app.rig.bridge.wait_for_connection.assert_not_called()
     app.home_screen.assert_not_called()
     app.rig.restore_park_origin.assert_called_once()
-    app.perception.tune_exposure.assert_called_once()
+    app.perception.settle_camera.assert_called_once()
     app.rig.mark_ready.assert_called_once()
 
 

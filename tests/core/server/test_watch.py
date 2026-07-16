@@ -113,9 +113,9 @@ async def test_ready_route_marks_and_returns_ready_state(
 
 
 @pytest.mark.asyncio
-async def test_ready_route_fires_exposure_tune(fake_mcp, async_request) -> None:
+async def test_ready_route_fires_camera_settle(fake_mcp, async_request) -> None:
     # Fire-and-forget on the default executor: the response must not wait
-    # for the tune, but the tune must run.
+    # for the settle, but the settle must run.
     import asyncio
 
     pl = MagicMock()
@@ -125,7 +125,7 @@ async def test_ready_route_fires_exposure_tune(fake_mcp, async_request) -> None:
     await fake_mcp.get("/api/ready", "POST")(async_request())
 
     for _ in range(100):
-        if pl.perception.tune_exposure.called:
+        if pl.perception.settle_camera.called:
             break
         await asyncio.sleep(0.01)
-    pl.perception.tune_exposure.assert_called_once()
+    pl.perception.settle_camera.assert_called_once()

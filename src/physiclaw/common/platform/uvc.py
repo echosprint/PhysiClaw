@@ -1,6 +1,6 @@
-"""UVC exposure control over IOKit — pure ctypes. The IOKit machinery is
-macOS-only; `ticks_from_log2_seconds` (the UVC tick scale) is shared with
-the Linux backend.
+"""UVC exposure and focus control over IOKit — pure ctypes. The IOKit
+machinery is macOS-only; `ticks_from_log2_seconds` (the UVC tick scale)
+is shared with the Linux backend.
 
 macOS offers no API OpenCV can reach to control a UVC webcam's exposure:
 the AVFoundation backend never implemented the exposure properties, and
@@ -29,10 +29,10 @@ ABI notes, because ctypes gets no compiler to check them:
   open is attempted best-effort and its failure ignored, matching what we
   measured on real hardware.
 
-Fail-soft contract: `exposure_channel()` returns None unless exactly one
+Fail-soft contract: `camera_terminal()` returns None unless exactly one
 VideoControl-capable device is on the bus AND it answers a GET_CUR for
-its exposure controls. Callers treat None as "not tunable" and leave the
-firmware auto-exposure alone.
+its exposure controls (the verification handshake). Callers treat None
+as "no control channel" and leave firmware AE/AF alone.
 
 Firmware quirks, measured on real hardware (2026-07) — trust pixels,
 never control-request readbacks:
@@ -71,6 +71,10 @@ _USB_CLASS_VIDEO, _SUBCLASS_VIDEOCONTROL = 14, 1
 _DONT_CARE = 0xFFFF
 _SET_CUR, _GET_CUR, _GET_MIN, _GET_MAX = 0x01, 0x81, 0x82, 0x83
 _CT_AE_MODE, _CT_EXPOSURE_ABS = 0x02, 0x04
+# Focus controls, same camera terminal (UVC 1.1 §4.2.2.1): absolute
+# position is 2 bytes, the continuous-AF toggle 1 byte. Fixed-focus
+# cameras simply don't answer for them — `answers_focus` gates that.
+_CT_FOCUS_ABS, _CT_FOCUS_AUTO = 0x06, 0x08
 # bmRequestType: direction | class request | interface recipient.
 _OUT, _IN = 0x21, 0xA1
 # Camera-terminal entity ids to try, in order. The UVC spec only requires
@@ -338,13 +342,16 @@ def _video_control_interfaces() -> list:
     return []
 
 
-class ExposureChannel:
-    """Exposure controls of one UVC camera. Obtain via `exposure_channel`."""
+class CameraTerminal:
+    """One UVC camera's Camera Terminal (UVC 1.1 §4.2.2.1) — the entity
+    holding the exposure and focus controls. Obtain via
+    `camera_terminal`."""
 
     def __init__(self, intf) -> None:
         self._intf = intf
         self._terminal = _CAMERA_TERMINAL_CANDIDATES[0]
         self._range: tuple[int | None, int | None] | None = None
+        self._focus_support: bool | None = None  # probed lazily, cached
         ifnum = C.c_uint8()
         _call(intf, "GetInterfaceNumber", C.byref(ifnum))
         self._ifnum = ifnum.value
@@ -412,6 +419,37 @@ class ExposureChannel:
         UVC "auto"), falling back to 2 (full auto) where unsupported."""
         return self._set(_CT_AE_MODE, 8, 1) or self._set(_CT_AE_MODE, 2, 1)
 
+    def answers_focus(self) -> bool:
+        """Whether the camera terminal answers for its focus controls,
+        with their exact byte sizes (AF toggle 1, absolute focus 2).
+        Fixed-focus cameras don't — locking is then meaningless and the
+        caller skips it. Device-static, so probed once and cached."""
+        if self._focus_support is None:
+            self._focus_support = (
+                self._get(_GET_CUR, _CT_FOCUS_AUTO, 1) is not None
+                and self._get(_GET_CUR, _CT_FOCUS_ABS, 2) is not None
+            )
+        return self._focus_support
+
+    def lock_focus(self) -> bool:
+        """Freeze the lens: read the converged position, switch
+        continuous AF off, and pin the position back explicitly —
+        disabling AF alone holds the lens on most firmware, but some
+        need the absolute write to keep it (the uvcdynctrl folklore).
+        The pin is best-effort: a junk GET_CUR readback (see the module
+        docstring's firmware quirks) would write back the junk, which
+        the caller's measured-sharpness verify catches and reverts."""
+        cur = self._get(_GET_CUR, _CT_FOCUS_ABS, 2)
+        if not self._set(_CT_FOCUS_AUTO, 0, 1):
+            return False
+        if cur is not None:
+            self._set(_CT_FOCUS_ABS, cur, 2)
+        return True
+
+    def unlock_focus(self) -> bool:
+        """Hand the lens back to continuous autofocus."""
+        return self._set(_CT_FOCUS_AUTO, 1, 1)
+
     def set_manual(self, ticks: int) -> bool:
         """Manual mode + absolute exposure time in 100µs ticks, clamped
         to the device-reported range when the device publishes one.
@@ -431,30 +469,34 @@ class ExposureChannel:
         return self._set(_CT_EXPOSURE_ABS, max(1, ticks), 4)
 
 
-def exposure_channel() -> ExposureChannel | None:
-    """The single UVC camera's exposure channel, or None.
+def camera_terminal() -> CameraTerminal | None:
+    """The single UVC camera's camera terminal, or None.
 
     None when IOKit is unavailable, no UVC device exists, several exist
     (OpenCV indexes cameras via AVFoundation, this module via IOKit, and
     nothing guarantees the two orders agree — with one device there is
     nothing to disagree about), or the device won't answer for its
-    exposure controls. Callers treat None as "not tunable"."""
+    exposure controls — the probe's verification handshake: a terminal
+    that answers for exposure with exact camera-terminal byte sizes is
+    the verified entity to drive for every control family. Callers
+    treat None as "no control channel" — firmware AE/AF stay in
+    charge."""
     if not _load():
         return None
     interfaces = _video_control_interfaces()
     if len(interfaces) != 1:
         if len(interfaces) > 1:
             log.info(
-                "UVC exposure tuning off: %d UVC devices on the bus "
+                "UVC camera control off: %d UVC devices on the bus "
                 "(need exactly 1 to match OpenCV's camera unambiguously)",
                 len(interfaces),
             )
         for intf in interfaces:
             _call(intf, "Release")
         return None
-    channel = ExposureChannel(interfaces[0])
+    channel = CameraTerminal(interfaces[0])
     if not channel.probe():
-        log.info("UVC exposure tuning off: device doesn't answer for exposure")
+        log.info("UVC camera control off: device doesn't answer for exposure")
         _call(interfaces[0], "Release")
         return None
     return channel

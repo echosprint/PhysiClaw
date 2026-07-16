@@ -49,7 +49,7 @@ def _no_real_uvc(monkeypatch: pytest.MonkeyPatch) -> None:
     if sys.platform == "darwin":
         from physiclaw.common.platform import darwin
 
-        monkeypatch.setattr(darwin, "_uvc_channel", False)
+        monkeypatch.setattr(darwin, "_uvc_terminal", False)
     from physiclaw.common import platform as _platform
 
     monkeypatch.setattr(_platform, "camera_size_cap", lambda: None)

@@ -167,3 +167,53 @@ def test_set_manual_exposure_tick_conversion_bounds() -> None:
         linux.camera_set_manual_exposure(cap, log2_value)
 
         assert call(cv2.CAP_PROP_EXPOSURE, ticks) in cap.set.call_args_list
+
+
+# ---------- camera focus ----------
+
+
+def test_camera_focus_lockable_on_linux() -> None:
+    assert linux.camera_focus_lockable() is True
+
+
+def test_lock_focus_disables_af_before_pinning() -> None:
+    # Order is load-bearing: the kernel ignores manual focus writes
+    # while FOCUS_AUTO is on.
+    import cv2
+
+    cap = MagicMock()
+    cap.set.return_value = True
+    cap.get.return_value = 42.0
+
+    assert linux.camera_lock_focus(cap) is True
+    assert cap.set.call_args_list == [
+        call(cv2.CAP_PROP_AUTOFOCUS, 0),
+        call(cv2.CAP_PROP_FOCUS, 42.0),
+    ]
+
+
+def test_lock_focus_skips_pin_when_focus_unreadable() -> None:
+    import cv2
+
+    cap = MagicMock()
+    cap.set.return_value = True
+    cap.get.return_value = 0.0
+
+    assert linux.camera_lock_focus(cap) is True
+    assert cap.set.call_args_list == [call(cv2.CAP_PROP_AUTOFOCUS, 0)]
+
+
+def test_lock_focus_fails_when_af_toggle_refused() -> None:
+    cap = MagicMock()
+    cap.set.return_value = False
+
+    assert linux.camera_lock_focus(cap) is False
+
+
+def test_unlock_focus_reenables_af() -> None:
+    import cv2
+
+    cap = MagicMock()
+    linux.camera_unlock_focus(cap)
+
+    assert cap.set.call_args_list == [call(cv2.CAP_PROP_AUTOFOCUS, 1)]

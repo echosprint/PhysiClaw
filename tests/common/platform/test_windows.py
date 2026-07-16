@@ -150,3 +150,56 @@ def test_set_manual_exposure_msmf_encoding() -> None:
         call(cv2.CAP_PROP_AUTO_EXPOSURE, 0),
         call(cv2.CAP_PROP_EXPOSURE, -6),
     ]
+
+
+# ---------- camera focus ----------
+
+
+def test_camera_focus_lockable_on_windows() -> None:
+    # Always worth attempting — the lock call and measured sharpness
+    # judge whether this camera honors it.
+    assert windows.camera_focus_lockable() is True
+
+
+def test_lock_focus_disables_af_then_pins_position() -> None:
+    import cv2
+
+    cap = MagicMock()
+    cap.set.return_value = True
+    cap.get.return_value = 42.0
+
+    assert windows.camera_lock_focus(cap) is True
+    assert cap.set.call_args_list == [
+        call(cv2.CAP_PROP_AUTOFOCUS, 0),
+        call(cv2.CAP_PROP_FOCUS, 42.0),
+    ]
+
+
+def test_lock_focus_skips_pin_when_focus_unreadable() -> None:
+    # get() returns 0.0 when CAP_PROP_FOCUS is unsupported — never risk
+    # racking an unsupported lens to its stop.
+    import cv2
+
+    cap = MagicMock()
+    cap.set.return_value = True
+    cap.get.return_value = 0.0
+
+    assert windows.camera_lock_focus(cap) is True
+    assert cap.set.call_args_list == [call(cv2.CAP_PROP_AUTOFOCUS, 0)]
+
+
+def test_lock_focus_fails_when_af_toggle_refused() -> None:
+    cap = MagicMock()
+    cap.set.return_value = False
+
+    assert windows.camera_lock_focus(cap) is False
+    cap.get.assert_not_called()
+
+
+def test_unlock_focus_reenables_af() -> None:
+    import cv2
+
+    cap = MagicMock()
+    windows.camera_unlock_focus(cap)
+
+    assert cap.set.call_args_list == [call(cv2.CAP_PROP_AUTOFOCUS, 1)]

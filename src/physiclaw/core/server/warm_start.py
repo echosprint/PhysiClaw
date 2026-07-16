@@ -218,12 +218,14 @@ def try_resume(cam_index_override: int | None, *, verify: bool = True) -> bool:
             f"{flag}: trusting the parked arm — skipping bridge wait, "
             "sanity tap, and home-screen swipe"
         )
-    # Verify/converge exposure before flipping ready (under --warm-start the
-    # home screen is showing — the dark scene that exposes AE failure; under
-    # --hot-start whatever's on screen still beats not checking at all).
-    # Synchronous is fine: try_resume already runs on a background thread,
-    # and tune_exposure is fail-open + bounded by frame-wait timeouts.
-    physiclaw.perception.tune_exposure()
+    # Settle the camera before flipping ready: verify/converge exposure
+    # (under --warm-start the home screen is showing — the dark scene that
+    # exposes AE failure; under --hot-start whatever's on screen still
+    # beats not checking at all), then freeze autofocus on the settled
+    # view. Synchronous is fine: try_resume already runs on a background
+    # thread, and settle_camera is fail-open + bounded by frame-wait
+    # timeouts.
+    physiclaw.perception.settle_camera()
     rig.mark_ready()
     log.info(f"{flag}: resumed from bundle (cam={cam_index}) — MCP tools ready")
     return True

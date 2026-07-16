@@ -158,7 +158,7 @@ def test_open_image_files_noop_on_empty_list(mocker) -> None:
 # itself is always mocked so the suite runs on every platform.
 
 
-class _FakeChannel:
+class _FakeTerminal:
     def __init__(self, ok: bool = True) -> None:
         self.ok = ok
         self.auto_calls = 0
@@ -176,11 +176,11 @@ class _FakeChannel:
 def _reset_probe(monkeypatch, channel) -> None:
     from physiclaw.common.platform import uvc
 
-    monkeypatch.setattr(darwin, "_uvc_channel", None)
-    monkeypatch.setattr(uvc, "exposure_channel", lambda: channel)
+    monkeypatch.setattr(darwin, "_uvc_terminal", None)
+    monkeypatch.setattr(uvc, "camera_terminal", lambda: channel)
 
 
-def test_exposure_not_tunable_without_uvc_channel(monkeypatch) -> None:
+def test_exposure_not_tunable_without_uvc_terminal(monkeypatch) -> None:
     # No UVC device / ambiguous bus / silent camera -> degrade to the old
     # firmware-AE behavior.
     _reset_probe(monkeypatch, None)
@@ -190,7 +190,7 @@ def test_exposure_not_tunable_without_uvc_channel(monkeypatch) -> None:
 
 @pytest.mark.parametrize(
     "channel, tunable",
-    [(_FakeChannel(), True), (None, False)],
+    [(_FakeTerminal(), True), (None, False)],
     ids=["live-channel", "failed-probe"],
 )
 def test_probe_verdict_is_cached_either_way(monkeypatch, channel, tunable) -> None:
@@ -203,8 +203,8 @@ def test_probe_verdict_is_cached_either_way(monkeypatch, channel, tunable) -> No
         calls += 1
         return channel
 
-    monkeypatch.setattr(darwin, "_uvc_channel", None)
-    monkeypatch.setattr(uvc, "exposure_channel", probe)
+    monkeypatch.setattr(darwin, "_uvc_terminal", None)
+    monkeypatch.setattr(uvc, "camera_terminal", probe)
 
     assert darwin.camera_exposure_tunable() is tunable
     assert darwin.camera_exposure_tunable() is tunable
@@ -214,7 +214,7 @@ def test_probe_verdict_is_cached_either_way(monkeypatch, channel, tunable) -> No
 def test_manual_exposure_converts_log2_seconds_to_uvc_ticks(monkeypatch) -> None:
     # Same contract as linux.py: 2^e seconds in 100µs ticks, so one
     # integer step of `converge` stays one real stop.
-    channel = _FakeChannel()
+    channel = _FakeTerminal()
     _reset_probe(monkeypatch, channel)
 
     darwin.camera_set_manual_exposure(MagicMock(), -6)  # 2^-6 s ≈ 15.6 ms
@@ -223,7 +223,7 @@ def test_manual_exposure_converts_log2_seconds_to_uvc_ticks(monkeypatch) -> None
 
 
 def test_manual_exposure_never_sends_zero_ticks(monkeypatch) -> None:
-    channel = _FakeChannel()
+    channel = _FakeTerminal()
     _reset_probe(monkeypatch, channel)
 
     darwin.camera_set_manual_exposure(MagicMock(), -20)  # 2^-20 s ≈ 1 µs
@@ -232,7 +232,7 @@ def test_manual_exposure_never_sends_zero_ticks(monkeypatch) -> None:
 
 
 def test_auto_exposure_delegates_to_channel(monkeypatch) -> None:
-    channel = _FakeChannel()
+    channel = _FakeTerminal()
     _reset_probe(monkeypatch, channel)
 
     darwin.camera_set_auto_exposure(MagicMock())
@@ -261,7 +261,7 @@ def test_size_cap_1080p_when_exposure_not_tunable(monkeypatch) -> None:
 
 
 def test_no_size_cap_when_exposure_tunable(monkeypatch) -> None:
-    _reset_probe(monkeypatch, _FakeChannel())
+    _reset_probe(monkeypatch, _FakeTerminal())
 
     assert darwin.camera_size_cap() is None
 
@@ -270,3 +270,68 @@ def test_camera_backend_lets_opencv_pick() -> None:
     import cv2
 
     assert darwin.camera_backend() == cv2.CAP_ANY
+
+
+# ---------- camera focus ----------
+
+
+class _FakeFocusTerminal(_FakeTerminal):
+    def __init__(self, *, answers: bool = True, ok: bool = True) -> None:
+        super().__init__(ok=ok)
+        self.answers = answers
+        self.lock_calls = 0
+        self.unlock_calls = 0
+
+    def answers_focus(self) -> bool:
+        return self.answers
+
+    def lock_focus(self) -> bool:
+        self.lock_calls += 1
+        return self.ok
+
+    def unlock_focus(self) -> bool:
+        self.unlock_calls += 1
+        return self.ok
+
+
+def test_focus_not_lockable_without_uvc_terminal(monkeypatch) -> None:
+    _reset_probe(monkeypatch, None)
+
+    assert darwin.camera_focus_lockable() is False
+
+
+def test_focus_not_lockable_on_fixed_focus_camera(monkeypatch) -> None:
+    # The channel is live but the camera terminal doesn't answer for its
+    # focus controls — a fixed-focus camera needs no lock.
+    _reset_probe(monkeypatch, _FakeFocusTerminal(answers=False))
+
+    assert darwin.camera_focus_lockable() is False
+
+
+def test_focus_lockable_with_answering_channel(monkeypatch) -> None:
+    _reset_probe(monkeypatch, _FakeFocusTerminal())
+
+    assert darwin.camera_focus_lockable() is True
+
+
+def test_lock_focus_delegates_to_channel(monkeypatch) -> None:
+    channel = _FakeFocusTerminal()
+    _reset_probe(monkeypatch, channel)
+
+    assert darwin.camera_lock_focus(MagicMock()) is True
+    assert channel.lock_calls == 1
+
+
+def test_lock_focus_false_without_channel(monkeypatch) -> None:
+    _reset_probe(monkeypatch, None)
+
+    assert darwin.camera_lock_focus(MagicMock()) is False
+
+
+def test_unlock_focus_delegates_and_survives_refusal(monkeypatch) -> None:
+    channel = _FakeFocusTerminal(ok=False)
+    _reset_probe(monkeypatch, channel)
+
+    darwin.camera_unlock_focus(MagicMock())  # refused write only logs
+
+    assert channel.unlock_calls == 1

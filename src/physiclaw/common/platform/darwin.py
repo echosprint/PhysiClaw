@@ -107,30 +107,30 @@ def open_image_files(paths: list[str]) -> None:
 # macOS lever that lets exposure.py's `converge` correct that.
 
 # Probe result cache: None = not probed yet, False = unavailable this
-# process, else the live ExposureChannel. One verdict per process — a
+# process, else the live CameraTerminal. One verdict per process — a
 # camera hot-plugged mid-session picks it up on the next restart.
-_uvc_channel = None
+_uvc_terminal = None
 
 
-def _exposure_channel():
-    global _uvc_channel
-    if _uvc_channel is None:
+def _camera_terminal():
+    global _uvc_terminal
+    if _uvc_terminal is None:
         from physiclaw.common.platform import uvc
 
-        _uvc_channel = uvc.exposure_channel() or False
-        if _uvc_channel:
-            log.info("UVC exposure control live (IOKit, in-process)")
-    return _uvc_channel or None
+        _uvc_terminal = uvc.camera_terminal() or False
+        if _uvc_terminal:
+            log.info("UVC camera-terminal control live (IOKit, in-process)")
+    return _uvc_terminal or None
 
 
 def camera_exposure_tunable() -> bool:
     """Whether UVC exposure control is live (probed once per process).
 
     True only when exactly one UVC device is on the bus and it answers
-    for its exposure controls — see `uvc.exposure_channel` for why the
+    for its exposure controls — see `uvc.camera_terminal` for why the
     single-device rule exists. (Built-in FaceTime/Continuity cameras are
     not UVC and don't count.)"""
-    return _exposure_channel() is not None
+    return _camera_terminal() is not None
 
 
 def camera_size_cap() -> tuple[int, int] | None:
@@ -159,7 +159,7 @@ def camera_set_auto_exposure(cap) -> None:
     the control channel is USB, not the capture session; it takes effect
     mid-stream). No-op when the probe found no usable UVC channel —
     firmware AE was already in charge."""
-    channel = _exposure_channel()
+    channel = _camera_terminal()
     if channel is None:
         return
     if not channel.set_auto():
@@ -176,12 +176,39 @@ def camera_set_manual_exposure(cap, exposure: int) -> None:
     to auto, so it degrades, never wedges."""
     from physiclaw.common.platform import uvc
 
-    channel = _exposure_channel()
+    channel = _camera_terminal()
     if channel is None:
         return
     ticks = uvc.ticks_from_log2_seconds(exposure)
     if not channel.set_manual(ticks):
         log.warning("UVC: could not set exposure-time-abs=%d", ticks)
+
+
+def camera_focus_lockable() -> bool:
+    """Whether the lens can be frozen on this rig: needs the live UVC
+    channel (AVFoundation exposes no focus API, same story as exposure)
+    AND a camera terminal that answers for its focus controls —
+    fixed-focus cameras don't, and need no lock."""
+    channel = _camera_terminal()
+    return channel is not None and channel.answers_focus()
+
+
+def camera_lock_focus(cap) -> bool:
+    """Freeze autofocus at its current position via UVC (`cap` unused —
+    the control channel is USB, it takes effect mid-stream). Returns
+    whether the freeze was accepted; the caller verifies by measured
+    sharpness, never by this return alone."""
+    channel = _camera_terminal()
+    return channel is not None and channel.lock_focus()
+
+
+def camera_unlock_focus(cap) -> None:
+    """Hand the lens back to continuous autofocus via UVC."""
+    channel = _camera_terminal()
+    if channel is None:
+        return
+    if not channel.unlock_focus():
+        log.warning("UVC: could not re-enable autofocus")
 
 
 # ─── doctor diagnostics ─────────────────────────────────────

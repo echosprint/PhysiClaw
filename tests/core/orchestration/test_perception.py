@@ -463,3 +463,283 @@ def test_tune_now_runs_while_rig_lock_is_held(mocker, rig, per: Perception) -> N
         rig.release()
 
     conv.assert_called_once()
+
+
+# ---------- focus lock ----------
+
+
+def _lock_ok() -> object:
+    from physiclaw.core.hardware.focus import LockResult
+
+    return LockResult(locked=True, detail="focus locked (sharpness 400)")
+
+
+def _lock_deferred() -> object:
+    from physiclaw.core.hardware.focus import LockResult
+
+    return LockResult(locked=False, detail="deferred", deferred=True)
+
+
+def _blurry_report() -> object:
+    from physiclaw.core.vision.quality import QualityReport
+
+    return QualityReport(sharpness=20.0, clip_pct=0.0, median_luma=120.0)
+
+
+def test_lock_focus_noop_without_camera(mocker, rig, per: Perception) -> None:
+    rig._cam = None
+    lk = mocker.patch.object(perception_mod.focus, "lock")
+
+    per.lock_focus()
+
+    lk.assert_not_called()
+
+
+def test_lock_focus_noop_when_platform_not_lockable(
+    mocker, rig, per: Perception
+) -> None:
+    rig._cam.focus_lockable = False
+    lk = mocker.patch.object(perception_mod.focus, "lock")
+
+    per.lock_focus()  # macOS without UVC, or a fixed-focus camera
+
+    lk.assert_not_called()
+
+
+def test_lock_focus_skips_when_busy(mocker, rig, per: Perception) -> None:
+    rig._cam.focus_lockable = True
+    lk = mocker.patch.object(perception_mod.focus, "lock")
+    rig.acquire()
+    try:
+        per.lock_focus()
+    finally:
+        rig.release()
+
+    lk.assert_not_called()
+
+
+def test_lock_focus_runs_lock_and_releases_rig(mocker, rig, per: Perception) -> None:
+    rig._cam.focus_lockable = True
+    lk = mocker.patch.object(perception_mod.focus, "lock", return_value=_lock_ok())
+
+    per.lock_focus()
+
+    lk.assert_called_once()
+    args = lk.call_args.args
+    # Freeze/unfreeze are the camera's own bound methods.
+    assert args[1] == rig._cam.lock_focus
+    assert args[2] == rig._cam.unlock_focus
+    assert per._last_lock is lk.return_value
+    rig.acquire()  # lock released after the attempt
+    rig.release()
+
+
+def test_lock_focus_rerun_af_unlocks_before_relocking(
+    mocker, rig, per: Perception
+) -> None:
+    # The persistent-blur path: the frozen position is stale — AF must
+    # re-converge before the re-freeze.
+    rig._cam.focus_lockable = True
+    mocker.patch.object(perception_mod.focus, "lock", return_value=_lock_ok())
+
+    per.lock_focus(rerun_af=True)
+
+    rig._cam.unlock_focus.assert_called_once()
+
+
+def test_lock_focus_meter_crops_and_scores_sharpness(
+    mocker, rig, per: Perception
+) -> None:
+    # The focus meter scores ONLY sharpness — laplacian_variance on the
+    # crop, not the full assess() report (whose histogram/blob passes
+    # would be discarded work here).
+    rig._cam.focus_lockable = True
+    frame = np.full((200, 100, 3), 128, dtype=np.uint8)
+    rig._cam.wait_frames.return_value = True
+    rig._cam.peek.return_value = frame
+    cropped = np.full((100, 50, 3), 128, dtype=np.uint8)
+    mocker.patch.object(perception_mod, "crop_to_phone_screen", return_value=cropped)
+    variance = mocker.patch.object(
+        perception_mod.quality, "laplacian_variance", return_value=345.0
+    )
+    lk = mocker.patch.object(perception_mod.focus, "lock", return_value=_lock_ok())
+
+    per.lock_focus()
+
+    meter = lk.call_args.args[0]
+    sharpness = meter()
+    variance.assert_called_once_with(cropped)
+    assert sharpness == 345.0
+
+
+def test_lock_focus_meter_fails_open_on_stalled_reader(
+    mocker, rig, per: Perception
+) -> None:
+    rig._cam.focus_lockable = True
+    rig._cam.wait_frames.return_value = False  # reader stalled
+    lk = mocker.patch.object(perception_mod.focus, "lock", return_value=_lock_ok())
+
+    per.lock_focus()
+
+    assert lk.call_args.args[0]() is None
+
+
+def test_lock_focus_swallows_lock_crash(mocker, rig, per: Perception) -> None:
+    rig._cam.focus_lockable = True
+    mocker.patch.object(perception_mod.focus, "lock", side_effect=RuntimeError("boom"))
+
+    per.lock_focus()  # no raise
+
+    rig.acquire()  # and the rig lock is not leaked
+    rig.release()
+
+
+# ---------- settle_camera ----------
+
+
+def test_settle_camera_runs_tune_and_lock_under_one_hold(
+    mocker, rig, per: Perception
+) -> None:
+    # One acquire/park for both phases, exposure before focus (a blown
+    # frame's sharpness means nothing to the lock meter).
+    calls: list[str] = []
+    mocker.patch.object(per, "tune_now", side_effect=lambda: calls.append("tune"))
+    mocker.patch.object(per, "lock_focus_now", side_effect=lambda: calls.append("lock"))
+
+    per.settle_camera()
+
+    assert calls == ["tune", "lock"]
+    rig.acquire()  # released after the settle
+    rig.release()
+
+
+def test_settle_camera_noop_without_camera(mocker, rig, per: Perception) -> None:
+    rig._cam = None
+    tune = mocker.patch.object(per, "tune_now")
+
+    per.settle_camera()
+
+    tune.assert_not_called()
+
+
+def test_settle_camera_busy_skip_seeds_a_deferred_lock(
+    mocker, rig, per: Perception
+) -> None:
+    # A busy startup must not strand the lens on AF forever: the seeded
+    # deferred result lets _focus_policy retry on the next sharp view.
+    rig._cam.focus_lockable = True
+    rig.acquire()
+    try:
+        per.settle_camera()
+    finally:
+        rig.release()
+
+    assert per._last_lock is not None and per._last_lock.deferred
+
+
+def test_settle_camera_busy_skip_seeds_nothing_when_not_lockable(
+    mocker, rig, per: Perception
+) -> None:
+    # A deferred seed on an unlockable rig would schedule doomed
+    # re-locks on every sharp view.
+    rig._cam.focus_lockable = False
+    rig.acquire()
+    try:
+        per.settle_camera()
+    finally:
+        rig.release()
+
+    assert per._last_lock is None
+
+
+# ---------- re-lock policy (_focus_policy via on_quality_report) ----------
+
+
+def test_no_focus_policy_before_the_startup_lock(mocker, rig, per: Perception) -> None:
+    # _last_lock is None until the startup lock runs (or forever, on a
+    # rig that can't lock) — no scheduling either way.
+    sched = mocker.patch.object(per, "_schedule_refocus")
+
+    per.on_quality_report(_blurry_report(), streak=5)
+
+    sched.assert_not_called()
+
+
+def test_sharp_view_after_deferred_lock_schedules_relock(
+    mocker, rig, per: Perception
+) -> None:
+    per._last_lock = _lock_deferred()
+    sched = mocker.patch.object(per, "_schedule_refocus")
+
+    per.on_quality_report(_report(median=120.0), streak=0)
+
+    sched.assert_called_once()
+    assert sched.call_args.kwargs["rerun_af"] is False
+
+
+def test_soft_view_after_deferred_lock_keeps_waiting(
+    mocker, rig, per: Perception
+) -> None:
+    # Still no converged focus to freeze — the blur is what deferred it.
+    per._last_lock = _lock_deferred()
+    sched = mocker.patch.object(per, "_schedule_refocus")
+
+    per.on_quality_report(_blurry_report(), streak=1)
+
+    sched.assert_not_called()
+
+
+def test_blur_streak_under_locked_focus_reruns_af(mocker, rig, per: Perception) -> None:
+    from physiclaw.core.vision import quality
+
+    per._last_lock = _lock_ok()
+    sched = mocker.patch.object(per, "_schedule_refocus")
+
+    per.on_quality_report(_blurry_report(), streak=quality.PERSIST_AFTER)
+
+    sched.assert_called_once()
+    assert sched.call_args.kwargs["rerun_af"] is True
+
+
+def test_single_blurry_view_under_lock_waits_for_a_streak(
+    mocker, rig, per: Perception
+) -> None:
+    # One blurry frame is a normal transient the grab-retry handles — an
+    # unlock/relock cycle costs seconds of rig time and needs a streak.
+    per._last_lock = _lock_ok()
+    sched = mocker.patch.object(per, "_schedule_refocus")
+
+    per.on_quality_report(_blurry_report(), streak=1)
+
+    sched.assert_not_called()
+
+
+def test_sharp_view_under_locked_focus_schedules_nothing(
+    mocker, rig, per: Perception
+) -> None:
+    per._last_lock = _lock_ok()
+    sched = mocker.patch.object(per, "_schedule_refocus")
+
+    per.on_quality_report(_report(median=120.0), streak=0)
+
+    sched.assert_not_called()
+
+
+def test_schedule_refocus_runs_lock_on_a_thread_once(
+    mocker, rig, per: Perception
+) -> None:
+    mocker.patch.object(perception_mod.time, "sleep")
+    lk = mocker.patch.object(per, "lock_focus")
+    thread = mocker.patch.object(perception_mod.threading, "Thread")
+
+    per._schedule_refocus("test", rerun_af=True)
+    per._schedule_refocus("test again", rerun_af=True)  # single-flight
+
+    thread.assert_called_once()
+    thread.return_value.start.assert_called_once()
+    body = thread.call_args.kwargs["target"]
+    body()  # runs the lock, then clears the pending flag
+    lk.assert_called_once_with(rerun_af=True)
+
+    per._schedule_refocus("after completion", rerun_af=False)
+    assert thread.call_count == 2
