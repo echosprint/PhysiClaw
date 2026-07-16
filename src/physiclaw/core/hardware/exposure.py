@@ -82,6 +82,9 @@ DARK_REFERENCE_LUMA = 15.0
 # A set that changes measured median luma by less than this did nothing:
 # the driver is ignoring exposure writes (common — see opencv#9738), and
 # further stepping is theater. One log2 stop should move luma far more.
+# Judged only between consecutive MANUAL reads (from step 2 on): step 1's
+# baseline is the auto-mode read, and a manual start that matches AE's
+# converged brightness is normal, not an ignored write.
 LUMA_STALL_EPSILON = 3.0
 
 # After re-asserting auto-exposure the firmware loop re-converges over
@@ -241,10 +244,6 @@ def converge(
         if r is None:
             reason = "meter lost frames mid-stepping"
             break
-        if abs(r.median_luma - prev_luma) < LUMA_STALL_EPSILON:
-            reason = f"driver ignores exposure writes (luma stuck ~{r.median_luma:.0f})"
-            break
-        prev_luma = r.median_luma
         if _good(r):
             return TuneResult(
                 "manual",
@@ -253,6 +252,16 @@ def converge(
                 f"converged at {exp} in {step} step(s) "
                 f"(median {r.median_luma:.0f}, clip {r.clip_pct:.0%})",
             )
+        # Stall check after the in-band accept (a step that lands in band
+        # is a success however little the luma moved), and only from the
+        # second step on: step 1's baseline is the auto-mode read, and a
+        # manual start that happens to match AE's converged brightness is
+        # normal — declaring it a stall would abort a search whose next
+        # step could still converge.
+        if step > 1 and abs(r.median_luma - prev_luma) < LUMA_STALL_EPSILON:
+            reason = f"driver ignores exposure writes (luma stuck ~{r.median_luma:.0f})"
+            break
+        prev_luma = r.median_luma
         if _usable(r) and (best is None or exp < best):
             best = exp
         # Darker while highlights clip — globally (clip fraction) or as

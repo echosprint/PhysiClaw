@@ -99,16 +99,44 @@ def test_converges_manually_stepping_darker() -> None:
 
 
 def test_driver_ignoring_sets_reverts_to_auto() -> None:
-    # Manual set produces the exact same luma as auto: the classic
-    # ignored-write case (opencv#9738) — stall check must catch it.
-    rig = Rig(BLOWN, {-6: BLOWN})
+    # Manual sets produce the exact same luma step after step: the
+    # classic ignored-write case (opencv#9738) — stall check must catch
+    # it. Detection takes two manual reads: step 1 compares against the
+    # auto baseline, which a working driver can legitimately match.
+    rig = Rig(BLOWN, {-6: BLOWN, -7: BLOWN})
 
     res = converge(rig.meter, rig.set_auto, rig.set_manual, start=-6)
 
     assert not res.ok and res.mode == "auto"
-    assert rig.manual_calls == [-6]
+    assert rig.manual_calls == [-6, -7]
     assert rig.auto_calls == 2  # phase-2 re-assert + final revert
     assert "ignores" in res.detail
+
+
+def test_first_step_matching_auto_brightness_is_not_a_stall() -> None:
+    # A manual start whose effective brightness matches what AE had
+    # converged to is normal, not a driver ignoring writes: the search
+    # must continue stepping — the next darker step lands in band. The
+    # old first-step stall check aborted here and looped futile re-tunes.
+    hot = _r(150.0, clip=0.05)  # over TUNE_CLIP_PCT, under the blown rule
+    rig = Rig(hot, {-6: hot, -7: _r(120.0)})
+
+    res = converge(rig.meter, rig.set_auto, rig.set_manual, start=-6)
+
+    assert res.ok and res.mode == "manual" and res.exposure == -7
+    assert rig.manual_calls == [-6, -7]
+
+
+def test_in_band_step_is_accepted_however_little_the_luma_moved() -> None:
+    # A step that lands in band is a success even when the median barely
+    # moved from the previous read — the in-band accept must run before
+    # the stall judgment, or a marginal AE state one step from the band
+    # gets rejected as "driver ignores writes".
+    rig = Rig(_r(130.0, clip=0.03), {-6: _r(129.0, clip=0.01)})
+
+    res = converge(rig.meter, rig.set_auto, rig.set_manual, start=-6)
+
+    assert res.ok and res.mode == "manual" and res.exposure == -6
 
 
 def test_oscillation_holds_darkest_usable_step() -> None:
