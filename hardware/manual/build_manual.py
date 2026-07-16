@@ -6,7 +6,7 @@ list of *page* dicts in visual (DOM) order. This script turns those pages into
 one HTML document per language, laid out by ``styles.css`` (always inlined).
 
 Image assets (the SVG renders + the crab logo) are handled by one of two
-strategies, chosen with ``--assets``:
+strategies, chosen with ``--assets`` (see ``hardware.manual.assets``):
 
 - ``external`` (default) — best for the web. SVGs are written as separate files
   under ``assets/`` and referenced with ``loading="lazy" decoding="async"`` so
@@ -17,178 +17,68 @@ strategies, chosen with ``--assets``:
   base64 ``data:`` URI (no external requests, no lazy loading — best for
   offline use / emailing one file around, at the cost of a large document).
 
-Run under ``uv`` from the repo root (standard library only, Python 3.12+);
-all paths resolve relative to this file, so the cwd does not matter::
+Run under ``uv`` from the repo root (standard library only, Python 3.12+)::
 
-    uv run hardware/manual/build_manual.py                 # en + zh, external assets, HTML only
-    uv run hardware/manual/build_manual.py --pdf            # also render a PDF per language
-    uv run hardware/manual/build_manual.py --lang en        # English only -> physiclaw_manual.html
-    uv run hardware/manual/build_manual.py --assets inline  # single self-contained file
-    uv run hardware/manual/build_manual.py --out /tmp/out   # custom output directory
+    uv run python -m hardware.manual.build_manual                  # en + zh, external assets, HTML only
+    uv run python -m hardware.manual.build_manual --pdf            # also render a PDF per language
+    uv run python -m hardware.manual.build_manual --lang en        # English only -> physiclaw_manual.html
+    uv run python -m hardware.manual.build_manual --assets inline  # single self-contained file
+    uv run python -m hardware.manual.build_manual --out /tmp/out   # custom output directory
 
 PDF output uses an already-installed Chromium-family browser (Chrome / Chromium
-/ Edge); if none is found the HTML still builds and PDF is skipped with a note.
+/ Edge); if none is found the HTML still builds and PDF is skipped with a note
+(see ``hardware.manual.pdf``).
 """
 
 from __future__ import annotations
 
 import argparse
-import base64
-import contextlib
-import copy
-import json
-import os
 import re
-import shutil
-import signal
-import subprocess
 import sys
-import tempfile
-import time
-from collections.abc import Iterator
-from dataclasses import dataclass, field
-from functools import cache
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Callable
 
-from icon_svg import (
+from hardware.manual import BuildError
+from hardware.manual.assets import (
+    ASSETS_SUBDIR,
+    HAND_FIGURES,
+    Assets,
+    ExternalAssets,
+    InlineAssets,
+)
+from hardware.manual.common import (
+    HTML_LANG,
+    URL_MARK,
+    _rowspans,
+    _step,
+    load_pages,
+    loc,
+)
+from hardware.manual.icon_svg import (
     BACK_CORNER_SVG,
     COVER_STRIPES_SVG,
-    CRAB_SVG,
     GITHUB_OCTICON_SVG,
     INFO_ICON_SVG,
-    WIRE_SPLICE_SVG,
 )
+from hardware.manual.paginate import assign_page_numbers, paginate_bom_pages
+from hardware.manual.pdf import find_chrome, render_pdf
+from hardware.scheme import OUTPUT_DIR as _OUTPUT_ROOT
+from hardware.scheme import SVG_DIR
 
 # Note "icon" keys -> inline SVG markup, for the leading icon of a flex callout.
 NOTE_ICONS = {"info": INFO_ICON_SVG}
 
-# Hand-authored figures kept as constants in icon_svg.py (so they are tracked,
-# unlike the generated output/svg renders). build() writes them into the SVG
-# pool before rendering, so the figure pipeline treats them like any render and
-# the file stays a single-source copy of the constant.
-HAND_FIGURES = {"wire_splice.svg": WIRE_SPLICE_SVG}
-
 # --------------------------------------------------------------------------- #
-# Paths — everything is resolved relative to this file so cwd does not matter.
+# Paths — package files are resolved relative to this file; output paths come
+# from hardware.scheme, so the cwd does not matter.
 # --------------------------------------------------------------------------- #
 SCRIPT_DIR = Path(__file__).resolve().parent
-CONTENT_DIR = SCRIPT_DIR / "content"
 STYLES_CSS = SCRIPT_DIR / "styles.css"
-SVG_DIR = SCRIPT_DIR / ".." / "output" / "svg"  # source SVG renders.
-OUTPUT_DIR = SCRIPT_DIR / ".." / "output" / "manual"
-ASSETS_SUBDIR = "assets"  # where external mode writes images, relative to the HTML.
+OUTPUT_DIR = _OUTPUT_ROOT / "manual"
 
-# Output filename per language, plus the <html lang> attribute value.
+# Output filename per language.
 LANG_FILENAME = {"en": "physiclaw_manual.html", "zh": "physiclaw装配手册.html"}
-HTML_LANG = {"en": "en", "zh": "zh-Hans"}
-
-# Inline-SVG chrome (cover stripes, GitHub octicon, back corner, crab logo)
-# lives in icon_svg.py — imported above.
-URL_MARK = "PhysiClaw.ai"  # masthead mark, never localized.
-
-
-# --------------------------------------------------------------------------- #
-# Assets — resolve an SVG name to an <img src> and emit whatever files the
-# chosen strategy needs. Images stay <img> (not inline <svg>) so the figure
-# framing can rely on object-fit / object-position.
-# --------------------------------------------------------------------------- #
-class BuildError(Exception):
-    """A user-facing build failure: ``main()`` prints the message on its own,
-    without a Python traceback."""
-
-
-def _render_stem(basename: str) -> str:
-    """The procedure stem behind a render filename, e.g.
-    ``camera_40_frame_assembled_cam0_ljek.svg`` -> ``camera_40_frame``."""
-    return re.sub(r"_(?:exploded|assembled)_cam\d+(?:_[a-z0-9]+)?\.svg$", "", basename)
-
-
-def _require_renders(names) -> None:
-    """Raise a clear ``BuildError`` if any referenced SVG render is absent from
-    output/svg. Those files come from the assembly render pipeline (not this
-    script), so the message names exactly what's missing and the command that
-    regenerates precisely those stems."""
-    missing = sorted(n for n in names if not (SVG_DIR / n).exists())
-    if not missing:
-        return
-    stems = sorted({_render_stem(n) for n in missing})
-    listed = "\n".join(f"    {n}" for n in missing)
-    raise BuildError(
-        f"{len(missing)} referenced SVG render(s) missing from output/svg:\n"
-        f"{listed}\n\n"
-        "These are produced by the assembly render pipeline, not build_manual.\n"
-        "Regenerate them with:\n"
-        f"    uv run --group cad python -m hardware.assembly.build_procedures "
-        f"--stems {' '.join(stems)}"
-    )
-
-
-@cache
-def _read_svg(basename: str) -> str:
-    """Read one SVG render from output/svg (cached — several are reused)."""
-    _require_renders([basename])
-    return (SVG_DIR / basename).read_text(encoding="utf-8")
-
-
-def _data_uri(svg_text: str) -> str:
-    """Encode SVG markup as a base64 ``data:image/svg+xml`` URI."""
-    b64 = base64.b64encode(svg_text.encode("utf-8")).decode("ascii")
-    return f"data:image/svg+xml;base64,{b64}"
-
-
-class Assets(Protocol):
-    """Maps image references to ``<img src>`` values for a build mode."""
-
-    def figure(self, basename: str) -> str: ...
-    @property
-    def crab(self) -> str: ...
-    def preload(self, src: str) -> str: ...  # optional <head> preload for src
-    def emit(self, out_dir: Path) -> None: ...  # write any external files
-
-
-@dataclass
-class InlineAssets:
-    """Embed every image directly in the HTML as a ``data:`` URI."""
-
-    def figure(self, basename: str) -> str:
-        return _data_uri(_read_svg(basename))
-
-    @property
-    def crab(self) -> str:
-        return _data_uri(CRAB_SVG)
-
-    def preload(self, src: str) -> str:
-        return ""  # nothing to preload — the bytes are already in the document.
-
-    def emit(self, out_dir: Path) -> None:
-        pass  # self-contained: no sidecar files.
-
-
-@dataclass
-class ExternalAssets:
-    """Write images as sidecar files and reference them with relative URLs."""
-
-    referenced: set[str] = field(default_factory=set)
-
-    def figure(self, basename: str) -> str:
-        self.referenced.add(basename)
-        return f"{ASSETS_SUBDIR}/{basename}"
-
-    @property
-    def crab(self) -> str:
-        return f"{ASSETS_SUBDIR}/crab.svg"
-
-    def preload(self, src: str) -> str:
-        return f'<link rel="preload" as="image" href="{src}">'
-
-    def emit(self, out_dir: Path) -> None:
-        assets_dir = out_dir / ASSETS_SUBDIR
-        assets_dir.mkdir(parents=True, exist_ok=True)
-        (assets_dir / "crab.svg").write_text(CRAB_SVG, encoding="utf-8")
-        _require_renders(self.referenced)  # all missing at once, with a fix hint
-        for name in sorted(self.referenced):
-            shutil.copyfile(SVG_DIR / name, assets_dir / name)
 
 
 @dataclass(frozen=True)
@@ -197,22 +87,6 @@ class Ctx:
 
     lang: str
     assets: Assets
-
-
-# --------------------------------------------------------------------------- #
-# Localization
-# --------------------------------------------------------------------------- #
-def loc(value: Any, lang: str) -> str:
-    """Resolve a localized value.
-
-    Localized text is ``{"en": ..., "zh": ...}``; this returns the requested
-    language, falling back to English when the translation is empty. Plain
-    strings (specs, ids, URLs) pass straight through. Localized strings are
-    trusted HTML and are emitted raw — the source embeds inline ``<span>``/``<a>``.
-    """
-    if isinstance(value, dict):
-        return value.get(lang) or value.get("en", "")
-    return value
 
 
 # --------------------------------------------------------------------------- #
@@ -549,20 +423,6 @@ def render_back(page: dict, ctx: Ctx) -> str:
     return page_shell(page, ctx, body, "back")
 
 
-def _rowspans(rows: list[dict], key: Callable[[dict], Any]) -> list[int]:
-    """For consecutive rows sharing ``key``, return the group size at each
-    group's first row and 0 at the rest — i.e. the rowspan to emit (or skip)."""
-    spans = [0] * len(rows)
-    i = 0
-    while i < len(rows):
-        j = i + 1
-        while j < len(rows) and key(rows[j]) == key(rows[i]):
-            j += 1
-        spans[i] = j - i
-        i = j
-    return spans
-
-
 def render_bom_page(page: dict, ctx: Ctx) -> str:
     """Full-page consolidated bill of materials — a five-column table
     (Class / Component / Spec / Qty / Application). Rows are grouped so the Class
@@ -635,143 +495,6 @@ RENDERERS: dict[str, Callable[[dict, Ctx], str]] = {
 # --------------------------------------------------------------------------- #
 # Document assembly
 # --------------------------------------------------------------------------- #
-def load_pages() -> list[dict]:
-    """Load every content/*.json (sorted by filename = page order) into pages."""
-    pages: list[dict] = []
-    for path in sorted(CONTENT_DIR.glob("*.json")):
-        pages.extend(json.loads(path.read_text(encoding="utf-8")))
-    return pages
-
-
-def assign_page_numbers(pages: list[dict]) -> None:
-    """Number pages by position so the content JSON never hardcodes a page
-    number — inserting or reordering a page needs no number edits anywhere.
-
-    Each page is identified by a unique semantic ``page`` id (e.g. "frame_20",
-    "hardware-reference"); the printed number is its 1-based position, stored
-    in ``_pageno`` (cover and back render no footer). A TOC row references a
-    page by that same ``page`` id, and the number it prints is resolved here
-    from the referenced page's position into ``_pgno``."""
-    # Build position map, validating the two invariants a new page can break:
-    # every page carries a ``page`` id and those ids are unique (they double as
-    # HTML anchors, so a collision would silently misroute links).
-    id_to_no: dict[str, int] = {}
-    toc_pages: list[dict] = []
-    for i, page in enumerate(pages, start=1):
-        page["_pageno"] = i
-        if page["type"] == "toc":
-            toc_pages.append(page)
-        pid = page.get("page")
-        if pid is None:
-            raise ValueError(
-                f"page #{i} (type {page.get('type')!r}) is missing a 'page' id"
-            )
-        if pid in id_to_no:
-            raise ValueError(
-                f"duplicate page id {pid!r} (pages #{id_to_no[pid]} and #{i})"
-            )
-        id_to_no[pid] = i
-    # Resolve each TOC row's printed number now that the full position map is
-    # built — a row may reference a page that follows the TOC itself.
-    for page in toc_pages:
-        for row in page.get("rows", []):
-            ref = row.get("page")
-            if ref not in id_to_no:
-                raise ValueError(f"TOC row references unknown page id {ref!r}")
-            row["_pgno"] = id_to_no[ref]
-
-
-# Max table rows per BOM page. Tuned to the landscape page height for airy
-# spacing (leaving margin below the last row); if the parts list grows, more
-# pages are added automatically.
-BOM_ROWS_PER_PAGE = 16
-
-# Per-language "continued" marker appended to a BOM page's label on overflow
-# pages. Falls back to the English form for any unlisted language.
-BOM_CONT_SUFFIX = {"en": " (cont.)", "zh": "（续）"}
-
-
-def _balanced_split(rows: list[dict], per_page: int) -> list[list[dict]]:
-    """Partition rows into balanced pages without splitting any component's
-    spec-rows (its rowspan must stay on one page). Uses ``ceil(total/per_page)``
-    pages and places each evenly-spaced cut at the component boundary nearest its
-    ideal position, so pages come out balanced and the last one is never left
-    sparse. A class spanning a break repeats its label (spans recomputed per
-    page)."""
-    if not rows:
-        return [[]]
-    total = len(rows)
-    n_pages = max(1, -(-total // per_page))  # ceil
-    # Component boundaries — the only row indices a page may break at.
-    free = [
-        i
-        for i in range(1, total)
-        if (rows[i]["cls"]["en"], rows[i]["component"]["en"])
-        != (rows[i - 1]["cls"]["en"], rows[i - 1]["component"]["en"])
-    ]
-    # Snap each evenly-spaced cut to the nearest unused boundary (n_pages == 1
-    # makes this loop a no-op, leaving a single full-page chunk).
-    cuts: list[int] = []
-    for k in range(1, n_pages):
-        if not free:
-            break
-        ideal = k * total / n_pages
-        best = min(free, key=lambda s: abs(s - ideal))
-        free.remove(best)
-        cuts.append(best)
-    points = [0, *sorted(cuts), total]
-    return [rows[a:b] for a, b in zip(points, points[1:])]
-
-
-def _paginate_bom(rows: list[dict], per_page: int) -> list[list[dict]]:
-    """Partition the consolidated rows into pages. A row carrying
-    ``"break_before": true`` forces a hard page break (it always starts a new
-    page); the spans between forced breaks are then balanced independently by
-    ``_balanced_split`` so each one still respects ``per_page``. Empty input
-    falls through as a single empty span to ``_balanced_split``'s own ``[[]]``."""
-    forced = [
-        0,
-        *(i for i in range(1, len(rows)) if rows[i].get("break_before")),
-        len(rows),
-    ]
-    pages: list[list[dict]] = []
-    for a, b in zip(forced, forced[1:]):
-        pages.extend(_balanced_split(rows[a:b], per_page))
-    return pages
-
-
-def paginate_bom_pages(pages: list[dict]) -> None:
-    """Split the ``bom`` page's authored rows (the hand-maintained parts list in
-    ``content/11_bom.json``) across as many pages as fit, cloning the page shell
-    for any overflow. This is layout only — it does NOT derive the list from the
-    per-section BOMs; the consolidated BOM is kept consistent by hand. Must run
-    BEFORE ``assign_page_numbers`` so any added pages get numbered."""
-    idx = next((i for i, p in enumerate(pages) if p["type"] == "bom"), None)
-    if idx is None:
-        return
-    template = pages[idx]
-    chunks = _paginate_bom(template.get("rows", []), BOM_ROWS_PER_PAGE)
-    template["rows"] = chunks[0]
-
-    # Build continuation pages for any overflow chunks and splice them in.
-    extras: list[dict] = []
-    for n, chunk in enumerate(chunks[1:], start=2):
-        cont = copy.deepcopy(template)
-        cont["page"] = f"{template['page']}-{n}"
-        cont["rows"] = chunk
-        # Tag the continuation in the masthead title (the in-body label was
-        # dropped to give the table more room), per translation.
-        title = cont.get("head", {}).get("title")
-        if title:
-            cont["head"]["title"] = {
-                lang: text + BOM_CONT_SUFFIX.get(lang, BOM_CONT_SUFFIX["en"])
-                for lang, text in title.items()
-            }
-        extras.append(cont)
-    if extras:
-        pages[idx + 1 : idx + 1] = extras
-
-
 def cover_render_src(pages: list[dict], ctx: Ctx) -> str | None:
     """The cover render's resolved src, for preloading (None if no cover)."""
     cover = next((p for p in pages if p["type"] == "cover"), None)
@@ -804,125 +527,6 @@ def render_document(pages: list[dict], css: str, ctx: Ctx) -> str:
     )
 
 
-# --------------------------------------------------------------------------- #
-# PDF (headless Chrome) — the manual's CSS is print-ready (@page A4 landscape),
-# so we render it with the browser engine it's designed for rather than a
-# separate PDF library. Chrome is used only if already installed; absent it,
-# the HTML build still succeeds and PDF is skipped with a note.
-# --------------------------------------------------------------------------- #
-CHROME_APP_PATHS = (
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    "/Applications/Chromium.app/Contents/MacOS/Chromium",
-    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-)
-
-
-def find_chrome() -> str | None:
-    """Path to a Chromium-family browser, or None if none is installed."""
-    for name in (
-        "google-chrome",
-        "google-chrome-stable",
-        "chromium",
-        "chromium-browser",
-        "chrome",
-    ):
-        if found := shutil.which(name):
-            return found
-    return next((p for p in CHROME_APP_PATHS if Path(p).exists()), None)
-
-
-PDF_TIMEOUT = 90  # s per attempt — a clean print is ~40s; this is generous
-PDF_ATTEMPTS = 2  # a fresh process retry covers the rare launch that never
-# writes the file (cf. the OCCT crash-retry in dispatch.py).
-
-
-def _chrome_print(chrome: str, src_uri: str, profile: str, pdf_path: Path) -> bool:
-    """One headless-Chrome print. Returns True once the PDF is written.
-
-    ``--headless=new --print-to-pdf`` reliably *writes* the PDF but then often
-    fails to *exit*, so we watch the output file rather than the process exit
-    code: once it appears and its size stops growing, the print is done and we
-    kill Chrome. Chrome runs in its own process group so a stuck launch (and
-    all its renderer/helper children) dies as a unit — a survivor would
-    contend with the next attempt."""
-    pdf_path.unlink(missing_ok=True)  # so a stale file isn't read as success
-
-    def written() -> bool:
-        return pdf_path.exists() and pdf_path.stat().st_size > 0
-
-    proc = subprocess.Popen(
-        [
-            chrome,
-            "--headless=new",
-            "--disable-gpu",
-            "--no-sandbox",
-            "--disable-dev-shm-usage",
-            "--disable-background-networking",
-            f"--user-data-dir={profile}",
-            "--no-pdf-header-footer",
-            "--virtual-time-budget=30000",
-            f"--print-to-pdf={pdf_path}",
-            src_uri,
-        ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
-    try:
-        deadline = time.monotonic() + PDF_TIMEOUT
-        last_size, stable = -1, 0
-        while time.monotonic() < deadline:
-            size = pdf_path.stat().st_size if pdf_path.exists() else 0
-            stable = stable + 1 if size > 0 and size == last_size else 0
-            if stable >= 3:  # size held ~2.4s → fully written
-                return True
-            last_size = size
-            if proc.poll() is not None:  # exited on its own
-                return written()
-            time.sleep(0.8)
-        return written()
-    finally:
-        if proc.poll() is None:
-            with contextlib.suppress(ProcessLookupError):
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-            proc.wait()
-
-
-def render_pdf(html: str, pdf_path: Path, chrome: str) -> bool:
-    """Render ``html`` to ``pdf_path`` via headless Chrome, retrying in a
-    fresh process if a launch hangs.
-
-    The HTML is written to a temp file beside the PDF (so its relative
-    ``assets/`` figure references resolve against the emitted asset dir) and
-    printed with the new headless mode, which honours the document's CSS
-    @page size/margins (A4 landscape, zero margin). ``loading="lazy"`` is
-    stripped so every figure is painted in the single print pass. Returns
-    True once a non-empty PDF is produced, else False."""
-    html = html.replace(' loading="lazy"', "")
-    for attempt in range(1, PDF_ATTEMPTS + 1):
-        with (
-            tempfile.TemporaryDirectory() as profile,
-            tempfile.NamedTemporaryFile(
-                "w", suffix=".html", dir=pdf_path.parent, encoding="utf-8", delete=False
-            ) as tmp,
-        ):
-            tmp_path = Path(tmp.name)
-            tmp.write(html)
-            tmp.flush()
-            try:
-                result = _chrome_print(chrome, tmp_path.as_uri(), profile, pdf_path)
-            finally:
-                tmp_path.unlink(missing_ok=True)
-        if result:  # _chrome_print returns True only after the PDF is written
-            return True
-        pdf_path.unlink(missing_ok=True)
-        tail = " — retrying" if attempt < PDF_ATTEMPTS else " — skipped"
-        print(
-            f"warning: PDF render failed for {pdf_path.name} (attempt {attempt}){tail}"
-        )
-    return False
-
-
 def _clear_output_dir(out_dir: Path) -> None:
     """Wipe stale manual artifacts so each run starts clean — a figure no
     longer referenced, the other language's HTML after a ``--lang`` build, or
@@ -942,24 +546,6 @@ def _clear_output_dir(out_dir: Path) -> None:
             f.unlink()
             cleared += 1
     print(f"  cleared {cleared} stale file(s)")
-
-
-_STEP_LABEL_W = 22  # pad labels to a column so every duration lines up
-
-
-@contextlib.contextmanager
-def _step(label: str) -> Iterator[None]:
-    """Print a build step (padded with dot leaders to a fixed column) and, once
-    it finishes, how long it took — so a slow phase shows what's running and the
-    times read down a clean right-aligned column."""
-    print(f"  {label:.<{_STEP_LABEL_W}} ", end="", flush=True)
-    t0 = time.monotonic()
-    try:
-        yield
-    except BaseException:
-        print("FAILED", flush=True)
-        raise
-    print(f"{time.monotonic() - t0:>5.1f}s")
 
 
 def build(
@@ -1036,7 +622,7 @@ def main() -> None:
         "--out",
         type=Path,
         default=OUTPUT_DIR,
-        help="output directory (default: ../output/manual)",
+        help="output directory (default: hardware/output/manual)",
     )
     parser.add_argument(
         "--pdf",

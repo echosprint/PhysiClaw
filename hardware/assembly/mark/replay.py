@@ -19,15 +19,15 @@ import sys
 from pathlib import Path
 from typing import List
 
-from hardware.assembly.base import SVG_DIR
 from hardware.assembly.mark.patch import (
     ORIG_SENTINEL,
-    PATCH_DIR,
     load_patch,
     patch_path,
     snapshot_path,
+    source_for_patch,
 )
 from hardware.assembly.mark.svg import build_shapes_svg
+from hardware.scheme import PATCH_DIR
 
 
 def find_leaves(entries: list[dict]) -> list[dict]:
@@ -103,8 +103,7 @@ def _resolve_targets(argv: list[str]) -> list[tuple[Path, Path]]:
 
     pairs: list[tuple[Path, Path]] = []
     for pj in patches:
-        src = SVG_DIR / f"{pj.stem}.svg"
-        pairs.append((src, pj))
+        pairs.append((source_for_patch(pj), pj))
     return pairs
 
 

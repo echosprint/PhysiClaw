@@ -18,34 +18,18 @@ eventually succeeds — but the worst stems fail most attempts, hence
 from __future__ import annotations
 
 import importlib
-import re
 from collections.abc import Callable
 from itertools import groupby
 
 from hardware.assembly.base import BaseAssembly
-from hardware.parts.base import REPO_ROOT
-
-PROCEDURES_DIR = REPO_ROOT / "hardware" / "assembly" / "procedures"
-
-# Filename convention: <family>_<NN>_<descriptor>.py (e.g. belt_20_clamp).
-_STEM_RE = re.compile(r"^(?P<family>[a-z]+)_(?P<nn>\d+)_(?P<descriptor>.+)$")
-
-# Dependency-order families — lower index built first. Clustering each batch
-# within a family lets the in-batch geometry cache reuse the shared chain.
-_FAMILIES = (
-    "fastener",
-    "frame",
-    "idler",
-    "motor",
-    "linear",
-    "belt",
-    "tapz",
-    "phone",
-    "board",
-    "camera",
-    "wire",
+from hardware.scheme import (
+    FAMILY_PRIORITY,
+    PROCEDURES_DIR,
+    STEM_CONVENTION,
+    STEM_RE,
+    family_of,
 )
-_FAMILY_PRIORITY = {name: i for i, name in enumerate(_FAMILIES)}
+
 DEFAULT_BATCH_SIZE = 5
 # Exact-HLR crashes hit up to ~80% per attempt on the worst stem
 # (board_30_pcb assembled). A failed retry costs ~15s — only the missing
@@ -58,15 +42,33 @@ MAX_STEM_RETRIES = 12
 
 
 def list_procedures() -> list[str]:
-    """All procedure module stems, sorted by family then NN."""
+    """All procedure module stems, in build order: family dependency
+    order (``FAMILIES``), then NN within the family.
+
+    Fails fast on a ``.py`` that doesn't match the stem convention or
+    names an unknown family — either would otherwise be silently skipped
+    (a typo'd stem never builds) or silently ordered last (an unlisted
+    family). Underscore-prefixed files are non-procedures by convention
+    and stay exempt."""
     keyed = []
+    bad: list[str] = []
     for path in PROCEDURES_DIR.glob("*.py"):
-        m = _STEM_RE.match(path.stem)
-        if not m or path.stem.startswith("_"):
+        if path.stem.startswith("_"):
             continue
-        keyed.append((m["family"], int(m["nn"]), path.stem))
+        m = STEM_RE.match(path.stem)
+        if not m or m["family"] not in FAMILY_PRIORITY:
+            bad.append(path.name)
+            continue
+        keyed.append((FAMILY_PRIORITY[m["family"]], int(m["nn"]), path.stem))
+    if bad:
+        raise ValueError(
+            f"procedure file(s) {sorted(bad)} don't match "
+            f"{STEM_CONVENTION}.py with a family from "
+            f"hardware.scheme.FAMILIES; rename them (or prefix with '_' "
+            f"to exclude)"
+        )
     keyed.sort()
-    return [stem for _, _, stem in keyed]
+    return [stem for *_, stem in keyed]
 
 
 def load_class(module_name: str) -> type[BaseAssembly]:
@@ -91,28 +93,13 @@ def load_step(module_name: str) -> BaseAssembly:
     return load_class(module_name)(exploded=False)
 
 
-# ── Ordering & batching ───────────────────────────────────────────────────────
-
-
-def _family_of(stem: str) -> str:
-    return stem.split("_", 1)[0]
-
-
-def _ordered_stems() -> list[str]:
-    """Procedure stems in dependency-order family, then NN. list_procedures
-    already sorts by (family, NN), but alphabetical family order isn't the
-    dependency/build order — so re-sort by _FAMILY_PRIORITY."""
-    fallback = len(_FAMILY_PRIORITY)
-    return sorted(
-        list_procedures(),
-        key=lambda s: (_FAMILY_PRIORITY.get(_family_of(s), fallback), s),
-    )
+# ── Batching ──────────────────────────────────────────────────────────────────
 
 
 def _batches(batch_size: int) -> list[list[str]]:
     """Family-clustered chunks of up to ``batch_size``, dependency order."""
     out: list[list[str]] = []
-    for _, group in groupby(_ordered_stems(), key=_family_of):
+    for _, group in groupby(list_procedures(), key=family_of):
         stems = list(group)
         for i in range(0, len(stems), batch_size):
             out.append(stems[i : i + batch_size])

@@ -67,14 +67,9 @@ import time
 import traceback
 from functools import cache
 
-from hardware.assembly.base import (
-    SVG_DIR,
-    BaseAssembly,
-    svg_path_for,
-    variant_suffix,
-)
-from hardware.assembly.mark.patch import patch_path
-from hardware.assembly.mark.replay import replay_one
+from hardware.assembly import cache as stepcache
+from hardware.assembly.base import BaseAssembly
+from hardware.assembly.bom import write_bom  # only for the optional --bom feature
 
 # Procedure ordering & batching live in dispatch.py so the BOM and render
 # pipelines share one source of truth.
@@ -82,22 +77,28 @@ from hardware.assembly.dispatch import (
     DEFAULT_BATCH_SIZE,
     MAX_STEM_RETRIES,
     _batches,
-    _family_of,
     load_class,
     retry_stems,
 )
-from hardware.assembly.bom import (
+from hardware.assembly.mark.patch import patch_path
+from hardware.assembly.mark.replay import replay_one
+from hardware.scheme import (
     BOM_DIR,
-    write_bom,
-)  # only for the optional --bom feature
-from hardware.assembly import cache as stepcache
-from hardware.parts.base import REPO_ROOT, STEP_DIR
+    OUTPUT_DIR,
+    REPO_ROOT,
+    STEP_DIR,
+    SVG_DIR,
+    VARIANTS,
+    family_of,
+    step_path_for,
+    svg_path_for,
+)
 
 # Worker faulthandler target. The OCCT HLR SIGSEGV is routine, and its full
 # dump (thread stack + extension-module list) would bury the progress table
 # on every crash — so workers write it here instead of stderr. Fresh per
 # dispatch run (the dispatcher unlinks it up front).
-CRASH_LOG = REPO_ROOT / "hardware" / "output" / "crash.log"
+CRASH_LOG = OUTPUT_DIR / "crash.log"
 
 
 def _clear_outputs(clear_bom: bool = False) -> None:
@@ -302,7 +303,7 @@ def _run_subprocess(
     )
 
 
-_VARIANTS = (("exploded", True), ("assembled", False))
+_VARIANTS = tuple((name, name == "exploded") for name in VARIANTS)
 
 
 @cache
@@ -326,7 +327,7 @@ def _missing_variants(stem: str) -> list[str]:
     return [
         name
         for name, exploded in _VARIANTS
-        if not (STEP_DIR / f"{stem}{variant_suffix(exploded)}.step").exists()
+        if not step_path_for(stem, exploded).exists()
         or any(
             not svg_path_for(stem, exploded, index=i).exists()
             for i in _view_indices(stem, exploded)
@@ -377,7 +378,7 @@ def _dispatch(
         start, end = position[stems[0]], position[stems[-1]]
         progress = f"{start}/{total}" if start == end else f"{start}-{end}/{total}"
         tail = stems[0] if start == end else f"{stems[0]} … {stems[-1]}"
-        return f"\n=== [{progress}] {_family_of(stems[0])}: {tail} ==="
+        return f"\n=== [{progress}] {family_of(stems[0])}: {tail} ==="
 
     n_fresh = n_replay = 0
     for batch in batches:

@@ -17,9 +17,8 @@ from build123d import MM, Compound, ExportSVG, LineType, ShapeList, Unit
 
 from hardware.assembly.projection import ISO, Camera, camera_view
 from hardware.assembly.svg_utils import inject_non_scaling_strokes, strip_root_dims
-from hardware.parts.base import REPO_ROOT, BasePart
-
-SVG_DIR = REPO_ROOT / "hardware" / "output" / "svg"
+from hardware.parts.base import BasePart
+from hardware.scheme import svg_path_for, variant_suffix
 
 # Top-level Compound labels recognised by BaseAssembly.render() for the
 # two-layer split. The ``layer_`` prefix namespaces them as render-routing
@@ -27,10 +26,6 @@ SVG_DIR = REPO_ROOT / "hardware" / "output" / "svg"
 # "ghost" that a procedure might choose for an unrelated reason.
 SOLID_LABEL = "_layer_solid"
 GHOST_LABEL = "_layer_ghost"
-
-
-def variant_suffix(exploded: bool) -> str:
-    return "_exploded" if exploded else "_assembled"
 
 
 # View tags for the ``views`` declaration — (variant, camera index) pairs
@@ -42,12 +37,6 @@ EXPLODED_CAM0 = ("exploded", 0)
 EXPLODED_CAM1 = ("exploded", 1)
 ASSEMBLED_CAM0 = ("assembled", 0)
 ASSEMBLED_CAM1 = ("assembled", 1)
-
-
-def svg_path_for(stem: str, exploded: bool, index: int | None = None) -> Path:
-    """Output path for a rendered SVG. Single-camera assemblies use
-    ``_cam0`` so the filename scheme is uniform with multi-camera ones."""
-    return SVG_DIR / f"{stem}{variant_suffix(exploded)}_cam{index or 0}.svg"
 
 
 class BaseAssembly(BasePart):

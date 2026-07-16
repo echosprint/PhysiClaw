@@ -20,7 +20,6 @@ from pathlib import Path
 
 from build123d import export_step
 
-from hardware.parts.base import REPO_ROOT
 from hardware.parts.custom.belt_clamp import BeltClamp
 from hardware.parts.custom.idler_mount_front import IdlerMountFront
 from hardware.parts.custom.idler_mount_motor import IdlerMountMotor
@@ -30,8 +29,9 @@ from hardware.parts.custom.solenoid_mount import SolenoidMount
 from hardware.parts.custom.tube_holder import TubeHolder
 from hardware.parts.custom.xy_joint_left import XyJointLeft
 from hardware.parts.custom.xy_joint_right import XyJointRight
+from hardware.scheme import OUTPUT_DIR
 
-OUT_DIR = REPO_ROOT / "hardware" / "output" / "print_3d"
+OUT_DIR = OUTPUT_DIR / "print_3d"
 ZIP_PATH = OUT_DIR / "physiclaw_custom_parts.zip"
 
 # (class, qty to print, English name, 中文名). Quantities match the consolidated

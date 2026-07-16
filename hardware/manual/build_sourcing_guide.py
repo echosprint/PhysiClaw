@@ -40,12 +40,11 @@ rest, so the cutting order reads as one spanned block. ``"Ditto"`` works per
 field (``ref`` / ``inquiry`` / ``suppliers`` / ``note``), or per supplier
 slot inside the ``suppliers`` array; on the first row it is an error.
 
-Run under ``uv`` from the repo root (standard library only, Python 3.12+);
-all paths resolve relative to this file, so the cwd does not matter::
+Run under ``uv`` from the repo root (standard library only, Python 3.12+)::
 
-    uv run hardware/manual/build_sourcing_guide.py              # en + zh
-    uv run hardware/manual/build_sourcing_guide.py --lang en    # English only -> sourcing_guide.html
-    uv run hardware/manual/build_sourcing_guide.py --scaffold   # sync sourcing_vendors.json with the BOM, then build
+    uv run python -m hardware.manual.build_sourcing_guide              # en + zh
+    uv run python -m hardware.manual.build_sourcing_guide --lang en    # English only -> sourcing_guide.html
+    uv run python -m hardware.manual.build_sourcing_guide --scaffold   # sync sourcing_vendors.json with the BOM, then build
 
 ``--scaffold`` inserts a bare ``{"part_id": …}`` entry for every BOM row
 missing from the file, reorders entries to BOM order, and reports stale ids;
@@ -61,28 +60,31 @@ import sys
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
+from hardware.manual import BuildError
+
 # Shared with the manual build: localization, BOM row grouping, step timing,
-# content loading and the html-lang / masthead-mark conventions.
-from build_manual import (
+# content/vendor-data loading and the html-lang / masthead-mark conventions.
+from hardware.manual.common import (
     CONTENT_DIR,
     HTML_LANG,
     URL_MARK,
-    BuildError,
+    VENDOR_FILE,
     _rowspans,
     _step,
     load_pages,
     loc,
 )
+from hardware.scheme import OUTPUT_DIR as _OUTPUT_ROOT
 
 # --------------------------------------------------------------------------- #
-# Paths — everything is resolved relative to this file so cwd does not matter.
+# Paths — package files are resolved relative to this file; output paths come
+# from hardware.scheme, so the cwd does not matter.
 # --------------------------------------------------------------------------- #
 SCRIPT_DIR = Path(__file__).resolve().parent
-VENDOR_FILE = SCRIPT_DIR / "sourcing_vendors.json"
 STYLES_CSS = SCRIPT_DIR / "sourcing_styles.css"
 # Own output dir — build_manual._clear_output_dir wipes *.html in output/manual,
 # so the sourcing guide must not live there.
-OUTPUT_DIR = SCRIPT_DIR / ".." / "output" / "sourcing"
+OUTPUT_DIR = _OUTPUT_ROOT / "sourcing"
 
 LANG_FILENAME = {"en": "sourcing_guide.html", "zh": "physiclaw采购指南.html"}
 
@@ -517,7 +519,7 @@ def main() -> None:
         "--out",
         type=Path,
         default=OUTPUT_DIR,
-        help="output directory (default: ../output/sourcing)",
+        help="output directory (default: hardware/output/sourcing)",
     )
     parser.add_argument(
         "--scaffold",

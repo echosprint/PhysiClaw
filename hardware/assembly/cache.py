@@ -46,37 +46,22 @@ import shutil
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-_HW = REPO_ROOT / "hardware"
-STEP_DIR = _HW / "output" / "step"
-SVG_DIR = _HW / "output" / "svg"
-BOM_DIR = _HW / "output" / "bom"
-CACHE_DIR = _HW / "output" / ".cache"
-PROCEDURES_DIR = _HW / "assembly" / "procedures"
-PATCH_DIR = _HW / "assembly" / "patch"
-MARK_DIR = _HW / "assembly" / "mark"
+from hardware.scheme import (
+    BOM_DIR,
+    CACHE_DIR,
+    MARK_DIR,
+    PATCH_DIR,
+    PROCEDURES_DIR,
+    REPO_ROOT,
+    STEP_DIR,
+    SVG_DIR,
+    VARIANTS,
+    raw_svg_re,
+    snapshot_svg_re,
+)
 
-_VARIANTS = ("assembled", "exploded")
 _SOURCE_KEY = "source.key"
 _PATCH_KEY = "patch.key"
-
-# Output filename scheme, mirroring assembly/base.py `svg_path_for` and
-# mark/patch.py `snapshot_path`: a raw render is ``<stem>_<variant>_cam<i>.svg``
-# and a patch snapshot is the same with a trailing ``_<opid>`` (lowercase op
-# id). Keep these regexes in step with that convention if it ever changes.
-_SVG_BODY = rf"_(?:{'|'.join(_VARIANTS)})_cam\d+"
-
-
-@functools.cache
-def _raw_svg_re(stem: str) -> re.Pattern:
-    """``<stem>_<variant>_cam<i>.svg`` — a render output (no op-id suffix)."""
-    return re.compile(rf"^{re.escape(stem)}{_SVG_BODY}\.svg$")
-
-
-@functools.cache
-def _snap_svg_re(stem: str) -> re.Pattern:
-    """``<stem>_<variant>_cam<i>_<opid>.svg`` — a patch snapshot."""
-    return re.compile(rf"^{re.escape(stem)}{_SVG_BODY}_[a-z]+\.svg$")
 
 
 # ── content hashing ──────────────────────────────────────────────────────────
@@ -151,7 +136,7 @@ def source_key(stem: str) -> str:
 
 def _patch_files(stem: str) -> list[Path]:
     out: list[Path] = []
-    for v in _VARIANTS:
+    for v in VARIANTS:
         out += PATCH_DIR.glob(f"{stem}_{v}_cam*.json")
     return out
 
@@ -191,14 +176,14 @@ def _is_source(stem: str, name: str, *, want_bom: bool = True) -> bool:
     """``name`` belongs to ``stem``'s source layer (.step / raw .svg / BOM)."""
     return (
         name.endswith(".step")
-        or bool(_raw_svg_re(stem).match(name))
+        or bool(raw_svg_re(stem).match(name))
         or (want_bom and name.endswith(".md"))
     )
 
 
 def _is_snapshot(stem: str, name: str) -> bool:
     """``name`` belongs to ``stem``'s patch-snapshot layer."""
-    return bool(_snap_svg_re(stem).match(name))
+    return bool(snapshot_svg_re(stem).match(name))
 
 
 def _svgs(stem: str, pat: re.Pattern) -> list[Path]:
@@ -207,8 +192,8 @@ def _svgs(stem: str, pat: re.Pattern) -> list[Path]:
 
 def _source_outputs(stem: str) -> list[Path]:
     """``.step`` + raw ``.svg`` + BOM ``.md`` for ``stem`` currently on disk."""
-    files = [p for v in _VARIANTS for p in STEP_DIR.glob(f"{stem}_{v}.step")]
-    files += _svgs(stem, _raw_svg_re(stem))
+    files = [p for v in VARIANTS for p in STEP_DIR.glob(f"{stem}_{v}.step")]
+    files += _svgs(stem, raw_svg_re(stem))
     files += [
         p for p in (BOM_DIR / f"{stem}.md", BOM_DIR / f"{stem}_delta.md") if p.exists()
     ]
@@ -216,7 +201,7 @@ def _source_outputs(stem: str) -> list[Path]:
 
 
 def _snapshot_outputs(stem: str) -> list[Path]:
-    return _svgs(stem, _snap_svg_re(stem))
+    return _svgs(stem, snapshot_svg_re(stem))
 
 
 def clear_outputs(stem: str) -> None:
@@ -327,7 +312,7 @@ def source_cached(stem: str, *, want_bom: bool) -> bool:
     if key != source_key(stem):
         return False
     has_step = any(n.endswith(".step") for n in files)
-    has_raw = any(_raw_svg_re(stem).match(n) for n in files)
+    has_raw = any(raw_svg_re(stem).match(n) for n in files)
     if not (has_step and has_raw):
         return False
     if want_bom and not any(n.endswith(".md") for n in files):

@@ -22,10 +22,9 @@ from collections import defaultdict
 from dataclasses import dataclass
 
 from hardware.assembly.base import BaseAssembly
-from hardware.assembly.dispatch import PROCEDURES_DIR, _STEM_RE, load_step
-from hardware.parts.base import BOM_REGISTRY, REPO_ROOT, BomCategory
-
-BOM_DIR = REPO_ROOT / "hardware" / "output" / "bom"
+from hardware.assembly.dispatch import load_step
+from hardware.parts.base import BOM_REGISTRY, BomCategory
+from hardware.scheme import BOM_DIR, PROCEDURES_DIR, STEM_RE
 
 
 @dataclass(frozen=True, order=True)
@@ -103,13 +102,13 @@ def predecessor_module(module_name: str) -> str | None:
     Convention: predecessor = same family prefix, largest NN strictly
     less than this file's NN. Cross-family chains aren't auto-resolved."""
     stem = module_name.rsplit(".", 1)[-1]
-    m = _STEM_RE.match(stem)
+    m = STEM_RE.match(stem)
     if not m:
         return None
     family, nn = m["family"], int(m["nn"])
     candidates: list[tuple[int, str]] = []
     for path in PROCEDURES_DIR.glob(f"{family}_*.py"):
-        cm = _STEM_RE.match(path.stem)
+        cm = STEM_RE.match(path.stem)
         if not cm:
             continue
         cnn = int(cm["nn"])

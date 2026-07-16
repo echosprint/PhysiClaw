@@ -29,10 +29,8 @@ import string
 from pathlib import Path
 from typing import Iterable
 
-from hardware.assembly.base import SVG_DIR
-from hardware.parts.base import REPO_ROOT
+from hardware.scheme import PATCH_DIR, SVG_DIR
 
-PATCH_DIR = REPO_ROOT / "hardware" / "assembly" / "patch"
 ID_ALPHABET = string.ascii_lowercase
 ID_LEN = 4
 ORIG_SENTINEL = "orig"

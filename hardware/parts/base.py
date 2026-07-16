@@ -5,8 +5,7 @@ from typing import Literal
 
 from build123d import export_step
 
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-STEP_DIR = REPO_ROOT / "hardware" / "output" / "step"
+from hardware.scheme import STEP_DIR
 
 BomCategory = Literal["standard", "custom"]
 

@@ -11,14 +11,16 @@ still apply:
     uv run --group cad python -m hardware build     [--bom] [--bom-delta]     build assembly steps (STEP + SVG)
     uv run --group cad python -m hardware step      <stem>                    build one step via `build --bom --stems`
     uv run --group cad python -m hardware print                               3D-print package (zip)
+    uv run            python -m hardware check                                static consistency check (CI-friendly)
     uv run            python -m hardware manual     [--pdf] [--lang …] …      bilingual build manual
     uv run            python -m hardware sourcing   [--lang …] [--scaffold]   sourcing guide
     uv run --group cad python -m hardware mark      <svg|json>                annotate a step drawing
     uv run --group cad python -m hardware replay    [file]                    replay annotation patches
     uv run --group cad python -m hardware camera    "<freecad-view>"          FreeCAD view → Camera() literal
 
-Geometry commands need ``--group cad`` (build123d); the manual and sourcing
-builders are standard-library only. Run all commands from the repo root.
+Geometry commands need ``--group cad`` (build123d); ``check`` and the manual
+and sourcing builders are standard-library only. Run all commands from the
+repo root.
 
 Each underlying module also stays runnable on its own (e.g.
 ``uv run --group cad python -m hardware.assembly.build_procedures``) — the
@@ -28,21 +30,18 @@ subcommands are a convenience wrapper, not a replacement.
 import argparse
 import subprocess
 import sys
-from pathlib import Path
 
-HARDWARE = Path(__file__).resolve().parent
-
-# Subcommand → argv it delegates to (after ``sys.executable``). Modules run
-# with ``-m``; the manual builders run by file path because they use
-# script-relative imports (``import icon_svg``) and are not a package.
+# Subcommand → argv it delegates to (after ``sys.executable``), every one a
+# ``-m`` module run.
 _DELEGATED: dict[str, list[str]] = {
     "build": ["-m", "hardware.assembly.build_procedures"],
+    "check": ["-m", "hardware.check"],
     "print": ["-m", "hardware.parts.build_custom_parts"],
     "mark": ["-m", "hardware.assembly.mark"],
     "replay": ["-m", "hardware.assembly.mark.replay"],
     "camera": ["-m", "hardware.assembly.projection"],
-    "manual": [str(HARDWARE / "manual" / "build_manual.py")],
-    "sourcing": [str(HARDWARE / "manual" / "build_sourcing_guide.py")],
+    "manual": ["-m", "hardware.manual.build_manual"],
+    "sourcing": ["-m", "hardware.manual.build_sourcing_guide"],
 }
 
 
@@ -51,9 +50,10 @@ def _parts(argv: list[str]) -> int:
     non-geometry subcommands (manual, sourcing) don't need ``--group cad``."""
     import shutil
 
-    from hardware.parts.base import STEP_DIR, export_all
+    from hardware.parts.base import export_all
     from hardware.parts.export_custom import ALL_PARTS as CUSTOM_PARTS
     from hardware.parts.export_standard import ALL_PARTS as STANDARD_PARTS
+    from hardware.scheme import STEP_DIR
 
     parser = argparse.ArgumentParser(prog="python -m hardware")
     parser.add_argument(
