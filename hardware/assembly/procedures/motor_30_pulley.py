@@ -31,7 +31,7 @@ Run from the repo root:
 
 from build123d import Compound, Location
 
-from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM1
+from hardware.assembly.base import ASSEMBLED_CAM0, EXPLODED_CAM1, BaseAssembly
 from hardware.assembly.procedures.motor_21_frame import MO21Frame
 from hardware.assembly.projection import MAIN_FRAME_VIEW, Camera
 from hardware.parts.standard.pulley import Pulley2GT20T

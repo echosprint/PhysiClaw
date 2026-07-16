@@ -27,7 +27,8 @@ from hardware.assembly.base import ASSEMBLED_CAM0, EXPLODED_CAM0
 from hardware.assembly.procedures.idler_10_lu import Column, ID10Lu
 from hardware.parts.custom.idler_mount_motor import outer_hole_offset
 from hardware.parts.standard.pulley import flange_belt_h
-from hardware.parts.standard.ring import SPECS as RING_SPECS, Ring
+from hardware.parts.standard.ring import SPECS as RING_SPECS
+from hardware.parts.standard.ring import Ring
 
 WASHER_SPEC = "M5x8x0.5"
 SPACER_SPEC = "M5x10x9"

@@ -38,10 +38,12 @@ Run from the repo root:
 
 from build123d import Axis, Compound, Location
 
-from hardware.assembly.base import ASSEMBLED_CAM1, BaseAssembly, EXPLODED_CAM1
+from hardware.assembly.base import ASSEMBLED_CAM1, EXPLODED_CAM1, BaseAssembly
 from hardware.assembly.projection import FRONT_LEFT_HIGH, Camera
 from hardware.parts.standard.bracket import (
     MotorBracket as MotorBracketPart,
+)
+from hardware.parts.standard.bracket import (
     motor_m5_pitch,
     motor_m5_x_inset,
     motor_mount_pitch,
@@ -50,7 +52,8 @@ from hardware.parts.standard.bracket import (
     motor_shaft_x_offset,
 )
 from hardware.parts.standard.motor import Nema17Motor, default_height
-from hardware.parts.standard.ring import SPECS as RING_SPECS, Ring
+from hardware.parts.standard.ring import SPECS as RING_SPECS
+from hardware.parts.standard.ring import Ring
 from hardware.parts.standard.screw import Screw
 
 BHCS_M3_LENGTH = 6  # mm — BHCS M3 underhead length (motor mount)

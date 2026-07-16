@@ -17,25 +17,53 @@ from hardware.assembly.procedures.motor_30_pulley import LEFT_PULLEY_GAP
 from hardware.parts.base import BaseStandardPart
 from hardware.parts.custom.idler_mount_front import (
     slot_center_y as ld_slot_center_y,
+)
+from hardware.parts.custom.idler_mount_front import (
     top_hole_y as ld_top_hole_y,
+)
+from hardware.parts.custom.idler_mount_front import (
     width as ld_block_width,
 )
 from hardware.parts.custom.idler_mount_motor import (
     length as lu_block_length,
+)
+from hardware.parts.custom.idler_mount_motor import (
     outer_hole_offset,
+)
+from hardware.parts.custom.idler_mount_motor import (
     thickness as lu_block_thickness,
 )
 from hardware.parts.custom.xy_joint_left import (
     csk_hole_from_bottom as joint_csk_hole_from_bottom,
+)
+from hardware.parts.custom.xy_joint_left import (
     csk_hole_from_left as joint_csk_hole_from_left,
+)
+from hardware.parts.custom.xy_joint_left import (
     csk_x_spacing as joint_csk_x_spacing,
+)
+from hardware.parts.custom.xy_joint_left import (
     csk_y_spacing as joint_csk_y_spacing,
-    extra_hole_x as joint_extra_hole_x_n,
-    extra_hole_y as joint_extra_hole_y_n,
+)
+from hardware.parts.custom.xy_joint_left import (
     extra_hole2_x as joint_extra_hole2_x_n,
+)
+from hardware.parts.custom.xy_joint_left import (
     extra_hole2_y as joint_extra_hole2_y_n,
+)
+from hardware.parts.custom.xy_joint_left import (
+    extra_hole_x as joint_extra_hole_x_n,
+)
+from hardware.parts.custom.xy_joint_left import (
+    extra_hole_y as joint_extra_hole_y_n,
+)
+from hardware.parts.custom.xy_joint_left import (
     length as joint_length,
+)
+from hardware.parts.custom.xy_joint_left import (
     thickness as joint_thickness,
+)
+from hardware.parts.custom.xy_joint_left import (
     width as joint_width,
 )
 from hardware.parts.standard.bracket import (
@@ -47,13 +75,21 @@ from hardware.parts.standard.bracket import (
 from hardware.parts.standard.extrusion import cb_end_offset
 from hardware.parts.standard.mgn9h import (
     block_top_z as slider_top_z,
+)
+from hardware.parts.standard.mgn9h import (
     slider_position,
 )
 from hardware.parts.standard.motor import default_height as motor_default_height
 from hardware.parts.standard.pulley import (
     belt_width as pulley_belt_width,
+)
+from hardware.parts.standard.pulley import (
     flange_belt_h,
+)
+from hardware.parts.standard.pulley import (
     hub_height as pulley_hub_height,
+)
+from hardware.parts.standard.pulley import (
     pitch_diameter as pulley_pitch_diameter,
 )
 from hardware.parts.standard.ring import SPECS as RING_SPECS

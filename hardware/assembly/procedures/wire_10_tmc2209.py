@@ -27,10 +27,10 @@ from build123d import Compound, Location
 from hardware.assembly.base import (
     ASSEMBLED_CAM0,
     ASSEMBLED_CAM1,
-    BaseAssembly,
     EXPLODED_CAM1,
+    BaseAssembly,
 )
-from hardware.assembly.projection import Camera, ISO
+from hardware.assembly.projection import ISO, Camera
 from hardware.parts.standard.board import (
     DRIVER_X,
     DRIVER_Y,

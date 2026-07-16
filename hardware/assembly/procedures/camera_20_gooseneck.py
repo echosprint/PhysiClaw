@@ -23,7 +23,7 @@ Run from the repo root:
 
 from build123d import Axis, Compound
 
-from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM0
+from hardware.assembly.base import ASSEMBLED_CAM0, EXPLODED_CAM0, BaseAssembly
 from hardware.assembly.procedures.camera_10_bracket import Camera10Bracket
 from hardware.assembly.projection import Camera
 from hardware.parts.standard.gooseneck import (

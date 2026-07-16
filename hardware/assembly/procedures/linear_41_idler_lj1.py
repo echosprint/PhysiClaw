@@ -41,11 +41,12 @@ Run from the repo root:
 
 from build123d import Compound, Location, Plane
 
-from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM1
+from hardware.assembly.base import ASSEMBLED_CAM0, EXPLODED_CAM1, BaseAssembly
 from hardware.assembly.procedures.linear_33_x import LI33X
 from hardware.assembly.procedures.linear_40_idler_lj1 import LI40IdlerLj1
-from hardware.assembly.projection import Camera, MAIN_FRAME_VIEW
-from hardware.parts.standard.nut import SPECS as NUT_SPECS, Nut
+from hardware.assembly.projection import MAIN_FRAME_VIEW, Camera
+from hardware.parts.standard.nut import SPECS as NUT_SPECS
+from hardware.parts.standard.nut import Nut
 
 BUNDLE_EXPLODE = 35  # mm — exploded: bundle lifted along world -Y (outboard)
 NUT_EXPLODE = 25  # mm — exploded: nut lifted along world +Z (pocket opening)

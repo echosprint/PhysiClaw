@@ -29,7 +29,7 @@ from hardware.assembly.base import ASSEMBLED_CAM0, ASSEMBLED_CAM1, BaseAssembly
 from hardware.assembly.procedures.board_20_frame import SHORT_FACE_Z
 from hardware.assembly.procedures.board_30_pcb import BO30Pcb
 from hardware.assembly.procedures.board_31_tube_tnut import BO31TubeTnut
-from hardware.assembly.projection import Camera, MAIN_FRAME_VIEW
+from hardware.assembly.projection import MAIN_FRAME_VIEW, Camera
 from hardware.parts.custom import tube_holder as TH
 
 TH_X = (

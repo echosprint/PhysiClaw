@@ -30,7 +30,7 @@ Run from the repo root:
 
 from build123d import Compound, Location
 
-from hardware.assembly.base import ASSEMBLED_CAM1, BaseAssembly, EXPLODED_CAM1
+from hardware.assembly.base import ASSEMBLED_CAM1, EXPLODED_CAM1, BaseAssembly
 from hardware.assembly.procedures.frame_10_extrusion_tnut import (
     EXT_THICKNESS,
     SHORT_LENGTH,
@@ -42,12 +42,18 @@ from hardware.parts.custom.xy_joint_left import (
     csk_hole_from_left,
     csk_x_spacing,
     extra_hole2_dx_from_csk,
+)
+from hardware.parts.custom.xy_joint_left import (
     length as joint_length,
 )
 from hardware.parts.standard.extrusion import Extrusion1020
 from hardware.parts.standard.t_nut import (
     ENGAGEMENT_Y as TNUT_ENGAGEMENT_Y,
+)
+from hardware.parts.standard.t_nut import (
     LENGTHS as TNUT_LENGTHS,
+)
+from hardware.parts.standard.t_nut import (
     TNut,
 )
 

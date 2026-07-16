@@ -28,7 +28,7 @@ from build123d import Compound, Location, Plane
 from hardware.assembly.base import ASSEMBLED_CAM0, ASSEMBLED_CAM1, BaseAssembly
 from hardware.assembly.procedures.board_40_teflon import BO40Teflon
 from hardware.assembly.procedures.camera_30_mount import Camera30Mount
-from hardware.assembly.projection import Camera, MAIN_FRAME_VIEW
+from hardware.assembly.projection import MAIN_FRAME_VIEW, Camera
 from hardware.assembly.travel_ranges import X_EXTRUSION_LENGTH
 from hardware.parts.standard.extrusion import leg
 from hardware.parts.standard.t_nut import HAMMER_TOTAL_HEIGHT

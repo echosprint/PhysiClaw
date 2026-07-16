@@ -34,7 +34,7 @@ Run from the repo root:
 
 from build123d import Compound, Location, Plane
 
-from hardware.assembly.base import BaseAssembly, EXPLODED_CAM1
+from hardware.assembly.base import EXPLODED_CAM1, BaseAssembly
 from hardware.assembly.procedures.frame_10_extrusion_tnut import (
     EXT_THICKNESS,
     LONG_BOT_GAP,
@@ -47,11 +47,15 @@ from hardware.assembly.procedures.motor_30_pulley import MO30Pulley
 from hardware.assembly.projection import MAIN_FRAME_VIEW, Camera
 from hardware.parts.custom.idler_mount_front import (
     slot_center_y as ld_slot_center_y,
+)
+from hardware.parts.custom.idler_mount_front import (
     width as ld_block_width,
 )
 from hardware.parts.custom.idler_mount_motor import length as lu_block_length
 from hardware.parts.standard.mgn9h import (
     block_top_z as slider_top_z,
+)
+from hardware.parts.standard.mgn9h import (
     slider_position,
 )
 

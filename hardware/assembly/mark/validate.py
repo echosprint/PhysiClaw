@@ -5,8 +5,7 @@ from __future__ import annotations
 import re
 from typing import List, Tuple
 
-from hardware.assembly.mark.svg import Color, DEFAULT_COLOR
-
+from hardware.assembly.mark.svg import DEFAULT_COLOR, Color
 
 _HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 _VALID_TYPES = {"polygon", "rect", "circle", "ellipse", "line", "arrow"}

@@ -19,7 +19,7 @@ Run from the repo root:
 
 from build123d import Compound, Location
 
-from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM0
+from hardware.assembly.base import ASSEMBLED_CAM0, EXPLODED_CAM0, BaseAssembly
 from hardware.assembly.procedures.belt_20_clamp import BE20Clamp
 from hardware.assembly.projection import FRONT
 from hardware.parts.standard.belt import Belt, motor_a_path

@@ -28,18 +28,22 @@ Run from the repo root:
 
 from build123d import Compound, Location, Plane
 
-from hardware.assembly.base import BaseAssembly, EXPLODED_CAM0
+from hardware.assembly.base import EXPLODED_CAM0, BaseAssembly
 from hardware.assembly.projection import FRONT_LEFT_HIGH
 from hardware.parts.standard.bumper import (
     Bumper,
-    body_height as bumper_height,
     cbore_depth,
+)
+from hardware.parts.standard.bumper import (
+    body_height as bumper_height,
 )
 from hardware.parts.standard.screw import Screw
 from hardware.parts.standard.t_nut import (
     HAMMER_TOTAL_HEIGHT,
-    LENGTHS as TNUT_LENGTHS,
     TNut,
+)
+from hardware.parts.standard.t_nut import (
+    LENGTHS as TNUT_LENGTHS,
 )
 
 BHCS_LENGTH = 16  # mm — BHCS M5 underhead length

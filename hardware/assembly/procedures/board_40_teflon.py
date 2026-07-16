@@ -28,8 +28,8 @@ from build123d import Compound, Location, Vector
 
 from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly
 from hardware.assembly.procedures.board_32_tube_holder import (
-    BO32TubeHolder,
     TUBE_HOLDER_PLACEMENT,
+    BO32TubeHolder,
 )
 from hardware.assembly.projection import MAIN_FRAME_VIEW
 from hardware.parts.custom import belt_clamp as BC

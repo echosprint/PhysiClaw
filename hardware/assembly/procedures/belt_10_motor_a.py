@@ -32,7 +32,7 @@ Run from the repo root:
 
 from build123d import Compound, Location
 
-from hardware.assembly.base import BaseAssembly, EXPLODED_CAM0
+from hardware.assembly.base import EXPLODED_CAM0, BaseAssembly
 from hardware.assembly.procedures.linear_47_idler_rj2 import LI47IdlerRj2
 from hardware.assembly.projection import FRONT
 from hardware.parts.standard.belt import Belt, motor_a_path

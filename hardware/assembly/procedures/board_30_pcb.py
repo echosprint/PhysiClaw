@@ -20,12 +20,13 @@ Run from the repo root:
 
 from build123d import Compound, Location
 
-from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM1
-from hardware.assembly.procedures.board_20_frame import BO20Frame, BOARD_PLACEMENT
-from hardware.assembly.projection import Camera, MAIN_FRAME_VIEW
+from hardware.assembly.base import ASSEMBLED_CAM0, EXPLODED_CAM1, BaseAssembly
+from hardware.assembly.procedures.board_20_frame import BOARD_PLACEMENT, BO20Frame
+from hardware.assembly.projection import MAIN_FRAME_VIEW, Camera
 from hardware.parts.custom.pcb_holder import cyl_h, standoff_xy, thickness
 from hardware.parts.standard.board import MksBoard, pcb_th
-from hardware.parts.standard.nut import Nut, SPECS as NUT_SPECS
+from hardware.parts.standard.nut import SPECS as NUT_SPECS
+from hardware.parts.standard.nut import Nut
 from hardware.parts.standard.screw import Screw
 
 STANDOFF_TOP = thickness + cyl_h  # holder standoff top (PCB bottom rests here)

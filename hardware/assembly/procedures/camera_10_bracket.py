@@ -29,19 +29,25 @@ Run from the repo root:
 
 from build123d import Compound, Location, Plane
 
-from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM1
+from hardware.assembly.base import ASSEMBLED_CAM0, EXPLODED_CAM1, BaseAssembly
 from hardware.assembly.projection import Camera
 from hardware.parts.standard.bracket import (
     CornerBracket,
+)
+from hardware.parts.standard.bracket import (
     corner_face_depth as face_depth,
+)
+from hardware.parts.standard.bracket import (
     corner_thickness as plate_thick,
 )
 from hardware.parts.standard.nut import Nut
 from hardware.parts.standard.screw import Screw
 from hardware.parts.standard.t_nut import (
     HAMMER_TOTAL_HEIGHT,
-    LENGTHS as TNUT_LENGTHS,
     TNut,
+)
+from hardware.parts.standard.t_nut import (
+    LENGTHS as TNUT_LENGTHS,
 )
 
 BHCS_LENGTH = 10  # mm — BHCS M5 underhead length (frame side)

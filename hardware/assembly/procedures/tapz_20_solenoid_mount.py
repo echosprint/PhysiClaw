@@ -58,7 +58,7 @@ Run from the repo root:
 
 from build123d import Compound, Location, Plane
 
-from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM1
+from hardware.assembly.base import ASSEMBLED_CAM0, EXPLODED_CAM1, BaseAssembly
 from hardware.assembly.procedures.belt_20_clamp import (
     SLIDER_MOUNT_X,
     SLIDER_MOUNT_Y,
@@ -66,31 +66,50 @@ from hardware.assembly.procedures.belt_20_clamp import (
 )
 from hardware.assembly.procedures.belt_30_motor_b import BE30MotorB
 from hardware.assembly.procedures.tapz_11_solenoid_attach import (
-    TZ11SolenoidAttach,
     MOUNT_ORIGIN_X as _TZ11_MOUNT_X,
+)
+from hardware.assembly.procedures.tapz_11_solenoid_attach import (
     MOUNT_ORIGIN_Y as _TZ11_MOUNT_Y,
+)
+from hardware.assembly.procedures.tapz_11_solenoid_attach import (
     MOUNT_ORIGIN_Z as _TZ11_MOUNT_Z,
 )
-from hardware.assembly.projection import Camera, MAIN_FRAME_VIEW
+from hardware.assembly.procedures.tapz_11_solenoid_attach import (
+    TZ11SolenoidAttach,
+)
+from hardware.assembly.projection import MAIN_FRAME_VIEW, Camera
 from hardware.parts._fits import M3_NUT_T
 from hardware.parts.custom.belt_clamp import (
     corner_hole_offset,
     front_hole_offset,
     left_rect1_top_offset,
     left_rect2_right_from_front,
-    length as clamp_length,
     slot1_center_y,
     slot2_center_y,
+)
+from hardware.parts.custom.belt_clamp import (
+    length as clamp_length,
+)
+from hardware.parts.custom.belt_clamp import (
     thickness as clamp_thickness,
+)
+from hardware.parts.custom.belt_clamp import (
     width as clamp_width,
 )
 from hardware.parts.custom.solenoid_mount import (
     keyboard_rect_center_y as mount_keyboard_center_y,
+)
+from hardware.parts.custom.solenoid_mount import (
     screen_corner_csk_hole_from_bottom,
+)
+from hardware.parts.custom.solenoid_mount import (
     thickness as mount_plate_thickness,
+)
+from hardware.parts.custom.solenoid_mount import (
     width as mount_width,
 )
-from hardware.parts.standard.nut import Nut, SPECS as NUT_SPECS
+from hardware.parts.standard.nut import SPECS as NUT_SPECS
+from hardware.parts.standard.nut import Nut
 from hardware.parts.standard.screw import FHCS_DIMS, Screw, head_skirt
 
 BHCS_LENGTH = 8  # mm — M3 BHCS underhead length (plate corner → clamp top corner)

@@ -21,12 +21,12 @@ from build123d import Compound, Location
 
 from hardware.assembly.base import (
     ASSEMBLED_CAM1,
-    BaseAssembly,
     EXPLODED_CAM1,
     GHOST_LABEL,
     SOLID_LABEL,
+    BaseAssembly,
 )
-from hardware.assembly.projection import Camera, FRONT_LEFT_LOW_R70
+from hardware.assembly.projection import FRONT_LEFT_LOW_R70, Camera
 from hardware.parts.standard.solenoid import Solenoid
 from hardware.parts.standard.tip import Tip
 

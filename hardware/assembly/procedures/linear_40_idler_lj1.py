@@ -46,10 +46,11 @@ Run from the repo root:
 
 from build123d import Compound, Location
 
-from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM0
+from hardware.assembly.base import ASSEMBLED_CAM0, EXPLODED_CAM0, BaseAssembly
 from hardware.assembly.projection import FRONT_LEFT_HIGH
 from hardware.parts.standard.pulley import Pulley2GT20T, flange_belt_h
-from hardware.parts.standard.ring import SPECS as RING_SPECS, Ring
+from hardware.parts.standard.ring import SPECS as RING_SPECS
+from hardware.parts.standard.ring import Ring
 from hardware.parts.standard.screw import SHOULDER_DIMS, Screw
 
 WASHER_SPEC = "M5x8x0.5"

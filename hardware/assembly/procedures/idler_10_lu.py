@@ -54,21 +54,27 @@ from collections.abc import Callable
 
 from build123d import Axis, Compound, Location
 
-from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM0
+from hardware.assembly.base import ASSEMBLED_CAM0, EXPLODED_CAM0, BaseAssembly
 from hardware.assembly.projection import FRONT_LEFT_HIGH
 from hardware.parts.custom.idler_mount_motor import (
     IdlerMountMotor,
     front_hole_center_z,
-    length as block_length,
     outer_hole_offset,
     side_pocket_center_z,
-    thickness as block_thickness,
     top_counterbore_depth,
     top_pocket_center_y,
 )
-from hardware.parts.standard.nut import SPECS as NUT_SPECS, Nut
+from hardware.parts.custom.idler_mount_motor import (
+    length as block_length,
+)
+from hardware.parts.custom.idler_mount_motor import (
+    thickness as block_thickness,
+)
+from hardware.parts.standard.nut import SPECS as NUT_SPECS
+from hardware.parts.standard.nut import Nut
 from hardware.parts.standard.pulley import Pulley2GT20T, flange_belt_h
-from hardware.parts.standard.ring import SPECS as RING_SPECS, Ring
+from hardware.parts.standard.ring import SPECS as RING_SPECS
+from hardware.parts.standard.ring import Ring
 from hardware.parts.standard.screw import SHOULDER_DIMS, Screw
 
 RING_SPEC = "M5x8x0.5"

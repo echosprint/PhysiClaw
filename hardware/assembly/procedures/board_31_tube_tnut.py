@@ -31,7 +31,7 @@ Run from the repo root:
 
 from build123d import Compound, Location
 
-from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM1
+from hardware.assembly.base import ASSEMBLED_CAM0, EXPLODED_CAM1, BaseAssembly
 from hardware.assembly.projection import Camera
 from hardware.parts.custom import tube_holder as TH
 from hardware.parts.custom.tube_holder import TubeHolder

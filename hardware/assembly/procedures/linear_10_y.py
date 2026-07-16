@@ -39,20 +39,24 @@ Run from the repo root:
 
 from build123d import Compound, Location, Plane
 
-from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM0
+from hardware.assembly.base import ASSEMBLED_CAM0, EXPLODED_CAM0, BaseAssembly
 from hardware.assembly.projection import FRONT_LEFT_HIGH
 from hardware.assembly.travel_ranges import Y_RAIL_LENGTH
 from hardware.parts.standard.mgn9h import (
     MGN9H,
     rail_height,
     rail_hole_pitch,
+)
+from hardware.parts.standard.mgn9h import (
     slider_position as default_slider_position,
 )
 from hardware.parts.standard.screw import FHCS_DIMS, Screw, head_skirt
 from hardware.parts.standard.t_nut import (
     HAMMER_TOTAL_HEIGHT,
-    LENGTHS as TNUT_LENGTHS,
     TNut,
+)
+from hardware.parts.standard.t_nut import (
+    LENGTHS as TNUT_LENGTHS,
 )
 
 RAIL_LENGTH = Y_RAIL_LENGTH  # mm — MGN9H rail length — see assembly/travel_ranges.py

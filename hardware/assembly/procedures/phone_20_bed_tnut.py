@@ -27,7 +27,7 @@ Run from the repo root:
 
 from build123d import Compound, Location
 
-from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM1
+from hardware.assembly.base import ASSEMBLED_CAM0, EXPLODED_CAM1, BaseAssembly
 from hardware.assembly.projection import FRONT_LEFT_HIGH, Camera
 from hardware.parts.custom.phone_bed import (
     PhoneBed,

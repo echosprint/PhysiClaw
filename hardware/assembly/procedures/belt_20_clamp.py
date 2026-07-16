@@ -43,20 +43,26 @@ Run from the repo root:
 
 from build123d import Compound, Location, Plane
 
-from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM1
+from hardware.assembly.base import ASSEMBLED_CAM0, EXPLODED_CAM1, BaseAssembly
 from hardware.assembly.procedures.belt_10_motor_a import BE10MotorA
 from hardware.assembly.procedures.frame_10_extrusion_tnut import EXT_THICKNESS
-from hardware.assembly.projection import Camera, MAIN_FRAME_VIEW
+from hardware.assembly.projection import MAIN_FRAME_VIEW, Camera
 from hardware.parts.custom.belt_clamp import (
     BeltClamp,
-    length as clamp_length,
     slot1_center_y,
     slot2_center_y,
     slot_depth,
+)
+from hardware.parts.custom.belt_clamp import (
+    length as clamp_length,
+)
+from hardware.parts.custom.belt_clamp import (
     thickness as clamp_thickness,
 )
 from hardware.parts.standard.mgn9h import (
     block_top_z as slider_top_z,
+)
+from hardware.parts.standard.mgn9h import (
     mount_pitch_x,
     mount_pitch_y,
 )
@@ -91,13 +97,21 @@ from hardware.assembly.procedures.frame_10_extrusion_tnut import (
 from hardware.assembly.procedures.linear_10_y import RAIL_LENGTH
 from hardware.parts.custom.idler_mount_front import (
     slot_center_y as ld_slot_center_y,
+)
+from hardware.parts.custom.idler_mount_front import (
     width as ld_block_width,
 )
 from hardware.parts.custom.idler_mount_motor import length as lu_block_length
 from hardware.parts.custom.xy_joint_left import (
     big_csk_y as joint_big_csk_y_n,
+)
+from hardware.parts.custom.xy_joint_left import (
     csk_hole_from_bottom as joint_csk_hole_from_bottom,
+)
+from hardware.parts.custom.xy_joint_left import (
     csk_y_spacing as joint_csk_y_spacing,
+)
+from hardware.parts.custom.xy_joint_left import (
     width as joint_width,
 )
 from hardware.parts.standard.mgn9h import slider_position

@@ -39,7 +39,7 @@ Run from the repo root:
 
 from build123d import Compound, Location, Plane
 
-from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM1
+from hardware.assembly.base import ASSEMBLED_CAM0, EXPLODED_CAM1, BaseAssembly
 from hardware.assembly.procedures.linear_11_y import LI11Y
 from hardware.assembly.projection import MAIN_FRAME_VIEW, Camera
 from hardware.parts.custom.xy_joint_left import (
@@ -50,19 +50,25 @@ from hardware.parts.custom.xy_joint_left import (
     csk_hole_from_left,
     csk_x_spacing,
     csk_y_spacing,
-    extra_hole_x,
-    extra_hole_y,
     extra_hole2_x,
     extra_hole2_y,
+    extra_hole_x,
+    extra_hole_y,
     front_pocket_depth,
-    length as joint_length,
     pocket_face_y,
     slant_origin,
     slant_pocket_depth,
     slant_pocket_face_x,
     slant_x_dir,
     slant_z_dir,
+)
+from hardware.parts.custom.xy_joint_left import (
+    length as joint_length,
+)
+from hardware.parts.custom.xy_joint_left import (
     thickness as joint_thickness,
+)
+from hardware.parts.custom.xy_joint_left import (
     width as joint_width,
 )
 from hardware.parts.custom.xy_joint_right import XyJointRight

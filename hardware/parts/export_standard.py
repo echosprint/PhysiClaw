@@ -5,13 +5,13 @@ from build123d import MM
 
 from hardware.assembly.travel_ranges import X_RAIL_LENGTH, Y_RAIL_LENGTH
 from hardware.parts.base import export_all
+from hardware.parts.standard.board import MksBoard
 from hardware.parts.standard.bracket import CornerBracket, FlatBracket, MotorBracket
 from hardware.parts.standard.bumper import Bumper
 from hardware.parts.standard.driver import HexDriver
 from hardware.parts.standard.extrusion import Extrusion2020
 from hardware.parts.standard.gooseneck import Gooseneck
 from hardware.parts.standard.mgn9h import MGN9H
-from hardware.parts.standard.board import MksBoard
 from hardware.parts.standard.motor import Nema17Motor
 from hardware.parts.standard.nut import Nut
 from hardware.parts.standard.pulley import Pulley2GT20T

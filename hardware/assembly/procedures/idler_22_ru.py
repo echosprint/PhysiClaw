@@ -60,7 +60,7 @@ Run from the repo root:
 
 from build123d import Compound, Location, Plane
 
-from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM1
+from hardware.assembly.base import ASSEMBLED_CAM0, EXPLODED_CAM1, BaseAssembly
 from hardware.assembly.procedures.frame_10_extrusion_tnut import (
     EXT_THICKNESS,
     LONG_LENGTH,
@@ -73,7 +73,11 @@ from hardware.assembly.procedures.idler_21_ru import ID21Ru
 from hardware.assembly.projection import MAIN_FRAME_VIEW, Camera
 from hardware.parts.custom.idler_mount_motor import (
     front_hole_center_z,
+)
+from hardware.parts.custom.idler_mount_motor import (
     thickness as block_thickness,
+)
+from hardware.parts.custom.idler_mount_motor import (
     width as block_width,
 )
 from hardware.parts.standard.bracket import flat_hole_spacing

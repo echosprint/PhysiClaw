@@ -21,7 +21,7 @@ Run from the repo root:
 
 from build123d import Compound
 
-from hardware.assembly.base import BaseAssembly, EXPLODED_CAM0
+from hardware.assembly.base import EXPLODED_CAM0, BaseAssembly
 from hardware.assembly.procedures.frame_10_extrusion_tnut import FR10ExtrusionTnut
 from hardware.assembly.projection import MAIN_FRAME_VIEW
 from hardware.parts.standard.extrusion import CB_LABELS, cb_head_depth

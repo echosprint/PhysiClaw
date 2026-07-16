@@ -37,20 +37,26 @@ Run from the repo root:
 
 from build123d import Axis, Compound, Location
 
-from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM0
+from hardware.assembly.base import ASSEMBLED_CAM0, EXPLODED_CAM0, BaseAssembly
 from hardware.assembly.projection import FRONT_LEFT_HIGH
 from hardware.parts.custom.idler_mount_front import (
     IdlerMountFront,
     back_pocket_center_z,
     slot_center_y,
     slot_depth,
-    thickness as block_thickness,
     top_hole_y,
+)
+from hardware.parts.custom.idler_mount_front import (
+    thickness as block_thickness,
+)
+from hardware.parts.custom.idler_mount_front import (
     width as block_width,
 )
-from hardware.parts.standard.nut import SPECS as NUT_SPECS, Nut
+from hardware.parts.standard.nut import SPECS as NUT_SPECS
+from hardware.parts.standard.nut import Nut
 from hardware.parts.standard.pulley import Pulley2GT20T, flange_belt_h
-from hardware.parts.standard.ring import SPECS as RING_SPECS, Ring
+from hardware.parts.standard.ring import SPECS as RING_SPECS
+from hardware.parts.standard.ring import Ring
 from hardware.parts.standard.screw import SHOULDER_DIMS, Screw
 
 WASHER_SPEC = "M5x8x0.5"

@@ -28,12 +28,14 @@ Run from the repo root:
 
 from build123d import Compound, Location
 
-from hardware.assembly.base import ASSEMBLED_CAM1, BaseAssembly, EXPLODED_CAM1
+from hardware.assembly.base import ASSEMBLED_CAM1, EXPLODED_CAM1, BaseAssembly
 from hardware.assembly.projection import FRONT_LEFT_HIGH, Camera
 from hardware.assembly.travel_ranges import PHONE_BED_BEAM_LENGTH
 from hardware.parts.standard.extrusion import (
     Extrusion1020,
     end_hole_offset,
+)
+from hardware.parts.standard.extrusion import (
     half_x_1020 as BEAM_TOP_Y,  # section height (native Y of the top face)
 )
 from hardware.parts.standard.screw import Screw

@@ -32,15 +32,16 @@ Run from the repo root:
 
 from build123d import Compound, Location, Plane
 
-from hardware.assembly.base import BaseAssembly, EXPLODED_CAM0, GHOST_LABEL, SOLID_LABEL
+from hardware.assembly.base import EXPLODED_CAM0, GHOST_LABEL, SOLID_LABEL, BaseAssembly
 from hardware.assembly.projection import BACK_RIGHT_LOW_R90, MAIN_FRAME_VIEW
-from hardware.assembly.travel_ranges import Y_EXTRUSION_LENGTH, X_EXTRUSION_LENGTH
+from hardware.assembly.travel_ranges import X_EXTRUSION_LENGTH, Y_EXTRUSION_LENGTH
 from hardware.parts.standard.extrusion import (
     Extrusion2040,
     cb_end_offset,
     leg,
 )
-from hardware.parts.standard.t_nut import LENGTHS as TNUT_LENGTHS, TNut
+from hardware.parts.standard.t_nut import LENGTHS as TNUT_LENGTHS
+from hardware.parts.standard.t_nut import TNut
 
 LONG_LENGTH = Y_EXTRUSION_LENGTH  # Y-axis frame span — see assembly/travel_ranges.py
 SHORT_LENGTH = X_EXTRUSION_LENGTH  # frame width — see assembly/travel_ranges.py

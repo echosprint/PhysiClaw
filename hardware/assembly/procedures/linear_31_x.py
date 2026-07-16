@@ -36,7 +36,7 @@ Run from the repo root:
 
 from build123d import Compound, Location, Plane
 
-from hardware.assembly.base import BaseAssembly, EXPLODED_CAM1
+from hardware.assembly.base import EXPLODED_CAM1, BaseAssembly
 from hardware.assembly.procedures.linear_20_joint import LI20Joint
 from hardware.assembly.procedures.linear_30_x import LI30X, X_BEAM_LENGTH
 from hardware.assembly.projection import MAIN_FRAME_VIEW, Camera

@@ -29,7 +29,7 @@ Run from the repo root:
 
 from build123d import Compound, Location, Plane
 
-from hardware.assembly.base import BaseAssembly, EXPLODED_CAM1
+from hardware.assembly.base import EXPLODED_CAM1, BaseAssembly
 from hardware.assembly.procedures.linear_31_x import LI31X
 from hardware.assembly.procedures.linear_32_x import LI32X
 from hardware.assembly.projection import MAIN_FRAME_VIEW, Camera

@@ -22,12 +22,16 @@ Run from the repo root:
 
 from build123d import Axis, Compound, Location, Plane
 
-from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM0
+from hardware.assembly.base import ASSEMBLED_CAM0, EXPLODED_CAM0, BaseAssembly
 from hardware.assembly.procedures.camera_20_gooseneck import Camera20Gooseneck
 from hardware.assembly.projection import Camera
 from hardware.parts.standard.camera import (
     Camera as CameraPart,
+)
+from hardware.parts.standard.camera import (
     height as CAM_H,
+)
+from hardware.parts.standard.camera import (
     width as CAM_W,
 )
 

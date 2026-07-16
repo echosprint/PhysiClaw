@@ -44,7 +44,7 @@ Run from the repo root:
 
 from build123d import MM, Compound, Location, Plane
 
-from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM1
+from hardware.assembly.base import ASSEMBLED_CAM0, EXPLODED_CAM1, BaseAssembly
 from hardware.assembly.procedures.tapz_10_solenoid_tip import TZ10SolenoidTip
 from hardware.assembly.projection import Camera
 from hardware.parts.custom.solenoid_mount import (
@@ -54,13 +54,19 @@ from hardware.parts.custom.solenoid_mount import (
     screen_pattern_pair_offset,
     screen_pattern_spacing,
     screen_pattern_y_offsets,
-    thickness as mount_thickness,
     wall_thickness,
+)
+from hardware.parts.custom.solenoid_mount import (
+    thickness as mount_thickness,
+)
+from hardware.parts.custom.solenoid_mount import (
     width as mount_width,
 )
 from hardware.parts.standard.screw import Screw
 from hardware.parts.standard.solenoid import (
     depth as solenoid_depth,
+)
+from hardware.parts.standard.solenoid import (
     outer_w as solenoid_outer_w,
 )
 

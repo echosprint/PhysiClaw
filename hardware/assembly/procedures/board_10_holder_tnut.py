@@ -26,8 +26,8 @@ Run from the repo root:
 
 from build123d import Compound, Location
 
-from hardware.assembly.base import ASSEMBLED_CAM0, BaseAssembly, EXPLODED_CAM1
-from hardware.assembly.projection import Camera, FRONT_LEFT_HIGH
+from hardware.assembly.base import ASSEMBLED_CAM0, EXPLODED_CAM1, BaseAssembly
+from hardware.assembly.projection import FRONT_LEFT_HIGH, Camera
 from hardware.parts.custom.pcb_holder import (
     PcbHolder,
     mount_hole_pitch,
