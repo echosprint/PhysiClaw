@@ -606,3 +606,43 @@ def test_finish_job_uses_status_as_recap_when_recap_blank(
     text = _jobs_path.read_text()
     # Empty recap → status name as recap.
     assert "- Execution result: done" in text
+
+
+# ---------- job_ids / created_since (WAIT-close job detection) ----------
+
+
+def test_job_ids_empty_when_no_file() -> None:
+    assert jobs.job_ids() == set()
+
+
+def test_job_ids_and_created_since_detect_a_new_job(_jobs_path: Path) -> None:
+    before = jobs.job_ids()
+
+    with freeze_time("2026-07-16T09:00:00"):
+        jobs.create_job(
+            id="user-latte-2026-07-16",
+            description="Resume the latte order",
+            schedule="30 9 16 7 *",
+            context="Previous session ended WAIT; re-check IM and continue.",
+        )
+
+    assert jobs.job_ids() == {"user-latte-2026-07-16"}
+    assert jobs.created_since(before) is True
+    # A snapshot taken after the create sees no further additions.
+    assert jobs.created_since(jobs.job_ids()) is False
+
+
+def test_job_ids_none_on_unparseable_file(_jobs_path: Path) -> None:
+    _jobs_path.write_text("## bad-job\nBroken entry\n- Type: bogus\n", encoding="utf-8")
+
+    assert jobs.job_ids() is None
+
+
+def test_created_since_unknown_snapshots_count_as_not_created(
+    _jobs_path: Path,
+) -> None:
+    # Before-snapshot failed → False (a redundant follow-up beats a dead WAIT).
+    assert jobs.created_since(None) is False
+    # After-snapshot failed → same.
+    _jobs_path.write_text("## bad-job\nBroken entry\n- Type: bogus\n", encoding="utf-8")
+    assert jobs.created_since(set()) is False

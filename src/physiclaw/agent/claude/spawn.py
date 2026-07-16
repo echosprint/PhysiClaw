@@ -23,11 +23,14 @@ from pathlib import Path
 
 from physiclaw.agent.claude.plugin import prepare_plugin_dir
 from physiclaw.agent.claude.session_log import _SessionLog
+from physiclaw.agent.engine import jobs as engine_jobs
 from physiclaw.agent.engine import screen_layout, skill
 from physiclaw.agent.engine.mcp_inventory import discover_mcp_tools
 from physiclaw.agent.engine.skill import Skill
 from physiclaw.agent.engine.trace import new_sid
+from physiclaw.agent.runtime import contract
 from physiclaw.agent.runtime.hook import Trigger
+from physiclaw.agent.runtime.sentinel import WAIT
 from physiclaw.common import paths
 from physiclaw.common.config import CONFIG, server_url
 from physiclaw.common.text import read_text
@@ -280,9 +283,9 @@ def _build_cmd(
     model_id: str,
 ) -> list[str]:
     """Assemble argv from pre-computed pieces. `spawn_claude` builds the
-    plugin dir + system prompt + tool list once per wake and reuses them
-    across retries; this keeps `_build_cmd` pure (no side effects) and
-    makes the retry loop cheap.
+    system prompt + tool list once per wake and reuses them across
+    retries (the plugin dir is the per-attempt artifact); this keeps
+    `_build_cmd` pure (no side effects) and makes the retry loop cheap.
 
     `model_id` is the second segment of `[agent] model = "claude-code/<id>"`,
     normalized via `_normalize_claude_model_id` before passing as `--model`."""
@@ -356,13 +359,14 @@ async def spawn_claude(triggers: list[Trigger], *, model_id: str) -> None:
     model_ref = f"claude-code/{model_id}"
     env = _child_env()
 
-    for attempt in range(1, MAX_ATTEMPTS + 1):
-        if attempt > 1:
-            log.warning(
-                "retry %d/%d after %.0fs backoff", attempt, MAX_ATTEMPTS, RETRY_BACKOFF
-            )
-            await asyncio.sleep(RETRY_BACKOFF)
-
+    async def attempt(trigs: list[Trigger], n: int) -> contract.SessionOutcome:
+        # WAIT-close job detection needs the pre-attempt id set (see
+        # engine_jobs.created_since) — this path has no in-process
+        # created-a-job signal, unlike the native engine's session flag.
+        # Snapshotted per attempt, not per wake: a job written by an
+        # earlier UNDONE attempt must not suppress this attempt's WAIT
+        # follow-up (a redundant check-in beats a stranded WAIT).
+        jobs_before = engine_jobs.job_ids()
         # Plugin dir is the only per-attempt artifact. Fresh sid keeps
         # retries from overlapping (the random suffix matters: a retry
         # can start within the same second) and, if we ever debug one,
@@ -370,7 +374,7 @@ async def spawn_claude(triggers: list[Trigger], *, model_id: str) -> None:
         sid = new_sid()
         plugin_dir = prepare_plugin_dir(sid, skills=skills)
         cmd = _build_cmd(
-            triggers,
+            trigs,
             plugin_dir=plugin_dir,
             system_prompt=system_prompt,
             mcp_tools=mcp_tools,
@@ -379,7 +383,7 @@ async def spawn_claude(triggers: list[Trigger], *, model_id: str) -> None:
 
         log.info(
             "spawning claude (attempt=%d/%d, triggers=%s) — detail log: %s",
-            attempt,
+            n,
             MAX_ATTEMPTS,
             sources,
             LOG_DIR / f"claude-{dt.datetime.now():%Y-%m-%d}.log",
@@ -389,9 +393,7 @@ async def spawn_claude(triggers: list[Trigger], *, model_id: str) -> None:
         try:
             # Log construction BEFORE the spawn: if it raises, there is
             # no live claude subprocess left driving the phone unwatched.
-            slog = _SessionLog(
-                sid, triggers, model_ref=model_ref, prompt_hash=prompt_hash
-            )
+            slog = _SessionLog(sid, trigs, model_ref=model_ref, prompt_hash=prompt_hash)
             try:
                 proc = await asyncio.create_subprocess_exec(
                     *cmd,
@@ -446,7 +448,21 @@ async def spawn_claude(triggers: list[Trigger], *, model_id: str) -> None:
             # wakes.
             shutil.rmtree(plugin_dir, ignore_errors=True)
 
-        if status != "UNDONE":
-            return  # DONE, STUCK, IDLE, or WAIT — agent finished cleanly, no retry
+        # `slog.done` returns a sentinel status on a clean close, else
+        # "UNDONE" (crash, kill, timeout) — the contract's retry case.
+        final = None if status == "UNDONE" else status
+        return contract.SessionOutcome(
+            status=final,
+            created_job=final == WAIT and engine_jobs.created_since(jobs_before),
+        )
 
-    log.error("giving up after %d UNDONE attempts", MAX_ATTEMPTS)
+    # A model-declared STUCK is a considered close on this path — only
+    # UNDONE (no clean close at all) earns a re-spawn.
+    await contract.drive(
+        attempt,
+        triggers,
+        max_attempts=MAX_ATTEMPTS,
+        wait_default_minutes=CONFIG.engine.wait_default_minutes,
+        retry_on=(None,),
+        retry_backoff_seconds=RETRY_BACKOFF,
+    )

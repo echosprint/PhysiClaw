@@ -11,6 +11,7 @@ judgment is engine-visible behavior.
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -132,6 +133,7 @@ def _settings(**over) -> engine_mod.Settings:
         provider_retry_attempts=3,
         retry_backoff_seconds=0.0,
         wait_default_minutes=15,
+        max_session_seconds=0,
     )
     base.update(over)
     return engine_mod.Settings(**base)
@@ -149,6 +151,7 @@ def _mk_run(
     layout_incomplete=False,
     policies=None,
     settings=None,
+    deadline=None,
 ) -> engine_mod.EngineRun:
     tool_schemas = tool_schemas if tool_schemas is not None else []
     return engine_mod.EngineRun(
@@ -170,6 +173,7 @@ def _mk_run(
             else policy_mod.default_policies(layout_incomplete=layout_incomplete)
         ),
         layout_incomplete=layout_incomplete,
+        deadline=deadline,
     )
 
 
@@ -1525,82 +1529,40 @@ async def test_run_session_cancellation_propagates(mocker) -> None:
         )
 
 
-@pytest.mark.asyncio
-async def test_run_session_wait_without_create_job_auto_schedules(
-    mocker,
-) -> None:
-    _patch_session_deps(mocker)
-    asst = _asst(
-        tool_calls=[
-            _tc("note", {"summary": "x"}),
-            _tc("end_session", {"status": WAIT, "recap": "waiting"}),
-        ]
-    )
-    mocker.patch.object(engine_mod, "make_provider", return_value=FakeProvider([asst]))
-    schedule_spy = mocker.patch.object(engine_mod, "_auto_schedule_wait_check")
-
-    session = Session()
-    await engine_mod._run_session(
-        [Trigger(description="t")],
-        model_ref="fake/fake-model",
-        session=session,
-    )
-
-    assert session.sentinel_status == WAIT
-    schedule_spy.assert_called_once()
+# ---------- run (outcome-contract wiring: retries, WAIT, budget) ----------
 
 
 @pytest.mark.asyncio
-async def test_run_session_wait_with_create_job_skips_auto_schedule(
-    mocker,
-) -> None:
-    _patch_session_deps(mocker)
+async def test_run_wait_without_create_job_auto_schedules(mocker) -> None:
+    # The follow-up now lives in the outcome contract; run() must feed it
+    # the session's created-job flag so a jobless WAIT gets the singleton.
+    upsert = mocker.patch("physiclaw.agent.engine.jobs.upsert_auto_wait_check")
 
-    async def _end(session: Session, args: dict):
-        session.sentinel_status = args["status"]
-        session.sentinel_recap = args.get("recap", "")
+    async def fake_session(triggers, *, model_ref, session: Session, settings=None):
+        session.sentinel_status = WAIT
+        session.sentinel_recap = "waiting"
+
+    mocker.patch.object(engine_mod, "_run_session", side_effect=fake_session)
+
+    await engine_mod.run([Trigger(description="t")], model_ref="x/y")
+
+    upsert.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_run_wait_with_create_job_skips_auto_schedule(mocker) -> None:
+    upsert = mocker.patch("physiclaw.agent.engine.jobs.upsert_auto_wait_check")
+
+    async def fake_session(triggers, *, model_ref, session: Session, settings=None):
+        session.sentinel_status = WAIT
+        session.sentinel_recap = "scheduled"
         session.sentinel_turn_created_job = True
-        return "ok"
 
-    custom = LocalTool(
-        "end_session",
-        "x",
-        {"type": "object", "additionalProperties": True},
-        _end,
-    )
-    registry = {**_registry(), "end_session": custom}
-    schemas = _schemas(registry)
-    mocker.patch.object(
-        builtin_tool_mod,
-        "build_registry",
-        return_value=registry,
-    )
-    mocker.patch.object(
-        builtin_tool_mod,
-        "schemas",
-        return_value=schemas,
-    )
+    mocker.patch.object(engine_mod, "_run_session", side_effect=fake_session)
 
-    asst = _asst(
-        tool_calls=[
-            _tc("note", {"summary": "x"}),
-            _tc("end_session", {"status": WAIT, "recap": "scheduled"}),
-        ]
-    )
-    mocker.patch.object(engine_mod, "make_provider", return_value=FakeProvider([asst]))
-    schedule_spy = mocker.patch.object(engine_mod, "_auto_schedule_wait_check")
+    await engine_mod.run([Trigger(description="t")], model_ref="x/y")
 
-    session = Session()
-    await engine_mod._run_session(
-        [Trigger(description="t")],
-        model_ref="fake/fake-model",
-        session=session,
-    )
-
-    schedule_spy.assert_not_called()
-
-
-# ---------- run (top-level retry on STUCK) ----------
+    upsert.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -1755,6 +1717,49 @@ async def test_run_setup_restart_fires_at_most_once(mocker) -> None:
     # 1 setup restart (uncounted) + then the guard blocks further restarts and
     # the DONE session ends the loop → 2 total.
     assert spy.call_count == 2
+
+
+# ---------- wall-clock budget ----------
+
+
+@pytest.mark.asyncio
+async def test_loop_closes_stuck_when_budget_exhausted() -> None:
+    # Deadline already in the past: the loop must close before any
+    # provider round-trip (FakeProvider([]) raises if chatted with).
+    # Every other _loop test runs with deadline=None, covering the
+    # disabled-budget path.
+    session = Session()
+    run = _mk_run(
+        FakeProvider([]),
+        settings=_settings(max_session_seconds=10),
+        deadline=time.monotonic() - 1,
+    )
+    messages: list = []
+
+    await engine_mod._loop(run, session, messages)
+
+    assert session.sentinel_status == STUCK
+    assert session.budget_exhausted is True
+    assert "budget" in session.sentinel_recap
+    assert messages == []  # no turn ran
+
+
+@pytest.mark.asyncio
+async def test_run_budget_exhausted_stuck_not_retried(mocker) -> None:
+    # Budget exhaustion is STUCK but retryable=False — a slow environment
+    # would burn every retry the same way, so one attempt only.
+    mocker.patch.object(engine_mod.CONFIG.engine, "max_attempts", 3)
+
+    async def fake_session(triggers, *, model_ref, session: Session, settings=None):
+        session.sentinel_status = STUCK
+        session.sentinel_recap = "wall-clock budget (10s) exhausted"
+        session.budget_exhausted = True
+
+    spy = mocker.patch.object(engine_mod, "_run_session", side_effect=fake_session)
+
+    await engine_mod.run([Trigger(description="t")], model_ref="x/y")
+
+    assert spy.call_count == 1
 
 
 # ---------- _dispatch: layout lint ----------

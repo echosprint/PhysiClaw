@@ -191,6 +191,42 @@ def upsert_auto_wait_check(at: dt.datetime) -> None:
         )
 
 
+def job_ids() -> set[str] | None:
+    """Ids currently in jobs.md, or None when the file won't parse (a
+    missing file parses as no jobs). Two of these snapshots feed
+    `created_since` — used by the claude path's WAIT-close detection,
+    which has no in-process created-a-job signal. jobs.md does persist
+    a `Create time` field, but it isn't surfaced on `Job`, and an
+    id-set diff needs no clock at all."""
+    try:
+        return {j.id for j in load_jobs()}
+    except Exception:
+        log.warning("jobs.md unreadable for job-id snapshot", exc_info=True)
+        return None
+
+
+def created_since(before: set[str] | None) -> bool:
+    """True when jobs.md gained a job since the `before` snapshot — e.g.
+    a WAIT close's own resume job, which suppresses the outcome
+    contract's generic follow-up. Unknown (either snapshot failed)
+    counts as NOT created: a redundant auto-scheduled check-in beats a
+    dead WAIT.
+
+    Known coarseness: ANY new id counts, so an unrelated job created in
+    the same wake (a reminder the user also asked for) suppresses the
+    follow-up for a jobless WAIT. An id diff can't tell the two apart;
+    accepted because the doctrine drills "pair a WAIT close with a
+    resume job", making the created-but-unrelated + jobless-WAIT combo
+    rare. Callers wanting tighter scope must snapshot closer to the
+    close (the claude path snapshots per attempt for this reason)."""
+    if before is None:
+        return False
+    after = job_ids()
+    if after is None:
+        return False
+    return bool(after - before)
+
+
 def get_job(id: str) -> Job:
     """Return the full Job for `id`. Raises ValueError on unknown id."""
     existing = {j.id: j for j in load_jobs()}

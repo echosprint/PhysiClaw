@@ -30,7 +30,6 @@ from physiclaw.agent.engine import (
     assemble,
     compact,
     curate,
-    jobs,
     memory,
     prompt,
     trajectory,
@@ -64,8 +63,9 @@ from physiclaw.agent.provider import (
     make_provider,
     mcp_blocks_to_content_blocks,
 )
+from physiclaw.agent.runtime import contract
 from physiclaw.agent.runtime.hook import Trigger
-from physiclaw.agent.runtime.sentinel import FAIL, STUCK, WAIT
+from physiclaw.agent.runtime.sentinel import FAIL, STUCK
 from physiclaw.common import verdict
 from physiclaw.common.config import CONFIG
 
@@ -89,6 +89,10 @@ class Settings:
     headroom. `max_session_attempts` is session-level STUCK retries;
     `provider_retry_attempts` is per-call transient-error retries — two
     different knobs, deliberately not shared.
+
+    `max_session_seconds` is the wall-clock counterpart of `max_turns`:
+    the turn cap can't bound time (one hung MCP call holds a turn for
+    minutes), so the loop also watches the clock. 0 disables.
     """
 
     max_turns: int
@@ -96,6 +100,7 @@ class Settings:
     provider_retry_attempts: int
     retry_backoff_seconds: float
     wait_default_minutes: int
+    max_session_seconds: int
 
     @classmethod
     def from_config(cls) -> "Settings":
@@ -106,6 +111,7 @@ class Settings:
             provider_retry_attempts=e.provider_retry_attempts,
             retry_backoff_seconds=e.retry_backoff_seconds,
             wait_default_minutes=e.wait_default_minutes,
+            max_session_seconds=e.max_session_seconds,
         )
 
 
@@ -125,25 +131,22 @@ class EngineRun:
     settings: Settings
     policies: Policies
     layout_incomplete: bool = False
+    # Wall-clock cutoff (time.monotonic() value) for this session, or None
+    # when `settings.max_session_seconds` is 0 — see `_loop`.
+    deadline: float | None = None
 
 
 async def run(triggers: list[Trigger], *, model_ref: str) -> None:
-    """Run an engine session for `triggers`, retrying on STUCK.
+    """Run engine sessions for `triggers` under the session-outcome contract.
 
-    STUCK happens when the loop hit max_turns without a clean close, the
-    provider exhausted its retries, or the session crashed. Up to
-    `max_session_attempts` fresh attempts run before we accept the STUCK
-    outcome. DONE / FAIL / IDLE / WAIT are final on first occurrence — no
-    retry.
-
-    One extra restart is allowed when a session completes first-run
-    screen-layout setup (`session.restart_for_setup`): the layout only
-    reaches the SYSTEM prompt on a fresh render, so we re-run the same
-    triggers once with the layout loaded to handle the original request.
-    It doesn't consume a STUCK attempt, and fires at most once (the layout
-    is complete from then on). This restart only helps when there's a real
-    request to resume — a synthetic first-run wake (source="first-run") has
-    none, so it ends instead and the layout loads on the next wake.
+    One attempt = one fresh `Session` through `_run_session` (which never
+    raises — crashes close STUCK). Everything above the attempt belongs to
+    `contract.drive`: STUCK retries up to `max_attempts` (STUCK here is
+    mostly harness-detected — max turns, provider exhausted, crash — so a
+    fresh session is worth it; DONE / FAIL / IDLE / WAIT are final), the
+    one-shot first-run setup restart, and the jobless-WAIT follow-up. A
+    session that exhausted its wall-clock budget reports `retryable=False`
+    — a slow environment would burn every retry the same way.
 
     `model_ref` is a `provider/model` string (e.g. `"qwen/qwen3.6-plus"`).
     Parsed inside `_run_session`; the provider is instantiated via
@@ -151,38 +154,30 @@ async def run(triggers: list[Trigger], *, model_ref: str) -> None:
     caller goes through the launcher, which resolves `PHYSICLAW_MODEL`.
     """
     settings = Settings.from_config()
-    setup_restart_used = False
-    attempt = 0
-    while attempt < settings.max_session_attempts:
-        attempt += 1
+
+    async def attempt(trigs: list[Trigger], n: int) -> contract.SessionOutcome:
         session = Session()
         await _run_session(
-            triggers,
+            trigs,
             model_ref=model_ref,
             session=session,
             settings=settings,
         )
-        if session.restart_for_setup and not setup_restart_used:
-            setup_restart_used = True
-            # Re-running is only useful when there's a real request to resume
-            # with the layout now loaded. A synthetic first-run wake
-            # (source="first-run") has no request, and the layout loads on the
-            # next wake anyway — restarting would just replay the stale "learn
-            # the layout" trigger and send the agent back into first-run setup.
-            if any(t.source != "first-run" for t in triggers):
-                attempt -= 1  # a setup restart isn't a STUCK retry
-                log.info("screen layout learned during setup — restarting to load it")
-                continue
-            log.info("screen layout learned on first-run wake — no request to resume")
-        if session.sentinel_status != STUCK:
-            break
-        if attempt < settings.max_session_attempts:
-            log.warning(
-                "session STUCK (attempt %d/%d): %r — retrying",
-                attempt,
-                settings.max_session_attempts,
-                session.sentinel_recap,
-            )
+        return contract.SessionOutcome(
+            status=session.sentinel_status,
+            recap=session.sentinel_recap,
+            created_job=session.sentinel_turn_created_job,
+            restart_requested=session.restart_for_setup,
+            retryable=not session.budget_exhausted,
+        )
+
+    await contract.drive(
+        attempt,
+        triggers,
+        max_attempts=settings.max_session_attempts,
+        wait_default_minutes=settings.wait_default_minutes,
+        retry_on=(STUCK,),
+    )
 
 
 async def _run_session(
@@ -280,6 +275,11 @@ async def _run_session(
             settings=settings,
             policies=default_policies(layout_incomplete=bundle.layout_incomplete),
             layout_incomplete=bundle.layout_incomplete,
+            deadline=(
+                time.monotonic() + settings.max_session_seconds
+                if settings.max_session_seconds > 0
+                else None
+            ),
         )
         tr.write({"event": "prefix_pinned", "hash": prompt_hash})
         await _loop(engine_run, session, messages)
@@ -294,12 +294,6 @@ async def _run_session(
         # added traps this session. Fail-open — never affects the outcome.
         if CONFIG.pitfalls.curate_enabled and session.added_pitfalls:
             await curate.curate(provider, tr=tr)
-        if session.sentinel_status == WAIT and not session.sentinel_turn_created_job:
-            log.warning(
-                "WAIT with no create_job — auto-scheduling %d-min follow-up",
-                settings.wait_default_minutes,
-            )
-            _auto_schedule_wait_check(tr, minutes=settings.wait_default_minutes)
 
         tr.write(
             {
@@ -327,27 +321,34 @@ async def _run_session(
             rlog.close()
 
 
-def _log_external_stop(session: Session, tr: Trace | None) -> None:
-    """Deterministic mid-task checkpoint on external stop (Ctrl-C, runtime
-    shutdown). The model gets no final turn, so the harness writes the
-    daily-log line the doctrine would have required — the auto-injected
-    recovery breadcrumb for the next wake. Sync file I/O only (this runs
-    on the cancellation path); best effort, never raises."""
+def _log_external_stop(
+    session: Session,
+    tr: Trace | None,
+    *,
+    cause: str = "stopped externally",
+    event: str | None = "stopped_externally",
+) -> None:
+    """Deterministic mid-task checkpoint when a session is cut short —
+    external stop (Ctrl-C, runtime shutdown) or the wall-clock budget.
+    The model gets no final turn, so the harness writes the daily-log
+    line the doctrine would have required — the auto-injected recovery
+    breadcrumb for the next wake. Sync file I/O only (this runs on the
+    cancellation path); best effort, never raises."""
     if session.sentinel_status is not None or not session.plan.is_drafted():
         return  # closed cleanly, or nothing recoverable yet
     try:
         step = session.plan.current_step() or "(none in_progress)"
         done, total = session.plan.progress()
         memory.append_log(
-            f"[{dt.datetime.now():%H:%M}] engine: stopped externally mid-task "
+            f"[{dt.datetime.now():%H:%M}] engine: {cause} mid-task "
             f"({done}/{total} steps done) — in-progress: "
             f"{step}. Verify app state before resuming."
         )
-        if tr is not None:
-            tr.write({"event": "stopped_externally"})
-        log.warning("external stop mid-task — recovery line logged")
+        if tr is not None and event:
+            tr.write({"event": event})
+        log.warning("%s mid-task — recovery line logged", cause)
     except Exception:
-        log.exception("external-stop log failed")
+        log.exception("mid-task recovery log failed")
 
 
 # ---------- core loop ----------
@@ -387,6 +388,9 @@ async def _loop(run: EngineRun, session: Session, messages: list[Message]) -> No
     """
     state = _LoopState()
     for turn in range(run.settings.max_turns):
+        if run.deadline is not None and time.monotonic() >= run.deadline:
+            _close_budget_exhausted(run, session, turn)
+            return
         request_messages, compaction_imminent = _prepare_request(
             run,
             session,
@@ -434,6 +438,25 @@ async def _loop(run: EngineRun, session: Session, messages: list[Message]) -> No
         log.warning("engine hit max turns (%d)", run.settings.max_turns)
         session.sentinel_status = STUCK
         session.sentinel_recap = f"max turns ({run.settings.max_turns}) reached"
+
+
+def _close_budget_exhausted(run: EngineRun, session: Session, turn: int) -> None:
+    """Close the session STUCK when the wall-clock budget runs out — the
+    time counterpart of the max-turns backstop. Writes the mid-task
+    recovery breadcrumb first (the guard needs the sentinel still unset),
+    and flags `budget_exhausted` so the outcome is not retried: a slow
+    environment would burn every retry the same way."""
+    budget = run.settings.max_session_seconds
+    log.warning(
+        "session wall-clock budget (%ds) exhausted at turn %d — closing STUCK",
+        budget,
+        turn + 1,
+    )
+    run.tr.write({"event": "budget_exhausted", "turn": turn, "budget_seconds": budget})
+    _log_external_stop(session, run.tr, cause="wall-clock budget exhausted", event=None)
+    session.budget_exhausted = True
+    session.sentinel_status = STUCK
+    session.sentinel_recap = f"wall-clock budget ({budget}s) exhausted"
 
 
 # ---------- per-turn phases ----------
@@ -1054,24 +1077,3 @@ def _corrective_for_bad_shape(called: list[str]) -> str:
         )
 
     raise AssertionError(f"unreachable: called={called!r}")
-
-
-def _auto_schedule_wait_check(tr: Trace, *, minutes: int) -> None:
-    """Schedule the singleton auto-WAIT-check job to fire in `minutes`.
-    Reuses one canonical job id across sessions (see
-    `jobs.upsert_auto_wait_check`) so jobs.md doesn't grow one entry per
-    WAIT close.
-    """
-    at = dt.datetime.now() + dt.timedelta(minutes=minutes)
-    try:
-        jobs.upsert_auto_wait_check(at)
-        tr.write(
-            {
-                "event": "wait_auto_scheduled",
-                "job_id": jobs.AUTO_WAIT_JOB_ID,
-                "at": at.isoformat(timespec="minutes"),
-            }
-        )
-    except Exception as e:
-        log.exception("failed to auto-schedule WAIT follow-up")
-        tr.write({"event": "wait_auto_schedule_failed", "error": str(e)})

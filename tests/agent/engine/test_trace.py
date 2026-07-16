@@ -232,14 +232,6 @@ def test_brief_content_multiple_blocks_joined_by_plus() -> None:
             {"event": "sentinel", "turn": 9, "name": "DONE", "recap": "task complete"},
             "SENTINEL DONE — task complete",
         ),
-        (
-            {"event": "wait_auto_scheduled", "job_id": "wait-check", "at": "10:00"},
-            "WAIT auto-scheduled: wait-check at 10:00",
-        ),
-        (
-            {"event": "wait_auto_schedule_failed", "error": "x"},
-            "WAIT auto-schedule failed: x",
-        ),
         ({"event": "done", "sentinel": "DONE", "recap": "ok"}, "OUTCOME: DONE — ok"),
         ({"event": "crashed"}, "CRASHED"),
         (

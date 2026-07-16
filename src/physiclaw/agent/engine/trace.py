@@ -629,10 +629,6 @@ def _summarize(event: dict[str, Any]) -> str | None:  # noqa: C901 — flat disp
         return f"{pfx}memory: {brief(event.get('text', ''), 200)}"
     if name == "sentinel":
         return f"{pfx}SENTINEL {event.get('name', '?')} — {event.get('recap', '')}"
-    if name == "wait_auto_scheduled":
-        return f"WAIT auto-scheduled: {event.get('job_id')} at {event.get('at')}"
-    if name == "wait_auto_schedule_failed":
-        return f"WAIT auto-schedule failed: {event.get('error', '?')}"
     if name == "done":
         return (
             f"OUTCOME: {event.get('sentinel') or '(none)'} — {event.get('recap', '')}"

@@ -96,6 +96,8 @@ def patch_environment(mocker, tmp_path: Path):
 
     mocker.patch.object(spawn_mod, "prepare_plugin_dir", side_effect=_prep)
     mocker.patch.object(spawn_mod.asyncio, "sleep")  # collapse RETRY_BACKOFF
+    # Keep the WAIT-close job detection off the developer's real jobs.md.
+    mocker.patch.object(spawn_mod.engine_jobs, "job_ids", return_value=set())
     return {"plugin": plugin, "log_dir": log_dir}
 
 
@@ -398,6 +400,127 @@ async def test_spawn_claude_kills_on_oversized_output_line(
 
     assert proc.killed is True
     assert any("stream buffer" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_spawn_claude_wait_without_job_schedules_followup(
+    mocker,
+    patch_environment,
+) -> None:
+    """A WAIT close with no session-created job gets the contract's
+    auto-scheduled follow-up — the doctrine's promise, previously
+    implemented only by the native engine."""
+    upsert = mocker.patch("physiclaw.agent.engine.jobs.upsert_auto_wait_check")
+    proc = _FakeProc(lines=_result_line(">> WAIT - awaiting user reply"))
+
+    async def _exec(*args, **kwargs):
+        return proc
+
+    mocker.patch.object(spawn_mod.asyncio, "create_subprocess_exec", side_effect=_exec)
+
+    await spawn_mod.spawn_claude([Trigger(description="t")], model_id="opus")
+
+    upsert.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_spawn_claude_wait_with_new_job_skips_followup(
+    mocker,
+    patch_environment,
+) -> None:
+    """jobs.md gained an id during the wake → the session scheduled its
+    own resume job; the generic follow-up must stay out of its way."""
+    upsert = mocker.patch("physiclaw.agent.engine.jobs.upsert_auto_wait_check")
+    # Before-snapshot empty; after-snapshot carries the new job.
+    mocker.patch.object(
+        spawn_mod.engine_jobs,
+        "job_ids",
+        side_effect=[set(), {"user-latte-2026-07-16"}],
+    )
+    proc = _FakeProc(lines=_result_line(">> WAIT - resume job created"))
+
+    async def _exec(*args, **kwargs):
+        return proc
+
+    mocker.patch.object(spawn_mod.asyncio, "create_subprocess_exec", side_effect=_exec)
+
+    await spawn_mod.spawn_claude([Trigger(description="t")], model_id="opus")
+
+    upsert.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_spawn_claude_wait_followup_ignores_earlier_attempt_jobs(
+    mocker,
+    patch_environment,
+) -> None:
+    """The before-snapshot is per attempt: a job written during a killed
+    UNDONE attempt must not suppress the follow-up when the retry closes
+    WAIT without its own resume job."""
+    upsert = mocker.patch("physiclaw.agent.engine.jobs.upsert_auto_wait_check")
+    mocker.patch.object(spawn_mod, "MAX_ATTEMPTS", 2)
+    # attempt 1 before: empty; a job lands during attempt 1, which dies
+    # UNDONE (no after-read). attempt 2 before AND after both see it →
+    # no diff → the WAIT close still gets the generic follow-up.
+    mocker.patch.object(
+        spawn_mod.engine_jobs,
+        "job_ids",
+        side_effect=[set(), {"leftover-a1"}, {"leftover-a1"}],
+    )
+    procs = iter(
+        [
+            _FakeProc(lines=[b"\n", b""]),  # UNDONE
+            _FakeProc(lines=_result_line(">> WAIT - awaiting reply")),
+        ]
+    )
+
+    async def _exec(*args, **kwargs):
+        return next(procs)
+
+    mocker.patch.object(spawn_mod.asyncio, "create_subprocess_exec", side_effect=_exec)
+
+    await spawn_mod.spawn_claude([Trigger(description="t")], model_id="opus")
+
+    upsert.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_spawn_claude_done_never_schedules_followup(
+    mocker,
+    patch_environment,
+) -> None:
+    upsert = mocker.patch("physiclaw.agent.engine.jobs.upsert_auto_wait_check")
+    proc = _FakeProc(lines=_result_line(">> DONE - ok"))
+
+    async def _exec(*args, **kwargs):
+        return proc
+
+    mocker.patch.object(spawn_mod.asyncio, "create_subprocess_exec", side_effect=_exec)
+
+    await spawn_mod.spawn_claude([Trigger(description="t")], model_id="opus")
+
+    upsert.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_spawn_claude_stuck_is_final_no_retry(
+    mocker,
+    patch_environment,
+) -> None:
+    """A model-declared STUCK is a considered close on this path — it must
+    not be re-spawned (only UNDONE retries)."""
+    mocker.patch.object(spawn_mod, "MAX_ATTEMPTS", 3)
+    procs = iter([_FakeProc(lines=_result_line(">> STUCK - captcha wall"))])
+
+    async def _exec(*args, **kwargs):
+        return next(procs)  # a second attempt would exhaust the iterator
+
+    mocker.patch.object(spawn_mod.asyncio, "create_subprocess_exec", side_effect=_exec)
+    spawn_spy = mocker.spy(spawn_mod, "prepare_plugin_dir")
+
+    await spawn_mod.spawn_claude([Trigger(description="t")], model_id="opus")
+
+    spawn_spy.assert_called_once()
 
 
 @pytest.mark.asyncio

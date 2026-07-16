@@ -129,6 +129,11 @@ class VisionConfig:
 @dataclass
 class EngineConfig:
     max_turns: int = 300
+    # Wall-clock backstop for one engine session (seconds; 0 disables). The
+    # turn cap above can't bound time — one hung MCP call holds a turn for
+    # minutes — so the loop also watches the clock. Exhaustion closes STUCK
+    # and is not retried (a slow environment would burn every retry too).
+    max_session_seconds: int = 3600
     # Session-level STUCK retries (engine.run): fresh session attempts after
     # a session ends STUCK. Distinct from `provider_retry_attempts` below.
     max_attempts: int = 3

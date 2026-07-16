@@ -74,6 +74,7 @@ def test_config_error_is_value_error_subclass() -> None:
         ("auto_pick", "bridge_settle_seconds", 1.5),
         # EngineConfig
         ("engine", "max_turns", 300),
+        ("engine", "max_session_seconds", 3600),
         ("engine", "max_attempts", 3),
         ("engine", "retry_backoff_seconds", 5.0),
         ("engine", "wait_default_minutes", 15),
