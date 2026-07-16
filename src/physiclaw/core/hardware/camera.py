@@ -153,8 +153,9 @@ class Camera:
 
     A background daemon thread continuously calls ``cap.read()`` so the
     macOS AVFoundation pipeline never goes idle (cv2 stalls indefinitely
-    on the next read after tens of seconds of inactivity — see opencv
-    issue #24393). Callers get the latest frame via ``peek()`` /
+    on the next read after tens of seconds of inactivity — reproduced on
+    the bench rig; no matching issue exists on OpenCV's tracker).
+    Callers get the latest frame via ``peek()`` /
     ``snapshot()`` / ``_fresh_frame()`` without blocking on cv2.
 
     Holds the software rotation code applied to raw frames. Default is
