@@ -42,8 +42,18 @@ jobs:
       - name: Sync dependencies
         run: uv sync --group dev
 
+      # Mirrors `make lint`: ruff check on the packaged code, format check
+      # everywhere (hardware/ is style-star-import CAD code, format-only).
       - name: Lint
-        run: uv run ruff check src/ tests/
+        run: |
+          uv run ruff check src/ tests/
+          uv run ruff format --check src/ tests/ hardware/ scripts/
+
+      # Static cross-artifact consistency for the CAD pipeline (procedure
+      # stems / patches / manual figures / sourcing ids) — stdlib-only, no
+      # cad dependency group needed.
+      - name: Hardware consistency check
+        run: uv run python -m hardware check
 
       # Bare --cov: source + branch come from [tool.coverage.run] in
       # pyproject, keeping one source of truth.

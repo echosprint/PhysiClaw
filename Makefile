@@ -1,5 +1,5 @@
 .PHONY: test test-cov test-fast test-slow test-integration test-all mutate lint fmt help bump build publish release \
-        hw-help hw-parts hw-build hw-step hw-print hw-manual hw-manual-pdf hw-sourcing hw-mark hw-replay hw-camera hw-rebuild hw-release
+        hw-help hw-parts hw-build hw-check hw-step hw-print hw-manual hw-manual-pdf hw-sourcing hw-mark hw-replay hw-camera hw-rebuild hw-release
 
 PY ?= uv run
 
@@ -48,6 +48,7 @@ help:
 	@echo "  hw-help                 — list the hardware CLI subcommands"
 	@echo "  hw-parts                — export part STEPs"
 	@echo "  hw-build [ARGS=--bom]   — build assembly steps (STEP + SVG)"
+	@echo "  hw-check                — static consistency check (stems/patches/manual/sourcing)"
 	@echo "  hw-step ARGS=<stem>     — build one step (= build --bom --stems)"
 	@echo "  hw-print                — 3D-print package (zip)"
 	@echo "  hw-manual [ARGS=--pdf]  — bilingual build manual"
@@ -194,6 +195,11 @@ hw-parts:
 
 hw-build:
 	$(HW) build $(ARGS)
+
+# Static cross-artifact consistency check (stems / patches / manual /
+# sourcing) — stdlib-only, no cad group, also run in CI.
+hw-check:
+	$(HW_DOC) check
 
 hw-step:
 	$(call need-args,<procedure_stem>)
