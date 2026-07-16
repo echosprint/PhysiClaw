@@ -43,7 +43,10 @@ All generated files land under `output/` and are not committed.
 
 ```text
 hardware/
-├── __main__.py            Export part STEPs (entry point: python -m hardware)
+├── __main__.py            Unified CLI front door (python -m hardware <subcommand>)
+├── scheme.py              Shared naming scheme: output dirs, stem convention,
+│                          variant/filename builders + their matching regexes
+├── check.py               Static cross-artifact consistency check (CI gate)
 │
 ├── parts/                 Parametric part definitions
 │   ├── base.py            BasePart: build/export, geometry cache, BOM registry
@@ -67,6 +70,9 @@ hardware/
 ├── manual/                Bilingual (EN/ZH) assembly manual + sourcing guide
 │   ├── build_manual.py        content/*.json + SVGs → HTML / PDF
 │   ├── build_sourcing_guide.py  manual BOM + vendor data → HTML
+│   ├── assets.py / common.py / paginate.py / pdf.py   Support modules (asset
+│   │                          strategies, shared helpers, page numbering +
+│   │                          BOM splits, headless-Chrome PDF)
 │   ├── content/           13 ordered JSON sections (front + 11 chapters + back)
 │   └── sourcing_vendors.json   Supplier data, keyed to BOM rows
 │
@@ -144,6 +150,7 @@ The subcommands — each forwarding its flags to the stage it wraps:
 |---|---|
 | `parts` | export part STEPs → `output/step/` |
 | `build` | build assembly steps (STEP + SVG; `--bom` adds the BOM) |
+| `check` | static consistency check — stems, patches, manual figures, sourcing ids |
 | `step <stem>` | build one step via `build --bom --stems` (both variants) |
 | `print` | 3D-print package → `output/print_3d/*.zip` |
 | `manual` | bilingual HTML / PDF manual → `output/manual/` |
@@ -151,8 +158,8 @@ The subcommands — each forwarding its flags to the stage it wraps:
 | `mark` / `replay` | annotate step SVGs / replay saved patches |
 | `camera` | FreeCAD camera view → `Camera()` literal |
 
-Geometry subcommands need `--group cad`; `manual` and `sourcing` are
-standard-library only. Each stage module is also runnable on its own (e.g.
+Geometry subcommands need `--group cad`; `check`, `manual`, and `sourcing`
+are standard-library only. Each stage module is also runnable on its own (e.g.
 `uv run --group cad python -m hardware.parts.custom.solenoid_mount`).
 
 `build` is incremental: each step's outputs are cached under
@@ -169,6 +176,7 @@ target (flags via `ARGS`):
 ```bash
 make hw-parts                     # export part STEPs
 make hw-build ARGS="--bom"        # build steps + cumulative BOM
+make hw-check                     # static consistency check (also run in CI)
 make hw-step ARGS=belt_20_clamp   # build one step (= build --bom --stems)
 make hw-print                     # 3D-print package (zip)
 make hw-manual                    # build the assembly manual (HTML)
@@ -200,22 +208,22 @@ uv run            python -m hardware sourcing                    # the sourcing 
 
 ## Cutting a release
 
-Each `physiclaw-hardware-vX.Y` release bundles four zips, assembled by hand
-from a freshly regenerated `output/`:
+Each `physiclaw-hardware-vX.Y` release bundles four zips packaged from a
+freshly regenerated `output/`:
 
-1. **Regenerate everything** so the artifacts are current.
+- **Assembly manual** — the whole `manual/` folder (HTML + PDF in English
+  and 中文, plus the step figures).
+- **Sourcing guide** — the `sourcing/` folder (HTML in English and 中文).
+- **Camera frame** — just the assembled camera-frame STEP file, on its own.
+- **Custom parts** — the print package from `output/print_3d/`.
 
-2. **Zip the four assets** from `output/`, keeping the same internal layout as
-   the previous release:
-   - **Assembly manual** (`make hw-manual-pdf`) — the whole `manual/` folder
-     (HTML + PDF in English and 中文, plus the step figures).
-   - **Sourcing guide** (`make hw-sourcing`) — the `sourcing/` folder (HTML in
-     English and 中文).
-   - **Camera frame** (`make hw-build`) — just the assembled camera-frame STEP
-     file, on its own.
-   - **Custom parts** (`make hw-print`) — the print package already produced in
-     `output/print_3d/`.
+Regenerate the artifacts (`make hw-rebuild`, plus `make hw-manual-pdf` for
+the PDFs), then:
 
-3. **Publish** the release on GitHub with those four zips attached and a short
-   changelog. The tag points at the tip of `main`, so make sure your source
-   changes are committed and pushed first.
+```bash
+make hw-release HW_VERSION=X.Y
+```
+
+This packages the four zips from `output/` and publishes the GitHub release
+(via `gh`) with tag `physiclaw-hardware-vX.Y`. The tag points at the tip of
+`main`, so make sure your source changes are committed and pushed first.

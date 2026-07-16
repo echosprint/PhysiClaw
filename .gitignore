@@ -41,7 +41,6 @@ htmlcov/
 
 # FreeCAD generated artifacts (sources live under hardware/parts/)
 hardware/output/
-hardware/custom/
 *.FCStd
 *.FCStd1
 *.FCBak
