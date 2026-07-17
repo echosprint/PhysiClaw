@@ -1,7 +1,7 @@
 """Unit tests for `physiclaw.agent.engine.policy` — the policy objects in
 isolation. Their loop-visible behavior (rejection mechanics, blocked
-ToolResults, appended advisories) is covered through `test_engine_loop.py`;
-this file owns the judgment edges that don't need a loop.
+ToolResults, appended advisories) is covered through `test_loop.py` and
+`test_dispatch.py`; this file owns the judgment edges that don't need a loop.
 """
 
 from __future__ import annotations
@@ -9,6 +9,7 @@ from __future__ import annotations
 from physiclaw.agent.engine import policy as policy_mod
 from physiclaw.agent.engine.dto import AssistantMessage, FinishReason, ToolCall, Usage
 from physiclaw.agent.engine.session import Session
+from physiclaw.common.config import CONFIG
 
 
 def _asst(tool_calls: list[ToolCall]) -> AssistantMessage:
@@ -336,3 +337,29 @@ def test_keyboard_belief_success_routes_to_tracker(mocker) -> None:
     )
 
     spy.assert_called_once_with("tap", {"bbox": [0.1, 0.1, 0.2, 0.2]}, True)
+
+
+# ---------- plan gate: the overdue predicate ----------
+
+
+def test_plan_gate_overdue_predicate() -> None:
+    # The gate arms only when: past the threshold turn AND the plan is
+    # still undrafted AND not in first-run setup.
+    n = CONFIG.engine.plan_required_after
+    gate = policy_mod.PlanGate(layout_incomplete=False, required_after=n)
+    setup_gate = policy_mod.PlanGate(layout_incomplete=True, required_after=n)
+
+    fresh = Session()
+    assert gate.overdue(fresh, n)
+    assert not gate.overdue(fresh, n - 1)
+    assert not setup_gate.overdue(fresh, n)
+
+    drafted = Session()
+    drafted.plan.update(user_said="buy yogurt")
+    assert not gate.overdue(drafted, n)
+
+    steps_only = Session()
+    steps_only.plan.update(
+        steps=[{"content": "reply to user", "status": "in_progress"}]
+    )
+    assert not gate.overdue(steps_only, n)

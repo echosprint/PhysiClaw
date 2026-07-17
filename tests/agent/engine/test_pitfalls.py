@@ -12,6 +12,8 @@ import json
 import pytest
 
 from physiclaw.agent.engine import pitfalls
+from physiclaw.agent.engine.session import Session
+from physiclaw.agent.runtime.sentinel import DONE, FAIL, IDLE, STUCK, WAIT
 from physiclaw.common import config, paths
 
 
@@ -111,3 +113,31 @@ def test_render_section_has_header_doctrine_and_items() -> None:
     assert out.startswith("## Learned pitfalls")
     assert "don't repeat" in out
     assert "- 京东: avoid Ai搜索" in out
+
+
+# ---------- should_capture (the pre-close gate's predicate) ----------
+
+
+def test_should_capture_matrix() -> None:
+    floor = config.CONFIG.pitfalls.capture_turn_floor
+    s = Session()
+    assert pitfalls.should_capture(IDLE, 999, s)[0] is False
+    assert pitfalls.should_capture(WAIT, 999, s)[0] is False
+    # STUCK / FAIL never capture, however long.
+    assert pitfalls.should_capture(STUCK, floor + 5, s)[0] is False
+    assert pitfalls.should_capture(FAIL, floor + 5, s)[0] is False
+    # DONE captures only past the turn floor.
+    assert pitfalls.should_capture(DONE, floor - 1, s)[0] is False  # short DONE
+    do, seed = pitfalls.should_capture(DONE, floor, s)  # long DONE
+    assert do is True
+    assert f"{floor} turns" in seed and "DONE" in seed
+    # stuck_events only enriches the seed, doesn't gate.
+    looped = Session()
+    looped.stuck_events = 2
+    assert "2×" in pitfalls.should_capture(DONE, floor, looped)[1]
+
+
+def test_should_capture_disabled(monkeypatch) -> None:
+    monkeypatch.setattr(config.CONFIG.pitfalls, "capture_enabled", False)
+    # Long DONE, but capture is off.
+    assert pitfalls.should_capture(DONE, 999, Session())[0] is False

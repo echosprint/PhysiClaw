@@ -86,7 +86,7 @@ class _CaptureProvider:
     """Records the turn-0 request, then ends the session on the first turn."""
 
     PROVIDER_ID = "fake"
-    # Collapse knobs read by _loop each turn (provider contract).
+    # Collapse knobs read by `loop.drive` each turn (provider contract).
     COLLAPSE_FIRST_AT_TURN = 100
     COLLAPSE_INTERVAL_TURNS = 100
     KEEP_RECENT_TURNS = 10

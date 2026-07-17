@@ -871,7 +871,7 @@ def _view_result(tcid: str, text: str) -> ToolResultMessage:
 
 
 def test_drop_stale_screens_engine_loop_invariant() -> None:
-    """Simulate _loop: append a view-bearing turn, run drop_stale_screens
+    """Simulate `loop.drive`: append a view-bearing turn, run drop_stale_screens
     after every turn (as the engine does). Invariant at every point:
     exactly ONE image in history; every earlier view is a superseded
     string stub; no stub ever regains an image."""

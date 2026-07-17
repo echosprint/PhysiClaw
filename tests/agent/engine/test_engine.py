@@ -1,326 +1,373 @@
-"""Tests for `physiclaw.agent.engine.engine` — focused on testable
-helpers. The full `run()` loop is integration-tested separately
-(`test_engine_loop.py`); here we cover the pure units:
-`_chat_with_retry`, `_log_usage`, `_corrective_for_bad_shape`,
-`assemble.format_triggers`.
-"""
+"""Tests for `physiclaw.agent.engine.engine` — the session lifecycle:
+`_run_session` (wiring, teardown, crash handling) and `run` (the
+outcome-contract driver: STUCK retries, WAIT follow-up, setup restart,
+budget). The turn driver's tests live in `test_loop.py`; tool-call
+execution in `test_dispatch.py`."""
 
 from __future__ import annotations
 
+import asyncio
+from unittest.mock import MagicMock
+
 import pytest
-from freezegun import freeze_time
+from engine_fakes import (
+    FakeMcpClient,
+    FakeProvider,
+    _asst,
+    _registry,
+    _schemas,
+    _tc,
+    patch_loop_tails,
+)
 
+from physiclaw.agent.engine import (
+    builtin_tool as builtin_tool_mod,
+)
+from physiclaw.agent.engine import (
+    compact as compact_mod,
+)
 from physiclaw.agent.engine import engine as engine_mod
-from physiclaw.agent.engine.assemble import format_triggers
-from physiclaw.agent.engine.dto import (
-    AssistantMessage,
-    FinishReason,
-    Usage,
+from physiclaw.agent.engine import (
+    jobs as jobs_mod,
 )
-from physiclaw.agent.engine.engine import (
-    _chat_with_retry,
-    _corrective_for_bad_shape,
-    _log_usage,
+from physiclaw.agent.engine import (
+    memory as memory_mod,
 )
+from physiclaw.agent.engine import (
+    prompt as prompt_mod,
+)
+from physiclaw.agent.engine import (
+    skill as skill_mod,
+)
+from physiclaw.agent.engine.dto import UserMessage
 from physiclaw.agent.engine.session import Session
-from physiclaw.agent.engine.trace import Trace
-from physiclaw.agent.provider.provider_base import ProviderTransientError
 from physiclaw.agent.runtime.hook import Trigger
+from physiclaw.agent.runtime.sentinel import DONE, IDLE, STUCK, WAIT
 
-# ---------- _chat_with_retry ----------
+# ---------- _run_session ----------
+
+
+def _async_returning(value):
+    async def _coro(*a, **kw):
+        return value
+
+    return _coro
+
+
+def _patch_session_deps(mocker):
+    """Stub everything _run_session pulls beyond the loop."""
+    mocker.patch(
+        "physiclaw.common.config.parse_model_ref", return_value=("fake", "fake-model")
+    )
+    mocker.patch.object(
+        engine_mod, "get_mcp", side_effect=_async_returning(FakeMcpClient())
+    )
+    mocker.patch.object(
+        engine_mod, "list_tools_cached", side_effect=_async_returning([])
+    )
+    mocker.patch.object(skill_mod, "discover_builtin_skills", return_value={})
+    mocker.patch.object(skill_mod, "discover_user_skills", return_value={})
+    mocker.patch.object(
+        builtin_tool_mod,
+        "build_registry",
+        return_value=_registry(),
+    )
+    mocker.patch.object(
+        builtin_tool_mod,
+        "schemas",
+        return_value=_schemas(_registry()),
+    )
+    mocker.patch.object(memory_mod, "load_persistent", return_value="")
+    mocker.patch.object(skill_mod, "render_builtin", return_value="")
+    mocker.patch.object(skill_mod, "render_section", return_value="")
+    mocker.patch.object(prompt_mod, "render_system_prompts", return_value="SYSTEM")
+    mocker.patch.object(prompt_mod, "prefix_hash", return_value="hashX")
+    mocker.patch.object(
+        compact_mod,
+        "new_summary_placeholder",
+        return_value=UserMessage(content="<sum>"),
+    )
+    mocker.patch.object(
+        compact_mod, "new_memory_placeholder", return_value=UserMessage(content="<mem>")
+    )
+    mocker.patch.object(
+        compact_mod, "new_skills_placeholder", return_value=UserMessage(content="<skl>")
+    )
+    patch_loop_tails(mocker)
+    mocker.patch.object(jobs_mod, "format_fired", return_value="")
+
+    fake_tr = MagicMock()
+    fake_rlog = MagicMock()
+    mocker.patch.object(engine_mod, "Trace", return_value=fake_tr)
+    mocker.patch.object(engine_mod, "RawLog", return_value=fake_rlog)
+    return {"tr": fake_tr, "rlog": fake_rlog}
 
 
 @pytest.mark.asyncio
-async def test_chat_with_retry_returns_immediately_on_success(mocker) -> None:
-    provider = mocker.MagicMock()
-    asst = AssistantMessage(
-        content="ok", tool_calls=[], finish_reason=FinishReason.STOP
+async def test_run_session_closes_provider_in_finally(mocker) -> None:
+    deps = _patch_session_deps(mocker)
+    asst = _asst(
+        tool_calls=[
+            _tc("note", {"summary": "x"}),
+            _tc("end_session", {"status": DONE, "recap": "fin"}),
+        ]
     )
-    provider.chat = mocker.AsyncMock(return_value=asst)
+    fake_provider = FakeProvider([asst])
+    mocker.patch.object(engine_mod, "make_provider", return_value=fake_provider)
 
-    out = await _chat_with_retry(provider, [], [], attempts=3, backoff=0.0)
+    session = Session()
+    await engine_mod._run_session(
+        [Trigger(description="t")],
+        model_ref="fake/fake-model",
+        session=session,
+    )
 
-    assert out is asst
-    assert provider.chat.await_count == 1
+    assert session.sentinel_status == DONE
+    assert fake_provider.closed is True
+    deps["tr"].close.assert_called_once()
+    deps["rlog"].close.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_chat_with_retry_retries_then_succeeds(mocker) -> None:
-    mocker.patch("asyncio.sleep")
-    provider = mocker.MagicMock()
-    asst = AssistantMessage(
-        content="ok", tool_calls=[], finish_reason=FinishReason.STOP
-    )
-    provider.chat = mocker.AsyncMock(
-        side_effect=[ProviderTransientError("transient"), asst]
+async def test_run_session_crash_marks_stuck(mocker) -> None:
+    _patch_session_deps(mocker)
+    mocker.patch.object(
+        engine_mod,
+        "make_provider",
+        side_effect=RuntimeError("bad provider"),
     )
 
-    out = await _chat_with_retry(provider, [], [], attempts=3, backoff=0.0)
+    session = Session()
+    await engine_mod._run_session(
+        [Trigger(description="t")],
+        model_ref="fake/fake-model",
+        session=session,
+    )
 
-    assert out is asst
-    assert provider.chat.await_count == 2
+    assert session.sentinel_status == STUCK
+    assert "session crashed" in session.sentinel_recap
 
 
 @pytest.mark.asyncio
-async def test_chat_with_retry_raises_runtime_after_max_attempts(mocker) -> None:
-    mocker.patch("asyncio.sleep")
-    provider = mocker.MagicMock()
-    provider.chat = mocker.AsyncMock(side_effect=ProviderTransientError("nope"))
-
-    with pytest.raises(RuntimeError, match=r"^provider failed after 2 attempts:"):
-        await _chat_with_retry(provider, [], [], attempts=2, backoff=0.0)
-
-
-@pytest.mark.asyncio
-async def test_chat_with_retry_does_not_catch_permanent_errors(mocker) -> None:
-    provider = mocker.MagicMock()
-    provider.chat = mocker.AsyncMock(side_effect=RuntimeError("permanent"))
-
-    with pytest.raises(RuntimeError, match=r"^permanent$"):
-        await _chat_with_retry(provider, [], [], attempts=3, backoff=0.0)
-
-
-# ---------- _log_usage ----------
-
-
-@pytest.fixture
-def trace_stub(mocker):
-    t = mocker.MagicMock(spec=Trace)
-    return t
-
-
-def test_log_usage_returns_empty_string_when_no_usage_data(
-    trace_stub,
-) -> None:
-    asst = AssistantMessage(
-        content="x",
-        tool_calls=[],
-        finish_reason=FinishReason.STOP,
-        usage=Usage(),
+async def test_run_session_cancellation_propagates(mocker) -> None:
+    _patch_session_deps(mocker)
+    mocker.patch.object(
+        engine_mod,
+        "make_provider",
+        side_effect=asyncio.CancelledError,
     )
 
-    out = _log_usage(turn=1, asst=asst, tr=trace_stub)
-
-    assert out == ""
-    trace_stub.write.assert_called_once()
-
-
-def test_log_usage_emits_cache_event_with_derived_new_count(
-    trace_stub,
-) -> None:
-    asst = AssistantMessage(
-        content="x",
-        tool_calls=[],
-        finish_reason=FinishReason.STOP,
-        usage=Usage(prompt_tokens=200, cached_tokens=120, cache_creation_tokens=30),
-    )
-
-    _log_usage(turn=5, asst=asst, tr=trace_stub)
-
-    trace_stub.write.assert_called_once()
-    payload = trace_stub.write.call_args.args[0]
-    assert payload["event"] == "cache"
-    assert payload["turn"] == 5
-    assert payload["hit"] == 120
-    assert payload["create"] == 30
-    # new = total - cached - created = 200 - 120 - 30 = 50
-    assert payload["new"] == 50
-    assert payload["total"] == 200
-
-
-def test_log_usage_returns_token_summary_with_cache_pct(trace_stub) -> None:
-    asst = AssistantMessage(
-        content="",
-        tool_calls=[],
-        finish_reason=FinishReason.STOP,
-        usage=Usage(prompt_tokens=10000, cached_tokens=5000, cache_creation_tokens=0),
-    )
-
-    out = _log_usage(turn=1, asst=asst, tr=trace_stub)
-
-    assert out == "token: 10.0k, cache: 50%"
-
-
-def test_log_usage_clamps_new_at_zero_when_cached_exceeds_total(
-    trace_stub,
-) -> None:
-    # Defensive: if a provider reports cached > total (shouldn't happen
-    # but...), `new` floors at 0.
-    asst = AssistantMessage(
-        content="",
-        tool_calls=[],
-        finish_reason=FinishReason.STOP,
-        usage=Usage(prompt_tokens=100, cached_tokens=200, cache_creation_tokens=0),
-    )
-
-    _log_usage(turn=1, asst=asst, tr=trace_stub)
-
-    payload = trace_stub.write.call_args.args[0]
-    assert payload["new"] == 0
-
-
-# ---------- _corrective_for_bad_shape ----------
-
-
-def test_corrective_for_action_without_note() -> None:
-    out = _corrective_for_bad_shape(["peek"])
-
-    assert "called `peek` without `note`" in out
-    assert "[note(summary=...), peek(...)]" in out
-
-
-def test_corrective_for_action_without_note_with_extras() -> None:
-    out = _corrective_for_bad_shape(["peek", "tap"])
-
-    assert "without `note`" in out
-    assert "too many action tools" in out
-    assert "['tap']" in out
-
-
-def test_corrective_for_note_alone() -> None:
-    out = _corrective_for_bad_shape(["note"])
-
-    assert "`note` alone with no action tool" in out
-    assert "peek()" in out  # default suggestion
-
-
-def test_corrective_for_note_with_too_many_actions() -> None:
-    out = _corrective_for_bad_shape(["note", "peek", "tap"])
-
-    assert "`note` plus 2 action tools" in out
-
-
-def test_corrective_for_multiple_notes() -> None:
-    out = _corrective_for_bad_shape(["note", "note"])
-
-    assert "called `note` 2 times" in out
-
-
-def test_corrective_for_three_notes() -> None:
-    out = _corrective_for_bad_shape(["note", "note", "note"])
-
-    assert "called `note` 3 times" in out
-
-
-# ---------- assemble.format_triggers ----------
-
-
-def test_format_triggers_includes_now_and_each_trigger() -> None:
-    triggers = [
-        Trigger(description="phone IM arrived", source="phone"),
-        Trigger(description="cron fired", source="cron:user-greet"),
-    ]
-
-    with freeze_time("2026-04-28T14:30:00"):
-        out = format_triggers(triggers)
-
-    assert out.startswith("Now: 2026-04-28")
-    assert "[Current wake — act on this]" in out
-    assert "phone: phone IM arrived" in out
-    assert "cron:user-greet: cron fired" in out
-
-
-def test_format_triggers_uses_manual_for_empty_source() -> None:
-    triggers = [Trigger(description="user typed", source="")]
-
-    with freeze_time("2026-04-28T14:30:00"):
-        out = format_triggers(triggers)
-
-    assert "manual: user typed" in out
-
-
-def test_format_triggers_appends_cron_context_when_provided() -> None:
-    triggers = [Trigger(description="x", source="phone")]
-
-    with freeze_time("2026-04-28T14:30:00"):
-        out = format_triggers(
-            triggers, cron_ctx="## Scheduled jobs firing now\n\n### foo"
+    with pytest.raises(asyncio.CancelledError):
+        await engine_mod._run_session(
+            [Trigger(description="t")],
+            model_ref="fake/fake-model",
+            session=Session(),
         )
 
-    assert out.endswith("### foo")
 
-
-def test_format_triggers_omits_cron_section_when_blank() -> None:
-    out = format_triggers([Trigger(description="x", source="phone")])
-
-    assert "Scheduled jobs" not in out
-
-
-def test_log_usage_emits_output_tokens_for_the_session_summary(
-    trace_stub,
-) -> None:
-    # The session summary sums `cache.out` into usage.output_tokens.
-    asst = AssistantMessage(
-        content="",
-        tool_calls=[],
-        finish_reason=FinishReason.STOP,
-        usage=Usage(
-            prompt_tokens=100,
-            cached_tokens=0,
-            cache_creation_tokens=0,
-            completion_tokens=77,
-        ),
-    )
-
-    engine_mod._log_usage(turn=1, asst=asst, tr=trace_stub)
-
-    payload = trace_stub.write.call_args.args[0]
-    assert payload["out"] == 77
-
-
-def _settings(**over) -> engine_mod.Settings:
-    base = dict(
-        max_turns=300,
-        max_session_attempts=3,
-        provider_retry_attempts=3,
-        retry_backoff_seconds=0.0,
-        wait_default_minutes=15,
-        max_session_seconds=0,
-    )
-    base.update(over)
-    return engine_mod.Settings(**base)
+# ---------- run (outcome-contract wiring: retries, WAIT, budget) ----------
 
 
 @pytest.mark.asyncio
-async def test_call_provider_response_event_carries_elapsed_ms(
-    mocker,
-    trace_stub,
-) -> None:
-    # The session summary sums `response.elapsed_ms` into provider_time_ms.
-    from physiclaw.agent.engine.policy import default_policies
+async def test_run_wait_without_create_job_auto_schedules(mocker) -> None:
+    # The follow-up now lives in the outcome contract; run() must feed it
+    # the session's created-job flag so a jobless WAIT gets the singleton.
+    upsert = mocker.patch("physiclaw.agent.engine.jobs.upsert_auto_wait_check")
 
-    asst = AssistantMessage(
-        content="",
-        tool_calls=[],
-        finish_reason=FinishReason.STOP,
-        usage=Usage(),
-    )
-    provider = mocker.MagicMock()
-    provider.chat = mocker.AsyncMock(return_value=asst)
-    rlog = mocker.MagicMock()
-    run = engine_mod.EngineRun(
-        provider=provider,
-        mcp=mocker.MagicMock(),
-        tool_schemas=[],
-        schema_by_name={},
-        local_registry={},
-        tr=trace_stub,
-        rlog=rlog,
-        settings=_settings(),
-        policies=default_policies(layout_incomplete=False),
+    async def fake_session(triggers, *, model_ref, session: Session, settings=None):
+        session.sentinel_status = WAIT
+        session.sentinel_recap = "waiting"
+
+    mocker.patch.object(engine_mod, "_run_session", side_effect=fake_session)
+
+    await engine_mod.run([Trigger(description="t")], model_ref="x/y")
+
+    upsert.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_run_wait_with_create_job_skips_auto_schedule(mocker) -> None:
+    upsert = mocker.patch("physiclaw.agent.engine.jobs.upsert_auto_wait_check")
+
+    async def fake_session(triggers, *, model_ref, session: Session, settings=None):
+        session.sentinel_status = WAIT
+        session.sentinel_recap = "scheduled"
+        session.sentinel_turn_created_job = True
+
+    mocker.patch.object(engine_mod, "_run_session", side_effect=fake_session)
+
+    await engine_mod.run([Trigger(description="t")], model_ref="x/y")
+
+    upsert.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_retries_on_stuck(mocker) -> None:
+    mocker.patch.object(engine_mod.CONFIG.engine, "max_attempts", 3)
+    statuses = iter([STUCK, STUCK, DONE])
+
+    async def fake_session(triggers, *, model_ref, session: Session, settings=None):
+        session.sentinel_status = next(statuses)
+        session.sentinel_recap = "x"
+
+    spy = mocker.patch.object(
+        engine_mod,
+        "_run_session",
+        side_effect=fake_session,
     )
 
-    out = await engine_mod._call_provider(run, Session(), [], turn=0)
+    await engine_mod.run([Trigger(description="t")], model_ref="x/y")
 
-    assert out is asst
-    response_event = next(
-        c.args[0]
-        for c in trace_stub.write.call_args_list
-        if c.args[0].get("event") == "response"
+    assert spy.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_run_stops_after_done(mocker) -> None:
+    mocker.patch.object(engine_mod.CONFIG.engine, "max_attempts", 5)
+
+    async def fake_session(triggers, *, model_ref, session: Session, settings=None):
+        session.sentinel_status = DONE
+
+    spy = mocker.patch.object(
+        engine_mod,
+        "_run_session",
+        side_effect=fake_session,
     )
-    assert isinstance(response_event["elapsed_ms"], int)
-    # RawLog got the same number.
-    assert (
-        rlog.write_response.call_args.kwargs["elapsed_ms"]
-        == response_event["elapsed_ms"]
+
+    await engine_mod.run([Trigger(description="t")], model_ref="x/y")
+
+    assert spy.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_run_gives_up_after_max_stucks(mocker) -> None:
+    mocker.patch.object(engine_mod.CONFIG.engine, "max_attempts", 2)
+
+    async def fake_session(triggers, *, model_ref, session: Session, settings=None):
+        session.sentinel_status = STUCK
+        session.sentinel_recap = "always stuck"
+
+    spy = mocker.patch.object(
+        engine_mod,
+        "_run_session",
+        side_effect=fake_session,
     )
+
+    await engine_mod.run([Trigger(description="t")], model_ref="x/y")
+
+    assert spy.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_run_restarts_once_after_setup_completes(mocker) -> None:
+    # Session 1 finishes first-run setup → restart; session 2 does the task.
+    outcomes = iter([("setup", True), (DONE, False)])
+
+    async def fake_session(triggers, *, model_ref, session: Session, settings=None):
+        status, restart = next(outcomes)
+        session.sentinel_status = None if restart else status
+        session.restart_for_setup = restart
+
+    spy = mocker.patch.object(engine_mod, "_run_session", side_effect=fake_session)
+
+    await engine_mod.run([Trigger(description="t")], model_ref="x/y")
+
+    assert spy.call_count == 2  # setup session + task session
+
+
+@pytest.mark.asyncio
+async def test_run_no_restart_when_only_first_run_trigger(mocker) -> None:
+    # A synthetic first-run wake has no request to resume: after setup
+    # completes the layout is saved and loads on the next wake, so the loop
+    # must NOT restart (which would replay the stale "learn the layout"
+    # trigger and re-enter first-run setup).
+    async def fake_session(triggers, *, model_ref, session: Session, settings=None):
+        session.sentinel_status = IDLE
+        session.restart_for_setup = True
+
+    spy = mocker.patch.object(engine_mod, "_run_session", side_effect=fake_session)
+
+    await engine_mod.run(
+        [Trigger(description="learn the layout", source="first-run")],
+        model_ref="x/y",
+    )
+
+    assert spy.call_count == 1  # no restart — nothing real to resume
+
+
+@pytest.mark.asyncio
+async def test_run_restarts_when_real_trigger_accompanies_first_run(mocker) -> None:
+    # first-run + a real request in the same wake → restart so the real
+    # request is handled with the layout loaded.
+    outcomes = iter([(None, True), (DONE, False)])
+
+    async def fake_session(triggers, *, model_ref, session: Session, settings=None):
+        status, restart = next(outcomes)
+        session.sentinel_status = status
+        session.restart_for_setup = restart
+
+    spy = mocker.patch.object(engine_mod, "_run_session", side_effect=fake_session)
+
+    await engine_mod.run(
+        [
+            Trigger(description="phone IM arrived", source="phone"),
+            Trigger(description="learn the layout", source="first-run"),
+        ],
+        model_ref="x/y",
+    )
+
+    assert spy.call_count == 2  # restarted to handle the phone request
+
+
+@pytest.mark.asyncio
+async def test_run_setup_restart_does_not_consume_stuck_attempt(mocker) -> None:
+    # Even with max_attempts=1, the setup restart still allows the task session.
+    mocker.patch.object(engine_mod.CONFIG.engine, "max_attempts", 1)
+    outcomes = iter([("setup", True), (DONE, False)])
+
+    async def fake_session(triggers, *, model_ref, session: Session, settings=None):
+        status, restart = next(outcomes)
+        session.sentinel_status = None if restart else status
+        session.restart_for_setup = restart
+
+    spy = mocker.patch.object(engine_mod, "_run_session", side_effect=fake_session)
+
+    await engine_mod.run([Trigger(description="t")], model_ref="x/y")
+
+    assert spy.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_run_setup_restart_fires_at_most_once(mocker) -> None:
+    # A pathological session that keeps flagging restart must not loop forever.
+    mocker.patch.object(engine_mod.CONFIG.engine, "max_attempts", 3)
+
+    async def fake_session(triggers, *, model_ref, session: Session, settings=None):
+        session.sentinel_status = DONE
+        session.restart_for_setup = True  # always flags
+
+    spy = mocker.patch.object(engine_mod, "_run_session", side_effect=fake_session)
+
+    await engine_mod.run([Trigger(description="t")], model_ref="x/y")
+
+    # 1 setup restart (uncounted) + then the guard blocks further restarts and
+    # the DONE session ends the loop → 2 total.
+    assert spy.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_run_budget_exhausted_stuck_not_retried(mocker) -> None:
+    # Budget exhaustion is STUCK but retryable=False — a slow environment
+    # would burn every retry the same way, so one attempt only.
+    mocker.patch.object(engine_mod.CONFIG.engine, "max_attempts", 3)
+
+    async def fake_session(triggers, *, model_ref, session: Session, settings=None):
+        session.sentinel_status = STUCK
+        session.sentinel_recap = "wall-clock budget (10s) exhausted"
+        session.budget_exhausted = True
+
+    spy = mocker.patch.object(engine_mod, "_run_session", side_effect=fake_session)
+
+    await engine_mod.run([Trigger(description="t")], model_ref="x/y")
+
+    assert spy.call_count == 1
