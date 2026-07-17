@@ -32,7 +32,8 @@ The arm's motion makes the raw diff physically unreliable; a false
 `changed` is the harmful direction (it resets the stuck guard's counters
 and re-hides silent refusals). Three fixes:
 
-  - AUTOFOCUS HUNTING (the arm crossing the lens re-triggers AF) makes
+  - AUTOFOCUS HUNTING (an unpinned lens re-hunts when the arm crosses
+    it; the calibrated default is pinned — see hardware/focus.py) makes
     frames blurry. Handled at ACQUISITION: `GestureObserver.grab_screen` retries a
     low-sharpness capture once so AF settles. Not handled here — a
     diff-time focus-mismatch guard cannot distinguish "AF blur" from

@@ -396,7 +396,7 @@ async def test_handle_compute_camera_mapping_happy_path(mocker) -> None:
     mocker.patch.object(
         handler,
         "compute_camera_mapping",
-        return_value=(pct_to_cam, (1920, 1080)),
+        return_value=(pct_to_cam, (1920, 1080), 137.0),
     )
 
     resp = await handle_compute_camera_mapping(
@@ -409,8 +409,10 @@ async def test_handle_compute_camera_mapping_happy_path(mocker) -> None:
     assert body["ok"] is True
     assert body["dots"] == 15
     assert body["cam_size"] == [1920, 1080]
+    assert body["cam_focus"] == 137.0
     assert rig.calibration.pct_to_cam is pct_to_cam
     assert rig.calibration.cam_size == (1920, 1080)
+    assert rig.calibration.cam_focus == 137.0
 
 
 @pytest.mark.asyncio

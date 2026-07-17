@@ -89,11 +89,11 @@ class HardwareRig:
     def unmark_ready(self) -> None:
         """Drop the ready flag so the next ``become_ready`` re-settles.
         Called when the camera is replaced mid-session (a live-server
-        setup re-run): the fresh Camera boots with live AF and default
-        exposure, but ``become_ready`` early-returns while ``ready`` is
-        set — without this it would skip the re-settle for the rest of
-        the process, leaving the first views of the new camera
-        mis-exposed / AF-hunting."""
+        setup re-run): the fresh Camera boots with default exposure (its
+        lens is already pinned from the bundle seed), but
+        ``become_ready`` early-returns while ``ready`` is set — without
+        this it would skip the re-settle for the rest of the process,
+        leaving the first views of the new camera mis-exposed."""
         self._ready = False
 
     # ─── State queries ────────────────────────────────────────
@@ -222,15 +222,20 @@ class HardwareRig:
         loaded — only true on ``--warm-start``. Plain ``physiclaw server``
         boots with empty calibration, so step 8 of setup detects rotation
         fresh.
+
+        The lens position is a calibration constant — see
+        ``hardware/focus.py``. Seeding it into the Camera pins the lens
+        from the very first open; empty calibration (fresh setup) leaves
+        AF live until the mapping step pins it.
         """
         if self._cam is not None:
             self._cam.close()
             self._cam = None
-        self._cam = Camera(index)
+        self._cam = Camera(index, focus_value=self.calibration.cam_focus)
         if self.calibration.cam_rotation is not None:
             self._cam.rotation = self.calibration.cam_rotation
-        # A fresh Camera starts with live AF and default exposure — force
-        # the next become_ready to re-settle it (see unmark_ready).
+        # A fresh Camera starts with default exposure — force the next
+        # become_ready to re-settle it (see unmark_ready).
         self.unmark_ready()
         log.info(f"Camera {index} connected")
 

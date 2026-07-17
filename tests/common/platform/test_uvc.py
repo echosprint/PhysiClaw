@@ -313,3 +313,43 @@ def test_unlock_focus_reenables_af(monkeypatch) -> None:
     assert channel.unlock_focus() is True
     assert sent[-1][:3] == (uvc._OUT, uvc._SET_CUR, uvc._CT_FOCUS_AUTO)
     assert sent[-1][3] == (1).to_bytes(1, "little")
+
+
+def test_read_focus_returns_current_position(monkeypatch) -> None:
+    channel, _ = _terminal_with_recorder(
+        monkeypatch,
+        {(uvc._IN, uvc._GET_CUR, uvc._CT_FOCUS_ABS): 120},
+    )
+
+    assert channel.read_focus() == 120
+
+
+def test_read_focus_none_when_read_fails(monkeypatch) -> None:
+    channel, _ = _terminal_with_recorder(monkeypatch, {})
+
+    assert channel.read_focus() is None
+
+
+def test_apply_focus_disables_af_then_writes_position(monkeypatch) -> None:
+    channel, sent = _terminal_with_recorder(
+        monkeypatch,
+        {
+            (uvc._OUT, uvc._SET_CUR, uvc._CT_FOCUS_AUTO): 0,
+            (uvc._OUT, uvc._SET_CUR, uvc._CT_FOCUS_ABS): 0,
+        },
+    )
+
+    assert channel.apply_focus(137) is True
+    writes = [s for s in sent if s[0] == uvc._OUT]
+    assert writes[0][:3] == (uvc._OUT, uvc._SET_CUR, uvc._CT_FOCUS_AUTO)
+    assert writes[0][3] == (0).to_bytes(1, "little")
+    assert writes[1][:3] == (uvc._OUT, uvc._SET_CUR, uvc._CT_FOCUS_ABS)
+    assert writes[1][3] == (137).to_bytes(2, "little")
+
+
+def test_apply_focus_fails_when_af_toggle_refused(monkeypatch) -> None:
+    channel, sent = _terminal_with_recorder(monkeypatch, {})
+
+    assert channel.apply_focus(137) is False
+    # Never writes a focus position on top of a live AF.
+    assert all(s[2] != uvc._CT_FOCUS_ABS for s in sent if s[0] == uvc._OUT)

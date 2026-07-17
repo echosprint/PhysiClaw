@@ -378,7 +378,7 @@ def _mark_ready_and_wait(timeout: float = 45.0) -> None:
     """POST /api/ready, then poll status until the flag flips.
 
     The ready flip is deliberately asynchronous server-side: become_ready
-    settles the camera (exposure tune + focus lock, a few seconds) BEFORE
+    settles the camera (exposure tune, a few seconds) BEFORE
     marking ready, so a script that chains `setup hardware` into an agent
     command would otherwise race the settle window. Bounded: on timeout
     we proceed with a note rather than fail — the settle is fail-open and

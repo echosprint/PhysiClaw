@@ -638,3 +638,28 @@ def test_shutdown_swallows_camera_close_failure(rig, cam_double) -> None:
     rig._cam.close.side_effect = RuntimeError("camera busy")
 
     rig.shutdown()  # no raise
+
+
+def test_connect_camera_seeds_bundle_focus_into_the_camera(mocker, cam_double) -> None:
+    # The lens position is a calibration constant — seeded at
+    # construction so the first open is already pinned (see
+    # hardware/focus.py).
+    r = HardwareRig()
+    r.calibration.cam_focus = 137.0
+    ctor = mocker.patch.object(rig_mod, "Camera", return_value=cam_double())
+
+    r.connect_camera(0)
+
+    ctor.assert_called_once_with(0, focus_value=137.0)
+
+
+def test_connect_camera_seeds_no_focus_without_a_bundle_value(
+    mocker, cam_double
+) -> None:
+    # Fresh setup: the mapping step hasn't pinned the lens yet.
+    r = HardwareRig()
+    ctor = mocker.patch.object(rig_mod, "Camera", return_value=cam_double())
+
+    r.connect_camera(0)
+
+    ctor.assert_called_once_with(0, focus_value=None)

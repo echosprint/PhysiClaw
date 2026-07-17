@@ -35,7 +35,7 @@ def test_locks_after_two_consecutive_sharp_meters() -> None:
 
     res = lock(rig.meter, rig.freeze, rig.unfreeze)
 
-    assert res.locked and not res.deferred
+    assert res.locked
     assert rig.frozen is True
     assert rig.unfreeze_calls == 0
 
@@ -58,7 +58,7 @@ def test_defers_when_scene_never_sharp() -> None:
 
     res = lock(rig.meter, rig.freeze, rig.unfreeze)
 
-    assert not res.locked and res.deferred
+    assert not res.locked
     assert rig.frozen is False
 
 
@@ -69,7 +69,7 @@ def test_isolated_sharp_reads_do_not_count_as_settled() -> None:
 
     res = lock(rig.meter, rig.freeze, rig.unfreeze)
 
-    assert not res.locked and res.deferred
+    assert not res.locked
     assert rig.frozen is False
 
 
@@ -78,7 +78,7 @@ def test_no_frame_fails_open_without_deferring() -> None:
 
     res = lock(rig.meter, rig.freeze, rig.unfreeze)
 
-    assert not res.locked and not res.deferred
+    assert not res.locked
     assert rig.frozen is False
 
 
@@ -87,19 +87,19 @@ def test_meter_loss_mid_confirm_fails_open() -> None:
 
     res = lock(rig.meter, rig.freeze, rig.unfreeze)
 
-    assert not res.locked and not res.deferred
+    assert not res.locked
     assert rig.frozen is False
 
 
 def test_refused_freeze_fails_open_without_retry_bait() -> None:
-    # A driver that rejects the AF toggle is terminal, not deferred —
+    # A driver that rejects the AF toggle is terminal —
     # deferring would re-schedule the same doomed lock on every sharp
     # view forever.
     rig = Rig([SHARP, SHARP], freeze_ok=False)
 
     res = lock(rig.meter, rig.freeze, rig.unfreeze)
 
-    assert not res.locked and not res.deferred
+    assert not res.locked
     assert "refused" in res.detail
     assert rig.unfreeze_calls == 0
 

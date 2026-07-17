@@ -2,11 +2,13 @@
 
 Owns the lazily-loaded detectors (OCR, icons), the camera-frame
 acquisition helpers, the phone-screen watchdog, and the startup camera
-settle (exposure tune + focus lock). It never gestures: it borrows the
-rig for devices,
-transforms, parking, and the busy lock, and hands frames/element
-listings back to whoever asked (the orchestrator's tool ops, the
-observer's callbacks, the /api/phone/watch route).
+settle (exposure tune). It never gestures: it borrows the rig for
+devices, transforms, parking, and the busy lock, and hands
+frames/element listings back to whoever asked (the orchestrator's tool
+ops, the observer's callbacks, the /api/phone/watch route).
+
+Focus deliberately has NO machinery here — the lens position is a
+calibration constant (see hardware/focus.py).
 
 Pixel work itself still lives in physiclaw.core.vision — this class
 only coordinates it.
@@ -17,7 +19,7 @@ import threading
 import time
 
 from physiclaw.common.config import CONFIG
-from physiclaw.core.hardware import exposure, focus
+from physiclaw.core.hardware import exposure
 from physiclaw.core.orchestration.rig import HardwareRig
 from physiclaw.core.vision import quality
 from physiclaw.core.vision.icon_detect import IconDetector
@@ -50,9 +52,9 @@ class _NullOCR:
 class Perception:
     """Detectors + frame acquisition over a borrowed rig."""
 
-    # Delay before a scheduled settle task (exposure re-tune, focus
-    # re-lock) contends for the hardware: the view that triggered it
-    # still holds the rig lock while its gesture finishes parking.
+    # Delay before a scheduled settle task (exposure re-tune) contends
+    # for the hardware: the view that triggered it still holds the rig
+    # lock while its gesture finishes parking.
     RETUNE_DELAY_SECONDS = 2.0
 
     # How long a blurry stretch may starve the keypad poll before an
@@ -76,11 +78,9 @@ class Perception:
         self._ocr_error: str | None = None
         self._watchdog = Watchdog()
         self._last_tune: exposure.TuneResult | None = None
-        self._last_lock: focus.LockResult | None = None
-        # Single-flight guard for the background settle tasks, keyed by
-        # task name ("exposure re-tune" / "focus re-lock").
+        # Single-flight guard for the background re-tune.
         self._pending_lock = threading.Lock()
-        self._pending: set[str] = set()
+        self._retune_pending = False
 
     # ─── Lazy detectors ───────────────────────────────────────
 
@@ -228,20 +228,20 @@ class Perception:
                 return {"wake": False, "reason": ""}
             return self._watchdog.poll(frame, self._rig.transforms)
 
-    # ─── Camera settle (exposure tune + focus lock) ──────────
+    # ─── Camera settle (exposure tune) ───────────────────────
 
-    def _screen_crop(self, settle_frames: int):
-        """Settled phone-screen crop for the tune/lock meters, or None.
+    def _screen_crop(self):
+        """Settled phone-screen crop for the tune meter, or None.
 
-        The one home for the meters' acquisition contract: wait out the
-        driver's property-apply latency (`settle_frames` fresh frames,
-        bounded), take the latest frame, crop to the phone screen —
-        never meter the whole frame, the dark desk around the phone
-        would dominate the statistics."""
+        The one home for the meter's acquisition contract: wait out the
+        driver's property-apply latency (a few fresh frames, bounded),
+        take the latest frame, crop to the phone screen — never meter
+        the whole frame, the dark desk around the phone would dominate
+        the statistics."""
         cam, t = self._rig.cam, self._rig.transforms
         if cam is None or t is None:
             return None
-        if not cam.wait_frames(settle_frames, timeout=5.0):
+        if not cam.wait_frames(exposure.SETTLE_FRAMES, timeout=5.0):
             return None
         frame = cam.peek()
         if frame is None:
@@ -272,40 +272,11 @@ class Perception:
             self._rig.release()
 
     def settle_camera(self) -> None:
-        """Startup settle: verify/converge exposure, then freeze
-        autofocus, under ONE rig hold. The single entry point for every
-        ready-flipping path (warm start, the /api/ready flip) — the
-        exposure-before-focus order matters (a blown frame's sharpness
-        means nothing) and lives here instead of in each caller.
-        Fail-open: never raises, never blocks a session.
-
-        A skipped settle (rig busy, or the park/meter failed) seeds a
-        DEFERRED lock result so the re-lock policy retries on the next
-        sharp view — otherwise a skipped startup would leave the lens
-        hunting for the whole session."""
-        cam, t = self._rig.cam, self._rig.transforms
-        if cam is None or t is None:
-            return
-        # Probe BEFORE the settle: if the settle fails because the camera
-        # channel is momentarily wedged, a post-failure probe could read
-        # False and skip the seed, disabling the re-lock policy for the
-        # whole session.
-        lockable = cam.focus_lockable
-
-        def body() -> None:
-            self.tune_now()
-            self.lock_focus_now()
-
-        self._with_rig_parked("camera settle", body)
-        # Seed a deferred result whenever the lock left no record — the
-        # rig was busy so `body` never ran, OR `lock_focus_now` swallowed
-        # an internal driver error mid-attempt. Either way `_last_lock`
-        # is None, and `_focus_policy` disables itself on a None result;
-        # the seed keeps the re-lock policy alive to retry on a sharp view.
-        if lockable and self._last_lock is None:
-            self._last_lock = focus.LockResult(
-                False, "startup lock skipped (busy or failed)", deferred=True
-            )
+        """Startup settle for every ready-flipping path (warm start,
+        the /api/ready flip): verify/converge exposure. Fail-open.
+        Focus needs no settling — the lens is pinned from the moment
+        the camera opens."""
+        self.tune_exposure()
 
     def tune_exposure(self) -> None:
         """Standalone verify-and-converge for camera exposure — the
@@ -340,7 +311,7 @@ class Perception:
         try:
 
             def meter():
-                crop = self._screen_crop(exposure.SETTLE_FRAMES)
+                crop = self._screen_crop()
                 return None if crop is None else quality.assess(crop)
 
             result = exposure.converge(
@@ -354,84 +325,6 @@ class Perception:
             log.info("exposure tune: %s", result.detail)
         except Exception:
             log.exception("exposure tune failed — leaving camera as-is")
-
-    def lock_focus(self, *, rerun_af: bool = False) -> None:
-        """Freeze autofocus once it has converged — the background
-        re-lock target. Fail-open: never raises; skipped when busy.
-
-        The rig is rigid — camera bolted, screen at a fixed distance —
-        so the one position AF converges to stays right, and freezing
-        it removes the post-gesture AF hunts the arm's pass over the
-        lens keeps triggering (each one risks a blurred view and a
-        withheld verdict). A dark or hunting scene defers; the re-lock
-        policy retries on the first sharp view. With `rerun_af` the
-        lens goes back to AF first — the persistent-blur path: the rig
-        was bumped or drifted, so the frozen position itself is stale
-        and AF must re-converge before the re-freeze."""
-        cam, t = self._rig.cam, self._rig.transforms
-        if cam is None or t is None or not cam.focus_lockable:
-            return
-
-        def body() -> None:
-            if rerun_af:
-                cam.unlock_focus()
-            self.lock_focus_now()
-
-        self._with_rig_parked("focus lock", body)
-
-    def ensure_focus_locked(self) -> None:
-        """Freeze the lens only if it isn't already verified-frozen —
-        the cheap pre-gate for callers settling ahead of a
-        timing-critical window (unlock's keypad race). A verified lock
-        can't drift on its own (the lens is frozen), so re-running the
-        multi-meter confirm would spend ~0.5s of frame-waits re-proving
-        it on every call — and every agent retry; recovery from a
-        freeze gone stale belongs to the blur-streak re-lock policy
-        (`_focus_policy`).
-
-        The gate consults BOTH our remembered result and the camera's
-        own frozen flag: a mid-session `connect_camera` swaps in a fresh
-        Camera whose AF is live again while `_last_lock` still reads
-        locked, so trusting the mirror alone would skip the re-lock the
-        new lens needs. Rig lock must be held; parks the arm itself when
-        a re-lock is owed (the metering contract needs it), so the
-        common short-circuit path spends no arm motion."""
-        cam = self._rig.cam
-        frozen = cam is not None and cam.focus_locked
-        last = self._last_lock
-        if frozen and last is not None and last.locked:
-            return
-        # Time the re-lock: this spends the wake→swipe window, and the
-        # open "deferred-lock meter-loop stall" finding (BUGFIX_REVIEW)
-        # needs real durations from sessions to be confirmed or retired.
-        t0 = time.monotonic()
-        self._rig.park()
-        self.lock_focus_now()
-        log.info(
-            "focus re-lock before the unlock swipe took %.1fs",
-            time.monotonic() - t0,
-        )
-
-    def lock_focus_now(self) -> None:
-        """Freeze-and-verify with the rig lock ALREADY HELD and the arm
-        parked. Fail-open: never raises, no-op when the rig can't lock.
-        The meter scores only sharpness (`laplacian_variance`), skipping
-        the histogram/blob statistics `assess` would also compute."""
-        self._rig.assert_locked()
-        cam, t = self._rig.cam, self._rig.transforms
-        if cam is None or t is None or not cam.focus_lockable:
-            return
-        try:
-
-            def meter():
-                crop = self._screen_crop(focus.SETTLE_FRAMES)
-                return None if crop is None else quality.laplacian_variance(crop)
-
-            result = focus.lock(meter, cam.lock_focus, cam.unlock_focus)
-            self._last_lock = result
-            log.info("focus lock: %s", result.detail)
-        except Exception:
-            log.exception("focus lock failed — leaving autofocus on")
 
     def needs_inline_fix(self, report: quality.QualityReport) -> bool:
         """Should this view's exposure be fixed before it ships?
@@ -457,16 +350,18 @@ class Perception:
         )
 
     def on_quality_report(self, report: quality.QualityReport, streak: int) -> None:
-        """Background re-tune/re-lock, fed every judged view by the
+        """Background exposure re-tune, fed every judged view by the
         GestureObserver.
 
-        The exposure half is the safety net behind the observer's
-        inline fix (same `needs_inline_fix` predicate): the inline path
-        normally corrects the view before it ships, so it fires only
-        when that fix crashed, was skipped, or didn't recover the
-        frame. The focus half is `_focus_policy`. Never blocks the view
-        that reported: both run on detached threads (single-flight
-        each) and skip themselves if the hardware is busy."""
+        The safety net behind the observer's inline fix (same
+        `needs_inline_fix` predicate): the inline path normally corrects
+        the view before it ships, so it fires only when that fix
+        crashed, was skipped, or didn't recover the frame. Never blocks
+        the view that reported: runs on a detached thread
+        (single-flight) and skips itself if the hardware is busy.
+
+        Blur deliberately triggers nothing — focus is a calibration
+        constant (see hardware/focus.py)."""
         if self.needs_inline_fix(report):
             if report.blown:
                 self._schedule_retune(
@@ -474,57 +369,24 @@ class Perception:
                 )
             else:
                 self._schedule_retune("bright view arrived after a deferred tune")
-        self._focus_policy(report, streak)
-
-    def _focus_policy(self, report: quality.QualityReport, streak: int) -> None:
-        """Re-lock policy — the two evidence-driven cases:
-        - a sharp view while a deferred lock is owed its reference:
-          startup metered a soft/dark scene and skipped — now there is
-          a converged focus to freeze;
-        - a persistent blur streak under a LOCKED lens: the rig was
-          bumped or drifted, so the frozen position is stale — hand the
-          lens back to AF, let it re-converge, freeze again. A streak,
-          not one view: a single blurry frame is a normal transient the
-          grab-retry handles, and an unlocked→relock cycle costs
-          seconds of rig time."""
-        last = self._last_lock
-        if last is None:
-            return  # startup lock hasn't run yet (or the rig can't lock)
-        if last.deferred and not report.blurry:
-            self._schedule_refocus(
-                "sharp view arrived after a deferred lock", rerun_af=False
-            )
-        elif last.locked and report.blurry and streak >= quality.PERSIST_AFTER:
-            self._schedule_refocus(
-                f"blur streak {streak} under a locked focus", rerun_af=True
-            )
 
     def _schedule_retune(self, reason: str) -> None:
-        self._schedule_settle("exposure re-tune", reason, self.tune_exposure)
-
-    def _schedule_refocus(self, reason: str, *, rerun_af: bool) -> None:
-        self._schedule_settle(
-            "focus re-lock", reason, lambda: self.lock_focus(rerun_af=rerun_af)
-        )
-
-    def _schedule_settle(self, name: str, reason: str, task) -> None:
-        """Run a settle task on a detached daemon thread, at most one in
-        flight per `name`. The delay lets the triggering view's gesture
-        release the rig lock first; a still-busy rig makes the task skip
-        harmlessly (the trigger conditions persist, so it will be
-        re-scheduled)."""
+        """Run the re-tune on a detached daemon thread, at most one in
+        flight. The delay lets the triggering view's gesture release the
+        rig lock first; a still-busy rig makes the task skip harmlessly
+        (the trigger conditions persist, so it will be re-scheduled)."""
         with self._pending_lock:
-            if name in self._pending:
+            if self._retune_pending:
                 return
-            self._pending.add(name)
-        log.info("%s scheduled: %s", name, reason)
+            self._retune_pending = True
+        log.info("exposure re-tune scheduled: %s", reason)
 
         def run() -> None:
             try:
                 time.sleep(self.RETUNE_DELAY_SECONDS)
-                task()
+                self.tune_exposure()
             finally:
                 with self._pending_lock:
-                    self._pending.discard(name)
+                    self._retune_pending = False
 
-        threading.Thread(target=run, name=name, daemon=True).start()
+        threading.Thread(target=run, name="exposure re-tune", daemon=True).start()

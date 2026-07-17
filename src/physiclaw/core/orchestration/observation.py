@@ -2,8 +2,9 @@
 
 `GestureObserver` owns the observation pipeline that brackets a gesture:
 park (clearing the arm from the lens) → grab the cropped phone-screen
-frame with a blur/blown-retry (autofocus and auto-exposure settle after
-the arm's move and screen flips), escalating a persistently blown grab —
+frame with a blur/blown-retry (auto-exposure settles after screen flips
+— and, on an unpinned lens, autofocus after the arm's move),
+escalating a persistently blown grab —
 or a deferred tune's first bright reference — to an inline exposure
 re-tune so the agent gets a corrected view, not a warning → re-settle
 the after-grab when the before/after median jump says the screen
@@ -60,9 +61,10 @@ class GestureObserver:
     # ~1s of stylus retract + park, total ≈ 2s — enough for most page
     # transitions (Anthropic's computer-use reference uses a 2.0s delay).
     GESTURE_SETTLE_SECONDS = 1.0
-    # The arm crossing the lens re-triggers autofocus, and a screen-content
-    # flip (dark lock screen → bright home) sends firmware auto-exposure
-    # re-converging; a frame captured mid-hunt is blurry or blown and
+    # A screen-content flip (dark lock screen → bright home) sends
+    # firmware auto-exposure re-converging — and an unpinned lens (no
+    # bundle focus; see hardware/focus.py) re-hunts when the arm crosses
+    # it; a frame captured mid-swing is blurry or blown and
     # poisons both the verdict and the fused view. On either verdict,
     # wait and re-grab once. Blur uses the same number and scale as the
     # quality monitor's verdict.
@@ -207,11 +209,12 @@ class GestureObserver:
         return frame, report
 
     def grab_screen(self, settle: float = 0.0):
-        """Park (clearing the arm from the lens), let the screen and
-        autofocus settle for `settle`s, then capture the cropped
-        phone-screen frame for the gesture diff and fused view. Parking
-        first means the settle covers the AF hunt the arm's move
-        triggered, so the capture is usually sharp; a still-blurry frame
+        """Park (clearing the arm from the lens), let the screen —
+        and, on an unpinned lens, autofocus — settle for `settle`s,
+        then capture the cropped phone-screen frame for the gesture
+        diff and fused view. Parking first means the settle covers any
+        AF hunt the arm's move triggered, so the capture is usually
+        sharp; a still-blurry frame
         is re-grabbed once as a fallback.
 
         A blown frame (auto-exposure still re-converging after the screen

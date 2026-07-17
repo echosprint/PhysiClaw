@@ -438,23 +438,34 @@ class CameraTerminal:
         return self._focus_support
 
     def lock_focus(self) -> bool:
-        """Freeze the lens: read the converged position, switch
-        continuous AF off, and pin the position back explicitly —
-        disabling AF alone holds the lens on most firmware, but some
-        need the absolute write to keep it (the uvcdynctrl folklore).
-        The pin is best-effort: a junk GET_CUR readback (see the module
+        """Freeze the lens: read the converged position and re-pin it
+        via `apply_focus` — disabling AF alone holds the lens on most
+        firmware, but some need the absolute write to keep it (the
+        uvcdynctrl folklore). A junk GET_CUR readback (module
         docstring's firmware quirks) would write back the junk, which
-        the caller's measured-sharpness verify catches and reverts."""
-        cur = self._get(_GET_CUR, _CT_FOCUS_ABS, 2)
-        if not self._set(_CT_FOCUS_AUTO, 0, 1):
-            return False
-        if cur is not None:
-            self._set(_CT_FOCUS_ABS, cur, 2)
-        return True
+        the caller's measured-sharpness verify catches and reverts.
+        No readable position → AF off alone."""
+        cur = self.read_focus()
+        if cur is None:
+            return self._set(_CT_FOCUS_AUTO, 0, 1)
+        return self.apply_focus(cur)
 
     def unlock_focus(self) -> bool:
         """Hand the lens back to continuous autofocus."""
         return self._set(_CT_FOCUS_AUTO, 1, 1)
+
+    def read_focus(self) -> int | None:
+        """Current absolute focus position (device units), or None when
+        the read fails. Raw: a junk GET_CUR readback (module docstring's
+        firmware quirks) is the caller's to sanity-check."""
+        return self._get(_GET_CUR, _CT_FOCUS_ABS, 2)
+
+    def apply_focus(self, position: int) -> bool:
+        """Continuous AF off, then drive the lens to a caller-supplied
+        absolute ``position``."""
+        if not self._set(_CT_FOCUS_AUTO, 0, 1):
+            return False
+        return self._set(_CT_FOCUS_ABS, position, 2)
 
     def set_manual(self, ticks: int) -> bool:
         """Manual mode + absolute exposure time in 100µs ticks, clamped

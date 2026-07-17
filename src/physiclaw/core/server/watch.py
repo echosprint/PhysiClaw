@@ -52,7 +52,7 @@ def register(mcp: "FastMCP", physiclaw: "PhysiClaw") -> None:
     async def _mark_ready(request: Request) -> JSONResponse:  # noqa: ARG001
         # Fire-and-forget: setup just parked the phone on the home screen
         # (the dark scene that exposes AE failure). become_ready settles
-        # the camera FIRST (exposure tune + focus lock, one rig hold) and
+        # the camera FIRST (exposure tune) and
         # flips ready AFTER, so the runtime's status poll can't observe
         # ready on an unsettled camera — without stalling the wizard's
         # finish screen. become_ready is internally fail-open, so the

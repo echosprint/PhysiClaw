@@ -281,10 +281,16 @@ async def handle_compute_camera_mapping(
             raise PreconditionError("Camera not connected")
         rotation = rig.calibration.effective_rotation()
         rig.park()
-        pct_to_cam, cam_size = compute_camera_mapping(cam, calib, rotation)
+        pct_to_cam, cam_size, cam_focus = compute_camera_mapping(cam, calib, rotation)
         rig.calibration.pct_to_cam = pct_to_cam
         rig.calibration.cam_size = cam_size
-        return {"ok": True, "dots": 15, "cam_size": list(cam_size)}
+        rig.calibration.cam_focus = cam_focus
+        return {
+            "ok": True,
+            "dots": 15,
+            "cam_size": list(cam_size),
+            "cam_focus": cam_focus,
+        }
 
     return await _run_locked_step(rig, _do, precheck=_precheck)
 

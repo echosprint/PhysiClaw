@@ -24,6 +24,7 @@ from physiclaw.core.calibration._common import (
     require_viewport_shift,
 )
 from physiclaw.core.calibration.state import ROTATION_NAMES
+from physiclaw.core.hardware import focus
 from physiclaw.core.hardware.camera import Camera
 from physiclaw.core.vision.grid_detect import (
     detect_red_dots,
@@ -31,6 +32,7 @@ from physiclaw.core.vision.grid_detect import (
     screen_polygon,
     sort_dots_to_grid,
 )
+from physiclaw.core.vision.quality import laplacian_variance
 
 log = logging.getLogger(__name__)
 
@@ -74,6 +76,66 @@ def _mask_outside(frame: np.ndarray, poly: np.ndarray | None) -> np.ndarray:
     return cv2.bitwise_and(frame, frame, mask=mask)
 
 
+def _focus_region(frame: np.ndarray, poly: np.ndarray | None) -> np.ndarray:
+    """The screen's bounding rectangle (from the corner-block fence), or
+    the full frame when the fence is absent — the dark desk around the
+    phone would dilute the sharpness statistic."""
+    if poly is None:
+        return frame
+    x, y, w, h = cv2.boundingRect(poly.astype(np.int32))
+    return frame[y : y + h, x : x + w]
+
+
+def _pin_focus(cam: Camera, rotation: int, poly: np.ndarray | None) -> float | None:
+    """Converge-freeze-verify the lens on the calibration page, then
+    read the absolute position back for the bundle — the once-per-rig
+    focus calibration (doctrine: `hardware/focus.py`). The page is
+    bright and high-contrast, so AF has an ideal target and the
+    absolute sharpness gate in `focus.lock` is trustworthy.
+
+    Runs BEFORE dot detection so Mapping B is measured under the exact
+    lens state every later session replays. Returns None — with the
+    lens back on live AF, so every session behaves the same — when the
+    rig can't lock (fixed-focus camera), the scene never metered sharp,
+    or the position can't be read back and re-applied."""
+    if not cam.focus_lockable:
+        log.info("  Focus pin: rig can't lock focus — lens left on auto")
+        return None
+
+    # Start from live AF: a re-run (mapping retried after a failed
+    # validate, or a setup re-run over a warm-started session) arrives
+    # with the lens still pinned at the OLD position — frozen, AF can't
+    # re-converge, and if the rig moved that position never meters
+    # sharp. Unlocking also clears the remembered value, so a mid-step
+    # reopen can't re-pin the stale position while AF re-converges.
+    cam.unlock_focus()
+
+    def meter() -> float | None:
+        if not cam.wait_frames(focus.SETTLE_FRAMES, timeout=5.0):
+            return None
+        f = cam.raw_frame()
+        if f is None:
+            return None
+        frame = cv2.rotate(f, rotation) if rotation >= 0 else f
+        return laplacian_variance(_focus_region(frame, poly))
+
+    result = focus.lock(meter, cam.lock_focus, cam.unlock_focus)
+    log.info(f"  Focus pin: {result.detail}")
+    if not result.locked:
+        return None
+    # Persist only what a reconnect can actually replay: read the
+    # position back and prove the absolute-write channel now, at
+    # calibration. A freeze nothing can replay would give this session
+    # a lens state no later session gets — hand it back to AF instead.
+    value = cam.read_focus()
+    if value is None or not cam.apply_focus(value):
+        cam.unlock_focus()
+        log.info("  Focus pin: position not replayable — lens left on autofocus")
+        return None
+    log.info(f"  ✓ Focus pinned @ {value:g} — stored in the calibration bundle")
+    return value
+
+
 def _fit_grid_mapping(
     screen_pcts: np.ndarray, camera_01: np.ndarray
 ) -> tuple[np.ndarray | None, int, float]:
@@ -97,11 +159,13 @@ def _fit_grid_mapping(
 
 def compute_camera_mapping(
     cam: Camera, cal: CalibrationState, rotation: int
-) -> tuple[np.ndarray, tuple[int, int]]:
+) -> tuple[np.ndarray, tuple[int, int], float | None]:
     """Detect 15 red dots, compute screen 0-1 → camera 0-1 affine.
 
-    Returns (pct_to_cam affine (2,3), cam_size (w, h)).
-    Both sides are 0-1 normalized.
+    Returns (pct_to_cam affine (2,3), cam_size (w, h), cam_focus).
+    Affine sides are 0-1 normalized; ``cam_focus`` is the absolute lens
+    position pinned on the calibration page (None when the rig can't
+    lock or the pin didn't verify — see `_pin_focus`).
 
     Robustness: the screen is first fenced off via the RGBM corner blocks so an
     off-screen reflection can't masquerade as a dot, and every candidate fit is
@@ -132,6 +196,12 @@ def compute_camera_mapping(
     cal.set_phase("corners")
     time.sleep(1.0)
     screen_poly = _detect_screen_region(cam, rotation)
+
+    # 1.5 Pin the lens while the bright, high-contrast calibration page
+    #     is up, BEFORE dot detection — the dots (and everything after)
+    #     are then measured under the exact lens state every session
+    #     replays from the bundle.
+    cam_focus = _pin_focus(cam, rotation, screen_poly)
 
     # 2. Grid phase: grab a few fresh frames; accept the first that yields the
     #    full grid inside the screen AND passes the fit-quality gate. Off-screen
@@ -207,4 +277,4 @@ def compute_camera_mapping(
         f"  ✓ Camera mapping done: Mapping B ready (screen 0-1 → camera 0-1) "
         f"from {expected} dot pairs, frame {cam_size[0]}×{cam_size[1]}px"
     )
-    return pct_to_cam, cam_size
+    return pct_to_cam, cam_size, cam_focus

@@ -41,6 +41,9 @@ BUNDLE_PATH = paths.calibration_bundle()
 # shape changes so an old on-disk bundle fails loudly at load instead of
 # reconstructing wrong (``from_dict`` raises on mismatch). Bundles
 # written before versioning carry no key and count as version 1.
+# ``cam_focus`` rides version 1: a bundle without the key loads as None
+# (lens left on live AF — degraded, not wrong), so no forced
+# recalibration; re-running the camera-mapping step pins it.
 BUNDLE_VERSION = 1
 
 
@@ -53,6 +56,12 @@ class Calibration:
     cam_size: tuple[int, int] | None = None  # (width, height) in camera pixels
     cam_index: int | None = None  # USB camera index (for warm-restart)
     screen_dimension: dict | None = None  # width, height, viewport_w/h in CSS pt
+    # Absolute lens position pinned during the camera-mapping step, in
+    # the driver's native units. None on rigs that can't lock (fixed-
+    # focus camera, macOS without the UVC channel) or when the driver
+    # reported no readable position — those run on live AF. Deliberately
+    # NOT part of `complete`: a rig without it is degraded, not broken.
+    cam_focus: float | None = None
 
     @property
     def transforms_ready(self) -> bool:
@@ -145,6 +154,8 @@ class Calibration:
             out["mapping_a"] = "OK"
         if self.pct_to_cam is not None:
             out["mapping_b"] = "OK"
+        if self.cam_focus is not None:
+            out["focus"] = f"pinned @ {self.cam_focus:g}"
         if self.transforms_ready:
             out["validated"] = True
         return out
@@ -174,6 +185,7 @@ class Calibration:
             "cam_size": list(self.cam_size) if self.cam_size is not None else None,
             "cam_index": self.cam_index,
             "screen_dimension": self.screen_dimension,
+            "cam_focus": self.cam_focus,
         }
 
     @classmethod
@@ -202,6 +214,7 @@ class Calibration:
             cam_size=tuple(cs) if cs is not None else None,
             cam_index=payload.get("cam_index"),
             screen_dimension=payload.get("screen_dimension"),
+            cam_focus=payload.get("cam_focus"),
         )
 
     def save(self, path: Path = BUNDLE_PATH) -> None:

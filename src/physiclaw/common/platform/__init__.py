@@ -31,6 +31,8 @@ camera_set_manual_exposure = _impl.camera_set_manual_exposure
 camera_focus_lockable = _impl.camera_focus_lockable
 camera_lock_focus = _impl.camera_lock_focus
 camera_unlock_focus = _impl.camera_unlock_focus
+camera_read_focus = _impl.camera_read_focus
+camera_apply_focus = _impl.camera_apply_focus
 open_camera_aim_app = _impl.open_camera_aim_app
 quit_camera_aim_app = _impl.quit_camera_aim_app
 open_image_files = _impl.open_image_files
@@ -51,6 +53,8 @@ __all__ = [
     "camera_focus_lockable",
     "camera_lock_focus",
     "camera_unlock_focus",
+    "camera_read_focus",
+    "camera_apply_focus",
     "open_camera_aim_app",
     "quit_camera_aim_app",
     "open_image_files",

@@ -549,9 +549,10 @@ def test_exposure_setter_holds_cap_lock(mocker) -> None:
 # ---------- focus lock ----------
 
 
-def test_lock_focus_remembered_across_reopen(mocker) -> None:
-    # A reconnect must not silently hand a frozen lens back to AF — the
-    # rebuilt cap gets re-frozen from the remembered state.
+def test_lock_focus_is_a_raw_unremembered_freeze(mocker) -> None:
+    # The freeze is only the calibration step's `focus.lock` callable —
+    # the remembered, replayable state is an absolute position
+    # (`apply_focus`), so a reopen must NOT re-freeze.
     vc1 = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 200)
     cam = _open_camera_no_thread(mocker, vc=vc1)
     lock_spy = mocker.patch.object(
@@ -565,49 +566,15 @@ def test_lock_focus_remembered_across_reopen(mocker) -> None:
     mocker.patch.object(cv2, "VideoCapture", return_value=vc2)
     cam._reopen()
 
-    lock_spy.assert_called_with(vc2)
+    lock_spy.assert_called_once()  # no re-freeze on reopen
 
 
-def test_refused_lock_focus_is_not_remembered(mocker) -> None:
-    vc1 = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 200)
-    cam = _open_camera_no_thread(mocker, vc=vc1)
-    lock_spy = mocker.patch.object(
-        camera_mod.platform, "camera_lock_focus", return_value=False
-    )
-
-    assert cam.lock_focus() is False
-
-    vc2 = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 10)
-    mocker.patch.object(cv2, "VideoCapture", return_value=vc2)
-    cam._reopen()
-
-    lock_spy.assert_called_once()  # only the refused attempt — no re-apply
-
-
-def test_unlock_focus_clears_the_remembered_lock(mocker) -> None:
-    vc1 = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 200)
-    cam = _open_camera_no_thread(mocker, vc=vc1)
-    lock_spy = mocker.patch.object(
-        camera_mod.platform, "camera_lock_focus", return_value=True
-    )
-    mocker.patch.object(camera_mod.platform, "camera_unlock_focus")
-
-    cam.lock_focus()
-    cam.unlock_focus()
-
-    vc2 = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 10)
-    mocker.patch.object(cv2, "VideoCapture", return_value=vc2)
-    cam._reopen()
-
-    lock_spy.assert_called_once()  # the explicit lock — no re-apply after unlock
-
-
-def test_close_hands_frozen_focus_back_to_autofocus(mocker) -> None:
-    # A frozen lens position lives in the camera's volatile RAM and would
+def test_close_hands_pinned_focus_back_to_autofocus(mocker) -> None:
+    # A pinned lens position lives in the camera's volatile RAM and would
     # outlive the process — close() must hand it back to AF.
     cam, _ = _ready_camera(mocker)
-    mocker.patch.object(camera_mod.platform, "camera_lock_focus", return_value=True)
-    cam.lock_focus()
+    mocker.patch.object(camera_mod.platform, "camera_apply_focus", return_value=True)
+    cam.apply_focus(137.0)
     unlock_spy = mocker.patch.object(camera_mod.platform, "camera_unlock_focus")
 
     cam.close()
@@ -615,7 +582,7 @@ def test_close_hands_frozen_focus_back_to_autofocus(mocker) -> None:
     unlock_spy.assert_called_once_with(cam.cap)
 
 
-def test_close_does_not_touch_focus_when_never_locked(mocker) -> None:
+def test_close_does_not_touch_focus_when_never_pinned(mocker) -> None:
     cam, _ = _ready_camera(mocker)
     unlock_spy = mocker.patch.object(camera_mod.platform, "camera_unlock_focus")
 
@@ -732,3 +699,94 @@ def test_reopen_reuses_settled_ladder_rung(mocker) -> None:
     cam._reopen()
 
     assert _width_requests(vc2) == [1920]
+
+
+def test_apply_focus_remembered_across_reopen(mocker) -> None:
+    # The calibrated position must survive a reconnect: the rebuilt cap
+    # is re-driven to the exact value, not just re-frozen in place.
+    vc1 = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 200)
+    cam = _open_camera_no_thread(mocker, vc=vc1)
+    apply_spy = mocker.patch.object(
+        camera_mod.platform, "camera_apply_focus", return_value=True
+    )
+
+    assert cam.apply_focus(137.0) is True
+    apply_spy.assert_called_once_with(vc1, 137.0)
+
+    vc2 = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 10)
+    mocker.patch.object(cv2, "VideoCapture", return_value=vc2)
+    cam._reopen()
+
+    apply_spy.assert_called_with(vc2, 137.0)
+
+
+def test_refused_apply_focus_is_not_remembered(mocker) -> None:
+    vc1 = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 200)
+    cam = _open_camera_no_thread(mocker, vc=vc1)
+    apply_spy = mocker.patch.object(
+        camera_mod.platform, "camera_apply_focus", return_value=False
+    )
+
+    assert cam.apply_focus(137.0) is False
+
+    vc2 = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 10)
+    mocker.patch.object(cv2, "VideoCapture", return_value=vc2)
+    cam._reopen()
+
+    apply_spy.assert_called_once()  # only the refused explicit call
+
+
+def test_unlock_focus_clears_the_remembered_value(mocker) -> None:
+    vc1 = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 200)
+    cam = _open_camera_no_thread(mocker, vc=vc1)
+    apply_spy = mocker.patch.object(
+        camera_mod.platform, "camera_apply_focus", return_value=True
+    )
+    mocker.patch.object(camera_mod.platform, "camera_unlock_focus")
+
+    cam.apply_focus(137.0)
+    cam.unlock_focus()
+
+    vc2 = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 10)
+    mocker.patch.object(cv2, "VideoCapture", return_value=vc2)
+    cam._reopen()
+
+    apply_spy.assert_called_once()  # the explicit apply — none after unlock
+
+
+def test_read_focus_delegates_to_platform(mocker) -> None:
+    vc = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 200)
+    cam = _open_camera_no_thread(mocker, vc=vc)
+    mocker.patch.object(camera_mod.platform, "camera_read_focus", return_value=42.0)
+
+    assert cam.read_focus() == 42.0
+
+
+def test_configure_capture_applies_seeded_focus(mocker) -> None:
+    cap = MagicMock()
+    apply_spy = mocker.patch.object(
+        camera_mod.platform, "camera_apply_focus", return_value=True
+    )
+    mocker.patch.object(camera_mod.platform, "camera_set_auto_exposure")
+
+    camera_mod.configure_capture(
+        cap, exposure_auto=True, exposure=-6, focus_value=137.0
+    )
+
+    apply_spy.assert_called_once_with(cap, 137.0)
+
+
+def test_constructor_seed_pins_focus_at_first_open(mocker) -> None:
+    # The bundle value flows through configure_capture from the very
+    # first open — warmup frames are already captured under the pinned
+    # lens; no caller-side apply ritual afterwards.
+    vc = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 200)
+    mocker.patch.object(cv2, "VideoCapture", return_value=vc)
+    apply_spy = mocker.patch.object(
+        camera_mod.platform, "camera_apply_focus", return_value=True
+    )
+
+    cam = Camera(index=0, focus_value=137.0)
+    cam._reader.stop()
+
+    apply_spy.assert_called_with(vc, 137.0)

@@ -237,6 +237,7 @@ def test_to_dict_with_empty_calibration_yields_all_nones() -> None:
         "cam_size": None,
         "cam_index": None,
         "screen_dimension": None,
+        "cam_focus": None,
     }
 
 
@@ -271,6 +272,7 @@ def test_from_dict_round_trips_a_full_bundle() -> None:
         cam_size=(800, 600),
         cam_index=1,
         screen_dimension={"width": 1170, "height": 2532},
+        cam_focus=137.0,
     )
 
     restored = Calibration.from_dict(original.to_dict())
@@ -282,6 +284,15 @@ def test_from_dict_round_trips_a_full_bundle() -> None:
     assert restored.cam_size == (800, 600)
     assert restored.cam_index == 1
     assert restored.screen_dimension == {"width": 1170, "height": 2532}
+    assert restored.cam_focus == 137.0
+
+
+def test_from_dict_without_cam_focus_key_loads_as_none() -> None:
+    # Pre-cam_focus bundles keep loading (alpha: no forced
+    # recalibration) — the lens just stays on live AF.
+    restored = Calibration.from_dict({"version": 1})
+
+    assert restored.cam_focus is None
 
 
 def test_from_dict_with_all_nones_returns_empty_calibration() -> None:

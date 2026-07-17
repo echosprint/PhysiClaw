@@ -39,10 +39,13 @@ def _grid_dot_image(rows=5, cols=3, w=600, h=900) -> np.ndarray:
 def test_compute_camera_mapping_succeeds(mocker) -> None:
     mocker.patch.object(camera_map_mod.time, "sleep")
     cam = MagicMock()
+    cam.focus_lockable = False
     cam.raw_frame.return_value = _grid_dot_image()
     cal = _make_cal()
 
-    pct_to_cam, cam_size = camera_map_mod.compute_camera_mapping(cam, cal, rotation=-1)
+    pct_to_cam, cam_size, _ = camera_map_mod.compute_camera_mapping(
+        cam, cal, rotation=-1
+    )
 
     assert pct_to_cam.shape == (2, 3)
     assert cam_size == (600, 900)
@@ -51,6 +54,7 @@ def test_compute_camera_mapping_succeeds(mocker) -> None:
 def test_compute_camera_mapping_camera_dead(mocker) -> None:
     mocker.patch.object(camera_map_mod.time, "sleep")
     cam = MagicMock()
+    cam.focus_lockable = False
     cam.raw_frame.return_value = None
     cal = _make_cal()
 
@@ -61,6 +65,7 @@ def test_compute_camera_mapping_camera_dead(mocker) -> None:
 def test_compute_camera_mapping_retries_then_fails(mocker) -> None:
     mocker.patch.object(camera_map_mod.time, "sleep")
     cam = MagicMock()
+    cam.focus_lockable = False
     blank = np.zeros((600, 900, 3), dtype=np.uint8)
     cam.raw_frame.return_value = blank
     cal = _make_cal()
@@ -72,6 +77,7 @@ def test_compute_camera_mapping_retries_then_fails(mocker) -> None:
 def test_compute_camera_mapping_applies_rotation(mocker) -> None:
     mocker.patch.object(camera_map_mod.time, "sleep")
     cam = MagicMock()
+    cam.focus_lockable = False
     # The camera returns a frame that is canonical only AFTER the configured
     # rotation is applied — so pre-rotate the canonical grid the opposite way.
     # This is the real scenario: rotation is picked to upright the grid, and
@@ -82,7 +88,7 @@ def test_compute_camera_mapping_applies_rotation(mocker) -> None:
 
     rotate_spy = mocker.spy(camera_map_mod.cv2, "rotate")
 
-    pct_to_cam, _ = camera_map_mod.compute_camera_mapping(
+    pct_to_cam, _, _ = camera_map_mod.compute_camera_mapping(
         cam, cal, rotation=cv2.ROTATE_90_CLOCKWISE
     )
 
@@ -111,10 +117,13 @@ def test_compute_camera_mapping_masks_off_screen_reflection(mocker) -> None:
     cv2.circle(grid_frame, (10, 450), 10, (0, 0, 255), -1)  # off-screen stray
 
     cam = MagicMock()
+    cam.focus_lockable = False
     cam.raw_frame.side_effect = [corners_frame] + [grid_frame] * 5
     cal = _make_cal()
 
-    pct_to_cam, cam_size = camera_map_mod.compute_camera_mapping(cam, cal, rotation=-1)
+    pct_to_cam, cam_size, _ = camera_map_mod.compute_camera_mapping(
+        cam, cal, rotation=-1
+    )
 
     assert pct_to_cam.shape == (2, 3)
     assert cam_size == (600, 900)
@@ -136,6 +145,7 @@ def test_compute_camera_mapping_rejects_mis_corresponded_grid(mocker) -> None:
     for x, y in positions:
         cv2.circle(frame, (x, y), 10, (0, 0, 255), -1)
     cam = MagicMock()
+    cam.focus_lockable = False
     cam.raw_frame.return_value = frame
     cal = _make_cal()
 
@@ -146,6 +156,7 @@ def test_compute_camera_mapping_rejects_mis_corresponded_grid(mocker) -> None:
 def test_compute_camera_mapping_uses_viewport_shift(mocker) -> None:
     mocker.patch.object(camera_map_mod.time, "sleep")
     cam = MagicMock()
+    cam.focus_lockable = False
     cam.raw_frame.return_value = _grid_dot_image()
     vshift = ViewportShift(
         offset_x=0,
@@ -170,3 +181,128 @@ def test_compute_camera_mapping_requires_viewport_shift(mocker) -> None:
 
     with pytest.raises(RuntimeError, match="Viewport shift not measured"):
         camera_map_mod.compute_camera_mapping(MagicMock(), cal, rotation=-1)
+
+
+# ---------- focus pin ----------
+
+
+def _sharp_frame(w=600, h=900) -> np.ndarray:
+    """High-variance noise — meters far above BLUR_THRESHOLD."""
+    rng = np.random.default_rng(7)
+    return rng.integers(0, 256, size=(h, w, 3), dtype=np.uint8)
+
+
+def _lockable_cam(frame: np.ndarray | None) -> MagicMock:
+    cam = MagicMock()
+    cam.focus_lockable = True
+    cam.wait_frames.return_value = True
+    cam.raw_frame.return_value = frame
+    cam.lock_focus.return_value = True
+    return cam
+
+
+def test_pin_focus_returns_none_when_not_lockable() -> None:
+    cam = MagicMock()
+    cam.focus_lockable = False
+
+    assert camera_map_mod._pin_focus(cam, -1, None) is None
+    cam.lock_focus.assert_not_called()
+
+
+def test_pin_focus_releases_a_stale_pin_before_relocking() -> None:
+    # A re-run (mapping retried, or a setup re-run over a warm-started
+    # session) arrives with the lens still pinned at the OLD position —
+    # frozen, AF can't re-converge. The pin must start from live AF.
+    cam = _lockable_cam(_sharp_frame())
+    cam.read_focus.return_value = 123.0
+    order: list[str] = []
+    cam.unlock_focus.side_effect = lambda: order.append("unlock")
+    cam.lock_focus.side_effect = lambda: order.append("lock") or True
+
+    camera_map_mod._pin_focus(cam, -1, None)
+
+    assert order[0] == "unlock"
+    assert "lock" in order
+
+
+def test_pin_focus_locks_reads_and_reapplies() -> None:
+    # The verified position is read back AND re-applied through
+    # apply_focus, so the camera remembers the exact value across a
+    # reopen instead of re-freezing wherever the lens sits.
+    cam = _lockable_cam(_sharp_frame())
+    cam.read_focus.return_value = 123.0
+
+    value = camera_map_mod._pin_focus(cam, -1, None)
+
+    assert value == 123.0
+    cam.apply_focus.assert_called_once_with(123.0)
+
+
+def test_pin_focus_returns_none_when_scene_never_sharp() -> None:
+    # A blank frame can't converge AF — the lock defers and nothing is
+    # persisted (the bundle's cam_focus stays None; AF stays live).
+    cam = _lockable_cam(np.zeros((900, 600, 3), dtype=np.uint8))
+
+    value = camera_map_mod._pin_focus(cam, -1, None)
+
+    assert value is None
+    cam.read_focus.assert_not_called()
+
+
+def test_pin_focus_returns_none_when_position_unreadable() -> None:
+    # The freeze verified but the driver reports no position — nothing
+    # a reconnect could replay, so the lens goes back to live AF and
+    # every session behaves the same.
+    cam = _lockable_cam(_sharp_frame())
+    cam.read_focus.return_value = None
+
+    value = camera_map_mod._pin_focus(cam, -1, None)
+
+    assert value is None
+    cam.apply_focus.assert_not_called()
+    cam.unlock_focus.assert_called()
+
+
+def test_pin_focus_returns_none_when_apply_refused() -> None:
+    # The driver froze the lens but rejects absolute writes — a
+    # persisted value would fail to re-apply on every future connect,
+    # so nothing is persisted and the lens goes back to AF.
+    cam = _lockable_cam(_sharp_frame())
+    cam.read_focus.return_value = 123.0
+    cam.apply_focus.return_value = False
+
+    value = camera_map_mod._pin_focus(cam, -1, None)
+
+    assert value is None
+    cam.unlock_focus.assert_called()
+
+
+def test_pin_focus_meters_only_the_screen_region() -> None:
+    # Sharp content inside the corner-fenced screen, dark desk outside —
+    # the meter must score the fence's bounding rect, not the full frame.
+    frame = np.zeros((900, 600, 3), dtype=np.uint8)
+    frame[100:800, 50:550] = _sharp_frame(w=500, h=700)
+    poly = np.array([[50, 100], [550, 100], [550, 800], [50, 800]])
+
+    region = camera_map_mod._focus_region(frame, poly)
+
+    assert region.shape[:2] == (701, 501)  # boundingRect is inclusive
+
+
+def test_focus_region_full_frame_without_fence() -> None:
+    frame = np.zeros((900, 600, 3), dtype=np.uint8)
+
+    assert camera_map_mod._focus_region(frame, None) is frame
+
+
+def test_compute_camera_mapping_returns_pinned_focus(mocker) -> None:
+    mocker.patch.object(camera_map_mod.time, "sleep")
+    cam = MagicMock()
+    cam.focus_lockable = False
+    cam.raw_frame.return_value = _grid_dot_image()
+    cal = _make_cal()
+    mocker.patch.object(camera_map_mod, "_pin_focus", return_value=42.0)
+
+    _, _, cam_focus = camera_map_mod.compute_camera_mapping(cam, cal, rotation=-1)
+
+    assert cam_focus == 42.0

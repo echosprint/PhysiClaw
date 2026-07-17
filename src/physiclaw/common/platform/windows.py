@@ -127,22 +127,19 @@ def camera_focus_lockable() -> bool:
 
 
 def camera_lock_focus(cap) -> bool:
-    """Freeze autofocus at its current position.
-
-    AF off first, then pin the absolute position back where the driver
-    reports one — on some cameras disabling AF alone doesn't hold the
-    lens. get() returns 0.0 when CAP_PROP_FOCUS is unsupported, and 0
-    is also a legal focus value — the pin is skipped at <= 0 rather
-    than risk racking an unsupported lens to its stop; the caller's
-    measured-sharpness verify covers whichever way that call goes."""
+    """Freeze autofocus at its current position: read the converged
+    position, then re-pin it through `camera_apply_focus` — the AF-off
+    ordering lives there. No readable position (see
+    `camera_read_focus`) → AF off alone, rather than risk racking an
+    unsupported lens to its stop; disabling AF holds the lens on most
+    cameras, and the caller's measured-sharpness verify covers the
+    rest."""
     import cv2
 
-    if not cap.set(cv2.CAP_PROP_AUTOFOCUS, 0):
-        return False
-    cur = cap.get(cv2.CAP_PROP_FOCUS)
-    if cur > 0:
-        cap.set(cv2.CAP_PROP_FOCUS, cur)
-    return True
+    cur = camera_read_focus(cap)
+    if cur is None:
+        return bool(cap.set(cv2.CAP_PROP_AUTOFOCUS, 0))
+    return camera_apply_focus(cap, cur)
 
 
 def camera_unlock_focus(cap) -> None:
@@ -150,6 +147,27 @@ def camera_unlock_focus(cap) -> None:
     import cv2
 
     cap.set(cv2.CAP_PROP_AUTOFOCUS, 1)
+
+
+def camera_read_focus(cap) -> float | None:
+    """Current absolute focus position, or None when the driver reports
+    none. get() returns 0.0 when CAP_PROP_FOCUS is unsupported and 0
+    is also a legal focus value — <= 0 reads as "no usable position"."""
+    import cv2
+
+    cur = cap.get(cv2.CAP_PROP_FOCUS)
+    return cur if cur > 0 else None
+
+
+def camera_apply_focus(cap, value: float) -> bool:
+    """Drive the lens to a caller-supplied absolute position. AF off
+    first, then the absolute write — MSMF maps both onto
+    CameraControl_Focus."""
+    import cv2
+
+    if not cap.set(cv2.CAP_PROP_AUTOFOCUS, 0):
+        return False
+    return bool(cap.set(cv2.CAP_PROP_FOCUS, value))
 
 
 # ─── doctor diagnostics ─────────────────────────────────────

@@ -211,6 +211,24 @@ def camera_unlock_focus(cap) -> None:
         log.warning("UVC: could not re-enable autofocus")
 
 
+def camera_read_focus(cap) -> float | None:
+    """Current absolute focus position via UVC (`cap` unused). None when
+    the channel is absent or the readback is unusable; <= 0 reads as
+    "no usable position", matching the other backends."""
+    channel = _camera_terminal()
+    if channel is None:
+        return None
+    cur = channel.read_focus()
+    return float(cur) if cur is not None and cur > 0 else None
+
+
+def camera_apply_focus(cap, value: float) -> bool:
+    """Drive the lens to a caller-supplied absolute position via UVC
+    (`cap` unused)."""
+    channel = _camera_terminal()
+    return channel is not None and channel.apply_focus(int(value))
+
+
 # ─── doctor diagnostics ─────────────────────────────────────
 
 

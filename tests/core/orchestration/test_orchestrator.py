@@ -742,12 +742,11 @@ def test_force_quit_open_swipe_holds_before_lift(pc: PhysiClaw, wire_rig) -> Non
 
 
 def _wire_unlock(mocker, pc: PhysiClaw, wire_rig, *, digit_bbox, scan=()):
-    """Shared unlock harness: wired rig, warmed OCR double, camera
-    settle and keypad poll stubbed, verify scan returning `scan`."""
+    """Shared unlock harness: wired rig, warmed OCR double, keypad poll
+    stubbed, verify scan returning `scan`."""
     wire_rig(pc.rig)
     pc.perception._ocr_reader = MagicMock()
     mocker.patch.object(orchestrator.time, "sleep")
-    mocker.patch.object(pc.perception, "ensure_focus_locked")
     mocker.patch.object(pc.perception, "wait_for_numpad_digit", return_value=digit_bbox)
     mocker.patch.object(pc.perception, "scan_text", return_value=list(scan))
 
@@ -760,21 +759,6 @@ def test_unlock_phone_returns_when_keypad_not_found(
     out = pc.unlock_phone()
 
     assert "Failed to find passcode keypad" in out.text
-
-
-def test_unlock_phone_settles_focus_before_the_swipe(
-    mocker, pc: PhysiClaw, wire_rig
-) -> None:
-    # The keypad clock starts at the swipe — the lens freeze must come
-    # before it, or the settle spends the window it exists to protect.
-    _wire_unlock(mocker, pc, wire_rig, digit_bbox=None)
-    order: list[str] = []
-    pc.perception.ensure_focus_locked.side_effect = lambda: order.append("lock")
-    pc.rig._arm.swipe_to.side_effect = lambda *a, **k: order.append("swipe")
-
-    pc.unlock_phone()
-
-    assert order == ["lock", "swipe"]
 
 
 def test_unlock_phone_taps_six_times_when_keypad_found(

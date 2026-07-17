@@ -88,7 +88,7 @@ class PhysiClaw:
     # ─── Lifecycle ─────────────────────────────────────────────
 
     def become_ready(self):
-        """Settle the camera (exposure tune + focus lock), THEN flip the
+        """Settle the camera (exposure tune), THEN flip the
         ready flag — the single ready-flipping path. Ordering matters:
         the agent runtime polls `ready` and peeks immediately, so
         flipping first would let the first view of a session ship from
@@ -408,13 +408,9 @@ class PhysiClaw:
             # numpad sleep again before the first tap lands.
             self.perception.ocr_reader()
             self._execute(gestures.WAKE_SCREEN)
-            # Converge-and-freeze the lens on the lit lock screen while
-            # the keypad clock is NOT yet running: a frozen lens can't
-            # re-hunt when the swipe flips the screen bright→dark.
-            # Parks + settles only when a re-lock is actually owed (skips
-            # the arm move on the already-frozen fast path); fail-open
-            # no-op when the camera can't lock.
-            self.perception.ensure_focus_locked()
+            # No focus settling here: the lens is pinned at the
+            # calibrated position from camera connect, so the swipe's
+            # bright→dark flip can't trigger a hunt.
             self._execute(gestures.UNLOCK_SWIPE)
 
             digit_bbox = self.perception.wait_for_numpad_digit(digit)

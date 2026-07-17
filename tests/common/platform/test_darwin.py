@@ -276,11 +276,19 @@ def test_camera_backend_lets_opencv_pick() -> None:
 
 
 class _FakeFocusTerminal(_FakeTerminal):
-    def __init__(self, *, answers: bool = True, ok: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        answers: bool = True,
+        ok: bool = True,
+        position: int | None = 120,
+    ) -> None:
         super().__init__(ok=ok)
         self.answers = answers
+        self.position = position
         self.lock_calls = 0
         self.unlock_calls = 0
+        self.applied: list[int] = []
 
     def answers_focus(self) -> bool:
         return self.answers
@@ -291,6 +299,13 @@ class _FakeFocusTerminal(_FakeTerminal):
 
     def unlock_focus(self) -> bool:
         self.unlock_calls += 1
+        return self.ok
+
+    def read_focus(self) -> int | None:
+        return self.position
+
+    def apply_focus(self, position: int) -> bool:
+        self.applied.append(position)
         return self.ok
 
 
@@ -335,3 +350,37 @@ def test_unlock_focus_delegates_and_survives_refusal(monkeypatch) -> None:
     darwin.camera_unlock_focus(MagicMock())  # refused write only logs
 
     assert channel.unlock_calls == 1
+
+
+def test_read_focus_via_channel(monkeypatch) -> None:
+    _reset_probe(monkeypatch, _FakeFocusTerminal(position=120))
+
+    assert darwin.camera_read_focus(MagicMock()) == 120.0
+
+
+def test_read_focus_none_without_channel(monkeypatch) -> None:
+    _reset_probe(monkeypatch, None)
+
+    assert darwin.camera_read_focus(MagicMock()) is None
+
+
+def test_read_focus_none_on_junk_readback(monkeypatch) -> None:
+    # A GET_CUR of 0 is indistinguishable from "unsupported" — treated
+    # as no usable position, matching the other backends' pin guard.
+    _reset_probe(monkeypatch, _FakeFocusTerminal(position=0))
+
+    assert darwin.camera_read_focus(MagicMock()) is None
+
+
+def test_apply_focus_via_channel(monkeypatch) -> None:
+    channel = _FakeFocusTerminal()
+    _reset_probe(monkeypatch, channel)
+
+    assert darwin.camera_apply_focus(MagicMock(), 137.0) is True
+    assert channel.applied == [137]
+
+
+def test_apply_focus_false_without_channel(monkeypatch) -> None:
+    _reset_probe(monkeypatch, None)
+
+    assert darwin.camera_apply_focus(MagicMock(), 137.0) is False

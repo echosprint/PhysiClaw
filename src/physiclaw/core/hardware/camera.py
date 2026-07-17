@@ -100,7 +100,7 @@ def configure_capture(
     exposure_auto: bool,
     exposure: int,
     size: tuple[int, int] | None = None,
-    focus_locked: bool = False,
+    focus_value: float | None = None,
 ) -> None:
     """Apply PhysiClaw's capture properties to an open cv2.VideoCapture.
 
@@ -116,9 +116,10 @@ def configure_capture(
     ``size`` overrides the CONFIG request — `Camera._warmup` uses it to
     walk `RESOLUTION_FALLBACKS` when a negotiation misbehaves.
 
-    ``focus_locked`` re-freezes a remembered focus lock last, making
-    this the choke point for ALL remembered camera state — reconnects
-    can't sneak past it and silently hand the lens back to AF.
+    ``focus_value`` re-pins a remembered lens position last, making
+    this the choke point for ALL remembered camera state — the first
+    open and every reconnect flow through it identically, so neither
+    can silently hand the lens back to AF.
 
     The request passes through `apply_size_cap` — see its docstring
     for the macOS exposure-safety rationale.
@@ -145,11 +146,12 @@ def configure_capture(
         platform.camera_set_auto_exposure(cap)
     else:
         platform.camera_set_manual_exposure(cap, exposure)
-    # Remembered focus lock re-applied at the same choke point as the
-    # exposure state, so reconnects can't sneak past it either. The
-    # lens position itself lives in the camera; re-locking re-pins it.
-    if focus_locked:
-        platform.camera_lock_focus(cap)
+    # Remembered focus state re-applied at the same choke point as the
+    # exposure state, so reconnects can't sneak past it either.
+    if focus_value is not None and not platform.camera_apply_focus(cap, focus_value):
+        log.warning(
+            "could not apply the remembered focus position — lens left on autofocus"
+        )
 
 
 # Fallback requests when a high-resolution negotiation misbehaves.
@@ -194,7 +196,7 @@ class Camera:
     # the caller on it.
     CLOSE_LOCK_TIMEOUT_SECONDS = 2.0
 
-    def __init__(self, index: int = 0) -> None:
+    def __init__(self, index: int = 0, focus_value: float | None = None) -> None:
         self.index = index
         self.rotation: int = -1  # no rotation until calibration step 3 sets it
         # cv2.VideoCapture is not thread-safe for concurrent read()+set():
@@ -206,11 +208,11 @@ class Camera:
         # a converged manual value instead of silently reverting to auto.
         self._exposure_auto: bool = CONFIG.camera.auto_exposure
         self._exposure_value: int = CONFIG.camera.exposure
-        # Focus-lock state remembered for the same reason: a reconnect
-        # must not silently hand the lens back to continuous AF. The
-        # lens position itself lives in the camera and survives the
-        # reconnect; re-locking re-pins wherever it is.
-        self._focus_locked: bool = False
+        # Remembered absolute lens position (None = live AF), seedable at
+        # construction so the first open is already pinned. Remembered
+        # for the same reason as exposure: a reconnect must not silently
+        # hand the lens back to continuous AF.
+        self._focus_value: float | None = focus_value
         # The resolution request, remembered so _reopen() re-applies the
         # rung _warmup settled on instead of re-failing at the top of the
         # ladder on every reconnect.
@@ -269,7 +271,7 @@ class Camera:
             exposure_auto=self._exposure_auto,
             exposure=self._exposure_value,
             size=self._request_size,
-            focus_locked=self._focus_locked,
+            focus_value=self._focus_value,
         )
 
     def _request_ladder(self) -> list[tuple[int, int]]:
@@ -317,7 +319,7 @@ class Camera:
                     exposure_auto=self._exposure_auto,
                     exposure=self._exposure_value,
                     size=size,
-                    focus_locked=self._focus_locked,
+                    focus_value=self._focus_value,
                 )
             frame = self._acquire_first_frame()
             if frame is None:
@@ -388,30 +390,38 @@ class Camera:
         for its focus controls (fixed-focus cameras don't)."""
         return platform.camera_focus_lockable()
 
-    @property
-    def focus_locked(self) -> bool:
-        """Whether THIS camera's autofocus is currently frozen. The
-        authoritative source: a fresh Camera starts False (live AF) even
-        when an observer still remembers a lock from a previous camera,
-        so callers gate re-lock decisions on this, not their own mirror."""
-        return self._focus_locked
-
     def lock_focus(self) -> bool:
-        """Freeze autofocus at its current position. Remembered, so a
-        later `_reopen` re-freezes instead of silently reverting to AF.
+        """Freeze autofocus at its current position — a raw,
+        unremembered freeze (the `focus.lock` callable). The remembered,
+        replayable state is an absolute position: `apply_focus`.
         Verification is the caller's job — measured sharpness, never
-        the driver's word (see `focus.lock`)."""
+        the driver's word."""
         with self._cap_lock:
-            ok = platform.camera_lock_focus(self.cap)
-        if ok:
-            self._focus_locked = True
-        return ok
+            return platform.camera_lock_focus(self.cap)
 
     def unlock_focus(self) -> None:
         """Hand the lens back to continuous autofocus. Remembered."""
-        self._focus_locked = False
+        self._focus_value = None
         with self._cap_lock:
             platform.camera_unlock_focus(self.cap)
+
+    def read_focus(self) -> float | None:
+        """Current absolute lens position, or None when the driver
+        doesn't report a usable one."""
+        with self._cap_lock:
+            return platform.camera_read_focus(self.cap)
+
+    def apply_focus(self, value: float) -> bool:
+        """Pin the lens at a known-good absolute position. Remembered,
+        so a later `_reopen` re-drives the lens to the same position
+        instead of re-freezing wherever it happens to sit. Verification
+        is the caller's job — measured sharpness, never the driver's
+        word."""
+        with self._cap_lock:
+            ok = platform.camera_apply_focus(self.cap, value)
+        if ok:
+            self._focus_value = value
+        return ok
 
     def wait_frames(self, n: int, timeout: float = 5.0) -> bool:
         """Block until the reader publishes `n` MORE frames (or timeout).
@@ -499,10 +509,10 @@ class Camera:
                         platform.camera_set_auto_exposure(self.cap)
                     except Exception:
                         log.warning("exposure hand-back on close failed", exc_info=True)
-                # Same volatile-RAM story for a frozen lens: hand it back
+                # Same volatile-RAM story for a pinned lens: hand it back
                 # to AF so the next run (or any other app) starts hunting
                 # from a live autofocus, not our frozen position.
-                if self._focus_locked:
+                if self._focus_value is not None:
                     try:
                         platform.camera_unlock_focus(self.cap)
                     except Exception:

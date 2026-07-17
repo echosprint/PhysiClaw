@@ -77,7 +77,8 @@ def laplacian_variance(frame: np.ndarray) -> float:
 # to NORMALIZED_WIDTH, and the orchestrator's PEEK/GRAB blur-retry
 # thresholds are defined FROM this constant — this check runs AFTER
 # those retries, so a frame still under it means the retry didn't
-# recover (AF genuinely failing, not just mid-hunt).
+# recover (the pinned lens position no longer matches the scene — the
+# camera or phone moved — not a transient).
 # Seeded from `[vision]` config (deliberate CONFIG read at import, same
 # tradeoff as preprocess.py) so a rig with different optics/lighting can
 # re-tune without a source edit; the defaults are the calibrated values.
@@ -107,7 +108,7 @@ BLOWN_BLOB_COUNT = CONFIG.vision.blown_blob_count
 PERSIST_AFTER = 3
 
 # Agent-facing fragments — pinned by tests; edits change agent behavior.
-BLUR_NOTE = "image blurry — autofocus failed or the camera moved"
+BLUR_NOTE = "image blurry — the camera or phone moved, or focus calibration is stale"
 BLOWN_NOTE = "washed out to white — auto-exposure failed or glare on the screen"
 UNRELIABLE_NOTE = "labels in this view may be wrong or missing"
 PERSIST_REMINDER = (
