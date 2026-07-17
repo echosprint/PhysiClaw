@@ -194,11 +194,25 @@ def _infer_numpad(key_a: str, pos_a: tuple, key_b: str, pos_b: tuple) -> dict:
     }
 
 
+# Distinct single-digit reads required before the elements are believed
+# to BE a keypad — the same minimum the grid-inference path needs, so
+# no documented capability sits unreachable below the gate. A lone "1"
+# is noise — a dark lock screen's clock fragment or a widget number —
+# and tapping it types on whatever is actually showing (observed: a
+# "passcode" entered on the sleeping lock-screen cover). Not higher
+# than 2: marginal OCR (glare band, dim night keypad, digits merged
+# with their letter subtitles) can legitimately yield few clean reads,
+# and a false None here burns the whole keypad window.
+NUMPAD_MIN_DIGITS = 2
+
+
 def find_numpad_digit(elements: list[dict], digit: str) -> list[float] | None:
     """Find a passcode digit bbox from OCR elements. Falls back to grid inference.
 
-    1. Direct match: look for an element whose label is exactly the digit.
-    2. Inference: if not found, use any two detected digits on different
+    1. Keypad-context gate: at least NUMPAD_MIN_DIGITS distinct digits
+       must be visible — otherwise this isn't a keypad.
+    2. Direct match: look for an element whose label is exactly the digit.
+    3. Inference: if not found, use any two detected digits on different
        rows and columns to infer the full numpad layout.
 
     Returns [left, top, right, bottom] as 0-1 decimals, or None.
@@ -210,6 +224,9 @@ def find_numpad_digit(elements: list[dict], digit: str) -> list[float] | None:
         _, y1, _, y2 = e["bbox"]
         if len(label) == 1 and label.isdigit() and 0.2 <= y1 and y2 <= 0.8:
             detected[label] = e
+
+    if len(detected) < NUMPAD_MIN_DIGITS:
+        return None
 
     # Direct match
     if digit in detected:

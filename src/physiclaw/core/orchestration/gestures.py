@@ -153,7 +153,13 @@ FORCE_QUIT: tuple[Gesture, ...] = (
 # center: that is the "5" key, and a prepended 5 turns 111111 into a
 # wrong passcode — repeated wrong entries walk toward the iOS lockout.
 WAKE_SCREEN: Gesture = Tap([0.4, 0.28, 0.6, 0.32])
-UNLOCK_SWIPE: Gesture = Swipe(BOTTOM_EDGE, "up", "l", "fast")
+# "xl" travel, same as HOME_SCREEN's: an "l" swipe released mid-screen
+# can read as a partial peek that iOS settles back onto the cover
+# instead of committing to the passcode keypad. On an already-open
+# keypad a committed bottom-edge swipe is the CANCEL gesture — which
+# is why the unlock flow probes for a visible keypad and skips this
+# swipe entirely when one is up (orchestrator.unlock_phone).
+UNLOCK_SWIPE: Gesture = Swipe(BOTTOM_EDGE, "up", "xl", "fast")
 
 # The tool-phone passcode — a throwaway code, never the user's real one. The
 # single source of truth for the unlock tap loop: it taps ONE digit key N

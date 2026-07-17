@@ -86,6 +86,25 @@ BLUR_THRESHOLD = CONFIG.vision.blur_threshold
 
 # A pixel this bright is treated as clipped (detail destroyed).
 CLIP_LUMA = 250
+# Below this median luma the screen content is crushed to black — the
+# view is underexposed (stale bright-scene value, or a dim night screen
+# the exposure hasn't caught up with). Shared with exposure.py: its
+# tune acceptance and the dark-view triggers must agree on one floor.
+DARK_MEDIAN_LUMA = 25.0
+# The second axis of `dark`: a low median alone can't distinguish an
+# underexposed frame from CORRECTLY-EXPOSED dark content — dark-mode
+# UI (black background, white text) meters median ~7 on real session
+# frames while being perfectly readable. What separates them is the
+# highlights: readable dark UI carries near-white text (p99 ≈ 250);
+# a crushed frame has no bright pixels at all (p99 well under this).
+DARK_P99_LUMA = 180.0
+# Above this clip fraction the frame is saturated wall-to-wall — a
+# gross overexposure (e.g. a manual value held from a far dimmer
+# scene). The two-factor blown rule can't catch it (median ≥ 250
+# evades the BLOWN_MEDIAN_LUMA guard, and a page-sized clipped region
+# is not icon-shaped), so it gets its own clause. Legit light pages
+# measured well below this (a readable chat page clips ~70%).
+SATURATED_CLIP_PCT = 0.95
 # Two-factor blown-highlights rule — see module docstring for calibration.
 BLOWN_CLIP_PCT = CONFIG.vision.blown_clip_pct
 BLOWN_MEDIAN_LUMA = CONFIG.vision.blown_median_luma
@@ -110,6 +129,7 @@ PERSIST_AFTER = 3
 # Agent-facing fragments — pinned by tests; edits change agent behavior.
 BLUR_NOTE = "image blurry — the camera or phone moved, or focus calibration is stale"
 BLOWN_NOTE = "washed out to white — auto-exposure failed or glare on the screen"
+DARK_NOTE = "image dark — the screen is dim/asleep or exposure is stale"
 UNRELIABLE_NOTE = "labels in this view may be wrong or missing"
 PERSIST_REMINDER = (
     "Bad camera views {n} in a row — the rig needs physical attention: "
@@ -153,19 +173,38 @@ class QualityReport:
     clip_pct: float  # fraction of pixels >= CLIP_LUMA
     median_luma: float  # median gray level, 0-255
     white_blobs: int = 0  # icon-like clipped blobs (clipped_icon_blobs)
+    # 99th-percentile gray level — the highlight axis that separates
+    # underexposure from dark content (see DARK_P99_LUMA). Defaults to
+    # 0.0 ("no highlights") so hand-built low-median reports read dark.
+    p99_luma: float = 0.0
 
     @property
     def blurry(self) -> bool:
         return self.sharpness < BLUR_THRESHOLD
 
     @property
+    def dark(self) -> bool:
+        """Underexposed: content crushed to black — a low median AND no
+        bright pixels. Correctly-exposed dark-mode content (median ~7
+        with near-white text) is NOT dark: its p99 clears the highlight
+        floor. Underexposed frames are always low-sharpness too —
+        consumers should report dark INSTEAD of blurry, or a camera
+        problem gets blamed for an exposure one."""
+        return self.median_luma < DARK_MEDIAN_LUMA and self.p99_luma < DARK_P99_LUMA
+
+    @property
     def blown(self) -> bool:
-        """Two failure signatures, either one:
+        """Three failure signatures, any one:
         - the two-factor histogram rule (clipped pixels on a non-white
           median), which a white-median frame evades by construction;
         - the icon-grid white-out (many icon-sized clipped blobs), which
-          catches exactly those white-median catastrophes when the
-          burned content is icon-shaped."""
+          catches white-median catastrophes when the burned content is
+          icon-shaped;
+        - wall-to-wall saturation (clip >= SATURATED_CLIP_PCT), which
+          catches the gross case both others evade — a manual value
+          held from a far dimmer scene nuking the whole frame white."""
+        if self.clip_pct >= SATURATED_CLIP_PCT:
+            return True
         if self.clip_pct > BLOWN_CLIP_PCT and self.median_luma < BLOWN_MEDIAN_LUMA:
             return True
         return self.white_blobs >= BLOWN_BLOB_COUNT
@@ -189,6 +228,7 @@ def assess(frame: np.ndarray) -> QualityReport:
         clip_pct=float((gray >= CLIP_LUMA).mean()),
         median_luma=float(np.median(gray)),
         white_blobs=clipped_icon_blobs(gray),
+        p99_luma=float(np.percentile(gray, 99)),
     )
 
 
@@ -212,7 +252,12 @@ class QualityMonitor:
     def observe(self, report: QualityReport) -> str | None:
         """Return the ⚠ warning line for a bad view, else None."""
         issues: list[str] = []
-        if report.blurry:
+        if report.dark:
+            # Dark takes the blur slot: a crushed-black frame always
+            # meters blurry, and naming the sharpness would steer the
+            # agent at the camera when the problem is light.
+            issues.append(f"{DARK_NOTE} (median {report.median_luma:.0f})")
+        elif report.blurry:
             issues.append(
                 f"{BLUR_NOTE} (sharpness {report.sharpness:.0f} < {BLUR_THRESHOLD:.0f})"
             )

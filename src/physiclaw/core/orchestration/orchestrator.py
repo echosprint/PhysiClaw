@@ -133,9 +133,9 @@ class PhysiClaw:
         screenshot.
         """
         with self.rig.locked():
-            cropped, report = self._observer.peek_frame()
+            cropped, report, retuned = self._observer.peek_frame()
             listing, annotated = self.perception.detect(cropped)
-            warning = self._observer.observe_quality("peek", report)
+            warning = self._observer.observe_quality("peek", report, retuned=retuned)
             if warning is not None:
                 listing = f"{listing}\n{warning}"
             # detect() types the annotated frame as `object`; it is always
@@ -408,12 +408,18 @@ class PhysiClaw:
             # numpad sleep again before the first tap lands.
             self.perception.ocr_reader()
             self._execute(gestures.WAKE_SCREEN)
-            # No focus settling here: the lens is pinned at the
-            # calibrated position from camera connect, so the swipe's
-            # bright→dark flip can't trigger a hunt.
-            self._execute(gestures.UNLOCK_SWIPE)
-
-            digit_bbox = self.perception.wait_for_numpad_digit(digit)
+            # The keypad poll below can only meter sharpness — it can't
+            # tune, and the keypad lives seconds. Fix a crushed night
+            # view NOW, on the freshly-lit screen (this is the one
+            # explicit exposure fix point inside the wake→keypad window).
+            self.perception.ensure_readable_exposure()
+            # A keypad left open by a previous attempt must be typed on,
+            # not swiped: the bottom-edge swipe is the passcode screen's
+            # cancel gesture. Probe first; swipe only from the cover.
+            digit_bbox = self.perception.find_visible_numpad_digit(digit)
+            if digit_bbox is None:
+                self._execute(gestures.UNLOCK_SWIPE)
+                digit_bbox = self.perception.wait_for_numpad_digit(digit)
             if digit_bbox is None:
                 return "Failed to find passcode keypad — phone may already be unlocked"
 

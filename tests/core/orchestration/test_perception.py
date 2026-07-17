@@ -199,18 +199,27 @@ def _wire_numpad_poll(mocker, rig, *, sharpness: float):
     """Stub the poll's acquisition chain — a stock frame, pass-through
     crops, a fixed sharpness score, patched sleep (returned for
     cadence assertions)."""
+    from physiclaw.core.vision.quality import QualityReport
+
     frame = np.zeros((4, 4, 3), dtype=np.uint8)
     rig._cam.snapshot.return_value = frame
     mocker.patch.object(perception_mod, "crop_to_phone_screen", return_value=frame)
     mocker.patch.object(perception_mod, "phone_screen_crop_box", return_value=None)
+    # A lit (non-dark) crop at the requested sharpness — the dark-skip
+    # branch has its own dedicated test.
     mocker.patch.object(
-        perception_mod.quality, "laplacian_variance", return_value=sharpness
+        perception_mod.quality,
+        "assess",
+        return_value=QualityReport(
+            sharpness=sharpness, clip_pct=0.0, median_luma=100.0, p99_luma=250.0
+        ),
     )
     return mocker.patch.object(perception_mod.time, "sleep")
 
 
 def test_wait_for_numpad_digit_polls_until_found(mocker, rig, per: Perception) -> None:
     _wire_numpad_poll(mocker, rig, sharpness=1000.0)
+    mocker.patch.object(per, "NUMPAD_OCR_MIN_INTERVAL_SECONDS", 0.0)
     bbox = [0.1, 0.1, 0.2, 0.2]
     ocr = mocker.patch.object(
         per, "_ocr_elements", side_effect=[[], [], [{"hit": True}]]
@@ -704,3 +713,167 @@ def test_settle_camera_skips_when_busy(mocker, rig, per: Perception) -> None:
         rig.release()
 
     tune.assert_not_called()
+
+
+def test_dark_view_schedules_retune(mocker, rig, per: Perception) -> None:
+    # A stale bright-scene exposure crushes a night-dimmed screen to
+    # black — dark views must trigger the correction machinery.
+    rig._cam.exposure_tunable = True
+    sched = mocker.patch.object(per, "_schedule_retune")
+
+    per.on_quality_report(_report(median=5.0), streak=1)
+
+    sched.assert_called_once()
+
+
+def test_stuck_dark_scene_schedules_nothing_under_the_hold(
+    mocker, rig, per: Perception
+) -> None:
+    # The deferral recorded the scene's darkness — an unchanged scene
+    # re-proves nothing (the thrash bound for sessions staring at a
+    # sleeping phone).
+    from physiclaw.core.hardware import exposure as exposure_mod
+
+    rig._cam.exposure_tunable = True
+    per._last_tune = exposure_mod.TuneResult(
+        "auto", None, False, "dark", deferred=True, median=7.0
+    )
+    sched = mocker.patch.object(per, "_schedule_retune")
+
+    per.on_quality_report(_report(median=8.0), streak=5)
+
+    sched.assert_not_called()
+
+
+def test_tune_crash_records_a_deferred_sentinel(mocker, rig, per: Perception) -> None:
+    # Without a recorded result the dark-hold has no state — a flaky
+    # camera on a dark scene would re-fire the tune on every view.
+    rig._cam.exposure_tunable = True
+    mocker.patch.object(
+        perception_mod.exposure, "converge", side_effect=RuntimeError("boom")
+    )
+    rig.acquire()
+    try:
+        per.tune_now()
+    finally:
+        rig.release()
+
+    assert per._last_tune is not None and per._last_tune.deferred
+
+
+def test_ensure_readable_exposure_tunes_a_dark_view(
+    mocker, rig, per: Perception
+) -> None:
+    from physiclaw.core.vision.quality import QualityReport
+
+    rig._cam.exposure_tunable = True
+    frame = np.zeros((4, 4, 3), dtype=np.uint8)
+    mocker.patch.object(per, "_screen_crop", return_value=frame)
+    mocker.patch.object(
+        perception_mod.quality,
+        "assess",
+        return_value=QualityReport(sharpness=20.0, clip_pct=0.0, median_luma=5.0),
+    )
+    tune = mocker.patch.object(per, "tune_now")
+
+    rig.acquire()
+    try:
+        per.ensure_readable_exposure()
+    finally:
+        rig.release()
+
+    tune.assert_called_once()
+
+
+def test_ensure_readable_exposure_leaves_a_clean_view_alone(
+    mocker, rig, per: Perception
+) -> None:
+    from physiclaw.core.vision.quality import QualityReport
+
+    rig._cam.exposure_tunable = True
+    frame = np.zeros((4, 4, 3), dtype=np.uint8)
+    mocker.patch.object(per, "_screen_crop", return_value=frame)
+    mocker.patch.object(
+        perception_mod.quality,
+        "assess",
+        return_value=QualityReport(
+            sharpness=400.0, clip_pct=0.0, median_luma=120.0, p99_luma=250.0
+        ),
+    )
+    tune = mocker.patch.object(per, "tune_now")
+
+    rig.acquire()
+    try:
+        per.ensure_readable_exposure()
+    finally:
+        rig.release()
+
+    tune.assert_not_called()
+
+
+def test_find_visible_numpad_digit_probes_the_current_screen(
+    mocker, rig, per: Perception
+) -> None:
+    bbox = [0.1, 0.5, 0.2, 0.6]
+    rig._cam.snapshot.return_value = np.zeros((4, 4, 3), dtype=np.uint8)
+    mocker.patch.object(per, "_ocr_elements", return_value=[{"kp": True}])
+    mocker.patch.object(perception_mod, "find_numpad_digit", return_value=bbox)
+
+    rig.acquire()
+    try:
+        out = per.find_visible_numpad_digit("1")
+    finally:
+        rig.release()
+
+    assert out == bbox
+
+
+def test_scheduled_retune_superseded_by_a_fresher_tune(
+    mocker, rig, per: Perception
+) -> None:
+    # An inline fix that lands while the background task waits makes its
+    # conclusion fresher than the trigger — re-running the probe would
+    # re-learn the same answer seconds later.
+    mocker.patch.object(perception_mod.time, "sleep")
+    tune = mocker.patch.object(per, "tune_exposure")
+    thread = mocker.patch.object(perception_mod.threading, "Thread")
+
+    per._schedule_retune("test")
+    per._last_tune = perception_mod.exposure.TuneResult("auto", None, True, "fresh")
+    thread.call_args.kwargs["target"]()
+
+    tune.assert_not_called()
+
+
+def test_wait_for_numpad_digit_never_ocrs_a_dark_unsharp_crop(
+    mocker, rig, per: Perception
+) -> None:
+    # A crushed/asleep screen has nothing to read — the fix point is
+    # BEFORE this poll; burning multi-second OCR passes here just delays
+    # noticing the screen lighting up.
+    from physiclaw.core.vision.quality import QualityReport
+
+    frame = np.zeros((4, 4, 3), dtype=np.uint8)
+    rig._cam.snapshot.return_value = frame
+    mocker.patch.object(perception_mod, "crop_to_phone_screen", return_value=frame)
+    mocker.patch.object(
+        perception_mod.quality,
+        "assess",
+        return_value=QualityReport(sharpness=5.0, clip_pct=0.0, median_luma=3.0),
+    )
+    ocr = mocker.patch.object(per, "_ocr_elements")
+    clock = {"now": 0.0}
+    mocker.patch.object(
+        perception_mod.time, "monotonic", side_effect=lambda: clock["now"]
+    )
+    sleep = mocker.patch.object(perception_mod.time, "sleep")
+    sleep.side_effect = lambda s: clock.__setitem__("now", clock["now"] + s)
+
+    rig.acquire()
+    try:
+        out = per.wait_for_numpad_digit("1", timeout=2.0)
+    finally:
+        rig.release()
+
+    assert out is None
+    ocr.assert_not_called()

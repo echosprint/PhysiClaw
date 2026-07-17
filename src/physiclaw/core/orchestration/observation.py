@@ -110,9 +110,10 @@ class GestureObserver:
         self._on_quality = on_quality
         # Synchronous exposure fix (perception.tune_now) and the
         # predicate deciding when a grab warrants it
-        # (perception.needs_inline_fix: washed out, or a deferred tune
-        # owed its bright reference). Fixing BEFORE the view ships beats
-        # sending the agent a mis-exposed frame with a warning attached.
+        # (perception.needs_inline_fix: washed out, crushed dark, or a
+        # deferred tune owed its lit reference). Fixing BEFORE the view
+        # ships beats sending the agent a mis-exposed frame with a
+        # warning attached.
         self._fix_exposure = fix_exposure
         self._needs_fix = needs_fix if needs_fix is not None else lambda r: r.blown
 
@@ -130,11 +131,19 @@ class GestureObserver:
         grab as retuned either way."""
         if self._fix_exposure is None:
             return None, report, False
+        cause = (
+            "frame still blown after retry"
+            if report.blown
+            else "frame dark"
+            if report.dark
+            else "deferred tune"
+        )
         log.info(
-            "%s: %s (clip %.0f%%) — tuning exposure before the view ships",
+            "%s: %s (clip %.0f%%, median %.0f) — tuning exposure before the view ships",
             source,
-            "frame still blown after retry" if report.blown else "deferred tune",
+            cause,
             report.clip_pct * 100,
+            report.median_luma,
         )
         try:
             self._fix_exposure()
@@ -144,7 +153,13 @@ class GestureObserver:
             log.warning("inline exposure fix failed", exc_info=True)
             return None, report, True
 
-    def observe_quality(self, source: str, report: quality.QualityReport) -> str | None:
+    def observe_quality(
+        self,
+        source: str,
+        report: quality.QualityReport,
+        *,
+        retuned: bool = False,
+    ) -> str | None:
         """Judge an already-assessed camera view for AF/AE failure; on a
         bad one, warn in the log and return the agent-facing ⚠ line for
         the caller to attach.
@@ -155,8 +170,11 @@ class GestureObserver:
         a report still failing means the retry didn't recover it. Every
         judged view is also reported to `on_quality` (with the running
         bad-view streak) so the owner can react — e.g. re-tune exposure
-        on a washed-out view. Fail-open: a crash in the check never costs
-        the view."""
+        on a washed-out view — EXCEPT when `retuned` says the inline
+        tune already ran on this very grab: scheduling the background
+        tune then would repeat the identical probe seconds later on a
+        scene the inline run just judged. Fail-open: a crash in the
+        check never costs the view."""
         try:
             warning = self._quality.observe(report)
         except Exception:
@@ -164,7 +182,7 @@ class GestureObserver:
             return None
         if warning is not None:
             log.warning("%s: %s", source, warning)
-        if self._on_quality is not None:
+        if self._on_quality is not None and not retuned:
             try:
                 self._on_quality(report, self._quality.streak)
             except Exception:
@@ -177,9 +195,11 @@ class GestureObserver:
         path. Blown covers the AE-lag transient: the screen just flipped
         dark→bright and firmware auto-exposure hasn't re-converged yet.
 
-        Returns `(frame, report)` — the report always describes the
-        returned frame, so the caller's quality judgment
-        (`observe_quality`) reuses it instead of re-measuring.
+        Returns `(frame, report, retuned)` — the report always
+        describes the returned frame, so the caller's quality judgment
+        (`observe_quality`) reuses it instead of re-measuring, and
+        `retuned` tells it the inline tune already ran on this grab
+        (so the background safety net must not double-fire).
 
         Unlike `grab_screen`, failures propagate (a peek with no frame is
         a tool error, not a withheld verdict). A still-blurry retry frame
@@ -202,11 +222,12 @@ class GestureObserver:
             time.sleep(self.PEEK_RETRY_SECONDS)
             frame = self._grab()
             report = quality.assess(frame)
+        retuned = False
         if self._needs_fix(report):
-            fixed_frame, report, _ = self._fix_exposure_grab("peek", report)
+            fixed_frame, report, retuned = self._fix_exposure_grab("peek", report)
             if fixed_frame is not None:
                 frame = fixed_frame
-        return frame, report
+        return frame, report, retuned
 
     def grab_screen(self, settle: float = 0.0):
         """Park (clearing the arm from the lens), let the screen —
@@ -300,6 +321,14 @@ class GestureObserver:
         if (
             before_report is not None
             and after_report is not None
+            # A retune during the AFTER grab makes the median jump an
+            # exposure artifact, not an AE mid-swing: that frame was
+            # just metered inside the fix, so the regrab protects
+            # nothing. A before-grab retune is NOT a skip reason — the
+            # after frame is an ordinary grab that can still be exactly
+            # the mid-swing white-out this regrab exists to catch (and
+            # the fused view, not just the withheld verdict, ships it).
+            and not after_retuned
             and abs(after_report.median_luma - before_report.median_luma)
             > self.FLIP_MEDIAN_DELTA
         ):
@@ -343,7 +372,9 @@ class GestureObserver:
                 jpeg = encode_view_jpeg(annotated)
             except Exception:
                 log.warning("post-gesture view failed", exc_info=True)
-            warning = self.observe_quality("gesture view", after_report)
+            warning = self.observe_quality(
+                "gesture view", after_report, retuned=after_retuned
+            )
         else:
             warning = None
         text = verdict.attach(result, changed)

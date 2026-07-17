@@ -63,6 +63,13 @@ class Perception:
     # the old fixed-cadence poll instead of never OCRing at all.
     NUMPAD_OCR_FALLBACK_SECONDS = 2.5
 
+    # Minimum spacing between OCR passes once one has completed — a
+    # sharp non-keypad screen (already-unlocked phone) would otherwise
+    # re-OCR back-to-back for the whole timeout, CPU pegged with the
+    # rig lock held, re-proving the same answer. The FIRST sharp pass
+    # is immediate: the keypad's lifetime is the scarce resource.
+    NUMPAD_OCR_MIN_INTERVAL_SECONDS = 1.0
+
     def __init__(self, rig: HardwareRig):
         self._rig = rig
         # Serialize first-use model construction (the watch route and a
@@ -174,46 +181,92 @@ class Perception:
         self._rig.park()
         return self._ocr_elements(self.camera_view())
 
+    def find_visible_numpad_digit(self, digit: str) -> list[float] | None:
+        """One OCR pass over the current screen for `digit` on a
+        visible keypad — the unlock flow's pre-swipe probe. A keypad
+        left open by a previous attempt must be typed on, not swiped:
+        the bottom-edge swipe is the passcode screen's CANCEL gesture.
+        Caller must hold the lock. Fail-open (None) — a failed probe
+        just means the flow swipes as usual."""
+        self._rig.assert_locked()
+        try:
+            return find_numpad_digit(self._ocr_elements(self.camera_view()), digit)
+        except Exception:
+            log.warning("pre-swipe keypad probe failed", exc_info=True)
+            return None
+
+    def ensure_readable_exposure(self) -> None:
+        """One dark/blown check + synchronous tune with the rig lock
+        ALREADY HELD — the explicit exposure fix point for
+        timing-critical windows (unlock's keypad race: the poll that
+        follows can only meter sharpness, and the keypad lives seconds).
+        The caller invokes this right after a gesture that changed the
+        scene (the wake tap), so the deferral hold is deliberately
+        bypassed — the scene is known-new. Fail-open: never raises."""
+        self._rig.assert_locked()
+        cam, t = self._rig.cam, self._rig.transforms
+        if cam is None or t is None or not cam.exposure_tunable:
+            return
+        try:
+            crop = self._screen_crop()
+            if crop is None:
+                return
+            report = quality.assess(crop)
+            if report.dark or report.blown:
+                log.info(
+                    "pre-poll exposure check: median %.0f, clip %.0f%% — tuning",
+                    report.median_luma,
+                    report.clip_pct * 100,
+                )
+                self.tune_now()
+        except Exception:
+            log.exception("pre-poll exposure check failed — continuing")
+
     def wait_for_numpad_digit(
         self, digit: str, timeout: float = 10.0
     ) -> list[float] | None:
         """Poll the camera until the passcode keypad shows `digit`;
         return its bbox, or None at `timeout`. Caller must hold the lock.
 
-        Sharpness-gated: the keypad lives only a few seconds after the
-        unlock swipe, and that is exactly when frames are at their worst
-        (auto-exposure re-converging across the wake's dark→bright flip,
-        autofocus hunting from the arm's pass over the lens). An OCR
-        pass costs seconds, so spending it on an unreadable frame pushes
-        detection past the keypad's lifetime — the failure mode behind
-        session 20260716_212243. Each tick meters the phone-screen crop
-        (the same `crop_to_phone_screen` pipeline every BLUR_THRESHOLD
-        consumer scores — see `_screen_crop` and the observer's grabs)
-        and OCRs only when it clears the threshold — the SAME frame that
-        metered sharp — with an ungated pass every
-        NUMPAD_OCR_FALLBACK_SECONDS as the chronic-blur escape hatch.
-        The first tick starts the fallback clock rather than OCRing
-        blind, so a mid-hunt first frame doesn't burn the window."""
+        Gated three ways — the keypad lives only a few seconds after
+        the unlock swipe, and an OCR pass costs seconds, so every pass
+        spent on a frame that can't answer pushes detection past the
+        keypad's lifetime:
+        - a dark, unsharp crop (crushed or asleep screen) never OCRs —
+          there is nothing to read, and the exposure fix point is
+          BEFORE this poll (`ensure_readable_exposure`);
+        - an unsharp crop OCRs only every NUMPAD_OCR_FALLBACK_SECONDS —
+          the chronic-soft-focus escape hatch;
+        - a sharp crop OCRs immediately the first time (the race is
+          real), then every NUMPAD_OCR_MIN_INTERVAL_SECONDS — a sharp
+          NON-keypad screen would otherwise re-OCR back-to-back for
+          the whole timeout re-proving the same answer.
+        Timers stamp AFTER each (multi-second) pass, so spacing is
+        pass-end→next-start."""
         self._rig.assert_locked()
         self._rig.park()
         start = time.monotonic()
         deadline = start + timeout
         last_ocr = start
+        ocr_ran = False
         while time.monotonic() < deadline:
             frame = self.camera_view()
             crop = crop_to_phone_screen(frame, self._rig.transforms)
-            sharp = quality.laplacian_variance(crop) >= quality.BLUR_THRESHOLD
-            if not sharp and time.monotonic() - last_ocr < (
-                self.NUMPAD_OCR_FALLBACK_SECONDS
-            ):
+            report = quality.assess(crop)
+            sharp = report.sharpness >= quality.BLUR_THRESHOLD
+            if report.dark and not sharp:
+                time.sleep(0.15)
+                continue
+            since = time.monotonic() - last_ocr
+            if not sharp and since < self.NUMPAD_OCR_FALLBACK_SECONDS:
+                time.sleep(0.15)
+                continue
+            if sharp and ocr_ran and since < self.NUMPAD_OCR_MIN_INTERVAL_SECONDS:
                 time.sleep(0.15)
                 continue
             bbox = find_numpad_digit(self._ocr_elements(frame), digit)
-            # Stamp AFTER the (multi-second) OCR pass so the fallback
-            # spacing is pass-end→next-start — a true "every
-            # NUMPAD_OCR_FALLBACK_SECONDS", not back-to-back once one
-            # pass outlasts the interval.
             last_ocr = time.monotonic()
+            ocr_ran = True
             if bbox is not None:
                 return bbox
         return None
@@ -299,8 +352,8 @@ class Perception:
     def tune_now(self) -> None:
         """Verify-and-converge with the rig lock ALREADY HELD and the arm
         parked — the synchronous path: the observer calls this mid-grab
-        whenever `needs_inline_fix` flags a view (washed out, or the
-        first bright reference after a deferred cold-start tune), so the
+        whenever `needs_inline_fix` flags a view (washed out, crushed
+        dark, or a deferred tune owed a brighter scene), so the
         corrected frame ships to the agent instead of a mis-exposed one
         with a warning. Fail-open: never raises, no-op when the rig
         can't tune."""
@@ -320,34 +373,47 @@ class Perception:
                 cam.set_manual_exposure,
                 start=CONFIG.camera.exposure,
                 prefer_auto=CONFIG.camera.auto_exposure,
+                # The -4 ceiling costs ~16fps — affordable only under a
+                # pinned lens; live AF hunts outlive the view settle
+                # there (measured), so unpinned rigs keep the old -5.
+                max_exposure=(
+                    exposure.MAX_EXPOSURE
+                    if cam.focus_pinned
+                    else exposure.UNPINNED_MAX_EXPOSURE
+                ),
             )
             self._last_tune = result
             log.info("exposure tune: %s", result.detail)
         except Exception:
             log.exception("exposure tune failed — leaving camera as-is")
+            # Record a deferred sentinel: without a result the dark-hold
+            # has no state, and a flaky camera on a dark scene would
+            # re-fire the multi-second tune on every judged view. No
+            # median → `wants_retry` releases on the reference floor.
+            self._last_tune = exposure.TuneResult(
+                "auto",
+                None,
+                False,
+                "tune crashed — retry on a lit view",
+                deferred=True,
+            )
 
     def needs_inline_fix(self, report: quality.QualityReport) -> bool:
         """Should this view's exposure be fixed before it ships?
 
         The single predicate behind both the observer's inline fix and
-        the background safety net. Two evidence-driven cases:
-        - a washed-out view: whatever holds exposure (firmware AE or a
-          stale manual value) just proved wrong for the current screen;
-        - a bright view while a deferred tune is owed its reference:
-          startup metered a dark screen (lock screen / asleep) and
-          skipped — tuning on the first bright view, before it ships,
-          spares the agent the blinded-firmware-auto interim entirely
-          (views that are visibly hot yet under the warning threshold)."""
+        the background safety net: a washed-out view always fires
+        (whatever holds exposure just proved wrong for the current
+        screen); everything dark-side — dark views, deferred tunes owed
+        a brighter scene, the stuck-dark thrash bound — is
+        `exposure.wants_retry`'s call, one home next to the defer
+        semantics it inverts."""
         cam = self._rig.cam
         if cam is None or not cam.exposure_tunable:
             return False
         if report.blown:
             return True
-        return (
-            self._last_tune is not None
-            and self._last_tune.deferred
-            and exposure.is_reference(report)
-        )
+        return exposure.wants_retry(self._last_tune, report)
 
     def on_quality_report(self, report: quality.QualityReport, streak: int) -> None:
         """Background exposure re-tune, fed every judged view by the
@@ -367,23 +433,35 @@ class Perception:
                 self._schedule_retune(
                     f"washed-out view ({report.clip_pct:.0%} clip, streak {streak})"
                 )
+            elif report.dark:
+                self._schedule_retune(
+                    f"dark view (median {report.median_luma:.0f}, streak {streak})"
+                )
             else:
-                self._schedule_retune("bright view arrived after a deferred tune")
+                self._schedule_retune("brighter view arrived after a deferred tune")
 
     def _schedule_retune(self, reason: str) -> None:
         """Run the re-tune on a detached daemon thread, at most one in
         flight. The delay lets the triggering view's gesture release the
         rig lock first; a still-busy rig makes the task skip harmlessly
-        (the trigger conditions persist, so it will be re-scheduled)."""
+        (the trigger conditions persist, so it will be re-scheduled).
+        The run revalidates against `_last_tune`: if an inline fix (or
+        another path) tuned while this task waited, its conclusion is
+        fresher than the trigger — repeating the probe would re-learn
+        the same answer seconds later."""
         with self._pending_lock:
             if self._retune_pending:
                 return
             self._retune_pending = True
         log.info("exposure re-tune scheduled: %s", reason)
+        token = self._last_tune
 
         def run() -> None:
             try:
                 time.sleep(self.RETUNE_DELAY_SECONDS)
+                if self._last_tune is not token:
+                    log.info("exposure re-tune superseded — skipped")
+                    return
                 self.tune_exposure()
             finally:
                 with self._pending_lock:

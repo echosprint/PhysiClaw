@@ -8,6 +8,10 @@ import pytest
 
 from physiclaw.core.vision import quality
 from physiclaw.core.vision.quality import (
+    BLUR_NOTE,
+    DARK_MEDIAN_LUMA,
+    DARK_NOTE,
+    DARK_P99_LUMA,
     NORMALIZED_WIDTH,
     QualityMonitor,
     QualityReport,
@@ -235,3 +239,59 @@ def test_streak_property_mirrors_consecutive_bad_views() -> None:
     assert m.streak == 2
     m.observe(_good())
     assert m.streak == 0
+
+
+# ---------- dark: the two-axis underexposure predicate ----------
+
+
+def test_dark_requires_missing_highlights_not_just_low_median() -> None:
+    # Correctly-exposed dark-mode UI (black background, white text)
+    # meters a low median but carries near-white text — it is NOT
+    # underexposed; calling it dark would false-alarm the rig warning
+    # streak and fire tunes on every dark-themed app.
+    dark_ui = QualityReport(
+        sharpness=400.0, clip_pct=0.01, median_luma=7.0, p99_luma=250.0
+    )
+    crushed = QualityReport(
+        sharpness=20.0, clip_pct=0.0, median_luma=7.0, p99_luma=40.0
+    )
+
+    assert dark_ui.dark is False
+    assert crushed.dark is True
+
+
+def test_assess_measures_highlights_for_the_dark_axis() -> None:
+    # Black frame with a solid bright block (dark-mode text stand-in):
+    # p99 must clear the highlight floor so `dark` stays False.
+    frame = np.zeros((100, 100, 3), dtype=np.uint8)
+    frame[:20, :20] = 230
+
+    report = assess(frame)
+
+    assert report.median_luma < DARK_MEDIAN_LUMA
+    assert report.p99_luma >= DARK_P99_LUMA
+    assert report.dark is False
+
+
+def test_saturated_frame_is_blown_despite_white_median() -> None:
+    # A manual value held from a far dimmer scene nukes the whole frame:
+    # median >= 250 evades the two-factor rule and a page-sized clipped
+    # region is not icon-shaped — the saturation clause must catch it,
+    # or nothing ever corrects the exposure.
+    nuked = QualityReport(
+        sharpness=1.0, clip_pct=0.99, median_luma=254.0, p99_luma=255.0
+    )
+
+    assert nuked.blown is True
+
+
+def test_monitor_reports_dark_instead_of_blur() -> None:
+    # A crushed frame always meters blurry too — naming the sharpness
+    # would steer the agent at the camera when the problem is light.
+    monitor = QualityMonitor()
+    crushed = QualityReport(sharpness=20.0, clip_pct=0.0, median_luma=7.0)
+
+    line = monitor.observe(crushed)
+
+    assert line is not None and DARK_NOTE in line
+    assert BLUR_NOTE not in line

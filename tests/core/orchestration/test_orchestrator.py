@@ -747,6 +747,8 @@ def _wire_unlock(mocker, pc: PhysiClaw, wire_rig, *, digit_bbox, scan=()):
     wire_rig(pc.rig)
     pc.perception._ocr_reader = MagicMock()
     mocker.patch.object(orchestrator.time, "sleep")
+    mocker.patch.object(pc.perception, "ensure_readable_exposure")
+    mocker.patch.object(pc.perception, "find_visible_numpad_digit", return_value=None)
     mocker.patch.object(pc.perception, "wait_for_numpad_digit", return_value=digit_bbox)
     mocker.patch.object(pc.perception, "scan_text", return_value=list(scan))
 
@@ -872,3 +874,34 @@ def test_quality_check_failure_never_costs_the_view(
     out = pc.tap([0.1, 0.1, 0.2, 0.2])
 
     assert out.listing == "LISTING"  # fail-open: view intact, no line
+
+
+def test_unlock_phone_fixes_exposure_before_the_keypad_poll(
+    mocker, pc: PhysiClaw, wire_rig
+) -> None:
+    # The poll can only meter sharpness — the one exposure fix point in
+    # the wake→keypad window runs right after the wake tap, before the
+    # swipe starts the keypad clock.
+    _wire_unlock(mocker, pc, wire_rig, digit_bbox=None)
+    order: list[str] = []
+    pc.perception.ensure_readable_exposure.side_effect = lambda: order.append("fix")
+    pc.rig._arm.swipe_to.side_effect = lambda *a, **k: order.append("swipe")
+
+    pc.unlock_phone()
+
+    assert order == ["fix", "swipe"]
+
+
+def test_unlock_phone_skips_swipe_when_keypad_already_visible(
+    mocker, pc: PhysiClaw, wire_rig
+) -> None:
+    # A keypad left open by a previous attempt must be typed on, not
+    # swiped — the committed bottom-edge swipe is the passcode screen's
+    # cancel gesture and would dismiss the very keypad we need.
+    _wire_unlock(mocker, pc, wire_rig, digit_bbox=None)
+    pc.perception.find_visible_numpad_digit.return_value = [0.1, 0.1, 0.2, 0.2]
+
+    pc.unlock_phone()
+
+    pc.rig._arm.swipe_to.assert_not_called()
+    pc.perception.wait_for_numpad_digit.assert_not_called()

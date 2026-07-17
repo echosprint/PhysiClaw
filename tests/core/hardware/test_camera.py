@@ -790,3 +790,14 @@ def test_constructor_seed_pins_focus_at_first_open(mocker) -> None:
     cam._reader.stop()
 
     apply_spy.assert_called_with(vc, 137.0)
+
+
+def test_focus_pinned_reflects_the_remembered_position(mocker) -> None:
+    vc = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 200)
+    cam = _open_camera_no_thread(mocker, vc=vc)
+    assert cam.focus_pinned is False
+
+    mocker.patch.object(camera_mod.platform, "camera_apply_focus", return_value=True)
+    cam.apply_focus(137.0)
+
+    assert cam.focus_pinned is True

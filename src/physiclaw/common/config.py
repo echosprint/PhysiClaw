@@ -98,7 +98,8 @@ class CameraConfig:
     # are ignored otherwise. The startup tune verifies with measured
     # brightness and falls back to manual stepping when firmware
     # auto-exposure misbehaves; `exposure` is the stepping start, on the
-    # shared log2-seconds scale within exposure.py's -8..-5 band.
+    # shared log2-seconds scale within exposure.py's -8..-4 band (-5
+    # ceiling on rigs whose lens isn't pinned; see UNPINNED_MAX_EXPOSURE).
     auto_exposure: bool = True
     exposure: int = -6
 

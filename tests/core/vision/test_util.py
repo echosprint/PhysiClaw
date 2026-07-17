@@ -318,11 +318,22 @@ def _pad_element(digit: str, x: float, y: float) -> dict:
 
 
 def test_find_numpad_digit_direct_match_returns_bbox() -> None:
-    elements = [_pad_element("5", 0.5, 0.5)]
+    elements = [
+        _pad_element("5", 0.5, 0.5),
+        _pad_element("1", 0.3, 0.3),
+        _pad_element("9", 0.7, 0.7),
+    ]
 
     bbox = find_numpad_digit(elements, "5")
 
     assert bbox == [0.45, 0.45, 0.55, 0.55]
+
+
+def test_find_numpad_digit_rejects_a_lone_digit() -> None:
+    # A lone "1" is a clock fragment or widget number — a dark lock
+    # screen, not a keypad; tapping it types on whatever is showing.
+    # NUMPAD_MIN_DIGITS gates both paths.
+    assert find_numpad_digit([_pad_element("1", 0.3, 0.4)], "1") is None
 
 
 def test_find_numpad_digit_returns_none_when_no_digits_visible() -> None:
@@ -335,6 +346,7 @@ def test_find_numpad_digit_infers_layout_from_two_diagonal_keys() -> None:
     elements = [
         _pad_element("1", 0.30, 0.30),
         _pad_element("9", 0.70, 0.50),
+        _pad_element("3", 0.70, 0.30),  # keypad context (≥3 digits)
     ]
 
     bbox = find_numpad_digit(elements, "5")

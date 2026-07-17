@@ -268,7 +268,7 @@ def test_peek_frame_returns_sharp_frame_without_retry(mocker) -> None:
     frame = _sharp()
     obs = _observer([frame])
 
-    frame_out, _report = obs.peek_frame()
+    frame_out, _report, _ = obs.peek_frame()
     assert frame_out is frame
     sleep.assert_not_called()
 
@@ -281,7 +281,7 @@ def test_peek_frame_retries_once_and_keeps_retry_frame(mocker) -> None:
     retry = _flat()
     obs = _observer([_flat(), retry])
 
-    frame_out, _report = obs.peek_frame()
+    frame_out, _report, _ = obs.peek_frame()
     assert frame_out is retry
     sleep.assert_called_once_with(obs.PEEK_RETRY_SECONDS)
 
@@ -294,7 +294,7 @@ def test_peek_frame_retries_once_when_blown(mocker) -> None:
     obs = _observer([_blown(), retry])
     obs.PEEK_BLUR_THRESHOLD = 0
 
-    frame_out, _report = obs.peek_frame()
+    frame_out, _report, _ = obs.peek_frame()
     assert frame_out is retry
     sleep.assert_called_once_with(obs.PEEK_RETRY_SECONDS)
 
@@ -306,11 +306,12 @@ def test_peek_frame_fixes_exposure_when_retry_stays_blown(mocker) -> None:
     obs = _observer([_blown(), _blown(), good], fix=fix)
     obs.PEEK_BLUR_THRESHOLD = 0
 
-    frame_out, report = obs.peek_frame()
+    frame_out, report, retuned = obs.peek_frame()
 
     fix.assert_called_once()
     assert frame_out is good
     assert not report.blown
+    assert retuned  # the caller must not double-fire the background tune
 
 
 def test_peek_frame_propagates_grab_failure() -> None:
@@ -622,3 +623,78 @@ def test_gesture_result_defaults_to_text_only() -> None:
     assert res.jpeg is None and res.listing is None
     with pytest.raises(AttributeError):
         res.text = "frozen"  # type: ignore[misc]
+
+
+def test_with_view_flip_regrab_skipped_when_after_was_retuned(mocker) -> None:
+    # A dark after-frame the inline fix brightens jumps the median by
+    # exposure, not AE mid-swing — the flip settle+regrab would spend
+    # seconds (and could re-fire the tune) to protect a verdict that is
+    # already withheld.
+    sleep = mocker.patch.object(observation.time, "sleep")
+    mocker.patch.object(observation, "encode_view_jpeg", return_value=b"VIEW_JPG")
+    # before (lit), dark after, tuned regrab — a flip regrab would be a
+    # 4th grab and raise StopIteration.
+    frames = iter([_flat(60), _flat(5), _flat(200)])
+    monitor = MagicMock()
+    monitor.observe.return_value = None
+    obs = GestureObserver(
+        park=MagicMock(),
+        grab=lambda: next(frames),
+        detect=MagicMock(return_value=("LISTING", _flat())),
+        monitor=monitor,
+        fix_exposure=MagicMock(),
+        needs_fix=lambda r: r.dark,
+    )
+    obs.GESTURE_SETTLE_SECONDS = 0
+    obs.GRAB_BLUR_THRESHOLD = 0
+
+    obs.with_view(lambda: "Acted")
+
+    sleep.assert_not_called()  # no flip settle despite median 60 → 200
+
+
+def test_with_view_flip_regrab_still_runs_when_only_before_was_retuned(mocker) -> None:
+    # A before-grab retune says nothing about the AFTER frame — it can
+    # still be exactly the mid-AE-swing white-out the flip regrab
+    # exists to catch, and the fused view (not just the withheld
+    # verdict) would ship it.
+    sleep = mocker.patch.object(observation.time, "sleep")
+    mocker.patch.object(observation, "encode_view_jpeg", return_value=b"VIEW_JPG")
+    # before: dark → inline fix regrabs (40); after: 150 → delta 110
+    # trips the flip → settle + 4th grab.
+    frames = iter([_flat(5), _flat(40), _flat(150), _flat(150)])
+    monitor = MagicMock()
+    monitor.observe.return_value = None
+    obs = GestureObserver(
+        park=MagicMock(),
+        grab=lambda: next(frames),
+        detect=MagicMock(return_value=("LISTING", _flat())),
+        monitor=monitor,
+        fix_exposure=MagicMock(),
+        needs_fix=lambda r: r.dark,
+    )
+    obs.GESTURE_SETTLE_SECONDS = 0
+    obs.GRAB_BLUR_THRESHOLD = 0
+
+    obs.with_view(lambda: "Acted")
+
+    sleep.assert_called_once_with(obs.FLIP_SETTLE_SECONDS)
+
+
+def test_observe_quality_skips_on_quality_when_grab_was_retuned() -> None:
+    # The inline tune already ran on this grab — feeding the report to
+    # the background policy would schedule the identical probe again.
+    calls: list = []
+    monitor = MagicMock()
+    monitor.observe.return_value = None
+    obs = GestureObserver(
+        park=MagicMock(),
+        grab=MagicMock(),
+        detect=MagicMock(),
+        monitor=monitor,
+        on_quality=lambda report, streak: calls.append(report),
+    )
+
+    obs.observe_quality("peek", observation.quality.assess(_flat()), retuned=True)
+
+    assert calls == []

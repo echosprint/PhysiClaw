@@ -390,6 +390,14 @@ class Camera:
         for its focus controls (fixed-focus cameras don't)."""
         return platform.camera_focus_lockable()
 
+    @property
+    def focus_pinned(self) -> bool:
+        """Whether the lens is held at a remembered absolute position
+        (the calibration bundle's). Consulted by the exposure tune: the
+        -4 ceiling costs ~16fps, which live AF can't afford (hunts
+        outlive the view settle) — unpinned rigs get the -5 ceiling."""
+        return self._focus_value is not None
+
     def lock_focus(self) -> bool:
         """Freeze autofocus at its current position — a raw,
         unremembered freeze (the `focus.lock` callable). The remembered,

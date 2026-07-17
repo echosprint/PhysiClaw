@@ -166,7 +166,8 @@ def test_oscillation_with_no_usable_step_reverts_to_auto() -> None:
 
 def test_meter_losing_frames_mid_stepping_fails_open() -> None:
     # as-is, settled post-re-assert pair, then step 1 loses the frame
-    reports = iter([BLOWN, BLOWN, BLOWN, None])
+    # (the trailing None feeds the baseline read after the revert)
+    reports = iter([BLOWN, BLOWN, BLOWN, None, None])
     rig = Rig(BLOWN, {})
 
     res = converge(
@@ -178,6 +179,9 @@ def test_meter_losing_frames_mid_stepping_fails_open() -> None:
 
     assert not res.ok and res.mode == "auto"
     assert rig.auto_calls == 2  # re-assert + final revert
+    # A meter-dead camera defers as a baseline-less sentinel — the
+    # dark-hold must engage, or every dark view re-fires the tune.
+    assert res.deferred and res.median is None
 
 
 def test_start_is_clamped_into_range() -> None:
@@ -251,13 +255,13 @@ def test_prefer_auto_false_clamps_held_start_into_range() -> None:
     # Pinned manual + no usable step, with a config start ABOVE the
     # range: the held fallback must be the clamped start (the value the
     # stepping loop actually ran), never the raw out-of-range config one.
-    rig = Rig(BLOWN, {-5: _r(180.0, clip=0.2), -6: _r(15.0)})
+    rig = Rig(BLOWN, {-4: _r(180.0, clip=0.2), -5: _r(15.0)})
 
     res = converge(
         rig.meter,
         rig.set_auto,
         rig.set_manual,
-        start=-4,  # above MAX_EXPOSURE
+        start=-3,  # above MAX_EXPOSURE
         prefer_auto=False,
     )
 
@@ -290,25 +294,44 @@ def test_blob_blown_frame_steps_darker_to_a_clean_hold() -> None:
     assert rig.manual_calls == [-6, -7]
 
 
-def test_dark_screen_defers_instead_of_converging() -> None:
-    # The screen is dark (asleep / resting lock screen) even under AE:
-    # there is no white level to expose for. Converging here is how a
-    # frozen value blows out the screen once it lights up — defer, leave
-    # firmware AE in charge, and let the caller retry on a bright view.
-    rig = Rig(_r(5.0), {})
+def test_night_dim_screen_tunes_brighter_into_band() -> None:
+    # The night-unlock failure case: a lit-but-dim night screen under
+    # a stale bright-scene value. The tune must brighten into band — a
+    # pre-stepping dark deferral here leaves the passcode keypad
+    # unreadable all night.
+    rig = Rig(_r(12.0), {-6: _r(14.0), -5: _r(22.0), -4: _r(120.0)})
+
+    res = converge(rig.meter, rig.set_auto, rig.set_manual, start=-6)
+
+    assert res.ok and res.mode == "manual" and res.exposure == -4
+    assert not res.deferred
+    assert rig.manual_calls == [-6, -5, -4]  # monotonically brighter
+
+
+def test_asleep_screen_brightening_probe_then_defers() -> None:
+    # A dark screen gets the brightening probe first — but when even the
+    # ceiling can't lift the crop above the reference floor, the screen
+    # is asleep: revert to AE and defer until the scene changes. The
+    # sub-reference luma creep (5→6→7, under LUMA_STALL_EPSILON) must
+    # NOT read as "driver ignores writes": a black screen can't move the
+    # meter regardless of the driver.
+    rig = Rig(_r(5.0), {-6: _r(5.0), -5: _r(6.0), -4: _r(7.0)})
 
     res = converge(rig.meter, rig.set_auto, rig.set_manual, start=-6)
 
     assert res.deferred and not res.ok and res.mode == "auto"
-    assert rig.manual_calls == []
-    assert rig.auto_calls == 1  # the phase-2 re-assert, nothing else
-    assert "deferred" in res.detail
+    assert rig.manual_calls == [-6, -5, -4]  # probed to the ceiling
+    assert rig.auto_calls == 2  # the phase-2 re-assert + the final revert
+    assert "crop still dark" in res.detail
+    # The baseline is metered AFTER the revert to auto (same regime as
+    # the views wants_retry will judge) — not the ceiling's 7.0.
+    assert res.median == 5.0
 
 
-def test_dark_screen_defers_without_touching_pinned_manual() -> None:
-    # User pinned manual in config: the dark-screen deferral must not
-    # flip the camera to auto behind their back.
-    rig = Rig(_r(5.0), {})
+def test_asleep_screen_defers_while_honoring_pinned_manual() -> None:
+    # User pinned manual in config: the asleep deferral must not flip
+    # the camera to auto behind their back.
+    rig = Rig(_r(5.0), {-6: _r(5.0), -5: _r(6.0), -4: _r(7.0)})
 
     res = converge(
         rig.meter,
@@ -318,8 +341,12 @@ def test_dark_screen_defers_without_touching_pinned_manual() -> None:
         prefer_auto=False,
     )
 
-    assert res.deferred and not res.ok
-    assert rig.auto_calls == 0 and rig.manual_calls == []
+    assert res.deferred and not res.ok and res.mode == "manual"
+    assert rig.auto_calls == 0
+    # The brightest probed step is held — re-crushing back to the start
+    # would undo the very brightening the probe just proved least-bad.
+    assert rig.manual_calls[-1] == -4
+    assert res.median == 7.0  # baseline metered under the held -4
 
 
 def test_max_steps_bounds_the_search() -> None:
@@ -338,3 +365,62 @@ def test_max_steps_bounds_the_search() -> None:
 
     assert len(rig.manual_calls) == 3
     assert res.mode == "auto" and not res.ok
+
+
+def test_dim_screen_stuck_at_ceiling_defers_with_recorded_median() -> None:
+    # Brightening helps but can't clear the dark floor: without a
+    # deferral this outcome would re-fire a full tune on every view of
+    # the unchanged scene — wants_retry keys off the recorded median.
+    rig = Rig(_r(12.0), {-6: _r(14.0), -5: _r(19.0), -4: _r(23.0)})
+
+    res = converge(rig.meter, rig.set_auto, rig.set_manual, start=-6)
+
+    assert res.deferred and not res.ok
+    # Baseline under the restored auto state (12), not the ceiling's 23
+    # — the views wants_retry judges are captured under auto too.
+    assert res.median == 12.0
+    assert "crop still dark" in res.detail
+
+
+# ---------- wants_retry ----------
+
+
+def test_wants_retry_fires_on_dark_view_without_deferral() -> None:
+    assert exposure.wants_retry(None, _r(10.0)) is True
+    assert exposure.wants_retry(None, _r(120.0)) is False
+
+
+def test_wants_retry_holds_while_the_scene_stays_dark() -> None:
+    held = exposure.TuneResult("auto", None, False, "dark", deferred=True, median=7.0)
+
+    assert exposure.wants_retry(held, _r(8.0)) is False  # unchanged scene
+    assert exposure.wants_retry(held, _r(30.0)) is True  # visibly brighter
+
+
+def test_wants_retry_medianless_sentinel_holds_through_dark_band() -> None:
+    # Crash / meter-failure sentinel: no baseline to compare against, so
+    # the hold spans the whole dark band (a mid-band release would let a
+    # persistently-crashing tune re-fire on every 15-25-luma view) and
+    # releases on the first clearly-lit view.
+    held = exposure.TuneResult("auto", None, False, "crashed", deferred=True)
+
+    assert exposure.wants_retry(held, _r(10.0)) is False
+    assert exposure.wants_retry(held, _r(18.0)) is False
+    assert exposure.wants_retry(held, _r(40.0)) is True
+
+
+def test_max_exposure_param_caps_the_brightening_ladder() -> None:
+    # Unpinned-lens rigs pass the -5 ceiling: the -4 stop costs ~16fps,
+    # and live AF hunts outlive the view settle at that rate (measured).
+    rig = Rig(_r(12.0), {-6: _r(14.0), -5: _r(19.0)})
+
+    res = converge(
+        rig.meter,
+        rig.set_auto,
+        rig.set_manual,
+        start=-6,
+        max_exposure=exposure.UNPINNED_MAX_EXPOSURE,
+    )
+
+    assert res.deferred
+    assert rig.manual_calls == [-6, -5]  # never steps to -4
