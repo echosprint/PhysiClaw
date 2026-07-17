@@ -166,6 +166,7 @@ def test_auto_pick_camera_skips_when_corners_not_detected(
 
 def test_resolve_auto_index_happy_path(mocker) -> None:
     rig = MagicMock()
+    rig.require_bridge.return_value = rig.bridge
     rig.bridge.wait_for_connection.return_value = True
     phone = MagicMock()
     mocker.patch.object(camera_pick, "_auto_pick_camera_index", return_value=4)
@@ -184,6 +185,7 @@ def test_resolve_auto_index_happy_path(mocker) -> None:
 
 def test_resolve_auto_index_fails_when_bridge_not_polling(mocker) -> None:
     rig = MagicMock()
+    rig.require_bridge.return_value = rig.bridge
     rig.bridge.wait_for_connection.return_value = False
     phone = MagicMock()
 
@@ -196,6 +198,7 @@ def test_resolve_auto_index_fails_when_bridge_not_polling(mocker) -> None:
 
 def test_resolve_auto_index_restores_bridge_mode_on_no_match(mocker) -> None:
     rig = MagicMock()
+    rig.require_bridge.return_value = rig.bridge
     rig.bridge.wait_for_connection.return_value = True
     phone = MagicMock()
     mocker.patch.object(camera_pick, "_auto_pick_camera_index", return_value=None)

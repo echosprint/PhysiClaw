@@ -280,6 +280,8 @@ def _fetch_live_models(provider: str) -> list[dict]:
     from physiclaw.agent.provider import provider_class
 
     cls = provider_class(provider)
+    if cls is None:
+        raise ValueError(f"unknown provider {provider!r}")
     p = cls(model="")
 
     async def _run():

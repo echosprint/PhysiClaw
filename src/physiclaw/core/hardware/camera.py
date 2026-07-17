@@ -136,7 +136,9 @@ def configure_capture(
     )
     # AVFoundation (macOS) ignores this; V4L (Linux) honors it.
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*CONFIG.camera.fourcc))
+    # VideoWriter.fourcc is the stub-visible spelling of VideoWriter_fourcc
+    # (same function at runtime since OpenCV 3).
+    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter.fourcc(*CONFIG.camera.fourcc))
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
     if exposure_auto:

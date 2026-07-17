@@ -16,7 +16,7 @@ import time
 from collections.abc import Awaitable, Callable
 from functools import wraps
 from pathlib import Path
-from typing import Any, TypeVar, cast
+from typing import Any, TextIO, TypeVar, cast
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 
@@ -94,7 +94,7 @@ class _DailyFileHandler(logging.Handler):
         self._dir = dir
         self._prefix = prefix
         self._date = ""
-        self._f = None
+        self._f: TextIO | None = None
         self.setFormatter(_TaggedFormatter(tag, color=False))
         dir.mkdir(parents=True, exist_ok=True)
         purge_daily_logs(dir, prefix, CONFIG.retention.log_days)
@@ -102,18 +102,20 @@ class _DailyFileHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         try:
             today = dt.datetime.now().strftime("%Y-%m-%d")
-            if today != self._date:
-                if self._f is not None:
-                    self._f.close()
-                self._f = open(
+            f = self._f
+            if f is None or today != self._date:
+                if f is not None:
+                    f.close()
+                f = open(
                     self._dir / f"{self._prefix}-{today}.log",
                     "a",
                     encoding="utf-8",
                     newline="\n",
                 )
+                self._f = f
                 self._date = today
-            self._f.write(self.format(record) + "\n")
-            self._f.flush()
+            f.write(self.format(record) + "\n")
+            f.flush()
         except Exception:
             self.handleError(record)
 

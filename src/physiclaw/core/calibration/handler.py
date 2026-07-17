@@ -11,7 +11,7 @@ import asyncio
 import dataclasses
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -165,11 +165,17 @@ def _center_parked_stylus(rig: "HardwareRig") -> None:
                 "position the stylus over the circle and calibrate manually."
             )
         cal.pct_to_grbl = prior.pct_to_grbl
+    arm = rig.arm
+    if arm is None:  # caller prechecks the arm; re-narrow here
+        raise PreconditionError("Arm not connected")
     rig.restore_park_origin()  # re-pin the frame: current pos = PARK_PCT
-    gx, gy = cal.pct_to_grbl_mm(0.5, 0.5)
-    rig.arm.rapid_to(gx, gy)
-    rig.arm.wait_idle()
-    rig.arm.set_origin()  # screen center is now arm (0, 0) for the probe
+    center = cal.pct_to_grbl_mm(0.5, 0.5)
+    if center is None:  # unreachable: pct_to_grbl is ensured above
+        raise RuntimeError("Arm mapping missing — calibrate manually first")
+    gx, gy = center
+    arm.rapid_to(gx, gy)
+    arm.wait_idle()
+    arm.set_origin()  # screen center is now arm (0, 0) for the probe
 
 
 async def handle_calibrate_arm(
@@ -198,13 +204,16 @@ async def handle_calibrate_arm(
         phone.set_mode("calibrate", phase="center")
 
     def _do() -> dict:
+        arm = rig.arm
+        if arm is None:  # prechecked; re-narrow under the lock
+            raise PreconditionError("Arm not connected")
         if from_park:
             _center_parked_stylus(rig)
-        pct_to_grbl, tilt, touches = calibrate_arm(rig.arm, calib)
+        pct_to_grbl, tilt, touches = calibrate_arm(arm, calib)
         rig.calibration.pct_to_grbl = pct_to_grbl
         right_vec = (float(pct_to_grbl[0, 0]), float(pct_to_grbl[1, 0]))
         down_vec = (float(pct_to_grbl[0, 1]), float(pct_to_grbl[1, 1]))
-        rig.arm.set_direction_mapping(right_vec, down_vec)
+        arm.set_direction_mapping(right_vec, down_vec)
         # Park off-phone before returning so the camera-aim step's
         # preview shows an unobstructed phone (the stylus would
         # otherwise sit at the last grid-tap position over the
@@ -242,10 +251,13 @@ async def handle_calibrate_camera_frame(
             raise PreconditionError("Camera not connected")
 
     def _do() -> dict:
+        cam = rig.cam
+        if cam is None:  # prechecked; re-narrow under the lock
+            raise PreconditionError("Camera not connected")
         rig.park()
-        result = calibrate_camera_frame(rig.cam, calib)
+        result = calibrate_camera_frame(cam, calib)
         rig.calibration.cam_rotation = result["rotation"]
-        rig.cam.rotation = result["rotation"]
+        cam.rotation = result["rotation"]
         return result
 
     return await _run_locked_step(rig, _do, precheck=_precheck)
@@ -264,9 +276,12 @@ async def handle_compute_camera_mapping(
             raise PreconditionError("Camera not connected")
 
     def _do() -> dict:
+        cam = rig.cam
+        if cam is None:  # prechecked; re-narrow under the lock
+            raise PreconditionError("Camera not connected")
         rotation = rig.calibration.effective_rotation()
         rig.park()
-        pct_to_cam, cam_size = compute_camera_mapping(rig.cam, calib, rotation)
+        pct_to_cam, cam_size = compute_camera_mapping(cam, calib, rotation)
         rig.calibration.pct_to_cam = pct_to_cam
         rig.calibration.cam_size = cam_size
         return {"ok": True, "dots": 15, "cam_size": list(cam_size)}
@@ -295,9 +310,22 @@ async def handle_validate_calibration(
 
     def _do() -> dict:
         cal_state = rig.calibration
+        # Prechecked; the re-reads narrow arm/camera/affines and
+        # re-verify the state under the lock.
+        arm, cam = rig.arm, rig.cam
+        if arm is None:
+            raise PreconditionError("Arm not connected")
+        if cam is None:
+            raise PreconditionError("Camera not connected")
+        if (
+            cal_state.pct_to_grbl is None
+            or cal_state.pct_to_cam is None
+            or cal_state.cam_size is None
+        ):
+            raise PreconditionError("Run arm calibration and camera-mapping first")
         results = validate_calibration(
-            rig.arm,
-            rig.cam,
+            arm,
+            cam,
             calib,
             cal_state.effective_rotation(),
             cal_state.pct_to_grbl,
@@ -338,7 +366,14 @@ async def handle_trace_edge(
             raise PreconditionError("Not calibrated — run /setup first")
 
     def _do() -> dict:
-        trace_screen_edge(rig.arm, rig.transforms)
+        # rig.transforms is rebuilt per access — re-fetch and re-check the
+        # prechecked value so the locals are narrowed under the lock.
+        arm, transforms = rig.arm, rig.transforms
+        if arm is None:
+            raise PreconditionError("Arm not connected")
+        if transforms is None:
+            raise PreconditionError("Not calibrated — run /setup first")
+        trace_screen_edge(arm, transforms)
         phone.set_mode("bridge")
         # Park off-phone after tracing so the rig ends in a clean
         # state — same convention as the other arm-driving steps.
@@ -364,12 +399,16 @@ async def handle_show_assistive_touch(
     except PreconditionError as e:
         return _err(str(e), status_code=409)
     nonce = generate_nonce()
-    rig.assistive_touch.compute_at_screen_pos(calib.viewport_shift)
+    # require_viewport_shift() raised above if the shift were unset.
+    shift = cast(ViewportShift, calib.viewport_shift)
+    rig.assistive_touch.compute_at_screen_pos(shift)
+    # compute_at_screen_pos() just stored the position, so it is non-None.
+    at_screen = cast("tuple[float, float]", rig.assistive_touch.at_screen)
     phone.set_mode("calibrate", phase="assistive_touch", nonce_bits=nonce)
     return JSONResponse(
         {
             "status": "ok",
-            "at_screen": list(rig.assistive_touch.at_screen),
+            "at_screen": list(at_screen),
             "nonce_count": len(nonce),
         }
     )
@@ -393,12 +432,19 @@ async def handle_verify_assistive_touch(
             raise PreconditionError("Run assistive-touch/show first")
 
     def _do() -> dict:
+        # Prechecked; the re-reads narrow and re-verify under the lock.
+        arm = rig.arm
+        if arm is None:
+            raise PreconditionError("Arm not connected")
+        pct_to_grbl = rig.calibration.pct_to_grbl
+        if pct_to_grbl is None:
+            raise PreconditionError("Run arm calibration first")
         return verify_assistive_touch(
-            rig.arm,
+            arm,
             rig.assistive_touch,
             bridge,
             calib,
-            rig.calibration.pct_to_grbl,
+            pct_to_grbl,
             phone,
         )
 

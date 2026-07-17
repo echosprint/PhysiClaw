@@ -792,12 +792,12 @@ class RawLog:
             data = src.get("data") or ""
             mime = src.get("media_type") or "image/jpeg"
             rel = self._persist_image(mime, data) if data else ""
-            scrubbed = (
+            scrubbed_src = (
                 {"type": "ref", "ref": rel}
                 if rel
                 else {"type": "base64", "byte_count": len(data)}
             )
-            return {"type": "image", "source": scrubbed}
+            return {"type": "image", "source": scrubbed_src}
         if bt == "tool_result":
             inner = b.get("content")
             if isinstance(inner, list):

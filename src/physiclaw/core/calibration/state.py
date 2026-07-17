@@ -75,7 +75,9 @@ class Calibration:
 
     def transforms(self) -> ScreenTransforms | None:
         """Build a ScreenTransforms if arm + camera mappings are both set."""
-        if not self.transforms_ready:
+        # Spelled per-field (same condition as transforms_ready) so each
+        # argument below is narrowed to its non-None type.
+        if self.pct_to_grbl is None or self.pct_to_cam is None or self.cam_size is None:
             return None
         return ScreenTransforms(
             pct_to_grbl=self.pct_to_grbl,

@@ -115,7 +115,8 @@ def resolve_auto_index(rig: "HardwareRig", phone: "PageState") -> int:
     fail. (warm-start uses the same gate.) The phone is restored to
     bridge mode before returning, even on failure.
     """
-    if not rig.bridge.wait_for_connection(
+    bridge = rig.require_bridge()
+    if not bridge.wait_for_connection(
         AUTO_PICK_BRIDGE_TIMEOUT, AUTO_PICK_BRIDGE_SETTLE
     ):
         raise RuntimeError(

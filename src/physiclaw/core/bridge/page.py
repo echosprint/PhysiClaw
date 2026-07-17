@@ -48,7 +48,7 @@ class PageState:
         with self.lock:
             mode = self.mode
 
-        state = {"mode": mode}
+        state: dict[str, object] = {"mode": mode}
         state["has_device_info"] = self.cal.screen_dimension is not None
 
         if mode == "calibrate":

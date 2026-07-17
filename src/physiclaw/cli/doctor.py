@@ -165,7 +165,9 @@ def _frame_quality_verdict(frame) -> tuple[bool, str]:
 
     scope = "whole frame — no calibration crop"
     cal = Calibration.load()  # None on missing/unreadable bundle, logged
-    if cal is not None and cal.transforms_ready:
+    # The cam_size check restates what transforms_ready already implies;
+    # it narrows the Optional for the unpack below.
+    if cal is not None and cal.transforms_ready and cal.cam_size is not None:
         if cal.effective_rotation() != -1:
             frame = cv2.rotate(frame, cal.effective_rotation())
         h, w = frame.shape[:2]
@@ -315,6 +317,7 @@ def _probe_provider_deep(provider_id: str, model_id: str) -> str:
 
     from physiclaw.agent.engine.dto import (
         ImageBlock,
+        Message,
         SystemMessage,
         TextBlock,
         UserMessage,
@@ -327,7 +330,7 @@ def _probe_provider_deep(provider_id: str, model_id: str) -> str:
     except (ValueError, RuntimeError) as e:
         return _fmt_warn(f"{provider_id}/{model_id}: setup — {e}")
 
-    history = [
+    history: list[Message] = [
         SystemMessage(content="You are a one-word reply bot."),
         UserMessage(
             content=[
@@ -542,10 +545,11 @@ def doctor(
     from physiclaw.common.config import parse_model_ref
 
     live_ref = live.get("model_ref") if live else None
+    live_src = live.get("model_source") if live else None
     active_ref: str | None = None
     if live_ref:
         active_ref = live_ref
-        ref_source = f"live server, {live.get('model_source') or '?'}"
+        ref_source = f"live server, {live_src or '?'}"
         typer.echo(_fmt_ok(f"{engine_label(active_ref)} ({ref_source})"))
     else:
         try:

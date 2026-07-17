@@ -99,8 +99,8 @@ def ticks_from_log2_seconds(exposure: int) -> int:
     return max(1, round((2.0**exposure) * 10_000))
 
 
-_iokit = None
-_cf = None
+_iokit: C.CDLL | None = None
+_cf: C.CDLL | None = None
 
 
 class _CFUUIDBytes(C.Structure):
@@ -269,6 +269,8 @@ def _load() -> bool:
 
 
 def _cfuuid(raw: bytes):
+    if _cf is None:  # unreachable: camera_terminal() gates on _load()
+        raise RuntimeError("CoreFoundation not loaded")
     return _cf.CFUUIDGetConstantUUIDWithBytes(None, *raw)
 
 
@@ -282,6 +284,8 @@ def _call(ptr, name, *args):
 
 def _com_interface(service: int, uc_uuid: bytes, iid: bytes, vtbl_type):
     """service -> intermediate plug-in -> QueryInterface -> typed COM ptr."""
+    if _iokit is None:  # unreachable: camera_terminal() gates on _load()
+        raise RuntimeError("IOKit not loaded")
     plug = C.POINTER(C.POINTER(C.c_void_p))()
     score = C.c_int32()
     kr = _iokit.IOCreatePlugInInterfaceForService(
@@ -306,6 +310,8 @@ def _video_control_interfaces() -> list:
     interface. IOUSBHostDevice is the registry class on 10.15+; the
     IOUSBDevice fallback covers older systems (never both — on modern
     macOS they alias the same devices and would double-count)."""
+    if _iokit is None:  # unreachable: camera_terminal() gates on _load()
+        raise RuntimeError("IOKit not loaded")
     for cls in (b"IOUSBHostDevice", b"IOUSBDevice"):
         found = []
         it = C.c_uint32()

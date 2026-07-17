@@ -19,10 +19,12 @@ def hsv_mask(hsv: np.ndarray, ranges) -> np.ndarray:
     builds on (blob centroids in `blobs`, the dock badge's pixel count in
     the watchdog), so "red needs two ranges" lives in exactly one place.
     """
-    mask = None
+    mask: np.ndarray | None = None
     for lo, hi in ranges:
-        m = cv2.inRange(hsv, np.array(lo), np.array(hi))
+        m: np.ndarray = cv2.inRange(hsv, np.array(lo), np.array(hi))
         mask = m if mask is None else (mask | m)
+    if mask is None:
+        raise ValueError("hsv_mask: at least one HSV range is required")
     return mask
 
 

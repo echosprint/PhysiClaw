@@ -112,5 +112,8 @@ def stream(resp, write, label: str, *, progress: bool = True) -> None:
     if total is not None and received < total:
         raise urllib.error.ContentTooShortError(
             f"retrieval incomplete: got only {received} out of {total} bytes",
-            None,
+            # typeshed types `content` as urlretrieve's (filename, headers)
+            # result; there is no file result here and None is safe — the
+            # attribute is never read, only the URLError message is.
+            None,  # type: ignore[arg-type]
         )

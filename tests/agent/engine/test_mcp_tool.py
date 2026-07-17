@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
 import pytest
+from mcp.types import ImageContent, TextContent
 
 from physiclaw.agent.engine import mcp_tool
 
@@ -187,7 +188,7 @@ async def test_list_tools_asserts_session_entered() -> None:
 async def test_call_tool_normalizes_text_blocks(patched_transport) -> None:
     patched_transport.call_tool.return_value = SimpleNamespace(
         content=[
-            SimpleNamespace(type="text", text="hello"),
+            TextContent(type="text", text="hello"),
         ],
         isError=False,
     )
@@ -202,7 +203,7 @@ async def test_call_tool_normalizes_text_blocks(patched_transport) -> None:
 async def test_call_tool_normalizes_image_blocks(patched_transport) -> None:
     patched_transport.call_tool.return_value = SimpleNamespace(
         content=[
-            SimpleNamespace(type="image", mimeType="image/png", data="aGk="),
+            ImageContent(type="image", mimeType="image/png", data="aGk="),
         ],
         isError=False,
     )
@@ -214,13 +215,17 @@ async def test_call_tool_normalizes_image_blocks(patched_transport) -> None:
 
 
 @pytest.mark.asyncio
-async def test_call_tool_image_default_mime_when_missing(
+async def test_call_tool_image_shaped_duck_falls_to_repr(
     patched_transport,
 ) -> None:
-    # Image blob with NO `mimeType` attr — class-level default fires.
+    # Normalization is type-driven (isinstance over mcp.types), not
+    # duck-typed — an image-shaped impostor takes the stringify branch.
     class _ImgBlob:
         type = "image"
         data = "aGk="
+
+        def __repr__(self) -> str:
+            return "<img-blob>"
 
     patched_transport.call_tool.return_value = SimpleNamespace(
         content=[_ImgBlob()],
@@ -230,7 +235,7 @@ async def test_call_tool_image_default_mime_when_missing(
     async with mcp_tool.McpClient() as c:
         out = await c.call_tool("p")
 
-    assert out[0]["mime_type"] == "image/jpeg"
+    assert out == [{"type": "text", "text": "<img-blob>"}]
 
 
 @pytest.mark.asyncio
@@ -291,8 +296,8 @@ async def test_call_tool_raises_runtime_error_when_is_error_true(
 ) -> None:
     patched_transport.call_tool.return_value = SimpleNamespace(
         content=[
-            SimpleNamespace(type="text", text="bad arg"),
-            SimpleNamespace(type="text", text="bbox missing"),
+            TextContent(type="text", text="bad arg"),
+            TextContent(type="text", text="bbox missing"),
         ],
         isError=True,
     )

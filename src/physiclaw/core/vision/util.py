@@ -83,7 +83,9 @@ def check_phone_in_frame(frame: np.ndarray) -> dict:
 
     annotated = frame.copy()
     cv2.drawContours(annotated, [largest], -1, (0, 255, 0), 3)
-    cv2.drawContours(annotated, [np.int32(cv2.boxPoints(rect))], -1, (0, 200, 255), 2)
+    cv2.drawContours(
+        annotated, [cv2.boxPoints(rect).astype(np.int32)], -1, (0, 200, 255), 2
+    )
     cv2.putText(
         annotated,
         f"area {coverage:.0%}",

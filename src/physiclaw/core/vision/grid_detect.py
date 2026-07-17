@@ -65,7 +65,7 @@ def detect_red_dots(
     dots are uniform in size, so glare / merged / noise blobs (area outliers)
     fall away — far more robust than betting on one exact threshold.
     """
-    mask = (redness(frame) >= RED_DOT_MIN_REDNESS).astype(np.uint8) * 255
+    mask: np.ndarray = (redness(frame) >= RED_DOT_MIN_REDNESS).astype(np.uint8) * 255
 
     # Clean up noise
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
@@ -288,6 +288,7 @@ def screen_polygon(
     """
     if len(corners) < 2:
         return None
+    poly: np.ndarray
     if len(corners) == 2:
         (x0, y0), (x1, y1) = corners
         lo_x, hi_x = min(x0, x1), max(x0, x1)

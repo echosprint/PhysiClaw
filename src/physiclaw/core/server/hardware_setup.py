@@ -112,11 +112,14 @@ async def handle_connect_camera(
 
     try:
         await asyncio.to_thread(_do)
+        cam = rig.cam
+        if cam is None:  # _do just connected it, so the handle is set
+            raise RuntimeError("camera missing after connect")
         return JSONResponse(
             {
                 "status": "ok",
-                "message": f"Camera {rig.cam.index} connected",
-                "index": rig.cam.index,
+                "message": f"Camera {cam.index} connected",
+                "index": cam.index,
             }
         )
     except DeviceNotFound as e:

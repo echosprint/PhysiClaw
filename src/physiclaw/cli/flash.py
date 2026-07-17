@@ -37,7 +37,7 @@ import subprocess
 import tempfile
 import zipfile
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated
 from urllib.error import URLError
 
 import typer
@@ -90,6 +90,7 @@ def _fetch_bundle(into: Path) -> list[tuple[str, Path]]:
 
     files = []
     for offset, name in FLASH_LAYOUT:
+        p: Path | None
         p = into / name
         if not p.exists():  # tolerate a single wrapper folder inside the zip
             p = next(into.rglob(name), None)
@@ -100,15 +101,16 @@ def _fetch_bundle(into: Path) -> list[tuple[str, Path]]:
     return files
 
 
-def _bundle_version(into: Path) -> Optional[str]:
+def _bundle_version(into: Path) -> str | None:
     """FluidNC version recorded in the bundle (``fluidnc_version.txt``)."""
+    p: Path | None
     p = into / "fluidnc_version.txt"
     if not p.exists():  # tolerate a single wrapper folder inside the zip
         p = next(into.rglob("fluidnc_version.txt"), None)
     return p.read_text().strip() if p else None
 
 
-def _detect_port() -> Optional[str]:
+def _detect_port() -> str | None:
     """Best-guess USB-serial port. Doesn't probe (a blank board won't reply)."""
     from physiclaw.core.hardware.grbl import candidate_ports
 
@@ -147,7 +149,7 @@ def _uv_esptool(args: list[str]) -> None:
 
 def flash(
     port: Annotated[
-        Optional[str],
+        str | None,
         typer.Option("--port", help="Serial port (default: auto-detect)."),
     ] = None,
     erase: Annotated[

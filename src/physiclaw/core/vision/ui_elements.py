@@ -145,7 +145,7 @@ def _clean(
 def _dedupe(elements: list[UIElement], iou_thresh: float = 0.7) -> list[UIElement]:
     """Remove near-duplicate boxes by IoU, keeping higher confidence."""
     elements = sorted(elements, key=lambda e: -e.conf)
-    keep = []
+    keep: list[UIElement] = []
     for e in elements:
         if any(_iou(e.bbox, k.bbox) > iou_thresh for k in keep):
             continue

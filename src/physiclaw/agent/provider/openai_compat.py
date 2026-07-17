@@ -144,7 +144,9 @@ class OpenAICompatibleProvider(BaseProvider):
 
     # ---------- serialize_history hooks (called by BaseProvider) ----------
 
-    def _encode_message(self, msg: Message) -> dict | None:
+    # Return type stays as wide as `BaseProvider`'s contract so vendor
+    # overrides (google.py splits one DTO into several wire dicts) conform.
+    def _encode_message(self, msg: Message) -> dict | list[dict] | None:
         if isinstance(msg, SystemMessage):
             return {"role": "system", "content": msg.content}
         if isinstance(msg, UserMessage):

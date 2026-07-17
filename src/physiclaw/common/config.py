@@ -16,6 +16,7 @@ Layering (first match wins):
 import dataclasses
 import os
 import tomllib
+from collections.abc import MutableMapping
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any, get_type_hints
@@ -652,7 +653,11 @@ def set_dotted(dotted: str, raw_value: str, path: Path | None = None) -> None:
     doc = tomlkit.parse(read_text(path))
     if section not in doc:
         doc.add(section, tomlkit.table())
-    doc[section][field_name] = coerced
+    section_tbl = doc[section]
+    if not isinstance(section_tbl, MutableMapping):
+        # Unreachable: the strict load() above rejects non-table sections.
+        raise ConfigError(f"[{section}] is not a table in {path}")
+    section_tbl[field_name] = coerced
     write_text(path, tomlkit.dumps(doc))
     # Refresh module-level CONFIG so same-process callers see the write
     # (re-import wouldn't trigger between CLI commands and immediate use).
@@ -727,9 +732,15 @@ def unset_dotted(dotted: str, path: Path | None = None) -> bool:
     # a raw TypeError from indexing the tomlkit doc below.
     load(path)
     doc = tomlkit.parse(read_text(path))
-    if section not in doc or field_name not in doc[section]:
+    if section not in doc:
         return False
-    del doc[section][field_name]
+    section_tbl = doc[section]
+    if not isinstance(section_tbl, MutableMapping):
+        # Unreachable: the strict load() above rejects non-table sections.
+        raise ConfigError(f"[{section}] is not a table in {path}")
+    if field_name not in section_tbl:
+        return False
+    del section_tbl[field_name]
     write_text(path, tomlkit.dumps(doc))
     global CONFIG
     CONFIG = load(path)

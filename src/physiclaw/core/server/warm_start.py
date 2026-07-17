@@ -24,7 +24,7 @@ a violated invariant is a gesture landing off-target.
 
 import logging
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from physiclaw.common.config import CONFIG
 
@@ -35,6 +35,7 @@ from physiclaw.core.server.net import wait_for_port as wait_for_port
 
 if TYPE_CHECKING:
     from physiclaw.core.bridge import CalibrationState, PageState
+    from physiclaw.core.calibration import ViewportShift
     from physiclaw.core.orchestration import PhysiClaw
 
 log = logging.getLogger(__name__)
@@ -68,16 +69,21 @@ def _sanity(
 
     rig = physiclaw.rig
     cal = rig.calibration
+    pct_to_grbl, pct_to_cam, cam_size = cal.pct_to_grbl, cal.pct_to_cam, cal.cam_size
+    if pct_to_grbl is None or pct_to_cam is None or cam_size is None:
+        # try_resume gates on `loaded.complete` before calling — reaching
+        # here with a partial bundle is a programming error.
+        raise RuntimeError("_sanity called without a complete calibration bundle")
     phone.set_mode("calibrate")
     try:
         results = validate_calibration(
-            rig.arm,
-            rig.cam,
+            rig.require_arm(),
+            rig.require_cam(),
             calib,
             cal.effective_rotation(),
-            cal.pct_to_grbl,
-            cal.pct_to_cam,
-            cam_size=cal.cam_size,
+            pct_to_grbl,
+            pct_to_cam,
+            cam_size=cam_size,
             num_tests=2,
         )
     finally:
@@ -163,8 +169,10 @@ def try_resume(
     # read `calib.viewport_shift` (e.g. show_assistive_touch) see it,
     # and restore the CSS-pt dimensions so warm-start's validate can run
     # without waiting for the phone's /bridge page to POST them again.
-    calib.viewport_shift = loaded.viewport_shift
-    rig.assistive_touch.compute_at_screen_pos(loaded.viewport_shift)
+    # `loaded.complete` (gated above) guarantees the shift is present.
+    shift = cast("ViewportShift", loaded.viewport_shift)
+    calib.viewport_shift = shift
+    rig.assistive_touch.compute_at_screen_pos(shift)
     calib.screen_dimension = loaded.screen_dimension
 
     cal = rig.calibration
@@ -199,7 +207,10 @@ def try_resume(
         # bundle was calibrated at (e.g. the [camera] config changed, or the
         # default moved). Same aspect → the 0-1 mapping holds, adopt the live
         # pixel size; different aspect → the mapping is broken, recalibrate.
-        live = rig.cam.peek()
+        cam = rig.cam
+        if cam is None:  # connect_camera above succeeded, so the handle is set
+            raise RuntimeError(f"{flag}: camera missing after connect")
+        live = cam.peek()
         if live is None:
             log.error(f"{flag}: camera produced no frame")
             return False
@@ -230,7 +241,7 @@ def try_resume(
                     f"  Server waits up to {BRIDGE_WAIT_TIMEOUT}s for steady polling."
                 )
                 print("━" * 60)
-                if not rig.bridge.wait_for_connection(
+                if not rig.require_bridge().wait_for_connection(
                     BRIDGE_WAIT_TIMEOUT, BRIDGE_SETTLE_SECONDS
                 ):
                     log.error(

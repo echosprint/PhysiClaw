@@ -107,6 +107,10 @@ async def cron() -> Trigger | None:
             fields["Next fire time"] = NEVER
         else:
             nxt = next_fire(j.schedule, now)
+            if nxt is None:
+                # Can't happen for the validated schedules jobs.md holds —
+                # croniter always finds a next fire for a valid expression.
+                raise RuntimeError(f"cron: no next fire for {j.id} ({j.schedule!r})")
             fields["Next fire time"] = format_minute(nxt)
         updates[j.id] = fields
 

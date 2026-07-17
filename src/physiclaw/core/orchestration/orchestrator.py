@@ -20,7 +20,10 @@ orchestrator never touches pixels.
 import logging
 import threading
 import time
-from typing import assert_never
+from typing import TYPE_CHECKING, assert_never, cast
+
+if TYPE_CHECKING:
+    import numpy as np
 
 from physiclaw.common.gesture_vocab import STEP_ARG, STEP_TOOL
 from physiclaw.core.orchestration import gestures
@@ -62,7 +65,7 @@ class PhysiClaw:
         # the current ones.
         self._validator = gestures.GestureValidator(
             assistive_touch=lambda: self.rig.assistive_touch,
-            transforms=lambda: self.rig.transforms,
+            transforms=lambda: self.rig.require_transforms(),
         )
         self._clipboard = ClipboardSyncState()
         self._become_ready_lock = threading.Lock()  # see become_ready
@@ -135,7 +138,9 @@ class PhysiClaw:
             warning = self._observer.observe_quality("peek", report)
             if warning is not None:
                 listing = f"{listing}\n{warning}"
-            return encode_view_jpeg(annotated), listing
+            # detect() types the annotated frame as `object`; it is always
+            # the bbox-drawn ndarray from detect_ui_elements.
+            return encode_view_jpeg(cast("np.ndarray", annotated)), listing
 
     def screenshot(self) -> tuple[bytes, str]:
         """Pixel-perfect phone screenshot + icon detection + OCR.
@@ -155,7 +160,9 @@ class PhysiClaw:
             # Detection runs on the native-resolution screenshot;
             # encode_view_jpeg caps the image the agent sees.
             listing, annotated = self.perception.detect(frame)
-            return encode_view_jpeg(annotated), listing
+            # detect() types the annotated frame as `object`; it is always
+            # the bbox-drawn ndarray from detect_ui_elements.
+            return encode_view_jpeg(cast("np.ndarray", annotated)), listing
 
     # ─── Gesture primitives ────────────────────────────────────
 

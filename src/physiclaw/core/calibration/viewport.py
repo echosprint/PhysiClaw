@@ -80,7 +80,8 @@ def _decode_screenshot_square(
         )
 
     largest = max(contours, key=cv2.contourArea)
-    return img, cv2.boundingRect(largest)
+    x, y, w, h = cv2.boundingRect(largest)
+    return img, (x, y, w, h)
 
 
 def measure_viewport_shift(
@@ -130,6 +131,7 @@ def measure_viewport_shift(
     )
 
     cached = None if fresh else _find_viewport_cache()
+    data: bytes | None
     if cached is not None:
         data = cached.read_bytes()
         log.info(f"  Using cached screenshot: {cached} ({len(data)} bytes)")
@@ -140,15 +142,15 @@ def measure_viewport_shift(
         # that shot straight away. The phase-entry cutoff excludes uploads
         # that predate the square; a shot that decodes but shows no square
         # (tapped mid-render) falls through to a fresh wait.
-        img = rect = None
+        decoded: tuple[np.ndarray, tuple[int, int, int, int]] | None = None
         data = bridge.take_pending_screenshot(received_after=cal.phase_since)
         if data is not None:
             try:
-                img, rect = _decode_screenshot_square(data)
+                decoded = _decode_screenshot_square(data)
                 log.info(f"  Using already-uploaded screenshot: {len(data)} bytes")
             except RuntimeError as e:
                 log.info(f"  Pending upload unusable ({e}) — waiting for a fresh one")
-        if img is None:
+        if data is None or decoded is None:
             bridge.clear_screenshot()
             log.info("  Waiting for phone screenshot (double-tap AssistiveTouch)...")
             data = bridge.wait_screenshot(timeout=30.0)
@@ -157,7 +159,8 @@ def measure_viewport_shift(
                     "Timeout — no screenshot received. Double-tap AssistiveTouch to upload."
                 )
             log.info(f"  Screenshot received: {len(data)} bytes")
-            img, rect = _decode_screenshot_square(data)
+            decoded = _decode_screenshot_square(data)
+        img, rect = decoded
 
     sh, sw = img.shape[:2]
     x, y, w, h = rect

@@ -24,7 +24,7 @@ class ValidationError(Exception):
     into an error ToolResult rather than executing the tool."""
 
 
-_TYPE_MAP = {
+_TYPE_MAP: dict[str, type | tuple[type, ...]] = {
     "string": str,
     "integer": int,
     "number": (int, float),

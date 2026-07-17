@@ -112,8 +112,9 @@ class HardwareRig:
         steps = self.calibration.summary()
         if self._arm and self._arm.MOVE_DIRECTIONS:
             steps["alignment"] = "OK"
-        if self._assistive_touch.ready:
-            sx, sy = self._assistive_touch.at_screen
+        at_pos = self._assistive_touch.at_screen
+        if self._assistive_touch.ready and at_pos is not None:  # ready ⇒ at_pos
+            sx, sy = at_pos
             steps["assistive_touch"] = f"({sx:.3f}, {sy:.3f})"
         return {
             "arm": self._arm is not None,
@@ -303,6 +304,13 @@ class HardwareRig:
         """The attached server-side bridge, or None before assembly."""
         return self._bridge
 
+    def require_bridge(self) -> BridgeState:
+        """The attached bridge, or raise — for callers that must reach the
+        phone's /bridge page."""
+        if self._bridge is None:
+            raise RuntimeError("Bridge not attached — server assembly incomplete")
+        return self._bridge
+
     def require_arm(self) -> StylusArm:
         """The connected arm, or raise — for callers that must actuate."""
         if self._arm is None:
@@ -318,6 +326,14 @@ class HardwareRig:
     @property
     def transforms(self) -> ScreenTransforms | None:
         return self.calibration.transforms()
+
+    def require_transforms(self) -> ScreenTransforms:
+        """The calibrated transforms, or raise — for callers that must map
+        screen pct to hardware coordinates."""
+        t = self.calibration.transforms()
+        if t is None:
+            raise RuntimeError("Screen calibration not done")
+        return t
 
     @property
     def assistive_touch(self) -> AssistiveTouch:
@@ -342,14 +358,17 @@ class HardwareRig:
         self.assert_locked()
         at = self.require_assistive_touch()
         return at.take_screenshot(
-            self._arm, self._bridge, self.transforms.pct_to_grbl, timeout=timeout
+            self.require_arm(),
+            self.require_bridge(),
+            self.require_transforms().pct_to_grbl,
+            timeout=timeout,
         )
 
     def at_long_press(self) -> None:
         """Long-press the AssistiveTouch button (fires the clipboard Shortcut)."""
         self.assert_locked()
         at = self.require_assistive_touch()
-        at.long_press(self._arm, self.transforms.pct_to_grbl)
+        at.long_press(self.require_arm(), self.require_transforms().pct_to_grbl)
 
     def sync_clipboard(self, text: str, timeout: float) -> bool:
         """Queue `text` on the bridge, long-press AT (fires the clipboard
@@ -364,9 +383,7 @@ class HardwareRig:
         hold the lock; the retry/miss policy lives in the orchestrator's
         ClipboardSyncState."""
         self.assert_locked()
-        bridge = self._bridge
-        if bridge is None:
-            raise RuntimeError("Bridge not attached — server assembly incomplete")
+        bridge = self.require_bridge()
         bridge.send_text(text)
         self.at_long_press()
         if bridge.wait_clipboard(timeout=timeout):
@@ -443,6 +460,8 @@ class HardwareRig:
         ``park()`` has no target to compute then, and leaving the tip
         mid-travel would be worse than a known machine origin.
         """
+        if self._arm is None:
+            return
         if self.calibration.pct_to_grbl is not None:
             self.park()
         else:

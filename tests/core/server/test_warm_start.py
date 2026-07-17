@@ -130,6 +130,9 @@ def _ready_app(cal) -> MagicMock:
     app = MagicMock()
     app.rig.calibration = cal
     app.rig.assistive_touch = MagicMock()
+    # try_resume reaches the bridge via require_bridge(); alias it to the
+    # same mock the tests pin as `app.rig.bridge`.
+    app.rig.require_bridge.return_value = app.rig.bridge
     # A rotated live frame whose (w, h) matches the bundle's cam_size, so
     # the resolution reconcile step sees "same size" on the clean path.
     app.rig.cam.peek.return_value = np.zeros((1080, 1920, 3), dtype=np.uint8)

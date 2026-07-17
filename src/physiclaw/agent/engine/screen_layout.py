@@ -25,6 +25,7 @@ inject-the-layout.
 import json
 import logging
 from dataclasses import dataclass, replace
+from typing import NotRequired, TypedDict
 
 from physiclaw.agent.engine.dto import Message, UserMessage
 from physiclaw.agent.engine.geometry import center_of, inside
@@ -440,8 +441,16 @@ def inject_tail(messages: list[Message]) -> list[Message]:
 # Each field has a rough region (center within a band, minimum width) — coarse
 # on purpose, just enough to catch a mis-picked element before it's persisted.
 
-# field -> {cx: (lo, hi), cy: (lo, hi), wmin: float} — any key may be absent.
-_REGION = {
+
+class _Region(TypedDict):
+    """Rough region for one field — any key may be absent."""
+
+    cx: NotRequired[tuple[float, float]]  # (lo, hi) band for the center x
+    cy: NotRequired[tuple[float, float]]  # (lo, hi) band for the center y
+    wmin: NotRequired[float]  # minimum width
+
+
+_REGION: dict[str, _Region] = {
     # Bands are calibrated from real WeChat/Spotlight pages, with margin for
     # other apps/devices. Spotlight's field sits LOW — just above the keyboard
     # (~y 0.60); the chat input bar is at the very bottom with the keyboard down
@@ -483,7 +492,7 @@ def _validate_box(field: str, raw) -> str | None:
     if left >= right or top >= bottom:
         return f"{field}: need left<right and top<bottom ({bbox})."
 
-    region = _REGION.get(field, {})
+    region: _Region = _REGION.get(field, {})
     cx, cy, width = (left + right) / 2, (top + bottom) / 2, right - left
     if "cx" in region and not region["cx"][0] <= cx <= region["cx"][1]:
         return f"{field}: looks off — expected it toward x∈{region['cx']} (got center x={cx:.2f})."

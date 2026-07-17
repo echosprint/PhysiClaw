@@ -14,6 +14,7 @@ from typing import Any
 import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
+from mcp.types import ImageContent, TextContent
 
 from physiclaw.common import platform
 from physiclaw.common.config import server_url
@@ -98,14 +99,13 @@ class McpClient:
         result = await self._session.call_tool(name, args or {})
         blocks: list[dict] = []
         for c in result.content:
-            ctype = getattr(c, "type", None)
-            if ctype == "text":
+            if isinstance(c, TextContent):
                 blocks.append({"type": "text", "text": c.text})
-            elif ctype == "image":
+            elif isinstance(c, ImageContent):
                 blocks.append(
                     {
                         "type": "image",
-                        "mime_type": getattr(c, "mimeType", "image/jpeg"),
+                        "mime_type": c.mimeType,
                         "data": c.data,
                     }
                 )

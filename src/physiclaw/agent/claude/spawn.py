@@ -407,16 +407,18 @@ async def spawn_claude(triggers: list[Trigger], *, model_id: str) -> None:
                 result_data = await _stream(proc, slog)
                 # Bounded: stdout EOF usually means exit, but a child
                 # that closed stdout while alive must not hang us.
-                await asyncio.wait_for(proc.wait(), timeout=EXIT_WAIT_SECONDS)
-                if proc.returncode != 0:
-                    log.error("claude exited %s (see log for details)", proc.returncode)
+                returncode = await asyncio.wait_for(
+                    proc.wait(), timeout=EXIT_WAIT_SECONDS
+                )
+                if returncode != 0:
+                    log.error("claude exited %s (see log for details)", returncode)
                 elif result_data:
                     log.info(
                         "claude done (turns=%s): %s",
                         result_data.get("num_turns", "?"),
                         str(result_data.get("result", ""))[:200],
                     )
-                status = slog.done(proc.returncode)
+                status = slog.done(returncode)
             except asyncio.TimeoutError:
                 if proc is not None:
                     proc.kill()
