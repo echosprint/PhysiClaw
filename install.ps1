@@ -266,8 +266,10 @@ To debug, run manually with verbose output:
     Write-Host ""
     if ($useColor) { Write-Host "[OK] Done." -ForegroundColor Green -NoNewline; Write-Host " Next steps:" }
     else           { Write-Host "[OK] Done. Next steps:" }
-    Write-Host "    physiclaw doctor   check your environment"
-    Write-Host "    physiclaw          start the server - opens the hardware-setup wizard"
+    Write-Host "    physiclaw models key <provider>        add your LLM API key"
+    Write-Host "    physiclaw models use <provider/model>  pick the model the agent runs on"
+    Write-Host "    physiclaw doctor                       check your environment"
+    Write-Host "    physiclaw                              start the server - opens the hardware-setup wizard"
     if ($freshUv) {
         Write-Host ""
         Warn "Open a new PowerShell window so uv is on PATH in your interactive shell."

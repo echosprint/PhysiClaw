@@ -55,8 +55,10 @@ The `physiclaw` CLI runs on macOS, Windows, and Linux:
 curl -fsSL https://physiclaw.ai/install.sh | bash
 # Windows: iwr -useb https://physiclaw.ai/install.ps1 | iex
 
-physiclaw doctor    # check your environment
-physiclaw           # start the server — opens the hardware-setup wizard, then runs the agent
+physiclaw models key <provider>        # add your LLM API key
+physiclaw models use <provider/model>  # pick the model the agent runs on
+physiclaw doctor                       # check your environment
+physiclaw                              # start the server — opens the hardware-setup wizard, then runs the agent
 ```
 
 ## License

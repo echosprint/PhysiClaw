@@ -228,8 +228,10 @@ if ! physiclaw setup local-vision-model; then
 fi
 
 printf '\n%s%s✓ Done.%s Next steps:\n' "$B" "$G" "$N"
-printf '    %sphysiclaw doctor%s   check your environment\n' "$B" "$N"
-printf '    %sphysiclaw%s          start the server — opens the hardware-setup wizard\n' "$B" "$N"
+printf '    %sphysiclaw models key <provider>%s        add your LLM API key\n' "$B" "$N"
+printf '    %sphysiclaw models use <provider/model>%s  pick the model the agent runs on\n' "$B" "$N"
+printf '    %sphysiclaw doctor%s                       check your environment\n' "$B" "$N"
+printf '    %sphysiclaw%s                              start the server — opens the hardware-setup wizard\n' "$B" "$N"
 if [[ "$FRESH_UV" == "1" ]]; then
   printf '\n%s%s!%s Open a new terminal so uv is on PATH in your interactive shell.\n' \
     "$B" "$Y" "$N"
