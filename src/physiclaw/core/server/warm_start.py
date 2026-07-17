@@ -173,43 +173,51 @@ def try_resume(
         if cam_index_override is not None
         else (cal.cam_index if cal.cam_index is not None else 0)
     )
+    # Hold the hardware lock from BEFORE the reconnect: connect_arm /
+    # connect_camera flip `hardware_ready` the moment they succeed, and the
+    # MCP plane is already serving — an unlocked gap between connect and
+    # restore_park_origin would let a concurrent tool call pass
+    # require_hardware() and drive (or auto-park) the arm in the mis-pinned
+    # G92 frame arm.setup() just declared (physically displacing the tip),
+    # or grab the lock first so the resume's own non-blocking acquire aborts
+    # with "busy". Acquiring up front makes the invariant structural: tools
+    # can never observe hardware_ready with the lock free until the origin
+    # is re-pinned; racing callers fail fast with the busy error instead.
+    # (rig.locked() can't be used here — its require_hardware() gate would
+    # reject the not-yet-connected rig.)
+    rig.acquire()
+    origin_pinned = False
     try:
-        rig.connect_arm()
-        rig.connect_camera(cam_index)
-    except Exception as e:
-        log.error(f"{flag}: hardware reconnect failed: {e}")
-        return False
+        try:
+            rig.connect_arm()
+            rig.connect_camera(cam_index)
+        except Exception as e:
+            log.error(f"{flag}: hardware reconnect failed: {e}")
+            return False
 
-    # The camera may have negotiated a different resolution than the
-    # bundle was calibrated at (e.g. the [camera] config changed, or the
-    # default moved). Same aspect → the 0-1 mapping holds, adopt the live
-    # pixel size; different aspect → the mapping is broken, recalibrate.
-    live = rig.cam.peek()
-    if live is None:
-        log.error(f"{flag}: camera produced no frame")
-        return False
-    live_h, live_w = live.shape[:2]
-    if not cal.reconcile_cam_size((live_w, live_h)):
-        log.error(
-            f"{flag}: capture aspect ratio changed since calibration "
-            "— run `physiclaw` setup again"
-        )
-        return False
+        # The camera may have negotiated a different resolution than the
+        # bundle was calibrated at (e.g. the [camera] config changed, or the
+        # default moved). Same aspect → the 0-1 mapping holds, adopt the live
+        # pixel size; different aspect → the mapping is broken, recalibrate.
+        live = rig.cam.peek()
+        if live is None:
+            log.error(f"{flag}: camera produced no frame")
+            return False
+        live_h, live_w = live.shape[:2]
+        if not cal.reconcile_cam_size((live_w, live_h)):
+            log.error(
+                f"{flag}: capture aspect ratio changed since calibration "
+                "— run `physiclaw` setup again"
+            )
+            return False
 
-    # The tip rests at the park spot, not the calibrated origin that
-    # arm.setup() just assumed — re-pin the frame from it (see
-    # restore_park_origin). The sanity tap below catches the cases where the
-    # tip didn't hold that spot (killed mid-move, power yank, arm bumped).
-    #
-    # The whole re-pin + sanity span holds the hardware lock: the MCP plane
-    # is already serving and hardware_ready flipped at connect time, so an
-    # unlocked window here would let a concurrent tool call (or a second
-    # `physiclaw setup hardware`) interleave G-code with the resume's own
-    # motion. Concurrent callers fail fast with the busy error instead, and
-    # locked()'s auto-park restores the resting spot on every exit — success
-    # or failure. home_screen() stays outside: it takes locked() itself.
-    with rig.locked():
+        # The tip rests at the park spot, not the calibrated origin that
+        # arm.setup() just assumed — re-pin the frame from it (see
+        # restore_park_origin). The sanity tap below catches the cases where
+        # the tip didn't hold that spot (killed mid-move, power yank, arm
+        # bumped).
         rig.restore_park_origin()
+        origin_pinned = True
         if verify:
             if sys.stdin.isatty():
                 print()
@@ -241,6 +249,18 @@ def try_resume(
                 f"{flag}: trusting the parked arm — skipping bridge wait, "
                 "sanity tap, and home-screen swipe"
             )
+    finally:
+        # Mirror locked()'s exit: auto-park restores the resting spot on
+        # every path — but only once the origin is re-pinned, because park()
+        # in the mis-pinned frame would itself displace the tip (the exact
+        # hazard the lock span prevents). home_screen() below runs after the
+        # release: it takes locked() itself.
+        if origin_pinned:
+            try:
+                rig.park()
+            except Exception:
+                log.exception(f"{flag}: auto-park after resume failed")
+        rig.release()
     if verify:
         # Match setup.py's final step: send the phone home (swipe from
         # bottom), then flip ready. home_screen's locked() context auto-parks

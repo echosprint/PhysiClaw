@@ -27,7 +27,16 @@ def status() -> None:
     if data is None:
         typer.echo(typer.style("  calibration   ", fg=typer.colors.YELLOW) + "missing")
     else:
-        complete = bool(data.get("complete"))
+        # `complete` is a @property on Calibration, never serialized —
+        # reconstruct the bundle and read the live property (mirrors
+        # doctor's _probe_calibration_deep). Lazy import: the dataclass
+        # pulls cv2/numpy, too heavy for this module's import time.
+        from physiclaw.core.calibration.state import Calibration
+
+        try:
+            complete = Calibration.from_dict(data).complete
+        except (TypeError, ValueError, KeyError):
+            complete = False  # unreadable bundle reads as partial here
         tag = "complete" if complete else "partial"
         color = typer.colors.GREEN if complete else typer.colors.YELLOW
         typer.echo(typer.style("  calibration   ", fg=color) + tag)

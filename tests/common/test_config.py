@@ -677,6 +677,18 @@ def test_unset_dotted_returns_false_when_section_absent(tmp_path: Path) -> None:
     assert config.unset_dotted("engine.max_turns", path=p) is False
 
 
+def test_unset_dotted_surfaces_schema_error_on_non_table_section(
+    tmp_path: Path,
+) -> None:
+    # Same strict-load guard as set_dotted — `camera = 3` must raise the
+    # schema ConfigError, not a raw TypeError from indexing the tomlkit doc.
+    p = tmp_path / "config.toml"
+    p.write_text("camera = 3\n")
+
+    with pytest.raises(config.ConfigError, match=r"must be a table"):
+        config.unset_dotted("camera.width", path=p)
+
+
 def test_unset_dotted_refreshes_CONFIG_to_default(tmp_path: Path) -> None:
     p = tmp_path / "config.toml"
     p.write_text("[engine]\nmax_turns = 999\n")

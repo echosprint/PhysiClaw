@@ -291,6 +291,47 @@ def test_at_long_press_wires_at_with_rig_devices(rig, wire_rig) -> None:
     )
 
 
+def test_sync_clipboard_timeout_defers_to_expire_text(
+    rig, wire_rig, bridge_double
+) -> None:
+    # The timeout path must NOT clear_text() directly: a late Shortcut
+    # fetching between the wait timing out and the clear would receive
+    # the text while we report it didn't. expire_text decides under the
+    # bridge lock — and "already fetched" counts as a late success.
+    wire_rig(rig)
+    bridge = bridge_double()
+    bridge.wait_clipboard.return_value = False
+    bridge.expire_text.return_value = True
+    rig.attach_bridge(bridge)
+
+    rig.acquire()
+    try:
+        assert rig.sync_clipboard("x", timeout=0.01) is True
+    finally:
+        rig.release()
+
+    bridge.expire_text.assert_called_once_with()
+    bridge.clear_text.assert_not_called()
+
+
+def test_sync_clipboard_timeout_without_fetch_returns_false(
+    rig, wire_rig, bridge_double
+) -> None:
+    wire_rig(rig)
+    bridge = bridge_double()
+    bridge.wait_clipboard.return_value = False
+    bridge.expire_text.return_value = False
+    rig.attach_bridge(bridge)
+
+    rig.acquire()
+    try:
+        assert rig.sync_clipboard("x", timeout=0.01) is False
+    finally:
+        rig.release()
+
+    bridge.expire_text.assert_called_once_with()
+
+
 # ---------- assert_locked ----------
 
 
@@ -424,6 +465,28 @@ def test_connect_camera_propagates_rotation(mocker, cam_double) -> None:
     r.connect_camera(0)
 
     assert new.rotation == 90
+
+
+def test_connect_camera_clears_ready_to_force_a_re_settle(mocker, cam_double) -> None:
+    # A fresh Camera (live AF, default exposure) must not inherit the old
+    # camera's "ready" — the next become_ready has to re-settle it.
+    r = HardwareRig()
+    r.mark_ready()
+    mocker.patch.object(rig_mod, "Camera", return_value=cam_double())
+
+    r.connect_camera(0)
+
+    assert r._ready is False
+
+
+def test_disconnect_camera_clears_ready(cam_double) -> None:
+    r = HardwareRig()
+    r._cam = cam_double()
+    r.mark_ready()
+
+    r.disconnect_camera()
+
+    assert r._ready is False
 
 
 def test_apply_bundle_to_arm_noop_when_no_arm() -> None:

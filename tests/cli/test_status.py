@@ -11,6 +11,29 @@ status_mod = importlib.import_module("physiclaw.cli.status")
 status = status_mod.status
 
 
+def _bundle(**overrides) -> dict:
+    """A complete v1 bundle shaped like Calibration.to_dict() writes it —
+    `complete` is a @property there, so no such key exists on disk."""
+    base = {
+        "version": 1,
+        "viewport_shift": {
+            "offset_x": 0.0,
+            "offset_y": 120.0,
+            "dpr": 3.0,
+            "screenshot_width": 1170,
+            "screenshot_height": 2532,
+        },
+        "cam_rotation": 2,
+        "pct_to_grbl": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+        "pct_to_cam": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+        "cam_size": [1920, 1080],
+        "cam_index": 0,
+        "screen_dimension": {"width": 390, "height": 844},
+    }
+    base.update(overrides)
+    return base
+
+
 def test_status_reports_vision_model_ok(
     tmp_path: Path,
     mocker,
@@ -63,7 +86,7 @@ def test_status_reports_calibration_complete(
     mocker.patch.object(
         status_mod.paths,
         "load_calibration_bundle",
-        return_value={"complete": True},
+        return_value=_bundle(),
     )
     mocker.patch.object(status_mod.paths, "jobs_file", return_value=tmp_path / "no.md")
 
@@ -87,7 +110,32 @@ def test_status_reports_calibration_partial(
     mocker.patch.object(
         status_mod.paths,
         "load_calibration_bundle",
-        return_value={"complete": False},
+        return_value=_bundle(pct_to_cam=None),  # camera mapping step not done
+    )
+    mocker.patch.object(status_mod.paths, "jobs_file", return_value=tmp_path / "no.md")
+
+    status()
+    out = capsys.readouterr().out
+
+    assert "partial" in out
+
+
+def test_status_reports_unreadable_bundle_as_partial(
+    tmp_path: Path,
+    mocker,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    # from_dict raises on a schema-version mismatch — status degrades to
+    # "partial" rather than crashing (doctor carries the deep diagnosis).
+    mocker.patch.object(
+        status_mod.paths,
+        "omniparser_onnx",
+        return_value=tmp_path / "missing.onnx",
+    )
+    mocker.patch.object(
+        status_mod.paths,
+        "load_calibration_bundle",
+        return_value=_bundle(version=99),
     )
     mocker.patch.object(status_mod.paths, "jobs_file", return_value=tmp_path / "no.md")
 

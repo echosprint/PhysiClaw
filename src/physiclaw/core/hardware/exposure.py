@@ -232,7 +232,11 @@ def converge(
         )
 
     # Phase 4: manual stepping. On the log2 scale, lower = darker.
-    exp = max(MIN_EXPOSURE, min(MAX_EXPOSURE, start))
+    # Clamp `start` once for the whole manual phase — config doesn't
+    # range-check, and every manual value written below (steps and the
+    # pinned-manual fallback) must respect set_manual's contract.
+    start = max(MIN_EXPOSURE, min(MAX_EXPOSURE, start))
+    exp = start
     prev_luma = r.median_luma
     last_dir = 0
     flips = 0
@@ -289,13 +293,20 @@ def converge(
             break
         exp = nxt
 
-    if not prefer_auto and best is not None:
-        set_manual(best)
+    if not prefer_auto:
+        # Manual pinned in config: never flip to firmware AE, even when no
+        # usable step was found — honoring the pin matters more than a
+        # good exposure the user opted out of. Hold the best step if we
+        # have one, else the (clamped) configured start; either way stay
+        # manual.
+        value = best if best is not None else start
+        set_manual(value)
+        held = "best manual" if best is not None else "manual start"
         return TuneResult(
             "manual",
-            best,
+            value,
             False,
-            f"{reason} — held best manual {best} (auto disabled in config)",
+            f"{reason} — held {held} {value} (auto disabled in config)",
         )
     set_auto()
     return TuneResult("auto", None, False, f"{reason} — reverted to auto")

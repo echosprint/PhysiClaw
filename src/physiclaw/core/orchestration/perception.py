@@ -55,6 +55,12 @@ class Perception:
     # still holds the rig lock while its gesture finishes parking.
     RETUNE_DELAY_SECONDS = 2.0
 
+    # How long a blurry stretch may starve the keypad poll before an
+    # ungated OCR pass runs anyway — a rig whose crop never meters sharp
+    # (chronic soft focus that OCR can still read) degrades to roughly
+    # the old fixed-cadence poll instead of never OCRing at all.
+    NUMPAD_OCR_FALLBACK_SECONDS = 2.5
+
     def __init__(self, rig: HardwareRig):
         self._rig = rig
         # Serialize first-use model construction (the watch route and a
@@ -146,35 +152,70 @@ class Perception:
         )
         return format_elements(elements_to_json(elements)), annotated
 
-    def scan_text(self) -> list[dict]:
-        """OCR-only pass on the phone-screen region. Caller must hold the lock.
-
-        Fast path for internal polling (e.g. unlock_phone's keypad loop).
-        The agent-facing tools go through ``detect`` instead, which also
-        runs icon detection.
-        """
-        self._rig.assert_locked()
-        self._rig.park()
-        frame = self.camera_view()
-        results = self.ocr_reader().read(
-            frame, crop_box=phone_screen_crop_box(frame, self._rig.transforms)
-        )
+    def _ocr_elements(self, frame) -> list[dict]:
+        """OCR one already-grabbed frame into on-screen text elements —
+        the shared tail of ``scan_text`` and the keypad poll (which must
+        OCR the exact frame it metered, not a fresh grab). Derives the
+        crop box from the frame itself, so callers can't pair a box with
+        a different frame."""
+        crop_box = phone_screen_crop_box(frame, self._rig.transforms)
+        results = self.ocr_reader().read(frame, crop_box=crop_box)
         elements = results_to_elements(results, self._rig.transforms)
         return [e for e in elements if bbox_on_screen(e["bbox"])]
 
+    def scan_text(self) -> list[dict]:
+        """OCR-only pass on the phone-screen region. Caller must hold the lock.
+
+        Fast path for internal single-shot reads (e.g. unlock_phone's
+        still-locked verify). The agent-facing tools go through
+        ``detect`` instead, which also runs icon detection.
+        """
+        self._rig.assert_locked()
+        self._rig.park()
+        return self._ocr_elements(self.camera_view())
+
     def wait_for_numpad_digit(
-        self, digit: str, attempts: int = 8, interval: float = 1.0
+        self, digit: str, timeout: float = 10.0
     ) -> list[float] | None:
-        """Poll ``scan_text`` until the passcode keypad shows `digit`;
-        return its bbox, or None after `attempts` polls. Caller must hold
-        the lock. Used by unlock: Face ID takes a few seconds to fail
-        before the keypad appears, so one scan isn't enough."""
-        for _ in range(attempts):
-            elements = self.scan_text()
-            bbox = find_numpad_digit(elements, digit)
+        """Poll the camera until the passcode keypad shows `digit`;
+        return its bbox, or None at `timeout`. Caller must hold the lock.
+
+        Sharpness-gated: the keypad lives only a few seconds after the
+        unlock swipe, and that is exactly when frames are at their worst
+        (auto-exposure re-converging across the wake's dark→bright flip,
+        autofocus hunting from the arm's pass over the lens). An OCR
+        pass costs seconds, so spending it on an unreadable frame pushes
+        detection past the keypad's lifetime — the failure mode behind
+        session 20260716_212243. Each tick meters the phone-screen crop
+        (the same `crop_to_phone_screen` pipeline every BLUR_THRESHOLD
+        consumer scores — see `_screen_crop` and the observer's grabs)
+        and OCRs only when it clears the threshold — the SAME frame that
+        metered sharp — with an ungated pass every
+        NUMPAD_OCR_FALLBACK_SECONDS as the chronic-blur escape hatch.
+        The first tick starts the fallback clock rather than OCRing
+        blind, so a mid-hunt first frame doesn't burn the window."""
+        self._rig.assert_locked()
+        self._rig.park()
+        start = time.monotonic()
+        deadline = start + timeout
+        last_ocr = start
+        while time.monotonic() < deadline:
+            frame = self.camera_view()
+            crop = crop_to_phone_screen(frame, self._rig.transforms)
+            sharp = quality.laplacian_variance(crop) >= quality.BLUR_THRESHOLD
+            if not sharp and time.monotonic() - last_ocr < (
+                self.NUMPAD_OCR_FALLBACK_SECONDS
+            ):
+                time.sleep(0.15)
+                continue
+            bbox = find_numpad_digit(self._ocr_elements(frame), digit)
+            # Stamp AFTER the (multi-second) OCR pass so the fallback
+            # spacing is pass-end→next-start — a true "every
+            # NUMPAD_OCR_FALLBACK_SECONDS", not back-to-back once one
+            # pass outlasts the interval.
+            last_ocr = time.monotonic()
             if bbox is not None:
                 return bbox
-            time.sleep(interval)
         return None
 
     # ─── Watchdog ────────────────────────────────────────────
@@ -255,7 +296,13 @@ class Perception:
             self.tune_now()
             self.lock_focus_now()
 
-        if not self._with_rig_parked("camera settle", body) and lockable:
+        self._with_rig_parked("camera settle", body)
+        # Seed a deferred result whenever the lock left no record — the
+        # rig was busy so `body` never ran, OR `lock_focus_now` swallowed
+        # an internal driver error mid-attempt. Either way `_last_lock`
+        # is None, and `_focus_policy` disables itself on a None result;
+        # the seed keeps the re-lock policy alive to retry on a sharp view.
+        if lockable and self._last_lock is None:
             self._last_lock = focus.LockResult(
                 False, "startup lock skipped (busy or failed)", deferred=True
             )
@@ -331,6 +378,31 @@ class Perception:
             self.lock_focus_now()
 
         self._with_rig_parked("focus lock", body)
+
+    def ensure_focus_locked(self) -> None:
+        """Freeze the lens only if it isn't already verified-frozen —
+        the cheap pre-gate for callers settling ahead of a
+        timing-critical window (unlock's keypad race). A verified lock
+        can't drift on its own (the lens is frozen), so re-running the
+        multi-meter confirm would spend ~0.5s of frame-waits re-proving
+        it on every call — and every agent retry; recovery from a
+        freeze gone stale belongs to the blur-streak re-lock policy
+        (`_focus_policy`).
+
+        The gate consults BOTH our remembered result and the camera's
+        own frozen flag: a mid-session `connect_camera` swaps in a fresh
+        Camera whose AF is live again while `_last_lock` still reads
+        locked, so trusting the mirror alone would skip the re-lock the
+        new lens needs. Rig lock must be held; parks the arm itself when
+        a re-lock is owed (the metering contract needs it), so the
+        common short-circuit path spends no arm motion."""
+        cam = self._rig.cam
+        frozen = cam is not None and cam.focus_locked
+        last = self._last_lock
+        if frozen and last is not None and last.locked:
+            return
+        self._rig.park()
+        self.lock_focus_now()
 
     def lock_focus_now(self) -> None:
         """Freeze-and-verify with the rig lock ALREADY HELD and the arm

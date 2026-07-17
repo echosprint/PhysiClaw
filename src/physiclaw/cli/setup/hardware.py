@@ -231,10 +231,14 @@ def _step_locate_screen(auto: bool) -> None:
             "  The phone shows an orange square. Tap AssistiveTouch once (screenshot),"
         )
         print("  then double-tap it (upload).")
-    while True:
-        if ok(calibrate("viewport-shift", 35, body={"fresh": not auto})):
-            break
-        wait("Couldn't read the screenshot. Tap AT once, then double-tap. Retry?")
+    calibrate_retry(
+        "viewport-shift",
+        "Couldn't read the screenshot",
+        "Tap AT once, then double-tap. Retry?",
+        auto,
+        timeout=35,
+        body={"fresh": not auto},
+    )
     _done("Screen located")
 
 

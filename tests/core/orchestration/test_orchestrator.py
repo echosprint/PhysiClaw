@@ -266,6 +266,8 @@ def _wire_failing_bridge(pc, wire_rig, bridge_double):
     wire_rig(pc.rig)
     bridge = bridge_double()
     bridge.wait_clipboard.return_value = False
+    # No late fetch either — the expiry finds the text unfetched.
+    bridge.expire_text.return_value = False
     pc.rig.attach_bridge(bridge)
     return bridge
 
@@ -300,17 +302,30 @@ def test_send_to_clipboard_unconfirmed_raises(
     bridge.wait_clipboard.assert_called_once_with(timeout=pc._clipboard.CONFIRM_SECONDS)
 
 
-def test_send_to_clipboard_miss_clears_queued_text(
+def test_send_to_clipboard_miss_expires_queued_text(
     pc: PhysiClaw, wire_rig, bridge_double
 ) -> None:
     # A LATE Shortcut run must not fetch the text after we've told the
-    # agent "the phone clipboard still holds the previous content".
+    # agent "the phone clipboard still holds the previous content" —
+    # expiry is atomic with the fetch (BridgeState.expire_text), not a
+    # separate clear_text() a fetch could race.
     bridge = _wire_failing_bridge(pc, wire_rig, bridge_double)
 
     with pytest.raises(ClipboardSyncError):
         pc.send_to_clipboard("x")
 
-    bridge.clear_text.assert_called_once()
+    bridge.expire_text.assert_called_once()
+
+
+def test_send_to_clipboard_late_fetch_counts_as_success(
+    pc: PhysiClaw, wire_rig, bridge_double
+) -> None:
+    # The Shortcut fetched the text after wait_clipboard timed out but
+    # before the expiry — the phone HAS the text, so no error.
+    bridge = _wire_failing_bridge(pc, wire_rig, bridge_double)
+    bridge.expire_text.return_value = True
+
+    assert "Copied" in pc.send_to_clipboard("x")
 
 
 def test_send_to_clipboard_success_resets_miss_counter(
@@ -322,6 +337,7 @@ def test_send_to_clipboard_success_resets_miss_counter(
     wire_rig(pc.rig)
     bridge = bridge_double()
     bridge.wait_clipboard.side_effect = [False, True, False]
+    bridge.expire_text.return_value = False  # misses stay misses
     pc.rig.attach_bridge(bridge)
 
     with pytest.raises(ClipboardSyncError):
@@ -417,6 +433,41 @@ def test_sequence_stops_on_first_failure(pc: PhysiClaw, wire_rig) -> None:
     assert lines[0].startswith("1 tap ok")
     assert lines[1].startswith("2 tap FAIL")
     assert len(lines) == 2  # third step skipped
+
+
+def test_sequence_step_missing_tool_name_fails_that_step_only(
+    pc: PhysiClaw, wire_rig
+) -> None:
+    # The schema is only list[dict] — a step without "tool_name" must
+    # surface as a per-step FAIL line (keeping prior steps' ok lines and
+    # the fused view), not a bare KeyError that discards the whole
+    # batch's report.
+    wire_rig(pc.rig)
+
+    out = pc.sequence(
+        [
+            {"tool_name": "tap", "arg": [0.1, 0.1, 0.2, 0.2]},
+            {"arg": [0.3, 0.3, 0.4, 0.4]},
+        ]
+    )
+
+    lines = out.text.splitlines()
+    assert lines[0].startswith("1 tap ok")
+    assert lines[1].startswith("2 ? FAIL")
+    assert "tool_name" in lines[1]
+    pc.rig._arm.tap.assert_called_once()  # step 1 ran; the batch stopped
+
+
+def test_sequence_non_dict_step_fails_that_step_only(pc: PhysiClaw, wire_rig) -> None:
+    # Same contract for outright junk: a non-dict step is a per-step
+    # FAIL line, never an escaping TypeError.
+    wire_rig(pc.rig)
+
+    out = pc.sequence([{"tool_name": "tap", "arg": [0.1, 0.1, 0.2, 0.2]}, "junk"])
+
+    lines = out.text.splitlines()
+    assert lines[0].startswith("1 tap ok")
+    assert lines[1].startswith("2 ? FAIL")
 
 
 def test_sequence_aborts_before_paste_on_unconfirmed_clipboard(
@@ -661,35 +712,91 @@ def test_force_quit_open_swipe_holds_before_lift(pc: PhysiClaw, wire_rig) -> Non
 # ---------- unlock_phone ----------
 
 
-def test_unlock_phone_returns_when_keypad_not_found(
-    mocker, pc: PhysiClaw, wire_rig
-) -> None:
+def _wire_unlock(mocker, pc: PhysiClaw, wire_rig, *, digit_bbox, scan=()):
+    """Shared unlock harness: wired rig, warmed OCR double, camera
+    settle and keypad poll stubbed, verify scan returning `scan`."""
     wire_rig(pc.rig)
     pc.perception._ocr_reader = MagicMock()
     mocker.patch.object(orchestrator.time, "sleep")
-    mocker.patch.object(pc.perception, "wait_for_numpad_digit", return_value=None)
+    mocker.patch.object(pc.perception, "ensure_focus_locked")
+    mocker.patch.object(pc.perception, "wait_for_numpad_digit", return_value=digit_bbox)
+    mocker.patch.object(pc.perception, "scan_text", return_value=list(scan))
+
+
+def test_unlock_phone_returns_when_keypad_not_found(
+    mocker, pc: PhysiClaw, wire_rig
+) -> None:
+    _wire_unlock(mocker, pc, wire_rig, digit_bbox=None)
 
     out = pc.unlock_phone()
 
     assert "Failed to find passcode keypad" in out.text
 
 
+def test_unlock_phone_settles_focus_before_the_swipe(
+    mocker, pc: PhysiClaw, wire_rig
+) -> None:
+    # The keypad clock starts at the swipe — the lens freeze must come
+    # before it, or the settle spends the window it exists to protect.
+    _wire_unlock(mocker, pc, wire_rig, digit_bbox=None)
+    order: list[str] = []
+    pc.perception.ensure_focus_locked.side_effect = lambda: order.append("lock")
+    pc.rig._arm.swipe_to.side_effect = lambda *a, **k: order.append("swipe")
+
+    pc.unlock_phone()
+
+    assert order == ["lock", "swipe"]
+
+
 def test_unlock_phone_taps_six_times_when_keypad_found(
     mocker, pc: PhysiClaw, wire_rig
 ) -> None:
-    wire_rig(pc.rig)
-    pc.perception._ocr_reader = MagicMock()
-    mocker.patch.object(orchestrator.time, "sleep")
-    mocker.patch.object(
-        pc.perception,
-        "wait_for_numpad_digit",
-        return_value=[0.1, 0.1, 0.2, 0.2],
-    )
+    _wire_unlock(mocker, pc, wire_rig, digit_bbox=[0.1, 0.1, 0.2, 0.2])
 
     out = pc.unlock_phone()
 
     assert "Passcode entered" in out.text
+    assert "still shows the lock screen" not in out.text
     # 1 wake-tap + 6 digit-taps = 7 taps.
+    assert pc.rig._arm.tap.call_count == 7
+
+
+def test_unlock_phone_reports_still_locked_when_verify_sees_lock_screen(
+    mocker, pc: PhysiClaw, wire_rig
+) -> None:
+    _wire_unlock(
+        mocker,
+        pc,
+        wire_rig,
+        digit_bbox=[0.1, 0.1, 0.2, 0.2],
+        scan=[
+            {
+                "label": "Swipe up for Face ID or Enter Passcode",
+                "bbox": [0.06, 0.18, 0.93, 0.22],
+            }
+        ],
+    )
+
+    out = pc.unlock_phone()
+
+    assert "still shows the lock screen" in out.text
+    # The taps did run — the verify is what failed.
+    assert pc.rig._arm.tap.call_count == 7
+
+
+def test_unlock_phone_verify_camera_hiccup_still_reports_entered(
+    mocker, pc: PhysiClaw, wire_rig
+) -> None:
+    # The taps already landed — a dropped verify frame must fail toward
+    # "entered", not surface as a tool error that steers the agent to
+    # STUCK on an unlocked phone (the attached view shows the truth).
+    _wire_unlock(mocker, pc, wire_rig, digit_bbox=[0.1, 0.1, 0.2, 0.2])
+    pc.perception.scan_text.side_effect = RuntimeError("Camera capture failed")
+
+    out = pc.unlock_phone()
+
+    assert "Passcode entered" in out.text
+    assert "still shows the lock screen" not in out.text
     assert pc.rig._arm.tap.call_count == 7
 
 

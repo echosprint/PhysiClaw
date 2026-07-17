@@ -189,6 +189,55 @@ def test_session_log_extracts_screenshot(_isolated_log_dir: Path) -> None:
     assert imgs[0].read_bytes() == b"\xff\xd8fake-jpeg"
 
 
+def test_session_log_image_turn_tag_dedups_streamed_message(
+    _isolated_log_dir: Path,
+) -> None:
+    import base64
+
+    from physiclaw.common import paths
+
+    slog = _slog(["phone"])
+    # One assistant MESSAGE streamed as two events sharing message.id —
+    # the turn must advance ONCE, so the screenshot tags as t1, not t2.
+    for block in (
+        {"type": "text", "text": "looking"},
+        {"type": "tool_use", "name": "peek", "input": {}},
+    ):
+        slog.event(
+            {"type": "assistant", "message": {"id": "msg_1", "content": [block]}}
+        )
+    b64 = base64.b64encode(b"\xff\xd8fake-jpeg").decode()
+    slog.event(
+        {
+            "type": "user",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "image/jpeg",
+                                    "data": b64,
+                                },
+                            }
+                        ],
+                    }
+                ]
+            },
+        }
+    )
+    slog.close()
+
+    imgs = list(
+        (paths.claude_sessions_dir() / "20260101_120000_test00" / "images").glob("*")
+    )
+    assert len(imgs) == 1
+    assert imgs[0].name == "00001_t1.jpg"  # one message despite two events
+
+
 def test_session_log_event_assistant_text_returns_none(
     _isolated_log_dir: Path,
 ) -> None:

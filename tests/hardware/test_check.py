@@ -236,6 +236,17 @@ def test_patch_op_without_valid_id_is_flagged(world):
     assert_finding("op(s) without a valid id")
 
 
+def test_patch_op_named_orig_is_flagged(world):
+    # "orig" passes ID_RE (4 lowercase letters) but is the reserved
+    # source-SVG sentinel — an op that adopts it is silently dropped at
+    # replay, so the gate must reject it.
+    (world.patches / "frame_10_base_assembled_cam0.json").write_text(
+        json.dumps([{"id": "orig", "preop": "orig"}])
+    )
+
+    assert_finding("op(s) without a valid id")
+
+
 def test_patch_op_with_unknown_preop_is_flagged(world):
     (world.patches / "frame_10_base_assembled_cam0.json").write_text(
         json.dumps([{"id": "abcd", "preop": "gone"}])
@@ -326,6 +337,16 @@ def test_duplicate_bom_part_ids_are_flagged(world):
     )
 
     assert_finding("duplicate BOM part_id(s): p1")
+
+
+def test_malformed_bom_row_is_flagged_not_crashed(world):
+    # A non-object row must produce a finding, not an AttributeError that
+    # aborts the whole gate and masks every other finding.
+    (world.content / "11_bom.json").write_text(
+        json.dumps([{"type": "bom", "rows": [{"part_id": "p1"}, "stray string"]}])
+    )
+
+    assert_finding("malformed BOM row(s)")
 
 
 def test_stale_vendor_part_id_is_flagged(world):

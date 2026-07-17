@@ -40,6 +40,25 @@ def test_silenced_stderr_swallows_block_output(capfd: pytest.CaptureFixture) -> 
     assert "audible" in captured.err
 
 
+def test_silenced_stderr_serializes_concurrent_redirects() -> None:
+    """Two threads redirecting fd 2 at once can save each other's
+    /dev/null as the "real" stderr and leave it permanently silenced —
+    the whole save/redirect/restore window must run under the module
+    lock. Asserted directly: the lock is held inside the block, so a
+    second thread can't be juggling fd 2 concurrently, and fd 2 is
+    restored afterwards."""
+    stat_before = os.fstat(2)
+
+    with silenced_stderr():
+        assert camera_mod._STDERR_REDIRECT_LOCK.locked()
+
+    stat_after = os.fstat(2)
+    assert (stat_after.st_dev, stat_after.st_ino) == (
+        stat_before.st_dev,
+        stat_before.st_ino,
+    )
+
+
 # ---------- FakeVideoCapture ----------
 
 

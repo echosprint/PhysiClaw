@@ -34,10 +34,21 @@ from physiclaw.core.orchestration.rig import HardwareRig
 from physiclaw.core.vision.util import (
     decode_image,
     encode_view_jpeg,
+    looks_locked,
     validate_bbox,
 )
 
 log = logging.getLogger(__name__)
+
+# Agent-facing fragment: the unlock verify's "still locked" signal. The
+# `unlock_phone` tool docstring (server/tools.py) quotes this verbatim as the
+# retry trigger — a test pins that both sides carry it. Deliberately does NOT
+# start with "Passcode entered", so a success-substring check can't match a
+# failure.
+UNLOCK_STILL_LOCKED = (
+    "the phone still shows the lock screen — the keypad likely timed out "
+    "before the taps landed"
+)
 
 
 class PhysiClaw:
@@ -321,8 +332,16 @@ class PhysiClaw:
         def act() -> str:
             lines = []
             for i, s in enumerate(steps, 1):
-                tool = s[STEP_TOOL]
+                # Read the tool name INSIDE the try: the schema is only
+                # list[dict], so a malformed step (missing "tool_name",
+                # non-dict junk) must surface as a per-step FAIL line
+                # (keeping the results of steps already run + the fused
+                # view), not a bare error that discards the whole batch's
+                # report. The "?" seed covers the case where the read
+                # itself is what failed.
+                tool = "?"
                 try:
+                    tool = s[STEP_TOOL]
                     result = self._run_step(tool, s.get(STEP_ARG))
                     lines.append(f"{i} {tool} ok — {result}")
                 except Exception as e:
@@ -353,30 +372,62 @@ class PhysiClaw:
         return self._run_macro(gestures.FORCE_QUIT, "Force-quit current app")
 
     def unlock_phone(self) -> "GestureResult":
-        """Unlock the phone: wake → swipe up → wait for Face ID to fail → enter passcode.
+        """Unlock the phone: wake → settle camera → swipe up → find the
+        keypad "1" → tap it six times → verify by pixels.
 
-        Fully mechanical — no AI. OCR finds digit "1" on the passcode
-        screen, then taps it six times. Passcode is hardcoded to 111111 —
-        a dedicated tool-phone passcode, not the user's real password.
+        Fully mechanical — no AI. Passcode is hardcoded to 111111 — a
+        dedicated tool-phone passcode, not the user's real password.
+
+        The passcode keypad lives only seconds once the swipe opens it,
+        and the wake is exactly when the camera is at its worst (AE
+        re-converging across the dark→bright flip, AF hunting from the
+        arm's pass) — so the lens is converged-and-frozen BEFORE the
+        swipe starts the clock, and the keypad poll is sharpness-gated
+        (see wait_for_numpad_digit). Single-shot on purpose: a missed
+        window reports honestly and the AGENT retries — the next call
+        starts with the screen awake and the camera settled, so it is
+        faster and likelier to land.
         """
+
+        digit = gestures.UNLOCK_PASSCODE[0]
+        taps = len(gestures.UNLOCK_PASSCODE)
 
         def act() -> str:
             # Warm the OCR model before waking the phone — a cold RapidOCR
-            # load (seconds) inside the keypad's ~8s lifetime lets the
+            # load (seconds) inside the keypad's short lifetime lets the
             # numpad sleep again before the first tap lands.
             self.perception.ocr_reader()
-            for step in gestures.UNLOCK_WAKE:
-                self._execute(step)
-            self.rig.park()
-            time.sleep(2)  # Face ID starts; the keypad poll absorbs the rest
+            self._execute(gestures.WAKE_SCREEN)
+            # Converge-and-freeze the lens on the lit lock screen while
+            # the keypad clock is NOT yet running: a frozen lens can't
+            # re-hunt when the swipe flips the screen bright→dark.
+            # Parks + settles only when a re-lock is actually owed (skips
+            # the arm move on the already-frozen fast path); fail-open
+            # no-op when the camera can't lock.
+            self.perception.ensure_focus_locked()
+            self._execute(gestures.UNLOCK_SWIPE)
 
-            digit_bbox = self.perception.wait_for_numpad_digit("1")
+            digit_bbox = self.perception.wait_for_numpad_digit(digit)
             if digit_bbox is None:
                 return "Failed to find passcode keypad — phone may already be unlocked"
 
-            for _ in range(6):
+            for _ in range(taps):
                 self._execute(gestures.Tap(digit_bbox))
 
+            time.sleep(1.0)  # unlock transition before the verify frame
+            # The taps already landed; a camera hiccup on the verify grab
+            # must not turn a real unlock into a tool error (that would
+            # steer the agent to STUCK on an unlocked phone). Fail toward
+            # "entered" — the attached view still shows the truth.
+            try:
+                still_locked = looks_locked(self.perception.scan_text())
+            except Exception:
+                log.warning(
+                    "unlock verify scan failed — assuming entered", exc_info=True
+                )
+                still_locked = False
+            if still_locked:
+                return f"Taps landed but {UNLOCK_STILL_LOCKED}"
             return "Passcode entered"
 
         return self._observed(act)

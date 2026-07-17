@@ -4,6 +4,7 @@ import _thread
 import atexit
 import logging
 import os
+import socket
 import subprocess
 import sys
 import threading
@@ -11,7 +12,7 @@ from typing import Annotated, Optional
 
 import typer
 
-from physiclaw.common.config import CONFIG
+from physiclaw.common.config import CONFIG, WILDCARD_HOSTS
 
 
 def server(
@@ -154,6 +155,7 @@ def server(
 
     atexit.register(shutdown)
 
+    _refuse_if_already_running(host, port)
     model_ref, runtime_label = _resolve_and_record_model(host, port)
     _log_endpoints(host, port)
     _start_hardware_bringup(
@@ -166,6 +168,7 @@ def server(
         no_setup_hardware=no_setup_hardware,
     )
     _start_runtime_loop(
+        host,
         port,
         verbose,
         no_runtime=no_runtime,
@@ -263,6 +266,49 @@ def _apply_save_flags(
     ):
         if enabled:
             os.environ[env] = "1"
+
+
+def _dial_host(host: str) -> str:
+    """Bind address → an address a client can dial. A wildcard bind
+    (0.0.0.0/::) listens on loopback too but can't itself be dialed."""
+    return "127.0.0.1" if host in WILDCARD_HOSTS else host
+
+
+def _port_in_use(host: str, port: int) -> bool:
+    """Quick connect probe of the target control port."""
+    try:
+        with socket.create_connection((_dial_host(host), port), timeout=0.5):
+            return True
+    except OSError:
+        return False
+
+
+def _refuse_if_already_running(host: str, port: int) -> None:
+    """Exit before touching runtime state when a server is already live.
+
+    Without this, a second `physiclaw server` writes runtime_state (clobbering
+    the live server's record), fails the port bind, and its atexit clear()
+    then erases the record entirely — doctor/setup lose the LIVE server.
+    read_live() is pid-checked, so a stale file from a crash never blocks a
+    start; the socket probe catches a live listener whose state file is gone.
+    """
+    from physiclaw.cli._format import exit_error
+    from physiclaw.common import runtime_state
+
+    live = runtime_state.read_live()
+    if live:
+        exit_error(
+            f"physiclaw server already running (pid {live.get('pid')}, "
+            f"http://{live.get('host')}:{live.get('port')}). "
+            "Stop it first — the runtime-state record is single-slot, so "
+            "only one physiclaw server can run per machine."
+        )
+    if _port_in_use(host, port):
+        exit_error(
+            f"port {port} is already accepting connections on "
+            f"{_dial_host(host)} — is another server running? "
+            "Stop it first, or pass a different --port."
+        )
 
 
 def _resolve_and_record_model(host: str, port: int) -> tuple[Optional[str], str]:
@@ -430,6 +476,7 @@ def _open_hardware_wizard(host: str, port: int) -> None:
 
 
 def _start_runtime_loop(
+    host: str,
     port: int,
     verbose: bool,
     *,
@@ -460,7 +507,7 @@ def _start_runtime_loop(
         )
         return
 
-    runtime_proc = _spawn_runtime(port, verbose, runtime_label)
+    runtime_proc = _spawn_runtime(host, port, verbose, runtime_label)
 
     def _stop_runtime() -> None:
         if runtime_proc.poll() is None:
@@ -473,7 +520,7 @@ def _start_runtime_loop(
     atexit.register(_stop_runtime)
 
 
-def _spawn_runtime(port: int, verbose: bool, label: str) -> subprocess.Popen:
+def _spawn_runtime(host: str, port: int, verbose: bool, label: str) -> subprocess.Popen:
     """Run the hook loop out-of-process so long-running hooks don't block
     the MCP event loop. Terminated via atexit when the server exits.
 
@@ -482,12 +529,14 @@ def _spawn_runtime(port: int, verbose: bool, label: str) -> subprocess.Popen:
     record into runtime_state, so reuse that instead of resolving again.
     """
     log = logging.getLogger(__name__)
+    # Dial the configured bind, not hardcoded loopback — with --host set to
+    # a LAN IP nothing listens on 127.0.0.1 (wildcard binds do, so map those).
     cmd = [
         sys.executable,
         "-m",
         "physiclaw.agent.runtime",
         "--server",
-        f"http://127.0.0.1:{port}",
+        f"http://{_dial_host(host)}:{port}",
     ]
     if verbose:
         cmd.append("--verbose")

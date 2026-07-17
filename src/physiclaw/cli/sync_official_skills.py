@@ -360,10 +360,21 @@ def sync(
             #    below never ran) and re-syncing on every startup. os.replace
             #    overwrites atomically on Windows and POSIX alike.
             dst_skills = paths.official_skills_dir()
+            # Two-rename swap: park the live tree at a session-unique
+            # trash path, rename staging in, THEN delete the trash
+            # (best-effort). rmtree(live)-then-replace left a
+            # multi-second window where a concurrent session snapshot
+            # saw an empty/partial tree; now the gap is two renames.
+            # Fixed name, same pattern as STAGING_DIR above: a crash
+            # between the two renames leaves the parked tree here, and
+            # the next run reclaims it by name — nothing accumulates.
+            trash = official / ".sync-trash"
+            shutil.rmtree(trash, ignore_errors=True)
             if dst_skills.exists():
-                shutil.rmtree(dst_skills)
+                os.replace(dst_skills, trash)
             os.replace(staging / "skills", dst_skills)
             os.replace(staging / "source.json", official / "source.json")
+            shutil.rmtree(trash, ignore_errors=True)
         finally:
             if staging.exists():
                 shutil.rmtree(staging)

@@ -339,6 +339,58 @@ def test_try_resume_returns_false_when_camera_has_no_frame(mocker) -> None:
     app.become_ready.assert_not_called()
 
 
+# ---------- try_resume: lock ordering ----------
+
+
+def test_try_resume_holds_lock_from_connect_through_origin_repin(mocker) -> None:
+    # hardware_ready flips inside connect_arm/connect_camera while the MCP
+    # plane is already serving — the lock must be held BEFORE that flip and
+    # until restore_park_origin, or a concurrent tool call could pass
+    # require_hardware() and drive the arm in the mis-pinned G92 frame.
+    cal = _ready_bundle()
+    app = _ready_app(cal)
+    _patch_resume_env(mocker, cal, app)
+
+    assert _resume(app, verify=False) is True
+
+    names = [name for name, *_ in app.rig.mock_calls]
+    assert names.index("acquire") < names.index("connect_arm")
+    assert names.index("restore_park_origin") < names.index("release")
+
+
+def test_try_resume_releases_without_parking_when_origin_never_repinned(
+    mocker,
+) -> None:
+    # Failure before the re-pin (camera gave no frame): parking would move
+    # the arm in the mis-pinned frame, so the lock is released without it.
+    cal = _ready_bundle()
+    app = _ready_app(cal)
+    app.rig.cam.peek.return_value = None
+    _patch_resume_env(mocker, cal, app)
+
+    assert _resume(app) is False
+
+    app.rig.release.assert_called_once()
+    app.rig.park.assert_not_called()
+
+
+def test_try_resume_parks_before_release_once_repinned(mocker) -> None:
+    # Sanity failed AFTER the re-pin — the resume still restores the
+    # resting spot (locked()-style auto-park) before releasing the lock.
+    cal = _ready_bundle()
+    app = _ready_app(cal)
+    _patch_resume_env(mocker, cal, app, sanity=False)
+
+    assert _resume(app) is False
+
+    names = [name for name, *_ in app.rig.mock_calls]
+    assert (
+        names.index("restore_park_origin")
+        < names.index("park")
+        < names.index("release")
+    )
+
+
 # ---------- _sanity ----------
 
 

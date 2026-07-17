@@ -210,7 +210,14 @@ def check_patches(
             findings.append(f"patch: {path.name} must be a JSON array of ops")
             continue
         ids = [e.get("id") for e in entries if isinstance(e, dict)]
-        bad_ids = [i for i in ids if not (isinstance(i, str) and ID_RE.match(i))]
+        # ID_RE alone admits "orig", the reserved source-SVG sentinel: an
+        # op that names itself "orig" makes replay's chain_to() stop at it
+        # as if it were the source, silently dropping its shapes.
+        bad_ids = [
+            i
+            for i in ids
+            if not (isinstance(i, str) and ID_RE.match(i)) or i == ORIG_SENTINEL
+        ]
         if len(ids) != len(entries) or bad_ids:
             findings.append(f"patch: {path.name} has op(s) without a valid id")
         if len(set(ids)) != len(ids):
@@ -338,14 +345,27 @@ def check_sourcing(pages_by_file: dict[str, list]) -> list[str]:
     time (missing/duplicate row ids) plus the sync drift it only reports
     (stale / missing vendor entries)."""
     findings: list[str] = []
-    rows: list[dict] = [
-        row
-        for pages in pages_by_file.values()
-        if isinstance(pages, list)
-        for page in pages
-        if isinstance(page, dict) and page.get("type") == "bom"
-        for row in page.get("rows", [])
-    ]
+    # A malformed row (not an object) must produce a finding, not crash the
+    # gate on `row.get(...)` — the vendor-file side already guards this way.
+    rows: list[dict] = []
+    malformed = 0
+    for pages in pages_by_file.values():
+        if not isinstance(pages, list):
+            continue
+        for page in pages:
+            if not (isinstance(page, dict) and page.get("type") == "bom"):
+                continue
+            page_rows = page.get("rows", [])
+            if not isinstance(page_rows, list):
+                malformed += 1
+                continue
+            for row in page_rows:
+                if isinstance(row, dict):
+                    rows.append(row)
+                else:
+                    malformed += 1
+    if malformed:
+        findings.append(f"sourcing: {malformed} malformed BOM row(s) (not an object)")
     row_ids = [r.get("part_id") for r in rows]
     if missing := sum(1 for i in row_ids if not i):
         findings.append(f"sourcing: {missing} BOM row(s) missing a part_id")

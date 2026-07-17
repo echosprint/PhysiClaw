@@ -100,7 +100,6 @@ BACK_EDGE_DWELL_SECONDS = 0.15
 # names the same bbox, so a phone-bed change edits one line.
 BOTTOM_EDGE = [0.4, 0.96, 0.6, 0.98]
 LEFT_EDGE = [0.0, 0.4, 0.01, 0.6]
-SCREEN_CENTER = [0.4, 0.4, 0.6, 0.6]
 
 # Home: bottom-edge swipe up.
 HOME_SCREEN: tuple[Gesture, ...] = (Swipe(BOTTOM_EDGE, "up", "xl", "fast"),)
@@ -140,13 +139,34 @@ FORCE_QUIT: tuple[Gesture, ...] = (
     Tap([0.4, 0.92, 0.6, 0.96]),
 )
 
-# Unlock, mechanical prefix: wake the screen, then swipe up from the
-# bottom edge to leave the lock-screen cover. The passcode entry that
-# follows is imperative (OCR poll loop) and stays in the orchestrator.
-UNLOCK_WAKE: tuple[Gesture, ...] = (
-    Tap(SCREEN_CENTER),
-    Swipe(BOTTOM_EDGE, "up", "l", "fast"),
-)
+# Unlock, mechanical pieces: wake the screen, then swipe up from the
+# bottom edge to leave the lock-screen cover. Two named gestures rather
+# than a recipe tuple — the orchestrator settles the camera between
+# them (the passcode keypad lives only seconds once the swipe opens
+# it), and the passcode entry that follows is imperative (OCR poll
+# loop) and stays in the orchestrator.
+
+# The wake tap lands on dead space on BOTH screens a retry can hit: on
+# the lock-screen cover it's empty wallpaper (clear of the flashlight /
+# camera buttons); on the passcode screen it's the gap between the
+# entry dots (bottom ~0.26) and digit row 1 (top ~0.35). NOT screen
+# center: that is the "5" key, and a prepended 5 turns 111111 into a
+# wrong passcode — repeated wrong entries walk toward the iOS lockout.
+WAKE_SCREEN: Gesture = Tap([0.4, 0.28, 0.6, 0.32])
+UNLOCK_SWIPE: Gesture = Swipe(BOTTOM_EDGE, "up", "l", "fast")
+
+# The tool-phone passcode — a throwaway code, never the user's real one. The
+# single source of truth for the unlock tap loop: it taps ONE digit key N
+# times, so the code must be a repdigit (every digit the same). To change it,
+# edit this line only; the orchestrator derives the key and the tap count.
+UNLOCK_PASSCODE = "111111"
+# A raise, not an assert: asserts vanish under `python -O`, and this guard
+# is the only thing keeping a mixed-digit edit from silently mis-typing.
+if len(set(UNLOCK_PASSCODE)) != 1:
+    raise ValueError(
+        "UNLOCK_PASSCODE must be a repdigit — the unlock tap loop enters one "
+        "key repeatedly, so mixed digits can't be typed"
+    )
 
 
 class GestureValidator:

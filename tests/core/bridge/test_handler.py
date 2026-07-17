@@ -223,7 +223,8 @@ async def test_handle_screenshot_upload_consumes_the_armed_window(
 
 @pytest.mark.asyncio
 async def test_handle_screenshot_upload_pins_first_lan_ip(silenced_log) -> None:
-    """TOFU: the first LAN uploader pins its IP; a different IP is rejected."""
+    """Trust-on-first-use: with no fresh poller known, the first LAN
+    uploader is admitted (and remembered); a different IP is rejected."""
     bridge = BridgeState()
     bridge.clear_screenshot()
     first = await handle_screenshot_upload(

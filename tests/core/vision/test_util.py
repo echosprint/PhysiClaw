@@ -23,6 +23,7 @@ from physiclaw.core.vision.util import (
     encode_jpeg,
     find_numpad_digit,
     format_elements,
+    looks_locked,
     validate_bbox,
 )
 
@@ -356,6 +357,68 @@ def test_find_numpad_digit_skips_two_keys_on_same_row_or_column() -> None:
     ]
 
     assert find_numpad_digit(elements, "5") is None
+
+
+# ---------- looks_locked ----------
+
+
+def _text_element(label: str, bbox: list[float]) -> dict:
+    return {"id": 0, "kind": "text", "label": label, "bbox": bbox, "conf": 0.95}
+
+
+def test_looks_locked_on_passcode_screen_header() -> None:
+    elements = [
+        _text_element(
+            "Swipe up for Face ID or Enter Passcode", [0.06, 0.18, 0.93, 0.22]
+        )
+    ]
+
+    assert looks_locked(elements)
+
+
+def test_looks_locked_on_cover_via_wide_clock() -> None:
+    # The cover screen always shows the wide wallpaper clock alongside
+    # its bottom "swipe up to unlock" hint — the clock is the signature.
+    elements = [
+        _text_element("21:23", [0.08, 0.07, 0.90, 0.25]),
+        _text_element("Swipe up to unlock", [0.3, 0.9, 0.7, 0.93]),
+    ]
+
+    assert looks_locked(elements)
+
+
+def test_looks_locked_on_zh_passcode_header() -> None:
+    # Chinese-language iOS keypad header, high on the screen.
+    assert looks_locked([_text_element("输入密码", [0.35, 0.18, 0.65, 0.22])])
+
+
+def test_looks_locked_ignores_lock_phrases_in_app_body() -> None:
+    # A false "locked" sends the retry's wake tap into a live app, so an
+    # unlocked app whose content happens to contain a lock phrase LOW on
+    # the screen (a ZH login form's 密码 field, a video's "swipe up")
+    # must NOT read as the lock screen.
+    elements = [
+        _text_element("请输入密码", [0.2, 0.55, 0.6, 0.60]),
+        _text_element("Swipe up for more", [0.3, 0.80, 0.7, 0.84]),
+    ]
+
+    assert not looks_locked(elements)
+
+
+def test_looks_locked_ignores_small_clocks_and_badges() -> None:
+    # Status-bar / widget clocks are narrow; a home-screen badge digit
+    # must NOT read as the passcode keypad.
+    elements = [
+        _text_element("21:23", [0.07, 0.01, 0.20, 0.03]),
+        _text_element("1", [0.30, 0.40, 0.34, 0.43]),
+        _text_element("Messages", [0.25, 0.85, 0.45, 0.88]),
+    ]
+
+    assert not looks_locked(elements)
+
+
+def test_looks_locked_false_on_empty_listing() -> None:
+    assert not looks_locked([])
 
 
 def test_encode_view_jpeg_caps_long_edge_at_compact_config(monkeypatch) -> None:

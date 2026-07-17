@@ -372,6 +372,23 @@ def test_error_repeat_different_args_counted_separately() -> None:
     assert g.should_block("tap", {"bbox": FAR_BOX}) is None
 
 
+def test_pressless_sequences_with_different_actions_not_conflated() -> None:
+    # Two DIFFERENT all-swipe sequences must not share the (SEQUENCE, None)
+    # signature — else a corrective's instructed method change gets
+    # pre-blocked as "this exact call already failed".
+    up = {"actions": [{"tool_name": "swipe", "arg": {"bbox": BOX, "direction": "up"}}]}
+    down = {
+        "actions": [{"tool_name": "swipe", "arg": {"bbox": BOX, "direction": "down"}}]
+    }
+    g = _guard()
+    for _ in range(BLOCK_AT - 1):
+        g.record_error("sequence", up)
+    # The distinct batch is a different call — not blocked.
+    assert g.should_block("sequence", down) is None
+    # The identical batch still self-matches and blocks.
+    assert g.should_block("sequence", up) is not None
+
+
 def test_error_repeat_step_change_resets() -> None:
     g = _guard()
     g.observe_step("step A")

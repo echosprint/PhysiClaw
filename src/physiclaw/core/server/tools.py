@@ -68,7 +68,7 @@ HINT_VIEW_AFTER_FORCE_QUIT = (
     "— check the attached view: home screen means done, reopen the app "
     "fresh; anything else means the gesture missed — recover from there"
 )
-HINT_VIEW_AFTER_UNLOCK = "— the attached view should show the home screen"
+HINT_VIEW_AFTER_UNLOCK = "— check the attached view: home screen means unlocked"
 HINT_AFTER_CLIPBOARD = (
     "— now paste it. Target field's Paste box learned (SYSTEM § Screen "
     "layout) or already grounded? Bundle `long_press` + `tap` Paste (+ the "
@@ -277,15 +277,20 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw) -> None:
     @mcp.tool(structured_output=False)
     @logged
     async def unlock_phone() -> list | str:
-        """Unlock the phone with passcode `111111` (~12s).
+        """Unlock the phone with passcode `111111` (~20-40s).
 
-        Wakes the screen, swipes up, waits for Face ID to fail, OCRs
-        the keypad, taps each digit. Hardcoded to `111111` — a
-        throwaway tool-phone code so a real password never leaks via
-        git or logs.
+        Wakes the screen, settles the camera, swipes up, OCRs the
+        keypad, taps each digit, then verifies the lock screen is gone.
+        Hardcoded to `111111` — a throwaway tool-phone code so a real
+        password never leaks via git or logs.
 
-        On failure, don't retry — every other tool needs the phone
-        unlocked. Close out:
+        The passcode keypad only stays up a few seconds — a slow
+        detection loses the race and the phone falls back to the lock
+        screen. The result says so honestly: on "still shows the lock
+        screen", retry `unlock_phone` once or twice — a retry starts
+        with the screen awake and the camera settled, so it is faster
+        and usually lands. If retries keep failing, or the keypad was
+        never found on a phone that is clearly locked, close out:
           1. `append_log("[HH:MM] tried unlock_phone — failed")`
           2. `end_session("STUCK", "phone unlock failed — user needs
              passcode 111111 or auto-lock disabled")`

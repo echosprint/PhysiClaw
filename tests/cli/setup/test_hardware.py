@@ -611,6 +611,36 @@ def test_run_uses_cached_viewport_in_auto_mode(
     assert "Using cached screenshot" in out
 
 
+# ---------- _step_locate_screen ----------
+
+
+def test_step_locate_screen_auto_fails_without_prompting(mocker) -> None:
+    """Unattended --auto must fail the step like the calibrate_retry
+    siblings do — never block on a stdin prompt (hangs `physiclaw auto`)."""
+    mocker.patch.object(hw_mod, "_viewport_cache_candidates", return_value=[])
+    mocker.patch.object(hw_mod, "calibrate", return_value={"status": "error"})
+    ask_spy = mocker.patch.object(hw_mod, "ask")
+
+    with pytest.raises(SystemExit):
+        hw_mod._step_locate_screen(auto=True)
+
+    ask_spy.assert_not_called()
+
+
+def test_step_locate_screen_interactive_prompts_then_retries(mocker) -> None:
+    mocker.patch.object(hw_mod, "_viewport_cache_candidates", return_value=[])
+    mocker.patch.object(
+        hw_mod,
+        "calibrate",
+        side_effect=[{"status": "error"}, {"status": "ok"}],
+    )
+    ask_spy = mocker.patch.object(hw_mod, "ask", return_value=True)
+
+    hw_mod._step_locate_screen(auto=False)  # succeeds on the retry
+
+    ask_spy.assert_called_once()
+
+
 # ---------- await_bridge_and_calibrate ----------
 
 

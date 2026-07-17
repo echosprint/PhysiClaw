@@ -229,6 +229,43 @@ def test_prefer_auto_false_skips_reassert_and_keeps_best_manual() -> None:
     assert "auto disabled" in res.detail
 
 
+def test_prefer_auto_false_holds_manual_start_when_no_step_is_usable() -> None:
+    # Pinned manual + no usable step at all (best stays None): must still
+    # NOT flip to firmware AE the user disabled — hold the start value.
+    rig = Rig(BLOWN, {-6: _r(180.0, clip=0.2), -7: _r(15.0)})
+
+    res = converge(
+        rig.meter,
+        rig.set_auto,
+        rig.set_manual,
+        start=-6,
+        prefer_auto=False,
+    )
+
+    assert not res.ok and res.mode == "manual" and res.exposure == -6
+    assert rig.auto_calls == 0
+    assert rig.manual_calls[-1] == -6
+
+
+def test_prefer_auto_false_clamps_held_start_into_range() -> None:
+    # Pinned manual + no usable step, with a config start ABOVE the
+    # range: the held fallback must be the clamped start (the value the
+    # stepping loop actually ran), never the raw out-of-range config one.
+    rig = Rig(BLOWN, {-5: _r(180.0, clip=0.2), -6: _r(15.0)})
+
+    res = converge(
+        rig.meter,
+        rig.set_auto,
+        rig.set_manual,
+        start=-4,  # above MAX_EXPOSURE
+        prefer_auto=False,
+    )
+
+    assert not res.ok and res.mode == "manual"
+    assert res.exposure == exposure.MAX_EXPOSURE
+    assert rig.manual_calls[-1] == exposure.MAX_EXPOSURE
+
+
 def test_blob_blown_frame_steps_darker_to_a_clean_hold() -> None:
     # Low global clip but a burned icon grid: not acceptable as-is (the
     # QualityMonitor would flag it — a no-op re-tune loop otherwise),

@@ -82,8 +82,9 @@ async def handle_phone_state(request, phone: PageState):
     """GET /api/bridge/state — unified poll endpoint for the phone page."""
     phone.bridge.poll()  # keep connected status alive in both modes
     if request.client:
-        # A live poll is the freshest "this is the phone" signal — lets
-        # the upload IP pin follow a DHCP change.
+        # A live poll marks its IP upload-eligible (a TTL'd set — every
+        # recent poller, not just the latest) and is the freshest "this
+        # is the phone" signal, so it follows a DHCP change at once.
         phone.bridge.note_phone_ip(request.client.host)
     return JSONResponse(phone.get_state())
 
@@ -91,11 +92,9 @@ async def handle_phone_state(request, phone: PageState):
 async def handle_clipboard_copied(request, bridge: BridgeState):
     """POST /api/bridge/tapped — phone confirms text was copied to clipboard.
 
-    Deliberately NOT gated by the TOFU IP pin: `note_phone_ip` re-pins
-    on every /api/bridge/state poll, so a second open /bridge tab (a
-    leftover laptop tab) flip-flops the pin and would intermittently
-    403 the real phone's confirmations. The trust model for this route
-    is the documented one (planes.py): nothing secret crosses it."""
+    Deliberately NOT gated by the phone-IP set (see
+    ``BridgeState.upload_ip_allowed``): the trust model for this route
+    is the documented one (planes.py) — nothing secret crosses it."""
     bridge.mark_clipboard_copied()
     log.info(f"Bridge: clipboard copied — '{bridge.current_text()}'")
     return JSONResponse({"ok": True})
@@ -135,7 +134,9 @@ async def handle_screenshot_upload(request, bridge: BridgeState):
     into the vision pipeline):
       - arming window — only accepted while a consumer is expecting an
         upload (`BridgeState.upload_armed`), so an idle server ignores it;
-      - TOFU IP pin — must come from the pinned phone IP (loopback exempt);
+      - phone-IP set — must come from a recently-seen poller IP (TTL'd
+        set, trust-on-first-use when empty, loopback exempt; see
+        `BridgeState.upload_ip_allowed`);
       - size cap + magic bytes — streamed with a hard cap so an oversized
         body is cut off instead of buffered, and must look like PNG/JPEG.
     """
@@ -191,11 +192,10 @@ async def handle_clipboard_fetch(request, bridge: BridgeState):
     the clipboard) and marks the bridge as copied so bridge_tap() unblocks.
     Returns 204 if no text is queued.
 
-    Deliberately NOT gated by the TOFU IP pin (see
-    ``handle_clipboard_copied``): the pin follows the freshest poller,
-    so a second open /bridge tab would starve the phone's Shortcut.
-    The queued text is the agent reporting its own activity —
-    the documented bridge trust model (planes.py).
+    Deliberately NOT gated by the phone-IP set: this flow needs no
+    /bridge page open at all (BridgeState flow 2), so the phone may not
+    be a recent poller. The queued text is the agent reporting its own
+    activity — the documented bridge trust model (planes.py).
     """
     text = bridge.fetch_text()
     if text is None:
@@ -256,9 +256,9 @@ async def handle_calib_touch(request, cal: CalibrationState):
     report is only accepted while a calibration visual is on screen
     (`cal.phase != "idle"`); an idle server has no step collecting
     touches, so the report is a state conflict. (Deliberately NOT
-    IP-pinned: the pin follows the freshest /api/bridge/state poller,
-    so a second open /bridge tab would flip-flop it and intermittently
-    reject the real phone's touches mid-calibration.)
+    IP-gated: the phase gate is the operative defence here — the
+    single-IP pin this route once dodged, which flip-flopped between
+    two open /bridge tabs, is gone, but the exemption stays.)
     """
     if cal.phase == "idle":
         log.warning("Bridge: calibration touch rejected — no step waiting (idle)")

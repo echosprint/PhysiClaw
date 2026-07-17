@@ -266,6 +266,44 @@ def test_changed_commit_replaces_and_drops_removed_skills(
     assert state["skillCount"] == 1
 
 
+def test_resync_swap_never_rmtrees_live_tree(official_home: Path, mocker) -> None:
+    # Two-rename swap: the live tree is parked via os.replace (rename) and
+    # only the parked trash is rmtree'd — an rmtree of the live path would
+    # reopen the multi-second empty-tree window a concurrent session
+    # snapshot could observe.
+    _patch_net(mocker, _routes("a" * 40, ["jd"]))
+    osk.sync()
+
+    live = official_home / "skills"
+    rm_spy = mocker.spy(osk.shutil, "rmtree")
+    _patch_net(mocker, _routes("b" * 40, ["jd"]))
+    osk.sync()
+
+    assert (live / "jd" / "SKILL.md").is_file()
+    assert all(Path(c.args[0]) != live for c in rm_spy.call_args_list)
+    # The parked trash was cleaned up after the swap.
+    assert not list(official_home.glob(".sync-trash*"))
+
+
+def test_swap_reclaims_stale_trash_from_a_crashed_run(
+    official_home: Path, mocker
+) -> None:
+    # A crash between the two swap renames leaves the parked tree at the
+    # fixed `.sync-trash` name. The next sync must reclaim it before
+    # parking a new one, or the stale tree blocks/pollutes the swap.
+    official_home.mkdir(parents=True)
+    stale = official_home / ".sync-trash"
+    stale.mkdir()
+    (stale / "somefile").write_text("leaked by a crashed swap")
+    _patch_net(mocker, _routes("a" * 40, ["jd"]))
+
+    osk.sync()
+
+    assert not (stale / "somefile").exists()
+    assert not list(official_home.glob(".sync-trash*"))
+    assert (official_home / "skills" / "jd" / "SKILL.md").is_file()
+
+
 def test_resync_over_existing_source_json_windows_rename_semantics(
     official_home: Path, mocker
 ) -> None:

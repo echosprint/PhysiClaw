@@ -215,6 +215,15 @@ def clear_outputs(stem: str) -> None:
         f.unlink()
 
 
+def clear_snapshots(stem: str) -> None:
+    """Remove only ``stem``'s patch-snapshot SVGs (op-id-suffixed), leaving
+    the cached .step / raw .svg / BOM intact. Used before a patch re-replay
+    so the snapshot of a leaf op the edit removed or renamed doesn't survive
+    on disk and get re-manifested into the fresh snapshot layer."""
+    for f in _snapshot_outputs(stem):
+        f.unlink()
+
+
 def _restore(files) -> None:
     for f in files:
         dest = _dest_dir(f.name)

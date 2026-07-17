@@ -487,6 +487,36 @@ def test_is_drafted_false_for_blank_user_said_direct() -> None:
     assert p.is_drafted() is False
 
 
+def test_is_drafted_false_for_whitespace_only_step() -> None:
+    # Gate integrity: the schema's minLength 1 lets a lone space
+    # through — a whitespace-only step must not count as a draft.
+    p = Plan()
+    p.update(steps=[{"content": " ", "status": "pending"}])
+    assert p.is_drafted() is False
+
+
+def test_is_drafted_false_for_seed_step_plus_blank_step() -> None:
+    # Multi-step padding around the default seed: neither the seed nor
+    # a blank counts as real content, however many steps there are —
+    # step COUNT alone must never open the gate.
+    p = Plan()
+    p.update(
+        steps=[
+            {"content": DEFAULT_SEED_STEP, "status": "pending"},
+            {"content": " ", "status": "pending"},
+        ]
+    )
+    assert p.is_drafted() is False
+
+
+def test_is_drafted_true_for_whitespace_padded_real_step() -> None:
+    # A real step wrapped in whitespace still has actual content — the
+    # blank-step guard must strip, not reject on raw inequality.
+    p = Plan()
+    p.update(steps=[{"content": "  reply to user  ", "status": "pending"}])
+    assert p.is_drafted() is True
+
+
 def test_update_rejects_blank_user_said() -> None:
     # Gate integrity: whitespace passes the schema's minLength but must
     # not open the gate with an empty quote.

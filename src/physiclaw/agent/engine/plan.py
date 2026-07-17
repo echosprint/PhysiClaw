@@ -101,9 +101,13 @@ class Plan:
         `update` rejects blanks too)."""
         if self.user_said != DEFAULT_USER_SAID and self.user_said.strip():
             return True
-        if not self.steps:
-            return False
-        return not (len(self.steps) == 1 and self.steps[0].content == DEFAULT_SEED_STEP)
+        # A real steps-only draft needs at least one step with actual
+        # content — not the default seed, and not blank/whitespace (the
+        # schema's minLength 1 lets a lone space through, which would
+        # otherwise open the gate on an effectively empty plan).
+        return any(
+            s.content.strip() and s.content != DEFAULT_SEED_STEP for s in self.steps
+        )
 
     def tick_turn(self) -> None:
         """Engine calls this once per turn (before `inject_tail`) so

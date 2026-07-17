@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -39,6 +40,12 @@ from hardware.assembly.svg_utils import validate_viewbox
 
 # Sibling file so it can be edited with HTML / JS tooling.
 INDEX_HTML = (Path(__file__).parent / "index.html").read_bytes()
+
+# Serializes /save's load→modify→write of the shared patch JSON: the server
+# is a ThreadingHTTPServer, so two overlapping saves (double-click, two tabs)
+# would otherwise each read the same entries, upsert their own op, and the
+# last write_patch would clobber the other op.
+_SAVE_LOCK = threading.Lock()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -107,39 +114,42 @@ class Handler(BaseHTTPRequestHandler):
         # its 4-letter id, so the snapshot filename the manual links stays
         # stable) instead of appending a new op. Omit it to append.
         edit_id = payload.get("id")
-        try:
-            entries = load_patch(self.src_path)
-            existing_ids = {e["id"] for e in entries}
-            if preop != ORIG_SENTINEL and preop not in existing_ids:
-                raise ValueError(f"preop {preop!r} not found in patch")
-            if edit_id is not None:
-                if not (isinstance(edit_id, str) and ID_RE.match(edit_id)):
-                    raise ValueError(
-                        f"id must be four lowercase letters; got {edit_id!r}"
-                    )
-                if edit_id not in existing_ids:
-                    raise ValueError(f"id {edit_id!r} not found in patch")
-                if edit_id == preop:
-                    raise ValueError("an op cannot be its own preop")
-        except ValueError as exc:
-            self._send_json(400, {"error": f"{type(exc).__name__}: {exc}"})
-            return
+        # One lock across the whole read→modify→write so concurrent /save
+        # requests (ThreadingHTTPServer) can't interleave and lose an op.
+        with _SAVE_LOCK:
+            try:
+                entries = load_patch(self.src_path)
+                existing_ids = {e["id"] for e in entries}
+                if preop != ORIG_SENTINEL and preop not in existing_ids:
+                    raise ValueError(f"preop {preop!r} not found in patch")
+                if edit_id is not None:
+                    if not (isinstance(edit_id, str) and ID_RE.match(edit_id)):
+                        raise ValueError(
+                            f"id must be four lowercase letters; got {edit_id!r}"
+                        )
+                    if edit_id not in existing_ids:
+                        raise ValueError(f"id {edit_id!r} not found in patch")
+                    if edit_id == preop:
+                        raise ValueError("an op cannot be its own preop")
+            except ValueError as exc:
+                self._send_json(400, {"error": f"{type(exc).__name__}: {exc}"})
+                return
 
-        try:
-            op_id, entries = upsert_entry(
-                self.src_path, entries, edit_id, preop, shapes, viewbox
-            )
-            # Replay first; only persist the patch + snapshot once the
-            # chain has successfully produced bytes, so a build failure
-            # can't corrupt the patch file with a dangling entry.
-            chain = chain_to(entries, op_id)
-            new_bytes = apply_chain(self.src_path.read_bytes(), chain)
-            out_path = snapshot_path(self.src_path, op_id)
-            out_path.write_bytes(new_bytes)
-            patch_file = write_patch(self.src_path, entries)
-        except Exception as exc:  # I/O / build failure — surface to the browser
-            self._send_json(500, {"error": f"{type(exc).__name__}: {exc}"})
-            return
+            try:
+                op_id, entries = upsert_entry(
+                    self.src_path, entries, edit_id, preop, shapes, viewbox
+                )
+                # Replay first; only persist the patch + snapshot once the
+                # chain has successfully produced bytes, so a build failure
+                # can't corrupt the patch file with a dangling entry.
+                chain = chain_to(entries, op_id)
+                new_bytes = apply_chain(self.src_path.read_bytes(), chain)
+                out_path = snapshot_path(self.src_path, op_id)
+                out_path.write_bytes(new_bytes)
+                patch_file = write_patch(self.src_path, entries)
+            except Exception as exc:  # I/O / build failure — surface to the browser
+                self._send_json(500, {"error": f"{type(exc).__name__}: {exc}"})
+                return
 
         self._send(
             200,

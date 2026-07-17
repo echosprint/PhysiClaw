@@ -34,6 +34,8 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from physiclaw.common.config import WILDCARD_HOSTS
+
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
@@ -111,12 +113,18 @@ class ControlGate:
 
     def __init__(self, app: ASGIApp, host: str = "127.0.0.1") -> None:
         self.app = app
+        # A wildcard bind is the user's explicit opt-in to LAN exposure:
+        # clients then send Host: <whichever interface IP they dialed>,
+        # which can't be enumerated here — so the gate (a defense for the
+        # loopback bind's rebinding hole) stands down instead of 421-ing
+        # every real client. Concrete-IP binds keep the allowlist.
+        self._wildcard = host in WILDCARD_HOSTS
         self._allowed = _LOCAL_HOSTNAMES | {host}
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
-        if _host_name(scope) not in self._allowed:
+        if not self._wildcard and _host_name(scope) not in self._allowed:
             reject = JSONResponse({"error": "unrecognized Host"}, status_code=421)
             return await reject(scope, receive, send)
         return await self.app(scope, receive, send)

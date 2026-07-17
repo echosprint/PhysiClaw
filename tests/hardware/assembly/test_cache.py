@@ -218,6 +218,23 @@ def test_snapshots_cached_after_patch_edit_is_false(repo):
     assert not cache.snapshots_cached(STEM)
 
 
+def test_clear_snapshots_drops_snapshots_but_keeps_source(repo):
+    # A patch re-replay must drop the old snapshot layer (a leaf op the
+    # edit removed) without touching the cached .step / raw .svg.
+    raw = repo.SVG_DIR / f"{STEM}_exploded_cam0.svg"
+    raw.write_text("render")
+    step = repo.STEP_DIR / f"{STEM}_exploded.step"
+    step.write_text("geom")
+    stale = repo.SVG_DIR / f"{STEM}_exploded_cam0_gone.svg"
+    stale.write_text("stale snapshot")
+
+    cache.clear_snapshots(STEM)
+
+    assert not stale.exists()
+    assert raw.read_text() == "render"
+    assert step.read_text() == "geom"
+
+
 def test_restore_snapshots_reconstructs_deleted_snapshot(repo):
     snap = repo.SVG_DIR / f"{STEM}_exploded_cam0_abcd.svg"
     snap.write_text("snap")

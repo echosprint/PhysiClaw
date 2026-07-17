@@ -116,6 +116,21 @@ def _quant(center: tuple[float, float]) -> tuple[int, int]:
     return (round(center[0] / MATCH_TOLERANCE), round(center[1] / MATCH_TOLERANCE))
 
 
+def _hashable(v: object) -> object:
+    """Stable, hashable, jitter-tolerant form of a tool argument — for
+    signing press-less `sequence` batches by their action shape so two
+    genuinely different batches aren't conflated. Floats quantize to
+    MATCH_TOLERANCE cells — the same mechanism as `_quant`, so the two
+    signature paths share one jitter tolerance and can't drift."""
+    if isinstance(v, dict):
+        return tuple(sorted((k, _hashable(x)) for k, x in v.items()))
+    if isinstance(v, (list, tuple)):
+        return tuple(_hashable(x) for x in v)
+    if isinstance(v, float):
+        return round(v / MATCH_TOLERANCE)
+    return v
+
+
 def _trailing_cycles(history: list[tuple]) -> int:
     """Max count of consecutive repeats of the trailing action cycle,
     for cycle periods 2 and 3. The cycle must contain ≥2 distinct
@@ -336,7 +351,20 @@ class StuckGuard:
             return (name,)
         if name == SEQUENCE:
             counted = self._press_centers_counted(name, arguments)
-            return (SEQUENCE, _quant(counted[0]) if counted else None)
+            if counted:
+                return (SEQUENCE, _quant(counted[0]))
+            # No repeatable press to anchor on (e.g. an all-swipe batch):
+            # sign by the action shape so two DIFFERENT press-less
+            # sequences don't collapse to one (SEQUENCE, None) — which
+            # would pre-block the very method change a corrective just
+            # asked for. An identical retried batch still self-matches.
+            actions = arguments.get(STEP_ACTIONS) or []
+            shape = tuple(
+                (a.get(STEP_TOOL), _hashable(a.get(STEP_ARG)))
+                for a in actions
+                if isinstance(a, dict)
+            )
+            return (SEQUENCE, shape) if shape else None
         return None
 
     def _find(self, center: tuple[float, float]) -> _Target | None:

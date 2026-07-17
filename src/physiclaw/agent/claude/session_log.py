@@ -238,7 +238,8 @@ class _SessionLog:
         self._summary = _ClaudeSummary(
             sid, triggers, model_ref=model_ref, prompt_hash=prompt_hash
         )
-        self._turn = 0  # advanced per assistant response; tags extracted images
+        self._turn = 0  # advanced per assistant MESSAGE; tags extracted images
+        self._seen_msg_ids: set[str] = set()  # dedup streamed content-block events
         self._image_counter = 0
         self._closed = False
 
@@ -253,7 +254,18 @@ class _SessionLog:
         images/. Assistant text additionally narrates to the runtime log.
         """
         if data.get("type") == "assistant":
-            self._turn += 1
+            # One assistant MESSAGE streams as several assistant EVENTS
+            # sharing message.id; advance the turn only on a new message,
+            # so image tags match summary.json's message-id-deduped turn
+            # count (summary counts `len(_msg_ids)` — mirror it here).
+            # Fall back to per-event advance only when there is no id to
+            # dedup on (never in a real Claude stream).
+            mid = data.get("message", {}).get("id")
+            if not mid:
+                self._turn += 1
+            elif mid not in self._seen_msg_ids:
+                self._seen_msg_ids.add(mid)
+                self._turn += 1
             # Sentinel evidence for done(): capture assistant text here
             # (not in the render-only _summarize) — the LAST non-empty
             # text block wins, whichever event carried it.

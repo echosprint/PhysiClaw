@@ -685,6 +685,13 @@ def provider_base_url_override(provider_id: str) -> str | None:
 SERVER_ENV_VAR = "PHYSICLAW_SERVER"
 
 
+# The wildcard bind addresses. One contract, several consumers: a server
+# can listen on these but a client can't dial them (URL builders map them
+# to loopback), and the control plane's Host gate treats them as the
+# user's LAN-exposure opt-in. Shared so the halves can't drift.
+WILDCARD_HOSTS = frozenset({"0.0.0.0", "::"})
+
+
 def server_url() -> str:
     """The control-plane base URL agent-side clients dial.
 
@@ -700,7 +707,7 @@ def server_url() -> str:
     if env:
         return env
     host = CONFIG.server.host
-    if host in ("0.0.0.0", "::"):
+    if host in WILDCARD_HOSTS:
         host = "127.0.0.1"
     return f"http://{host}:{CONFIG.server.port}"
 
@@ -715,6 +722,10 @@ def unset_dotted(dotted: str, path: Path | None = None) -> bool:
     section, field_name = _validate_dotted(dotted)
     if not path.exists():
         return False
+    # Same strict-load guard as set_dotted: a malformed file (e.g. a
+    # non-table `camera = 3`) surfaces the schema ConfigError instead of
+    # a raw TypeError from indexing the tomlkit doc below.
+    load(path)
     doc = tomlkit.parse(read_text(path))
     if section not in doc or field_name not in doc[section]:
         return False

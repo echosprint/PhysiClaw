@@ -242,6 +242,35 @@ def test_fetch_text_when_no_text_returns_none_and_does_not_set_event(
     assert bs._clipboard_copied.is_set() is False
 
 
+# ---------- expire_text ----------
+
+
+def test_expire_text_clears_unfetched_text(bs: BridgeState) -> None:
+    bs.send_text("payload")
+
+    assert bs.expire_text() is False
+    assert bs.current_text() is None
+    assert bs.is_copied() is False
+
+
+def test_expire_text_after_fetch_reports_late_success(bs: BridgeState) -> None:
+    # The Shortcut fetched in the gap between the caller's wait timing out
+    # and the expiry — the phone HAS the text, so the sync must count as a
+    # (late) success, and the state must match the confirmed path (text
+    # still queued, copied set), never "copied set with nothing queued".
+    bs.send_text("payload")
+    bs.fetch_text()
+
+    assert bs.expire_text() is True
+    assert bs.current_text() == "payload"
+    assert bs.is_copied() is True
+
+
+def test_expire_text_with_nothing_queued_returns_false(bs: BridgeState) -> None:
+    assert bs.expire_text() is False
+    assert bs.is_copied() is False
+
+
 # ---------- is_copied ----------
 
 
@@ -492,31 +521,58 @@ def test_wait_screenshot_arms_for_its_own_duration(bs: BridgeState) -> None:
     assert bs.upload_armed()
 
 
-def test_upload_ip_pin_tofu_then_match(bs: BridgeState) -> None:
-    assert bs.upload_ip_allowed("192.168.1.30")  # first LAN sender pins
-    assert not bs.upload_ip_allowed("192.168.1.66")  # fresh pin → reject
-    assert bs.upload_ip_allowed("192.168.1.30")  # pinned IP stays fine
+def test_upload_ip_gate_tofu_then_match(bs: BridgeState) -> None:
+    assert bs.upload_ip_allowed("192.168.1.30")  # nothing fresh → admitted
+    assert not bs.upload_ip_allowed("192.168.1.66")  # fresh sender known → reject
+    assert bs.upload_ip_allowed("192.168.1.30")  # admitted IP stays fine
 
 
-def test_upload_ip_pin_always_allows_loopback(bs: BridgeState) -> None:
+def test_upload_ip_gate_always_allows_loopback(bs: BridgeState) -> None:
     assert bs.upload_ip_allowed("127.0.0.1")
     assert bs.upload_ip_allowed(None)
 
 
-def test_upload_ip_pin_repins_when_stale(
+def test_upload_ip_gate_readmits_when_everyone_expires(
     bs: BridgeState, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # DHCP heal: the pinned IP going quiet past the staleness window lets
-    # the next sender re-pin instead of being locked out until restart.
+    # DHCP heal: every known IP aging past the TTL lets the next sender in
+    # trust-on-first-use instead of being locked out until restart.
     assert bs.upload_ip_allowed("192.168.1.30")
-    monkeypatch.setattr(state_mod, "PIN_STALE_SECONDS", 0.0)
+    monkeypatch.setattr(state_mod, "PHONE_IP_TTL_SECONDS", 0.0)
     assert bs.upload_ip_allowed("192.168.1.66")
 
 
-def test_note_phone_ip_repins_immediately(bs: BridgeState) -> None:
-    # A live bridge-page poll IS the phone — it may move the pin at once,
-    # no staleness wait (the page reload after an IP change).
-    assert bs.upload_ip_allowed("192.168.1.30")
+def test_upload_ip_gate_expires_quiet_ips(bs: BridgeState, mocker) -> None:
+    # A poller that goes quiet past the TTL loses eligibility while a
+    # fresh one keeps it — expiry is per-IP, not all-or-nothing.
+    fake = mocker.patch.object(state_mod.time, "monotonic")
+    fake.return_value = 1000.0
+    bs.note_phone_ip("192.168.1.30")
+    fake.return_value = 1000.0 + state_mod.PHONE_IP_TTL_SECONDS + 1.0
+    bs.note_phone_ip("192.168.1.40")
+
+    assert not bs.upload_ip_allowed("192.168.1.30")
+    assert bs.upload_ip_allowed("192.168.1.40")
+
+
+def test_note_phone_ip_admits_poller_immediately(bs: BridgeState) -> None:
+    # A live bridge-page poll IS the phone — its IP is upload-eligible at
+    # once, no TTL wait (the page reload right after a DHCP change).
     bs.note_phone_ip("192.168.1.66")
     assert bs.upload_ip_allowed("192.168.1.66")
-    assert not bs.upload_ip_allowed("192.168.1.30")
+    assert not bs.upload_ip_allowed("192.168.1.99")
+
+
+def test_two_live_pollers_are_both_upload_eligible(bs: BridgeState) -> None:
+    # Regression: a single last-poller-wins pin flip-flopped when a second
+    # /bridge tab (a leftover laptop tab) polled alongside the phone, and
+    # 403'd the real phone's screenshot roughly every other upload (the
+    # Shortcut doesn't retry → 60s screenshot timeouts). Every recently-
+    # seen poller must be eligible simultaneously, whichever polled last.
+    for _ in range(3):
+        bs.note_phone_ip("192.168.1.30")  # the phone
+        bs.note_phone_ip("192.168.1.40")  # the leftover laptop tab
+    assert bs.upload_ip_allowed("192.168.1.30")
+    assert bs.upload_ip_allowed("192.168.1.40")
+    # The gate survives the fix: off-path senders are still rejected.
+    assert not bs.upload_ip_allowed("192.168.1.99")

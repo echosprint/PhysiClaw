@@ -262,6 +262,10 @@ def _build_stems(
                 )
                 print(f"  {short:<{name_w}}  bom        wrote {kinds}")
             except Exception as exc:
+                # Record it, don't just print: an unrecorded BOM failure
+                # leaves `failures` empty, so `_build_stems` returns 0 and
+                # a --bom build reports success with BOMs silently missing.
+                failures.append((short, "bom", exc))
                 print(
                     f"  {short:<{name_w}}  bom        FAIL {type(exc).__name__}: {exc}"
                 )
@@ -335,6 +339,22 @@ def _missing_variants(stem: str) -> list[str]:
     ]
 
 
+def _incomplete(stem: str, bom_flags: tuple[str, ...]) -> list[str]:
+    """Everything ``stem`` still owes: STEP/SVG variants plus, when a BOM
+    was requested, the BOM .md. write_bom rebuilds geometry
+    (``collect(load_step(...))``) in the same OCCT-HLR-hazard process, so a
+    SIGSEGV there leaves STEP + SVG present while the BOM never lands —
+    checking only ``_missing_variants`` would tally that stem 'complete'
+    and never retry it. Trustworthy on the dispatch/retry paths because
+    the miss stems' outputs (BOMs included) are cleared before building."""
+    missing = list(_missing_variants(stem))
+    if _missing_boms(
+        stem, bom="--bom" in bom_flags, bom_delta="--bom-delta" in bom_flags
+    ):
+        missing.append("bom")
+    return missing
+
+
 def _dispatch(
     batch_size: int, bom_flags: tuple[str, ...] = (), use_cache: bool = True
 ) -> int:
@@ -394,7 +414,11 @@ def _dispatch(
             else:
                 # Patch edited but geometry/render unchanged: keep the cached
                 # .step + raw .svg, just re-apply the (build123d-free) replay.
+                # Drop the old snapshot layer first — an op the edit removed
+                # or renamed would otherwise leave its stale `_<opid>.svg`
+                # behind for store_snapshots to re-manifest.
                 print(f"  [patch] {s}: geometry cached, re-replaying annotations")
+                stepcache.clear_snapshots(s)
                 for exploded in (True, False):
                     _replay_patches_for(s, exploded)
                 stepcache.store_snapshots(s)
@@ -413,7 +437,7 @@ def _dispatch(
             # Nondeterministic HLR SIGSEGV: re-run each incomplete stem in a
             # fresh process (new heap layout) until its outputs land or we
             # exhaust the retries.
-            incomplete = [s for s in misses if _missing_variants(s)]
+            incomplete = [s for s in misses if _incomplete(s, bom_flags)]
             print(
                 f"\n--- batch exit {rc}; retrying {len(incomplete)}/{len(misses)} "
                 f"incomplete stem(s)  [stacks → {CRASH_LOG.relative_to(REPO_ROOT)}] ---"
@@ -425,7 +449,7 @@ def _dispatch(
                 # HLR crash, so each attempt only has to survive the small
                 # remainder and the retries converge.
                 run=lambda s: _run_subprocess([s], bom_flags, only_missing=True),
-                done=lambda s: not _missing_variants(s),
+                done=lambda s: not _incomplete(s, bom_flags),
                 log=lambda s, a: print(
                     header([s]) + f"  (retry {a}/{MAX_STEM_RETRIES})"
                 ),
@@ -435,13 +459,13 @@ def _dispatch(
         # is worth storing; skipping the store would make the next cached
         # run rebuild all steps a second time.
         for s in misses:
-            if not _missing_variants(s):
+            if not _incomplete(s, bom_flags):
                 stepcache.store_source(s)
                 stepcache.store_snapshots(s)
 
     wall = time.monotonic() - t_wall0
-    failed_variants = [(s, v) for s in position for v in _missing_variants(s)]
-    ok_assemblies = sum(1 for s in position if not _missing_variants(s))
+    failed_variants = [(s, v) for s in position for v in _incomplete(s, bom_flags)]
+    ok_assemblies = sum(1 for s in position if not _incomplete(s, bom_flags))
     n_step = len(list(STEP_DIR.glob("*.step")))
     n_svg = len(list(SVG_DIR.glob("*.svg")))
     cache_note = (

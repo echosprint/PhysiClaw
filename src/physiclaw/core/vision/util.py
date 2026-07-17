@@ -8,6 +8,7 @@ Preprocessing stages (grayscale/HSV/blur/resize/crop) live in
 
 import json
 import logging
+import re
 import tempfile
 from pathlib import Path
 
@@ -228,6 +229,50 @@ def find_numpad_digit(elements: list[dict], digit: str) -> list[float] | None:
             return [cx - hw, cy - hh, cx + hw, cy + hh]
 
     return None
+
+
+# Lock-screen text signatures for `looks_locked`: substrings of the
+# keypad header ("Swipe up for Face ID or Enter Passcode" / "输入密码") —
+# matched case-insensitively, so a partial OCR read still hits.
+_LOCKED_PHRASES = ("passcode", "swipe up", "密码")
+_TIME_RE = re.compile(r"\d{1,2}:\d{2}")
+# The cover wallpaper clock spans ~0.8 of the screen width; home-screen
+# clock widgets stay under ~0.45 and the status-bar clock under 0.2.
+LOCK_CLOCK_MIN_WIDTH = 0.6
+# The passcode prompt / keypad header sits high (measured y ≈ 0.18–0.22),
+# above digit row 1 (~0.35). Only match lock phrases in this band: a
+# generic "swipe up" or 密码 in an app's body (lower) is not the lock
+# screen — and matching it there would forge "still locked" on a phone
+# that unlocked into an app, sending the retry's wake tap into that app.
+LOCK_PHRASE_MAX_Y = 0.33
+
+
+def looks_locked(elements: list[dict]) -> bool:
+    """Does this OCR listing look like the iOS lock/passcode screen?
+
+    Two signatures, either one:
+    - the cover wallpaper clock: a time-shaped label spanning most of
+      the screen width, which OCRs reliably even on frames far below the
+      blur threshold (measured at sharpness 7 in session logs);
+    - a lock-screen phrase (`_LOCKED_PHRASES`) in the top band where the
+      passcode prompt lives (`LOCK_PHRASE_MAX_Y`) — the keypad screen,
+      which has no wide clock.
+
+    Used by `unlock_phone` to verify the passcode actually took. Both
+    signatures are deliberately narrow: a false "locked" costs one
+    wasted agent retry whose wake tap can land inside a live app, so it
+    must not fire on ordinary app content. Keypad digits are likewise
+    NOT a signature — a home-screen badge count would read as a single
+    digit in the keypad band and forge "locked".
+    """
+    for e in elements:
+        label = e["label"].strip().lower()
+        left, _, right, bottom = e["bbox"]
+        if _TIME_RE.fullmatch(label) and right - left >= LOCK_CLOCK_MIN_WIDTH:
+            return True
+        if bottom <= LOCK_PHRASE_MAX_Y and any(p in label for p in _LOCKED_PHRASES):
+            return True
+    return False
 
 
 def compact_json(items: list[dict]) -> str:

@@ -28,7 +28,9 @@ def test_spawn_runtime_builds_cmd_with_port_and_label(mocker) -> None:
     fake_proc = MagicMock(pid=4242)
     spy = mocker.patch.object(server_mod.subprocess, "Popen", return_value=fake_proc)
 
-    proc = server_mod._spawn_runtime(8048, verbose=False, label="engine=claude-code")
+    proc = server_mod._spawn_runtime(
+        "127.0.0.1", 8048, verbose=False, label="engine=claude-code"
+    )
 
     assert proc is fake_proc
     args = spy.call_args.args[0]
@@ -40,6 +42,30 @@ def test_spawn_runtime_builds_cmd_with_port_and_label(mocker) -> None:
     assert "--verbose" not in args
 
 
+def test_spawn_runtime_dials_configured_host(mocker) -> None:
+    # With --host set to a LAN IP nothing listens on loopback — the runtime
+    # subprocess must dial the configured bind.
+    spy = mocker.patch.object(
+        server_mod.subprocess, "Popen", return_value=MagicMock(pid=1)
+    )
+
+    server_mod._spawn_runtime("192.168.1.5", 8048, verbose=False, label="engine=x")
+
+    assert "http://192.168.1.5:8048" in spy.call_args.args[0]
+
+
+@pytest.mark.parametrize("wildcard", ["0.0.0.0", "::"])
+def test_spawn_runtime_maps_wildcard_bind_to_loopback(mocker, wildcard: str) -> None:
+    # A wildcard bind can't be dialed, but it listens on loopback — dial that.
+    spy = mocker.patch.object(
+        server_mod.subprocess, "Popen", return_value=MagicMock(pid=1)
+    )
+
+    server_mod._spawn_runtime(wildcard, 8048, verbose=False, label="engine=x")
+
+    assert "http://127.0.0.1:8048" in spy.call_args.args[0]
+
+
 def test_spawn_runtime_passes_verbose_flag(mocker) -> None:
     spy = mocker.patch.object(
         server_mod.subprocess,
@@ -47,7 +73,7 @@ def test_spawn_runtime_passes_verbose_flag(mocker) -> None:
         return_value=MagicMock(pid=1),
     )
 
-    server_mod._spawn_runtime(9000, verbose=True, label="engine=x")
+    server_mod._spawn_runtime("127.0.0.1", 9000, verbose=True, label="engine=x")
 
     assert "--verbose" in spy.call_args.args[0]
 
@@ -63,7 +89,7 @@ def test_spawn_runtime_logs_label(
     )
 
     with caplog.at_level(logging.INFO, logger="physiclaw.cli.server"):
-        server_mod._spawn_runtime(8048, False, "engine=qwen")
+        server_mod._spawn_runtime("127.0.0.1", 8048, False, "engine=qwen")
 
     assert any("engine=qwen" in r.getMessage() for r in caplog.records)
 
@@ -105,6 +131,10 @@ def _patch_server_runtime_deps(
     fake_warm.wait_for_port.return_value = True
     fake_warm.try_resume.return_value = True
     fake_state = MagicMock()
+    fake_state.read_live.return_value = None  # no live server recorded
+    # No real socket probe in tests — the already-running guard's branches
+    # have their own tests below.
+    mocker.patch.object(server_mod, "_port_in_use", return_value=False)
     fake_launcher = MagicMock()
     if resolve_raises:
         fake_launcher.resolve.side_effect = RuntimeError("no model set")
@@ -128,10 +158,19 @@ def _patch_server_runtime_deps(
     import physiclaw.core
 
     mocker.patch.object(physiclaw.core, "server", fake_core_server, create=True)
+    # The submodules the server body imports must be faked EXPLICITLY:
+    # `from physiclaw.core.server.app import ...` looks up
+    # "physiclaw.core.server.app" in sys.modules first, and falls back to
+    # importing through the parent — a MagicMock, which is "not a package".
+    # (Unlisted, the tests only pass when the real module happens to be
+    # imported already by an earlier test file — a full-suite-only pass.)
+    fake_app = MagicMock()
+    fake_core_server.app = fake_app
     mocker.patch.dict(
         "sys.modules",
         {
             "physiclaw.core.server": fake_core_server,
+            "physiclaw.core.server.app": fake_app,
             "physiclaw.core.server.warm_start": fake_warm,
             "physiclaw.agent.runtime.launcher": fake_launcher,
             "physiclaw.core.bridge": fake_bridge,
@@ -409,7 +448,7 @@ def test_server_spawns_runtime_subprocess_by_default(mocker) -> None:
         save_screenshots=False,
     )
 
-    spawn_spy.assert_called_once_with(8048, True, "engine=openai")
+    spawn_spy.assert_called_once_with("127.0.0.1", 8048, True, "engine=openai")
 
 
 def test_server_no_runtime_skips_subprocess(mocker) -> None:
@@ -672,6 +711,67 @@ def test_server_warm_start_starts_thread(mocker) -> None:
     thread_spy.assert_called_once()
     assert thread_spy.call_args.kwargs.get("daemon") is True
     thread_spy.return_value.start.assert_called_once()
+
+
+# ---------- already-running guard ----------
+
+
+def _server_kwargs() -> dict:
+    return dict(
+        port=8048,
+        host="127.0.0.1",
+        verbose=False,
+        no_runtime=True,
+        warm_start=False,
+        cam_index=None,
+        save_tool_calls=False,
+        save_snapshots=False,
+        save_screenshots=False,
+    )
+
+
+def test_server_refuses_when_live_server_recorded(mocker, capsys) -> None:
+    """A second `physiclaw server` must exit BEFORE writing runtime state —
+    its write+atexit-clear would otherwise erase the LIVE server's record."""
+    deps = _patch_server_runtime_deps(mocker)
+    deps["state"].read_live.return_value = {
+        "pid": 4242,
+        "host": "127.0.0.1",
+        "port": 8048,
+    }
+
+    with pytest.raises(typer.Exit):
+        server_mod.server(**_server_kwargs())
+
+    deps["state"].write.assert_not_called()
+    assert "already running" in capsys.readouterr().err
+
+
+def test_server_refuses_when_port_probe_hits(mocker, capsys) -> None:
+    # State file gone (SIGKILL'd server) but the port is still held.
+    deps = _patch_server_runtime_deps(mocker)
+    mocker.patch.object(server_mod, "_port_in_use", return_value=True)
+
+    with pytest.raises(typer.Exit):
+        server_mod.server(**_server_kwargs())
+
+    deps["state"].write.assert_not_called()
+    assert "already accepting connections" in capsys.readouterr().err
+
+
+def test_port_in_use_probes_real_socket() -> None:
+    import socket as socket_mod
+
+    with socket_mod.socket() as srv:
+        srv.bind(("127.0.0.1", 0))
+        # Backlog > 1: the probes never get accept()ed, so each occupies a
+        # queue slot until the listener closes.
+        srv.listen(5)
+        port = srv.getsockname()[1]
+        assert server_mod._port_in_use("127.0.0.1", port) is True
+        # Wildcard bind address maps to a dialable loopback probe.
+        assert server_mod._port_in_use("0.0.0.0", port) is True
+    assert server_mod._port_in_use("127.0.0.1", port) is False
 
 
 # ---------- auto_calibrate branch (physiclaw auto) ----------

@@ -82,6 +82,24 @@ async def test_control_gate_admits_configured_bind_host() -> None:
     assert await _call(gate, headers={"host": "10.0.0.9:8048"}) == 200
 
 
+@pytest.mark.asyncio
+async def test_control_gate_concrete_bind_still_rejects_foreign_host() -> None:
+    gate = ControlGate(_inner_ok, host="10.0.0.9")
+
+    assert await _call(gate, headers={"host": "evil.example:8048"}) == 421
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bind", ["0.0.0.0", "::"])
+async def test_control_gate_stands_down_on_wildcard_bind(bind: str) -> None:
+    # A wildcard bind is the user's explicit exposure opt-in; clients send
+    # Host: <interface-ip>, which can't be allowlisted — gating would 421
+    # every real client.
+    gate = ControlGate(_inner_ok, host=bind)
+
+    assert await _call(gate, headers={"host": "192.168.1.7:8048"}) == 200
+
+
 # ---------- PhoneApp ----------
 
 

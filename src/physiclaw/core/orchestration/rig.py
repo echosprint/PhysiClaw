@@ -86,6 +86,16 @@ class HardwareRig:
         the agent can never observe ``ready`` on an unsettled camera."""
         self._ready = True
 
+    def unmark_ready(self) -> None:
+        """Drop the ready flag so the next ``become_ready`` re-settles.
+        Called when the camera is replaced mid-session (a live-server
+        setup re-run): the fresh Camera boots with live AF and default
+        exposure, but ``become_ready`` early-returns while ``ready`` is
+        set — without this it would skip the re-settle for the rest of
+        the process, leaving the first views of the new camera
+        mis-exposed / AF-hunting."""
+        self._ready = False
+
     # ─── State queries ────────────────────────────────────────
 
     @property
@@ -218,6 +228,9 @@ class HardwareRig:
         self._cam = Camera(index)
         if self.calibration.cam_rotation is not None:
             self._cam.rotation = self.calibration.cam_rotation
+        # A fresh Camera starts with live AF and default exposure — force
+        # the next become_ready to re-settle it (see unmark_ready).
+        self.unmark_ready()
         log.info(f"Camera {index} connected")
 
     def disconnect_camera(self) -> bool:
@@ -232,6 +245,8 @@ class HardwareRig:
             return False
         self._cam.close()
         self._cam = None
+        # No camera → not ready; a later reconnect re-settles via become_ready.
+        self.unmark_ready()
         log.info("Camera disconnected")
         return True
 
@@ -339,11 +354,15 @@ class HardwareRig:
     def sync_clipboard(self, text: str, timeout: float) -> bool:
         """Queue `text` on the bridge, long-press AT (fires the clipboard
         Shortcut), wait for the phone's fetch confirmation. Returns True
-        on confirm. On timeout the text is un-queued before returning
-        False, so a LATE Shortcut run can't fetch it afterwards — callers
-        report "the phone clipboard still holds the previous content" and
-        that must stay true, not racy. Caller must hold the lock; the
-        retry/miss policy lives in the orchestrator's ClipboardSyncState."""
+        on confirm. On timeout the text is retired via
+        ``BridgeState.expire_text()``, which is atomic with the Shortcut's
+        fetch: a late run either already got the text (counted here as a
+        late success) or can never get it afterwards — a plain
+        ``clear_text()`` left a gap where the phone received the text
+        while we returned False, so callers' "the phone clipboard still
+        holds the previous content" stays true, not racy. Caller must
+        hold the lock; the retry/miss policy lives in the orchestrator's
+        ClipboardSyncState."""
         self.assert_locked()
         bridge = self._bridge
         if bridge is None:
@@ -352,8 +371,7 @@ class HardwareRig:
         self.at_long_press()
         if bridge.wait_clipboard(timeout=timeout):
             return True
-        bridge.clear_text()
-        return False
+        return bridge.expire_text()
 
     # ─── Primitive movements ─────────────────────────────────
 

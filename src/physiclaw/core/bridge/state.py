@@ -28,13 +28,18 @@ UPLOAD_WINDOW_GRACE_SECONDS = 5.0
 # taps land before wait_screenshot() arms, so entering calibrate mode opens
 # a wider window up front (see PageState.set_mode).
 CAL_UPLOAD_WINDOW_SECONDS = 120.0
-# IP pin staleness: if the pinned phone IP hasn't been seen (poll or upload)
-# for this long, an armed upload from a NEW IP re-pins instead of 403ing —
-# that's how a DHCP lease change heals without a server restart. While the
-# phone is active its pin stays fresh, so a hijack needs the phone silent
-# this long AND an armed window — the off-path attacker the pin targets
-# doesn't get both.
-PIN_STALE_SECONDS = 600.0
+# Upload-eligible IP freshness: an IP that polled /api/bridge/state (or had
+# an upload accepted) within this window may upload. A TTL'd SET, not a
+# single "last poller wins" pin: pinning the most recent poller flip-flopped
+# whenever a second /bridge tab (a leftover laptop tab) polled alongside the
+# phone, 403ing the real phone's screenshot roughly every other upload — and
+# the iOS Shortcut doesn't retry, so each rejection became a 60s screenshot
+# timeout. Expiry doubles as the DHCP heal: an address that goes quiet ages
+# out, and once nothing fresh remains the next armed uploader is admitted
+# trust-on-first-use. While the phone is active its entry stays fresh, so a
+# hijack needs the phone (and every other poller) silent this long AND an
+# armed window — the off-path attacker the gate targets doesn't get both.
+PHONE_IP_TTL_SECONDS = 180.0
 
 # Callers on the host itself bypass the phone IP pin entirely.
 _LOOPBACK_IPS = frozenset({"127.0.0.1", "::1"})
@@ -98,11 +103,10 @@ class BridgeState:
         # above (wait/clear never touch it), so a reader can't disturb it.
         self._recent_screens: deque[bytes] = deque(maxlen=RECENT_SCREENSHOTS_MAX)
         # Upload gate: monotonic deadline until which an upload is expected
-        # (0.0 = disarmed), the TOFU-pinned phone IP (None = unpinned), and
-        # when that IP was last seen (drives the DHCP-change re-pin).
+        # (0.0 = disarmed), plus the TTL'd set of upload-eligible IPs —
+        # ip → monotonic last-seen (see PHONE_IP_TTL_SECONDS).
         self._upload_armed_until: float = 0.0
-        self._phone_ip: str | None = None
-        self._phone_ip_seen: float = 0.0
+        self._phone_ips: dict[str, float] = {}
 
     @property
     def connected(self) -> bool:
@@ -169,12 +173,35 @@ class BridgeState:
         Used by /api/bridge/clipboard so the iOS Shortcut can fetch the text
         in one round trip — no separate confirm-tap is needed. Returns None
         if no text is queued; in that case the clipboard event is not set.
+        The copied event is set in the SAME lock hold as the read, so
+        :meth:`expire_text` can atomically distinguish "already fetched"
+        from "never fetched" on the sync-timeout path.
         """
         with self.lock:
             text = self._text
-        if text is not None:
-            self._clipboard_copied.set()
+            if text is not None:
+                self._clipboard_copied.set()
         return text
+
+    def expire_text(self) -> bool:
+        """Retire the queued text after a sync timeout. Returns True if it
+        had in fact already been copied — the caller should treat the sync
+        as a (late) success.
+
+        The check-and-clear shares one lock hold with :meth:`fetch_text`'s
+        read-and-mark: a late Shortcut fetching in the gap between the
+        caller's ``wait_clipboard`` timing out and a plain ``clear_text()``
+        would put the text on the phone clipboard while the caller reports
+        it didn't — and leave the copied event set with no text queued.
+        On the copied path the text stays queued (matching a confirmed
+        sync); otherwise it is cleared so a later fetch can never deliver
+        it after the caller reported failure.
+        """
+        with self.lock:
+            if self._clipboard_copied.is_set():
+                return True
+            self._text = None
+            return False
 
     def mark_clipboard_copied(self):
         """Phone confirms the tap-to-copy succeeded."""
@@ -262,49 +289,62 @@ class BridgeState:
         with self.lock:
             return time.monotonic() < self._upload_armed_until
 
-    # ─── Phone IP pin (trust-on-first-use) ────────────────────
+    # ─── Phone IP gate (TTL'd recently-seen set) ──────────────
+
+    def _prune_phone_ips_locked(self, now: float) -> None:
+        """Drop IPs not seen within `PHONE_IP_TTL_SECONDS`. Caller holds
+        the lock."""
+        self._phone_ips = {
+            ip: seen
+            for ip, seen in self._phone_ips.items()
+            if now - seen <= PHONE_IP_TTL_SECONDS
+        }
 
     def upload_ip_allowed(self, ip: str | None) -> bool:
-        """Gate an upload by source IP. First non-loopback uploader pins the
-        phone's IP; later uploads must match — unless the pinned IP has gone
-        quiet for `PIN_STALE_SECONDS`, in which case the new IP re-pins
-        (the phone came back from a DHCP lease change). Loopback is always
-        allowed (the host itself is trusted). The pin is risk reduction,
-        not authentication: it excludes only the *off-path* LAN sender
-        (e.g. a compromised IoT device) — an on-path attacker on the same
-        Wi-Fi can spoof the pinned address.
+        """Gate an upload by source IP: any IP seen recently — a live
+        /api/bridge/state poll or a prior accepted upload within
+        `PHONE_IP_TTL_SECONDS` — is accepted. When no fresh IP is known,
+        the first non-loopback uploader is admitted trust-on-first-use.
+        Loopback is always allowed (the host itself is trusted). The gate
+        is risk reduction, not authentication: it excludes only the
+        *off-path* LAN sender (e.g. a compromised IoT device) — an
+        on-path attacker on the same Wi-Fi can spoof an admitted address.
         """
         if ip is None or ip in _LOOPBACK_IPS:
             return True
         now = time.monotonic()
         with self.lock:
-            if ip == self._phone_ip:
-                self._phone_ip_seen = now
+            self._prune_phone_ips_locked(now)
+            if ip in self._phone_ips:
+                self._phone_ips[ip] = now
                 return True
-            if (
-                self._phone_ip is not None
-                and now - self._phone_ip_seen <= PIN_STALE_SECONDS
-            ):
+            if self._phone_ips:
+                # Fresh senders are known and this isn't one of them.
                 return False
-            stale = self._phone_ip
-            self._phone_ip, self._phone_ip_seen = ip, now
-        if stale is not None:
-            log.info(f"Bridge: phone IP {stale} went quiet — re-pinned to {ip}")
-        else:
-            log.info(f"Bridge: pinned phone IP {ip}")
+            # Nothing fresh (first upload ever, or everyone aged out —
+            # e.g. the phone came back from a DHCP lease change): admit
+            # and remember the sender.
+            self._phone_ips[ip] = now
+        log.info(f"Bridge: no fresh phone IP — admitted uploader {ip}")
         return True
 
     def note_phone_ip(self, ip: str | None):
-        """Refresh the pin from a live bridge-page poll — the freshest
-        "this is the phone" signal, so it may re-pin immediately after a
-        DHCP change without waiting out the staleness window."""
+        """Record a live bridge-page poller as upload-eligible. Every
+        recently-seen poller stays eligible (see `PHONE_IP_TTL_SECONDS`),
+        not just the latest one: a single last-poller-wins pin flip-flopped
+        whenever a second /bridge tab polled alongside the phone, 403ing
+        the real phone's uploads roughly every other time. A poll is also
+        the freshest "this is the phone" signal, so a post-DHCP-change
+        address is admitted immediately, without waiting out any TTL."""
         if ip is None or ip in _LOOPBACK_IPS:
             return
+        now = time.monotonic()
         with self.lock:
-            changed = self._phone_ip != ip
-            self._phone_ip, self._phone_ip_seen = ip, time.monotonic()
-        if changed:
-            log.info(f"Bridge: pinned phone IP {ip}")
+            self._prune_phone_ips_locked(now)
+            new = ip not in self._phone_ips
+            self._phone_ips[ip] = now
+        if new:
+            log.info(f"Bridge: upload-eligible phone IP {ip}")
 
     def recent_screenshots(self, n: int = RECENT_SCREENSHOTS_MAX) -> list[bytes]:
         """Snapshot of the last `n` raw uploads, oldest→newest. Read-only

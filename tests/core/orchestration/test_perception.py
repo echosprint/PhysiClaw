@@ -195,10 +195,26 @@ def test_scan_text_raises_when_lock_not_held(rig, per: Perception) -> None:
         per.scan_text()
 
 
+def _wire_numpad_poll(mocker, rig, *, sharpness: float):
+    """Stub the poll's acquisition chain — a stock frame, pass-through
+    crops, a fixed sharpness score, patched sleep (returned for
+    cadence assertions)."""
+    frame = np.zeros((4, 4, 3), dtype=np.uint8)
+    rig._cam.snapshot.return_value = frame
+    mocker.patch.object(perception_mod, "crop_to_phone_screen", return_value=frame)
+    mocker.patch.object(perception_mod, "phone_screen_crop_box", return_value=None)
+    mocker.patch.object(
+        perception_mod.quality, "laplacian_variance", return_value=sharpness
+    )
+    return mocker.patch.object(perception_mod.time, "sleep")
+
+
 def test_wait_for_numpad_digit_polls_until_found(mocker, rig, per: Perception) -> None:
-    mocker.patch.object(perception_mod.time, "sleep")
+    _wire_numpad_poll(mocker, rig, sharpness=1000.0)
     bbox = [0.1, 0.1, 0.2, 0.2]
-    mocker.patch.object(per, "scan_text", side_effect=[[], [], [{"hit": True}]])
+    ocr = mocker.patch.object(
+        per, "_ocr_elements", side_effect=[[], [], [{"hit": True}]]
+    )
     mocker.patch.object(
         perception_mod,
         "find_numpad_digit",
@@ -210,22 +226,113 @@ def test_wait_for_numpad_digit_polls_until_found(mocker, rig, per: Perception) -
     rig.release()
 
     assert out == bbox
+    assert ocr.call_count == 3
 
 
-def test_wait_for_numpad_digit_gives_up_after_attempts(
+def test_wait_for_numpad_digit_gives_up_at_timeout(
     mocker, rig, per: Perception
 ) -> None:
-    sleep = mocker.patch.object(perception_mod.time, "sleep")
-    scan = mocker.patch.object(per, "scan_text", return_value=[])
+    sleep = _wire_numpad_poll(mocker, rig, sharpness=1000.0)
+    ocr = mocker.patch.object(per, "_ocr_elements", return_value=[])
     mocker.patch.object(perception_mod, "find_numpad_digit", return_value=None)
+    # Fake clock (advances on sleep): a real monotonic would busy-spin
+    # the no-op-sleep loop for the whole timeout, recording thousands
+    # of mock calls for the same two deterministic iterations.
+    clock = {"now": 0.0}
+    mocker.patch.object(
+        perception_mod.time, "monotonic", side_effect=lambda: clock["now"]
+    )
+    sleep.side_effect = lambda s: clock.__setitem__("now", clock["now"] + s)
 
     rig.acquire()
-    out = per.wait_for_numpad_digit("1", attempts=3, interval=0.5)
+    out = per.wait_for_numpad_digit("1", timeout=0.05)
     rig.release()
 
     assert out is None
-    assert scan.call_count == 3
-    sleep.assert_called_with(0.5)
+    assert ocr.called
+
+
+def test_wait_for_numpad_digit_skips_ocr_on_blurry_frames(
+    mocker, rig, per: Perception
+) -> None:
+    # Within the fallback grace a soft frame costs a cheap meter + a
+    # short sleep, never an OCR pass — the point of the gate.
+    sleep = _wire_numpad_poll(mocker, rig, sharpness=1.0)
+    ocr = mocker.patch.object(per, "_ocr_elements", return_value=[])
+    clock = {"now": 0.0}
+    mocker.patch.object(
+        perception_mod.time, "monotonic", side_effect=lambda: clock["now"]
+    )
+    sleep.side_effect = lambda s: clock.__setitem__("now", clock["now"] + s)
+
+    rig.acquire()
+    out = per.wait_for_numpad_digit("1", timeout=0.05)
+    rig.release()
+
+    assert out is None
+    assert not ocr.called
+    sleep.assert_called_with(0.15)
+
+
+def test_wait_for_numpad_digit_falls_back_to_ungated_ocr(
+    mocker, rig, per: Perception
+) -> None:
+    # A rig that never meters sharp still OCRs once the fallback
+    # interval elapses — chronic soft focus degrades, never starves.
+    _wire_numpad_poll(mocker, rig, sharpness=1.0)
+    mocker.patch.object(per, "NUMPAD_OCR_FALLBACK_SECONDS", 0.0)
+    bbox = [0.1, 0.1, 0.2, 0.2]
+    mocker.patch.object(per, "_ocr_elements", return_value=[])
+    mocker.patch.object(perception_mod, "find_numpad_digit", return_value=bbox)
+
+    rig.acquire()
+    out = per.wait_for_numpad_digit("1")
+    rig.release()
+
+    assert out == bbox
+
+
+def test_wait_for_numpad_digit_fallback_spacing_is_pass_end_to_next_start(
+    mocker, rig, per: Perception
+) -> None:
+    # Once one OCR pass outlasts NUMPAD_OCR_FALLBACK_SECONDS, stamping
+    # `last_ocr` BEFORE the pass would make every later blurry tick OCR
+    # back-to-back; stamping at loop entry would starve the fallback
+    # entirely. The stamp lands AFTER the pass, so the cadence is
+    # pass-end→next-start. Pinned with a fake clock that advances only
+    # on sleep and on the (multi-second) mocked OCR pass.
+    sleep = _wire_numpad_poll(mocker, rig, sharpness=1.0)  # chronically blurry
+    mocker.patch.object(perception_mod, "find_numpad_digit", return_value=None)
+
+    clock = {"now": 0.0}
+    mocker.patch.object(
+        perception_mod.time, "monotonic", side_effect=lambda: clock["now"]
+    )
+    sleep.side_effect = lambda s: clock.__setitem__("now", clock["now"] + s)
+
+    ocr_cost = 4.0  # a pass longer than the 2.5s fallback interval
+    spans: list[tuple[float, float]] = []
+
+    def slow_ocr(frame) -> list:
+        begin = clock["now"]
+        clock["now"] += ocr_cost
+        spans.append((begin, clock["now"]))
+        return []
+
+    mocker.patch.object(per, "_ocr_elements", side_effect=slow_ocr)
+
+    rig.acquire()
+    out = per.wait_for_numpad_digit("1", timeout=20.0)
+    rig.release()
+
+    assert out is None
+    # The fallback kept firing across the window (a loop-entry stamp
+    # would never let `now - last_ocr` reach the interval → 0 passes).
+    assert len(spans) >= 2
+    # And each pass waited the full interval from the PREVIOUS PASS'S
+    # END (a stamp-before-the-pass yields gap 0 once ocr_cost > 2.5).
+    gaps = [nxt[0] - prev[1] for prev, nxt in zip(spans, spans[1:])]
+    assert all(g >= per.NUMPAD_OCR_FALLBACK_SECONDS for g in gaps)
 
 
 # ---------- watch ----------
@@ -619,6 +726,52 @@ def test_lock_focus_rerun_af_unlocks_before_relocking(
     rig._cam.unlock_focus.assert_called_once()
 
 
+def test_ensure_focus_locked_skips_when_already_verified_frozen(
+    mocker, rig, per: Perception
+) -> None:
+    # A frozen lens can't drift — re-proving it would spend ~0.5s of
+    # frame-waits per unlock call.
+    rig._cam.focus_locked = True
+    per._last_lock = _lock_ok()
+    now = mocker.patch.object(per, "lock_focus_now")
+    park = mocker.patch.object(rig, "park")
+
+    per.ensure_focus_locked()
+
+    now.assert_not_called()
+    park.assert_not_called()  # fast path spends no arm motion
+
+
+@pytest.mark.parametrize("last", [None, _lock_deferred()])
+def test_ensure_focus_locked_runs_when_unlocked_or_deferred(
+    mocker, rig, per: Perception, last
+) -> None:
+    rig._cam.focus_locked = True
+    per._last_lock = last
+    now = mocker.patch.object(per, "lock_focus_now")
+
+    per.ensure_focus_locked()
+
+    now.assert_called_once()
+
+
+def test_ensure_focus_locked_relocks_when_camera_lost_the_freeze(
+    mocker, rig, per: Perception
+) -> None:
+    # After a mid-session connect_camera, the fresh Camera's AF is live
+    # again while _last_lock still reads locked — the stale mirror must
+    # not skip the re-lock the new lens needs.
+    rig._cam.focus_locked = False
+    per._last_lock = _lock_ok()
+    now = mocker.patch.object(per, "lock_focus_now")
+    park = mocker.patch.object(rig, "park")
+
+    per.ensure_focus_locked()
+
+    now.assert_called_once()
+    park.assert_called_once()  # metering contract needs the arm parked
+
+
 def test_lock_focus_meter_crops_and_scores_sharpness(
     mocker, rig, per: Perception
 ) -> None:
@@ -707,6 +860,36 @@ def test_settle_camera_busy_skip_seeds_a_deferred_lock(
         rig.release()
 
     assert per._last_lock is not None and per._last_lock.deferred
+
+
+def test_settle_camera_seeds_a_deferred_lock_when_lock_left_no_record(
+    mocker, rig, per: Perception
+) -> None:
+    # lock_focus_now can swallow an internal driver error and leave
+    # _last_lock None even though the settle body ran — the seed must
+    # still fire, or _focus_policy disables itself for the session.
+    rig._cam.focus_lockable = True
+    mocker.patch.object(per, "tune_now")
+    mocker.patch.object(per, "lock_focus_now")  # runs, records nothing
+
+    per.settle_camera()
+
+    assert per._last_lock is not None and per._last_lock.deferred
+
+
+def test_settle_camera_keeps_a_real_lock_result(mocker, rig, per: Perception) -> None:
+    # A successful lock must not be clobbered by the deferred seed.
+    rig._cam.focus_lockable = True
+    mocker.patch.object(per, "tune_now")
+    mocker.patch.object(
+        per,
+        "lock_focus_now",
+        side_effect=lambda: setattr(per, "_last_lock", _lock_ok()),
+    )
+
+    per.settle_camera()
+
+    assert per._last_lock.locked
 
 
 def test_settle_camera_busy_skip_seeds_nothing_when_not_lockable(

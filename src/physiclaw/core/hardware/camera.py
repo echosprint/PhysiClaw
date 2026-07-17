@@ -35,6 +35,10 @@ from physiclaw.core.hardware.frame_reader import FrameReader
 
 log = logging.getLogger(__name__)
 
+# Serializes the fd-2 redirect in `silenced_stderr` across threads (camera
+# reopen vs a concurrent preview/auto-pick open) — see its docstring.
+_STDERR_REDIRECT_LOCK = threading.Lock()
+
 
 @contextlib.contextmanager
 def silenced_stderr() -> Iterator[None]:
@@ -48,20 +52,24 @@ def silenced_stderr() -> Iterator[None]:
 
     Process-global: fd 2 is shared, so any other thread logging to
     stderr inside the ``with`` block drops to /dev/null too. Keep the
-    wrapped region short.
+    wrapped region short. Serialized by ``_STDERR_REDIRECT_LOCK`` —
+    without it, two threads redirecting fd 2 concurrently (a camera
+    reopen racing a preview/auto-pick open) can save each other's
+    /dev/null as the "real" stderr and leave it permanently silenced.
     """
-    sys.stderr.flush()
-    devnull = os.open(os.devnull, os.O_WRONLY)
-    try:
-        saved = os.dup(2)
+    with _STDERR_REDIRECT_LOCK:
+        sys.stderr.flush()
+        devnull = os.open(os.devnull, os.O_WRONLY)
         try:
-            os.dup2(devnull, 2)
-            yield
+            saved = os.dup(2)
+            try:
+                os.dup2(devnull, 2)
+                yield
+            finally:
+                os.dup2(saved, 2)
+                os.close(saved)
         finally:
-            os.dup2(saved, 2)
-            os.close(saved)
-    finally:
-        os.close(devnull)
+            os.close(devnull)
 
 
 def apply_size_cap(size: tuple[int, int]) -> tuple[int, int]:
@@ -377,6 +385,14 @@ class Camera:
         true only when the UVC channel is live AND the camera answers
         for its focus controls (fixed-focus cameras don't)."""
         return platform.camera_focus_lockable()
+
+    @property
+    def focus_locked(self) -> bool:
+        """Whether THIS camera's autofocus is currently frozen. The
+        authoritative source: a fresh Camera starts False (live AF) even
+        when an observer still remembers a lock from a previous camera,
+        so callers gate re-lock decisions on this, not their own mirror."""
+        return self._focus_locked
 
     def lock_focus(self) -> bool:
         """Freeze autofocus at its current position. Remembered, so a
