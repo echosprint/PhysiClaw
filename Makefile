@@ -1,4 +1,4 @@
-.PHONY: test test-cov test-fast test-slow test-integration test-all mutate lint fmt help bump build publish release \
+.PHONY: test test-cov test-fast test-slow test-integration test-all mutate lint fmt typecheck help bump build publish release \
         hw-help hw-parts hw-build hw-check hw-step hw-print hw-manual hw-manual-pdf hw-sourcing hw-mark hw-replay hw-camera hw-rebuild hw-release
 
 PY ?= uv run
@@ -35,6 +35,7 @@ help:
 	@echo "  mutate MOD=path       — mutmut on a path (e.g. MOD=src/physiclaw/agent/engine/validator.py)"
 	@echo "  lint                  — ruff check + format check"
 	@echo "  fmt                   — ruff format (src, tests, hardware, scripts)"
+	@echo "  typecheck             — mypy on src/physiclaw (scope in [tool.mypy])"
 	@echo "  bump [VERSION=X.Y.Z]  — bump version. Defaults to incrementing the last"
 	@echo "                          component split by '.' (0.0.7 → 0.0.8). Override with"
 	@echo "                          VERSION for major/minor jumps. Commits LOCALLY."
@@ -88,6 +89,10 @@ lint:
 
 fmt:
 	$(PY) ruff format src/ tests/ hardware/ scripts/
+
+# Scope (src/physiclaw) and settings live in [tool.mypy] in pyproject.toml.
+typecheck:
+	$(PY) mypy
 
 # --- Release workflow ---------------------------------------------------------
 #

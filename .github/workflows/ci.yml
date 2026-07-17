@@ -49,6 +49,11 @@ jobs:
           uv run ruff check src/ tests/
           uv run ruff format --check src/ tests/ hardware/ scripts/
 
+      # Mirrors `make typecheck`: scope + settings from [tool.mypy] in
+      # pyproject (src/physiclaw only; tests and hardware/ aren't gated yet).
+      - name: Type check
+        run: uv run mypy
+
       # Static cross-artifact consistency for the CAD pipeline (procedure
       # stems / patches / manual figures / sourcing ids) — stdlib-only, no
       # cad dependency group needed.

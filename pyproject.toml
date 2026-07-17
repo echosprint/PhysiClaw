@@ -53,6 +53,9 @@ dev = [
     "hypothesis>=6.100",
     "respx>=0.21",
     "mutmut>=2.5,<3",
+    "mypy>=2.3.0",
+    "types-pyserial>=3.5.0.20260712",
+    "types-croniter>=6.2.4.20260711",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -66,6 +69,24 @@ physiclaw = "physiclaw.cli:app"
 # import sorting. Wider rule sets (ANN/ARG/BLE/C901) are deliberately
 # not enabled: ~435 findings, mostly deliberate patterns and pytest noise.
 select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.mypy]
+# Baseline gate: mypy defaults plus untyped-def bodies and ignore hygiene.
+# Ratchet toward strict per-module (disallow_untyped_defs and friends) as
+# annotations fill in, rather than blanket-strict on a retrofit codebase.
+files = ["src/physiclaw"]
+python_version = "3.12"
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+strict_equality = true
+extra_checks = true
+enable_error_code = ["ignore-without-code"]
+
+[[tool.mypy.overrides]]
+# Ship no py.typed marker or stubs.
+module = ["rapidocr.*", "onnxruntime.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 # "." makes the repo-root `hardware` package importable for tests/hardware
