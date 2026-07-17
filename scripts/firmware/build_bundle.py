@@ -10,7 +10,7 @@ https://physiclaw.ai/downloads/firmware/ and on the ``firmware_fluidNC``
 GitHub release) from upstream FluidNC release assets plus
 ``scripts/firmware/config.yaml``.
 
-    uv run scripts/firmware/build_bundle.py                # v4.0.3
+    uv run scripts/firmware/build_bundle.py                # DEFAULT_TAG
     uv run scripts/firmware/build_bundle.py --tag v4.1.0   # a new release
 
 Provenance of each file in the bundle:

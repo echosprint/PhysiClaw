@@ -100,6 +100,14 @@ def _fetch_bundle(into: Path) -> list[tuple[str, Path]]:
     return files
 
 
+def _bundle_version(into: Path) -> Optional[str]:
+    """FluidNC version recorded in the bundle (``fluidnc_version.txt``)."""
+    p = into / "fluidnc_version.txt"
+    if not p.exists():  # tolerate a single wrapper folder inside the zip
+        p = next(into.rglob("fluidnc_version.txt"), None)
+    return p.read_text().strip() if p else None
+
+
 def _detect_port() -> Optional[str]:
     """Best-guess USB-serial port. Doesn't probe (a blank board won't reply)."""
     from physiclaw.core.hardware.grbl import candidate_ports
@@ -161,6 +169,9 @@ def flash(
     with tempfile.TemporaryDirectory(prefix="physiclaw-fw-") as td:
         typer.echo("→ Downloading firmware …")
         files = _fetch_bundle(Path(td))
+        version = _bundle_version(Path(td))
+        if version:
+            typer.echo(f"→ Firmware: FluidNC {version}")
 
         dev = port or _detect_port() or ("auto-detect" if dry_run else None)
         if not dev:

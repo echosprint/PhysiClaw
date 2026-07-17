@@ -27,10 +27,14 @@ def _bundle_bytes(*, skip: str | None = None, prefix: str = "") -> bytes:
     """A flat (or wrapper-folder) firmware bundle zip, built in memory."""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
-        for _offset, name in flash_mod.FLASH_LAYOUT:
+        names = [name for _offset, name in flash_mod.FLASH_LAYOUT]
+        names.append("fluidnc_version.txt")
+        for name in names:
             if name == skip:
                 continue
-            zf.writestr(prefix + name, b"\x01")
+            # Arbitrary version — the CLI just echoes whatever the bundle says.
+            data = b"v9.9.9\n" if name == "fluidnc_version.txt" else b"\x01"
+            zf.writestr(prefix + name, data)
     return buf.getvalue()
 
 
@@ -138,12 +142,31 @@ def test_flash_incomplete_bundle_exits_nonzero(mocker) -> None:
 
 
 def test_flash_bundle_with_wrapper_folder_is_tolerated(mocker) -> None:
-    _mock_download(mocker, _bundle_bytes(prefix="fluidnc-4.0.3/"))
+    _mock_download(mocker, _bundle_bytes(prefix="wrapper-folder/"))
 
     result = runner.invoke(app, ["--port", "/dev/cu.usbserial-X", "--dry-run"])
 
     assert result.exit_code == 0
     assert "firmware.bin" in result.output
+    assert "Firmware: FluidNC v9.9.9" in result.output
+
+
+def test_flash_reports_bundle_firmware_version(mocker) -> None:
+    _mock_download(mocker)
+
+    result = runner.invoke(app, ["--port", "/dev/cu.usbserial-X", "--dry-run"])
+
+    assert result.exit_code == 0
+    assert "Firmware: FluidNC v9.9.9" in result.output
+
+
+def test_flash_bundle_without_version_file_stays_quiet(mocker) -> None:
+    _mock_download(mocker, _bundle_bytes(skip="fluidnc_version.txt"))
+
+    result = runner.invoke(app, ["--port", "/dev/cu.usbserial-X", "--dry-run"])
+
+    assert result.exit_code == 0
+    assert "Firmware: FluidNC" not in result.output
 
 
 # ---------- flashing ----------
