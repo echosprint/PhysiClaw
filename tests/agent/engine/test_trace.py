@@ -947,7 +947,7 @@ def test_new_sid_shape_and_uniqueness() -> None:
     # is what makes instant-crash retries safe.
     assert len(sids) == 50
     for sid in sids:
-        assert re.fullmatch(r"\d{8}_\d{6}_[0-9a-f]{6}", sid)
+        assert re.fullmatch(r"\d{8}-\d{6}-[0-9a-f]{6}", sid)
 
 
 def test_new_sid_sorts_chronologically() -> None:
@@ -1049,3 +1049,19 @@ def test_sessions_readme_documents_the_full_summary_schema() -> None:
         assert key in readme, f"outcome key {key!r} missing from SESSIONS_README"
     for name in ("events.jsonl", "wire.jsonl", "summary.json", "images/"):
         assert name in readme
+
+
+def test_sessions_readme_refreshed_when_stale(_trace_dirs: Path) -> None:
+    # Existing installs carry READMEs from older builds — a changed
+    # constant (e.g. the sid separator move) must reach them, or the
+    # on-disk doc (which promises analysts can bootstrap from it alone)
+    # describes a retired format forever.
+    readme = _trace_dirs / "sessions" / "README.md"
+    readme.parent.mkdir(parents=True, exist_ok=True)
+    readme.write_text("stale doc", encoding="utf-8")
+
+    Trace("s1").close()
+
+    text = readme.read_text(encoding="utf-8")
+    assert "stale doc" not in text
+    assert "events.jsonl" in text

@@ -59,7 +59,7 @@ def _redact_images(content):
 _CLAUDE_SESSIONS_README = """\
 # PhysiClaw claude-code session logs
 
-One directory per `claude -p` wake, `YYYYMMDD_HHMMSS_<6 hex digits>`. The
+One directory per `claude -p` wake, `YYYYMMDD-HHMMSS-<6 hex digits>`. The
 human-readable narrative for all wakes of a day lives alongside, in
 `../claude-YYYY-MM-DD.log`.
 
@@ -79,11 +79,15 @@ Privacy: images/ are phone screenshots. Treat a session dir as sensitive.
 
 
 def _ensure_claude_sessions_readme() -> None:
-    """Drop the format doc once — idempotent, fail-open, cheap."""
+    """Keep the format doc current — rewritten whenever the shipped
+    constant changed, so existing installs don't keep documenting a
+    retired format. Fail-open, cheap."""
     path = paths.claude_sessions_dir() / "README.md"
     try:
         if not path.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(_CLAUDE_SESSIONS_README, encoding="utf-8", newline="\n")
+        elif path.read_text(encoding="utf-8") != _CLAUDE_SESSIONS_README:
             path.write_text(_CLAUDE_SESSIONS_README, encoding="utf-8", newline="\n")
     except OSError:
         log.debug("claude sessions README write failed", exc_info=True)

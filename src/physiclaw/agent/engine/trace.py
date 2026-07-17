@@ -101,7 +101,7 @@ def _env_snapshot() -> dict[str, Any]:
 
 
 def new_sid() -> str:
-    """Mint a session id: `YYYYMMDD_HHMMSS_<6 hex digits>`.
+    """Mint a session id: `YYYYMMDD-HHMMSS-<6 hex digits>`.
 
     The timestamp prefix keeps ids human-readable and lexicographically
     chronological; the random suffix (16^6 ≈ 16.7M) makes them unique —
@@ -111,7 +111,7 @@ def new_sid() -> str:
     doubles as a short handle: `physiclaw logs <suffix>` resolves a
     session by it.
     """
-    return f"{dt.datetime.now():%Y%m%d_%H%M%S}_{secrets.token_hex(3)}"
+    return f"{dt.datetime.now():%Y%m%d-%H%M%S}-{secrets.token_hex(3)}"
 
 
 # mime → filename suffix for images extracted from data-URLs. Everything
@@ -136,7 +136,7 @@ _SILENT_EVENTS = frozenset({"prefix_pinned", "finish_length_warning"})
 SESSIONS_README = """\
 # PhysiClaw agent session logs
 
-One directory per agent session, named `YYYYMMDD_HHMMSS_<6 hex digits>`
+One directory per agent session, named `YYYYMMDD-HHMMSS-<6 hex digits>`
 (sorts chronologically; the id suffix is a unique short handle). All
 files are UTF-8 with LF newlines on every platform. Timestamps (`t`)
 are LOCAL time with millisecond precision — the session's UTC offset is
@@ -198,11 +198,14 @@ sensitive.
 
 
 def _ensure_sessions_readme() -> None:
-    """Drop the format doc at sessions/README.md once — idempotent,
-    fail-open, and cheap (an exists() check per session start)."""
+    """Keep the format doc at sessions/README.md current — rewritten
+    whenever the shipped constant changed (existing installs would
+    otherwise keep documenting a retired format forever, and the doc
+    explicitly promises analysts can bootstrap from it). Fail-open,
+    cheap (one small read per session start)."""
     path = _SESSIONS_DIR / "README.md"
     try:
-        if not path.exists():
+        if not path.exists() or path.read_text(encoding="utf-8") != SESSIONS_README:
             path.write_text(SESSIONS_README, encoding="utf-8", newline="\n")
     except OSError:
         log.debug("sessions README write failed", exc_info=True)

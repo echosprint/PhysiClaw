@@ -282,3 +282,23 @@ def test_save_zip_embeds_format_readme(sessions: Path, tmp_path, monkeypatch) ->
     assert "events.jsonl" in readme
     # arcnames are forward-slashed on every platform
     assert all("\\\\" not in n for n in z.namelist())
+
+
+def test_logs_list_orders_by_mtime_across_sid_formats(sessions: Path) -> None:
+    # '-' < '_' lexicographically, so a name sort would list a morning
+    # legacy `_` session above a newer `-` session from the same day —
+    # and [:n] could drop the genuinely newest sessions entirely.
+    import os
+    import time as time_mod
+
+    from physiclaw.cli.logs import _collect
+
+    old = _write_session(sessions, "20260717_090000_aaaaaa")
+    new = _write_session(sessions, "20260717-100000-bbbbbb")
+    now = time_mod.time()
+    os.utime(old, (now - 100, now - 100))
+    os.utime(new, (now, now))
+
+    sids = [s["sid"] for s in _collect(sessions, 10)]
+
+    assert sids == ["20260717-100000-bbbbbb", "20260717_090000_aaaaaa"]

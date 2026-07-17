@@ -114,10 +114,19 @@ def _stub_summary(d: Path) -> dict[str, Any]:
 
 
 def _collect(sessions_dir: Path, n: int) -> list[dict[str, Any]]:
+    # mtime, not name: dirs from before the `-` sid format sort ABOVE
+    # newer `-` dirs lexicographically ('_' > '-'), which would list
+    # stale sessions as most recent and push the newest past [:n].
+    def mtime(d: Path) -> float:
+        try:
+            return d.stat().st_mtime
+        except OSError:
+            return 0.0
+
     try:
         dirs = sorted(
             (d for d in sessions_dir.iterdir() if d.is_dir()),
-            key=lambda d: d.name,
+            key=mtime,
             reverse=True,
         )
     except OSError:
@@ -237,7 +246,9 @@ def _show_session(d: Path, *, n: int, as_json: bool) -> None:
     typer.echo("")
     typer.echo(info(f"wire log:  {d / 'wire.jsonl'}"))
     typer.echo(info(f"images:    {d / 'images'}"))
-    typer.echo(info(f"save a copy: physiclaw logs {d.name.rsplit('_', 1)[-1]} --save"))
+    # Suffix handle = the trailing 6 hex chars — true regardless of the
+    # id's separator style, and all `_resolve` matches via `endswith`.
+    typer.echo(info(f"save a copy: physiclaw logs {d.name[-6:]} --save"))
 
 
 def _echo_narrative(events_path: Path, n: int) -> None:
