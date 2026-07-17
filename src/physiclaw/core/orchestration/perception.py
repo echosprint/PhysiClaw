@@ -401,8 +401,16 @@ class Perception:
         last = self._last_lock
         if frozen and last is not None and last.locked:
             return
+        # Time the re-lock: this spends the wake→swipe window, and the
+        # open "deferred-lock meter-loop stall" finding (BUGFIX_REVIEW)
+        # needs real durations from sessions to be confirmed or retired.
+        t0 = time.monotonic()
         self._rig.park()
         self.lock_focus_now()
+        log.info(
+            "focus re-lock before the unlock swipe took %.1fs",
+            time.monotonic() - t0,
+        )
 
     def lock_focus_now(self) -> None:
         """Freeze-and-verify with the rig lock ALREADY HELD and the arm
