@@ -13,12 +13,13 @@ The bundle (``FIRMWARE_URL``) is a flat zip of ready-to-flash images:
     firmware.bin     -> 0x10000    (FluidNC noradio app)
     littlefs.bin     -> 0x3d0000   (filesystem image holding config.yaml)
 
-To rebuild the bundle from a FluidNC release: take ``common/boot_app0.bin`` and
-``wifi/{bootloader,partitions}.bin`` from ``fluidnc-<ver>-posix.zip`` (the
-bootloader + partition table are radio-independent), convert the noradio app
-with ``esptool elf2image esp32-noradio-firmware.elf -o firmware.bin``, build a
-192K LittleFS image of the spiffs partition (offset 0x3d0000) containing the
-PhysiClaw config.yaml, and zip them flat (config.yaml is added for reference).
+plus, for reference only: ``config.yaml`` and ``fluidnc_version.txt`` —
+the bundle name and URL are version-free; the txt records what's inside.
+
+To build the bundle from a FluidNC release, run
+``uv run scripts/firmware/build_bundle.py`` in a repo checkout — it
+assembles the zip from upstream release assets plus
+``scripts/firmware/config.yaml`` (pass ``--tag`` for a newer FluidNC).
 
 esptool runs in an ephemeral ``uv`` environment, so it isn't a permanent
 dependency of the CLI.
@@ -44,7 +45,9 @@ import typer
 from physiclaw.cli._format import ok
 from physiclaw.cli._http import http_get, stream
 
-FIRMWARE_URL = "https://physiclaw.ai/downloads/firmware/fluidnc_4_0_3.zip"
+# Version-stable URL — the served bundle is whichever release the site last
+# published (see scripts/firmware/build_bundle.py for the build + publish flow).
+FIRMWARE_URL = "https://physiclaw.ai/downloads/firmware/fluidnc.zip"
 CHIP = "esp32"  # MKS DLC32 V2.1
 BAUD = 115200  # matches the firmware guide's install speed
 

@@ -1,0 +1,68 @@
+# FluidNC config — MKS DLC32 v2.1 — CoreXY + Solenoid
+# Comments ONLY on their own lines (FluidNC YAML subset rule)
+# Tune: steps_per_mm, max_travel_mm, acceleration, direction pins
+
+board: MKS-DLC32 V2.1
+name: PhysiClaw
+
+# I2S bus — hardwired on DLC32 v2.1, do not change
+i2so:
+  bck_pin: gpio.16
+  data_pin: gpio.21
+  ws_pin: gpio.17
+
+# I2S_STATIC only — I2S_STREAM causes drift on this board
+stepping:
+  engine: I2S_STATIC
+  idle_ms: 250
+  pulse_us: 4
+  dir_delay_us: 1
+  disable_delay_us: 0
+
+kinematics:
+  corexy:
+
+axes:
+  shared_stepper_disable_pin: I2SO.0
+
+  x:
+    steps_per_mm: 80.000
+    max_rate_mm_per_min: 10000.000
+    acceleration_mm_per_sec2: 1000.000
+    max_travel_mm: 200.000
+    soft_limits: false
+
+    motor0:
+      hard_limits: false
+      stepstick:
+        step_pin: I2SO.1
+        direction_pin: I2SO.2:low
+
+  y:
+    steps_per_mm: 80.000
+    max_rate_mm_per_min: 10000.000
+    acceleration_mm_per_sec2: 1000.000
+    max_travel_mm: 200.000
+    soft_limits: false
+
+    motor0:
+      hard_limits: false
+      stepstick:
+        step_pin: I2SO.5
+        direction_pin: I2SO.6:low
+
+PWM:
+  pwm_hz: 1000
+  output_pin: gpio.32
+  enable_pin: NO_PIN
+  direction_pin: NO_PIN
+  disable_with_s0: false
+  s0_with_disable: true
+  spinup_ms: 0
+  spindown_ms: 0
+  tool_num: 0
+  speed_map: 0=0% 1000=100%
+  off_on_alarm: true
+
+start:
+  must_home: false
