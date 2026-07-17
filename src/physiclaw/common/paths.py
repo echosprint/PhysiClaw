@@ -24,6 +24,19 @@ Layout::
         │   └── sessions/{README.md, <sid>/{events.jsonl, wire.jsonl, summary.json, images/}}
         ├── runtime/runtime-YYYY-MM-DD.log
         └── claude/claude-YYYY-MM-DD.log
+
+File-format rule — the mix above is deliberate, one format per audience
+(the Python-community split: TOML for what humans edit, JSON for what
+machines write):
+
+    config.toml     the ONE user-edited file → TOML
+    *.json/*.jsonl  machine-written state, caches, and append-only logs
+                    (jq-able; source.json mirrors the upstream manifest
+                    verbatim)
+    *.md            agent-facing documents (memory, jobs, pitfalls)
+
+New files follow this rule; don't convert one format to another for
+uniformity's sake.
 """
 
 import json
