@@ -335,8 +335,8 @@ def prune_builtin_skills(skills: dict) -> dict:
 # tokens that appear in that fenced template (filling is code-block-only, so a
 # prose-only token like <backspace> would never substitute).
 # Skill placeholders use the same `{{token}}` syntax as doctrine's
-# config tokens (prompt._DOCTRINE_TOKENS) — one placeholder style
-# everywhere. Two domains though: doctrine tokens are ALL substituted
+# config tokens (common.doctrine.DOCTRINE_TOKENS) — one placeholder
+# style everywhere. Two domains though: doctrine tokens are ALL substituted
 # (leftovers warn), while skill element tokens are substituted only
 # here, only inside code blocks, only once the layout is learned —
 # elsewhere they stay symbolic and the agent resolves them from

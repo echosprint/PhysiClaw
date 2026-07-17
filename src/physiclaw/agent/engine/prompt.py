@@ -20,43 +20,21 @@ models read the schema reliably opt out via `INLINE_TOOL_INDEX = False`
 
 import hashlib
 import logging
-import re
 from pathlib import Path
 
 from physiclaw.agent.engine import mcp_inventory, memory, screen_layout
-from physiclaw.common.config import CONFIG
+from physiclaw.common.doctrine import fill_tokens
 from physiclaw.common.text import read_text
 
 log = logging.getLogger(__name__)
 
 CONTEXT_DIR = Path(__file__).resolve().parent.parent / "context"
 
-# Engine-enforced thresholds quoted by the doctrine files. Doctrine uses
-# `{{token}}` placeholders so the prompt can never drift from the config
-# the engine actually enforces; substituted on every render (config is
-# process-constant, so the rendered bytes stay cache-stable).
-_DOCTRINE_TOKENS = {
-    "{{same_target_warn}}": str(CONFIG.engine.same_target_warn),
-    "{{same_target_block}}": str(CONFIG.engine.same_target_block),
-    "{{step_stuck_warn}}": str(CONFIG.engine.step_stuck_warn),
-    "{{step_stuck_urgent}}": str(CONFIG.engine.step_stuck_urgent),
-    "{{plan_required_after}}": str(CONFIG.engine.plan_required_after),
-}
-
-
-def _fill_tokens(name: str, body: str) -> str:
-    """Substitute `{{token}}` placeholders; warn on leftovers (a typo'd
-    token would otherwise reach the model as literal braces)."""
-    for token, value in _DOCTRINE_TOKENS.items():
-        body = body.replace(token, value)
-    leftover = re.search(r"\{\{[^}\n]*\}\}|\{\{", body)
-    if leftover:
-        log.warning(
-            "doctrine %s: unresolved placeholder %r",
-            name,
-            leftover.group(),
-        )
-    return body
+# Doctrine quotes engine-enforced thresholds via `{{token}}` placeholders
+# rendered by `common.doctrine.fill_tokens` — shared with the MCP
+# instructions path (`core.server.mcp`), so both deliveries of the same
+# file substitute identically. Config is process-constant, so the
+# rendered bytes stay cache-stable across turns.
 
 
 # OpenClaw-style modular doctrine: each named file is a slot with a defined
@@ -166,7 +144,7 @@ def _load_doctrine_files() -> list[tuple[str, str]]:
             body = read_text(path).rstrip() if path.exists() else ""
         if not body:
             continue
-        out.append((name, _fill_tokens(name, body)))
+        out.append((name, fill_tokens(name, body)))
     return out
 
 

@@ -11,16 +11,24 @@ in-tree agent loads the same file directly as a doctrine slot in
 Keep it focused on cross-tool reasoning: mental model, tool-choice
 trade-offs, operating loop, coordinate conventions, global safety, and
 setup gating. Per-tool mechanics live in `@mcp.tool()` docstrings.
+
+Doctrine `{{token}}`s render here too (`common.doctrine.fill_tokens`,
+the same pass the engine's prompt composer runs) — before this, a
+token in PHYSICLAW.md reached external clients as literal braces.
+Config is process-constant, so rendering once at import is stable.
 """
 
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
+from physiclaw.common.doctrine import fill_tokens
 from physiclaw.common.text import read_text
 
 _PKG_ROOT = Path(__file__).resolve().parents[2]
-_INSTRUCTIONS = read_text(_PKG_ROOT / "agent" / "context" / "PHYSICLAW.md")
+_INSTRUCTIONS = fill_tokens(
+    "PHYSICLAW.md", read_text(_PKG_ROOT / "agent" / "context" / "PHYSICLAW.md")
+)
 
 
 def build_mcp() -> FastMCP:

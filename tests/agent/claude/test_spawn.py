@@ -190,6 +190,17 @@ def test_render_system_prompt_injects_first_run_notice_when_unlearned(
     assert "[First-run setup needed]" in out
 
 
+def test_shipped_claude_md_has_no_unrendered_tokens() -> None:
+    """CLAUDE.md ships raw via `--append-system-prompt` — no render pass
+    runs on it: doctrine `{{token}}`s are filled only by
+    `common.doctrine` (engine SYSTEM + MCP instructions paths), and the
+    claude path's `{{box}}` filling applies to built-in skill code, not
+    this file. Any `{{` here would reach the claude subprocess as
+    literal braces; threshold-quoting prose belongs in the token-
+    rendered doctrine files instead."""
+    assert "{{" not in spawn.CLAUDE_MD.read_text(encoding="utf-8")
+
+
 # ---------- _build_trigger_prompt ----------
 
 

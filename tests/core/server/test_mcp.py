@@ -30,10 +30,14 @@ def test_mcp_instance_name() -> None:
     assert mcp_mod.mcp.name == "physiclaw"
 
 
-def test_instructions_loaded_from_disk() -> None:
+def test_instructions_are_rendered_from_disk() -> None:
     """`PHYSICLAW.md` lives in `physiclaw/agent/context/`; module reads
-    it at import time. Verify the cached _INSTRUCTIONS matches the
-    on-disk content so a typo in the path is caught."""
+    it at import time and renders doctrine `{{token}}`s through the same
+    `common.doctrine.fill_tokens` pass the engine uses. Verify the
+    cached _INSTRUCTIONS matches the rendered on-disk content so both a
+    path typo and a skipped render are caught."""
+    from physiclaw.common.doctrine import fill_tokens
+
     expected = (
         Path(__file__).resolve().parents[3]
         / "src"
@@ -42,7 +46,17 @@ def test_instructions_loaded_from_disk() -> None:
         / "context"
         / "PHYSICLAW.md"
     )
-    assert mcp_mod._INSTRUCTIONS == expected.read_text(encoding="utf-8")
+    assert mcp_mod._INSTRUCTIONS == fill_tokens(
+        "PHYSICLAW.md", expected.read_text(encoding="utf-8")
+    )
+
+
+def test_instructions_render_engine_thresholds() -> None:
+    """The doctrine quotes the same-target hard-block threshold via a
+    `{{token}}`; external clients must receive the rendered number."""
+    from physiclaw.common.config import CONFIG
+
+    assert f"press #{CONFIG.engine.same_target_block}" in mcp_mod._INSTRUCTIONS
 
 
 def test_instructions_non_empty() -> None:
@@ -50,6 +64,15 @@ def test_instructions_non_empty() -> None:
     no cross-tool reasoning to anchor the agent on."""
     assert mcp_mod._INSTRUCTIONS.strip() != ""
     assert len(mcp_mod._INSTRUCTIONS) > 100  # sanity: real content
+
+
+def test_instructions_contain_no_unrendered_tokens() -> None:
+    """The MCP path renders `{{token}}`s at import via
+    `common.doctrine.fill_tokens`, which fails open on unknown tokens
+    (warns, leaves the braces). This pin turns that soft failure hard:
+    a typo'd or unregistered token in PHYSICLAW.md must fail CI, not
+    ship literal braces to external clients."""
+    assert "{{" not in mcp_mod._INSTRUCTIONS
 
 
 def test_pkg_root_resolves_to_physiclaw_package() -> None:

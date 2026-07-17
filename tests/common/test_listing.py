@@ -3,9 +3,9 @@
 The contract lives in one module now, so the round-trip guarantee
 (`format_row` output must parse under the matching regex and never the
 other kind's) is tested next to the grammar. Three doc surfaces quote
-the header verbatim for a model to read; none of their delivery paths
-renders `{{token}}`s, so a parametrized pin holds each copy to the
-constant instead.
+the header verbatim for a model to read; the header stays literal
+prose (not a doctrine `{{token}}` — two of the surfaces have no render
+pass), so a parametrized pin holds each copy to the constant instead.
 """
 
 from __future__ import annotations
@@ -47,9 +47,9 @@ def test_listing_header_bytes_pinned() -> None:
 
 @pytest.mark.parametrize("path", HEADER_COPIES, ids=lambda p: p.name)
 def test_listing_header_quoted_verbatim_in_doc_surfaces(path: Path) -> None:
-    """Each doc surface quotes the header as plain text (no render-time
-    substitution on its delivery path), so this pin is what keeps every
-    copy true to the constant."""
+    """Each doc surface quotes the header as literal prose — it is not
+    a doctrine `{{token}}` (two of the three surfaces have no render
+    pass) — so this pin is what keeps every copy true to the constant."""
     assert LISTING_HEADER in read_text(path)
 
 

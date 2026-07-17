@@ -9,11 +9,11 @@ parser change are the same edit.
 Three doc surfaces quote `LISTING_HEADER` verbatim for a model to read:
 the doctrine (`agent/context/PHYSICLAW.md` § Element listing), the
 `peek` tool docstring (`core/server/tools.py`), and the claude-engine
-doctrine (`agent/claude/CLAUDE.md`). Those copies stay literal because
-each ships on a delivery path that renders no `{{token}}`s today
-(`core.server.mcp` reads the doctrine raw; tool docstrings go out as-is)
-— so `tests/common/test_listing.py` pins all three against this
-constant instead.
+doctrine (`agent/claude/CLAUDE.md`). Those copies stay literal rather
+than becoming a `{{token}}`: only the doctrine path renders tokens
+(`common.doctrine`), while tool docstrings and CLAUDE.md ship as-is —
+so `tests/common/test_listing.py` pins all three against this constant
+instead.
 
 Dependency-free on purpose: core composes, engine parses, and neither
 should drag the other's imports (cv2 on one side, provider stack on the
