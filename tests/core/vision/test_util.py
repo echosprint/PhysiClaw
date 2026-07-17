@@ -15,6 +15,7 @@ import cv2
 import numpy as np
 import pytest
 
+from physiclaw.common.listing import LISTING_HEADER, format_row
 from physiclaw.core.vision.util import (
     bbox_on_screen,
     check_phone_in_frame,
@@ -140,12 +141,12 @@ def test_compact_json_uses_ensure_ascii_false_for_non_ascii() -> None:
 
 
 def test_format_elements_header_always_present() -> None:
-    assert format_elements([]).startswith(
-        'id [kind] "label" [left,top,right,bottom] conf'
-    )
+    # The grammar bytes themselves are pinned in tests/common/test_listing.py;
+    # here we assert only that the composer opens with the shared header.
+    assert format_elements([]) == LISTING_HEADER
 
 
-def test_format_elements_renders_one_line_per_item_with_3_decimal_bbox() -> None:
+def test_format_elements_renders_one_row_per_item_via_shared_grammar() -> None:
     items = [
         {
             "id": 1,
@@ -158,7 +159,10 @@ def test_format_elements_renders_one_line_per_item_with_3_decimal_bbox() -> None
 
     out = format_elements(items)
 
-    assert out.endswith('1 [icon] "settings" [0.100,0.200,0.300,0.400] 0.88')
+    assert out.splitlines() == [
+        LISTING_HEADER,
+        format_row(1, "icon", "settings", [0.1, 0.2, 0.3, 0.4], 0.875),
+    ]
 
 
 def test_format_elements_handles_missing_or_none_label_as_empty_string() -> None:
