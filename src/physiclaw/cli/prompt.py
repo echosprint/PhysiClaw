@@ -81,7 +81,7 @@ def request(save_as: _SaveAs = None) -> None:
     triggers = [Trigger(description="phone screen changed", source="phone")]
     messages = assemble.build_initial_messages(triggers, bundle.system_prompt)
 
-    # Mirror `_loop`'s turn-0: tick the plan, then pin the same tail slots.
+    # Mirror `loop.drive`'s turn-0: tick the plan, then pin the same tail slots.
     session = Session()
     session.plan.tick_turn()
     messages = assemble.apply_request_tails(

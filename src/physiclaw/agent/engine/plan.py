@@ -64,7 +64,7 @@ DEFAULT_STATE_AFTER = CONFIG.engine.state_decay_turns
 STEP_STUCK_WARN = CONFIG.engine.step_stuck_warn
 STEP_STUCK_URGENT = CONFIG.engine.step_stuck_urgent
 # From this turn the engine's plan gate blocks action tools while the plan
-# is undrafted (engine._dispatch enforces; the default-state tip warns).
+# is undrafted (policy.PlanGate enforces at dispatch; the default-state tip warns).
 PLAN_REQUIRED_AFTER = CONFIG.engine.plan_required_after
 
 

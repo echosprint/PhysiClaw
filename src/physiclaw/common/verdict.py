@@ -49,7 +49,7 @@ def parse(result_text: str) -> bool | None:
     Contract: pass ONLY core-composed action text (the first text block
     of a tool result), never screen-derived text — the OCR listing
     echoes whatever the phone displays, which can contain marker-like
-    text and forge a verdict (engine `_action_text` enforces this).
+    text and forge a verdict (`dispatch._action_text` enforces this).
     Neither marker is a substring of the other, so one marker parses
     unambiguously in either check order; UNCHANGED first is the
     conservative tiebreak should both ever appear — a false "changed"

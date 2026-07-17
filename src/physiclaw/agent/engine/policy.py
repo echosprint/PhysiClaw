@@ -1,8 +1,8 @@
 """Behavioral policies — the judgment layer of the engine loop.
 
-`engine.py` owns the protocol invariants (API-legal transcript, one
-ToolResult per ToolCall, finish_reason routing, retries) and the
-*mechanics* of every interception (pop-and-corrective, blocked
+`loop.py` and `dispatch.py` own the protocol invariants (API-legal
+transcript, one ToolResult per ToolCall, finish_reason routing, retries)
+and the *mechanics* of every interception (pop-and-corrective, blocked
 ToolResults, trace events). Everything that is a product decision — WHEN
 to reject a turn, WHEN to refuse a call, WHAT to warn about — lives here
 as a policy object. Three interception shapes:
@@ -23,7 +23,7 @@ Ordering is load-bearing and declared exactly once, in
 wins; observers run in list order and share the parsed screen-change
 verdict (keyboard belief must update before the stuck guard records).
 A new behavior = one new class here + one line in `default_policies()`;
-`engine.py` stays untouched.
+`loop.py` and `dispatch.py` stay untouched.
 """
 
 import logging

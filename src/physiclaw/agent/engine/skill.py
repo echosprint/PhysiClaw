@@ -200,7 +200,7 @@ def _scan_root(root: Path, out: dict[str, Skill], *, source: str = "user") -> No
 
 def dispatch(skills: dict[str, Skill], args: dict) -> str:
     """Route a Skill() invocation by exact name. Raises ValueError /
-    FileNotFoundError on bad input so the engine's _dispatch marks the
+    FileNotFoundError on bad input so `dispatch.dispatch` marks the
     tool_result as is_error=True (principle 5).
 
     A miss that names a BUILT-IN skill gets a redirecting error instead

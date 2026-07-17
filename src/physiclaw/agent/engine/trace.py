@@ -208,7 +208,7 @@ def _ensure_sessions_readme() -> None:
         log.debug("sessions README write failed", exc_info=True)
 
 
-# ---------- public formatting helpers (shared with engine.py) ----------
+# ---------- public formatting helpers (shared with dispatch.py) ----------
 
 
 def brief(value: Any, limit: int = 80) -> str:
@@ -251,9 +251,9 @@ def format_call_result(tool_name: str, text: str) -> str:
 
 def brief_content(content: Any) -> str:
     """Compact summary of a `ToolResultMessage.content` (DTO) or an MCP
-    blocks list (raw dicts). Handles both because `_dispatch` summarizes
-    after MCP→DTO conversion, but tools that bypass that path still pass
-    raw blocks through."""
+    blocks list (raw dicts). Handles both because `dispatch.dispatch`
+    summarizes after MCP→DTO conversion, but tools that bypass that path
+    still pass raw blocks through."""
     from physiclaw.agent.engine.dto import ImageBlock, TextBlock
 
     if isinstance(content, str):
@@ -401,7 +401,7 @@ _CORRECTIVE_EVENTS = frozenset(
         "memory_cue_checkpoint",
     }
 )
-# Events that mirror a `session.stuck_events += 1` in engine.py — keep in
+# Events that mirror a `session.stuck_events += 1` in policy.py — keep in
 # sync with those increment sites.
 _STUCK_EVENTS = frozenset({"stuck_warning", "tool_blocked_stuck"})
 _BLOCKED_KEYS = {
@@ -414,7 +414,7 @@ _BLOCKED_KEYS = {
 class _Summary:
     """Accumulates session metrics from the events flowing through
     `Trace.write` — zero extra plumbing in the engine; everything in
-    summary.json is derivable from the stream (engine.py enriches two
+    summary.json is derivable from the stream (loop.py enriches two
     events for it: `response.elapsed_ms` and `cache.out`)."""
 
     def __init__(self, sid: str):

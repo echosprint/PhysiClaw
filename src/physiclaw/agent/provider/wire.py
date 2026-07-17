@@ -4,7 +4,7 @@ Two transformation directions:
 
   - **MCP → DTO**: `mcp_blocks_to_content_blocks` converts MCP tool-result
     content blocks into engine-native `ContentBlock`s (TextBlock,
-    ImageBlock). Used by `engine._dispatch` when wrapping an MCP response
+    ImageBlock). Used by `engine.dispatch` when wrapping an MCP response
     into a `ToolResultMessage`. Image bytes get scaled here once, on the
     way into history.
 

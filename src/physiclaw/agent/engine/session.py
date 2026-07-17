@@ -29,7 +29,7 @@ class Session:
     # engine ends this session and re-runs the same triggers from scratch so
     # the fresh SYSTEM prompt carries the learned layout for the real task.
     restart_for_setup: bool = False
-    # Set by `engine._close_budget_exhausted` when the session's wall-clock
+    # Set by `loop._close_budget_exhausted` when the session's wall-clock
     # budget runs out: the STUCK it closes with must not be retried (the
     # outcome contract reads this as `retryable=False`).
     budget_exhausted: bool = False

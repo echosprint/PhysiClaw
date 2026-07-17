@@ -3,7 +3,7 @@
 Everything here runs without an MCP connection or a provider: discover
 skills, build the local tool registry, render the SYSTEM prompt, compose
 the wake user-message, and pin the per-turn tail slots. Shared by the
-engine (`engine._run_session` / `engine._prepare_request`) and the
+engine (`engine._run_session` / `loop._prepare_request`) and the
 `physiclaw prompt` dump (`cli/prompt.py`), so a dump can never drift from
 the wire the running agent actually sends.
 """
@@ -109,7 +109,7 @@ def apply_request_tails(
     pre-compression checkpoint notice (`compaction_keep` set = this is a
     `collapse_pending` turn), and (while first-run setup is pending) the
     layout reminder — the LAST things the model sees. Shared by
-    `engine._prepare_request` and the `prompt` dump so a turn-0 dump matches
+    `loop._prepare_request` and the `prompt` dump so a turn-0 dump matches
     the wire the engine sends. Does not mutate `messages`."""
     out = scratchpad.inject_tail(messages, session.scratchpad)
     out = plan.inject_tail(out, session.plan)

@@ -163,7 +163,7 @@ class EngineConfig:
     # the counter resets on every tick, so 8 stays quiet on healthy steps.
     step_stuck_warn: int = 8
     step_stuck_urgent: int = 12
-    # Plan gate (agent.engine.engine._dispatch): after this many turns a
+    # Plan gate (agent.engine.dispatch, via policy.PlanGate): after this many turns a
     # session with no drafted plan has every tool blocked except
     # note / update_progress / end_session. Must exceed a legitimate
     # plan-less idle wake (peek IM → nothing → close) and the reminder
