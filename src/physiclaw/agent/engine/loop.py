@@ -199,10 +199,7 @@ def _prepare_request(
     # the request carries a ⚠ tail and the turn's note must bank state into the
     # scratchpad (enforced by policy.CompactionCheckpoint).
     compaction_imminent = compact.collapse_pending(
-        messages,
-        first_at=run.provider.COLLAPSE_FIRST_AT_TURN,
-        interval=run.provider.COLLAPSE_INTERVAL_TURNS,
-        keep=run.provider.KEEP_RECENT_TURNS,
+        messages, policy=run.provider.COLLAPSE
     )
     # First-run reminder is empty once learned, and a session that started
     # learned stays learned — so the per-turn disk read is skipped entirely
@@ -211,9 +208,7 @@ def _prepare_request(
         messages,
         session,
         layout_incomplete=run.layout_incomplete,
-        compaction_keep=(
-            run.provider.KEEP_RECENT_TURNS if compaction_imminent else None
-        ),
+        compaction_keep=(run.provider.COLLAPSE.keep if compaction_imminent else None),
     )
     # Cache markers + the actual wire format are the provider's business now;
     # log the wire form for debugging by asking the provider to serialize once.
@@ -462,12 +457,7 @@ def _finalize_turn(
         scratchpad_written=scratchpad_written,
     )
     compact.drop_stale_screens(messages)
-    compact.collapse_old_turns(
-        messages,
-        first_at=run.provider.COLLAPSE_FIRST_AT_TURN,
-        interval=run.provider.COLLAPSE_INTERVAL_TURNS,
-        keep=run.provider.KEEP_RECENT_TURNS,
-    )
+    compact.collapse_old_turns(messages, policy=run.provider.COLLAPSE)
     for gate in run.policies.turn_gates:
         gate.on_turn_complete()
 

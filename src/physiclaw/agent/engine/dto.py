@@ -182,6 +182,49 @@ class ToolResultMessage:
 Message = Union[SystemMessage, UserMessage, AssistantMessage, ToolResultMessage]
 
 
+# ---------- collapse policy ----------
+
+
+@dataclass(frozen=True)
+class CollapsePolicy:
+    """Turn-age collapse cadence — see `compact.collapse_old_turns`.
+
+      first_at  — first collapse fires at this complete-turn count
+      keep      — recent turns kept intact per collapse
+      interval  — cadence between subsequent collapses (keep + interval)
+
+    One value object instead of three loose ints so the invariants are
+    checked where a bad triple is declared: providers construct their
+    `COLLAPSE` as a class attribute, so a vendor override that would
+    IndexError mid-session (`collapse_old_turns` cuts at
+    `turn_starts[-keep]`, so `keep` may not exceed `first_at`) fails at
+    import instead. Default values and the per-vendor economics behind
+    them live on `BaseProvider.COLLAPSE`.
+
+    Lives in dto.py rather than compact.py (which owns the collapse
+    semantics) because dto.py is the shared type vocabulary the provider
+    layer already imports for the message DTOs — a config value type
+    belongs with the types, not with the behavior module that consumes
+    it. This is a cohesion choice, not an import-weight one: the
+    provider package already pulls compact (and with it cv2/numpy) at
+    import time via `wire.py`'s use of `compact.scale_image_bytes`.
+    """
+
+    first_at: int
+    keep: int
+    interval: int
+
+    def __post_init__(self) -> None:
+        if not 1 <= self.keep <= self.first_at:
+            raise ValueError(
+                f"CollapsePolicy: keep={self.keep} must be in "
+                f"[1, first_at={self.first_at}] — the collapse cuts at "
+                "turn_starts[-keep] once first_at turns accumulate"
+            )
+        if self.interval < 1:
+            raise ValueError(f"CollapsePolicy: interval={self.interval} must be >= 1")
+
+
 # ---------- ToolResult (legacy alias for ToolResultMessage) ----------
 # Pre-DTO-refactor short name. Engine + provider code migrated to the
 # fully-qualified `ToolResultMessage`; only test fixtures still
@@ -202,4 +245,5 @@ __all__ = [
     "ToolResultMessage",
     "ToolResult",  # alias — see note above
     "Message",
+    "CollapsePolicy",
 ]

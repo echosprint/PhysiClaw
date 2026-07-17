@@ -22,8 +22,8 @@ markers, every wake hits cache up to the marked anchors. The earlier
 "K2 is purely auto-prefix, markers redundant" reading turned out to
 match only the byte-identical case.
 
-Collapse cadence: inherits the base defaults (COLLAPSE_INTERVAL_TURNS
-= 20) — same cadence as Anthropic/Qwen. The whole-prefix invalidation
+Collapse cadence: inherits the base default `COLLAPSE` policy
+(interval = 20) — same cadence as Anthropic/Qwen. The whole-prefix invalidation
 on K2.x makes each collapse more expensive than for anchored caches,
 but a longer interval (was 30) noticeably hurt context-length quality
 on long sessions; 20 keeps the prompt tighter at the cost of one extra

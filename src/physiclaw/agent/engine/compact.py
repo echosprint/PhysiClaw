@@ -34,7 +34,6 @@ stub via the typed flag — no string parsing across modules.
 
 import json
 import logging
-import re
 
 import cv2
 import numpy as np
@@ -42,6 +41,7 @@ import numpy as np
 from physiclaw.agent.engine import memory
 from physiclaw.agent.engine.dto import (
     AssistantMessage,
+    CollapsePolicy,
     ContentBlock,
     ImageBlock,
     Message,
@@ -51,6 +51,7 @@ from physiclaw.agent.engine.dto import (
     UserMessage,
 )
 from physiclaw.common.config import CONFIG
+from physiclaw.common.listing import ICON_ROW_RE, LISTING_HEADER, TEXT_ROW_RE
 
 log = logging.getLogger(__name__)
 
@@ -66,22 +67,6 @@ STUB_PREFIX = "(superseded "
 # on-screen labels only, in their original order, so it doesn't mistake a
 # bare label list for the current screen or try to re-tap a vanished bbox.
 STUB_NOTE = " — labels only, in order"
-
-# The element-listing shape produced by `core.vision.util.format_elements`
-# — keep the header string and the row regexes in sync with that formatter.
-_LISTING_HEADER = 'id [kind] "label" [left,top,right,bottom] conf'
-# Prefix matcher — "is this line an element row?" (kept for the non-row
-# line strategy in tests; `_stub_body` itself uses the full-shape regexes
-# below so its output is stable under re-application).
-_ROW_RE = re.compile(r"^\d+ \[(icon|text)\] ")
-# Full-shape matchers. `_TEXT_ROW_RE` captures the label (group 1); the
-# greedy `.*` plus a `]`-free bbox class lets a label carry quotes and
-# brackets (`He said "hi" [ok]`) yet still peel off the trailing bbox +
-# confidence. `_ICON_ROW_RE` requires the empty-label icon shape so a
-# stubbed label that merely *looks* icon-ish isn't re-dropped on a second
-# pass (idempotency).
-_TEXT_ROW_RE = re.compile(r'^\d+ \[text\] "(.*)" \[[^\]]*\] [0-9.]+\s*$')
-_ICON_ROW_RE = re.compile(r'^\d+ \[icon\] "" \[[^\]]*\] [0-9.]+\s*$')
 
 
 # ---------- summary collapse (turn-age pruning) ----------
@@ -121,19 +106,6 @@ SKILL_TOOL_NAMES = frozenset({"Skill"})
 # range is `[_FIRST_TURN_INDEX:cut]`.
 _FIRST_TURN_INDEX = 5
 
-# Three knobs for collapse behavior, all on the `Provider` class:
-#
-#   F = COLLAPSE_FIRST_AT_TURN     first collapse fires at this turn
-#   K = KEEP_RECENT_TURNS          recent turns kept intact per collapse
-#   I = COLLAPSE_INTERVAL_TURNS    cadence between subsequent collapses
-#
-# Defaults (F=30, K=10, I=20) are an EOQ optimum for vendors with
-# anchored caches (Anthropic/Qwen). Moonshot accepts the same I=20
-# despite its whole-prefix cache invalidation — the EOQ analysis
-# alone would suggest I≈30 there, but the tighter prompt at I=20
-# wins on long-session quality. See `MoonshotProvider` for the
-# trade-off rationale.
-
 
 def new_summary_placeholder() -> UserMessage:
     """The pre-allocated summary slot. Engine bootstrap puts this at
@@ -169,7 +141,7 @@ def new_skills_placeholder() -> UserMessage:
 
 
 def _trigger_threshold(
-    messages: list[Message], *, first_at: int, interval: int, keep: int
+    messages: list[Message], *, policy: CollapsePolicy
 ) -> int | None:
     """The complete-turn count at which a collapse fires, or None when
     the pre-allocated slots are missing. ONE source of truth shared by
@@ -183,15 +155,13 @@ def _trigger_threshold(
     ):
         return None
     is_first = messages[2].content == SUMMARY_INITIAL
-    return first_at if is_first else keep + interval
+    return policy.first_at if is_first else policy.keep + policy.interval
 
 
 def collapse_pending(
     messages: list[Message],
     *,
-    first_at: int,
-    interval: int,
-    keep: int,
+    policy: CollapsePolicy,
 ) -> bool:
     """True when the turn ABOUT to run will, once complete, trigger
     `collapse_old_turns` — i.e. this is the model's LAST turn with the
@@ -201,12 +171,7 @@ def collapse_pending(
 
     Same threshold as the collapse itself; the +1 counts the upcoming
     turn. Missing slots → False (collapse would refuse too)."""
-    threshold = _trigger_threshold(
-        messages,
-        first_at=first_at,
-        interval=interval,
-        keep=keep,
-    )
+    threshold = _trigger_threshold(messages, policy=policy)
     if threshold is None:
         return False
     turns = sum(isinstance(m, AssistantMessage) for m in messages)
@@ -235,11 +200,9 @@ def inject_checkpoint_tail(messages: list[Message], *, keep: int) -> list[Messag
 def collapse_old_turns(
     messages: list[Message],
     *,
-    first_at: int,
-    interval: int,
-    keep: int,
+    policy: CollapsePolicy,
 ) -> None:
-    """Fold turns older than `keep` into three slots:
+    """Fold turns older than `policy.keep` into three slots:
       - `messages[2]` — `note(summary=...)` bullets
       - `messages[3]` — `read_memory` / `read_logs` results in full
       - `messages[4]` — `Skill(...)` bodies + references in full
@@ -249,13 +212,12 @@ def collapse_old_turns(
     collapsed too — no API-rejecting orphans.
 
     Trigger:
-      - First collapse: when complete-turn count reaches `first_at`.
-      - Subsequent: when count reaches `keep + interval`.
+      - First collapse: when complete-turn count reaches `policy.first_at`.
+      - Subsequent: when count reaches `policy.keep + policy.interval`.
 
-    All three knobs come from the active provider's class attributes
-    (`COLLAPSE_FIRST_AT_TURN`, `KEEP_RECENT_TURNS`, `COLLAPSE_INTERVAL_TURNS`).
-    The engine threads them through; this function stays vendor-
-    agnostic.
+    The policy comes from the active provider's `COLLAPSE` class
+    attribute (a validated `CollapsePolicy`). The engine threads it
+    through; this function stays vendor-agnostic.
 
     "First vs subsequent" is detected by the summary slot's content —
     the placeholder body persists until the first collapse rewrites it.
@@ -272,14 +234,10 @@ def collapse_old_turns(
     Each collapse mutates the prefix bytes between system and the next
     stub anchor → triggers one cache_creation event. The vendor's
     defaults amortize this tax against the bounded-prompt savings
-    (EOQ analysis in this file's module-level comment).
+    (EOQ analysis at `BaseProvider.COLLAPSE`; `MoonshotProvider` for
+    the whole-prefix-invalidation trade-off).
     """
-    threshold = _trigger_threshold(
-        messages,
-        first_at=first_at,
-        interval=interval,
-        keep=keep,
-    )
+    threshold = _trigger_threshold(messages, policy=policy)
     if threshold is None:
         log.warning("collapse_old_turns: missing summary/memory/skill slots")
         return
@@ -288,7 +246,7 @@ def collapse_old_turns(
     if len(turn_starts) < threshold:
         return
 
-    cut = turn_starts[-keep]
+    cut = turn_starts[-policy.keep]
 
     # Carry forward existing slot bodies so running history stays
     # continuous across multiple collapse events.
@@ -432,25 +390,25 @@ def _stub_body(text: str) -> str:
     survives verbatim as decision history, and a blank line sets it off
     from the label block.
 
-    Format coupling: `_LISTING_HEADER` / `_TEXT_ROW_RE` / `_ICON_ROW_RE`
-    mirror the shape produced by `physiclaw.core.vision.util.format_elements`;
-    sequence step lines (`1 tap ok — …`) lack a quoted label + bbox and are
-    kept. Output is stable under re-application — a bare label can't match a
-    full-shape row regex unless it is itself a complete row, which OCR never
-    produces.
+    The listing grammar (`LISTING_HEADER` / `TEXT_ROW_RE` / `ICON_ROW_RE`)
+    is shared with its composer, `core.vision.util.format_elements`, via
+    `physiclaw.common.listing`; sequence step lines (`1 tap ok — …`) lack
+    a quoted label + bbox and are kept. Output is stable under
+    re-application — a bare label can't match a full-shape row regex
+    unless it is itself a complete row, which OCR never produces.
     """
     pre: list[str] = []  # action result + verdict + sequence steps
     labels: list[str] = []  # surviving [text] labels, in listing order
     for line in text.splitlines():
-        if line == _LISTING_HEADER:
+        if line == LISTING_HEADER:
             continue  # names columns that no longer exist
-        m = _TEXT_ROW_RE.match(line)
+        m = TEXT_ROW_RE.match(line)
         if m:
             label = m.group(1)
             if label:  # drop empty-label text rows — no content to keep
                 labels.append(label)
             continue
-        if _ICON_ROW_RE.match(line):
+        if ICON_ROW_RE.match(line):
             continue  # opaque without the image, and label-less
         pre.append(line)
     pre_s = "\n".join(pre).strip()

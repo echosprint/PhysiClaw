@@ -27,6 +27,7 @@ from physiclaw.agent.engine import memory as memory_mod
 from physiclaw.agent.engine.builtin_tool import LocalTool
 from physiclaw.agent.engine.dto import (
     AssistantMessage,
+    CollapsePolicy,
     FinishReason,
     SystemMessage,
     ToolResultMessage,
@@ -157,9 +158,7 @@ class CheckpointProvider(FakeProvider):
     """Collapse knobs small enough to hit the checkpoint turn in a short
     scripted session; records every request for tail assertions."""
 
-    COLLAPSE_FIRST_AT_TURN = 2
-    COLLAPSE_INTERVAL_TURNS = 100
-    KEEP_RECENT_TURNS = 1
+    COLLAPSE = CollapsePolicy(first_at=2, keep=1, interval=100)
 
     def __init__(self, responses):
         super().__init__(responses)
@@ -270,7 +269,7 @@ async def test_checkpoint_corrective_renews_per_collapse_event() -> None:
     # retry must renew per collapse event (completed turn), not once per
     # session, or every compression after the first gets no checkpoint.
     class TightProvider(CheckpointProvider):
-        COLLAPSE_INTERVAL_TURNS = 1
+        COLLAPSE = CollapsePolicy(first_at=2, keep=1, interval=1)
 
     def _plain_turn():
         return _asst(tool_calls=[_tc("note", {"summary": "s"}), _tc("peek")])

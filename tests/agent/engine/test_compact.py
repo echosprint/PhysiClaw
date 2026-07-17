@@ -44,6 +44,7 @@ from physiclaw.agent.engine.compact import (
 )
 from physiclaw.agent.engine.dto import (
     AssistantMessage,
+    CollapsePolicy,
     FinishReason,
     ImageBlock,
     Message,
@@ -53,6 +54,12 @@ from physiclaw.agent.engine.dto import (
     ToolResultMessage,
     UserMessage,
 )
+from physiclaw.common.listing import LISTING_HEADER, ROW_RE, format_row
+
+# Canonical tight cadence for collapse tests: first collapse at 3
+# complete turns, keep 1. Tests exercising a DIFFERENT triple
+# construct it inline so the deviation stands out.
+TIGHT_POLICY = CollapsePolicy(first_at=3, keep=1, interval=10)
 
 # ---------- placeholder constructors ----------
 
@@ -460,7 +467,9 @@ def test_collapse_old_turns_warns_when_slots_missing(
     msgs: list[Message] = [SystemMessage(content="s"), UserMessage(content="u")]
 
     with caplog.at_level(logging.WARNING, logger="physiclaw.agent.engine.compact"):
-        collapse_old_turns(msgs, first_at=10, interval=10, keep=5)
+        collapse_old_turns(
+            msgs, policy=CollapsePolicy(first_at=10, keep=5, interval=10)
+        )
 
     assert any(
         "missing summary/memory/skill slots" in r.getMessage() for r in caplog.records
@@ -481,7 +490,7 @@ def test_collapse_no_op_when_below_first_at_threshold() -> None:
     msgs = _scaffold_with_slots()
     snapshot = list(msgs)
 
-    collapse_old_turns(msgs, first_at=10, interval=5, keep=3)
+    collapse_old_turns(msgs, policy=CollapsePolicy(first_at=10, keep=3, interval=5))
 
     assert msgs == snapshot
 
@@ -508,7 +517,7 @@ def test_collapse_first_collapse_harvests_note_summaries_into_slot() -> None:
     for s in ("step-a", "step-b", "step-c", "step-d"):
         msgs.extend(_note_turn(s))
 
-    collapse_old_turns(msgs, first_at=3, interval=10, keep=1)
+    collapse_old_turns(msgs, policy=TIGHT_POLICY)
 
     # Slot at index 2 now contains the summaries.
     summary = msgs[2]
@@ -537,7 +546,7 @@ def test_collapse_no_op_when_no_salvageable_content() -> None:
 
     snapshot = [(m.__class__, getattr(m, "content", None)) for m in msgs]
 
-    collapse_old_turns(msgs, first_at=3, interval=10, keep=1)
+    collapse_old_turns(msgs, policy=TIGHT_POLICY)
 
     assert [(m.__class__, getattr(m, "content", None)) for m in msgs] == snapshot
 
@@ -557,7 +566,7 @@ def test_collapse_harvests_memory_tool_results() -> None:
         msgs.append(ToolResultMessage(tool_call_id=f"r{i}", content=f"value-{i}"))
     msgs.extend(_note_turn("step-keep"))  # latest kept turn
 
-    collapse_old_turns(msgs, first_at=3, interval=10, keep=1)
+    collapse_old_turns(msgs, policy=TIGHT_POLICY)
 
     memory_slot = msgs[3]
     assert isinstance(memory_slot, UserMessage)
@@ -581,7 +590,7 @@ def test_collapse_harvests_skill_tool_results() -> None:
     for s in ("a", "b", "c"):
         msgs.extend(_note_turn(s))
 
-    collapse_old_turns(msgs, first_at=3, interval=10, keep=1)
+    collapse_old_turns(msgs, policy=TIGHT_POLICY)
 
     skill_slot = msgs[4]
     assert isinstance(skill_slot, UserMessage)
@@ -599,7 +608,7 @@ def test_collapse_subsequent_collapse_uses_keep_plus_interval_threshold() -> Non
         msgs.extend(_note_turn(s))
 
     # keep+interval = 1+5 = 6 turns needed before subsequent fires.
-    collapse_old_turns(msgs, first_at=100, interval=5, keep=1)
+    collapse_old_turns(msgs, policy=CollapsePolicy(first_at=100, keep=1, interval=5))
 
     summary = msgs[2]
     assert isinstance(summary, UserMessage)
@@ -629,7 +638,7 @@ def test_collapse_skips_when_artifact_result_is_error() -> None:
     for s in ("a", "b", "c"):
         msgs.extend(_note_turn(s))
 
-    collapse_old_turns(msgs, first_at=3, interval=10, keep=1)
+    collapse_old_turns(msgs, policy=TIGHT_POLICY)
 
     skill_slot = msgs[4]
     assert isinstance(skill_slot, UserMessage)
@@ -642,7 +651,10 @@ def test_collapse_skips_when_artifact_result_is_error() -> None:
 
 def test_collapse_pending_false_when_slots_missing() -> None:
     msgs: list[Message] = [SystemMessage(content="s"), UserMessage(content="u")]
-    assert collapse_pending(msgs, first_at=1, interval=1, keep=1) is False
+    assert (
+        collapse_pending(msgs, policy=CollapsePolicy(first_at=1, keep=1, interval=1))
+        is False
+    )
 
 
 def test_collapse_pending_predicts_first_collapse_exactly() -> None:
@@ -651,9 +663,9 @@ def test_collapse_pending_predicts_first_collapse_exactly() -> None:
     # turn earlier it isn't.
     msgs = _scaffold_with_slots()
     msgs.extend(_note_turn("a"))
-    assert collapse_pending(msgs, first_at=3, interval=10, keep=1) is False
+    assert collapse_pending(msgs, policy=TIGHT_POLICY) is False
     msgs.extend(_note_turn("b"))
-    assert collapse_pending(msgs, first_at=3, interval=10, keep=1) is True
+    assert collapse_pending(msgs, policy=TIGHT_POLICY) is True
 
 
 def test_collapse_pending_agrees_with_collapse_trigger() -> None:
@@ -662,9 +674,9 @@ def test_collapse_pending_agrees_with_collapse_trigger() -> None:
     msgs = _scaffold_with_slots()
     for s in ("a", "b"):
         msgs.extend(_note_turn(s))
-    assert collapse_pending(msgs, first_at=3, interval=10, keep=1) is True
+    assert collapse_pending(msgs, policy=TIGHT_POLICY) is True
     msgs.extend(_note_turn("c"))
-    collapse_old_turns(msgs, first_at=3, interval=10, keep=1)
+    collapse_old_turns(msgs, policy=TIGHT_POLICY)
     assert SUMMARY_HEADER in msgs[2].content
     assert "- a" in msgs[2].content
 
@@ -675,13 +687,13 @@ def test_collapse_pending_switches_threshold_after_first_collapse() -> None:
     msgs = _scaffold_with_slots()
     for s in ("a", "b", "c", "d"):
         msgs.extend(_note_turn(s))
-    collapse_old_turns(msgs, first_at=3, interval=10, keep=1)
+    collapse_old_turns(msgs, policy=TIGHT_POLICY)
     # 1 turn kept; threshold now keep+interval=11 → far from pending.
-    assert collapse_pending(msgs, first_at=3, interval=10, keep=1) is False
+    assert collapse_pending(msgs, policy=TIGHT_POLICY) is False
     for i in range(9):
         msgs.extend(_note_turn(f"t{i}"))
     # 10 complete turns; the upcoming one is the 11th → pending.
-    assert collapse_pending(msgs, first_at=3, interval=10, keep=1) is True
+    assert collapse_pending(msgs, policy=TIGHT_POLICY) is True
 
 
 def test_inject_checkpoint_tail_appends_notice_last() -> None:
@@ -701,9 +713,10 @@ def test_inject_checkpoint_tail_appends_notice_last() -> None:
 
 
 def test_stub_body_against_real_format_elements_output() -> None:
-    """The format coupling test: `_LISTING_HEADER` / `_ROW_RE` mirror
-    `core.vision.util.format_elements` — run the REAL formatter's output
-    through `_stub_body` so a formatter change breaks here, not in prod."""
+    """End-to-end guard on the shared listing grammar: run the REAL
+    formatter's output through `_stub_body`. The grammar itself lives in
+    `common.listing` (one definition for composer and parser); this test
+    keeps the behavioral round-trip honest."""
     from physiclaw.core.vision.util import format_elements
 
     listing = format_elements(
@@ -747,7 +760,7 @@ def test_stub_body_against_real_format_elements_output() -> None:
     assert 'He said "hi" [ok]' in out  # label w/ quotes+brackets peeled off whole
     assert "[icon]" not in out  # icon rows dropped
     assert "[text]" not in out  # kind tag dropped
-    assert compact._LISTING_HEADER not in out  # header dropped
+    assert LISTING_HEADER not in out  # header dropped
     assert "0.99" not in out  # bbox + confidence dropped
     # Labels emitted in listing order, one per line.
     assert '加入购物车\nHe said "hi" [ok]' in out
@@ -786,7 +799,7 @@ _non_row_line = st.text(
         blacklist_characters=_LINE_BREAKS,
     ),
     max_size=80,
-).filter(lambda s: not compact._ROW_RE.match(s) and s != compact._LISTING_HEADER)
+).filter(lambda s: not ROW_RE.match(s) and s != LISTING_HEADER)
 
 
 @given(st.lists(_non_row_line, max_size=12))
@@ -800,7 +813,9 @@ def test_stub_body_preserves_all_non_listing_lines(lines) -> None:
 
 
 def _row(id_: int, kind: str, label: str) -> str:
-    return f'{id_} [{kind}] "{label}" [0.100,0.200,0.300,0.400] 0.90'
+    # Delegate to the real composer so these strategies can never feed
+    # `_stub_body` a row shape `format_elements` no longer produces.
+    return format_row(id_, kind, label, [0.1, 0.2, 0.3, 0.4], 0.9)
 
 
 @given(
@@ -821,7 +836,7 @@ def _row(id_: int, kind: str, label: str) -> str:
 def test_stub_body_keeps_exactly_the_text_rows(kinds, label) -> None:
     # Icon rows carry an empty label in real formatter output.
     rows = [_row(i, k, label if k == "text" else "") for i, k in enumerate(kinds)]
-    text = compact._LISTING_HEADER + "\n" + "\n".join(rows)
+    text = LISTING_HEADER + "\n" + "\n".join(rows)
 
     out = _stub_body(text)
 
@@ -843,7 +858,7 @@ def test_stub_body_emitted_label_never_contains_a_newline(label) -> None:
     line break splits the row and can't round-trip as one label — it falls
     through to the preamble instead. Locks the invariant against a future
     switch to `re.DOTALL` / away from `splitlines()`."""
-    out = _stub_body(compact._LISTING_HEADER + "\n" + _row(0, "text", label))
+    out = _stub_body(LISTING_HEADER + "\n" + _row(0, "text", label))
     if any(brk in label for brk in _LINE_BREAKS):
         assert label not in out.splitlines()  # split apart, not a clean label
     else:
@@ -895,7 +910,7 @@ def test_drop_stale_screens_engine_loop_invariant() -> None:
             _view_result(
                 tcid,
                 f"{tool} result | screen: changed\n"
-                f"{compact._LISTING_HEADER}\n"
+                f"{LISTING_HEADER}\n"
                 f'1 [text] "Send" [0.5,0.8,0.6,0.9] 0.99',
             )
         )
@@ -1015,7 +1030,7 @@ def test_drop_stale_screens_composes_with_collapse_old_turns() -> None:
         msgs.append(ToolResultMessage(tool_call_id=f"{tcid}-n", content="noted"))
         msgs.append(_view_result(tcid, "Tapped | screen: changed"))
         drop_stale_screens(msgs)
-        collapse_old_turns(msgs, first_at=6, interval=4, keep=2)
+        collapse_old_turns(msgs, policy=CollapsePolicy(first_at=6, keep=2, interval=4))
 
     imaged = [
         m for m in msgs if isinstance(m, ToolResultMessage) and _has_image(m.content)

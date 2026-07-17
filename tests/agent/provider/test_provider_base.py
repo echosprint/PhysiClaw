@@ -22,6 +22,7 @@ import pytest
 
 from physiclaw.agent.engine.dto import (
     AssistantMessage,
+    CollapsePolicy,
     FinishReason,
     Message,
     SystemMessage,
@@ -131,16 +132,8 @@ def test_baseprovider_default_class_attributes_pinned() -> None:
     assert BaseProvider.API_KEY_ENV_VARS == ()
 
 
-@pytest.mark.parametrize(
-    "name, value",
-    [
-        ("COLLAPSE_FIRST_AT_TURN", 30),
-        ("KEEP_RECENT_TURNS", 10),
-        ("COLLAPSE_INTERVAL_TURNS", 20),
-    ],
-)
-def test_baseprovider_collapse_threshold_default(name: str, value: int) -> None:
-    assert getattr(BaseProvider, name) == value
+def test_baseprovider_collapse_policy_default_pinned() -> None:
+    assert BaseProvider.COLLAPSE == CollapsePolicy(first_at=30, keep=10, interval=20)
 
 
 # ---------- __init__ ----------

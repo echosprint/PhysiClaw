@@ -16,7 +16,13 @@ from typer.testing import CliRunner
 
 from physiclaw.agent.engine import assemble as assemble_mod
 from physiclaw.agent.engine import engine as engine_mod
-from physiclaw.agent.engine.dto import AssistantMessage, FinishReason, ToolCall, Usage
+from physiclaw.agent.engine.dto import (
+    AssistantMessage,
+    CollapsePolicy,
+    FinishReason,
+    ToolCall,
+    Usage,
+)
 from physiclaw.agent.engine.session import Session
 from physiclaw.agent.runtime.hook import Trigger
 from physiclaw.agent.runtime.sentinel import DONE
@@ -86,10 +92,8 @@ class _CaptureProvider:
     """Records the turn-0 request, then ends the session on the first turn."""
 
     PROVIDER_ID = "fake"
-    # Collapse knobs read by `loop.drive` each turn (provider contract).
-    COLLAPSE_FIRST_AT_TURN = 100
-    COLLAPSE_INTERVAL_TURNS = 100
-    KEEP_RECENT_TURNS = 10
+    # Collapse policy read by `loop.drive` each turn (provider contract).
+    COLLAPSE = CollapsePolicy(first_at=100, keep=10, interval=100)
 
     def __init__(self) -> None:
         self.model = "fake-model"

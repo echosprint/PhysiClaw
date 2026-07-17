@@ -13,6 +13,7 @@ from physiclaw.agent.engine import policy as policy_mod
 from physiclaw.agent.engine.builtin_tool import LocalTool
 from physiclaw.agent.engine.dto import (
     AssistantMessage,
+    CollapsePolicy,
     FinishReason,
     ToolCall,
     Usage,
@@ -25,9 +26,7 @@ class FakeProvider:
     """Scripted provider — pops AssistantMessages from a queue."""
 
     PROVIDER_ID = "fake"
-    COLLAPSE_FIRST_AT_TURN = 100
-    COLLAPSE_INTERVAL_TURNS = 100
-    KEEP_RECENT_TURNS = 10
+    COLLAPSE = CollapsePolicy(first_at=100, keep=10, interval=100)
 
     def __init__(self, responses: list[Any]):
         self._responses = list(responses)

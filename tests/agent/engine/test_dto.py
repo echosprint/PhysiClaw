@@ -23,6 +23,7 @@ import pytest
 
 from physiclaw.agent.engine.dto import (
     AssistantMessage,
+    CollapsePolicy,
     FinishReason,
     ImageBlock,
     Message,
@@ -163,3 +164,36 @@ def test_message_union_includes_all_four_kinds() -> None:
     args = set(typing.get_args(Message))
 
     assert args == {SystemMessage, UserMessage, AssistantMessage, ToolResultMessage}
+
+
+# ---------- CollapsePolicy ----------
+
+
+def test_collapse_policy_is_frozen() -> None:
+    policy = CollapsePolicy(first_at=30, keep=10, interval=20)
+
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        policy.keep = 5  # type: ignore[misc]
+
+
+def test_collapse_policy_keep_may_equal_first_at() -> None:
+    # Boundary: keep == first_at leaves zero turns to fold on the first
+    # collapse but never indexes past turn_starts — legal.
+    assert CollapsePolicy(first_at=10, keep=10, interval=1).keep == 10
+
+
+def test_collapse_policy_rejects_keep_above_first_at() -> None:
+    # keep > first_at would IndexError at `turn_starts[-keep]` the
+    # moment the first collapse fires — must die at construction.
+    with pytest.raises(ValueError, match="keep=40"):
+        CollapsePolicy(first_at=30, keep=40, interval=20)
+
+
+def test_collapse_policy_rejects_zero_keep() -> None:
+    with pytest.raises(ValueError, match="keep=0"):
+        CollapsePolicy(first_at=30, keep=0, interval=20)
+
+
+def test_collapse_policy_rejects_zero_interval() -> None:
+    with pytest.raises(ValueError, match="interval=0"):
+        CollapsePolicy(first_at=30, keep=10, interval=0)

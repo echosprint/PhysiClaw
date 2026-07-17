@@ -28,6 +28,7 @@ import httpx
 
 from physiclaw.agent.engine.dto import (
     AssistantMessage,
+    CollapsePolicy,
     Message,
     SystemMessage,
     ToolResultMessage,
@@ -53,9 +54,7 @@ class ProviderPermanentError(ProviderError):
 
 class Provider(Protocol):
     model: str
-    COLLAPSE_FIRST_AT_TURN: int
-    KEEP_RECENT_TURNS: int
-    COLLAPSE_INTERVAL_TURNS: int
+    COLLAPSE: CollapsePolicy
 
     async def chat(
         self,
@@ -174,19 +173,16 @@ class BaseProvider:
     CACHE_MARKERS: CacheMarkers = NO_CACHE_MARKERS
 
     # Turn-age summary collapse — see `compact.collapse_old_turns`.
-    # All three knobs live here so vendor-specific tuning (cache
-    # mechanics differ per provider) can override any of them in one
-    # place. Current defaults match every shipping provider; Moonshot
-    # carries the highest cost-per-collapse (whole-prefix invalidation
-    # vs anchored caches on Anthropic/Qwen) but accepts the tax in
-    # exchange for tighter prompts on long sessions.
-    #
-    #   F = COLLAPSE_FIRST_AT_TURN    first collapse threshold
-    #   K = KEEP_RECENT_TURNS         recent turns kept per collapse
-    #   I = COLLAPSE_INTERVAL_TURNS   subsequent collapse cadence
-    COLLAPSE_FIRST_AT_TURN: int = 30
-    KEEP_RECENT_TURNS: int = 10
-    COLLAPSE_INTERVAL_TURNS: int = 20
+    # The policy lives here so vendor-specific tuning (cache mechanics
+    # differ per provider) can override it in one place; a vendor
+    # declares its own `COLLAPSE = CollapsePolicy(...)`, which validates
+    # the triple at import time. The defaults (F=30, K=10, I=20) are an
+    # EOQ optimum for vendors with anchored caches (Anthropic/Qwen) and
+    # match every shipping provider; Moonshot carries the highest
+    # cost-per-collapse (whole-prefix invalidation vs anchored caches)
+    # but accepts the tax in exchange for tighter prompts on long
+    # sessions — see `MoonshotProvider` for the trade-off rationale.
+    COLLAPSE: CollapsePolicy = CollapsePolicy(first_at=30, keep=10, interval=20)
 
     def __init__(
         self,
