@@ -1509,7 +1509,7 @@ wheels = [
 
 [[package]]
 name = "physiclaw"
-version = "0.2.28"
+version = "0.2.29"
 source = { editable = "." }
 dependencies = [
     { name = "anthropic" },
