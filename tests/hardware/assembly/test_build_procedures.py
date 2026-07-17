@@ -13,7 +13,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from hardware.assembly import build_procedures as bp
+# The module under test imports the CAD stack at module level; that's
+# the optional `cad` extra (uv sync --extra cad), absent on CI runners.
+pytest.importorskip("build123d", reason="CAD extra not installed")
+
+from hardware.assembly import build_procedures as bp  # noqa: E402
 
 STEM = "frame_10_base"
 

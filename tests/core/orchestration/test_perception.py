@@ -233,16 +233,22 @@ def test_wait_for_numpad_digit_gives_up_at_timeout(
     mocker, rig, per: Perception
 ) -> None:
     sleep = _wire_numpad_poll(mocker, rig, sharpness=1000.0)
-    ocr = mocker.patch.object(per, "_ocr_elements", return_value=[])
     mocker.patch.object(perception_mod, "find_numpad_digit", return_value=None)
-    # Fake clock (advances on sleep): a real monotonic would busy-spin
-    # the no-op-sleep loop for the whole timeout, recording thousands
-    # of mock calls for the same two deterministic iterations.
+    # Fake clock: a real monotonic would busy-spin the no-op-sleep loop
+    # for the whole timeout, recording thousands of mock calls for the
+    # same two deterministic iterations. The sharp path never sleeps, so
+    # the OCR pass MUST advance the clock too or the loop never ends.
     clock = {"now": 0.0}
     mocker.patch.object(
         perception_mod.time, "monotonic", side_effect=lambda: clock["now"]
     )
     sleep.side_effect = lambda s: clock.__setitem__("now", clock["now"] + s)
+
+    def ocr_pass(frame) -> list:
+        clock["now"] += 0.03
+        return []
+
+    ocr = mocker.patch.object(per, "_ocr_elements", side_effect=ocr_pass)
 
     rig.acquire()
     out = per.wait_for_numpad_digit("1", timeout=0.05)
