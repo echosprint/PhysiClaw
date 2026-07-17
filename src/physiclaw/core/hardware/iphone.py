@@ -166,5 +166,6 @@ class AssistiveTouch:
         self.double_tap(arm, pct_to_grbl)
         data = bridge.wait_screenshot(timeout=timeout)
         if data is None:
-            log.warning("Screenshot upload timed out")
+            hint = bridge.connectivity_hint()
+            log.warning("Screenshot upload timed out" + (f" — {hint}" if hint else ""))
         return data

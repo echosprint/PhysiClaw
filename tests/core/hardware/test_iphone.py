@@ -321,12 +321,33 @@ def test_take_screenshot_warns_and_returns_none_on_timeout(
     arm = MagicMock()
     bridge = MagicMock()
     bridge.wait_screenshot.return_value = None
+    bridge.connectivity_hint.return_value = None  # phone still polling
 
     with caplog.at_level(logging.WARNING, logger="physiclaw.core.hardware.iphone"):
         out = at.take_screenshot(arm, bridge, _identity_pct_to_grbl())
 
     assert out is None
     assert any("upload timed out" in r.getMessage() for r in caplog.records)
+
+
+def test_take_screenshot_timeout_warning_carries_connectivity_hint(
+    mocker, caplog: pytest.LogCaptureFixture
+) -> None:
+    mocker.patch("physiclaw.core.hardware.iphone.time.sleep")
+    at = AssistiveTouch()
+    at.compute_at_screen_pos(_shift())
+    arm = MagicMock()
+    bridge = MagicMock()
+    bridge.wait_screenshot.return_value = None
+    bridge.connectivity_hint.return_value = (
+        "the phone may be off Wi-Fi or on a different Wi-Fi network than this computer"
+    )
+
+    with caplog.at_level(logging.WARNING, logger="physiclaw.core.hardware.iphone"):
+        out = at.take_screenshot(arm, bridge, _identity_pct_to_grbl())
+
+    assert out is None
+    assert any("may be off Wi-Fi" in r.getMessage() for r in caplog.records)
 
 
 def test_take_screenshot_sleeps_5s_between_taps(mocker) -> None:

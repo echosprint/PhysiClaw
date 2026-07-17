@@ -133,8 +133,32 @@ def test_measure_viewport_shift_raises_when_screenshot_timeout(
     bridge = MagicMock()
     bridge.take_pending_screenshot.return_value = None
     bridge.wait_screenshot.return_value = None
+    bridge.connectivity_hint.return_value = None  # phone still polling
 
-    with pytest.raises(RuntimeError, match="Timeout"):
+    with pytest.raises(RuntimeError, match="Double-tap AssistiveTouch"):
+        measure_viewport_shift(cal, bridge, fresh=True)
+
+
+def test_measure_viewport_shift_timeout_carries_connectivity_hint(
+    mocker,
+    tmp_path: Path,
+) -> None:
+    mocker.patch.object(viewport_mod.time, "sleep")
+    mocker.patch.object(
+        viewport_mod,
+        "VIEWPORT_CACHE_STEM",
+        tmp_path / "viewport",
+    )
+    cal = MagicMock()
+    cal.screen_dimension = {"viewport_width": 390, "viewport_height": 844}
+    bridge = MagicMock()
+    bridge.take_pending_screenshot.return_value = None
+    bridge.wait_screenshot.return_value = None
+    bridge.connectivity_hint.return_value = (
+        "the phone may be off Wi-Fi or on a different Wi-Fi network than this computer"
+    )
+
+    with pytest.raises(RuntimeError, match="may be off Wi-Fi"):
         measure_viewport_shift(cal, bridge, fresh=True)
 
 

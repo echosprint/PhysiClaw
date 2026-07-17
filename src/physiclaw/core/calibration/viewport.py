@@ -155,8 +155,12 @@ def measure_viewport_shift(
             log.info("  Waiting for phone screenshot (double-tap AssistiveTouch)...")
             data = bridge.wait_screenshot(timeout=30.0)
             if data is None:
+                hint = bridge.connectivity_hint()
                 raise RuntimeError(
-                    "Timeout — no screenshot received. Double-tap AssistiveTouch to upload."
+                    f"Timeout — no screenshot received; {hint}."
+                    if hint
+                    else "Timeout — no screenshot received. "
+                    "Double-tap AssistiveTouch to upload."
                 )
             log.info(f"  Screenshot received: {len(data)} bytes")
             decoded = _decode_screenshot_square(data)

@@ -103,7 +103,8 @@ def verify_assistive_touch(
     log.info("  Waiting for screenshot upload...")
     data = bridge.wait_screenshot(timeout=10.0)
     if data is None:
-        log.warning("  Screenshot upload timed out")
+        hint = bridge.connectivity_hint()
+        log.warning("  Screenshot upload timed out" + (f" — {hint}" if hint else ""))
         return _failed()
 
     arr = np.frombuffer(data, dtype=np.uint8)
@@ -155,7 +156,11 @@ def verify_assistive_touch(
         # before we clear the text out.
         time.sleep(3.0)
     else:
-        log.warning("  ✗ Clipboard fetch timed out — server was not hit")
+        hint = bridge.connectivity_hint()
+        log.warning(
+            "  ✗ Clipboard fetch timed out — server was not hit"
+            + (f"; {hint}" if hint else "")
+        )
 
     # Clear the queued text — the phone drops back to the plain bridge page
     # ("PhysiClaw"). We deliberately stay in bridge mode rather than

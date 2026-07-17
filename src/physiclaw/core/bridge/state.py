@@ -118,6 +118,22 @@ class BridgeState:
         """
         return time.time() - self.last_seen < 0.5
 
+    def connectivity_hint(self) -> str | None:
+        """Possible cause for an upload/fetch that never arrived.
+
+        ``connected`` only carries signal one way: a live poll PROVES the
+        network is fine (return None — the Shortcut path is the suspect,
+        not Wi-Fi). A silent page proves nothing — mid-task the /bridge
+        page is backgrounded and never polls, and both Shortcut channels
+        hit the server directly without it — so the Wi-Fi cause is worded
+        as a possibility, never a diagnosis."""
+        if self.connected:
+            return None
+        return (
+            "the phone may be off Wi-Fi or on a different Wi-Fi "
+            "network than this computer"
+        )
+
     def wait_for_connection(self, timeout: float, settle_seconds: float = 1.0) -> bool:
         """Block until the phone has been polling steadily for
         `settle_seconds` continuously, or `timeout` elapses.

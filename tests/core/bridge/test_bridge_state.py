@@ -73,6 +73,29 @@ def test_connected_false_at_init() -> None:
     assert bs.connected is False
 
 
+def test_connectivity_hint_suggests_wifi_when_page_is_silent() -> None:
+    bs = BridgeState()  # last_seen = 0 — no poll ever seen
+
+    hint = bs.connectivity_hint()
+
+    assert hint is not None
+    # Worded as a possibility ("may"), never a diagnosis: a silent page is
+    # the NORMAL mid-task state (backgrounded Safari), not proof of a
+    # network problem. And no /bridge-page advice — both Shortcut channels
+    # hit the server directly without the page.
+    assert "may be off Wi-Fi" in hint
+    assert "different Wi-Fi" in hint
+    assert "/bridge" not in hint
+
+
+def test_connectivity_hint_none_while_phone_is_polling(bs: BridgeState, mocker) -> None:
+    fake_time = mocker.patch.object(state_mod.time, "time")
+    fake_time.return_value = 1000.0
+    bs.poll()
+
+    assert bs.connectivity_hint() is None
+
+
 def test_connected_true_when_polled_within_500ms(bs: BridgeState, mocker) -> None:
     fake_time = mocker.patch.object(state_mod.time, "time")
     fake_time.return_value = 1000.0

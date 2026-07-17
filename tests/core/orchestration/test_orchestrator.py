@@ -181,10 +181,27 @@ def test_peek_does_not_retry_on_sharp_frame(mocker, pc: PhysiClaw, wire_rig) -> 
 
 def test_screenshot_raises_on_timeout(pc: PhysiClaw, wire_rig, bridge_double) -> None:
     wire_rig(pc.rig)
-    pc.rig.attach_bridge(bridge_double())
+    bridge = bridge_double()
+    bridge.connectivity_hint.return_value = None  # phone still polling
+    pc.rig.attach_bridge(bridge)
     pc.rig._assistive_touch.take_screenshot.return_value = None
 
-    with pytest.raises(TimeoutError, match="Screenshot upload timed out"):
+    with pytest.raises(TimeoutError, match="check the iOS Shortcut"):
+        pc.screenshot()
+
+
+def test_screenshot_timeout_carries_connectivity_hint(
+    pc: PhysiClaw, wire_rig, bridge_double
+) -> None:
+    wire_rig(pc.rig)
+    bridge = bridge_double()
+    bridge.connectivity_hint.return_value = (
+        "the phone may be off Wi-Fi or on a different Wi-Fi network than this computer"
+    )
+    pc.rig.attach_bridge(bridge)
+    pc.rig._assistive_touch.take_screenshot.return_value = None
+
+    with pytest.raises(TimeoutError, match="may be off Wi-Fi"):
         pc.screenshot()
 
 
@@ -300,6 +317,18 @@ def test_send_to_clipboard_unconfirmed_raises(
         pc.send_to_clipboard("x")
 
     bridge.wait_clipboard.assert_called_once_with(timeout=pc._clipboard.CONFIRM_SECONDS)
+
+
+def test_send_to_clipboard_miss_message_carries_connectivity_hint(
+    pc: PhysiClaw, wire_rig, bridge_double
+) -> None:
+    bridge = _wire_failing_bridge(pc, wire_rig, bridge_double)
+    bridge.connectivity_hint.return_value = (
+        "the phone may be off Wi-Fi or on a different Wi-Fi network than this computer"
+    )
+
+    with pytest.raises(ClipboardSyncError, match="may be off Wi-Fi"):
+        pc.send_to_clipboard("x")
 
 
 def test_send_to_clipboard_miss_expires_queued_text(

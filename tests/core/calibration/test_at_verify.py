@@ -9,6 +9,7 @@ the end), and the clipboard-timeout partial failure.
 
 from __future__ import annotations
 
+import logging
 from unittest.mock import MagicMock
 
 import cv2
@@ -73,6 +74,7 @@ def test_verify_assistive_touch_returns_failed_dict_on_screenshot_timeout(
     cal._screenshot_nonce = [1, 0, 1, 0]
     bridge = MagicMock()
     bridge.wait_screenshot.return_value = None  # timeout
+    bridge.connectivity_hint.return_value = None  # phone still polling
 
     out = at_verify_mod.verify_assistive_touch(
         arm,
@@ -86,6 +88,37 @@ def test_verify_assistive_touch_returns_failed_dict_on_screenshot_timeout(
     assert out["passed"] is False
     assert out["screenshot"]["passed"] is False
     assert out["clipboard"]["fetched"] is False
+
+
+def test_verify_assistive_touch_screenshot_timeout_carries_connectivity_hint(
+    mocker, caplog: pytest.LogCaptureFixture
+) -> None:
+    mocker.patch.object(at_verify_mod.time, "sleep")
+    arm = MagicMock()
+    at = MagicMock()
+    at.at_screen = (0.05, 0.1)
+    cal = _make_cal()
+    cal._screenshot_nonce = [1, 0, 1, 0]
+    bridge = MagicMock()
+    bridge.wait_screenshot.return_value = None  # timeout
+    bridge.connectivity_hint.return_value = (
+        "the phone may be off Wi-Fi or on a different Wi-Fi network than this computer"
+    )
+
+    with caplog.at_level(
+        logging.WARNING, logger="physiclaw.core.calibration.at_verify"
+    ):
+        out = at_verify_mod.verify_assistive_touch(
+            arm,
+            at,
+            bridge,
+            cal,
+            _identity_pct_to_grbl(),
+            MagicMock(),
+        )
+
+    assert out["passed"] is False
+    assert any("may be off Wi-Fi" in r.getMessage() for r in caplog.records)
 
 
 def test_verify_assistive_touch_returns_failed_dict_on_decode_error(mocker) -> None:

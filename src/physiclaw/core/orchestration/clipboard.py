@@ -62,10 +62,11 @@ class ClipboardSyncState:
         """The phone fetched the text — any miss streak is over."""
         self._misses = 0
 
-    def record_miss(self) -> str:
+    def record_miss(self, connectivity_hint: str | None = None) -> str:
         """Count an unconfirmed sync; return the agent-facing error text,
         escalated once the misses look like a broken Shortcut rather than
-        a one-off."""
+        a one-off. `connectivity_hint` is the bridge's possible-cause line
+        (None while the phone is provably reaching the server)."""
         self._misses += 1
         self._miss_at = self._now()
         msg = (
@@ -73,6 +74,8 @@ class ClipboardSyncState:
             "phone never fetched the text; its clipboard still holds the "
             "PREVIOUS content, so do NOT paste"
         )
+        if connectivity_hint:
+            msg += f" ({connectivity_hint})"
         if self._misses >= 2:
             msg += (
                 f". Miss #{self._misses} in a row — the clipboard "

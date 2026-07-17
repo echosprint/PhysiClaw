@@ -152,8 +152,9 @@ class PhysiClaw:
         with self.rig.locked():
             data = self.rig.take_screenshot(timeout=60.0)
             if data is None:
+                hint = self.rig.require_bridge().connectivity_hint()
                 raise TimeoutError(
-                    "Screenshot upload timed out — check the iOS Shortcut"
+                    f"Screenshot upload timed out — {hint or 'check the iOS Shortcut'}"
                 )
 
             frame = decode_image(data)
@@ -307,7 +308,9 @@ class PhysiClaw:
         if self.rig.sync_clipboard(text, timeout):
             self._clipboard.confirm()
             return f"Copied {len(text)} chars to phone clipboard"
-        raise ClipboardSyncError(self._clipboard.record_miss())
+        raise ClipboardSyncError(
+            self._clipboard.record_miss(self.rig.require_bridge().connectivity_hint())
+        )
 
     def send_to_clipboard(self, text: str) -> str:
         """Copy text to the phone's clipboard via AssistiveTouch long-press."""

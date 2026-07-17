@@ -60,6 +60,22 @@ def test_first_miss_warns_without_escalation() -> None:
     assert "Miss #" not in msg
 
 
+def test_record_miss_appends_connectivity_hint() -> None:
+    state, _ = _state()
+
+    msg = state.record_miss(connectivity_hint="phone not reaching the server")
+
+    assert "do NOT paste (phone not reaching the server)" in msg
+
+
+def test_record_miss_without_hint_has_no_parenthetical() -> None:
+    state, _ = _state()
+
+    msg = state.record_miss(connectivity_hint=None)
+
+    assert "(" not in msg
+
+
 def test_second_miss_escalates_with_count() -> None:
     state, _ = _state()
     state.record_miss()
