@@ -212,8 +212,22 @@ class Perception:
         deadline = start + timeout
         ocr_passes = 0
         while True:
-            bbox = find_numpad_digit(self._ocr_elements(self.camera_view()), digit)
+            grab_start = time.monotonic()
+            frame = self.camera_view()
+            ocr_start = time.monotonic()
+            elements = self._ocr_elements(frame)
+            bbox = find_numpad_digit(elements, digit)
             ocr_passes += 1
+            now = time.monotonic()
+            log.info(
+                "numpad poll #%d @%.1fs: grab %.2fs, ocr %.2fs, %d text elems — %s",
+                ocr_passes,
+                grab_start - start,
+                ocr_start - grab_start,
+                now - ocr_start,
+                len(elements),
+                "found" if bbox is not None else "miss",
+            )
             if bbox is not None:
                 log.info(
                     "numpad digit %r found in %.1fs (%d OCR pass(es))",
