@@ -811,23 +811,6 @@ def test_ensure_readable_exposure_leaves_a_clean_view_alone(
     tune.assert_not_called()
 
 
-def test_find_visible_numpad_digit_probes_the_current_screen(
-    mocker, rig, per: Perception
-) -> None:
-    bbox = [0.1, 0.5, 0.2, 0.6]
-    rig._cam.snapshot.return_value = np.zeros((4, 4, 3), dtype=np.uint8)
-    mocker.patch.object(per, "_ocr_elements", return_value=[{"kp": True}])
-    mocker.patch.object(perception_mod, "find_numpad_digit", return_value=bbox)
-
-    rig.acquire()
-    try:
-        out = per.find_visible_numpad_digit("1")
-    finally:
-        rig.release()
-
-    assert out == bbox
-
-
 def test_scheduled_retune_superseded_by_a_fresher_tune(
     mocker, rig, per: Perception
 ) -> None:

@@ -181,23 +181,6 @@ class Perception:
         self._rig.park()
         return self._ocr_elements(self.camera_view())
 
-    def find_visible_numpad_digit(self, digit: str) -> list[float] | None:
-        """One OCR pass over the current screen for `digit` on a
-        visible keypad — the unlock flow's pre-swipe probe. A keypad
-        left open by a previous attempt must be typed on, not swiped:
-        the bottom-edge swipe is the passcode screen's CANCEL gesture.
-        Caller must hold the lock; parks explicitly — an occluded probe
-        that misses would fire the very cancel swipe it exists to
-        prevent. Fail-open (None) — a failed probe just means the flow
-        swipes as usual."""
-        self._rig.assert_locked()
-        self._rig.park()
-        try:
-            return find_numpad_digit(self._ocr_elements(self.camera_view()), digit)
-        except Exception:
-            log.warning("pre-swipe keypad probe failed", exc_info=True)
-            return None
-
     def ensure_readable_exposure(self) -> None:
         """One dark/blown check + synchronous tune with the rig lock
         ALREADY HELD — the explicit exposure fix point for
@@ -258,6 +241,7 @@ class Perception:
         deadline = start + timeout
         last_ocr = start
         ocr_ran = False
+        ocr_passes = 0
         while time.monotonic() < deadline:
             frame = self.camera_view()
             crop = crop_to_phone_screen(frame, self._rig.transforms)
@@ -281,8 +265,21 @@ class Perception:
             bbox = find_numpad_digit(self._ocr_elements(frame), digit)
             last_ocr = time.monotonic()
             ocr_ran = True
+            ocr_passes += 1
             if bbox is not None:
+                log.info(
+                    "numpad digit %r found in %.1fs (%d OCR pass(es))",
+                    digit,
+                    time.monotonic() - start,
+                    ocr_passes,
+                )
                 return bbox
+        log.info(
+            "numpad digit %r not found — gave up after %.1fs (%d OCR pass(es))",
+            digit,
+            time.monotonic() - start,
+            ocr_passes,
+        )
         return None
 
     # ─── Watchdog ────────────────────────────────────────────

@@ -413,20 +413,17 @@ class PhysiClaw:
             # view NOW, on the freshly-lit screen (this is the one
             # explicit exposure fix point inside the wake→keypad window).
             self.perception.ensure_readable_exposure()
-            # A keypad left open by a previous attempt must be typed on,
-            # not swiped: the bottom-edge swipe is the passcode screen's
-            # cancel gesture. Probe first; swipe only from the cover.
-            digit_bbox = self.perception.find_visible_numpad_digit(digit)
+            # A fresh wake shows the lock-screen cover, not the keypad —
+            # swipe up from the bottom edge to raise it.
+            self._execute(gestures.UNLOCK_SWIPE)
+            digit_bbox = self.perception.wait_for_numpad_digit(digit)
             if digit_bbox is None:
-                self._execute(gestures.UNLOCK_SWIPE)
-                digit_bbox = self.perception.wait_for_numpad_digit(digit)
-            if digit_bbox is None:
-                return "Failed to find passcode keypad — phone may already be unlocked"
+                return "Failed to find passcode keypad"
 
             for _ in range(taps):
                 self._execute(gestures.Tap(digit_bbox))
 
-            time.sleep(1.0)  # unlock transition before the verify frame
+            time.sleep(0.2)  # unlock transition before the verify frame
             # The taps already landed; a camera hiccup on the verify grab
             # must not turn a real unlock into a tool error (that would
             # steer the agent to STUCK on an unlocked phone). Fail toward
