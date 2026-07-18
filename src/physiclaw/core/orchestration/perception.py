@@ -156,9 +156,15 @@ class Perception:
         """OCR one already-grabbed frame into on-screen text elements —
         used by the keypad poll, which must OCR the exact frame it
         metered, not a fresh grab. Derives the crop box from the frame
-        itself, so callers can't pair a box with a different frame."""
+        itself, so callers can't pair a box with a different frame, and
+        caps the OCR input to CONFIG.compact.max_image_edge_px so a raw
+        4K crop doesn't cost seconds per pass (the peek/gesture paths
+        already downscale to the same cap via crop_to_phone_screen before
+        OCR)."""
         crop_box = phone_screen_crop_box(frame, self._rig.transforms)
-        results = self.ocr_reader().read(frame, crop_box=crop_box)
+        results = self.ocr_reader().read(
+            frame, crop_box=crop_box, max_edge=CONFIG.compact.max_image_edge_px
+        )
         elements = results_to_elements(results, self._rig.transforms)
         return [e for e in elements if bbox_on_screen(e["bbox"])]
 

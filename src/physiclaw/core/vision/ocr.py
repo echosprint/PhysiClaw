@@ -23,6 +23,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from physiclaw.core.vision.preprocess import resize_to_max_edge
+
 log = logging.getLogger(__name__)
 
 
@@ -60,12 +62,19 @@ class OCRReader:
         self,
         frame: np.ndarray,
         crop_box: tuple[int, int, int, int] | None = None,
+        max_edge: int | None = None,
     ) -> list[TextResult]:
         """Detect and read all text in an image.
 
         When ``crop_box`` is given, OCR only inside that rectangle but
         report bboxes in the original frame's coordinate space — lets
         callers skip off-screen pixels without rewriting coordinates.
+
+        ``max_edge`` downscales the (cropped) image so its long edge is at
+        most that many pixels before OCR — recognition cost scales with
+        pixels, so a 4K crop OCRs many times slower than a screen-sized
+        one. Reported bboxes are scaled back to the original frame's
+        coordinates, so callers are unaffected.
 
         Returns TextResults sorted top-to-bottom, left-to-right.
         """
@@ -77,6 +86,12 @@ class OCRReader:
             image = frame[top:bottom, left:right]
             dx, dy = left, top
 
+        scale = 1.0
+        if max_edge is not None:
+            orig_h = image.shape[0]
+            image = resize_to_max_edge(image, max_edge)
+            scale = image.shape[0] / orig_h
+
         result = self._ocr(image)
 
         if result.boxes is None or result.txts is None:
@@ -86,8 +101,8 @@ class OCRReader:
         for points, text, score in zip(result.boxes, result.txts, result.scores):
             xs = [p[0] for p in points]
             ys = [p[1] for p in points]
-            x1, y1 = int(min(xs)) + dx, int(min(ys)) + dy
-            x2, y2 = int(max(xs)) + dx, int(max(ys)) + dy
+            x1, y1 = int(min(xs) / scale) + dx, int(min(ys) / scale) + dy
+            x2, y2 = int(max(xs) / scale) + dx, int(max(ys) / scale) + dy
 
             texts.append(
                 TextResult(

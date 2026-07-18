@@ -9,6 +9,7 @@ Two element kinds — icon (label="") and text (label=content):
 """
 
 import logging
+import time
 from dataclasses import dataclass
 
 import numpy as np
@@ -56,8 +57,11 @@ def detect_ui_elements(
     """
     h, w = frame.shape[:2]
 
+    t0 = time.perf_counter()
     icons = _detect_icons(frame, w, h, icon_detector, icon_confidence)
+    t1 = time.perf_counter()
     texts = _detect_texts(frame, w, h, ocr_reader)
+    t2 = time.perf_counter()
     elements = _clean(icons + texts, min_icon_conf, min_text_conf)
 
     elements.sort(key=lambda e: (e.bbox[1], e.bbox[0]))
@@ -67,10 +71,15 @@ def detect_ui_elements(
     annotated = annotate_elements(frame, elements_to_json(elements), w, h)
     n_ico = sum(1 for e in elements if e.kind == "icon")
     log.info(
-        "detected %d UI elements (%d icons, %d text)",
+        "detected %d UI elements (%d icons, %d text) — input %dx%d, "
+        "icon %.2fs, ocr %.2fs",
         len(elements),
         n_ico,
         len(elements) - n_ico,
+        w,
+        h,
+        t1 - t0,
+        t2 - t1,
     )
     return elements, annotated
 

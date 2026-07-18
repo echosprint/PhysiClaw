@@ -107,6 +107,31 @@ def test_read_with_crop_box_offsets_bbox(mocker) -> None:
     assert out[0].bbox == (25, 35, 35, 45)
 
 
+def test_read_max_edge_downscales_and_rescales_bbox(mocker) -> None:
+    # A 200px-long-edge image capped at max_edge=100 → scale 0.5: OCR sees
+    # the 100x100 downscale, and the returned bbox is scaled back up 2x to
+    # the original frame's coordinates.
+    boxes = [[(10, 10), (20, 10), (20, 20), (10, 20)]]  # in downscaled space
+    fake_ocr = MagicMock(return_value=_ocr_result(boxes, ["X"], [1.0]))
+    reader = _new_reader(mocker, fake_ocr)
+
+    out = reader.read(np.zeros((200, 200, 3), dtype=np.uint8), max_edge=100)
+
+    assert fake_ocr.call_args.args[0].shape[:2] == (100, 100)  # OCR'd the downscale
+    assert out[0].bbox == (20, 20, 40, 40)  # bbox scaled back 2x
+
+
+def test_read_max_edge_noop_when_already_small(mocker) -> None:
+    boxes = [[(5, 5), (15, 5), (15, 15), (5, 15)]]
+    fake_ocr = MagicMock(return_value=_ocr_result(boxes, ["X"], [1.0]))
+    reader = _new_reader(mocker, fake_ocr)
+
+    out = reader.read(np.zeros((80, 80, 3), dtype=np.uint8), max_edge=100)
+
+    assert fake_ocr.call_args.args[0].shape[:2] == (80, 80)  # untouched
+    assert out[0].bbox == (5, 5, 15, 15)
+
+
 def test_read_crop_clamps_to_frame(mocker) -> None:
     fake_ocr = MagicMock(
         return_value=_ocr_result(
