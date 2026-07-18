@@ -141,10 +141,10 @@ FORCE_QUIT: tuple[Gesture, ...] = (
 
 # Unlock, mechanical pieces: wake the screen, then swipe up from the
 # bottom edge to leave the lock-screen cover. Two named gestures rather
-# than a recipe tuple — the orchestrator settles the camera between
-# them (the passcode keypad lives only seconds once the swipe opens
-# it), and the passcode entry that follows is imperative (OCR poll
-# loop) and stays in the orchestrator.
+# than a recipe tuple — the orchestrator settles the camera on the
+# raised keypad after the swipe (the passcode keypad lives only seconds
+# once the swipe opens it), and the passcode entry that follows is
+# imperative (OCR poll loop) and stays in the orchestrator.
 
 # The wake tap lands on dead space on BOTH screens a retry can hit: on
 # the lock-screen cover it's empty wallpaper (clear of the flashlight /
@@ -155,10 +155,11 @@ FORCE_QUIT: tuple[Gesture, ...] = (
 WAKE_SCREEN: Gesture = Tap([0.4, 0.28, 0.6, 0.32])
 # "xl" travel, same as HOME_SCREEN's: an "l" swipe released mid-screen
 # can read as a partial peek that iOS settles back onto the cover
-# instead of committing to the passcode keypad. On an already-open
-# keypad a committed bottom-edge swipe is the CANCEL gesture — which
-# is why the unlock flow probes for a visible keypad and skips this
-# swipe entirely when one is up (orchestrator.unlock_phone).
+# instead of committing to the passcode keypad. Caveat: on an
+# already-open keypad (a fast retry catching one still up) a committed
+# bottom-edge swipe is iOS's CANCEL gesture and dismisses it — the cold
+# wake this flow assumes always shows the cover, where the swipe is
+# always correct.
 UNLOCK_SWIPE: Gesture = Swipe(BOTTOM_EDGE, "up", "xl", "fast")
 
 # The tool-phone passcode — a throwaway code, never the user's real one. The

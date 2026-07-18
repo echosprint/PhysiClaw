@@ -187,8 +187,9 @@ class Perception:
         timing-critical windows (unlock's keypad race: the poll that
         follows can only meter sharpness, and the keypad lives seconds).
         The caller invokes this right after a gesture that changed the
-        scene (the wake tap), so the deferral hold is deliberately
-        bypassed — the scene is known-new. Fail-open: never raises."""
+        scene (the unlock swipe that raised the keypad), so the deferral
+        hold is deliberately bypassed — the scene is known-new.
+        Fail-open: never raises."""
         self._rig.assert_locked()
         cam, t = self._rig.cam, self._rig.transforms
         if cam is None or t is None or not cam.exposure_tunable:

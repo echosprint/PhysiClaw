@@ -279,8 +279,9 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw) -> None:
     async def unlock_phone() -> list | str:
         """Unlock the phone with passcode `111111` (~20-40s).
 
-        Wakes the screen, settles the camera, swipes up, OCRs the
-        keypad, taps each digit, then verifies the lock screen is gone.
+        Wakes the screen, swipes up, settles the camera on the raised
+        keypad, OCRs it, taps each digit, then verifies the lock screen
+        is gone.
         Hardcoded to `111111` — a throwaway tool-phone code so a real
         password never leaks via git or logs.
 

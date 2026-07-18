@@ -382,21 +382,20 @@ class PhysiClaw:
         return self._run_macro(gestures.FORCE_QUIT, "Force-quit current app")
 
     def unlock_phone(self) -> "GestureResult":
-        """Unlock the phone: wake → settle camera → swipe up → find the
-        keypad "1" → tap it six times → verify by pixels.
+        """Unlock the phone: wake → swipe up → fix exposure on the keypad
+        → find the keypad "1" → tap it six times → verify by pixels.
 
         Fully mechanical — no AI. Passcode is hardcoded to 111111 — a
         dedicated tool-phone passcode, not the user's real password.
 
         The passcode keypad lives only seconds once the swipe opens it,
-        and the wake is exactly when the camera is at its worst (AE
-        re-converging across the dark→bright flip, AF hunting from the
-        arm's pass) — so the lens is converged-and-frozen BEFORE the
-        swipe starts the clock, and the keypad poll is sharpness-gated
-        (see wait_for_numpad_digit). Single-shot on purpose: a missed
-        window reports honestly and the AGENT retries — the next call
-        starts with the screen awake and the camera settled, so it is
-        faster and likelier to land.
+        so the swipe fires on a freshly-woken screen (a short settle
+        after the wake tap, no slow work before it), and the exposure fix
+        runs on the raised keypad — a bright, stable target — right
+        before the sharpness-gated keypad poll (see wait_for_numpad_digit).
+        Single-shot on purpose: a missed window reports honestly and the
+        AGENT retries — the next call starts with the screen awake, so it
+        is faster and likelier to land.
         """
 
         digit = gestures.UNLOCK_PASSCODE[0]
@@ -408,14 +407,12 @@ class PhysiClaw:
             # numpad sleep again before the first tap lands.
             self.perception.ocr_reader()
             self._execute(gestures.WAKE_SCREEN)
-            # The keypad poll below can only meter sharpness — it can't
-            # tune, and the keypad lives seconds. Fix a crushed night
-            # view NOW, on the freshly-lit screen (this is the one
-            # explicit exposure fix point inside the wake→keypad window).
-            self.perception.ensure_readable_exposure()
-            # A fresh wake shows the lock-screen cover, not the keypad —
-            # swipe up from the bottom edge to raise it.
+            # Let the woken screen settle before the swipe.
+            time.sleep(0.5)
             self._execute(gestures.UNLOCK_SWIPE)
+            # Fix exposure on the raised keypad — the poll below can only
+            # meter sharpness, not tune, and the keypad lives seconds.
+            self.perception.ensure_readable_exposure()
             digit_bbox = self.perception.wait_for_numpad_digit(digit)
             if digit_bbox is None:
                 return "Failed to find passcode keypad"

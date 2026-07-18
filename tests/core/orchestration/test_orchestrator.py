@@ -875,12 +875,11 @@ def test_quality_check_failure_never_costs_the_view(
     assert out.listing == "LISTING"  # fail-open: view intact, no line
 
 
-def test_unlock_phone_fixes_exposure_before_the_keypad_poll(
+def test_unlock_phone_fixes_exposure_after_the_swipe(
     mocker, pc: PhysiClaw, wire_rig
 ) -> None:
-    # The poll can only meter sharpness — the one exposure fix point in
-    # the wake→keypad window runs right after the wake tap, before the
-    # swipe starts the keypad clock.
+    # The poll can only meter sharpness, not tune — so exposure is fixed
+    # on the raised keypad (after the swipe), before the detection poll.
     _wire_unlock(mocker, pc, wire_rig, digit_bbox=None)
     order: list[str] = []
     pc.perception.ensure_readable_exposure.side_effect = lambda: order.append("fix")
@@ -888,4 +887,4 @@ def test_unlock_phone_fixes_exposure_before_the_keypad_poll(
 
     pc.unlock_phone()
 
-    assert order == ["fix", "swipe"]
+    assert order == ["swipe", "fix"]
