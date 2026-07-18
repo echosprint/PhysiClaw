@@ -280,18 +280,17 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw) -> None:
         """Unlock the phone with passcode `111111` (~20-40s).
 
         Wakes the screen, swipes up, settles the camera on the raised
-        keypad, OCRs it, taps each digit, then verifies the lock screen
-        is gone.
+        keypad, OCRs it, and taps each digit.
         Hardcoded to `111111` — a throwaway tool-phone code so a real
         password never leaks via git or logs.
 
         The passcode keypad only stays up a few seconds — a slow
         detection loses the race and the phone falls back to the lock
-        screen. The result says so honestly: on "still shows the lock
-        screen", retry `unlock_phone` once or twice — a retry starts
-        with the screen awake and the camera settled, so it is faster
-        and usually lands. If retries keep failing, or the keypad was
-        never found on a phone that is clearly locked, close out:
+        screen. Confirm from the attached view: if it still shows the
+        lock screen (or the keypad was never found), retry `unlock_phone`
+        once or twice — a retry starts with the screen awake, so it is
+        faster and usually lands. If retries keep failing on a phone that
+        is clearly locked, close out:
           1. `append_log("[HH:MM] tried unlock_phone — failed")`
           2. `end_session("STUCK", "phone unlock failed — user needs
              passcode 111111 or auto-lock disabled")`

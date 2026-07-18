@@ -43,7 +43,8 @@ class _NullOCR:
     """Stand-in reader after OCR construction failed — `detect` keeps its
     icons channel without re-attempting the heavy model load (and
     re-warning) on every frame. Deliberately NOT installed in the
-    `_ocr_reader` cache slot: `scan_text` must keep raising loudly."""
+    `_ocr_reader` cache slot: the keypad poll (`_ocr_elements`) must
+    keep raising loudly."""
 
     def read(self, frame, crop_box=None) -> list:
         return []
@@ -57,18 +58,10 @@ class Perception:
     # lock while its gesture finishes parking.
     RETUNE_DELAY_SECONDS = 2.0
 
-    # How long a blurry stretch may starve the keypad poll before an
-    # ungated OCR pass runs anyway — a rig whose crop never meters sharp
-    # (chronic soft focus that OCR can still read) degrades to roughly
-    # the old fixed-cadence poll instead of never OCRing at all.
-    NUMPAD_OCR_FALLBACK_SECONDS = 2.5
-
-    # Minimum spacing between OCR passes once one has completed — a
-    # sharp non-keypad screen (already-unlocked phone) would otherwise
-    # re-OCR back-to-back for the whole timeout, CPU pegged with the
-    # rig lock held, re-proving the same answer. The FIRST sharp pass
-    # is immediate: the keypad's lifetime is the scarce resource.
-    NUMPAD_OCR_MIN_INTERVAL_SECONDS = 1.0
+    # Spacing between keypad-detection OCR passes. The first pass is
+    # immediate — the keypad may already be up and is short-lived — then
+    # after each miss the poll waits this long and tries again.
+    NUMPAD_OCR_INTERVAL_SECONDS = 1.0
 
     def __init__(self, rig: HardwareRig):
         self._rig = rig
@@ -141,8 +134,8 @@ class Perception:
         # raise in __init__, not read()). Same contract applies: the text
         # channel degrades, icons must survive. The failure is memoized —
         # warned once, then a null reader per frame instead of re-loading
-        # models on every peek. scan_text deliberately keeps raising —
-        # its callers need text or nothing.
+        # models on every peek. The keypad poll deliberately keeps
+        # raising — its caller needs text or nothing.
         if self._ocr_error is not None:
             ocr: OCRReader | _NullOCR = _NullOCR()
         else:
@@ -161,25 +154,13 @@ class Perception:
 
     def _ocr_elements(self, frame) -> list[dict]:
         """OCR one already-grabbed frame into on-screen text elements —
-        the shared tail of ``scan_text`` and the keypad poll (which must
-        OCR the exact frame it metered, not a fresh grab). Derives the
-        crop box from the frame itself, so callers can't pair a box with
-        a different frame."""
+        used by the keypad poll, which must OCR the exact frame it
+        metered, not a fresh grab. Derives the crop box from the frame
+        itself, so callers can't pair a box with a different frame."""
         crop_box = phone_screen_crop_box(frame, self._rig.transforms)
         results = self.ocr_reader().read(frame, crop_box=crop_box)
         elements = results_to_elements(results, self._rig.transforms)
         return [e for e in elements if bbox_on_screen(e["bbox"])]
-
-    def scan_text(self) -> list[dict]:
-        """OCR-only pass on the phone-screen region. Caller must hold the lock.
-
-        Fast path for internal single-shot reads (e.g. unlock_phone's
-        still-locked verify). The agent-facing tools go through
-        ``detect`` instead, which also runs icon detection.
-        """
-        self._rig.assert_locked()
-        self._rig.park()
-        return self._ocr_elements(self.camera_view())
 
     def ensure_readable_exposure(self) -> None:
         """One dark/blown check + synchronous tune with the rig lock
@@ -219,53 +200,19 @@ class Perception:
         """Poll the camera until the passcode keypad shows `digit`;
         return its bbox, or None at `timeout`. Caller must hold the lock.
 
-        Gated three ways — the keypad lives only a few seconds after
-        the unlock swipe, and an OCR pass costs seconds, so every pass
-        spent on a frame that can't answer pushes detection past the
-        keypad's lifetime:
-        - a dark, unsharp crop (crushed or asleep screen) never OCRs —
-          there is nothing to read, and the exposure fix point is
-          BEFORE this poll (`ensure_readable_exposure`);
-        - an unsharp crop OCRs only every NUMPAD_OCR_FALLBACK_SECONDS —
-          the chronic-soft-focus escape hatch;
-        - a sharp crop OCRs immediately the first time (the race is
-          real), then every NUMPAD_OCR_MIN_INTERVAL_SECONDS — a sharp
-          NON-keypad screen would otherwise re-OCR back-to-back for
-          the whole timeout re-proving the same answer.
-        Timers stamp AFTER each (multi-second) pass, so spacing is
-        pass-end→next-start."""
+        Deliberately simple: OCR immediately — the keypad may already be
+        up and is the scarce, short-lived resource — then retry every
+        NUMPAD_OCR_INTERVAL_SECONDS until found or timeout. No quality
+        gating: the keypad's big white digits read even on a dark or
+        slightly soft crop, so trying always beats waiting for a perfect
+        frame (the exposure fix ran before this poll)."""
         self._rig.assert_locked()
         self._rig.park()
-        cam = self._rig.cam
-        can_tune = cam is not None and cam.exposure_tunable
         start = time.monotonic()
         deadline = start + timeout
-        last_ocr = start
-        ocr_ran = False
         ocr_passes = 0
-        while time.monotonic() < deadline:
-            frame = self.camera_view()
-            crop = crop_to_phone_screen(frame, self._rig.transforms)
-            report = quality.assess(crop)
-            sharp = report.sharpness >= quality.BLUR_THRESHOLD
-            if report.dark and not sharp and can_tune:
-                # A crushed crop reads nothing — but only skip when the
-                # rig could have fixed the exposure (the fix point runs
-                # before this poll). On an untunable rig a dark frame
-                # is the best it will ever produce: fall through to the
-                # unsharp fallback cadence rather than never OCRing.
-                time.sleep(0.15)
-                continue
-            since = time.monotonic() - last_ocr
-            if not sharp and since < self.NUMPAD_OCR_FALLBACK_SECONDS:
-                time.sleep(0.15)
-                continue
-            if sharp and ocr_ran and since < self.NUMPAD_OCR_MIN_INTERVAL_SECONDS:
-                time.sleep(0.15)
-                continue
-            bbox = find_numpad_digit(self._ocr_elements(frame), digit)
-            last_ocr = time.monotonic()
-            ocr_ran = True
+        while True:
+            bbox = find_numpad_digit(self._ocr_elements(self.camera_view()), digit)
             ocr_passes += 1
             if bbox is not None:
                 log.info(
@@ -275,6 +222,9 @@ class Perception:
                     ocr_passes,
                 )
                 return bbox
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(self.NUMPAD_OCR_INTERVAL_SECONDS)
         log.info(
             "numpad digit %r not found — gave up after %.1fs (%d OCR pass(es))",
             digit,

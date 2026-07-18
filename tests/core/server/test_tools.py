@@ -305,18 +305,6 @@ async def test_unlock_phone_dispatches_and_appends_hint(registered) -> None:
     _assert_view_reply(out, "unlock result ", tools_mod.HINT_VIEW_AFTER_UNLOCK)
 
 
-def test_unlock_docstring_quotes_the_still_locked_retry_trigger(registered) -> None:
-    # Cross-file byte contract: the tool docstring tells the agent to
-    # retry on the orchestrator's "still locked" phrase, so a reword of
-    # one side that doesn't update the other silently breaks retries.
-    from physiclaw.core.orchestration.orchestrator import UNLOCK_STILL_LOCKED
-
-    mcp, _ = registered
-    doc = " ".join((mcp.tools["unlock_phone"].__doc__ or "").split())
-    assert "still shows the lock screen" in UNLOCK_STILL_LOCKED
-    assert "still shows the lock screen" in doc
-
-
 def test_unlock_docstring_quotes_the_current_passcode(registered) -> None:
     # Same contract class as the retry trigger above: the docstring
     # tells the agent (and the STUCK message tells the user) the literal

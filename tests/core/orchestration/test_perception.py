@@ -98,7 +98,7 @@ def test_cropped_view_crops_with_current_transforms(
     crop.assert_called_once_with(frame, rig.transforms)
 
 
-# ---------- detect / scan_text ----------
+# ---------- detect / _ocr_elements ----------
 
 
 def test_detect_degrades_to_icons_when_ocr_construction_fails(
@@ -149,9 +149,9 @@ def test_detect_calls_ui_pipeline(mocker, per: Perception) -> None:
     assert ann is annotated
 
 
-def test_scan_text_filters_offscreen(mocker, rig, per: Perception) -> None:
+def test_ocr_elements_filters_offscreen(mocker, rig, per: Perception) -> None:
     per._ocr_reader = MagicMock()
-    rig._cam.snapshot.return_value = np.zeros((4, 4, 3), dtype=np.uint8)
+    frame = np.zeros((4, 4, 3), dtype=np.uint8)
     mocker.patch.object(perception_mod, "phone_screen_crop_box", return_value=None)
     mocker.patch.object(
         perception_mod,
@@ -167,59 +167,23 @@ def test_scan_text_filters_offscreen(mocker, rig, per: Perception) -> None:
         side_effect=lambda b: b[0] >= 0,
     )
 
-    rig.acquire()
-    out = per.scan_text()
-    rig.release()
+    out = per._ocr_elements(frame)
 
     assert len(out) == 1
     assert out[0]["bbox"][0] == 0.1
 
 
-def test_scan_text_parks_first(mocker, rig, per: Perception) -> None:
-    # The stylus must be off the glass before the OCR frame is grabbed.
-    per._ocr_reader = MagicMock()
-    rig._cam.snapshot.return_value = np.zeros((4, 4, 3), dtype=np.uint8)
-    mocker.patch.object(perception_mod, "phone_screen_crop_box", return_value=None)
-    mocker.patch.object(perception_mod, "results_to_elements", return_value=[])
-
-    rig.acquire()
-    per.scan_text()
-    rig.release()
-
-    rig._arm.rapid_to.assert_called_once_with(5.0, 6.0)
-
-
-def test_scan_text_raises_when_lock_not_held(rig, per: Perception) -> None:
-    """scan_text parks the arm — an unlocked call is a programming error."""
-    with pytest.raises(RuntimeError, match="hardware lock not held"):
-        per.scan_text()
-
-
-def _wire_numpad_poll(mocker, rig, *, sharpness: float):
-    """Stub the poll's acquisition chain — a stock frame, pass-through
-    crops, a fixed sharpness score, patched sleep (returned for
-    cadence assertions)."""
-    from physiclaw.core.vision.quality import QualityReport
-
+def _wire_numpad_poll(mocker, rig):
+    """Stub the poll's acquisition — a stock camera frame and patched
+    sleep (returned for cadence assertions). Tests stub `_ocr_elements`
+    / `find_numpad_digit` for the detection result."""
     frame = np.zeros((4, 4, 3), dtype=np.uint8)
     rig._cam.snapshot.return_value = frame
-    mocker.patch.object(perception_mod, "crop_to_phone_screen", return_value=frame)
-    mocker.patch.object(perception_mod, "phone_screen_crop_box", return_value=None)
-    # A lit (non-dark) crop at the requested sharpness — the dark-skip
-    # branch has its own dedicated test.
-    mocker.patch.object(
-        perception_mod.quality,
-        "assess",
-        return_value=QualityReport(
-            sharpness=sharpness, clip_pct=0.0, median_luma=100.0, p99_luma=250.0
-        ),
-    )
     return mocker.patch.object(perception_mod.time, "sleep")
 
 
 def test_wait_for_numpad_digit_polls_until_found(mocker, rig, per: Perception) -> None:
-    _wire_numpad_poll(mocker, rig, sharpness=1000.0)
-    mocker.patch.object(per, "NUMPAD_OCR_MIN_INTERVAL_SECONDS", 0.0)
+    _wire_numpad_poll(mocker, rig)
     bbox = [0.1, 0.1, 0.2, 0.2]
     ocr = mocker.patch.object(
         per, "_ocr_elements", side_effect=[[], [], [{"hit": True}]]
@@ -241,12 +205,12 @@ def test_wait_for_numpad_digit_polls_until_found(mocker, rig, per: Perception) -
 def test_wait_for_numpad_digit_gives_up_at_timeout(
     mocker, rig, per: Perception
 ) -> None:
-    sleep = _wire_numpad_poll(mocker, rig, sharpness=1000.0)
+    sleep = _wire_numpad_poll(mocker, rig)
     mocker.patch.object(perception_mod, "find_numpad_digit", return_value=None)
     # Fake clock: a real monotonic would busy-spin the no-op-sleep loop
     # for the whole timeout, recording thousands of mock calls for the
-    # same two deterministic iterations. The sharp path never sleeps, so
-    # the OCR pass MUST advance the clock too or the loop never ends.
+    # same deterministic iterations. The sleep side-effect advances the
+    # clock past the timeout so the loop terminates.
     clock = {"now": 0.0}
     mocker.patch.object(
         perception_mod.time, "monotonic", side_effect=lambda: clock["now"]
@@ -265,89 +229,6 @@ def test_wait_for_numpad_digit_gives_up_at_timeout(
 
     assert out is None
     assert ocr.called
-
-
-def test_wait_for_numpad_digit_skips_ocr_on_blurry_frames(
-    mocker, rig, per: Perception
-) -> None:
-    # Within the fallback grace a soft frame costs a cheap meter + a
-    # short sleep, never an OCR pass — the point of the gate.
-    sleep = _wire_numpad_poll(mocker, rig, sharpness=1.0)
-    ocr = mocker.patch.object(per, "_ocr_elements", return_value=[])
-    clock = {"now": 0.0}
-    mocker.patch.object(
-        perception_mod.time, "monotonic", side_effect=lambda: clock["now"]
-    )
-    sleep.side_effect = lambda s: clock.__setitem__("now", clock["now"] + s)
-
-    rig.acquire()
-    out = per.wait_for_numpad_digit("1", timeout=0.05)
-    rig.release()
-
-    assert out is None
-    assert not ocr.called
-    sleep.assert_called_with(0.15)
-
-
-def test_wait_for_numpad_digit_falls_back_to_ungated_ocr(
-    mocker, rig, per: Perception
-) -> None:
-    # A rig that never meters sharp still OCRs once the fallback
-    # interval elapses — chronic soft focus degrades, never starves.
-    _wire_numpad_poll(mocker, rig, sharpness=1.0)
-    mocker.patch.object(per, "NUMPAD_OCR_FALLBACK_SECONDS", 0.0)
-    bbox = [0.1, 0.1, 0.2, 0.2]
-    mocker.patch.object(per, "_ocr_elements", return_value=[])
-    mocker.patch.object(perception_mod, "find_numpad_digit", return_value=bbox)
-
-    rig.acquire()
-    out = per.wait_for_numpad_digit("1")
-    rig.release()
-
-    assert out == bbox
-
-
-def test_wait_for_numpad_digit_fallback_spacing_is_pass_end_to_next_start(
-    mocker, rig, per: Perception
-) -> None:
-    # Once one OCR pass outlasts NUMPAD_OCR_FALLBACK_SECONDS, stamping
-    # `last_ocr` BEFORE the pass would make every later blurry tick OCR
-    # back-to-back; stamping at loop entry would starve the fallback
-    # entirely. The stamp lands AFTER the pass, so the cadence is
-    # pass-end→next-start. Pinned with a fake clock that advances only
-    # on sleep and on the (multi-second) mocked OCR pass.
-    sleep = _wire_numpad_poll(mocker, rig, sharpness=1.0)  # chronically blurry
-    mocker.patch.object(perception_mod, "find_numpad_digit", return_value=None)
-
-    clock = {"now": 0.0}
-    mocker.patch.object(
-        perception_mod.time, "monotonic", side_effect=lambda: clock["now"]
-    )
-    sleep.side_effect = lambda s: clock.__setitem__("now", clock["now"] + s)
-
-    ocr_cost = 4.0  # a pass longer than the 2.5s fallback interval
-    spans: list[tuple[float, float]] = []
-
-    def slow_ocr(frame) -> list:
-        begin = clock["now"]
-        clock["now"] += ocr_cost
-        spans.append((begin, clock["now"]))
-        return []
-
-    mocker.patch.object(per, "_ocr_elements", side_effect=slow_ocr)
-
-    rig.acquire()
-    out = per.wait_for_numpad_digit("1", timeout=20.0)
-    rig.release()
-
-    assert out is None
-    # The fallback kept firing across the window (a loop-entry stamp
-    # would never let `now - last_ocr` reach the interval → 0 passes).
-    assert len(spans) >= 2
-    # And each pass waited the full interval from the PREVIOUS PASS'S
-    # END (a stamp-before-the-pass yields gap 0 once ocr_cost > 2.5).
-    gaps = [nxt[0] - prev[1] for prev, nxt in zip(spans, spans[1:])]
-    assert all(g >= per.NUMPAD_OCR_FALLBACK_SECONDS for g in gaps)
 
 
 # ---------- watch ----------
@@ -828,66 +709,3 @@ def test_scheduled_retune_superseded_by_a_fresher_tune(
     tune.assert_not_called()
 
 
-def test_wait_for_numpad_digit_never_ocrs_a_dark_unsharp_crop(
-    mocker, rig, per: Perception
-) -> None:
-    # A crushed/asleep screen has nothing to read — the fix point is
-    # BEFORE this poll; burning multi-second OCR passes here just delays
-    # noticing the screen lighting up.
-    from physiclaw.core.vision.quality import QualityReport
-
-    frame = np.zeros((4, 4, 3), dtype=np.uint8)
-    rig._cam.snapshot.return_value = frame
-    mocker.patch.object(perception_mod, "crop_to_phone_screen", return_value=frame)
-    mocker.patch.object(
-        perception_mod.quality,
-        "assess",
-        return_value=QualityReport(sharpness=5.0, clip_pct=0.0, median_luma=3.0),
-    )
-    ocr = mocker.patch.object(per, "_ocr_elements")
-    clock = {"now": 0.0}
-    mocker.patch.object(
-        perception_mod.time, "monotonic", side_effect=lambda: clock["now"]
-    )
-    sleep = mocker.patch.object(perception_mod.time, "sleep")
-    sleep.side_effect = lambda s: clock.__setitem__("now", clock["now"] + s)
-
-    rig.acquire()
-    try:
-        out = per.wait_for_numpad_digit("1", timeout=2.0)
-    finally:
-        rig.release()
-
-    assert out is None
-    ocr.assert_not_called()
-
-
-def test_wait_for_numpad_digit_ocrs_dark_frames_on_untunable_rigs(
-    mocker, rig, per: Perception
-) -> None:
-    # No exposure fix point exists on an untunable rig — a dark frame is
-    # the best it will ever produce, so the fallback cadence must still
-    # OCR instead of skipping the whole window.
-    from physiclaw.core.vision.quality import QualityReport
-
-    rig._cam.exposure_tunable = False
-    frame = np.zeros((4, 4, 3), dtype=np.uint8)
-    rig._cam.snapshot.return_value = frame
-    mocker.patch.object(perception_mod, "crop_to_phone_screen", return_value=frame)
-    mocker.patch.object(
-        perception_mod.quality,
-        "assess",
-        return_value=QualityReport(sharpness=5.0, clip_pct=0.0, median_luma=3.0),
-    )
-    mocker.patch.object(per, "NUMPAD_OCR_FALLBACK_SECONDS", 0.0)
-    bbox = [0.1, 0.1, 0.2, 0.2]
-    mocker.patch.object(per, "_ocr_elements", return_value=[])
-    mocker.patch.object(perception_mod, "find_numpad_digit", return_value=bbox)
-
-    rig.acquire()
-    try:
-        out = per.wait_for_numpad_digit("1")
-    finally:
-        rig.release()
-
-    assert out == bbox

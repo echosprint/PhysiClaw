@@ -17,7 +17,6 @@ surface. Image processing lives in physiclaw.core.vision — the
 orchestrator never touches pixels.
 """
 
-import logging
 import threading
 import time
 from typing import TYPE_CHECKING, assert_never, cast
@@ -37,20 +36,7 @@ from physiclaw.core.orchestration.rig import HardwareRig
 from physiclaw.core.vision.util import (
     decode_image,
     encode_view_jpeg,
-    looks_locked,
     validate_bbox,
-)
-
-log = logging.getLogger(__name__)
-
-# Agent-facing fragment: the unlock verify's "still locked" signal. The
-# `unlock_phone` tool docstring (server/tools.py) quotes this verbatim as the
-# retry trigger — a test pins that both sides carry it. Deliberately does NOT
-# start with "Passcode entered", so a success-substring check can't match a
-# failure.
-UNLOCK_STILL_LOCKED = (
-    "the phone still shows the lock screen — the keypad likely timed out "
-    "before the taps landed"
 )
 
 
@@ -383,7 +369,7 @@ class PhysiClaw:
 
     def unlock_phone(self) -> "GestureResult":
         """Unlock the phone: wake → swipe up → fix exposure on the keypad
-        → find the keypad "1" → tap it six times → verify by pixels.
+        → find the keypad "1" → tap it six times.
 
         Fully mechanical — no AI. Passcode is hardcoded to 111111 — a
         dedicated tool-phone passcode, not the user's real password.
@@ -392,10 +378,9 @@ class PhysiClaw:
         so the swipe fires on a freshly-woken screen (a short settle
         after the wake tap, no slow work before it), and the exposure fix
         runs on the raised keypad — a bright, stable target — right
-        before the sharpness-gated keypad poll (see wait_for_numpad_digit).
-        Single-shot on purpose: a missed window reports honestly and the
-        AGENT retries — the next call starts with the screen awake, so it
-        is faster and likelier to land.
+        before the keypad-detection poll (see wait_for_numpad_digit).
+        Single-shot on purpose: no pixel verify here — the attached view
+        shows whether the phone unlocked, and the AGENT retries if not.
         """
 
         digit = gestures.UNLOCK_PASSCODE[0]
@@ -410,8 +395,8 @@ class PhysiClaw:
             # Let the woken screen settle before the swipe.
             time.sleep(0.5)
             self._execute(gestures.UNLOCK_SWIPE)
-            # Fix exposure on the raised keypad — the poll below can only
-            # meter sharpness, not tune, and the keypad lives seconds.
+            # Fix exposure on the raised keypad — the poll below only
+            # detects (OCR), it can't tune, and the keypad lives seconds.
             self.perception.ensure_readable_exposure()
             digit_bbox = self.perception.wait_for_numpad_digit(digit)
             if digit_bbox is None:
@@ -420,20 +405,6 @@ class PhysiClaw:
             for _ in range(taps):
                 self._execute(gestures.Tap(digit_bbox))
 
-            time.sleep(0.2)  # unlock transition before the verify frame
-            # The taps already landed; a camera hiccup on the verify grab
-            # must not turn a real unlock into a tool error (that would
-            # steer the agent to STUCK on an unlocked phone). Fail toward
-            # "entered" — the attached view still shows the truth.
-            try:
-                still_locked = looks_locked(self.perception.scan_text())
-            except Exception:
-                log.warning(
-                    "unlock verify scan failed — assuming entered", exc_info=True
-                )
-                still_locked = False
-            if still_locked:
-                return f"Taps landed but {UNLOCK_STILL_LOCKED}"
             return "Passcode entered"
 
         return self._observed(act)

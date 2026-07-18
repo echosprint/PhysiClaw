@@ -741,15 +741,14 @@ def test_force_quit_open_swipe_holds_before_lift(pc: PhysiClaw, wire_rig) -> Non
 # ---------- unlock_phone ----------
 
 
-def _wire_unlock(mocker, pc: PhysiClaw, wire_rig, *, digit_bbox, scan=()):
+def _wire_unlock(mocker, pc: PhysiClaw, wire_rig, *, digit_bbox):
     """Shared unlock harness: wired rig, warmed OCR double, keypad poll
-    stubbed, verify scan returning `scan`."""
+    stubbed."""
     wire_rig(pc.rig)
     pc.perception._ocr_reader = MagicMock()
     mocker.patch.object(orchestrator.time, "sleep")
     mocker.patch.object(pc.perception, "ensure_readable_exposure")
     mocker.patch.object(pc.perception, "wait_for_numpad_digit", return_value=digit_bbox)
-    mocker.patch.object(pc.perception, "scan_text", return_value=list(scan))
 
 
 def test_unlock_phone_returns_when_keypad_not_found(
@@ -770,47 +769,7 @@ def test_unlock_phone_taps_six_times_when_keypad_found(
     out = pc.unlock_phone()
 
     assert "Passcode entered" in out.text
-    assert "still shows the lock screen" not in out.text
     # 1 wake-tap + 6 digit-taps = 7 taps.
-    assert pc.rig._arm.tap.call_count == 7
-
-
-def test_unlock_phone_reports_still_locked_when_verify_sees_lock_screen(
-    mocker, pc: PhysiClaw, wire_rig
-) -> None:
-    _wire_unlock(
-        mocker,
-        pc,
-        wire_rig,
-        digit_bbox=[0.1, 0.1, 0.2, 0.2],
-        scan=[
-            {
-                "label": "Swipe up for Face ID or Enter Passcode",
-                "bbox": [0.06, 0.18, 0.93, 0.22],
-            }
-        ],
-    )
-
-    out = pc.unlock_phone()
-
-    assert "still shows the lock screen" in out.text
-    # The taps did run — the verify is what failed.
-    assert pc.rig._arm.tap.call_count == 7
-
-
-def test_unlock_phone_verify_camera_hiccup_still_reports_entered(
-    mocker, pc: PhysiClaw, wire_rig
-) -> None:
-    # The taps already landed — a dropped verify frame must fail toward
-    # "entered", not surface as a tool error that steers the agent to
-    # STUCK on an unlocked phone (the attached view shows the truth).
-    _wire_unlock(mocker, pc, wire_rig, digit_bbox=[0.1, 0.1, 0.2, 0.2])
-    pc.perception.scan_text.side_effect = RuntimeError("Camera capture failed")
-
-    out = pc.unlock_phone()
-
-    assert "Passcode entered" in out.text
-    assert "still shows the lock screen" not in out.text
     assert pc.rig._arm.tap.call_count == 7
 
 
