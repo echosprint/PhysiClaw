@@ -381,5 +381,7 @@ class PhysiClaw:
         phone unlocked, and the AGENT retries if not.
         """
         return self._observed(
-            lambda: self._unlock.unlock_phone(self._execute, self.perception)
+            lambda: self._unlock.unlock_phone(
+                self._execute, self.perception, self.rig.park
+            )
         )

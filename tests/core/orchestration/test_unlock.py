@@ -32,8 +32,9 @@ def _run(mocker, unlocker, *, bbox, monotonic=None):
         return "ok"
 
     per = _Perception(bbox)
-    result = unlocker.unlock_phone(execute, per)
-    return result, recorded, per
+    park = MagicMock()
+    result = unlocker.unlock_phone(execute, per, park)
+    return result, recorded, per, park
 
 
 def _taps(recorded) -> list:
@@ -45,7 +46,7 @@ def _swipes(recorded) -> list:
 
 
 def test_taps_six_times_when_keypad_found(mocker) -> None:
-    result, recorded, per = _run(
+    result, recorded, per, park = _run(
         mocker, unlock.PhoneUnlock(), bbox=[0.1, 0.1, 0.2, 0.2]
     )
 
@@ -54,10 +55,11 @@ def test_taps_six_times_when_keypad_found(mocker) -> None:
     # 1 wake-tap (WAKE_SCREEN is a Tap) + 6 digit-taps = 7.
     assert len(_taps(recorded)) == 7
     assert len(_swipes(recorded)) == 1  # single swipe, no re-arm
+    park.assert_called_once()  # stylus off-screen after the swipe
 
 
 def test_fails_when_keypad_not_found(mocker) -> None:
-    result, recorded, _ = _run(mocker, unlock.PhoneUnlock(), bbox=None)
+    result, recorded, _, _ = _run(mocker, unlock.PhoneUnlock(), bbox=None)
 
     assert result == "Failed to find passcode keypad"
     # Only the wake tap ran; no digit taps after the failed poll.
@@ -66,19 +68,21 @@ def test_fails_when_keypad_not_found(mocker) -> None:
 
 def test_rearms_keypad_when_locate_is_slow(mocker) -> None:
     # Locating the "1" ran past STALE_SECONDS → re-swipe a fresh keypad
-    # and blind-tap the found bbox, with NO second OCR. monotonic feeds
-    # swipe_at=0 then two reads past the threshold.
-    result, recorded, per = _run(
+    # and blind-tap the found bbox, with NO second OCR. monotonic feeds:
+    # open swipe_at=0, two threshold reads past it, then the re-swipe's
+    # own (ignored) swipe_at.
+    result, recorded, per, park = _run(
         mocker,
         unlock.PhoneUnlock(),
         bbox=[0.1, 0.1, 0.2, 0.2],
-        monotonic=[0.0, 10.0, 10.0],
+        monotonic=[0.0, 10.0, 10.0, 10.0],
     )
 
     assert result == "Passcode entered"
     per.wait_for_numpad_digit.assert_called_once()  # no second OCR
     assert len(_swipes(recorded)) == 2  # initial swipe + re-arm
     assert len(_taps(recorded)) == 7
+    assert park.call_count == 2  # parked after each swipe
 
 
 def test_second_unlock_uses_cached_bbox_without_ocr(mocker) -> None:
@@ -88,10 +92,11 @@ def test_second_unlock_uses_cached_bbox_without_ocr(mocker) -> None:
 
     # Second unlock: the poll would return None, but it must never be
     # called — the cached bbox is blind-tapped instead.
-    result, recorded, per2 = _run(mocker, unlocker, bbox=None)
+    result, recorded, per2, park = _run(mocker, unlocker, bbox=None)
 
     assert result == "Passcode entered"
     per2.ocr_reader.assert_not_called()  # cached — no OCR warm
     per2.wait_for_numpad_digit.assert_not_called()  # cached — no OCR poll
     assert len(_taps(recorded)) == 7  # 1 wake + 6 digit taps
     assert len(_swipes(recorded)) == 1
+    park.assert_called_once()  # cached path still parks after the swipe
