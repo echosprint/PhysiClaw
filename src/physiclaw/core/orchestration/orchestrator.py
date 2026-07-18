@@ -18,14 +18,13 @@ orchestrator never touches pixels.
 """
 
 import threading
-import time
 from typing import TYPE_CHECKING, assert_never, cast
 
 if TYPE_CHECKING:
     import numpy as np
 
 from physiclaw.common.gesture_vocab import STEP_ARG, STEP_TOOL
-from physiclaw.core.orchestration import gestures
+from physiclaw.core.orchestration import gestures, unlock
 from physiclaw.core.orchestration.clipboard import (
     ClipboardSyncError,
     ClipboardSyncState,
@@ -54,6 +53,8 @@ class PhysiClaw:
             transforms=lambda: self.rig.require_transforms(),
         )
         self._clipboard = ClipboardSyncState()
+        # Long-lived so the located "1" bbox caches across unlocks.
+        self._unlock = unlock.PhoneUnlock()
         self._become_ready_lock = threading.Lock()  # see become_ready
         # Lambdas, not bound methods: they look `grab`/`detect` up on the
         # perception object at call time, so a replaced (or test-patched)
@@ -368,44 +369,17 @@ class PhysiClaw:
         return self._run_macro(gestures.FORCE_QUIT, "Force-quit current app")
 
     def unlock_phone(self) -> "GestureResult":
-        """Unlock the phone: wake → swipe up → fix exposure on the keypad
-        → find the keypad "1" → tap it six times.
+        """Unlock the phone with passcode 111111 — wake, swipe up, find the
+        keypad "1", tap it six times.
 
-        Fully mechanical — no AI. Passcode is hardcoded to 111111 — a
-        dedicated tool-phone passcode, not the user's real password.
-
-        The passcode keypad lives only seconds once the swipe opens it,
-        so the swipe fires on a freshly-woken screen and the detection
-        poll OCRs immediately — no exposure tune on the critical path (it
-        would delay the first OCR past the keypad's lifetime, and the
-        high-contrast keypad reads even at a dark exposure). Single-shot
-        on purpose: no pixel verify here — the attached view shows whether
-        the phone unlocked, and the AGENT retries if not.
+        Fully mechanical (no AI) with a dedicated throwaway passcode. The
+        imperative timing dance (Face-ID wait, keypad OCR poll, stale-keypad
+        re-arm) lives in ``unlock.PhoneUnlock``, which caches the located
+        "1" so later unlocks skip OCR; the facade only supplies the lock +
+        observation bracket and the two collaborators it needs. Single-shot
+        on purpose: no pixel verify — the attached view shows whether the
+        phone unlocked, and the AGENT retries if not.
         """
-
-        digit = gestures.UNLOCK_PASSCODE[0]
-        taps = len(gestures.UNLOCK_PASSCODE)
-
-        def act() -> str:
-            # Warm the OCR model before waking the phone — a cold RapidOCR
-            # load (seconds) inside the keypad's short lifetime lets the
-            # numpad sleep again before the first tap lands.
-            self.perception.ocr_reader()
-            self._execute(gestures.WAKE_SCREEN)
-            # Let the woken screen settle before the swipe.
-            time.sleep(0.5)
-            self._execute(gestures.UNLOCK_SWIPE)
-            # OCR the keypad immediately — no exposure tune on this path.
-            # The keypad lives only seconds, and its high-contrast white
-            # digits read even at a dark exposure, so a tune here would
-            # just delay the first OCR past the keypad's lifetime.
-            digit_bbox = self.perception.wait_for_numpad_digit(digit)
-            if digit_bbox is None:
-                return "Failed to find passcode keypad"
-
-            for _ in range(taps):
-                self._execute(gestures.Tap(digit_bbox))
-
-            return "Passcode entered"
-
-        return self._observed(act)
+        return self._observed(
+            lambda: self._unlock.unlock_phone(self._execute, self.perception)
+        )

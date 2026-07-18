@@ -738,40 +738,6 @@ def test_force_quit_open_swipe_holds_before_lift(pc: PhysiClaw, wire_rig) -> Non
     assert dwells[1:] == [0.0, 0.0]
 
 
-# ---------- unlock_phone ----------
-
-
-def _wire_unlock(mocker, pc: PhysiClaw, wire_rig, *, digit_bbox):
-    """Shared unlock harness: wired rig, warmed OCR double, keypad poll
-    stubbed."""
-    wire_rig(pc.rig)
-    pc.perception._ocr_reader = MagicMock()
-    mocker.patch.object(orchestrator.time, "sleep")
-    mocker.patch.object(pc.perception, "wait_for_numpad_digit", return_value=digit_bbox)
-
-
-def test_unlock_phone_returns_when_keypad_not_found(
-    mocker, pc: PhysiClaw, wire_rig
-) -> None:
-    _wire_unlock(mocker, pc, wire_rig, digit_bbox=None)
-
-    out = pc.unlock_phone()
-
-    assert "Failed to find passcode keypad" in out.text
-
-
-def test_unlock_phone_taps_six_times_when_keypad_found(
-    mocker, pc: PhysiClaw, wire_rig
-) -> None:
-    _wire_unlock(mocker, pc, wire_rig, digit_bbox=[0.1, 0.1, 0.2, 0.2])
-
-    out = pc.unlock_phone()
-
-    assert "Passcode entered" in out.text
-    # 1 wake-tap + 6 digit-taps = 7 taps.
-    assert pc.rig._arm.tap.call_count == 7
-
-
 # ---------- camera-quality warning (AF/AE failure) ----------
 
 
