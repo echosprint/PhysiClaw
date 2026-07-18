@@ -217,7 +217,7 @@ def test_wait_for_numpad_digit_gives_up_at_timeout(
     )
     sleep.side_effect = lambda s: clock.__setitem__("now", clock["now"] + s)
 
-    def ocr_pass(frame) -> list:
+    def ocr_pass(frame, max_edge=None) -> list:
         clock["now"] += 0.03
         return []
 
@@ -640,56 +640,6 @@ def test_tune_crash_records_a_deferred_sentinel(mocker, rig, per: Perception) ->
         rig.release()
 
     assert per._last_tune is not None and per._last_tune.deferred
-
-
-def test_ensure_readable_exposure_tunes_a_dark_view(
-    mocker, rig, per: Perception
-) -> None:
-    from physiclaw.core.vision.quality import QualityReport
-
-    rig._cam.exposure_tunable = True
-    frame = np.zeros((4, 4, 3), dtype=np.uint8)
-    mocker.patch.object(per, "_screen_crop", return_value=frame)
-    mocker.patch.object(
-        perception_mod.quality,
-        "assess",
-        return_value=QualityReport(sharpness=20.0, clip_pct=0.0, median_luma=5.0),
-    )
-    tune = mocker.patch.object(per, "tune_now")
-
-    rig.acquire()
-    try:
-        per.ensure_readable_exposure()
-    finally:
-        rig.release()
-
-    tune.assert_called_once()
-
-
-def test_ensure_readable_exposure_leaves_a_clean_view_alone(
-    mocker, rig, per: Perception
-) -> None:
-    from physiclaw.core.vision.quality import QualityReport
-
-    rig._cam.exposure_tunable = True
-    frame = np.zeros((4, 4, 3), dtype=np.uint8)
-    mocker.patch.object(per, "_screen_crop", return_value=frame)
-    mocker.patch.object(
-        perception_mod.quality,
-        "assess",
-        return_value=QualityReport(
-            sharpness=400.0, clip_pct=0.0, median_luma=120.0, p99_luma=250.0
-        ),
-    )
-    tune = mocker.patch.object(per, "tune_now")
-
-    rig.acquire()
-    try:
-        per.ensure_readable_exposure()
-    finally:
-        rig.release()
-
-    tune.assert_not_called()
 
 
 def test_scheduled_retune_superseded_by_a_fresher_tune(

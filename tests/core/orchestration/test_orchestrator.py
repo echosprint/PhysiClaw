@@ -747,7 +747,6 @@ def _wire_unlock(mocker, pc: PhysiClaw, wire_rig, *, digit_bbox):
     wire_rig(pc.rig)
     pc.perception._ocr_reader = MagicMock()
     mocker.patch.object(orchestrator.time, "sleep")
-    mocker.patch.object(pc.perception, "ensure_readable_exposure")
     mocker.patch.object(pc.perception, "wait_for_numpad_digit", return_value=digit_bbox)
 
 
@@ -832,18 +831,3 @@ def test_quality_check_failure_never_costs_the_view(
     out = pc.tap([0.1, 0.1, 0.2, 0.2])
 
     assert out.listing == "LISTING"  # fail-open: view intact, no line
-
-
-def test_unlock_phone_fixes_exposure_after_the_swipe(
-    mocker, pc: PhysiClaw, wire_rig
-) -> None:
-    # The poll can only meter sharpness, not tune — so exposure is fixed
-    # on the raised keypad (after the swipe), before the detection poll.
-    _wire_unlock(mocker, pc, wire_rig, digit_bbox=None)
-    order: list[str] = []
-    pc.perception.ensure_readable_exposure.side_effect = lambda: order.append("fix")
-    pc.rig._arm.swipe_to.side_effect = lambda *a, **k: order.append("swipe")
-
-    pc.unlock_phone()
-
-    assert order == ["swipe", "fix"]

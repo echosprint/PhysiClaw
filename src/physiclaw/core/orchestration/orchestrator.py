@@ -375,12 +375,12 @@ class PhysiClaw:
         dedicated tool-phone passcode, not the user's real password.
 
         The passcode keypad lives only seconds once the swipe opens it,
-        so the swipe fires on a freshly-woken screen (a short settle
-        after the wake tap, no slow work before it), and the exposure fix
-        runs on the raised keypad — a bright, stable target — right
-        before the keypad-detection poll (see wait_for_numpad_digit).
-        Single-shot on purpose: no pixel verify here — the attached view
-        shows whether the phone unlocked, and the AGENT retries if not.
+        so the swipe fires on a freshly-woken screen and the detection
+        poll OCRs immediately — no exposure tune on the critical path (it
+        would delay the first OCR past the keypad's lifetime, and the
+        high-contrast keypad reads even at a dark exposure). Single-shot
+        on purpose: no pixel verify here — the attached view shows whether
+        the phone unlocked, and the AGENT retries if not.
         """
 
         digit = gestures.UNLOCK_PASSCODE[0]
@@ -395,9 +395,10 @@ class PhysiClaw:
             # Let the woken screen settle before the swipe.
             time.sleep(0.5)
             self._execute(gestures.UNLOCK_SWIPE)
-            # Fix exposure on the raised keypad — the poll below only
-            # detects (OCR), it can't tune, and the keypad lives seconds.
-            self.perception.ensure_readable_exposure()
+            # OCR the keypad immediately — no exposure tune on this path.
+            # The keypad lives only seconds, and its high-contrast white
+            # digits read even at a dark exposure, so a tune here would
+            # just delay the first OCR past the keypad's lifetime.
             digit_bbox = self.perception.wait_for_numpad_digit(digit)
             if digit_bbox is None:
                 return "Failed to find passcode keypad"

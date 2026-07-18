@@ -63,6 +63,15 @@ class Perception:
     # after each miss the poll waits this long and tries again.
     NUMPAD_OCR_INTERVAL_SECONDS = 1.0
 
+    # Long-edge cap for the keypad-detection OCR input — much smaller than
+    # the LLM-view budget (CONFIG.compact.max_image_edge_px, ~1566) the
+    # other detect paths use. OCR cost scales with pixels and the keypad
+    # lives only seconds, so the input is shrunk hard; the big,
+    # high-contrast passcode digits survive the downscale where fine app
+    # text would not. Tune against the poll's per-pass log: if the keypad
+    # stops reading (few text elems, always a miss), raise this.
+    NUMPAD_OCR_MAX_EDGE = 900
+
     def __init__(self, rig: HardwareRig):
         self._rig = rig
         # Serialize first-use model construction (the watch route and a
@@ -152,53 +161,17 @@ class Perception:
         )
         return format_elements(elements_to_json(elements)), annotated
 
-    def _ocr_elements(self, frame) -> list[dict]:
+    def _ocr_elements(self, frame, max_edge: int | None = None) -> list[dict]:
         """OCR one already-grabbed frame into on-screen text elements —
         used by the keypad poll, which must OCR the exact frame it
         metered, not a fresh grab. Derives the crop box from the frame
-        itself, so callers can't pair a box with a different frame, and
-        caps the OCR input to CONFIG.compact.max_image_edge_px so a raw
-        4K crop doesn't cost seconds per pass (the peek/gesture paths
-        already downscale to the same cap via crop_to_phone_screen before
-        OCR)."""
+        itself, so callers can't pair a box with a different frame.
+        ``max_edge`` (px), when set, downscales the OCR input to that long
+        edge for speed (see OCRReader.read)."""
         crop_box = phone_screen_crop_box(frame, self._rig.transforms)
-        results = self.ocr_reader().read(
-            frame, crop_box=crop_box, max_edge=CONFIG.compact.max_image_edge_px
-        )
+        results = self.ocr_reader().read(frame, crop_box=crop_box, max_edge=max_edge)
         elements = results_to_elements(results, self._rig.transforms)
         return [e for e in elements if bbox_on_screen(e["bbox"])]
-
-    def ensure_readable_exposure(self) -> None:
-        """One dark/blown check + synchronous tune with the rig lock
-        ALREADY HELD — the explicit exposure fix point for
-        timing-critical windows (unlock's keypad race: the poll that
-        follows can only meter sharpness, and the keypad lives seconds).
-        The caller invokes this right after a gesture that changed the
-        scene (the unlock swipe that raised the keypad), so the deferral
-        hold is deliberately bypassed — the scene is known-new.
-        Fail-open: never raises."""
-        self._rig.assert_locked()
-        cam, t = self._rig.cam, self._rig.transforms
-        if cam is None or t is None or not cam.exposure_tunable:
-            return
-        try:
-            # Explicit park: the meter contract needs an unoccluded
-            # screen, and this must hold by contract, not by the
-            # happenstance of the previous gesture ending parked.
-            self._rig.park()
-            crop = self._screen_crop()
-            if crop is None:
-                return
-            report = quality.assess(crop)
-            if report.dark or report.blown:
-                log.info(
-                    "pre-poll exposure check: median %.0f, clip %.0f%% — tuning",
-                    report.median_luma,
-                    report.clip_pct * 100,
-                )
-                self.tune_now()
-        except Exception:
-            log.exception("pre-poll exposure check failed — continuing")
 
     def wait_for_numpad_digit(
         self, digit: str, timeout: float = 10.0
@@ -209,9 +182,9 @@ class Perception:
         Deliberately simple: OCR immediately — the keypad may already be
         up and is the scarce, short-lived resource — then retry every
         NUMPAD_OCR_INTERVAL_SECONDS until found or timeout. No quality
-        gating: the keypad's big white digits read even on a dark or
-        slightly soft crop, so trying always beats waiting for a perfect
-        frame (the exposure fix ran before this poll)."""
+        gating and no exposure tune: the keypad's big high-contrast digits
+        read even on a dark or slightly soft crop, so trying always beats
+        delaying the first OCR past the keypad's lifetime."""
         self._rig.assert_locked()
         self._rig.park()
         start = time.monotonic()
@@ -221,7 +194,7 @@ class Perception:
             grab_start = time.monotonic()
             frame = self.camera_view()
             ocr_start = time.monotonic()
-            elements = self._ocr_elements(frame)
+            elements = self._ocr_elements(frame, max_edge=self.NUMPAD_OCR_MAX_EDGE)
             bbox = find_numpad_digit(elements, digit)
             ocr_passes += 1
             now = time.monotonic()
