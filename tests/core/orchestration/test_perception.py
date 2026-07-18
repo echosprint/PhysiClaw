@@ -707,5 +707,3 @@ def test_scheduled_retune_superseded_by_a_fresher_tune(
     thread.call_args.kwargs["target"]()
 
     tune.assert_not_called()
-
-

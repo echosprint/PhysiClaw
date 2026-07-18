@@ -374,7 +374,6 @@ def test_find_numpad_digit_skips_two_keys_on_same_row_or_column() -> None:
     assert find_numpad_digit(elements, "5") is None
 
 
-
 def test_encode_view_jpeg_caps_long_edge_at_compact_config(monkeypatch) -> None:
     from physiclaw.core.vision.util import CONFIG, decode_image, encode_view_jpeg
 
