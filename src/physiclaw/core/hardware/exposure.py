@@ -11,8 +11,9 @@ Acceptance targets highlight headroom, not a median band: a phone
 screen's white level is constant at fixed brightness, so the one manual
 exposure that renders white *just below* clipping stays correct for any
 screen content — dark UIs simply have fewer lit pixels. Concretely: the
-crop must have (almost) no clipped pixels and clear quality.py's dark
-floor.
+crop must have (almost) no clipped pixels and must not be underexposed
+(`QualityReport.dark`, the two-axis predicate — so correctly-exposed
+dark-content screens are accepted as-is).
 
 A dark (underexposed — see `QualityReport.dark`) crop is still worth
 tuning against: at night auto-brightness dims the phone to a few nits,
@@ -20,18 +21,20 @@ and a value held for a lit daytime screen crushes the lock screen (and
 its passcode keypad) to black — the observed night-unlock failure
 mode. The tune therefore steps BRIGHTER on a dark crop; if the screen
 lights up later and the held value runs hot, the blown-view inline fix
-corrects it before the view ships (including the wall-to-wall
-saturation case, caught by quality.py's SATURATED_CLIP_PCT clause —
-without it a median-250 white-out evades every other rule). Only when
-brightening to the ceiling still leaves the crop dark is the scene
-judged unfixable for now — then the tune DEFERS (`deferred=True`,
-firmware AE back in charge under `prefer_auto`) with a baseline median
-metered under the RESTORED exposure state, and `wants_retry` releases
-the hold when the scene itself changes.
+corrects it before the view ships (the saturation clauses in quality.py
+— wall-to-wall clip, and white-median + clip + featureless — exist so
+that white-out is detectable at all).
 
-Every other failure path ends in `set_auto()` + a descriptive TuneResult
-(unless the user pinned manual in config): firmware AE plus the runtime
-⚠ warnings beat a bad frozen manual value.
+EVERY failed search defers (`deferred=True`): the scene was judged
+unfixable as-is — dark at the ceiling, blown/oscillating, or the meter
+lost frames — and re-proving that per view is the livelock this design
+exists to prevent. The hold records a baseline median metered under the
+RESTORED exposure state (firmware AE under `prefer_auto`; the held
+manual otherwise), and `wants_retry` releases it only when the scene
+itself changes or a fully in-band view arrives. Failure still ends in
+`set_auto()` + a descriptive TuneResult (unless the user pinned manual
+in config): firmware AE plus the runtime ⚠ warnings beat a bad frozen
+manual value.
 """
 
 import logging
@@ -41,7 +44,6 @@ from typing import Callable, Literal
 from physiclaw.core.vision.quality import (
     BLOWN_BLOB_COUNT,
     BLOWN_CLIP_PCT,
-    DARK_MEDIAN_LUMA,
     QualityReport,
 )
 
@@ -85,18 +87,20 @@ UNPINNED_MAX_EXPOSURE = -5
 # into any crop.
 TUNE_CLIP_PCT = 0.02
 
-# Below this median the screen itself is dark (asleep, lock screen at
-# rest) — there is nothing to expose FOR, and any value converged here
-# would be wildly hot for a lit screen. The tune defers instead.
+# Below this median the screen shows no lit content at all (asleep,
+# resting lock screen) — the gate on the stall check only: a black
+# screen can't move the meter regardless of the driver, so "ignored
+# writes" is judgeable only above this floor.
 DARK_REFERENCE_LUMA = 15.0
 
-# The scene must brighten by this much over a deferral's recorded
-# baseline before a re-tune is worth trying — the dark-hold's release
-# valve WITHIN the dark band (a not-dark view always releases). The
-# baseline is metered under the same exposure state as the views it
-# gates (see the dark verdict in `converge`), so this compares scene
-# against scene; it only needs to clear per-frame metering noise on a
-# static dark scene (~2-3 luma), not an exposure-regime gap.
+# The scene must move by this much (either direction) from a failed
+# tune's recorded baseline before a re-tune is worth trying — the
+# hold's release valve for still-mis-exposed views (an in-band view
+# releases via its own branch). The baseline is metered under the same
+# exposure state as the views it gates (see the failure hold in
+# `converge`), so this compares scene against scene; it only needs to
+# clear per-frame metering noise on a static scene (~2-3 luma), not an
+# exposure-regime gap.
 RETRY_LUMA_DELTA = 5.0
 
 # A set that changes measured median luma by less than this did nothing:
@@ -123,40 +127,35 @@ class TuneResult:
     exposure: int | None  # the held manual value; None in auto mode
     ok: bool  # True = final metered frame is in band
     detail: str  # human line for the tune log
-    # True = the search ended with the crop still dark (screen asleep,
-    # or dim beyond the exposure ceiling), or the meter lost frames —
-    # nothing more to learn until the scene changes. `wants_retry` is
+    # True on EVERY failed search (dark ending, blown/oscillating
+    # ending, meter loss) — the scene was judged unfixable as-is and
+    # nothing more can be learned until it changes. `wants_retry` is
     # the release valve.
     deferred: bool = False
-    # The deferral's baseline median, metered under the RESTORED
-    # exposure state so it shares a regime with the views `wants_retry`
-    # gates. None on non-deferred results and on sentinels (crash /
-    # meter failure), where the hold spans the whole dark band.
+    # The hold's baseline median, metered under the RESTORED exposure
+    # state so it shares a regime with the views `wants_retry` gates.
+    # None on ok results and on sentinels (crash / meter failure),
+    # where the hold spans the dark band and blown stays urgent.
     median: float | None = None
 
 
 def _good(r: QualityReport) -> bool:
-    """In band: highlight headroom (near-zero clip) + readable shadows.
-    `not blown` folds in every failure signature quality.py knows
-    (including the icon-grid blob axis) — the tune must never accept a
-    frame the runtime QualityMonitor would flag, or each such view
-    triggers a re-tune that changes nothing."""
-    return (
-        not r.blown
-        and r.clip_pct <= TUNE_CLIP_PCT
-        and r.median_luma >= DARK_MEDIAN_LUMA
-    )
+    """In band: highlight headroom (near-zero clip) + not underexposed.
+    `not blown` / `not dark` fold in every failure signature quality.py
+    knows — the tune must never accept a frame the runtime
+    QualityMonitor would flag (each such view triggers a re-tune that
+    changes nothing), and must never REJECT a frame the monitor calls
+    fine: `dark` is the two-axis predicate, so a correctly-exposed
+    dark-content screen (median ~7, bright text) is accepted as-is
+    instead of laddering a correct exposure hot."""
+    return not r.blown and r.clip_pct <= TUNE_CLIP_PCT and not r.dark
 
 
 def _usable(r: QualityReport) -> bool:
-    """Fallback-holdable: bright enough to read and under the runtime
-    warning threshold — worse than `_good` (some highlights clip) but
-    strictly better than a frame the QualityMonitor would flag."""
-    return (
-        not r.blown
-        and r.clip_pct <= BLOWN_CLIP_PCT
-        and r.median_luma >= DARK_MEDIAN_LUMA
-    )
+    """Fallback-holdable: readable and under the runtime warning
+    threshold — worse than `_good` (some highlights clip) but strictly
+    better than a frame the QualityMonitor would flag."""
+    return not r.blown and r.clip_pct <= BLOWN_CLIP_PCT and not r.dark
 
 
 def is_reference(r: QualityReport) -> bool:
@@ -170,30 +169,35 @@ def is_reference(r: QualityReport) -> bool:
 def wants_retry(last: TuneResult | None, r: QualityReport) -> bool:
     """Should this view trigger a (re-)tune, given the last outcome?
 
-    The single home for the defer/retry inverse — `converge` decides
-    when to give up on a dark scene, and this decides when the scene
-    has changed enough to try again; keeping both here is what stops
-    the two from drifting apart (the caller adds only the blown
-    short-circuit):
+    The single home for the ENTIRE fire/hold policy — dark and blown
+    alike. `converge` decides when to give up on a scene (every failed
+    tune defers with a restored-regime baseline); this decides when the
+    scene has changed enough to try again. Keeping both here is what
+    stops them drifting apart:
 
-    - no deferral outstanding → tune on any dark view (a stale
-      bright-scene value crushes a night-dimmed screen);
-    - deferral outstanding, view no longer dark → always retry: the
-      scene is clearly lit, and a verify-tune on an in-band frame costs
-      a single meter (phase 1 accepts as-is);
-    - deferral outstanding, view still dark → only when it is brighter
-      than the deferral's same-regime baseline by RETRY_LUMA_DELTA (a
-      stuck-dark scene re-proves nothing — the thrash bound for
-      sessions staring at a sleeping phone); a baseline-less deferral
-      (crash / meter-failure sentinel) holds through the whole dark
-      band, releasing on the first not-dark view."""
+    - view is clean (neither dark nor blown) → tune only when a hold is
+      outstanding AND the view is fully in band (`_good`): the
+      verify-tune is then genuinely one meter (phase 1 accepts as-is)
+      and clears the stale hold. A merely-usable clean view (the held
+      darkest-usable glare frame) must NOT clear it — the re-run would
+      repeat the search that just failed, every view;
+    - mis-exposed view, no hold → tune (a stale value crushes a night
+      screen / saturates a morning one);
+    - mis-exposed view under a hold → only when the scene moved past
+      the hold's baseline by RETRY_LUMA_DELTA in EITHER direction (a
+      stuck scene re-proves what the failed tune measured — the thrash
+      bound for sleeping phones and persistent glare alike);
+    - baseline-less hold (crash / meter-failure sentinel): dark views
+      hold (no baseline to compare), blown views fire — saturation is
+      urgent and the crash may have been dark-side."""
+    bad = r.dark or r.blown
     if last is None or not last.deferred:
-        return r.dark
-    if not r.dark:
-        return True
+        return bad
+    if not bad:
+        return _good(r)
     if last.median is None:
-        return False
-    return r.median_luma > last.median + RETRY_LUMA_DELTA
+        return r.blown
+    return abs(r.median_luma - last.median) > RETRY_LUMA_DELTA
 
 
 def _restored_median(meter: Callable[[], QualityReport | None]) -> float | None:
@@ -253,14 +257,13 @@ def converge(
          matter what the driver does), two direction flips (band lies
          between two integer steps — keep the darkest usable step
          tried), range exhausted, or `max_steps`.
-      4. Dark verdict: if the search ended with the crop still
-         underexposed (`QualityReport.dark`) — or the meter lost frames
-         — nothing more can be learned from this scene. Defer
-         (`deferred=True`; firmware AE restored under `prefer_auto`,
-         pinned-manual holds the brightest probed step) and record the
-         baseline median under the restored state so `wants_retry`
-         compares scene against scene. The loop's diagnosis stays in
-         the detail; the dark note is appended to it.
+      4. Failure hold: every search that ends without an accepted frame
+         defers (`deferred=True`; firmware AE restored under
+         `prefer_auto`, pinned-manual holds the brightest probed step
+         on a dark ending) and records a baseline median under the
+         RESTORED state, so `wants_retry` compares scene against scene
+         for dark and blown alike. The loop's diagnosis stays in the
+         detail; the state note is appended to it.
 
     A `meter` returning None (no frame) fails open immediately — as a
     DEFERRED sentinel (no baseline), so the caller's re-tune policy
@@ -351,12 +354,18 @@ def converge(
             flips += 1
             if flips >= 2:
                 if best is not None:
+                    # Held-usable exit still defers with a baseline:
+                    # without the hold, a scene the search already
+                    # proved band-less (persistent glare) re-fires the
+                    # full tune on every subsequent view.
                     set_manual(best)
                     return TuneResult(
                         "manual",
                         best,
                         False,
                         f"band between steps — held darkest usable {best}",
+                        deferred=True,
+                        median=_restored_median(meter),
                     )
                 reason = "oscillating with no usable step"
                 break
@@ -367,29 +376,29 @@ def converge(
             break
         exp = nxt
 
-    # Dark verdict: the search ended with the crop still underexposed
-    # (or with the meter lost mid-stepping — sentinel semantics, no
-    # baseline). Defer; the baseline `wants_retry` compares against is
-    # metered AFTER the final exposure state is restored below, so
-    # baseline and future views share one regime — a ceiling-metered
-    # baseline would gate the release on the exposure difference, not
-    # on scene change. The loop's own diagnosis (stall, oscillation,
-    # exhaustion) stays in `reason`; the dark note is appended, never
+    # Failure hold: EVERY failed search defers — the scene was judged
+    # unfixable as-is, and `wants_retry` re-fires only when the scene
+    # itself moves (or a clean view arrives, clearing the hold with one
+    # cheap verify-tune). The baseline is metered AFTER the exposure
+    # state is restored below, so release and any re-defer judge the
+    # SAME regime — a stepped-manual verdict against restored-regime
+    # views livelocks. The loop's own diagnosis (stall, oscillation,
+    # exhaustion) stays in `reason`; the state note is appended, never
     # a replacement.
-    dark_hold = r is None or r.dark
-    if r is not None and r.dark:
-        reason += f"; crop still dark (median {r.median_luma:.0f})"
+    if r is not None and (r.dark or r.blown):
+        state = "dark" if r.dark else "blown"
+        reason += f"; crop still {state} (median {r.median_luma:.0f})"
 
     if not prefer_auto:
         # Manual pinned in config: never flip to firmware AE, even when
         # no usable step was found — honoring the pin matters more than
-        # a good exposure the user opted out of. On a dark verdict hold
+        # a good exposure the user opted out of. On a dark ending hold
         # the LAST step tried — the brightest probe, least-bad for a
         # dark scene — rather than re-crushing the screen back to the
         # configured start.
         if best is not None:
             value, held = best, "best manual"
-        elif dark_hold and r is not None:
+        elif r is not None and r.dark:
             value, held = exp, "brightest probed"
         else:
             value, held = start, "manual start"
@@ -399,8 +408,8 @@ def converge(
             value,
             False,
             f"{reason} — held {held} {value} (auto disabled in config)",
-            deferred=dark_hold,
-            median=_restored_median(meter) if dark_hold else None,
+            deferred=True,
+            median=_restored_median(meter),
         )
     set_auto()
     return TuneResult(
@@ -408,6 +417,6 @@ def converge(
         None,
         False,
         f"{reason} — reverted to auto",
-        deferred=dark_hold,
-        median=_restored_median(meter) if dark_hold else None,
+        deferred=True,
+        median=_restored_median(meter),
     )

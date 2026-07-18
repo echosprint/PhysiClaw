@@ -295,3 +295,27 @@ def test_monitor_reports_dark_instead_of_blur() -> None:
 
     assert line is not None and DARK_NOTE in line
     assert BLUR_NOTE not in line
+
+
+def test_uniform_saturated_frame_is_blown() -> None:
+    # The morning white-out: a manual value held from a dim night scene
+    # nukes the lit screen featureless — white median, heavy clip, no
+    # edges. Median >= 250 evades the two-factor rule and a page-sized
+    # region is not icon-shaped; the saturation clause must catch it.
+    frame = np.full((200, 100, 3), 255, dtype=np.uint8)
+
+    r = assess(frame)
+
+    assert r.blown
+
+
+def test_glint_does_not_defeat_the_dark_axis() -> None:
+    # A ~1% specular glint at 255 would pin a raw p99 and mechanically
+    # disarm `dark` on a genuinely crushed frame — the highlight axis
+    # excludes clipped pixels.
+    frame = np.full((200, 100, 3), 5, dtype=np.uint8)
+    frame[:4, :50] = 255  # glint: 1% of the crop
+
+    r = assess(frame)
+
+    assert r.dark

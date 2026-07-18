@@ -186,9 +186,12 @@ class Perception:
         visible keypad — the unlock flow's pre-swipe probe. A keypad
         left open by a previous attempt must be typed on, not swiped:
         the bottom-edge swipe is the passcode screen's CANCEL gesture.
-        Caller must hold the lock. Fail-open (None) — a failed probe
-        just means the flow swipes as usual."""
+        Caller must hold the lock; parks explicitly — an occluded probe
+        that misses would fire the very cancel swipe it exists to
+        prevent. Fail-open (None) — a failed probe just means the flow
+        swipes as usual."""
         self._rig.assert_locked()
+        self._rig.park()
         try:
             return find_numpad_digit(self._ocr_elements(self.camera_view()), digit)
         except Exception:
@@ -208,6 +211,10 @@ class Perception:
         if cam is None or t is None or not cam.exposure_tunable:
             return
         try:
+            # Explicit park: the meter contract needs an unoccluded
+            # screen, and this must hold by contract, not by the
+            # happenstance of the previous gesture ending parked.
+            self._rig.park()
             crop = self._screen_crop()
             if crop is None:
                 return
@@ -245,6 +252,8 @@ class Perception:
         pass-end→next-start."""
         self._rig.assert_locked()
         self._rig.park()
+        cam = self._rig.cam
+        can_tune = cam is not None and cam.exposure_tunable
         start = time.monotonic()
         deadline = start + timeout
         last_ocr = start
@@ -254,7 +263,12 @@ class Perception:
             crop = crop_to_phone_screen(frame, self._rig.transforms)
             report = quality.assess(crop)
             sharp = report.sharpness >= quality.BLUR_THRESHOLD
-            if report.dark and not sharp:
+            if report.dark and not sharp and can_tune:
+                # A crushed crop reads nothing — but only skip when the
+                # rig could have fixed the exposure (the fix point runs
+                # before this poll). On an untunable rig a dark frame
+                # is the best it will ever produce: fall through to the
+                # unsharp fallback cadence rather than never OCRing.
                 time.sleep(0.15)
                 continue
             since = time.monotonic() - last_ocr
@@ -352,8 +366,9 @@ class Perception:
     def tune_now(self) -> None:
         """Verify-and-converge with the rig lock ALREADY HELD and the arm
         parked — the synchronous path: the observer calls this mid-grab
-        whenever `needs_inline_fix` flags a view (washed out, crushed
-        dark, or a deferred tune owed a brighter scene), so the
+        whenever `needs_inline_fix` flags a view (mis-exposed with no
+        hold, a held scene that moved, or an in-band view clearing a
+        stale hold), so the
         corrected frame ships to the agent instead of a mis-exposed one
         with a warning. Fail-open: never raises, no-op when the rig
         can't tune."""
@@ -386,15 +401,16 @@ class Perception:
             log.info("exposure tune: %s", result.detail)
         except Exception:
             log.exception("exposure tune failed — leaving camera as-is")
-            # Record a deferred sentinel: without a result the dark-hold
+            # Record a deferred sentinel: without a result the hold
             # has no state, and a flaky camera on a dark scene would
             # re-fire the multi-second tune on every judged view. No
-            # median → `wants_retry` releases on the reference floor.
+            # baseline → dark views hold, blown views stay urgent, and
+            # the first in-band view clears it.
             self._last_tune = exposure.TuneResult(
                 "auto",
                 None,
                 False,
-                "tune crashed — retry on a lit view",
+                "tune crashed — holding until the scene changes",
                 deferred=True,
             )
 
@@ -402,17 +418,15 @@ class Perception:
         """Should this view's exposure be fixed before it ships?
 
         The single predicate behind both the observer's inline fix and
-        the background safety net: a washed-out view always fires
-        (whatever holds exposure just proved wrong for the current
-        screen); everything dark-side — dark views, deferred tunes owed
-        a brighter scene, the stuck-dark thrash bound — is
-        `exposure.wants_retry`'s call, one home next to the defer
-        semantics it inverts."""
+        the background safety net — and it is entirely
+        `exposure.wants_retry`'s call: dark and blown views fire it,
+        failed-tune holds bound it (a scene the search already proved
+        unfixable doesn't re-fire until it changes), and clean views
+        clear stale holds with one cheap verify-tune. One home, next
+        to the defer semantics it inverts."""
         cam = self._rig.cam
         if cam is None or not cam.exposure_tunable:
             return False
-        if report.blown:
-            return True
         return exposure.wants_retry(self._last_tune, report)
 
     def on_quality_report(self, report: quality.QualityReport, streak: int) -> None:
@@ -438,7 +452,7 @@ class Perception:
                     f"dark view (median {report.median_luma:.0f}, streak {streak})"
                 )
             else:
-                self._schedule_retune("brighter view arrived after a deferred tune")
+                self._schedule_retune("in-band view — clearing a stale hold")
 
     def _schedule_retune(self, reason: str) -> None:
         """Run the re-tune on a detached daemon thread, at most one in

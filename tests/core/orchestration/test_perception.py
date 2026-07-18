@@ -877,3 +877,34 @@ def test_wait_for_numpad_digit_never_ocrs_a_dark_unsharp_crop(
 
     assert out is None
     ocr.assert_not_called()
+
+
+def test_wait_for_numpad_digit_ocrs_dark_frames_on_untunable_rigs(
+    mocker, rig, per: Perception
+) -> None:
+    # No exposure fix point exists on an untunable rig — a dark frame is
+    # the best it will ever produce, so the fallback cadence must still
+    # OCR instead of skipping the whole window.
+    from physiclaw.core.vision.quality import QualityReport
+
+    rig._cam.exposure_tunable = False
+    frame = np.zeros((4, 4, 3), dtype=np.uint8)
+    rig._cam.snapshot.return_value = frame
+    mocker.patch.object(perception_mod, "crop_to_phone_screen", return_value=frame)
+    mocker.patch.object(
+        perception_mod.quality,
+        "assess",
+        return_value=QualityReport(sharpness=5.0, clip_pct=0.0, median_luma=3.0),
+    )
+    mocker.patch.object(per, "NUMPAD_OCR_FALLBACK_SECONDS", 0.0)
+    bbox = [0.1, 0.1, 0.2, 0.2]
+    mocker.patch.object(per, "_ocr_elements", return_value=[])
+    mocker.patch.object(perception_mod, "find_numpad_digit", return_value=bbox)
+
+    rig.acquire()
+    try:
+        out = per.wait_for_numpad_digit("1")
+    finally:
+        rig.release()
+
+    assert out == bbox

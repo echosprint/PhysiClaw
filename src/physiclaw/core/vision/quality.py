@@ -98,13 +98,16 @@ DARK_MEDIAN_LUMA = 25.0
 # highlights: readable dark UI carries near-white text (p99 ≈ 250);
 # a crushed frame has no bright pixels at all (p99 well under this).
 DARK_P99_LUMA = 180.0
-# Above this clip fraction the frame is saturated wall-to-wall — a
-# gross overexposure (e.g. a manual value held from a far dimmer
-# scene). The two-factor blown rule can't catch it (median ≥ 250
-# evades the BLOWN_MEDIAN_LUMA guard, and a page-sized clipped region
-# is not icon-shaped), so it gets its own clause. Legit light pages
-# measured well below this (a readable chat page clips ~70%).
+# Saturation — the gross-overexposure signatures the two-factor rule
+# can't catch (median ≥ 250 evades the BLOWN_MEDIAN_LUMA guard, and a
+# page-sized clipped region is not icon-shaped). Two clauses:
+# wall-to-wall clip, and a white median + clip + NO EDGES — a readable
+# white page also meters a white median with heavy clip (measured; the
+# pinned doctrine tests encode it), but it carries text, so what
+# separates a nuked frame is featurelessness: sharpness below the blur
+# floor on a white-median frame means the content burned away.
 SATURATED_CLIP_PCT = 0.95
+SATURATED_MEDIAN_LUMA = 250.0
 # Two-factor blown-highlights rule — see module docstring for calibration.
 BLOWN_CLIP_PCT = CONFIG.vision.blown_clip_pct
 BLOWN_MEDIAN_LUMA = CONFIG.vision.blown_median_luma
@@ -200,12 +203,18 @@ class QualityReport:
         - the icon-grid white-out (many icon-sized clipped blobs), which
           catches white-median catastrophes when the burned content is
           icon-shaped;
-        - wall-to-wall saturation (clip >= SATURATED_CLIP_PCT), which
-          catches the gross case both others evade — a manual value
-          held from a far dimmer scene nuking the whole frame white."""
+        - saturation (wall-to-wall clip, or a white median with real
+          clip), which catches the gross case both others evade — a
+          manual value held from a far dimmer scene nuking the frame."""
         if self.clip_pct >= SATURATED_CLIP_PCT:
             return True
         if self.clip_pct > BLOWN_CLIP_PCT and self.median_luma < BLOWN_MEDIAN_LUMA:
+            return True
+        if (
+            self.clip_pct > BLOWN_CLIP_PCT
+            and self.median_luma >= SATURATED_MEDIAN_LUMA
+            and self.sharpness < BLUR_THRESHOLD
+        ):
             return True
         return self.white_blobs >= BLOWN_BLOB_COUNT
 
@@ -223,12 +232,20 @@ def assess(frame: np.ndarray) -> QualityReport:
     independent, so they read the native crop directly.
     """
     gray = grayscale(frame)
+    # The highlight axis excludes clipped pixels: a small specular
+    # glint (>=1% of the crop at 255) would otherwise pin p99 and
+    # mechanically defeat `dark` on a genuinely crushed frame. Real
+    # readable highlights (white text through camera optics) spread
+    # across 180-249 and survive the mask; an all-clipped frame is
+    # bright by definition.
+    unclipped = gray[gray < CLIP_LUMA]
+    p99 = float(np.percentile(unclipped, 99)) if unclipped.size else 255.0
     return QualityReport(
         sharpness=laplacian_variance(gray),
         clip_pct=float((gray >= CLIP_LUMA).mean()),
         median_luma=float(np.median(gray)),
         white_blobs=clipped_icon_blobs(gray),
-        p99_luma=float(np.percentile(gray, 99)),
+        p99_luma=p99,
     )
 
 

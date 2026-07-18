@@ -424,3 +424,56 @@ def test_max_exposure_param_caps_the_brightening_ladder() -> None:
 
     assert res.deferred
     assert rig.manual_calls == [-6, -5]  # never steps to -4
+
+
+def test_converge_accepts_correctly_exposed_dark_content() -> None:
+    # Dark-mode UI: median ~7 with bright text (p99 clears the floor).
+    # Acceptance shares `dark`'s two axes — laddering this correct
+    # exposure hot (or reverting a good hold) was the audit's top
+    # coherence finding.
+    dark_ui = QualityReport(
+        sharpness=400.0, clip_pct=0.01, median_luma=7.0, p99_luma=250.0
+    )
+    rig = Rig(dark_ui, {})
+
+    res = converge(rig.meter, rig.set_auto, rig.set_manual, start=-6)
+
+    assert res.ok and res.mode == "auto"
+    assert rig.manual_calls == []
+
+
+def test_failed_tune_holds_against_the_restored_scene() -> None:
+    # The livelock guard: the baseline is metered under the RESTORED
+    # state, so the very views that follow the failure judge as
+    # "unchanged" and do not re-fire the tune.
+    rig = Rig(_r(12.0), {-6: _r(14.0), -5: _r(19.0), -4: _r(23.0)})
+
+    res = converge(rig.meter, rig.set_auto, rig.set_manual, start=-6)
+
+    assert exposure.wants_retry(res, _r(12.0)) is False  # same scene
+    assert exposure.wants_retry(res, _r(23.0)) is True  # scene moved
+
+
+def test_blown_failure_holds_and_releases_on_scene_change() -> None:
+    # Persistent glare: the oscillation exit holds the darkest usable
+    # step AND defers with a baseline, so unchanged views don't re-run
+    # the search — the blown-side thrash bound the audit demanded.
+    rig = Rig(BLOWN, {-6: _r(160.0, clip=0.08), -7: _r(18.0)})
+
+    res = converge(rig.meter, rig.set_auto, rig.set_manual, start=-6)
+
+    assert res.deferred and res.median == 160.0
+    held_view = _r(160.0, clip=0.08)  # usable, not in band — no re-run
+    assert exposure.wants_retry(res, held_view) is False
+    assert exposure.wants_retry(res, _r(120.0)) is True  # glare gone
+
+
+def test_wants_retry_blown_truth_table() -> None:
+    blown_view = _r(150.0, clip=0.3)
+    hold = exposure.TuneResult("auto", None, False, "held", deferred=True, median=150.0)
+    sentinel = exposure.TuneResult("auto", None, False, "crashed", deferred=True)
+
+    assert exposure.wants_retry(None, blown_view) is True  # no hold: urgent
+    assert exposure.wants_retry(hold, blown_view) is False  # unchanged scene
+    assert exposure.wants_retry(hold, _r(180.0, clip=0.3)) is True  # moved
+    assert exposure.wants_retry(sentinel, blown_view) is True  # blown stays urgent
