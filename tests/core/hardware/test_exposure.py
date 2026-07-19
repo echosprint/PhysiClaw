@@ -294,6 +294,22 @@ def test_blob_blown_frame_steps_darker_to_a_clean_hold() -> None:
     assert rig.manual_calls == [-6, -7]
 
 
+def test_washed_white_frame_steps_darker() -> None:
+    # Whites washed to ~245: a high highlight fraction that does NOT clip at
+    # 250 and has no icon blobs, so clip/blob alone read "fine, go brighter".
+    # It's blown (washed + featureless), so the stepper must go DARKER —
+    # the direction test must mirror blown's washed clause.
+    washed = QualityReport(
+        sharpness=60.0, clip_pct=0.0, median_luma=245.0, highlight_pct=0.9
+    )
+    rig = Rig(washed, {-6: washed, -7: _r(120.0)})
+
+    res = converge(rig.meter, rig.set_auto, rig.set_manual, start=-6)
+
+    assert res.ok and res.mode == "manual" and res.exposure == -7
+    assert rig.manual_calls == [-6, -7]  # darker, not brighter
+
+
 def test_night_dim_screen_tunes_brighter_into_band() -> None:
     # The night-unlock failure case: a lit-but-dim night screen under
     # a stale bright-scene value. The tune must brighten into band — a

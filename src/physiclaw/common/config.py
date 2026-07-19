@@ -121,6 +121,7 @@ class VisionConfig:
     blown_clip_pct: float = 0.12  # clipped-pixel fraction for the blown rule
     blown_median_luma: float = 200.0  # ...only when the median is below this
     blown_blob_count: int = 6  # icon-grid white-out blob count
+    washed_highlight_pct: float = 0.5  # highlight (≥225) fraction for washed-white
     # watchdog.py — did the idle screen wake?
     wake_std_increase: float = 4.0
     wake_mean_increase: float = 4.0

@@ -17,15 +17,15 @@ failure except from the pixels. So this module judges the frames:
   overlay, which is exactly the failure that strands the agent.
 
   A white-out whose median itself crosses 200 (AE caught mid-swing
-  right after a dark→bright screen flip) evades the histogram rule —
-  and no luma statistic can separate it from a legit white page
-  (measured 2026-07: a readable chat page clips MORE than a nuked home
-  screen). Two complementary defenses: STRUCTURE — the icon-grid
-  variant is many icon-sized solid clipped blobs (`clipped_icon_blobs`)
-  where a white page is one page-sized component, so it folds into
-  `blown`; and ACQUISITION — `GestureObserver.with_view` detects the
-  brightness flip from the before/after median jump and re-settles the
-  grab, covering white-outs with no icon structure at all.
+  right after a dark→bright screen flip) evades the two-factor rule —
+  and no luma MEDIAN can separate it from a legit white page (measured
+  2026-07: a readable chat page clips MORE than a nuked home screen).
+  So the defenses key on FEATURELESSNESS instead: WASHED — a large
+  highlight fraction that is featureless folds into `blown` (see the
+  HIGHLIGHT_LUMA constant); STRUCTURE — the icon-grid variant is many
+  icon-sized solid clipped blobs (`clipped_icon_blobs`), also `blown`;
+  and ACQUISITION — `GestureObserver.with_view` detects the brightness
+  flip from the before/after median jump and re-settles the grab.
 
 Thresholds were calibrated on real session frames (2026-07): a bad-rig
 corpus (Windows, overexposed + glare) vs a good-rig corpus (macOS). At
@@ -107,7 +107,19 @@ DARK_P99_LUMA = 180.0
 # separates a nuked frame is featurelessness: sharpness below the blur
 # floor on a white-median frame means the content burned away.
 SATURATED_CLIP_PCT = 0.95
-SATURATED_MEDIAN_LUMA = 250.0
+# "Washed white" overexposure — the canonical rationale for the `blown`
+# saturation clause. HIGHLIGHT_LUMA (225) is the onset of the detail-
+# destroyed highlight band, the standard high-tail threshold in no-
+# reference exposure-quality work (To ≈ 225), LOWER than CLIP_LUMA's
+# strict 250 so a screen washed to ~230-249 still registers (the band the
+# old median>=250 cliff slipped through). A crop with >= WASHED_HIGHLIGHT_PCT
+# of its pixels this bright AND below the blur floor (featureless) is burned;
+# the SHARPNESS guard — not a luma cliff — is what keeps a readable hot white
+# page (text edges clear the blur floor) from tripping, since a correctly-
+# exposed white UI renders white near 205 (≈0% here). Calibrated 2026-07:
+# washed WeChat views metered 86-91%, every correct frame ≤ 27% — a wide gap.
+HIGHLIGHT_LUMA = 225
+WASHED_HIGHLIGHT_PCT = CONFIG.vision.washed_highlight_pct
 # Two-factor blown-highlights rule — see module docstring for calibration.
 BLOWN_CLIP_PCT = CONFIG.vision.blown_clip_pct
 BLOWN_MEDIAN_LUMA = CONFIG.vision.blown_median_luma
@@ -139,6 +151,12 @@ PERSIST_REMINDER = (
     "report it to your user (camera focus, glare / lighting, screen "
     "brightness) instead of retrying blind."
 )
+
+
+def _luma_fraction(gray: np.ndarray, thresh: int) -> float:
+    """Fraction of pixels at or above `thresh` — the shape shared by the
+    clip (>=CLIP_LUMA) and highlight (>=HIGHLIGHT_LUMA) metrics."""
+    return float((gray >= thresh).mean())
 
 
 def clipped_icon_blobs(gray: np.ndarray) -> int:
@@ -180,6 +198,10 @@ class QualityReport:
     # underexposure from dark content (see DARK_P99_LUMA). Defaults to
     # 0.0 ("no highlights") so hand-built low-median reports read dark.
     p99_luma: float = 0.0
+    # Fraction of pixels >= HIGHLIGHT_LUMA — the washed-white signal (see
+    # the `blown` saturation clause). Defaults to 0.0 so hand-built reports
+    # read un-washed.
+    highlight_pct: float = 0.0
 
     @property
     def blurry(self) -> bool:
@@ -197,22 +219,22 @@ class QualityReport:
 
     @property
     def blown(self) -> bool:
-        """Three failure signatures, any one:
+        """Four failure signatures, any one:
         - the two-factor histogram rule (clipped pixels on a non-white
           median), which a white-median frame evades by construction;
         - the icon-grid white-out (many icon-sized clipped blobs), which
           catches white-median catastrophes when the burned content is
           icon-shaped;
-        - saturation (wall-to-wall clip, or a white median with real
-          clip), which catches the gross case both others evade — a
-          manual value held from a far dimmer scene nuking the frame."""
+        - wall-to-wall clip (>= SATURATED_CLIP_PCT), the gross case;
+        - washed white: a large highlight fraction (>= WASHED_HIGHLIGHT_PCT
+          at HIGHLIGHT_LUMA) that is featureless (below the blur floor) —
+          see the HIGHLIGHT_LUMA constant for the rationale."""
         if self.clip_pct >= SATURATED_CLIP_PCT:
             return True
         if self.clip_pct > BLOWN_CLIP_PCT and self.median_luma < BLOWN_MEDIAN_LUMA:
             return True
         if (
-            self.clip_pct > BLOWN_CLIP_PCT
-            and self.median_luma >= SATURATED_MEDIAN_LUMA
+            self.highlight_pct >= WASHED_HIGHLIGHT_PCT
             and self.sharpness < BLUR_THRESHOLD
         ):
             return True
@@ -242,10 +264,11 @@ def assess(frame: np.ndarray) -> QualityReport:
     p99 = float(np.percentile(unclipped, 99)) if unclipped.size else 255.0
     return QualityReport(
         sharpness=laplacian_variance(gray),
-        clip_pct=float((gray >= CLIP_LUMA).mean()),
+        clip_pct=_luma_fraction(gray, CLIP_LUMA),
         median_luma=float(np.median(gray)),
         white_blobs=clipped_icon_blobs(gray),
         p99_luma=p99,
+        highlight_pct=_luma_fraction(gray, HIGHLIGHT_LUMA),
     )
 
 

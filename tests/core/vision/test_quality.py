@@ -82,6 +82,32 @@ def test_legit_white_page_is_not_blown() -> None:
     assert not r.blown
 
 
+def test_washed_white_ui_below_strict_clip_is_blown() -> None:
+    # The 2026-07 miss: a white UI (WeChat chat) overexposed so the
+    # background sits at ~240 — in the detail-destroyed highlight band
+    # (>=225) but UNDER the strict 250 clip, and featureless. The old
+    # median>=250 / clip>=250 clauses all slipped it; the highlight-
+    # fraction clause catches it.
+    frame = _flat(value=240)
+    r = assess(frame)
+    assert r.clip_pct == 0.0  # nothing at >=250, so the clip clauses are blind
+    assert r.highlight_pct >= quality.WASHED_HIGHLIGHT_PCT
+    assert r.sharpness < quality.BLUR_THRESHOLD
+    assert r.blown
+
+
+def test_hot_but_readable_white_page_is_not_blown() -> None:
+    # Same highlight band, but a readable page: its text carries edges,
+    # so sharpness clears the blur floor and the washed clause holds off —
+    # the sharpness guard, not a luma cutoff, is what distinguishes them.
+    frame = _flat(value=240)
+    frame[80:120, :, :] = _checkerboard(40, 100)[:, :, :]  # dark text band
+    r = assess(frame)
+    assert r.highlight_pct >= quality.WASHED_HIGHLIGHT_PCT
+    assert r.sharpness >= quality.BLUR_THRESHOLD
+    assert not r.blown
+
+
 def _burned_icon_grid(background: int) -> np.ndarray:
     """3x4 grid of solid clipped squares — burned app icons — on the
     given background. Icon area fraction ~2% (inside the blob band)."""

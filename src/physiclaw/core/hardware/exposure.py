@@ -44,6 +44,7 @@ from typing import Callable, Literal
 from physiclaw.core.vision.quality import (
     BLOWN_BLOB_COUNT,
     BLOWN_CLIP_PCT,
+    WASHED_HIGHLIGHT_PCT,
     QualityReport,
 )
 
@@ -345,10 +346,17 @@ def converge(
         prev_luma = r.median_luma
         if _usable(r) and (best is None or exp < best):
             best = exp
-        # Darker while highlights clip — globally (clip fraction) or as
-        # burned icon blobs (which can ride on a low global clip);
-        # brighter only when neither says overexposed.
-        overexposed = r.clip_pct > TUNE_CLIP_PCT or r.white_blobs >= BLOWN_BLOB_COUNT
+        # Darker while highlights are too hot — globally (clip fraction),
+        # as burned icon blobs (which ride on a low global clip), or as a
+        # washed highlight fraction (whites at ~230-249 that don't clip at
+        # 250 yet still burn `blown`); brighter only when none says so. The
+        # washed term must mirror `blown`'s washed clause, or the acceptance
+        # test rejects a frame the stepper then walks the wrong way.
+        overexposed = (
+            r.clip_pct > TUNE_CLIP_PCT
+            or r.white_blobs >= BLOWN_BLOB_COUNT
+            or r.highlight_pct >= WASHED_HIGHLIGHT_PCT
+        )
         direction = -1 if overexposed else 1
         if last_dir and direction != last_dir:
             flips += 1
