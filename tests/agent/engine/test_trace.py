@@ -753,7 +753,7 @@ def _feed_session(t: Trace) -> None:
         {
             "event": "wake",
             "session": "s1",
-            "model_ref": "moonshot/kimi-k2.6",
+            "model_ref": "moonshot/kimi-k3",
             "triggers": [{"source": "phone", "description": "screen changed"}],
         }
     )
@@ -823,7 +823,7 @@ def test_summary_json_derived_from_event_stream(_trace_dirs: Path) -> None:
     s = json.loads((_trace_dirs / "sessions" / "s1" / "summary.json").read_text())
     assert s["schema"] == 1
     assert s["sid"] == "s1"
-    assert s["model_ref"] == "moonshot/kimi-k2.6"
+    assert s["model_ref"] == "moonshot/kimi-k3"
     assert s["provider"] == "moonshot"
     assert s["prompt_hash"] == "deadbeef"
     assert s["triggers"][0]["source"] == "phone"

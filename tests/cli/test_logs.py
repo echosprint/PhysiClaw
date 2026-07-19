@@ -20,7 +20,7 @@ def _summary(sid: str, sentinel: str = "DONE", recap: str = "ok") -> dict:
         "started_at": "x",
         "ended_at": "y",
         "duration_s": 313.0,
-        "model_ref": "moonshot/kimi-k2.6",
+        "model_ref": "moonshot/kimi-k3",
         "provider": "moonshot",
         "prompt_hash": "h",
         "triggers": [],
