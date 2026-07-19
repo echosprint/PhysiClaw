@@ -2,13 +2,13 @@
 
 `GestureObserver` owns the observation pipeline that brackets a gesture:
 park (clearing the arm from the lens) → grab the cropped phone-screen
-frame with a blur/blown-retry (auto-exposure settles after screen flips
+frame with a blur/blown-retry (the exposure settles after screen flips
 — and, on an unpinned lens, autofocus after the arm's move),
 escalating a persistently blown grab —
 or a stale failed-tune hold met by an in-band view — to an inline exposure
 re-tune so the agent gets a corrected view, not a warning → re-settle
 the after-grab when the before/after median jump says the screen
-flipped brightness class (AE mid-swing white-outs are invisible to luma
+flipped brightness class (mid-flip white-outs are invisible to luma
 statistics; see FLIP_MEDIAN_DELTA) → detect UI on the after-frame →
 assess camera quality → attach the screen-change verdict. Gesture
 bodies stay thin callables; a new diagnostic plugs in here without
@@ -61,10 +61,10 @@ class GestureObserver:
     # ~1s of stylus retract + park, total ≈ 2s — enough for most page
     # transitions (Anthropic's computer-use reference uses a 2.0s delay).
     GESTURE_SETTLE_SECONDS = 1.0
-    # A screen-content flip (dark lock screen → bright home) sends
-    # firmware auto-exposure re-converging — and an unpinned lens (no
-    # bundle focus; see hardware/focus.py) re-hunts when the arm crosses
-    # it; a frame captured mid-swing is blurry or blown and
+    # A screen-content flip (dark lock screen → bright home) can leave
+    # the exposure unsettled — and an unpinned lens (no bundle focus;
+    # see hardware/focus.py) re-hunts when the arm crosses it; a frame
+    # captured mid-transition is blurry or blown and
     # poisons both the verdict and the fused view. On either verdict,
     # wait and re-grab once. Blur uses the same number and scale as the
     # quality monitor's verdict.
@@ -78,10 +78,10 @@ class GestureObserver:
     PEEK_RETRY_SECONDS = 2.0
 
     # A gesture that flips the screen's brightness class (lock → home,
-    # dark app → white page) sends firmware AE re-converging over
-    # seconds; the settled after-grab can still catch it mid-swing,
-    # recording a white-out the phone never showed. Luma statistics
-    # can't flag that frame — a *readable* white page meters MORE
+    # dark app → white page) can leave the settled after-grab still
+    # mid-transition, recording a white-out the phone never showed
+    # (worst when firmware AE is driving — it re-converges over seconds).
+    # Luma statistics can't flag that frame — a *readable* white page meters MORE
     # clipped than a nuked one (measured 2026-07: good chat page 70%
     # clip vs nuked home screen 48%) — but the median jump between the
     # gesture's own before/after frames detects the flip itself: above
@@ -192,8 +192,8 @@ class GestureObserver:
     def peek_frame(self):
         """Park, grab the cropped phone-screen frame, and re-grab once
         after a settle if it's too blurry or blown — peek's acquisition
-        path. Blown covers the AE-lag transient: the screen just flipped
-        dark→bright and firmware auto-exposure hasn't re-converged yet.
+        path. Blown covers the post-flip exposure transient: the screen
+        just flipped dark→bright and the exposure hasn't settled yet.
 
         Returns `(frame, report, retuned)` — the report always
         describes the returned frame, so the caller's quality judgment
@@ -237,8 +237,8 @@ class GestureObserver:
         sharp; a still-blurry frame
         is re-grabbed once as a fallback.
 
-        A blown frame (auto-exposure still re-converging after the screen
-        content flipped dark→bright) triggers the same wait-and-regrab as
+        A blown frame (exposure not yet settled after the screen content
+        flipped dark→bright) triggers the same wait-and-regrab as
         blur; when the `needs_fix` predicate then says the exposure
         itself warrants a tune, the injected `fix_exposure` runs and the
         corrected frame replaces the mis-exposed one — the agent gets a
@@ -306,10 +306,12 @@ class GestureObserver:
         arm was already parked from the previous op, screen static); the
         after-grab settles so the transition completes and AF recovers
         from the gesture's arm move before capture. A brightness-class
-        flip between the pair (median jump > FLIP_MEDIAN_DELTA) earns
-        the after-grab an extra settle + regrab — firmware AE needs
-        seconds to re-converge across such a flip, and luma statistics
-        cannot flag the mid-swing white-out after the fact.
+        flip between the pair (median jump > FLIP_MEDIAN_DELTA) marks a
+        major transition (unlock, app launch) that may still be mid-flight,
+        so the after-grab earns an extra settle + regrab — the after-frame
+        feeds the verdict, listing, and view, and any mid-transition
+        white-out it would otherwise catch is invisible to luma statistics
+        after the fact.
         """
         before, before_sharp, before_report, before_retuned = self.grab_screen()
         result = action()
@@ -320,22 +322,22 @@ class GestureObserver:
             before_report is not None
             and after_report is not None
             # A retune during the AFTER grab makes the median jump an
-            # exposure artifact, not an AE mid-swing: that frame was
+            # exposure artifact, not a mid-transition flip: that frame was
             # just metered inside the fix, so the regrab protects
             # nothing. A before-grab retune is NOT a skip reason — the
             # after frame is an ordinary grab that can still be exactly
-            # the mid-swing white-out this regrab exists to catch (and
+            # the mid-transition white-out this regrab exists to catch (and
             # the fused view, not just the withheld verdict, ships it).
             and not after_retuned
             and abs(after_report.median_luma - before_report.median_luma)
             > self.FLIP_MEDIAN_DELTA
         ):
             # Brightness-class flip: the after frame was likely grabbed
-            # mid-AE-swing (see FLIP_MEDIAN_DELTA) — settle again and
+            # mid-transition (see FLIP_MEDIAN_DELTA) — settle again and
             # regrab through the full quality pipeline.
             log.info(
                 "gesture view: screen flipped brightness (median %.0f → %.0f) "
-                "— extra settle for AE",
+                "— extra settle + regrab",
                 before_report.median_luma,
                 after_report.median_luma,
             )

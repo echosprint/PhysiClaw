@@ -109,8 +109,8 @@ def test_grab_screen_retries_once_when_blurry(mocker) -> None:
 
 
 def test_grab_screen_retries_once_when_blown(mocker) -> None:
-    # A washed-out frame (auto-exposure still re-converging after the
-    # screen flipped dark→bright) gets the same wait-and-regrab as blur.
+    # A washed-out frame (exposure not yet settled after the screen
+    # flipped dark→bright) gets the same wait-and-regrab as blur.
     sleep = mocker.patch.object(observation.time, "sleep")
     sharp = _sharp()
     obs = _observer([_blown(), sharp])  # blur disabled by _observer
@@ -287,7 +287,7 @@ def test_peek_frame_retries_once_and_keeps_retry_frame(mocker) -> None:
 
 
 def test_peek_frame_retries_once_when_blown(mocker) -> None:
-    # Blown covers the AE-lag transient; blur is disabled here so the
+    # Blown covers the post-flip exposure transient; blur is disabled here so the
     # washout is what triggers the retry.
     sleep = mocker.patch.object(observation.time, "sleep")
     retry = _flat()
@@ -405,9 +405,9 @@ def test_with_view_withholds_verdict_when_before_grab_tune_regrab_fails(
 
 def test_with_view_regrabs_after_brightness_flip(mocker) -> None:
     # A dark→bright flip between the pair (unlock: lock screen → home)
-    # means the after frame was likely grabbed mid-AE-swing — one extra
+    # means the after frame was likely grabbed mid-transition — one extra
     # settle + regrab replaces it; the verdict still stands (both the
-    # mid-swing and settled frames diff as changed).
+    # mid-transition and settled frames diff as changed).
     sleep = mocker.patch.object(observation.time, "sleep")
     mocker.patch.object(observation, "encode_view_jpeg", return_value=b"VIEW_JPG")
     settled = _flat(210)
@@ -627,7 +627,7 @@ def test_gesture_result_defaults_to_text_only() -> None:
 
 def test_with_view_flip_regrab_skipped_when_after_was_retuned(mocker) -> None:
     # A dark after-frame the inline fix brightens jumps the median by
-    # exposure, not AE mid-swing — the flip settle+regrab would spend
+    # exposure, not a mid-transition flip — the flip settle+regrab would spend
     # seconds (and could re-fire the tune) to protect a verdict that is
     # already withheld.
     sleep = mocker.patch.object(observation.time, "sleep")
@@ -655,7 +655,7 @@ def test_with_view_flip_regrab_skipped_when_after_was_retuned(mocker) -> None:
 
 def test_with_view_flip_regrab_still_runs_when_only_before_was_retuned(mocker) -> None:
     # A before-grab retune says nothing about the AFTER frame — it can
-    # still be exactly the mid-AE-swing white-out the flip regrab
+    # still be exactly the mid-transition white-out the flip regrab
     # exists to catch, and the fused view (not just the withheld
     # verdict) would ship it.
     sleep = mocker.patch.object(observation.time, "sleep")
