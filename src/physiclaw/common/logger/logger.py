@@ -231,6 +231,13 @@ class _SessionCaptureHandler(logging.StreamHandler):
         self.setLevel(logging.DEBUG)
         self.addFilter(_OwnDebugFilter())
 
+    def emit(self, record: logging.LogRecord) -> None:
+        # Drop records once the handle is closed — logging.shutdown() at exit
+        # closes it while other threads may still log. The session is over, so
+        # (unlike the long-lived daily file) there's nothing to reopen for.
+        if not self._file.closed:
+            super().emit(record)
+
     def close(self) -> None:
         try:
             super().close()

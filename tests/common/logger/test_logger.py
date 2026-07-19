@@ -217,6 +217,28 @@ def test_setup_logging_file_level_debug_keeps_own_debug(tmp_path, mocker) -> Non
     assert "dep-debug-line" not in text  # third-party DEBUG filtered out
 
 
+def test_session_capture_drops_write_after_close(tmp_path) -> None:
+    import contextlib
+    import io
+
+    from physiclaw.common.logger.logger import _SessionCaptureHandler
+
+    h = _SessionCaptureHandler(tmp_path / "runtime.log")
+    lg = logging.getLogger("t.cap.afterclose")
+    lg.propagate = False
+    lg.setLevel(logging.DEBUG)
+    lg.handlers = [h]
+    lg.info("before")
+    h.close()  # simulate logging.shutdown() at interpreter exit
+
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        lg.info("after-close")  # a stray record after close must not spam
+
+    assert "Logging error" not in err.getvalue()
+    assert "closed file" not in err.getvalue()
+
+
 def test_attach_session_log_failopen_on_bad_path(tmp_path) -> None:
     from physiclaw.common.logger.logger import attach_session_log, detach_session_log
 
