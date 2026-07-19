@@ -128,12 +128,26 @@ def server(
     loop) start daemon threads / a subprocess so `_serve` can start first.
     """
     from physiclaw import __version__
-    from physiclaw.common.logger import setup_logging
+    from physiclaw.common import paths
+    from physiclaw.common.logger import (
+        SERVER_LOG_TAG,
+        attach_server_mcp_tee,
+        setup_logging,
+    )
 
     # Logging first: everything from here on — including the version line and
     # the background auto-sync's outcome — speaks in one voice, the
-    # timestamped `[physiclaw]` stream.
-    setup_logging("physiclaw", logging.DEBUG if verbose else logging.INFO)
+    # timestamped `[physiclaw]` stream. The daily file is DEBUG regardless of
+    # console verbosity (the server's own persistent log).
+    setup_logging(
+        SERVER_LOG_TAG,
+        logging.DEBUG if verbose else logging.INFO,
+        file_dir=paths.server_log_dir(),
+        file_level=logging.DEBUG,
+    )
+    # Tee this process's camera/exposure/tune detail into the agent's active
+    # session dir as mcp.log (the runtime publishes which session is active).
+    attach_server_mcp_tee()
     logging.getLogger("mcp").setLevel(logging.WARNING)
     # Phones opening the bridge URL probe https:// first (Safari's HTTPS
     # upgrade, VPN apps); the TLS bytes hitting our plaintext port make

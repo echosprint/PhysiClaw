@@ -20,7 +20,10 @@ def read_text(path: Path) -> str:
 
 
 def write_text(path: Path, data: str) -> None:
-    path.write_text(data, encoding="utf-8")
+    # newline="\n" pins LF: the default (newline=None) translates \n to
+    # os.linesep — CRLF on Windows — breaking the "UTF-8 with LF on every
+    # platform" invariant the config and session-log artifacts promise.
+    path.write_text(data, encoding="utf-8", newline="\n")
 
 
 def append_text(path: Path, data: str) -> None:

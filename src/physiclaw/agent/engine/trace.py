@@ -52,7 +52,9 @@ from typing import Any
 
 from physiclaw.common import paths
 from physiclaw.common.config import CONFIG
+from physiclaw.common.logger import SessionLogSidecars
 from physiclaw.common.logger.retention import purge_daily_logs
+from physiclaw.common.text import read_text, write_text
 
 log = logging.getLogger(__name__)
 
@@ -177,6 +179,23 @@ in the `env` event / `summary.json.env.utc_offset`.
 - `images/NNNNN_t<turn>.<ext>` — screenshots the model saw (typically
   .jpg), ordered, tagged with the turn whose request carried them.
 
+- `notes.md` — the agent's own turn-by-turn narration: one line per
+  `note(summary=...)`, `- turn N — <summary>`. The fastest human read
+  of what the agent thought it was doing, in order.
+
+- `runtime.log` — a mirror of the runtime process's log stream for
+  this session (uncolored, full DEBUG for `physiclaw.*` plus INFO+
+  from other loggers): the turn-by-turn engine log, provider timings,
+  warnings, and full tracebacks that the structured events only record
+  as an error string.
+
+- `mcp.log` — the MCP-server process's log for this session (camera,
+  exposure/tune, gesture execution), written live by the server: the
+  runtime publishes the active session id to a marker and the server
+  resolves it to this dir and tees its log there. This is where to look
+  when a view came back wrong (blur, glare, bad exposure). Absent if the
+  server logged nothing, was not running, or predates this feature.
+
 ## Analysis tips
 
 - Underperforming session? Check `images/` first — bad runs usually
@@ -205,8 +224,8 @@ def _ensure_sessions_readme() -> None:
     cheap (one small read per session start)."""
     path = _SESSIONS_DIR / "README.md"
     try:
-        if not path.exists() or path.read_text(encoding="utf-8") != SESSIONS_README:
-            path.write_text(SESSIONS_README, encoding="utf-8", newline="\n")
+        if not path.exists() or read_text(path) != SESSIONS_README:
+            write_text(path, SESSIONS_README)
     except OSError:
         log.debug("sessions README write failed", exc_info=True)
 
@@ -315,6 +334,12 @@ class Trace:
         d.mkdir(parents=True, exist_ok=True)
         _ensure_sessions_readme()
         self._events = open(d / "events.jsonl", "a", encoding="utf-8", newline="\n")
+        # Self-containment: runtime.log (process log mirror) + mcp.log
+        # (the server's log for this session's window) via the shared
+        # sidecars, plus a human-readable per-turn note history — so a
+        # shared session dir explains itself without the terminal or `jq`.
+        self._sidecars = SessionLogSidecars(d)
+        self._notes = self._open_notes(d / "notes.md")
         self._summary = _Summary(session_id)
         self._closed = False
         # First line of every session: the environment it ran in —
@@ -322,13 +347,50 @@ class Trace:
         # self-describing.
         self.write({"event": "env", **_env_snapshot()})
 
+    def _open_notes(self, path: Path):
+        """Open the per-turn note-history file and write its header.
+        Fail-open (returns None) — a note-log failure must never sink a
+        session."""
+        try:
+            f = open(path, "a", encoding="utf-8", newline="\n")
+            f.write(f"# Session {self.session_id} — note history\n\n")
+            f.flush()
+            return f
+        except OSError:
+            log.debug("notes.md open failed", exc_info=True)
+            return None
+
     def write(self, event: dict[str, Any]) -> None:
         self._write_event(event)
         self._summary.observe(event)
+        self._append_note(event)
         msg = _summarize(event)
         if msg is None:
             return
         self._emit(msg)
+
+    def _append_note(self, event: dict[str, Any]) -> None:
+        """Append a `note` tool_result's summary to notes.md — the
+        session's story in the agent's own words, one line per turn.
+        Fail-open; newlines in a summary are flattened to keep one line
+        per turn."""
+        if (
+            self._notes is None
+            or event.get("event") != "tool_result"
+            or event.get("name") != "note"
+        ):
+            return
+        summary = (event.get("arguments") or {}).get("summary")
+        if not summary:
+            return
+        turn = event.get("turn")
+        pfx = f"turn {turn}" if turn is not None else "note"
+        line = " ".join(str(summary).split())
+        try:
+            self._notes.write(f"- {pfx} — {line}\n")
+            self._notes.flush()
+        except OSError:
+            log.debug("notes.md append failed", exc_info=True)
 
     def close(self) -> None:
         """Finalize the session: summary.json, END footer, close files.
@@ -346,9 +408,13 @@ class Trace:
         except OSError:
             log.warning("session summary write failed", exc_info=True)
         finally:
-            for f in (self._events, self._f):
+            # Consolidate the MCP-server log window + detach the runtime
+            # mirror (ordering owned by SessionLogSidecars) before closing
+            # the trace files below.
+            self._sidecars.close()
+            for f in (self._events, self._f, self._notes):
                 try:
-                    if not f.closed:
+                    if f is not None and not f.closed:
                         f.close()
                 except OSError:
                     pass

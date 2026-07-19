@@ -98,6 +98,35 @@ def test_formatter_paints_error_red() -> None:
     assert "\033[31m" in out
 
 
+def test_formatter_plain_mode_strips_ansi_in_message() -> None:
+    # Embedded ANSI in the message content (subprocess/claude-stream output)
+    # must not survive into a file sink.
+    fmt = _TaggedFormatter(tag="runtime", color=False)
+
+    out = fmt.format(_record("saw \033[31mred\033[0m text"))
+
+    assert "\033[" not in out  # no escape sequence anywhere
+    assert "saw red text" in out
+
+
+def test_formatter_includes_exception_traceback() -> None:
+    import sys
+
+    fmt = _TaggedFormatter(tag="runtime", color=False)
+    try:
+        raise ValueError("boom-detail")
+    except ValueError:
+        rec = logging.LogRecord(
+            "physiclaw.x", logging.ERROR, "f", 1, "provider failed", (), sys.exc_info()
+        )
+
+    out = fmt.format(rec)
+
+    assert "provider failed" in out
+    assert "Traceback" in out  # the traceback is no longer dropped
+    assert "ValueError: boom-detail" in out
+
+
 def test_formatter_indents_continuation_lines() -> None:
     fmt = _TaggedFormatter(tag="runtime", color=False)
 
@@ -118,9 +147,188 @@ def test_setup_logging_force_replaces_handlers(mocker) -> None:
     setup_logging("physiclaw", level=logging.WARNING)
 
     root = logging.getLogger()
-    assert root.level == logging.WARNING
-    # Last handler is the one we just added with our formatter.
-    assert any(isinstance(h.formatter, _TaggedFormatter) for h in root.handlers)
+    # Root stays permissive (DEBUG) so a later DEBUG session-capture
+    # handler can see everything; the console handler gates at `level`.
+    assert root.level == logging.DEBUG
+    stream = next(
+        h for h in root.handlers if isinstance(h.formatter, _TaggedFormatter)
+    )
+    assert stream.level == logging.WARNING
+
+
+# ---------- attach_session_log / detach_session_log ----------
+
+
+def test_session_log_captures_own_debug_and_others_info(tmp_path, mocker) -> None:
+    """The session capture keeps physiclaw.* down to DEBUG, but only
+    INFO+ from other loggers — full detail for our code, no third-party
+    DEBUG spew."""
+    mocker.patch.object(logger_mod, "_colorize", return_value=False)
+    from physiclaw.common.logger.logger import attach_session_log, detach_session_log
+
+    setup_logging("runtime", level=logging.INFO)  # console at INFO, root at DEBUG
+    path = tmp_path / "runtime.log"
+    handler = attach_session_log(path)
+    try:
+        logging.getLogger("physiclaw.x").debug("own-debug-line")
+        logging.getLogger("some.thirdparty").debug("tp-debug-line")
+        logging.getLogger("some.thirdparty").warning("tp-warning-line")
+    finally:
+        detach_session_log(handler)
+
+    text = path.read_text(encoding="utf-8")
+    assert "own-debug-line" in text  # our DEBUG kept despite console INFO
+    assert "tp-warning-line" in text  # third-party WARNING kept
+    assert "tp-debug-line" not in text  # third-party DEBUG dropped
+
+
+def test_detach_session_log_closes_file_and_stops_capture(tmp_path, mocker) -> None:
+    mocker.patch.object(logger_mod, "_colorize", return_value=False)
+    from physiclaw.common.logger.logger import attach_session_log, detach_session_log
+
+    setup_logging("runtime", level=logging.INFO)
+    path = tmp_path / "runtime.log"
+    handler = attach_session_log(path)
+    logging.getLogger("physiclaw.x").info("before-detach")
+    detach_session_log(handler)
+    logging.getLogger("physiclaw.x").info("after-detach")
+
+    text = path.read_text(encoding="utf-8")
+    assert "before-detach" in text
+    assert "after-detach" not in text  # handler removed → no more capture
+    assert handler not in logging.getLogger().handlers
+
+
+def test_setup_logging_file_level_debug_keeps_own_debug(tmp_path, mocker) -> None:
+    """A DEBUG daily file (file_level) captures physiclaw.* DEBUG while the
+    console stays at `level` — how the server persists tune detail."""
+    from freezegun import freeze_time
+
+    mocker.patch.object(logger_mod, "_colorize", return_value=False)
+    with freeze_time("2026-04-28T10:00:00"):
+        setup_logging(
+            "physiclaw", level=logging.INFO, file_dir=tmp_path, file_level=logging.DEBUG
+        )
+        logging.getLogger("physiclaw.srv").debug("tune-debug-line")
+        logging.getLogger("noisy.dep").debug("dep-debug-line")
+        for h in logging.getLogger().handlers:
+            h.flush()
+
+    text = (tmp_path / "physiclaw-2026-04-28.log").read_text()
+    assert "tune-debug-line" in text  # our DEBUG persisted
+    assert "dep-debug-line" not in text  # third-party DEBUG filtered out
+
+
+def test_attach_session_log_failopen_on_bad_path(tmp_path) -> None:
+    from physiclaw.common.logger.logger import attach_session_log, detach_session_log
+
+    blocker = tmp_path / "blocked"
+    blocker.write_text("a file where a dir must go")
+
+    handler = attach_session_log(blocker / "sub" / "runtime.log")
+
+    assert handler is None  # unwritable → None, no raise
+    detach_session_log(None)  # no-op, no raise
+
+
+# ---------- daily_log_path ----------
+
+
+def test_daily_log_path_naming(tmp_path) -> None:
+    from physiclaw.common.logger.logger import daily_log_path
+
+    assert daily_log_path(tmp_path, "physiclaw", "2026-04-28") == (
+        tmp_path / "physiclaw-2026-04-28.log"
+    )
+
+
+# ---------- active-session marker + server mcp tee ----------
+
+
+def test_session_sidecars_publishes_and_clears_marker(tmp_path) -> None:
+    from physiclaw.common import paths
+    from physiclaw.common.logger.logger import SessionLogSidecars
+
+    session_dir = tmp_path / "20260101-000000-abcdef"
+    session_dir.mkdir()
+
+    sidecars = SessionLogSidecars(session_dir)
+    marker = paths.active_session_marker()
+    assert marker.read_text(encoding="utf-8").strip() == session_dir.name  # the sid
+
+    sidecars.close()
+    assert not marker.exists()  # cleared on close
+
+
+def _marker_for(sid: str):
+    from physiclaw.common import paths
+
+    marker = paths.active_session_marker()
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(sid, encoding="utf-8")
+    return marker
+
+
+def test_server_mcp_tee_writes_to_active_session(tmp_path) -> None:
+    from physiclaw.common import paths
+    from physiclaw.common.logger.logger import attach_server_mcp_tee
+
+    sid = "20260101-000000-abcdef"
+    session_dir = paths.engine_sessions_dir() / sid  # tee resolves the id → dir
+    session_dir.mkdir(parents=True)
+    _marker_for(sid)
+
+    setup_logging("physiclaw", level=logging.INFO)
+    tee = attach_server_mcp_tee()
+    try:
+        logging.getLogger("physiclaw.core.tune").info("exposure tune: in band")
+    finally:
+        logging.getLogger().removeHandler(tee)
+        tee.close()
+
+    assert "exposure tune: in band" in (session_dir / "mcp.log").read_text()
+
+
+def test_server_mcp_tee_drops_between_sessions(tmp_path) -> None:
+    from physiclaw.common.logger.logger import attach_server_mcp_tee
+
+    # No marker → records belong to no session and are dropped (no crash).
+    setup_logging("physiclaw", level=logging.INFO)
+    tee = attach_server_mcp_tee()
+    try:
+        logging.getLogger("physiclaw.core.tune").info("orphan line")
+    finally:
+        logging.getLogger().removeHandler(tee)
+        tee.close()
+
+
+def test_server_mcp_tee_repoints_on_marker_change(tmp_path) -> None:
+    from physiclaw.common import paths
+    from physiclaw.common.logger.logger import attach_server_mcp_tee
+
+    sid_a, sid_b = "20260101-000000-aaaaaa", "20260101-000001-bbbbbb"
+    a = paths.engine_sessions_dir() / sid_a
+    b = paths.engine_sessions_dir() / sid_b
+    a.mkdir(parents=True)
+    b.mkdir(parents=True)
+    marker = _marker_for(sid_a)
+
+    setup_logging("physiclaw", level=logging.INFO)
+    tee = attach_server_mcp_tee()
+    lg = logging.getLogger("physiclaw.core.tune")
+    try:
+        # Two publishes back-to-back (same mtime tick) — id identity repoints
+        # anyway, where mtime tracking would have missed the second.
+        lg.info("line-A")
+        marker.write_text(sid_b, encoding="utf-8")
+        lg.info("line-B")
+    finally:
+        logging.getLogger().removeHandler(tee)
+        tee.close()
+
+    assert "line-A" in (a / "mcp.log").read_text()
+    assert "line-B" in (b / "mcp.log").read_text()
+    assert "line-B" not in (a / "mcp.log").read_text()  # repointed, no leak
 
 
 # ---------- make_tagged_logger ----------

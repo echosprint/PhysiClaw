@@ -346,6 +346,52 @@ def test_trace_close_is_idempotent(_trace_dirs: Path) -> None:
     t.close()  # must not raise
 
 
+def test_trace_writes_per_turn_note_history(_trace_dirs: Path) -> None:
+    t = Trace("s1")
+    t.write(
+        {
+            "event": "tool_result",
+            "turn": 3,
+            "name": "note",
+            "arguments": {"summary": "In WeChat, sending the London weather reply"},
+            "text": "noted: ...",
+        }
+    )
+    # A non-note tool_result is not narrated to notes.md.
+    t.write({"event": "tool_result", "turn": 4, "name": "tap", "text": "Tapped"})
+    t.close()
+
+    notes = (_trace_dirs / "sessions" / "s1" / "notes.md").read_text()
+    assert "# Session s1 — note history" in notes
+    assert "- turn 3 — In WeChat, sending the London weather reply" in notes
+    assert "Tapped" not in notes
+
+
+def test_trace_mirrors_process_log_into_session_runtime_log(_trace_dirs: Path) -> None:
+    import logging
+
+    from physiclaw.common.logger import setup_logging
+
+    setup_logging("runtime", level=logging.INFO)  # permissive root, console INFO
+    t = Trace("s1")
+    logging.getLogger("physiclaw.test.trace").debug("captured-debug-line")
+    t.close()
+
+    runtime_log = (_trace_dirs / "sessions" / "s1" / "runtime.log").read_text()
+    assert "captured-debug-line" in runtime_log  # our DEBUG despite console INFO
+
+
+def test_trace_publishes_and_clears_active_session_marker(_trace_dirs: Path) -> None:
+    from physiclaw.common import paths
+
+    marker = paths.active_session_marker()
+    t = Trace("s1")  # SessionLogSidecars publishes the active session id
+    assert marker.read_text(encoding="utf-8").strip() == "s1"
+
+    t.close()
+    assert not marker.exists()  # cleared on close
+
+
 def test_trace_rolls_over_to_new_day_when_midnight_crossed(
     _trace_dirs: Path,
 ) -> None:

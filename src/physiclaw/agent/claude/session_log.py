@@ -30,7 +30,9 @@ from physiclaw.agent.runtime.hook import Trigger
 from physiclaw.agent.runtime.sentinel import STATUSES, parse_sentinel
 from physiclaw.common import paths
 from physiclaw.common.config import CONFIG
+from physiclaw.common.logger import SessionLogSidecars
 from physiclaw.common.logger.retention import purge_daily_logs
+from physiclaw.common.text import read_text, write_text
 
 log = logging.getLogger(__name__)
 
@@ -61,7 +63,8 @@ _CLAUDE_SESSIONS_README = """\
 
 One directory per `claude -p` wake, `YYYYMMDD-HHMMSS-<6 hex digits>`. The
 human-readable narrative for all wakes of a day lives alongside, in
-`../claude-YYYY-MM-DD.log`.
+`../claude-YYYY-MM-DD.log`. All files are UTF-8 with LF newlines on every
+platform.
 
 - `summary.json` — session metrics, schema v1 (shared with the engine's
   sessions): sid, started/ended, duration_s, model_ref, provider, triggers,
@@ -69,6 +72,13 @@ human-readable narrative for all wakes of a day lives alongside, in
   cost_usd, tool_calls{name:count}, errors, images, env. Missing = the
   session was killed. Cross-session: `jq .usage.cache_hit_pct */summary.json`.
 - `images/NNNNN_t<turn>.jpg` — screenshots the model saw, turn-tagged.
+- `runtime.log` — a mirror of the runtime process log stream for this
+  wake (uncolored, full DEBUG for `physiclaw.*` plus INFO+ from other
+  loggers): warnings and full tracebacks the daily narrative elides.
+- `mcp.log` — the MCP-server process's log for this wake (camera,
+  exposure/tune, gesture execution), written live by the server via an
+  active-session marker. Where to look when a view came back wrong.
+  Absent if the server logged nothing or was not running.
 
 Underperforming wake? Check `images/` first — bad runs usually trace to
 what the model actually saw, not how it reasoned. Look for blur, glare,
@@ -84,11 +94,9 @@ def _ensure_claude_sessions_readme() -> None:
     retired format. Fail-open, cheap."""
     path = paths.claude_sessions_dir() / "README.md"
     try:
-        if not path.exists():
+        if not path.exists() or read_text(path) != _CLAUDE_SESSIONS_README:
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(_CLAUDE_SESSIONS_README, encoding="utf-8", newline="\n")
-        elif path.read_text(encoding="utf-8") != _CLAUDE_SESSIONS_README:
-            path.write_text(_CLAUDE_SESSIONS_README, encoding="utf-8", newline="\n")
+            write_text(path, _CLAUDE_SESSIONS_README)
     except OSError:
         log.debug("claude sessions README write failed", exc_info=True)
 
@@ -235,6 +243,10 @@ class _SessionLog:
         self._sdir = paths.claude_sessions_dir() / sid
         self._img_dir = self._sdir / "images"
         self._img_dir.mkdir(parents=True, exist_ok=True)
+        # Per-session log sidecars: runtime.log (process log mirror) +
+        # mcp.log (the server's log for this wake's window). Shared with
+        # the engine writer so the two can't drift.
+        self._sidecars = SessionLogSidecars(self._sdir)
         _ensure_claude_sessions_readme()
         purge_old_sessions(
             paths.claude_sessions_dir(), days=CONFIG.retention.trace_days
@@ -324,6 +336,7 @@ class _SessionLog:
         except OSError:
             log.warning("claude session summary write failed", exc_info=True)
         finally:
+            self._sidecars.close()
             if not self._f.closed:
                 self._f.close()
 

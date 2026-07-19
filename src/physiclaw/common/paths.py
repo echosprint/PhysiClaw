@@ -198,3 +198,18 @@ def engine_sessions_dir() -> Path:
 
 def runtime_log_dir() -> Path:
     return LOG_DIR / "runtime"
+
+
+def server_log_dir() -> Path:
+    """Daily log files for the MCP-server process (`physiclaw-YYYY-MM-DD.log`)
+    — the server's own persistent log, spanning all sessions and the idle
+    time between them."""
+    return LOG_DIR / "server"
+
+
+def active_session_marker() -> Path:
+    """Cross-process pointer to the agent's current session id. The runtime
+    writes the session id here at session start and clears it at close; the
+    MCP-server process (a separate process — no shared memory) reads it,
+    resolves the id to its session dir, and tees `mcp.log` there."""
+    return LOG_DIR / "active_session"
