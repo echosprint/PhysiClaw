@@ -317,6 +317,11 @@ class Perception:
         cam, t = self._rig.cam, self._rig.transforms
         if cam is None or t is None or not cam.exposure_tunable:
             return
+        # Wall-clock the whole search: a tune meters SETTLE_FRAMES per step
+        # and can block on `wait_frames` timeouts, so the elapsed is the
+        # honest cost the observer paid mid-grab — worth surfacing to spot a
+        # tune that's dragging out the view (e.g. a driver ignoring writes).
+        started = time.monotonic()
         try:
 
             def meter():
@@ -339,9 +344,14 @@ class Perception:
                 ),
             )
             self._last_tune = result
-            log.info("exposure tune: %s", result.detail)
+            log.info(
+                "exposure tune: %s (%.2fs)", result.detail, time.monotonic() - started
+            )
         except Exception:
-            log.exception("exposure tune failed — leaving camera as-is")
+            log.exception(
+                "exposure tune failed after %.2fs — leaving camera as-is",
+                time.monotonic() - started,
+            )
             # Record a deferred sentinel: without a result the hold
             # has no state, and a flaky camera on a dark scene would
             # re-fire the multi-second tune on every judged view. No
