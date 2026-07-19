@@ -185,7 +185,7 @@ def test_session_log_extracts_screenshot(_isolated_log_dir: Path) -> None:
         (paths.claude_sessions_dir() / "20260101_120000_test00" / "images").glob("*")
     )
     assert len(imgs) == 1
-    assert imgs[0].name == "00001_t1.jpg"  # turn 1 (one assistant seen), first image
+    assert imgs[0].name.endswith("_t1.jpg")  # turn 1 (one assistant seen)
     assert imgs[0].read_bytes() == b"\xff\xd8fake-jpeg"
 
 
@@ -235,7 +235,7 @@ def test_session_log_image_turn_tag_dedups_streamed_message(
         (paths.claude_sessions_dir() / "20260101_120000_test00" / "images").glob("*")
     )
     assert len(imgs) == 1
-    assert imgs[0].name == "00001_t1.jpg"  # one message despite two events
+    assert imgs[0].name.endswith("_t1.jpg")  # one message despite two events
 
 
 def test_session_log_event_assistant_text_returns_none(

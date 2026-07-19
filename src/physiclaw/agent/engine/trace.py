@@ -24,8 +24,8 @@
                     {"t","turn","kind":"request","messages":[...]} and
                     {"t","turn","kind":"response","elapsed_ms","raw"}.
                     Inline base64 images are extracted to
-                    images/<NNNNN>_t<turn>.<ext> and replaced by that
-                    relative path.
+                    images/<HHMMSS>_<mmm>_t<turn>.<ext> and replaced by
+                    that relative path.
      summary.json   session metrics derived from the event stream at
                     `Trace.close()` (schema v1): outcome, turns, token/
                     cache totals, tool-call counts, error counts. The
@@ -126,6 +126,18 @@ _MIME_EXT = {
     "image/webp": ".webp",
 }
 
+
+def image_filename(turn: int, mime: str) -> str:
+    """Name a captured screenshot `<HHMMSS>_<mmm>_t<turn>.<ext>`: a
+    local-time stamp (hour-minute-second + milliseconds, so the names sort
+    chronologically within a session) plus the turn whose request carried
+    it. Shared by both engines so the `images/` layout stays identical.
+    `.bin` is the fallback for an unknown mime."""
+    now = dt.datetime.now()
+    ext = _MIME_EXT.get(mime, ".bin")
+    return f"{now:%H%M%S}_{now.microsecond // 1000:03d}_t{turn}{ext}"
+
+
 # Events that are internal bookkeeping — don't surface in the human log.
 # Add here when silencing a new event is cheaper than adding a dedicated
 # summary branch.
@@ -176,8 +188,12 @@ in the `env` event / `summary.json.env.utc_offset`.
   elapsed_ms). Inline base64 images are replaced by relative paths
   into `images/`.
 
-- `images/NNNNN_t<turn>.<ext>` — screenshots the model saw (typically
-  .jpg), ordered, tagged with the turn whose request carried them.
+- `images/<HHMMSS>_<mmm>_t<turn>.<ext>` — screenshots the model saw
+  (typically .jpg). The name is the local capture time (hour-minute-
+  second `_` milliseconds) plus `_t<turn>` = the turn whose request
+  carried the frame, so `ls` sorts them in capture order and each links
+  back to its turn in `events.jsonl` / `wire.jsonl`. Example:
+  `104542_123_t20.jpg` = 10:45:42.123, turn 20.
 
 - `notes.md` — the agent's own turn-by-turn narration: one line per
   `note(summary=...)`, `- turn N — <summary>`. The fastest human read
@@ -742,7 +758,6 @@ class RawLog:
         self.session_id = session_id
         self.path = d / "wire.jsonl"
         self._f = open(self.path, "a", encoding="utf-8", newline="\n")
-        self._image_counter = 0
         # The turn currently being scrubbed — set by write_request before
         # _scrub_images so extracted images carry their turn in the name.
         self._turn = -1
@@ -790,30 +805,27 @@ class RawLog:
 
     def _persist_image(self, mime: str, b64_data: str) -> str:
         """Decode `b64_data`, write to
-        `sessions/<sid>/images/<NNNNN>_t<turn><ext>`, return the path
-        relative to the session dir (so wire.jsonl + images move
-        together when the dir is copied). The counter is per-RawLog
-        instance — one per session — so filenames sort chronologically;
-        the `_t<turn>` tag links each image straight to its turn.
-        Returns "" on decode failure so the caller can fall back to a
+        `sessions/<sid>/images/<HHMMSS>_<mmm>_t<turn><ext>`, return the path
+        relative to the session dir (so wire.jsonl + images move together
+        when the dir is copied). The `image_filename` stamp sorts the frames
+        chronologically and its `_t<turn>` tag links each straight to its
+        turn. Returns "" on decode failure so the caller can fall back to a
         byte-count stub."""
         try:
             raw = base64.b64decode(b64_data, validate=False)
         except (ValueError, TypeError):
             return ""
-        self._image_counter += 1
-        ext = _MIME_EXT.get(mime, ".bin")
-        rel = f"images/{self._image_counter:05d}_t{self._turn}{ext}"
+        rel = f"images/{image_filename(self._turn, mime)}"
         path = _session_dir(self.session_id) / rel
         path.write_bytes(raw)
         return rel
 
     def _scrub_images(self, messages: list[dict]) -> list[dict]:
         """Copy of `messages` with inline base64 image data replaced by
-        a reference to an on-disk file under `images/<NNNNN>_t<turn>.ext`
-        in the session dir. Each call gets a fresh counter value — no
-        cross-request dedup, which is by design: the numbered sequence
-        preserves turn order on disk for debugging.
+        a reference to an on-disk file under `images/<HHMMSS>_<mmm>_t<turn>.ext`
+        in the session dir. No cross-request dedup, by design: a screen still
+        in context is re-persisted each request it appears in (a fresh stamp
+        each time), so the frames sort chronologically on disk for debugging.
 
         Handles two wire shapes (recognized at the block level, not the
         provider level):

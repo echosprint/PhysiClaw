@@ -489,7 +489,7 @@ def test_rawlog_scrubs_openai_image_url_data_to_disk(_trace_dirs: Path) -> None:
     # The image_url is replaced with a session-relative turn-tagged path
     # (turn defaults to -1 when scrubbing outside write_request).
     img_url = out[0]["content"][1]["image_url"]["url"]
-    assert img_url == "images/00001_t-1.jpg"
+    assert img_url.startswith("images/") and img_url.endswith("_t-1.jpg")
     # The actual file was written inside the session dir.
     assert (_trace_dirs / "sessions" / "sess-IMG" / img_url).read_bytes() == raw_bytes
 
@@ -872,8 +872,8 @@ def test_close_counts_images_from_session_dir(_trace_dirs: Path) -> None:
     t = Trace("s1")
     img_dir = _trace_dirs / "sessions" / "s1" / "images"
     img_dir.mkdir(parents=True, exist_ok=True)
-    (img_dir / "00001_t0.jpg").write_bytes(b"x")
-    (img_dir / "00002_t1.jpg").write_bytes(b"y")
+    (img_dir / "120000_000_t0.jpg").write_bytes(b"x")
+    (img_dir / "120001_500_t1.jpg").write_bytes(b"y")
     t.close()
 
     s = json.loads((_trace_dirs / "sessions" / "s1" / "summary.json").read_text())
@@ -920,7 +920,7 @@ def test_write_request_tags_images_with_turn(_trace_dirs: Path) -> None:
         (_trace_dirs / "sessions" / "sess-T" / "wire.jsonl").read_text().splitlines()[0]
     )
     url = json.loads(line)["messages"][0]["content"][0]["image_url"]["url"]
-    assert url == "images/00001_t7.jpg"
+    assert url.startswith("images/") and url.endswith("_t7.jpg")  # tagged with turn 7
     assert (_trace_dirs / "sessions" / "sess-T" / url).read_bytes() == b"img"
 
 

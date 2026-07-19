@@ -179,7 +179,7 @@ def _populate(sd: Path) -> None:
     (sd / "wire.jsonl").write_text('{"kind": "session_start"}\n')
     img = sd / "images"
     img.mkdir(exist_ok=True)
-    (img / "00001_t0.jpg").write_bytes(b"jpeg")
+    (img / "090000_000_t0.jpg").write_bytes(b"jpeg")
 
 
 def test_save_packs_session_zip_with_privacy_notice(
@@ -205,7 +205,7 @@ def test_save_packs_session_zip_with_privacy_notice(
     assert "20260710_090000_ab12cd/summary.json" in names
     assert "20260710_090000_ab12cd/events.jsonl" in names
     assert "20260710_090000_ab12cd/wire.jsonl" in names
-    assert "20260710_090000_ab12cd/images/00001_t0.jpg" in names
+    assert "20260710_090000_ab12cd/images/090000_000_t0.jpg" in names
     # Privacy notice; no issue-filing prompts.
     assert "PRIVATE" in result.output
     assert "review before sharing" in result.output

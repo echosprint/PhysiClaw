@@ -21,9 +21,9 @@ from collections import Counter
 # summary.json + images/ stay byte-compatible with the engine's (one
 # `physiclaw logs` / `jq` reads both).
 from physiclaw.agent.engine.trace import (
-    _MIME_EXT,
     _env_snapshot,
     _write_json_atomic,
+    image_filename,
     purge_old_sessions,
 )
 from physiclaw.agent.runtime.hook import Trigger
@@ -71,7 +71,10 @@ platform.
   outcome{sentinel,recap,crashed}, turns, usage{tokens,cache_hit_pct},
   cost_usd, tool_calls{name:count}, errors, images, env. Missing = the
   session was killed. Cross-session: `jq .usage.cache_hit_pct */summary.json`.
-- `images/NNNNN_t<turn>.jpg` — screenshots the model saw, turn-tagged.
+- `images/<HHMMSS>_<mmm>_t<turn>.<ext>` — screenshots the model saw
+  (typically .jpg). Name = local capture time (hour-minute-second `_`
+  milliseconds) + `_t<turn>` (the turn it belongs to), so they sort in
+  capture order. Example: `104542_123_t20.jpg` = 10:45:42.123, turn 20.
 - `runtime.log` — a mirror of the runtime process log stream for this
   wake (uncolored, full DEBUG for `physiclaw.*` plus INFO+ from other
   loggers): warnings and full tracebacks the daily narrative elides.
@@ -342,8 +345,8 @@ class _SessionLog:
 
     def _extract_images(self, data: dict) -> None:
         """Decode base64 screenshots from tool_result blocks to
-        images/NNNNN_t<turn>.<ext> — the screenshots the model actually saw,
-        the biggest post-mortem win over the elided daily log."""
+        images/<HHMMSS>_<mmm>_t<turn>.<ext> — the screenshots the model
+        actually saw, the biggest post-mortem win over the elided daily log."""
         if data.get("type") != "user":
             return
         for b in data.get("message", {}).get("content", []):
@@ -365,7 +368,7 @@ class _SessionLog:
         except (ValueError, TypeError):
             return
         n = self._image_counter + 1
-        name = f"{n:05d}_t{self._turn}{_MIME_EXT.get(mime, '.bin')}"
+        name = image_filename(self._turn, mime)
         try:
             (self._img_dir / name).write_bytes(raw)
         except OSError:
