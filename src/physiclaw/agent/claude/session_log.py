@@ -263,7 +263,7 @@ class _SessionLog:
         self._closed = False
 
         sources = [t.source or "?" for t in triggers]
-        self._write(f"WAKE triggers={sources}")
+        self._write(f"WAKE session={sid} triggers={sources}")
 
     def event(self, data: dict) -> dict | None:
         """Log a stream-json event. Returns the data if it's a result.

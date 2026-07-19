@@ -192,7 +192,8 @@ async def _run_session(
         await loop.drive(engine_run, session, messages)
 
         log.info(
-            "session done: status=%s recap=%r",
+            "session done: session=%s status=%s recap=%r",
+            sid,
             session.sentinel_status,
             session.sentinel_recap,
         )
@@ -214,7 +215,7 @@ async def _run_session(
         raise
     except Exception as e:
         # Crashes count as STUCK so the retry loop gives it another shot.
-        log.exception("engine session crashed")
+        log.exception("engine session crashed: session=%s", sid)
         if tr is not None:
             tr.write({"event": "crashed"})
         session.sentinel_status = STUCK

@@ -73,7 +73,7 @@ def test_session_log_init_writes_wake_header(_isolated_log_dir: Path) -> None:
     files = list(_isolated_log_dir.glob("claude-*.log"))
     assert len(files) == 1
     text = files[0].read_text()
-    assert "WAKE triggers=['cron:a', 'phone']" in text
+    assert "WAKE session=20260101_120000_test00 triggers=['cron:a', 'phone']" in text
     assert "=" * 60 in text
 
 

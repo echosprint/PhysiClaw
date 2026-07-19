@@ -382,7 +382,8 @@ async def spawn_claude(triggers: list[Trigger], *, model_id: str) -> None:
         )
 
         log.info(
-            "spawning claude (attempt=%d/%d, triggers=%s) — detail log: %s",
+            "spawning claude (session=%s attempt=%d/%d, triggers=%s) — detail log: %s",
+            sid,
             n,
             MAX_ATTEMPTS,
             sources,
@@ -411,10 +412,15 @@ async def spawn_claude(triggers: list[Trigger], *, model_id: str) -> None:
                     proc.wait(), timeout=EXIT_WAIT_SECONDS
                 )
                 if returncode != 0:
-                    log.error("claude exited %s (see log for details)", returncode)
+                    log.error(
+                        "claude exited %s (session=%s; see log for details)",
+                        returncode,
+                        sid,
+                    )
                 elif result_data:
                     log.info(
-                        "claude done (turns=%s): %s",
+                        "claude done (session=%s turns=%s): %s",
+                        sid,
                         result_data.get("num_turns", "?"),
                         str(result_data.get("result", ""))[:200],
                     )
