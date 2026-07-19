@@ -367,6 +367,8 @@ def test_close_hands_held_manual_exposure_back_to_auto(mocker) -> None:
     # A held manual value lives in the camera's volatile RAM and would
     # outlive the process — close() must hand exposure back to firmware
     # auto so the next run (or another app) doesn't inherit a stale hold.
+    # Only when AE is the configured mode (a tune-imposed hold, not a pin).
+    mocker.patch.object(camera_mod.CONFIG.camera, "auto_exposure", True)
     cam, _ = _ready_camera(mocker)
     cam.set_manual_exposure(-5)
     set_auto = mocker.patch.object(camera_mod.platform, "camera_set_auto_exposure")
@@ -458,7 +460,9 @@ def test_open_uses_config_request_without_size_cap(mocker) -> None:
 
 def test_open_applies_exposure_after_size_negotiation(mocker) -> None:
     # Renegotiation (FOURCC/size) is what disables driver AE — the
-    # re-assert must come after it or it gets wiped.
+    # re-assert must come after it or it gets wiped. (AE mode; the manual
+    # path is covered by test_open_applies_manual_exposure_when_config_...)
+    mocker.patch.object(camera_mod.CONFIG.camera, "auto_exposure", True)
     vc = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 200)
     order: list = []
     mocker.patch.object(

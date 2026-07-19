@@ -95,12 +95,15 @@ class CameraConfig:
     # Exposure control. Windows/Linux go through OpenCV capture props;
     # macOS AVFoundation exposes none, so there the keys apply only when
     # the UVC/IOKit channel controls the camera (see platform.uvc) and
-    # are ignored otherwise. The startup tune verifies with measured
-    # brightness and falls back to manual stepping when firmware
-    # auto-exposure misbehaves; `exposure` is the stepping start, on the
-    # shared log2-seconds scale within exposure.py's -8..-4 band (-5
-    # ceiling on rigs whose lens isn't pinned; see UNPINNED_MAX_EXPOSURE).
-    auto_exposure: bool = True
+    # are ignored otherwise. Default is manual (`auto_exposure = False`): a
+    # held value keeps one exposure regime for the screen-filming rig,
+    # where firmware AE drifts and thrashes as the agent flips between dark
+    # and white screens. `exposure` is then the held value (calibrate phone
+    # brightness so white renders just below clipping); flip to True to let
+    # firmware AE drive, with the tune stepping from `exposure` if it fails.
+    # Log2-seconds scale within exposure.py's -8..-4 band (-5 ceiling on
+    # rigs whose lens isn't pinned; see UNPINNED_MAX_EXPOSURE).
+    auto_exposure: bool = False
     exposure: int = -6
 
 
@@ -427,11 +430,11 @@ _FIELD_COMMENTS: dict[tuple[str, str], str] = {
     (
         "camera",
         "auto_exposure",
-    ): "false = hold `exposure` manually (Windows/Linux; macOS ignores)",
+    ): "false (default) holds `exposure` manually; true = firmware AE (Windows/Linux; macOS ignores)",
     (
         "camera",
         "exposure",
-    ): "log2 seconds (-6 = 1/64s, indoors -4..-8); manual-fallback start",
+    ): "log2 seconds (-6 = 1/64s, indoors -4..-8); the held manual value (tune start when auto)",
 }
 
 

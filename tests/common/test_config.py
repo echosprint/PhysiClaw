@@ -894,11 +894,11 @@ def test_resolve_provider_key_returns_none_for_unknown_config_key() -> None:
 def test_camera_exposure_keys_default_and_render() -> None:
     cfg = config.Config()
 
-    assert cfg.camera.auto_exposure is True
+    assert cfg.camera.auto_exposure is False
     assert cfg.camera.exposure == -6
 
     out = config.to_toml(cfg, with_comments=True)
-    assert "auto_exposure = true" in out
+    assert "auto_exposure = false" in out
     assert "exposure = -6" in out
 
 
