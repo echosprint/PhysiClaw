@@ -150,9 +150,7 @@ def test_setup_logging_force_replaces_handlers(mocker) -> None:
     # Root stays permissive (DEBUG) so a later DEBUG session-capture
     # handler can see everything; the console handler gates at `level`.
     assert root.level == logging.DEBUG
-    stream = next(
-        h for h in root.handlers if isinstance(h.formatter, _TaggedFormatter)
-    )
+    stream = next(h for h in root.handlers if isinstance(h.formatter, _TaggedFormatter))
     assert stream.level == logging.WARNING
 
 
