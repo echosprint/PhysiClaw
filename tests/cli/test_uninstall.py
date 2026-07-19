@@ -211,6 +211,31 @@ def test_data_wins_over_config_when_both_passed(
     assert not populated_home.exists()  # full tree gone, not just config
 
 
+# ---------- delete failure ----------
+
+
+def test_uninstall_reports_delete_failure_cleanly(
+    populated_home: Path,
+    runner: CliRunner,
+    mocker,
+) -> None:
+    # A partial rmtree (permission error, file held open on Windows) must
+    # surface as a clean `error: could not remove …` line, exit 1, and skip
+    # the "Removed"/manual-step echoes — not a bare traceback.
+    mocker.patch(
+        "physiclaw.cli.uninstall._delete",
+        side_effect=PermissionError("denied"),
+    )
+
+    result = runner.invoke(_make_app(), ["--data", "--yes"])
+
+    assert result.exit_code == 1
+    assert "could not remove" in result.output
+    assert "denied" in result.output
+    assert "Removed" not in result.output
+    assert populated_home.exists()
+
+
 # ---------- config_path resolution ----------
 
 

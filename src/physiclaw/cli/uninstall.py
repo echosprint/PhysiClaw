@@ -18,6 +18,7 @@ from typing import Annotated
 
 import typer
 
+from physiclaw.cli._format import exit_error
 from physiclaw.common import config as _config
 from physiclaw.common import paths
 
@@ -91,7 +92,14 @@ def uninstall(
         elif dry_run:
             typer.echo(f"[dry-run] would remove: {target}")
         elif yes or typer.confirm(f"Remove {label}?", default=False):
-            _delete(target)
+            # A partial rmtree (permission error, a file held open on Windows)
+            # leaves data half-removed — surface the path + reason as a clean
+            # CLI error instead of a bare traceback, and skip the "success"
+            # echo and the manual-step reminder below.
+            try:
+                _delete(target)
+            except OSError as e:
+                exit_error(f"could not remove {target}: {e}")
             typer.echo(f"Removed: {target}")
         else:
             typer.echo("Cancelled.")
