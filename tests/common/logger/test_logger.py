@@ -553,6 +553,23 @@ def test_daily_file_handler_writes_uncolored_tagged_lines(tmp_path) -> None:
     assert "\033[" not in text.split("hello")[0]  # prefix uncolored
 
 
+def test_daily_file_handler_reopens_after_close(tmp_path) -> None:
+    from freezegun import freeze_time
+
+    # logging.shutdown() closes the file at interpreter exit while the app
+    # still logs (arm teardown) — emit must reopen, not raise per record.
+    with freeze_time("2026-04-28T10:00:00"):
+        logger, handler = _file_logger(tmp_path, "t.daily.reopen")
+        logger.info("before shutdown")
+        handler.close()  # simulate logging.shutdown() closing the handle
+        logger.info(">>> M5")  # a teardown G-code line after close
+        handler.close()
+
+    text = (tmp_path / "runtime-2026-04-28.log").read_text()
+    assert "before shutdown" in text
+    assert ">>> M5" in text  # captured after reopen, no "closed file" error
+
+
 def test_daily_file_handler_rolls_to_new_day(tmp_path) -> None:
     from freezegun import freeze_time
 

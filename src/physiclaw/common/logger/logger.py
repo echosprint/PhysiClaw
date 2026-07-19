@@ -142,8 +142,12 @@ class _DailyFileHandler(logging.Handler):
         try:
             today = dt.datetime.now().strftime("%Y-%m-%d")
             f = self._f
-            if f is None or today != self._date:
-                if f is not None:
+            # Reopen on a new day OR a closed handle: at interpreter exit
+            # logging.shutdown() closes every handler, but the app still logs
+            # (physiclaw.shutdown drives the arm, emitting DEBUG G-code) — so
+            # reopen and capture that tail instead of raising per record.
+            if f is None or f.closed or today != self._date:
+                if f is not None and not f.closed:
                     f.close()
                 f = _open_log_file(daily_log_path(self._dir, self._prefix, today))
                 self._f = f
