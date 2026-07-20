@@ -120,9 +120,23 @@ def test_init_uses_detect_grbl_when_port_omitted(mocker) -> None:
 
 
 def test_init_raises_when_no_grbl_detected(mocker) -> None:
+    # Ports exist but none answered as GRBL — manual port choice is the
+    # right hint.
     mocker.patch.object(arm_mod, "detect_grbl", return_value=None)
+    mocker.patch.object(arm_mod, "candidate_ports", return_value=["/dev/cu.usb-A"])
 
-    with pytest.raises(Exception, match="GRBL device not found"):
+    with pytest.raises(Exception, match="specify port manually"):
+        StylusArm()
+
+
+def test_init_hints_unplugged_board_when_no_ports_at_all(mocker) -> None:
+    # No serial ports on the bus almost always means the control board
+    # isn't plugged in or isn't powered — say that, not "specify port
+    # manually".
+    mocker.patch.object(arm_mod, "detect_grbl", return_value=None)
+    mocker.patch.object(arm_mod, "candidate_ports", return_value=[])
+
+    with pytest.raises(Exception, match="plugged into USB"):
         StylusArm()
 
 

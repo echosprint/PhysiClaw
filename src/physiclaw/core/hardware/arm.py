@@ -31,7 +31,7 @@ from physiclaw.core.hardware.device import (
     DeviceTimeout,
     ProtocolError,
 )
-from physiclaw.core.hardware.grbl import detect_grbl
+from physiclaw.core.hardware.grbl import candidate_ports, detect_grbl
 from physiclaw.core.hardware.solenoid import Solenoid
 from physiclaw.core.hardware.transport import SerialTransport
 
@@ -84,6 +84,16 @@ class StylusArm:
         if port is None:
             port = detect_grbl()
         if port is None:
+            # No ports at all ≠ ports that didn't answer as GRBL: the
+            # first almost always means the board isn't plugged in or
+            # isn't powered, and "specify port manually" would send the
+            # user hunting for a port that doesn't exist.
+            if not candidate_ports():
+                raise DeviceNotFound(
+                    "GRBL device not found — no serial ports detected; "
+                    "is the control board plugged into USB and its 12V "
+                    "power on?"
+                )
             raise DeviceNotFound("GRBL device not found, please specify port manually")
 
         self.ser = serial.Serial(port, baudrate, timeout=3)

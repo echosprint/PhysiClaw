@@ -496,7 +496,10 @@ def doctor(
                 )
             else:
                 typer.echo(
-                    _fmt_warn("no serial ports detected — connect the arm and re-run.")
+                    _fmt_warn(
+                        "no serial ports detected — is the control board "
+                        "plugged into USB and its 12V power on?"
+                    )
                 )
         from physiclaw.common import platform as os_platform
 

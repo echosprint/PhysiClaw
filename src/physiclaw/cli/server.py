@@ -438,13 +438,11 @@ def _warm_start_hardware(
             log.exception("%s: resume crashed", flag)
             resumed = False
         if not resumed:
-            # Mode-neutral hint: the user may have typed `physiclaw now`,
+            # Mode-neutral: the user may have typed `physiclaw now`,
             # `physiclaw server -H`, or `--warm-start` — try_resume already
-            # named the failing mode in its diagnosis.
-            log.error(
-                "Exiting. Re-run plain `physiclaw server`, then "
-                "`physiclaw setup hardware` to recalibrate."
-            )
+            # named the failing mode AND the fix (plug in the board,
+            # recalibrate, …) in its diagnosis, so prescribe nothing here.
+            log.error("Exiting. Fix the cause above and re-run.")
             _thread.interrupt_main()
 
     threading.Thread(target=_warm_start_thread, daemon=True).start()
