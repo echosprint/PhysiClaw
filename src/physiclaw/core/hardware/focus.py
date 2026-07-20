@@ -4,9 +4,13 @@ The rig is rigid: the camera is bolted at a fixed position and the
 phone screen sits at a constant distance, so the correct lens position
 is a constant of the rig — a calibration value, like the affine
 transforms. `lock` runs ONCE, during the camera-mapping calibration
-step (`camera_map._pin_focus`), against the bright high-contrast
-calibration page — the one scene where the absolute sharpness gate is
-trustworthy. The verified position is read back, persisted in the
+step (`camera_map._pin_focus`), against the dedicated ``focus`` page:
+a full-screen checkerboard, the one scene where the absolute sharpness
+gate is trustworthy. The other calibration pages are mostly flat and
+meter far below the gate even in perfect focus on a far camera — the
+corners page measured 14-34 against the 80 gate on a rig at minimum
+phone coverage, while the checkerboard meters like session content
+(hundreds). The verified position is read back, persisted in the
 calibration bundle, and seeded into every fresh `Camera`
 (`rig.connect_camera`); `configure_capture` — the remembered-state
 choke point — re-applies it at the first open and every reconnect.
@@ -16,7 +20,7 @@ gesture) can't happen under a pinned lens, and persistent blur means
 the rig physically changed — recalibrate, don't adjust.
 
 Like `exposure.converge`, `lock` is pure logic over injected
-callables — `meter` (capture + score the calibration page's
+callables — `meter` (capture + score the focus page's
 sharpness), `freeze`, `unfreeze` — so the whole flow is unit-testable
 with a fake camera. And like exposure, it trusts only measured
 pixels: focus writes can be silently ignored just as exposure writes
@@ -35,6 +39,11 @@ import logging
 from dataclasses import dataclass
 from typing import Callable
 
+# The pin gate deliberately rides the session gate: calibration proves
+# the lens clears the same number every session judges views by, and an
+# optics re-tune of `[vision] blur_threshold` moves both scenes
+# together. The checkerboard's wide margin (hundreds vs 80) keeps that
+# coupling safe.
 from physiclaw.core.vision.quality import BLUR_THRESHOLD
 
 log = logging.getLogger(__name__)

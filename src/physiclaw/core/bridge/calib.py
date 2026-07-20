@@ -57,6 +57,7 @@ class CalibrationState:
         "center",  # orange circle at screen center
         "markers",  # blue UP + red RIGHT labels for camera orientation
         "corners",  # RGBM squares at phone-screen corners (auto-pick)
+        "focus",  # full-screen checkerboard — the focus pin's sharpness target
         "grid",  # 15 red dots at known viewport positions
         "dot",  # single orange dot at a given (x, y) in 0-1
         "assistive_touch",  # AT circle + grey nonce grid

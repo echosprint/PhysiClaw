@@ -295,6 +295,24 @@ def test_focus_region_full_frame_without_fence() -> None:
     assert camera_map_mod._focus_region(frame, None) is frame
 
 
+def test_compute_camera_mapping_pins_during_the_focus_phase(mocker) -> None:
+    # The pin must run while the dedicated checkerboard page is up, with
+    # the grid phase following for dot detection (see hardware/focus.py).
+    mocker.patch.object(camera_map_mod.time, "sleep")
+    cam = MagicMock()
+    cam.raw_frame.return_value = _grid_dot_image()
+    cal = _make_cal()
+    events: list[str] = []
+    mocker.patch.object(cal, "set_phase", side_effect=lambda p, **kw: events.append(p))
+    mocker.patch.object(
+        camera_map_mod, "_pin_focus", side_effect=lambda *a, **kw: events.append("PIN")
+    )
+
+    camera_map_mod.compute_camera_mapping(cam, cal, rotation=-1)
+
+    assert events[:4] == ["corners", "focus", "PIN", "grid"]
+
+
 def test_compute_camera_mapping_returns_pinned_focus(mocker) -> None:
     mocker.patch.object(camera_map_mod.time, "sleep")
     cam = MagicMock()

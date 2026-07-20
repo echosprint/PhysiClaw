@@ -48,13 +48,14 @@ def test_grid_rows_pct_pinned() -> None:
     assert CalibrationState.GRID_ROWS_PCT == (0.20, 0.40, 0.50, 0.60, 0.80)
 
 
-def test_phases_set_pinned_to_known_eight_members() -> None:
+def test_phases_set_pinned_to_known_nine_members() -> None:
     assert CalibrationState.PHASES == {
         "idle",
         "screenshot_cal",
         "center",
         "markers",
         "corners",
+        "focus",
         "grid",
         "dot",
         "assistive_touch",

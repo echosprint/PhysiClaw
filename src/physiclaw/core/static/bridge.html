@@ -212,7 +212,17 @@ body.mode-bridge #bridge-layer{
   // ════════════════════════════════════════════════════════
   // RENDER FROM SERVER STATE (no local state)
   // ════════════════════════════════════════════════════════
+  var lastCalKey = '';
   function renderCalibrate(data){
+    // Skip the SVG teardown/rebuild when nothing the switch below reads
+    // has changed — the 250ms poll would otherwise redraw a static page
+    // 4×/s (the focus checkerboard alone is ~180 nodes). The key derives
+    // from the polled payload, so the server stays the single source of
+    // truth: any state change still re-renders on the next poll.
+    var calKey = JSON.stringify([data.phase, data.square, data.dot,
+                                 data.grid, data.at, data.nonce]);
+    if(calKey === lastCalKey) return;
+    lastCalKey = calKey;
     clearSvg();
     var phase = data.phase || 'idle';
     var r = Math.min(W, H) * 0.08;
@@ -269,6 +279,17 @@ body.mode-bridge #bridge-layer{
           cluster(W-2*bs,   H-2*bs);     // bottom-right
           cluster(0,        H-2*bs);     // bottom-left
         })();
+        break;
+      case 'focus':
+        // Full-screen checkerboard — the focus pin's sharpness target
+        // (why the pin needs it: hardware/focus.py doctrine). The cell
+        // must stay coarse enough to survive the server's 480px metering
+        // downscale (vision/quality.py NORMALIZED_WIDTH) — finer cells
+        // alias toward gray after the downscale and gut the score.
+        var cell = Math.min(W, H) * 0.10;
+        for(var row=0; row*cell<H; row++)
+          for(var col=0; col*cell<W; col++)
+            if((row+col)%2===0) rect(col*cell, row*cell, cell, cell, '#000', 0);
         break;
       case 'grid':
         var grid = data.grid || {cols: [0.25, 0.50, 0.75], rows: [0.20, 0.40, 0.50, 0.60, 0.80]};

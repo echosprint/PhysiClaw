@@ -32,6 +32,7 @@ from physiclaw.core.vision.grid_detect import (
     screen_polygon,
     sort_dots_to_grid,
 )
+from physiclaw.core.vision.preprocess import grayscale
 from physiclaw.core.vision.quality import laplacian_variance
 
 log = logging.getLogger(__name__)
@@ -87,11 +88,12 @@ def _focus_region(frame: np.ndarray, poly: np.ndarray | None) -> np.ndarray:
 
 
 def _pin_focus(cam: Camera, rotation: int, poly: np.ndarray | None) -> float | None:
-    """Converge-freeze-verify the lens on the calibration page, then
-    read the absolute position back for the bundle — the once-per-rig
-    focus calibration (doctrine: `hardware/focus.py`). The page is
-    bright and high-contrast, so AF has an ideal target and the
-    absolute sharpness gate in `focus.lock` is trustworthy.
+    """Converge-freeze-verify the lens on the ``focus`` page (a
+    full-screen checkerboard; the caller flips the phase), then read the
+    absolute position back for the bundle — the once-per-rig focus
+    calibration. Sharpness is metered on the corner-fenced screen crop
+    of that page; why the pin needs the checkerboard, and the measured
+    numbers, live in the `hardware/focus.py` doctrine.
 
     Runs BEFORE dot detection so Mapping B is measured under the exact
     lens state every later session replays. Returns None — with the
@@ -112,12 +114,25 @@ def _pin_focus(cam: Camera, rotation: int, poly: np.ndarray | None) -> float | N
 
     def meter() -> float | None:
         if not cam.wait_frames(focus.SETTLE_FRAMES, timeout=5.0):
+            log.debug("  Focus meter: no frames within 5s — meter aborts")
             return None
         f = cam.raw_frame()
         if f is None:
+            log.debug("  Focus meter: reader returned no frame — meter aborts")
             return None
         frame = cv2.rotate(f, rotation) if rotation >= 0 else f
-        return laplacian_variance(_focus_region(frame, poly))
+        gray = grayscale(_focus_region(frame, poly))
+        score = laplacian_variance(gray)
+        # The gate itself is voiced by focus.lock's verdict, not here.
+        # Guarded: the full-res median costs more than the (downscaled)
+        # sharpness measurement it decorates.
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug(
+                "  Focus meter: screen crop — sharpness %.1f, median luma %.0f",
+                score,
+                float(np.median(gray)),
+            )
+        return score
 
     result = focus.lock(meter, cam.lock_focus, cam.unlock_focus)
     log.info(f"  Focus pin: {result.detail}")
@@ -197,10 +212,12 @@ def compute_camera_mapping(
     time.sleep(1.0)
     screen_poly = _detect_screen_region(cam, rotation)
 
-    # 1.5 Pin the lens while the bright, high-contrast calibration page
-    #     is up, BEFORE dot detection — the dots (and everything after)
-    #     are then measured under the exact lens state every session
-    #     replays from the bundle.
+    # 1.5 Pin the lens BEFORE dot detection — the dots (and everything
+    #     after) are then measured under the exact lens state every
+    #     session replays from the bundle. The pin gets its own page:
+    #     the other pages are too flat to meter (see hardware/focus.py).
+    cal.set_phase("focus")
+    time.sleep(1.0)
     cam_focus = _pin_focus(cam, rotation, screen_poly)
 
     # 2. Grid phase: grab a few fresh frames; accept the first that yields the
