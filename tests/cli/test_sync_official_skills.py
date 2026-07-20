@@ -573,16 +573,17 @@ def test_log_emit_logs_unstyled(caplog) -> None:
     assert caplog.records[-1].getMessage() == "✓ synced 1 skill @ abc1234."
 
 
-def test_run_sync_quiet_logs_sync_error_as_warning(mocker, caplog) -> None:
-    """A background sync failure must reach the daily log — the daemon
-    thread has no visible stderr."""
+def test_run_sync_quiet_logs_sync_error_at_debug(mocker, caplog) -> None:
+    """A background sync failure must reach the daily log (the daemon
+    thread has no visible stderr) — but only at DEBUG: the sync is
+    best-effort, so a flaky network must not warn on every startup."""
     mocker.patch.object(osk, "sync", side_effect=osk.SyncError("GET x failed"))
 
-    with caplog.at_level(logging.WARNING, logger=osk.__name__):
+    with caplog.at_level(logging.DEBUG, logger=osk.__name__):
         osk._run_sync_quiet()  # must never escape the thread
 
     assert any(
-        "GET x failed" in r.getMessage() and r.levelno == logging.WARNING
+        "GET x failed" in r.getMessage() and r.levelno == logging.DEBUG
         for r in caplog.records
     )
 

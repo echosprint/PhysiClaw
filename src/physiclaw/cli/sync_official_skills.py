@@ -435,16 +435,17 @@ def maybe_auto_sync() -> None:
 
 
 def _run_sync_quiet() -> None:
-    """The background-thread body: run ``sync`` fully fail-soft — a clean
-    ``SyncError`` lands in the daily log as a warning (a daemon thread's
-    stderr is invisible); any unexpected error is logged with traceback.
-    Either way the thread dies quietly and the server is never affected."""
+    """The background-thread body: run ``sync`` fully fail-soft — failures
+    land in the daily log at DEBUG (file logging always records DEBUG),
+    silent on console: the sync is a best-effort nicety and a flaky network
+    shouldn't put a warning in every startup. Either way the thread dies
+    quietly and the server is never affected."""
     try:
         sync(emit=_log_emit)
     except SyncError as e:
-        log.warning("auto-sync: official skills sync failed (non-fatal): %s", e)
+        log.debug("auto-sync: official skills sync failed (non-fatal): %s", e)
     except Exception:
-        log.exception("auto-sync: official skills sync failed (non-fatal)")
+        log.debug("auto-sync: official skills sync failed (non-fatal)", exc_info=True)
 
 
 def _log_emit(msg: str) -> None:
