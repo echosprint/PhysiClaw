@@ -286,7 +286,7 @@ body.mode-bridge #bridge-layer{
         // must stay coarse enough to survive the server's 480px metering
         // downscale (vision/quality.py NORMALIZED_WIDTH) — finer cells
         // alias toward gray after the downscale and gut the score.
-        var cell = Math.min(W, H) * 0.10;
+        var cell = Math.min(W, H) * 0.08;
         for(var row=0; row*cell<H; row++)
           for(var col=0; col*cell<W; col++)
             if((row+col)%2===0) rect(col*cell, row*cell, cell, cell, '#000', 0);
