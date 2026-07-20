@@ -796,7 +796,7 @@ def test_constructor_seed_pins_focus_at_first_open(mocker) -> None:
     apply_spy.assert_called_with(vc, 137.0)
 
 
-def test_focus_pinned_reflects_the_remembered_position(mocker) -> None:
+def test_focus_pinned_true_when_apply_succeeds(mocker) -> None:
     vc = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 200)
     cam = _open_camera_no_thread(mocker, vc=vc)
     assert cam.focus_pinned is False
@@ -805,3 +805,57 @@ def test_focus_pinned_reflects_the_remembered_position(mocker) -> None:
     cam.apply_focus(137.0)
 
     assert cam.focus_pinned is True
+
+
+def test_focus_pinned_is_false_when_the_driver_refuses_the_apply(mocker) -> None:
+    # A remembered position the driver won't apply → lens not pinned, so
+    # focus_pinned must report False (the -4 exposure ceiling depends on it).
+    vc = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 200)
+    mocker.patch.object(cv2, "VideoCapture", return_value=vc)
+    mocker.patch.object(camera_mod.platform, "camera_apply_focus", return_value=False)
+
+    cam = Camera(index=0, focus_value=137.0)  # bundle value present…
+    cam._reader.stop()
+
+    assert cam.focus_pinned is False  # …but apply failed → not pinned
+
+
+def test_focus_pinned_self_heals_when_a_reopen_apply_lands(mocker) -> None:
+    # A transient refusal at first open must not condemn the session:
+    # _focus_value keeps the replay, so a reconnect whose apply succeeds
+    # flips focus_pinned back to True on its own.
+    vc1 = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 200)
+    mocker.patch.object(cv2, "VideoCapture", return_value=vc1)
+    apply_spy = mocker.patch.object(
+        camera_mod.platform, "camera_apply_focus", return_value=False
+    )
+    cam = Camera(index=0, focus_value=137.0)
+    cam._reader.stop()
+    assert cam.focus_pinned is False
+
+    apply_spy.return_value = True
+    vc2 = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 10)
+    mocker.patch.object(cv2, "VideoCapture", return_value=vc2)
+    cam._reopen()
+
+    assert cam.focus_pinned is True
+
+
+def test_focus_pinned_drops_when_a_reopen_apply_is_refused(mocker) -> None:
+    # The honest downgrade: a lens pinned earlier whose reconnect apply
+    # is refused is no longer verifiably pinned — focus_pinned must
+    # follow reality down, not stay True off the remembered value.
+    vc1 = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 200)
+    cam = _open_camera_no_thread(mocker, vc=vc1)
+    apply_spy = mocker.patch.object(
+        camera_mod.platform, "camera_apply_focus", return_value=True
+    )
+    assert cam.apply_focus(137.0) is True
+    assert cam.focus_pinned is True
+
+    apply_spy.return_value = False
+    vc2 = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 10)
+    mocker.patch.object(cv2, "VideoCapture", return_value=vc2)
+    cam._reopen()
+
+    assert cam.focus_pinned is False

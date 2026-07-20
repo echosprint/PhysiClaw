@@ -101,7 +101,7 @@ def configure_capture(
     exposure: int,
     size: tuple[int, int] | None = None,
     focus_value: float | None = None,
-) -> None:
+) -> bool:
     """Apply PhysiClaw's capture properties to an open cv2.VideoCapture.
 
     Order is load-bearing: FOURCC must be set before width/height —
@@ -120,6 +120,11 @@ def configure_capture(
     this the choke point for ALL remembered camera state — the first
     open and every reconnect flow through it identically, so neither
     can silently hand the lens back to AF.
+
+    Returns whether the lens ended up actually pinned at ``focus_value``
+    — False on a refused apply and when no ``focus_value`` was given.
+    NOT overall configuration success; the other property writes are
+    judged by the first frame, never by their return.
 
     The request passes through `apply_size_cap` — see its docstring
     for the macOS exposure-safety rationale.
@@ -147,11 +152,18 @@ def configure_capture(
     else:
         platform.camera_set_manual_exposure(cap, exposure)
     # Remembered focus state re-applied at the same choke point as the
-    # exposure state, so reconnects can't sneak past it either.
-    if focus_value is not None and not platform.camera_apply_focus(cap, focus_value):
-        log.warning(
-            "could not apply the remembered focus position — lens left on autofocus"
-        )
+    # exposure state, so reconnects can't sneak past it either. Returns
+    # whether the lens is ACTUALLY pinned now: a refused write leaves it
+    # unpinned (AF live — or frozen off-position, when only the position
+    # write of the two-write apply was refused), and the -4 exposure
+    # ceiling (which live AF can't afford) must know that — so the caller
+    # records this, never "a value was remembered".
+    if focus_value is None:
+        return False
+    if not platform.camera_apply_focus(cap, focus_value):
+        log.warning("could not apply the remembered focus position — lens not pinned")
+        return False
+    return True
 
 
 # Fallback requests when a high-resolution negotiation misbehaves.
@@ -213,6 +225,12 @@ class Camera:
         # for the same reason as exposure: a reconnect must not silently
         # hand the lens back to continuous AF.
         self._focus_value: float | None = focus_value
+        # Whether the last apply of _focus_value landed (driver-confirmed)
+        # — recomputed by _open on every (re)open. Distinct from
+        # _focus_value, the remembered intent replayed on every reconnect:
+        # the two diverge exactly when an apply is refused. focus_pinned
+        # reads THIS.
+        self._focus_applied: bool = False
         # The resolution request, remembered so _reopen() re-applies the
         # rung _warmup settled on instead of re-failing at the top of the
         # ladder on every reconnect.
@@ -266,7 +284,7 @@ class Camera:
         # FOURCC → size → exposure, in that order (see configure_capture).
         # Reads the REMEMBERED exposure state, so a converged manual value
         # survives _reopen()'s reconstruction of the cap.
-        configure_capture(
+        self._focus_applied = configure_capture(
             self.cap,
             exposure_auto=self._exposure_auto,
             exposure=self._exposure_value,
@@ -314,7 +332,7 @@ class Camera:
                     f"retrying at {size[0]}x{size[1]}"
                 )
                 self._request_size = size
-                configure_capture(
+                self._focus_applied = configure_capture(
                     self.cap,
                     exposure_auto=self._exposure_auto,
                     exposure=self._exposure_value,
@@ -392,11 +410,12 @@ class Camera:
 
     @property
     def focus_pinned(self) -> bool:
-        """Whether the lens is held at a remembered absolute position
-        (the calibration bundle's). Consulted by the exposure tune: the
-        -4 ceiling costs ~16fps, which live AF can't afford (hunts
-        outlive the view settle) — unpinned rigs get the -5 ceiling."""
-        return self._focus_value is not None
+        """Whether the last apply of the remembered absolute position
+        (the calibration bundle's) landed — the driver's word, not just
+        a remembered value. Consulted by the exposure tune: the -4
+        ceiling costs ~16fps, which live AF can't afford (hunts outlive
+        the view settle) — unpinned rigs get the -5 ceiling."""
+        return self._focus_applied
 
     def lock_focus(self) -> bool:
         """Freeze autofocus at its current position — a raw,
@@ -410,6 +429,7 @@ class Camera:
     def unlock_focus(self) -> None:
         """Hand the lens back to continuous autofocus. Remembered."""
         self._focus_value = None
+        self._focus_applied = False
         with self._cap_lock:
             platform.camera_unlock_focus(self.cap)
 
@@ -429,6 +449,7 @@ class Camera:
             ok = platform.camera_apply_focus(self.cap, value)
         if ok:
             self._focus_value = value
+            self._focus_applied = True
         return ok
 
     def wait_frames(self, n: int, timeout: float = 5.0) -> bool:
