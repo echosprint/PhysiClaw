@@ -58,9 +58,10 @@ class Calibration:
     screen_dimension: dict | None = None  # width, height, viewport_w/h in CSS pt
     # Absolute lens position pinned during the camera-mapping step, in
     # the driver's native units. None on rigs that can't lock (fixed-
-    # focus camera, macOS without the UVC channel) or when the driver
-    # reported no readable position — those run on live AF. Deliberately
-    # NOT part of `complete`: a rig without it is degraded, not broken.
+    # focus camera, macOS without the UVC channel) or when the pin
+    # didn't verify end-to-end (see `camera_map._pin_focus`) — those
+    # run on live AF. Deliberately NOT part of `complete`: a rig
+    # without it is degraded, not broken.
     cam_focus: float | None = None
 
     @property

@@ -10,8 +10,9 @@ gate is trustworthy. The other calibration pages are mostly flat and
 meter far below the gate even in perfect focus on a far camera — the
 corners page measured 14-34 against the 80 gate on a rig at minimum
 phone coverage, while the checkerboard meters like session content
-(hundreds). The verified position is read back, persisted in the
-calibration bundle, and seeded into every fresh `Camera`
+(hundreds). The verified position is read back, re-applied and
+re-verified by pixels, then persisted in the calibration bundle and
+seeded into every fresh `Camera`
 (`rig.connect_camera`); `configure_capture` — the remembered-state
 choke point — re-applies it at the first open and every reconnect.
 Nothing re-locks at runtime: continuous AF

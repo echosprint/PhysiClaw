@@ -277,6 +277,27 @@ def test_pin_focus_returns_none_when_apply_refused() -> None:
     cam.unlock_focus.assert_called()
 
 
+def test_pin_focus_returns_none_when_applied_position_meters_soft() -> None:
+    # The freeze verified sharp, but read-back + re-apply is a second
+    # driver round-trip: an intermittent junk readback drives the lens
+    # elsewhere. The applied state must be proven by pixels before the
+    # value is persisted — on a soft read nothing is stored and the
+    # lens goes back to AF.
+    cam = _lockable_cam(_sharp_frame())
+    cam.read_focus.return_value = 123.0
+
+    def apply_and_blur(value: float) -> bool:
+        cam.raw_frame.return_value = np.zeros((900, 600, 3), dtype=np.uint8)
+        return True
+
+    cam.apply_focus.side_effect = apply_and_blur
+
+    value = camera_map_mod._pin_focus(cam, -1, None)
+
+    assert value is None
+    cam.unlock_focus.assert_called()
+
+
 def test_pin_focus_meters_only_the_screen_region() -> None:
     # Sharp content inside the corner-fenced screen, dark desk outside —
     # the meter must score the fence's bounding rect, not the full frame.

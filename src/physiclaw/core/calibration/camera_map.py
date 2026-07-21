@@ -99,7 +99,8 @@ def _pin_focus(cam: Camera, rotation: int, poly: np.ndarray | None) -> float | N
     lens state every later session replays. Returns None — with the
     lens back on live AF, so every session behaves the same — when the
     rig can't lock (fixed-focus camera), the scene never metered sharp,
-    or the position can't be read back and re-applied."""
+    the position can't be read back and re-applied, or the applied
+    position doesn't meter sharp."""
     if not cam.focus_lockable:
         log.info("  Focus pin: rig can't lock focus — lens left on auto")
         return None
@@ -146,6 +147,17 @@ def _pin_focus(cam: Camera, rotation: int, poly: np.ndarray | None) -> float | N
     if value is None or not cam.apply_focus(value):
         cam.unlock_focus()
         log.info("  Focus pin: position not replayable — lens left on autofocus")
+        return None
+    # Verify the APPLIED state by pixels before persisting: the freeze
+    # was sharpness-verified, but this read-back + re-apply is a second
+    # driver round-trip — an intermittent junk readback (uvc.py's
+    # measured firmware quirks) would drive the lens elsewhere and put
+    # the junk in the bundle on the driver's word alone. Same gate the
+    # freeze verify used, so the two can't diverge.
+    after = meter()
+    if after is None or after < focus.BLUR_THRESHOLD:
+        cam.unlock_focus()
+        log.info("  Focus pin: applied position metered soft — lens left on autofocus")
         return None
     log.info(f"  ✓ Focus pinned @ {value:g} — stored in the calibration bundle")
     return value
