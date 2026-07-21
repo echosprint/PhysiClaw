@@ -820,6 +820,23 @@ def test_focus_pinned_is_false_when_the_driver_refuses_the_apply(mocker) -> None
     assert cam.focus_pinned is False  # …but apply failed → not pinned
 
 
+def test_refused_open_apply_hands_the_lens_back_to_autofocus(mocker) -> None:
+    # A half-failed apply (AF disabled, then the position write refused)
+    # would strand the lens frozen at an arbitrary position — a state
+    # nothing downstream models. The choke point must restore live AF,
+    # the one supported unpinned mode.
+    vc = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 200)
+    mocker.patch.object(cv2, "VideoCapture", return_value=vc)
+    mocker.patch.object(camera_mod.platform, "camera_apply_focus", return_value=False)
+    unlock_spy = mocker.patch.object(camera_mod.platform, "camera_unlock_focus")
+
+    cam = Camera(index=0, focus_value=137.0)
+    cam._reader.stop()
+
+    assert cam.focus_pinned is False
+    unlock_spy.assert_called()
+
+
 def test_focus_pinned_self_heals_when_a_reopen_apply_lands(mocker) -> None:
     # A transient refusal at first open must not condemn the session:
     # _focus_value keeps the replay, so a reconnect whose apply succeeds
@@ -843,8 +860,9 @@ def test_focus_pinned_self_heals_when_a_reopen_apply_lands(mocker) -> None:
 
 def test_focus_pinned_drops_when_a_reopen_apply_is_refused(mocker) -> None:
     # The honest downgrade: a lens pinned earlier whose reconnect apply
-    # is refused is no longer verifiably pinned — focus_pinned must
-    # follow reality down, not stay True off the remembered value.
+    # is refused is handed back to live AF by the choke point —
+    # focus_pinned must follow reality down, not stay True off the
+    # remembered value.
     vc1 = FakeVideoCapture(index=0, read_results=[(True, _frame())] * 200)
     cam = _open_camera_no_thread(mocker, vc=vc1)
     apply_spy = mocker.patch.object(

@@ -153,15 +153,22 @@ def configure_capture(
         platform.camera_set_manual_exposure(cap, exposure)
     # Remembered focus state re-applied at the same choke point as the
     # exposure state, so reconnects can't sneak past it either. Returns
-    # whether the lens is ACTUALLY pinned now: a refused write leaves it
-    # unpinned (AF live — or frozen off-position, when only the position
-    # write of the two-write apply was refused), and the -4 exposure
-    # ceiling (which live AF can't afford) must know that — so the caller
-    # records this, never "a value was remembered".
+    # whether the lens is ACTUALLY pinned now — the -4 exposure ceiling
+    # (which live AF can't afford) must know, so the caller records this,
+    # never "a value was remembered". A refused apply can strand the lens
+    # half-pinned (the two-write apply may disable AF before the position
+    # write is refused — frozen at an arbitrary position, a state nothing
+    # downstream models), so failure hands the lens back to live AF, the
+    # one supported unpinned mode. Best-effort: on a dead control channel
+    # the unlock is a no-op and the lens was on AF all along.
     if focus_value is None:
         return False
     if not platform.camera_apply_focus(cap, focus_value):
-        log.warning("could not apply the remembered focus position — lens not pinned")
+        platform.camera_unlock_focus(cap)
+        log.warning(
+            "could not apply the remembered focus position — "
+            "lens handed back to autofocus"
+        )
         return False
     return True
 

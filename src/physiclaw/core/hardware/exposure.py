@@ -75,9 +75,10 @@ MAX_EXPOSURE = -4
 MAX_STEPS = 6
 
 # Ceiling for rigs whose lens is NOT pinned (no calibrated focus in the
-# bundle, or the calibration-time pin failed): the old full-frame-rate
-# ceiling, so live AF never has to iterate at 16fps. Callers pass it
-# via `converge(..., max_exposure=UNPINNED_MAX_EXPOSURE)`.
+# bundle, a failed calibration-time pin, or an apply refused at open —
+# every one of which leaves the lens on live AF): the old
+# full-frame-rate ceiling, so live AF never has to iterate at 16fps.
+# Callers pass it via `converge(..., max_exposure=UNPINNED_MAX_EXPOSURE)`.
 UNPINNED_MAX_EXPOSURE = -5
 
 # Acceptance ceiling for clipped pixels during a tune — much tighter than
