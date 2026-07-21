@@ -131,7 +131,7 @@ def test_in_band_step_is_accepted_however_little_the_luma_moved() -> None:
     # A step that lands in band is a success even when the median barely
     # moved from the previous read — the in-band accept must run before
     # the stall judgment, or a marginal AE state one step from the band
-    # gets rejected as "driver ignores writes".
+    # gets rejected as "driver ignores or clamps writes".
     rig = Rig(_r(130.0, clip=0.03), {-6: _r(129.0, clip=0.01)})
 
     res = converge(rig.meter, rig.set_auto, rig.set_manual, start=-6)
@@ -329,8 +329,8 @@ def test_asleep_screen_brightening_probe_then_defers() -> None:
     # ceiling can't lift the crop above the reference floor, the screen
     # is asleep: revert to AE and defer until the scene changes. The
     # sub-reference luma creep (5→6→7, under LUMA_STALL_EPSILON) must
-    # NOT read as "driver ignores writes": a black screen can't move the
-    # meter regardless of the driver.
+    # NOT read as "driver ignores or clamps writes": a black screen
+    # can't move the meter regardless of the driver.
     rig = Rig(_r(5.0), {-6: _r(5.0), -5: _r(6.0), -4: _r(7.0)})
 
     res = converge(rig.meter, rig.set_auto, rig.set_manual, start=-6)
@@ -359,10 +359,33 @@ def test_asleep_screen_defers_while_honoring_pinned_manual() -> None:
 
     assert res.deferred and not res.ok and res.mode == "manual"
     assert rig.auto_calls == 0
-    # The brightest probed step is held — re-crushing back to the start
-    # would undo the very brightening the probe just proved least-bad.
+    # The last probed step is held (here the brightest — this dark walk
+    # is monotone): re-crushing back to the start would undo the very
+    # brightening the probe just proved least-bad.
     assert rig.manual_calls[-1] == -4
     assert res.median == 7.0  # baseline metered under the held -4
+
+
+def test_max_steps_dark_ending_holds_a_probed_value() -> None:
+    # The stepping loop advances `exp` past the last probe at the bottom
+    # of each iteration, so a search that runs out of max_steps mid-band
+    # exits with `exp` one un-probed step ahead. The pinned-manual dark
+    # ending must hold the last value actually set AND metered — never
+    # write an exposure the search learned nothing about.
+    rig = Rig(_r(5.0), {-8: _r(5.0), -7: _r(6.0)})
+
+    res = converge(
+        rig.meter,
+        rig.set_auto,
+        rig.set_manual,
+        start=-8,
+        max_steps=2,
+        prefer_auto=False,
+    )
+
+    assert res.deferred and not res.ok
+    assert res.exposure == -7  # last probed, not the advanced -6
+    assert rig.manual_calls == [-8, -7, -7]
 
 
 def test_max_steps_bounds_the_search() -> None:

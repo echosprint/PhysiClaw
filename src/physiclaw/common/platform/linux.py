@@ -132,9 +132,11 @@ def camera_set_manual_exposure(cap, exposure: int) -> None:
     ticks, converted by `uvc.ticks_from_log2_seconds` (shared with
     darwin.py). (Passing the raw negative through — the old behavior —
     got clamped by the driver, which the luma stall check read as
-    "driver ignores exposure writes", reverting every tune to blown-out
-    auto.) Tick ranges vary per device; out-of-range values are the
-    driver's to clamp."""
+    "driver ignores or clamps exposure writes", reverting every tune to
+    blown-out auto.) Tick ranges vary per device; out-of-range values
+    are the driver's to clamp — and the frame interval caps exposure
+    too, so a driver holding 30fps silently clamps writes past ~333
+    ticks (the stall check reads either case as "no effect")."""
     import cv2
 
     from physiclaw.common.platform import uvc

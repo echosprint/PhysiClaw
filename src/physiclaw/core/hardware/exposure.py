@@ -91,8 +91,8 @@ TUNE_CLIP_PCT = 0.02
 
 # Below this median the screen shows no lit content at all (asleep,
 # resting lock screen) — the gate on the stall check only: a black
-# screen can't move the meter regardless of the driver, so "ignored
-# writes" is judgeable only above this floor.
+# screen can't move the meter regardless of the driver, so "ignored or
+# clamped writes" is judgeable only above this floor.
 DARK_REFERENCE_LUMA = 15.0
 
 # The scene must move by this much (either direction) from a failed
@@ -106,11 +106,13 @@ DARK_REFERENCE_LUMA = 15.0
 RETRY_LUMA_DELTA = 5.0
 
 # A set that changes measured median luma by less than this did nothing:
-# the driver is ignoring exposure writes (common — see opencv#9738), and
-# further stepping is theater. One log2 stop should move luma far more.
+# the driver is ignoring exposure writes (common — see opencv#9738) or
+# silently clamping them (V4L2 caps exposure at the frame interval, so
+# writes past ~1/30s can do nothing at 30fps), and further stepping is
+# theater. One log2 stop should move luma far more.
 # Judged only between consecutive MANUAL reads (from step 2 on): step 1's
 # baseline is the auto-mode read, and a manual start that matches AE's
-# converged brightness is normal, not an ignored write.
+# converged brightness is normal, not a stall.
 LUMA_STALL_EPSILON = 3.0
 
 # After re-asserting auto-exposure the firmware loop re-converges over
@@ -125,6 +127,10 @@ AE_SETTLE_TOLERANCE = 0.05
 class TuneResult:
     """Outcome of one convergence run — for the log, and for tests."""
 
+    # "manual" only when THIS run drove or held a manual value. Phase-1
+    # accepts touch nothing and report "auto" meaning "left as-is" —
+    # the camera may still hold an earlier tune's (or the config's)
+    # manual value; converge has no way to know.
     mode: Literal["auto", "manual"]
     exposure: int | None  # the held manual value; None in auto mode
     ok: bool  # True = final metered frame is in band
@@ -163,8 +169,8 @@ def _usable(r: QualityReport) -> bool:
 def is_reference(r: QualityReport) -> bool:
     """Whether the metered crop shows a lit screen at all — the gate on
     the stall check (a black screen can't move the meter no matter what
-    the driver does, so "ignored writes" is only judgeable on a lit
-    crop)."""
+    the driver does, so "ignored or clamped writes" is only judgeable
+    on a lit crop)."""
     return r.median_luma >= DARK_REFERENCE_LUMA
 
 
@@ -254,15 +260,15 @@ def converge(
       3. Integer-step a manual exposure from `start`: darker while
          highlights clip, brighter while too dark (including a dark
          crop — a night-dimmed screen tunes like any other). Stops on:
-         in band (success), stalled luma (driver ignores writes; judged
-         only on lit crops — a black screen can't move the meter no
-         matter what the driver does), two direction flips (band lies
-         between two integer steps — keep the darkest usable step
-         tried), range exhausted, or `max_steps`.
+         in band (success), stalled luma (driver ignores or clamps
+         writes; judged only on lit crops — a black screen can't move
+         the meter no matter what the driver does), two direction
+         flips (band lies between two integer steps — keep the darkest
+         usable step tried), range exhausted, or `max_steps`.
       4. Failure hold: every search that ends without an accepted frame
          defers (`deferred=True`; firmware AE restored under
-         `prefer_auto`, pinned-manual holds the brightest probed step
-         on a dark ending) and records a baseline median under the
+         `prefer_auto`, pinned-manual holds the last probed step on a
+         dark ending) and records a baseline median under the
          RESTORED state, so `wants_retry` compares scene against scene
          for dark and blown alike. The loop's diagnosis stays in the
          detail; the state note is appended to it.
@@ -314,9 +320,15 @@ def converge(
     last_dir = 0
     flips = 0
     best: int | None = None  # darkest usable exposure tried
+    # The last value actually set AND metered. `exp` advances past it at
+    # the bottom of each iteration, so after a full max_steps run `exp`
+    # is one un-probed step ahead — the dark-ending hold below must
+    # never write that untried value.
+    probed = start
     reason = f"no progress within {max_steps} steps"
     for step in range(1, max_steps + 1):
         set_manual(exp)
+        probed = exp
         r = meter()
         if r is None:
             reason = "meter lost frames mid-stepping"
@@ -336,13 +348,17 @@ def converge(
         # normal — declaring it a stall would abort a search whose next
         # step could still converge. Lit crops only: on a black screen
         # the meter can't move regardless of the driver, and the asleep
-        # verdict below is the right conclusion, not "ignored writes".
+        # verdict below is the right conclusion, not "ignored or
+        # clamped writes".
         if (
             step > 1
             and is_reference(r)
             and abs(r.median_luma - prev_luma) < LUMA_STALL_EPSILON
         ):
-            reason = f"driver ignores exposure writes (luma stuck ~{r.median_luma:.0f})"
+            reason = (
+                f"driver ignores or clamps exposure writes "
+                f"(luma stuck ~{r.median_luma:.0f})"
+            )
             break
         prev_luma = r.median_luma
         if _usable(r) and (best is None or exp < best):
@@ -402,13 +418,15 @@ def converge(
         # Manual pinned in config: never flip to firmware AE, even when
         # no usable step was found — honoring the pin matters more than
         # a good exposure the user opted out of. On a dark ending hold
-        # the LAST step tried — the brightest probe, least-bad for a
-        # dark scene — rather than re-crushing the screen back to the
-        # configured start.
+        # the last step actually probed — the brightest probe on the
+        # monotone walk a pure dark ending takes, the brightest
+        # non-blown probe on an oscillating one; either way the
+        # least-bad known value for a dark scene — rather than
+        # re-crushing the screen back to the configured start.
         if best is not None:
             value, held = best, "best manual"
         elif r is not None and r.dark:
-            value, held = exp, "brightest probed"
+            value, held = probed, "last probed"
         else:
             value, held = start, "manual start"
         set_manual(value)
