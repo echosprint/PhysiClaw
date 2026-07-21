@@ -26,7 +26,11 @@ survive turns AND wakes:
      `is_superseded` flag on the source `ToolResultMessage` (set by
      `compact.drop_stale_screens`). Deepest byte-stable point before
      the live multipart image; marking through the image would cache
-     bytes that mutate away.
+     bytes that mutate away. Because this anchor MOVES (a newer stub
+     lands most screen turns), a stub's wire shape must not depend on
+     whether it currently holds the marker: `_encode_message` encodes
+     every superseded stub as a one-element text-block list, and
+     `mark_stub` adds only the `cache_control` key.
 
 Provider-specific response leakage (Qwen's `reasoning_content`) is
 stripped here at parse time so it never re-rides the wire on the next
@@ -68,15 +72,27 @@ log = logging.getLogger(__name__)
 
 
 class OpenAICacheMarkers(CacheMarkers):
-    """OpenAI-shape marker mechanics: both anchors (system entry,
-    stubbed tool_result) carry string content on the wire, so both
-    wrap it in a single cache-controlled text block the same way."""
+    """OpenAI-shape marker mechanics, split by anchor mobility.
+
+    The system entry is marked on EVERY request, so `mark_system` may
+    rewrap its string content into a cache-controlled text block — the
+    wrapped shape is simply what every request carries. The stub anchor
+    MOVES (a newer stub takes it most screen turns), so `mark_stub`
+    must be additive: `_encode_message` guarantees a superseded stub is
+    a one-element text-block list, and marking only adds the
+    `cache_control` key to a copy of that block. Marked and unmarked
+    stubs therefore serialize byte-identically apart from that key —
+    the invariant vendors with strict anchor semantics (DashScope/Qwen)
+    depend on, and the same contract `AnthropicCacheMarkers` keeps.
+    Moonshot K3 is measured indifferent to both the key and the shape —
+    see `vendors/moonshot.py` for the dated observations."""
 
     def mark_system(self, entry: dict) -> dict:
         return _with_cache_marker(entry)
 
     def mark_stub(self, entry: dict) -> dict:
-        return _with_cache_marker(entry)
+        block = {**entry["content"][0], "cache_control": EPHEMERAL_CACHE_CONTROL}
+        return {**entry, "content": [block]}
 
 
 class OpenAICompatibleProvider(BaseProvider):
@@ -154,7 +170,15 @@ class OpenAICompatibleProvider(BaseProvider):
         if isinstance(msg, AssistantMessage):
             return assistant_to_wire(msg)
         if isinstance(msg, ToolResultMessage):
-            return tool_result_to_wire(msg)
+            wire = tool_result_to_wire(msg)
+            # Superseded stubs always ride as a one-element text-block
+            # list so their bytes don't depend on whether the stub holds
+            # the moving cache anchor this turn (only the `cache_control`
+            # key may differ — see `OpenAICacheMarkers`). Non-superseded
+            # results keep the plain string/multipart shapes.
+            if msg.is_superseded and isinstance(wire["content"], str):
+                wire["content"] = [{"type": "text", "text": wire["content"]}]
+            return wire
         # Exhaustive on the `Message` Union; runtime guard against future
         # subtypes added without updating the dispatch.
         assert_never(msg)
@@ -238,9 +262,10 @@ class OpenAICompatibleProvider(BaseProvider):
 
 def _with_cache_marker(entry: dict) -> dict:
     """Shallow-copy `entry` and wrap its string content in a single text
-    block carrying an ephemeral cache_control. Caller guarantees string
-    content (system message + stubbed tool_result both qualify in the
-    OpenAI wire shape)."""
+    block carrying an ephemeral cache_control. Only for the always-
+    marked system entry: the string→list rewrap changes shape between
+    marked and unmarked serializations, which a moving anchor must never
+    do (see `OpenAICacheMarkers.mark_stub`, which is additive instead)."""
     out = dict(entry)
     out["content"] = [
         {

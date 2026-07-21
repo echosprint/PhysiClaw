@@ -60,9 +60,11 @@ class GoogleProvider(OpenAICompatibleProvider):
     # Cache markers: disabled. Gemini's shim ignores Anthropic-style
     # `cache_control`. The bigger reason for stripping is that the stub
     # marker tracks the *latest* superseded tool_result, whose position
-    # shifts forward every screen-obs turn — wrapping that one entry
-    # on/off perturbs exactly the prefix bytes Gemini's implicit cache
-    # wants to anchor on. Hits surface via standard
+    # shifts forward every screen-obs turn — even the additive key the
+    # base `mark_stub` now toggles on/off is a byte delta at exactly
+    # the prefix position Gemini's implicit cache wants to anchor on,
+    # with zero upside when the shim ignores the field anyway. Hits
+    # surface via standard
     # `usage.prompt_tokens_details.cached_tokens`; the base `_parse_usage`
     # already reads it. Implicit caching itself is non-deterministic
     # across both Flash and Pro (intermittent zero-hit turns on stable

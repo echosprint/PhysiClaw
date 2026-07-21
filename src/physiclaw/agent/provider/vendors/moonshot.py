@@ -6,21 +6,17 @@ Auth: `MOONSHOT_API_KEY` env, or `[provider] moonshot_api_key` in
 override via `[providers.moonshot] base_url = "https://api.moonshot.ai/v1"`
 in user config (a key minted for one domain returns 401 on the other).
 
-Caching: Moonshot honors `cache_control: {type: ephemeral}` markers on
-text blocks — same shape as DashScope, so the inherited
-`OpenAICacheMarkers` are load-bearing for cross-wake hits. Empirically
-(A/B against the API):
-
-  - Markers OFF + identical request          : 100% hit (full byte match)
-  - Markers OFF + user-message change        :   0% hit (cache busted)
-  - Markers ON  + user-message change        : 100% hit (anchors honored)
-
-PhysiClaw rewrites the wake-volatile content (cron stamps, trigger
-text) into the user message right after the system. Without markers,
-every wake starts cold even when the system is byte-stable. With
-markers, every wake hits cache up to the marked anchors. The earlier
-"K2 is purely auto-prefix, markers redundant" reading turned out to
-match only the byte-identical case.
+Caching: on K2, markers looked load-bearing (A/B: user-message change
+hit 0% without markers, 100% with). On K3 a three-arm session replay
+(logged bytes / byte-stable stub shapes / markers stripped) returned
+token-identical cached counts — the cache is content-based and ignores
+both `cache_control` and text-block vs bare-string shape, so the
+inherited `OpenAICacheMarkers` are harmless uniformity, not
+load-bearing. K3's hit collapses (~95% → ~75% on screen turns) are
+`compact.drop_stale_screens` rewriting the previous screen to its stub
+— the compaction trade-off, not a serialization bug. Entries take
+~60–120s to materialize (first 3–4 turns of a session read 0%); TTL is
+5–30 min.
 
 Collapse cadence: inherits the base default `COLLAPSE` policy
 (interval = 20) — same cadence as Anthropic/Qwen. The whole-prefix invalidation

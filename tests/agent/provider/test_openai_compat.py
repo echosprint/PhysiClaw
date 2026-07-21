@@ -187,14 +187,89 @@ def test_cache_markers_mark_system_delegates_to_with_cache_marker(
     assert out["content"][0]["cache_control"] == EPHEMERAL_CACHE_CONTROL
 
 
-def test_cache_markers_mark_stub_delegates_to_with_cache_marker(
+def test_cache_markers_mark_stub_adds_only_cache_control_to_block(
     provider: _TestOpenAI,
 ) -> None:
-    entry = {"role": "tool", "content": "stale"}
+    # Stubs arrive as a one-element text-block list (guaranteed by
+    # `_encode_message`); the marker must be additive so marked and
+    # unmarked stubs serialize identically apart from the key.
+    entry = {
+        "role": "tool",
+        "tool_call_id": "t1",
+        "content": [{"type": "text", "text": "(superseded peek) stale"}],
+    }
 
     out = provider.CACHE_MARKERS.mark_stub(entry)
 
-    assert out["content"][0]["cache_control"] == EPHEMERAL_CACHE_CONTROL
+    assert out == {
+        "role": "tool",
+        "tool_call_id": "t1",
+        "content": [
+            {
+                "type": "text",
+                "text": "(superseded peek) stale",
+                "cache_control": EPHEMERAL_CACHE_CONTROL,
+            }
+        ],
+    }
+
+
+def test_cache_markers_mark_stub_does_not_mutate_original_entry(
+    provider: _TestOpenAI,
+) -> None:
+    entry = {
+        "role": "tool",
+        "tool_call_id": "t1",
+        "content": [{"type": "text", "text": "stale"}],
+    }
+
+    provider.CACHE_MARKERS.mark_stub(entry)
+
+    assert entry["content"] == [{"type": "text", "text": "stale"}]
+
+
+def test_encode_superseded_tool_result_wraps_string_in_text_block(
+    provider: _TestOpenAI,
+) -> None:
+    out = provider._encode_message(
+        ToolResultMessage(
+            tool_call_id="t1", content="(superseded tap) gone", is_superseded=True
+        )
+    )
+
+    assert out == {
+        "role": "tool",
+        "tool_call_id": "t1",
+        "content": [{"type": "text", "text": "(superseded tap) gone"}],
+    }
+
+
+def test_superseded_stub_serializes_byte_identical_marked_vs_unmarked(
+    provider: _TestOpenAI,
+) -> None:
+    """The invariant this shape exists for: when a newer stub takes the
+    moving anchor, the previous stub's wire bytes must be unchanged
+    except for losing the `cache_control` key — the contract vendors
+    with strict anchor semantics depend on, and the same one the
+    Anthropic shape keeps by construction."""
+    sys_ = SystemMessage(content="sys")
+    s1 = ToolResultMessage(
+        tool_call_id="t1", content="(superseded peek) a", is_superseded=True
+    )
+    s2 = ToolResultMessage(
+        tool_call_id="t2", content="(superseded tap) b", is_superseded=True
+    )
+
+    as_anchor = provider.serialize_history([sys_, s1])[1]  # s1 marked
+    after_move = provider.serialize_history([sys_, s1, s2])[1]  # s1 unmarked
+
+    stripped_blocks = []
+    for block in as_anchor["content"]:
+        block = dict(block)
+        block.pop("cache_control", None)
+        stripped_blocks.append(block)
+
+    assert {**as_anchor, "content": stripped_blocks} == after_move
 
 
 # ---------- chat: success path ----------
