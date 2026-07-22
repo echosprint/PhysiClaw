@@ -199,7 +199,9 @@ def _prepare_request(
     # the request carries a ⚠ tail and the turn's note must bank state into the
     # scratchpad (enforced by policy.CompactionCheckpoint).
     compaction_imminent = compact.collapse_pending(
-        messages, policy=run.provider.COLLAPSE
+        messages,
+        policy=run.provider.COLLAPSE,
+        collapsed_once=session.collapsed_once,
     )
     # First-run reminder is empty once learned, and a session that started
     # learned stays learned — so the per-turn disk read is skipped entirely
@@ -457,7 +459,12 @@ def _finalize_turn(
         scratchpad_written=scratchpad_written,
     )
     compact.drop_stale_screens(messages)
-    compact.collapse_old_turns(messages, policy=run.provider.COLLAPSE)
+    if compact.collapse_old_turns(
+        messages,
+        policy=run.provider.COLLAPSE,
+        collapsed_once=session.collapsed_once,
+    ):
+        session.collapsed_once = True
     for gate in run.policies.turn_gates:
         gate.on_turn_complete()
 

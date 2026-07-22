@@ -33,6 +33,13 @@ class Session:
     # budget runs out: the STUCK it closes with must not be retried (the
     # outcome contract reads this as `retryable=False`).
     budget_exhausted: bool = False
+    # Set by `loop._finalize_turn` when `compact.collapse_old_turns`
+    # actually folds; threads back into the collapse threshold so
+    # first-vs-subsequent cadence is explicit state, never inferred from
+    # slot byte-forms (an all-empty-summaries fold re-renders the summary
+    # slot to its placeholder bytes, which would look like "never
+    # collapsed" to a content sniff).
+    collapsed_once: bool = False
     # Set by `add_pitfall` (also triggers post-session curation); read by the
     # pre-close pitfalls gate (policy.PitfallCheckpoint). `stuck_events`
     # (loop-guard tally) only enriches the capture corrective's seed.

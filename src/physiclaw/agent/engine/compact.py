@@ -141,12 +141,22 @@ def new_skills_placeholder() -> UserMessage:
 
 
 def _trigger_threshold(
-    messages: list[Message], *, policy: CollapsePolicy
+    messages: list[Message], *, policy: CollapsePolicy, collapsed_once: bool
 ) -> int | None:
     """The complete-turn count at which a collapse fires, or None when
     the pre-allocated slots are missing. ONE source of truth shared by
     `collapse_pending` and `collapse_old_turns` — the predictor and the
-    trigger can never disagree on the firing turn."""
+    trigger can never disagree on the firing turn.
+
+    `collapsed_once` is the engine's explicit first-collapse marker
+    (session state, recorded when `collapse_old_turns` returns True).
+    The summary slot's byte-form deliberately is NOT used as the
+    marker: a fold that salvages only memory/skill artifacts (all
+    folded note summaries empty) re-renders the slot to exactly
+    `SUMMARY_INITIAL`, which would silently revert the threshold to
+    `first_at` — wrong for the legitimate configs this exists for,
+    e.g. collapse late once (first_at=50) then on a tighter cadence
+    (keep=10, interval=20)."""
     if (
         len(messages) < _FIRST_TURN_INDEX
         or not isinstance(messages[2], UserMessage)
@@ -154,14 +164,14 @@ def _trigger_threshold(
         or not isinstance(messages[4], UserMessage)
     ):
         return None
-    is_first = messages[2].content == SUMMARY_INITIAL
-    return policy.first_at if is_first else policy.keep + policy.interval
+    return policy.keep + policy.interval if collapsed_once else policy.first_at
 
 
 def collapse_pending(
     messages: list[Message],
     *,
     policy: CollapsePolicy,
+    collapsed_once: bool,
 ) -> bool:
     """True when the turn ABOUT to run will, once complete, trigger
     `collapse_old_turns` — i.e. this is the model's LAST turn with the
@@ -169,9 +179,12 @@ def collapse_pending(
     tail and require a `note(scratchpad=...)` write-down before the
     folding erases everything but summary lines.
 
-    Same threshold as the collapse itself; the +1 counts the upcoming
-    turn. Missing slots → False (collapse would refuse too)."""
-    threshold = _trigger_threshold(messages, policy=policy)
+    Same threshold as the collapse itself (thread the same
+    `collapsed_once` session flag); the +1 counts the upcoming turn.
+    Missing slots → False (collapse would refuse too)."""
+    threshold = _trigger_threshold(
+        messages, policy=policy, collapsed_once=collapsed_once
+    )
     if threshold is None:
         return False
     turns = sum(isinstance(m, AssistantMessage) for m in messages)
@@ -201,7 +214,8 @@ def collapse_old_turns(
     messages: list[Message],
     *,
     policy: CollapsePolicy,
-) -> None:
+    collapsed_once: bool,
+) -> bool:
     """Fold turns older than `policy.keep` into three slots:
       - `messages[2]` — `note(summary=...)` bullets
       - `messages[3]` — `read_memory` / `read_logs` results in full
@@ -219,8 +233,11 @@ def collapse_old_turns(
     attribute (a validated `CollapsePolicy`). The engine threads it
     through; this function stays vendor-agnostic.
 
-    "First vs subsequent" is detected by the summary slot's content —
-    the placeholder body persists until the first collapse rewrites it.
+    "First vs subsequent" comes from the caller's `collapsed_once`
+    session flag. Returns True iff this call actually folded (spliced
+    the history) — the loop records that on the session; the no-op
+    paths (below threshold, missing slots, nothing salvageable)
+    return False and leave first-collapse status unchanged.
 
     Source material:
       - summary: each turn's `note(summary=...)` — string concat,
@@ -237,14 +254,16 @@ def collapse_old_turns(
     (EOQ analysis at `BaseProvider.COLLAPSE`; `MoonshotProvider` for
     the whole-prefix-invalidation trade-off).
     """
-    threshold = _trigger_threshold(messages, policy=policy)
+    threshold = _trigger_threshold(
+        messages, policy=policy, collapsed_once=collapsed_once
+    )
     if threshold is None:
         log.warning("collapse_old_turns: missing summary/memory/skill slots")
-        return
+        return False
 
     turn_starts = [i for i, m in enumerate(messages) if isinstance(m, AssistantMessage)]
     if len(turn_starts) < threshold:
-        return
+        return False
 
     cut = turn_starts[-policy.keep]
 
@@ -282,13 +301,14 @@ def collapse_old_turns(
                     skill_entries.append(entry)
 
     if not (summary_lines or memory_entries or skill_entries):
-        return  # nothing salvageable; leave bytes in place
+        return False  # nothing salvageable; leave bytes in place
 
     messages[2:cut] = [
         UserMessage(content=_render_slot(SUMMARY_HEADER, summary_lines, sep="\n")),
         UserMessage(content=_render_slot(MEMORY_HEADER, memory_entries, sep="\n\n")),
         UserMessage(content=_render_slot(SKILLS_HEADER, skill_entries, sep="\n\n")),
     ]
+    return True
 
 
 def _carry_items(existing: str | list, header: str, *, sep: str) -> list[str]:

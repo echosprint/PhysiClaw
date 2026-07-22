@@ -468,7 +468,9 @@ def test_collapse_old_turns_warns_when_slots_missing(
 
     with caplog.at_level(logging.WARNING, logger="physiclaw.agent.engine.compact"):
         collapse_old_turns(
-            msgs, policy=CollapsePolicy(first_at=10, keep=5, interval=10)
+            msgs,
+            policy=CollapsePolicy(first_at=10, keep=5, interval=10),
+            collapsed_once=False,
         )
 
     assert any(
@@ -490,7 +492,11 @@ def test_collapse_no_op_when_below_first_at_threshold() -> None:
     msgs = _scaffold_with_slots()
     snapshot = list(msgs)
 
-    collapse_old_turns(msgs, policy=CollapsePolicy(first_at=10, keep=3, interval=5))
+    collapse_old_turns(
+        msgs,
+        policy=CollapsePolicy(first_at=10, keep=3, interval=5),
+        collapsed_once=False,
+    )
 
     assert msgs == snapshot
 
@@ -517,7 +523,7 @@ def test_collapse_first_collapse_harvests_note_summaries_into_slot() -> None:
     for s in ("step-a", "step-b", "step-c", "step-d"):
         msgs.extend(_note_turn(s))
 
-    collapse_old_turns(msgs, policy=TIGHT_POLICY)
+    collapse_old_turns(msgs, policy=TIGHT_POLICY, collapsed_once=False)
 
     # Slot at index 2 now contains the summaries.
     summary = msgs[2]
@@ -546,7 +552,7 @@ def test_collapse_no_op_when_no_salvageable_content() -> None:
 
     snapshot = [(m.__class__, getattr(m, "content", None)) for m in msgs]
 
-    collapse_old_turns(msgs, policy=TIGHT_POLICY)
+    collapse_old_turns(msgs, policy=TIGHT_POLICY, collapsed_once=False)
 
     assert [(m.__class__, getattr(m, "content", None)) for m in msgs] == snapshot
 
@@ -566,7 +572,7 @@ def test_collapse_harvests_memory_tool_results() -> None:
         msgs.append(ToolResultMessage(tool_call_id=f"r{i}", content=f"value-{i}"))
     msgs.extend(_note_turn("step-keep"))  # latest kept turn
 
-    collapse_old_turns(msgs, policy=TIGHT_POLICY)
+    collapse_old_turns(msgs, policy=TIGHT_POLICY, collapsed_once=False)
 
     memory_slot = msgs[3]
     assert isinstance(memory_slot, UserMessage)
@@ -590,7 +596,7 @@ def test_collapse_harvests_skill_tool_results() -> None:
     for s in ("a", "b", "c"):
         msgs.extend(_note_turn(s))
 
-    collapse_old_turns(msgs, policy=TIGHT_POLICY)
+    collapse_old_turns(msgs, policy=TIGHT_POLICY, collapsed_once=False)
 
     skill_slot = msgs[4]
     assert isinstance(skill_slot, UserMessage)
@@ -602,13 +608,18 @@ def test_collapse_harvests_skill_tool_results() -> None:
 
 def test_collapse_subsequent_collapse_uses_keep_plus_interval_threshold() -> None:
     msgs = _scaffold_with_slots()
-    # Pre-set the summary slot to indicate first collapse already happened.
+    # A prior collapse is signalled via collapsed_once=True below; the
+    # pre-set slot body only exercises the carry-forward path.
     msgs[2] = UserMessage(content=f"{SUMMARY_HEADER}\n- pre-existing")
     for s in [f"s{i}" for i in range(8)]:
         msgs.extend(_note_turn(s))
 
     # keep+interval = 1+5 = 6 turns needed before subsequent fires.
-    collapse_old_turns(msgs, policy=CollapsePolicy(first_at=100, keep=1, interval=5))
+    collapse_old_turns(
+        msgs,
+        policy=CollapsePolicy(first_at=100, keep=1, interval=5),
+        collapsed_once=True,
+    )
 
     summary = msgs[2]
     assert isinstance(summary, UserMessage)
@@ -638,7 +649,7 @@ def test_collapse_skips_when_artifact_result_is_error() -> None:
     for s in ("a", "b", "c"):
         msgs.extend(_note_turn(s))
 
-    collapse_old_turns(msgs, policy=TIGHT_POLICY)
+    collapse_old_turns(msgs, policy=TIGHT_POLICY, collapsed_once=False)
 
     skill_slot = msgs[4]
     assert isinstance(skill_slot, UserMessage)
@@ -652,7 +663,11 @@ def test_collapse_skips_when_artifact_result_is_error() -> None:
 def test_collapse_pending_false_when_slots_missing() -> None:
     msgs: list[Message] = [SystemMessage(content="s"), UserMessage(content="u")]
     assert (
-        collapse_pending(msgs, policy=CollapsePolicy(first_at=1, keep=1, interval=1))
+        collapse_pending(
+            msgs,
+            policy=CollapsePolicy(first_at=1, keep=1, interval=1),
+            collapsed_once=False,
+        )
         is False
     )
 
@@ -663,9 +678,9 @@ def test_collapse_pending_predicts_first_collapse_exactly() -> None:
     # turn earlier it isn't.
     msgs = _scaffold_with_slots()
     msgs.extend(_note_turn("a"))
-    assert collapse_pending(msgs, policy=TIGHT_POLICY) is False
+    assert collapse_pending(msgs, policy=TIGHT_POLICY, collapsed_once=False) is False
     msgs.extend(_note_turn("b"))
-    assert collapse_pending(msgs, policy=TIGHT_POLICY) is True
+    assert collapse_pending(msgs, policy=TIGHT_POLICY, collapsed_once=False) is True
 
 
 def test_collapse_pending_agrees_with_collapse_trigger() -> None:
@@ -674,26 +689,61 @@ def test_collapse_pending_agrees_with_collapse_trigger() -> None:
     msgs = _scaffold_with_slots()
     for s in ("a", "b"):
         msgs.extend(_note_turn(s))
-    assert collapse_pending(msgs, policy=TIGHT_POLICY) is True
+    assert collapse_pending(msgs, policy=TIGHT_POLICY, collapsed_once=False) is True
     msgs.extend(_note_turn("c"))
-    collapse_old_turns(msgs, policy=TIGHT_POLICY)
+    collapse_old_turns(msgs, policy=TIGHT_POLICY, collapsed_once=False)
     assert SUMMARY_HEADER in msgs[2].content
     assert "- a" in msgs[2].content
 
 
 def test_collapse_pending_switches_threshold_after_first_collapse() -> None:
-    # After the first collapse the summary slot is rewritten and the
-    # trigger switches to keep+interval — pending must switch with it.
+    # After the first collapse fires (returns True — the loop records it
+    # on the session), the trigger switches to keep+interval — pending
+    # must switch with it via the same flag.
     msgs = _scaffold_with_slots()
     for s in ("a", "b", "c", "d"):
         msgs.extend(_note_turn(s))
-    collapse_old_turns(msgs, policy=TIGHT_POLICY)
+    fired = collapse_old_turns(msgs, policy=TIGHT_POLICY, collapsed_once=False)
+    assert fired is True
     # 1 turn kept; threshold now keep+interval=11 → far from pending.
-    assert collapse_pending(msgs, policy=TIGHT_POLICY) is False
+    assert collapse_pending(msgs, policy=TIGHT_POLICY, collapsed_once=fired) is False
     for i in range(9):
         msgs.extend(_note_turn(f"t{i}"))
     # 10 complete turns; the upcoming one is the 11th → pending.
-    assert collapse_pending(msgs, policy=TIGHT_POLICY) is True
+    assert collapse_pending(msgs, policy=TIGHT_POLICY, collapsed_once=fired) is True
+
+
+def test_collapse_threshold_survives_all_empty_summary_fold() -> None:
+    """The scenario the explicit flag exists for: first_at differs from
+    keep+interval (collapse late once, then a tighter cadence), and the
+    first fold salvages only a memory artifact because every folded
+    note summary was empty. The summary slot re-renders to its
+    placeholder bytes, but the returned True keeps the cadence on the
+    subsequent threshold."""
+    policy = CollapsePolicy(first_at=5, keep=1, interval=2)  # subsequent = 3
+    msgs = _scaffold_with_slots()
+    msgs.append(
+        AssistantMessage(
+            content="",
+            tool_calls=[ToolCall(id="r1", name="read_memory", arguments={})],
+            finish_reason=FinishReason.TOOL_CALLS,
+        )
+    )
+    msgs.append(ToolResultMessage(tool_call_id="r1", content="artifact"))
+    for _ in range(4):
+        msgs.extend(_note_turn(""))  # empty summaries — nothing banked
+
+    fired = collapse_old_turns(msgs, policy=policy, collapsed_once=False)
+
+    assert fired is True
+    # Slot bytes are back to the placeholder — the old content sniff
+    # would misread this as "never collapsed" and revert to first_at=5.
+    assert msgs[2].content == SUMMARY_INITIAL
+    # With the flag, the next fold fires at keep+interval=3, not 5.
+    msgs.extend(_note_turn("x"))
+    msgs.extend(_note_turn("y"))
+    assert collapse_pending(msgs, policy=policy, collapsed_once=True) is True
+    assert collapse_old_turns(msgs, policy=policy, collapsed_once=True) is True
 
 
 def test_inject_checkpoint_tail_appends_notice_last() -> None:
@@ -1013,6 +1063,7 @@ def test_drop_stale_screens_composes_with_collapse_old_turns() -> None:
     # The engine runs drop_stale_screens then collapse_old_turns each
     # turn — verify the pair leaves slots intact and exactly one image.
     msgs = _scaffold_with_slots()
+    collapsed_once = False  # threaded exactly like session.collapsed_once
     for turn in range(12):
         tcid = f"t{turn}"
         msgs.append(
@@ -1030,7 +1081,12 @@ def test_drop_stale_screens_composes_with_collapse_old_turns() -> None:
         msgs.append(ToolResultMessage(tool_call_id=f"{tcid}-n", content="noted"))
         msgs.append(_view_result(tcid, "Tapped | screen: changed"))
         drop_stale_screens(msgs)
-        collapse_old_turns(msgs, policy=CollapsePolicy(first_at=6, keep=2, interval=4))
+        if collapse_old_turns(
+            msgs,
+            policy=CollapsePolicy(first_at=6, keep=2, interval=4),
+            collapsed_once=collapsed_once,
+        ):
+            collapsed_once = True
 
     imaged = [
         m for m in msgs if isinstance(m, ToolResultMessage) and _has_image(m.content)
