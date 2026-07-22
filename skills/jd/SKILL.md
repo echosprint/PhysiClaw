@@ -10,6 +10,8 @@ description: Shop on the 京东 (JD) app. Use whenever the user wants to buy, or
 - **Common goods** — the JD home page search bar.
 - **Groceries / fresh** — tap **京东七鲜** on the JD home page, then search inside it (delivers fast).
 
+**京东七鲜 is a separate store** with its own cart and its own **我的** tab (七鲜 order history) — distinct from 京东's. To search regular 京东 goods or check 京东 order history, first leave 七鲜 back to the 京东 home page.
+
 ## Searching
 
 Tap the search area to open the search page. `send_to_clipboard` the query, long-press the input, tap Paste from that view — then **read the field and submit only if it shows your query**. Wrong text → tap the field's ✕ (right edge inside the field), re-copy, re-paste; don't hunt for other clear methods. Submit via the 搜索 button, not a suggestion row — suggestions can open JD's AI chat instead of results (recover with the `<` arrow, top-left).
