@@ -247,7 +247,9 @@ def test_grab_screen_fails_open_when_grab_raises() -> None:
 
     obs = GestureObserver(park=MagicMock(), grab=grab, detect=MagicMock())
 
-    assert obs.grab_screen() == observation.Grab(frame=None, report=None, sharp=False, retuned=False)
+    assert obs.grab_screen() == observation.Grab(
+        frame=None, report=None, sharp=False, retuned=False
+    )
 
 
 def test_grab_screen_fails_open_when_park_raises() -> None:
@@ -257,7 +259,9 @@ def test_grab_screen_fails_open_when_park_raises() -> None:
         detect=MagicMock(),
     )
 
-    assert obs.grab_screen() == observation.Grab(frame=None, report=None, sharp=False, retuned=False)
+    assert obs.grab_screen() == observation.Grab(
+        frame=None, report=None, sharp=False, retuned=False
+    )
 
 
 # ---------- peek_frame ----------
