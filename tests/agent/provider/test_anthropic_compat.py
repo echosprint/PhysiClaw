@@ -300,6 +300,71 @@ def test_cache_markers_mark_system_is_identity() -> None:
     assert AnthropicCacheMarkers().mark_system(entry) is entry
 
 
+def test_cache_markers_mark_tail_attaches_ephemeral_cache_control_to_inner_block(
+    provider: _TestAnthropic,
+) -> None:
+    entry = {
+        "role": "user",
+        "content": [{"type": "tool_result", "tool_use_id": "t9", "content": "live"}],
+    }
+
+    out = provider.CACHE_MARKERS.mark_tail(entry)
+
+    assert out["content"][0]["cache_control"] == EPHEMERAL_CACHE_CONTROL
+    # Original entry untouched (shallow copy).
+    assert "cache_control" not in entry["content"][0]
+
+
+def test_serialize_history_marks_stub_plus_dual_moving_tails(
+    provider: _TestAnthropic,
+) -> None:
+    history = [
+        ToolResultMessage(tool_call_id="t1", content="stale", is_superseded=True),
+        ToolResultMessage(tool_call_id="note_2", content="noted"),
+        ToolResultMessage(
+            tool_call_id="peek_2",
+            content=[
+                TextBlock(text="listing"),
+                ImageBlock(media_type="image/jpeg", data_b64="QUJD"),
+            ],
+        ),
+        UserMessage(content="<plan>volatile tail</plan>"),
+    ]
+
+    out = provider.serialize_history(history)
+
+    # stub + pre-view + last-result: 3 message breakpoints (system is
+    # the 4th, on the payload) — Anthropic's limit exactly.
+    assert out[0]["content"][0]["cache_control"] == EPHEMERAL_CACHE_CONTROL  # stub
+    assert out[1]["content"][0]["cache_control"] == EPHEMERAL_CACHE_CONTROL  # pre-view
+    assert out[2]["content"][0]["cache_control"] == EPHEMERAL_CACHE_CONTROL  # last
+    # The volatile plan tail is never marked.
+    assert "cache_control" not in str(out[3])
+
+
+def test_tail_anchor_moves_forward_with_byte_stable_old_entry(
+    provider: _TestAnthropic,
+) -> None:
+    """When the next turn's tool result takes the tail anchor, the
+    previous tail must serialize byte-identically minus the
+    `cache_control` key — same contract as the stub anchor, so the
+    cached prefix through it still matches."""
+    r1 = ToolResultMessage(tool_call_id="t1", content="turn one")
+    r2 = ToolResultMessage(tool_call_id="t2", content="turn two")
+
+    as_tail = provider.serialize_history([r1])[0]
+    after_move = provider.serialize_history([r1, r2])[0]
+
+    stripped = {
+        **as_tail,
+        "content": [
+            {k: v for k, v in b.items() if k != "cache_control"}
+            for b in as_tail["content"]
+        ],
+    }
+    assert stripped == after_move
+
+
 # ---------- chat: payload construction ----------
 
 

@@ -8,13 +8,34 @@ use the native messages endpoint. Vendors speaking this shape (just
 declare `BASE_URL` plus any auth quirks.
 
 Cache-control marker layout (the *why* — block-level translation rules
-live with the functions that emit them):
+live with the functions that emit them). Three breakpoints, within
+Anthropic's limit of four:
   1. `system` field, sent as `[{type: text, text, cache_control: ephemeral}]`.
   2. Latest stubbed screen-obs `tool_result` — the source DTO has
      `is_superseded=True` (set by `compact.drop_stale_screens`); the
      base `serialize_history` template invokes the `AnthropicCacheMarkers`
      factory to attach `cache_control` to the inner tool_result block.
      No string parsing, no post-pass.
+  3.+4. Two moving tail anchors (4 breakpoints total — Anthropic's
+     limit). Anthropic caches only up to explicit breakpoints (no
+     auto-extension over a stable prefix), so without them everything
+     after the stub — the live screen and every turn since — re-bills
+     as fresh input on every request; measured ~3–5k tokens/turn on a
+     real session. The two anchors split the two failure modes a
+     single one can't cover (replay-measured):
+       - last `tool_result` BEFORE the live screen: survives the next
+         `drop_stale_screens` rewrite — an entry covering the live
+         view dies unread the turn a new screen supersedes it, and its
+         1.25× write-then-die traffic ate almost the whole saving when
+         this was the only anchor.
+       - last `tool_result` overall: advances every turn, so note-only
+         stretches read at the cached rate; when a supersede kills it,
+         the pre-view anchor above backs it up.
+     The volatile per-turn tails (plan/scratchpad) are UserMessages
+     appended after both, outside the cached prefix. Marking is
+     additive (`cache_control` key only), so an entry an anchor has
+     moved off serializes byte-identically minus the key and the
+     prefix through it still matches.
 
 `thinking` blocks in the response are stripped from the assistant-echo
 path (principle 2) — they would break re-serialization to history. The
@@ -71,22 +92,23 @@ _STOP_REASON_MAP: dict[str, FinishReason] = {
 
 
 class AnthropicCacheMarkers(CacheMarkers):
-    """Anthropic-shape marker mechanics. Only the stub anchor lives in
-    the messages array — Anthropic accepts `cache_control` directly on
-    a `tool_result` block, so `mark_stub` annotates the inner block.
-    The entry shape from `_encode_message(ToolResultMessage)` is
+    """Anthropic-shape marker mechanics. Every messages-array anchor —
+    the stub and the two moving tails — lands on a `tool_result` entry,
+    and Anthropic accepts `cache_control` directly on a `tool_result`
+    block, so one mechanic serves them all: annotate the inner block. The
+    entry shape from `_encode_message(ToolResultMessage)` is
     `{role: user, content: [tr_block]}`; we shallow-copy the wrapper
-    and the inner block so caller-held dicts aren't mutated.
-    `mark_system` stays the identity — Anthropic's system rides outside
-    the messages array and is marked on the top-level `system` payload
-    field in `chat()`."""
+    and the inner block so caller-held dicts aren't mutated, and the
+    marking is additive so an entry the anchor has moved off serializes
+    byte-identically minus the key. `mark_system` stays the identity —
+    Anthropic's system rides outside the messages array and is marked
+    on the top-level `system` payload field in `chat()`."""
 
     def mark_stub(self, entry: dict) -> dict:
-        tr_block = entry["content"][0]
-        return {
-            **entry,
-            "content": [{**tr_block, "cache_control": EPHEMERAL_CACHE_CONTROL}],
-        }
+        return _mark_tool_result(entry)
+
+    def mark_tail(self, entry: dict) -> dict:
+        return _mark_tool_result(entry)
 
 
 class AnthropicCompatibleProvider(BaseProvider):
@@ -221,6 +243,17 @@ class AnthropicCompatibleProvider(BaseProvider):
 
 
 # ---------- request translation (DTO → Anthropic blocks) ----------
+
+
+def _mark_tool_result(entry: dict) -> dict:
+    """Attach an ephemeral `cache_control` to the inner tool_result
+    block of a `{role: user, content: [tr_block]}` entry, copying both
+    layers so caller-held dicts stay untouched."""
+    tr_block = entry["content"][0]
+    return {
+        **entry,
+        "content": [{**tr_block, "cache_control": EPHEMERAL_CACHE_CONTROL}],
+    }
 
 
 def _extract_system_text(history: list[Message]) -> str:

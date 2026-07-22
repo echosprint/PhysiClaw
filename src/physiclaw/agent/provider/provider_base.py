@@ -29,6 +29,7 @@ import httpx
 from physiclaw.agent.engine.dto import (
     AssistantMessage,
     CollapsePolicy,
+    ImageBlock,
     Message,
     SystemMessage,
     ToolResultMessage,
@@ -89,19 +90,22 @@ class CacheMarkers:
     """Wire-shape cache-marker mechanics — *how* a `cache_control`
     attaches to a wire entry. The `serialize_history` template owns
     *where* markers go (system entry at index 0, latest superseded
-    tool_result); each wire shape ships one `CacheMarkers` subclass
-    saying how its entries carry the marker, and a provider picks its
-    factory once via the `CACHE_MARKERS` class attribute.
+    tool_result, and the two moving tail anchors around the live
+    screen); each wire shape ships one `CacheMarkers` subclass saying
+    how its entries carry the marker, and a provider picks its factory
+    once via the `CACHE_MARKERS` class attribute.
 
-    Both hooks return a marked shallow copy; caller-held dicts are
+    All hooks return a marked shallow copy; caller-held dicts are
     never mutated. Defaults are identity, which makes the base the
     null object — a provider that must not mark declares
     `NO_CACHE_MARKERS` (e.g. Google, whose shim ignores the field and
     whose implicit cache the on/off wrapping would perturb) — and lets
-    a shape override only the placements its messages array actually
-    carries (Anthropic marks system on the top-level `system` payload
-    field in `chat()`, not on a messages entry, so its subclass
-    overrides `mark_stub` alone).
+    a shape override only the placements its cache semantics actually
+    reward (Anthropic marks system on the top-level `system` payload
+    field in `chat()`, not on a messages entry, and is the only shape
+    that needs `mark_tail` — its cache stops at explicit breakpoints,
+    while the OpenAI-shape vendors extend over stable prefixes on
+    their own).
     """
 
     def mark_system(self, entry: dict) -> dict:
@@ -110,10 +114,37 @@ class CacheMarkers:
     def mark_stub(self, entry: dict) -> dict:
         return entry
 
+    def mark_tail(self, entry: dict) -> dict:
+        return entry
 
-# The null object — identity on both hooks. Declaring this (rather
+
+# The null object — identity on all hooks. Declaring this (rather
 # than a `None` sentinel) keeps `serialize_history` branch-free.
 NO_CACHE_MARKERS = CacheMarkers()
+
+
+def _has_image(content) -> bool:
+    """True iff a tool result's DTO content carries an `ImageBlock` —
+    i.e. it is (or was, until superseded) a live screen capture."""
+    return isinstance(content, list) and any(isinstance(b, ImageBlock) for b in content)
+
+
+def _tail_anchor_indexes(results: list[tuple[int, bool]]) -> list[int]:
+    """The moving tail anchors for one request, from `serialize_history`'s
+    (out-index, carries-image) record of every tool result: the last
+    result BEFORE the live screen (survives the next supersede rewrite)
+    and the last result overall (advances every turn, dies on the next
+    supersede). Deduped; one entry when they coincide or when no live
+    screen exists."""
+    anchors: list[int] = []
+    images = [i for i, has in results if has]
+    if images:
+        before = [i for i, _ in results if i < images[-1]]
+        if before:
+            anchors.append(before[-1])
+    if results:
+        anchors.append(results[-1][0])
+    return list(dict.fromkeys(anchors))
 
 
 # ---------- BaseProvider ----------
@@ -285,8 +316,21 @@ class BaseProvider:
         """Single-pass DTO history → provider wire-format messages, with
         cache markers attached (via the `CACHE_MARKERS` factory; the
         default `NO_CACHE_MARKERS` is identity) to:
-          - the `SystemMessage` at index 0, and
-          - the latest `ToolResultMessage` flagged `is_superseded`.
+          - the `SystemMessage` at index 0,
+          - the latest `ToolResultMessage` flagged `is_superseded`, and
+          - two moving tail anchors (both via `mark_tail`, deduped, so
+            at most 4 breakpoints total): the last `ToolResultMessage`
+            BEFORE the live screen (the deepest point that survives the
+            next `drop_stale_screens` rewrite — an entry covering the
+            live view dies unread the turn a new screen supersedes it),
+            and the last `ToolResultMessage` overall (advances every
+            turn, so note-only stretches read for pennies; it dies on
+            the next supersede, which the pre-view anchor then backs
+            up). Models order a turn's results differently ([note,
+            view] vs [view, note]), so "before the live screen" is
+            positional, not type-based. The volatile plan/scratchpad
+            tails are UserMessages appended after all anchors, outside
+            the cached prefix.
 
         Subclasses implement `_encode_message` (DTO → wire dict, list of
         wire dicts, or `None` to skip). Most encodings are 1:1; the list
@@ -300,6 +344,7 @@ class BaseProvider:
         markers = self.CACHE_MARKERS
         out: list[dict] = []
         last_stub_idx: int | None = None
+        results: list[tuple[int, bool]] = []  # (out index, carries image)
         for i, msg in enumerate(history):
             entries = self._encode_message(msg)
             if entries is None:
@@ -310,11 +355,16 @@ class BaseProvider:
                 continue
             if i == 0 and isinstance(msg, SystemMessage):
                 entries[0] = markers.mark_system(entries[0])
-            elif isinstance(msg, ToolResultMessage) and msg.is_superseded:
-                last_stub_idx = len(out)
+            elif isinstance(msg, ToolResultMessage):
+                results.append((len(out), _has_image(msg.content)))
+                if msg.is_superseded:
+                    last_stub_idx = len(out)
             out.extend(entries)
         if last_stub_idx is not None:
             out[last_stub_idx] = markers.mark_stub(out[last_stub_idx])
+        for idx in _tail_anchor_indexes(results):
+            if idx != last_stub_idx:
+                out[idx] = markers.mark_tail(out[idx])
         return out
 
     def _encode_message(self, msg: Message) -> dict | list[dict] | None:

@@ -24,8 +24,10 @@ from physiclaw.agent.engine.dto import (
     AssistantMessage,
     CollapsePolicy,
     FinishReason,
+    ImageBlock,
     Message,
     SystemMessage,
+    TextBlock,
     ToolResultMessage,
     UserMessage,
 )
@@ -77,6 +79,7 @@ class _RecordingMarkers(CacheMarkers):
     def __init__(self) -> None:
         self.system_entries: list[dict] = []
         self.stub_entries: list[dict] = []
+        self.tail_entries: list[dict] = []
 
     def mark_system(self, entry: dict) -> dict:
         self.system_entries.append(entry)
@@ -85,6 +88,10 @@ class _RecordingMarkers(CacheMarkers):
     def mark_stub(self, entry: dict) -> dict:
         self.stub_entries.append(entry)
         return {**entry, "marked": "stub"}
+
+    def mark_tail(self, entry: dict) -> dict:
+        self.tail_entries.append(entry)
+        return {**entry, "marked": "tail"}
 
 
 # ---------- error hierarchy ----------
@@ -400,6 +407,109 @@ def test_serialize_history_marks_last_superseded_tool_result_stub(
     assert out[2]["marked"] == "stub"
 
 
+def test_serialize_history_marks_last_tool_result_as_tail(
+    stub: _TestProvider,
+) -> None:
+    markers = _RecordingMarkers()
+    stub.CACHE_MARKERS = markers
+    history: list[Message] = [
+        ToolResultMessage(tool_call_id="t1", content="a"),
+        ToolResultMessage(tool_call_id="t2", content="b"),
+        UserMessage(content="volatile tail"),  # rides after; never marked
+    ]
+
+    out = stub.serialize_history(history)
+
+    assert [e["id"] for e in markers.tail_entries] == ["t2"]
+    assert out[1]["marked"] == "tail"
+    assert "marked" not in out[2]
+
+
+def test_serialize_history_marks_stub_and_tail_on_distinct_results(
+    stub: _TestProvider,
+) -> None:
+    markers = _RecordingMarkers()
+    stub.CACHE_MARKERS = markers
+    history: list[Message] = [
+        ToolResultMessage(tool_call_id="t1", content="old", is_superseded=True),
+        ToolResultMessage(tool_call_id="t2", content="live"),
+    ]
+
+    out = stub.serialize_history(history)
+
+    assert out[0]["marked"] == "stub"
+    assert out[1]["marked"] == "tail"
+
+
+def test_serialize_history_dual_tail_anchors_straddle_the_live_screen(
+    stub: _TestProvider,
+) -> None:
+    # Two moving anchors: the result BEFORE the live screen (survives
+    # the next supersede rewrite) and the last result overall (advances
+    # every turn) — here that last result IS the live screen ([note,
+    # view] dispatch order).
+    markers = _RecordingMarkers()
+    stub.CACHE_MARKERS = markers
+    history: list[Message] = [
+        ToolResultMessage(tool_call_id="note_1", content="noted"),
+        ToolResultMessage(
+            tool_call_id="peek_1",
+            content=[
+                TextBlock(text="listing"),
+                ImageBlock(media_type="image/jpeg", data_b64="QUJD"),
+            ],
+        ),
+    ]
+
+    out = stub.serialize_history(history)
+
+    assert [e["id"] for e in markers.tail_entries] == ["note_1", "peek_1"]
+    assert out[0]["marked"] == "tail"
+    assert out[1]["marked"] == "tail"
+
+
+def test_serialize_history_single_tail_when_nothing_precedes_the_live_screen(
+    stub: _TestProvider,
+) -> None:
+    # [view, note] dispatch order with no earlier results: no pre-view
+    # anchor exists; only the advancing last-result anchor is marked.
+    markers = _RecordingMarkers()
+    stub.CACHE_MARKERS = markers
+    history: list[Message] = [
+        ToolResultMessage(
+            tool_call_id="peek_1",
+            content=[
+                TextBlock(text="listing"),
+                ImageBlock(media_type="image/jpeg", data_b64="QUJD"),
+            ],
+        ),
+        ToolResultMessage(tool_call_id="note_1", content="noted"),
+    ]
+
+    out = stub.serialize_history(history)
+
+    assert [e["id"] for e in markers.tail_entries] == ["note_1"]
+    assert "marked" not in out[0]
+    assert out[1]["marked"] == "tail"
+
+
+def test_serialize_history_skips_tail_when_it_is_the_marked_stub(
+    stub: _TestProvider,
+) -> None:
+    # The newest tool result IS the latest superseded stub — one anchor,
+    # not two stacked marks on the same entry.
+    markers = _RecordingMarkers()
+    stub.CACHE_MARKERS = markers
+    history: list[Message] = [
+        ToolResultMessage(tool_call_id="t1", content="stale", is_superseded=True),
+    ]
+
+    out = stub.serialize_history(history)
+
+    assert out[0]["marked"] == "stub"
+    assert markers.tail_entries == []
+
+
 def test_serialize_history_skips_messages_when_encode_returns_none() -> None:
     class _NoneEncoder(_TestProvider):
         def _encode_message(self, msg: Message) -> dict | list[dict] | None:
@@ -521,6 +631,12 @@ def test_no_cache_markers_mark_system_is_identity() -> None:
     entry = {"role": "system", "content": "x"}
 
     assert NO_CACHE_MARKERS.mark_system(entry) is entry
+
+
+def test_no_cache_markers_mark_tail_is_identity() -> None:
+    entry = {"role": "tool", "content": "x"}
+
+    assert NO_CACHE_MARKERS.mark_tail(entry) is entry
 
 
 def test_no_cache_markers_mark_stub_is_identity() -> None:

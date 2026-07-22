@@ -9,15 +9,17 @@ any auth quirks. This file owns:
     level encoding to `wire.py`; the inherited `serialize_history`
     template assembles the list)
   - cache-control marker mechanics (`OpenAICacheMarkers`; the base
-    template owns placement — system + latest stubbed tool_result)
+    template owns placement and this shape uses two of its four slots —
+    system + latest stubbed tool_result; the moving tail anchors stay
+    identity here)
   - response parsing (`_parse_response` + `_parse_usage` methods).
     `_parse_usage` tolerates the known shape drift among OpenAI-compat
     endpoints (top-level `cached_tokens` when the nested location is
     empty); a vendor whose `usage` shape differs beyond that overrides
     `_parse_usage` on its own class.
 
-Cache-control marker layout — two anchors, chosen so cached bytes
-survive turns AND wakes:
+Cache-control marker layout — this shape marks two anchors (of the
+template's four), chosen so cached bytes survive turns AND wakes:
 
   1. System message (index 0). Session-stable; one cache_creation per
      `cache_key` ever; cache hits the first turn of every wake within
@@ -85,7 +87,10 @@ class OpenAICacheMarkers(CacheMarkers):
     the invariant vendors with strict anchor semantics (DashScope/Qwen)
     depend on, and the same contract `AnthropicCacheMarkers` keeps.
     Moonshot K3 is measured indifferent to both the key and the shape —
-    see `vendors/moonshot.py` for the dated observations."""
+    see `vendors/moonshot.py`. The template's third hook, `mark_tail`,
+    stays identity here: OpenAI-shape caches extend over stable
+    prefixes on their own (Moonshot measured; markers add nothing),
+    unlike Anthropic's strict-breakpoint cache which needs it."""
 
     def mark_system(self, entry: dict) -> dict:
         return _with_cache_marker(entry)
