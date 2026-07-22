@@ -76,7 +76,9 @@ class SerialTransport:
                         # non-terminator, so the next command's read loop
                         # skips it harmlessly — no draining needed now that
                         # we send LF (single reply each).
-                        log.debug(f"[GRBL] {cmd}: {line} — not accepted at runtime, skipping")
+                        log.debug(
+                            f"[GRBL] {cmd}: {line} — not accepted at runtime, skipping"
+                        )
                         break
                     raise ProtocolError(f"GRBL error: {line}  command: {cmd}")
                 if line.startswith("ALARM"):
