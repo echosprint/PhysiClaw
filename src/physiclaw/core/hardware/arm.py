@@ -170,8 +170,8 @@ class StylusArm:
         if m_mpos:
             # No WCO available — configure GRBL to report WPos with $10=0
             log.warning(
-                "GRBL not reporting WPos or WCO — position may be wrong. "
-                "Set $10=0 for WPos reporting."
+                "[GRBL] board not reporting WPos or WCO — position may be "
+                "wrong; set $10=0 for WPos reporting"
             )
             return float(m_mpos.group(1)), float(m_mpos.group(2))
 
@@ -189,13 +189,13 @@ class StylusArm:
         time.sleep(0.5)
         startup = self.transport.read_startup()
         if startup.strip():
-            log.debug(f"<<< {startup.strip()}")
+            log.debug(f"[GRBL] startup banner: {startup.strip()}")
 
         self._send(GCODE_VERSION)
 
         status = self._query_status()
         if "Alarm" in status:
-            log.debug("Alarm detected, unlocking...")
+            log.debug("[GRBL] alarm detected, unlocking...")
             self.unlock()
 
         self._send(GCODE_SET_ORIGIN)

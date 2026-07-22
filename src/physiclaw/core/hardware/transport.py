@@ -44,7 +44,7 @@ class SerialTransport:
         FluidNC (which takes them from YAML) and a bare GRBL board alike.
         """
         with self._lock:
-            log.debug(f">>> {cmd}")
+            log.debug(f"[GRBL] sent {cmd}")
             # LF only — NOT CRLF. FluidNC v4 treats the trailing `\r` + `\n`
             # as two line endings (the command + an empty line) and acks BOTH
             # with `ok`; that extra `ok` lags every reply by one and desyncs
@@ -61,7 +61,7 @@ class SerialTransport:
                 line = self.ser.readline().decode("utf-8", errors="ignore").strip()
                 if line:
                     retries = 0
-                    log.debug(f"<<< {line}")
+                    log.debug(f"[GRBL] got {line}")
                 else:
                     retries += 1
                     if retries > 3:
@@ -76,7 +76,7 @@ class SerialTransport:
                         # non-terminator, so the next command's read loop
                         # skips it harmlessly — no draining needed now that
                         # we send LF (single reply each).
-                        log.debug(f"{cmd}: {line} not supported at runtime — skipping")
+                        log.debug(f"[GRBL] {cmd}: {line} — not accepted at runtime, skipping")
                         break
                     raise ProtocolError(f"GRBL error: {line}  command: {cmd}")
                 if line.startswith("ALARM"):
@@ -92,7 +92,7 @@ class SerialTransport:
             )
         for line in resp.splitlines():
             if line.startswith("<"):
-                log.debug(f"<<< {line}")
+                log.debug(f"[GRBL] got {line}")
                 return line
         return ""
 
@@ -109,4 +109,4 @@ class SerialTransport:
 
     def close(self) -> None:
         self.ser.close()
-        log.debug("Serial port closed")
+        log.debug("[GRBL] serial port closed")
