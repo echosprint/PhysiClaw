@@ -77,9 +77,9 @@ def test_grab_screen_returns_sharp_frame_without_retry(mocker) -> None:
     obs = _observer([_sharp()])
     obs.GRAB_BLUR_THRESHOLD = 50.0
 
-    frame, sharp_flag, _report, _retuned = obs.grab_screen()
+    g = obs.grab_screen()
 
-    assert sharp_flag is True
+    assert g.sharp is True
     sleep.assert_not_called()
 
 
@@ -101,10 +101,10 @@ def test_grab_screen_retries_once_when_blurry(mocker) -> None:
     obs = _observer([_flat(), sharp])
     obs.GRAB_BLUR_THRESHOLD = 50.0
 
-    frame, sharp_flag, _report, _retuned = obs.grab_screen()
+    g = obs.grab_screen()
 
-    assert frame is sharp
-    assert sharp_flag is True
+    assert g.frame is sharp
+    assert g.sharp is True
     sleep.assert_called_once_with(obs.GRAB_RETRY_SECONDS)
 
 
@@ -115,10 +115,10 @@ def test_grab_screen_retries_once_when_blown(mocker) -> None:
     sharp = _sharp()
     obs = _observer([_blown(), sharp])  # blur disabled by _observer
 
-    frame, sharp_flag, _report, _retuned = obs.grab_screen()
+    g = obs.grab_screen()
 
-    assert frame is sharp
-    assert sharp_flag is True
+    assert g.frame is sharp
+    assert g.sharp is True
     sleep.assert_called_once_with(obs.GRAB_RETRY_SECONDS)
 
 
@@ -130,10 +130,10 @@ def test_grab_screen_flags_frame_still_blurry_after_retry(mocker) -> None:
     obs = _observer([blurry, blurry])
     obs.GRAB_BLUR_THRESHOLD = 50.0
 
-    frame, sharp_flag, _report, _retuned = obs.grab_screen()
+    g = obs.grab_screen()
 
-    assert frame is blurry
-    assert sharp_flag is False
+    assert g.frame is blurry
+    assert g.sharp is False
 
 
 def test_grab_screen_fixes_exposure_when_retry_stays_blown(mocker) -> None:
@@ -146,12 +146,12 @@ def test_grab_screen_fixes_exposure_when_retry_stays_blown(mocker) -> None:
     good = _sharp()
     obs = _observer([_blown(), _blown(), good], fix=fix)
 
-    frame, sharp_flag, report, retuned = obs.grab_screen()
+    g = obs.grab_screen()
 
     fix.assert_called_once()
-    assert frame is good
-    assert retuned is True
-    assert not report.blown
+    assert g.frame is good
+    assert g.retuned is True
+    assert not g.report.blown
 
 
 def test_grab_screen_keeps_blown_frame_without_a_fixer(mocker) -> None:
@@ -161,11 +161,11 @@ def test_grab_screen_keeps_blown_frame_without_a_fixer(mocker) -> None:
     blown = _blown()
     obs = _observer([_blown(), blown])
 
-    frame, sharp_flag, report, retuned = obs.grab_screen()
+    g = obs.grab_screen()
 
-    assert frame is blown
-    assert retuned is False
-    assert report.blown
+    assert g.frame is blown
+    assert g.retuned is False
+    assert g.report.blown
 
 
 def test_grab_screen_fix_crash_keeps_blown_frame(mocker) -> None:
@@ -177,11 +177,11 @@ def test_grab_screen_fix_crash_keeps_blown_frame(mocker) -> None:
     blown = _blown()
     obs = _observer([_blown(), blown], fix=MagicMock(side_effect=RuntimeError("boom")))
 
-    frame, sharp_flag, report, retuned = obs.grab_screen()
+    g = obs.grab_screen()
 
-    assert frame is blown
-    assert retuned is True
-    assert report.blown
+    assert g.frame is blown
+    assert g.retuned is True
+    assert g.report.blown
 
 
 def test_grab_screen_regrab_crash_after_tune_still_flags_retuned(mocker) -> None:
@@ -209,11 +209,11 @@ def test_grab_screen_regrab_crash_after_tune_still_flags_retuned(mocker) -> None
     obs.GESTURE_SETTLE_SECONDS = 0
     obs.GRAB_BLUR_THRESHOLD = 0
 
-    frame, sharp_flag, report, retuned = obs.grab_screen()
+    g = obs.grab_screen()
 
-    assert frame is blown  # the pre-tune frame still serves the view
-    assert retuned is True
-    assert report.blown  # the report describes the returned frame
+    assert g.frame is blown  # the pre-tune frame still serves the view
+    assert g.retuned is True
+    assert g.report.blown  # the report describes the returned frame
 
 
 def test_grab_screen_fixes_deferred_tune_on_clean_bright_frame(mocker) -> None:
@@ -232,11 +232,11 @@ def test_grab_screen_fixes_deferred_tune_on_clean_bright_frame(mocker) -> None:
     obs = _observer([first, corrected], fix=fix)
     obs._needs_fix = needs_fix
 
-    frame, sharp_flag, report, retuned = obs.grab_screen()
+    g = obs.grab_screen()
 
     fix.assert_called_once()
-    assert frame is corrected
-    assert retuned is True
+    assert g.frame is corrected
+    assert g.retuned is True
     sleep.assert_not_called()  # no blur/blown retry preceded the fix
 
 
@@ -247,7 +247,7 @@ def test_grab_screen_fails_open_when_grab_raises() -> None:
 
     obs = GestureObserver(park=MagicMock(), grab=grab, detect=MagicMock())
 
-    assert obs.grab_screen() == (None, False, None, False)
+    assert obs.grab_screen() == observation.Grab(frame=None, report=None, sharp=False, retuned=False)
 
 
 def test_grab_screen_fails_open_when_park_raises() -> None:
@@ -257,7 +257,7 @@ def test_grab_screen_fails_open_when_park_raises() -> None:
         detect=MagicMock(),
     )
 
-    assert obs.grab_screen() == (None, False, None, False)
+    assert obs.grab_screen() == observation.Grab(frame=None, report=None, sharp=False, retuned=False)
 
 
 # ---------- peek_frame ----------
