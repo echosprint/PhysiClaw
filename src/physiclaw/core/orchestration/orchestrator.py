@@ -66,7 +66,7 @@ class PhysiClaw:
             on_quality=lambda report, streak: self.perception.on_quality_report(
                 report, streak
             ),
-            # Synchronous: grab paths run inside rig.locked(), so the
+            # Synchronous: grab paths run inside rig.engaged(), so the
             # inline fix must not re-acquire — tune_now assumes the lock.
             fix_exposure=lambda: self.perception.tune_now(),
             needs_fix=lambda report: self.perception.needs_inline_fix(report),
@@ -119,7 +119,7 @@ class PhysiClaw:
         screenshot(), but from the camera rather than the phone's own
         screenshot.
         """
-        with self.rig.locked():
+        with self.rig.engaged():
             cropped, report, retuned = self._observer.peek_frame()
             listing, annotated = self.perception.detect(cropped)
             warning = self._observer.observe_quality("peek", report, retuned=retuned)
@@ -136,7 +136,7 @@ class PhysiClaw:
         element listing — same shape as peek(), but sourced from the
         phone's own screenshot instead of the camera.
         """
-        with self.rig.locked():
+        with self.rig.engaged():
             data = self.rig.take_screenshot(timeout=60.0)
             if data is None:
                 hint = self.rig.require_bridge().connectivity_hint()
@@ -195,7 +195,7 @@ class PhysiClaw:
         """Lock, run `act` (which returns its action text) bracketed by
         the observer's verdict/view frames — the single lock +
         observation bracket every mutating tool goes through."""
-        with self.rig.locked():
+        with self.rig.engaged():
             return self._observer.with_view(act)
 
     def _execute(self, step: gestures.Gesture) -> str:
@@ -301,7 +301,7 @@ class PhysiClaw:
 
     def send_to_clipboard(self, text: str) -> str:
         """Copy text to the phone's clipboard via AssistiveTouch long-press."""
-        with self.rig.locked():
+        with self.rig.engaged():
             return self._send_to_clipboard(text)
 
     def _run_step(self, tool: str, arg) -> str:

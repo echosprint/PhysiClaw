@@ -351,7 +351,7 @@ def test_assert_locked_raises_when_lock_not_held(rig, wire_rig) -> None:
     rig._assistive_touch.long_press.assert_not_called()
 
 
-# ---------- acquire / release / locked ----------
+# ---------- acquire / release / locked / engaged ----------
 
 
 def test_acquire_raises_when_already_held(rig) -> None:
@@ -363,11 +363,37 @@ def test_acquire_raises_when_already_held(rig) -> None:
         rig.release()
 
 
-def test_locked_acquires_and_parks_on_exit(rig, wire_rig) -> None:
+def test_locked_acquires_and_releases_without_parking(rig, wire_rig) -> None:
+    # The primitive holds the lock only — no auto-park (that's engaged()'s job,
+    # and setup/warm-start callers must not move the arm on exit).
+    wire_rig(rig)
+
+    with rig.locked():
+        pass
+
+    rig._arm.rapid_to.assert_not_called()  # did NOT park
+    # Lock released — re-acquire should succeed.
+    rig.acquire()
+    rig.release()
+
+
+def test_locked_does_not_require_hardware() -> None:
+    # Unlike engaged(), the primitive skips the require_hardware() gate — the
+    # connect/warm-start callers acquire it before hardware is even connected.
+    r = HardwareRig()  # nothing wired: hardware_ready is False
+
+    with r.locked():  # no raise (engaged() would raise "Hardware not set up")
+        pass
+
+    r.acquire()  # lock was released on exit
+    r.release()
+
+
+def test_engaged_acquires_and_parks_on_exit(rig, wire_rig) -> None:
     wire_rig(rig)
     rig.calibration.pct_to_grbl_mm.return_value = (5.0, 6.0)
 
-    with rig.locked():
+    with rig.engaged():
         pass
 
     rig._arm.rapid_to.assert_called_once_with(5.0, 6.0)
@@ -376,12 +402,12 @@ def test_locked_acquires_and_parks_on_exit(rig, wire_rig) -> None:
     rig.release()
 
 
-def test_locked_swallows_park_exception(rig, wire_rig) -> None:
+def test_engaged_swallows_park_exception(rig, wire_rig) -> None:
     wire_rig(rig)
     rig._arm.rapid_to.side_effect = RuntimeError("arm jammed")
 
-    # park() exception inside locked() must not surface.
-    with rig.locked():
+    # park() exception inside engaged() must not surface.
+    with rig.engaged():
         pass
     rig.acquire()  # lock should have been released anyway
     rig.release()

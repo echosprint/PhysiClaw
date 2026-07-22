@@ -230,7 +230,7 @@ class Perception:
 
     def watch(self) -> dict:
         """Poll the camera for wake events. Returns ``{"wake": bool, "reason": str}``."""
-        with self._rig.locked():
+        with self._rig.engaged():
             frame = self._rig.require_cam().peek()
             if frame is None:
                 return {"wake": False, "reason": ""}

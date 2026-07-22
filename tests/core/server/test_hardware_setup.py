@@ -22,6 +22,7 @@ from physiclaw.core.server.hardware_setup import (
     handle_setup_page,
     handle_status,
 )
+from tests.core.conftest import wire_locked
 
 
 @pytest.mark.asyncio
@@ -103,7 +104,7 @@ async def test_handle_status_returns_status_dict() -> None:
 
 @pytest.mark.asyncio
 async def test_handle_connect_arm_happy_path() -> None:
-    rig = MagicMock()
+    rig = _rig_mock()
 
     resp = await handle_connect_arm(_fake_request(), rig)
 
@@ -121,7 +122,7 @@ async def test_handle_connect_arm_missing_device_is_409() -> None:
     client state, same 409 convention as the calibration preconditions."""
     from physiclaw.core.hardware.device import DeviceNotFound
 
-    rig = MagicMock()
+    rig = _rig_mock()
     rig.connect_arm.side_effect = DeviceNotFound("GRBL device not found")
 
     resp = await handle_connect_arm(_fake_request(), rig)
@@ -146,7 +147,7 @@ async def test_handle_connect_camera_missing_device_is_409() -> None:
 
 @pytest.mark.asyncio
 async def test_handle_connect_arm_releases_even_on_failure() -> None:
-    rig = MagicMock()
+    rig = _rig_mock()
     rig.connect_arm.side_effect = RuntimeError("no port")
 
     resp = await handle_connect_arm(_fake_request(), rig)
@@ -161,9 +162,17 @@ async def test_handle_connect_arm_releases_even_on_failure() -> None:
 # ---------- handle_connect_camera ----------
 
 
+def _rig_mock() -> MagicMock:
+    """A MagicMock rig whose ``locked()`` delegates to ``acquire()`` /
+    ``release()`` (see ``wire_locked``), so the connect/disconnect tests assert
+    the real acquire→release bracket rather than an inert context-manager
+    mock."""
+    return wire_locked(MagicMock(name="rig"))
+
+
 def _fake_rig_cam_index(idx: int = 5) -> SimpleNamespace:
     """Build a fake rig with .cam.index and required methods."""
-    rig = MagicMock()
+    rig = _rig_mock()
     rig.cam.index = idx
     return rig
 
@@ -283,7 +292,7 @@ async def test_handle_connect_camera_stores_index_in_calibration(mocker) -> None
 
 @pytest.mark.asyncio
 async def test_handle_disconnect_camera_releases_when_connected() -> None:
-    rig = MagicMock()
+    rig = _rig_mock()
     rig.disconnect_camera.return_value = True
 
     resp = await handle_disconnect_camera(_fake_request(), rig)
@@ -296,7 +305,7 @@ async def test_handle_disconnect_camera_releases_when_connected() -> None:
 
 @pytest.mark.asyncio
 async def test_handle_disconnect_camera_idempotent_when_no_camera() -> None:
-    rig = MagicMock()
+    rig = _rig_mock()
     rig.disconnect_camera.return_value = False
 
     resp = await handle_disconnect_camera(_fake_request(), rig)
@@ -307,7 +316,7 @@ async def test_handle_disconnect_camera_idempotent_when_no_camera() -> None:
 
 @pytest.mark.asyncio
 async def test_handle_disconnect_camera_releases_lock_on_failure() -> None:
-    rig = MagicMock()
+    rig = _rig_mock()
     rig.disconnect_camera.side_effect = RuntimeError("close failed")
 
     resp = await handle_disconnect_camera(_fake_request(), rig)

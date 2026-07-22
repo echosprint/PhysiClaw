@@ -115,7 +115,7 @@ class Solenoid:
         (the firmware's ``off_on_alarm`` is the last line of defense).
 
         The trailing ``RELEASE_MS`` dwell matters here too: the error path
-        unwinds into ``rig.locked()``'s auto-park, and without the dwell the
+        unwinds into ``rig.engaged()``'s auto-park, and without the dwell the
         park G0 starts while the spring is still rebounding — ~200 ms of
         tip-on-glass drag registering phantom touches mid-error-recovery.
         """

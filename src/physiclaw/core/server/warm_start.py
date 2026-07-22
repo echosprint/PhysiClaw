@@ -191,90 +191,90 @@ def try_resume(
     # with "busy". Acquiring up front makes the invariant structural: tools
     # can never observe hardware_ready with the lock free until the origin
     # is re-pinned; racing callers fail fast with the busy error instead.
-    # (rig.locked() can't be used here — its require_hardware() gate would
-    # reject the not-yet-connected rig.)
-    rig.acquire()
+    # (rig.engaged() can't be used here — its require_hardware() gate would
+    # reject the not-yet-connected rig. rig.locked() is the same lock bracket
+    # without that gate; the conditional auto-park below is this path's own.)
     origin_pinned = False
-    try:
+    with rig.locked():
         try:
-            rig.connect_arm()
-            rig.connect_camera(cam_index)
-        except Exception as e:
-            log.error(f"{flag}: hardware reconnect failed: {e}")
-            return False
+            try:
+                rig.connect_arm()
+                rig.connect_camera(cam_index)
+            except Exception as e:
+                log.error(f"{flag}: hardware reconnect failed: {e}")
+                return False
 
-        # The camera may have negotiated a different resolution than the
-        # bundle was calibrated at (e.g. the [camera] config changed, or the
-        # default moved). Same aspect → the 0-1 mapping holds, adopt the live
-        # pixel size; different aspect → the mapping is broken, recalibrate.
-        cam = rig.cam
-        if cam is None:  # connect_camera above succeeded, so the handle is set
-            raise RuntimeError(f"{flag}: camera missing after connect")
-        live = cam.peek()
-        if live is None:
-            log.error(f"{flag}: camera produced no frame")
-            return False
-        live_h, live_w = live.shape[:2]
-        if not cal.reconcile_cam_size((live_w, live_h)):
-            log.error(
-                f"{flag}: capture aspect ratio changed since calibration "
-                "— run `physiclaw` setup again"
-            )
-            return False
+            # The camera may have negotiated a different resolution than the
+            # bundle was calibrated at (e.g. the [camera] config changed, or the
+            # default moved). Same aspect → the 0-1 mapping holds, adopt the live
+            # pixel size; different aspect → the mapping is broken, recalibrate.
+            cam = rig.cam
+            if cam is None:  # connect_camera above succeeded, so the handle is set
+                raise RuntimeError(f"{flag}: camera missing after connect")
+            live = cam.peek()
+            if live is None:
+                log.error(f"{flag}: camera produced no frame")
+                return False
+            live_h, live_w = live.shape[:2]
+            if not cal.reconcile_cam_size((live_w, live_h)):
+                log.error(
+                    f"{flag}: capture aspect ratio changed since calibration "
+                    "— run `physiclaw` setup again"
+                )
+                return False
 
-        # The tip rests at the park spot, not the calibrated origin that
-        # arm.setup() just assumed — re-pin the frame from it (see
-        # restore_park_origin). The sanity tap below catches the cases where
-        # the tip didn't hold that spot (killed mid-move, power yank, arm
-        # bumped).
-        rig.restore_park_origin()
-        origin_pinned = True
-        if verify:
-            if sys.stdin.isatty():
-                print()
-                print("━" * 60)
-                print("Warm-start")
-                print(
-                    "  Open or refresh /bridge on the phone (foreground, not locked)."
-                )
-                print(
-                    f"  Server waits up to {BRIDGE_WAIT_TIMEOUT}s for steady polling."
-                )
-                print("━" * 60)
-                if not rig.require_bridge().wait_for_connection(
-                    BRIDGE_WAIT_TIMEOUT, BRIDGE_SETTLE_SECONDS
-                ):
-                    log.error(
-                        f"{flag}: /bridge page not polling within "
-                        f"{BRIDGE_WAIT_TIMEOUT}s — open or refresh /bridge on the phone."
+            # The tip rests at the park spot, not the calibrated origin that
+            # arm.setup() just assumed — re-pin the frame from it (see
+            # restore_park_origin). The sanity tap below catches the cases where
+            # the tip didn't hold that spot (killed mid-move, power yank, arm
+            # bumped).
+            rig.restore_park_origin()
+            origin_pinned = True
+            if verify:
+                if sys.stdin.isatty():
+                    print()
+                    print("━" * 60)
+                    print("Warm-start")
+                    print(
+                        "  Open or refresh /bridge on the phone (foreground, not locked)."
                     )
+                    print(
+                        f"  Server waits up to {BRIDGE_WAIT_TIMEOUT}s for steady polling."
+                    )
+                    print("━" * 60)
+                    if not rig.require_bridge().wait_for_connection(
+                        BRIDGE_WAIT_TIMEOUT, BRIDGE_SETTLE_SECONDS
+                    ):
+                        log.error(
+                            f"{flag}: /bridge page not polling within "
+                            f"{BRIDGE_WAIT_TIMEOUT}s — open or refresh /bridge on the phone."
+                        )
+                        return False
+                else:
+                    log.info(f"{flag}: non-interactive; running sanity immediately")
+
+                if not _sanity(physiclaw, calib, phone):
+                    # _sanity logged the specific diagnosis.
                     return False
             else:
-                log.info(f"{flag}: non-interactive; running sanity immediately")
-
-            if not _sanity(physiclaw, calib, phone):
-                # _sanity logged the specific diagnosis.
-                return False
-        else:
-            log.info(
-                f"{flag}: trusting the parked arm — skipping bridge wait, "
-                "sanity tap, and home-screen swipe"
-            )
-    finally:
-        # Mirror locked()'s exit: auto-park restores the resting spot on
-        # every path — but only once the origin is re-pinned, because park()
-        # in the mis-pinned frame would itself displace the tip (the exact
-        # hazard the lock span prevents). home_screen() below runs after the
-        # release: it takes locked() itself.
-        if origin_pinned:
-            try:
-                rig.park()
-            except Exception:
-                log.exception(f"{flag}: auto-park after resume failed")
-        rig.release()
+                log.info(
+                    f"{flag}: trusting the parked arm — skipping bridge wait, "
+                    "sanity tap, and home-screen swipe"
+                )
+        finally:
+            # Mirror engaged()'s exit: auto-park restores the resting spot on
+            # every path — but only once the origin is re-pinned, because park()
+            # in the mis-pinned frame would itself displace the tip (the exact
+            # hazard the lock span prevents). locked() releases the lock after
+            # this; home_screen() below runs unlocked and takes engaged() itself.
+            if origin_pinned:
+                try:
+                    rig.park()
+                except Exception:
+                    log.exception(f"{flag}: auto-park after resume failed")
     if verify:
         # Match setup.py's final step: send the phone home (swipe from
-        # bottom), then flip ready. home_screen's locked() context auto-parks
+        # bottom), then flip ready. home_screen's engaged() context auto-parks
         # the arm off-screen on exit, so nothing is hovering over the glass
         # afterward.
         physiclaw.home_screen()

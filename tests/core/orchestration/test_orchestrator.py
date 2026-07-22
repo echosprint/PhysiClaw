@@ -388,7 +388,7 @@ def test_send_to_clipboard_success_resets_miss_counter(
 def test_run_step_dispatches_each_tool(pc: PhysiClaw, wire_rig) -> None:
     wire_rig(pc.rig)
 
-    with pc.rig.locked():
+    with pc.rig.engaged():
         assert "Tapped" in pc._run_step("tap", [0.1, 0.1, 0.2, 0.2])
         assert "Double tapped" in pc._run_step("double_tap", [0.1, 0.1, 0.2, 0.2])
         assert "Long pressed" in pc._run_step("long_press", [0.1, 0.1, 0.2, 0.2])
@@ -397,7 +397,7 @@ def test_run_step_dispatches_each_tool(pc: PhysiClaw, wire_rig) -> None:
 def test_run_step_swipe_happy_path(pc: PhysiClaw, wire_rig) -> None:
     wire_rig(pc.rig)
 
-    with pc.rig.locked():
+    with pc.rig.engaged():
         out = pc._run_step(
             "swipe",
             {
@@ -417,7 +417,7 @@ def test_run_step_send_to_clipboard_dispatches(
     bridge.wait_clipboard.return_value = True
     pc.rig.attach_bridge(bridge)
 
-    with pc.rig.locked():
+    with pc.rig.engaged():
         out = pc._run_step("send_to_clipboard", "hi")
 
     assert "Copied 2 chars" in out

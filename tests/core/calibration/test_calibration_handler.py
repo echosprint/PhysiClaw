@@ -27,6 +27,7 @@ from physiclaw.core.calibration.handler import (
     handle_verify_assistive_touch,
 )
 from physiclaw.core.calibration.transforms import ViewportShift
+from tests.core.conftest import wire_locked
 
 
 def _async(value: Any):
@@ -41,6 +42,14 @@ def _async_raise(exc: Exception):
         raise exc
 
     return _coro
+
+
+def _rig_mock() -> MagicMock:
+    """A MagicMock rig whose ``locked()`` delegates to ``acquire()`` /
+    ``release()`` (see ``wire_locked``), so the handler tests assert the real
+    lock bracket (acquire → park-on-failure → release) rather than an inert
+    context-manager mock."""
+    return wire_locked(MagicMock(name="rig"))
 
 
 def _fake_request(json_obj: Any = None, raise_on_json: bool = False):
@@ -114,7 +123,7 @@ def _viewport_shift() -> ViewportShift:
 
 @pytest.mark.asyncio
 async def test_handle_measure_viewport_shift_happy_path(mocker) -> None:
-    rig = MagicMock()
+    rig = _rig_mock()
     rig.calibration = SimpleNamespace()
     calib = MagicMock()
     bridge = MagicMock()
@@ -140,7 +149,7 @@ async def test_handle_measure_viewport_shift_happy_path(mocker) -> None:
 
 @pytest.mark.asyncio
 async def test_handle_measure_viewport_shift_default_fresh_false(mocker) -> None:
-    rig = MagicMock()
+    rig = _rig_mock()
     calib = MagicMock()
     bridge = MagicMock()
     phone = MagicMock()
@@ -160,7 +169,7 @@ async def test_handle_measure_viewport_shift_default_fresh_false(mocker) -> None
 
 @pytest.mark.asyncio
 async def test_handle_measure_viewport_shift_returns_err_on_exception(mocker) -> None:
-    rig = MagicMock()
+    rig = _rig_mock()
     calib = MagicMock()
     mocker.patch.object(
         handler,
@@ -195,7 +204,7 @@ def _identity_pct_to_grbl() -> np.ndarray:
 
 @pytest.mark.asyncio
 async def test_handle_calibrate_arm_happy_path(mocker) -> None:
-    rig = MagicMock()
+    rig = _rig_mock()
     rig.arm = MagicMock()
     rig.calibration = SimpleNamespace(pct_to_grbl=None)
     calib = MagicMock()
@@ -232,7 +241,7 @@ async def test_handle_calibrate_arm_happy_path(mocker) -> None:
 async def test_handle_calibrate_arm_from_park_centers_stylus(mocker) -> None:
     """Auto mode (from_park): with a prior mapping, drive the parked stylus to
     center before calibrating."""
-    rig = MagicMock()
+    rig = _rig_mock()
     rig.arm = MagicMock()
     rig.calibration = SimpleNamespace(
         pct_to_grbl=_identity_pct_to_grbl(),
@@ -261,7 +270,7 @@ async def test_handle_calibrate_arm_from_park_centers_stylus(mocker) -> None:
 @pytest.mark.asyncio
 async def test_handle_calibrate_arm_from_park_without_bundle_errors(mocker) -> None:
     """from_park with no in-memory mapping and no saved bundle → clear error."""
-    rig = MagicMock()
+    rig = _rig_mock()
     rig.arm = MagicMock()
     rig.calibration = SimpleNamespace(pct_to_grbl=None)
     mocker.patch.object(handler.Calibration, "load", return_value=None)
@@ -283,7 +292,7 @@ async def test_handle_calibrate_arm_from_park_without_bundle_errors(mocker) -> N
 
 @pytest.mark.asyncio
 async def test_handle_calibrate_arm_arm_not_connected() -> None:
-    rig = MagicMock()
+    rig = _rig_mock()
     rig.arm = None
 
     resp = await handle_calibrate_arm(
@@ -300,7 +309,7 @@ async def test_handle_calibrate_arm_arm_not_connected() -> None:
 
 @pytest.mark.asyncio
 async def test_handle_calibrate_arm_releases_on_failure(mocker) -> None:
-    rig = MagicMock()
+    rig = _rig_mock()
     rig.arm = MagicMock()
     rig.calibration = SimpleNamespace(pct_to_grbl=None)
     mocker.patch.object(
@@ -325,7 +334,7 @@ async def test_handle_calibrate_arm_releases_on_failure(mocker) -> None:
 
 @pytest.mark.asyncio
 async def test_handle_calibrate_camera_frame_happy_path(mocker) -> None:
-    rig = MagicMock()
+    rig = _rig_mock()
     rig.cam = MagicMock()
     rig.calibration = SimpleNamespace()
     mocker.patch.object(
@@ -350,7 +359,7 @@ async def test_handle_calibrate_camera_frame_happy_path(mocker) -> None:
 
 @pytest.mark.asyncio
 async def test_handle_calibrate_camera_frame_camera_not_connected() -> None:
-    rig = MagicMock()
+    rig = _rig_mock()
     rig.cam = None
 
     resp = await handle_calibrate_camera_frame(
@@ -366,7 +375,7 @@ async def test_handle_calibrate_camera_frame_camera_not_connected() -> None:
 
 @pytest.mark.asyncio
 async def test_handle_calibrate_camera_frame_releases_on_failure(mocker) -> None:
-    rig = MagicMock()
+    rig = _rig_mock()
     rig.cam = MagicMock()
     mocker.patch.object(
         handler,
@@ -389,7 +398,7 @@ async def test_handle_calibrate_camera_frame_releases_on_failure(mocker) -> None
 
 @pytest.mark.asyncio
 async def test_handle_compute_camera_mapping_happy_path(mocker) -> None:
-    rig = MagicMock()
+    rig = _rig_mock()
     rig.cam = MagicMock()
     rig.calibration = SimpleNamespace(effective_rotation=lambda: 90)
     pct_to_cam = np.eye(3)
@@ -417,7 +426,7 @@ async def test_handle_compute_camera_mapping_happy_path(mocker) -> None:
 
 @pytest.mark.asyncio
 async def test_handle_compute_camera_mapping_camera_not_connected() -> None:
-    rig = MagicMock()
+    rig = _rig_mock()
     rig.cam = None
 
     resp = await handle_compute_camera_mapping(
@@ -433,7 +442,7 @@ async def test_handle_compute_camera_mapping_camera_not_connected() -> None:
 
 @pytest.mark.asyncio
 async def test_handle_compute_camera_mapping_releases_on_failure(mocker) -> None:
-    rig = MagicMock()
+    rig = _rig_mock()
     rig.cam = MagicMock()
     rig.calibration = SimpleNamespace(effective_rotation=lambda: 0)
     mocker.patch.object(
@@ -457,7 +466,7 @@ async def test_handle_compute_camera_mapping_releases_on_failure(mocker) -> None
 
 @pytest.mark.asyncio
 async def test_handle_validate_calibration_happy_path_and_persists(mocker) -> None:
-    rig = MagicMock()
+    rig = _rig_mock()
     rig.arm = MagicMock()
     cal = MagicMock()
     cal.transforms_ready = True
@@ -493,7 +502,7 @@ async def test_handle_validate_calibration_happy_path_and_persists(mocker) -> No
 async def test_handle_validate_calibration_does_not_save_when_not_calibrated(
     mocker,
 ) -> None:
-    rig = MagicMock()
+    rig = _rig_mock()
     rig.arm = MagicMock()
     cal = MagicMock()
     cal.transforms_ready = True
@@ -524,7 +533,7 @@ async def test_handle_validate_calibration_does_not_save_when_not_calibrated(
 
 @pytest.mark.asyncio
 async def test_handle_validate_calibration_arm_not_connected() -> None:
-    rig = MagicMock()
+    rig = _rig_mock()
     rig.arm = None
 
     resp = await handle_validate_calibration(
@@ -541,7 +550,7 @@ async def test_handle_validate_calibration_arm_not_connected() -> None:
 
 @pytest.mark.asyncio
 async def test_handle_validate_calibration_requires_transforms_ready() -> None:
-    rig = MagicMock()
+    rig = _rig_mock()
     rig.arm = MagicMock()
     cal = MagicMock()
     cal.transforms_ready = False
@@ -564,7 +573,7 @@ async def test_handle_validate_calibration_requires_transforms_ready() -> None:
 
 @pytest.mark.asyncio
 async def test_handle_trace_edge_happy_path(mocker) -> None:
-    rig = MagicMock()
+    rig = _rig_mock()
     rig.transforms = MagicMock()  # truthy → calibrated
     phone = MagicMock()
     spy = mocker.patch(
@@ -581,7 +590,7 @@ async def test_handle_trace_edge_happy_path(mocker) -> None:
 
 @pytest.mark.asyncio
 async def test_handle_trace_edge_uncalibrated_returns_error() -> None:
-    rig = MagicMock()
+    rig = _rig_mock()
     rig.transforms = None
 
     resp = await handle_trace_edge(_fake_request(), rig, MagicMock())
@@ -593,7 +602,7 @@ async def test_handle_trace_edge_uncalibrated_returns_error() -> None:
 
 @pytest.mark.asyncio
 async def test_handle_trace_edge_releases_on_failure(mocker) -> None:
-    rig = MagicMock()
+    rig = _rig_mock()
     rig.transforms = MagicMock()
     mocker.patch(
         "physiclaw.core.calibration.calibrate.trace_screen_edge",
@@ -611,7 +620,7 @@ async def test_handle_trace_edge_releases_on_failure(mocker) -> None:
 
 @pytest.mark.asyncio
 async def test_handle_show_assistive_touch_happy_path(mocker) -> None:
-    rig = MagicMock()
+    rig = _rig_mock()
     rig.assistive_touch.at_screen = (0.1, 0.2)
     calib = SimpleNamespace(viewport_shift=_viewport_shift())
     phone = MagicMock()
@@ -640,7 +649,7 @@ async def test_handle_show_assistive_touch_happy_path(mocker) -> None:
 
 @pytest.mark.asyncio
 async def test_handle_show_assistive_touch_requires_viewport_shift() -> None:
-    rig = MagicMock()
+    rig = _rig_mock()
     calib = SimpleNamespace(viewport_shift=None)
 
     resp = await handle_show_assistive_touch(
@@ -661,7 +670,7 @@ async def test_handle_show_assistive_touch_requires_viewport_shift() -> None:
 
 @pytest.mark.asyncio
 async def test_handle_verify_assistive_touch_happy_path(mocker) -> None:
-    rig = MagicMock()
+    rig = _rig_mock()
     rig.arm = MagicMock()
     rig.calibration = SimpleNamespace(pct_to_grbl=_identity_pct_to_grbl())
     rig.assistive_touch.at_screen = (0.1, 0.2)
@@ -686,7 +695,7 @@ async def test_handle_verify_assistive_touch_happy_path(mocker) -> None:
 
 @pytest.mark.asyncio
 async def test_handle_verify_assistive_touch_arm_not_connected() -> None:
-    rig = MagicMock()
+    rig = _rig_mock()
     rig.arm = None
 
     resp = await handle_verify_assistive_touch(
@@ -704,7 +713,7 @@ async def test_handle_verify_assistive_touch_arm_not_connected() -> None:
 
 @pytest.mark.asyncio
 async def test_handle_verify_assistive_touch_requires_pct_to_grbl() -> None:
-    rig = MagicMock()
+    rig = _rig_mock()
     rig.arm = MagicMock()
     rig.calibration = SimpleNamespace(pct_to_grbl=None)
 
@@ -723,7 +732,7 @@ async def test_handle_verify_assistive_touch_requires_pct_to_grbl() -> None:
 
 @pytest.mark.asyncio
 async def test_handle_verify_assistive_touch_requires_at_show() -> None:
-    rig = MagicMock()
+    rig = _rig_mock()
     rig.arm = MagicMock()
     rig.calibration = SimpleNamespace(pct_to_grbl=_identity_pct_to_grbl())
     rig.assistive_touch.at_screen = None  # show step not run

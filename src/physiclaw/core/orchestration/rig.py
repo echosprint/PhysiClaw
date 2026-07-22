@@ -165,20 +165,40 @@ class HardwareRig:
 
     @contextmanager
     def locked(self):
-        """Check hardware, acquire lock, auto-park on exit, then release."""
-        self.require_hardware()
+        """Hold the hardware lock for the block, releasing on any exit.
+
+        The bare acquire→release bracket with no parking and no ready
+        gate — the shared primitive under ``engaged()`` and under the
+        connect/calibration/warm-start handlers that must serialize
+        hardware work *before* the rig is ready (so ``engaged()``'s
+        ``require_hardware()`` gate would wrongly reject them). Each of
+        those callers layers its own parking policy on top, because the
+        park timing genuinely differs (on exit, on failure, or not at
+        all); this owns only the part that never differs. Raises the busy
+        error if the lock is already held — callers that must fail open on
+        contention (the background settle) use ``acquire()`` directly and
+        catch it."""
         self.acquire()
         try:
             yield
         finally:
-            try:
-                self.park()
-            except Exception:
-                # Best-effort like shutdown's _safe, but never silent: a
-                # persistently failing inter-gesture park leaves the tip
-                # over the glass while gestures keep running.
-                log.exception("locked(): auto-park failed")
             self.release()
+
+    @contextmanager
+    def engaged(self):
+        """Check hardware, acquire lock, auto-park on exit, then release."""
+        self.require_hardware()
+        with self.locked():
+            try:
+                yield
+            finally:
+                try:
+                    self.park()
+                except Exception:
+                    # Best-effort like shutdown's _safe, but never silent: a
+                    # persistently failing inter-gesture park leaves the tip
+                    # over the glass while gestures keep running.
+                    log.exception("engaged(): auto-park failed")
 
     # ─── Hardware connection ──────────────────────────────────
 
@@ -263,7 +283,7 @@ class HardwareRig:
         ``arm.setup()`` on reconnect issues ``G92 X0 Y0``, declaring the
         arm's *current* physical position to be GRBL ``(0, 0)``. That's only
         the calibrated origin if the tip is sitting there — but clean
-        shutdown (and every inter-action ``locked()`` park) leaves it at the
+        shutdown (and every inter-action ``engaged()`` park) leaves it at the
         park spot instead. So re-declare the current position as the park
         coordinate from the loaded bundle, restoring the affine's frame;
         otherwise every subsequent tap is offset by the park vector.

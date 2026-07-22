@@ -228,7 +228,7 @@ def test_held_forces_coil_off_when_block_raises() -> None:
             raise ValueError("slide failed")
 
     assert rec.sends[-1] == "M5"  # released despite the error
-    # The error path unwinds into rig.locked()'s auto-park — the same
+    # The error path unwinds into rig.engaged()'s auto-park — the same
     # spring-clear dwell as release(), or the park G0 starts while the
     # tip is still on the glass and drags across the screen.
     assert ("dwell", Solenoid.RELEASE_MS / 1000.0) in rec.calls

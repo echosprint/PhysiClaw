@@ -67,11 +67,8 @@ async def handle_connect_arm(request: Request, rig: "HardwareRig") -> JSONRespon
     """POST /api/connect-arm — auto-detect and connect the GRBL arm."""
 
     def _do() -> None:
-        rig.acquire()
-        try:
+        with rig.locked():
             rig.connect_arm()
-        finally:
-            rig.release()
 
     try:
         await asyncio.to_thread(_do)
@@ -103,12 +100,9 @@ async def handle_connect_camera(
         nonlocal index
         if index is None or index == "auto":
             index = resolve_auto_index(rig, phone)
-        rig.acquire()
-        try:
+        with rig.locked():
             rig.connect_camera(int(index))
             rig.calibration.cam_index = int(index)
-        finally:
-            rig.release()
 
     try:
         await asyncio.to_thread(_do)
@@ -141,11 +135,8 @@ async def handle_disconnect_camera(
     """
 
     def _do() -> bool:
-        rig.acquire()
-        try:
+        with rig.locked():
             return rig.disconnect_camera()
-        finally:
-            rig.release()
 
     try:
         released = await asyncio.to_thread(_do)

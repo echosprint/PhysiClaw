@@ -525,7 +525,7 @@ def test_tune_exposure_records_result_for_the_retune_policy(
 
 
 def test_tune_now_runs_while_rig_lock_is_held(mocker, rig, per: Perception) -> None:
-    # The inline fix runs mid-grab, INSIDE rig.locked() — unlike
+    # The inline fix runs mid-grab, INSIDE rig.engaged() — unlike
     # tune_exposure it must not try to acquire (that would busy-skip).
     rig._cam.exposure_tunable = True
     conv = mocker.patch.object(

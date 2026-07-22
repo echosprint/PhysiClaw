@@ -90,23 +90,21 @@ async def _run_locked_step(
     def _step() -> dict:
         if precheck is not None:
             precheck()
-        rig.acquire()
-        try:
-            return do()
-        except BaseException:
-            # Every success path parks inside `do` (the resting-position
-            # invariant auto/from_park retries rely on); a mid-step failure
-            # must not leave the tip at the failure position — the retry's
-            # restore_park_origin would declare that spot the park frame.
-            # rig.park() is defensive: it no-ops when the arm or transform
-            # isn't there yet, so this is safe at any calibration stage.
+        with rig.locked():
             try:
-                rig.park()
-            except Exception:
-                log.exception("calibration step failed — auto-park also failed")
-            raise
-        finally:
-            rig.release()
+                return do()
+            except BaseException:
+                # Every success path parks inside `do` (the resting-position
+                # invariant auto/from_park retries rely on); a mid-step failure
+                # must not leave the tip at the failure position — the retry's
+                # restore_park_origin would declare that spot the park frame.
+                # rig.park() is defensive: it no-ops when the arm or transform
+                # isn't there yet, so this is safe at any calibration stage.
+                try:
+                    rig.park()
+                except Exception:
+                    log.exception("calibration step failed — auto-park also failed")
+                raise
 
     try:
         result = await _run_blocking(_step)

@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 
 from physiclaw.core.server import net, warm_start
+from tests.core.conftest import wire_locked
 
 # ---------- wait_for_port re-export ----------
 
@@ -128,6 +129,9 @@ def _ready_bundle() -> MagicMock:
 
 def _ready_app(cal) -> MagicMock:
     app = MagicMock()
+    # try_resume holds the lock via `with rig.locked()`; wire the mock so the
+    # acquire→release bracket is recorded for the lock-ordering assertions.
+    wire_locked(app.rig)
     app.rig.calibration = cal
     app.rig.assistive_touch = MagicMock()
     # try_resume reaches the bridge via require_bridge(); alias it to the
@@ -379,7 +383,7 @@ def test_try_resume_releases_without_parking_when_origin_never_repinned(
 
 def test_try_resume_parks_before_release_once_repinned(mocker) -> None:
     # Sanity failed AFTER the re-pin — the resume still restores the
-    # resting spot (locked()-style auto-park) before releasing the lock.
+    # resting spot (engaged()-style auto-park) before releasing the lock.
     cal = _ready_bundle()
     app = _ready_app(cal)
     _patch_resume_env(mocker, cal, app, sanity=False)
