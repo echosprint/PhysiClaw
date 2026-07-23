@@ -28,6 +28,9 @@ physiclaw flash
 
 ## 手动烧录
 
+<details>
+<summary>手动烧录流程</summary>
+
 <Steps>
 
 1. **给控制板上电。** 接 **12 V** 电源，用 **USB** 串口线连接到电脑。
@@ -66,9 +69,14 @@ physiclaw flash
 
 </Steps>
 
+</details>
+
 ## 配置文件
 
 命令行烧录会自动帮你刷入；手动烧录则需在第 13 步粘贴。FluidNC 配置：
+
+<details>
+<summary>config.yaml</summary>
 
 ```yaml
 # FluidNC config — MKS DLC32 v2.1 — CoreXY + Solenoid
@@ -146,3 +154,5 @@ PWM:
 start:
   must_home: false
 ```
+
+</details>
