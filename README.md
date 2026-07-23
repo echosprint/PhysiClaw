@@ -4,6 +4,8 @@
 
 [English docs](https://docs.physiclaw.ai/en/) · [中文文档](https://docs.physiclaw.ai/zh/)
 
+[Demo video](https://youtu.be/-gV9EdpQb6E) · [演示视频](https://b23.tv/jnegfgC)
+
 PhysiClaw watches a phone's screen with a camera and taps it with a stylus,
 working the phone the way a person would. No APIs, no OAuth, no ADB cables,
 nothing installed on the phone — just unlock it, set it on the desk, and let
