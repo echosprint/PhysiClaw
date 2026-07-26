@@ -44,7 +44,7 @@ report_screen_layout(page="spotlight", field="spotlight_input", bbox=[0.020, 0.5
 
 Field: `chat_input_kb_hidden`. Pass `app`.
 
-1. Open the chat app (see `im` / `open-app` — the layout isn't loaded yet, so use the Spotlight boxes you just read), enter any real thread, keyboard hidden.
+1. `home_screen`, then open the dock's IM app; if the dock has none, open one via `im` / `open-app` using the Spotlight boxes you just read. Enter any real thread, keyboard hidden.
 2. `screenshot`; read the **chat input bar**.
 3. `report_screen_layout(page="chat-no-keyboard", field="chat_input_kb_hidden", bbox=[…], app="wechat")`
 
