@@ -2,7 +2,7 @@
 
 **An AI agent that physically operates a phone — the way you do.**
 
-[English docs](https://docs.physiclaw.ai/en/) · [Demo video](https://youtu.be/-gV9EdpQb6E)
+[English docs](https://docs.physiclaw.ai/en/) · [Demo video](https://youtu.be/YJ1O6gW0KVw)
 
 [中文文档](https://docs.physiclaw.ai/zh/) · [演示视频](https://b23.tv/jnegfgC)
 
