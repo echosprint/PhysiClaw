@@ -615,6 +615,18 @@ def test_tracker_nav_means_down_and_other_press_means_unknown() -> None:
     assert kb.state == "unknown"
 
 
+def test_tracker_no_change_nav_preserves_belief() -> None:
+    # A camera-verified no-change go_back (missed edge swipe) left the
+    # screen — keyboard included — exactly as it was; only a nav that
+    # visibly changed the screen (or has no verdict) proves "down".
+    kb = _tracker_with_layout()
+    kb.observe("tap", {"bbox": _HIDDEN_BOX}, True)
+    kb.observe("go_back", {}, False)
+    assert kb.state == "up"
+    kb.observe("go_back", {}, None)
+    assert kb.state == "down"
+
+
 def test_tracker_typing_and_views_preserve_up() -> None:
     kb = _tracker_with_layout()
     kb.observe("tap", {"bbox": _HIDDEN_BOX}, True)

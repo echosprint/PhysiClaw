@@ -51,6 +51,7 @@ Every action bbox comes verbatim — every digit — from a grounded source: the
 The engine counts what compaction erases, and tells you:
 
 - **Same target** — press #{{same_target_warn}} with no screen change gets a ⚠ on its result; press #{{same_target_block}} is BLOCKED, not executed. Two no-change presses on one element already mean refusal (PHYSICLAW § Unchanged screen).
+- **System gestures** — `go_back`/`home_screen`/`force_quit` count the same tiers per tool: an unmoved `go_back` = missed swipe or no back action — use the on-screen ‹ Back / X.
 - **Action cycles** — repeating the same 2–3-action cycle (page↔back, cart↔checkout↔product) warns at {{same_target_warn}} repeats, blocks at {{same_target_block}} — even though each action changes the screen.
 - **Same step** — the `<plan>` tail flags an `in_progress` step at {{step_stuck_warn}} turns, orders escalation at {{step_stuck_urgent}}.
 - **Same intent** — different elements toward one state change (five ways to clear a field) are ONE attempt; invisible to the counters above, so YOU count. Two failed variants → the ladder.

@@ -165,17 +165,20 @@ class KeyboardTracker:
     "up" is claimed only when the camera verified the raising press (a
     changed-verdict press on the chat input's keyboard-hidden box) and
     every gesture since provably preserves it (typing/pasting boxes).
-    Nav gestures mean "down"; swipes, batches with presses, and presses
-    outside the keyboard region decay to "unknown". Views, local tools,
-    and clipboard syncs never touch the screen. Consumers act only on
-    "up" — "down"/"unknown" fail open.
+    Nav gestures mean "down" — except a camera-verified no-change nav
+    (a missed edge swipe: the stuck guard's nav-miss case), which left
+    the screen, keyboard included, exactly as it was. Swipes, batches
+    with presses, and presses outside the keyboard region decay to
+    "unknown". Views, local tools, and clipboard syncs never touch the
+    screen. Consumers act only on "up" — "down"/"unknown" fail open.
     """
 
     state: str = "unknown"  # "up" | "down" | "unknown"
 
     def observe(self, name: str, arguments: dict, changed: bool | None) -> None:
         if name in NAV_TOOLS:
-            self.state = "down"
+            if changed is not False:
+                self.state = "down"
             return
         if name == SWIPE:
             self.state = "unknown"

@@ -18,7 +18,11 @@ The detectors, by the loop they catch:
      — switching gesture type on a dead element is not "changing
      method") whose results carry `screen: no visible change`
      (`physiclaw.common.verdict`). A silent refusal — stock-limit toast the
-     camera never sees — looks exactly like this.
+     camera never sees — looks exactly like this. Nav gestures
+     (go_back / home_screen / force_quit) count the same way, keyed
+     per tool name (they have no target): a back swipe whose tip
+     misses the ~30pt edge zone registers nothing, and a screen with
+     no back action (modal, root tab, image viewer) refuses forever.
   2. ACTION CYCLES  repeating the same 2–3-action cycle (checkout ↔
      cart, tab ↔ tab ↔ back) — each action CHANGES the screen, so
      detector 1 is blind to it; identity comes from action signatures.
@@ -53,9 +57,9 @@ from physiclaw.agent.engine import screen_layout
 from physiclaw.agent.engine.geometry import MATCH_TOLERANCE, center_of, near
 from physiclaw.common.config import CONFIG
 
-# Only presses count toward same-target tiers (PRESS_TOOLS from the
-# shared vocabulary). Swipes are deliberately absent (see module
-# docstring).
+# Presses count toward same-target tiers by bbox center, nav gestures
+# by tool name (both from the shared vocabulary). Swipes are
+# deliberately absent (see module docstring).
 from physiclaw.common.gesture_vocab import (
     NAV_TOOLS,
     PRESS_TOOLS,
@@ -168,6 +172,9 @@ class StuckGuard:
     _targets: list[_Target] = field(default_factory=list)
     _history: list[tuple] = field(default_factory=list)  # action signatures
     _error_counts: dict[tuple, int] = field(default_factory=dict)
+    # Detector-1 counting for nav gestures — per tool name, since they
+    # have no target bbox to key on.
+    _nav_misses: dict[str, int] = field(default_factory=dict)
     _presses: list[tuple[int, int]] = field(
         default_factory=list
     )  # quantized press positions
@@ -186,6 +193,7 @@ class StuckGuard:
             self._targets.clear()
             self._history.clear()
             self._error_counts.clear()
+            self._nav_misses.clear()
             self._presses.clear()
             self._orbit_warned.clear()
 
@@ -204,6 +212,17 @@ class StuckGuard:
                     "This element is exhausted (refusing or dead). Pick a "
                     "different element or method, or report the blocker to the "
                     "user and close (CONVENTION § Stuck)."
+                )
+        if name in NAV_TOOLS:
+            n = self._nav_misses.get(name, 0)
+            if n >= BLOCK_AT - 1:
+                return (
+                    f"BLOCKED — not executed: `{name}` #{n + 1} this step, "
+                    f"{n} camera-verified no-ops so far. The gesture isn't "
+                    "registering or this screen doesn't respond to it — use "
+                    "an on-screen control (‹ Back / X / Done) or another "
+                    "exit, or report the blocker to the user and close "
+                    "(CONVENTION § Stuck)."
                 )
         sig = self._signature(name, arguments)
         if sig is not None:
@@ -285,6 +304,24 @@ class StuckGuard:
                     "a limit label, or switch method (CONVENTION § Stuck). "
                     f"The engine blocks press #{BLOCK_AT}."
                 )
+        # Nav-gesture misses mirror the target counting, keyed per tool
+        # name. A pop that lands resets — the gesture provably works, so
+        # accumulated misses were transient (arm drift, mid-animation).
+        if name in NAV_TOOLS:
+            if changed is True:
+                self._nav_misses.pop(name, None)
+            elif changed is False:
+                n = self._nav_misses.get(name, 0) + 1
+                self._nav_misses[name] = n
+                if n == WARN_AT:
+                    warnings.append(
+                        f"⚠ `{name}` #{n} this step, screen unchanged every "
+                        "time. The gesture isn't registering or this screen "
+                        "doesn't respond to it (modal, root tab, image "
+                        "viewer). Don't re-issue — use an on-screen control "
+                        "(‹ Back / X / Done) or another exit (CONVENTION "
+                        f"§ Stuck). The engine blocks attempt #{BLOCK_AT}."
+                    )
         # Cycle history extends regardless of the verdict — the loop it
         # detects is screen-CHANGING by nature. A successful execution
         # also clears the signature's error count (the error was fixed).

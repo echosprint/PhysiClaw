@@ -1,4 +1,4 @@
-"""Tests for `physiclaw.agent.engine.stuck` — the same-target press guard."""
+"""Tests for `physiclaw.agent.engine.stuck` — the engine's loop detectors."""
 
 from __future__ import annotations
 
@@ -123,7 +123,7 @@ def test_swipes_never_counted() -> None:
     assert g.should_block("swipe", args) is None
 
 
-@pytest.mark.parametrize("tool", ["peek", "screenshot", "note", "wait", "go_back"])
+@pytest.mark.parametrize("tool", ["peek", "screenshot", "note", "wait"])
 def test_non_gesture_tools_ignored(tool: str) -> None:
     g = _guard()
     assert g.record(tool, {}, False) is None
@@ -141,6 +141,62 @@ def test_learned_keyboard_keys_exempt(mocker) -> None:
     for _ in range(20):
         assert g.record("tap", {"bbox": backspace}, False) is None
     assert g.should_block("tap", {"bbox": backspace}) is None
+
+
+# ---------- nav-gesture misses ----------
+
+
+def test_nav_miss_warns_then_blocks() -> None:
+    # The silent go_back miss: edge swipe never registers, screen never
+    # changes. Same tiers as a dead press target, keyed per tool name.
+    g = _guard()
+    warnings = [g.record("go_back", {}, False) for _ in range(WARN_AT)]
+    assert warnings[:-1] == [None, None]
+    assert "go_back" in warnings[-1]
+    assert "CONVENTION § Stuck" in warnings[-1]
+
+    for _ in range(BLOCK_AT - 1 - WARN_AT):
+        g.record("go_back", {}, False)
+    msg = g.should_block("go_back", {})
+    assert msg is not None and msg.startswith("BLOCKED")
+    # Not exhausted one miss earlier:
+    g2 = _guard()
+    for _ in range(BLOCK_AT - 2):
+        g2.record("go_back", {}, False)
+    assert g2.should_block("go_back", {}) is None
+
+
+def test_nav_pop_success_resets_the_count() -> None:
+    g = _guard()
+    for _ in range(BLOCK_AT - 1):
+        g.record("go_back", {}, False)
+    g.record("go_back", {}, True)  # a pop finally landed
+    assert g.should_block("go_back", {}) is None
+
+
+def test_nav_no_verdict_fails_open() -> None:
+    g = _guard()
+    for _ in range(20):
+        assert g.record("go_back", {}, None) is None
+    assert g.should_block("go_back", {}) is None
+
+
+def test_nav_tools_counted_separately() -> None:
+    g = _guard()
+    for _ in range(BLOCK_AT - 1):
+        g.record("go_back", {}, False)
+    assert g.should_block("go_back", {}) is not None
+    assert g.should_block("home_screen", {}) is None
+
+
+def test_nav_miss_step_change_resets() -> None:
+    g = _guard()
+    g.observe_step("step A")
+    for _ in range(BLOCK_AT - 1):
+        g.record("go_back", {}, False)
+    assert g.should_block("go_back", {}) is not None
+    g.observe_step("step B")
+    assert g.should_block("go_back", {}) is None
 
 
 def test_malformed_bbox_ignored() -> None:
