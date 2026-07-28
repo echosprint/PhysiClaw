@@ -99,14 +99,21 @@ BACK_EDGE_DWELL_SECONDS = 0.15
 # Shared anchor zones — every recipe that touches the same screen region
 # names the same bbox, so a phone-bed change edits one line.
 BOTTOM_EDGE = [0.4, 0.96, 0.6, 0.98]
-LEFT_EDGE = [0.0, 0.4, 0.01, 0.6]
+# Back-swipe start: ~2% in from the physical edge, NOT x≈0. iOS's edge-pan
+# zone is ~30pt (~7% of screen width), so 2% is still deep inside it — but
+# a start hugging the glass edge (the old x≈0.005) left the arm <0.5mm of
+# outward calibration tolerance before the tip landed on the bezel and no
+# touch registered at all: the silent go_back miss. Landing too far INWARD
+# is the other cliff (past ~7% the app owns the drag — WhatsApp reads it
+# as swipe-to-reply), so keep the start well under half the zone.
+LEFT_EDGE = [0.015, 0.4, 0.025, 0.6]
 
 # Home: bottom-edge swipe up.
 HOME_SCREEN: tuple[Gesture, ...] = (Swipe(BOTTOM_EDGE, "up", "xl", "fast"),)
 
-# Back: left-edge swipe right. Starts at the true left edge (x≈0) and
-# dwells briefly on contact so the touch is seen inside iOS's edge-pan
-# zone before the slide arms the interactive pop.
+# Back: left-edge swipe right. Starts just inside the edge zone (see
+# LEFT_EDGE) and dwells briefly on contact so the touch is seen inside
+# iOS's edge-pan zone before the slide arms the interactive pop.
 GO_BACK: tuple[Gesture, ...] = (
     Swipe(LEFT_EDGE, "right", "xxl", "fast", BACK_EDGE_DWELL_SECONDS),
 )
