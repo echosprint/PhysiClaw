@@ -114,8 +114,13 @@ HOME_SCREEN: tuple[Gesture, ...] = (Swipe(BOTTOM_EDGE, "up", "xl", "fast"),)
 # Back: left-edge swipe right. Starts just inside the edge zone (see
 # LEFT_EDGE) and dwells briefly on contact so the touch is seen inside
 # iOS's edge-pan zone before the slide arms the interactive pop.
+# "slow", not "fast": on-rig A/B in a WhatsApp thread (2026-07-28) —
+# fast (~167mm/s) failed to pop 2/2 while slow (~50mm/s) popped 2/2,
+# same start point and travel. At stylus speeds the fast slide loses
+# the pan (tip skip / tracking); commit doesn't need velocity anyway —
+# releasing past half the screen commits at any speed.
 GO_BACK: tuple[Gesture, ...] = (
-    Swipe(LEFT_EDGE, "right", "xxl", "fast", BACK_EDGE_DWELL_SECONDS),
+    Swipe(LEFT_EDGE, "right", "xxl", "slow", BACK_EDGE_DWELL_SECONDS),
 )
 
 # Force-quit, four steps. The switcher opens with the current app's
