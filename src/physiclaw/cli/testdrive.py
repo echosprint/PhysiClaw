@@ -1,7 +1,7 @@
 """``physiclaw testdrive`` — take the board for a spin after flashing.
 
 The post-flash bring-up check: connect to the board, show the machine's
-axes, then hand the user the controls — ``X20Y20`` / ``Y-10`` style
+axes, then hand the user the controls — ``X10`` / ``X-10Y-10`` style
 moves plus ``tap`` and ``longpress`` — so they watch the motors and
 solenoid do what they typed. No pass/fail bookkeeping: the user's own
 eyes are the verdict. Every command routes through ``StylusArm``, so
@@ -48,8 +48,9 @@ AXES_DIAGRAM = """\
 TRY_IT_HELP = """\
   Try the machine — type a command, q to finish:
 
-    X20Y20     move 20 mm in X+ and 20 mm in Y+
-    Y-10       move 10 mm in Y-
+    X10        move 10 mm in X+
+    Y10        move 10 mm in Y+
+    X-10Y-10   move 10 mm in X- and 10 mm in Y-
     tap        click the stylus
     longpress  press and hold ~1 s
 
@@ -86,9 +87,9 @@ def testdrive(
 ) -> None:
     """Take the board for a spin — drive the motors and solenoid yourself.
 
-    Shows the machine's axes, then reads commands in a loop: `X20Y20` /
-    `Y-10` moves the carriage, `tap` / `longpress` fires the stylus, `q`
-    finishes. Run it right after `physiclaw flash` or any re-wiring, with
+    Shows the machine's axes, then reads commands in a loop: `X10` /
+    `X-10Y-10` moves the carriage, `tap` / `longpress` fires the stylus,
+    `q` finishes. Run it right after `physiclaw flash` or any re-wiring, with
     the phone off the bed.
     """
     from physiclaw.common import runtime_state
@@ -152,7 +153,7 @@ def testdrive(
             move = _parse_move(cmd)
             if move is None:
                 typer.echo(
-                    info("? try X10, Y-10, X5Y5, tap, longpress — or q to finish")
+                    info("? try X10, Y10, X-10Y-10, tap, longpress — or q to finish")
                 )
                 continue
             dx, dy = move

@@ -99,7 +99,7 @@ def test_unknown_input_shows_help_line(fake_arm) -> None:
     result = runner.invoke(app, [], input=_cmds("wat", "q"))
 
     assert result.exit_code == 0
-    assert "try X10, Y-10" in result.output
+    assert "try X10, Y10, X-10Y-10" in result.output
     assert fake_arm.jogs == []
 
 
