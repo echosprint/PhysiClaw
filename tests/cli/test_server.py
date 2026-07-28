@@ -94,6 +94,56 @@ def test_spawn_runtime_logs_label(
     assert any("engine=qwen" in r.getMessage() for r in caplog.records)
 
 
+# ---------- ready-line watcher ----------
+
+
+def _run_ready_watcher(mocker, caplog, polls) -> list:
+    """Drive `_announce_ready_when_up` with `check_ready_once` outcomes
+    scripted (an Exception instance = probe fails; a bool = its return)
+    and the watcher thread's target run inline. The script must end on
+    True — the watcher polls forever by design."""
+    probe = mocker.patch(
+        "physiclaw.common.ready.check_ready_once", side_effect=polls
+    )
+    sleep_spy = mocker.patch.object(server_mod.time, "sleep")
+    captured = {}
+
+    def fake_thread(target, daemon=False):
+        captured["target"] = target
+        return MagicMock()
+
+    mocker.patch.object(server_mod.threading, "Thread", side_effect=fake_thread)
+
+    with caplog.at_level(logging.INFO, logger="physiclaw.cli.server"):
+        server_mod._announce_ready_when_up("127.0.0.1", 8047)
+        captured["target"]()
+    probe.assert_called_with("http://127.0.0.1:8047")
+    assert probe.call_count == len(polls)
+    assert sleep_spy.call_count == len(polls) - 1  # no sleep after ready
+    return list(caplog.records)
+
+
+def test_ready_line_waits_for_status_ready(mocker, caplog) -> None:
+    # Serving starts while hardware bring-up is still running — the line
+    # must NOT land on port-accept, only when the shared ready probe
+    # flips true (the same flag the built-in runtime polls before waking).
+    records = _run_ready_watcher(
+        mocker,
+        caplog,
+        [ConnectionError("refused"), False, True],
+    )
+
+    assert len(records) == 1
+    msg = records[0].getMessage()
+    assert "PhysiClaw ready" in msg and "http://127.0.0.1:8047/mcp" in msg
+
+
+def test_ready_line_immediate_when_already_ready(mocker, caplog) -> None:
+    records = _run_ready_watcher(mocker, caplog, [True])
+
+    assert len(records) == 1
+
+
 # ---------- server CLI invocation ----------
 
 
@@ -326,7 +376,9 @@ def test_server_default_invocation_serves_both_planes(mocker) -> None:
 
     # Both ASGI apps built for the control bind and handed to _serve.
     deps["core_server"].build_apps.assert_called_once_with("127.0.0.1")
-    deps["serve"].assert_called_once_with("127.0.0.1", 8048, *deps["apps"])
+    deps["serve"].assert_called_once_with(
+        "127.0.0.1", 8048, *deps["apps"], announce_ready=True
+    )
     # State recorded with resolved model.
     deps["state"].write.assert_called_once()
 

@@ -8,6 +8,7 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 from typing import Annotated, Optional
 
 import typer
@@ -151,6 +152,12 @@ def server(
     # session dir as mcp.log (the runtime publishes which session is active).
     attach_server_mcp_tee()
     logging.getLogger("mcp").setLevel(logging.WARNING)
+    # Silence per-request logs from httpx/httpcore (same as the runtime's
+    # launcher): the mcp-mode ready watcher probes /api/status at 1 Hz,
+    # and each probe would otherwise print an INFO "HTTP Request:" line —
+    # and flood the DEBUG-level daily file for as long as ready takes.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     # Phones opening the bridge URL probe https:// first (Safari's HTTPS
     # upgrade, VPN apps); the TLS bytes hitting our plaintext port make
     # uvicorn warn "Invalid HTTP request received." once per attempt —
@@ -193,12 +200,14 @@ def server(
     )
 
     try:
-        _serve(host, port, *build_apps(host))
+        _serve(host, port, *build_apps(host), announce_ready=no_runtime)
     except KeyboardInterrupt:
         pass
 
 
-def _serve(host: str, port: int, control_app, bridge_app) -> None:
+def _serve(
+    host: str, port: int, control_app, bridge_app, *, announce_ready: bool
+) -> None:
     """Serve the two planes from one process, two listeners.
 
     Control (MCP + setup + calibrate) binds `host` (loopback by default) on
@@ -216,6 +225,8 @@ def _serve(host: str, port: int, control_app, bridge_app) -> None:
 
     from physiclaw.core.bridge.lan import bridge_port
 
+    if announce_ready:
+        _announce_ready_when_up(host, port)
     bridge_server = uvicorn.Server(
         uvicorn.Config(
             bridge_app, host="0.0.0.0", port=bridge_port(port), log_level="warning"
@@ -225,6 +236,39 @@ def _serve(host: str, port: int, control_app, bridge_app) -> None:
     uvicorn.Server(
         uvicorn.Config(control_app, host=host, port=port, log_level="warning")
     ).run()
+
+
+def _announce_ready_when_up(host: str, port: int) -> None:
+    """`physiclaw mcp` mode: one ready line when the rig can actually be
+    driven — /api/status `ready: true`, the same flag the built-in
+    runtime polls before waking (`runtime._check_ready`).
+
+    A port-accept probe is NOT that moment: serving starts while
+    hardware bring-up (hot-start resume, or the setup wizard) is still
+    running, and an MCP client connecting then would watch its tool
+    calls fail. With a built-in runtime its subprocess already logs
+    `physiclaw ready=True`, so this watcher runs only without one.
+    Daemon thread, no deadline — the wizard flow flips ready whenever
+    the user finishes calibrating; connection errors are pre-serving
+    or mid-blip states, held and retried like the runtime does."""
+    log = logging.getLogger(__name__)
+    # The shared ready definition (`common.ready`); its httpx transport
+    # loads on the first probe, not at import.
+    from physiclaw.common.ready import check_ready_once
+
+    base = f"http://{_dial_host(host)}:{port}"
+
+    def _watch() -> None:
+        while True:
+            try:
+                if check_ready_once(base):
+                    break
+            except Exception:
+                pass
+            time.sleep(1.0)
+        log.info(f"PhysiClaw ready — MCP tools live at {base}/mcp")
+
+    threading.Thread(target=_watch, daemon=True).start()
 
 
 def _require_vision_model() -> None:
