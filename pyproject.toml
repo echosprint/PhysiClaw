@@ -24,7 +24,11 @@ dependencies = [
     "pyserial>=3.5",
     "opencv-python>=4.8",
     "numpy>=1.26",
-    "mcp[cli]>=1.2",
+    # <2: SDK 2.0 removed `mcp.server.fastmcp` (core/server/mcp.py's
+    # import). A fresh `uv tool install` resolves without uv.lock, so an
+    # unbounded spec breaks installs the moment a major ships — 2.0 did
+    # exactly that (0.3.20). Migration to SDK 2.x is its own project.
+    "mcp[cli]>=1.2,<2",
     # Direct import; [socks] pulls socksio so socks5:// proxies work
     # (physiclaw.common.proxy rewrites Linux VPN clients' socks:// to socks5://).
     "httpx[socks]>=0.27",
