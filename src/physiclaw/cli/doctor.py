@@ -23,6 +23,7 @@ from physiclaw.cli._format import section as _fmt_section
 from physiclaw.cli._format import warn as _fmt_warn
 from physiclaw.cli._update_check import maybe_print_update_banner
 from physiclaw.common import paths, runtime_state
+from physiclaw.common.ready import STATUS_PATH, ready_from_status
 
 
 def _opencv_import_error() -> str | None:
@@ -89,7 +90,7 @@ def _probe_server(live: dict | None) -> tuple[str, int, bool, dict | None]:
     if bind_all:
         host = "localhost"
     # _http.api handles the proxy-bypass policy and fails soft to None.
-    status = _http.api(f"http://{host}:{port}", "GET", "/api/status", timeout=1.0)
+    status = _http.api(f"http://{host}:{port}", "GET", STATUS_PATH, timeout=1.0)
     return (host, port, bind_all, status)
 
 
@@ -597,7 +598,7 @@ def doctor(
     steps = []
     if not model.exists():
         steps.append("physiclaw setup local-vision-model")
-    if not (status and status.get("ready")):
+    if not (status and ready_from_status(status)):
         if status is None:
             steps.append(
                 "physiclaw   (starts the server and opens the hardware-setup wizard)"

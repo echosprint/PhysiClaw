@@ -23,6 +23,7 @@ import httpx
 from physiclaw.agent.runtime.hook import Trigger, check_hooks, load_hooks
 from physiclaw.common import platform
 from physiclaw.common.config import CONFIG, server_url
+from physiclaw.common.ready import check_ready
 
 log = logging.getLogger(__name__)
 
@@ -48,12 +49,11 @@ def _get_client() -> httpx.AsyncClient:
 
 
 async def _check_ready() -> bool:
-    """Query /api/status — True once /setup has finished. Raises on
-    error; the server is this process's parent, so any failure is a
-    client-side blip and callers should hold last-known."""
-    r = await _get_client().get("/api/status")
-    r.raise_for_status()
-    return bool(r.json().get("ready"))
+    """Query /api/status (via `common.ready` — shared with the CLI's
+    mcp-mode watcher) — True once /setup has finished. Raises on error;
+    the server is this process's parent, so any failure is a client-side
+    blip and callers should hold last-known."""
+    return await check_ready(_get_client())
 
 
 class Runtime:

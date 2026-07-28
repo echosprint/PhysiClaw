@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse
 
+from physiclaw.common.ready import STATUS_PATH
 from physiclaw.core.bridge import PageState
 from physiclaw.core.server.hardware_setup import (
     handle_camera_preview,
@@ -31,7 +32,9 @@ def register(mcp: "FastMCP", rig: "HardwareRig", phone: PageState) -> None:
     async def _setup_page(request: Request) -> HTMLResponse:
         return await handle_setup_page(request)
 
-    @mcp.custom_route("/api/status", methods=["GET"])
+    # The path constant is shared with every client-side reader
+    # (`common.ready`) — route and probes can't drift apart.
+    @mcp.custom_route(STATUS_PATH, methods=["GET"])
     async def _status(request: Request) -> JSONResponse:
         return await handle_status(request, rig)
 

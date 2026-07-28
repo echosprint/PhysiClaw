@@ -20,6 +20,7 @@ import typer
 from physiclaw.cli import _http
 from physiclaw.cli._format import step_fail, step_ok, step_warn
 from physiclaw.common import config, paths, platform
+from physiclaw.common.ready import STATUS_PATH, ready_from_status
 
 BASE = config.server_url()
 
@@ -386,10 +387,10 @@ def _mark_ready_and_wait(timeout: float = 45.0) -> None:
     """
     api("POST", "/api/ready")
     for _ in range(int(timeout)):
-        status = api("GET", "/api/status")
+        status = api("GET", STATUS_PATH)
         if status is None:  # server gone — the CLI is fail-soft throughout
             return
-        if status.get("ready"):
+        if ready_from_status(status):
             return
         time.sleep(1)
     print("  (camera settle still running — ready will flip shortly)")
@@ -415,10 +416,10 @@ def run(auto: bool = False, trace: bool = False) -> None:
     # (core/static/setup-hardware.html) so the two surfaces stay consistent.
     t0 = time.time()
 
-    status = api("GET", "/api/status")
+    status = api("GET", STATUS_PATH)
     if not status:
         sys.exit("Server not running. Start: physiclaw server")
-    if status.get("ready"):
+    if ready_from_status(status):
         print("PhysiClaw is already ready.")
         return
     if status.get("calibrated"):
@@ -470,9 +471,11 @@ def await_bridge_and_calibrate(host: str, port: int) -> None:
     BASE = f"http://localhost:{port}"
     log.info("auto: waiting for the phone bridge to connect…")
     while True:
-        status = api("GET", "/api/status")
+        status = api("GET", STATUS_PATH)
         if status and (
-            status.get("bridge") or status.get("calibrated") or status.get("ready")
+            status.get("bridge")
+            or status.get("calibrated")
+            or ready_from_status(status)
         ):
             break
         time.sleep(1.0)

@@ -45,36 +45,16 @@ async def test_maybe_await_awaits_coroutines() -> None:
 
 
 @pytest.mark.asyncio
-async def test_check_ready_true(respx_mock: respx.MockRouter) -> None:
+async def test_check_ready_delegates_through_the_module_client(
+    respx_mock: respx.MockRouter,
+) -> None:
+    # One end-to-end probe proving the delegate wiring: the module's
+    # long-lived client (base_url from the server env) reaches the shared
+    # `common.ready.check_ready`. Payload/error semantics (false, 4xx,
+    # missing field) are pinned centrally in tests/common/test_ready.py.
     respx_mock.get("http://test.host:8048/api/status").respond(json={"ready": True})
 
     assert await _check_ready() is True
-
-
-@pytest.mark.asyncio
-async def test_check_ready_false(respx_mock: respx.MockRouter) -> None:
-    respx_mock.get("http://test.host:8048/api/status").respond(json={"ready": False})
-
-    assert await _check_ready() is False
-
-
-@pytest.mark.asyncio
-async def test_check_ready_raises_on_4xx(respx_mock: respx.MockRouter) -> None:
-    import httpx
-
-    respx_mock.get("http://test.host:8048/api/status").respond(404)
-
-    with pytest.raises(httpx.HTTPStatusError):
-        await _check_ready()
-
-
-@pytest.mark.asyncio
-async def test_check_ready_returns_false_when_ready_field_missing(
-    respx_mock: respx.MockRouter,
-) -> None:
-    respx_mock.get("http://test.host:8048/api/status").respond(json={})
-
-    assert await _check_ready() is False
 
 
 # ---------- Runtime construction + stop ----------
