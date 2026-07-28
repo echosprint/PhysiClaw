@@ -83,8 +83,9 @@ job after opening the thread.
 2. Log the close — final summary line in `memory/YYYY-MM-DD.md`
    (purchases include merchant, brand, spec, quantity, price).
 3. Reply to the user in IM. Never reply before logging.
-4. Exit cleanly: `go_back` out of the thread to the chat list,
-   then `home_screen`. Skip either and the next wake wastes turns
+4. Exit cleanly: `go_back` out of the thread to the chat list
+   (view didn't pop → tap the thread's top-left `‹`), then
+   `home_screen`. Skip either and the next wake wastes turns
    re-orienting.
 5. **Emit the sentinel** — the last non-empty line of your final
    reply must be:

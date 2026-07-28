@@ -22,7 +22,7 @@
 1. Final verify — usually the last gesture's attached view; `peek` only if it's stale or failed.
 2. `append_log` (PERSISTENCE § Format). **Skip on WAIT / IDLE** — per-step logs cover it.
 3. Reply to the user in IM — never before logging.
-4. `go_back` to the chats list (the `im` Send flow already ends there — don't double it).
+4. `go_back` to the chats list (the `im` Send flow already ends there — don't double it; didn't pop → tap the top-left `‹`).
 5. `home_screen` — clean launch pad.
 6. `create_job` the resume — **WAIT only.**
 7. `end_session(status, recap)`.
