@@ -102,9 +102,7 @@ def _run_ready_watcher(mocker, caplog, polls) -> list:
     scripted (an Exception instance = probe fails; a bool = its return)
     and the watcher thread's target run inline. The script must end on
     True — the watcher polls forever by design."""
-    probe = mocker.patch(
-        "physiclaw.common.ready.check_ready_once", side_effect=polls
-    )
+    probe = mocker.patch("physiclaw.common.ready.check_ready_once", side_effect=polls)
     sleep_spy = mocker.patch.object(server_mod.time, "sleep")
     captured = {}
 
