@@ -21,6 +21,7 @@ runner = CliRunner()
         "server",
         "now",
         "auto",
+        "mcp",
         "status",
         "setup",
         "config",

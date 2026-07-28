@@ -39,7 +39,9 @@ def server(
     no_runtime: Annotated[
         bool,
         typer.Option(
-            "--no-runtime", help="Don't spawn the agent runtime loop subprocess."
+            "--no-runtime",
+            help="Don't spawn the agent runtime loop subprocess "
+            "(the `physiclaw mcp` mode).",
         ),
     ] = False,
     warm_start: Annotated[
@@ -160,7 +162,7 @@ def server(
     log = logging.getLogger(__name__)
     log.info("PhysiClaw %s", __version__)
     _require_vision_model()
-    _run_startup_maintenance()
+    _run_startup_maintenance(sync_skills=not no_runtime)
     _apply_save_flags(
         save_tool_calls, save_snapshots, save_screenshots, save_raw_camera
     )
@@ -171,7 +173,7 @@ def server(
 
     _refuse_if_already_running(host, port)
     model_ref, runtime_label = _resolve_and_record_model(host, port)
-    _log_endpoints(host, port)
+    _log_endpoints(host, port, no_runtime=no_runtime)
     _start_hardware_bringup(
         host,
         port,
@@ -243,7 +245,7 @@ def _require_vision_model() -> None:
         )
 
 
-def _run_startup_maintenance() -> None:
+def _run_startup_maintenance(*, sync_skills: bool) -> None:
     """Startup housekeeping that must NOT block serving.
 
     Phase A update check: if a prior run staged a newer version, print a
@@ -253,6 +255,9 @@ def _run_startup_maintenance() -> None:
 
     Then two off-critical-path background flows:
       - skills: sync the official pack; a session picks it up at its next wake.
+        Skipped when `sync_skills` is False (--no-runtime / `physiclaw mcp`):
+        the pack feeds the in-tree engine's prompt, so with no runtime there
+        is no consumer. The next runtime-full start re-syncs.
       - update: Phase B — stage the NEXT release (probe + warm uv's cache +
         marker) so the next start can notify it's ready and the user's
         `uv tool upgrade` links it from cache fast.
@@ -261,7 +266,8 @@ def _run_startup_maintenance() -> None:
     from physiclaw.cli.update import notify_staged_update, start_stage_update_thread
 
     notify_staged_update()
-    maybe_auto_sync()
+    if sync_skills:
+        maybe_auto_sync()
     start_stage_update_thread()
 
 
@@ -356,16 +362,27 @@ def _resolve_and_record_model(host: str, port: int) -> tuple[Optional[str], str]
     return model_ref, runtime_label
 
 
-def _log_endpoints(host: str, port: int) -> None:
+def _log_endpoints(host: str, port: int, *, no_runtime: bool) -> None:
     """Log the MCP URL, the QR link, and the phone /bridge URLs — primary
     (mDNS, survives IP changes) plus IP fallback, or a single URL and a
-    LocalHostName tip when the two coincide."""
+    LocalHostName tip when the two coincide. Without a built-in runtime
+    (--no-runtime / `physiclaw mcp`) an external MCP client is the consumer,
+    so the /mcp line carries the connect hint — dialable via `_dial_host`,
+    since the client pastes it."""
     log = logging.getLogger(__name__)
     from physiclaw.core.bridge import bridge_base_urls
 
     primary, fallback = bridge_base_urls(port)
     display_host = "localhost" if host == "0.0.0.0" else host
-    log.info(f"PhysiClaw MCP server on http://{display_host}:{port}/mcp")
+    if no_runtime:
+        url = f"http://{_dial_host(host)}:{port}/mcp"
+        log.info(
+            f"PhysiClaw MCP server on {url} — no built-in runtime\n"
+            f"  Connect an external MCP client, e.g. Claude Code: "
+            f"claude mcp add --transport http physiclaw {url}"
+        )
+    else:
+        log.info(f"PhysiClaw MCP server on http://{display_host}:{port}/mcp")
     log.info(f"QR code (scan with phone): http://localhost:{port}/api/bridge/qr")
     if primary != fallback:
         log.info(f"Phone page: {primary}/bridge  (recommended — survives IP changes)")
@@ -500,7 +517,8 @@ def _start_runtime_loop(
     unless disabled (--no-runtime) or no model is configured."""
     log = logging.getLogger(__name__)
     if no_runtime:
-        log.info("Runtime loop disabled by --no-runtime.")
+        # The external-client connect hint rides the /mcp endpoint line
+        # (`_log_endpoints`) — nothing to report here.
         return
     if model_ref is None:
         # First-run case: server is useful for hardware setup + manual MCP

@@ -470,6 +470,55 @@ def test_server_no_runtime_skips_subprocess(mocker) -> None:
     spawn_spy.assert_not_called()
 
 
+@pytest.mark.parametrize("no_runtime, sync_calls", [(True, 0), (False, 1)])
+def test_server_skills_sync_gated_on_runtime(
+    mocker, no_runtime: bool, sync_calls: int
+) -> None:
+    # The official pack feeds the in-tree engine's prompt — startup
+    # maintenance must fetch it only when a runtime will consume it.
+    _patch_server_runtime_deps(mocker)
+    sync_spy = mocker.patch("physiclaw.cli.sync_official_skills.maybe_auto_sync")
+
+    server_mod.server(
+        port=8048,
+        host="127.0.0.1",
+        verbose=False,
+        no_runtime=no_runtime,
+        warm_start=False,
+        cam_index=None,
+        save_tool_calls=False,
+        save_snapshots=False,
+        save_screenshots=False,
+    )
+
+    assert sync_spy.call_count == sync_calls
+
+
+def test_server_no_runtime_logs_external_client_hint(
+    mocker,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # `physiclaw mcp` users land here — the /mcp endpoint line must say how
+    # to point an external MCP client at it, not just print a bare URL.
+    _patch_server_runtime_deps(mocker)
+
+    with caplog.at_level(logging.INFO, logger="physiclaw.cli.server"):
+        server_mod.server(
+            port=8048,
+            host="127.0.0.1",
+            verbose=False,
+            no_runtime=True,
+            warm_start=False,
+            cam_index=None,
+            save_tool_calls=False,
+            save_snapshots=False,
+            save_screenshots=False,
+        )
+
+    msgs = " ".join(r.getMessage() for r in caplog.records)
+    assert "claude mcp add --transport http physiclaw http://127.0.0.1:8048/mcp" in msgs
+
+
 def test_server_logs_single_phone_url_when_no_mdns(
     mocker,
     caplog: pytest.LogCaptureFixture,
