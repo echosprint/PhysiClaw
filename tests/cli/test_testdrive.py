@@ -104,12 +104,16 @@ def test_unknown_input_shows_help_line(fake_arm) -> None:
 
 
 def test_oversize_move_rejected(fake_arm) -> None:
-    # The cap is inclusive: exactly ±100 passes, anything beyond is refused.
-    result = runner.invoke(app, [], input=_cmds("X500", "Y100.5", "X100", "Y-100", "q"))
+    # Caps are inclusive and per-axis: exactly ±20 in X / ±50 in Y pass,
+    # anything beyond either cap is refused (X20.5 shows X's cap is its
+    # own, not Y's).
+    result = runner.invoke(
+        app, [], input=_cmds("X500", "X20.5", "Y50.5", "X20", "Y-50", "q")
+    )
 
     assert result.exit_code == 0
-    assert "within ±100 mm" in result.output
-    assert fake_arm.jogs == [(100.0, 0.0), (0.0, -100.0)]
+    assert "within ±20 mm in X and ±50 mm in Y" in result.output
+    assert fake_arm.jogs == [(20.0, 0.0), (0.0, -50.0)]
 
 
 def test_axes_diagram_and_help_shown(fake_arm) -> None:

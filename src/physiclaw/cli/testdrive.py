@@ -59,10 +59,12 @@ TRY_IT_HELP = """\
   Phone off the bed — keep hands clear.
 """
 
-# Per-command cap (inclusive): no homing or limit switches, so any one
+# Per-command caps (inclusive): no homing or limit switches, so any one
 # move stays small enough that a typo can't run the carriage hard into
-# the frame. Up to ±100 mm per axis is allowed.
-_MAX_JOG_MM = 100
+# the frame. X is the short axis — the top beam's usable travel is well
+# under Y's — so its cap is tighter.
+_MAX_JOG_X_MM = 20
+_MAX_JOG_Y_MM = 50
 
 # `X20`, `Y-10`, `X1.5Y-2.5` — case and spaces already normalized away.
 _MOVE_RE = re.compile(r"^(?:x(?P<x>-?\d+(?:\.\d+)?))?(?:y(?P<y>-?\d+(?:\.\d+)?))?$")
@@ -104,6 +106,17 @@ def testdrive(
     from physiclaw.core.hardware.arm import StylusArm
     from physiclaw.core.hardware.device import DeviceNotFound, HardwareError
 
+    # ↑/↓ recall in the command loop: importing readline swaps input()'s
+    # line reader for the line editor (libedit on macOS) — jog commands
+    # get re-sent tweaked far more often than typed fresh. The prompt
+    # must then be passed TO input() so the editor owns redraw; a
+    # recalled line after a separately printed prompt smears into it.
+    # Windows has no stdlib readline — plain input() there, no recall.
+    try:
+        import readline  # noqa: F401
+    except ImportError:
+        pass
+
     typer.secho("Test-drive the control board: motors + solenoid\n", bold=True)
     typer.echo("→ Looking for the control board …")
     try:
@@ -119,7 +132,14 @@ def testdrive(
         typer.echo(TRY_IT_HELP)
 
         while True:
-            raw = typer.prompt("testdrive", prompt_suffix="> ")
+            # input() over typer.prompt: readline only edits/recalls when
+            # it renders the prompt itself. EOF and Ctrl-C mean "done" —
+            # same clean close as `q` (the finally releases the coil).
+            try:
+                raw = input("testdrive> ")
+            except (EOFError, KeyboardInterrupt):
+                typer.echo()
+                break
             cmd = "".join(raw.split()).lower()
             if cmd in ("q", "quit", "exit"):
                 break
@@ -136,8 +156,13 @@ def testdrive(
                 )
                 continue
             dx, dy = move
-            if abs(dx) > _MAX_JOG_MM or abs(dy) > _MAX_JOG_MM:
-                typer.echo(info(f"keep each move within ±{_MAX_JOG_MM} mm per axis"))
+            if abs(dx) > _MAX_JOG_X_MM or abs(dy) > _MAX_JOG_Y_MM:
+                typer.echo(
+                    info(
+                        f"keep each move within ±{_MAX_JOG_X_MM} mm in X "
+                        f"and ±{_MAX_JOG_Y_MM} mm in Y"
+                    )
+                )
                 continue
             arm.jog(dx, dy)
     except HardwareError as e:
