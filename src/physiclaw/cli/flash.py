@@ -42,7 +42,7 @@ from urllib.error import URLError
 
 import typer
 
-from physiclaw.cli._format import ok
+from physiclaw.cli._format import next_hint, ok
 from physiclaw.cli._http import http_get, stream
 
 # Version-stable URL — the served bundle is whichever release the site last
@@ -220,3 +220,4 @@ def flash(
     typer.echo("")
     typer.echo(ok("Done — the board now runs as a PhysiClaw machine."))
     typer.echo("  FluidNC firmware and the config.yml are both on the board.\n")
+    typer.echo(next_hint("physiclaw testdrive — take the board for a spin.\n"))

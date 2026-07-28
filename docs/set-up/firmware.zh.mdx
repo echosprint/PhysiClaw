@@ -22,11 +22,17 @@ PhysiClaw 硬件通过 [FluidNC](https://github.com/bdring/FluidNC) 固件与电
 physiclaw flash
 ```
 
-:::tip
-若 `physiclaw flash` 执行成功，即可跳过下面的步骤。
-:::
+### 验证
+
+连接两个电机和电磁铁，手动测试一遍，确认一切正常：
+
+```bash
+physiclaw testdrive
+```
 
 ## 手动烧录
+
+若 `physiclaw flash` 执行成功，可跳过这部分。
 
 <details>
 <summary>手动烧录流程</summary>

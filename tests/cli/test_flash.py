@@ -202,6 +202,16 @@ def test_flash_erase_runs_before_write(mocker) -> None:
     assert "write_flash" in second
 
 
+def test_flash_success_points_to_testdrive(mocker) -> None:
+    _mock_download(mocker)
+    mocker.patch.object(flash_mod.subprocess, "run")
+
+    result = runner.invoke(app, ["--port", "/dev/cu.usbserial-X"])
+
+    assert result.exit_code == 0
+    assert "physiclaw testdrive" in result.output
+
+
 def test_flash_esptool_failure_exits_with_power_hint(mocker) -> None:
     _mock_download(mocker)
     mocker.patch.object(

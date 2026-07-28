@@ -277,6 +277,18 @@ class StylusArm:
         the solenoid holds the tip down."""
         self._send(GCODE_LINEAR_MOVE.format(x=x, y=y, f=speed))
 
+    def jog(self, dx: float, dy: float) -> None:
+        """Relative rapid move of (dx, dy) mm, then wait for it to settle.
+
+        The relative-move primitive: `move()` routes its calibrated
+        direction vectors through it, and `physiclaw testdrive` drives it
+        directly — raw arm axes, before any direction mapping exists.
+        Restores absolute mode so the relative G91 can't leak into later
+        absolute moves."""
+        self._send(GCODE_REL_FAST.format(x=dx, y=dy))
+        self._send(GCODE_ABSOLUTE)
+        self.wait_idle()
+
     # ─── Public API (for AI agent) ─────────────────────────
 
     def move(self, direction: str, distance: str = "medium") -> None:
@@ -291,9 +303,7 @@ class StylusArm:
         d = self.MOVE_DISTANCES[distance]
         # Normalize diagonal vectors so actual distance matches intended distance
         mag = (mx**2 + my**2) ** 0.5 or 1
-        self._send(GCODE_REL_FAST.format(x=mx / mag * d, y=my / mag * d))
-        self._send(GCODE_ABSOLUTE)
-        self.wait_idle()
+        self.jog(mx / mag * d, my / mag * d)
 
     def tap(self) -> None:
         """Single tap at current position."""

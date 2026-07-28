@@ -22,11 +22,17 @@ Connect the board over USB (12 V power on, **stepper motors disconnected**), the
 physiclaw flash
 ```
 
-:::tip
-If `physiclaw flash` succeeds, you can skip the steps below.
-:::
+### Verification
+
+Connect the two motors and the solenoid, then drive the machine by hand to confirm everything works:
+
+```bash
+physiclaw testdrive
+```
 
 ## Manual flash
+
+If `physiclaw flash` succeeds, you can skip this part.
 
 <details>
 <summary>manual flash flow</summary>

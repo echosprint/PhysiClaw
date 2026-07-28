@@ -22,6 +22,7 @@ runner = CliRunner()
         "now",
         "auto",
         "mcp",
+        "testdrive",
         "status",
         "setup",
         "config",

@@ -504,6 +504,22 @@ def test_linear_move_emits_G1(mocker) -> None:
     assert any(b"G1 X0.000Y1.000" in w for w in fake.writes)
 
 
+def test_jog_emits_relative_G0_then_restores_absolute(mocker) -> None:
+    arm, fake = _arm(
+        mocker,
+        responses=[b"ok\n"] * 2,  # G91G0 jog + G90 restore
+        status_replies=[b"<Idle|WPos:0,0>\n"],  # wait_idle
+    )
+
+    arm.jog(15.0, -15.0)
+
+    written = b"".join(fake.writes)
+    assert b"G91G0 X15.000Y-15.000" in written
+    # G90 must follow the jog so relative mode can't leak into later moves.
+    assert written.index(b"G91G0") < written.index(b"G90\n")
+    assert b"?" in written  # settled via wait_idle
+
+
 # ---------- public gestures ----------
 
 

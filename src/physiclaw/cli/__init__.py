@@ -20,6 +20,7 @@ from physiclaw.cli.server import server
 from physiclaw.cli.setup import setup_app
 from physiclaw.cli.skills import skills_app
 from physiclaw.cli.status import status
+from physiclaw.cli.testdrive import testdrive
 from physiclaw.cli.uninstall import uninstall
 from physiclaw.cli.update import update
 from physiclaw.common.proxy import normalize_proxy_env
@@ -39,6 +40,7 @@ app.command()(mcp)
 app.command()(status)
 app.command()(update)
 app.command()(flash)
+app.command()(testdrive)
 app.command()(logs)
 app.command()(clear)
 app.command()(reset)
