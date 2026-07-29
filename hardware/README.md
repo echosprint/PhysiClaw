@@ -217,13 +217,20 @@ freshly regenerated `output/`:
 - **Camera frame** — just the assembled camera-frame STEP file, on its own.
 - **Custom parts** — the print package from `output/print_3d/`.
 
-Regenerate the artifacts (`make hw-rebuild`, plus `make hw-manual-pdf` for
-the PDFs), then:
+One key does it all:
 
 ```bash
-make hw-release HW_VERSION=X.Y
+make hw-deploy HW_VERSION=X.Y
 ```
 
-This packages the four zips from `output/` and publishes the GitHub release
-(via `gh`) with tag `physiclaw-hardware-vX.Y`. The tag points at the tip of
-`main`, so make sure your source changes are committed and pushed first.
+This preflights (version, `gh`, tag free, tree clean and pushed — the tag
+points at GitHub's `main`), rebuilds what's stale (the step build is
+incremental via `output/.cache`; manual with PDFs and sourcing always
+re-render), runs `hw-check`, then packages the four zips and publishes the
+release with tag `physiclaw-hardware-vX.Y`. To publish `output/` as-is
+without building, use `make hw-release HW_VERSION=X.Y` — it guards that the
+artifacts (including the manual PDFs) exist first.
+
+After publishing, redeploy the docs site (docs-site) — it serves the
+assembly manual and its PDF from the release assets, so the live pages stay
+on the old manual until the site rebuilds.
