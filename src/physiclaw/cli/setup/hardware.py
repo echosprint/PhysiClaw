@@ -284,9 +284,10 @@ def _step_calibrate_arm(auto: bool) -> None:
 
 
 def _step_calibrate_camera(auto: bool, cam: int) -> None:
-    # Rotation/coverage check, then 15-dot mapping.
+    # Rotation/coverage check, then focus pin (checkerboard) + 15-dot mapping.
     print("\n── 7. Calibrate the camera ──")
     print("  Keep the whole screen in view, evenly lit and free of glare.")
+    print("  The phone shows a checkerboard to lock focus, then 15 dots to map.")
     # Interactive only: aiming with the OS camera app releases the device, so
     # reopen it afterwards. In auto mode the camera stays connected from step 4
     # — mirror the browser wizard, which calibrates the still-connected camera
