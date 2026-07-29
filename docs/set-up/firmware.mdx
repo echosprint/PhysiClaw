@@ -30,6 +30,29 @@ Connect the two motors and the solenoid, then drive the machine by hand to confi
 physiclaw testdrive
 ```
 
+<svg viewBox="0 0 340 330" role="img" aria-label="Bird's-eye view of the machine: origin at the top-left corner, X to the right along the motor beam, Y away from the beam" style="max-width:340px;width:100%;height:auto;margin:1.5rem auto;display:block" xmlns="http://www.w3.org/2000/svg" font-family="'Inter','Segoe UI',system-ui,sans-serif">
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 62 51 Q 180 48.5 298 51 Q 300.5 170 298.5 288 Q 180 290.5 61.5 288.5 Q 59.5 170 62 51 Z" stroke="currentColor" stroke-width="2"/>
+    <path d="M 89 57.5 Q 106 55.5 123 57 Q 125 74 123.5 90.5 Q 106 92.5 89.5 91 Q 87.5 74 89 57.5 Z" stroke="currentColor" stroke-width="1.5"/>
+    <text x="106" y="80" text-anchor="middle" font-size="15" font-weight="600" fill="currentColor" stroke="none">A</text>
+    <path d="M 237.5 57 Q 254 55.5 271 57.5 Q 272.5 74 271 91 Q 254 92.5 237 90.5 Q 235.5 74 237.5 57 Z" stroke="currentColor" stroke-width="1.5"/>
+    <text x="254" y="80" text-anchor="middle" font-size="15" font-weight="600" fill="currentColor" stroke="none">B</text>
+    <path d="M 149 111 Q 180 109.5 211 110.5 Q 224 111 224.5 124 Q 226 190 224.5 256 Q 224 269 211 269.5 Q 180 271 149.5 269.5 Q 136 269 135.5 256 Q 134.5 190 136 124 Q 136.5 111.5 149 111 Z" stroke="currentColor" stroke-width="1.5" opacity="0.7"/>
+    <path d="M 165 256 Q 180 257 195 256" stroke="currentColor" stroke-width="3" opacity="0.5"/>
+    <circle cx="40" cy="30" r="5" fill="#3b82f6" stroke="none"/>
+    <path d="M 48 30 Q 117 28.5 188 30 M 179 24 L 189 30 L 179 36" stroke="#3b82f6" stroke-width="2"/>
+    <text x="200" y="35" font-size="14" font-weight="600" fill="#3b82f6" stroke="none">X+</text>
+    <path d="M 40 38 Q 38.5 119 40 200 M 34 191 L 40 201 L 46 191" stroke="#3b82f6" stroke-width="2"/>
+    <text x="40" y="226" text-anchor="middle" font-size="14" font-weight="600" fill="#3b82f6" stroke="none">Y+</text>
+  </g>
+</svg>
+
+Try `X10` / `Y10` and check that each move follows the axes illustrated above. `tap` to check the solenoid works.
+
+:::tip
+Motor A goes to the board's Y1 port, motor B to X, and the solenoid to the spindle terminal.
+:::
+
 ## Manual flash
 
 If `physiclaw flash` succeeds, you can skip this part.
