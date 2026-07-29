@@ -625,7 +625,11 @@
         },
         "url": "https://detail.tmall.com/item.htm?id=972516011330&skuId=6091561787183"
       }
-    ]
+    ],
+    "note": {
+      "en": "The lead wire needs soldering to extend and is easily damaged by careless handling; buy one spare.",
+      "zh": "引线需焊接加长，操作不当容易损坏，建议多买一个备用。"
+    }
   },
   {
     "part_id": "flat-bracket",
