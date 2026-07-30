@@ -40,6 +40,20 @@ rest, so the cutting order reads as one spanned block. ``"Ditto"`` works per
 field (``ref`` / ``inquiry`` / ``suppliers`` / ``note``), or per supplier
 slot inside the ``suppliers`` array; on the first row it is an error.
 
+The page is also the builder's own checklist: every row carries a
+"bought" checkbox between the BOM columns and the supplier columns,
+ticked rows dim, and a tally just above the table counts progress
+(``12/57 bought``). A cell that spans several rows (a class group or a
+Ditto block) dims only once every row it covers is bought. The list
+persists in ``localStorage`` keyed by the manual version, so state
+survives sessions but a new guide revision starts a clean list, and the
+EN / ZH pages share one list. Beside the reset control, a "highlight"
+toggle washes the unbought rows' Spec and Qty cells (what the buyer
+reads at the shop) in the accent's light wash; it persists with the
+list and hides, off, while the list is empty. State only ever changes
+by the builder's explicit tick or toggle; browsing (following a
+supplier link) marks nothing.
+
 Run under ``uv`` from the repo root (standard library only, Python 3.12+)::
 
     uv run python -m hardware.manual.build_sourcing_guide              # en + zh
@@ -73,6 +87,7 @@ from hardware.manual.common import (
     _step,
     load_pages,
     loc,
+    manual_version,
 )
 from hardware.scheme import OUTPUT_DIR as _OUTPUT_ROOT
 
@@ -88,6 +103,11 @@ OUTPUT_DIR = _OUTPUT_ROOT / "sourcing"
 
 LANG_FILENAME = {"en": "sourcing_guide.html", "zh": "physiclaw采购指南.html"}
 
+# localStorage key prefix for the bought checklist; the version-suffixed key
+# and the prefix both reach the page as body data attributes, so the JS never
+# restates this literal.
+STORE_PREFIX = "physiclaw-sourcing-"
+
 SUPPLIERS_PER_ROW = 3  # supplier slots per part
 DITTO = "Ditto"  # field value: merge this cell with the row above
 
@@ -97,14 +117,13 @@ UI = {
     "h1": {"en": "Sourcing guide", "zh": "采购指南"},
     "lede": {
         "en": "This guide covers every part in the assembly manual's bill "
-        "of materials, with three reference suppliers per part.<br>"
+        "of materials, with three reference suppliers each.<br>"
         "Reference prices are subtotals for the required quantity "
-        "(not unit prices; shipping excluded) and do not represent "
-        "actual transaction prices — vendors may adjust pricing at "
-        "any time; use them only to gauge the general price level.",
-        "zh": "本指南涵盖装配手册物料清单的全部零件，每项零件列出三家参考供应商。<br>"
-        "参考价为所需数量的合计金额（非单价，不含运费），并非实际成交价格"
-        "——厂商可能随时调价，仅供衡量大致价格水平。",
+        "(not unit prices, shipping excluded). Vendors may adjust "
+        "prices at any time, so use them only as a rough gauge.",
+        "zh": "本指南涵盖装配手册物料清单的全部零件，每项列出三家参考供应商。<br>"
+        "参考价为所需数量的合计金额（非单价，不含运费）。"
+        "商家可能随时调价，仅供衡量大致价格水平。",
     },
     "pending": {"en": "to be found", "zh": "待补充"},
     "disclaimer": {
@@ -127,6 +146,14 @@ UI = {
     },
     "inquiry_label": {"en": "Inquiry message", "zh": "询价说明"},
     "supplier_n": {"en": "Supplier", "zh": "供应商"},
+    # Bought-checklist chrome. tally_fmt/tally_done are JS templates
+    # ({n} ticked / {t} rows).
+    "th_bought": {"en": "Bought", "zh": "已购"},
+    "tally_fmt": {"en": "{n}/{t} bought", "zh": "已购 {n}/{t}"},
+    "tally_done": {"en": "All {t} parts bought", "zh": "全部 {t} 项已购齐"},
+    "reset": {"en": "reset", "zh": "重置"},
+    "reset_confirm": {"en": "Clear all bought marks?", "zh": "清除所有已购标记？"},
+    "hl": {"en": "highlight", "zh": "高亮"},
     "th_cls": {"en": "Class", "zh": "类别"},
     "th_component": {"en": "Component", "zh": "组件"},
     "th_spec": {"en": "Spec", "zh": "规格"},
@@ -381,19 +408,23 @@ def render_table(rows: list[dict], entries: list[dict], lang: str) -> str:
     _, inquiries = ditto_walk([e.get("inquiry") for e in entries], "inquiry", ids)
 
     body: list[str] = []
+    bought_label = ui("th_bought", lang)
     for idx, row in enumerate(rows):
+        comp = loc(row["component"], lang)
         cells = ""
         if cls_span[idx]:
             cells += f'<td class="cls"{_span_attr(cls_span[idx])}>{loc(row["cls"], lang)}</td>'
         if comp_span[idx]:
-            cells += (
-                f'<td class="comp"{_span_attr(comp_span[idx])}>'
-                f"{loc(row['component'], lang)}</td>"
-            )
+            cells += f'<td class="comp"{_span_attr(comp_span[idx])}>{comp}</td>'
+        # The bought checkbox — the only control that changes checklist
+        # state — sits between the BOM identity columns (what the part is)
+        # and the sourcing columns (where to buy it): tick as you cross over.
+        aria = html.escape(f"{bought_label}: {comp}", quote=True)
         cells += (
             f'<td class="spec">{loc(row["spec"], lang)}</td>'
             f'<td class="qty">{row["qty"]}</td>'
             f'<td class="desc">{loc(row["desc"], lang)}</td>'
+            f'<td class="get"><input type="checkbox" aria-label="{aria}"></td>'
         )
 
         message = loc(inquiries[idx] or "", lang)
@@ -423,7 +454,7 @@ def render_table(rows: list[dict], entries: list[dict], lang: str) -> str:
         # Only class starts get a heavier separator; the full cell grid
         # already delineates components, so no `sub` class here.
         row_cls = ' class="grp"' if cls_span[idx] else ""
-        body.append(f"<tr{row_cls}>{cells}</tr>")
+        body.append(f'<tr{row_cls} data-pid="{row["part_id"]}">{cells}</tr>')
 
     supplier_ths = "".join(
         f"<th>{ui('supplier_n', lang)} {j + 1}</th>" for j in range(SUPPLIERS_PER_ROW)
@@ -432,6 +463,7 @@ def render_table(rows: list[dict], entries: list[dict], lang: str) -> str:
         f"<tr><th>{ui('th_cls', lang)}</th><th>{ui('th_component', lang)}</th>"
         f"<th>{ui('th_spec', lang)}</th><th>{ui('th_qty', lang)}</th>"
         f"<th>{ui('th_desc', lang)}</th>"
+        f'<th class="get">{ui("th_bought", lang)}</th>'
         f"{supplier_ths}<th>{ui('th_ref', lang)}</th>"
         f"<th>{ui('th_note', lang)}</th></tr>"
     )
@@ -441,9 +473,113 @@ def render_table(rows: list[dict], entries: list[dict], lang: str) -> str:
     )
 
 
-# Page script: copy-to-clipboard for the per-row inquiry message. Both file://
-# and https:// are secure contexts, so navigator.clipboard is always there.
+# Page script: the bought checklist + copy-to-clipboard for the per-row
+# inquiry message. All localized strings arrive via data attributes, so the
+# script itself is language-free and shared verbatim by both files. Both
+# file:// and https:// are secure contexts, so navigator.clipboard is always
+# there; localStorage may still be denied (e.g. some file:// policies) — the
+# try/catch degrades to per-visit state instead of breaking the page.
 PAGE_JS = """\
+(function () {
+  var KEY = document.body.dataset.storeKey;
+  var PREFIX = document.body.dataset.storePrefix;
+  var bought = {};
+  try {
+    Object.keys(localStorage).forEach(function (k) {
+      if (k.indexOf(PREFIX) === 0 && k !== KEY)
+        localStorage.removeItem(k);  // older guide revisions start clean
+    });
+    // Stored shape: {pids: [...], hl: bool}; early builds stored a bare
+    // array of pids — accept both.
+    var stored = JSON.parse(localStorage.getItem(KEY) || '[]');
+    (Array.isArray(stored) ? stored : stored.pids || []).forEach(function (p) {
+      bought[p] = true;
+    });
+    if (stored.hl) document.body.classList.add('hl');
+  } catch (e) {}
+
+  // The row anatomy, resolved once: the tr, its part id, its checkbox.
+  var items = Array.from(document.querySelectorAll('tbody tr')).map(function (tr) {
+    return {tr: tr, pid: tr.dataset.pid, box: tr.querySelector('td.get input')};
+  });
+  // A cell that spans several rows (class group, component group, Ditto
+  // block) belongs to its anchor row, so row-level dimming would grey it
+  // while spanned rows are still unbought. Map each spanning cell to the
+  // part ids it covers; render() greys it only when all are ticked.
+  var spans = [];
+  items.forEach(function (it, i) {
+    Array.from(it.tr.children).forEach(function (td) {
+      if (td.rowSpan > 1) spans.push({
+        td: td,
+        pids: items.slice(i, i + td.rowSpan).map(function (x) { return x.pid; })
+      });
+    });
+  });
+  var tally = document.getElementById('tally');
+  var reset = document.getElementById('reset');
+  var hl = document.getElementById('hl');
+
+  function save() {
+    try {
+      localStorage.setItem(KEY, JSON.stringify({
+        pids: Object.keys(bought),
+        hl: document.body.classList.contains('hl')
+      }));
+    } catch (e) {}
+  }
+
+  function render() {
+    var n = 0;
+    items.forEach(function (it) {
+      var done = !!bought[it.pid];
+      it.tr.classList.toggle('done', done);
+      it.box.checked = done;
+      if (done) n++;
+    });
+    spans.forEach(function (s) {
+      s.td.classList.toggle('done', s.pids.every(function (p) {
+        return bought[p];
+      }));
+    });
+    tally.textContent = (n === items.length ? tally.dataset.done : tally.dataset.fmt)
+      .replace('{n}', n).replace('{t}', items.length);
+    reset.hidden = n === 0;
+    // The highlight only means something once sourcing has started; an
+    // empty list would just wash every row. body.hl is its only state.
+    if (n === 0) document.body.classList.remove('hl');
+    hl.hidden = n === 0;
+  }
+
+  // render() before save(): render may auto-clear the highlight (empty
+  // list), and save() records the settled DOM state.
+  items.forEach(function (it) {
+    it.box.addEventListener('change', function (ev) {
+      if (ev.target.checked) {
+        bought[it.pid] = true;
+        // Marks a hand-made tick: only these play the landing flash, so
+        // restored checks on reload settle without animating.
+        ev.target.classList.add('ticked');
+      } else {
+        delete bought[it.pid];
+      }
+      render();
+      save();
+    });
+  });
+  reset.addEventListener('click', function () {
+    if (!confirm(reset.dataset.confirm)) return;
+    bought = {};
+    render();
+    save();
+  });
+  hl.addEventListener('click', function () {
+    document.body.classList.toggle('hl');
+    render();
+    save();
+  });
+  render();
+})();
+
 document.querySelectorAll('button.copy').forEach(function (b) {
   b.addEventListener('click', function () {
     navigator.clipboard.writeText(b.dataset.q).then(function () {
@@ -456,20 +592,42 @@ document.querySelectorAll('button.copy').forEach(function (b) {
 
 
 def render_document(rows: list[dict], entries: list[dict], css: str, lang: str) -> str:
+    # The checklist line sits left-aligned just above the table: the tally
+    # (JS fills it from the localized templates) and the reset / highlight
+    # buttons (hidden until something is ticked; reset's confirm text rides
+    # the button).
+    checklist = (
+        '<div class="checklist">'
+        '<span class="tally" id="tally" '
+        f'data-fmt="{html.escape(ui("tally_fmt", lang), quote=True)}" '
+        f'data-done="{html.escape(ui("tally_done", lang), quote=True)}"></span>'
+        '<button id="reset" type="button" hidden '
+        f'data-confirm="{html.escape(ui("reset_confirm", lang), quote=True)}">'
+        f"{ui('reset', lang)}</button>"
+        f'<button class="hl" id="hl" type="button" hidden>{ui("hl", lang)}</button>'
+        "</div>"
+    )
     body = (
         '<div class="wrap">'
         f'<header class="mast"><h1>{ui("h1", lang)}</h1>'
         f'<span class="url">{URL_MARK}</span></header>'
         f'<div class="preamble"><p class="lede">{ui("lede", lang)}</p>'
         f'<p class="disclaimer">{ui("disclaimer", lang)}</p></div>'
-        f"{render_table(rows, entries, lang)}</div>"
+        f"{checklist}{render_table(rows, entries, lang)}</div>"
     )
+    # Bought marks and the highlight preference persist per manual version
+    # (a revision starts clean); the EN and ZH files share the key, so state
+    # carries across languages. The prefix rides along so the JS stale-key
+    # sweep never restates it.
+    store_key = f"{STORE_PREFIX}{manual_version()}"
     return (
         f'<!DOCTYPE html>\n<html lang="{HTML_LANG[lang]}">\n<head>\n'
         '<meta charset="UTF-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
         f"<title>{ui('doc_title', lang)}</title>\n"
-        f"<style>\n{css}</style>\n</head>\n<body>\n{body}\n"
+        f"<style>\n{css}</style>\n</head>\n"
+        f'<body data-store-key="{html.escape(store_key, quote=True)}" '
+        f'data-store-prefix="{html.escape(STORE_PREFIX, quote=True)}">\n{body}\n'
         f"<script>\n{PAGE_JS}</script>\n</body>\n</html>\n"
     )
 

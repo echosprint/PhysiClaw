@@ -10,6 +10,8 @@
   --ink-faint:  #b8b8b8;
   --rule:       #d8d8d8;
   --page-bg:    #ffffff;
+  --tint:       #faf4f0;
+  --mark:       #f6dcd1;  /* ~20% accent on white — the highlight wash */
   --link:       #4a8bc7;
   --ok:         #2e7d4f;
   --font-sans:  "Inter", "Helvetica Neue", "Segoe UI", Arial, sans-serif;
@@ -60,6 +62,28 @@ a:hover { text-decoration: underline; }
   font-size: 14px;
   letter-spacing: 0.12em;
 }
+
+/* ---- bought-checklist chrome -------------------------------------------- */
+/* The tally and its reset / highlight buttons sit on their own line,
+   left-aligned just above the table; the count is mono so it doesn't
+   jitter as rows tick. */
+.checklist { display: flex; align-items: baseline; gap: 14px; margin-top: 24px; }
+.checklist .tally {
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+.checklist button {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink-faint);
+  cursor: pointer;
+}
+.checklist button:hover { color: var(--accent); }
+body.hl .checklist .hl { color: var(--accent); }
 .preamble {
   display: flex;
   justify-content: space-between;
@@ -75,7 +99,7 @@ a:hover { text-decoration: underline; }
   margin: 0;
   padding: 8px 12px;
   border-left: 3px solid var(--accent);
-  background: #faf4f0;
+  background: var(--tint);
 }
 
 /* ---- parts table --------------------------------------------------------
@@ -84,7 +108,7 @@ a:hover { text-decoration: underline; }
    a light inner grid (rule). Numbers are tabular so columns of figures
    align; the type hierarchy is component (semibold ink) > spec (mono soft)
    > application/notes (small soft). */
-.table-wrap { margin-top: 24px; overflow-x: auto; }
+.table-wrap { margin-top: 8px; overflow-x: auto; }
 table.sourcing {
   border-collapse: collapse;
   width: 100%;
@@ -100,16 +124,17 @@ table.sourcing {
   line-height: 1.45;
 }
 
-/* Column widths (10 columns, sums to 100%):
-   Class | Component | Spec | Qty | Application | Ref | 3 × Supplier | Notes */
+/* Column widths (11 columns, sums to 100%):
+   Class | Component | Spec | Qty | Application | Bought | 3 × Supplier | Ref | Notes */
 .sourcing th:nth-child(1)  { width: 6%; }
 .sourcing th:nth-child(2)  { width: 11%; }
-.sourcing th:nth-child(3)  { width: 23%; }
+.sourcing th:nth-child(3)  { width: 21%; }
 .sourcing th:nth-child(4)  { width: 4%; }
 .sourcing th:nth-child(5)  { width: 11%; }
-.sourcing th:nth-child(6), .sourcing th:nth-child(7), .sourcing th:nth-child(8) { width: 9%; }
-.sourcing th:nth-child(9)  { width: 6%; }
-.sourcing th:nth-child(10) { width: 12%; }
+.sourcing th:nth-child(6)  { width: 3%; }
+.sourcing th:nth-child(7), .sourcing th:nth-child(8), .sourcing th:nth-child(9) { width: 9%; }
+.sourcing th:nth-child(10) { width: 6%; }
+.sourcing th:nth-child(11) { width: 11%; }
 
 /* Open header in the manual's table idiom — no vertical rules, thin uppercase
    letterspaced labels, one strong closing rule above the ruled body. */
@@ -128,11 +153,52 @@ table.sourcing {
   border: none;
   border-bottom: 2px solid var(--ink);
 }
-/* Align the Qty header with its centered column. */
-.sourcing thead th:nth-child(4) { text-align: center; }
+/* Align the Qty / Bought headers with their centered columns. */
+.sourcing thead th:nth-child(4),
+.sourcing thead th.get { text-align: center; }
 
 /* A medium rule opens each class group, lifting it off the inner grid. */
 .sourcing tbody tr.grp td { border-top: 1.5px solid var(--ink-faint); }
+
+/* The bought checkbox, the row's only stateful control, drawn in the
+   page's idiom instead of the OS widget: a hairline box that leans toward
+   the accent on hover, ticking with the same Feather check the copy
+   buttons morph to. The tick lands with a green flash and soft scale (the
+   copy-button morph's idiom), then settles into the row's muted grey — a
+   checked row is always a dimmed row, so a well-bought list stays quiet
+   instead of accumulating saturated green. Ticked rows dim in place, never
+   hide: display:none inside the rowspan grid would orphan a block's
+   merged cells. */
+td.get { text-align: center; }
+td.get input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  vertical-align: middle;
+  border: 1.5px solid var(--ink-faint);
+  border-radius: 3px;
+  background: var(--page-bg) center / 11px no-repeat;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+td.get input:hover { border-color: var(--accent); }
+td.get input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+td.get input:checked {
+  border-color: var(--ink-faint);
+  background-color: var(--ink-faint);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");
+}
+/* The landing flash plays only on a fresh tick: `ticked` is set by the
+   change handler, never by the restore path, so a reload's re-checked
+   boxes settle silently instead of all flashing green. */
+td.get input.ticked:checked { animation: tick-in 0.3s ease; }
+@keyframes tick-in {
+  0% { transform: scale(0.7); border-color: var(--ok); background-color: var(--ok); }
+  60% { transform: scale(1.1); border-color: var(--ok); background-color: var(--ok); }
+  100% { transform: scale(1); }
+}
 
 td.cls {
   color: var(--accent);
@@ -265,11 +331,32 @@ button.copy.flip::before { left: auto; right: 14px; }
 td.note { color: var(--ink-soft); font-size: 12.5px; }
 td.note button.copy { margin-top: 0; vertical-align: -1px; }
 
+/* Bought dimming. Row-level dimming covers only single-row cells; a cell
+   spanning several rows ([rowspan]) greys via its own `done` class, which
+   the page script sets only when every covered row is bought. :is() gives
+   the group its most specific argument's weight, so the dim color outranks
+   the per-column color rules (td.cls, td.note, td.ref, .v-prod) regardless
+   of source order. */
+:is(tr.done td:not([rowspan]), td.done),
+:is(tr.done td:not([rowspan]), td.done) :is(.v-vendor a, .v-prod, button.copy) {
+  color: var(--ink-faint);
+}
+
+/* Highlight (body.hl): unbought rows wash their Spec and Qty cells —
+   exactly what the buyer reads at the shop — in the accent's own light
+   wash, strong enough to eyeball scanning down the column. Both are
+   always single-row cells, so row state alone decides. */
+body.hl tbody tr:not(.done) :is(td.spec, td.qty) { background: var(--mark); }
+
 /* ---- print -------------------------------------------------------------- */
+/* The checkboxes stay — printed empty they make the page a bench checklist,
+   printed mid-sourcing they carry the current state; only the buttons
+   (reset, highlight) drop. The tally prints. */
 @media print {
   body { background: #fff; }
   .wrap { margin: 0; padding: 0; max-width: none; }
   .table-wrap { overflow: visible; }
   .sourcing thead th { position: static; }
+  .checklist button { display: none; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
