@@ -401,12 +401,11 @@ def test_trace_rolls_over_to_new_day_when_midnight_crossed(
         t.write({"event": "tools_loaded", "mcp": [], "local": []})
         t.close()
 
-    today_log = _trace_dirs / "engine-2026-04-28.log"
-    tomorrow_log = _trace_dirs / "engine-2026-04-29.log"
-
-    assert "ROLLOVER" in today_log.read_text()
-    assert "ROLLOVER ← continued from previous day" in tomorrow_log.read_text()
-    assert "tools: 0 MCP" in tomorrow_log.read_text()
+    # Marker details are pinned by the DailyLogWriter unit tests
+    # (tests/common/logger); here just the wiring: a post-midnight write
+    # lands in the new day's file.
+    assert (_trace_dirs / "engine-2026-04-28.log").exists()
+    assert "tools: 0 MCP" in (_trace_dirs / "engine-2026-04-29.log").read_text()
 
 
 # ---------- RawLog ----------

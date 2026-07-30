@@ -2,9 +2,10 @@
 
 1. `Trace` — per-day human-readable log
      log/engine/engine-YYYY-MM-DD.log
-   Matches the shape of `agent/claude/spawn.py`'s _SessionLog so
-   operators scan either runtime the same way. One-line summaries
-   via `_summarize(event)`; internal bookkeeping events in
+   Written through the shared `DailyLogWriter`, the same one
+   `agent/claude/session_log.py`'s _SessionLog uses, so operators
+   scan either runtime the same way. One-line summaries via
+   `_summarize(event)`; internal bookkeeping events in
    `_SILENT_EVENTS` are skipped there. Each session ends with an
    `END session=… outcome=… turns=…` footer carrying the headline
    metrics.
@@ -38,13 +39,10 @@
    CONFIG.retention.log_days.
 """
 
-import base64
-import dataclasses
 import datetime as dt
 import json
 import logging
 import secrets
-import shutil
 import time
 from collections import Counter
 from pathlib import Path
@@ -52,9 +50,17 @@ from typing import Any
 
 from physiclaw.common import paths
 from physiclaw.common.config import CONFIG
-from physiclaw.common.logger import SessionLogSidecars
-from physiclaw.common.logger.retention import purge_daily_logs
-from physiclaw.common.text import read_text, write_text
+from physiclaw.common.logger import (
+    DailyLogWriter,
+    SessionLogSidecars,
+    build_summary,
+    ensure_readme,
+    env_snapshot,
+    iso_now,
+    save_image,
+    write_json_atomic,
+)
+from physiclaw.common.logger.retention import purge_daily_logs, purge_old_sessions
 
 log = logging.getLogger(__name__)
 
@@ -73,35 +79,6 @@ def _session_dir(sid: str) -> Path:
     return _SESSIONS_DIR / sid
 
 
-def _env_snapshot() -> dict[str, Any]:
-    """The session's environment — versions, OS, rig identity, and the
-    behavior-relevant config, captured once per session (OTel calls these
-    resource attributes). This is what makes a shared session dir
-    self-describing: "which rig / version / camera settings produced
-    this?" without asking.
-
-    Deliberately NOT the whole CONFIG — the provider section holds API
-    keys. Only secret-free sections that vary across rigs and change
-    what the agent sees (camera exposure/format, image compaction)."""
-    import platform as _platform
-    import sys
-
-    from physiclaw import __version__
-
-    return {
-        "physiclaw": __version__,
-        "python": _platform.python_version(),
-        "os": sys.platform,
-        "platform": _platform.platform(),
-        "host": _platform.node(),
-        "utc_offset": dt.datetime.now().astimezone().strftime("%z"),
-        "config": {
-            "camera": dataclasses.asdict(CONFIG.camera),
-            "compact": dataclasses.asdict(CONFIG.compact),
-        },
-    }
-
-
 def new_sid() -> str:
     """Mint a session id: `YYYYMMDD-HHMMSS-<6 hex digits>`.
 
@@ -114,28 +91,6 @@ def new_sid() -> str:
     session by it.
     """
     return f"{dt.datetime.now():%Y%m%d-%H%M%S}-{secrets.token_hex(3)}"
-
-
-# mime → filename suffix for images extracted from data-URLs. Everything
-# we actually serve is JPEG via compact.scale_image_bytes, but keep the
-# fallback open for PNG / WebP in case an upstream tool starts emitting
-# them.
-_MIME_EXT = {
-    "image/jpeg": ".jpg",
-    "image/png": ".png",
-    "image/webp": ".webp",
-}
-
-
-def image_filename(turn: int, mime: str) -> str:
-    """Name a captured screenshot `<HHMMSS>_<mmm>_t<turn>.<ext>`: a
-    local-time stamp (hour-minute-second + milliseconds, so the names sort
-    chronologically within a session) plus the turn whose request carried
-    it. Shared by both engines so the `images/` layout stays identical.
-    `.bin` is the fallback for an unknown mime."""
-    now = dt.datetime.now()
-    ext = _MIME_EXT.get(mime, ".bin")
-    return f"{now:%H%M%S}_{now.microsecond // 1000:03d}_t{turn}{ext}"
 
 
 # Events that are internal bookkeeping — don't surface in the human log.
@@ -232,20 +187,6 @@ sensitive.
 """
 
 
-def _ensure_sessions_readme() -> None:
-    """Keep the format doc at sessions/README.md current — rewritten
-    whenever the shipped constant changed (existing installs would
-    otherwise keep documenting a retired format forever, and the doc
-    explicitly promises analysts can bootstrap from it). Fail-open,
-    cheap (one small read per session start)."""
-    path = _SESSIONS_DIR / "README.md"
-    try:
-        if not path.exists() or read_text(path) != SESSIONS_README:
-            write_text(path, SESSIONS_README)
-    except OSError:
-        log.debug("sessions README write failed", exc_info=True)
-
-
 # ---------- public formatting helpers (shared with dispatch.py) ----------
 
 
@@ -335,20 +276,11 @@ class Trace:
     """
 
     def __init__(self, session_id: str):
-        _LOG_DIR.mkdir(parents=True, exist_ok=True)
         self.session_id = session_id
-        self._date = dt.datetime.now().strftime("%Y-%m-%d")
-        self._f = open(
-            _LOG_DIR / f"engine-{self._date}.log",
-            "a",
-            encoding="utf-8",
-            newline="\n",
-        )
-        self._f.write(f"\n{'=' * 60}\n")
-        self._f.flush()
+        self._daily = DailyLogWriter(_LOG_DIR, "engine")
         d = _session_dir(session_id)
         d.mkdir(parents=True, exist_ok=True)
-        _ensure_sessions_readme()
+        ensure_readme(_SESSIONS_DIR, SESSIONS_README)
         self._events = open(d / "events.jsonl", "a", encoding="utf-8", newline="\n")
         # Self-containment: runtime.log (process log mirror) + mcp.log
         # (the server's log for this session's window) via the shared
@@ -361,7 +293,7 @@ class Trace:
         # First line of every session: the environment it ran in —
         # crash-safe (flushed now), so even a killed session is
         # self-describing.
-        self.write({"event": "env", **_env_snapshot()})
+        self.write({"event": "env", **env_snapshot()})
 
     def _open_notes(self, path: Path):
         """Open the per-turn note-history file and write its header.
@@ -383,7 +315,7 @@ class Trace:
         msg = _summarize(event)
         if msg is None:
             return
-        self._emit(msg)
+        self._daily.line(msg)
 
     def _append_note(self, event: dict[str, Any]) -> None:
         """Append a `note` tool_result's summary to notes.md — the
@@ -419,8 +351,8 @@ class Trace:
             summary = self._summary.finalize(
                 images=_count_images(self.session_id),
             )
-            _write_json_atomic(_session_dir(self.session_id) / "summary.json", summary)
-            self._emit(_end_footer(summary))
+            write_json_atomic(_session_dir(self.session_id) / "summary.json", summary)
+            self._daily.line(_end_footer(summary))
         except OSError:
             log.warning("session summary write failed", exc_info=True)
         finally:
@@ -428,7 +360,8 @@ class Trace:
             # mirror (ordering owned by SessionLogSidecars) before closing
             # the trace files below.
             self._sidecars.close()
-            for f in (self._events, self._f, self._notes):
+            self._daily.close()
+            for f in (self._events, self._notes):
                 try:
                     if f is not None and not f.closed:
                         f.close()
@@ -440,7 +373,7 @@ class Trace:
         payloads are summarized — `blocks` may carry base64 screenshots
         whose full bytes already live in wire.jsonl/images; duplicating
         them here would double the session's disk cost for nothing."""
-        obj: dict[str, Any] = {"t": _now(), **event}
+        obj: dict[str, Any] = {"t": iso_now(), **event}
         if event.get("event") == "tool_result" and "blocks" in obj:
             obj["result_summary"] = brief_content(obj.pop("blocks"))
         try:
@@ -449,27 +382,6 @@ class Trace:
             self._events.flush()
         except (OSError, TypeError, ValueError):
             log.warning("events.jsonl write failed", exc_info=True)
-
-    def _emit(self, msg: str) -> None:
-        now = dt.datetime.now()
-        today = now.strftime("%Y-%m-%d")
-        if today != self._date:
-            # Crossed midnight — close current file, continue in today's.
-            self._f.write(f"[{now:%H:%M:%S}] ROLLOVER → engine-{today}.log\n")
-            self._f.flush()
-            self._f.close()
-            self._date = today
-            self._f = open(
-                _LOG_DIR / f"engine-{today}.log",
-                "a",
-                encoding="utf-8",
-                newline="\n",
-            )
-            self._f.write(
-                f"\n[{now:%H:%M:%S}] ROLLOVER ← continued from previous day\n"
-            )
-        self._f.write(f"[{now:%H:%M:%S}] {msg}\n")
-        self._f.flush()
 
 
 # ---------- session summary (derived from the event stream) ----------
@@ -504,7 +416,7 @@ class _Summary:
 
     def __init__(self, sid: str):
         self.sid = sid
-        self.started_at = _now()
+        self.started_at = iso_now()
         self._start_mono = time.monotonic()
         self.model_ref = ""
         self.prompt_hash = ""
@@ -567,53 +479,29 @@ class _Summary:
             self.stuck_events += 1
 
     def finalize(self, *, images: int) -> dict[str, Any]:
-        return {
-            "schema": 1,
-            "sid": self.sid,
-            "started_at": self.started_at,
-            "ended_at": _now(),
-            "duration_s": round(time.monotonic() - self._start_mono, 1),
-            "model_ref": self.model_ref,
-            "provider": self.model_ref.partition("/")[0],
-            "prompt_hash": self.prompt_hash,
-            "triggers": self.triggers,
-            "outcome": {
-                "sentinel": self.sentinel,
-                "recap": self.recap,
-                "crashed": self.crashed,
-            },
-            "turns": self.max_turn + 1,
-            "provider_calls": self.provider_calls,
-            "provider_time_ms": self.provider_time_ms,
-            "usage": {
-                "input_tokens": self.input_tokens,
-                "output_tokens": self.output_tokens,
-                "cache_read_tokens": self.cache_read,
-                "cache_creation_tokens": self.cache_creation,
-                "cache_hit_pct": (
-                    round(100 * self.cache_read / self.input_tokens, 1)
-                    if self.input_tokens
-                    else 0.0
-                ),
-            },
-            "tool_calls": dict(self.tool_calls),
-            "errors": {
-                key: self.errors.get(key, 0)
-                for key in (
-                    "blocked_plan",
-                    "blocked_layout",
-                    "blocked_stuck",
-                    "invalid_args",
-                    "unknown_tool",
-                    "tool_errors",
-                    "correctives",
-                    "provider_failures",
-                )
-            },
-            "stuck_events": self.stuck_events,
-            "images": images,
-            "env": self.env,
-        }
+        return build_summary(
+            sid=self.sid,
+            started_at=self.started_at,
+            duration_s=time.monotonic() - self._start_mono,
+            model_ref=self.model_ref,
+            prompt_hash=self.prompt_hash,
+            triggers=self.triggers,
+            sentinel=self.sentinel,
+            recap=self.recap,
+            crashed=self.crashed,
+            turns=self.max_turn + 1,
+            provider_calls=self.provider_calls,
+            provider_time_ms=self.provider_time_ms,
+            input_tokens=self.input_tokens,
+            output_tokens=self.output_tokens,
+            cache_read_tokens=self.cache_read,
+            cache_creation_tokens=self.cache_creation,
+            tool_calls=self.tool_calls,
+            errors=self.errors,
+            stuck_events=self.stuck_events,
+            images=images,
+            env=self.env,
+        )
 
 
 def fmt_tokens(n: int) -> str:
@@ -636,17 +524,6 @@ def _end_footer(summary: dict[str, Any]) -> str:
         f"cache={u['cache_hit_pct']:.0f}% "
         f"tools={sum(summary['tool_calls'].values())}"
     )
-
-
-def _write_json_atomic(path: Path, obj: dict[str, Any]) -> None:
-    """tmp + rename so a crash mid-write can't leave a truncated summary."""
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(
-        json.dumps(obj, ensure_ascii=False, indent=2, default=repr) + "\n",
-        encoding="utf-8",
-        newline="\n",
-    )
-    tmp.replace(path)
 
 
 def _count_images(sid: str) -> int:
@@ -799,7 +676,7 @@ class RawLog:
             self._f.close()
 
     def _emit(self, kind: str, **data: Any) -> None:
-        obj = {"t": _now(), "kind": kind, **data}
+        obj = {"t": iso_now(), "kind": kind, **data}
         self._f.write(json.dumps(obj, ensure_ascii=False) + "\n")
         self._f.flush()
 
@@ -811,14 +688,8 @@ class RawLog:
         chronologically and its `_t<turn>` tag links each straight to its
         turn. Returns "" on decode failure so the caller can fall back to a
         byte-count stub."""
-        try:
-            raw = base64.b64decode(b64_data, validate=False)
-        except (ValueError, TypeError):
-            return ""
-        rel = f"images/{image_filename(self._turn, mime)}"
-        path = _session_dir(self.session_id) / rel
-        path.write_bytes(raw)
-        return rel
+        name = save_image(self._image_dir, self._turn, mime, b64_data)
+        return f"images/{name}" if name else ""
 
     def _scrub_images(self, messages: list[dict]) -> list[dict]:
         """Copy of `messages` with inline base64 image data replaced by
@@ -890,12 +761,6 @@ class RawLog:
         return b
 
 
-def _now() -> str:
-    # ms precision makes per-turn latency analysis possible without having
-    # to correlate against the engine log.
-    return dt.datetime.now().isoformat(timespec="milliseconds")
-
-
 def _purge_old(
     *,
     days: int = _RETENTION_DAYS,
@@ -932,28 +797,3 @@ def _purge_old(
         log.info("purged %d session dir(s) older than %d days", removed, days)
 
     purge_daily_logs(_LOG_DIR, "engine", log_days)
-
-
-def purge_old_sessions(sessions_dir: Path, *, days: int) -> int:
-    """Remove session dirs under `sessions_dir` whose newest file is older
-    than `days` (mtime, not filename — tolerant of clock skew + files
-    appended long after creation). Fail-open; returns the count removed.
-    Shared by the engine (`_purge_old`) and the claude session writer."""
-    cutoff = time.time() - days * 86400
-    try:
-        dirs = [d for d in sessions_dir.iterdir() if d.is_dir() and not d.is_symlink()]
-    except OSError:
-        return 0
-    removed = 0
-    for d in dirs:
-        try:
-            newest = max(
-                (p.stat().st_mtime for p in d.rglob("*") if p.is_file()),
-                default=d.stat().st_mtime,
-            )
-            if newest < cutoff:
-                shutil.rmtree(d)
-                removed += 1
-        except OSError:
-            pass
-    return removed

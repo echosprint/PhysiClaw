@@ -9,15 +9,33 @@ from physiclaw.common.logger.logger import (
     make_tagged_logger,
     setup_logging,
 )
+from physiclaw.common.logger.session_artifacts import (
+    DailyLogWriter,
+    build_summary,
+    ensure_readme,
+    env_snapshot,
+    image_filename,
+    iso_now,
+    save_image,
+    write_json_atomic,
+)
 
 __all__ = [
     "SERVER_LOG_TAG",
+    "DailyLogWriter",
     "LineLogStream",
     "SessionLogSidecars",
     "attach_server_mcp_tee",
     "attach_session_log",
+    "build_summary",
     "detach_session_log",
+    "ensure_readme",
+    "env_snapshot",
+    "image_filename",
+    "iso_now",
     "logged",
     "make_tagged_logger",
+    "save_image",
     "setup_logging",
+    "write_json_atomic",
 ]

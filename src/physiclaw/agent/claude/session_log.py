@@ -11,28 +11,30 @@ Extracted from `spawn.py`, which keeps only the subprocess lifecycle;
 this module owns everything written to disk about a wake.
 """
 
-import base64
-import datetime as dt
 import logging
 import time
 from collections import Counter
 
-# Shared session-artifact helpers — reused verbatim so the claude sessions'
-# summary.json + images/ stay byte-compatible with the engine's (one
-# `physiclaw logs` / `jq` reads both).
-from physiclaw.agent.engine.trace import (
-    _env_snapshot,
-    _write_json_atomic,
-    image_filename,
-    purge_old_sessions,
-)
 from physiclaw.agent.runtime.hook import Trigger
 from physiclaw.agent.runtime.sentinel import STATUSES, parse_sentinel
 from physiclaw.common import paths
 from physiclaw.common.config import CONFIG
-from physiclaw.common.logger import SessionLogSidecars
-from physiclaw.common.logger.retention import purge_daily_logs
-from physiclaw.common.text import read_text, write_text
+
+# Shared session-artifact surface (`common.logger.session_artifacts`) —
+# the same daily writer, summary constructor, and helpers the engine's
+# trace.py uses, so the claude sessions' summary.json + images/ stay
+# byte-compatible (one `physiclaw logs` / `jq` reads both).
+from physiclaw.common.logger import (
+    DailyLogWriter,
+    SessionLogSidecars,
+    build_summary,
+    ensure_readme,
+    env_snapshot,
+    iso_now,
+    save_image,
+    write_json_atomic,
+)
+from physiclaw.common.logger.retention import purge_daily_logs, purge_old_sessions
 
 log = logging.getLogger(__name__)
 
@@ -91,19 +93,6 @@ Privacy: images/ are phone screenshots. Treat a session dir as sensitive.
 """
 
 
-def _ensure_claude_sessions_readme() -> None:
-    """Keep the format doc current — rewritten whenever the shipped
-    constant changed, so existing installs don't keep documenting a
-    retired format. Fail-open, cheap."""
-    path = paths.claude_sessions_dir() / "README.md"
-    try:
-        if not path.exists() or read_text(path) != _CLAUDE_SESSIONS_README:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            write_text(path, _CLAUDE_SESSIONS_README)
-    except OSError:
-        log.debug("claude sessions README write failed", exc_info=True)
-
-
 class _ClaudeSummary:
     """Accumulate a wake's metrics from the stream-json into the engine's
     summary.json schema (v1), so both engines' sessions read with one tool.
@@ -119,7 +108,7 @@ class _ClaudeSummary:
         prompt_hash: str,
     ):
         self.sid = sid
-        self.started_at = dt.datetime.now().isoformat(timespec="milliseconds")
+        self.started_at = iso_now()
         self._start_mono = time.monotonic()
         self.model_ref = model_ref
         self.prompt_hash = prompt_hash
@@ -139,7 +128,7 @@ class _ClaudeSummary:
         self._msg_ids: set[str] = set()  # distinct assistant messages = calls
         self.tool_calls: Counter[str] = Counter()
         self.tool_errors = 0
-        self.env = _env_snapshot()
+        self.env = env_snapshot()
 
     def observe(self, data: dict) -> None:
         t = data.get("type")
@@ -166,55 +155,38 @@ class _ClaudeSummary:
         u = self.usage
         cr = int(u.get("cache_read_input_tokens") or 0)
         cc = int(u.get("cache_creation_input_tokens") or 0)
-        total_in = int(u.get("input_tokens") or 0) + cr + cc
         calls = len(self._msg_ids)
-        return {
-            "schema": 1,
-            "sid": self.sid,
-            "started_at": self.started_at,
-            "ended_at": dt.datetime.now().isoformat(timespec="milliseconds"),
-            "duration_s": round(time.monotonic() - self._start_mono, 1),
-            "model_ref": self.model_ref,
-            "provider": self.model_ref.partition("/")[0],
-            "prompt_hash": self.prompt_hash,
-            "triggers": self.triggers,
-            "outcome": {
-                "sentinel": self.sentinel,
-                "recap": self.recap,
-                "crashed": self.crashed,
-            },
+        return build_summary(
+            sid=self.sid,
+            started_at=self.started_at,
+            duration_s=time.monotonic() - self._start_mono,
+            model_ref=self.model_ref,
+            prompt_hash=self.prompt_hash,
+            triggers=self.triggers,
+            sentinel=self.sentinel,
+            recap=self.recap,
+            crashed=self.crashed,
             # Distinct assistant messages = provider round-trips; on the
             # claude path one turn == one call, so both keys carry the same
             # value (engine parity — there a turn can span calls).
-            "turns": calls,
-            "provider_calls": calls,
-            "provider_time_ms": self.provider_time_ms,
-            "usage": {
-                "input_tokens": total_in,
-                "output_tokens": int(u.get("output_tokens") or 0),
-                "cache_read_tokens": cr,
-                "cache_creation_tokens": cc,
-                "cache_hit_pct": (round(100 * cr / total_in, 1) if total_in else 0.0),
-            },
-            "cost_usd": round(self.cost_usd, 4),
-            "tool_calls": dict(self.tool_calls),
-            "errors": {
-                # Engine-internal refusal counters don't apply to the claude
-                # path (Claude Code owns its own loop); keep the keys for
-                # schema parity, populate the two that are observable here.
-                "blocked_plan": 0,
-                "blocked_layout": 0,
-                "blocked_stuck": 0,
-                "invalid_args": 0,
-                "unknown_tool": 0,
-                "tool_errors": self.tool_errors,
-                "correctives": 0,
-                "provider_failures": 0,
-            },
-            "stuck_events": 0,
-            "images": images,
-            "env": self.env,
-        }
+            turns=calls,
+            provider_calls=calls,
+            provider_time_ms=self.provider_time_ms,
+            input_tokens=int(u.get("input_tokens") or 0) + cr + cc,
+            output_tokens=int(u.get("output_tokens") or 0),
+            cache_read_tokens=cr,
+            cache_creation_tokens=cc,
+            cost_usd=self.cost_usd,
+            tool_calls=self.tool_calls,
+            # Engine-internal refusal counters don't apply to the claude
+            # path (Claude Code owns its own loop) — build_summary
+            # renders the full key set for schema parity; populate the one
+            # observable here.
+            errors={"tool_errors": self.tool_errors},
+            stuck_events=0,
+            images=images,
+            env=self.env,
+        )
 
 
 class _SessionLog:
@@ -230,17 +202,9 @@ class _SessionLog:
         model_ref: str,
         prompt_hash: str,
     ):
-        LOG_DIR.mkdir(parents=True, exist_ok=True)
         purge_daily_logs(LOG_DIR, "claude", CONFIG.retention.log_days)
-        self._date = dt.datetime.now().strftime("%Y-%m-%d")
         self._last_text = ""  # most recent assistant text block, for sentinel check
-        self._f = open(
-            LOG_DIR / f"claude-{self._date}.log",
-            "a",
-            encoding="utf-8",
-            newline="\n",
-        )
-        self._f.write(f"\n{'=' * 60}\n")
+        self._daily = DailyLogWriter(LOG_DIR, "claude")
 
         # Per-session artifact dir + running metrics.
         self._sdir = paths.claude_sessions_dir() / sid
@@ -250,7 +214,7 @@ class _SessionLog:
         # mcp.log (the server's log for this wake's window). Shared with
         # the engine writer so the two can't drift.
         self._sidecars = SessionLogSidecars(self._sdir)
-        _ensure_claude_sessions_readme()
+        ensure_readme(paths.claude_sessions_dir(), _CLAUDE_SESSIONS_README)
         purge_old_sessions(
             paths.claude_sessions_dir(), days=CONFIG.retention.trace_days
         )
@@ -263,7 +227,7 @@ class _SessionLog:
         self._closed = False
 
         sources = [t.source or "?" for t in triggers]
-        self._write(f"WAKE session={sid} triggers={sources}")
+        self._daily.line(f"WAKE session={sid} triggers={sources}")
 
     def event(self, data: dict) -> dict | None:
         """Log a stream-json event. Returns the data if it's a result.
@@ -293,14 +257,14 @@ class _SessionLog:
                     self._last_text = b["text"]
         summary = self._summarize(data)
         if summary:
-            self._write(summary)
+            self._daily.line(summary)
         self._summary.observe(data)
         self._extract_images(data)
         self._forward_to_runtime(data)
         return data if data.get("type") == "result" else None
 
     def raw(self, text: str) -> None:
-        self._write(f"raw: {text[:500]}")
+        self._daily.line(f"raw: {text[:500]}")
 
     def done(self, returncode: int | str) -> str:
         """Write OUTCOME + EXIT bookends, record them on the summary, and
@@ -320,9 +284,9 @@ class _SessionLog:
         self._summary.sentinel = status if status in STATUSES else None
         self._summary.recap = recap
         self._summary.crashed = returncode != 0
-        self._write(f"OUTCOME: {status} - {recap}")
-        self._write(f"EXIT code={returncode}")
-        self._f.write(f"{'=' * 60}\n\n")
+        self._daily.line(f"OUTCOME: {status} - {recap}")
+        self._daily.line(f"EXIT code={returncode}")
+        self._daily.footer()
         return status
 
     def close(self) -> None:
@@ -332,7 +296,7 @@ class _SessionLog:
             return
         self._closed = True
         try:
-            _write_json_atomic(
+            write_json_atomic(
                 self._sdir / "summary.json",
                 self._summary.finalize(images=self._image_counter),
             )
@@ -340,8 +304,7 @@ class _SessionLog:
             log.warning("claude session summary write failed", exc_info=True)
         finally:
             self._sidecars.close()
-            if not self._f.closed:
-                self._f.close()
+            self._daily.close()
 
     def _extract_images(self, data: dict) -> None:
         """Decode base64 screenshots from tool_result blocks to
@@ -364,38 +327,11 @@ class _SessionLog:
 
     def _save_image(self, mime: str, b64: str) -> None:
         try:
-            raw = base64.b64decode(b64, validate=False)
-        except (ValueError, TypeError):
-            return
-        n = self._image_counter + 1
-        name = image_filename(self._turn, mime)
-        try:
-            (self._img_dir / name).write_bytes(raw)
+            name = save_image(self._img_dir, self._turn, mime, b64)
         except OSError:
             return  # don't advance the counter for a write that didn't land
-        self._image_counter = n
-
-    def _write(self, msg: str) -> None:
-        now = dt.datetime.now()
-        today = now.strftime("%Y-%m-%d")
-        if today != self._date:
-            # Crossed midnight — close current file, continue in today's file.
-            # Markers in both files let a reader follow the session across days.
-            self._f.write(f"[{now:%H:%M:%S}] ROLLOVER → claude-{today}.log\n")
-            self._f.flush()
-            self._f.close()
-            self._date = today
-            self._f = open(
-                LOG_DIR / f"claude-{today}.log",
-                "a",
-                encoding="utf-8",
-                newline="\n",
-            )
-            self._f.write(
-                f"\n[{now:%H:%M:%S}] ROLLOVER ← continued from previous day\n"
-            )
-        self._f.write(f"[{now:%H:%M:%S}] {msg}\n")
-        self._f.flush()
+        if name is not None:
+            self._image_counter += 1
 
     def _forward_to_runtime(self, data: dict) -> None:
         """Forward the high-signal subset of events to runtime stderr so

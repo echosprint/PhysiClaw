@@ -487,7 +487,10 @@ def test_session_log_rollover_at_midnight(_isolated_log_dir: Path) -> None:
         slog.event({"type": "result", "num_turns": 1, "result": "ok"})
         slog.close()
 
+    # Marker details are pinned by the DailyLogWriter unit tests
+    # (tests/common/logger); here just the wiring: a post-midnight write
+    # lands in the new day's file.
     files = sorted(_isolated_log_dir.glob("claude-*.log"))
     assert len(files) == 2
     today_text = (_isolated_log_dir / "claude-2026-04-29.log").read_text()
-    assert "ROLLOVER" in today_text
+    assert "result: turns=1" in today_text
