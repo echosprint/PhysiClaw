@@ -1,30 +1,30 @@
 ---
 title: Why Does It Need a Body?
-description: Why PhysiClaw has to be a physical machine—before you start building, here's the case for why "a real touch on a real screen" is essential.
+description: Why PhysiClaw has to be a physical machine. Before you start building, here's the case for why "a real touch on a real screen" is essential.
 ---
 
-PhysiClaw is an agent that operates a phone—it watches the screen with a camera and taps and swipes with a stylus. Why a phone? And why such a "clumsy" physical approach? Here's the case, in three parts.
+PhysiClaw is an agent that operates a phone. It watches the screen with a camera and taps and swipes with a stylus. Why a phone? And why such a "primitive" physical approach? Here's the case, in three parts.
 
 ## Most everyday apps have no API
 
-The obvious approach is to let the agent call an app's public API. But the services that actually matter are closed off. Amazon, Instacart, DoorDash, Uber, WhatsApp—what they want is for you to stay inside their interface: spend more time, spend more money, see more ads, and keep a direct relationship with you. An open API runs against all of that. The agent does everything in your place: the interface gets skipped, ads never get shown, and the platform is reduced to a backend supplier that can be swapped out at any time. It loses the engagement, the ad revenue, and its direct line to the user. So they have no incentive to open up to a third-party agent, and every reason to keep outside access locked out; many of the apps you'd most want to use simply have no public API at all.
+The obvious approach is to let the agent call an app's public API. But the services that actually matter are closed off. Amazon, Instacart, DoorDash, Uber, WhatsApp—what they want is for you to stay inside their interface, where you spend more time, spend more money, and see more ads, and they keep a direct relationship with you. An open API runs against all of that. The agent does everything in your place. The interface gets skipped, ads never get shown, and the platform is reduced to a backend supplier that can be swapped out at any time. It loses the engagement, the ad revenue, and its direct line to the user. So they have no incentive to open up to a third-party agent, and every reason to keep outside access locked out.
 
 For the foreseeable future, no one is going to hand the services that run your daily life over to your agent, free and open. That route is closed from the start.
 
 ## Simulated input doesn't work either
 
-If the API is out, the next thought is to simulate human input—mouse clicks, keystrokes, or touch gestures.
+If the API is out, the next thought is to simulate human input, like mouse clicks, keystrokes, or touch gestures.
 
-On the desktop, a program can simulate a mouse and keyboard, but web anti-scraping and anti-bot detection keeps getting stricter; automated access is easily flagged and blocked, and can't reach services reliably.
+On the desktop, a program can simulate a mouse and keyboard, but web anti-scraping and anti-bot detection keeps getting stricter. Automated access is easily flagged and blocked, and can't reach services reliably.
 
-On the phone, Android's ADB can inject taps and gestures, but those calls are just as detectable—they carry the fingerprints of software-driven actions, which trip risk controls more easily, getting you anything from a blocked session to an outright ban.
+On the phone, Android's ADB can inject taps and gestures, but those calls are just as detectable. They carry the fingerprints of software-driven actions, which trip risk controls more easily, getting you anything from a blocked session to an outright ban.
 
-The bottom line: anything issued from the software layer can be identified. The moment it's recognized as "not a real person," it gets limited or banned.
+The bottom line is that anything issued from the software layer, even system-level event injection, can be identified. The moment it's recognized as "not a real person", it gets limited or banned.
 
 ## A physical approach gets around the limits
 
-With both the API and simulated input ruled out, only the most basic path is left: do it like a person—touch the screen with a hand.
+With both the API and simulated input ruled out, only the most primitive path is left. Do it like a person, touch the screen with a hand.
 
-That's exactly what PhysiClaw does—it treats the phone screen itself as the API: a camera reads the screen, a stylus performs the gestures, interacting with apps directly. No ADB, nothing injected into the apps, zero footprint inside them. Setup uses only stock iOS features: AssistiveTouch and a few Shortcuts. To the phone, this is indistinguishable from a real person's finger, so there's nothing to detect—and it can reach virtually any app reliably.
+A phone's screen is small and its layout fixed, so visual targeting stays simple, and it's the device most people use every day. Apps also place more trust in it, so risk controls are harder to trip. That's why PhysiClaw operates a phone. It treats the phone screen itself as the API. A camera reads the screen and a stylus performs the gestures, interacting with apps directly. Nothing plugs into the phone, no system-level event injection, zero footprint inside the target apps. Setup uses only stock iOS features, just AssistiveTouch and a few Shortcuts. To the phone, this is indistinguishable from a real person's finger, so it's very hard to detect, and it can reach virtually any app reliably.
 
-The cost is speed. A tap or a swipe takes a few seconds, nowhere near the milliseconds of a software call. It's a deliberate trade-off: giving up speed for universality and reliability. For an agent handling your everyday errands, a little slowness doesn't matter—what matters is getting the job done, dependably.
+The cost is speed. A tap or a swipe takes a few seconds, nowhere near the milliseconds of a software call. It's a deliberate trade-off, giving up speed for universality and reliability. For an agent handling your everyday errands, a little slowness doesn't matter—what matters is getting the job done, dependably.

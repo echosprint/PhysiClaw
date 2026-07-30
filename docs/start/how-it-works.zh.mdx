@@ -1,9 +1,9 @@
 ---
 title: 它如何工作
-description: PhysiClaw 的智能体如何端到端地完成一次请求——唤醒、读取消息、执行任务、反馈、退出。
+description: PhysiClaw 的智能体如何端到端地完成一次请求：唤醒、查看消息、执行任务、反馈、退出。
 ---
 
-用户与 PhysiClaw 交互的方式很直观：它拥有一部独立的手机并登录了微信，你只需和它互加好友，就能像和真人聊天一样与它沟通。
+用户与 PhysiClaw 交互的方式很直观。它拥有一部独立的手机并登录了微信，你只需和它互加好友，就能像和真人聊天一样与它沟通。
 
 <svg viewBox="0 0 700 290" role="img" aria-label="用户与 PhysiClaw 通过手机进行交流" style="max-width:560px;width:100%;height:auto;margin:1.5rem auto;display:block" xmlns="http://www.w3.org/2000/svg" font-family="'Inter','Segoe UI',system-ui,sans-serif">
   <defs>
@@ -26,7 +26,7 @@ description: PhysiClaw 的智能体如何端到端地完成一次请求——唤
 
 ## 唤醒
 
-PhysiClaw 的`runtime`会持续运行一个循环，不断检查两件事：是否有定时任务到点需要执行，以及手机屏幕是否因新通知而点亮。一旦满足任一条件，就唤醒智能体。
+PhysiClaw 的运行时会持续运行一个循环，不断检查两件事：是否有定时任务到点需要执行，以及手机屏幕是否因新通知而点亮。一旦满足任一条件，就唤醒智能体。
 
 ## 查看消息
 
