@@ -1,13 +1,13 @@
 ---
 title: Skills
-description: How PhysiClaw learns app-specific workflows — folder-based skills loaded progressively so the prompt stays small.
+description: How PhysiClaw learns app-specific workflows. Folder-based skills loaded progressively so the prompt stays small.
 ---
 
-PhysiClaw can operate most apps with no special skill. But sometimes the agent repeats the same mistake, or takes many tries to finish a task — wasting tokens and time. When that happens, create a skill to guide it through a specific task efficiently.
+PhysiClaw can operate most apps with no special skill. But sometimes the agent repeats the same mistake, or takes many tries to finish a task, wasting tokens and time. When that happens, create a skill to guide it through a specific task efficiently.
 
 ## Create a skill
 
-Make a new folder under `~/.physiclaw/skills/` (name it in English — e.g. an Instacart shopping skill is `instacart`), and create a file named `SKILL.md` (all caps) inside it.
+Make a new folder under `~/.physiclaw/skills/` (name it in English, e.g. an Instacart shopping skill is `instacart`), and create a file named `SKILL.md` (all caps) inside it.
 
 <FileTree>
 - ~/.physiclaw/skills/
@@ -20,32 +20,32 @@ Make a new folder under `~/.physiclaw/skills/` (name it in English — e.g. an I
 ```markdown
 ---
 name: instacart
-description: Use when buying groceries — produce, snacks, or household items — on Instacart.
+description: Use when buying groceries on Instacart, such as produce, snacks, or household items.
 ---
 
-# Instacart — grocery shopping
+# Instacart: grocery shopping
 
-Use Instacart for groceries. Read the screen with the MCP tools — `peek` by default, avoid `screenshot` unless needed.
+Use Instacart for groceries. Read the screen with the MCP tools. Default to `peek`, and avoid `screenshot` unless needed.
 
 ## Flow
 
-1. Open Instacart and tap a store on the home screen. (For delivery, Instacart picks the actual store location — you only choose the retailer.)
+1. Open Instacart and tap a store on the home screen. For delivery, you only choose the retailer, and Instacart picks the actual store location.
 2. Tap the search box, type the item, open its product page.
-3. Tap "Add to cart". A replacement-preference sheet may slide up — pick "Best match", a specific item, or "Refund", or dismiss it (your choice is saved for next time).
-   - **Don't tap "Add to cart" twice on the same product page** — it adds the item twice.
+3. Tap "Add to cart". A replacement-preference sheet may slide up. Pick "Best match", a specific item, or "Refund", or dismiss it. Your choice is saved for next time.
+   - **Don't tap "Add to cart" twice on the same product page.** It adds the item twice.
 4. Tap the cart icon, review the items and quantities, tap "Go to checkout".
-5. **Turn OFF the Instacart+ free-trial toggle** unless the user asked for it — it's pre-checked and will start a paid membership. Once off, it stays off.
+5. **Turn OFF the Instacart+ free-trial toggle** unless the user asked for it. It's pre-checked and will start a paid membership. Once off, it stays off.
 6. Send the user the items, quantities, price, delivery address, fees, tip, and ETA, and wait for confirmation.
 7. After the user confirms, tap "Place order".
 
 ## Gotcha: the Instacart+ upsell
 
-Instacart pushes its paid membership hard — a dialog after login, a banner on every page, and a pre-checked free-trial toggle at checkout. Dismiss them, and never start the trial without the user's OK. And the **service fee is not the tip** — they're separate line items, so surface both.
+Instacart pushes its paid membership hard: a dialog after login, a banner on every page, and a pre-checked free-trial toggle at checkout. Dismiss them, and never start the trial without the user's OK. And the **service fee is not the tip**. They're separate line items, so surface both.
 ```
 
 ## Best practices
 
-**The description decides whether a skill fires.** It's always loaded into context, while the body loads only after the skill is triggered — so the description should spell out when and in which app to use it, not vaguely describe what it does.
+**The description decides whether a skill fires.** It's always loaded into context, while the body loads only after the skill is triggered, so the description should spell out when and in which app to use it, not vaguely describe what it does.
 
 **Only write down the non-obvious.** The agent can already operate most apps; a skill's value is filling in what it doesn't know yet, or keeps getting wrong.
 
@@ -55,8 +55,8 @@ Instacart pushes its paid membership hard — a dialog after login, a banner on 
 
 ## Trigger a skill
 
-When you message PhysiClaw over WhatsApp, say which app to use — it makes the matching skill easier to trigger.
+When you message PhysiClaw over WhatsApp, say which app to use; that makes the matching skill easier to trigger.
 
 :::tip[Message]
-Buy me a half-gallon of milk on Instacart
+Buy me a half-gallon of milk on Instacart.
 :::
