@@ -348,6 +348,17 @@ td.note button.copy { margin-top: 0; vertical-align: -1px; }
    always single-row cells, so row state alone decides. */
 body.hl tbody tr:not(.done) :is(td.spec, td.qty) { background: var(--mark); }
 
+/* ---- narrow screens ------------------------------------------------------ */
+/* The table stays a table (it slides in .table-wrap); only the page chrome
+   adapts: the lede and disclaimer stack full-width instead of cramping
+   side by side, and the sheet's margins tighten. */
+@media (max-width: 720px) {
+  .wrap { margin: 0; padding: 24px 16px 48px; }
+  .mast { flex-wrap: wrap; gap: 4px; }
+  .preamble { flex-direction: column; gap: 12px; }
+  .lede, .disclaimer { max-width: none; }
+}
+
 /* ---- print -------------------------------------------------------------- */
 /* The checkboxes stay — printed empty they make the page a bench checklist,
    printed mid-sourcing they carry the current state; only the buttons

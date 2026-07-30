@@ -52,7 +52,8 @@ toggle washes the unbought rows' Spec and Qty cells (what the buyer
 reads at the shop) in the accent's light wash; it persists with the
 list and hides, off, while the list is empty. State only ever changes
 by the builder's explicit tick or toggle; browsing (following a
-supplier link) marks nothing.
+supplier link) marks nothing. On narrow screens the lede and disclaimer
+stack full-width; the table itself just scrolls sideways.
 
 Run under ``uv`` from the repo root (standard library only, Python 3.12+)::
 
