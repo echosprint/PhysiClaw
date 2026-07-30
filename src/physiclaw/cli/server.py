@@ -570,7 +570,7 @@ def _start_runtime_loop(
         # rather than letting the subprocess crash with a stack trace.
         # Reuse `_NO_MODEL_MSG` so this hint stays in sync with the
         # RuntimeError raised elsewhere — single source of truth.
-        from physiclaw.common.config import _NO_MODEL_MSG
+        from physiclaw.common.model_ref import _NO_MODEL_MSG
 
         log.warning(
             "Runtime loop NOT started — %s\n"

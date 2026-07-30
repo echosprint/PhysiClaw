@@ -209,9 +209,10 @@ class AgentConfig:
 class ProviderConfig:
     """Per-provider credentials (only).
 
-    Empty strings mean "fall back to env" — see ``resolve_provider_key``
-    for the env-var → config-key precedence each provider applies.
-    Provider/model selection lives under ``[agent] model``.
+    Empty strings mean "fall back to env" — see
+    ``common.model_ref.resolve_provider_key`` for the env-var →
+    config-key precedence each provider applies. Provider/model
+    selection lives under ``[agent] model``.
 
     Field names match the provider id (qwen/moonshot/openai/anthropic/
     google/deepseek) — same convention OpenClaw uses.
@@ -322,29 +323,22 @@ class Config:
     skills: SkillsConfig = field(default_factory=SkillsConfig)
 
 
-_SECTION_TYPES: dict[str, type] = {
-    "server": ServerConfig,
-    "update": UpdateConfig,
-    "warm_start": WarmStartConfig,
-    "auto_pick": AutoPickConfig,
-    "camera": CameraConfig,
-    "vision": VisionConfig,
-    "engine": EngineConfig,
-    "agent": AgentConfig,
-    "provider": ProviderConfig,
-    "compact": CompactConfig,
-    "memory": MemoryConfig,
-    "claude": ClaudeConfig,
-    "retention": RetentionConfig,
-    "pitfalls": PitfallsConfig,
-    "skills": SkillsConfig,
-}
+def _section_types() -> dict[str, type]:
+    """The section-name → dataclass map, derived from ``Config``'s own
+    fields — the sections ARE the dataclass, so a new section is one
+    declaration, not a hand-kept mirror edit. Field order is declaration
+    order, which ``to_toml`` relies on for section ordering."""
+    hints = get_type_hints(Config)
+    return {f.name: hints[f.name] for f in fields(Config)}
+
+
+_SECTION_TYPES: dict[str, type] = _section_types()
 
 
 # Top-level sections parsed elsewhere — accepted by the loader but
 # skipped by the dataclass validator. `providers` holds per-provider
 # overrides like `[providers.<id>] base_url = "..."` (read directly via
-# `provider_base_url_override`).
+# `model_ref.provider_base_url_override`).
 _FREEFORM_SECTIONS: frozenset[str] = frozenset({"providers"})
 
 
@@ -670,28 +664,6 @@ def set_dotted(dotted: str, raw_value: str, path: Path | None = None) -> None:
     CONFIG = load(path)
 
 
-def provider_base_url_override(provider_id: str) -> str | None:
-    """Read `[providers.<provider_id>] base_url` from user config.toml.
-    Lets users point a builtin provider at a proxy / alt endpoint
-    (e.g. Moonshot's .ai vs .cn). Returns None when unset or the file
-    is absent. Called once at provider construction — no caching."""
-    path = config_path()
-    try:
-        raw = read_text(path)
-    except (FileNotFoundError, OSError, UnicodeDecodeError):
-        # Encoding errors get the same fail-soft as a missing file —
-        # this code path is best-effort (returns None when no override).
-        # The friendly recovery hint comes from `load()` when the user
-        # actually runs a command that needs the config.
-        return None
-    try:
-        doc = tomllib.loads(raw)
-    except tomllib.TOMLDecodeError:
-        return None
-    val = doc.get("providers", {}).get(provider_id, {}).get("base_url")
-    return val if isinstance(val, str) else None
-
-
 SERVER_ENV_VAR = "PHYSICLAW_SERVER"
 
 
@@ -775,87 +747,20 @@ except ConfigError as _e:
     CONFIG = Config()
 
 
-# --- Model + provider selection ----------------------------------------------
-# Order: env var > config.toml > raise. There is no implicit default —
-# the user must configure a model. Refs use `provider/model` shape.
-
-
-MODEL_ENV_VAR = "PHYSICLAW_MODEL"
-
-_NO_MODEL_MSG = (
-    "no model configured.\n"
-    "  Quick start:\n"
-    "    physiclaw models key <provider>     # e.g. anthropic, openai, qwen\n"
-    "    physiclaw models use <provider/model>\n"
-    f"  Or set {MODEL_ENV_VAR}=<provider>/<model> in your shell."
+# --- Model + provider selection lives in `common.model_ref` (see its
+# docstring for the split rationale and the CONFIG-rebind subtlety).
+# Re-exported for existing call sites — this list is frozen compat; new
+# call sites import from `physiclaw.common.model_ref`. Position at the
+# bottom is cosmetic: model_ref defers all CONFIG access into function
+# bodies, so import order doesn't matter.
+from physiclaw.common.model_ref import (  # noqa: E402
+    MODEL_ENV_VAR,
+    model_ref,
+    model_ref_with_source,
+    parse_model_ref,
+    provider_base_url_override,
+    resolve_provider_key,
 )
-
-
-def model_ref() -> str:
-    """Resolve effective model ref: PHYSICLAW_MODEL > [agent] model > raise.
-
-    Returns a `provider/model` string like `"qwen/qwen3.6-plus"`. Use
-    `parse_model_ref` to split into the two parts. Display callers
-    that want the source label too should call `model_ref_with_source`.
-    """
-    return model_ref_with_source()[0]
-
-
-def model_ref_with_source() -> tuple[str, str]:
-    """`(ref, source)` for the active model — same env > config order as
-    `model_ref`. Raises `RuntimeError` when nothing is configured.
-    `source` is a human-readable string for log / diagnostic output
-    (`"PHYSICLAW_MODEL env"` or `"config.toml [agent] model"`).
-    """
-    if os.environ.get(MODEL_ENV_VAR):
-        return os.environ[MODEL_ENV_VAR], f"{MODEL_ENV_VAR} env"
-    if CONFIG.agent.model:
-        return CONFIG.agent.model, "config.toml [agent] model"
-    raise RuntimeError(_NO_MODEL_MSG)
-
-
-def parse_model_ref(ref: str) -> tuple[str, str]:
-    """Split `"provider/model-id"` on the FIRST slash.
-
-    `"qwen/qwen3.6-plus"`  →  `("qwen", "qwen3.6-plus")`.
-    `"openrouter/openai/gpt-5"`  →  `("openrouter", "openai/gpt-5")`.
-    """
-    if "/" not in ref:
-        raise ValueError(
-            f"model ref {ref!r} must be 'provider/model' (e.g. 'qwen/qwen3.6-plus')"
-        )
-    provider_id, model_id = ref.split("/", 1)
-    if not (provider_id and model_id):
-        raise ValueError(f"model ref {ref!r} has empty provider or model segment")
-    return provider_id, model_id
-
-
-# --- Provider credential resolution. -----------------------------------------
-# Order: env var(s) in declaration order > config.toml > None. Empty
-# strings in config count as "unset" and fall through to the next layer.
-
-
-def resolve_provider_key(
-    env_vars: tuple[str, ...],
-    config_key: str,
-) -> tuple[str | None, str | None]:
-    """Generic credential resolver. Returns ``(key, source)``; both
-    ``None`` if not set anywhere.
-
-    ``env_vars`` are checked in order (first hit wins). If none match,
-    falls through to ``CONFIG.provider.<config_key>``. ``source`` is a
-    human-readable string for diagnostic output (``"OPENAI_API_KEY env"``
-    or ``"config.toml [provider] openai_api_key"``).
-    """
-    for var in env_vars:
-        val = os.environ.get(var)
-        if val:
-            return val, f"{var} env"
-    val = getattr(CONFIG.provider, config_key, "")
-    if val:
-        return val, f"config.toml [provider] {config_key}"
-    return None, None
-
 
 __all__ = [
     "CONFIG",
