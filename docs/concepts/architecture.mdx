@@ -1,11 +1,11 @@
 ---
 title: System architecture
-description: How a "tap that button" decision becomes a stylus on glass — bottom-up, from the FluidNC board to the runtime loop and how it keeps its context as cheap as possible.
+description: How a "tap that button" decision becomes a stylus on glass, bottom-up from the FluidNC board to the runtime loop, and how it keeps its context as cheap as possible.
 ---
 
 ## Hardware
 
-PhysiClaw's hardware uses a [CoreXY](https://corexy.com/) motion system: two stepper motors drive the stylus across the X/Y plane, while the Z axis (the tap) is driven by a solenoid. The controller board runs [FluidNC](https://github.com/bdring/FluidNC) firmware, which receives [G-code](https://en.wikipedia.org/wiki/G-code) commands over USB serial from the Python server on your computer, and turns them into stylus moves and taps.
+PhysiClaw's hardware uses a [CoreXY](https://corexy.com/) motion system. Two stepper motors drive the stylus across the X/Y plane, while the Z axis (the tap) is driven by a solenoid. The controller board runs [FluidNC](https://github.com/bdring/FluidNC) firmware, which receives [G-code](https://en.wikipedia.org/wiki/G-code) commands over USB serial from the Python server on your computer, and turns them into stylus moves and taps.
 
 ## MCP tools
 
@@ -22,25 +22,25 @@ The MCP tools abstract over the low-level hardware, giving the agent a set of re
 
 ### OCR and icon detection
 
-PhysiClaw runs OCR and icon detection on the camera frame and screenshots, then hands the results — along with a compressed image — to the agent.
+PhysiClaw runs OCR and icon detection on the camera frame and screenshots, then hands the results, along with a compressed image, to the agent.
 
 ### Coordinate mapping
 
-Image pixel coordinates → phone screen coordinates → physical-plane coordinates: the full chain needs two transform matrices to convert between coordinate systems.
+Image pixel coordinates → phone screen coordinates → physical-plane coordinates. The full chain needs two transform matrices to convert between coordinate systems.
 
 The arm has to be recalibrated before every run to compute accurate transform matrices.
 
 ### Screenshot
 
-The camera view is sometimes out of focus. When that happens, the arm taps AssistiveTouch: a single tap takes an iOS screenshot, then a double tap runs a Shortcut that uploads it to the server — no page switching, and more efficient.
+The camera view is sometimes out of focus. When that happens, the arm taps AssistiveTouch. A single tap takes an iOS screenshot, then a double tap runs a Shortcut that uploads it to the server. There's no page switching, and it's more efficient.
 
 ### Typing text
 
-Typing on the phone keyboard is natural for humans but unfriendly to the agent: the keys are small and densely packed, hard to target and tap precisely, and every keystroke needs a separate model call — slow, error-prone, and a waste of tokens.
+Typing on the phone keyboard is natural for humans but unfriendly to the agent. The keys are small and densely packed, hard to target and tap precisely, and every keystroke needs a separate model call. That's slow, error-prone, and a waste of tokens.
 
-A better approach is to fetch the text from the computer via a Shortcut, write it to the clipboard, and paste it directly — fast and accurate.
+A better approach is to fetch the text from the computer via a Shortcut, write it to the clipboard, and paste it directly. That's fast and accurate.
 
-Shortcuts are iOS-only — Android has no native equivalent, which is why we currently use the iPhone.
+Shortcuts are iOS-only. Android has no native equivalent, which is why we currently use the iPhone.
 
 ## The runtime loop
 
@@ -56,4 +56,4 @@ An agent usually needs many model calls to finish a single task, and every call 
 
 **Update progress.** The model is prompted to update its task progress at key steps, so it doesn't lose its way after the context is compressed. The progress sits at the end of the message list, guiding the model.
 
-**Keep cache hits stable.** Put the stable content — system prompt, tool descriptions, memory — at the very front and keep it byte-for-byte identical; and when compressing the context, change as little of the earlier content as possible, to minimize cache invalidation and raise the hit rate.
+**Keep cache hits stable.** Put your stable content — system prompt, tool descriptions, memory — right at the front, and keep it byte-for-byte identical. When you compress the context, touch as little of the earlier content as you can. Every edit invalidates the cache from that point on.
