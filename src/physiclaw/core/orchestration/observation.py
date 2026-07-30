@@ -97,19 +97,15 @@ class GestureObserver:
     # ~1s of stylus retract + park, total ≈ 2s — enough for most page
     # transitions (Anthropic's computer-use reference uses a 2.0s delay).
     GESTURE_SETTLE_SECONDS = 1.0
-    # A screen-content flip (dark lock screen → bright home) can leave
-    # the exposure unsettled — and an unpinned lens (no bundle focus;
-    # see hardware/focus.py) re-hunts when the arm crosses it; a frame
-    # captured mid-transition is blurry or blown and
-    # poisons both the verdict and the fused view. On either verdict,
-    # wait and re-grab once. Blur uses the same number and scale as the
-    # quality monitor's verdict.
+    # Blur-retry gates for the two acquisition paths (`_acquire_frame`
+    # runs the shared ladder; these steer it per path). Both thresholds
+    # carry the quality monitor's number in production — same measurement,
+    # same scale — but stay separate class knobs so each path can be
+    # steered independently (tests do; a rig tweak could). The retry
+    # waits genuinely differ: peek waits longer, gesture grabs ride the
+    # settle that already preceded them.
     GRAB_BLUR_THRESHOLD = quality.BLUR_THRESHOLD
     GRAB_RETRY_SECONDS = 1.5
-
-    # Retry gate for peeks — same measurements as the gesture grabs above
-    # and the quality monitor's verdict: one number, defined once. Peek
-    # waits longer but re-grabs only once, without a re-check.
     PEEK_BLUR_THRESHOLD = quality.BLUR_THRESHOLD
     PEEK_RETRY_SECONDS = 2.0
 
@@ -197,8 +193,8 @@ class GestureObserver:
         bad one, warn in the log and return the agent-facing ⚠ line for
         the caller to attach.
 
-        Takes the `QualityReport` the acquisition path (`peek_frame` /
-        `grab_screen`) already computed for its retry decision — the
+        Takes the `QualityReport` the acquisition ladder
+        (`_acquire_frame`) already computed for its retry decision — the
         frame is never re-measured here. Runs AFTER the retry grabs, so
         a report still failing means the retry didn't recover it. Every
         judged view is also reported to `on_quality` (with the running
@@ -222,89 +218,92 @@ class GestureObserver:
                 log.exception("quality-report callback failed — ignoring")
         return warning
 
-    def peek_frame(self):
-        """Park, grab the cropped phone-screen frame, and re-grab once
-        after a settle if it's too blurry or blown — peek's acquisition
-        path. Blown covers the post-flip exposure transient: the screen
-        just flipped dark→bright and the exposure hasn't settled yet.
+    def _acquire_frame(self, source: str):
+        """The shared acquisition ladder behind `peek_frame` and
+        `grab_screen`: grab → assess → wait-and-regrab once when the
+        frame is too blurry or blown → inline exposure fix when the
+        injected predicate demands it. One ladder for both paths, so the
+        exposure regime changes in one place — the known livelock mode
+        is exactly this logic diverging between them.
 
-        Returns `(frame, report, retuned)` — the report always
-        describes the returned frame, so the caller's quality judgment
+        Blown covers the post-flip exposure transient (the screen just
+        flipped dark→bright and the exposure hasn't settled); blur
+        covers an unpinned lens re-hunting after the arm's move. A
+        still-blurry retry frame is used as-is (better shown than
+        dropped — the callers decide what a soft frame costs); a frame
+        the `needs_fix` predicate flags escalates to the inline fix,
+        since a mis-exposed frame is correctable, not just observable.
+
+        `source` selects the path and threads one label through the
+        retry log, the fix log, and the callers' `observe_quality`.
+        "peek" picks the peek knobs and the measurement-carrying retry
+        warning (an operator watching a peek wants the numbers; the
+        literal must match the prefix baked into that warning's format
+        string); anything else is a gesture grab — gesture knobs,
+        debug-level retry (routine mid-gesture settling). Deriving the
+        knobs here, from the same predicate as the log, keeps a call
+        site from ever pairing one path's label with the other's
+        threshold.
+
+        Returns `(frame, report, retuned)` — the report always describes
+        the returned frame, so the caller's quality judgment
         (`observe_quality`) reuses it instead of re-measuring, and
-        `retuned` tells it the inline tune already ran on this grab
-        (so the background safety net must not double-fire).
-
-        Unlike `grab_screen`, failures propagate (a peek with no frame is
-        a tool error, not a withheld verdict). A still-blurry retry frame
-        is used as-is (no verdict to protect — better shown than
-        dropped); a frame the `needs_fix` predicate flags escalates to
-        the inline exposure fix, since a mis-exposed frame is
-        correctable, not just observable. Caller must hold the lock."""
-        self._park()
+        `retuned` says the inline tune already ran on this grab (the
+        background safety net must not double-fire)."""
+        peek = source == "peek"
+        threshold = self.PEEK_BLUR_THRESHOLD if peek else self.GRAB_BLUR_THRESHOLD
+        retry_seconds = self.PEEK_RETRY_SECONDS if peek else self.GRAB_RETRY_SECONDS
         frame = self._grab()
         report = quality.assess(frame)
-        blurry = report.sharpness < self.PEEK_BLUR_THRESHOLD
+        blurry = report.sharpness < threshold
         if blurry or report.blown:
-            log.warning(
-                "peek: %s frame (sharpness %.1f, clip %.0f%%) — retrying",
-                "blurry" if blurry else "blown",
-                report.sharpness,
-                report.clip_pct * 100,
-            )
-            time.sleep(self.PEEK_RETRY_SECONDS)
+            kind = "blurry" if blurry else "blown"
+            if peek:
+                log.warning(
+                    "peek: %s frame (sharpness %.1f, clip %.0f%%) — retrying",
+                    kind,
+                    report.sharpness,
+                    report.clip_pct * 100,
+                )
+            else:
+                log.debug("gesture frame %s — waiting for AF/AE", kind)
+            time.sleep(retry_seconds)
             frame = self._grab()
             report = quality.assess(frame)
         retuned = False
         if self._needs_fix(report):
-            fixed_frame, report, retuned = self._fix_exposure_grab("peek", report)
+            fixed_frame, report, retuned = self._fix_exposure_grab(source, report)
             if fixed_frame is not None:
                 frame = fixed_frame
         return frame, report, retuned
 
+    def peek_frame(self):
+        """Park, then run the acquisition ladder (`_acquire_frame`) —
+        peek's path. Returns `(frame, report, retuned)`.
+
+        Unlike `grab_screen`, failures propagate (a peek with no frame is
+        a tool error, not a withheld verdict). Caller must hold the lock."""
+        self._park()
+        return self._acquire_frame("peek")
+
     def grab_screen(self, settle: float = 0.0):
         """Park (clearing the arm from the lens), let the screen —
         and, on an unpinned lens, autofocus — settle for `settle`s,
-        then capture the cropped phone-screen frame for the gesture
-        diff and fused view. Parking first means the settle covers any
-        AF hunt the arm's move triggered, so the capture is usually
-        sharp; a still-blurry frame
-        is re-grabbed once as a fallback.
-
-        A blown frame (exposure not yet settled after the screen content
-        flipped dark→bright) triggers the same wait-and-regrab as
-        blur; when the `needs_fix` predicate then says the exposure
-        itself warrants a tune, the injected `fix_exposure` runs and the
-        corrected frame replaces the mis-exposed one — the agent gets a
-        readable view instead of a warning.
+        then run the acquisition ladder (`_acquire_frame`) for the
+        gesture diff and fused view. Parking first means the settle
+        covers any AF hunt the arm's move triggered, so the capture is
+        usually sharp.
 
         Returns a `Grab` (frame/report/sharp/retuned) — frame is None on
         any failure (the view is best-effort, never a reason to fail a
-        gesture) and the report always describes the returned frame, so
-        the caller's `observe_quality` reuses it. See `Grab` for what
-        `sharp`/`retuned` mean and why the caller must withhold the
-        verdict when either is unfavorable. Caller must hold the lock."""
+        gesture). See `Grab` for what `sharp`/`retuned` mean and why the
+        caller must withhold the verdict when either is unfavorable.
+        Caller must hold the lock."""
         try:
             self._park()
             if settle:
                 time.sleep(settle)
-            frame = self._grab()
-            report = quality.assess(frame)
-            blurry = report.sharpness < self.GRAB_BLUR_THRESHOLD
-            retuned = False
-            if blurry or report.blown:
-                log.debug(
-                    "gesture frame %s — waiting for AF/AE",
-                    "blurry" if blurry else "blown",
-                )
-                time.sleep(self.GRAB_RETRY_SECONDS)
-                frame = self._grab()
-                report = quality.assess(frame)
-            if self._needs_fix(report):
-                fixed_frame, report, retuned = self._fix_exposure_grab(
-                    "gesture view", report
-                )
-                if fixed_frame is not None:
-                    frame = fixed_frame
+            frame, report, retuned = self._acquire_frame("gesture view")
             sharp = report.sharpness >= self.GRAB_BLUR_THRESHOLD
             if not sharp:
                 log.warning("gesture frame blurry — verdict withheld")
