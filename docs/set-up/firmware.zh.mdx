@@ -1,9 +1,9 @@
 ---
 title: 固件
-description: 给控制板刷上 FluidNC——一条命令（`physiclaw flash`）或手动浏览器流程——以及它会加载的配置文件。
+description: 给控制板刷上 FluidNC，以及它会加载的配置文件。
 ---
 
-PhysiClaw 硬件通过 [FluidNC](https://github.com/bdring/FluidNC) 固件与电脑通信：电脑用 [G-code](https://en.wikipedia.org/wiki/G-code)（GRBL 协议）发送指令，控制电机转动和电磁铁开关，完成点击和滑动等手势。
+PhysiClaw 硬件通过 [FluidNC](https://github.com/bdring/FluidNC) 固件与电脑通信。电脑用 [G-code](https://en.wikipedia.org/wiki/G-code)（GRBL 协议）发送指令，控制电机转动和电磁铁开关，完成点击和滑动等手势。
 
 ## 准备工作
 
@@ -47,7 +47,7 @@ physiclaw testdrive
   </g>
 </svg>
 
-试试 `X10` / `Y10`，确认每次移动都与上图坐标轴的方向一致；再用 `tap` 检查电磁铁是否正常。
+试试 `X10` / `Y10`，确认每次移动都与上图坐标轴的方向一致。再用 `tap` 检查电磁铁是否正常。
 
 :::tip
 电机 A 接主板的 Y1 口，电机 B 接 X 口，电磁铁接主轴（spindle）端子。
@@ -64,7 +64,7 @@ physiclaw testdrive
 
 1. **给控制板上电。** 接 **12 V** 电源，用 **USB** 串口线连接到电脑。
 
-2. **打开安装器。** 在 Chrome 里打开 [FluidNC 网页安装器](https://installer.fluidnc.com)。页面会显示两个产品——在 **FluidNC** 下点击 **Continue**。
+2. **打开安装器。** 在 Chrome 里打开 [FluidNC 网页安装器](https://installer.fluidnc.com)。页面会显示两个产品，在 **FluidNC** 下点击 **Continue**。
 
 3. **连接控制板。** 点击 **Connect**。弹出的对话框会列出可用串口。选 **USB Serial**，点击 **Connect**。
 
@@ -82,7 +82,7 @@ physiclaw testdrive
 
 10. **打开 File browser。** Home 页会显示红色的 **"invalid configuration"** 警告，这是因为控制板已经刷入固件，但还没有配置。点击左侧栏的 **File browser**。
 
-11. **创建配置文件。** File browser 会提示你创建一个。点击 **Create config**；弹出的对话框里 `config.yaml` 已预填为文件名。点击 **OK**。
+11. **创建配置文件。** File browser 会提示你创建一个。点击 **Create config**。弹出的对话框里 `config.yaml` 已预填为文件名。点击 **OK**。
 
 12. **打开 Source 标签页。** 编辑器停在 **General** 标签。点击最右侧的 **Source** 标签。
 
@@ -94,7 +94,7 @@ physiclaw testdrive
 
 16. **重启控制板。** 点击红色的 **Restart** 按钮。控制板重启并打印启动日志。
 
-17. **验证。** 每条消息都应当是**绿色**的，最后一行应为 `<Idle|...>`——说明刷入固件并配置成功。
+17. **验证。** 每条消息都应当是**绿色**的，最后一行应为 `<Idle|...>`，说明刷入固件并配置成功。
 
 </Steps>
 
@@ -102,7 +102,7 @@ physiclaw testdrive
 
 ## 配置文件
 
-命令行烧录会自动帮你刷入；手动烧录则需在第 13 步粘贴。FluidNC 配置：
+命令行烧录会自动帮你刷入。手动烧录则需在第 13 步粘贴。FluidNC 配置：
 
 <details>
 <summary>config.yaml</summary>

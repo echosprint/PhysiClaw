@@ -1,15 +1,15 @@
 ---
 title: Calibrate
-description: Run the browser wizard that lines up the arm, camera, and screen — plus auto mode and the camera check that makes calibration pass.
+description: Run the browser wizard that lines up the arm, camera, and screen. Plus auto mode and the camera check that makes calibration pass.
 ---
 
 PhysiClaw watches the screen with a camera and taps it with a stylus. To do that, it needs to learn two mappings:
 
-One is from the **phone screen** to the **camera image** — figuring out where a given button on the screen appears in the camera's view.
+One is from the **phone screen** to the **camera image**: figuring out where a given button on the screen appears in the camera's view.
 
-The other is from the **phone screen** to the **arm's plane of motion** — working out how far the stylus must move to reach that button.
+The other is from the **phone screen** to the **arm's plane of motion**: working out how far the stylus must move to reach that button.
 
-With both mappings, PhysiClaw's eye and hand agree: it sees the screen, then taps exactly the right spot.
+With both mappings, PhysiClaw's eye and hand agree. It sees the screen, then taps exactly the right spot.
 
 ## Camera
 
@@ -21,12 +21,12 @@ Before calibrating, open a camera-preview app on your computer, look at what the
 
 Apps that show the live camera feed:
 
-- **macOS** — Photo Booth
-- **Windows** — Camera
-- **Linux** — Snapshot (or Cheese)
+- **macOS**: Photo Booth
+- **Windows**: Camera
+- **Linux**: Snapshot (or Cheese)
 
 :::caution[Level the phone]
-The phone's rear camera bump keeps it from lying flat. Put something shaped to fit under the phone — a piece of thin cardboard cut to shape, or a soft pad — to level it, so the screen stays horizontal and doesn't wobble.
+The phone's rear camera bump keeps it from lying flat. Level it with something shaped to fit underneath, like a piece of thin cardboard cut to shape or a soft pad, so the screen stays horizontal and doesn't wobble.
 :::
 
 ## Setup
@@ -40,7 +40,7 @@ Start the server:
 physiclaw
 ```
 
-The first time it reads the camera, macOS asks for permission — click **Allow**. You can also change it later under **System Settings → Privacy & Security → Camera**.
+The first time it reads the camera, macOS asks for permission. Click **Allow**. You can also change it later under **System Settings → Privacy & Security → Camera**.
 
 </TabItem>
 <TabItem label="Windows">
@@ -79,10 +79,10 @@ If you've calibrated before and haven't moved the hardware, you can turn on auto
 
 ## First run
 
-On first run, once calibration is complete, PhysiClaw spends a few minutes learning the phone's screen layout — the messaging app's input field, send button, and on-screen keyboard. This step is fully automatic; nothing for you to do.
+On first run, once calibration is complete, PhysiClaw spends a few minutes learning the phone's screen layout, working out where the messaging app's input field, send button, and on-screen keyboard sit. This step is fully automatic, nothing for you to do.
 
 Just make sure **WhatsApp** (or your messaging app of choice) is pinned to the Dock (see [Prepare the phone](/en/set-up/prepare-the-phone/)) so PhysiClaw can find and open it. Once learning is done, it's ready to take tasks.
 
 :::tip[Switched phones?]
-Run `physiclaw reset` to clear the calibration and the learned layout, then restart PhysiClaw — it will re-calibrate and relearn the new phone's interface.
+Run `physiclaw reset` to clear the calibration and the learned layout, then restart PhysiClaw. It will re-calibrate and relearn the new phone's interface.
 :::

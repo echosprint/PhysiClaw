@@ -1,9 +1,9 @@
 ---
 title: Firmware
-description: Flash FluidNC onto the control board — one command (`physiclaw flash`) or the manual browser flow — plus the config it loads.
+description: Flash FluidNC onto the control board with one command or the manual browser flow, plus the config it loads.
 ---
 
-PhysiClaw's hardware talks to the computer through the [FluidNC](https://github.com/bdring/FluidNC) firmware: the computer sends [G-code](https://en.wikipedia.org/wiki/G-code) (the GRBL protocol) to drive the motors and switch the solenoid, performing taps, swipes, and other gestures.
+PhysiClaw's hardware talks to the computer through the [FluidNC](https://github.com/bdring/FluidNC) firmware. The computer sends [G-code](https://en.wikipedia.org/wiki/G-code) (the GRBL protocol) to drive the motors and switch the solenoid, performing taps, swipes, and other gestures.
 
 ## Prerequisites
 
@@ -47,7 +47,7 @@ physiclaw testdrive
   </g>
 </svg>
 
-Try `X10` / `Y10` and check that each move follows the axes illustrated above. `tap` to check the solenoid works.
+Try `X10` / `Y10` and check that each move follows the axes illustrated above. Run `tap` to check the solenoid works.
 
 :::tip
 Motor A goes to the board's Y1 port, motor B to X, and the solenoid to the spindle terminal.
@@ -64,25 +64,25 @@ If `physiclaw flash` succeeds, you can skip this part.
 
 1. **Power up the board.** Connect **12 V** power, then connect **USB** to the computer.
 
-2. **Open the installer.** Open the [FluidNC web installer](https://installer.fluidnc.com) in Chrome. The page shows two products — click **Continue** under **FluidNC**.
+2. **Open the installer.** Open the [FluidNC web installer](https://installer.fluidnc.com) in Chrome. The page shows two products. Click **Continue** under **FluidNC**.
 
 3. **Connect to the board.** Click **Connect**. A dialog lists available serial ports. Select **USB Serial** and click **Connect**.
 
 4. **Go to Install.** The Home page appears. Click **Install** in the left sidebar.
 
-5. **Select the firmware variant.** Pick the latest version from the dropdown. Three variants appear — select **`noradio`**.
+5. **Select the firmware variant.** Pick the latest version from the dropdown. Three variants appear. Select **`noradio`**.
 
 6. **Select the installation type.** Select **fresh-install**.
 
 7. **Confirm.** A confirmation dialog appears. Make sure **Installation speed** is **115200 baud**, then click **Install**.
 
-8. **Wait.** A progress bar appears — wait until it completes.
+8. **Wait.** A progress bar appears. Wait until it completes.
 
 9. **Installation complete.** A "Done" dialog confirms it. Click **Continue**.
 
-10. **Open the File browser.** The Home page shows a red **"invalid configuration"** warning — this is because the board has firmware but no config yet. Click **File browser** in the left sidebar.
+10. **Open the File browser.** The Home page shows a red **"invalid configuration"** warning. That's because the board has firmware but no config yet. Click **File browser** in the left sidebar.
 
-11. **Create the config file.** The File browser prompts you to create one. Click **Create config**; a dialog appears with `config.yaml` pre-filled as the filename. Click **OK**.
+11. **Create the config file.** The File browser prompts you to create one. Click **Create config**. A dialog appears with `config.yaml` pre-filled as the filename. Click **OK**.
 
 12. **Open the Source tab.** The editor opens on the **General** tab. Click the **Source** tab (rightmost).
 
@@ -94,7 +94,7 @@ If `physiclaw flash` succeeds, you can skip this part.
 
 16. **Restart the board.** Click the red **Restart** button. The board reboots and prints the startup log.
 
-17. **Verify.** Every message should be **green**, and the last line should read `<Idle|...>` — the firmware flashed and the config loaded successfully.
+17. **Verify.** Every message should be **green**, and the last line should read `<Idle|...>`, meaning the firmware flashed and the config loaded successfully.
 
 </Steps>
 
@@ -102,7 +102,7 @@ If `physiclaw flash` succeeds, you can skip this part.
 
 ## The config file
 
-The command-line flash installs this for you; for the manual flash, paste it in step 13. The FluidNC config:
+The command-line flash installs this for you. For the manual flash, paste it in step 13. The FluidNC config:
 
 <details>
 <summary>config.yaml</summary>
