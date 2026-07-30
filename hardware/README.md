@@ -74,6 +74,7 @@ hardware/
 │   │                          strategies, shared helpers, page numbering +
 │   │                          BOM splits, headless-Chrome PDF)
 │   ├── content/           13 ordered JSON sections (front + 11 chapters + back)
+│   ├── MANUAL_VERSION     The cover's version stamp (single source of truth)
 │   └── sourcing_vendors.json   Supplier data, keyed to BOM rows
 │
 └── output/                Generated artifacts (git-ignored)
@@ -216,6 +217,9 @@ freshly regenerated `output/`:
 - **Sourcing guide** — the `sourcing/` folder (HTML in English and 中文).
 - **Camera frame** — just the assembled camera-frame STEP file, on its own.
 - **Custom parts** — the print package from `output/print_3d/`.
+
+The version stamp on the manual's cover comes from `manual/MANUAL_VERSION` —
+bump that file when the manual content changes.
 
 One key does it all:
 

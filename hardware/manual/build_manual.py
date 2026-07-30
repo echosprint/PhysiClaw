@@ -54,6 +54,7 @@ from hardware.manual.common import (
     _step,
     load_pages,
     loc,
+    manual_version,
 )
 from hardware.manual.icon_svg import (
     BACK_CORNER_SVG,
@@ -265,7 +266,7 @@ def render_cover(page: dict, ctx: Ctx) -> str:
         f"<h1>{loc(page['title'], ctx.lang)}</h1>"
         f'<p class="tag"> {loc(page["tag"], ctx.lang)} </p>'
         '<div class="red-rule"></div></div>'
-        f'<div class="ver">VERSION {page["version"]}</div>'
+        f'<div class="ver">VERSION {manual_version()}</div>'
     )
     return page_shell(page, ctx, body, "cover")
 

@@ -12,8 +12,7 @@
     "tag": {
       "en": "We build agents that interact with you in the real world",
       "zh": "我们打造能在真实世界里与你互动的智能体"
-    },
-    "version": "2026-07-03"
+    }
   },
   {
     "type": "toc",
@@ -184,7 +183,7 @@
           "en": "Docs",
           "zh": "文档"
         },
-        "url": "https://PhysiClaw.ai"
+        "url": "https://docs.physiclaw.ai"
       }
     ]
   },

@@ -15,6 +15,7 @@ from typing import Any, Callable
 
 CONTENT_DIR = Path(__file__).resolve().parent / "content"
 VENDOR_FILE = Path(__file__).resolve().parent / "sourcing_vendors.json"
+MANUAL_VERSION_FILE = Path(__file__).resolve().parent / "MANUAL_VERSION"
 
 # The <html lang> attribute value per language.
 HTML_LANG = {"en": "en", "zh": "zh-Hans"}
@@ -33,6 +34,11 @@ def loc(value: Any, lang: str) -> str:
     if isinstance(value, dict):
         return value.get(lang) or value.get("en", "")
     return value
+
+
+def manual_version() -> str:
+    """The manual's cover version stamp; MANUAL_VERSION is the single source of truth."""
+    return MANUAL_VERSION_FILE.read_text(encoding="utf-8").strip()
 
 
 def load_pages() -> list[dict]:
