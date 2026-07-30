@@ -37,7 +37,7 @@
         },
         "items": {
           "type": "array",
-          "description": "Pages in this section, in order. Each entry is a page slug relative to the docs root — e.g. \"start/introduction\" — with no locale prefix and no file extension. The page's own title is used as its label.",
+          "description": "Pages in this section, in order. Each entry is a page slug relative to the docs root, e.g. \"start/introduction\", with no locale prefix and no file extension. The page's own title is used as its label.",
           "minItems": 1,
           "uniqueItems": true,
           "items": {

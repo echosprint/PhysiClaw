@@ -1,11 +1,11 @@
 ---
 title: Troubleshooting
-description: Fixes for common snags — PhysiClaw quitting on its own, camera calibration failing despite a normal-looking preview, the agent suddenly performing worse, the solenoid tapping intermittently, and Shortcuts failing mid-run.
+description: Fixes for common snags, covering PhysiClaw quitting on its own, camera calibration failing despite a normal-looking preview, the agent suddenly performing worse, the solenoid tapping intermittently, and Shortcuts failing mid-run.
 ---
 
 ## PhysiClaw exits on its own after a while
 
-PhysiClaw runs fine but quits on its own after a while. This usually happens because the system shuts off the camera after a long stretch of inactivity — without it, PhysiClaw can't capture the phone screen, so it exits.
+PhysiClaw runs fine but quits on its own after a while. This usually happens because the system shuts off the camera after a long stretch of inactivity. Without it, PhysiClaw can't capture the phone screen, so it exits.
 
 :::tip[Fix]
 Make sure the computer running PhysiClaw won't lock the screen or go to sleep.
@@ -21,15 +21,15 @@ Make sure the room is evenly lit, avoid glare on the screen, and set the phone's
 
 ## The agent suddenly performs much worse
 
-Tasks that used to run reliably start failing — the agent mis-taps, gets lost, or gives up — yet nothing in software changed. The cause is almost always physical: the camera got bumped and no longer points straight at the phone screen, or a light is now hitting the screen directly, blowing out the image so the agent can barely see it.
+Tasks that used to run reliably start failing. The agent mis-taps, gets lost, or gives up, yet nothing in software changed. The cause is almost always physical. The camera got bumped and no longer points straight at the phone screen, or a light is now hitting the screen directly, blowing out the image so the agent can barely see it.
 
 :::tip[Fix]
-Check what the model actually saw: `physiclaw logs` lists recent sessions, and `physiclaw logs <id>` prints the path to the session's `images/` folder — the exact frames sent to the LLM. Tilted, blurry, or washed-out frames confirm it. Re-aim the camera (recalibrate if it moved) and light the screen evenly with no direct glare.
+Check what the model actually saw. `physiclaw logs` lists recent sessions, and `physiclaw logs <id>` prints the path to the session's `images/` folder, which holds the exact frames sent to the LLM. Tilted, blurry, or washed-out frames confirm it. Re-aim the camera, recalibrate if it moved, and light the screen evenly with no direct glare.
 :::
 
 ## Solenoid clicks sometimes, unresponsive other times
 
-Usually this is flex fatigue in the solenoid cable — the wire has broken. If the joint is soldered, solder wicks into the wire and makes that section stiff and brittle, so it can't take repeated bending. The cable is pulled straight as the gantry extends and bent as it returns; after enough cycles it breaks at the bend point. The broken ends touch and separate intermittently, so the clicks come and go.
+Usually this is flex fatigue in the solenoid cable, meaning the wire has broken. If the joint is soldered, solder wicks into the wire and makes that section stiff and brittle, so it can't take repeated bending. The cable is pulled straight as the gantry extends and bent as it returns; after enough cycles it breaks at the bend point. The broken ends touch and separate intermittently, so the clicks come and go.
 
 :::tip[Fix]
 Rewire it, keeping two things in mind: place the joint within 50 mm of the solenoid, clear of the section that flexes most; and secure the leads to the tube holder (the drag-chain bracket) with a zip tie, so the wiring at the control board terminals doesn't swing back and forth with the solenoid's movement and work the terminals loose over time.

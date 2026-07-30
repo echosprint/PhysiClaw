@@ -5,7 +5,7 @@ here, next to the code, so docs ship in the same pull request as the change they
 
 On every push to `main` that touches `docs/`, a GitHub Action mirrors this directory into
 the renderer ([physiclaw/docs-site](https://github.com/physiclaw/docs-site)), which builds
-and deploys the static site. You don't build anything here — just edit Markdown.
+and deploys the static site. You don't build anything here; just edit Markdown.
 
 ## Authoring
 
@@ -22,10 +22,10 @@ and deploys the static site. You don't build anything here — just edit Markdow
   ```
 - **No `import` statements.** Write callouts as directives (`:::note`, `:::tip[Title]`,
   `:::caution`, `:::danger`) and components ([Card, CardGrid, Steps, Tabs, FileTree,
-  LinkCard, Badge, …](https://starlight.astro.build/components/)) as bare tags — the
+  LinkCard, Badge, …](https://starlight.astro.build/components/)) as bare tags. The
   renderer injects imports during the build.
 
-## Navigation — `docs.json`
+## Navigation: `docs.json`
 
 The sidebar is defined in [`docs.json`](./docs.json) (validated against
 [`docs.schema.json`](./docs.schema.json)). Each section lists its pages **in order**, by
