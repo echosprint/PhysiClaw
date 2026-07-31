@@ -237,16 +237,44 @@ def test_load_raises_ConfigError_on_malformed_toml(tmp_path: Path) -> None:
         config.load(p)
 
 
-def test_load_accepts_freeform_providers_section_without_validating(
-    tmp_path: Path,
-) -> None:
-    # `[providers.<id>]` is in _FREEFORM_SECTIONS — read directly elsewhere.
+def test_load_accepts_wellformed_providers_section(tmp_path: Path) -> None:
+    # `[providers.<id>]` keys are free-form (unknown ids, extra keys OK);
+    # only the SHAPE is checked. Read directly elsewhere.
     p = tmp_path / "config.toml"
-    p.write_text('[providers.openai]\nbase_url = "https://proxy.example/v1"\n')
+    p.write_text(
+        '[providers.openai]\nbase_url = "https://proxy.example/v1"\n'
+        '[providers.custom-vendor]\nbase_url = "https://alt.example"\nextra = 1\n'
+    )
 
     cfg = config.load(p)
 
     assert cfg == config.Config()
+
+
+def test_load_rejects_flat_providers_entry(tmp_path: Path) -> None:
+    # The natural typo: flattening the documented sub-table shape. Used
+    # to pass load() and AttributeError at provider construction.
+    p = tmp_path / "config.toml"
+    p.write_text('[providers]\nmoonshot = "https://api.moonshot.ai/v1"\n')
+
+    with pytest.raises(config.ConfigError, match=r"moonshot: expected a sub-table"):
+        config.load(p)
+
+
+def test_load_rejects_non_table_providers_section(tmp_path: Path) -> None:
+    p = tmp_path / "config.toml"
+    p.write_text("providers = 3\n")
+
+    with pytest.raises(config.ConfigError, match=r"\[providers\] must be a table"):
+        config.load(p)
+
+
+def test_load_rejects_non_string_base_url(tmp_path: Path) -> None:
+    p = tmp_path / "config.toml"
+    p.write_text("[providers.openai]\nbase_url = 42\n")
+
+    with pytest.raises(config.ConfigError, match=r"base_url: expected str"):
+        config.load(p)
 
 
 # ---------- to_toml ----------
@@ -743,6 +771,19 @@ def test_provider_base_url_override_returns_none_for_non_string_value(
     p = config.config_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text("[providers.openai]\nbase_url = 42\n")
+
+    assert config.provider_base_url_override("openai") is None
+
+
+def test_provider_base_url_override_returns_none_for_flat_providers_table(
+    physiclaw_home: Path,
+) -> None:
+    # `[providers]\nopenai = "url"` — a natural flattening of the
+    # documented table shape — passes load() (free-form section) and must
+    # fail soft here, not AttributeError at provider construction.
+    p = config.config_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text('[providers]\nopenai = "https://proxy.example/v1"\n')
 
     assert config.provider_base_url_override("openai") is None
 

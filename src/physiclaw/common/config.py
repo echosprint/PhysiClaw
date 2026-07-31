@@ -335,11 +335,35 @@ def _section_types() -> dict[str, type]:
 _SECTION_TYPES: dict[str, type] = _section_types()
 
 
-# Top-level sections parsed elsewhere — accepted by the loader but
-# skipped by the dataclass validator. `providers` holds per-provider
-# overrides like `[providers.<id>] base_url = "..."` (read directly via
+# Top-level sections parsed elsewhere — skipped by the dataclass
+# validator (their KEYS are free-form), but shape-checked on load.
+# `providers` holds per-provider overrides like
+# `[providers.<id>] base_url = "..."` (read directly via
 # `model_ref.provider_base_url_override`).
 _FREEFORM_SECTIONS: frozenset[str] = frozenset({"providers"})
+
+
+def _validate_providers(providers: Any) -> None:
+    """Shape-check the free-form ``[providers]`` section: unknown
+    provider ids and extra keys are fine, but each entry must be a
+    sub-table (``[providers.<id>]``) and ``base_url`` a string. The flat
+    spelling (``moonshot = "url"`` under ``[providers]``) used to load
+    silently and AttributeError at provider construction. The runtime
+    reader stays fail-soft (``model_ref.provider_base_url_override``)."""
+    if not isinstance(providers, dict):
+        raise ConfigError(
+            f"[providers] must be a table, got {type(providers).__name__}"
+        )
+    for pid, entry in providers.items():
+        if not isinstance(entry, dict):
+            raise ConfigError(
+                f"[providers] {pid}: expected a sub-table — write\n"
+                f"    [providers.{pid}]\n"
+                f'    base_url = "https://..."\n'
+                f"  not: {pid} = {entry!r}"
+            )
+        if "base_url" in entry:
+            _check_scalar_type(f"providers.{pid}", "base_url", str, entry["base_url"])
 
 
 _FILE_HEADER = """\
@@ -511,6 +535,8 @@ def load(path: Path | None = None) -> Config:
             f"unknown section(s) in {path}: {sorted(unknown_sections)} — "
             f"valid sections: {sorted(_SECTION_TYPES)}"
         )
+    if "providers" in raw:
+        _validate_providers(raw["providers"])
 
     built: dict[str, Any] = {}
     for key, cls in _SECTION_TYPES.items():

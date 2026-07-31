@@ -120,5 +120,16 @@ def provider_base_url_override(provider_id: str) -> str | None:
         doc = tomllib.loads(raw)
     except tomllib.TOMLDecodeError:
         return None
-    val = doc.get("providers", {}).get(provider_id, {}).get("base_url")
+    # Shape-guard every level: `config.load()` rejects a malformed
+    # `[providers]` loudly (`_validate_providers`), but this reader
+    # parses the raw file independently and can still see it — e.g. when
+    # the import-time load failed soft to defaults. Fail soft per this
+    # function's contract, don't AttributeError.
+    providers = doc.get("providers")
+    if not isinstance(providers, dict):
+        return None
+    entry = providers.get(provider_id)
+    if not isinstance(entry, dict):
+        return None
+    val = entry.get("base_url")
     return val if isinstance(val, str) else None
