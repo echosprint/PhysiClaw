@@ -248,6 +248,14 @@ def update_fact(old: str, new: str) -> None:
     if new:
         updated = text.replace(old, new, 1)
     else:
+        if "\n" in old:
+            # The line loop below can never match a substring spanning a
+            # newline — without this guard the rewrite is a byte-identical
+            # no-op that still reports "memory.md updated".
+            raise ValueError(
+                "old spans multiple lines — delete one line at a time "
+                "(pass a single-line substring)"
+            )
         lines = text.splitlines(keepends=True)
         out: list[str] = []
         removed = False
