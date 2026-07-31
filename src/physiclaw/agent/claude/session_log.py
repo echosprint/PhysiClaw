@@ -41,6 +41,25 @@ log = logging.getLogger(__name__)
 LOG_DIR = paths.claude_log_dir()
 
 
+def _message(data: dict) -> dict:
+    """The event's `message` as a dict — {} for null/absent/non-dict.
+    The `claude` CLI is external and unpinned; a shape deviation must
+    cost a log line, never the wake (spawn._stream's catch is the last
+    resort, this is the first)."""
+    msg = data.get("message")
+    return msg if isinstance(msg, dict) else {}
+
+
+def _blocks(msg: dict) -> list[dict]:
+    """`msg["content"]` as a list of dict blocks — non-list content and
+    non-dict blocks drop out (string content is handled by the callers
+    that can render it)."""
+    content = msg.get("content")
+    if not isinstance(content, list):
+        return []
+    return [b for b in content if isinstance(b, dict)]
+
+
 def _redact_images(content):
     """Replace base64 image data with a length placeholder so logs stay readable."""
     if not isinstance(content, list):
@@ -133,17 +152,17 @@ class _ClaudeSummary:
     def observe(self, data: dict) -> None:
         t = data.get("type")
         if t == "assistant":
-            msg = data.get("message", {})
+            msg = _message(data)
             mid = msg.get("id")
             if mid:
                 self._msg_ids.add(mid)
             # Each content block appears in exactly one assistant event, so
             # counting tool_use across events doesn't double-count.
-            for b in msg.get("content", []):
+            for b in _blocks(msg):
                 if b.get("type") == "tool_use":
                     self.tool_calls[b.get("name") or "?"] += 1
         elif t == "user":
-            for b in data.get("message", {}).get("content", []):
+            for b in _blocks(_message(data)):
                 if b.get("type") == "tool_result" and b.get("is_error"):
                     self.tool_errors += 1
         elif t == "result":
@@ -243,7 +262,8 @@ class _SessionLog:
             # count (summary counts `len(_msg_ids)` — mirror it here).
             # Fall back to per-event advance only when there is no id to
             # dedup on (never in a real Claude stream).
-            mid = data.get("message", {}).get("id")
+            msg = _message(data)
+            mid = msg.get("id")
             if not mid:
                 self._turn += 1
             elif mid not in self._seen_msg_ids:
@@ -251,8 +271,12 @@ class _SessionLog:
                 self._turn += 1
             # Sentinel evidence for done(): capture assistant text here
             # (not in the render-only _summarize) — the LAST non-empty
-            # text block wins, whichever event carried it.
-            for b in data.get("message", {}).get("content", []):
+            # text block wins, whichever event carried it. String-shaped
+            # content counts too, so a shape drift can't cost the sentinel.
+            content = msg.get("content")
+            if isinstance(content, str) and content.strip():
+                self._last_text = content
+            for b in _blocks(msg):
                 if b.get("type") == "text" and b.get("text", "").strip():
                     self._last_text = b["text"]
         summary = self._summarize(data)
@@ -312,7 +336,7 @@ class _SessionLog:
         actually saw, the biggest post-mortem win over the elided daily log."""
         if data.get("type") != "user":
             return
-        for b in data.get("message", {}).get("content", []):
+        for b in _blocks(_message(data)):
             if b.get("type") != "tool_result":
                 continue
             content = b.get("content")
@@ -343,7 +367,7 @@ class _SessionLog:
         """
         if data.get("type") != "assistant":
             return
-        for b in data.get("message", {}).get("content", []):
+        for b in _blocks(_message(data)):
             if b.get("type") == "text" and b.get("text", "").strip():
                 first = b["text"].strip().splitlines()[0][:200]
                 log.info("claude: %s", first)
@@ -355,11 +379,15 @@ class _SessionLog:
         t = data.get("type", "")
 
         if t == "assistant":
+            msg = _message(data)
+            content = msg.get("content")
+            if isinstance(content, str) and content.strip():
+                return f"text: {content[:1000]}"
             parts = []
-            for b in data.get("message", {}).get("content", []):
+            for b in _blocks(msg):
                 if b.get("type") == "tool_use":
                     parts.append(
-                        f"tool_use: {b['name']} {str(b.get('input', ''))[:1000]}"
+                        f"tool_use: {b.get('name', '?')} {str(b.get('input', ''))[:1000]}"
                     )
                 elif b.get("type") == "text" and b.get("text", "").strip():
                     parts.append(f"text: {b['text'][:1000]}")
@@ -368,7 +396,7 @@ class _SessionLog:
             return " | ".join(parts) if parts else None
 
         if t == "user":
-            for b in data.get("message", {}).get("content", []):
+            for b in _blocks(_message(data)):
                 if b.get("type") == "tool_result":
                     return f"tool_result: {str(_redact_images(b.get('content', '')))[:1000]}"
 

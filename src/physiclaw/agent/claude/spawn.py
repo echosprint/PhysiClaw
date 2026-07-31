@@ -334,6 +334,10 @@ async def _stream(proc, slog: _SessionLog) -> dict | None:
             result_data = slog.event(json.loads(text)) or result_data
         except json.JSONDecodeError:
             slog.raw(text)
+        except Exception:
+            # Last-resort catch — see session_log._message for the contract.
+            log.warning("session log failed on event", exc_info=True)
+            slog.raw(text)
     return result_data
 
 

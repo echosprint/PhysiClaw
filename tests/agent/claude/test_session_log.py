@@ -66,6 +66,35 @@ def _slog(sources: list[str]) -> _SessionLog:
     )
 
 
+def test_session_log_survives_hostile_event_shapes(_isolated_log_dir: Path) -> None:
+    """The `claude` CLI is external and unpinned — shape drift must cost
+    a log line, never the wake: no exception may escape event(), and a
+    string-shaped assistant content still carries the sentinel."""
+    slog = _slog([])
+    hostile: list[dict] = [
+        {"type": "assistant", "message": None},
+        {"type": "assistant", "message": "plain string"},
+        {
+            "type": "assistant",
+            "message": {"id": "m1", "content": "string content\n>> DONE - ok"},
+        },
+        {
+            "type": "assistant",
+            "message": {"content": [{"type": "tool_use"}, "stray-string", 42]},
+        },
+        {
+            "type": "user",
+            "message": {"content": [{"type": "tool_result", "is_error": True}, None]},
+        },
+        {"type": "user", "message": {"content": "not-a-list"}},
+    ]
+    for event in hostile:
+        slog.event(event)
+
+    assert slog.done(0) == "DONE"  # the string-content sentinel was captured
+    slog.close()
+
+
 def test_session_log_init_writes_wake_header(_isolated_log_dir: Path) -> None:
     slog = _slog(["cron:a", "phone"])
     slog.close()
