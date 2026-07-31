@@ -249,7 +249,11 @@ class BridgeState:
             self._screenshot_received_at = time.monotonic()
             self._recent_screens.append(data)
             self._upload_armed_until = 0.0
-        self._screenshot_ready.set()
+            # Inside the lock: data and event must change atomically, or a
+            # clear racing this upload can leave the event set with
+            # _screenshot_data=None (waiter returns "no screenshot" while
+            # the fresh upload lands unconsumed).
+            self._screenshot_ready.set()
 
     def clear_screenshot(self):
         """Clear any pending screenshot so wait_screenshot blocks for a fresh one.
@@ -262,8 +266,10 @@ class BridgeState:
         deliberately left intact so a fetch after the MCP tool consumed a
         shot still sees it.
         """
-        self._screenshot_ready.clear()
         with self.lock:
+            # Same atomicity as receive_screenshot: clearing the event
+            # outside the lock raced a late-window upload.
+            self._screenshot_ready.clear()
             self._screenshot_data = None
             self._arm_upload_locked(UPLOAD_WINDOW_SECONDS)
 
