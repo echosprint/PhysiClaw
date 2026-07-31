@@ -41,7 +41,7 @@ def _read_cache() -> dict | None:
     try:
         data = json.loads(read_text(p))
         return data if isinstance(data, dict) else None
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):  # ValueError covers JSON + UTF-8 decode errors
         return None
 
 

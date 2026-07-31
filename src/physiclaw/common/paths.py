@@ -88,7 +88,7 @@ def load_calibration_bundle() -> dict | None:
         return None
     try:
         data = json.loads(read_text(p))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):  # ValueError covers JSON + UTF-8 decode errors
         return None
     return data if isinstance(data, dict) else None
 

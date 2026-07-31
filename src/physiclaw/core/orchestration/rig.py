@@ -38,7 +38,7 @@ def _layout_learned() -> bool:
         return False
     try:
         data = json.loads(read_text(p))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):  # ValueError covers JSON + UTF-8 decode errors
         return False
     # "layout_learned" is written by agent-side screen_layout.record() once
     # every box is captured; core only reads it (keep in sync with that writer).

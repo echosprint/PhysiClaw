@@ -234,6 +234,6 @@ class Calibration:
             return None
         try:
             return cls.from_dict(json.loads(read_text(path)))
-        except (json.JSONDecodeError, TypeError, ValueError, KeyError) as e:
+        except (OSError, ValueError, TypeError, KeyError) as e:
             log.warning(f"Failed to load calibration bundle from {path}: {e}")
             return None

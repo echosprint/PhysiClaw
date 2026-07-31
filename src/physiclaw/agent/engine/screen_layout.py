@@ -96,7 +96,7 @@ def _load() -> dict:
         return {}
     try:
         data = json.loads(read_text(p))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):  # ValueError covers JSON + UTF-8 decode errors
         return {}
     return data if isinstance(data, dict) else {}
 

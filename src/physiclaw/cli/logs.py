@@ -100,7 +100,7 @@ def _resolve(sessions_dir: Path, query: str) -> Path:
 def _load_summary(d: Path) -> dict[str, Any] | None:
     try:
         return json.loads((d / "summary.json").read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):  # ValueError covers JSON + UTF-8 decode errors
         return None
 
 

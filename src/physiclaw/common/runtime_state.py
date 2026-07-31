@@ -61,7 +61,7 @@ def clear() -> None:
     p = paths.runtime_state_file()
     try:
         state = json.loads(read_text(p))
-    except (FileNotFoundError, OSError, json.JSONDecodeError):
+    except (OSError, ValueError):  # ValueError covers JSON + UTF-8 decode errors
         return
     if state.get("pid") != os.getpid():
         return
@@ -82,7 +82,7 @@ def read_live() -> dict | None:
         return None
     try:
         state = json.loads(read_text(p))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):  # ValueError covers JSON + UTF-8 decode errors
         return None
     pid = state.get("pid")
     if not isinstance(pid, int) or not _pid_alive(pid):
