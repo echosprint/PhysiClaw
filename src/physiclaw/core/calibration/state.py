@@ -19,7 +19,8 @@ import cv2
 import numpy as np
 
 from physiclaw.common import paths
-from physiclaw.common.text import read_text, write_text
+from physiclaw.common.logger import write_json_atomic
+from physiclaw.common.text import read_text
 from physiclaw.core.calibration.transforms import ScreenTransforms, ViewportShift
 from physiclaw.core.geometry import apply_affine
 
@@ -219,9 +220,11 @@ class Calibration:
         )
 
     def save(self, path: Path = BUNDLE_PATH) -> None:
-        """Write this bundle to disk as JSON."""
+        """Write this bundle to disk as JSON — atomically (tmp + rename),
+        so a kill or full disk mid-write can't truncate the previous good
+        bundle and cost the operator a full re-calibration."""
         path.parent.mkdir(parents=True, exist_ok=True)
-        write_text(path, json.dumps(self.to_dict(), indent=2))
+        write_json_atomic(path, self.to_dict())
         log.info(f"Saved calibration bundle → {path}")
 
     @classmethod

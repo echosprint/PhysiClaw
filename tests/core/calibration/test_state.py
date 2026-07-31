@@ -373,9 +373,12 @@ def test_save_writes_two_space_indented_json_to_disk(tmp_path: Path) -> None:
 
     assert bundle_path.is_file()
     text = bundle_path.read_text()
-    # Byte-for-byte equality with json.dumps(indent=2) — kills any
-    # mutation on the indent argument.
-    assert text == json.dumps(c.to_dict(), indent=2)
+    # Byte-for-byte equality with write_json_atomic's rendering — kills
+    # any mutation on the indent argument, and pins the atomic writer as
+    # the single serialization path.
+    assert text == json.dumps(c.to_dict(), ensure_ascii=False, indent=2) + "\n"
+    # tmp + rename: no .json.tmp residue next to the bundle.
+    assert not list(bundle_path.parent.glob("*.tmp"))
 
 
 def test_save_creates_intermediate_parent_directories(tmp_path: Path) -> None:
