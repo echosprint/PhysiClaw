@@ -133,19 +133,41 @@ def _warn(msg):
     print(step_warn(msg))
 
 
+def _poll_bridge(seconds: float = 15.0) -> bool:
+    """Re-poll /api/status until the phone bridge reports connected, up
+    to `seconds`. The wizard must verify, not assume — a checkmark on a
+    stale status surfaces as a confusing failure steps later."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        status = api("GET", STATUS_PATH, timeout=5) or {}
+        if status.get("bridge"):
+            return True
+        time.sleep(1)
+    return False
+
+
 def _step_connect_phone(status, auto: bool) -> None:
     print("\n── 1. Connect phone ──")
     if status.get("bridge"):
         _done("Phone connected")
-    else:
-        from physiclaw.core.bridge.lan import bridge_port
+        return
+    from physiclaw.core.bridge.lan import bridge_port
 
-        lan_port = bridge_port(_base_port())
-        print(f"  Phone URL: http://{lan_ip()}:{lan_port}/bridge")
+    lan_port = bridge_port(_base_port())
+    phone_url = f"http://{lan_ip()}:{lan_port}/bridge"
+    print(f"  Phone URL: {phone_url}")
+    while True:
         if not auto:
             webbrowser.open(f"{BASE}/api/bridge/qr")
             wait("Scan the QR on your phone — the page should say 'PhysiClaw'")
-        _done("Phone connected")
+        if _poll_bridge():
+            _done("Phone connected")
+            return
+        if auto or not ask(
+            "Phone not seen yet — retry after opening the page?", auto=False
+        ):
+            _warn(f"Phone not connected — keep {phone_url} open and foregrounded")
+            return
 
 
 def _step_position_rig(auto: bool) -> None:
