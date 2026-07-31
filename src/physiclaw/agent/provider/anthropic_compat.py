@@ -155,15 +155,17 @@ class AnthropicCompatibleProvider(BaseProvider):
 
     async def list_models(self) -> list[dict]:
         """Anthropic exposes models via `client.models.list()`. Each
-        entry surfaces `id`, `display_name`, `created_at`."""
-        resp = await self._client.models.list()
+        entry surfaces `id`, `display_name`, `created_at`. Iterated (not
+        awaited once) so the SDK auto-paginates: a single await yields
+        only page 1 (default 20), and this cache is `models use`'s
+        validation source of truth — truncation rejects real models."""
         return [
             {
                 "id": m.id,
                 "display_name": m.display_name,
                 "created_at": str(m.created_at),
             }
-            for m in resp.data
+            async for m in self._client.models.list(limit=100)
         ]
 
     # ---------- serialize_history hooks (called by BaseProvider) ----------

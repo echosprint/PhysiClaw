@@ -148,20 +148,28 @@ async def test_aclose_calls_sdk_close_not_aclose(provider: _TestAnthropic) -> No
 async def test_list_models_normalizes_each_entry(
     provider: _TestAnthropic, mocker
 ) -> None:
-    provider._client.models.list.return_value = mocker.MagicMock(
-        data=[
-            mocker.MagicMock(
-                id="claude-opus-4-7",
-                display_name="Claude Opus 4.7",
-                created_at="2026-01-01",
-            ),
-            mocker.MagicMock(
-                id="claude-sonnet-4-6",
-                display_name="Claude Sonnet 4.6",
-                created_at="2025-09-01",
-            ),
-        ]
-    )
+    entries = [
+        mocker.MagicMock(
+            id="claude-opus-4-7",
+            display_name="Claude Opus 4.7",
+            created_at="2026-01-01",
+        ),
+        mocker.MagicMock(
+            id="claude-sonnet-4-6",
+            display_name="Claude Sonnet 4.6",
+            created_at="2025-09-01",
+        ),
+    ]
+
+    # Async-iterable like the SDK's AsyncPaginator: list_models must
+    # iterate (auto-pagination across pages), not await a single page.
+    # The real models.list() is a sync call returning the paginator, so
+    # the mock must be sync too (an AsyncMock would hand back a coroutine).
+    async def _paginator():
+        for m in entries:
+            yield m
+
+    provider._client.models.list = mocker.MagicMock(return_value=_paginator())
 
     out = await provider.list_models()
 
