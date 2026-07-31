@@ -704,6 +704,18 @@ SERVER_ENV_VAR = "PHYSICLAW_SERVER"
 WILDCARD_HOSTS = frozenset({"0.0.0.0", "::"})
 
 
+def url_host(host: str) -> str:
+    """Bind address → the host part of a dialable URL: wildcards map to
+    loopback (a server can listen on them, a client can't dial them) and
+    a bare IPv6 literal gets bracketed (`http://::1:8048` is unparseable).
+    URL-scoped on purpose — sockets need the unbracketed form."""
+    if host in WILDCARD_HOSTS:
+        return "127.0.0.1"
+    if ":" in host and not host.startswith("["):
+        return f"[{host}]"
+    return host
+
+
 def server_url() -> str:
     """The control-plane base URL agent-side clients dial.
 
@@ -718,10 +730,7 @@ def server_url() -> str:
     env = os.environ.get(SERVER_ENV_VAR)
     if env:
         return env
-    host = CONFIG.server.host
-    if host in WILDCARD_HOSTS:
-        host = "127.0.0.1"
-    return f"http://{host}:{CONFIG.server.port}"
+    return f"http://{url_host(CONFIG.server.host)}:{CONFIG.server.port}"
 
 
 def unset_dotted(dotted: str, path: Path | None = None) -> bool:
@@ -807,6 +816,7 @@ __all__ = [
     "provider_base_url_override",
     "resolve_provider_key",
     "server_url",
+    "url_host",
     "set_dotted",
     "to_toml",
     "unset_dotted",

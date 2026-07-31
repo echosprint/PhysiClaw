@@ -13,7 +13,7 @@ from typing import Annotated, Optional
 
 import typer
 
-from physiclaw.common.config import CONFIG, WILDCARD_HOSTS
+from physiclaw.common.config import CONFIG, WILDCARD_HOSTS, url_host
 
 
 def server(
@@ -256,7 +256,7 @@ def _announce_ready_when_up(host: str, port: int) -> None:
     # loads on the first probe, not at import.
     from physiclaw.common.ready import check_ready_once
 
-    base = f"http://{_dial_host(host)}:{port}"
+    base = f"http://{url_host(host)}:{port}"
 
     def _watch() -> None:
         while True:
@@ -334,7 +334,9 @@ def _apply_save_flags(
 
 def _dial_host(host: str) -> str:
     """Bind address → an address a client can dial. A wildcard bind
-    (0.0.0.0/::) listens on loopback too but can't itself be dialed."""
+    (0.0.0.0/::) listens on loopback too but can't itself be dialed.
+    Socket-scoped (unbracketed IPv6) — URL builders use
+    `config.url_host`, which additionally brackets IPv6 literals."""
     return "127.0.0.1" if host in WILDCARD_HOSTS else host
 
 
@@ -411,15 +413,15 @@ def _log_endpoints(host: str, port: int, *, no_runtime: bool) -> None:
     (mDNS, survives IP changes) plus IP fallback, or a single URL and a
     LocalHostName tip when the two coincide. Without a built-in runtime
     (--no-runtime / `physiclaw mcp`) an external MCP client is the consumer,
-    so the /mcp line carries the connect hint — dialable via `_dial_host`,
-    since the client pastes it."""
+    so the /mcp line carries the connect hint — dialable via
+    `config.url_host`, since the client pastes it."""
     log = logging.getLogger(__name__)
     from physiclaw.core.bridge import bridge_base_urls
 
     primary, fallback = bridge_base_urls(port)
-    display_host = "localhost" if host == "0.0.0.0" else host
+    display_host = "localhost" if host in WILDCARD_HOSTS else host
     if no_runtime:
-        url = f"http://{_dial_host(host)}:{port}/mcp"
+        url = f"http://{url_host(host)}:{port}/mcp"
         log.info(
             f"PhysiClaw MCP server on {url} — no built-in runtime\n"
             f"  Connect an external MCP client, e.g. Claude Code: "
@@ -610,7 +612,7 @@ def _spawn_runtime(host: str, port: int, verbose: bool, label: str) -> subproces
         "-m",
         "physiclaw.agent.runtime",
         "--server",
-        f"http://{_dial_host(host)}:{port}",
+        f"http://{url_host(host)}:{port}",
     ]
     if verbose:
         cmd.append("--verbose")

@@ -86,11 +86,18 @@ def _probe_server(live: dict | None) -> tuple[str, int, bool, dict | None]:
         from physiclaw.common.config import CONFIG
 
         host, port = CONFIG.server.host, CONFIG.server.port
-    bind_all = host == "0.0.0.0"
+    from physiclaw.common.config import WILDCARD_HOSTS, url_host
+
+    # Both wildcards ("0.0.0.0" AND "::"): a `--host ::` server probed at
+    # http://:::PORT read as offline, and doctor's offline branch then
+    # opens serial/cameras the live server holds.
+    bind_all = host in WILDCARD_HOSTS
     if bind_all:
         host = "localhost"
     # _http.api handles the proxy-bypass policy and fails soft to None.
-    status = _http.api(f"http://{host}:{port}", "GET", STATUS_PATH, timeout=1.0)
+    status = _http.api(
+        f"http://{url_host(host)}:{port}", "GET", STATUS_PATH, timeout=1.0
+    )
     return (host, port, bind_all, status)
 
 
