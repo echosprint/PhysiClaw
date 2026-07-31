@@ -155,17 +155,32 @@ async def test_handle_screen_dimension_records_into_calib() -> None:
 
 
 @pytest.mark.asyncio
-async def test_handle_screen_dimension_defaults_missing_fields_to_zero() -> None:
+async def test_handle_screen_dimension_rejects_missing_fields() -> None:
+    # Missing keys int() to 0 — accepting them overwrote valid geometry
+    # with zeros, stickily. 400, and the state stays untouched.
     cal = CalibrationState()
 
-    await handle_screen_dimension(_fake_request(json_obj={}), cal)
+    resp = await handle_screen_dimension(_fake_request(json_obj={}), cal)
 
-    assert cal.screen_dimension == {
-        "width": 0,
-        "height": 0,
+    assert resp.status_code == 400
+    assert cal.screen_dimension is None
+
+
+@pytest.mark.asyncio
+async def test_handle_screen_dimension_rejects_zero_viewport() -> None:
+    # A backgrounded tab reports a zero viewport — must not clobber state.
+    cal = CalibrationState()
+    body = {
+        "screen_width": 390,
+        "screen_height": 844,
         "viewport_width": 0,
         "viewport_height": 0,
     }
+
+    resp = await handle_screen_dimension(_fake_request(json_obj=body), cal)
+
+    assert resp.status_code == 400
+    assert cal.screen_dimension is None
 
 
 # ---------- handle_screenshot_upload ----------

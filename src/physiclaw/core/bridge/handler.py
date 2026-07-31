@@ -114,6 +114,11 @@ async def handle_screen_dimension(request, cal: CalibrationState):
         }
     except (TypeError, ValueError):
         return _bad_request("dimension fields must be numbers")
+    if any(v <= 0 for v in dim.values()):
+        # A missing key int()s to 0 and a backgrounded tab reports a zero
+        # viewport — either would overwrite valid calibration geometry
+        # with zeros, stickily (has_device_info stays true). Reject.
+        return _bad_request("dimension fields must all be positive")
     with cal.lock:
         cal.screen_dimension = dim
     dim = cal.screen_dimension
