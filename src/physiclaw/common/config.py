@@ -14,6 +14,7 @@ Layering (first match wins):
 """
 
 import dataclasses
+import json
 import os
 import tomllib
 from collections.abc import MutableMapping
@@ -562,7 +563,10 @@ def _toml_scalar(v: Any) -> str:
             raise ConfigError(f"non-finite float not representable in TOML: {v!r}")
         return repr(v)
     if isinstance(v, str):
-        return f'"{v}"'
+        # json.dumps escaping (\" \\ \uXXXX, control chars) is valid TOML
+        # basic-string syntax — a bare f'"{v}"' emitted invalid TOML for
+        # values containing quotes or backslashes (Windows paths).
+        return json.dumps(v)
     raise ConfigError(f"cannot serialize {v!r} ({type(v).__name__}) to TOML")
 
 
