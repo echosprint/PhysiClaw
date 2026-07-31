@@ -276,14 +276,21 @@ def vision(
     onnx_in_scratch = convert_dir / _ONNX_NAME
 
     if not pt_path.exists():
+        # Download to a temp name and rename on completion: the exists()
+        # check above must never see a partial file. The old in-place
+        # write cleaned up on OSError only — Ctrl-C left a truncated .pt
+        # that every later --build silently reused.
+        tmp_path = pt_path.with_name(pt_path.name + ".partial")
         try:
-            with http_get(_PT_URL) as r, open(pt_path, "wb") as f:
+            with http_get(_PT_URL) as r, open(tmp_path, "wb") as f:
                 stream(r, f.write, "  OmniParser weights")
+            tmp_path.replace(pt_path)
         except OSError as e:
-            # A failed fetch can leave a partial file behind; drop it so a retry
-            # re-fetches from scratch instead of skipping the download.
-            pt_path.unlink(missing_ok=True)
             _abort_download(e)
+        finally:
+            # No-op after a successful rename; on any failure (incl.
+            # Ctrl-C) it drops the partial so the retry re-fetches.
+            tmp_path.unlink(missing_ok=True)
 
     script_path.write_text(_CONVERT_SCRIPT)
 
