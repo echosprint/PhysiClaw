@@ -53,6 +53,14 @@ class ProviderPermanentError(ProviderError):
     """4xx (except 429) — retries will keep failing, fail fast."""
 
 
+def describe(e: BaseException) -> str:
+    """`ClassName: message`, or just `ClassName` when the message is
+    empty — httpx timeouts commonly str() to '', which made wrapped
+    errors log as the famously unhelpful `transport: `."""
+    msg = str(e)
+    return f"{type(e).__name__}: {msg}" if msg else type(e).__name__
+
+
 class Provider(Protocol):
     model: str
     COLLAPSE: CollapsePolicy

@@ -62,6 +62,7 @@ from physiclaw.agent.provider.provider_base import (
     CacheMarkers,
     ProviderPermanentError,
     ProviderTransientError,
+    describe,
 )
 from physiclaw.agent.provider.wire import (
     assistant_to_wire,
@@ -129,7 +130,7 @@ class OpenAICompatibleProvider(BaseProvider):
         try:
             r = await self._client.post("/chat/completions", json=payload)
         except (httpx.TransportError, httpx.TimeoutException) as e:
-            raise ProviderTransientError(f"transport: {e}") from e
+            raise ProviderTransientError(f"transport: {describe(e)}") from e
 
         if r.status_code == 429 or r.status_code >= 500:
             log.warning("provider HTTP %s (transient): %s", r.status_code, r.text[:200])
@@ -154,7 +155,7 @@ class OpenAICompatibleProvider(BaseProvider):
         try:
             r = await self._client.get("/models")
         except (httpx.TransportError, httpx.TimeoutException) as e:
-            raise ProviderTransientError(f"transport: {e}") from e
+            raise ProviderTransientError(f"transport: {describe(e)}") from e
         if r.status_code >= 400:
             raise ProviderPermanentError(f"HTTP {r.status_code}: {r.text[:300]}")
         try:

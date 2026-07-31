@@ -46,7 +46,10 @@ from physiclaw.agent.engine.loop import (
 from physiclaw.agent.engine.runspec import EngineRun
 from physiclaw.agent.engine.session import Session
 from physiclaw.agent.engine.trace import Trace
-from physiclaw.agent.provider.provider_base import ProviderTransientError
+from physiclaw.agent.provider.provider_base import (
+    ProviderError,
+    ProviderTransientError,
+)
 from physiclaw.agent.runtime.sentinel import DONE, FAIL, IDLE, STUCK
 
 # ---------- drive ----------
@@ -873,12 +876,16 @@ async def test_chat_with_retry_retries_then_succeeds(mocker) -> None:
 
 
 @pytest.mark.asyncio
-async def test_chat_with_retry_raises_runtime_after_max_attempts(mocker) -> None:
+async def test_chat_with_retry_raises_provider_error_after_max_attempts(
+    mocker,
+) -> None:
     mocker.patch("asyncio.sleep")
     provider = mocker.MagicMock()
     provider.chat = mocker.AsyncMock(side_effect=ProviderTransientError("nope"))
 
-    with pytest.raises(RuntimeError, match=r"^provider failed after 2 attempts:"):
+    # Typed (ProviderError, not bare RuntimeError) so _call_provider logs
+    # expected exhaustion as one line instead of a traceback.
+    with pytest.raises(ProviderError, match=r"^gave up after 2 attempts:"):
         await _chat_with_retry(provider, [], [], attempts=2, backoff=0.0)
 
 

@@ -63,6 +63,7 @@ from physiclaw.agent.provider.provider_base import (
     CacheMarkers,
     ProviderPermanentError,
     ProviderTransientError,
+    describe,
 )
 from physiclaw.agent.provider.wire import encode_content
 
@@ -228,7 +229,7 @@ class AnthropicCompatibleProvider(BaseProvider):
         try:
             resp = await self._client.messages.create(**payload)
         except (APIConnectionError, APITimeoutError) as e:
-            raise ProviderTransientError(f"transport: {e}") from e
+            raise ProviderTransientError(f"transport: {describe(e)}") from e
         except RateLimitError as e:
             raise ProviderTransientError(f"rate limited: {e}") from e
         except APIStatusError as e:
