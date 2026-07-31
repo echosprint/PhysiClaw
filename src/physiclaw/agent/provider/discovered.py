@@ -58,10 +58,15 @@ def load(provider_id: str) -> list[dict]:
         payload = json.loads(read_text(cache_path(provider_id)))
     except FileNotFoundError:
         return []
-    except (OSError, json.JSONDecodeError) as e:
+    except (OSError, ValueError) as e:  # ValueError covers JSON + UTF-8 decode
         log.warning("failed to read discovered cache for %s: %s", provider_id, e)
         return []
-    return payload.get("models") or []
+    if not isinstance(payload, dict):
+        return []
+    models = payload.get("models")
+    if not isinstance(models, list):
+        return []
+    return [m for m in models if isinstance(m, dict)]
 
 
 def model_ids(provider_id: str) -> set[str]:
