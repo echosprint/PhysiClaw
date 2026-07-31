@@ -1,6 +1,7 @@
 """Network helpers for the LAN bridge."""
 
 import socket
+import threading
 
 from physiclaw.common import platform
 
@@ -31,16 +32,25 @@ def get_mdns_host() -> str | None:
         return None
 
     host = f"{name.lower()}.local"
-    prev_timeout = socket.getdefaulttimeout()
-    try:
-        socket.setdefaulttimeout(1)
-        socket.gethostbyname(host)
-    except (socket.gaierror, socket.timeout, OSError):
-        return None
-    finally:
-        socket.setdefaulttimeout(prev_timeout)
+    # Bound the lookup with a daemon thread + join: setdefaulttimeout
+    # does NOT apply to gethostbyname (no socket object involved), so
+    # the old 1s "timeout" was inert — on mDNS-blocked networks the
+    # resolver blocked for its own OS timeout, synchronously inside the
+    # async QR/setup handlers — and it mutated a process-global default
+    # other threads could see.
+    ok = threading.Event()
 
-    return host
+    def _lookup() -> None:
+        try:
+            socket.gethostbyname(host)
+            ok.set()
+        except OSError:
+            pass
+
+    t = threading.Thread(target=_lookup, daemon=True, name="mdns-probe")
+    t.start()
+    t.join(timeout=1.0)
+    return host if ok.is_set() else None
 
 
 def bridge_port(control_port: int) -> int:
