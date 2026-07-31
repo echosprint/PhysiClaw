@@ -24,12 +24,17 @@ class PageState:
 
     def set_mode(self, mode: str, phase: str | None = None, **phase_kwargs):
         with self.lock:
+            if mode == "calibrate" and phase:
+                # Validate the phase BEFORE flipping the mode: set_phase
+                # raises on an unknown phase, and a mode already mutated
+                # would strand the phone page in calibrate with a stale
+                # phase and no upload arming (UI vanishes until the next
+                # valid switch).
+                self.cal.set_phase(phase, **phase_kwargs)
             if self.mode != mode:
                 self.mode = mode
                 log.info(f"Phone mode → {mode}")
             if mode == "calibrate":
-                if phase:
-                    self.cal.set_phase(phase, **phase_kwargs)
                 # Calibration asks the user to double-tap AssistiveTouch;
                 # open the upload window right away so an eager upload —
                 # even one sent before the step's button is pressed —
