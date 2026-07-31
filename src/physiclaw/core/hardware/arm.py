@@ -49,8 +49,13 @@ GCODE_DEFAULT_F = "F8000"
 GCODE_IDLE_DELAY = "$1=250"
 GCODE_UNLOCK = "$X"
 GCODE_VERSION = "$I"
-GCODE_FAST_MOVE = "G0 X{x:.3f}Y{y:.3f}F{f}"  # rapid XY (G0)
-GCODE_LINEAR_MOVE = "G1 X{x:.3f}Y{y:.3f}F{f}"  # controlled XY (G1)
+# Absolute moves carry their own G90 (symmetric with the G91 relative
+# templates below): the modal invariant lives in the G-code line itself,
+# so a lost ack that leaves the board latched in G91 can't turn a later
+# absolute move into a ~30mm relative one. GRBL accepts combined modal
+# words on one line.
+GCODE_FAST_MOVE = "G90G0 X{x:.3f}Y{y:.3f}F{f}"  # rapid XY (G0)
+GCODE_LINEAR_MOVE = "G90G1 X{x:.3f}Y{y:.3f}F{f}"  # controlled XY (G1)
 GCODE_REL_FAST = "G91G0 X{x:.3f}Y{y:.3f}"  # relative rapid
 GCODE_REL_LINEAR = "G91G1 X{x:.3f}Y{y:.3f}F{f}"  # relative linear
 GCODE_DWELL = "G4 P{s}"  # dwell for s seconds (planner-side)
@@ -284,9 +289,13 @@ class StylusArm:
         direction vectors through it, and `physiclaw testdrive` drives it
         directly — raw arm axes, before any direction mapping exists.
         Restores absolute mode so the relative G91 can't leak into later
-        absolute moves."""
-        self._send(GCODE_REL_FAST.format(x=dx, y=dy))
-        self._send(GCODE_ABSOLUTE)
+        absolute moves — in a finally, because the G91 may have latched
+        even when the ack was lost (DeviceTimeout), and a later bare
+        absolute move would then execute as a ~30mm relative one."""
+        try:
+            self._send(GCODE_REL_FAST.format(x=dx, y=dy))
+        finally:
+            self._send(GCODE_ABSOLUTE)
         self.wait_idle()
 
     # ─── Public API (for AI agent) ─────────────────────────
@@ -342,8 +351,13 @@ class StylusArm:
         # pressed() holds the tip down (at HOLD_S) for the slide and guarantees
         # release even on error, so a failed slide can't leave the coil hot.
         with self.solenoid.held():
-            self._send(GCODE_REL_LINEAR.format(x=dx, y=dy, f=f))  # XY slide
-            self._send(GCODE_ABSOLUTE)  # restore absolute mode
+            try:
+                self._send(GCODE_REL_LINEAR.format(x=dx, y=dy, f=f))  # XY slide
+            finally:
+                # Same modal guarantee as jog(): restore absolute mode even
+                # when the slide's ack was lost, or a later bare absolute
+                # move executes as a relative one.
+                self._send(GCODE_ABSOLUTE)
 
     def swipe_to(
         self,
