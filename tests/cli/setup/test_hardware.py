@@ -396,6 +396,32 @@ def test_hardware_passes_auto_and_trace(mocker) -> None:
     run_spy.assert_called_once_with(auto=True, trace=True)
 
 
+# ---------- _poll_bridge ----------
+
+
+def test_poll_bridge_returns_true_when_bridge_appears(mocker) -> None:
+    mocker.patch.object(hw_mod.time, "sleep")
+    mocker.patch.object(
+        hw_mod,
+        "api",
+        side_effect=[{"bridge": False}, {"bridge": False}, {"bridge": True}],
+    )
+
+    assert hw_mod._poll_bridge() is True
+
+
+def test_poll_bridge_times_out_without_bridge(mocker) -> None:
+    # Fake clock: each monotonic() call advances 1s, so the 15s deadline
+    # expires after ~15 iterations without any real waiting.
+    mocker.patch.object(hw_mod.time, "sleep")
+    clock = iter(range(1000))
+    mocker.patch.object(hw_mod.time, "monotonic", side_effect=lambda: next(clock))
+    api = mocker.patch.object(hw_mod, "api", return_value={"bridge": False})
+
+    assert hw_mod._poll_bridge() is False
+    assert api.call_count > 1  # it really polled, not a single-shot check
+
+
 # ---------- run() full happy-path (auto mode) ----------
 
 
@@ -409,13 +435,15 @@ def test_run_full_auto_path(mocker, tmp_path) -> None:
         return_value=[],  # no cache → fresh measurement.
     )
 
-    # Endpoint-specific responses.
+    # Endpoint-specific responses. bridge=True per the "always succeed"
+    # contract — the phone step verifies it now, and False would spin
+    # _poll_bridge's 15s deadline against the real clock.
     def fake_api(method, path, body=None, timeout=60):
         if path == "/api/status":
             return {
                 "ready": False,
                 "calibrated": False,
-                "bridge": False,
+                "bridge": True,
             }
         if path == "/api/connect-arm":
             return {"status": "ok"}
