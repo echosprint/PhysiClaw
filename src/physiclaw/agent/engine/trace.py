@@ -676,9 +676,15 @@ class RawLog:
             self._f.close()
 
     def _emit(self, kind: str, **data: Any) -> None:
+        """Fail-open like the sibling sinks (`Trace._write_event`,
+        `DailyLogWriter.line`): a full disk or an unserializable payload
+        costs the wire record, never the session."""
         obj = {"t": iso_now(), "kind": kind, **data}
-        self._f.write(json.dumps(obj, ensure_ascii=False) + "\n")
-        self._f.flush()
+        try:
+            self._f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+            self._f.flush()
+        except (OSError, TypeError, ValueError):
+            log.warning("wire.jsonl write failed", exc_info=True)
 
     def _persist_image(self, mime: str, b64_data: str) -> str:
         """Decode `b64_data`, write to

@@ -124,8 +124,17 @@ def save_image(img_dir: Path, turn: int, mime: str, b64: str) -> str | None:
     except (ValueError, TypeError):
         return None
     name = image_filename(turn, mime)
-    (img_dir / name).write_bytes(raw)
-    return name
+    path = img_dir / name
+    # The stamp has millisecond resolution — two images in one
+    # tool_result (or trace's per-request re-persist loop) can collide
+    # within 1ms, and a silent overwrite loses a frame the model saw.
+    stem, _, ext = name.rpartition(".")
+    n = 1
+    while path.exists():
+        path = img_dir / f"{stem}_{n}.{ext}"
+        n += 1
+    path.write_bytes(raw)
+    return path.name
 
 
 # The session banner/footer rule — one width, so "operators scan either
@@ -153,28 +162,40 @@ class DailyLogWriter:
         self._f.write(f"\n{_RULE}\n")
         self._f.flush()
 
+    def _write(self, text: str) -> None:
+        """The one guarded write: fail-open (like the sibling sinks) — a
+        full disk costs narrative lines, never the session. ValueError
+        covers writes after a failed rollover reopen left the handle
+        closed."""
+        try:
+            self._f.write(text)
+            self._f.flush()
+        except (OSError, ValueError):
+            log.warning("daily log write failed", exc_info=True)
+
     def line(self, msg: str) -> None:
         """Append `[HH:MM:SS] msg`, rolling to the new day's file first
         when midnight was crossed."""
         now = dt.datetime.now()
         today = now.strftime("%Y-%m-%d")
         if today != self._date:
-            new_path = daily_log_path(self._dir, self._prefix, today)
-            self._f.write(f"[{now:%H:%M:%S}] ROLLOVER → {new_path.name}\n")
-            self._f.flush()
-            self._f.close()
-            self._date = today
-            self._f = _open_log_file(new_path)
-            self._f.write(
-                f"\n[{now:%H:%M:%S}] ROLLOVER ← continued from previous day\n"
-            )
-        self._f.write(f"[{now:%H:%M:%S}] {msg}\n")
-        self._f.flush()
+            try:
+                new_path = daily_log_path(self._dir, self._prefix, today)
+                self._f.write(f"[{now:%H:%M:%S}] ROLLOVER → {new_path.name}\n")
+                self._f.flush()
+                self._f.close()
+                self._date = today
+                self._f = _open_log_file(new_path)
+                self._f.write(
+                    f"\n[{now:%H:%M:%S}] ROLLOVER ← continued from previous day\n"
+                )
+            except (OSError, ValueError):
+                log.warning("daily log rollover failed", exc_info=True)
+        self._write(f"[{now:%H:%M:%S}] {msg}\n")
 
     def footer(self) -> None:
         """Close the session's block in the daily narrative."""
-        self._f.write(f"{_RULE}\n\n")
-        self._f.flush()
+        self._write(f"{_RULE}\n\n")
 
     def close(self) -> None:
         try:
