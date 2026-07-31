@@ -410,7 +410,16 @@ class HardwareRig:
         self.assert_locked()
         bridge = self.require_bridge()
         bridge.send_text(text)
-        self.at_long_press()
+        try:
+            self.at_long_press()
+        except Exception:
+            # Arm failure after the text is queued: retire it before
+            # re-raising, or a later Shortcut run / /bridge tap could
+            # fetch THIS run's text — the residue the expire path exists
+            # to prevent, and a violation of ClipboardSyncError's "the
+            # phone clipboard still holds the previous content" contract.
+            bridge.expire_text()
+            raise
         if bridge.wait_clipboard(timeout=timeout):
             return True
         return bridge.expire_text()
