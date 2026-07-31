@@ -817,9 +817,7 @@ def test_parse_model_ref_keeps_extra_slashes_in_model_segment() -> None:
 
 
 def test_parse_model_ref_raises_on_no_slash() -> None:
-    expected = (
-        "model ref 'qwen-only' must be 'provider/model' (e.g. 'qwen/qwen3.6-plus')"
-    )
+    expected = "model ref 'qwen-only' must be 'provider/model' (e.g. 'openai/gpt-5')"
     with pytest.raises(ValueError) as exc_info:
         config.parse_model_ref("qwen-only")
     assert str(exc_info.value) == expected

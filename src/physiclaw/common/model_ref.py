@@ -68,7 +68,7 @@ def parse_model_ref(ref: str) -> tuple[str, str]:
     """
     if "/" not in ref:
         raise ValueError(
-            f"model ref {ref!r} must be 'provider/model' (e.g. 'qwen/qwen3.6-plus')"
+            f"model ref {ref!r} must be 'provider/model' (e.g. 'openai/gpt-5')"
         )
     provider_id, model_id = ref.split("/", 1)
     if not (provider_id and model_id):

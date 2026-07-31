@@ -64,6 +64,18 @@ def test_resolve_raises_for_unknown_provider(
         resolve()
 
 
+def test_resolve_raises_runtime_error_for_slashless_ref(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # parse_model_ref's ValueError must normalize to RuntimeError — every
+    # resolve() caller guards with `except RuntimeError` (server startup's
+    # non-fatal fallback, doctor's diagnosis line).
+    monkeypatch.setenv("PHYSICLAW_MODEL", "gpt-4o")
+
+    with pytest.raises(RuntimeError, match="must be 'provider/model'"):
+        resolve()
+
+
 def test_resolve_raises_for_claude_code_when_unavailable(
     monkeypatch: pytest.MonkeyPatch, mocker
 ) -> None:

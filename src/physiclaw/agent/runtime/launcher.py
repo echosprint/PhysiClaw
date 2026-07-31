@@ -82,7 +82,14 @@ def resolve() -> tuple[str, str]:
     provider id is selectable; the model id is passed through verbatim
     — provider APIs reject unknown ids on the first chat."""
     ref, source = model_ref_with_source()  # raises if not configured
-    provider_id, _ = parse_model_ref(ref)
+    try:
+        provider_id, _ = parse_model_ref(ref)
+    except ValueError as e:
+        # Normalize to RuntimeError: every resolve() caller guards with
+        # `except RuntimeError` (server startup's non-fatal fallback,
+        # doctor's diagnosis line) — a slashless ref must not traceback
+        # past them.
+        raise RuntimeError(f"{e} (from {source})") from e
     known_in_process = in_process_provider_ids()
     if provider_id == CLAUDE_CODE_ID:
         if not _claude_available():
