@@ -147,9 +147,12 @@ async def handle_disconnect_camera(
 
 async def handle_camera_preview(request: Request) -> JSONResponse:
     """GET /api/camera-preview/{index} — capture one frame from a camera index."""
-    index = int(request.path_params["index"])
     watermark = request.query_params.get("watermark", "0") == "1"
     try:
+        # Inside the try: the route has no :int converter, so a
+        # non-numeric index must produce this module's JSON error shape,
+        # not a bare 500.
+        index = int(request.path_params["index"])
         jpeg = await asyncio.to_thread(camera_preview, index, watermark)
         return JSONResponse(
             {"status": "ok", "index": index, "image": base64.b64encode(jpeg).decode()}
