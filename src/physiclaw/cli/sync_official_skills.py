@@ -320,9 +320,17 @@ def sync(
     try:
         # 3. Integrity — compare our digest to the published .sha256 BEFORE we
         #    touch the install. Mismatch = corrupt/tampered → abort untouched.
-        expected = _parse_sha256(
-            _fetch_bytes(urls["sha256"]).decode("utf-8", "replace")
-        )
+        try:
+            sha_body = _fetch_bytes(urls["sha256"])
+        except _NotPublished as e:
+            # Only the latest.json fetch has a _NotPublished catch; the
+            # CLI guards `except SyncError`, so a mid-publish 404 here
+            # was a raw traceback.
+            raise SyncError(
+                f"{urls['sha256']} is not published yet — the pack may be "
+                "mid-publish; retry shortly."
+            ) from e
+        expected = _parse_sha256(sha_body.decode("utf-8", "replace"))
         if expected is None:
             raise SyncError(f"{urls['sha256']} is not a valid sha256sum line.")
         if actual != expected:
