@@ -222,7 +222,13 @@ async def _run_session(
         session.sentinel_recap = f"session crashed: {e}"
     finally:
         if provider is not None:
-            await provider.aclose()
+            try:
+                await provider.aclose()
+            except Exception:
+                # A close failure (cancellation landing here, transport
+                # error) must not skip the trace closes below — losing
+                # summary.json mislabels the session as killed.
+                log.warning("provider close failed", exc_info=True)
         if tr is not None:
             tr.close()
         if rlog is not None:
