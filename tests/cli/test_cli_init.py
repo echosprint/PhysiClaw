@@ -40,11 +40,12 @@ def test_top_level_help_lists_subcommand(subcommand: str) -> None:
 # ---------- --version ----------
 
 
-def test_version_flag_prints_pkg_version() -> None:
-    result = runner.invoke(app, ["--version"])
+@pytest.mark.parametrize("flag", ["--version", "-v"])
+def test_version_flag_prints_pkg_version(flag: str) -> None:
+    result = runner.invoke(app, [flag])
 
     assert result.exit_code == 0
-    assert physiclaw.__version__ in result.stdout
+    assert result.stdout.strip() == f"{physiclaw.__version__} (PhysiClaw)"
 
 
 def test_help_header_includes_pkg_version() -> None:

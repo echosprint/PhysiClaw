@@ -75,7 +75,7 @@ app.add_typer(
 
 def _version_callback(value: bool) -> None:
     if value:
-        typer.echo(f"physiclaw, version {_pkg_version}")
+        typer.echo(f"{_pkg_version} (PhysiClaw)")
         raise typer.Exit()
 
 
@@ -86,6 +86,7 @@ def _root(
         bool,
         typer.Option(
             "--version",
+            "-v",
             callback=_version_callback,
             is_eager=True,
             help="Show the version and exit.",
