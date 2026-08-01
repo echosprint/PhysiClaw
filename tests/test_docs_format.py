@@ -16,7 +16,7 @@ The contract they enforce comes from two places:
 - This repo's authoring rules (``docs/README.md``): frontmatter is just
   ``title`` + ``description`` as flat one-line scalars, pages carry no
   ESM ``import``/``export`` (the renderer injects component imports),
-  every page has an English source with an optional ``.zh`` sibling,
+  every page ships as an EN/ZH pair (``foo.mdx`` + ``foo.zh.mdx``),
   and the sidebar order lives in ``docs.json``.
 
 The frontmatter parser below is deliberately a strict subset of YAML:
@@ -167,25 +167,29 @@ def test_frontmatter_is_valid() -> None:
     assert not bad, "docs frontmatter violations:\n" + "\n".join(bad)
 
 
-def test_zh_pages_mirror_their_english_source() -> None:
-    """A ``.zh`` page is a translation: its English source must exist and
-    the two must declare the same frontmatter keys (values differ, shape
-    doesn't)."""
+def test_every_page_ships_en_and_zh() -> None:
+    """Pages come in pairs: the English source and its ``.zh`` translation
+    must both exist, declaring the same frontmatter keys (values are
+    translated, shape isn't)."""
     bad: list[str] = []
+    orphans = {p for p in _pages() if ".zh" in p.suffixes}
     for page in _pages():
-        if ".zh" not in page.suffixes:
+        if ".zh" in page.suffixes:
             continue
         rel = page.relative_to(REPO)
-        source = page.with_name(page.name.replace(".zh.", ".", 1))
-        if not source.exists():
-            bad.append(f"{rel}: translation without an English source")
+        zh = page.with_suffix(f".zh{page.suffix}")
+        if zh not in orphans:
+            bad.append(f"{rel}: missing its {zh.name} translation")
             continue
-        zh_fields, _ = _parse(page)
-        en_fields, _ = _parse(source)
+        orphans.remove(zh)
+        en_fields, _ = _parse(page)
+        zh_fields, _ = _parse(zh)
         if set(zh_fields) != set(en_fields):
             diff = sorted(set(zh_fields) ^ set(en_fields))
-            bad.append(f"{rel}: frontmatter keys differ from {source.name}: {diff}")
-    assert not bad, "EN/ZH mirror violations:\n" + "\n".join(bad)
+            bad.append(f"{rel}: frontmatter keys differ from {zh.name}: {diff}")
+    for zh in sorted(orphans):
+        bad.append(f"{zh.relative_to(REPO)}: translation without an English source")
+    assert not bad, "EN/ZH pairing violations:\n" + "\n".join(bad)
 
 
 def test_pages_carry_no_esm() -> None:

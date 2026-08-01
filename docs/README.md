@@ -11,8 +11,9 @@ and deploys the static site. You don't build anything here; just edit Markdown.
 
 - **One file per page**, `.md` for prose or `.mdx` when you use a component.
 - **Bilingual by suffix:** `intro.mdx` is English (the source of truth); `intro.zh.mdx` is
-  its 简体中文 translation. A page **must** have the English file; the `.zh` sibling is
-  optional and falls back to English when missing.
+  its 简体中文 translation. Every page **must** ship both files: the renderer
+  silently falls back to English when `.zh` is missing, so the pair is
+  enforced by this repo's test suite, not the site build.
 - **Frontmatter is just `title` + `description`:**
   ```mdx
   ---
@@ -39,7 +40,7 @@ slug (the path under `docs/`, no extension):
 }
 ```
 
-To **add a page**: create `docs/<section>/<name>.mdx` (and optionally `.zh.mdx`), then add
+To **add a page**: create `docs/<section>/<name>.mdx` and its `.zh.mdx` translation, then add
 its slug to the right section's `items` in `docs.json`. To **reorder**, move the slug. The
 build fails fast on an unknown/duplicate slug or a page missing its English source, and
 warns about any page not listed in a section.
