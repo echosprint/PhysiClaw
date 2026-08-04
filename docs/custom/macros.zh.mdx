@@ -3,7 +3,7 @@ title: 宏
 description: 由你编写并排练过的手势序列，智能体一次调用即可重放，省时省 token。
 ---
 
-token 很贵。宏把多个手势合并进一次模型调用，于是智能体直接调用你编写并排练好的序列，而不必逐步驱动手机。宏能省下 token，也省下时间。
+token 很贵。宏把一连串手势打包进一次模型调用，智能体因此只需调用你写好、排练过的序列，不必再一步步地操作手机。省 token，也省时间。
 
 ## 创建宏
 
@@ -25,7 +25,7 @@ physiclaw macros init notify-user-wechat
 ```yaml
 name: notify-user-wechat
 # 智能体只凭这一行挑选宏，所以要写清楚什么时候用、做什么。
-description: 需要用微信给你的用户发消息时使用。打开聊天并把文本粘好，停在发送之前
+description: 需要用微信给用户发消息时使用。会打开聊天窗口、把文本粘进输入框，停在发送之前
 
 # false 表示智能体看不到、也调不了它。
 enabled: true
@@ -96,7 +96,7 @@ steps:
 # 刻意不写发送步骤：由智能体确认文本后决定是否发送。
 ```
 
-可用工具：`tap`、`double_tap`、`long_press`、`swipe`、`home_screen`、`go_back`、`force_quit`、`send_to_clipboard`、`peek` 和 `wait`。
+可用工具：`tap`、`double_tap`、`long_press`、`swipe`、`home_screen`、`go_back`、`force_quit`、`send_to_clipboard`、`peek` 和 `wait`。`guard`、`expect`、`skip_when` 等完整格式参考见 `~/.physiclaw/macros/README.md`。
 
 ## 排练
 
@@ -106,7 +106,7 @@ steps:
 physiclaw mcp
 ```
 
-再校验每个 `MACRO.yml`，并在真机上重放这一个：
+再校验所有 `MACRO.yml`，然后在真机上把这个宏跑一遍：
 
 ```bash
 physiclaw macros check
@@ -115,10 +115,10 @@ physiclaw macros run notify-user-wechat -i message=hi
 
 ## 最佳实践
 
-**保持宏短小、单一用途。** 途中需要判断的事，如确认、支付、多选一，属于智能体，不属于宏。
+**保持宏短小、单一用途。** 中途需要拿主意的事，比如二次确认、付款、从多个结果里挑一个，都归智能体，不归宏。
 
-**让智能体来写。** 把 `claude` 或 `codex` 接上你的 MCP 服务，然后让它来写这个宏。
+**让智能体来写。** 把 `claude` 或 `codex` 接到你的 MCP 服务上，再让它写这个宏。
 
-**先排练，后启用。** 硬编码的 bbox 之所以可靠，是因为你在这台设备、这部手机、这套布局上验证过。
+**先排练，再启用。** 写死的 bbox 之所以靠得住，是因为你在这台设备、这部手机、这套布局上验证过。
 
-**关注统计。** `physiclaw macros stats` 显示每个宏的计数。`consecutive_aborts` 持续上升说明 App 布局变了，需要重新排练并更新 bbox。
+**关注统计。** `physiclaw macros stats` 列出每个宏的运行计数。`consecutive_aborts` 一路上涨，说明 App 布局在宏底下变了，要重新排练并更新 bbox。
