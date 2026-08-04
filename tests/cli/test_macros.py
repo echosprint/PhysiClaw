@@ -1,0 +1,351 @@
+"""Tests for `physiclaw.cli.macros` — list/check/run/stats over macro dirs
+under the per-test `~/.physiclaw` (autouse `physiclaw_home`)."""
+
+from __future__ import annotations
+
+import typer
+from typer.testing import CliRunner
+
+from physiclaw.agent.macros import runner as macro_runner
+from physiclaw.agent.macros import stats as macro_stats
+from physiclaw.cli.macros import macros_app
+from physiclaw.common import paths, verdict
+
+app = typer.Typer()
+app.add_typer(macros_app, name="macros")
+runner = CliRunner()
+
+VALID = """
+name: {name}
+description: Demo macro
+enabled: {enabled}
+
+inputs:
+  msg:
+    description: text
+
+steps:
+  - name: send-to-clipboard-1
+    tool: send_to_clipboard
+    with:
+      text: "{{msg}}"
+"""
+
+
+def _write(name: str, text: str | None = None, *, enabled: bool = True) -> None:
+    d = paths.macros_dir() / name
+    d.mkdir(parents=True)
+    body = (
+        text
+        if text is not None
+        else VALID.format(name=name, enabled=str(enabled).lower())
+    )
+    (d / "MACRO.yml").write_text(body, encoding="utf-8")
+
+
+class FakeMcp:
+    """Async-context MCP stand-in returning one changed-screen gesture."""
+
+    def __init__(self, *a, **kw):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return None
+
+    async def call_tool(self, name, args=None):
+        return [{"type": "text", "text": verdict.attach(f"{name} ok", True)}]
+
+
+def _patch_mcp(mocker, client=FakeMcp) -> None:
+    mocker.patch("physiclaw.agent.engine.mcp_tool.McpClient", client)
+
+
+# ---------- init ----------
+
+
+def test_init_scaffolds_a_checkable_macro() -> None:
+    result = runner.invoke(app, ["macros", "init", "my-macro"])
+
+    assert result.exit_code == 0
+    assert "MACRO.yml" in result.output
+    assert "flip `enabled: false` to true" in result.output  # next-steps guidance
+    check = runner.invoke(app, ["macros", "check"])
+    assert check.exit_code == 0
+
+
+def test_init_existing_macro_exits_one() -> None:
+    runner.invoke(app, ["macros", "init", "my-macro"])
+
+    result = runner.invoke(app, ["macros", "init", "my-macro"])
+
+    assert result.exit_code == 1
+    assert "already exists" in result.output
+
+
+def test_init_bad_name_exits_one() -> None:
+    result = runner.invoke(app, ["macros", "init", "Bad_Name"])
+
+    assert result.exit_code == 1
+    assert "lowercase" in result.output
+
+
+# ---------- list ----------
+
+
+def test_list_with_no_macros_hints_at_init() -> None:
+    result = runner.invoke(app, ["macros", "list"])
+
+    assert result.exit_code == 0
+    assert "No macros found" in result.output
+    assert "physiclaw macros init" in result.output
+
+
+def test_list_writes_the_format_readme() -> None:
+    runner.invoke(app, ["macros", "list"])
+
+    assert (paths.macros_dir() / "README.md").exists()
+
+
+def test_list_shows_enabled_disabled_and_invalid() -> None:
+    _write("on", enabled=True)
+    _write("off", enabled=False)
+    _write("bad", text="steps: [not yaml")
+
+    result = runner.invoke(app, ["macros", "list"])
+
+    assert "enabled" in result.output and "on" in result.output
+    assert "disabled" in result.output and "off" in result.output
+    assert "invalid" in result.output and "bad" in result.output
+
+
+# ---------- check ----------
+
+
+def test_check_all_valid_exits_zero() -> None:
+    _write("good")
+
+    result = runner.invoke(app, ["macros", "check"])
+
+    assert result.exit_code == 0
+    assert "✓ good" in result.output
+
+
+def test_check_invalid_macro_exits_one_with_reason() -> None:
+    _write(
+        "bad",
+        text="name: other\ndescription: d\nsteps:\n  - name: peek-1\n    tool: peek\n",
+    )
+
+    result = runner.invoke(app, ["macros", "check"])
+
+    assert result.exit_code == 1
+    assert "must equal the directory name" in result.output
+
+
+# ---------- run ----------
+
+
+def test_run_unknown_macro_exits_one() -> None:
+    result = runner.invoke(app, ["macros", "run", "ghost"])
+
+    assert result.exit_code == 1
+    assert "no macro named" in result.output
+
+
+def test_run_invalid_macro_exits_one_with_reason() -> None:
+    _write("bad", text="steps: [not yaml")
+
+    result = runner.invoke(app, ["macros", "run", "bad"])
+
+    assert result.exit_code == 1
+    assert "invalid YAML" in result.output
+
+
+def test_run_bad_input_pair_exits_two() -> None:
+    _write("demo")
+
+    result = runner.invoke(app, ["macros", "run", "demo", "-i", "novalue"])
+
+    assert result.exit_code == 2
+    assert "key=value" in result.output
+
+
+def test_run_success_prints_log_and_records_stats(mocker) -> None:
+    _write("demo")
+    _patch_mcp(mocker)
+
+    result = runner.invoke(app, ["macros", "run", "demo", "-i", "msg=hi"])
+
+    assert result.exit_code == 0
+    assert "all 1 steps completed" in result.output
+    assert macro_stats.load()["demo"]["total_successes"] == 1
+
+
+def test_run_works_on_disabled_macro(mocker) -> None:
+    # Rehearse-before-enable: `run` must not require enabled: true.
+    _write("demo", enabled=False)
+    _patch_mcp(mocker)
+
+    result = runner.invoke(app, ["macros", "run", "demo", "-i", "msg=hi"])
+
+    assert result.exit_code == 0
+
+
+def test_run_missing_required_input_records_bad_input(mocker) -> None:
+    _write("demo")
+    _patch_mcp(mocker)
+
+    result = runner.invoke(app, ["macros", "run", "demo"])
+
+    assert result.exit_code == 1
+    assert "missing required input" in result.output
+    assert macro_stats.load()["demo"]["last_abort"]["reason"] == "bad_input"
+
+
+def test_run_abort_exits_one_and_records(mocker) -> None:
+    class DownMcp(FakeMcp):
+        async def call_tool(self, name, args=None):
+            raise RuntimeError("arm busy")
+
+    _write("demo")
+    _patch_mcp(mocker, DownMcp)
+
+    result = runner.invoke(app, ["macros", "run", "demo", "-i", "msg=hi"])
+
+    assert result.exit_code == 1
+    assert "ABORTED" in result.output
+    assert macro_stats.load()["demo"]["last_abort"]["reason"] == "tool_error"
+
+
+def test_run_unreachable_server_records_nothing(mocker) -> None:
+    class NoServer(FakeMcp):
+        async def __aenter__(self):
+            # The shape McpClient now raises: a plain Exception naming the
+            # URL, not the bare CancelledError the anyio task group used to
+            # leak (which no `except Exception` could catch, so this command
+            # printed a raw traceback instead of the message below).
+            raise ConnectionError(
+                "cannot reach the MCP server at http://127.0.0.1:8048/mcp"
+            )
+
+    _write("demo")
+    _patch_mcp(mocker, NoServer)
+
+    result = runner.invoke(app, ["macros", "run", "demo", "-i", "msg=hi"])
+
+    assert result.exit_code == 1
+    assert "cannot reach the MCP server" in result.output
+    assert "Start it first" in result.output
+    assert "Traceback" not in result.output
+    assert macro_stats.load() == {}  # nothing ran, so nothing is recorded
+
+
+# ---------- runs (per-step debug log) ----------
+
+
+def test_run_prints_the_run_id_and_lookup_hint(mocker) -> None:
+    _write("demo")
+    _patch_mcp(mocker)
+
+    result = runner.invoke(app, ["macros", "run", "demo", "-i", "msg=hi"])
+
+    assert "run: macro-run-" in result.output
+    assert "physiclaw macros runs " in result.output
+
+
+def test_runs_with_no_history_reports_empty() -> None:
+    result = runner.invoke(app, ["macros", "runs"])
+
+    assert result.exit_code == 0
+    assert "No macro runs logged" in result.output
+
+
+def test_runs_lists_recent_runs(mocker) -> None:
+    _write("demo")
+    _patch_mcp(mocker)
+    runner.invoke(app, ["macros", "run", "demo", "-i", "msg=hi"])
+
+    result = runner.invoke(app, ["macros", "runs"])
+
+    assert result.exit_code == 0
+    assert "macro-run-" in result.output
+    assert "demo" in result.output
+    assert "cli" in result.output
+
+
+def test_runs_replays_one_run_by_bare_hex(mocker) -> None:
+    _write("demo")
+    _patch_mcp(mocker)
+    ran = runner.invoke(app, ["macros", "run", "demo", "-i", "msg=hi"])
+    import re
+
+    hex6 = re.search(r"macro-run-([0-9a-f]{6})", ran.output).group(1)
+
+    result = runner.invoke(app, ["macros", "runs", hex6])
+
+    assert result.exit_code == 0
+    assert "✓ 1. send_to_clipboard" in result.output
+    assert "[ok]" in result.output
+
+
+def test_runs_unknown_id_exits_one(mocker) -> None:
+    _write("demo")
+    _patch_mcp(mocker)
+    runner.invoke(app, ["macros", "run", "demo", "-i", "msg=hi"])
+
+    result = runner.invoke(app, ["macros", "runs", "ffffff"])
+
+    assert result.exit_code == 1
+    assert "no run matching" in result.output
+
+
+# ---------- stats ----------
+
+
+def test_stats_empty_reports_no_runs() -> None:
+    result = runner.invoke(app, ["macros", "stats"])
+
+    assert result.exit_code == 0
+    assert "No macro runs recorded" in result.output
+
+
+def test_stats_shows_counters_and_last_abort() -> None:
+    macro_stats.record("demo", ok=True, known_names={"demo"})
+    macro_stats.record(
+        "demo",
+        ok=False,
+        known_names={"demo"},
+        step=2,
+        reason="guard_failed",
+        detail="'WeChat' not found",
+    )
+
+    result = runner.invoke(app, ["macros", "stats"])
+
+    assert "demo: 1/2 ok, 1 abort(s), streak 1" in result.output
+    assert "step 2 [guard_failed] 'WeChat' not found" in result.output
+
+
+def test_run_start_at_is_forwarded_to_the_runner(mocker) -> None:
+    # The agent can resume a macro partway in, so the rehearsal command must
+    # be able to exercise that same path — otherwise the one thing you are
+    # told to test before enabling is untestable.
+    _write("demo")
+    seen: dict = {}
+
+    async def fake(spec, values, mcp, caller="engine", start_at=""):
+        seen["start_at"] = start_at
+        return macro_runner.MacroRunResult(blocks=[], ok=True)
+
+    _patch_mcp(mocker, FakeMcp)
+    mocker.patch.object(macro_runner, "run_and_record", side_effect=fake)
+
+    result = runner.invoke(
+        app, ["macros", "run", "demo", "-i", "msg=hi", "--start-at", "paste"]
+    )
+
+    assert result.exit_code == 0
+    assert seen["start_at"] == "paste"

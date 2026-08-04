@@ -11,6 +11,7 @@ from physiclaw.cli.config import config_app
 from physiclaw.cli.doctor import doctor
 from physiclaw.cli.flash import flash
 from physiclaw.cli.logs import logs
+from physiclaw.cli.macros import macros_app
 from physiclaw.cli.mcp_cmd import mcp
 from physiclaw.cli.models import models_app
 from physiclaw.cli.now import now
@@ -65,6 +66,11 @@ app.add_typer(
     skills_app,
     name="skills",
     help="Install, list, and remove skills from a git-repo source.",
+)
+app.add_typer(
+    macros_app,
+    name="macros",
+    help="List, check, rehearse, and track gesture macros.",
 )
 app.add_typer(
     prompt_app,
