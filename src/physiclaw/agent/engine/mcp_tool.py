@@ -7,9 +7,11 @@ Module-level `get_mcp()` returns the singleton; `close_mcp()` tears it
 down at process exit.
 """
 
+import asyncio
 import logging
 from contextlib import AsyncExitStack
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 from mcp import ClientSession
@@ -42,6 +44,78 @@ class McpClient:
         self.server_instructions: str = ""
 
     async def __aenter__(self) -> "McpClient":
+        """Connect, or raise ConnectionError naming the URL.
+
+        The transport runs the handshake inside an anyio task group, so a
+        refused connection surfaces as `CancelledError` — a BaseException.
+        Left alone it sails past every `except Exception` in the stack: the
+        CLI's "cannot reach the server" message never fires and the user
+        gets a raw anyio traceback, `dispatch` breaks its documented "never
+        raises" contract, and `engine` — which catches CancelledError to log
+        an operator stop — records a dead server as a deliberate kill.
+
+        `_probe` is the answer: it settles reachability BEFORE the transport
+        can bury it. It is a pre-flight, not a guarantee — a server dying
+        between the probe and the handshake reproduces the illegible
+        CancelledError, so the `except Exception` below stays even though
+        the probe catches the common case. A CancelledError from here on is
+        deliberately left alone — it cannot be told apart from a real
+        shutdown (anyio cancels the host task either way, so `cancelling()`
+        is non-zero for both), and swallowing a genuine cancellation is the
+        worse mistake."""
+        try:
+            return await self._connect()
+        except ConnectionError:
+            await self._safe_close()
+            raise  # already named the URL; don't wrap it twice
+        except Exception as e:
+            await self._safe_close()
+            raise ConnectionError(
+                f"cannot reach the MCP server at {self._url}: {e}"
+            ) from e
+
+    async def _probe(self) -> None:
+        """Fail fast, and legibly, when nothing is listening.
+
+        Inside `streamable_http_client` the handshake runs in an anyio task
+        group: a refused connection there collapses the scope into a bare
+        `CancelledError`, which no `except Exception` above us can catch and
+        which is indistinguishable from a real shutdown. So we answer the
+        question before handing over control.
+
+        A raw TCP connect, not an HTTP request: the MCP server is this
+        runtime's parent on localhost, but `trust_env` is on, so a configured
+        system proxy answers an HTTP pre-flight itself — returning 502 for a
+        dead upstream, which looks reachable. The socket cannot be fooled
+        that way."""
+        host, port = self._host_port()
+        try:
+            _, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port), timeout=5.0
+            )
+        except (OSError, asyncio.TimeoutError) as e:
+            raise ConnectionError(f"cannot reach the MCP server at {self._url}") from e
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except OSError:
+            pass
+
+    def _host_port(self) -> tuple[str, int]:
+        parsed = urlparse(self._url)
+        return parsed.hostname or "127.0.0.1", parsed.port or (
+            443 if parsed.scheme == "https" else 80
+        )
+
+    async def _safe_close(self) -> None:
+        """Unwind a half-open stack. A teardown error must not mask the
+        connect error we are about to raise."""
+        try:
+            await self._stack.aclose()
+        except BaseException:
+            log.debug("MCP teardown after failed connect", exc_info=True)
+
+    async def _connect(self) -> "McpClient":
         # Hand the transport our own httpx client so `trust_env` follows the
         # same per-platform proxy policy as every other localhost client (the
         # status poll, phone-watch hook, doctor). The MCP server is this
@@ -51,6 +125,7 @@ class McpClient:
         # client, so our stack closes it — entered first so it outlives the
         # transport's terminate-on-close DELETE. Other kwargs match mcp's
         # create_mcp_http_client defaults.
+        await self._probe()  # legible error before the transport swallows it
         http_client = await self._stack.enter_async_context(
             httpx.AsyncClient(
                 follow_redirects=True,

@@ -8,6 +8,7 @@ error mapping, and the process-level singleton + cache.
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
@@ -79,6 +80,10 @@ def fake_session(mocker):
     return sess
 
 
+async def _no_probe(self) -> None:
+    """Stand-in for the socket pre-flight when the transport is faked."""
+
+
 @pytest.fixture
 def patched_transport(mocker, fake_session):
     """Patch streamable_http_client + ClientSession so __aenter__ wires
@@ -92,6 +97,9 @@ def patched_transport(mocker, fake_session):
         yield ("read", "write", "extra")
 
     mocker.patch.object(mcp_tool, "streamable_http_client", fake_http)
+    # The connect pre-flight opens a real socket; a faked transport means
+    # there is nothing to reach, so stand it down with the rest.
+    mocker.patch.object(mcp_tool.McpClient, "_probe", _no_probe)
 
     @asynccontextmanager
     async def fake_session_ctx(read, write):
@@ -340,8 +348,9 @@ async def test_get_mcp_cleans_up_stack_on_aenter_failure(mocker) -> None:
         yield None  # pragma: no cover
 
     mocker.patch.object(mcp_tool, "streamable_http_client", boom_http)
+    mocker.patch.object(mcp_tool.McpClient, "_probe", _no_probe)
 
-    with pytest.raises(RuntimeError, match=r"^transport failed$"):
+    with pytest.raises(ConnectionError, match="transport failed"):
         await mcp_tool.get_mcp()
 
     # Stack must NOT have been retained.
@@ -403,3 +412,42 @@ async def test_close_mcp_logs_warning_on_aclose_exception(
     assert any(
         r.getMessage().startswith("MCP client close failed") for r in caplog.records
     )
+
+
+# ---------- connect failures are legible ----------
+
+
+@pytest.mark.asyncio
+async def test_probe_raises_connection_error_when_nothing_is_listening() -> None:
+    # A refused connection inside `streamable_http_client` collapses its
+    # anyio scope into a bare CancelledError — a BaseException no
+    # `except Exception` can catch, which is why the CLI's "cannot reach the
+    # server" message never fired and `dispatch` could break its "never
+    # raises" contract. Answer the question before the transport does.
+    client = mcp_tool.McpClient("http://127.0.0.1:1")
+
+    with pytest.raises(ConnectionError, match="cannot reach the MCP server"):
+        await client._probe()
+
+
+@pytest.mark.asyncio
+async def test_probe_passes_when_a_socket_is_listening() -> None:
+    server = await asyncio.start_server(lambda r, w: w.close(), "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    try:
+        await mcp_tool.McpClient(f"http://127.0.0.1:{port}")._probe()
+    finally:
+        server.close()
+        await server.wait_closed()
+
+
+def test_probe_targets_the_url_host_and_port() -> None:
+    # A raw socket, not an HTTP request: `trust_env` is on, so a configured
+    # system proxy answers an HTTP pre-flight itself and returns 502 for a
+    # dead upstream — which reads as "reachable".
+    assert mcp_tool.McpClient("http://127.0.0.1:8899")._host_port() == (
+        "127.0.0.1",
+        8899,
+    )
+    assert mcp_tool.McpClient("https://rig.local")._host_port() == ("rig.local", 443)
+    assert mcp_tool.McpClient("http://rig.local")._host_port() == ("rig.local", 80)
