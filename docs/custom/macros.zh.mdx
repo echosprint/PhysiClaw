@@ -1,0 +1,128 @@
+---
+title: 宏
+description: 由你编写并排练过的手势序列，智能体一次调用即可重放，省时省 token。
+---
+
+有些操作序列从不变化：回主屏、打开微信、粘贴消息、点发送。若逐个手势执行，每一步都要消耗一轮模型调用。宏把这样的固定序列记录下来，智能体通过一次 `run_macro` 调用整体重放，并返回步骤日志和当前屏幕。宏刻意保持"笨拙"：没有条件，没有循环。一旦屏幕与排练路径不符，宏会安全中止，由智能体接手继续。中止过的宏在该次会话中不再被调用，`start_at` 也不例外，因此已经失准的宏不会被反复重试。
+
+## 创建宏
+
+先生成脚手架，再编辑生成的文件：
+
+```bash
+physiclaw macros init notify-user-wechat
+```
+
+<FileTree>
+- ~/.physiclaw/macros/
+  - README.md
+  - notify-user-wechat/
+    - MACRO.yml
+</FileTree>
+
+### MACRO.yml 示例
+
+文件结构沿用 GitHub Actions 惯例：顶层 `name`、`description`、`inputs`，每个步骤有自己的 `name` 和 `with:`。每个步骤都必须有 `name`，在宏内唯一，写法与宏名一致：小写字母、数字、连字符，不含空格。它既是 `start_at` 使用的标识符，也是日志中的标签。
+
+```yaml
+name: notify-user-wechat        # 必须与目录名一致
+description: 打开微信，把消息粘贴进聊天输入框，停在发送之前
+
+enabled: true                   # 不写即为 true;排练期间设为 false,
+                                # 可让这个宏不进入智能体的提示词
+
+inputs:
+  message:
+    description: 要发送的消息文本
+    example: "订单已下,共 ¥30"
+
+steps:
+  - name: start-home
+    tool: home_screen
+
+  - name: open-wechat
+    tool: tap
+    with:
+      bbox: [0.62, 0.18, 0.85, 0.30]
+
+  - name: await-wechat            # 先等再确认:`seconds` 精确睡这么久,
+    tool: wait                    # `expect` 在其后检查一次,整对只花
+    with:                         # 一次相机采样
+      seconds: 2
+    expect:                       # 微信会停在上次离开的界面,标题栏可能是
+                                  # 应用名,也可能是对方昵称——两者都接受,
+                                  # 由下一步分辨
+      {or: ["微信", "Weixin", "对方昵称"],
+       within: [0.15, 0.02, 0.85, 0.1]}
+    hint: "微信没有打开,先登录再手动发送"
+
+  - name: open-chat
+    tool: tap
+    with:
+      bbox: [0.05, 0.10, 0.95, 0.20]
+    skip_when:                    # 已经在聊天里:这一下会点到消息气泡
+      {text: "对方昵称", within: [0.15, 0.02, 0.85, 0.1]}
+    guard:                        # 点的是固定行位置,先确认名字确实在那里
+      require: {text: "对方昵称", within: [0.05, 0.10, 0.95, 0.20]}
+
+  - name: stage-text
+    tool: send_to_clipboard
+    with:
+      text: "{message}"
+
+  - name: focus-input
+    tool: tap
+    with:
+      bbox: [0.05, 0.90, 0.75, 0.96]
+    skip_when:                    # 键盘已弹起时,这个 bbox 会按到字母键
+      {or: ["space", "空格"], within: [0.25, 0.85, 0.8, 0.95]}
+
+  - name: paste-menu
+    tool: long_press
+    with:
+      bbox: [0.05, 0.56, 0.75, 0.62]
+
+  - name: paste
+    tool: tap
+    with:
+      bbox: [0.10, 0.54, 0.20, 0.57]
+    guard:
+      require: {text: "粘贴", within: [0.03, 0.50, 0.35, 0.62]}
+
+# 刻意不写发送步骤：点发送即提交，提交类动作留给智能体。它会在返回的画面上
+# 读一遍粘贴好的文本，确认无误后自己点发送。宏要停在不可撤销的那一下之前。
+```
+
+步骤可调用 `tap`、`double_tap`、`long_press`、`swipe`、`home_screen`、`go_back`、`force_quit`、`send_to_clipboard`、`peek` 和 `wait`。输入均为字符串，带 `default` 的为可选项。有效的宏默认即启用，脚手架初始为 `enabled: false`，排练通过后再打开。完整格式参考见 `~/.physiclaw/macros/README.md`。
+
+:::warning[给文本加引号]
+守卫和输入匹配的是屏幕上的字面文本，而 YAML 会悄悄改写未加引号的值：`true` 变成布尔值，`007` 变成数字，未加引号的 `{message}` 会被解析成映射。YAML 锚点与别名（`&name` / `*name`）一律拒绝，请把值完整写出。`physiclaw macros check` 会逐一拒绝并给出加引号的写法，但更省事的习惯是：所有文本值都加引号。
+:::
+
+## 守卫（guard）
+
+`guard` 在其所属步骤执行前检查，结果只有通过或中止，绝不分支。既然先于步骤执行，它描述的就是该步骤所*需要*的画面，而不是该步骤产生的画面。它的镜像是 `expect`：一个 clause，在 `wait` 睡完之后检查，描述本应出现的画面。守卫说的是步骤需要什么，`expect` 说的是等到了什么。要等一个刚启动的 App，就给 `wait` 步骤加上 `expect`，如上面的示例所示——这一对就是过渡写法，失败时报的是启动这一步，而不是三行之后被连累的那一步。唯一被允许的跳过形式是 `skip_when`：用一个与 `require` 语法相同的 clause 描述该步骤的"后置状态"，若该步骤要达成的状态已经成立，则跳过执行，因为再执行只会多余甚至有害。上面的示例给出了典型场景：键盘已经弹起时不要再点输入框，否则该 bbox 会按到键盘。仅在"跳过与执行后屏幕状态相同"时使用；其他情况都是变相分支，应交给智能体处理。每一种检查——`require`、`forbid`、`expect`、`skip_when`——都恰好是一个 clause，没有逐字段的形状要记；要写两个条件就用 `{and: [...]}`。clause 共四种写法，组合运算一律显式书写，不靠嵌套层数暗示：裸字符串表示在整屏文本中出现；`{text: "微信", within: [0.2, 0.2, 0.8, 0.3]}` 精确到元素，要求标签包含该文本且其中心落在该区域内，适用于同一文本可能出现在别处的场景；`{or: [...]}` 与 `{and: [...]}` 组合多个 clause；`{not: ...}` 要求不出现。它们最多可嵌套两层，例如 `{or: [{not: "升级"}, {and: ["聊天", "微信"]}]}` 合法且所见即所得；该上限只限制嵌套深度，不限制并列个数，`or` 可以列出任意多个候选，超限时把并列项摊平到同一个运算符里即可。三者都可以带 `within`，作用于整棵子树——写 `{or: ["space", "空格"], within: [0.25, 0.85, 0.8, 0.95]}` 即可，不必给每个备选重复同一个 bbox；内层的 `within` 覆盖外层。`forbid` 是一个不得成立的 clause，等价于 `require: {not: ...}` 的弹窗警戒线写法。这些字段曾经收列表，使得括号形状本身带有含义（顶层是 AND，往下一层却是错误）；把连接词写出来就没有这条规则了。守卫只检查一次：它是判断，不是等待，免费读取已持有的屏幕文本。等待是独立的步骤——`tool: wait` 配 `{seconds: N}`（1–30，配 `expect` 时可为 `0`，表示立即检查）精确睡 N 秒，不调用任何工具；机械臂本身的手势耗时已经覆盖了大部分冷启动，所以从小值开始。`expect` 直接写一个 clause，而不是 `require`/`forbid` 表，因为该语法已经能表达“不出现”和“同时满足”；失败时由该步骤的 `hint` 引导接续。它只能用在 `wait` 步骤上，固定消耗一次相机采样：手势自身的画面是在触碰约两秒后拍的，和下一步守卫免费读到的是同一帧，写在那里断言不出任何新东西。要确认某个手势产生了什么，就在它后面加一个 `wait` 步骤。单次运行整体上限 300 秒，超时即以 `timeout` 中止。当手上没有屏幕文本时（第 1 步，或上一步没有返回画面），守卫会先 peek 一次再判断；`send_to_clipboard` 这类纯文本步骤刻意保留已持有的屏幕，因此其后的守卫依然免费。读不到屏幕永远不算守卫通过：peek 失败会重试一次，之后以 `could not read the screen` 中止，此时该做的是重试读取，而不是去改屏幕。中止时 `hint` 文本会展示给智能体，引导其手动接续。守卫消耗的只是相机采样，从不消耗模型 token。
+
+## 先排练，再启用
+
+```bash
+physiclaw macros check                                  # 校验每个 MACRO.yml
+physiclaw macros run notify-user-wechat -i message=hi   # 在真机上重放
+physiclaw macros run notify-user-wechat --start-at paste  # 排练中途续跑
+```
+
+`run` 在宏未启用时也能执行，所以先排练。重放时盯着手机，修正 bbox 直到每一步都落准，再把脚手架里的 `enabled: false` 改为 true，或直接删掉该行。已启用的宏会出现在智能体提示词的 `## Available Macros` 区块中，供其按名调用；没有启用任何宏时，提示词中不含任何宏相关内容。要一键关闭全部宏，在 `~/.physiclaw/config.toml` 中设置 `[macros] enabled = false`，CLI 命令不受影响，仍可编写和排练。
+
+## 最佳实践
+
+**先排练，后启用。** 硬编码的 bbox 之所以可靠，是因为你在这台设备、这部手机、这套布局上验证过。
+
+**只在关键步骤设防。** `require` 要加在需要该状态的那一步，而不是制造该状态的那一步：点击列表中某个固定位置（顺序可能变）之前，以及一切逼近提交的动作之前。启动或跳转类步骤后面跟一个带 `expect` 的 `wait`，冷启动慢就只是多花一点时间，而不会中止。不必每一步都加守卫。
+
+**用 `skip_when` 吸收起始状态。** App 重新打开时停在上次的界面、键盘已经弹起：写清这一步的后置状态，一个宏就能覆盖你排练过的每个入口。
+
+**保持宏短小、单一用途。** 途中需要判断的事，如确认、支付、多选一，属于智能体，不属于宏。
+
+**关注统计。** `physiclaw macros stats` 显示每个宏的计数。`consecutive_aborts` 持续上升说明 App 布局变了，需要重新排练并更新 bbox。
+
+**按运行 id 排查。** 每次运行（智能体触发或手动排练）都有形如 `macro-run-a3f9c1` 的 id，排练结束后打印，并写入结果与统计；每次运行在 `~/.physiclaw/log/macros/` 下有独立目录，存放逐步事件日志和每一步执行后的屏幕截图。`physiclaw macros runs` 列出近期运行；`physiclaw macros runs a3f9c1` 逐步回放该次运行（耗时、守卫轮询次数、每步截图，守卫失败时还包含检查所见的屏幕文本）。

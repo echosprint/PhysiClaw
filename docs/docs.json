@@ -60,7 +60,8 @@
       },
       "items": [
         "custom/memory",
-        "custom/skills"
+        "custom/skills",
+        "custom/macros"
       ]
     },
     {

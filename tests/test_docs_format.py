@@ -39,6 +39,9 @@ import re
 from collections import Counter
 from pathlib import Path
 
+from physiclaw.agent.macros.model import Macro
+from physiclaw.agent.macros.parse import parse_macro
+
 REPO = Path(__file__).resolve().parents[1]
 DOCS = REPO / "docs"
 
@@ -234,3 +237,36 @@ def test_sidebar_lists_every_page_exactly_once() -> None:
 
     unlisted = sorted(english - set(slugs) - {"index"})
     assert not unlisted, f"pages missing from docs.json sidebar: {unlisted}"
+
+
+def test_macro_examples_are_valid_macros() -> None:
+    """The YAML on the macros pages is a copy-paste starting point, so it
+    has to survive `macros check` — both translations, since each one
+    anchors on its own locale's screen text. Prose can be reviewed by
+    reading; an example that no longer parses cannot."""
+    for page in (DOCS / "custom/macros.mdx", DOCS / "custom/macros.zh.mdx"):
+        blocks = re.findall(
+            r"^```yaml\n(.*?)^```", page.read_text(encoding="utf-8"), re.M | re.S
+        )
+        assert blocks, f"{page.relative_to(REPO)}: no YAML example to check"
+        for block in blocks:
+            spec = parse_macro(block, "notify-user-wechat")  # raises MacroError
+            _assert_settle_guard_matches_the_skip(spec, page.relative_to(REPO))
+
+
+def _assert_settle_guard_matches_the_skip(spec: Macro, rel: Path) -> None:
+    """The example's launch `expect` must accept every state a later
+    `skip_when` knows how to absorb. WeChat reopens where it was left, so an
+    expect listing only the app name aborts one step before the `skip_when`
+    written for the reopened-inside-the-chat case — a semantic break that
+    still parses, and one the example has regressed into twice."""
+    steps = {s.name: s for s in spec.steps}
+    settle, thread = steps["await-wechat"], steps["open-chat"]
+    assert settle.expect is not None
+    accepted = {c.text for c in settle.expect.children}
+
+    assert thread.skip_when is not None
+    assert thread.skip_when.text in accepted, (
+        f"{rel}: await-wechat accepts {sorted(accepted)}, which excludes the "
+        f"{thread.skip_when.text!r} state open-chat skips on"
+    )
