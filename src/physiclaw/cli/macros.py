@@ -23,8 +23,9 @@ from physiclaw.agent.macros import runner as macro_runner
 from physiclaw.agent.macros import stats as macro_stats
 from physiclaw.agent.macros import store as macro_store
 from physiclaw.agent.macros.model import Macro, MacroError
-from physiclaw.cli._format import exit_error, ok, step_fail
+from physiclaw.cli._format import exit_error, ok, step_fail, warn
 from physiclaw.common import paths, verdict
+from physiclaw.common.config import CONFIG
 from physiclaw.common.text import read_text
 
 macros_app = typer.Typer(
@@ -93,11 +94,46 @@ def check() -> None:
         typer.echo(step_fail(f"{e.dir_name}: {e.error or ''}"))
     for e in entries:
         if e.spec is not None:
-            typer.echo(ok(e.dir_name))
+            typer.echo(
+                ok(e.dir_name if e.spec.enabled else f"{e.dir_name}  (disabled)")
+            )
     if not entries:
         typer.echo("No macros found.")
+    _report_unreachable(entries)
     if bad:
         raise typer.Exit(1)
+
+
+def _report_unreachable(entries: list[macro_store.ScanEntry]) -> None:
+    """Valid is not the same as live. `check` answers "does it parse", and a
+    disabled macro passes it while the agent never sees it — the one thing a
+    green checkmark invites you to assume. Say which macros the agent cannot
+    call, and why.
+
+    The fleet-wide gate is reported instead of, not alongside, the per-file
+    advice: it overrides every file's own flag, so telling someone to set
+    `enabled: true` while it is off sends them to edit a file that changes
+    nothing."""
+    valid = [e.spec for e in entries if e.spec is not None]
+    if not valid:
+        return
+    if not CONFIG.macros.enabled:
+        typer.echo(
+            warn(
+                "[macros] enabled = false in config.toml, so the agent sees "
+                "no macros at all, whatever each file says. Rehearsing with "
+                "`physiclaw macros run` still works."
+            )
+        )
+        return
+    off = [s.name for s in valid if not s.enabled]
+    if off:
+        typer.echo(
+            warn(
+                f"disabled, so the agent cannot call: {', '.join(off)}. "
+                "Set `enabled: true` in MACRO.yml once rehearsed."
+            )
+        )
 
 
 @macros_app.command()
@@ -135,7 +171,12 @@ def run(
         # Narrow on purpose: `McpClient.__aenter__` raises exactly this and
         # names the URL. A blanket `except Exception` here told the user to
         # start a server that was already running, for any bug in the runner.
-        exit_error(f"{e}. Start it first: physiclaw server")
+        #
+        # `mcp`, not `server`: both serve the same MCP endpoint, but `server`
+        # also spawns the agent runtime, which would wake on its own hooks
+        # and drive the phone between the steps being rehearsed. A rehearsal
+        # wants the rig to itself.
+        exit_error(f"{e}. Start it first: physiclaw mcp")
 
     # The composed header + step log is always block 0 (runner contract).
     typer.echo(verdict.action_text(result.blocks))

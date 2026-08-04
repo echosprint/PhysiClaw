@@ -13,6 +13,7 @@ from physiclaw.agent.macros import runner as macro_runner
 from physiclaw.agent.macros import stats as macro_stats
 from physiclaw.cli.macros import macros_app
 from physiclaw.common import paths, verdict
+from physiclaw.common.config import CONFIG
 
 app = typer.Typer()
 app.add_typer(macros_app, name="macros")
@@ -169,6 +170,65 @@ def test_check_invalid_macro_exits_one_with_reason() -> None:
     assert "must equal the directory name" in result.output
 
 
+def test_check_reminds_that_a_disabled_macro_is_not_reachable() -> None:
+    # A disabled macro passes `check` — the one thing a green checkmark
+    # invites you to assume it does not.
+    _write("staged", enabled=False)
+
+    result = runner.invoke(app, ["macros", "check"])
+
+    assert result.exit_code == 0
+    assert "✓ staged  (disabled)" in result.output
+    assert "the agent cannot call: staged" in result.output
+    assert "enabled: true" in result.output
+
+
+def test_check_says_nothing_extra_when_every_macro_is_enabled() -> None:
+    _write("live")
+
+    result = runner.invoke(app, ["macros", "check"])
+
+    assert "disabled" not in result.output
+    assert "cannot call" not in result.output
+
+
+def test_check_names_every_disabled_macro() -> None:
+    _write("one", enabled=False)
+    _write("two", enabled=False)
+    _write("three")
+
+    result = runner.invoke(app, ["macros", "check"])
+
+    assert "cannot call: one, two" in result.output
+    assert "three" not in result.output.split("cannot call")[1]
+
+
+def test_check_reports_the_fleet_gate_instead_of_the_per_file_advice(mocker) -> None:
+    # The gate overrides every file's own flag, so advising `enabled: true`
+    # here would send the user to edit a file that changes nothing.
+    mocker.patch.object(CONFIG.macros, "enabled", False)
+    _write("live")
+    _write("staged", enabled=False)
+
+    result = runner.invoke(app, ["macros", "check"])
+
+    assert "the agent sees no macros at all" in result.output
+    assert "cannot call" not in result.output
+
+
+def test_check_still_exits_one_when_a_disabled_macro_sits_beside_a_broken_one() -> None:
+    # The reminder must not swallow the failure it prints after.
+    _write("staged", enabled=False)
+    _write(
+        "bad", text="name: nope\ndescription: d\nsteps:\n  - {name: p, tool: peek}\n"
+    )
+
+    result = runner.invoke(app, ["macros", "check"])
+
+    assert result.exit_code == 1
+    assert "cannot call: staged" in result.output
+
+
 # ---------- run ----------
 
 
@@ -262,7 +322,9 @@ def test_run_unreachable_server_records_nothing(mocker) -> None:
 
     assert result.exit_code == 1
     assert "cannot reach the MCP server" in result.output
-    assert "Start it first" in result.output
+    # `mcp`, not `server`: the latter also spawns the agent runtime, which
+    # would drive the phone between the steps being rehearsed.
+    assert "Start it first: physiclaw mcp" in result.output
     assert "Traceback" not in result.output
     assert macro_stats.load() == {}  # nothing ran, so nothing is recorded
 
