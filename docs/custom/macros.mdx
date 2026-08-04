@@ -10,22 +10,22 @@ Tokens are expensive. A macro batches many gestures into a single model call, so
 Scaffold one, then edit the `MACRO.yml` file:
 
 ```bash
-physiclaw macros init notify-user-wechat
+physiclaw macros init notify-user-whatsapp
 ```
 
 <FileTree>
 - ~/.physiclaw/macros/
   - README.md
-  - notify-user-wechat/
+  - notify-user-whatsapp/
     - MACRO.yml
 </FileTree>
 
 ### MACRO.yml
 
 ```yaml
-name: notify-user-wechat
+name: notify-user-whatsapp
 # The agent picks a macro by this line alone, so make clear when to use it and what it does.
-description: Use when messaging your user on WeChat. Opens the chat and stages the text, stopping before Send
+description: Use when messaging your user on WhatsApp. Opens the chat and stages the text, stopping before Send
 
 # false means the agent can't see or call it.
 enabled: true
@@ -34,39 +34,38 @@ enabled: true
 inputs:
   message:
     description: The message text to send
-    example: "Order placed, ¥30 total"
+    example: "Order placed, $4.77"
 
 # Run top to bottom, one action per step.
 steps:
   - name: start-home
     tool: home_screen
 
-  - name: open-wechat
+  - name: open-whatsapp
     tool: tap
     with:
       # [left, top, right, bottom] as 0–1 screen fractions.
-      bbox: [0.62, 0.18, 0.85, 0.30]
+      bbox: [0.31, 0.893, 0.491, 0.974]
 
-  - name: await-wechat
+  - name: await-whatsapp
     tool: wait
     with:
       seconds: 2
-    # WeChat reopens where it was left, so the title bar shows either name.
+    # WhatsApp reopens where it was left, so accept either title.
     expect:
-      {or: ["WeChat", "Weixin", "your-user-name"],
-       within: [0.15, 0.02, 0.85, 0.1]}
-    hint: "WeChat did not open — log in, then send manually"
+      {or: ["Chats", "your-user-name"], within: [0.02, 0.05, 0.95, 0.18]}
+    hint: "WhatsApp did not open — log in, then send manually"
 
   - name: open-chat
     tool: tap
     with:
-      bbox: [0.05, 0.10, 0.95, 0.20]
+      bbox: [0.03, 0.32, 0.60, 0.42]
     # Skip if we are already in the chat.
     skip_when:
-      {text: "your-user-name", within: [0.15, 0.02, 0.85, 0.1]}
+      {text: "your-user-name", within: [0.20, 0.05, 0.60, 0.11]}
     # Make sure we tap the right list item.
     guard:
-      require: {text: "your-user-name", within: [0.05, 0.10, 0.95, 0.20]}
+      require: {text: "your-user-name", within: [0.03, 0.30, 0.95, 0.44]}
 
   - name: stage-text
     tool: send_to_clipboard
@@ -76,27 +75,28 @@ steps:
   - name: focus-input
     tool: tap
     with:
-      bbox: [0.05, 0.90, 0.75, 0.96]
-    # Skip if the keyboard is up (the space bar is showing).
+      bbox: [0.2, 0.928, 0.6, 0.962]
+    # Skip if the keyboard is up. Its space bar has no label, so use "123".
     skip_when:
-      {or: ["space", "空格"], within: [0.25, 0.85, 0.8, 0.95]}
+      {text: "123", within: [0.05, 0.86, 0.30, 0.93]}
 
   - name: paste-menu
     tool: long_press
     with:
-      bbox: [0.05, 0.56, 0.75, 0.62]
+      # The input box sits higher once the keyboard is up.
+      bbox: [0.2, 0.59, 0.6, 0.62]
 
   - name: paste
     tool: tap
     with:
-      bbox: [0.10, 0.54, 0.20, 0.57]
+      bbox: [0.10, 0.545, 0.21, 0.566]
     guard:
-      require: {text: "Paste", within: [0.03, 0.50, 0.35, 0.62]}
+      require: {text: "Paste", within: [0.03, 0.52, 0.40, 0.59]}
 
 # No send step: the agent checks the text and decides whether to send.
 ```
 
-Available tools: `tap`, `double_tap`, `long_press`, `swipe`, `home_screen`, `go_back`, `force_quit`, `send_to_clipboard`, `peek`, and `wait`.
+Available tools: `tap`, `double_tap`, `long_press`, `swipe`, `home_screen`, `go_back`, `force_quit`, `send_to_clipboard`, `peek`, and `wait`. The full reference for `guard`, `expect`, `skip_when` and the rest lives at `~/.physiclaw/macros/README.md`.
 
 ## Rehearse
 
@@ -110,7 +110,7 @@ Then lint every `MACRO.yml` and replay this one on the live rig:
 
 ```bash
 physiclaw macros check
-physiclaw macros run notify-user-wechat -i message=hi
+physiclaw macros run notify-user-whatsapp -i message=hi
 ```
 
 ## Best practices

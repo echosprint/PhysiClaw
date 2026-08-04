@@ -250,23 +250,29 @@ def test_macro_examples_are_valid_macros() -> None:
         )
         assert blocks, f"{page.relative_to(REPO)}: no YAML example to check"
         for block in blocks:
-            spec = parse_macro(block, "notify-user-wechat")  # raises MacroError
+            # Read the name from the block rather than hardcoding it: each
+            # page demonstrates the messenger its own readers use.
+            dir_name = re.search(r"^name:\s*(\S+)", block, re.M).group(1)
+            spec = parse_macro(block, dir_name)  # raises MacroError
             _assert_settle_guard_matches_the_skip(spec, page.relative_to(REPO))
 
 
 def _assert_settle_guard_matches_the_skip(spec: Macro, rel: Path) -> None:
-    """The example's launch `expect` must accept every state a later
-    `skip_when` knows how to absorb. WeChat reopens where it was left, so an
-    expect listing only the app name aborts one step before the `skip_when`
-    written for the reopened-inside-the-chat case — a semantic break that
-    still parses, and one the example has regressed into twice."""
-    steps = {s.name: s for s in spec.steps}
-    settle, thread = steps["await-wechat"], steps["open-chat"]
+    """The example's launch `expect` must accept every state the step right
+    after it knows how to absorb. A messenger reopens where it was left, so
+    an expect listing only the app name aborts one step before the
+    `skip_when` written for the reopened-inside-the-chat case — a semantic
+    break that still parses, and one the example has regressed into twice.
+
+    Located by position (the settle step, then the one after it) rather than
+    by name, so the check holds whichever app a translation demonstrates."""
+    settle_at = next(i for i, s in enumerate(spec.steps) if getattr(s, "expect", None))
+    settle, thread = spec.steps[settle_at], spec.steps[settle_at + 1]
     assert settle.expect is not None
     accepted = {c.text for c in settle.expect.children}
 
     assert thread.skip_when is not None
     assert thread.skip_when.text in accepted, (
-        f"{rel}: await-wechat accepts {sorted(accepted)}, which excludes the "
-        f"{thread.skip_when.text!r} state open-chat skips on"
+        f"{rel}: {settle.name} accepts {sorted(accepted)}, which excludes the "
+        f"{thread.skip_when.text!r} state {thread.name} skips on"
     )
