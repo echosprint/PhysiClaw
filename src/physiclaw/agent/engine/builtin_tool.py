@@ -48,7 +48,8 @@ class LocalTool:
     # observers, screen supersede). DECLARED here rather than sniffed from
     # the returned value: the two pipelines differ in what they let a result
     # do to session state, and that is a property of the tool, not of one
-    # call's return type.
+    # call's return type. `dispatch` enforces the declaration in both
+    # directions — a mismatched return type becomes a normal tool error.
     returns_blocks: bool = False
 
 

@@ -112,6 +112,15 @@ async def dispatch(
                         f"{type(result).__name__}"
                     )
                 return _blocks_result(run, session, call, result, turn)
+            if not isinstance(result, str):
+                # The mirror mismatch: blocks from a handler that never
+                # declared them would be serialized as their repr. Same
+                # landing as above — and this narrows the Handler union for
+                # the text path below.
+                raise TypeError(
+                    f"{call.name} returned {type(result).__name__} but does "
+                    "not declare returns_blocks"
+                )
             run.tr.write(
                 {
                     "event": "tool_result",

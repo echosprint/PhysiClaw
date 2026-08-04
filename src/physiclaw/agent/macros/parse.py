@@ -254,27 +254,26 @@ def _parse_step(
             "so it needs an `expect` to belong to (a guard carries its "
             "own `hint` inside `guard`)"
         )
-    common = {
-        "name": name,
-        "guard": (
-            _parse_guard(step["guard"], i, input_names) if "guard" in step else None
-        ),
-        "skip_when": (
-            _parse_check(step.get("skip_when"), f"step {i}: `skip_when`", input_names)
-            if "skip_when" in step
-            else None
-        ),
-    }
+    guard = _parse_guard(step["guard"], i, input_names) if "guard" in step else None
+    skip_when = (
+        _parse_check(step.get("skip_when"), f"step {i}: `skip_when`", input_names)
+        if "skip_when" in step
+        else None
+    )
     # The one place the DSL's two step kinds are chosen. Everything
     # downstream is polymorphic, so this `if` has no siblings.
     if tool == WAIT:
         return WaitStep(
+            name=name,
+            guard=guard,
+            skip_when=skip_when,
             seconds=int(args[WAIT_SECONDS_ARG]),
             expect=expect,
             hint=hint,
-            **common,
         )
-    return GestureStep(mcp_tool=tool, args=dict(args), **common)
+    return GestureStep(
+        name=name, guard=guard, skip_when=skip_when, mcp_tool=tool, args=dict(args)
+    )
 
 
 def _check_wait_args(args: dict, step_no: int, has_expect: bool) -> None:
@@ -430,19 +429,17 @@ def _clause_expr(v: Any, where: str, scope: Bbox | None = None) -> Clause:
                 "listing them side by side"
             )
         op = ops[0]
-        node, arity = COMBINATORS[op]
+        build, arity = COMBINATORS[op]
         inner = _bbox(v["within"], f"{where}.within") if "within" in v else scope
         if arity == 1:
-            return node(child=_clause_expr(v[op], f"{where}.{op}", inner))
+            return build((_clause_expr(v[op], f"{where}.{op}", inner),))
         kids = v[op]
         if not isinstance(kids, list) or len(kids) < arity:
             raise MacroError(
                 f"{where}.{op} must be a list of at least {arity} clauses "
                 "(one child would just be the child)"
             )
-        return node(
-            children=tuple(_clause_expr(k, f"{where}.{op}", inner) for k in kids)
-        )
+        return build(tuple(_clause_expr(k, f"{where}.{op}", inner) for k in kids))
     return _region_clause(v, where, scope)
 
 

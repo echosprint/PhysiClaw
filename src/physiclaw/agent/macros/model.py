@@ -15,6 +15,7 @@ anywhere — nothing here reads files, YAML, or the rig.
 
 import re
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, ClassVar, TypeVar
 
@@ -127,9 +128,9 @@ if TYPE_CHECKING:  # `Macro` names its steps; `steps` imports this module.
 # The YAML keys for the three combinators. They name the GRAMMAR; the
 # classes below carry the behaviour, so there is no runtime tag to switch
 # on. `COMBINATORS` (defined under the classes) is the one map from key to
-# class, so a new operator is a class plus one entry — never a dispatch
-# edited in several places, and never an error message listing operators
-# by hand.
+# constructor, so a new operator is a class plus one entry — never a
+# dispatch edited in several places, and never an error message listing
+# operators by hand.
 AND, OR, NOT = "and", "or", "not"
 
 Bbox = tuple[float, float, float, float]
@@ -322,12 +323,15 @@ class NotClause(Clause):
         return replace(self, child=self.child.substituted(values))
 
 
-# key → (class, minimum children). `NOT` takes exactly one child; the
-# binary operators need two, since one child would just be the child.
-COMBINATORS: dict[str, tuple[type[Clause], int]] = {
-    AND: (AndClause, 2),
-    OR: (OrClause, 2),
-    NOT: (NotClause, 1),
+# key → (constructor over the parsed children, minimum children). `NOT`
+# takes exactly one child; the binary operators need two, since one child
+# would just be the child. One uniform signature — children in, clause
+# out — so `parse` builds every operator the same way and a new one is
+# still a class plus one entry.
+COMBINATORS: dict[str, tuple[Callable[[tuple[Clause, ...]], Clause], int]] = {
+    AND: (lambda kids: AndClause(children=kids), 2),
+    OR: (lambda kids: OrClause(children=kids), 2),
+    NOT: (lambda kids: NotClause(child=kids[0]), 1),
 }
 
 

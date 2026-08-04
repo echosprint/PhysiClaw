@@ -119,6 +119,43 @@ async def test_dispatch_local_blocks_traced_like_mcp_result() -> None:
 
 
 @pytest.mark.asyncio
+async def test_dispatch_declared_blocks_but_text_is_a_tool_error() -> None:
+    # `returns_blocks` and the handler's return type state one fact twice,
+    # so dispatch enforces the agreement: a str under the flag would
+    # otherwise dissolve into a list of characters.
+    async def handler(_session, _args):
+        return "oops, plain text"
+
+    tool = LocalTool("run_macro", "x", {"type": "object"}, handler, returns_blocks=True)
+    schema = {"name": "run_macro", "input_schema": {"type": "object"}}
+    run = _mk_run(
+        schema_by_name={"run_macro": schema}, local_registry={"run_macro": tool}
+    )
+
+    result = await dispatch(run, Session(), _tc("run_macro"), 0)
+
+    assert result.is_error is True
+    assert "returns_blocks" in result.content
+
+
+@pytest.mark.asyncio
+async def test_dispatch_undeclared_blocks_is_a_tool_error() -> None:
+    # The mirror mismatch: a block list from a handler that never declared
+    # it must not be serialized as its repr.
+    async def handler(_session, _args):
+        return [{"type": "text", "text": "sneaky blocks"}]
+
+    tool = LocalTool("greet", "x", {"type": "object"}, handler)
+    schema = {"name": "greet", "input_schema": {"type": "object"}}
+    run = _mk_run(schema_by_name={"greet": schema}, local_registry={"greet": tool})
+
+    result = await dispatch(run, Session(), _tc("greet"), 0)
+
+    assert result.is_error is True
+    assert "returns_blocks" in result.content
+
+
+@pytest.mark.asyncio
 async def test_dispatch_mcp_tool_returns_blocks() -> None:
     schema = {"name": "physiclaw__peek", "input_schema": {"type": "object"}}
     mcp = FakeMcpClient()
