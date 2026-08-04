@@ -26,18 +26,71 @@ def attach(result: str, changed: bool | None) -> str:
     `None` means the diff couldn't run (camera hiccup, missing frame) —
     the result passes through unmarked and the guard fails open.
 
-    Marker bytes already inside `result` are defanged first (`:` → ` -`),
-    so downstream a marker exists IFF this function wrote it. Composed
-    action text normally can't contain one, but echoed content can —
-    an error message repr-ing an agent argument is enough — and a
-    pre-existing marker would forge the verdict the engine parses.
+    The input is `defang`ed first, so downstream a marker exists IFF this
+    function wrote it.
     """
-    for marker in (SCREEN_UNCHANGED, SCREEN_CHANGED):
-        if marker in result:
-            result = result.replace(marker, marker.replace(":", " -"))
+    result = defang(result)
     if changed is None:
         return result
     return f"{result}{_SEPARATOR}{SCREEN_CHANGED if changed else SCREEN_UNCHANGED}"
+
+
+def defang(text: str) -> str:
+    """Neutralize verdict-marker bytes already inside `text` (`:` → ` -`).
+
+    The forgery defense, named on its own: composed action text normally
+    can't contain a marker, but echoed content can — an error message
+    repr-ing an agent argument is enough — and a pre-existing marker would
+    forge the verdict the engine parses. `attach` defangs before writing
+    its own marker; the macro runner defangs its retained view's texts so
+    the one marker in a composed result is always the runner's.
+    """
+    for marker in (SCREEN_UNCHANGED, SCREEN_CHANGED):
+        if marker in text:
+            text = text.replace(marker, marker.replace(":", " -"))
+    return text
+
+
+def action_text(blocks: list[dict]) -> str:
+    """The core-composed action text of a raw MCP tool result — the half
+    carrying the verdict marker, and the ONLY safe haystack for `parse`:
+    action text is the one text the phone cannot forge, so scanning the
+    listing instead would let on-screen text fake a `screen: changed`.
+    `screen_text` is the opposite half; the block-shape rule they share
+    is documented there."""
+    if not blocks or blocks[0].get("type") != "text":
+        return ""  # a view reply composes no action text
+    return blocks[0].get("text") or ""
+
+
+def screen_text(blocks: list[dict]) -> str:
+    """The screen half of a raw MCP tool result — the OCR listing, joined.
+    What guards and macro `skip_when` clauses match against: they WANT
+    whatever the phone displays. Never pass this to `parse`.
+
+    `action_text`'s complement, and both halves are security boundaries
+    pointing opposite ways: the verdict haystack must contain ONLY what
+    core composed (see `action_text`), while the screen haystack must
+    EXCLUDE it — the action text echoes the caller's own arguments back,
+    so a macro guard requiring the string a previous step just staged
+    would otherwise match its own echo and gate nothing.
+
+    The shape rule both apply: a gesture replies `[action text, image,
+    listing]`, a view replies `[image, listing]` with no action text at
+    all — so block 0 is action text iff it is a text block. Must run on
+    the RAW blocks — provider-side fusing merges text blocks and erases
+    the boundary."""
+    texts = [b.get("text") or "" for b in blocks if b.get("type") == "text"]
+    if blocks and blocks[0].get("type") == "text":
+        texts = texts[1:]  # drop the action text — it is not screen content
+    return "\n".join(texts)
+
+
+def has_image(blocks: list[dict]) -> bool:
+    """Whether a reply carries a screen image. The image half of the same
+    block-shape rule the text helpers above own — kept here so callers
+    never re-spell `b.get("type") == "image"`."""
+    return any(b.get("type") == "image" for b in blocks)
 
 
 def parse(result_text: str) -> bool | None:
@@ -49,7 +102,7 @@ def parse(result_text: str) -> bool | None:
     Contract: pass ONLY core-composed action text (the first text block
     of a tool result), never screen-derived text — the OCR listing
     echoes whatever the phone displays, which can contain marker-like
-    text and forge a verdict (`dispatch._action_text` enforces this).
+    text and forge a verdict (`action_text` above extracts exactly that).
     Neither marker is a substring of the other, so one marker parses
     unambiguously in either check order; UNCHANGED first is the
     conservative tiebreak should both ever appear — a false "changed"
