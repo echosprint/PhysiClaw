@@ -23,6 +23,7 @@ recursive-descent style, sharing the scalar terminals at the bottom:
     clause    ::= "text"                          # whole-screen substring
                 | {text, within: bbox}            # element-granular
                 | {and|or: [clause × 2+]} | {not: clause}   # may carry within
+                  # combinators nest ≤ MAX_CLAUSE_DEPTH levels
     bbox      ::= [left, top, right, bottom]      # unit floats, l<r, t<b
 
 Validation is all-or-nothing (a file failing ANY check is excluded
@@ -53,6 +54,7 @@ from physiclaw.agent.macros.model import (
     ALLOWED_STEP_TOOLS,
     COMBINATORS,
     INPUT_NAME_RE,
+    MAX_CLAUSE_DEPTH,
     MAX_INPUTS,
     MAX_PROSE_LEN,
     MAX_RUN_SECONDS,
@@ -390,7 +392,9 @@ def _parse_check(raw: Any, where: str, input_names: set[str]) -> Clause:
     return clause
 
 
-def _clause_expr(v: Any, where: str, scope: Bbox | None = None) -> Clause:
+def _clause_expr(
+    v: Any, where: str, scope: Bbox | None = None, depth: int = 0
+) -> Clause:
     """The recursive clause production, in one of four forms:
 
         "WeChat"                                whole-screen substring
@@ -406,7 +410,11 @@ def _clause_expr(v: Any, where: str, scope: Bbox | None = None) -> Clause:
     on every alternative. It is pure sugar: `scope` is pushed down here so
     the runner only ever sees fully-resolved leaves and never has to walk
     back up for an inherited region. Innermost wins, so a leaf may override
-    the scope it sits in."""
+    the scope it sits in.
+
+    `depth` counts the combinators enclosing this expression, capped at
+    `MAX_CLAUSE_DEPTH` — see there for why. Leaves are free: the cap is on
+    nesting, not on how many alternatives an `or` lists."""
     if isinstance(v, list):
         raise MacroError(
             f"{where}: a bare list is not a clause — write the operator: "
@@ -429,17 +437,30 @@ def _clause_expr(v: Any, where: str, scope: Bbox | None = None) -> Clause:
                 "listing them side by side"
             )
         op = ops[0]
+        # Checked AFTER the shape check above, so a malformed clause reports
+        # its shape rather than its depth — the more specific error wins.
+        depth += 1
+        if depth > MAX_CLAUSE_DEPTH:
+            raise MacroError(
+                f"{where}.{op}: clauses may nest at most {MAX_CLAUSE_DEPTH} "
+                f"levels of {_operator_list()} — flatten it. `and`/`or` take "
+                "any number of children, so conditions that are merely "
+                "siblings never need a level of their own; a check that "
+                "genuinely needs more belongs in two steps."
+            )
         build, arity = COMBINATORS[op]
         inner = _bbox(v["within"], f"{where}.within") if "within" in v else scope
         if arity == 1:
-            return build((_clause_expr(v[op], f"{where}.{op}", inner),))
+            return build((_clause_expr(v[op], f"{where}.{op}", inner, depth),))
         kids = v[op]
         if not isinstance(kids, list) or len(kids) < arity:
             raise MacroError(
                 f"{where}.{op} must be a list of at least {arity} clauses "
                 "(one child would just be the child)"
             )
-        return build(tuple(_clause_expr(k, f"{where}.{op}", inner) for k in kids))
+        return build(
+            tuple(_clause_expr(k, f"{where}.{op}", inner, depth) for k in kids)
+        )
     return _region_clause(v, where, scope)
 
 

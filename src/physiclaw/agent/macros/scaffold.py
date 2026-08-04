@@ -12,6 +12,7 @@ same edit.
 from physiclaw.agent.macros.model import (
     ALLOWED_STEP_TOOLS,
     MACRO_FILENAME,
+    MAX_CLAUSE_DEPTH,
     MAX_INPUTS,
     MAX_PROSE_LEN,
     MAX_RUN_SECONDS,
@@ -192,8 +193,11 @@ Scaffold one with `physiclaw macros init <name>`, edit it, then:
       {{text: "WeChat", within: [l,t,r,b]}}   element-granular, region-scoped
       {{or: [c, c]}}   {{and: [c, c]}}         any-of / all-of
       {{not: c}}                             absent
-  They nest, so `{{or: [{{not: "x"}}, {{and: ["y", "zz"]}}]}}` is legal. Any of
-  them may carry `within`, which scopes the whole subtree — write
+  They nest up to {MAX_CLAUSE_DEPTH} levels, so
+  `{{or: [{{not: "x"}}, {{and: ["y", "zz"]}}]}}` is legal. The cap is on
+  NESTING, not breadth — an `or` may list as many alternatives as it needs,
+  and flattening siblings into one operator is the fix when you hit it. Any
+  of them may carry `within`, which scopes the whole subtree — write
   `{{or: ["space", "空格"], within: [...]}}` rather than repeating the bbox
   on each alternative; an inner `within` overrides the one it sits in.
   For two conditions write `{{and: [...]}}`: these fields took LISTS once,

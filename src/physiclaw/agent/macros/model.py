@@ -42,6 +42,23 @@ MAX_WAIT_SECONDS = 30
 # long blocks the engine task and an incoming IM cannot land a turn. One
 # macro must never own half a session.
 MAX_RUN_SECONDS = 300
+# How deep the combinators may nest inside ONE check. Two, because that is
+# where real macros already sit: the shipped `init` scaffold and the docs
+# example both top out at ONE level, and `{not: {or: ["Upgrade", "升级"]}}`
+# — no language variant of the popup — is the deepest idiom worth writing.
+# Three means tracing brackets, and an unreadable check is one nobody
+# verifies against the screen; the failure mode is a guard that silently
+# always passes, which reads exactly like a guard that passed.
+#
+# The cap costs authors nothing because the format flattens for them: a
+# guard conjoins `require` and `forbid` for free, `forbid: X` IS
+# `require: {not: X}`, and `within` scopes a whole subtree so alternatives
+# need no wrapper each. What is left over belongs in two steps.
+#
+# `not` counts like the binary operators: exempting it would leave
+# `{not: {not: ...}}` as an unbounded escape hatch around the cap. The cap
+# is on NESTING only — an `or` may list as many alternatives as it likes.
+MAX_CLAUSE_DEPTH = 2
 
 MACRO_FILENAME = "MACRO.yml"
 

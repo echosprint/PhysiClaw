@@ -10,6 +10,7 @@ from physiclaw.agent.engine.mcp_inventory import discover_mcp_tools
 from physiclaw.agent.macros.model import (
     ALLOWED_STEP_TOOLS,
     LOCAL_STEP_TOOLS,
+    MAX_CLAUSE_DEPTH,
     MAX_INPUTS,
     MAX_PROSE_LEN,
     MAX_STEPS,
@@ -659,6 +660,102 @@ def test_parse_macro_guard_empty_require_raises() -> None:
 
     with pytest.raises(MacroError, match="`guard`.require is empty"):
         parse_macro(text, "m")
+
+
+# ---------- clause nesting depth ----------
+
+
+def _nested_require(levels: int) -> str:
+    """A guard whose `require` nests `and` exactly `levels` deep. The
+    innermost level holds two leaves, so every level is a real combinator."""
+    clause = '["aa", "bb"]'
+    for _ in range(levels - 1):
+        clause = f'[{{and: {clause}}}, "cc"]'
+    return (
+        "name: m\ndescription: d\nsteps:\n  - name: peek-40\n    tool: peek\n"
+        f"    guard:\n      require: {{and: {clause}}}\n"
+    )
+
+
+@pytest.mark.parametrize("levels", [1, MAX_CLAUSE_DEPTH])
+def test_parse_macro_clause_within_the_depth_cap_parses(levels: int) -> None:
+    spec = parse_macro(_nested_require(levels), "m")
+
+    assert spec.steps[0].guard is not None
+    assert spec.steps[0].guard.require is not None
+
+
+@pytest.mark.parametrize("levels", [MAX_CLAUSE_DEPTH + 1, MAX_CLAUSE_DEPTH + 5, 30])
+def test_parse_macro_clause_past_the_depth_cap_raises(levels: int) -> None:
+    # Unreadable checks are the real cost: a clause nobody can follow is one
+    # nobody verifies against the screen, and a guard that silently always
+    # passes reads exactly like a guard that passed.
+    with pytest.raises(MacroError, match="nest at most"):
+        parse_macro(_nested_require(levels), "m")
+
+
+def test_parse_macro_depth_cap_counts_not_like_the_binary_operators() -> None:
+    # Exempting `not` would leave `{not: {not: ...}}` as an unbounded escape
+    # hatch around the cap, so it costs a level like `and`/`or`.
+    clause = '{not: {not: {not: {not: "aa"}}}}'
+    text = (
+        "name: m\ndescription: d\nsteps:\n  - name: peek-41\n    tool: peek\n"
+        f"    guard:\n      require: {clause}\n"
+    )
+
+    with pytest.raises(MacroError, match="nest at most"):
+        parse_macro(text, "m")
+
+
+def test_parse_macro_depth_cap_does_not_limit_breadth() -> None:
+    # The cap is on NESTING, not on how many alternatives an `or` lists —
+    # a flat 12-way `or` is exactly the shape authors are pushed toward.
+    alternatives = ", ".join(f'"label{i}"' for i in range(12))
+    text = (
+        "name: m\ndescription: d\nsteps:\n  - name: peek-42\n    tool: peek\n"
+        f"    guard:\n      require: {{or: [{alternatives}]}}\n"
+    )
+
+    spec = parse_macro(text, "m")
+
+    assert spec.steps[0].guard is not None
+    assert len(spec.steps[0].guard.require.children) == 12
+
+
+def test_parse_macro_depth_cap_applies_to_every_check_field() -> None:
+    # `expect` takes the same clause grammar as `require`, so it inherits
+    # the cap from `_clause_expr` rather than from a per-field rule.
+    text = (
+        "name: m\ndescription: d\nsteps:\n  - name: settle\n    tool: wait\n"
+        "    with: {seconds: 2}\n"
+        '    expect: {and: [{and: [{and: [{and: ["aa", "bb"]}, "cc"]}, "dd"]}, "ee"]}\n'
+    )
+
+    with pytest.raises(MacroError, match="nest at most"):
+        parse_macro(text, "m")
+
+
+def _malformed_under(levels: int) -> str:
+    """A two-operator (illegal) node buried under `levels` legal `and`s, so
+    every ancestor is within the cap and the malformed node itself is the
+    first thing one level past it."""
+    clause = '{and: ["aa", "bb"], or: ["cc", "dd"]}'
+    for _ in range(levels):
+        clause = f'{{and: [{clause}, "zz"]}}'
+    return (
+        "name: m\ndescription: d\nsteps:\n  - name: peek-43\n    tool: peek\n"
+        f"    guard:\n      require: {clause}\n"
+    )
+
+
+def test_parse_macro_malformed_clause_at_the_cap_reports_its_shape() -> None:
+    # On ONE node the shape check runs before the depth check, so a clause
+    # that is both malformed and too deep reports the shape — the more
+    # specific error. (Depth is judged on the way down, so an outer level
+    # past the cap still wins over a deeper malformed node; that is the
+    # point of the cap, not a masked error.)
+    with pytest.raises(MacroError, match="exactly one of"):
+        parse_macro(_malformed_under(MAX_CLAUSE_DEPTH), "m")
 
 
 # ---------- YAML alias bomb ----------
