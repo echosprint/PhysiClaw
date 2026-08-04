@@ -3,11 +3,11 @@ title: Macros
 description: Rehearsed gesture sequences the agent replays in one step. You author and test them; the agent runs them cheaply.
 ---
 
-Some sequences never change: going home, opening WeChat, pasting a message, tapping send. Done with gestures, each step costs one model turn. A macro records such a fixed sequence once, and the agent replays it with a single `run_macro` call that returns the step log and the current screen. Macros are deliberately dumb: no conditions, no loops. If the screen stops matching the rehearsed path, the macro aborts safely and the agent continues by hand. An aborted macro is then refused for the rest of that session, `start_at` included, so a macro that has drifted cannot be retried in a loop.
+Tokens are expensive. A macro batches many gestures into a single model call, so the agent invokes a sequence you authored and rehearsed instead of driving the phone step by step. Macros save tokens and time.
 
 ## Create a macro
 
-Scaffold one, then edit the generated file:
+Scaffold one, then edit the `MACRO.yml` file:
 
 ```bash
 physiclaw macros init notify-user-wechat
@@ -20,23 +20,23 @@ physiclaw macros init notify-user-wechat
     - MACRO.yml
 </FileTree>
 
-### MACRO.yml example
-
-The shape follows GitHub Actions conventions: `name`, `description`, `inputs`, then `steps` with per-step `name` and `with:`. Every step needs a `name`, unique within the macro and shaped like the macro name — lowercase, digits, hyphens, no spaces. It is the identifier `start_at` uses and the label in logs.
+### MACRO.yml
 
 ```yaml
-name: notify-user-wechat        # must equal the directory name
-description: Open WeChat and paste a message into the chat, stopping before Send
+name: notify-user-wechat
+# The agent picks a macro by this line alone, so make clear when to use it and what it does.
+description: Use when messaging your user on WeChat. Opens the chat and stages the text, stopping before Send
 
-enabled: true                   # absent means true; set false to keep a
-                                # macro out of the agent's prompt while you
-                                # rehearse it
+# false means the agent can't see or call it.
+enabled: true
 
+# The args needed for this macro.
 inputs:
   message:
     description: The message text to send
     example: "Order placed, ¥30 total"
 
+# Run top to bottom, one action per step.
 steps:
   - name: start-home
     tool: home_screen
@@ -44,16 +44,15 @@ steps:
   - name: open-wechat
     tool: tap
     with:
+      # [left, top, right, bottom] as 0–1 screen fractions.
       bbox: [0.62, 0.18, 0.85, 0.30]
 
-  - name: await-wechat            # settle, then confirm: `seconds` is
-    tool: wait                    # exactly that long, `expect` checks once
-    with:                         # afterwards, and the pair costs one
-      seconds: 2                  # camera read
-    expect:                       # WeChat reopens where it was left, so the
-                                  # title bar reads the app name or the
-                                  # chat's — accept both, and let the next
-                                  # step sort out which one we got
+  - name: await-wechat
+    tool: wait
+    with:
+      seconds: 2
+    # WeChat reopens where it was left, so the title bar shows either name.
+    expect:
       {or: ["WeChat", "Weixin", "your-user-name"],
        within: [0.15, 0.02, 0.85, 0.1]}
     hint: "WeChat did not open — log in, then send manually"
@@ -62,11 +61,11 @@ steps:
     tool: tap
     with:
       bbox: [0.05, 0.10, 0.95, 0.20]
-    skip_when:                    # already inside the chat: this tap would
-                                  # land on a message bubble
+    # Skip if we are already in the chat.
+    skip_when:
       {text: "your-user-name", within: [0.15, 0.02, 0.85, 0.1]}
-    guard:                        # a fixed row position, so check the name
-                                  # is really sitting there before tapping
+    # Make sure we tap the right list item.
+    guard:
       require: {text: "your-user-name", within: [0.05, 0.10, 0.95, 0.20]}
 
   - name: stage-text
@@ -78,8 +77,8 @@ steps:
     tool: tap
     with:
       bbox: [0.05, 0.90, 0.75, 0.96]
-    skip_when:                    # keyboard already up: this bbox would
-                                  # land on the letter keys
+    # Skip if the keyboard is up (the space bar is showing).
+    skip_when:
       {or: ["space", "空格"], within: [0.25, 0.85, 0.8, 0.95]}
 
   - name: paste-menu
@@ -94,41 +93,32 @@ steps:
     guard:
       require: {text: "Paste", within: [0.03, 0.50, 0.35, 0.62]}
 
-# No send step: tapping Send commits the message, and commit actions stay with
-# the agent. It reads the pasted text on the returned screen, checks it, and
-# taps Send itself. End your macros just before the irreversible tap.
+# No send step: the agent checks the text and decides whether to send.
 ```
 
-Steps may call `tap`, `double_tap`, `long_press`, `swipe`, `home_screen`, `go_back`, `force_quit`, `send_to_clipboard`, `peek`, and `wait`. Inputs are strings; one with a `default` is optional. A valid macro is enabled by default; the scaffold starts with `enabled: false` until you rehearse it. The full format reference lives at `~/.physiclaw/macros/README.md`.
+Available tools: `tap`, `double_tap`, `long_press`, `swipe`, `home_screen`, `go_back`, `force_quit`, `send_to_clipboard`, `peek`, and `wait`.
 
-:::warning[Quote your text]
-Guards and inputs match literal screen text, and YAML silently retypes unquoted values: `true` becomes a boolean, `007` becomes a number, and an unquoted `{message}` becomes a mapping. YAML anchors and aliases (`&name` / `*name`) are rejected outright — write the value out in full. `physiclaw macros check` rejects each of these with the quoted fix, but the habit that avoids the round-trip is simple: quote every text value.
-:::
+## Rehearse
 
-## Guards
-
-A `guard` runs before its step fires and either passes or aborts the macro — never branches. Running first means it describes the screen the step *needs*, not the screen the step produces. Its mirror is `expect`: one clause, checked *after* a `wait` sleeps, saying what should have arrived. A guard says what a step needs; `expect` says what showed up. To wait on an app you just launched, give a `wait` step an `expect`, as the example above does — that pair is the settle idiom, and it aborts naming the launch rather than whatever step trips three lines later. The one sanctioned form of skipping is `skip_when`: one clause (same grammar as `require`) describing the step's *postcondition* — if the state the step exists to create already holds, the step is skipped, because executing it would be redundant or harmful. The example above shows the canonical case: don't tap the input box when the keyboard is already up, since that bbox would hit the keys. Use it only when skipping leaves the same screen state as executing; anything else is branching in disguise and belongs to the agent. Every check — `require`, `forbid`, `expect`, `skip_when` — is exactly one clause, so there is no per-field shape to remember; for two conditions write `{and: [...]}`. A clause is one of four forms, and the combinators are spelled out rather than implied by nesting: a bare string matches anywhere in the screen text; `{text: "WeChat", within: [0.2, 0.2, 0.8, 0.3]}` is element-granular, demanding a label that contains the text with its center inside that region — use it when the same text can legitimately appear elsewhere; `{or: [...]}` and `{and: [...]}` combine clauses; `{not: ...}` requires absence. They nest up to two levels, so `{or: [{not: "Upgrade"}, {and: ["Chats", "WeChat"]}]}` is legal and reads as it looks; the cap is on nesting, not breadth, so an `or` may list as many alternatives as it needs and flattening siblings into one operator is the fix when you hit it. Any of the three can carry `within`, which scopes the whole subtree — write `{or: ["space", "空格"], within: [0.25, 0.85, 0.8, 0.95]}` rather than repeating the bbox on each alternative; an inner `within` overrides the one it sits in. `forbid` is one clause that must NOT hold — the popup-tripwire spelling of `require: {not: ...}`. These fields took lists once, which made bracket shape carry meaning (a list was AND at the top level and an error one level down); spelling the conjunction removes the rule. A guard checks once: it is a predicate, not a wait. It reads the screen text it already holds, for free. Waiting is a separate step — `tool: wait` with `{seconds: N}` (1–30, or `0` with an `expect` to check immediately) sleeps exactly N seconds and calls nothing; the arm's own gesture latency already absorbs most cold starts, so start small. `expect` takes a bare clause rather than a `require`/`forbid` table, since the grammar already spells absence and conjunction, and the step's `hint` steers recovery when it fails. It is valid only on a `wait` step and costs exactly one camera read: a gesture's own view is captured about two seconds after the touch and is the same frame the next step's guard reads for free, so an `expect` there would assert nothing new. To confirm what a gesture produced, put a `wait` step after it. A whole run is capped at 300 seconds and aborts with `timeout` past that. With no screen text held — step 1, or after a step that returned no view — the guard peeks once before judging; a text-only step like `send_to_clipboard` deliberately keeps the held screen, so the guard after it is still free. An unreadable screen is never a satisfied guard: a failed peek is retried once, then aborts with `could not read the screen`, so the recovery is to retry the read, not to fix the screen. On abort, the `hint` text is shown to the agent to steer its manual recovery. Guard checks cost camera cycles, never model tokens.
-
-## Rehearse, then enable
+Start the MCP server:
 
 ```bash
-physiclaw macros check                                  # lint every MACRO.yml
-physiclaw macros run notify-user-wechat -i message=hi   # replay on the live rig
-physiclaw macros run notify-user-wechat --start-at paste  # rehearse a resume
+physiclaw mcp
 ```
 
-`run` works while the macro is disabled, so rehearse first. Watch the phone during the replay, fix bboxes until every step lands, then flip the scaffold's `enabled: false` to true or delete the line. The agent sees enabled macros under `## Available Macros` in its prompt and calls them by name; with no enabled macros, the prompt carries no macro content at all. To switch off every macro at once, set `[macros] enabled = false` in `~/.physiclaw/config.toml`; the CLI commands keep working for authoring.
+Then lint every `MACRO.yml` and replay this one on the live rig:
+
+```bash
+physiclaw macros check
+physiclaw macros run notify-user-wechat -i message=hi
+```
 
 ## Best practices
 
-**Rehearse before enabling.** Hard-coded bboxes are trustworthy only because you tested them on this rig, this phone, this layout.
-
-**Guard the risky steps.** Put a `require` on the step that needs the state, not on the one that creates it: before a tap at a fixed position in a list that can reorder, and before anything just short of a commit. Follow a launch or navigation step with a `wait` carrying an `expect`, so cold starts cost a little time instead of aborting. Don't ritually guard every step.
-
-**Let `skip_when` absorb the starting state.** An app reopening inside the last screen, a keyboard already up: declare the step's postcondition and one macro survives every entry point you rehearsed.
-
 **Keep macros short and single-purpose.** Anything that needs a decision mid-way, like confirmations, payments, or choosing among results, belongs to the agent, not a macro.
 
-**Watch the stats.** `physiclaw macros stats` shows per-macro counters. A rising `consecutive_aborts` streak means the app layout changed under the macro; re-rehearse and update the bboxes.
+**Let an agent draft it.** Connect `claude` or `codex` to your MCP server, then ask it to write the macro.
 
-**Debug by run id.** Every run — agent-triggered or rehearsal — gets an id like `macro-run-a3f9c1`, printed after rehearsals and stamped into the result and the stats, with its own directory under `~/.physiclaw/log/macros/` holding the per-step event log and a screenshot of each step's resulting screen. `physiclaw macros runs` lists recent runs; `physiclaw macros runs a3f9c1` replays one run step by step (timings, guard polls, per-step images, and on a guard failure the exact screen text the check saw).
+**Rehearse before enabling.** Hard-coded bboxes are trustworthy only because you tested them on this rig, this phone, this layout.
+
+**Watch the stats.** `physiclaw macros stats` shows per-macro counters. A rising `consecutive_aborts` streak means the app layout changed under the macro; re-rehearse and update the bboxes.
