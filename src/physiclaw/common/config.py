@@ -306,6 +306,18 @@ class SkillsConfig:
 
 
 @dataclass
+class MacrosConfig:
+    """Global gate for user-authored gesture macros. ``enabled = false``
+    hides ALL macros from the agent regardless of each file's own
+    ``enabled`` flag — the prompt then carries zero macro content (no
+    section, no run_macro tool, no MACRO.md doctrine). CLI authoring
+    commands (init/check/run/stats) ignore this gate so a macro can be
+    rehearsed while the fleet-wide switch is off."""
+
+    enabled: bool = True
+
+
+@dataclass
 class Config:
     server: ServerConfig = field(default_factory=ServerConfig)
     update: UpdateConfig = field(default_factory=UpdateConfig)
@@ -322,6 +334,7 @@ class Config:
     retention: RetentionConfig = field(default_factory=RetentionConfig)
     pitfalls: PitfallsConfig = field(default_factory=PitfallsConfig)
     skills: SkillsConfig = field(default_factory=SkillsConfig)
+    macros: MacrosConfig = field(default_factory=MacrosConfig)
 
 
 def _section_types() -> dict[str, type]:
@@ -430,6 +443,11 @@ _SECTION_COMMENTS: dict[str, str] = {
         "`physiclaw skills`. `default_source`: repo for `install` (empty = "
         "require `--from`; `owner/repo` or a git URL). `official_base_url` + "
         "`sync_auto`: the `sync official` pack source + auto-sync at startup."
+    ),
+    "macros": (
+        "`physiclaw macros`. `enabled = false` hides ALL macros from the "
+        "agent (per-file `enabled` flags don't matter); the CLI authoring "
+        "commands keep working so macros can still be rehearsed."
     ),
 }
 

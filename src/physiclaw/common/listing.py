@@ -59,3 +59,12 @@ ROW_RE = re.compile(rf"^\d+ \[({'|'.join(KINDS)})\] ")
 # empty-label icon shape.
 TEXT_ROW_RE = re.compile(r'^\d+ \[text\] "(.*)" \[[^\]]*\] [0-9.]+\s*$')
 ICON_ROW_RE = re.compile(r'^\d+ \[icon\] "" \[[^\]]*\] [0-9.]+\s*$')
+
+# Label + bbox capture, either kind — region-scoped macro guards
+# (`agent.macros.model`) match a required text against element rows'
+# positions. Groups: (1) label, (2) the comma-joined bbox coords.
+# Derives from KINDS like the matchers above, so a new kind can't be
+# silently unparseable.
+ROW_PARSE_RE = re.compile(
+    rf'^\d+ \[(?:{"|".join(KINDS)})\] "(.*)" \[([^\]]*)\] [0-9.]+\s*$'
+)

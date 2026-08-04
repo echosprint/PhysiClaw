@@ -150,12 +150,13 @@ async def _run_session(
         )
         log.info(
             "tools loaded: %d MCP + %d local + %d built-in + %d user skills "
-            "+ %d pitfalls",
+            "+ %d pitfalls + %d macros",
             len(mcp_tools),
             len(bundle.local_registry),
             bundle.builtin_skill_count,
             bundle.user_skill_count,
             bundle.pitfall_count,
+            bundle.macro_count,
         )
 
         messages: list[Message] = assemble.build_initial_messages(

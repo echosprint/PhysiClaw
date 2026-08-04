@@ -38,6 +38,10 @@ dependencies = [
     "typer>=0.12",
     "tomlkit>=0.13",
     "anthropic>=0.40",
+    # MACRO.yml parsing. ruamel over PyYAML for YAML 1.2 semantics: unquoted
+    # yes/no/on/off stay strings (macro guards match literal screen text, so
+    # 1.1's implicit booleans would silently corrupt them).
+    "ruamel-yaml>=0.18",
 ]
 
 [project.urls]

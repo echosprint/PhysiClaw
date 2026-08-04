@@ -14,7 +14,10 @@ import pytest
 
 from physiclaw.common.gesture_vocab import (
     NAV_TOOLS,
+    PEEK,
     PRESS_TOOLS,
+    RUN_MACRO,
+    SEND_TO_CLIPBOARD,
     SEQUENCE,
     STEP_ACTIONS,
     STEP_ARG,
@@ -60,8 +63,12 @@ def test_registered_tool_names_cover_the_vocabulary(mocker) -> None:
     mocker.patch.object(tools_mod, "save_tool_call")
     tools_mod.register(mcp, MagicMock())
 
-    vocabulary = PRESS_TOOLS | NAV_TOOLS | {SWIPE, SEQUENCE}
+    vocabulary = PRESS_TOOLS | NAV_TOOLS | {SWIPE, SEQUENCE, PEEK, SEND_TO_CLIPBOARD}
     assert vocabulary <= mcp.names
+    # RUN_MACRO lives in this module because the engine's classifiers have to
+    # name it, but it is a LOCAL tool — it must never appear in the server
+    # registration, or a macro would become a gesture a macro could nest.
+    assert RUN_MACRO not in mcp.names
 
 
 def test_parse_step_accepts_every_press_tool() -> None:

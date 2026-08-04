@@ -73,6 +73,52 @@ async def test_dispatch_local_tool_returns_text() -> None:
 
 
 @pytest.mark.asyncio
+async def test_dispatch_local_tool_returning_blocks_uses_mcp_result_path() -> None:
+    # run_macro's shape: a local handler handing back raw MCP-style blocks
+    # (step log + final view) must convert like an MCP result — images and
+    # all — not stringify.
+    async def handler(_session, _args):
+        return [
+            {"type": "text", "text": "macro demo: all 2 steps completed"},
+            {"type": "image", "mime_type": "image/jpeg", "data": "aGk="},
+        ]
+
+    tool = LocalTool("run_macro", "x", {"type": "object"}, handler, returns_blocks=True)
+    schema = {"name": "run_macro", "input_schema": {"type": "object"}}
+    run = _mk_run(
+        schema_by_name={"run_macro": schema}, local_registry={"run_macro": tool}
+    )
+
+    result = await dispatch(run, Session(), _tc("run_macro"), 0)
+
+    assert result.is_error is False
+    assert isinstance(result.content, list)
+    kinds = {type(b).__name__ for b in result.content}
+    assert "ImageBlock" in kinds
+
+
+@pytest.mark.asyncio
+async def test_dispatch_local_blocks_traced_like_mcp_result() -> None:
+    blocks = [{"type": "text", "text": "log line"}]
+
+    async def handler(_session, _args):
+        return blocks
+
+    tool = LocalTool("run_macro", "x", {"type": "object"}, handler, returns_blocks=True)
+    schema = {"name": "run_macro", "input_schema": {"type": "object"}}
+    run = _mk_run(
+        schema_by_name={"run_macro": schema}, local_registry={"run_macro": tool}
+    )
+
+    await dispatch(run, Session(), _tc("run_macro"), 0)
+
+    traced = [c.args[0] for c in run.tr.write.call_args_list]
+    assert any(
+        e.get("event") == "tool_result" and e.get("blocks") == blocks for e in traced
+    )
+
+
+@pytest.mark.asyncio
 async def test_dispatch_mcp_tool_returns_blocks() -> None:
     schema = {"name": "physiclaw__peek", "input_schema": {"type": "object"}}
     mcp = FakeMcpClient()

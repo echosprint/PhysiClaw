@@ -26,6 +26,7 @@ from physiclaw.agent.engine import (
 from physiclaw.agent.engine.builtin_tool import LocalTool
 from physiclaw.agent.engine.dto import Message, SystemMessage, UserMessage
 from physiclaw.agent.engine.session import Session
+from physiclaw.agent.macros import store as macro_store
 from physiclaw.agent.runtime.hook import Trigger
 
 
@@ -44,6 +45,7 @@ class PromptBundle:
     builtin_skill_count: int
     user_skill_count: int
     pitfall_count: int = 0
+    macro_count: int = 0
 
 
 def build_prompt_bundle(provider_id: str) -> PromptBundle:
@@ -55,7 +57,8 @@ def build_prompt_bundle(provider_id: str) -> PromptBundle:
     # so the agent uses coordinates directly instead of cross-referencing.
     builtin_skills = screen_layout.fill_builtin_boxes(builtin_skills)
     user_skills = skill.discover_user_skills()
-    local_registry = builtin_tool.build_registry(user_skills)
+    macros = macro_store.discover_enabled()
+    local_registry = builtin_tool.build_registry(user_skills, macros)
     local_schemas = builtin_tool.schemas(local_registry)
     pitfall_items = pitfalls.read()  # read once; render + count both use it
     system_prompt = prompt.render_system_prompts(
@@ -63,6 +66,7 @@ def build_prompt_bundle(provider_id: str) -> PromptBundle:
         memory_ctx=memory.load_persistent(),
         builtin_skills_ctx=skill.render_builtin(builtin_skills),
         user_skills_ctx=skill.render_section(user_skills),
+        macros_ctx=macro_store.render_section(macros),
         # Agent-flagged traps, always-on right after user skills (no Skill() load).
         pitfalls_ctx=pitfalls.render_section(pitfall_items),
         provider_id=provider_id,
@@ -75,6 +79,7 @@ def build_prompt_bundle(provider_id: str) -> PromptBundle:
         builtin_skill_count=len(builtin_skills),
         user_skill_count=len(user_skills),
         pitfall_count=len(pitfall_items),
+        macro_count=len(macros),
     )
 
 

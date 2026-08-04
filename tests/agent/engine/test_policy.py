@@ -279,6 +279,7 @@ def test_default_policies_declares_the_documented_order() -> None:
     assert [type(g).__name__ for g in p.dispatch_guards] == [
         "PlanGate",
         "LayoutLint",
+        "BurnedMacro",
         "StuckBlock",
     ]
     assert [type(o).__name__ for o in p.result_observers] == [
@@ -290,6 +291,7 @@ def test_default_policies_declares_the_documented_order() -> None:
     assert [type(g).__name__ for g in p.pre_validation_guards] == ["PlanGate"]
     assert [type(g).__name__ for g in p.post_validation_guards] == [
         "LayoutLint",
+        "BurnedMacro",
         "StuckBlock",
     ]
 
@@ -363,3 +365,65 @@ def test_plan_gate_overdue_predicate() -> None:
         steps=[{"content": "reply to user", "status": "in_progress"}]
     )
     assert not gate.overdue(steps_only, n)
+
+
+# ---------- BurnedMacro: one abort retires a macro for the session ----------
+
+
+def _macro_call(**args):
+    return ToolCall(id="c1", name="run_macro", arguments=args)
+
+
+def test_burned_macro_allows_a_macro_that_has_not_failed() -> None:
+    assert (
+        policy_mod.BurnedMacro().check(Session(), _macro_call(name="notify"), turn=1)
+        is None
+    )
+
+
+def test_burned_macro_blocks_a_rerun_after_an_abort() -> None:
+    # The stuck guard cannot see run_macro (no press centers, no signature),
+    # so without this a macro whose guard fails every time can be re-issued
+    # every turn for a whole session.
+    session = Session()
+    session.failed_macros.add("notify")
+
+    block = policy_mod.BurnedMacro().check(session, _macro_call(name="notify"), turn=2)
+
+    assert block is not None
+    assert block.event == "tool_blocked_burned_macro"
+    assert "already aborted this session" in block.content
+
+
+def test_burned_macro_blocks_start_at_retries_too() -> None:
+    # A resumed run is still the same stale rehearsal.
+    session = Session()
+    session.failed_macros.add("notify")
+
+    block = policy_mod.BurnedMacro().check(
+        session, _macro_call(name="notify", start_at="paste"), turn=3
+    )
+
+    assert block is not None
+
+
+def test_burned_macro_leaves_other_macros_and_gestures_alone() -> None:
+    session = Session()
+    session.failed_macros.add("notify")
+    guard = policy_mod.BurnedMacro()
+
+    assert guard.check(session, _macro_call(name="other"), turn=4) is None
+    assert (
+        guard.check(session, ToolCall(id="c2", name="tap", arguments={}), turn=5)
+        is None
+    )
+
+
+def test_burned_macro_is_registered_and_runs_before_the_stuck_block() -> None:
+    # A blocked macro must not also feed the loop counters — the same
+    # ordering rule LayoutLint already follows.
+    guards = policy_mod.default_policies(layout_incomplete=False).dispatch_guards
+    kinds = [type(g).__name__ for g in guards]
+
+    assert "BurnedMacro" in kinds
+    assert kinds.index("BurnedMacro") < kinds.index("StuckBlock")

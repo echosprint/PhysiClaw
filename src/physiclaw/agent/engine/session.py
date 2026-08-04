@@ -45,6 +45,14 @@ class Session:
     # (loop-guard tally) only enriches the capture corrective's seed.
     added_pitfalls: bool = False
     stuck_events: int = 0
+    # Macros that aborted this session — `run_macro` refuses them from then
+    # on (policy.BurnedMacro). A macro is a REHEARSED path: once the screen
+    # stops matching it, the rehearsal no longer describes what is in front
+    # of us, and a re-run replays every already-completed step. One strike,
+    # then the agent finishes by hand. Written by the run_macro handler;
+    # bad_input never lands here — it raises before a result exists and says
+    # nothing about the macro.
+    failed_macros: set[str] = field(default_factory=set)
     # Memory-cue gate inputs (policy.MemoryCueCheckpoint): `memory_cues` =
     # "remember this"/"记住" snippets scanned per turn; `saved_memory` set by
     # save/update_memory.

@@ -33,6 +33,7 @@ from physiclaw.common import paths
 from physiclaw.common.gesture_vocab import (
     NAV_TOOLS,
     PRESS_TOOLS,
+    RUN_MACRO,
     SEQUENCE,
     STEP_ACTIONS,
     STEP_ARG,
@@ -42,6 +43,11 @@ from physiclaw.common.gesture_vocab import (
 from physiclaw.common.text import read_text, write_text
 
 log = logging.getLogger(__name__)
+
+# Calls whose effect on the keyboard cannot be attributed: a swipe may or
+# may not dismiss it, and `run_macro` hides a whole rehearsed sequence
+# behind one result. Both decay the belief to "unknown" rather than guess.
+KEYBOARD_OPAQUE = frozenset({SWIPE, RUN_MACRO})
 
 # The built-in skill that drives first-run capture — dropped from the prompt
 # once the layout is learned (its body is only useful during setup).
@@ -169,8 +175,10 @@ class KeyboardTracker:
     (a missed edge swipe: the stuck guard's nav-miss case), which left
     the screen, keyboard included, exactly as it was. Swipes, batches
     with presses, and presses outside the keyboard region decay to
-    "unknown". Views, local tools, and clipboard syncs never touch the
-    screen. Consumers act only on "up" — "down"/"unknown" fail open.
+    "unknown", as does `run_macro` — the one local tool that replays real
+    gestures, and so the exception to the rule below. Every OTHER local
+    tool, plus views and clipboard syncs, never touches the screen.
+    Consumers act only on "up" — "down"/"unknown" fail open.
     """
 
     state: str = "unknown"  # "up" | "down" | "unknown"
@@ -180,7 +188,15 @@ class KeyboardTracker:
             if changed is not False:
                 self.state = "down"
             return
-        if name == SWIPE:
+        if name in KEYBOARD_OPAQUE:
+            # RUN_MACRO is the SEQUENCE case wearing a local tool's name: a
+            # macro replays up to 20 rehearsed gestures — `home_screen`
+            # dismisses the keyboard, a chat-input tap raises it — behind ONE
+            # result no one can attribute per step. Without this it falls to
+            # the "views / local tools — screen untouched" return below and
+            # carries a pre-macro belief across a macro that invalidated it,
+            # so LayoutLint then blocks the agent's next long_press on the
+            # box that is now correct. Decay, never keep.
             self.state = "unknown"
             return
         if name == SEQUENCE:

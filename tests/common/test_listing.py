@@ -21,6 +21,7 @@ from physiclaw.common.listing import (
     ICON_ROW_RE,
     KINDS,
     LISTING_HEADER,
+    ROW_PARSE_RE,
     ROW_RE,
     TEXT_ROW_RE,
     format_row,
@@ -65,6 +66,18 @@ def test_format_row_text_bytes_pinned() -> None:
 def test_format_row_icon_bytes_pinned() -> None:
     row = format_row(0, "icon", "", [0.1, 0.2, 0.3, 0.4], 0.9)
     assert row == '0 [icon] "" [0.100,0.200,0.300,0.400] 0.90'
+
+
+def test_row_parse_re_round_trips_format_row() -> None:
+    # Region-scoped macro guards parse label + bbox back out of rows —
+    # a formatter change that breaks this fails here, not mid-macro.
+    row = format_row(7, "text", 'He said "hi" [ok]', [0.1, 0.2, 0.3, 0.4], 0.93)
+
+    m = ROW_PARSE_RE.match(row)
+
+    assert m is not None
+    assert m.group(1) == 'He said "hi" [ok]'
+    assert [float(v) for v in m.group(2).split(",")] == [0.1, 0.2, 0.3, 0.4]
 
 
 def test_format_row_rejects_unknown_kind() -> None:

@@ -91,7 +91,27 @@ async def dispatch(
     local = run.local_registry.get(call.name)
     try:
         if local is not None:
-            text = await local.handler(session, call.arguments)
+            result = await local.handler(session, call.arguments)
+            if local.returns_blocks:
+                # A local tool DECLARING raw MCP-style blocks (run_macro's
+                # step log + final view) — same verdict + observer path as
+                # an MCP call, so the screen it carries supersedes and the
+                # observers see its verdict. It IS a gesture turn to
+                # StuckReflection and KeyboardBelief, but invisible to
+                # stuck.py's same-target and cycle detectors (no bbox
+                # centers, no signature) — so its loop protection is
+                # `policy.BurnedMacro`, one abort burning the macro for the
+                # session, rather than the same-target tiers.
+                if not isinstance(result, list):
+                    # The flag and the handler's return type state one fact
+                    # twice, and nothing else checks they agree — a str here
+                    # would silently become a list of characters. Raising
+                    # lands in the except below, a normal tool error.
+                    raise TypeError(
+                        f"{call.name} declares returns_blocks but returned "
+                        f"{type(result).__name__}"
+                    )
+                return _blocks_result(run, session, call, result, turn)
             run.tr.write(
                 {
                     "event": "tool_result",
@@ -99,36 +119,14 @@ async def dispatch(
                     "name": call.name,
                     "id": call.id,
                     "arguments": call.arguments,
-                    "text": text,
+                    "text": result,
                 }
             )
-            log.info("  ✓ %s → %s", call.name, format_call_result(call.name, text))
-            return ToolResultMessage(tool_call_id=call.id, content=text)
+            log.info("  ✓ %s → %s", call.name, format_call_result(call.name, result))
+            return ToolResultMessage(tool_call_id=call.id, content=result)
 
         blocks = await run.mcp.call_tool(call.name, call.arguments)
-        content = mcp_blocks_to_content_blocks(blocks)
-        changed = verdict.parse(_action_text(blocks))
-        content = _observe_result(
-            run,
-            session,
-            call,
-            content,
-            turn=turn,
-            changed=changed,
-            failed=False,
-        )
-        run.tr.write(
-            {
-                "event": "tool_result",
-                "turn": turn,
-                "name": call.name,
-                "id": call.id,
-                "arguments": call.arguments,
-                "blocks": blocks,
-            }
-        )
-        log.info("  ✓ %s → %s", call.name, brief_content(content))
-        return ToolResultMessage(tool_call_id=call.id, content=content)
+        return _blocks_result(run, session, call, blocks, turn)
 
     except Exception as e:
         log.error("  ✗ %s failed: %s", call.name, e)
@@ -149,6 +147,40 @@ async def dispatch(
             content=content,
             is_error=True,
         )
+
+
+def _blocks_result(
+    run: EngineRun,
+    session: Session,
+    call: ToolCall,
+    blocks: list[dict],
+    turn: int,
+) -> ToolResultMessage:
+    """Raw MCP-style blocks → observed ToolResultMessage — the shared tail
+    of the MCP path and the local block-returning path (run_macro)."""
+    content = mcp_blocks_to_content_blocks(blocks)
+    changed = verdict.parse(verdict.action_text(blocks))
+    content = _observe_result(
+        run,
+        session,
+        call,
+        content,
+        turn=turn,
+        changed=changed,
+        failed=False,
+    )
+    run.tr.write(
+        {
+            "event": "tool_result",
+            "turn": turn,
+            "name": call.name,
+            "id": call.id,
+            "arguments": call.arguments,
+            "blocks": blocks,
+        }
+    )
+    log.info("  ✓ %s → %s", call.name, brief_content(content))
+    return ToolResultMessage(tool_call_id=call.id, content=content)
 
 
 def _run_guards(
@@ -209,21 +241,6 @@ def _observe_result(
         )
         content = _append_text(content, advisory.text)
     return content
-
-
-def _action_text(blocks: list[dict]) -> str:
-    """The FIRST text block of a raw MCP tool result — the core-composed
-    action text carrying the verdict marker, and the ONLY safe haystack
-    for it. Later text blocks hold the OCR listing, i.e. whatever the
-    phone displays — scanning those would let on-screen text forge a
-    verdict (the agent IM'ing the user "…screen: no visible change…"
-    about a blocker, then operating in that chat, is enough). Must run
-    on the raw blocks: `mcp_blocks_to_content_blocks` fuses all text
-    blocks into one, erasing the boundary."""
-    for b in blocks:
-        if b.get("type") == "text":
-            return b.get("text") or ""
-    return ""
 
 
 def _append_text(

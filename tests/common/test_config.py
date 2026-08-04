@@ -116,6 +116,8 @@ def test_config_error_is_value_error_subclass() -> None:
             "https://physiclaw.ai/downloads/official-skills",
         ),
         ("skills", "sync_auto", True),
+        # MacrosConfig
+        ("macros", "enabled", True),
     ],
 )
 def test_default_config_field_value_pinned(
@@ -334,6 +336,12 @@ def test_to_toml_emits_header_and_section_comments_when_with_comments() -> None:
             "Applied when [agent] model = 'claude-code/...' (external CLI subprocess).",
         ),
         ("retention", "Purge window for on-disk engine trace logs + cron job history."),
+        (
+            "macros",
+            "`physiclaw macros`. `enabled = false` hides ALL macros from the "
+            "agent (per-file `enabled` flags don't matter); the CLI authoring "
+            "commands keep working so macros can still be rehearsed.",
+        ),
     ],
 )
 def test_section_comment_pinned(

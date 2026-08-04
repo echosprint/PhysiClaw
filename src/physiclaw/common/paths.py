@@ -12,6 +12,7 @@ Layout::
     ├── jobs/jobs.md
     ├── models/omniparser_icon_detect/model.onnx
     ├── skills/<name>/SKILL.md           (user-authored; overrides built-in)
+    ├── macros/{README.md, <name>/MACRO.yml, stats.json}  (gesture macros + run stats)
     ├── official/{source.json, skills/, .sync-state.json}  (synced official pack)
     ├── cache/update.json                (update-notice stage marker; Phase B→A)
     ├── learned/pitfalls/{pitfalls.md, history.jsonl}  (agent-flagged traps; add_pitfall)
@@ -19,6 +20,7 @@ Layout::
     ├── snapshots/, screenshots/, tool_calls/, raw_camera/  (debug dumps; `physiclaw clear`)
     ├── run/server.json                  (live server pid+host+port; cleared on exit)
     └── log/
+        ├── macros/macro-run-<hex6>/{events.jsonl, images/}  (per-step macro-run records)
         ├── engine/
         │   ├── engine-YYYY-MM-DD.log    (human narrative, all sessions of a day)
         │   └── sessions/{README.md, <sid>/{events.jsonl, wire.jsonl, summary.json, images/}}
@@ -29,7 +31,11 @@ File-format rule — the mix above is deliberate, one format per audience
 (the Python-community split: TOML for what humans edit, JSON for what
 machines write):
 
-    config.toml     the ONE user-edited file → TOML
+    config.toml     the ONE user-edited settings file → TOML
+    MACRO.yml       the one deliberate YAML exception: user-edited step
+                    flows follow the GitHub-Actions shape, and YAML's
+                    implicit-typing hazards are fenced by a 1.2 parser +
+                    strict type checks (agent/macros/parse.py)
     *.json/*.jsonl  machine-written state, caches, and append-only logs
                     (jq-able; source.json mirrors the upstream manifest
                     verbatim)
@@ -125,6 +131,14 @@ def skills_dir() -> Path:
     return HOME / "skills"
 
 
+def macros_dir() -> Path:
+    """User-authored gesture macros — one ``<name>/MACRO.yml`` dir per macro
+    (rehearsed MCP-gesture sequences the agent runs via ``run_macro``), plus a
+    single machine-written ``stats.json`` at the root. Only ``*/MACRO.yml``
+    is scanned, so the stats file can never be read as a macro."""
+    return HOME / "macros"
+
+
 def official_dir() -> Path:
     """Official skill pack synced from the site (``physiclaw skills sync
     official``). Kept separate from ``skills_dir()`` (user-authored): the
@@ -173,6 +187,14 @@ def screen_layout_md() -> Path:
 
 def runtime_state_file() -> Path:
     return HOME / "run" / "server.json"
+
+
+def macros_log_dir() -> Path:
+    """Per-step forensic records of macro runs — one
+    ``<macro-run-hex6>/{events.jsonl, images/}`` dir per run (the engine
+    session layout in miniature), engine runs and CLI rehearsals alike.
+    Read by `physiclaw macros runs`."""
+    return LOG_DIR / "macros"
 
 
 def claude_log_dir() -> Path:

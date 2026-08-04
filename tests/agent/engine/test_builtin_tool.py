@@ -609,6 +609,113 @@ def test_build_registry_returns_local_tool_instances() -> None:
     assert all(isinstance(t, LocalTool) for t in reg.values())
 
 
+# ---------- run_macro ----------
+
+
+def _macro_spec(name: str = "demo"):
+    from physiclaw.agent.macros.parse import parse_macro
+
+    return parse_macro(
+        f"name: {name}\ndescription: d\nenabled: true\n"
+        "inputs:\n  msg:\n    description: text\n"
+        "steps:\n  - name: send-to-clipboard-1\n    tool: send_to_clipboard\n    with:\n"
+        '      text: "{msg}"\n',
+        name,
+    )
+
+
+def test_build_registry_omits_run_macro_when_no_macros() -> None:
+    reg = build_registry({}, {})
+
+    assert "run_macro" not in reg
+
+
+def test_build_registry_includes_run_macro_when_macros_present() -> None:
+    reg = build_registry({}, {"demo": _macro_spec()})
+
+    assert "run_macro" in reg
+    assert "demo" in reg["run_macro"].description
+
+
+@pytest.mark.asyncio
+async def test_run_macro_handler_unknown_name_raises_with_available() -> None:
+    reg = build_registry({}, {"demo": _macro_spec()})
+
+    with pytest.raises(ValueError, match="unknown macro 'nope'.*demo"):
+        await reg["run_macro"].handler(Session(), {"name": "nope"})
+
+
+@pytest.mark.asyncio
+async def test_run_macro_handler_runs_and_records_success(mocker) -> None:
+    from physiclaw.agent.macros import stats as macro_stats
+
+    class OkMcp:
+        async def call_tool(self, name, args=None):
+            return [{"type": "text", "text": f"{name} ok | screen: changed"}]
+
+    mocker.patch(
+        "physiclaw.agent.engine.mcp_tool.get_mcp",
+        new=mocker.AsyncMock(return_value=OkMcp()),
+    )
+    reg = build_registry({}, {"demo": _macro_spec()})
+
+    session = Session()
+    blocks = await reg["run_macro"].handler(
+        session, {"name": "demo", "inputs": {"msg": "hi"}}
+    )
+
+    assert isinstance(blocks, list)
+    assert "all 1 steps completed" in blocks[0]["text"]
+    assert macro_stats.load()["demo"]["total_successes"] == 1
+    assert session.failed_macros == set()  # a good run burns nothing
+
+
+@pytest.mark.asyncio
+async def test_run_macro_handler_records_abort(mocker) -> None:
+    from physiclaw.agent.macros import stats as macro_stats
+
+    class DownMcp:
+        async def call_tool(self, name, args=None):
+            raise RuntimeError("arm busy")
+
+    mocker.patch(
+        "physiclaw.agent.engine.mcp_tool.get_mcp",
+        new=mocker.AsyncMock(return_value=DownMcp()),
+    )
+    reg = build_registry({}, {"demo": _macro_spec()})
+
+    session = Session()
+    blocks = await reg["run_macro"].handler(
+        session, {"name": "demo", "inputs": {"msg": "hi"}}
+    )
+
+    assert "ABORTED" in blocks[0]["text"]
+    entry = macro_stats.load()["demo"]
+    assert entry["total_aborts"] == 1
+    assert entry["last_abort"]["reason"] == "tool_error"
+    # The handler is the ONLY writer of this set; `policy.BurnedMacro` is the
+    # only reader. Without this assertion, dropping the write leaves the
+    # suite green and silently turns the one-strike rule into dead code.
+    assert session.failed_macros == {"demo"}
+
+
+@pytest.mark.asyncio
+async def test_run_macro_handler_bad_input_records_and_raises(mocker) -> None:
+    from physiclaw.agent.macros import stats as macro_stats
+    from physiclaw.agent.macros.model import MacroError
+
+    mocker.patch(
+        "physiclaw.agent.engine.mcp_tool.get_mcp",
+        new=mocker.AsyncMock(return_value=object()),
+    )
+    reg = build_registry({}, {"demo": _macro_spec()})
+
+    with pytest.raises(MacroError, match="missing required input"):
+        await reg["run_macro"].handler(Session(), {"name": "demo"})
+
+    assert macro_stats.load()["demo"]["last_abort"]["reason"] == "bad_input"
+
+
 @pytest.mark.asyncio
 async def test_add_pitfall_handler_appends_and_sets_flag() -> None:
     from physiclaw.agent.engine import pitfalls

@@ -4,7 +4,11 @@ The engine's stuck guard, keyboard tracker, and layout lint classify
 dispatched calls by tool name and unpack `sequence` steps; the
 orchestrator executes those same steps. Both sides used to hold private
 copies of these names held together by "keep in sync" comments — this
-module is the single source. FastMCP registration in
+module is the single source. It also owns the non-gesture tool names the
+agent layer references (PEEK, SEND_TO_CLIPBOARD — macro whitelists and
+recovery views), so those renames fail the same pin, and RUN_MACRO: the
+one LOCAL (non-MCP) tool the classifiers must name, deliberately outside
+that pin, with a test asserting the exclusion. FastMCP registration in
 `core/server/tools.py` deliberately does NOT consume it: names there
 are function identifiers, and `tests/common/test_gesture_vocab.py`
 pins registration ⊇ vocabulary instead, so a rename fails red in CI
@@ -24,6 +28,23 @@ NAV_TOOLS = frozenset({"go_back", "home_screen", "force_quit"})
 
 SWIPE = "swipe"
 SEQUENCE = "sequence"
+
+# Non-gesture tools the agent layer also names — the perception peek
+# (macro recovery views) and the clipboard bridge (macro steps). Owned
+# here so macros' whitelist and the registration ⊇ vocabulary pin cover
+# them like any gesture name.
+PEEK = "peek"
+SEND_TO_CLIPBOARD = "send_to_clipboard"
+
+# The one LOCAL engine tool the classifiers must name. NOT an MCP tool, so
+# it is deliberately outside the registration ⊇ vocabulary pin — the test
+# asserts that exclusion, so the distinction is stated rather than assumed.
+# It belongs here anyway: a macro replays real gestures, so the classifiers
+# that reason about gesture names have to reason about it too. (The macro
+# settle step `wait` deliberately does NOT live here: nothing outside
+# `agent.macros` names it, and the engine has an unrelated local tool that
+# also answers to "wait" — see `agent.macros.model.WAIT`.)
+RUN_MACRO = "run_macro"
 
 # `sequence` argument shape: {"actions": [{"tool_name": ..., "arg": ...}]}.
 STEP_ACTIONS = "actions"

@@ -26,9 +26,15 @@ from physiclaw.agent.engine.job_store import (
     load_jobs,
 )
 from physiclaw.agent.engine.session import Session
+from physiclaw.agent.macros import runner as macro_runner
+from physiclaw.agent.macros.model import Macro
 from physiclaw.agent.runtime.sentinel import IDLE, STATUSES
+from physiclaw.common import gesture_vocab
 
-Handler = Callable[[Session, dict], Awaitable[str]]
+# A handler returns either plain text, or raw MCP-style blocks (run_macro's
+# step log + final view) — dispatch routes a block list through the same
+# verdict/observer path as an MCP result.
+Handler = Callable[[Session, dict], Awaitable[str | list[dict]]]
 
 
 @dataclass(frozen=True)
@@ -37,6 +43,13 @@ class LocalTool:
     description: str
     input_schema: dict[str, Any]
     handler: Handler
+    # Whether the handler returns raw MCP-style blocks rather than text, and
+    # so takes the gesture-result path in `dispatch` (verdict parse, result
+    # observers, screen supersede). DECLARED here rather than sniffed from
+    # the returned value: the two pipelines differ in what they let a result
+    # do to session state, and that is a property of the tool, not of one
+    # call's return type.
+    returns_blocks: bool = False
 
 
 # ---------- handlers ----------
@@ -194,6 +207,42 @@ async def _handle_report_screen_layout(session: Session, args: dict) -> str:
 def _handle_skill_factory(skill_registry: dict[str, skill.Skill]) -> Handler:
     async def _handle(_session: Session, args: dict) -> str:
         return skill.dispatch(skill_registry, args)
+
+    return _handle
+
+
+def _handle_run_macro_factory(macro_registry: dict[str, Macro]) -> Handler:
+    """Execute one enabled macro over the process MCP singleton.
+    `run_and_record` owns the stats fold (shared with CLI rehearsal, so a
+    successful rehearsal resets `consecutive_aborts` too). Raises on an
+    unknown name or bad inputs (dispatch marks is_error); a mid-run abort
+    returns normally — the step log + current screen are a substantive
+    result the model must read, not an error to retry."""
+
+    async def _handle(session: Session, args: dict) -> str | list[dict]:
+        # Local import: mcp_tool pulls the mcp SDK; keep it off the module's
+        # import path so offline assembly (`physiclaw prompt`) stays light.
+        from physiclaw.agent.engine.mcp_tool import get_mcp
+
+        name = (args.get("name") or "").strip()
+        spec = macro_registry.get(name)
+        if spec is None:
+            available = ", ".join(sorted(macro_registry)) or "(none)"
+            raise ValueError(f"unknown macro {name!r}. Available: {available}")
+        result = await macro_runner.run_and_record(
+            spec,
+            args.get("inputs") or {},
+            await get_mcp(),
+            start_at=(args.get("start_at") or "").strip(),
+        )
+        if not result.ok:
+            # One strike. The rehearsed path stopped matching this screen, so
+            # every later call would replay completed steps against a state
+            # we already know diverged — which is exactly what the abort
+            # header tells the agent not to do. `policy.BurnedMacro` enforces
+            # it from here; bad_input can't reach this line (it raised).
+            session.failed_macros.add(spec.name)
+        return result.blocks
 
     return _handle
 
@@ -601,6 +650,37 @@ _REPORT_SCREEN_LAYOUT = LocalTool(
 )
 
 
+_RUN_MACRO_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "name": {
+            "type": "string",
+            "description": (
+                "Macro name, exactly as listed under `## Available Macros`."
+            ),
+        },
+        "inputs": {
+            "type": "object",
+            "description": (
+                "Values for the macro's declared inputs — strings only. "
+                "Omit an optional input to use its default."
+            ),
+        },
+        "start_at": {
+            "type": "string",
+            "description": (
+                "Optional. Begin at this step NAME (as listed under the "
+                "macro's `steps:` in `## Available Macros`) instead of the "
+                "first, for when you already did the leading steps by hand. "
+                "The skipped steps are NOT executed. Omit to run the whole "
+                "macro."
+            ),
+        },
+    },
+    "required": ["name"],
+}
+
+
 _SKILL_SCHEMA = {
     "type": "object",
     "properties": {
@@ -636,9 +716,11 @@ def schemas(registry: dict[str, LocalTool]) -> list[dict]:
 
 def build_registry(
     skill_registry: dict[str, skill.Skill],
+    macro_registry: dict[str, Macro] | None = None,
 ) -> dict[str, LocalTool]:
-    """All local tools keyed by name. Skill is included iff skills were
-    discovered (keeps the tool surface minimal when no skills exist).
+    """All local tools keyed by name. Skill / run_macro are included iff
+    skills / enabled macros were discovered (keeps the tool surface minimal
+    when none exist).
 
     **Insertion order matters.** `schemas()` iterates `.values()`, and the
     engine concatenates MCP tools + these to build `tool_schemas`, so the
@@ -683,5 +765,25 @@ def build_registry(
             ),
             input_schema=_SKILL_SCHEMA,
             handler=_handle_skill_factory(skill_registry),
+        )
+    if macro_registry:
+        # The constant, not a literal: policy.BurnedMacro, policy._GESTURES
+        # and KeyboardTracker all key off gesture_vocab.RUN_MACRO, and every
+        # one of them fails OPEN on a mismatch.
+        tools[gesture_vocab.RUN_MACRO] = LocalTool(
+            name=gesture_vocab.RUN_MACRO,
+            returns_blocks=True,
+            description=(
+                f"Execute a rehearsed gesture macro "
+                f"({'/'.join(sorted(macro_registry))}) as ONE step — see "
+                "`## Available Macros` for what each does and its inputs. "
+                "Aborts safely the moment the screen stops matching the "
+                "rehearsed path; the result shows the completed steps plus "
+                "the current screen, so you can continue manually. A macro "
+                "that aborted this session cannot be called again, with or "
+                "without `start_at`."
+            ),
+            input_schema=_RUN_MACRO_SCHEMA,
+            handler=_handle_run_macro_factory(macro_registry),
         )
     return tools

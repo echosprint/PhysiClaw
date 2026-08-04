@@ -50,6 +50,7 @@ DOCTRINE_FILE_ORDER = (
     "TOOLS.md",  # extra user-authored tool guidance
     "PERSISTENCE.md",  # memory.md vs YYYY-MM-DD.md + read/write tools
     "JOBS.md",  # jobs.md + create_job/get_job/list_jobs/finish_job (immutable, append-only)
+    "MACRO.md",  # run_macro semantics — rendered only when enabled macros exist
     "CONVENTION.md",  # engine turn rules — last so it sits next to mechanics
 )
 
@@ -60,6 +61,7 @@ def render_system_prompts(
     memory_ctx: str = "",
     builtin_skills_ctx: str = "",
     user_skills_ctx: str = "",
+    macros_ctx: str = "",
     pitfalls_ctx: str = "",
     provider_id: str = "",
 ) -> str:
@@ -78,6 +80,8 @@ def render_system_prompts(
       ## Screen layout     learned input/keyboard bboxes the skills above use
       ## Available skills  official + user skills (### subsections),
                            name+description index (load on demand via Skill)
+      ## Available Macros  enabled user macros — name/description/inputs
+                           index (executed as one step via run_macro)
       ## Learned pitfalls  agent-flagged traps, always-on (add_pitfall appends)
       ## Examples          ❌/✅ for the most common per-turn failures
       ## Reasoning Format  provider-specific reasoning wrapper (e.g. Qwen
@@ -92,12 +96,18 @@ def render_system_prompts(
     message the engine appends right after — keeping the system message
     byte-stable across wakes for cross-session cache hits.
     """
+    # Pay only for what's used: with no enabled macros there is no
+    # `## Available Macros` section, no run_macro tool, and no MACRO.md
+    # doctrine — zero macro bytes in SYSTEM. Keyed on the same condition
+    # as the section, so the prompt stays session-stable either way.
+    doctrine_skip = () if macros_ctx else ("MACRO.md",)
     lines: list[str] = [
-        *_render_doctrine(),
+        *_render_doctrine(skip=doctrine_skip),
         *_render_tooling(local_tool_schemas or [], provider_id),
         *_render_section(builtin_skills_ctx),
         *_render_screen_layout(),
         *_render_section(user_skills_ctx),
+        *_render_section(macros_ctx),
         *_render_section(pitfalls_ctx),
         *_render_examples(),
         *_render_reasoning_format(provider_id),
@@ -111,11 +121,12 @@ def render_system_prompts(
 # ---------- section builders ----------
 
 
-def _render_doctrine() -> list[str]:
+def _render_doctrine(skip: tuple[str, ...] = ()) -> list[str]:
     """Emit one `## <FileName>` block per file in DOCTRINE_FILE_ORDER,
     bodies injected raw under a `# Doctrine` wrapper. Re-read every call
-    so file edits take effect on the next wake without a restart."""
-    files = _load_doctrine_files()
+    so file edits take effect on the next wake without a restart. `skip`
+    drops slots whose feature is inactive this session (MACRO.md)."""
+    files = _load_doctrine_files(skip)
     if not files:
         return []
     out: list[str] = ["# Doctrine", ""]
@@ -127,7 +138,7 @@ def _render_doctrine() -> list[str]:
     return out
 
 
-def _load_doctrine_files() -> list[tuple[str, str]]:
+def _load_doctrine_files(skip: tuple[str, ...] = ()) -> list[tuple[str, str]]:
     """Return [(name, body)] for files in DOCTRINE_FILE_ORDER that exist
     and are non-empty, in order. Missing or empty files are skipped — the
     user opts in to a slot by creating the file.
@@ -137,6 +148,8 @@ def _load_doctrine_files() -> list[tuple[str, str]]:
     inside `# Doctrine` from a single source of truth."""
     out: list[tuple[str, str]] = []
     for name in DOCTRINE_FILE_ORDER:
+        if name in skip:
+            continue
         if name == "USER.md":
             body = memory.load_user()
         else:
@@ -313,6 +326,7 @@ def dump(
     memory_ctx: str = "",
     builtin_skills_ctx: str = "",
     user_skills_ctx: str = "",
+    macros_ctx: str = "",
     pitfalls_ctx: str = "",
     provider_id: str = "",
 ) -> str:
@@ -324,6 +338,7 @@ def dump(
         memory_ctx=memory_ctx,
         builtin_skills_ctx=builtin_skills_ctx,
         user_skills_ctx=user_skills_ctx,
+        macros_ctx=macros_ctx,
         pitfalls_ctx=pitfalls_ctx,
         provider_id=provider_id,
     )

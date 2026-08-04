@@ -708,3 +708,34 @@ def test_lint_gesture_fails_open_without_layout() -> None:
         )
         is None
     )
+
+
+# ---------- run_macro and the keyboard belief ----------
+
+
+@pytest.mark.parametrize("before", ["up", "down", "unknown"])
+def test_run_macro_decays_the_keyboard_belief(before: str) -> None:
+    # A macro replays real gestures behind one non-gesture name, so its
+    # verdict cannot be attributed per step — the SEQUENCE reasoning. Left
+    # to fall through as a "local tool", a pre-macro "up" survives a macro
+    # whose first step is `home_screen`, and LayoutLint then BLOCKS the
+    # agent's next long_press on the box that is now the correct one.
+    kb = sl.KeyboardTracker(state=before)
+
+    kb.observe("run_macro", {"name": "notify", "inputs": {}}, True)
+
+    assert kb.state == "unknown"
+
+
+def test_a_macro_cannot_leave_a_stale_up_belief_behind() -> None:
+    # End to end over the tracker: the raising tap is camera-verified, then
+    # a macro runs. Whatever the macro did, the belief must not still claim
+    # "up" — that is the state LayoutLint acts on.
+    kb = sl.KeyboardTracker()
+    kb.observe("tap", {"bbox": [0.1, 0.9, 0.7, 0.96]}, True)
+    raised = kb.state
+
+    kb.observe("run_macro", {"name": "go-home"}, True)
+
+    assert raised in ("up", "unknown")  # depends on the learned layout
+    assert kb.state == "unknown"

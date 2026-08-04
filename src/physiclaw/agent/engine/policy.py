@@ -22,8 +22,11 @@ Ordering is load-bearing and declared exactly once, in
 `default_policies()`: gates run in list order and the first rejection
 wins; observers run in list order and share the parsed screen-change
 verdict (keyboard belief must update before the stuck guard records).
-A new behavior = one new class here + one line in `default_policies()`;
-`loop.py` and `dispatch.py` stay untouched.
+A new behavior = one new class here + one line in `default_policies()`,
+plus a `Session` field when it needs state outliving the call — the one
+current case is `BurnedMacro`, which reads `session.failed_macros` as
+written by the run_macro handler. `loop.py` and `dispatch.py` stay
+untouched either way.
 """
 
 import logging
@@ -39,7 +42,13 @@ from physiclaw.agent.engine import (
 )
 from physiclaw.agent.engine.dto import AssistantMessage, ToolCall
 from physiclaw.common.config import CONFIG
-from physiclaw.common.gesture_vocab import NAV_TOOLS, PRESS_TOOLS, SEQUENCE, SWIPE
+from physiclaw.common.gesture_vocab import (
+    NAV_TOOLS,
+    PRESS_TOOLS,
+    RUN_MACRO,
+    SEQUENCE,
+    SWIPE,
+)
 
 if TYPE_CHECKING:
     from physiclaw.agent.engine.session import Session
@@ -192,8 +201,9 @@ class CompactionCheckpoint(TurnGate):
 
 # Phone gestures — the calls StuckReflection treats as "still pressing".
 # swipe/sequence extend the press family: a stuck step continued by a
-# scroll or a batched run is the same loop.
-_GESTURES = PRESS_TOOLS | {SWIPE, SEQUENCE}
+# scroll or a batched run is the same loop, and run_macro is that batch
+# under a local tool's name — a stuck step worked by macro is still stuck.
+_GESTURES = PRESS_TOOLS | {SWIPE, SEQUENCE, RUN_MACRO}
 
 
 class StuckReflection(TurnGate):
@@ -419,6 +429,40 @@ class LayoutLint(DispatchGuard):
         )
 
 
+class BurnedMacro(DispatchGuard):
+    """Refuse a macro that already aborted this session.
+
+    A macro is a rehearsed path, not a retryable action: when it aborts, the
+    screen stopped matching the rehearsal, and the completed steps already
+    moved the phone. Re-running replays those steps against a state we know
+    has diverged. `MACRO.md` and the abort header both say so; this is the
+    enforcement, because stuck.py's same-target and cycle detectors cannot
+    see `run_macro` (no press centers, no signature) — only StuckReflection's
+    turn-level check does — and a warning the model may ignore is the exact
+    failure mode `stuck.py` exists for.
+
+    One strike, whole session, `start_at` included — a resumed run is still
+    the same stale rehearsal. `bad_input` never gets here: it raises before a
+    result exists, so a malformed call cannot burn a healthy macro."""
+
+    def check(self, session, call, *, turn):
+        if call.name != RUN_MACRO:
+            return None
+        name = (call.arguments.get("name") or "").strip()
+        if name not in session.failed_macros:
+            return None
+        return Block(
+            content=(
+                f"Rejected — macro {name!r} already aborted this session, so "
+                "its rehearsed path no longer matches this screen. Do NOT "
+                "retry it (a re-run would replay the steps that already "
+                "ran). Finish this stretch with individual gestures."
+            ),
+            event="tool_blocked_burned_macro",
+            log_msg=f"blocked burned macro {name!r}",
+        )
+
+
 class StuckBlock(DispatchGuard):
     """Stuck guard tier 2: refuse a looping call BEFORE actuating —
     exhausted target, repeated action cycle, or identical failing call.
@@ -527,6 +571,7 @@ def default_policies(*, layout_incomplete: bool) -> Policies:
                 required_after=CONFIG.engine.plan_required_after,
             ),
             LayoutLint(),
+            BurnedMacro(),
             StuckBlock(),
         ],
         result_observers=[

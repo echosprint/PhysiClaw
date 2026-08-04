@@ -59,6 +59,7 @@ def test_doctrine_file_order_pinned() -> None:
         "TOOLS.md",
         "PERSISTENCE.md",
         "JOBS.md",
+        "MACRO.md",
         "CONVENTION.md",
     )
 
@@ -457,6 +458,40 @@ def test_render_system_assembles_all_present_sections(
     assert "## Examples" in out
     assert "## memory.md" in out
     assert "recent fact" in out
+
+
+def test_render_system_places_macros_between_skills_and_examples(
+    _isolate_context_dir,
+) -> None:
+    out = prompt.render_system_prompts(
+        user_skills_ctx="## Available skills\n\n- **taobao** — shop",
+        macros_ctx="## Available Macros\n\n- **notify-user** — ping (2 steps)",
+    )
+
+    assert "- **notify-user** — ping (2 steps)" in out
+    assert (
+        out.index("## Available skills")
+        < out.index("## Available Macros")
+        < out.index("## Examples")
+    )
+
+
+def test_render_system_omits_macros_section_when_empty(_isolate_context_dir) -> None:
+    out = prompt.render_system_prompts(macros_ctx="")
+
+    assert "## Available Macros" not in out
+
+
+def test_macro_doctrine_renders_only_with_macros(_isolate_context_dir) -> None:
+    # Pay only for what's used: the MACRO.md slot is keyed on the same
+    # condition as the `## Available Macros` section.
+    (_isolate_context_dir / "MACRO.md").write_text("macro doctrine body")
+
+    with_macros = prompt.render_system_prompts(macros_ctx="## Available Macros\n\n- x")
+    without = prompt.render_system_prompts(macros_ctx="")
+
+    assert "macro doctrine body" in with_macros
+    assert "macro doctrine body" not in without
 
 
 def test_render_system_returns_empty_when_all_sections_disabled(
