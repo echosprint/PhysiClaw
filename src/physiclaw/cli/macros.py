@@ -32,6 +32,15 @@ macros_app = typer.Typer(
     help="User-authored gesture macros (~/.physiclaw/macros/<name>/MACRO.yml).",
 )
 
+# Indent of a step's detail lines, under the step line's own two spaces.
+_STEP_INDENT = " " * 6
+# `args` is generous because a bbox row must never be the thing that gets
+# clipped — a `send_to_clipboard` text is the only argument that runs long,
+# and the one place a lost tail matters least. `screen` is the OCR haystack,
+# already clipped to 500 on write by `runlog`; this is the reading budget.
+_ARGS_CHARS = 240
+_SCREEN_CHARS = 200
+
 
 @macros_app.command()
 def init(
@@ -187,10 +196,48 @@ def runs_cmd(
                 if e.get("image"):
                     line += f" — images/{e['image']}"
                 typer.echo(line)
+                # The two things you read after a failure: what the step
+                # fired with (the bbox you edit when a tap lands wrong) and
+                # what the camera saw. Both were already on disk; `args` was
+                # merely never rendered. Own lines, not suffixes to skim.
+                if e.get("args"):
+                    typer.echo(_field("args", _fmt_args(e["args"]), _ARGS_CHARS))
                 if e.get("screen_text"):
-                    typer.echo(f"      screen: {e['screen_text'][:200]}")
+                    typer.echo(_field("screen", e["screen_text"], _SCREEN_CHARS))
             elif e["event"] == "end" and e.get("detail"):
                 typer.echo(f"  end: {e.get('reason')} — {e['detail']}")
+
+
+def _field(label: str, value: str, limit: int) -> str:
+    """One labeled detail line under a step. `args` and `screen` are the
+    same kind of thing — what this step did, and what it saw — so they are
+    rendered by one function rather than two f-strings that drift.
+
+    Continuation rows hang under the value: an element listing carries
+    embedded newlines, and left as-is those rows restart at column 0, which
+    stops the block reading as one field of the step above it."""
+    pad = _STEP_INDENT + " " * (len(label) + 2)
+    body = _clip(value, limit).replace("\n", "\n" + pad)
+    return f"{_STEP_INDENT}{label}: {body}"
+
+
+def _clip(text: str, limit: int) -> str:
+    """Bound one rendered field, marking the cut. Truncating silently would
+    read as a short value rather than a long one — the same reason
+    `runlog` marks its own clips."""
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _fmt_args(args: dict) -> str:
+    """A step's recorded arguments, rendered to paste straight back into
+    the `with:` table that produced them — `bbox: [0.12, 0.04, 0.34, 0.1]`,
+    not a Python dict repr. JSON per VALUE (not over the whole mapping)
+    keeps YAML flow syntax for lists and quotes strings, so whitespace in a
+    clipboard value is visible instead of silently trailing. Values are
+    post-substitution, so `{name}` placeholders show what actually fired."""
+    return ", ".join(
+        f"{k}: {json.dumps(v, ensure_ascii=False)}" for k, v in args.items()
+    )
 
 
 def _collect_runs(*, limit: int | None = None, tail: str = "") -> list[list[dict]]:

@@ -3,9 +3,12 @@ under the per-test `~/.physiclaw` (autouse `physiclaw_home`)."""
 
 from __future__ import annotations
 
+import re
+
 import typer
 from typer.testing import CliRunner
 
+from physiclaw.agent.macros import runlog as macro_runlog
 from physiclaw.agent.macros import runner as macro_runner
 from physiclaw.agent.macros import stats as macro_stats
 from physiclaw.cli.macros import macros_app
@@ -29,6 +32,27 @@ steps:
     tool: send_to_clipboard
     with:
       text: "{{msg}}"
+"""
+
+
+TAP_MACRO = """
+name: tap-demo
+description: One tap, for reading a bbox back out of the run log
+
+steps:
+  - name: tap-1
+    tool: tap
+    with:
+      bbox: [0.12, 0.04, 0.34, 0.10]
+"""
+
+NAV_MACRO = """
+name: nav-demo
+description: One argument-free navigation step
+
+steps:
+  - name: home-1
+    tool: home_screen
 """
 
 
@@ -280,8 +304,6 @@ def test_runs_replays_one_run_by_bare_hex(mocker) -> None:
     _write("demo")
     _patch_mcp(mocker)
     ran = runner.invoke(app, ["macros", "run", "demo", "-i", "msg=hi"])
-    import re
-
     hex6 = re.search(r"macro-run-([0-9a-f]{6})", ran.output).group(1)
 
     result = runner.invoke(app, ["macros", "runs", hex6])
@@ -289,6 +311,77 @@ def test_runs_replays_one_run_by_bare_hex(mocker) -> None:
     assert result.exit_code == 0
     assert "✓ 1. send_to_clipboard" in result.output
     assert "[ok]" in result.output
+
+
+def test_runs_shows_the_arguments_each_step_fired_with(mocker) -> None:
+    # The number you edit when a tap lands wrong. It was always recorded;
+    # rendering it is what makes the run log answer the rehearsal question
+    # without opening MACRO.yml.
+    _write("tap-demo", TAP_MACRO)
+    _patch_mcp(mocker)
+    ran = runner.invoke(app, ["macros", "run", "tap-demo"])
+    hex6 = re.search(r"macro-run-([0-9a-f]{6})", ran.output).group(1)
+
+    result = runner.invoke(app, ["macros", "runs", hex6])
+
+    assert result.exit_code == 0
+    assert "args: bbox: [0.12, 0.04, 0.34, 0.1]" in result.output
+
+
+def test_runs_shows_arguments_after_substitution(mocker) -> None:
+    # Post-substitution, so the log shows what actually fired rather than
+    # the `{msg}` template that produced it.
+    _write("demo")
+    _patch_mcp(mocker)
+    ran = runner.invoke(app, ["macros", "run", "demo", "-i", "msg=hello there"])
+    hex6 = re.search(r"macro-run-([0-9a-f]{6})", ran.output).group(1)
+
+    result = runner.invoke(app, ["macros", "runs", hex6])
+
+    assert 'args: text: "hello there"' in result.output
+    assert "{msg}" not in result.output
+
+
+def test_runs_omits_the_args_line_for_a_step_with_no_arguments(mocker) -> None:
+    # `home_screen` takes none — an empty `args: ` line would be noise on
+    # every navigation step.
+    _write("nav-demo", NAV_MACRO)
+    _patch_mcp(mocker)
+    ran = runner.invoke(app, ["macros", "run", "nav-demo"])
+    hex6 = re.search(r"macro-run-([0-9a-f]{6})", ran.output).group(1)
+
+    result = runner.invoke(app, ["macros", "runs", hex6])
+
+    assert "✓ 1. home_screen" in result.output
+    assert "args:" not in result.output
+
+
+def test_runs_clips_an_overlong_argument_value(mocker) -> None:
+    _write("long-demo")
+    _patch_mcp(mocker)
+    ran = runner.invoke(app, ["macros", "run", "long-demo", "-i", f"msg={'x' * 400}"])
+    hex6 = re.search(r"macro-run-([0-9a-f]{6})", ran.output).group(1)
+
+    result = runner.invoke(app, ["macros", "runs", hex6])
+
+    args_line = next(ln for ln in result.output.splitlines() if "args:" in ln)
+
+    assert "…" in args_line
+    assert len(args_line) < 400
+
+
+def test_runs_hangs_a_multiline_screen_under_its_own_label() -> None:
+    # An element listing carries embedded newlines. Left as-is those rows
+    # restart at column 0 and the block stops reading as one field of the
+    # step above it.
+    rl = macro_runlog.RunLogger("demo", "cli")
+    rl.step(1, "tap", "tap-1", "guard_failed", screen_text="row one\nrow two")
+
+    result = runner.invoke(app, ["macros", "runs", rl.run_id[-6:]])
+
+    assert result.exit_code == 0
+    assert "      screen: row one" in result.output
+    assert "              row two" in result.output
 
 
 def test_runs_unknown_id_exits_one(mocker) -> None:
