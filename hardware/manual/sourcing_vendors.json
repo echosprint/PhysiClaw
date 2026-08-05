@@ -520,10 +520,10 @@
           "zh": "杭州鹏菲"
         },
         "product": {
-          "en": "3 m, 0.3 mm², red — GB full-measure",
-          "zh": "3m 0.3平方毫米 红色 国标足米"
+          "en": "5 m, 0.3 mm², red — GB full-measure",
+          "zh": "5m 0.3平方毫米 红色 国标足米"
         },
-        "url": "https://item.taobao.com/item.htm?id=679174967756&skuId=6231636559122"
+        "url": "https://item.taobao.com/item.htm?id=679174967756&skuId=5710275586172"
       },
       {
         "name": {
@@ -547,7 +547,11 @@
         },
         "url": "https://item.taobao.com/item.htm?id=668641608310&skuId=6196538982576"
       }
-    ]
+    ],
+    "note": {
+      "en": "Buy 5 m to leave slack for the ground run.",
+      "zh": "铜线建议买 5m 长度，给接地走线预留余量。"
+    }
   },
   {
     "part_id": "stepper-motor",
