@@ -60,7 +60,7 @@
       },
       {
         "h3": { "en": "Match the Motor B belt length", "zh": "电机 B 的带长要一致" },
-        "body": { "en": "Before fitting the Motor A belt into its clamp, cut the Motor B belt to match it — both must be the same length.", "zh": "把电机 A 的同步带装进夹具之前，先照它的长度再剪一条作电机 B 的同步带——两条要一样长。" },
+        "body": { "en": "Before fitting the Motor A belt into its clamp, cut the Motor B belt to match it. Both must be the same length.", "zh": "把电机 A 的同步带装进夹具之前，先照它的长度再剪一条作电机 B 的同步带。两条必须一样长。" },
         "classes": "note overlay sm",
         "style": "left:140mm; top:60mm; width:45mm;"
       }
@@ -85,13 +85,13 @@
     "notes": [
       {
         "h3": { "en": "Install belt B", "zh": "装电机 B 的同步带" },
-        "body": { "en": "Route the Motor B belt on the upper idler plane — it must not cross belt A — and clamp both ends to the X carriage, the same way as belt A.", "zh": "把电机 B 的同步带安装在上层惰轮平面上，不要与电机 A 的同步带交叉，两端同样夹到 X 滑座上，装法和电机 A 的同步带一致。" },
+        "body": { "en": "Route the Motor B belt on the upper idler plane. It must not cross belt A. Clamp both ends to the X carriage, the same way as belt A.", "zh": "把电机 B 的同步带安装在上层惰轮平面上，不要与电机 A 的同步带交叉，两端同样夹到 X 滑座上，装法和电机 A 的同步带一致。" },
         "classes": "note overlay sm",
         "style": "right:60mm; top:20mm; width:100mm;"
       },
       {
         "h3": { "en": "Check the belts", "zh": "检查同步带" },
-        "body": { "en": "With both belts installed, push the carriage by hand through its full travel in every direction. It should move smoothly with the same, even resistance throughout — that resistance is just the motors. Confirm there's no sticking, no interference, no twisted belts, and no odd noises, with the two belts on their separate planes.", "zh": "两条带都装好后，用手推动滑座，沿各个方向走完整个行程。推起来应当全程顺滑、阻力均匀——你感到的那点阻力，只应来自电机本身。一边推一边确认：没有卡滞、没有蹭碰、带不打绞、没有怪声，两条带也各自待在自己的平面上。" },
+        "body": { "en": "With both belts installed, push the carriage by hand through its full travel in every direction. It should move smoothly with the same, even resistance throughout. That resistance is just the motors. Confirm there's no sticking, no interference, no twisted belts, and no odd noises, with the two belts on their separate planes.", "zh": "两条带都装好后，用手推动滑座，沿各个方向走完整个行程。推起来应当全程顺滑、阻力均匀。你感到的那点阻力，只应来自电机本身。一边推一边确认：没有卡滞、没有蹭碰、带不打绞、没有怪声，两条带也各自待在自己的平面上。" },
         "classes": "note overlay sm",
         "style": "right:60mm; top:105mm; width:100mm;"
       },
@@ -125,14 +125,14 @@
       },
       {
         "h3": { "en": "Pluck the belts", "zh": "拨一拨同步带" },
-        "body": { "en": "For a quick check, move the X carriage fully to the motor side and pluck the indicated belts with a finger. The two should feel and sound about the same — matching pitch means roughly equal tension.", "zh": "想快速检查，把 X 滑座推到电机一侧到底，用手指拨一拨图中指出的两条带。两条带手感和声音应当差不多——音高一致，张力就大致相等。" },
+        "body": { "en": "For a quick check, move the X carriage fully to the motor side and pluck the indicated belts with a finger. The two should feel and sound about the same. Matching pitch means roughly equal tension.", "zh": "想快速检查，把 X 滑座推到电机一侧到底，用手指拨一拨图中指出的两条带。两条带手感和声音应当差不多。音高一致，张力就大致相等。" },
         "classes": "note overlay sm",
         "style": "left:152mm; top:75mm; width:112mm;"
       },
       {
         "h3": { "en": "75 Hz at 220 mm", "zh": "220 mm 处 75 Hz" },
         "h3Class": "normal-case",
-        "body": { "en": "For a precise check, measure each belt with a tuning app on your phone while the X carriage is parked at the marked position. Pluck the belts and aim for 75 Hz — both reading the same frequency confirms the tension is correct.", "zh": "想精确检查，把 X 滑座停在标记位置，用手机上的调音 app 分别测每条带。拨动带，把频率调到 75 Hz——两条读数一致，张力就对了。" },
+        "body": { "en": "For a precise check, measure each belt with a tuning app on your phone while the X carriage is parked at the marked position. Pluck the belts and aim for 75 Hz. If both read the same frequency, the tension is correct.", "zh": "想精确检查，把 X 滑座停在标记位置，用手机上的调音 app 分别测每条带。拨动带，把频率调到 75 Hz。两条读数一致，张力就对了。" },
         "classes": "note overlay sm",
         "style": "left:152mm; top:120mm; width:112mm;"
       }

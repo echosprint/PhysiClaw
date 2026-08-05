@@ -4,7 +4,7 @@
     "page": "frame",
     "secnum": { "en": "SECTION 01", "zh": "第 01 节" },
     "h1": { "en": "Frame", "zh": "框架" },
-    "lede": { "en": "Four 2040 aluminum extrusions form the base frame, and every other part mounts onto it. Make sure all four corners are square — this is the foundation for accurate motion later on.", "zh": "四根 2040 铝型材拼成底座，其余零件都装在上面。框架四角务必成直角，这是后续运动精度的基础。" }
+    "lede": { "en": "Four 2040 aluminum extrusions form the base frame, and every other part mounts onto it. Make sure all four corners are square. This is the foundation for accurate motion later on.", "zh": "四根 2040 铝型材拼成底座，其余零件都装在上面。框架四角务必成直角，这是后续运动精度的基础。" }
   },
   {
     "type": "solo",
@@ -112,7 +112,7 @@
       },
       {
         "h3": { "en": "Use the screws that come with the bumpers", "zh": "用橡胶脚垫自带的螺栓" },
-        "body": { "en": "If the bumpers you bought came with their own screws, use those — they're the right size.", "zh": "若你买的那款也配了螺栓，就用自带的，尺寸正好合适。" },
+        "body": { "en": "If the bumpers you bought came with their own screws, use those. They're the right size.", "zh": "若你买的那款也配了螺栓，就用自带的，尺寸正好合适。" },
         "classes": "note overlay sm",
         "style": "left:135mm; top:30mm; width:70mm;"
       }

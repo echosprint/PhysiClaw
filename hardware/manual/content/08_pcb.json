@@ -88,7 +88,7 @@
     "notes": [
       {
         "h3": { "en": "Fit the T-nuts", "zh": "装上 T 型螺母" },
-        "body": { "en": "Two M5 FHCS into hammer T-nuts — leave them loose for the next step.", "zh": "两颗 M5 沉头螺栓拧进 T 型螺母——先别拧紧，下一步再拧。" },
+        "body": { "en": "Two M5 FHCS into hammer T-nuts. Leave them loose for the next step.", "zh": "两颗 M5 沉头螺栓拧进 T 型螺母，先别拧紧，下一步再拧。" },
         "classes": "note overlay sm",
         "style": "left:140mm; top:110mm; width:80mm;"
       }
@@ -128,25 +128,25 @@
     "notes": [
       {
         "h3": { "en": "Rough length", "zh": "大致长度" },
-        "body": { "en": "Make the tube about 400 mm — long enough to reach from the tube holder to the X carriage at its farthest position.", "zh": "管子取大约 400 mm——从导管支架够到 X 滑座最远位置即可。" },
+        "body": { "en": "Make the tube about 400 mm, long enough to reach from the tube holder to the X carriage at its farthest position.", "zh": "管子取大约 400 mm，从导管支架够到 X 滑座最远位置即可。" },
         "classes": "note overlay sm",
         "style": "right:30mm; top:30mm; width:100mm; max-width:100mm;"
       },
       {
         "h3": { "en": "Anchor the solenoid leads", "zh": "固定电磁铁引线" },
-        "body": { "en": "Cable-tie the solenoid leads to the tube holder, so the solenoid's travel can't shake the wire at the control-board terminals — constant shaking works the contact loose, and the solenoid stops tapping the screen.", "zh": "用捆扎带把电磁铁引线固定在导管支架上，确保电磁铁移动时不会带动控制板端子处的引线晃动——反复晃动会导致接触不良，电磁铁就无法点击屏幕。" },
+        "body": { "en": "Cable-tie the solenoid leads to the tube holder, so the solenoid's travel can't shake the wire at the control-board terminals. Constant shaking works the contact loose, and the solenoid stops tapping the screen.", "zh": "用捆扎带把电磁铁引线固定在导管支架上，确保电磁铁移动时不会带动控制板端子处的引线晃动。反复晃动会导致接触不良，电磁铁就无法点击屏幕。" },
         "classes": "note overlay sm",
         "style": "right:30mm; top:50mm; width:100mm; max-width:100mm;"
       },
       {
         "h3": { "en": "PTFE vs FEP", "zh": "PTFE 和 FEP" },
-        "body": { "en": "Either tube works here — PTFE (milky white) or FEP (clear). The Ø4 tube's stiffness is enough to hold the wire bundle's shape.", "zh": "两种管子都能用——PTFE（乳白色）或 FEP（透明）。Ø4 管的硬度足以撑住线束的形状。" },
+        "body": { "en": "Either tube works here: PTFE (milky white) or FEP (clear). The Ø4 tube's stiffness is enough to hold the wire bundle's shape.", "zh": "两种管子都能用：PTFE（乳白色）或 FEP（透明）。Ø4 管的硬度足以撑住线束的形状。" },
         "classes": "note overlay sm",
         "style": "right:30mm; top:80mm; width:100mm; max-width:100mm;"
       },
       {
         "h3": { "en": "Spiral-wrap the tube", "zh": "螺旋缠绕成束" },
-        "body": { "en": "Spiral-wrap the solenoid wires to the Teflon tube along its length. The wires don't go inside — the tube just stiffens the bundle so it holds a clear path past the belts and motors.", "zh": "用螺旋缠绕带把电磁铁导线沿特氟龙管捆成一束。导线不穿进管子里——管子只是让线束变硬、能保持形状，避开同步带和电机。" },
+        "body": { "en": "Spiral-wrap the solenoid wires to the Teflon tube along its length. The wires don't go inside. The tube just stiffens the bundle so it holds a clear path past the belts and motors.", "zh": "用螺旋缠绕带把电磁铁导线沿特氟龙管捆成一束。导线不穿进管子里，管子只是让线束变硬、能保持形状，避开同步带和电机。" },
         "classes": "note overlay sm",
         "style": "right:30mm; top:110mm; width:100mm; max-width:100mm;"
       }

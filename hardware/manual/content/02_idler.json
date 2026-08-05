@@ -17,7 +17,7 @@
     "notes": [
       {
         "h3": { "en": "Center hardware first", "zh": "先装中间的螺栓螺母" },
-        "body": { "en": "Drop the center M5 square nut and its M5×10 BHCS into the middle counterbore hole first — the stacks block access later.", "zh": "先把中间的 M5 四方螺母和 M5×10 半圆头螺栓放进中间的沉孔——两侧惰轮柱装上后，中间沉孔就被挡住了。" },
+        "body": { "en": "Drop the center M5 square nut and its M5×10 BHCS into the middle counterbore hole first. The idler stacks block access later.", "zh": "先把中间的 M5 四方螺母和 M5×10 半圆头螺栓放进中间的沉孔。两侧惰轮柱装上后，中间沉孔就被挡住了。" },
         "classes": "note overlay sm",
         "style": "left:105mm; top:70mm; width:80mm;"
       },
@@ -35,7 +35,7 @@
       },
       {
         "h3": { "en": "Side pocket hard to seat?", "zh": "侧面槽位放不进？" },
-        "body": { "en": "If a side square nut won't drop into place, clear the pocket with a small screwdriver or a pin first — prints can leave residue in the slot.", "zh": "如侧面四方螺母难以放到位，先用小螺丝刀或细针清理槽孔——打印件槽内可能有残留。" },
+        "body": { "en": "If a side square nut won't drop into place, clear the pocket with a small screwdriver or a pin first. Prints can leave residue in the slot.", "zh": "如侧面四方螺母难以放到位，先用小螺丝刀或细针清理槽孔。打印件槽内可能有残留。" },
         "classes": "note overlay sm",
         "style": "left:135mm; top:155mm; width:70mm;"
       }
@@ -98,7 +98,7 @@
     "notes": [
       {
         "h3": { "en": "Each idler stack is 18 mm", "zh": "惰轮组高度统一 18 mm" },
-        "body": { "en": "Idler 8.5 mm, spacer 9 mm, shim 0.5 mm — use shims and spacers to bring every idler stack to a uniform 18 mm.", "zh": "惰轮高 8.5 mm、轴套高 9 mm、垫片厚 0.5 mm。用垫片和轴套把每个惰轮组都调到 18 mm，保持高度一致。" },
+        "body": { "en": "Idler 8.5 mm, spacer 9 mm, shim 0.5 mm. Use shims and spacers to bring every idler stack to a uniform 18 mm.", "zh": "惰轮高 8.5 mm、轴套高 9 mm、垫片厚 0.5 mm。用垫片和轴套把每个惰轮组都调到 18 mm，保持高度一致。" },
         "classes": "note overlay sm",
         "style": "left:105mm; top:40mm; width:80mm;"
       },
@@ -141,7 +141,7 @@
       },
       {
         "h3": { "en": "Match the left block's gap", "zh": "间隙和左边的支座保持一致" },
-        "body": { "en": "Set the right block the same 2 mm clear of the frame-corner plate as the left block — keep both gaps equal so the idler stations stay symmetric.", "zh": "右边的支座和左边一样，离框架转角连接板留 2 mm 间隙——两边间隙相等，惰轮工位才能左右对称。" },
+        "body": { "en": "Set the right block the same 2 mm clear of the frame-corner plate as the left block. Keep both gaps equal so the idler stations stay symmetric.", "zh": "右边的支座和左边一样，离框架转角连接板留 2 mm 间隙。两边间隙相等，惰轮工位才能左右对称。" },
         "classes": "note overlay sm",
         "style": "left:130mm; top:120mm; width:80mm;"
       }
@@ -196,7 +196,7 @@
     "notes": [
       {
         "h3": { "en": "2 mm gap to the corner plate", "zh": "与转角连接板留 2 mm 间隙" },
-        "body": { "en": "Set this block 2 mm clear of the frame-corner plate — the same gap used at every other idler station.", "zh": "把这个支座放到离框架转角连接板 2 mm 的位置——和其他每个惰轮工位的间隙一样。" },
+        "body": { "en": "Set this block 2 mm clear of the frame-corner plate, the same gap used at every other idler station.", "zh": "把这个支座放到离框架转角连接板 2 mm 的位置，与其他每个惰轮工位的间隙保持一致。" },
         "classes": "note overlay sm",
         "style": "left:160mm; top:130mm; width:78mm;"
       }

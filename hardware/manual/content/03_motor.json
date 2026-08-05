@@ -17,7 +17,7 @@
     "notes": [
       {
         "h3": { "en": "Note the motor wire direction", "zh": "注意电机引线的朝向" },
-        "body": { "en": "Check which way the motor's wires face and match the orientation shown — it sets the wiring clearance later.", "zh": "看清电机引线朝哪个方向，照图装好——引线朝向决定后面布线能留出多少空间。" },
+        "body": { "en": "Check which way the motor's wires face and match the orientation shown. That orientation sets the wiring clearance later.", "zh": "看清电机引线朝哪个方向，照图装好。引线朝向决定后面布线能留出多少空间。" },
         "classes": "note overlay sm",
         "style": "left:130mm; top:130mm; width:80mm;"
       },
@@ -69,7 +69,7 @@
       },
       {
         "h3": { "en": "Leave the bolts loose", "zh": "螺栓先别拧紧" },
-        "body": { "en": "Don't fully tighten the motor mount yet — you'll slide it later to tension the belt.", "zh": "电机座先别拧死——后面还要靠滑动电机座来张紧同步带。" },
+        "body": { "en": "Don't fully tighten the motor mount yet. You'll slide it later to tension the belt.", "zh": "电机座先别拧死，后面还要靠滑动电机座来张紧同步带。" },
         "classes": "note overlay sm",
         "style": "left:150mm; top:128mm; width:80mm;"
       }
@@ -126,13 +126,13 @@
       },
       {
         "h3": { "en": "Mirror", "zh": "镜像" },
-        "body": { "en": "This is the right motor — mirror of the left. The cable connector faces right.", "zh": "这是右边那台电机——与左边镜像，线缆接头朝右。" },
+        "body": { "en": "This is the right motor, a mirror of the left. The cable connector faces right.", "zh": "这是右边那台电机，与左边镜像。线缆接头朝右。" },
         "classes": "note overlay sm",
         "style": "left:140mm; top:120mm; width:78mm;"
       },
       {
         "h3": { "en": "Leave the bolts loose", "zh": "螺栓先别拧紧" },
-        "body": { "en": "Snug only — final torque comes after belt tensioning.", "zh": "先轻轻拧到贴紧就行——等同步带张紧后再拧死。" },
+        "body": { "en": "Snug only. Final torque comes after belt tensioning.", "zh": "先轻轻拧到贴紧就行，等同步带张紧后再拧死。" },
         "classes": "note overlay sm",
         "style": "left:140mm; top:150mm; width:78mm;"
       }
@@ -162,7 +162,7 @@
       },
       {
         "h3": { "en": "Threadlocker", "zh": "螺纹胶加固" },
-        "body": { "en": "<p>Apply threadlocker to every set screw — a loose pulley throws off motion accuracy and is the single most common issue users report. Before you do, though, make sure the pulleys and idlers are aligned. You can also hold off on the threadlocker and apply it after the belts are installed.</p>", "zh": "<p>每颗紧定螺钉都要上螺纹胶——同步轮松动会导致运动失准，是用户反馈最多的问题，但上胶前务必先把同步轮和惰轮对齐。也可以暂不上胶，等装好同步带后再涂。</p>" },
+        "body": { "en": "<p>Apply threadlocker to every set screw. A loose pulley throws off motion accuracy and is the single most common issue users report. Before you do, though, make sure the pulleys and idlers are aligned. You can also hold off on the threadlocker and apply it after the belts are installed.</p>", "zh": "<p>每颗紧定螺钉都要上螺纹胶。同步轮松动会导致运动失准，是用户反馈最多的问题，但上胶前务必先把同步轮和惰轮对齐。也可以暂不上胶，等装好同步带后再涂。</p>" },
         "classes": "note overlay sm",
         "style": "left:140mm; top:110mm; width:80mm;"
       }

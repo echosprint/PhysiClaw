@@ -182,8 +182,8 @@
           "zh": "安装手机托架"
         },
         "body": {
-          "en": "Stand the frame on end first — it's far easier to work vertically. Then slide each beam's T-nuts into the slots on the frame's underside.",
-          "zh": "先把框架竖起来——立着干活要省事得多。再把每根横梁上的 T 型螺母滑进框架底面的型材槽里。"
+          "en": "Stand the frame on end first. It's far easier to work vertically. Then slide each beam's T-nuts into the slots on the frame's underside.",
+          "zh": "先把框架竖起来，立着干活要省事得多。再把每根横梁上的 T 型螺母滑进框架底面的型材槽里。"
         },
         "classes": "note overlay sm",
         "style": "right:30mm; top:22mm; width:90mm;"
@@ -206,7 +206,7 @@
           "zh": "调整电磁铁高度"
         },
         "body": {
-          "en": "Set the solenoid's mounting height so the stylus tip just makes stable contact with the screen. Too low, and the solenoid can't pull in fully — the magnetic force is too weak to hold the tip down, so the tip springs back and both long-press and swipe fail. Too high, and the tip can't reach the screen or the contact patch is too small. Fine-tune until the tip makes stable contact with the screen.",
+          "en": "Set the solenoid's mounting height so the stylus tip just makes stable contact with the screen. Too low, and the solenoid can't pull in fully: the magnetic force is then too weak to hold the tip down, so the tip springs back and both long-press and swipe fail. Too high, and the tip can't reach the screen or the contact patch is too small. Fine-tune until the tip makes stable contact with the screen.",
           "zh": "调整电磁铁的安装高度，让笔尖恰好能稳定接触屏幕：装得太低，螺线管吸合不到位，电磁吸引力不够，压不住笔尖，笔尖被弹开，无法实现长按和划屏手势；装得太高，够不到屏幕或接触面太小。反复微调，直到笔尖和屏幕能稳定接触。"
         },
         "classes": "note overlay sm",
@@ -218,8 +218,8 @@
           "zh": "让屏幕保持水平"
         },
         "body": {
-          "en": "The rear camera bump lifts one corner, so the phone won't lie flat. Slip a thin shim or a few sheets of paper under the low edge until the screen is level and facing straight up. Make sure the phone can't rock or shift when the stylus taps — any tilt or wobble can make it miss.",
-          "zh": "后置摄像头那块凸起会把一个角顶起来，手机就放不平。在偏低的那一边垫一片薄垫片或几张纸，直到屏幕水平、正对上方。还要确保点击时手机不会晃、不会移位——只要有一点歪或松，就可能点不准。"
+          "en": "The rear camera bump lifts one corner, so the phone won't lie flat. Slip a thin shim or a few sheets of paper under the low edge until the screen is level and facing straight up. Make sure the phone can't rock or shift when the stylus taps. Any tilt or wobble can make it miss.",
+          "zh": "后置摄像头那块凸起会把一个角顶起来，手机就放不平。在偏低的那一边垫一片薄垫片或几张纸，直到屏幕水平、正对上方。还要确保点击时手机不会晃、不会移位。只要有一点歪或松，就可能点不准。"
         },
         "classes": "note overlay sm",
         "style": "right:30mm; top:135mm; width:90mm; display:flex; gap:4mm; align-items:flex-start;",

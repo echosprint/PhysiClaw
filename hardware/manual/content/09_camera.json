@@ -18,13 +18,13 @@
     "notes": [
       {
         "h3": { "en": "1/4-20, not metric", "zh": "1/4-20 英制，不是公制" },
-        "body": { "en": "The socket screw and hex nut that the gooseneck mounts on are 1/4-20 — the imperial tripod thread (≈ 6.35 mm). Don't substitute an M6.", "zh": "装金属软管用的内六角螺栓和六角螺母是 1/4-20 规格，也就是英制三脚架螺纹（约 6.35 mm）。别用 M6 代替。" },
+        "body": { "en": "The socket screw and hex nut that the gooseneck mounts on are 1/4-20, the imperial tripod thread (≈ 6.35 mm). Don't substitute an M6.", "zh": "装金属软管用的内六角螺栓和六角螺母是 1/4-20 规格，也就是英制三脚架螺纹（约 6.35 mm）。别用 M6 代替。" },
         "classes": "note overlay sm",
         "style": "left:120mm; top:30mm; width:70mm;"
       },
       {
         "h3": { "en": "Imperial Tools", "zh": "英制工具" },
-        "body": { "en": "SHCS 1/4-20 takes a 3/16\" hex key; hex nut 1/4-20 takes a 7/16\" (or metric 11mm) open-end wrench. Needle-nose pliers you already have will also do the job — no need to buy tools just for this.", "zh": "圆柱头螺栓 1/4-20 对应 3/16\" 内六角扳手；六角螺母 1/4-20 对应 7/16\"（或公制 11mm）开口扳手。也可以直接用手头的尖嘴钳夹住拧紧，不必单独购买工具。" },
+        "body": { "en": "SHCS 1/4-20 takes a 3/16\" hex key; hex nut 1/4-20 takes a 7/16\" (or metric 11mm) open-end wrench. Needle-nose pliers you already have will also do the job. There's no need to buy tools just for this.", "zh": "圆柱头螺栓 1/4-20 对应 3/16\" 内六角扳手；六角螺母 1/4-20 对应 7/16\"（或公制 11mm）开口扳手。也可以直接用手头的尖嘴钳夹住拧紧，不必单独购买工具。" },
         "classes": "note overlay sm",
         "style": "left:130mm; top:120mm; width:70mm;"
       }
@@ -108,7 +108,7 @@
       },
       {
         "h3": { "en": "Lock it down", "zh": "固定牢" },
-        "body": { "en": "Make sure the camera is held firm — it shouldn't drift or wobble.", "zh": "确认摄像头已固定牢靠，不会移位，也不会晃动。" },
+        "body": { "en": "Make sure the camera is held firm. It shouldn't drift or wobble.", "zh": "确认摄像头已固定牢靠，不会移位，也不会晃动。" },
         "classes": "note overlay sm",
         "style": "right:10mm; top:140mm; width:80mm;"
       },

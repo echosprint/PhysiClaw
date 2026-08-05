@@ -67,7 +67,7 @@
       },
       {
         "h3": { "en": "Ground the solenoid", "zh": "电磁铁接地" },
-        "body": { "en": "Clamp the ground wire's bare copper between the solenoid housing and the mount, then tighten a screw to pin it — this grounds the solenoid. Run it out through the other rectangular hole below to join the power leads.", "zh": "把接地线的裸露铜线夹在电磁铁外壳和支架之间，拧上螺栓压紧——这样电磁铁就接好了地；再从下方另一个方孔穿出，与电源线汇合。" },
+        "body": { "en": "Clamp the ground wire's bare copper between the solenoid housing and the mount, then tighten a screw to pin it. This grounds the solenoid. Run the ground wire out through the other rectangular hole below to join the power leads.", "zh": "把接地线的裸露铜线夹在电磁铁外壳和支架之间，拧上螺栓压紧，这样电磁铁就接好了地。再把接地线从下方另一个方孔穿出，与电源线汇合。" },
         "classes": "note overlay sm",
         "style": "left:140mm; top:110mm; width:60mm;"
       }

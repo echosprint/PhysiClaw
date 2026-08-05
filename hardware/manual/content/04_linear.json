@@ -52,8 +52,8 @@
           "zh": "把导轨擦干净、上好润滑脂"
         },
         "body": {
-          "en": "MGN9H rails arrive coated in shipping oil. Wipe it off and pack the carriage with fresh grease before mounting — that's what gives smooth, long-lasting motion. Prep every rail the same way.",
-          "zh": "MGN9H 导轨出厂时涂着一层防锈油。安装前先擦掉，再给滑块补上新的润滑脂——这样运动才顺滑、耐用。每条导轨都这么处理。"
+          "en": "MGN9H rails arrive coated in shipping oil. Wipe it off and pack the carriage with fresh grease before mounting. That's what gives smooth, long-lasting motion. Prep every rail the same way.",
+          "zh": "MGN9H 导轨出厂时涂着一层防锈油。安装前先擦掉，再给滑块补上新的润滑脂，这样运动才顺滑、耐用。每条导轨都这么处理。"
         },
         "classes": "note overlay sm",
         "style": "left:120mm; bottom:25mm; width:80mm;"
@@ -76,7 +76,7 @@
           "zh": "当心滑块"
         },
         "body": {
-          "en": "The carriage slides off the rail end with little effort, and a dropped one spills its ball bearings — ruining it. Keep it on the rail, and never swap carriages between rails.",
+          "en": "The carriage slides off the rail end with little effort, and a dropped one spills its ball bearings, ruining it. Keep it on the rail, and never swap carriages between rails.",
           "zh": "滑块稍一用力就会从导轨端头滑出，一旦掉到地上，滚珠就会散落，整个滑块也就报废了。务必让它始终留在导轨上，且不同导轨的滑块绝不要互换。"
         },
         "classes": "note overlay sm",
@@ -555,8 +555,8 @@
           "zh": "用对孔位"
         },
         "body": {
-          "en": "The idler mounts in the top hole of the left joint — take care not to use the wrong one.",
-          "zh": "惰轮装在左连接件上面那个孔——注意别装错孔。"
+          "en": "The idler mounts in the top hole of the left joint. Take care not to use the wrong one.",
+          "zh": "惰轮装在左连接件上面那个孔，注意别装错孔。"
         },
         "classes": "note overlay sm",
         "style": "left:140mm; top:120mm; width:80mm;"

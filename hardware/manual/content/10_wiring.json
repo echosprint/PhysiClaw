@@ -24,7 +24,7 @@
       },
       {
         "h3": { "en": "Mind the orientation", "zh": "注意方向" },
-        "body": { "en": "Match each driver's pin labels to the board silkscreen before pressing it home — a reversed TMC2209 can burn out on power-up.", "zh": "压到位之前，先让每个驱动的引脚标识对准板上丝印——TMC2209 装反，一上电就可能烧坏。" },
+        "body": { "en": "Match each driver's pin labels to the board silkscreen before pressing it home. A reversed TMC2209 can burn out on power-up.", "zh": "压到位之前，先让每个驱动的引脚标识对准板上丝印。TMC2209 装反，一上电就可能烧坏。" },
         "classes": "note overlay sm",
         "style": "left:150mm; top:100mm; width:90mm;"
       },
@@ -96,13 +96,13 @@
       },
       {
         "h3": { "en": "No polarity", "zh": "无需分极性" },
-        "body": { "en": "The Spindle output (to the solenoid) is not polarity-sensitive — either lead can go to either terminal.", "zh": "主轴（Spindle） 输出（接电磁铁）不分极性，两根线接哪个端子都行。" },
+        "body": { "en": "The Spindle output (to the solenoid) is not polarity-sensitive. Either lead can go to either terminal.", "zh": "主轴（Spindle） 输出（接电磁铁）不分极性，两根线接哪个端子都行。" },
         "classes": "note overlay sm",
         "style": "left:16mm; top:30mm; width:100mm;"
       },
       {
         "h3": { "en": "Motor cable connectors", "zh": "电机接线端子" },
-        "body": { "en": "Motor side: 6-pin PH2.0 (2.0 mm pitch) — two pins sit empty, only four are used. Board side: 4-pin XH2.54 (2.54 mm pitch).", "zh": "电机侧：6 针 PH2.0（2.0 mm 间距），其中 2 针空置，实际只用 4 针；控制板侧：4 针 XH2.54（2.54 mm 间距）。" },
+        "body": { "en": "Motor side: 6-pin PH2.0 (2.0 mm pitch), with two pins empty and only four used. Board side: 4-pin XH2.54 (2.54 mm pitch).", "zh": "电机侧：6 针 PH2.0（2.0 mm 间距），其中 2 针空置，实际只用 4 针；控制板侧：4 针 XH2.54（2.54 mm 间距）。" },
         "classes": "note overlay sm",
         "style": "left:30mm; top:145mm; width:100mm;"
       }
@@ -132,7 +132,7 @@
       },
       {
         "h3": { "en": "Keep the stock leads under 50 mm", "zh": "原装引线不超过 50 mm" },
-        "body": { "en": "Cut the solenoid's stock leads back to 50 mm or less before splicing, so the joints sit clear of where the cable bends most — a joint that flexes with every gesture fatigues and snaps.", "zh": "电磁铁原装引线剪到不超过 50 mm 再接长，这样接头就不在线缆弯曲最大的地方，防止接头反复弯折、疲劳断裂。" },
+        "body": { "en": "Cut the solenoid's stock leads back to 50 mm or less before splicing, so the joints sit clear of where the cable bends most. A joint that flexes with every gesture fatigues and snaps.", "zh": "电磁铁原装引线剪到不超过 50 mm 再接长，这样接头就不在线缆弯曲最大的地方，防止接头反复弯折、疲劳断裂。" },
         "classes": "note overlay sm",
         "style": "left:140mm; top:25mm; width:100mm;"
       },
@@ -161,7 +161,7 @@
     "notes": [
       {
         "h3": { "en": "Ground the stylus", "zh": "给触控笔接地" },
-        "body": { "en": "The stylus rides on the solenoid's iron core, and the core is tied to the housing through the metal return spring — so grounding the housing grounds the core, and the tip with it. Give it a real ground reference — do not use the control board's GND.", "zh": "触控笔装在电磁铁铁芯上，铁芯通过金属弹簧与外壳相连——把外壳接地，铁芯和笔尖就跟着接地。要找一个真正的接地参考，别用控制板的 GND。" },
+        "body": { "en": "The stylus rides on the solenoid's iron core, and the core is tied to the housing through the metal return spring, so grounding the housing grounds the core, and the tip with it. Give it a real ground reference. Do not use the control board's GND.", "zh": "触控笔装在电磁铁铁芯上，铁芯通过金属弹簧与外壳相连。把外壳接地，铁芯和笔尖就跟着接地。要找一个真正的接地参考，别用控制板的 GND。" },
         "classes": "note overlay sm",
         "style": "left:130mm; top:22mm; width:150mm; max-width:150mm;"
       },
@@ -173,19 +173,19 @@
       },
       {
         "h3": { "en": "How to ground it", "zh": "怎么接地" },
-        "body": { "en": "Connect the housing to the power supply's common ground. The simplest option is to clip the wire to bare metal on a desktop PC chassis that is grounded through a three-prong outlet — it reaches earth through the mains, giving a stable reference.", "zh": "把外壳接到电源的公共地。最简单的办法是找一台用三脚插座可靠接地的台式电脑，把线夹在机箱裸露的金属上。机箱经市电连到大地，能提供稳定的接地参考。" },
+        "body": { "en": "Connect the housing to the power supply's common ground. The simplest option is to clip the wire to bare metal on a desktop PC chassis that is grounded through a three-prong outlet. The chassis reaches earth through the mains, giving a stable reference.", "zh": "把外壳接到电源的公共地。最简单的办法是找一台用三脚插座可靠接地的台式电脑，把线夹在机箱裸露的金属上。机箱经市电连到大地，能提供稳定的接地参考。" },
         "classes": "note overlay sm",
         "style": "left:130mm; top:82mm; width:150mm; max-width:150mm;"
       },
       {
         "h3": { "en": "Three wires", "zh": "三根线" },
-        "body": { "en": "Three wires run from the solenoid — positive (+), negative (−), and ground. Use spiral wrap to bind all three wires together with the Teflon tube into one bundle, and run it up to the control board holder, then connect + and − to the control board's Spindle terminal and the ground wire to the power supply's common ground.", "zh": "电磁铁引出三根线：正极（+）、负极（−）和接地线。用螺旋缠绕带把三根线和特氟龙管缠成一束，沿管子走到控制板支架处，再把正、负极接到控制板的主轴（Spindle） 端子，接地线接到电源的公共地。" },
+        "body": { "en": "Three wires run from the solenoid: positive (+), negative (−), and ground. Use spiral wrap to bind all three wires together with the Teflon tube into one bundle, and run it up to the control board holder, then connect + and − to the control board's Spindle terminal and the ground wire to the power supply's common ground.", "zh": "电磁铁引出三根线：正极（+）、负极（−）和接地线。用螺旋缠绕带把三根线和特氟龙管缠成一束，沿管子走到控制板支架处，再把正、负极接到控制板的主轴（Spindle） 端子，接地线接到电源的公共地。" },
         "classes": "note overlay sm",
         "style": "left:130mm; top:112mm; width:150mm; max-width:150mm;"
       },
       {
         "h3": { "en": "Warning", "zh": "警告" },
-        "body": { "en": "Never put the ground wire into a wall socket. Mains voltage (220 V/110 V) is lethal — touching the live terminal instead of earth can cause a fatal shock and instantly destroy your phone and equipment. Connect only to a verified ground point.", "zh": "切勿把接地线插进墙壁插座。市电电压（220V/110V）足以致命：万一接到火线而不是地线，可能造成致命电击，瞬间烧毁手机和设备。只能接到确认可靠的接地点。" },
+        "body": { "en": "Never put the ground wire into a wall socket. Mains voltage (220 V/120 V) is lethal. Touching the live terminal instead of earth can cause a fatal shock and instantly destroy your phone and equipment. Connect only to a verified ground point.", "zh": "切勿把接地线插进墙壁插座。市电电压（220V/120V）足以致命：万一接到火线而不是地线，可能造成致命电击，瞬间烧毁手机和设备。只能接到确认可靠的接地点。" },
         "classes": "note overlay sm",
         "style": "left:130mm; top:150mm; width:150mm; max-width:150mm; display:flex; gap:4mm; align-items:flex-start;",
         "icon": "info"

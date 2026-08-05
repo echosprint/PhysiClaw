@@ -141,7 +141,7 @@
         },
         "body": {
           "en": "PhysiClaw is a physically-interactive agent: it operates a phone by tapping on its screen, so it needs hardware to carry out those actions. This manual covers the assembly of that hardware. It has three parts: a CoreXY stage that moves across the plane (X/Y positioning), a touch mechanism that presses the screen along the Z axis, and a camera that watches the screen.",
-          "zh": "PhysiClaw 是一个能与物理世界交互的 Agent——靠点触屏幕来操作手机，因此需要一套硬件来执行动作。本手册讲的就是这套硬件怎么装，它分三部分：在平面内移动的 CoreXY 结构（负责 X/Y 定位）、沿 Z 轴按压屏幕的触控机构，以及一个观察屏幕的摄像头。"
+          "zh": "PhysiClaw 是一个能与物理世界交互的 Agent，靠点触屏幕来操作手机，因此需要一套硬件来执行动作。本手册讲的就是这套硬件怎么装，它分三部分：在平面内移动的 CoreXY 结构（负责 X/Y 定位）、沿 Z 轴按压屏幕的触控机构，以及一个观察屏幕的摄像头。"
         },
         "classes": "note"
       },
@@ -234,7 +234,7 @@
           "zh": "内六角沉头螺栓（FHCS）"
         },
         "body": {
-          "en": "90° countersunk head, hex drive. Sits flush with the surface — used where nothing can protrude above the part.",
+          "en": "90° countersunk head, hex drive. Sits flush with the surface, used where nothing can protrude above the part.",
           "zh": "90° 沉头，用内六角扳手拧。装好后与表面齐平，用在不允许凸出零件表面的位置。"
         },
         "ref": {
@@ -412,8 +412,8 @@
           "zh": "扳手规格"
         },
         "body": {
-          "en": "These cover the socket screws used in this build — 2 mm for M3 button/flat head screws, 3 mm for M5 button/flat head screws (BHCS/FHCS), and 5 mm for M6 socket head cap screws (SHCS).",
-          "zh": "这几把扳手覆盖本次装配用到的内六角螺栓——2 mm 对应 M3 半圆头/沉头螺栓，3 mm 对应 M5 半圆头/沉头螺栓，5 mm 对应 M6 内六角圆柱头螺栓。"
+          "en": "These cover the socket screws used in this build: 2 mm for M3 button/flat head screws, 3 mm for M5 button/flat head screws (BHCS/FHCS), and 5 mm for M6 socket head cap screws (SHCS).",
+          "zh": "这几把扳手覆盖本次装配用到的内六角螺栓：2 mm 对应 M3 半圆头/沉头螺栓，3 mm 对应 M5 半圆头/沉头螺栓，5 mm 对应 M6 内六角圆柱头螺栓。"
         },
         "classes": "note overlay sm",
         "style": "left:152mm; top:108mm; width:120mm;"
@@ -436,8 +436,8 @@
           "zh": "零件打印设置与说明"
         },
         "body": {
-          "en": "PhysiClaw's custom parts are printed by a nylon powder-bed fusion process — either Selective Laser Sintering (SLS) or Multi Jet Fusion (MJF) — not the common FDM. The powder-bed process fuses nylon powder layer by layer into dense, support-free parts with uniform strength in every direction. Because these parts carry side holes and overhangs — the side holes deform and the overhangs sag with FDM — a powder-bed process is required. Match the specifications below when sourcing parts.",
-          "zh": "PhysiClaw 的定制零件采用尼龙粉末床熔融工艺打印，选择性激光烧结（SLS）或 多射流熔融（MJF）均可，不采用常见的 FDM。粉末床工艺将尼龙粉末逐层熔结成型，零件结构致密、无需支撑、各向强度均匀。由于这些零件带有侧向开孔和悬空结构——FDM 打印时侧孔易变形、悬空处会塌陷——故须采用粉末床工艺。采购时请参照以下规格。"
+          "en": "PhysiClaw's custom parts are printed by a nylon powder-bed fusion process, either Selective Laser Sintering (SLS) or Multi Jet Fusion (MJF), rather than the common FDM. The powder-bed process fuses nylon powder layer by layer into dense, support-free parts with uniform strength in every direction. These parts carry side holes and overhangs: with FDM the side holes deform and the overhangs sag, so a powder-bed process is required. Match the specifications below when sourcing parts.",
+          "zh": "PhysiClaw 的定制零件采用尼龙粉末床熔融工艺打印，选择性激光烧结（SLS）或 多射流熔融（MJF）均可，不采用常见的 FDM。粉末床工艺将尼龙粉末逐层熔结成型，零件结构致密、无需支撑、各向强度均匀。这些零件带有侧向开孔和悬空结构：FDM 打印时侧孔易变形、悬空处会塌陷，故须采用粉末床工艺。采购时请参照以下规格。"
         },
         "classes": "note"
       }
@@ -531,8 +531,8 @@
           "zh": "文件命名"
         },
         "body": {
-          "en": "Any file whose name ends in <span class=\"ref\">_x#</span> tells you the quantity of that part required to build the machine — for example a part named <span class=\"ref\">idler_mount_front_x2.step</span> is needed two times.",
-          "zh": "文件名以 <span class=\"ref\">_x#</span> 结尾时，末尾的数字表示组装整机要用到几个这种零件——比如 <span class=\"ref\">idler_mount_front_x2.step</span>，就需要用到两个。"
+          "en": "Any file whose name ends in <span class=\"ref\">_x#</span> tells you the quantity of that part required to build the machine. For example, a part named <span class=\"ref\">idler_mount_front_x2.step</span> is needed two times.",
+          "zh": "文件名以 <span class=\"ref\">_x#</span> 结尾时，末尾的数字表示组装整机要用到几个这种零件。比如 <span class=\"ref\">idler_mount_front_x2.step</span>，就需要用到两个。"
         },
         "classes": "note"
       }
