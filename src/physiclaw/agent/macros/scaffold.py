@@ -155,6 +155,9 @@ Scaffold one with `physiclaw macros init <name>`, edit it, then:
 
     physiclaw macros list           # every macro: enabled / disabled / invalid
     physiclaw macros check          # lint every {MACRO_FILENAME}
+    physiclaw mcp                   # the server `run` drives — NOT `server`,
+                                    # which also wakes the agent and would
+                                    # move the phone mid-rehearsal
     physiclaw macros run <name> -i key=value   # rehearse on the live rig
     # then flip the scaffold's `enabled: false` to true (or delete the line)
     physiclaw macros stats          # success/abort counters per macro
@@ -162,7 +165,10 @@ Scaffold one with `physiclaw macros init <name>`, edit it, then:
                                     # `macro-run-<hex6>` (printed after
                                     # rehearsals, stamped in results/stats)
                                     # and its own log/macros/<id>/ dir with
-                                    # events.jsonl + per-step screenshots
+                                    # events.jsonl + per-step screenshots.
+                                    # Each step prints the arguments it
+                                    # fired with — the bbox you edit when a
+                                    # tap lands wrong
 
 ## Format (GitHub-Actions-shaped YAML)
 
@@ -261,9 +267,15 @@ Habit: quote every text value.
   whatever step tripped three lines later.
 - Guard the steps where drift would hurt: taps at a FIXED position in a
   list that can reorder, and anything just short of a commit.
+- Point a guard's `within` at the SAME region the step is about to tap.
+  Checking that the label is somewhere in a wider band, then tapping a
+  fixed bbox elsewhere, passes the guard and still hits the wrong row.
 - Reach for `skip_when` whenever a step's effect may already be in place —
   the app reopening inside the last screen, the keyboard already up. It is
   what makes one macro survive several starting states.
+- `home_screen` opens the App SWITCHER when you are already on the home
+  screen, so a macro starting there wants a `skip_when` anchored on
+  something only the home screen shows.
 - Keep macros short and single-purpose. Anything needing a decision mid-way
   belongs to the agent, not a macro.
 - A rising `consecutive_aborts` streak in stats means the app layout
