@@ -3,11 +3,11 @@ title: 宏
 description: 由你编写并排练过的手势序列，智能体一次调用即可重放，省时省 token。
 ---
 
-token 很贵。宏把一连串手势打包进一次模型调用，智能体因此只需调用你写好、排练过的序列，不必再一步步地操作手机。省 token，也省时间。
+智能体每执行一个手势都要调用一次大模型，token 成本很高。宏把常用的手势动作序列预先固化下来，一次调用即可执行整个手势序列，节省 token 和时间。
 
 ## 创建宏
 
-先生成脚手架，再编辑其中的 `MACRO.yml` 文件：
+生成模板，再编辑 `MACRO.yml`：
 
 ```bash
 physiclaw macros init notify-user-wechat
@@ -24,10 +24,10 @@ physiclaw macros init notify-user-wechat
 
 ```yaml
 name: notify-user-wechat
-# 智能体只凭这一行挑选宏，所以要写清楚什么时候用、做什么。
-description: 需要用微信给用户发消息时使用。会打开聊天窗口、把文本粘进输入框，停在发送之前
+# 要写清楚什么时候用、做什么。
+description: 需要用微信给用户发消息时使用。打开聊天窗口，把文本粘进输入框。
 
-# false 表示智能体看不到、也调不了它。
+# 如果为 false 则智能体无法调用。
 enabled: true
 
 # 这个宏需要的参数。
@@ -36,7 +36,7 @@ inputs:
     description: 要发送的消息文本
     example: "订单已下，共 ¥30"
 
-# 自上而下依次执行，每步一个动作。
+# 按顺序执行，每步一个动作。
 steps:
   - name: start-home
     tool: home_screen
@@ -44,16 +44,16 @@ steps:
   - name: open-wechat
     tool: tap
     with:
-      # [左, 上, 右, 下]，取值是 0–1 的屏幕比例。
+      # [左, 上, 右, 下]，归一化的屏幕坐标。
       bbox: [0.62, 0.18, 0.85, 0.30]
 
   - name: await-wechat
     tool: wait
     with:
       seconds: 2
-    # 微信会停在上次离开的界面，标题栏可能是应用名，也可能是对方昵称。
+    # 微信会停在上次离开的界面，标题栏可能是应用名，也可能是用户昵称。
     expect:
-      {or: ["微信", "Weixin", "对方昵称"],
+      {or: ["微信", "Weixin", "用户昵称"],
        within: [0.15, 0.02, 0.85, 0.1]}
     hint: "微信没有打开，先登录再手动发送"
 
@@ -61,12 +61,12 @@ steps:
     tool: tap
     with:
       bbox: [0.05, 0.10, 0.95, 0.20]
-    # 已经在聊天里就跳过。
+    # 如果已经在聊天界面就跳过此步。
     skip_when:
-      {text: "对方昵称", within: [0.15, 0.02, 0.85, 0.1]}
-    # 确认点的是正确的列表项。
+      {text: "用户昵称", within: [0.15, 0.02, 0.85, 0.1]}
+    # 确保选择正确的聊天列表项。
     guard:
-      require: {text: "对方昵称", within: [0.05, 0.10, 0.95, 0.20]}
+      require: {text: "用户昵称", within: [0.05, 0.10, 0.95, 0.20]}
 
   - name: stage-text
     tool: send_to_clipboard
@@ -77,13 +77,14 @@ steps:
     tool: tap
     with:
       bbox: [0.05, 0.90, 0.75, 0.96]
-    # 键盘已弹起（能看到空格键）就跳过。
+    # 如果键盘已弹起（能看到空格键），跳过此步。
     skip_when:
       {or: ["space", "空格"], within: [0.25, 0.85, 0.8, 0.95]}
 
   - name: paste-menu
     tool: long_press
     with:
+      # 键盘弹起后输入框上移。
       bbox: [0.05, 0.56, 0.75, 0.62]
 
   - name: paste
@@ -93,20 +94,24 @@ steps:
     guard:
       require: {text: "粘贴", within: [0.03, 0.50, 0.35, 0.62]}
 
-# 刻意不写发送步骤：由智能体确认文本后决定是否发送。
+# 不点击发送按钮，由智能体确认文本后决定是否发送。
 ```
 
-可用工具：`tap`、`double_tap`、`long_press`、`swipe`、`home_screen`、`go_back`、`force_quit`、`send_to_clipboard`、`peek` 和 `wait`。`guard`、`expect`、`skip_when` 等完整格式参考见 `~/.physiclaw/macros/README.md`。
+可用工具：
 
-## 排练
+`tap`、`double_tap`、`long_press`、`swipe`、`home_screen`、`go_back`、`force_quit`、`send_to_clipboard`、`peek` 和 `wait`。
 
-先启动 MCP 服务：
+完整参考见 `~/.physiclaw/macros/README.md`。
+
+## 验证
+
+启动 MCP 服务：
 
 ```bash
 physiclaw mcp
 ```
 
-再校验所有 `MACRO.yml`，然后在真机上把这个宏跑一遍：
+检查所有 `MACRO.yml`，在真实场景验证宏能否正确执行：
 
 ```bash
 physiclaw macros check
@@ -115,10 +120,10 @@ physiclaw macros run notify-user-wechat -i message=hi
 
 ## 最佳实践
 
-**保持宏短小、单一用途。** 中途需要拿主意的事，比如二次确认、付款、从多个结果里挑一个，都归智能体，不归宏。
+**宏要短小、职责单一。** 需要中途做判断的场景，比如二次确认、付款、从多个结果里挑一个，这些交给智能体，别写进宏。
 
-**让智能体来写。** 把 `claude` 或 `codex` 接到你的 MCP 服务上，再让它写这个宏。
+**让智能体来写。** 把 `claude` 或 `codex` 接到你的 MCP 服务上，让它替你生成宏。
 
-**先排练，再启用。** 写死的 bbox 之所以靠得住，是因为你在这台设备、这部手机、这套布局上验证过。
+**先跑通，再启用。** 写死的 bbox 之所以可靠，是因为你在这台设备、这部手机、这套布局上真跑过一遍。
 
-**关注统计。** `physiclaw macros stats` 列出每个宏的运行计数。`consecutive_aborts` 一路上涨，说明 App 布局在宏底下变了，要重新排练并更新 bbox。
+**关注统计。** `physiclaw macros stats` 会列出每个宏的运行次数，据此确认宏有没有正常执行。
