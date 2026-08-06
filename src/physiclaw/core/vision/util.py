@@ -253,5 +253,3 @@ def compact_json(items: list[dict]) -> str:
     """Pretty-print a list of dicts with one item per line (for file output)."""
     lines = [json.dumps(item, ensure_ascii=False) for item in items]
     return "[\n" + ",\n".join(f"  {line}" for line in lines) + "\n]\n"
-
-

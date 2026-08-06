@@ -204,8 +204,7 @@ def decode_elements(text: str) -> list[Element]:
     lines = text.splitlines()
     if not lines or lines[0].rstrip() != LISTING_HEADER:
         raise ValueError(
-            f"decode_elements: first line must be the listing header "
-            f"{LISTING_HEADER!r}"
+            f"decode_elements: first line must be the listing header {LISTING_HEADER!r}"
         )
     out: list[Element] = []
     for n, line in enumerate(lines[1:], start=2):

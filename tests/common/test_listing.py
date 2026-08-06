@@ -284,7 +284,9 @@ def test_core_producer_converts_to_the_canonical_element() -> None:
     text = UIElement(1, "text", "$29.9", [0.37, 0.5407, 0.51, 0.56], 0.912)
 
     assert icon.to_element() == Element(0, "icon", "", (0.021, 0.06, 0.115, 0.1), 0.64)
-    assert text.to_element() == Element(1, "text", "$29.9", (0.37, 0.541, 0.51, 0.56), 0.91)
+    assert text.to_element() == Element(
+        1, "text", "$29.9", (0.37, 0.541, 0.51, 0.56), 0.91
+    )
 
 
 def test_macro_screen_consumption_agrees_with_the_codec() -> None:
