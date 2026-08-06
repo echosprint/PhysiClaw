@@ -411,8 +411,8 @@ def _stub_body(text: str) -> str:
     from the label block.
 
     The listing grammar (`LISTING_HEADER` / `TEXT_ROW_RE` / `ICON_ROW_RE`)
-    is shared with its composer, `core.vision.util.format_elements`, via
-    `physiclaw.common.listing`; sequence step lines (`1 tap ok — …`) lack
+    lives in `physiclaw.common.listing` beside its composer,
+    `format_elements`; sequence step lines (`1 tap ok — …`) lack
     a quoted label + bbox and are kept. Output is stable under
     re-application — a bare label can't match a full-shape row regex
     unless it is itself a complete row, which OCR never produces.

@@ -16,7 +16,6 @@ import numpy as np
 
 from physiclaw.common.bbox import validate_bbox
 from physiclaw.common.config import CONFIG
-from physiclaw.common.listing import LISTING_HEADER, format_row
 from physiclaw.core.vision.preprocess import grayscale, resize_to_max_edge
 
 # `validate_bbox` comes from `physiclaw.common.bbox` (the shared
@@ -256,16 +255,3 @@ def compact_json(items: list[dict]) -> str:
     return "[\n" + ",\n".join(f"  {line}" for line in lines) + "\n]\n"
 
 
-def format_elements(items: list[dict]) -> str:
-    """Human/agent-friendly element list — one line per element, no JSON noise.
-
-    The row grammar lives in `physiclaw.common.listing` — shared with
-    `agent.engine.compact`, which parses rows back out when stubbing
-    superseded views, and pinned against the doctrine's quoted copy.
-    """
-    lines = [LISTING_HEADER]
-    for e in items:
-        lines.append(
-            format_row(e["id"], e["kind"], e.get("label") or "", e["bbox"], e["conf"])
-        )
-    return "\n".join(lines)

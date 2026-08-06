@@ -150,7 +150,6 @@ def _wire_peek(mocker, pc, wire_rig, *, listing: str = "ok", sharpness=200.0):
         "detect_ui_elements",
         return_value=([], np.zeros((4, 4, 3), dtype=np.uint8)),
     )
-    mocker.patch.object(perception, "elements_to_json", return_value=[])
     mocker.patch.object(perception, "format_elements", return_value=listing)
     mocker.patch.object(orchestrator, "encode_view_jpeg", return_value=b"JPG")
     return sleep_spy
@@ -219,7 +218,6 @@ def test_screenshot_decodes_and_detects(
         "detect_ui_elements",
         return_value=([], np.zeros((4, 4, 3), dtype=np.uint8)),
     )
-    mocker.patch.object(perception, "elements_to_json", return_value=[])
     mocker.patch.object(perception, "format_elements", return_value="L")
     mocker.patch.object(orchestrator, "encode_view_jpeg", return_value=b"JPG")
 

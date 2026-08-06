@@ -15,6 +15,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from physiclaw.common import paths
+from physiclaw.common.listing import Element
 from physiclaw.common.text import write_text
 from physiclaw.core.vision.render import annotate_elements
 
@@ -23,20 +24,29 @@ log = logging.getLogger(__name__)
 
 @dataclass
 class UIElement:
+    """Mutable detection staging — ids are reassigned after sorting and
+    bboxes are built up in place. Converts to the canonical shared shape
+    (`common.listing.Element`, which owns rounding and the row-grammar
+    constraints) at the boundary via `to_element`."""
+
     id: int
     kind: str  # "icon" | "text"
     label: str  # "" for icon, OCR content for text
     bbox: list[float]  # [left, top, right, bottom] 0-1
     conf: float
 
+    def to_element(self) -> Element:
+        left, top, right, bottom = self.bbox
+        return Element(
+            id=self.id,
+            kind=self.kind,
+            label=self.label,
+            bbox=(left, top, right, bottom),
+            conf=self.conf,
+        )
+
     def to_dict(self) -> dict:
-        return {
-            "id": self.id,
-            "kind": self.kind,
-            "label": self.label,
-            "bbox": [round(v, 3) for v in self.bbox],
-            "conf": round(self.conf, 2),
-        }
+        return self.to_element().to_dict()
 
 
 # ── Detection ─────────────────────────────────
@@ -110,6 +120,14 @@ def _detect_icons(frame, w, h, detector, confidence) -> list[UIElement]:
         return []
 
 
+def _single_line(text: str) -> str:
+    """OCR emits one detected line per result, but nothing upstream
+    guarantees the string is `splitlines`-clean — and `Element` refuses
+    labels that are not, so one stray control character must not crash
+    the whole detection pass. Collapse any line boundary to a space."""
+    return " ".join(text.splitlines())
+
+
 def _detect_texts(frame, w, h, reader) -> list[UIElement]:
     try:
         from physiclaw.core.vision.ocr import OCRReader
@@ -123,7 +141,7 @@ def _detect_texts(frame, w, h, reader) -> list[UIElement]:
             UIElement(
                 0,
                 "text",
-                t.text,
+                _single_line(t.text),
                 [t.bbox[0] / w, t.bbox[1] / h, t.bbox[2] / w, t.bbox[3] / h],
                 t.confidence,
             )

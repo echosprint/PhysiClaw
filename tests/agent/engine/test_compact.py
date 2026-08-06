@@ -767,38 +767,14 @@ def test_stub_body_against_real_format_elements_output() -> None:
     formatter's output through `_stub_body`. The grammar itself lives in
     `common.listing` (one definition for composer and parser); this test
     keeps the behavioral round-trip honest."""
-    from physiclaw.core.vision.util import format_elements
+    from physiclaw.common.listing import Element, format_elements
 
     listing = format_elements(
         [
-            {
-                "id": 0,
-                "kind": "icon",
-                "label": "",
-                "bbox": [0.1, 0.1, 0.2, 0.2],
-                "conf": 0.95,
-            },
-            {
-                "id": 1,
-                "kind": "text",
-                "label": "加入购物车",
-                "bbox": [0.5, 0.8, 0.6, 0.9],
-                "conf": 0.99,
-            },
-            {
-                "id": 2,
-                "kind": "text",
-                "label": 'He said "hi" [ok]',
-                "bbox": [0.1, 0.3, 0.4, 0.35],
-                "conf": 0.80,
-            },
-            {
-                "id": 3,
-                "kind": "icon",
-                "label": "",
-                "bbox": [0.7, 0.1, 0.8, 0.2],
-                "conf": 0.90,
-            },
+            Element(0, "icon", "", (0.1, 0.1, 0.2, 0.2), 0.95),
+            Element(1, "text", "加入购物车", (0.5, 0.8, 0.6, 0.9), 0.99),
+            Element(2, "text", 'He said "hi" [ok]', (0.1, 0.3, 0.4, 0.35), 0.80),
+            Element(3, "icon", "", (0.7, 0.1, 0.8, 0.2), 0.90),
         ]
     )
     text = "Tapped at bbox [0.5, 0.8, 0.6, 0.9] | screen: changed — hint\n" + listing
@@ -817,19 +793,9 @@ def test_stub_body_against_real_format_elements_output() -> None:
 
 
 def test_stub_body_real_formatter_icon_only_listing_drops_header() -> None:
-    from physiclaw.core.vision.util import format_elements
+    from physiclaw.common.listing import Element, format_elements
 
-    listing = format_elements(
-        [
-            {
-                "id": 0,
-                "kind": "icon",
-                "label": "",
-                "bbox": [0.1, 0.1, 0.2, 0.2],
-                "conf": 0.95,
-            },
-        ]
-    )
+    listing = format_elements([Element(0, "icon", "", (0.1, 0.1, 0.2, 0.2), 0.95)])
 
     assert _stub_body(listing) == ""
 
@@ -908,7 +874,11 @@ def test_stub_body_emitted_label_never_contains_a_newline(label) -> None:
     line break splits the row and can't round-trip as one label — it falls
     through to the preamble instead. Locks the invariant against a future
     switch to `re.DOTALL` / away from `splitlines()`."""
-    out = _stub_body(LISTING_HEADER + "\n" + _row(0, "text", label))
+    # Built by hand, NOT via the composer: the point is an adversarial
+    # line-broken label, a shape `format_row` (via `Element`) now refuses
+    # to compose — but arbitrary screen text can still contain it.
+    row = f'0 [text] "{label}" [0.100,0.200,0.300,0.400] 0.90'
+    out = _stub_body(LISTING_HEADER + "\n" + row)
     if any(brk in label for brk in _LINE_BREAKS):
         assert label not in out.splitlines()  # split apart, not a clean label
     else:

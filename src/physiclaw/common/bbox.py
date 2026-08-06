@@ -12,6 +12,10 @@ or re-exports into its own error surface (`agent.engine.validator`
 converts to ValidationError; `core.vision.util` re-exports as-is).
 """
 
+# The canonical 4-tuple spelling of the same box — element rows
+# (`common.listing.Element`) and macro region clauses share it.
+Bbox = tuple[float, float, float, float]
+
 
 def validate_bbox(bbox: list[float]) -> list[float]:
     """Raise ValueError if bbox is malformed; return `bbox` unchanged.

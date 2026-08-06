@@ -257,6 +257,26 @@ def test_detect_texts_uses_supplied_reader(mocker) -> None:
     assert out[0].bbox == [50 / 500, 100 / 1000, 150 / 500, 200 / 1000]
 
 
+def test_detect_texts_collapses_stray_line_breaks_in_ocr_output(mocker) -> None:
+    # `Element` refuses labels that are not `splitlines`-clean, so a stray
+    # control character out of OCR must be collapsed here — one artifact
+    # must not crash the whole detection pass at `to_element()` time.
+    fake_reader = MagicMock()
+    fake_reader.read.return_value = [
+        MagicMock(text="line1\nline2\x0cline3", bbox=(0, 0, 10, 10), confidence=0.9),
+    ]
+
+    out = _detect_texts(
+        np.zeros((1000, 500, 3), dtype=np.uint8),
+        500,
+        1000,
+        fake_reader,
+    )
+
+    assert out[0].label == "line1 line2 line3"
+    assert out[0].to_element().label == "line1 line2 line3"  # composes clean
+
+
 def test_detect_texts_handles_import_error(
     mocker,
     caplog: pytest.LogCaptureFixture,

@@ -117,7 +117,6 @@ def test_detect_degrades_to_icons_when_ocr_construction_fails(
         "detect_ui_elements",
         return_value=([], np.zeros((4, 4, 3), dtype=np.uint8)),
     )
-    mocker.patch.object(perception_mod, "elements_to_json", return_value=[])
     mocker.patch.object(perception_mod, "format_elements", return_value="")
 
     frame = np.zeros((4, 4, 3), dtype=np.uint8)
@@ -140,7 +139,6 @@ def test_detect_calls_ui_pipeline(mocker, per: Perception) -> None:
         "detect_ui_elements",
         return_value=(elements, annotated),
     )
-    mocker.patch.object(perception_mod, "elements_to_json", return_value=[{"id": 0}])
     mocker.patch.object(perception_mod, "format_elements", return_value="LISTING")
 
     listing, ann = per.detect(np.zeros((4, 4, 3), dtype=np.uint8))

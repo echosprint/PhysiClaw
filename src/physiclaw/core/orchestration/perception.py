@@ -19,6 +19,7 @@ import threading
 import time
 
 from physiclaw.common.config import CONFIG
+from physiclaw.common.listing import format_elements
 from physiclaw.core.hardware import exposure
 from physiclaw.core.orchestration.rig import HardwareRig
 from physiclaw.core.vision import quality
@@ -28,12 +29,8 @@ from physiclaw.core.vision.preprocess import (
     crop_to_phone_screen,
     phone_screen_crop_box,
 )
-from physiclaw.core.vision.ui_elements import detect_ui_elements, elements_to_json
-from physiclaw.core.vision.util import (
-    bbox_on_screen,
-    find_numpad_digit,
-    format_elements,
-)
+from physiclaw.core.vision.ui_elements import detect_ui_elements
+from physiclaw.core.vision.util import bbox_on_screen, find_numpad_digit
 from physiclaw.core.vision.watchdog import Watchdog
 
 log = logging.getLogger(__name__)
@@ -159,7 +156,7 @@ class Perception:
             icon_detector=self.icon_detector(),
             ocr_reader=ocr,
         )
-        return format_elements(elements_to_json(elements)), annotated
+        return format_elements(e.to_element() for e in elements), annotated
 
     def _ocr_elements(self, frame, max_edge: int | None = None) -> list[dict]:
         """OCR one already-grabbed frame into on-screen text elements —

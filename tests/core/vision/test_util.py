@@ -1,5 +1,5 @@
 """Tests for `physiclaw.core.vision.util` — codecs, bbox validation,
-numpad inference, element formatting, and the phone-in-frame diagnostic.
+numpad inference, and the phone-in-frame diagnostic.
 
 All tests use synthetic BGR `np.ndarray` images — no real photos
 required. `check_phone_in_frame` writes a debug JPEG under
@@ -15,7 +15,6 @@ import cv2
 import numpy as np
 import pytest
 
-from physiclaw.common.listing import LISTING_HEADER, format_row
 from physiclaw.core.vision.util import (
     bbox_on_screen,
     check_phone_in_frame,
@@ -23,7 +22,6 @@ from physiclaw.core.vision.util import (
     decode_image,
     encode_jpeg,
     find_numpad_digit,
-    format_elements,
     validate_bbox,
 )
 
@@ -134,44 +132,6 @@ def test_compact_json_uses_ensure_ascii_false_for_non_ascii() -> None:
 
     assert "你好" in out
     assert "\\u4f60" not in out  # not escape-encoded
-
-
-# ---------- format_elements ----------
-
-
-def test_format_elements_header_always_present() -> None:
-    # The grammar bytes themselves are pinned in tests/common/test_listing.py;
-    # here we assert only that the composer opens with the shared header.
-    assert format_elements([]) == LISTING_HEADER
-
-
-def test_format_elements_renders_one_row_per_item_via_shared_grammar() -> None:
-    items = [
-        {
-            "id": 1,
-            "kind": "icon",
-            "label": "settings",
-            "bbox": [0.1, 0.2, 0.3, 0.4],
-            "conf": 0.875,
-        }
-    ]
-
-    out = format_elements(items)
-
-    assert out.splitlines() == [
-        LISTING_HEADER,
-        format_row(1, "icon", "settings", [0.1, 0.2, 0.3, 0.4], 0.875),
-    ]
-
-
-def test_format_elements_handles_missing_or_none_label_as_empty_string() -> None:
-    items = [
-        {"id": 2, "kind": "icon", "label": None, "bbox": [0, 0, 1, 1], "conf": 0.9},
-    ]
-
-    out = format_elements(items)
-
-    assert '"" [' in out
 
 
 # ---------- encode_jpeg / decode_image ----------

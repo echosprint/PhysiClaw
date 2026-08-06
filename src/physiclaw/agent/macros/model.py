@@ -21,7 +21,8 @@ from typing import TYPE_CHECKING, ClassVar, TypeVar
 
 from physiclaw.agent.macros.template import TemplateError, fill
 from physiclaw.common import gesture_vocab
-from physiclaw.common.listing import LISTING_HEADER, ROW_PARSE_RE
+from physiclaw.common.bbox import Bbox
+from physiclaw.common.listing import LISTING_HEADER, ROW_RE, Element, parse_row
 
 MAX_STEPS = 20
 MAX_INPUTS = 8
@@ -150,8 +151,6 @@ if TYPE_CHECKING:  # `Macro` names its steps; `steps` imports this module.
 # operators by hand.
 AND, OR, NOT = "and", "or", "not"
 
-Bbox = tuple[float, float, float, float]
-
 
 @dataclass(frozen=True)
 class Screen:
@@ -166,31 +165,32 @@ class Screen:
     tripped on the coordinate `0.128`; both directions are silent, and a
     guard that always passes reads exactly like a guard that passed.
 
-    `rows` is what a REGION clause matches — label plus box, so a match can
-    be required to sit where it was rehearsed."""
+    `rows` is what a REGION clause matches — the parsed `Element` per row,
+    so a match can be required to sit where it was rehearsed."""
 
     text: str
     content: str
-    rows: tuple[tuple[str, Bbox], ...]
+    rows: tuple[Element, ...]
 
     @classmethod
     def read(cls, text: str) -> "Screen":
         content: list[str] = []
-        rows: list[tuple[str, Bbox]] = []
+        rows: list[Element] = []
         for line in text.splitlines():
-            row = ROW_PARSE_RE.match(line)
-            if row:
-                content.append(row.group(1))
-                try:
-                    left, top, right, bottom = (
-                        float(v) for v in row.group(2).split(",")
-                    )
-                except ValueError:
-                    continue  # malformed coords — not a real row
-                rows.append((row.group(1), (left, top, right, bottom)))
-            elif line.strip() and line.strip() != LISTING_HEADER:
-                # Not a listing at all (a plain text block) — keep it, or a
-                # clause could never match non-listing content.
+            el = parse_row(line)
+            if el is not None:
+                content.append(el.label)
+                rows.append(el)
+            elif (
+                line.strip()
+                and line.strip() != LISTING_HEADER
+                and not ROW_RE.match(line)
+            ):
+                # A plain text block: keep it whole, or a clause could never
+                # match non-listing content. A row-SHAPED line that failed
+                # `parse_row` is dropped instead — its coordinate text in the
+                # haystack is the `forbid: "12"` trap `content` exists to
+                # kill.
                 content.append(line)
         return cls(text=text, content="\n".join(content), rows=tuple(rows))
 
@@ -251,9 +251,10 @@ class TextClause(Clause):
         if self.within is None:
             return self.text in screen.content
         left, top, right, bottom = self.within
-        for label, (el, et, er, eb) in screen.rows:
-            if not self._label_matches(label):
+        for row in screen.rows:
+            if not self._label_matches(row.label):
                 continue
+            el, et, er, eb = row.bbox
             cx, cy = (el + er) / 2, (et + eb) / 2
             if left <= cx <= right and top <= cy <= bottom:
                 return True
