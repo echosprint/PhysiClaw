@@ -255,7 +255,7 @@ def test_render_section_lists_inputs_with_required_and_default() -> None:
 
     section = render_section(discover_enabled())
 
-    assert "- `message` (required): The message text Example: `hello`" in section
+    assert "- `message` (required): The message text (example: `hello`)" in section
     assert "- `greeting` (default: `hi`): Opening line" in section
 
 

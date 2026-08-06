@@ -152,14 +152,13 @@ def render_section(macros: dict[str, Macro]) -> str:
     lines = [
         "## Available Macros",
         "",
-        "Rehearsed gesture macros. Call `run_macro(name, inputs)` to execute "
-        "one as a single step instead of gesturing turn by turn. A macro "
-        "aborts the moment the screen stops matching its rehearsed path — "
-        "the result then shows the completed steps and the current screen; "
-        "continue manually from there — a macro that aborted is blocked for "
-        "the rest of the session, `start_at` included. If you already did "
-        "the leading steps by hand, pass `start_at` with a step name from "
-        "`steps:` below to begin partway in.",
+        # One line, not the semantics: MACRO.md always co-renders with this
+        # section (prompt.py keys both on the same condition), so usage and
+        # abort rules live there once — duplicating them here billed ~80
+        # cached-prefix tokens per wake for nothing.
+        "Rehearsed gesture macros — `run_macro(name, inputs)` replays one "
+        "as a single step. Usage, `start_at`, and abort rules: MACRO "
+        "doctrine above.",
         "",
     ]
     for spec in macros.values():
@@ -168,7 +167,10 @@ def render_section(macros: dict[str, Macro]) -> str:
             hint = "required" if inp.required else f"default: `{inp.default}`"
             line = f"  - `{inp.name}` ({hint}): {inp.description}"
             if inp.example:
-                line += f" Example: `{inp.example}`"
+                # Parenthesized, not appended prose: the description is
+                # user-authored and may not end with punctuation, and
+                # "…the chat Example: …" reads as one run-on sentence.
+                line += f" (example: `{inp.example}`)"
             lines.append(line)
         # Every step is named and unique (parse enforces it), so this line
         # is both the step count and the set of valid `start_at` values.

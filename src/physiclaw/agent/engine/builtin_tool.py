@@ -778,11 +778,13 @@ def build_registry(
                 f"Execute a rehearsed gesture macro "
                 f"({'/'.join(sorted(macro_registry))}) as ONE step — see "
                 "`## Available Macros` for what each does and its inputs. "
-                "Aborts safely the moment the screen stops matching the "
-                "rehearsed path; the result shows the completed steps plus "
-                "the current screen, so you can continue manually. A macro "
-                "that aborted this session cannot be called again, with or "
-                "without `start_at`."
+                "Use this instead of gesturing a covered stretch turn by "
+                "turn: one call replaces every one of those turns' round "
+                "trips. Aborts safely the moment the screen stops matching "
+                "the rehearsed path; the result shows the completed steps "
+                "plus the current screen, so you can continue manually. A "
+                "macro that aborted this session cannot be called again, "
+                "with or without `start_at`."
             ),
             input_schema=_RUN_MACRO_SCHEMA,
             handler=_handle_run_macro_factory(macro_registry),
