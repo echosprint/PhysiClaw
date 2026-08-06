@@ -19,7 +19,8 @@ import subprocess
 import time
 
 # urllib/httpx read proxy config from env vars on Linux and honor `no_proxy`
-# for loopback, so trusting env is safe when calling our own 127.0.0.1 server.
+# for loopback — which is only guaranteed because `normalize_proxy_env()`
+# (common/proxy.py) pins loopback into NO_PROXY first; users rarely set it.
 TRUST_PROXY_ENV = True
 
 # Webcam viewers tried in preference order. GNOME Snapshot superseded Cheese

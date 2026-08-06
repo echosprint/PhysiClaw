@@ -257,8 +257,9 @@ class BaseProvider:
             # (HTTP(S)_PROXY) — behind a corporate/VPN/region proxy the runtime
             # may only reach the LLM API through it. This is the deliberate
             # inverse of the localhost clients (MCP transport, status poll,
-            # phone-watch hook), which pass trust_env=platform.TRUST_PROXY_ENV
-            # to BYPASS the proxy for 127.0.0.1. Don't unify the two.
+            # phone-watch hook), which stay off the proxy for 127.0.0.1 via
+            # trust_env=platform.TRUST_PROXY_ENV plus the NO_PROXY loopback
+            # pin from `normalize_proxy_env()`. Don't unify the two.
             trust_env=True,
         )
 

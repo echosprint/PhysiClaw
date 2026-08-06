@@ -14,7 +14,9 @@ log = logging.getLogger(__name__)
 # urllib's ProxyHandler / httpx's `trust_env` consult the system proxy
 # config for loopback HTTP. macOS exposes its bypass list (which usually
 # includes 127.0.0.1, localhost, *.local) via getproxies_macosx_sysconf,
-# and urllib/httpx honor it — so trusting env on darwin is safe.
+# and urllib/httpx honor it — but an env HTTP_PROXY OVERRIDES the system
+# config, so trusting env is only safe because `normalize_proxy_env()`
+# (common/proxy.py) pins loopback into NO_PROXY first.
 TRUST_PROXY_ENV = True
 
 

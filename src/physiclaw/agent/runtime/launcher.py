@@ -112,8 +112,9 @@ def launch() -> None:
     # Normally inherited already normalized from the server process, but
     # a direct `python -m physiclaw.agent.runtime` skips the CLI callback
     # — and a raw `socks://` proxy env kills every httpx client here
-    # (provider AND the loopback poll/MCP clients, whose construction
-    # parses the env even though loopback is proxy-bypassed).
+    # (provider AND the loopback poll/MCP clients). It also pins loopback
+    # into NO_PROXY, which the claude-code child INHERITS — its MCP client
+    # dials our loopback URL, so this must run before any spawn.
     normalize_proxy_env()
     parser = argparse.ArgumentParser(description="PhysiClaw runtime loop")
     # None → resolve via config.server_url() ($PHYSICLAW_SERVER, else

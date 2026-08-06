@@ -100,7 +100,8 @@ def _root(
     ] = False,
 ) -> None:
     # VPN clients export `all_proxy=socks://…`, a scheme httpx rejects —
-    # rewrite it before any command builds an HTTP client.
+    # rewrite it, and pin loopback into NO_PROXY, before any command
+    # builds an HTTP client.
     normalize_proxy_env()
     # Bare `physiclaw` (no subcommand) defaults to `physiclaw server`.
     if ctx.invoked_subcommand is None:

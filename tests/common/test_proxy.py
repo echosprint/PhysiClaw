@@ -61,3 +61,45 @@ def test_httpx_accepts_normalized_env(monkeypatch):
     normalize_proxy_env()
     client = httpx.Client(trust_env=True)  # raised ValueError before the fix
     client.close()
+
+
+# ---------- loopback NO_PROXY exemption ----------
+# Guards: a proxied env must never route the runtime's own loopback
+# clients (or the claude child's inherited env) through the proxy.
+# Conftest's autouse `scrub_proxy_env` clears every proxy var first.
+
+
+@pytest.mark.parametrize(
+    ("existing", "expected"),
+    [
+        (None, "127.0.0.1,localhost,::1"),  # absent → set outright
+        (  # user entries survive; only missing loopback hosts join
+            "example.com,localhost",
+            "example.com,localhost,127.0.0.1,::1",
+        ),
+        (  # fully covered (whitespace tolerated) → byte-untouched
+            "127.0.0.1, localhost, ::1",
+            "127.0.0.1, localhost, ::1",
+        ),
+    ],
+)
+def test_loopback_pinned_into_no_proxy(monkeypatch, existing, expected):
+    monkeypatch.setenv("HTTP_PROXY", "http://localhost:6984")
+    if existing is not None:
+        monkeypatch.setenv("NO_PROXY", existing)
+
+    normalize_proxy_env()
+
+    assert os.environ["NO_PROXY"] == expected
+    if existing == expected:  # already covered — untouched means untouched
+        assert "no_proxy" not in os.environ
+    else:  # a write sets both spellings
+        assert os.environ["no_proxy"] == expected
+
+
+def test_no_proxy_not_set_without_any_proxy_var():
+    normalize_proxy_env()
+
+    # Without a proxy, NO_PROXY is inert — don't surprise the environment.
+    assert "NO_PROXY" not in os.environ
+    assert "no_proxy" not in os.environ
