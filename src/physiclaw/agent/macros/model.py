@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, ClassVar, TypeVar
 from physiclaw.agent.macros.template import TemplateError, fill
 from physiclaw.common import gesture_vocab
 from physiclaw.common.bbox import Bbox, center_of, inside
-from physiclaw.common.listing import LISTING_HEADER, ROW_RE, Element, parse_row
+from physiclaw.common.listing import ROW_RE, Element, is_header, parse_row
 
 MAX_STEPS = 20
 MAX_INPUTS = 8
@@ -181,11 +181,7 @@ class Screen:
             if el is not None:
                 content.append(el.label)
                 rows.append(el)
-            elif (
-                line.strip()
-                and line.strip() != LISTING_HEADER
-                and not ROW_RE.match(line)
-            ):
+            elif line.strip() and not is_header(line) and not ROW_RE.match(line):
                 # A plain text block: keep it whole, or a clause could never
                 # match non-listing content. A row-SHAPED line that failed
                 # `parse_row` is dropped instead — its coordinate text in the

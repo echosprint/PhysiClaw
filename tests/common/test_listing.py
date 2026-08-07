@@ -10,6 +10,7 @@ pass), so a parametrized pin holds each copy to the constant instead.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -18,11 +19,9 @@ from hypothesis import strategies as st
 
 import physiclaw
 from physiclaw.common.listing import (
-    ICON_ROW_RE,
     KINDS,
     LISTING_HEADER,
     ROW_RE,
-    TEXT_ROW_RE,
     Element,
     decode_elements,
     format_elements,
@@ -30,6 +29,19 @@ from physiclaw.common.listing import (
     parse_row,
 )
 from physiclaw.common.text import read_text
+
+# Per-kind full-shape pins, test-only since `compact._stub_body` moved
+# onto `parse_row`: hand-written (never derived from the module's
+# regexes) so they hold the row shape independent of the parser — a
+# grammar change can't hide behind a matching parser change. Keyed by
+# kind; `test_every_kind_has_a_shape_pin` forces a new kind to bring
+# its pin.
+_ROW_PINS = {
+    "text": re.compile(r'^\d+ \[text\] "(.*)" \[[^\]]*\] [0-9.]+\s*$'),
+    "icon": re.compile(r'^\d+ \[icon\] "" \[[^\]]*\] [0-9.]+\s*$'),
+}
+TEXT_ROW_RE = _ROW_PINS["text"]
+ICON_ROW_RE = _ROW_PINS["icon"]
 
 _PKG = Path(physiclaw.__file__).parent
 
@@ -85,15 +97,21 @@ def test_parse_row_round_trips_format_row() -> None:
 
 
 def test_format_row_rejects_unknown_kind() -> None:
-    # The kind vocabulary is closed: a new kind must extend KINDS (and
-    # gain a full-shape regex) in the same edit, or composition fails
-    # loudly here instead of parsers silently missing the new rows.
+    # The kind vocabulary is closed: a new kind must extend KINDS in
+    # the same edit, or composition fails loudly here instead of
+    # parsers silently missing the new rows.
     with pytest.raises(ValueError, match="unknown kind 'input'"):
         format_row(1, "input", "Search", [0.1, 0.2, 0.3, 0.4], 0.9)
 
 
 def test_row_re_alternation_derives_from_kinds() -> None:
     assert all(kind in ROW_RE.pattern for kind in KINDS)
+
+
+def test_every_kind_has_a_shape_pin() -> None:
+    # The production regexes derive from KINDS automatically; the pins
+    # are hand-written on purpose, so this is the growth reminder.
+    assert set(_ROW_PINS) == set(KINDS)
 
 
 # ---------- composer × parser round-trip ----------

@@ -4,7 +4,7 @@ One canonical shape, `Element`, with both codecs beside it: text via
 `format_elements` / `decode_elements` (the listing an agent reads), JSON
 via `Element.to_dict` / `from_dict` (`elements_to_json`, snapshot files).
 Core composes through `format_elements` (`orchestration.perception`);
-`agent.engine.compact._stub_body` parses rows back out with the regexes
+`agent.engine.compact._stub_body` parses rows back out with `parse_row`
 when stubbing superseded views. Defining every side here means the shape
 exists once — a formatter change and its parser change are the same
 edit.
@@ -33,10 +33,19 @@ from physiclaw.common.bbox import Bbox
 # Column header, first line of every listing.
 LISTING_HEADER = 'id [kind] "label" [left,top,right,bottom] conf'
 
+
+def is_header(line: str) -> bool:
+    """The column header, whitespace-tolerant — the one spelling of
+    "this line names columns, it is not a row". `parse_row` returns
+    None for it like any non-row; consumers that must tell the header
+    apart from prose (drop it vs keep it) go through this predicate."""
+    return line.strip() == LISTING_HEADER
+
+
 # The closed element-kind vocabulary. `Element` rejects anything else,
-# so adding a kind forces this tuple (and a matching full-shape regex
-# below) to grow in the same edit — the composer can never emit a row
-# shape the parsers silently miss.
+# so adding a kind forces this tuple (and its shape pin in
+# tests/common/test_listing.py) to grow in the same edit — the composer
+# can never emit a row shape the parsers silently miss.
 KINDS = ("icon", "text")
 
 
@@ -58,18 +67,11 @@ def format_row(id: int, kind: str, label: str, bbox, conf: float) -> str:
 # to generate non-row lines. Derives from KINDS so it can't drift.
 ROW_RE = re.compile(rf"^\d+ \[({'|'.join(KINDS)})\] ")
 
-# Full-shape matchers, one per kind in KINDS. `TEXT_ROW_RE` captures the
-# label (group 1); the greedy `.*` plus a `]`-free bbox class lets a
-# label carry quotes and brackets (`He said "hi" [ok]`) yet still peel
-# off the trailing bbox + confidence. `ICON_ROW_RE` requires the
-# empty-label icon shape.
-TEXT_ROW_RE = re.compile(r'^\d+ \[text\] "(.*)" \[[^\]]*\] [0-9.]+\s*$')
-ICON_ROW_RE = re.compile(r'^\d+ \[icon\] "" \[[^\]]*\] [0-9.]+\s*$')
-
 # All five fields, for `parse_row` — the one row parser production code
-# uses (region-scoped macro guards read rows through it via
-# `Screen.read`). Derives from KINDS like the matchers above, so a new
-# kind can't be silently unparseable.
+# uses. The greedy `.*` label plus a `]`-free bbox class lets a label
+# carry quotes and brackets (`He said "hi" [ok]`) yet still peel off
+# the trailing bbox + confidence. Derives from KINDS so a new kind
+# can't be silently unparseable.
 _DECODE_ROW_RE = re.compile(
     rf'^(\d+) \[({"|".join(KINDS)})\] "(.*)" \[([^\]]*)\] ([0-9.]+)\s*$'
 )
@@ -87,8 +89,8 @@ class Element:
     round-trip is testable as one. The constraints the row grammar
     implies are enforced here instead of trusted: `kind` is closed over
     KINDS, a label is single-line (rows are lines), and an icon's label
-    is empty — a labelled icon row matches neither full-shape regex, so
-    it would silently survive `compact._stub_body` as prose."""
+    is empty — a labelled icon row would fail `parse_row` and silently
+    survive `compact._stub_body` as prose."""
 
     id: int
     kind: str
@@ -202,7 +204,7 @@ def decode_elements(text: str) -> list[Element]:
     ValueError naming the line. For screen text that mixes rows with
     prose, use `parse_row` per line instead."""
     lines = text.splitlines()
-    if not lines or lines[0].rstrip() != LISTING_HEADER:
+    if not lines or not is_header(lines[0]):
         raise ValueError(
             f"decode_elements: first line must be the listing header {LISTING_HEADER!r}"
         )

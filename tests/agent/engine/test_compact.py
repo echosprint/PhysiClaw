@@ -48,7 +48,7 @@ from physiclaw.agent.engine.dto import (
     ToolResultMessage,
     UserMessage,
 )
-from physiclaw.common.listing import LISTING_HEADER, ROW_RE, format_row
+from physiclaw.common.listing import LISTING_HEADER, ROW_RE, format_row, is_header
 
 # Canonical tight cadence for collapse tests: first collapse at 3
 # complete turns, keep 1. Tests exercising a DIFFERENT triple
@@ -754,7 +754,7 @@ def test_stub_body_real_formatter_icon_only_listing_drops_header() -> None:
 # results, hints, warnings, sequence step lines, arbitrary text. The
 # blacklist covers every `str.splitlines` boundary, not just `\n` —
 # hypothesis found that e.g. `\x1e` inside a "line" gets re-split (a
-# pre-existing, benign normalization shared with the old filter).
+# pre-existing, benign normalization).
 _LINE_BREAKS = "\n\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029"
 _non_row_line = st.text(
     alphabet=st.characters(
@@ -762,7 +762,7 @@ _non_row_line = st.text(
         blacklist_characters=_LINE_BREAKS,
     ),
     max_size=80,
-).filter(lambda s: not ROW_RE.match(s) and s != LISTING_HEADER)
+).filter(lambda s: not ROW_RE.match(s) and not is_header(s))
 
 
 @given(st.lists(_non_row_line, max_size=12))
@@ -816,11 +816,11 @@ def test_stub_body_keeps_exactly_the_text_rows(kinds, label) -> None:
     ).filter(lambda s: s == s.strip()),
 )
 def test_stub_body_emitted_label_never_contains_a_newline(label) -> None:
-    """No emitted label carries a newline. `_stub_body` matches rows against
-    individual `splitlines()` lines, so a label field with an embedded
+    """No emitted label carries a newline. `_stub_body` parses each
+    `splitlines()` line separately, so a label field with an embedded
     line break splits the row and can't round-trip as one label — it falls
     through to the preamble instead. Locks the invariant against a future
-    switch to `re.DOTALL` / away from `splitlines()`."""
+    move away from `splitlines()`."""
     # Built by hand, NOT via the composer: the point is an adversarial
     # line-broken label, a shape `format_row` (via `Element`) now refuses
     # to compose — but arbitrary screen text can still contain it.

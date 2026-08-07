@@ -41,7 +41,7 @@ from physiclaw.agent.engine.dto import (
     ToolResultMessage,
     UserMessage,
 )
-from physiclaw.common.listing import ICON_ROW_RE, LISTING_HEADER, TEXT_ROW_RE
+from physiclaw.common.listing import is_header, parse_row
 
 log = logging.getLogger(__name__)
 
@@ -363,27 +363,21 @@ def _stub_body(text: str) -> str:
     survives verbatim as decision history, and a blank line sets it off
     from the label block.
 
-    The listing grammar (`LISTING_HEADER` / `TEXT_ROW_RE` / `ICON_ROW_RE`)
-    lives in `physiclaw.common.listing` beside its composer,
-    `format_elements`; sequence step lines (`1 tap ok — …`) lack
-    a quoted label + bbox and are kept. Output is stable under
-    re-application — a bare label can't match a full-shape row regex
-    unless it is itself a complete row, which OCR never produces.
+    Rows are recognized with `listing.parse_row`; sequence step lines
+    (`1 tap ok — …`) don't parse as rows and are kept. Output is stable
+    under re-application — a bare label can't parse as a row unless it
+    is itself a complete row, which OCR never produces.
     """
     pre: list[str] = []  # action result + verdict + sequence steps
     labels: list[str] = []  # surviving [text] labels, in listing order
     for line in text.splitlines():
-        if line == LISTING_HEADER:
+        if is_header(line):
             continue  # names columns that no longer exist
-        m = TEXT_ROW_RE.match(line)
-        if m:
-            label = m.group(1)
-            if label:  # drop empty-label text rows — no content to keep
-                labels.append(label)
-            continue
-        if ICON_ROW_RE.match(line):
-            continue  # opaque without the image, and label-less
-        pre.append(line)
+        el = parse_row(line)
+        if el is None:
+            pre.append(line)  # not a row — decision history, kept verbatim
+        elif el.label:
+            labels.append(el.label)  # label-less/empty rows have no content
     pre_s = "\n".join(pre).strip()
     lbl_s = "\n".join(labels).strip()
     if pre_s and lbl_s:
