@@ -53,8 +53,8 @@ camera-verified no-ops / four full cycles / four identical errors.
 
 from dataclasses import dataclass, field
 
-from physiclaw.agent.engine import screen_layout
-from physiclaw.agent.engine.geometry import MATCH_TOLERANCE, center_of, near
+from physiclaw.agent import layout
+from physiclaw.common.bbox import center_of, near
 from physiclaw.common.config import CONFIG
 
 # Presses count toward same-target tiers by bbox center, nav gestures
@@ -72,6 +72,14 @@ from physiclaw.common.gesture_vocab import (
 
 WARN_AT = CONFIG.engine.same_target_warn
 BLOCK_AT = CONFIG.engine.same_target_block
+
+# Two press centers within this L∞ distance are the same target —
+# covers the coordinate jitter of re-transcribed bboxes without
+# swallowing a genuinely different neighbor element. Deliberately a
+# separate knob from `layout.store.BOX_MARGIN` even though the values
+# coincide today: same-target matching and learned-box slack may
+# drift apart legitimately.
+MATCH_TOLERANCE = 0.02
 
 
 def _press_centers(name: str, arguments: dict) -> list[tuple[float, float]]:
@@ -364,14 +372,12 @@ class StuckGuard:
     ) -> list[tuple[float, float]]:
         if self._exempt is None:
             self._exempt = [
-                c
-                for c in (center_of(b) for b in screen_layout.repeatable_key_boxes())
-                if c
+                c for c in (center_of(b) for b in layout.repeatable_key_boxes()) if c
             ]
         return [
             c
             for c in _press_centers(name, arguments)
-            if not any(near(c, e) for e in self._exempt)
+            if not any(near(c, e, tolerance=MATCH_TOLERANCE) for e in self._exempt)
         ]
 
     def _signature(self, name: str, arguments: dict) -> tuple | None:
@@ -406,6 +412,6 @@ class StuckGuard:
 
     def _find(self, center: tuple[float, float]) -> _Target | None:
         for t in self._targets:
-            if near(center, t.center):
+            if near(center, t.center, tolerance=MATCH_TOLERANCE):
                 return t
         return None

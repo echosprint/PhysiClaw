@@ -30,7 +30,7 @@ log = logging.getLogger(__name__)
 def _layout_learned() -> bool:
     """Read the first-run layout's `learned` marker straight from its JSON.
 
-    The agent-side `screen_layout` module writes the marker (it owns the
+    The agent-side `agent.layout` module writes the marker (it owns the
     page/field schema); core only reads it, so the rig can report
     first-run progress without importing the agent package."""
     p = paths.screen_layout_json()
@@ -40,7 +40,7 @@ def _layout_learned() -> bool:
         data = json.loads(read_text(p))
     except (OSError, ValueError):  # ValueError covers JSON + UTF-8 decode errors
         return False
-    # "layout_learned" is written by agent-side screen_layout.record() once
+    # "layout_learned" is written by agent-side layout.record() once
     # every box is captured; core only reads it (keep in sync with that writer).
     return bool(isinstance(data, dict) and data.get("layout_learned"))
 

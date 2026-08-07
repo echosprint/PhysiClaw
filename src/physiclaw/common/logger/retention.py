@@ -47,7 +47,7 @@ def purge_old_sessions(sessions_dir: Path, *, days: int) -> int:
     """Remove session dirs under `sessions_dir` whose newest file is older
     than `days` (mtime, not filename — tolerant of clock skew + files
     appended long after creation). Fail-open; returns the count removed.
-    Shared by the engine (`trace._purge_old`) and the claude session
+    Shared by the engine (`trace.store._purge_old`) and the claude session
     writer."""
     cutoff = time.time() - days * 86400
     try:

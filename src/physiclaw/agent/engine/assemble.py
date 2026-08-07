@@ -11,6 +11,7 @@ the wire the running agent actually sends.
 import datetime as dt
 from dataclasses import dataclass
 
+from physiclaw.agent import layout
 from physiclaw.agent.engine import (
     builtin_tool,
     compact,
@@ -20,7 +21,6 @@ from physiclaw.agent.engine import (
     plan,
     prompt,
     scratchpad,
-    screen_layout,
     skill,
 )
 from physiclaw.agent.engine.builtin_tool import LocalTool
@@ -51,11 +51,11 @@ class PromptBundle:
 def build_prompt_bundle(provider_id: str) -> PromptBundle:
     """Discover skills, build the local tool registry, and render the SYSTEM
     prompt for a session — the offline half of `engine._run_session`'s setup."""
-    layout_incomplete = not screen_layout.is_learned()
-    builtin_skills = screen_layout.prune_builtin_skills(skill.discover_builtin_skills())
+    layout_incomplete = not layout.is_learned()
+    builtin_skills = layout.prune_builtin_skills(skill.discover_builtin_skills())
     # Inline the learned bboxes into the skill bodies (e.g. im's send sequence)
     # so the agent uses coordinates directly instead of cross-referencing.
-    builtin_skills = screen_layout.fill_builtin_boxes(builtin_skills)
+    builtin_skills = layout.fill_builtin_boxes(builtin_skills)
     user_skills = skill.discover_user_skills()
     macros = macro_store.discover_enabled()
     local_registry = builtin_tool.build_registry(user_skills, macros)
@@ -121,7 +121,7 @@ def apply_request_tails(
     if compaction_keep is not None:
         out = compact.inject_checkpoint_tail(out, keep=compaction_keep)
     if layout_incomplete:
-        out = screen_layout.inject_tail(out)
+        out = layout.inject_tail(out)
     return out
 
 

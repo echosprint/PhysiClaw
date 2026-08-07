@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from physiclaw.common.bbox import validate_bbox
+from physiclaw.common.bbox import center_of, inside, near, validate_bbox
 
 
 @pytest.mark.parametrize(
@@ -79,3 +79,40 @@ def test_engine_validator_wraps_the_same_message() -> None:
     with pytest.raises(ValidationError) as engine_err:
         validate_arguments({"bbox": bad}, {"type": "object", "properties": {}})
     assert str(engine_err.value) == str(common_err.value)
+
+
+# ---------- geometry primitives ----------
+
+
+@pytest.mark.parametrize(
+    "bbox", [None, [], [0.1, 0.2], [0.1, "x", 0.9, 1.0], "garbage", {}]
+)
+def test_center_of_garbage_is_none(bbox) -> None:
+    assert center_of(bbox) is None
+
+
+def test_center_of_valid_bbox() -> None:
+    assert center_of([0.2, 0.4, 0.6, 0.8]) == (0.4, 0.6000000000000001)
+
+
+def test_center_of_accepts_string_floats() -> None:
+    # bboxes re-transcribed by the model sometimes arrive as strings.
+    assert center_of(["0.2", "0.4", "0.6", "0.8"]) is not None
+
+
+def test_near_within_tolerance() -> None:
+    a = (0.5, 0.5)
+    assert near(a, (0.5 + 0.02 * 0.9, 0.5 - 0.02 * 0.9), tolerance=0.02)
+    assert not near(a, (0.5 + 0.02 * 1.5, 0.5), tolerance=0.02)
+
+
+def test_inside_zero_margin_is_exact_containment() -> None:
+    box = [0.2, 0.2, 0.4, 0.4]
+    assert inside((0.4, 0.3), box, margin=0.0)
+    assert not inside((0.401, 0.3), box, margin=0.0)
+
+
+def test_inside_expands_by_margin() -> None:
+    box = [0.2, 0.2, 0.4, 0.4]
+    assert inside((0.4 + 0.02, 0.3), box, margin=0.02)
+    assert not inside((0.4 + 0.02 * 1.5, 0.3), box, margin=0.02)

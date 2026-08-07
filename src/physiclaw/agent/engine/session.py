@@ -13,7 +13,7 @@ makes the one-shot semantics structural.
 
 from dataclasses import dataclass, field
 
-from physiclaw.agent.engine import screen_layout
+from physiclaw.agent import layout
 from physiclaw.agent.engine.plan import Plan
 from physiclaw.agent.engine.stuck import StuckGuard
 
@@ -67,6 +67,4 @@ class Session:
     scratchpad_log: list[tuple[int, str]] = field(default_factory=list)
     guard: StuckGuard = field(default_factory=StuckGuard)
     # Cross-call keyboard belief for the layout lint (see KeyboardTracker).
-    kb: screen_layout.KeyboardTracker = field(
-        default_factory=screen_layout.KeyboardTracker
-    )
+    kb: layout.KeyboardTracker = field(default_factory=layout.KeyboardTracker)

@@ -1,6 +1,6 @@
 """Shared session-artifact surface for the two agent engines.
 
-The engine (`agent/engine/trace.py`) and the claude subprocess path
+The engine (`agent/trace`) and the claude subprocess path
 (`agent/claude/session_log.py`) each write a daily human narrative plus
 a per-session artifact dir whose `summary.json` shares one schema (v1)
 — one `physiclaw logs` / `jq` reads both engines' sessions. This module

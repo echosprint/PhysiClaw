@@ -157,7 +157,7 @@ def _list_sessions(sessions_dir: Path, *, n: int, as_json: bool) -> None:
 
 
 def _row(s: dict[str, Any]) -> str:
-    from physiclaw.agent.engine.trace import brief, fmt_tokens
+    from physiclaw.agent.trace import brief, fmt_tokens
 
     outcome = s.get("outcome") or {}
     sentinel = outcome.get("sentinel") or "?"
@@ -205,7 +205,7 @@ def _save_session(d: Path, dest: Path | None) -> None:
             z.write(p, arcname=f"{d.name}/{p.relative_to(d).as_posix()}")
         # Ship the format doc with the data so any analyst — human or
         # AI agent — can bootstrap from the zip alone.
-        from physiclaw.agent.engine.trace import SESSIONS_README
+        from physiclaw.agent.trace import SESSIONS_README
 
         z.writestr(f"{d.name}/README.md", SESSIONS_README)
     images = sum(1 for p in files if p.parent.name == "images")
@@ -255,7 +255,7 @@ def _echo_narrative(events_path: Path, n: int) -> None:
     """Re-render the last `n` events with the daily log's formatter — the
     per-session equivalent of the day file's narrative, without the other
     sessions interleaved."""
-    from physiclaw.agent.engine.trace import summarize_event
+    from physiclaw.agent.trace import summarize_event
 
     try:
         lines = events_path.read_text(encoding="utf-8").splitlines()

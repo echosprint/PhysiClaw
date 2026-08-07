@@ -1,4 +1,5 @@
-"""First-run screen layout: validate the boxes the agent measured, accumulate.
+"""The layout store: schema, validation, persistence, rendering, the
+`record` tool entry point, and the first-run tail reminder.
 
 The agent captures three pages one at a time — Spotlight search, the IM chat
 with the keyboard down, and the same chat with it up. `screenshot` already
@@ -24,34 +25,27 @@ inject-the-layout.
 
 import json
 import logging
-from dataclasses import dataclass, replace
 from typing import NotRequired, TypedDict
 
 from physiclaw.agent.engine.dto import Message, UserMessage
-from physiclaw.agent.engine.geometry import center_of, inside
 from physiclaw.common import paths
-from physiclaw.common.gesture_vocab import (
-    NAV_TOOLS,
-    PRESS_TOOLS,
-    RUN_MACRO,
-    SEQUENCE,
-    STEP_ACTIONS,
-    STEP_ARG,
-    STEP_TOOL,
-    SWIPE,
-)
+from physiclaw.common.bbox import inside
 from physiclaw.common.text import read_text, write_text
 
 log = logging.getLogger(__name__)
 
-# Calls whose effect on the keyboard cannot be attributed: a swipe may or
-# may not dismiss it, and `run_macro` hides a whole rehearsed sequence
-# behind one result. Both decay the belief to "unknown" rather than guess.
-KEYBOARD_OPAQUE = frozenset({SWIPE, RUN_MACRO})
+# Slack around a learned box before a press counts as inside it — the
+# package's tolerance for bbox re-transcription jitter, consumed by the
+# lint and the keyboard belief. `stuck.MATCH_TOLERANCE` is deliberately
+# a separate knob (see its comment).
+BOX_MARGIN = 0.02
 
-# The built-in skill that drives first-run capture — dropped from the prompt
-# once the layout is learned (its body is only useful during setup).
-SKILL_NAME = "screen-layout"
+
+def inside_learned(center: tuple[float, float], box: list) -> bool:
+    """`bbox.inside` with the learned-box slack applied — the one form
+    this package tests containment with."""
+    return inside(center, box, margin=BOX_MARGIN)
+
 
 # Any chat app is supported — the agent passes whichever it's in. This just
 # nice-cases a few common ones for the layout card; unknown apps are used
@@ -130,284 +124,6 @@ def repeatable_key_boxes() -> list[list[float]]:
     repeatedly. Empty while the layout is unlearned."""
     d = _load()
     return [d[f] for f in REPEATABLE_KEY_FIELDS if isinstance(d.get(f), list)]
-
-
-def _step_center(step, tool: str) -> tuple[float, float] | None:
-    """Center of a sequence step's bbox if it's the given press tool."""
-    if not isinstance(step, dict) or step.get(STEP_TOOL) != tool:
-        return None
-    return center_of(step.get(STEP_ARG) or [])
-
-
-def _taps_box(steps, box) -> bool:
-    """True if any step is a tap landing inside `box` (None/garbage → False)."""
-    if not isinstance(box, list):
-        return False
-    for s in steps:
-        c = _step_center(s, "tap")
-        if c is not None and inside(c, box):
-            return True
-    return False
-
-
-# Boxes that are only ever pressed while typing/pasting — a press there
-# neither raises nor dismisses the keyboard.
-_KEYBOARD_REGION_FIELDS = (
-    "chat_input_kb_visible",
-    "send",
-    "chat_paste",
-    "backspace",
-    "return",
-    "space",
-    "spotlight_input",
-    "spotlight_paste",
-)
-
-
-@dataclass
-class KeyboardTracker:
-    """Conservative cross-call belief about the on-screen keyboard.
-
-    "up" is claimed only when the camera verified the raising press (a
-    changed-verdict press on the chat input's keyboard-hidden box) and
-    every gesture since provably preserves it (typing/pasting boxes).
-    Nav gestures mean "down" — except a camera-verified no-change nav
-    (a missed edge swipe: the stuck guard's nav-miss case), which left
-    the screen, keyboard included, exactly as it was. Swipes, batches
-    with presses, and presses outside the keyboard region decay to
-    "unknown", as does `run_macro` — the one local tool that replays real
-    gestures, and so the exception to the rule below. Every OTHER local
-    tool, plus views and clipboard syncs, never touches the screen.
-    Consumers act only on "up" — "down"/"unknown" fail open.
-    """
-
-    state: str = "unknown"  # "up" | "down" | "unknown"
-
-    def observe(self, name: str, arguments: dict, changed: bool | None) -> None:
-        if name in NAV_TOOLS:
-            if changed is not False:
-                self.state = "down"
-            return
-        if name in KEYBOARD_OPAQUE:
-            # RUN_MACRO is the SEQUENCE case wearing a local tool's name: a
-            # macro replays up to 20 rehearsed gestures — `home_screen`
-            # dismisses the keyboard, a chat-input tap raises it — behind ONE
-            # result no one can attribute per step. Without this it falls to
-            # the "views / local tools — screen untouched" return below and
-            # carries a pre-macro belief across a macro that invalidated it,
-            # so LayoutLint then blocks the agent's next long_press on the
-            # box that is now correct. Decay, never keep.
-            self.state = "unknown"
-            return
-        if name == SEQUENCE:
-            actions = arguments.get(STEP_ACTIONS)
-            steps = actions if isinstance(actions, list) else []
-            if any(
-                isinstance(x, dict) and x.get(STEP_TOOL) in (*PRESS_TOOLS, SWIPE)
-                for x in steps
-            ):
-                # A batch verdict can't be attributed per step — any press
-                # or swipe inside may have moved the keyboard.
-                self.state = "unknown"
-            return
-        if name not in PRESS_TOOLS:
-            return  # views / local tools / clipboard — screen untouched
-        c = center_of(arguments.get("bbox") or [])
-        if c is None:
-            self.state = "unknown"
-            return
-        d = _load()
-        hidden = d.get("chat_input_kb_hidden")
-        if isinstance(hidden, list) and inside(c, hidden):
-            # The raising press — but only the camera proves the keyboard
-            # actually rose (a dead press must not claim "up").
-            self.state = "up" if changed is True else "unknown"
-            return
-        for f in _KEYBOARD_REGION_FIELDS:
-            box = d.get(f)
-            if isinstance(box, list) and inside(c, box):
-                return  # typing/pasting — keyboard state preserved
-        self.state = "unknown"  # a press elsewhere may have dismissed it
-
-
-def lint_gesture(name: str, arguments: dict, *, keyboard_up: bool) -> str | None:
-    """Pre-dispatch layout lint — blocking message, or None.
-
-    Covers both shapes of the wrong-box failure: a `sequence` (checked
-    always — in-batch evidence plus the caller's keyboard belief) and a
-    STANDALONE `long_press` (checked only when the keyboard is believed
-    up: the raising tap happened in an earlier call, so no in-batch
-    evidence can exist).
-    """
-    if name == SEQUENCE:
-        return lint_sequence(arguments.get(STEP_ACTIONS), keyboard_up=keyboard_up)
-    if name != "long_press" or not keyboard_up:
-        return None
-    d = _load()
-    hidden = d.get("chat_input_kb_hidden")
-    visible = d.get("chat_input_kb_visible")
-    if not (isinstance(hidden, list) and isinstance(visible, list)):
-        return None
-    c = center_of(arguments.get("bbox") or [])
-    if c is None or not inside(c, hidden):
-        return None
-    return (
-        f"BLOCKED — not executed: this long-press targets the chat input's "
-        f"KEYBOARD-HIDDEN box {hidden}, but the keyboard is up (your earlier "
-        "press on the input raised it), so that region is now the keyboard "
-        "itself and no Paste popover can appear there. Long-press the "
-        f"chat input's KEYBOARD-VISIBLE box {visible} instead "
-        "(SYSTEM § Screen layout)."
-    )
-
-
-def lint_sequence(actions, *, keyboard_up: bool = False) -> str | None:
-    """Pre-dispatch layout lint for a `sequence` batch — blocking message,
-    or None.
-
-    The one signature it refuses: a `long_press` on the chat input's
-    KEYBOARD-HIDDEN box at a point in the batch where the keyboard must
-    be up — because an earlier step tapped that box (which raises the
-    keyboard), because the caller already believes the keyboard is up
-    (`keyboard_up`, raised in an earlier call), or because a later step
-    taps the Paste box (which only ever appears above the RISEN input).
-    With the keyboard up, the kb-hidden region IS the keyboard's bottom
-    rows, so the popover never opens and the batch "succeeds" into a
-    no-op the stuck guard can't see (every press changes the screen).
-    The im template's correct box is `chat_input_kb_visible`.
-
-    Fail-open by design: unlearned layout, malformed steps, or missing
-    fields return None — this lint must never invent a blocker.
-    """
-    if not isinstance(actions, list):
-        return None
-    d = _load()
-    hidden = d.get("chat_input_kb_hidden")
-    visible = d.get("chat_input_kb_visible")
-    paste = d.get("chat_paste")
-    if not (isinstance(hidden, list) and isinstance(visible, list)):
-        return None
-
-    input_tapped_at: int | None = None
-    for i, step in enumerate(actions, 1):
-        tap_c = _step_center(step, "tap")
-        if tap_c is not None and inside(tap_c, hidden):
-            if input_tapped_at is None:
-                input_tapped_at = i
-            continue
-        lp_c = _step_center(step, "long_press")
-        if lp_c is None or not inside(lp_c, hidden):
-            continue
-        pastes_after = _taps_box(actions[i:], paste)
-        if input_tapped_at is None and not keyboard_up and not pastes_after:
-            continue  # bare long-press near the bottom — not the paste flow
-        if input_tapped_at is not None:
-            why = f"step {input_tapped_at} taps that box, which raises the keyboard"
-        elif keyboard_up:
-            why = "the keyboard is already up (raised by an earlier press on the input)"
-        else:
-            why = "the batch then taps the Paste box, which only appears above the RISEN input"
-        return (
-            f"BLOCKED — no step ran: step {i} long-presses the chat input's "
-            f"KEYBOARD-HIDDEN box {hidden}, but {why} — that region is now "
-            "the keyboard, so no Paste popover can appear. Re-issue the "
-            f"batch with the long-press on the KEYBOARD-VISIBLE box "
-            f"{visible} (SYSTEM § Screen layout)."
-        )
-
-    # Reused-paste-box guard: the batch taps the learned chat Paste box but
-    # long-presses a box OTHER than the chat input it belongs to. chat_paste
-    # only exists above chat_input_kb_visible after long-pressing IT; copying
-    # the `im` bundled sequence into another app (a search field in Meituan /
-    # JD / …) long-presses THAT app's box, so the reused chat_paste coord lands
-    # on empty screen and the paste silently no-ops — the batch still "ok"s and
-    # the agent loops. The correct im template long-presses chat_input_kb_visible,
-    # so it never trips this.
-    if isinstance(paste, list) and _taps_box(actions, paste):
-        for step in actions:
-            c = _step_center(step, "long_press")
-            if c is not None and not inside(c, visible):
-                return (
-                    f"BLOCKED — no step ran (clipboard unchanged): reuses IM "
-                    f"chat Paste box {paste} after long-pressing a different "
-                    "field — its Paste popover is elsewhere. Redo every "
-                    "step: long-press the field ALONE (own turn), read Paste "
-                    "from that view (`search-in-app`). Don't reuse "
-                    "chat_paste."
-                )
-    return None
-
-
-def prune_builtin_skills(skills: dict) -> dict:
-    """Drop the first-run `screen-layout` skill once the layout is learned —
-    after setup its body is dead weight in `## Built-in Skills`. No-op (and a
-    fresh dict) while still incomplete, so the skill stays available for
-    capture."""
-    if is_learned():
-        return {k: v for k, v in skills.items() if k != SKILL_NAME}
-    return skills
-
-
-# Built-in skill markdown placeholder -> learned layout field. Keyed by skill:
-# the same token means different fields in different skills (im's <paste-button>
-# is the chat paste; open-app's is the Spotlight paste). Only `im` is filled —
-# it has a copy-paste `sequence` template the agent runs verbatim. Just the
-# tokens that appear in that fenced template (filling is code-block-only, so a
-# prose-only token like <backspace> would never substitute).
-# Skill placeholders use the same `{{token}}` syntax as doctrine's
-# config tokens (common.doctrine.DOCTRINE_TOKENS) — one placeholder
-# style everywhere. Two domains though: doctrine tokens are ALL substituted
-# (leftovers warn), while skill element tokens are substituted only
-# here, only inside code blocks, only once the layout is learned —
-# elsewhere they stay symbolic and the agent resolves them from
-# SYSTEM § Screen layout.
-_SKILL_BOX_TOKENS = {
-    "im": {
-        "{{input-hidden}}": "chat_input_kb_hidden",
-        "{{input-visible}}": "chat_input_kb_visible",
-        "{{paste-button}}": "chat_paste",
-        "{{send}}": "send",
-    },
-    # Same token name, different field per skill: {{paste-button}} is the
-    # CHAT paste box in `im` but the SPOTLIGHT paste box here.
-    "open-app": {
-        "{{search-field}}": "spotlight_input",
-        "{{backspace}}": "backspace",
-        "{{paste-button}}": "spotlight_paste",
-    },
-}
-
-
-def _sub_in_code_blocks(body: str, subs: dict) -> str:
-    """Apply `subs` (token -> replacement) only INSIDE fenced ``` code blocks.
-    Splitting on the fence, the odd-indexed segments are the code bodies."""
-    parts = body.split("```")
-    for i in range(1, len(parts), 2):
-        for token, val in subs.items():
-            parts[i] = parts[i].replace(token, val)
-    return "```".join(parts)
-
-
-def fill_builtin_boxes(skills: dict) -> dict:
-    """Once the layout is learned, swap the bbox placeholders
-    (`{{input-hidden}}`, `{{send}}`, ...) for concrete coordinates INSIDE the
-    skill's fenced code template (im's send `sequence`) so the agent runs it
-    verbatim. Prose keeps the readable placeholder names — they reference
-    § Screen layout. No-op (a fresh dict) while incomplete. Inputs aren't
-    mutated; filled skills are copies."""
-    if not is_learned():
-        return dict(skills)
-    layout = _load()
-    out = {}
-    for name, s in skills.items():
-        subs = {
-            token: _fmt(layout[field])
-            for token, field in _SKILL_BOX_TOKENS.get(name, {}).items()
-            if layout.get(field)
-        }
-        body = _sub_in_code_blocks(s.body, subs) if subs else s.body
-        out[name] = replace(s, body=body) if body != s.body else s
-    return out
 
 
 def load_layout_md() -> str:

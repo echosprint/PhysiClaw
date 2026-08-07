@@ -16,7 +16,7 @@ next screen change. Auto-discovered by `physiclaw.agent.runtime.hook.load_hooks(
 
 import logging
 
-from physiclaw.agent.engine import screen_layout
+from physiclaw.agent import layout
 from physiclaw.agent.runtime.hook import Trigger, register
 
 log = logging.getLogger(__name__)
@@ -27,7 +27,7 @@ _fired = False
 @register
 def first_run_layout() -> Trigger | None:
     global _fired
-    if _fired or screen_layout.is_learned():
+    if _fired or layout.is_learned():
         return None
     _fired = True
     log.info("screen layout not learned — waking agent for first-run setup")

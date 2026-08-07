@@ -12,8 +12,8 @@ from dataclasses import dataclass
 from physiclaw.agent.engine.builtin_tool import LocalTool
 from physiclaw.agent.engine.mcp_tool import McpClient
 from physiclaw.agent.engine.policy import Policies
-from physiclaw.agent.engine.trace import RawLog, Trace
 from physiclaw.agent.provider import Provider
+from physiclaw.agent.trace import RawLog, Trace
 from physiclaw.common.config import CONFIG
 
 

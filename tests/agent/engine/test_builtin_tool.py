@@ -481,11 +481,11 @@ async def test_report_screen_layout_handler_delegates(mocker) -> None:
     )
 
     rec = mocker.patch(
-        "physiclaw.agent.engine.screen_layout.record",
+        "physiclaw.agent.layout.record",
         return_value="LAYOUT SAVED",
     )
     # Not the completing call → no session-ending / restart side effect.
-    mocker.patch("physiclaw.agent.engine.screen_layout.is_learned", return_value=False)
+    mocker.patch("physiclaw.agent.layout.is_learned", return_value=False)
 
     session = Session()
     bbox = [0.03, 0.08, 0.88, 0.13]
@@ -506,12 +506,12 @@ async def test_report_screen_layout_handler_restarts_on_completion(mocker) -> No
     from physiclaw.agent.runtime.sentinel import IDLE
 
     mocker.patch(
-        "physiclaw.agent.engine.screen_layout.record",
+        "physiclaw.agent.layout.record",
         return_value="done",
     )
     # is_learned: False before the call, True after → this call completed setup.
     mocker.patch(
-        "physiclaw.agent.engine.screen_layout.is_learned",
+        "physiclaw.agent.layout.is_learned",
         side_effect=[False, True],
     )
 
@@ -537,9 +537,9 @@ async def test_report_screen_layout_handler_no_restart_when_already_complete(
         _handle_report_screen_layout,
     )
 
-    mocker.patch("physiclaw.agent.engine.screen_layout.record", return_value="updated")
+    mocker.patch("physiclaw.agent.layout.record", return_value="updated")
     # Already complete before AND after → a correction, not a completing call.
-    mocker.patch("physiclaw.agent.engine.screen_layout.is_learned", return_value=True)
+    mocker.patch("physiclaw.agent.layout.is_learned", return_value=True)
 
     session = Session()
     await _handle_report_screen_layout(
@@ -745,7 +745,7 @@ async def test_add_pitfall_handler_sets_flag_even_when_nothing_added() -> None:
 
 def test_build_registry_includes_all_tool_categories(mocker) -> None:
     # First run (layout not learned): the setup tool is present.
-    mocker.patch("physiclaw.agent.engine.screen_layout.is_learned", return_value=False)
+    mocker.patch("physiclaw.agent.layout.is_learned", return_value=False)
     keys = set(build_registry({}).keys())
 
     assert keys == {
@@ -768,7 +768,7 @@ def test_build_registry_includes_all_tool_categories(mocker) -> None:
 
 
 def test_build_registry_drops_report_screen_layout_once_learned(mocker) -> None:
-    mocker.patch("physiclaw.agent.engine.screen_layout.is_learned", return_value=True)
+    mocker.patch("physiclaw.agent.layout.is_learned", return_value=True)
     keys = set(build_registry({}).keys())
 
     assert "report_screen_layout" not in keys

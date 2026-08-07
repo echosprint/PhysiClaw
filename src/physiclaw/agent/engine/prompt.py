@@ -22,7 +22,8 @@ import hashlib
 import logging
 from pathlib import Path
 
-from physiclaw.agent.engine import mcp_inventory, memory, screen_layout
+from physiclaw.agent import layout
+from physiclaw.agent.engine import mcp_inventory, memory
 from physiclaw.common.doctrine import fill_tokens
 from physiclaw.common.text import read_text
 
@@ -220,14 +221,14 @@ def _render_screen_layout() -> list[str]:
     ``~/.physiclaw/screen-layout/`` at session start — cache-stable.
 
     Nothing here until setup is complete: while pages are still missing the
-    turn-volatile tail reminder (`screen_layout.inject_tail`) lists the fields
+    turn-volatile tail reminder (`layout.inject_tail`) lists the fields
     left to capture, and each `report_screen_layout` result confirms the save
     and how many remain. Once the last box lands, this loads the full layout on
     the next wake.
     """
-    if not screen_layout.is_learned():
+    if not layout.is_learned():
         return []
-    md = screen_layout.load_layout_md() or "not set yet"
+    md = layout.load_layout_md() or "not set yet"
     return ["## Screen layout", "", md, ""]
 
 

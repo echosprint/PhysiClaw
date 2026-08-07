@@ -7,7 +7,7 @@ already (config.toml in 58aa00d, SKILL.md after). Route every short-
 lived text I/O through these helpers so UTF-8 is the only default.
 
 Long-lived append handles (daily log loops in agent/claude/spawn.py,
-agent/engine/trace.py, agent/engine/jobs.py) keep an explicit
+agent/trace, agent/engine/jobs.py) keep an explicit
 ``open(path, "a", encoding="utf-8")`` inline — wrapping a stateful
 file handle in a helper would be more indirection than it's worth.
 """

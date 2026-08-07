@@ -330,8 +330,8 @@ def _probe_provider_deep(provider_id: str, model_id: str) -> str:
         TextBlock,
         UserMessage,
     )
-    from physiclaw.agent.engine.trace import brief
     from physiclaw.agent.provider import make_provider
+    from physiclaw.agent.trace import brief
 
     try:
         prov = make_provider(provider_id, model_id)

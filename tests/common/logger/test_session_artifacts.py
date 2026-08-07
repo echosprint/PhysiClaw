@@ -87,7 +87,7 @@ def _key_tree(d: dict) -> dict:
 
 @functools.cache
 def _engine_summary() -> dict:
-    from physiclaw.agent.engine.trace import _Summary
+    from physiclaw.agent.trace.trace import _Summary
 
     s = _Summary("eng-sid")
     for event in (

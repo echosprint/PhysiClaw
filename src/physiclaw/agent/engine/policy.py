@@ -33,11 +33,10 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from physiclaw.agent import layout, trace
 from physiclaw.agent.engine import (
     memory,
     pitfalls,
-    screen_layout,
-    trace,
     trajectory,
 )
 from physiclaw.agent.engine.dto import AssistantMessage, ToolCall
@@ -63,7 +62,7 @@ log = logging.getLogger(__name__)
 class Rejection:
     """A TurnGate verdict: pop the assistant turn, inject `corrective`,
     re-run the turn. `event` must stay stable — the session summary counts
-    rejection kinds by trace event name (see trace._CORRECTIVE_EVENTS)."""
+    rejection kinds by trace event name (see trace.trace._CORRECTIVE_EVENTS)."""
 
     corrective: str
     event: str
@@ -412,7 +411,7 @@ class LayoutLint(DispatchGuard):
         if call.name not in (SEQUENCE, "long_press"):
             return None
         try:
-            lint = screen_layout.lint_gesture(
+            lint = layout.lint_gesture(
                 call.name,
                 call.arguments,
                 keyboard_up=session.kb.state == "up",

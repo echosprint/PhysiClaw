@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from physiclaw.agent import layout
 from physiclaw.agent.engine import memory, prompt
 
 
@@ -37,13 +38,12 @@ def _stub_mcp_inventory(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _stub_screen_layout(monkeypatch: pytest.MonkeyPatch) -> None:
+def _stub_layout(monkeypatch: pytest.MonkeyPatch) -> None:
     """Default: setup incomplete → screen-layout section absent, so unrelated
     prompt tests stay hermetic. Tests exercising the section override this."""
-    from physiclaw.agent.engine import screen_layout
 
-    monkeypatch.setattr(screen_layout, "is_learned", lambda: False)
-    monkeypatch.setattr(screen_layout, "load_layout_md", lambda: "")
+    monkeypatch.setattr(layout, "is_learned", lambda: False)
+    monkeypatch.setattr(layout, "load_layout_md", lambda: "")
 
 
 # ---------- DOCTRINE_FILE_ORDER ----------
@@ -277,17 +277,16 @@ def test_render_section_passes_prerendered_block_through() -> None:
 
 
 # ---------- _render_screen_layout ----------
-# The first-run nudge is a tail message (screen_layout.inject_tail), not this
+# The first-run nudge is a tail message (layout.inject_tail), not this
 # section — here we only cover loading the layout once all pages are captured.
 
 
 def test_render_screen_layout_loads_md_when_complete(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from physiclaw.agent.engine import screen_layout
 
-    monkeypatch.setattr(screen_layout, "is_learned", lambda: True)
-    monkeypatch.setattr(screen_layout, "load_layout_md", lambda: "LAYOUT TABLE")
+    monkeypatch.setattr(layout, "is_learned", lambda: True)
+    monkeypatch.setattr(layout, "load_layout_md", lambda: "LAYOUT TABLE")
     out = "\n".join(prompt._render_screen_layout())
 
     assert "## Screen layout" in out
@@ -297,23 +296,21 @@ def test_render_screen_layout_loads_md_when_complete(
 def test_render_screen_layout_empty_while_incomplete(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from physiclaw.agent.engine import screen_layout
 
     # Even with a partial layout on disk, nothing shows until complete.
-    monkeypatch.setattr(screen_layout, "is_learned", lambda: False)
-    monkeypatch.setattr(screen_layout, "load_layout_md", lambda: "PARTIAL")
+    monkeypatch.setattr(layout, "is_learned", lambda: False)
+    monkeypatch.setattr(layout, "load_layout_md", lambda: "PARTIAL")
     assert prompt._render_screen_layout() == []
 
 
 def test_render_screen_layout_says_not_set_when_learned_but_md_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from physiclaw.agent.engine import screen_layout
 
     # Edge case: complete per json but the md file is gone — still show the
     # section, with a placeholder rather than hiding it.
-    monkeypatch.setattr(screen_layout, "is_learned", lambda: True)
-    monkeypatch.setattr(screen_layout, "load_layout_md", lambda: "")
+    monkeypatch.setattr(layout, "is_learned", lambda: True)
+    monkeypatch.setattr(layout, "load_layout_md", lambda: "")
     out = "\n".join(prompt._render_screen_layout())
 
     assert "## Screen layout" in out

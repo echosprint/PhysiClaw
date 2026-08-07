@@ -13,7 +13,8 @@ Members:
     proxy          — proxy env-var normalization for httpx
     runtime_state  — live-server state file (host/port)
     verdict        — screen-change markers shared by core and agent
-    bbox           — bbox validation shared by core and agent
+    bbox           — bbox validation + geometry primitives (center,
+                     containment, proximity), shared by core and agent
     gesture_vocab  — gesture tool names + sequence step keys
     listing        — element-listing grammar (core composes, agent parses)
     doctrine       — `{{token}}` rendering for doctrine delivery paths

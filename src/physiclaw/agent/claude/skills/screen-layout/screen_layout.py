@@ -4,7 +4,7 @@
   record — validate + persist the boxes read off a page's screenshot
   status — what's captured, what's still missing
 
-Both are thin wrappers around `physiclaw.agent.engine.screen_layout` — the
+Both are thin wrappers around `physiclaw.agent.layout` — the
 same `record()` the native engine's `report_screen_layout` local tool calls,
 so `~/.physiclaw/screen-layout/layout.json` stays identical whichever engine
 is driving. No MCP tool needed: this runs under the child's `Bash(uv run:*)`
@@ -14,7 +14,7 @@ grant, exactly like the `jobs` skill.
 import argparse
 import sys
 
-from physiclaw.agent.engine import screen_layout
+from physiclaw.agent import layout
 
 
 def _parse_box(spec: str) -> tuple[str, list[float]]:
@@ -42,7 +42,7 @@ def _cmd_record(args: argparse.Namespace) -> int:
         # record() validates one box, merges it into layout.json, re-renders
         # layout.md, and returns a human message (layout so far + what's left,
         # or a re-measure instruction if the box failed its sanity check).
-        last = screen_layout.record(args.page, field, bbox, args.app)
+        last = layout.record(args.page, field, bbox, args.app)
         print(f"[{field}] {last.splitlines()[0] if last else 'saved'}")
     if last:
         print()
@@ -51,10 +51,10 @@ def _cmd_record(args: argparse.Namespace) -> int:
 
 
 def _cmd_status(args: argparse.Namespace) -> int:
-    if screen_layout.is_learned():
+    if layout.is_learned():
         print("Screen layout is fully learned — no first-run capture needed.")
     else:
-        print(screen_layout.tail_reminder() or "Not learned; nothing captured yet.")
+        print(layout.tail_reminder() or "Not learned; nothing captured yet.")
     return 0
 
 
@@ -66,7 +66,7 @@ def main() -> None:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     pr = sub.add_parser("record", help="Validate + persist boxes read off a page")
-    pr.add_argument("--page", required=True, choices=list(screen_layout.PAGES))
+    pr.add_argument("--page", required=True, choices=list(layout.PAGES))
     pr.add_argument(
         "--app",
         help="chat app for the chat pages (wechat, whatsapp, …); omit for spotlight",

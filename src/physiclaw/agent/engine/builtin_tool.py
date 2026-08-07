@@ -11,12 +11,12 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
+from physiclaw.agent import layout
 from physiclaw.agent.engine import (
     jobs,
     memory,
     pitfalls,
     scratchpad,
-    screen_layout,
     skill,
 )
 from physiclaw.agent.engine.job_store import (
@@ -186,8 +186,8 @@ async def _handle_add_pitfall(session: Session, args: dict) -> str:
 
 
 async def _handle_report_screen_layout(session: Session, args: dict) -> str:
-    was_complete = screen_layout.is_learned()
-    result = screen_layout.record(
+    was_complete = layout.is_learned()
+    result = layout.record(
         args.get("page", ""),
         args.get("field", ""),
         args.get("bbox") or [],
@@ -196,7 +196,7 @@ async def _handle_report_screen_layout(session: Session, args: dict) -> str:
     # If THIS call finished first-run setup, close the session cleanly and ask
     # the engine to restart — the fresh SYSTEM prompt then carries the layout
     # so the agent handles the original request with it loaded.
-    if not was_complete and screen_layout.is_learned():
+    if not was_complete and layout.is_learned():
         session.sentinel_status = IDLE
         session.sentinel_recap = (
             "first-run screen layout captured — restarting to load it"
@@ -626,7 +626,7 @@ _REPORT_SCREEN_LAYOUT = LocalTool(
             },
             "field": {
                 "type": "string",
-                "enum": list(screen_layout.ALL_FIELDS),
+                "enum": list(layout.ALL_FIELDS),
                 "description": "Which box this bbox is — must be a field valid "
                 "for `page` (see the `screen-layout` skill).",
             },
@@ -752,7 +752,7 @@ def build_registry(
     # `screen-layout` skill it points to is pruned too, so keeping the tool
     # would dangle and clutter the tool surface every wake. Resetting the
     # layout brings both back.
-    if screen_layout.is_learned():
+    if layout.is_learned():
         tools.pop(_REPORT_SCREEN_LAYOUT.name, None)
     if skill_registry:
         tools["Skill"] = LocalTool(

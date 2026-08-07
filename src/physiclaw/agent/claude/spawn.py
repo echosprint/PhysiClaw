@@ -21,16 +21,17 @@ import shutil
 import sys
 from pathlib import Path
 
+from physiclaw.agent import layout
 from physiclaw.agent.claude.plugin import prepare_plugin_dir
 from physiclaw.agent.claude.session_log import _SessionLog
 from physiclaw.agent.engine import jobs as engine_jobs
-from physiclaw.agent.engine import screen_layout, skill
+from physiclaw.agent.engine import skill
 from physiclaw.agent.engine.mcp_inventory import discover_mcp_tools
 from physiclaw.agent.engine.skill import Skill
-from physiclaw.agent.engine.trace import new_sid
 from physiclaw.agent.runtime import contract
 from physiclaw.agent.runtime.hook import Trigger
 from physiclaw.agent.runtime.sentinel import WAIT
+from physiclaw.agent.trace import new_sid
 from physiclaw.common import paths
 from physiclaw.common.config import CONFIG, server_url
 from physiclaw.common.text import read_text
@@ -153,16 +154,16 @@ def _render_system_prompt(mcp_tools: list[dict], skills: dict[str, Skill]) -> st
     cat = skill.render_section(skills)
     if cat:
         parts.append(cat)
-    if screen_layout.is_learned():
-        layout = screen_layout.load_layout_md()
-        if layout:
-            parts.append(f"## Screen layout\n\n{layout}")
+    if layout.is_learned():
+        layout_md = layout.load_layout_md()
+        if layout_md:
+            parts.append(f"## Screen layout\n\n{layout_md}")
     else:
         # First run: no layout yet. Surface the same "[First-run setup needed]"
         # notice the native engine pins, so Claude knows to run the
         # `screen-layout` skill (which saves boxes via its screen_layout.py CLI)
         # before it tries to open apps by search or send messages.
-        reminder = screen_layout.tail_reminder()
+        reminder = layout.tail_reminder()
         if reminder:
             parts.append(reminder)
     return "\n\n".join(parts)
@@ -356,8 +357,8 @@ async def spawn_claude(triggers: list[Trigger], *, model_id: str) -> None:
     # Then fill the `{{box}}` tokens in the remaining built-in skill code
     # templates with the learned per-device bboxes (no-op until capture done).
     discovered = skill.discover()
-    discovered.pop(screen_layout.SKILL_NAME, None)
-    skills = screen_layout.fill_builtin_boxes(discovered)
+    discovered.pop(layout.SKILL_NAME, None)
+    skills = layout.fill_builtin_boxes(discovered)
     system_prompt = _render_system_prompt(mcp_tools, skills)
     prompt_hash = hashlib.sha256(system_prompt.encode("utf-8")).hexdigest()
     model_ref = f"claude-code/{model_id}"

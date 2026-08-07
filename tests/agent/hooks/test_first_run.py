@@ -15,7 +15,7 @@ def _reset_fired(monkeypatch):
 
 
 def test_fires_once_when_layout_not_learned(monkeypatch) -> None:
-    monkeypatch.setattr(first_run.screen_layout, "is_learned", lambda: False)
+    monkeypatch.setattr(first_run.layout, "is_learned", lambda: False)
 
     first = first_run.first_run_layout()
     second = first_run.first_run_layout()
@@ -27,6 +27,6 @@ def test_fires_once_when_layout_not_learned(monkeypatch) -> None:
 
 
 def test_silent_when_layout_already_learned(monkeypatch) -> None:
-    monkeypatch.setattr(first_run.screen_layout, "is_learned", lambda: True)
+    monkeypatch.setattr(first_run.layout, "is_learned", lambda: True)
 
     assert first_run.first_run_layout() is None

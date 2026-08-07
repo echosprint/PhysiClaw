@@ -1,4 +1,5 @@
-"""Bbox validation — the shared contract between core and agent.
+"""Bbox validation + geometry primitives — the shared contract between
+core and agent.
 
 Both layers police the same `[left, top, right, bottom]` 0-1 screen
 box: the engine validator rejects malformed LLM tool arguments before
@@ -6,6 +7,10 @@ dispatch, and the orchestrator re-checks at gesture time as
 defense-in-depth before any GRBL move. One implementation here means
 the agent sees the same diagnostic regardless of which layer catches
 the violation.
+
+The primitives (`center_of` / `near` / `inside`) are tolerance-neutral:
+callers own their slack and pass it in — policy knobs stay with the
+policy, only the math lives here.
 
 Dependency-free on purpose: raises plain ValueError; each layer wraps
 or re-exports into its own error surface (`agent.engine.validator`
@@ -38,3 +43,28 @@ def validate_bbox(bbox: list[float]) -> list[float]:
             f"bbox: left < right, top < bottom; got [{left}, {top}, {right}, {bottom}]"
         )
     return bbox
+
+
+def center_of(bbox) -> tuple[float, float] | None:
+    """Center of a [left, top, right, bottom] bbox; None on garbage."""
+    try:
+        left, top, right, bottom = (float(v) for v in bbox)
+    except (TypeError, ValueError):
+        return None
+    return (left + right) / 2, (top + bottom) / 2
+
+
+def near(a: tuple[float, float], b: tuple[float, float], *, tolerance: float) -> bool:
+    """True if two points are within `tolerance` of each other (L∞)."""
+    return abs(a[0] - b[0]) <= tolerance and abs(a[1] - b[1]) <= tolerance
+
+
+def inside(center: tuple[float, float], bbox: list, *, margin: float) -> bool:
+    """True if `center` lies within `bbox` expanded by `margin` per side
+    (0.0 = exact containment). Like `near`'s tolerance, the margin is
+    required: it is the caller's policy, never a hidden default."""
+    left, top, right, bottom = bbox
+    return (
+        left - margin <= center[0] <= right + margin
+        and top - margin <= center[1] <= bottom + margin
+    )

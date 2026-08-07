@@ -6,6 +6,7 @@ ToolResults, appended advisories) is covered through `test_loop.py` and
 
 from __future__ import annotations
 
+from physiclaw.agent import layout
 from physiclaw.agent.engine import policy as policy_mod
 from physiclaw.agent.engine.dto import AssistantMessage, FinishReason, ToolCall, Usage
 from physiclaw.agent.engine.session import Session
@@ -240,9 +241,8 @@ def test_memory_cue_scan_skipped_once_cap_is_full() -> None:
 
 
 def test_layout_lint_passes_when_lint_finds_nothing(mocker) -> None:
-    from physiclaw.agent.engine import screen_layout
 
-    mocker.patch.object(screen_layout, "lint_gesture", return_value=None)
+    mocker.patch.object(layout, "lint_gesture", return_value=None)
 
     block = policy_mod.LayoutLint().check(
         Session(),
@@ -254,9 +254,8 @@ def test_layout_lint_passes_when_lint_finds_nothing(mocker) -> None:
 
 
 def test_layout_lint_ignores_non_gesture_tools(mocker) -> None:
-    from physiclaw.agent.engine import screen_layout
 
-    spy = mocker.patch.object(screen_layout, "lint_gesture")
+    spy = mocker.patch.object(layout, "lint_gesture")
 
     block = policy_mod.LayoutLint().check(Session(), _tc("tap"), turn=0)
 

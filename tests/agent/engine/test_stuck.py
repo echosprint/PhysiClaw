@@ -133,7 +133,7 @@ def test_non_gesture_tools_ignored(tool: str) -> None:
 def test_learned_keyboard_keys_exempt(mocker) -> None:
     backspace = [0.864, 0.804, 0.986, 0.856]
     mocker.patch.object(
-        stuck.screen_layout,
+        stuck.layout,
         "repeatable_key_boxes",
         return_value=[backspace],
     )
@@ -344,7 +344,7 @@ def test_pingpong_exempt_keyboard_keys_never_tracked(mocker) -> None:
     key_a = [0.100, 0.800, 0.160, 0.860]
     key_b = [0.300, 0.800, 0.360, 0.860]
     mocker.patch.object(
-        stuck.screen_layout,
+        stuck.layout,
         "repeatable_key_boxes",
         return_value=[key_a, key_b],
     )
@@ -519,7 +519,7 @@ def test_orbit_exempt_keys_never_tracked(mocker) -> None:
     ret = [0.749, 0.864, 0.987, 0.916]
     space = [0.256, 0.865, 0.742, 0.916]
     mocker.patch.object(
-        stuck.screen_layout,
+        stuck.layout,
         "repeatable_key_boxes",
         return_value=[backspace, ret, space],
     )

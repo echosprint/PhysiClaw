@@ -33,11 +33,11 @@ from physiclaw.agent.engine.mcp_tool import get_mcp, list_tools_cached
 from physiclaw.agent.engine.policy import default_policies
 from physiclaw.agent.engine.runspec import EngineRun, Settings
 from physiclaw.agent.engine.session import Session
-from physiclaw.agent.engine.trace import RawLog, Trace, new_sid
 from physiclaw.agent.provider import Provider, make_provider
 from physiclaw.agent.runtime import contract
 from physiclaw.agent.runtime.hook import Trigger
 from physiclaw.agent.runtime.sentinel import STUCK
+from physiclaw.agent.trace import RawLog, Trace, new_sid
 from physiclaw.common.config import CONFIG
 
 log = logging.getLogger(__name__)

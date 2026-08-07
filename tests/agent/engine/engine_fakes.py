@@ -186,7 +186,8 @@ def patch_loop_tails(mocker) -> dict:
     `_patch_session_deps`. Imports lazily: `compact` pulls cv2/numpy, and
     this module is imported at collection time by files that never drive
     the loop. Returns the mocks keyed by target so tests can spy."""
-    from physiclaw.agent.engine import compact, plan, scratchpad, screen_layout
+    from physiclaw.agent import layout
+    from physiclaw.agent.engine import compact, plan, scratchpad
 
     return {
         "scratchpad": mocker.patch.object(
@@ -195,8 +196,8 @@ def patch_loop_tails(mocker) -> dict:
         "plan": mocker.patch.object(
             plan, "inject_tail", side_effect=lambda msgs, _p: msgs
         ),
-        "screen_layout": mocker.patch.object(
-            screen_layout, "inject_tail", side_effect=lambda msgs: msgs
+        "layout": mocker.patch.object(
+            layout, "inject_tail", side_effect=lambda msgs: msgs
         ),
         "drop_stale_screens": mocker.patch.object(compact, "drop_stale_screens"),
         "collapse_old_turns": mocker.patch.object(compact, "collapse_old_turns"),

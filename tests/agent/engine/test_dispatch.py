@@ -13,7 +13,7 @@ from engine_fakes import (
     _tc,
 )
 
-from physiclaw.agent.engine import screen_layout as screen_layout_mod
+from physiclaw.agent import layout
 from physiclaw.agent.engine.builtin_tool import LocalTool
 from physiclaw.agent.engine.dispatch import dispatch
 from physiclaw.agent.engine.session import Session
@@ -498,7 +498,7 @@ _SEQ_SCHEMA = {"name": "sequence", "input_schema": {"type": "object"}}
 @pytest.mark.asyncio
 async def test_dispatch_blocks_sequence_on_layout_lint(mocker) -> None:
     mocker.patch.object(
-        screen_layout_mod,
+        layout,
         "lint_gesture",
         return_value="BLOCKED — not executed: wrong box",
     )
@@ -524,7 +524,7 @@ async def test_dispatch_blocks_sequence_on_layout_lint(mocker) -> None:
 async def test_dispatch_lint_failure_is_fail_open(mocker) -> None:
     # A lint crash must never take down dispatch — the batch runs.
     mocker.patch.object(
-        screen_layout_mod,
+        layout,
         "lint_gesture",
         side_effect=RuntimeError("lint bug"),
     )

@@ -24,13 +24,13 @@ from physiclaw.agent.engine.dto import (
 from physiclaw.agent.engine.policy import DispatchGuard
 from physiclaw.agent.engine.runspec import EngineRun
 from physiclaw.agent.engine.session import Session
-from physiclaw.agent.engine.trace import (
+from physiclaw.agent.engine.validator import ValidationError, validate_arguments
+from physiclaw.agent.provider import mcp_blocks_to_content_blocks
+from physiclaw.agent.trace import (
     brief_content,
     format_call_args,
     format_call_result,
 )
-from physiclaw.agent.engine.validator import ValidationError, validate_arguments
-from physiclaw.agent.provider import mcp_blocks_to_content_blocks
 from physiclaw.common import verdict
 
 log = logging.getLogger(__name__)

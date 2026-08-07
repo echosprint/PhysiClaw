@@ -45,12 +45,12 @@ from physiclaw.agent.engine.loop import (
 )
 from physiclaw.agent.engine.runspec import EngineRun
 from physiclaw.agent.engine.session import Session
-from physiclaw.agent.engine.trace import Trace
 from physiclaw.agent.provider.provider_base import (
     ProviderError,
     ProviderTransientError,
 )
 from physiclaw.agent.runtime.sentinel import DONE, FAIL, IDLE, STUCK
+from physiclaw.agent.trace import Trace
 
 # ---------- drive ----------
 
@@ -102,9 +102,9 @@ async def test_loop_closes_cleanly_on_end_session(patched_loop_deps) -> None:
 
 @pytest.mark.asyncio
 async def test_loop_skips_layout_reminder_when_complete(patched_loop_deps) -> None:
-    # Default (layout_incomplete=False) must NOT call screen_layout.inject_tail
+    # Default (layout_incomplete=False) must NOT call layout.inject_tail
     # — that avoids a per-turn disk read once setup is done.
-    spy = patched_loop_deps["screen_layout"]
+    spy = patched_loop_deps["layout"]
 
     registry = _registry()
     asst = _asst(

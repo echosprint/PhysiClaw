@@ -40,7 +40,7 @@ def fill_tokens(name: str, body: str) -> str:
     the source label for the warning (e.g. the doctrine filename).
 
     NOTE: skill `{{box}}` placeholders are a different token system
-    (learned screen elements, resolved by `agent.engine.screen_layout`
+    (learned screen elements, resolved by `agent.layout`
     / `agent.claude.spawn`) — never pass skill bodies through this.
     """
     for token, value in DOCTRINE_TOKENS.items():

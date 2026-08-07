@@ -26,9 +26,9 @@ from physiclaw.agent.engine.dto import (
 )
 from physiclaw.agent.engine.runspec import EngineRun
 from physiclaw.agent.engine.session import Session
-from physiclaw.agent.engine.trace import Trace
 from physiclaw.agent.provider import Provider, ProviderError, ProviderTransientError
 from physiclaw.agent.runtime.sentinel import FAIL, STUCK
+from physiclaw.agent.trace import Trace
 
 log = logging.getLogger(__name__)
 

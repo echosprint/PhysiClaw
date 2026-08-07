@@ -143,8 +143,8 @@ def test_render_system_prompt_skips_empty_card_and_section(
     mocker.patch.object(spawn.skill, "render_section", return_value="")
     # Learned + empty layout md → no `## Screen layout` block and no first-run
     # notice, so only the card/section skipping is under test here.
-    mocker.patch.object(spawn.screen_layout, "is_learned", return_value=True)
-    mocker.patch.object(spawn.screen_layout, "load_layout_md", return_value="")
+    mocker.patch.object(spawn.layout, "is_learned", return_value=True)
+    mocker.patch.object(spawn.layout, "load_layout_md", return_value="")
 
     out = _render_system_prompt([], {})
 
@@ -159,9 +159,9 @@ def test_render_system_prompt_injects_screen_layout_when_learned(
     fake_md.write_text("body")
     mocker.patch.object(spawn, "CLAUDE_MD", fake_md)
     mocker.patch.object(spawn.skill, "render_section", return_value="")
-    mocker.patch.object(spawn.screen_layout, "is_learned", return_value=True)
+    mocker.patch.object(spawn.layout, "is_learned", return_value=True)
     mocker.patch.object(
-        spawn.screen_layout,
+        spawn.layout,
         "load_layout_md",
         return_value="- backspace [0.1,0.2,0.3,0.4]",
     )
@@ -180,9 +180,9 @@ def test_render_system_prompt_injects_first_run_notice_when_unlearned(
     fake_md.write_text("body")
     mocker.patch.object(spawn, "CLAUDE_MD", fake_md)
     mocker.patch.object(spawn.skill, "render_section", return_value="")
-    mocker.patch.object(spawn.screen_layout, "is_learned", return_value=False)
+    mocker.patch.object(spawn.layout, "is_learned", return_value=False)
     mocker.patch.object(
-        spawn.screen_layout, "tail_reminder", return_value="[First-run setup needed]"
+        spawn.layout, "tail_reminder", return_value="[First-run setup needed]"
     )
 
     out = _render_system_prompt([], {})

@@ -127,20 +127,35 @@ def test_common_is_a_leaf() -> None:
     assert not bad, "common must not import core or agent:\n" + "\n".join(bad)
 
 
-def test_provider_imports_only_dto_from_engine() -> None:
-    """The provider layer's one engine edge is the shared type vocabulary,
-    `engine.dto` — engine behavior modules stay out of providers (shared
-    behavior belongs in `common`, e.g. `common.image`). Bare
-    `from physiclaw.agent.engine import X` resolves to the package here
-    and fails too: import dto by its full path."""
-    bad = [
-        v
-        for v in _violations("agent/provider", "physiclaw.agent.engine")
-        if not v.endswith("-> physiclaw.agent.engine.dto")
-    ]
+# The agent packages that ARE the engine or drive it directly — they may
+# import engine internals freely. Everything else under `agent/`
+# (provider, trace, layout, and whatever lands next) is shared across
+# runtimes: its only legal engine edge is the type vocabulary
+# `engine.dto` (safe because `engine/__init__` is deliberately lazy).
+# Stated as the exception set so a new shared package is guarded from
+# birth, with no test edit to remember.
+_ENGINE_RUNTIMES = frozenset({"engine", "claude", "hooks", "runtime"})
+
+
+def test_shared_agent_packages_import_only_dto_from_engine() -> None:
+    """Anything under `agent/` that isn't an engine runtime imports at
+    most `engine.dto` from the engine — engine behavior stays out of the
+    shared packages (shared behavior belongs in `common`, e.g.
+    `common.image`). Bare `from physiclaw.agent.engine import X`
+    resolves to the package here and fails too: import dto by its full
+    path."""
+    bad = []
+    for pkg_dir in sorted((PKG_ROOT / "agent").iterdir()):
+        if not pkg_dir.is_dir() or pkg_dir.name in _ENGINE_RUNTIMES | {"__pycache__"}:
+            continue
+        bad += [
+            v
+            for v in _violations(f"agent/{pkg_dir.name}", "physiclaw.agent.engine")
+            if not v.endswith("-> physiclaw.agent.engine.dto")
+        ]
     assert not bad, (
-        "provider may import only physiclaw.agent.engine.dto from the engine:\n"
-        + "\n".join(bad)
+        "shared agent packages may import only physiclaw.agent.engine.dto "
+        "from the engine:\n" + "\n".join(bad)
     )
 
 

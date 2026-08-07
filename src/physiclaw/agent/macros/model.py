@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, ClassVar, TypeVar
 
 from physiclaw.agent.macros.template import TemplateError, fill
 from physiclaw.common import gesture_vocab
-from physiclaw.common.bbox import Bbox
+from physiclaw.common.bbox import Bbox, center_of, inside
 from physiclaw.common.listing import LISTING_HEADER, ROW_RE, Element, parse_row
 
 MAX_STEPS = 20
@@ -250,13 +250,13 @@ class TextClause(Clause):
     def holds(self, screen: Screen) -> bool:
         if self.within is None:
             return self.text in screen.content
-        left, top, right, bottom = self.within
         for row in screen.rows:
             if not self._label_matches(row.label):
                 continue
-            el, et, er, eb = row.bbox
-            cx, cy = (el + er) / 2, (et + eb) / 2
-            if left <= cx <= right and top <= cy <= bottom:
+            c = center_of(row.bbox)
+            # margin=0.0: a rehearsed region clause is exact — the lint's
+            # re-transcription slack has no business here.
+            if c is not None and inside(c, list(self.within), margin=0.0):
                 return True
         return False
 

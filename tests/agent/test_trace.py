@@ -1,12 +1,12 @@
-"""Tests for `physiclaw.agent.engine.trace` — engine session logging.
+"""Tests for `physiclaw.agent.trace` — engine session logging.
 
-Covers public formatting helpers, _summarize event dispatch, Trace
+Covers public formatting helpers, summarize_event dispatch, Trace
 file writes + day rollover, RawLog session-start/request/response
 emit + image scrubbing for both OpenAI (image_url) and Anthropic
 (image+source) wire shapes, and _purge_old retention.
 
-Module-level `_LOG_DIR` / `_RAW_DIR` / `_SESSIONS_DIR` are bound at
-import; the autouse fixture re-points them to per-test dirs.
+`trace.store` resolves its dirs through `common.paths` per call; the
+autouse fixture re-points the two `paths` functions to per-test dirs.
 """
 
 from __future__ import annotations
@@ -19,9 +19,9 @@ from pathlib import Path
 import pytest
 from freezegun import freeze_time
 
-from physiclaw.agent.engine import trace
+from physiclaw.agent import trace
 from physiclaw.agent.engine.dto import ImageBlock, TextBlock
-from physiclaw.agent.engine.trace import (
+from physiclaw.agent.trace import (
     RawLog,
     Trace,
     brief,
@@ -30,14 +30,14 @@ from physiclaw.agent.engine.trace import (
     format_call_args,
     format_call_result,
 )
+from physiclaw.common import paths
 
 
 @pytest.fixture(autouse=True)
 def _trace_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     log_dir = tmp_path / "engine"
-    monkeypatch.setattr(trace, "_LOG_DIR", log_dir)
-    monkeypatch.setattr(trace, "_RAW_DIR", log_dir / "raw")
-    monkeypatch.setattr(trace, "_SESSIONS_DIR", log_dir / "sessions")
+    monkeypatch.setattr(paths, "engine_log_dir", lambda: log_dir)
+    monkeypatch.setattr(paths, "engine_sessions_dir", lambda: log_dir / "sessions")
     return log_dir
 
 
@@ -162,7 +162,7 @@ def test_brief_content_multiple_blocks_joined_by_plus() -> None:
     assert out == "a + <image 4b>"
 
 
-# ---------- _summarize ----------
+# ---------- summarize_event ----------
 
 
 @pytest.mark.parametrize(
@@ -250,32 +250,32 @@ def test_brief_content_multiple_blocks_joined_by_plus() -> None:
     ],
 )
 def test_summarize_event_dispatch(event: dict, expected_substr: str) -> None:
-    out = trace._summarize(event)
+    out = trace.summarize_event(event)
 
     assert out is not None
     assert expected_substr in out
 
 
 def test_summarize_silent_event_returns_none() -> None:
-    assert trace._summarize({"event": "prefix_pinned"}) is None
-    assert trace._summarize({"event": "finish_length_warning"}) is None
+    assert trace.summarize_event({"event": "prefix_pinned"}) is None
+    assert trace.summarize_event({"event": "finish_length_warning"}) is None
 
 
 def test_summarize_unknown_event_falls_back_to_compact_repr() -> None:
-    out = trace._summarize({"event": "future_event_type", "data": 42})
+    out = trace.summarize_event({"event": "future_event_type", "data": 42})
 
     assert out is not None
     assert "future_event_type" in out
 
 
 def test_summarize_done_with_no_sentinel_uses_none_placeholder() -> None:
-    out = trace._summarize({"event": "done", "recap": "ok"})
+    out = trace.summarize_event({"event": "done", "recap": "ok"})
 
     assert "(none)" in out
 
 
 def test_summarize_tool_result_with_text_uses_format_call_result() -> None:
-    out = trace._summarize(
+    out = trace.summarize_event(
         {
             "event": "tool_result",
             "turn": 1,
@@ -290,7 +290,7 @@ def test_summarize_tool_result_with_text_uses_format_call_result() -> None:
 
 
 def test_summarize_tool_result_without_text_uses_brief_content_on_blocks() -> None:
-    out = trace._summarize(
+    out = trace.summarize_event(
         {
             "event": "tool_result",
             "turn": 1,
@@ -666,21 +666,21 @@ def test_purge_old_removes_files_older_than_retention_days(
 
     import os
 
-    cutoff_seconds = trace._RETENTION_DAYS * 86400
+    cutoff_seconds = trace.store._RETENTION_DAYS * 86400
     long_ago = (
         dt.datetime.now() - dt.timedelta(seconds=cutoff_seconds + 100)
     ).timestamp()
     os.utime(old, (long_ago, long_ago))
 
-    trace._purge_old()
+    trace.store._purge_old()
 
     assert not old.exists()
     assert young.exists()
 
 
 def test_purge_old_returns_silently_when_dir_missing() -> None:
-    # _RAW_DIR doesn't exist — must not raise.
-    trace._purge_old()
+    # raw dir doesn't exist — must not raise.
+    trace.store._purge_old()
 
 
 # ---------- events.jsonl ----------
@@ -938,13 +938,13 @@ def test_purge_old_removes_stale_session_dirs(_trace_dirs: Path) -> None:
     old.mkdir(parents=True)
     f = old / "events.jsonl"
     f.write_text("{}")
-    _age(f, trace._RETENTION_DAYS + 1)
-    _age(old, trace._RETENTION_DAYS + 1)
+    _age(f, trace.store._RETENTION_DAYS + 1)
+    _age(old, trace.store._RETENTION_DAYS + 1)
     young = _trace_dirs / "sessions" / "20990101_000000"
     young.mkdir(parents=True)
     (young / "events.jsonl").write_text("{}")
 
-    trace._purge_old()
+    trace.store._purge_old()
 
     assert not old.exists()
     assert young.exists()
@@ -957,11 +957,11 @@ def test_purge_old_spares_session_dir_with_a_recent_file(_trace_dirs: Path) -> N
     d.mkdir(parents=True)
     old_f = d / "events.jsonl"
     old_f.write_text("{}")
-    _age(old_f, trace._RETENTION_DAYS + 1)
+    _age(old_f, trace.store._RETENTION_DAYS + 1)
     (d / "summary.json").write_text("{}")  # fresh
-    _age(d, trace._RETENTION_DAYS + 1)
+    _age(d, trace.store._RETENTION_DAYS + 1)
 
-    trace._purge_old()
+    trace.store._purge_old()
 
     assert d.exists()
 
@@ -970,11 +970,11 @@ def test_purge_old_removes_stale_daily_logs(_trace_dirs: Path) -> None:
     _trace_dirs.mkdir(parents=True, exist_ok=True)
     old = _trace_dirs / "engine-2026-01-01.log"
     old.write_text("x")
-    _age(old, trace._LOG_RETENTION_DAYS + 1)
+    _age(old, trace.store._LOG_RETENTION_DAYS + 1)
     young = _trace_dirs / "engine-2099-01-01.log"
     young.write_text("y")
 
-    trace._purge_old()
+    trace.store._purge_old()
 
     assert not old.exists()
     assert young.exists()
@@ -1082,7 +1082,7 @@ def test_sessions_readme_documents_the_full_summary_schema() -> None:
     # summary.json actually emits must be named in it, so schema changes
     # can't silently outrun the doc.
     readme = trace.SESSIONS_README
-    s = trace._Summary("x").finalize(images=0)
+    s = trace.trace._Summary("x").finalize(images=0)
 
     for key in s:
         assert key in readme, f"summary key {key!r} missing from SESSIONS_README"
