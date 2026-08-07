@@ -109,6 +109,25 @@ class SerialTransport:
         with self._lock:
             self.ser.reset_input_buffer()
 
+    def send_bounded(self, cmd: str, *, lock_timeout: float) -> bool:
+        """``send``, but give up if the wire lock can't be won in
+        ``lock_timeout`` — for teardown, where a holder abandoned inside a
+        blocking read (a daemon killed at interpreter exit) must not hang
+        an atexit handler (``Camera.close``'s bounded-acquire precedent).
+        Returns whether the command was sent. The port close remains the
+        true backstop: it unblocks the stuck reader, and the DTR drop
+        resets the board."""
+        if not self._lock.acquire(timeout=lock_timeout):
+            log.warning(
+                "[GRBL] wire lock held > %.1fs — skipping %r", lock_timeout, cmd
+            )
+            return False
+        try:
+            self.send(cmd)
+            return True
+        finally:
+            self._lock.release()
+
     def close(self) -> None:
         self.ser.close()
         log.debug("[GRBL] serial port closed")

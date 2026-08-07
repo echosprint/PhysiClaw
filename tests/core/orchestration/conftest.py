@@ -87,6 +87,7 @@ def _wire_rig(rig, *, transforms=None):
     rig.calibration.cam_rotation = None
     rig.calibration.pct_to_grbl = None
     rig.calibration.pct_to_grbl_mm.return_value = (5.0, 6.0)
+    rig._origin_pinned = True  # a wired rig models a resumed/calibrated session
 
 
 @pytest.fixture

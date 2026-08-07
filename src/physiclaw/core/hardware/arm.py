@@ -399,10 +399,23 @@ class StylusArm:
         """
         self.solenoid.release()
 
+    # Bounded backstop-release wait at close — never deadlock a teardown
+    # behind an abandoned wire-lock holder (Camera.close precedent).
+    CLOSE_LOCK_TIMEOUT_SECONDS = 2.0
+
     def close(self) -> None:
-        """Release the solenoid and close serial port."""
+        """Release the coil (bounded, best-effort) and close the serial port.
+
+        The M5 uses a bounded wire-lock acquire so a holder abandoned
+        mid-read can't hang an atexit teardown. Sent or skipped, the port
+        close is the real backstop: it unblocks any stuck reader and the
+        DTR drop resets the board, coil included. No rebound dwell here —
+        close queues no XY motion after the release."""
         try:
-            self.solenoid.release()
+            self.transport.send_bounded(
+                self.solenoid.GCODE_OFF,
+                lock_timeout=self.CLOSE_LOCK_TIMEOUT_SECONDS,
+            )
         except Exception:
             pass
         self.transport.close()

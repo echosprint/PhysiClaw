@@ -62,6 +62,8 @@ class HardwareRig:
         self._assistive_touch = AssistiveTouch()
         self._bridge: BridgeState | None = None
         self._ready = False  # set True only after /setup finishes its last step
+        # Does the GRBL work frame match `calibration`'s affine? See park().
+        self._origin_pinned = False
 
     # ─── Wiring ──────────────────────────────────────────────
 
@@ -123,6 +125,7 @@ class HardwareRig:
             "steps": steps,
             "calibrated": self.hardware_ready,
             "ready": self.ready,
+            "origin_pinned": self._origin_pinned,
             "layout_learned": _layout_learned(),
         }
 
@@ -133,6 +136,15 @@ class HardwareRig:
         if not self.hardware_ready:
             raise RuntimeError(
                 "Hardware not set up. Run /setup to connect and calibrate."
+            )
+        # A loaded affine with an un-pinned frame (a mid-session arm
+        # reconnect that never re-pinned) would land every gesture off by
+        # the park vector — fail loudly instead of tapping a stale frame.
+        if self.calibration.pct_to_grbl is not None and not self._origin_pinned:
+            raise RuntimeError(
+                "Arm work frame is not pinned to the calibration — restart "
+                "the server (--hot-start with the arm at its park spot), or "
+                "recalibrate."
             )
 
     # ─── Concurrency ──────────────────────────────────────────
@@ -150,18 +162,45 @@ class HardwareRig:
         self._lock_owner = None
         self._lock.release()
 
+    def _held_by_this_thread(self) -> bool:
+        """OWNERSHIP, not mere held-ness — another thread legitimately
+        holding the lock is exactly when an unserialized caller would
+        interleave G-code with a gesture in flight, so held-by-anyone
+        would pass right when the distinction matters most."""
+        return self._lock_owner == threading.get_ident()
+
     def assert_locked(self):
         """Loud guard for caller-must-hold-the-lock methods: raise instead
-        of silently touching hardware unserialized. Checks OWNERSHIP, not
-        mere held-ness — another thread legitimately holding the lock is
-        exactly when an unlocked caller would interleave G-code with a
-        gesture in flight, so held-by-anyone would pass right when the
-        guard matters most."""
-        if self._lock_owner != threading.get_ident():
+        of silently touching hardware unserialized."""
+        if not self._held_by_this_thread():
             raise RuntimeError(
                 "hardware lock not held by this thread — wrap the call in "
                 "rig.locked() or acquire()"
             )
+
+    @contextmanager
+    def try_locked(self, timeout: float):
+        """Bounded, non-raising lock bracket for teardown-grade callers
+        that must proceed either way. Yields whether the lock was won;
+        already-owning threads pass straight through. Owner bookkeeping
+        stays here, beside acquire/release, so the protocol has one home."""
+        if self._held_by_this_thread():
+            yield True
+            return
+        try:
+            got = self._lock.acquire(timeout=timeout)
+        except KeyboardInterrupt:
+            # A second Ctrl-C during the bounded wait means "stop waiting",
+            # not "abandon teardown" — this bracket exists for callers that
+            # must proceed either way.
+            got = False
+        if got:
+            self._lock_owner = threading.get_ident()
+        try:
+            yield got
+        finally:
+            if got:
+                self.release()
 
     @contextmanager
     def locked(self):
@@ -218,10 +257,12 @@ class HardwareRig:
         arm = StylusArm()
         try:
             arm.setup()
-        except Exception:
-            # A half-configured arm (serial open DTR-reset the board, so no
-            # G92 work origin, no G21/G90, unconfigured solenoid) must not
-            # stay attached: hardware_ready would report it connected and
+        except BaseException:
+            # BaseException, matching StylusArm.__init__: a Ctrl-C mid-setup
+            # must still close the port (releasing the coil via the DTR
+            # drop). A half-configured arm (serial open DTR-reset the board,
+            # so no G92 work origin, no G21/G90, unconfigured solenoid) must
+            # not stay attached: hardware_ready would report it connected and
             # gestures would land machine-origin-relative — wrong-place taps.
             try:
                 arm.close()
@@ -229,6 +270,7 @@ class HardwareRig:
                 log.exception("connect_arm: close after failed setup also failed")
             raise
         self._arm = arm
+        self._origin_pinned = False  # arm.setup() re-zeroed the work frame
         self._apply_bundle_to_arm()
         log.info("Arm connected")
 
@@ -288,8 +330,9 @@ class HardwareRig:
         coordinate from the loaded bundle, restoring the affine's frame;
         otherwise every subsequent tap is offset by the park vector.
 
-        Returns False (no-op) if the arm or `pct_to_grbl` isn't ready — the
-        caller (warm-start) only invokes this with a complete bundle loaded.
+        Returns False (no-op) if the arm or `pct_to_grbl` isn't ready.
+        On success the frame counts as pinned again — `park()` and its
+        callers may trust absolute moves from here on.
         """
         if self._arm is None:
             return False
@@ -297,8 +340,23 @@ class HardwareRig:
         if park_xy is None:
             return False
         self._arm.set_work_position(*park_xy)
+        self._origin_pinned = True  # frame and affine agree again
         log.info("Re-pinned GRBL origin from park spot %s", PARK_PCT)
         return True
+
+    @property
+    def origin_pinned(self) -> bool:
+        """Whether the GRBL work frame matches `calibration`'s affine."""
+        return self._origin_pinned
+
+    def install_arm_calibration(self, pct_to_grbl) -> None:
+        """The one way a live affine is installed: sets it, propagates the
+        direction mapping to the arm, and pins the frame — `calibrate_arm`
+        ends `set_origin`'d at screen center, the exact frame the fresh
+        affine is rebased to, so the two agree by construction."""
+        self.calibration.pct_to_grbl = pct_to_grbl
+        self._apply_bundle_to_arm()
+        self._origin_pinned = True
 
     def _apply_bundle_to_arm(self):
         """Propagate cached calibration into the newly-connected arm."""
@@ -430,16 +488,24 @@ class HardwareRig:
         """Move stylus off-screen to ``PARK_PCT`` — left of the screen,
         slightly above top edge.
 
-        Defensive: no-ops if the arm isn't connected or `pct_to_grbl`
-        isn't set yet. This makes parking safe between calibration
-        steps (e.g. after step 7 when only the arm-side affine is
-        ready, or before step 7 when nothing is). Caller must hold
-        the hardware lock.
+        Defensive: no-ops if the arm isn't connected, `pct_to_grbl` isn't
+        set yet, or the work frame isn't pinned to that affine. The first
+        two make parking safe between calibration steps; the third is the
+        crash guard: ``arm.setup()`` zeroes the frame at the resting
+        position on every connect, and an absolute park move in that
+        un-pinned frame travels the full park vector PAST the resting
+        spot — into the frame top. Un-pinned means the frame's relation
+        to the affine is UNKNOWN, so no absolute move can be modeled —
+        refusing to move is the only safe park. Caller must hold the
+        hardware lock.
         """
         if self._arm is None:
             return
         park_xy = self.calibration.pct_to_grbl_mm(*PARK_PCT)
         if park_xy is None:
+            return
+        if not self._origin_pinned:
+            log.warning("park skipped: work frame not pinned to the affine")
             return
         self._arm.rapid_to(*park_xy)
         self._arm.wait_idle()
@@ -490,9 +556,13 @@ class HardwareRig:
         taps and swipes, so the user can place or lift the phone without
         the tip sitting over the glass.
 
-        Falls back to homing (0, 0) only when calibration isn't loaded —
-        ``park()`` has no target to compute then, and leaving the tip
-        mid-travel would be worse than a known machine origin.
+        ``park()`` self-guards (no affine, or a frame not pinned to it →
+        no move; see its docstring). Falls back to homing (0, 0) only
+        when calibration isn't loaded — the frame ``arm.setup()`` declared
+        at connect, a known BELIEVED position; leaving the tip mid-travel
+        would be worse. Caveat: believed, not measured — steppers idle off
+        and there are no encoders, so a hand-moved gantry desyncs this.
+        After moving the arm by hand, reconnect before relying on it.
         """
         if self._arm is None:
             return
@@ -501,21 +571,28 @@ class HardwareRig:
         else:
             self._arm.return_to_origin()
 
-    def shutdown(self):
+    def shutdown(self, lock_timeout: float = 5.0):
         """Release the coil, park the arm off-screen, and close every device
         handle.
 
         Teardown is best-effort: each step is guarded so a failure in one (a
         serial timeout, a GRBL alarm, an already-disconnected device) can't
         skip the rest and leak the serial/camera handle or strand the coil.
-        Steps run in safety order — release the coil first; ``arm.close`` also
-        re-attempts the release as a backstop, and the firmware drops the PWM
-        on alarm. Failures are logged, never raised, so callers (atexit /
-        signal handlers) can rely on shutdown completing.
+        Failures are logged, never raised — including a second Ctrl-C during
+        the bounded lock wait (``try_locked`` absorbs it) — so callers
+        (atexit / signal handlers) can rely on shutdown completing.
 
-        The arm parks at the same off-screen spot used between taps (homing
-        only if uncalibrated) so the resting position is consistent and the
-        phone stays clear for placement / removal.
+        Two paths, split by whether the hardware lock is won within
+        ``lock_timeout``:
+
+        - Lock won (the normal exit): safety order — release the coil,
+          park at the same off-screen spot used between taps (homing only
+          if uncalibrated), close. ``arm.close`` re-attempts the release
+          as a backstop, and the firmware drops the PWM on alarm.
+        - Timeout (a live or abandoned holder): motion-free — ``arm.close``
+          only. Its bounded M5 releases the coil when the wire is free,
+          and the port close is the true backstop either way (it unblocks
+          a stuck reader; the DTR drop resets the board, coil included).
         """
 
         def _safe(action, desc):
@@ -524,9 +601,26 @@ class HardwareRig:
             except Exception:
                 log.exception("shutdown: %s failed", desc)
 
-        if self._arm:
-            _safe(self._arm.lift_stylus, "lift stylus")
-            _safe(self._park_for_teardown, "park")
-            _safe(self._arm.close, "arm close")
-        if self._cam:
-            _safe(self._cam.close, "camera close")
+        # Order teardown after any in-flight holder (a gesture mid-move,
+        # the resume thread mid-re-pin), but never hang an atexit handler.
+        # The default wait is long enough for a gesture to land, far
+        # shorter than a warm-start bridge wait.
+        with self.try_locked(lock_timeout) as got:
+            if got:
+                if self._arm:
+                    _safe(self._arm.lift_stylus, "lift stylus")
+                    _safe(self._park_for_teardown, "park")
+                    _safe(self._arm.close, "arm close")
+            elif self._arm:
+                # The lock is owned by a live or abandoned holder: any
+                # motion here would be unserialized, and the pin flag can't
+                # be trusted from outside the lock (the holder may be
+                # mutating the frame right now). No park, no homing —
+                # arm.close's bounded release plus the port close (DTR
+                # resets the board) handle the coil.
+                log.warning(
+                    "shutdown: hardware lock still held; closing without parking"
+                )
+                _safe(self._arm.close, "arm close")
+            if self._cam:
+                _safe(self._cam.close, "camera close")

@@ -228,12 +228,10 @@ async def test_handle_calibrate_arm_happy_path(mocker) -> None:
     assert body["status"] == "ok"
     assert body["pairs"] == 4  # 1 touch + 3 probe
     assert body["aligned"] is True
-    rig.arm.set_direction_mapping.assert_called_once_with(
-        (10.0, 0.0),
-        (0.0, 20.0),
-    )
+    # The affine lands through the one installer (which wires the arm's
+    # direction mapping and pins the frame — pinned by test_rig).
+    rig.install_arm_calibration.assert_called_once_with(pct_to_grbl)
     rig.park.assert_called_once()
-    assert rig.calibration.pct_to_grbl is pct_to_grbl
     rig.release.assert_called_once()
 
 
@@ -264,7 +262,11 @@ async def test_handle_calibrate_arm_from_park_centers_stylus(mocker) -> None:
     assert _read_json(resp)["status"] == "ok"
     rig.restore_park_origin.assert_called_once()
     rig.arm.rapid_to.assert_called_once_with(5.0, 6.0)  # screen center
-    rig.arm.set_origin.assert_called_once()
+    # No set_origin: the affine is center-rebased so the tip already rests
+    # AT the frame zero, and a G92 here would silently void the pin that
+    # restore_park_origin just earned — the probe must run pinned so a
+    # mid-probe failure park still lands at the true park spot.
+    rig.arm.set_origin.assert_not_called()
 
 
 @pytest.mark.asyncio

@@ -607,13 +607,16 @@ def test_shutdown_closes_arm_and_camera(rig, arm_double, cam_double) -> None:
     rig._cam.close.assert_called_once()
 
 
-def test_shutdown_parks_off_screen_when_calibrated(rig, arm_double, cam_double) -> None:
-    # With calibration loaded, teardown rests the tip at the same off-screen
-    # park spot used between taps — not the machine origin — so the phone
-    # stays clear for placement / removal.
+def test_shutdown_parks_off_screen_when_calibrated_and_pinned(
+    rig, arm_double, cam_double
+) -> None:
+    # With calibration loaded AND the frame pinned, teardown rests the tip
+    # at the same off-screen park spot used between taps — not the machine
+    # origin — so the phone stays clear for placement / removal.
     rig._arm = arm_double()
     rig._cam = cam_double()
     rig.calibration.pct_to_grbl = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+    rig.restore_park_origin()
 
     rig.shutdown()
 
@@ -623,6 +626,107 @@ def test_shutdown_parks_off_screen_when_calibrated(rig, arm_double, cam_double) 
     rig._arm.rapid_to.assert_called_once_with(-0.1, -0.05)
     rig._arm.close.assert_called_once()
     rig._cam.close.assert_called_once()
+
+
+def test_shutdown_never_moves_the_arm_in_an_unpinned_frame(
+    rig, arm_double, cam_double
+) -> None:
+    # The interrupted-resume window: affine loaded, frame never re-pinned.
+    rig._arm = arm_double()
+    rig._cam = cam_double()
+    rig.calibration.pct_to_grbl = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+
+    rig.shutdown()
+
+    rig._arm.rapid_to.assert_not_called()
+    rig._arm.return_to_origin.assert_not_called()
+    rig._arm.close.assert_called_once()  # handles still released
+    rig._cam.close.assert_called_once()
+
+
+def test_park_refuses_an_unpinned_frame(rig, arm_double) -> None:
+    # The gate lives on park() itself, so engaged()'s auto-park, the
+    # wizard's failure park, and teardown all inherit it.
+    rig._arm = arm_double()
+    rig.calibration.pct_to_grbl = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+
+    rig.park()
+    rig._arm.rapid_to.assert_not_called()
+
+    rig.restore_park_origin()
+    rig.park()
+    rig._arm.rapid_to.assert_called_once_with(-0.1, -0.05)
+
+
+def test_connect_arm_unpins_the_frame(rig, mocker, arm_double) -> None:
+    # Every arm.setup() re-zeroes the frame at the resting position, so a
+    # reconnect must invalidate the previous pin.
+    rig.calibration.pct_to_grbl = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+    rig._arm = arm_double()
+    rig.restore_park_origin()
+    mocker.patch(
+        "physiclaw.core.orchestration.rig.StylusArm", return_value=arm_double()
+    )
+
+    rig.connect_arm()
+    rig.shutdown()
+
+    assert rig.origin_pinned is False
+    rig._arm.rapid_to.assert_not_called()
+
+
+def test_install_arm_calibration_pins_and_wires_the_arm(rig, arm_double) -> None:
+    # The one way a live affine lands: affine set, direction mapping
+    # propagated, frame trusted — three facts one call can't split.
+    rig._arm = arm_double()
+
+    rig.install_arm_calibration(np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]))
+
+    assert rig.origin_pinned is True
+    rig._arm.set_direction_mapping.assert_called_once_with((1.0, 0.0), (0.0, 1.0))
+    rig.park()
+    rig._arm.rapid_to.assert_called_once_with(-0.1, -0.05)
+
+
+def test_shutdown_waits_briefly_for_a_held_lock_then_proceeds(rig, arm_double) -> None:
+    # An atexit shutdown must not hang behind a stuck lock holder — after
+    # the bounded wait it closes handles and NOTHING else: even a pinned
+    # frame can't be trusted from outside the lock (the holder may be
+    # mutating it right now), so the timeout teardown is motion-free.
+    rig._arm = arm_double()
+    rig.calibration.pct_to_grbl = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+    rig.restore_park_origin()  # pinned — and still no move on timeout
+    rig._arm.reset_mock()
+    rig._lock.acquire()
+    rig._lock_owner = 12345  # held by another thread
+
+    rig.shutdown(lock_timeout=0.05)  # returns despite the held lock
+
+    rig._arm.rapid_to.assert_not_called()
+    rig._arm.return_to_origin.assert_not_called()
+    rig._arm.lift_stylus.assert_not_called()  # coil handled by close()
+    rig._arm.close.assert_called_once()
+    assert rig._lock.locked()  # shutdown did not steal or release it
+
+
+def test_require_hardware_rejects_an_unpinned_frame(rig, wire_rig) -> None:
+    # A mid-session arm reconnect that never re-pinned would land every
+    # gesture off by the park vector — fail loudly, not tap a stale frame.
+    wire_rig(rig)
+    rig.calibration.pct_to_grbl = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+    rig._origin_pinned = False
+
+    with pytest.raises(RuntimeError, match="not pinned"):
+        rig.require_hardware()
+
+
+def test_status_reports_origin_pinned(rig, wire_rig) -> None:
+    wire_rig(rig)
+    rig._assistive_touch.ready = False
+
+    assert rig.status()["origin_pinned"] is True
+    rig._origin_pinned = False
+    assert rig.status()["origin_pinned"] is False
 
 
 def test_shutdown_handles_no_hardware() -> None:

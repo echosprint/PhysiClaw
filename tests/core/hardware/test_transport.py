@@ -139,3 +139,41 @@ def test_close_closes_port() -> None:
     t.close()
 
     assert fake.closed is True
+
+
+# ---------- send_bounded (teardown path) ----------
+
+
+def test_send_bounded_sends_when_wire_is_free() -> None:
+    ser = _FakeSerial(responses=[b"ok\n"])
+    t = SerialTransport(ser)
+
+    assert t.send_bounded("M5", lock_timeout=0.05) is True
+    assert b"M5\n" in ser.writes
+
+
+def test_send_bounded_skips_when_wire_lock_is_held() -> None:
+    # An abandoned holder (daemon killed mid-read at interpreter exit)
+    # must not hang an atexit teardown — skip the command; the port
+    # close is the backstop.
+    import threading
+
+    ser = _FakeSerial(responses=[b"ok\n"])
+    t = SerialTransport(ser)
+    held = threading.Event()
+    release = threading.Event()
+
+    def hold() -> None:
+        with t._lock:
+            held.set()
+            release.wait(timeout=5)
+
+    holder = threading.Thread(target=hold, daemon=True)
+    holder.start()
+    held.wait(timeout=5)
+    try:
+        assert t.send_bounded("M5", lock_timeout=0.05) is False
+        assert b"M5\n" not in ser.writes
+    finally:
+        release.set()
+        holder.join(timeout=5)

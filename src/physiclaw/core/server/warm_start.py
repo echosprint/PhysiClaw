@@ -193,8 +193,7 @@ def try_resume(
     # is re-pinned; racing callers fail fast with the busy error instead.
     # (rig.engaged() can't be used here — its require_hardware() gate would
     # reject the not-yet-connected rig. rig.locked() is the same lock bracket
-    # without that gate; the conditional auto-park below is this path's own.)
-    origin_pinned = False
+    # without that gate; the auto-park below is this path's own.)
     with rig.locked():
         try:
             try:
@@ -229,7 +228,6 @@ def try_resume(
             # the tip didn't hold that spot (killed mid-move, power yank, arm
             # bumped).
             rig.restore_park_origin()
-            origin_pinned = True
             if verify:
                 if sys.stdin.isatty():
                     print()
@@ -263,15 +261,14 @@ def try_resume(
                 )
         finally:
             # Mirror engaged()'s exit: auto-park restores the resting spot on
-            # every path — but only once the origin is re-pinned, because park()
-            # in the mis-pinned frame would itself displace the tip (the exact
-            # hazard the lock span prevents). locked() releases the lock after
-            # this; home_screen() below runs unlocked and takes engaged() itself.
-            if origin_pinned:
-                try:
-                    rig.park()
-                except Exception:
-                    log.exception(f"{flag}: auto-park after resume failed")
+            # every path. park() itself refuses a frame that was never
+            # re-pinned (the exact hazard the lock span prevents), so no
+            # gate is needed here. locked() releases the lock after this;
+            # home_screen() below runs unlocked and takes engaged() itself.
+            try:
+                rig.park()
+            except Exception:
+                log.exception(f"{flag}: auto-park after resume failed")
     if verify:
         # Match setup.py's final step: send the phone home (swipe from
         # bottom), then flip ready. home_screen's engaged() context auto-parks

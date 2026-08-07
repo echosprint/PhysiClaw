@@ -99,7 +99,12 @@ async def _run_locked_step(
                 # must not leave the tip at the failure position — the retry's
                 # restore_park_origin would declare that spot the park frame.
                 # rig.park() is defensive: it no-ops when the arm or transform
-                # isn't there yet, so this is safe at any calibration stage.
+                # isn't there yet, or when the frame isn't pinned to the
+                # affine. from_park probe failures park fine (the probe runs
+                # pinned); the refusing case is a MANUAL recal over a stale
+                # bundle, where the tip stays at the failure spot — a
+                # from_park retry can't assume the park spot then; expect it
+                # to miss its center probe and fail loudly.
                 try:
                     rig.park()
                 except Exception:
@@ -173,7 +178,12 @@ def _center_parked_stylus(rig: "HardwareRig") -> None:
     gx, gy = center
     arm.rapid_to(gx, gy)
     arm.wait_idle()
-    arm.set_origin()  # screen center is now arm (0, 0) for the probe
+    # No set_origin here: every affine is center-rebased (arm_cal rebases
+    # so pct (0.5, 0.5) ≡ work (0, 0)), so the tip now rests AT the frame
+    # zero already — a G92 re-zero would be an exact no-op, and issuing
+    # one would silently invalidate the pin restore_park_origin just
+    # earned. The probe runs in a pinned frame, so a mid-probe failure
+    # park still lands at the true park spot.
 
 
 async def handle_calibrate_arm(
@@ -207,16 +217,20 @@ async def handle_calibrate_arm(
             raise PreconditionError("Arm not connected")
         if from_park:
             _center_parked_stylus(rig)
+        # from_park: the probe runs PINNED (frame ≡ the prior affine, both
+        # center-zero), so a mid-probe failure park lands at the true park
+        # spot. Only calibrate_arm's final set_origin at the newly fitted
+        # center drifts the frame — by the fit residual, millimetres —
+        # until install_arm_calibration re-pins it to the fresh affine.
+        # Manual first-run: no affine yet, parks no-op, nothing to pin.
         pct_to_grbl, tilt, touches = calibrate_arm(arm, calib)
-        rig.calibration.pct_to_grbl = pct_to_grbl
-        right_vec = (float(pct_to_grbl[0, 0]), float(pct_to_grbl[1, 0]))
-        down_vec = (float(pct_to_grbl[0, 1]), float(pct_to_grbl[1, 1]))
-        arm.set_direction_mapping(right_vec, down_vec)
+        rig.install_arm_calibration(pct_to_grbl)
         # Park off-phone before returning so the camera-aim step's
         # preview shows an unobstructed phone (the stylus would
         # otherwise sit at the last grid-tap position over the
-        # screen). `rig.park()` is defensive — it works as
-        # soon as `pct_to_grbl` is set, which happens above.
+        # screen). Works because `install_arm_calibration` above PINS
+        # the frame to the fresh affine — not merely because the
+        # affine exists.
         rig.park()
         return {
             "pairs": len(touches) + 3,

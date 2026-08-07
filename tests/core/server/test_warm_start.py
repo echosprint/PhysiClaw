@@ -365,11 +365,13 @@ def test_try_resume_holds_lock_from_connect_through_origin_repin(mocker) -> None
     assert names.index("restore_park_origin") < names.index("release")
 
 
-def test_try_resume_releases_without_parking_when_origin_never_repinned(
+def test_try_resume_auto_parks_before_release_even_on_early_failure(
     mocker,
 ) -> None:
-    # Failure before the re-pin (camera gave no frame): parking would move
-    # the arm in the mis-pinned frame, so the lock is released without it.
+    # Failure before the re-pin (camera gave no frame): the bracket still
+    # calls park() unconditionally — park() itself refuses a frame that
+    # was never re-pinned (pinned by test_rig), so on a real rig this is
+    # a no-op rather than a move in the mis-pinned frame.
     cal = _ready_bundle()
     app = _ready_app(cal)
     app.rig.cam.peek.return_value = None
@@ -378,7 +380,7 @@ def test_try_resume_releases_without_parking_when_origin_never_repinned(
     assert _resume(app) is False
 
     app.rig.release.assert_called_once()
-    app.rig.park.assert_not_called()
+    app.rig.park.assert_called_once()
 
 
 def test_try_resume_parks_before_release_once_repinned(mocker) -> None:
