@@ -72,6 +72,7 @@ async def _run_locked_step(
     do: Callable[[], dict],
     *,
     precheck: Callable[[], None] | None = None,
+    on_failure: Callable[[], None] | None = None,
 ) -> JSONResponse:
     """Run one calibration step off-thread under the hardware lock.
 
@@ -82,9 +83,12 @@ async def _run_locked_step(
     ``do`` runs with the lock held and the lock is always released,
     even on failure; a failing step also parks (best-effort) so the
     tip never rests mid-screen where a retry would re-pin the frame.
-    A ``PreconditionError`` becomes a 409 (client state — the wizard
-    can act on the message); anything else becomes the standard 500
-    ``_err`` JSON (a genuine fault).
+    ``on_failure`` runs AFTER that park, still under the lock — for
+    step-specific cleanup that must wait until the park has used the
+    state it clears (the from_park borrow). A ``PreconditionError``
+    becomes a 409 (client state — the wizard can act on the message);
+    anything else becomes the standard 500 ``_err`` JSON (a genuine
+    fault).
     """
 
     def _step() -> dict:
@@ -94,21 +98,20 @@ async def _run_locked_step(
             try:
                 return do()
             except BaseException:
-                # Every success path parks inside `do` (the resting-position
-                # invariant auto/from_park retries rely on); a mid-step failure
-                # must not leave the tip at the failure position — the retry's
-                # restore_park_origin would declare that spot the park frame.
-                # rig.park() is defensive: it no-ops when the arm or transform
-                # isn't there yet, or when the frame isn't pinned to the
-                # affine. from_park probe failures park fine (the probe runs
-                # pinned); the refusing case is a MANUAL recal over a stale
-                # bundle, where the tip stays at the failure spot — a
-                # from_park retry can't assume the park spot then; expect it
-                # to miss its center probe and fail loudly.
+                # A mid-step failure must not leave the tip at the failure
+                # position — the retry's restore_park_origin would declare
+                # that spot the park frame. rig.park() is defensive: it
+                # no-ops when the arm, the affine, or the pin isn't there
+                # (each `do` owns its own success-path parking).
                 try:
                     rig.park()
                 except Exception:
                     log.exception("calibration step failed — auto-park also failed")
+                if on_failure is not None:
+                    try:
+                        on_failure()
+                    except Exception:
+                        log.exception("calibration step failure cleanup failed")
                 raise
 
     try:
@@ -154,26 +157,38 @@ async def handle_measure_viewport_shift(
 # ─── Arm-side unified calibration ───────────────────────────
 
 
+def _borrow_saved_affine(rig: "HardwareRig") -> bool:
+    """Seat the saved bundle's affine into the live one when none is
+    live (plain server boot) — `rig.borrow_arm_calibration`. Returns
+    True on a borrow; raises when there is nothing to borrow. Kept
+    separate from the centering MOTION so the caller can flag the
+    borrow before any operation that can raise — a serial error
+    mid-move must be able to undo it, not just a failed probe."""
+    if rig.calibration.pct_to_grbl is not None:
+        return False
+    prior = Calibration.load()
+    if prior is None or prior.pct_to_grbl is None:
+        raise RuntimeError(
+            "Auto needs a previous calibration to place the stylus — "
+            "position the stylus over the circle and calibrate manually."
+        )
+    rig.borrow_arm_calibration(prior.pct_to_grbl)
+    return True
+
+
 def _center_parked_stylus(rig: "HardwareRig") -> None:
-    """Drive the parked stylus onto the screen center using the saved
-    calibration, so auto mode needs no hand-positioning. Assumes the tip
-    rests at ``PARK_PCT`` (the off-screen spot every run parks at). Requires
-    a prior bundle; raises a clear error if none exists. Caller holds the lock."""
+    """Drive the parked stylus onto the screen center, so auto mode
+    needs no hand-positioning. Assumes the tip rests at ``PARK_PCT``
+    (the off-screen spot every run parks at) and that the live bundle
+    carries an affine (`_borrow_saved_affine` ran). Caller holds the
+    lock."""
     cal = rig.calibration
-    if cal.pct_to_grbl is None:  # plain server boot doesn't load the bundle
-        prior = Calibration.load()
-        if prior is None or prior.pct_to_grbl is None:
-            raise RuntimeError(
-                "Auto needs a previous calibration to place the stylus — "
-                "position the stylus over the circle and calibrate manually."
-            )
-        cal.pct_to_grbl = prior.pct_to_grbl
     arm = rig.arm
     if arm is None:  # caller prechecks the arm; re-narrow here
         raise PreconditionError("Arm not connected")
     rig.restore_park_origin()  # re-pin the frame: current pos = PARK_PCT
     center = cal.pct_to_grbl_mm(0.5, 0.5)
-    if center is None:  # unreachable: pct_to_grbl is ensured above
+    if center is None:  # unreachable: _borrow_saved_affine ensured it
         raise RuntimeError("Arm mapping missing — calibrate manually first")
     gx, gy = center
     arm.rapid_to(gx, gy)
@@ -211,11 +226,18 @@ async def handle_calibrate_arm(
             raise PreconditionError("Arm not connected")
         phone.set_mode("calibrate", phase="center")
 
+    borrowed = False
+
     def _do() -> dict:
+        nonlocal borrowed
         arm = rig.arm
         if arm is None:  # prechecked; re-narrow under the lock
             raise PreconditionError("Arm not connected")
         if from_park:
+            # Flag the borrow BEFORE the centering motion: any raise
+            # from here on (serial error mid-move, failed probe) must
+            # be able to undo it.
+            borrowed = _borrow_saved_affine(rig)
             _center_parked_stylus(rig)
         # from_park: the probe runs PINNED (frame ≡ the prior affine, both
         # center-zero), so a mid-probe failure park lands at the true park
@@ -225,6 +247,9 @@ async def handle_calibrate_arm(
         # Manual first-run: no affine yet, parks no-op, nothing to pin.
         pct_to_grbl, tilt, touches = calibrate_arm(arm, calib)
         rig.install_arm_calibration(pct_to_grbl)
+        # The borrow is repaid — the live affine is now probe-confirmed,
+        # so a failure past this point (the park below) must NOT undo it.
+        borrowed = False
         # Park off-phone before returning so the camera-aim step's
         # preview shows an unobstructed phone (the stylus would
         # otherwise sit at the last grid-tap position over the
@@ -238,7 +263,15 @@ async def handle_calibrate_arm(
             "aligned": tilt < TILT_ALIGNED_THRESHOLD,
         }
 
-    return await _run_locked_step(rig, _do, precheck=_precheck)
+    def _undo_borrow() -> None:
+        # Runs after the runner's park (which needs the borrowed affine
+        # + pin to land the tip at the true park spot): a failed probe
+        # must not leave `mapping_a: OK` standing off an affine it never
+        # confirmed — a page reload would skip the arm step over it.
+        if borrowed:
+            rig.uninstall_arm_calibration()
+
+    return await _run_locked_step(rig, _do, precheck=_precheck, on_failure=_undo_borrow)
 
 
 # ─── Camera frame calibration — setup check + rotation ──────

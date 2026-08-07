@@ -293,6 +293,114 @@ async def test_handle_calibrate_arm_from_park_without_bundle_errors(mocker) -> N
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("live_affine", "expect_undo"),
+    [
+        pytest.param(None, True, id="borrowed-affine-undone"),
+        pytest.param(_identity_pct_to_grbl(), False, id="live-affine-kept"),
+    ],
+)
+async def test_handle_calibrate_arm_failed_probe_borrow_lifecycle(
+    mocker, live_affine, expect_undo
+) -> None:
+    """A failed probe undoes a BORROWED affine — `mapping_a` must not
+    read OK off an affine no probe confirmed (a page reload would skip
+    the arm step) — and only AFTER the runner's park, while the frame is
+    still pinned to it. An affine already live in the session is kept:
+    its `mapping_a: OK` is truthful."""
+    rig = _rig_mock()
+    rig.arm = MagicMock()
+    rig.calibration = SimpleNamespace(
+        pct_to_grbl=live_affine, pct_to_grbl_mm=lambda x, y: (5.0, 6.0)
+    )
+    mocker.patch.object(
+        handler.Calibration,
+        "load",
+        return_value=SimpleNamespace(pct_to_grbl=_identity_pct_to_grbl()),
+    )
+    mocker.patch.object(
+        handler, "calibrate_arm", side_effect=RuntimeError("probe missed")
+    )
+
+    resp = await handle_calibrate_arm(
+        _fake_request(json_obj={"from_park": True}), rig, MagicMock(), MagicMock()
+    )
+
+    assert _read_json(resp)["status"] == "error"
+    rig.install_arm_calibration.assert_not_called()
+    if expect_undo:
+        rig.uninstall_arm_calibration.assert_called_once()
+        names = [name for name, *_ in rig.mock_calls]
+        assert names.index("park") < names.index("uninstall_arm_calibration")
+    else:
+        rig.uninstall_arm_calibration.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_handle_calibrate_arm_borrow_undone_when_centering_fails(
+    mocker,
+) -> None:
+    """The gap the borrow flag must cover: a failure BETWEEN the borrow
+    and the probe (a serial error during the centering move) must undo
+    the borrow too — the flag is set at the borrow, not on the motion
+    helper's return."""
+    rig = _rig_mock()
+    rig.arm = MagicMock()
+    rig.arm.rapid_to.side_effect = RuntimeError("serial gone mid-move")
+    rig.calibration = SimpleNamespace(
+        pct_to_grbl=None, pct_to_grbl_mm=lambda x, y: (5.0, 6.0)
+    )
+    mocker.patch.object(
+        handler.Calibration,
+        "load",
+        return_value=SimpleNamespace(pct_to_grbl=_identity_pct_to_grbl()),
+    )
+    cal_arm = mocker.patch.object(handler, "calibrate_arm")
+
+    resp = await handle_calibrate_arm(
+        _fake_request(json_obj={"from_park": True}), rig, MagicMock(), MagicMock()
+    )
+
+    assert _read_json(resp)["status"] == "error"
+    cal_arm.assert_not_called()  # never reached the probe
+    rig.uninstall_arm_calibration.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_handle_calibrate_arm_confirmed_affine_survives_park_failure(
+    mocker,
+) -> None:
+    """The borrow is repaid at install: a probe that SUCCEEDED must keep
+    its confirmed affine even when the closing park then fails — the
+    step errors (redo the park situation), but the calibration is real
+    and must not be wiped."""
+    rig = _rig_mock()
+    rig.arm = MagicMock()
+    rig.park.side_effect = RuntimeError("serial gone at park")
+    rig.calibration = SimpleNamespace(
+        pct_to_grbl=None, pct_to_grbl_mm=lambda x, y: (5.0, 6.0)
+    )
+    mocker.patch.object(
+        handler.Calibration,
+        "load",
+        return_value=SimpleNamespace(pct_to_grbl=_identity_pct_to_grbl()),
+    )
+    mocker.patch.object(
+        handler,
+        "calibrate_arm",
+        return_value=(_identity_pct_to_grbl(), 0.01, []),
+    )
+
+    resp = await handle_calibrate_arm(
+        _fake_request(json_obj={"from_park": True}), rig, MagicMock(), MagicMock()
+    )
+
+    assert _read_json(resp)["status"] == "error"
+    rig.install_arm_calibration.assert_called_once()  # the probe confirmed it
+    rig.uninstall_arm_calibration.assert_not_called()  # ...so nothing is undone
+
+
+@pytest.mark.asyncio
 async def test_handle_calibrate_arm_arm_not_connected() -> None:
     rig = _rig_mock()
     rig.arm = None

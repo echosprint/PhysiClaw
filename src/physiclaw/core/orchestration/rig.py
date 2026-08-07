@@ -350,13 +350,32 @@ class HardwareRig:
         return self._origin_pinned
 
     def install_arm_calibration(self, pct_to_grbl) -> None:
-        """The one way a live affine is installed: sets it, propagates the
-        direction mapping to the arm, and pins the frame — `calibrate_arm`
-        ends `set_origin`'d at screen center, the exact frame the fresh
-        affine is rebased to, so the two agree by construction."""
+        """The one way a probe-CONFIRMED affine is installed: sets it,
+        propagates the direction mapping to the arm, and pins the frame —
+        `calibrate_arm` ends `set_origin`'d at screen center, the exact
+        frame the fresh affine is rebased to, so the two agree by
+        construction. (`borrow_arm_calibration` is the provisional
+        sibling; `uninstall_arm_calibration` the undo.)"""
         self.calibration.pct_to_grbl = pct_to_grbl
         self._apply_bundle_to_arm()
         self._origin_pinned = True
+
+    def borrow_arm_calibration(self, pct_to_grbl) -> None:
+        """`install_arm_calibration`'s provisional sibling: seats a SAVED
+        affine so a from_park calibration can reach the screen. No pin
+        (the caller earns that from `restore_park_origin` at the physical
+        park spot) and no direction-mapping propagation (the arm keeps
+        what connect applied) — nothing here claims a probe confirmed
+        the affine. Undone by `uninstall_arm_calibration` if the probe
+        then fails."""
+        self.calibration.pct_to_grbl = pct_to_grbl
+
+    def uninstall_arm_calibration(self) -> None:
+        """The borrow/install undo: clears the affine and the pin
+        together (a pin without an affine models nothing). Callers park
+        BEFORE this — park needs both."""
+        self.calibration.pct_to_grbl = None
+        self._origin_pinned = False
 
     def _apply_bundle_to_arm(self):
         """Propagate cached calibration into the newly-connected arm."""

@@ -676,7 +676,7 @@ def test_connect_arm_unpins_the_frame(rig, mocker, arm_double) -> None:
 
 
 def test_install_arm_calibration_pins_and_wires_the_arm(rig, arm_double) -> None:
-    # The one way a live affine lands: affine set, direction mapping
+    # The one way a probe-confirmed affine lands: affine set, direction mapping
     # propagated, frame trusted — three facts one call can't split.
     rig._arm = arm_double()
 
@@ -686,6 +686,36 @@ def test_install_arm_calibration_pins_and_wires_the_arm(rig, arm_double) -> None
     rig._arm.set_direction_mapping.assert_called_once_with((1.0, 0.0), (0.0, 1.0))
     rig.park()
     rig._arm.rapid_to.assert_called_once_with(-0.1, -0.05)
+
+
+def test_borrow_arm_calibration_seats_affine_without_pin(rig, arm_double) -> None:
+    # The provisional door: the affine lands so from_park can reach the
+    # screen, but no pin (that comes from restore_park_origin at the
+    # physical park spot) and no direction-mapping propagation — nothing
+    # claims a probe confirmed it.
+    rig._arm = arm_double()
+
+    rig.borrow_arm_calibration(np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]))
+
+    assert rig.calibration.pct_to_grbl is not None
+    assert rig.origin_pinned is False
+    rig._arm.set_direction_mapping.assert_not_called()
+
+
+def test_uninstall_arm_calibration_drops_affine_and_pin(rig, arm_double) -> None:
+    # install's undo, for the failed from_park probe: mapping_a must not
+    # read OK off a borrowed affine, and a pin without an affine models
+    # nothing — the two drop together, and park goes back to refusing.
+    rig._arm = arm_double()
+    rig.install_arm_calibration(np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]))
+
+    rig.uninstall_arm_calibration()
+
+    assert rig.calibration.pct_to_grbl is None
+    assert rig.origin_pinned is False
+    rig._arm.reset_mock()
+    rig.park()  # defensive: nothing to model, no motion
+    rig._arm.rapid_to.assert_not_called()
 
 
 def test_shutdown_waits_briefly_for_a_held_lock_then_proceeds(rig, arm_double) -> None:
