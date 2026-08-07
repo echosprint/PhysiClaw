@@ -10,6 +10,7 @@ import time
 from collections import deque
 
 from physiclaw.common.dumps import save_screenshot
+from physiclaw.common.loopback import LOOPBACK_IPS
 
 log = logging.getLogger(__name__)
 
@@ -40,9 +41,6 @@ CAL_UPLOAD_WINDOW_SECONDS = 120.0
 # hijack needs the phone (and every other poller) silent this long AND an
 # armed window — the off-path attacker the gate targets doesn't get both.
 PHONE_IP_TTL_SECONDS = 180.0
-
-# Callers on the host itself bypass the phone IP pin entirely.
-_LOOPBACK_IPS = frozenset({"127.0.0.1", "::1"})
 
 
 class BridgeState:
@@ -332,7 +330,7 @@ class BridgeState:
         *off-path* LAN sender (e.g. a compromised IoT device) — an
         on-path attacker on the same Wi-Fi can spoof an admitted address.
         """
-        if ip is None or ip in _LOOPBACK_IPS:
+        if ip is None or ip in LOOPBACK_IPS:
             return True
         now = time.monotonic()
         with self.lock:
@@ -358,7 +356,7 @@ class BridgeState:
         the real phone's uploads roughly every other time. A poll is also
         the freshest "this is the phone" signal, so a post-DHCP-change
         address is admitted immediately, without waiting out any TTL."""
-        if ip is None or ip in _LOOPBACK_IPS:
+        if ip is None or ip in LOOPBACK_IPS:
             return
         now = time.monotonic()
         with self.lock:

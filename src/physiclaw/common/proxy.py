@@ -36,10 +36,9 @@ Network Settings keeps relying on macOS's own bypass list).
 
 import os
 
+from physiclaw.common.loopback import LOOPBACK_HOSTS
+
 _PROXY_VARS = ("all_proxy", "http_proxy", "https_proxy")
-# Every spelling `config.url_host` can produce for a loopback server —
-# `[server] host = "::1"` is a supported bind, so IPv6 is not optional.
-_LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
 
 
 def normalize_proxy_env() -> None:
@@ -58,7 +57,7 @@ def normalize_proxy_env() -> None:
 def _ensure_loopback_no_proxy() -> None:
     current = os.environ.get("no_proxy") or os.environ.get("NO_PROXY") or ""
     entries = [h.strip() for h in current.split(",")]
-    missing = [h for h in _LOOPBACK_HOSTS if h not in entries]
+    missing = [h for h in LOOPBACK_HOSTS if h not in entries]
     if missing:
         merged = ",".join(filter(None, [current, *missing]))
         os.environ["NO_PROXY"] = os.environ["no_proxy"] = merged

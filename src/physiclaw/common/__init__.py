@@ -11,6 +11,8 @@ Members:
     paths          — data-root (``~/.physiclaw``) resolver
     config         — ``config.toml`` load / access
     proxy          — proxy env-var normalization for httpx
+    loopback       — the spellings of "this very host" (NO_PROXY, peer
+                     IPs, Host headers), one reviewed home
     runtime_state  — live-server state file (host/port)
     verdict        — screen-change markers shared by core and agent
     bbox           — bbox validation + geometry primitives (center,

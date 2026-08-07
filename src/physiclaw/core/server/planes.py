@@ -35,14 +35,13 @@ from starlette.routing import Route
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from physiclaw.common.config import WILDCARD_HOSTS
+from physiclaw.common.loopback import LOOPBACK_HOST_HEADERS
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
 log = logging.getLogger(__name__)
 
-# Host values a local browser/client legitimately sends to a loopback bind.
-_LOCAL_HOSTNAMES = frozenset({"localhost", "127.0.0.1", "::1", "[::1]"})
 
 # The complete set of LAN-exposed paths — the phone page's XHRs and the
 # two iOS Shortcut endpoints, nothing else. ``PhoneApp.custom_route``
@@ -119,7 +118,7 @@ class ControlGate:
         # loopback bind's rebinding hole) stands down instead of 421-ing
         # every real client. Concrete-IP binds keep the allowlist.
         self._wildcard = host in WILDCARD_HOSTS
-        self._allowed = _LOCAL_HOSTNAMES | {host}
+        self._allowed = LOOPBACK_HOST_HEADERS | {host}
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
