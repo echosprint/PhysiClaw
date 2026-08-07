@@ -5,21 +5,16 @@ Covers:
   - collapse_old_turns: bootstrap state, threshold gating, summary
     accumulation across collapses, memory/skill artifact harvesting
   - drop_stale_screens: idempotency, latest preserved, gesture views
-  - scale_image_bytes: small image passthrough, oversized scaled, decode
-    failure fallback
   - small helpers: _content_to_text, _has_image, _stub_body,
     _format_artifact_text, _carry_items, _render_slot
 """
 
 from __future__ import annotations
 
-import cv2
-import numpy as np
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from physiclaw.agent.engine import compact
 from physiclaw.agent.engine.compact import (
     MEMORY_HEADER,
     MEMORY_INITIAL,
@@ -40,7 +35,6 @@ from physiclaw.agent.engine.compact import (
     new_memory_placeholder,
     new_skills_placeholder,
     new_summary_placeholder,
-    scale_image_bytes,
 )
 from physiclaw.agent.engine.dto import (
     AssistantMessage,
@@ -263,53 +257,6 @@ def test_stub_body_keeps_sequence_step_lines() -> None:
 
 def test_stub_body_empty_for_empty_text() -> None:
     assert _stub_body("") == ""
-
-
-# ---------- scale_image_bytes ----------
-
-
-def _encode_jpg(arr: np.ndarray) -> bytes:
-    ok, buf = cv2.imencode(".jpg", arr)
-    assert ok
-    return buf.tobytes()
-
-
-def test_scale_image_bytes_passthrough_when_within_max_edge(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(compact, "MAX_IMAGE_EDGE", 1000)
-    img = np.full((300, 200, 3), 128, dtype=np.uint8)
-    raw = _encode_jpg(img)
-
-    out_bytes, mime = scale_image_bytes(raw)
-
-    assert mime == "image/jpeg"
-    decoded = cv2.imdecode(np.frombuffer(out_bytes, np.uint8), cv2.IMREAD_COLOR)
-    assert decoded.shape == (300, 200, 3)
-
-
-def test_scale_image_bytes_scales_when_over_max_edge(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(compact, "MAX_IMAGE_EDGE", 100)
-    img = np.full((300, 600, 3), 128, dtype=np.uint8)
-    raw = _encode_jpg(img)
-
-    out_bytes, mime = scale_image_bytes(raw)
-
-    assert mime == "image/jpeg"
-    decoded = cv2.imdecode(np.frombuffer(out_bytes, np.uint8), cv2.IMREAD_COLOR)
-    # Long edge 600 → 100; aspect 2 preserved.
-    assert max(decoded.shape[:2]) == 100
-
-
-def test_scale_image_bytes_returns_input_on_decode_failure() -> None:
-    raw = b"definitely not an image"
-
-    out_bytes, mime = scale_image_bytes(raw)
-
-    assert out_bytes == raw
-    assert mime == "application/octet-stream"
 
 
 # ---------- drop_stale_screens ----------
@@ -1066,31 +1013,3 @@ def test_drop_stale_screens_composes_with_collapse_old_turns() -> None:
     assert isinstance(summary, UserMessage)
     assert SUMMARY_HEADER in str(summary.content)
     assert "- s0" in str(summary.content)  # folded turns' notes harvested
-
-
-def test_scale_image_bytes_jpeg_within_cap_passes_through_byte_identical(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # The server already sized this view to the shared knob — a re-encode
-    # would only stack a second generation of JPEG loss onto screen text.
-    monkeypatch.setattr(compact, "MAX_IMAGE_EDGE", 1000)
-    raw = _encode_jpg(np.full((300, 200, 3), 128, dtype=np.uint8))
-
-    out_bytes, mime = scale_image_bytes(raw)
-
-    assert out_bytes is raw
-    assert mime == "image/jpeg"
-
-
-def test_scale_image_bytes_png_within_cap_reencoded_to_jpeg(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(compact, "MAX_IMAGE_EDGE", 1000)
-    ok, buf = cv2.imencode(".png", np.full((300, 200, 3), 128, dtype=np.uint8))
-    assert ok
-    raw = buf.tobytes()
-
-    out_bytes, mime = scale_image_bytes(raw)
-
-    assert mime == "image/jpeg"
-    assert out_bytes.startswith(b"\xff\xd8\xff")

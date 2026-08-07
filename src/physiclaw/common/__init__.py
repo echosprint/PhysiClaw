@@ -20,10 +20,12 @@ Members:
     platform       — OS-specific branching (single source of truth)
     logger         — log formatting, tagging, and daily-file retention
     dumps          — image/artifact dumps (screenshots, tool calls)
+    image          — LLM-bound image ingress cap (provider ingress; the
+                     server encodes views to the same edge cap)
 
 This package stays import-light: nothing here pulls a heavy dependency
-at import time. ``dumps`` needs ``cv2`` for two of its four helpers, but
-imports it lazily inside those functions, so even ``import
-physiclaw.common.dumps`` stays cheap. Members are imported by full path
+at import time. ``dumps`` and ``image`` need ``cv2``, but import it
+lazily inside the functions that use it, so importing them stays
+cheap. Members are imported by full path
 where needed rather than re-exported here.
 """

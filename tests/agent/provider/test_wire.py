@@ -305,7 +305,7 @@ def test_mcp_blocks_single_image_block_returns_list_with_one_image(
     import base64 as _b64
 
     scaler = mocker.patch(
-        "physiclaw.agent.engine.compact.scale_image_bytes",
+        "physiclaw.common.image.scale_image_bytes",
         return_value=(b"scaled", "image/png"),
     )
 
@@ -330,7 +330,7 @@ def test_mcp_blocks_text_then_image_returns_list_with_textblock_first(
     mocker,
 ) -> None:
     mocker.patch(
-        "physiclaw.agent.engine.compact.scale_image_bytes",
+        "physiclaw.common.image.scale_image_bytes",
         return_value=(b"scaled", "image/jpeg"),
     )
 
@@ -353,7 +353,7 @@ def test_mcp_blocks_image_with_no_mime_type_defaults_to_jpeg_on_scale_failure(
 ) -> None:
     # scaler raises → fallback path uses `b.get("mime_type") or "image/jpeg"`.
     mocker.patch(
-        "physiclaw.agent.engine.compact.scale_image_bytes",
+        "physiclaw.common.image.scale_image_bytes",
         side_effect=RuntimeError("scaler down"),
     )
 
@@ -370,7 +370,7 @@ def test_mcp_blocks_image_scale_failure_logs_exception(
     mocker, caplog: pytest.LogCaptureFixture
 ) -> None:
     mocker.patch(
-        "physiclaw.agent.engine.compact.scale_image_bytes",
+        "physiclaw.common.image.scale_image_bytes",
         side_effect=RuntimeError("scaler down"),
     )
 
@@ -389,7 +389,7 @@ def test_mcp_blocks_image_scale_failure_preserves_explicit_mime_type(
     # In the fallback path, mime falls back to b.get("mime_type") — when
     # the block declares a mime, that wins over the "image/jpeg" default.
     mocker.patch(
-        "physiclaw.agent.engine.compact.scale_image_bytes",
+        "physiclaw.common.image.scale_image_bytes",
         side_effect=RuntimeError("scaler down"),
     )
 
@@ -404,7 +404,7 @@ def test_mcp_blocks_image_scale_failure_preserves_explicit_mime_type(
 
 def test_mcp_blocks_unknown_block_type_silently_dropped(mocker) -> None:
     mocker.patch(
-        "physiclaw.agent.engine.compact.scale_image_bytes",
+        "physiclaw.common.image.scale_image_bytes",
         return_value=(b"scaled", "image/png"),
     )
 

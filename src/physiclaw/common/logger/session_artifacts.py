@@ -92,7 +92,7 @@ def ensure_readme(dir: Path, content: str) -> None:
 
 
 # mime → filename suffix for images extracted from data-URLs. Everything
-# we actually serve is JPEG via compact.scale_image_bytes, but keep the
+# we actually serve is JPEG via common.image.scale_image_bytes, but keep the
 # fallback open for PNG / WebP in case an upstream tool starts emitting
 # them.
 _MIME_EXT = {

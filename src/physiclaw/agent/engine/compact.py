@@ -1,30 +1,24 @@
-"""Context compaction — two jobs, both about keeping image payload small:
+"""Context compaction — keeping stale screen payload small.
 
-  1. `drop_stale_screens` — "latest screen wins": only the most recent
-     image-bearing tool_result keeps its image + full listing. Views
-     arrive from `peek`/`screenshot` AND from every gesture (the fused
-     post-action view), so staleness is keyed on ImageBlock presence,
-     not tool names. Earlier view results are stubbed down to a marker
-     line (`(superseded <tool>) — labels only, in order`) plus their
-     surviving text: the action result line (verdict included — the
-     retry history must stay legible) and the listing reduced to LABELS
-     ONLY — each `[text]` row's id index, kind tag, bbox and confidence
-     are dropped, leaving just the label text, one per line, in the
-     original top-to-bottom order and set off from the action line by a
-     blank line. Once the screen is gone those fields
-     are dead weight: you can't tap a bbox on a page you've left or
-     reference an old element's id, and a past detection's confidence is
-     moot — the label is the only content worth remembering (and it's
-     ~20% of a row's tokens; the rest is the 80% we drop). Icon rows are
-     label-less and dropped; the listing header is dropped too. The
-     assistant message and its tool_calls stay intact, so the decision
-     history ("I called peek here, tapped there") is preserved.
-
-  2. `scale_image_bytes` — ingress cap: every incoming tool-result image
-     leaves as JPEG with long edge ≤ MAX_IMAGE_EDGE. The server sizes
-     its views to the same knob, so the steady state is a byte-identical
-     pass-through; oversized or non-JPEG strays get resized/re-encoded
-     (drops PNG transparency — fine for screenshots).
+`drop_stale_screens` — "latest screen wins": only the most recent
+image-bearing tool_result keeps its image + full listing. Views
+arrive from `peek`/`screenshot` AND from every gesture (the fused
+post-action view), so staleness is keyed on ImageBlock presence,
+not tool names. Earlier view results are stubbed down to a marker
+line (`(superseded <tool>) — labels only, in order`) plus their
+surviving text: the action result line (verdict included — the
+retry history must stay legible) and the listing reduced to LABELS
+ONLY — each `[text]` row's id index, kind tag, bbox and confidence
+are dropped, leaving just the label text, one per line, in the
+original top-to-bottom order and set off from the action line by a
+blank line. Once the screen is gone those fields
+are dead weight: you can't tap a bbox on a page you've left or
+reference an old element's id, and a past detection's confidence is
+moot — the label is the only content worth remembering (and it's
+~20% of a row's tokens; the rest is the 80% we drop). Icon rows are
+label-less and dropped; the listing header is dropped too. The
+assistant message and its tool_calls stay intact, so the decision
+history ("I called peek here, tapped there") is preserved.
 
 `drop_stale_screens` operates on `Message` DTOs: it replaces each stale
 `ImageBlock`-bearing `ToolResultMessage`'s content with the stub string
@@ -34,9 +28,6 @@ stub via the typed flag — no string parsing across modules.
 
 import json
 import logging
-
-import cv2
-import numpy as np
 
 from physiclaw.agent.engine import memory
 from physiclaw.agent.engine.dto import (
@@ -50,13 +41,9 @@ from physiclaw.agent.engine.dto import (
     ToolResultMessage,
     UserMessage,
 )
-from physiclaw.common.config import CONFIG
 from physiclaw.common.listing import ICON_ROW_RE, LISTING_HEADER, TEXT_ROW_RE
 
 log = logging.getLogger(__name__)
-
-MAX_IMAGE_EDGE = CONFIG.compact.max_image_edge_px
-JPEG_QUALITY = CONFIG.compact.jpeg_quality
 
 # Human-readable lead-in for the stubbed content. Operators reading raw
 # logs see `(superseded peek)` / `(superseded tap)` and immediately know
@@ -345,40 +332,6 @@ def _format_artifact_text(name: str, arguments: dict, content: str) -> str:
     so both surfaces produce identical formatting."""
     args_str = json.dumps(arguments, ensure_ascii=False, sort_keys=True)
     return f"{name}({args_str}) →\n{content}"
-
-
-_JPEG_MAGIC = b"\xff\xd8\xff"  # JPEG SOI marker
-
-
-def scale_image_bytes(raw: bytes) -> tuple[bytes, str]:
-    """Decode, scale long-edge to MAX_IMAGE_EDGE if larger, re-encode JPEG.
-
-    A JPEG already within the cap (the steady state — the server sizes
-    views to the same knob) passes through byte-identical rather than
-    stacking a second generation of q85 loss onto on-screen text.
-
-    Returns (bytes, mime_type). On decode/encode failure returns the input
-    unchanged with a generic mime so the caller still has something to
-    forward — context bloat is preferable to a dropped screenshot.
-    """
-    arr = np.frombuffer(raw, dtype=np.uint8)
-    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-    if img is None:
-        log.warning("scale_image_bytes: decode failed on %d bytes", len(raw))
-        return raw, "application/octet-stream"
-    h, w = img.shape[:2]
-    long_edge = max(h, w)
-    if long_edge <= MAX_IMAGE_EDGE and raw.startswith(_JPEG_MAGIC):
-        return raw, "image/jpeg"
-    if long_edge > MAX_IMAGE_EDGE:
-        scale = MAX_IMAGE_EDGE / long_edge
-        new_size = (int(round(w * scale)), int(round(h * scale)))
-        img = cv2.resize(img, new_size, interpolation=cv2.INTER_AREA)
-    ok, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY])
-    if not ok:
-        log.warning("scale_image_bytes: encode failed")
-        return raw, "application/octet-stream"
-    return buf.tobytes(), "image/jpeg"
 
 
 def _content_to_text(content: str | list[ContentBlock]) -> str:

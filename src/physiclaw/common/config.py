@@ -230,8 +230,8 @@ class ProviderConfig:
 @dataclass
 class CompactConfig:
     """Size/quality of every image the LLM sees — applied server-side at
-    encode (`vision.util.encode_view_jpeg`) and again at the engine's
-    ingress (`compact.scale_image_bytes`) as a safety net. 1566 keeps a
+    encode (`vision.util.encode_view_jpeg`) and again at the agent's
+    ingress (`common.image.scale_image_bytes`) as a safety net. 1566 keeps a
     portrait phone view at ~1.15 megapixels: Claude's hard-resize sweet
     spot (1568), well inside Kimi/Qwen budgets — larger only adds
     tokens + latency, smaller blurs fine print."""
@@ -427,7 +427,7 @@ _SECTION_COMMENTS: dict[str, str] = {
     "compact": (
         "Size/quality of every image the LLM sees. `max_image_edge_px` caps "
         "the long edge of camera views and phone screenshots (applied "
-        "server-side at capture and again at the engine's ingress); 1566 ≈ "
+        "server-side at capture and again at the agent's ingress); 1566 ≈ "
         "the ~1.15-megapixel vision sweet spot — larger wastes tokens, "
         "smaller blurs fine print."
     ),

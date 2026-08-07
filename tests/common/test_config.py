@@ -323,7 +323,7 @@ def test_to_toml_emits_header_and_section_comments_when_with_comments() -> None:
             "compact",
             "Size/quality of every image the LLM sees. `max_image_edge_px` caps "
             "the long edge of camera views and phone screenshots (applied "
-            "server-side at capture and again at the engine's ingress); 1566 ≈ "
+            "server-side at capture and again at the agent's ingress); 1566 ≈ "
             "the ~1.15-megapixel vision sweet spot — larger wastes tokens, "
             "smaller blurs fine print.",
         ),

@@ -205,9 +205,9 @@ class CollapsePolicy:
     semantics) because dto.py is the shared type vocabulary the provider
     layer already imports for the message DTOs — a config value type
     belongs with the types, not with the behavior module that consumes
-    it. This is a cohesion choice, not an import-weight one: the
-    provider package already pulls compact (and with it cv2/numpy) at
-    import time via `wire.py`'s use of `compact.scale_image_bytes`.
+    it. It's also what keeps dto.py the only engine module providers
+    import: moving the type into compact.py would drag the behavior
+    module (back) across the provider/engine boundary.
     """
 
     first_at: int

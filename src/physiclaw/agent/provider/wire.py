@@ -31,7 +31,6 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from physiclaw.agent.engine import compact
 from physiclaw.agent.engine.dto import (
     AssistantMessage,
     ContentBlock,
@@ -39,6 +38,7 @@ from physiclaw.agent.engine.dto import (
     TextBlock,
     ToolResultMessage,
 )
+from physiclaw.common import image
 
 log = logging.getLogger(__name__)
 
@@ -166,8 +166,12 @@ def mcp_blocks_to_content_blocks(blocks: list[dict]) -> str | list[ContentBlock]
         elif kind == "image":
             try:
                 raw = base64.b64decode(b["data"])
-                scaled, mime = compact.scale_image_bytes(raw)
-                new_b64 = base64.b64encode(scaled).decode()
+                scaled, mime = image.scale_image_bytes(raw)
+                # Steady state returns `raw` itself (byte-identical
+                # pass-through) — the b64 we already hold is the answer.
+                new_b64 = (
+                    b["data"] if scaled is raw else base64.b64encode(scaled).decode()
+                )
             except Exception:
                 log.exception("scale failed; forwarding original image")
                 new_b64 = b["data"]
