@@ -14,6 +14,7 @@ into an error ToolResult.
 """
 
 import logging
+import time
 
 from physiclaw.agent.engine.dto import (
     ContentBlock,
@@ -89,6 +90,8 @@ async def dispatch(
         return blocked
 
     local = run.local_registry.get(call.name)
+    # Clock starts after the guards: this measures the tool, not the gating.
+    t0 = time.monotonic()
     try:
         if local is not None:
             result = await local.handler(session, call.arguments)
@@ -111,7 +114,9 @@ async def dispatch(
                         f"{call.name} declares returns_blocks but returned "
                         f"{type(result).__name__}"
                     )
-                return _blocks_result(run, session, call, result, turn)
+                return _blocks_result(
+                    run, session, call, result, turn, elapsed_ms=_ms_since(t0)
+                )
             if not isinstance(result, str):
                 # The mirror mismatch: blocks from a handler that never
                 # declared them would be serialized as their repr. Same
@@ -128,6 +133,7 @@ async def dispatch(
                     "name": call.name,
                     "id": call.id,
                     "arguments": call.arguments,
+                    "elapsed_ms": _ms_since(t0),
                     "text": result,
                 }
             )
@@ -135,12 +141,20 @@ async def dispatch(
             return ToolResultMessage(tool_call_id=call.id, content=result)
 
         blocks = await run.mcp.call_tool(call.name, call.arguments)
-        return _blocks_result(run, session, call, blocks, turn)
+        return _blocks_result(
+            run, session, call, blocks, turn, elapsed_ms=_ms_since(t0)
+        )
 
     except Exception as e:
         log.error("  ✗ %s failed: %s", call.name, e)
         run.tr.write(
-            {"event": "tool_error", "turn": turn, "name": call.name, "error": str(e)}
+            {
+                "event": "tool_error",
+                "turn": turn,
+                "name": call.name,
+                "elapsed_ms": _ms_since(t0),
+                "error": str(e),
+            }
         )
         content = _observe_result(
             run,
@@ -158,12 +172,18 @@ async def dispatch(
         )
 
 
+def _ms_since(t0: float) -> int:
+    return int((time.monotonic() - t0) * 1000)
+
+
 def _blocks_result(
     run: EngineRun,
     session: Session,
     call: ToolCall,
     blocks: list[dict],
     turn: int,
+    *,
+    elapsed_ms: int,
 ) -> ToolResultMessage:
     """Raw MCP-style blocks → observed ToolResultMessage — the shared tail
     of the MCP path and the local block-returning path (run_macro)."""
@@ -185,6 +205,8 @@ def _blocks_result(
             "name": call.name,
             "id": call.id,
             "arguments": call.arguments,
+            "elapsed_ms": elapsed_ms,
+            "changed": changed,
             "blocks": blocks,
         }
     )

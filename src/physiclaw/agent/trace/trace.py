@@ -13,9 +13,11 @@ from physiclaw.agent.trace.format import (
     brief_content,
     summarize_event,
 )
+from physiclaw.common import paths
 from physiclaw.common.logger import (
     DailyLogWriter,
     SessionLogSidecars,
+    append_stats,
     build_summary,
     ensure_readme,
     env_snapshot,
@@ -115,6 +117,7 @@ class Trace:
             write_json_atomic(
                 store._session_dir(self.session_id) / "summary.json", summary
             )
+            append_stats(paths.LOG_DIR, summary)
             self._daily.line(_end_footer(summary))
         except OSError:
             log.warning("session summary write failed", exc_info=True)
@@ -190,6 +193,8 @@ class _Summary:
         self.max_turn = -1
         self.provider_calls = 0
         self.provider_time_ms = 0
+        self.tool_time_ms = 0
+        self.verdicts: Counter[str] = Counter()
         self.input_tokens = 0
         self.output_tokens = 0
         self.cache_read = 0
@@ -221,6 +226,20 @@ class _Summary:
             self.cache_creation += int(event.get("create") or 0)
         elif name == "tool_result":
             self.tool_calls[event.get("name") or "?"] += 1
+            self.tool_time_ms += int(event.get("elapsed_ms") or 0)
+            if "changed" in event:
+                # Three buckets, deliberately: absent (text tool) is not
+                # counted at all — null means "camera couldn't decide",
+                # which a miss-rate denominator must keep apart.
+                c = event["changed"]
+                key = (
+                    "changed"
+                    if c is True
+                    else "unchanged"
+                    if c is False
+                    else "no_verdict"
+                )
+                self.verdicts[key] += 1
         elif name in _BLOCKED_KEYS:
             self.errors[_BLOCKED_KEYS[name]] += 1
         elif name == "tool_invalid_args":
@@ -229,6 +248,7 @@ class _Summary:
             self.errors["unknown_tool"] += 1
         elif name == "tool_error":
             self.errors["tool_errors"] += 1
+            self.tool_time_ms += int(event.get("elapsed_ms") or 0)
         elif name == "provider_failed":
             self.errors["provider_failures"] += 1
         elif name == "done":
@@ -260,6 +280,8 @@ class _Summary:
             cache_read_tokens=self.cache_read,
             cache_creation_tokens=self.cache_creation,
             tool_calls=self.tool_calls,
+            tool_time_ms=self.tool_time_ms,
+            verdicts=self.verdicts,
             errors=self.errors,
             stuck_events=self.stuck_events,
             images=images,

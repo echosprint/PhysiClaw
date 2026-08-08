@@ -11,6 +11,7 @@ from physiclaw.common.logger.logger import (
 )
 from physiclaw.common.logger.session_artifacts import (
     DailyLogWriter,
+    append_stats,
     build_summary,
     ensure_readme,
     env_snapshot,
@@ -25,6 +26,7 @@ __all__ = [
     "DailyLogWriter",
     "LineLogStream",
     "SessionLogSidecars",
+    "append_stats",
     "attach_server_mcp_tee",
     "attach_session_log",
     "build_summary",

@@ -12,10 +12,26 @@ from freezegun import freeze_time
 
 from physiclaw.common.logger.session_artifacts import (
     DailyLogWriter,
+    append_stats,
     build_summary,
     image_filename,
     write_json_atomic,
 )
+
+# ---------- append_stats ----------
+
+
+def test_append_stats_creates_then_appends_one_line_per_session(
+    tmp_path: Path,
+) -> None:
+    log_dir = tmp_path / "log" / "engine"  # not pre-created — helper mkdirs
+
+    append_stats(log_dir, {"sid": "a", "turns": 3})
+    append_stats(log_dir, {"sid": "b", "turns": 5})
+
+    lines = (log_dir / "stats.jsonl").read_text(encoding="utf-8").splitlines()
+    assert [json.loads(ln)["sid"] for ln in lines] == ["a", "b"]
+
 
 # ---------- DailyLogWriter ----------
 
@@ -144,17 +160,25 @@ def _claude_summary() -> dict:
 
 def test_both_engines_emit_the_same_summary_key_tree() -> None:
     """The parity contract: `physiclaw logs` / `jq` read both engines'
-    summary.json with one schema. cost_usd is the single claude-only key."""
+    summary.json with one schema, modulo the declared per-engine keys:
+    cost_usd is claude-only (the CLI reports it); tool_time_ms and
+    verdicts are engine-only (the claude stream carries no per-tool
+    timing or camera verdicts)."""
     engine_full, claude_full = _engine_summary(), _claude_summary()
     engine, claude = _key_tree(engine_full), _key_tree(claude_full)
 
     assert claude.pop("cost_usd", "absent") is None  # present, scalar
+    assert engine.pop("tool_time_ms", "absent") is None  # present, scalar
+    assert isinstance(engine.pop("verdicts"), dict)
     # `env` is engine-populated data (the engine relays its env event
     # verbatim), not part of the constructed schema — opaque here.
     assert isinstance(engine.pop("env"), dict) and isinstance(claude.pop("env"), dict)
     assert claude == engine
     # Same top-level ordering too — the files diff cleanly across engines.
-    assert [k for k in claude_full if k != "cost_usd"] == list(engine_full)
+    _PER_ENGINE = {"cost_usd", "tool_time_ms", "verdicts"}
+    assert [k for k in claude_full if k not in _PER_ENGINE] == [
+        k for k in engine_full if k not in _PER_ENGINE
+    ]
 
 
 def test_claude_usage_folds_cache_tokens_into_input_tokens() -> None:

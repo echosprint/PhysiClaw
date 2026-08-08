@@ -77,6 +77,20 @@ def write_json_atomic(path: Path, obj: dict[str, Any]) -> None:
     tmp.replace(path)
 
 
+def append_stats(log_dir: Path, summary: dict[str, Any]) -> None:
+    """Append one session's summary as a line to `<log_dir>/stats.jsonl` —
+    the durable per-session aggregate that outlives session-dir retention
+    (both engines append to the same file at the sweep-free `log/` root).
+    Fail-open: losing a stats line must never cost the session close."""
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        line = json.dumps(summary, ensure_ascii=False, default=repr)
+        with _open_log_file(log_dir / "stats.jsonl") as f:
+            f.write(line + "\n")
+    except OSError:
+        log.warning("stats.jsonl append failed", exc_info=True)
+
+
 def ensure_readme(dir: Path, content: str) -> None:
     """Keep the format doc at `<dir>/README.md` current — rewritten
     whenever the shipped constant changed, so existing installs don't
@@ -240,6 +254,8 @@ def build_summary(
     cache_creation_tokens: int,
     cost_usd: float | None = None,
     tool_calls: Mapping[str, int],
+    tool_time_ms: int | None = None,
+    verdicts: Mapping[str, int] | None = None,
     errors: Mapping[str, int],
     stuck_events: int,
     images: int,
@@ -250,7 +266,9 @@ def build_summary(
     is stamped here (finalize time). `errors` may carry any subset of
     `_ERROR_KEYS`; the rest render as 0. `cost_usd` (claude-only — the
     CLI reports it) is dropped when None, keeping engine summaries
-    byte-stable."""
+    byte-stable; `tool_time_ms` / `verdicts` (engine-only — the claude
+    CLI's stream carries no per-tool timing or camera verdicts) are
+    dropped the same way."""
     unknown = set(errors) - set(_ERROR_KEYS)
     if unknown:
         # A counter incremented somewhere without a matching _ERROR_KEYS
@@ -274,6 +292,7 @@ def build_summary(
         "turns": turns,
         "provider_calls": provider_calls,
         "provider_time_ms": provider_time_ms,
+        "tool_time_ms": tool_time_ms,
         "usage": {
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
@@ -287,11 +306,13 @@ def build_summary(
         },
         "cost_usd": round(cost_usd, 4) if cost_usd is not None else None,
         "tool_calls": dict(tool_calls),
+        "verdicts": dict(verdicts) if verdicts is not None else None,
         "errors": {key: int(errors.get(key, 0)) for key in _ERROR_KEYS},
         "stuck_events": stuck_events,
         "images": images,
         "env": env,
     }
-    if cost_usd is None:
-        del summary["cost_usd"]
+    for optional in ("cost_usd", "tool_time_ms", "verdicts"):
+        if summary[optional] is None:
+            del summary[optional]
     return summary

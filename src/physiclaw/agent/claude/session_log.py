@@ -27,6 +27,7 @@ from physiclaw.common.config import CONFIG
 from physiclaw.common.logger import (
     DailyLogWriter,
     SessionLogSidecars,
+    append_stats,
     build_summary,
     ensure_readme,
     env_snapshot,
@@ -91,7 +92,9 @@ platform.
   sessions): sid, started/ended, duration_s, model_ref, provider, triggers,
   outcome{sentinel,recap,crashed}, turns, usage{tokens,cache_hit_pct},
   cost_usd, tool_calls{name:count}, errors, images, env. Missing = the
-  session was killed. Cross-session: `jq .usage.cache_hit_pct */summary.json`.
+  session was killed. Cross-session: `jq .usage.cache_hit_pct */summary.json`;
+  for trends past the retention window, `log/stats.jsonl` (one summary
+  line per session, both engines) survives the session-dir purge.
 - `images/<HHMMSS>_<mmm>_t<turn>.<ext>` — screenshots the model saw
   (typically .jpg). Name = local capture time (hour-minute-second `_`
   milliseconds) + `_t<turn>` (the turn it belongs to), so they sort in
@@ -320,10 +323,9 @@ class _SessionLog:
             return
         self._closed = True
         try:
-            write_json_atomic(
-                self._sdir / "summary.json",
-                self._summary.finalize(images=self._image_counter),
-            )
+            summary = self._summary.finalize(images=self._image_counter)
+            write_json_atomic(self._sdir / "summary.json", summary)
+            append_stats(paths.LOG_DIR, summary)
         except OSError:
             log.warning("claude session summary write failed", exc_info=True)
         finally:

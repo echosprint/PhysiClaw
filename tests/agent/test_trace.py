@@ -785,6 +785,7 @@ def _feed_session(t: Trace) -> None:
             "name": "note",
             "id": "a",
             "arguments": {},
+            "elapsed_ms": 5,
             "text": "noted",
         }
     )
@@ -795,6 +796,8 @@ def _feed_session(t: Trace) -> None:
             "name": "tap",
             "id": "b",
             "arguments": {},
+            "elapsed_ms": 2000,
+            "changed": True,
             "text": "tapped",
         }
     )
@@ -836,6 +839,8 @@ def test_summary_json_derived_from_event_stream(_trace_dirs: Path) -> None:
     assert s["usage"]["cache_creation_tokens"] == 100
     assert s["usage"]["cache_hit_pct"] == 80.0
     assert s["tool_calls"] == {"note": 1, "tap": 1}
+    assert s["tool_time_ms"] == 5 + 2000  # both tool_result events
+    assert s["verdicts"] == {"changed": 1}  # note carried no verdict
     assert s["errors"]["blocked_stuck"] == 1
     assert s["errors"]["invalid_args"] == 1
     assert s["errors"]["correctives"] == 1
@@ -931,6 +936,17 @@ def _age(path: Path, days: float) -> None:
 
     ago = (dt.datetime.now() - dt.timedelta(days=days)).timestamp()
     os.utime(path, (ago, ago))
+
+
+def test_close_appends_summary_line_to_durable_stats(_trace_dirs: Path) -> None:
+    # Tiered retention: session dirs purge after trace_days; the one-line
+    # summary appended at close lands at the sweep-free `log/` root — no
+    # purge target ever matches it, by placement rather than by exemption.
+    Trace("s1").close()
+    Trace("s2").close()
+
+    lines = (paths.LOG_DIR / "stats.jsonl").read_text(encoding="utf-8").splitlines()
+    assert [json.loads(ln)["sid"] for ln in lines] == ["s1", "s2"]
 
 
 def test_purge_old_removes_stale_session_dirs(_trace_dirs: Path) -> None:

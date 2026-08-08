@@ -119,6 +119,40 @@ async def test_dispatch_local_blocks_traced_like_mcp_result() -> None:
 
 
 @pytest.mark.asyncio
+async def test_dispatch_local_text_event_carries_elapsed_without_verdict() -> None:
+    async def handler(_session, _args):
+        return "noted: ok"
+
+    tool = LocalTool("note", "x", {"type": "object"}, handler)
+    schema = {"name": "note", "input_schema": {"type": "object"}}
+    run = _mk_run(schema_by_name={"note": schema}, local_registry={"note": tool})
+
+    await dispatch(run, Session(), _tc("note"), 0)
+
+    traced = [c.args[0] for c in run.tr.write.call_args_list]
+    ev = next(e for e in traced if e.get("event") == "tool_result")
+    assert isinstance(ev["elapsed_ms"], int) and ev["elapsed_ms"] >= 0
+    assert "changed" not in ev  # no screen semantics on a local text tool
+
+
+@pytest.mark.asyncio
+async def test_dispatch_tool_error_event_carries_elapsed() -> None:
+    schema = {"name": "physiclaw__tap", "input_schema": {"type": "object"}}
+
+    class BadMcp:
+        async def call_tool(self, *a, **kw):
+            raise RuntimeError("mcp down")
+
+    run = _mk_run(mcp=BadMcp(), schema_by_name={"physiclaw__tap": schema})
+
+    await dispatch(run, Session(), _tc("physiclaw__tap"), 0)
+
+    traced = [c.args[0] for c in run.tr.write.call_args_list]
+    ev = next(e for e in traced if e.get("event") == "tool_error")
+    assert isinstance(ev["elapsed_ms"], int) and ev["elapsed_ms"] >= 0
+
+
+@pytest.mark.asyncio
 async def test_dispatch_declared_blocks_but_text_is_a_tool_error() -> None:
     # `returns_blocks` and the handler's return type state one fact twice,
     # so dispatch enforces the agreement: a str under the flag would
@@ -230,6 +264,31 @@ _TAP_SCHEMA = {
     },
 }
 _STEPPER = [0.908, 0.526, 0.983, 0.562]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        pytest.param("Tapped at bbox [...] | screen: changed", True, id="changed"),
+        pytest.param("Tapped, no verdict marker here", None, id="no-verdict"),
+    ],
+)
+async def test_dispatch_gesture_event_carries_elapsed_and_verdict(
+    text, expected
+) -> None:
+    """Debuggability contract: the tool's own execution time and the
+    camera verdict land on the event as DATA — per-step latency and
+    miss-rate statistics must never regex the result text."""
+    mcp = VerdictMcpClient(text=text)
+    run = _mk_run(mcp=mcp, schema_by_name={"tap": _TAP_SCHEMA})
+
+    await dispatch(run, Session(), _tc("tap", {"bbox": _STEPPER}), 0)
+
+    traced = [c.args[0] for c in run.tr.write.call_args_list]
+    ev = next(e for e in traced if e.get("event") == "tool_result")
+    assert isinstance(ev["elapsed_ms"], int) and ev["elapsed_ms"] >= 0
+    assert ev["changed"] is expected
 
 
 def _all_text(content) -> str:

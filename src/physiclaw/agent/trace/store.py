@@ -114,9 +114,10 @@ in the `env` event / `summary.json.env.utc_offset`.
   stream (schema v1): sid, started_at/ended_at (local ISO), duration_s,
   model_ref ("provider/model"), provider, prompt_hash, triggers,
   outcome {sentinel: DONE|WAIT|IDLE|STUCK|FAIL, recap, crashed},
-  turns, provider_calls, provider_time_ms, usage {input_tokens,
-  output_tokens, cache_read_tokens, cache_creation_tokens,
-  cache_hit_pct}, tool_calls {name: count}, errors {blocked_plan,
+  turns, provider_calls, provider_time_ms, tool_time_ms, usage
+  {input_tokens, output_tokens, cache_read_tokens,
+  cache_creation_tokens, cache_hit_pct}, tool_calls {name: count},
+  verdicts {changed/unchanged/no_verdict}, errors {blocked_plan,
   blocked_layout, blocked_stuck, invalid_args, unknown_tool,
   tool_errors, correctives, provider_failures}, stuck_events, images,
   env {physiclaw/python versions, os, platform, host, utc_offset,
@@ -128,7 +129,9 @@ in the `env` event / `summary.json.env.utc_offset`.
   ...event fields}`. First line is always `env`. Key event types:
   `wake` (triggers), `response` (finish_reason, tool_calls requested,
   elapsed_ms), `cache` (token usage: total/hit/create/out),
-  `tool_result` (name, arguments, text or result_summary),
+  `tool_result` (name, arguments, elapsed_ms, text or result_summary;
+  gesture results also carry `changed`: true/false/null, the camera
+  verdict as data),
   `tool_blocked_no_plan|_layout|_stuck` (engine refused the call),
   `stuck_warning` (loop detector fired), `bad_turn_shape` /
   `*_checkpoint` (turn rejected, corrective sent), `done`
@@ -174,7 +177,9 @@ in the `env` event / `summary.json.env.utc_offset`.
   `events.jsonl` for `tool_blocked`/`stuck_warning`/`bad_turn_shape`
   around the last turns, then view the matching `images/`.
 - Cross-session stats: every summary is one JSON file —
-  `jq .usage.cache_hit_pct sessions/*/summary.json`.
+  `jq .usage.cache_hit_pct sessions/*/summary.json`. For trends past
+  the retention window, `log/stats.jsonl` (one summary line per
+  session at close, both engines) survives the session-dir purge.
 - Turn timeline: events with the same `turn` value tell one
   turn's story: response → cache → tool_result(s).
 

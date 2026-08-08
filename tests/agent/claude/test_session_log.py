@@ -170,6 +170,13 @@ def test_session_log_writes_summary_json(_isolated_log_dir: Path) -> None:
     assert s["usage"]["cache_read_tokens"] == 400
     assert s["cost_usd"] == 0.0123
     assert s["provider_time_ms"] == 4200
+    # Durable copy at the sweep-free `log/` root, shared with the engine:
+    # one summary line per session, surviving session-dir retention.
+    stats = (paths.LOG_DIR / "stats.jsonl").read_text().splitlines()
+    assert json.loads(stats[0])["sid"] == "20260101_120000_test00"
+    # Engine-only fields are DROPPED, not faked as zero — the claude
+    # stream carries no per-tool timing or camera verdicts.
+    assert "tool_time_ms" not in json.loads(stats[0])
 
 
 def test_session_log_extracts_screenshot(_isolated_log_dir: Path) -> None:
