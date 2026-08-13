@@ -13,3 +13,5 @@ description: Shop on the 淘宝 (Taobao) app. Use whenever the user wants to buy
 ## 闪购
 
 Tap the **闪购** tab at the top of the home page first, then search there (no **非直播** needed).
+
+- **外卖:** pick the brand's nearest, fastest-delivering branch.
