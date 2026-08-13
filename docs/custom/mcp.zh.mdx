@@ -1,0 +1,56 @@
+---
+title: MCP
+description: 只运行 MCP 服务器，用你自己的智能体驱动硬件。
+---
+
+PhysiClaw 通过 MCP 把底层硬件封装成 `peek`、`tap`、`swipe` 等工具，你用自己的智能体就能直接调用。
+
+## 启动 MCP
+
+```bash
+physiclaw mcp
+```
+
+也可用 `physiclaw mcp -H` 热启动。
+
+## 连接 MCP
+
+<Tabs>
+<TabItem label="Claude Code">
+```bash
+claude mcp add --transport http physiclaw http://127.0.0.1:8048/mcp
+```
+</TabItem>
+<TabItem label="Codex">
+```bash
+codex mcp add physiclaw --url http://127.0.0.1:8048/mcp
+```
+</TabItem>
+<TabItem label="Gemini CLI">
+```bash
+gemini mcp add --transport http physiclaw http://127.0.0.1:8048/mcp
+```
+</TabItem>
+<TabItem label="OpenClaw">
+```bash
+openclaw mcp add physiclaw --url http://127.0.0.1:8048/mcp --transport streamable-http
+```
+</TabItem>
+<TabItem label="Hermes">
+```bash
+hermes mcp add physiclaw --url http://127.0.0.1:8048/mcp
+```
+</TabItem>
+</Tabs>
+
+## 使用
+
+连接完成后，直接在你的智能体里下达任务：
+
+```text
+帮我打开微信
+```
+
+:::note[注意 token 消耗]
+每一步操作都会返回一张摄像头拍摄的屏幕画面，token 消耗大，长任务容易触及上下文窗口上限。
+:::

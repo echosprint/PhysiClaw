@@ -61,7 +61,8 @@
       "items": [
         "custom/memory",
         "custom/skills",
-        "custom/macros"
+        "custom/macros",
+        "custom/mcp"
       ]
     },
     {

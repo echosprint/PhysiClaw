@@ -1,0 +1,56 @@
+---
+title: MCP
+description: Run the MCP server alone and drive the hardware with your own agent.
+---
+
+PhysiClaw wraps the hardware into `peek`, `tap`, `swipe`, and other tools over MCP, so your own agent can call them directly.
+
+## Start the MCP server
+
+```bash
+physiclaw mcp
+```
+
+Or hot-start with `physiclaw mcp -H`.
+
+## Connect your agent
+
+<Tabs>
+<TabItem label="Claude Code">
+```bash
+claude mcp add --transport http physiclaw http://127.0.0.1:8048/mcp
+```
+</TabItem>
+<TabItem label="Codex">
+```bash
+codex mcp add physiclaw --url http://127.0.0.1:8048/mcp
+```
+</TabItem>
+<TabItem label="Gemini CLI">
+```bash
+gemini mcp add --transport http physiclaw http://127.0.0.1:8048/mcp
+```
+</TabItem>
+<TabItem label="OpenClaw">
+```bash
+openclaw mcp add physiclaw --url http://127.0.0.1:8048/mcp --transport streamable-http
+```
+</TabItem>
+<TabItem label="Hermes">
+```bash
+hermes mcp add physiclaw --url http://127.0.0.1:8048/mcp
+```
+</TabItem>
+</Tabs>
+
+## Use it
+
+Once connected, hand your agent a task:
+
+```text
+Open WhatsApp for me.
+```
+
+:::note[Mind the token cost]
+Every action returns a camera image of the phone screen, so tokens add up fast and long tasks can hit the context window sooner.
+:::
