@@ -13,9 +13,11 @@ Layout::
     ├── models/omniparser_icon_detect/model.onnx
     ├── skills/<name>/SKILL.md           (user-authored; overrides built-in)
     ├── macros/{README.md, <name>/MACRO.yml, stats.json}  (gesture macros + run stats)
+    ├── playbooks/<app>/{pages.yml, <playbook>.yml, macros/}  (self-contained app packs)
     ├── official/{source.json, skills/, .sync-state.json}  (synced official pack)
     ├── cache/update.json                (update-notice stage marker; Phase B→A)
     ├── learned/pitfalls/{pitfalls.md, history.jsonl}  (agent-flagged traps; add_pitfall)
+    ├── learned/pages/<app>.json         (captured page geometry: anchors, thresholds, variants)
     ├── screen-layout/{layout.json, layout.md}  (learned on first run by the `screen-layout` skill)
     ├── snapshots/, screenshots/, tool_calls/, raw_camera/  (debug dumps; `physiclaw clear`)
     ├── run/server.json                  (live server pid+host+port; cleared on exit)
@@ -32,10 +34,12 @@ File-format rule — the mix above is deliberate, one format per audience
 machines write):
 
     config.toml     the ONE user-edited settings file → TOML
-    MACRO.yml       the one deliberate YAML exception: user-edited step
-                    flows follow the GitHub-Actions shape, and YAML's
+    MACRO.yml,      the deliberate YAML exceptions: user-edited automation
+    pages.yml       specs (macro step flows, playbook page declarations)
+                    follow the GitHub-Actions shape, and YAML's
                     implicit-typing hazards are fenced by a 1.2 parser +
-                    strict type checks (agent/macros/parse.py)
+                    strict type checks (agent/macros/parse.py,
+                    agent/conductor/pages.py)
     *.json/*.jsonl  machine-written state, caches, and append-only logs
                     (jq-able; source.json mirrors the upstream manifest
                     verbatim)
@@ -137,6 +141,25 @@ def macros_dir() -> Path:
     single machine-written ``stats.json`` at the root. Only ``*/MACRO.yml``
     is scanned, so the stats file can never be read as a macro."""
     return HOME / "macros"
+
+
+def playbooks_dir() -> Path:
+    """Self-contained conductor app packs — one ``<app>/`` dir per app
+    holding its ``pages.yml`` (page declarations, human-authored), one
+    ``<playbook>.yml`` per playbook, and the pack's private ``macros/``.
+    Geometry never lives here; it is captured on-device into
+    ``learned_pages_dir()`` — device variance (iPhone models, iOS and app
+    versions) makes shipped or authored geometry infeasible."""
+    return HOME / "playbooks"
+
+
+def learned_pages_dir() -> Path:
+    """Machine-captured page geometry per app — ``<app>.json`` holding the
+    learned half of each page fingerprint (anchor positions/tolerances,
+    OCR variants, calibrated thresholds), merged with the authored
+    declarations at load. Deleting a file resets that app's capture
+    without touching any authoring."""
+    return HOME / "learned" / "pages"
 
 
 def official_dir() -> Path:

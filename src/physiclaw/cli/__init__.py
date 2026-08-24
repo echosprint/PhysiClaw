@@ -7,6 +7,7 @@ import typer
 from physiclaw import __version__ as _pkg_version
 from physiclaw.cli.auto import auto
 from physiclaw.cli.clear import clear
+from physiclaw.cli.conductor import conductor_app
 from physiclaw.cli.config import config_app
 from physiclaw.cli.doctor import doctor
 from physiclaw.cli.flash import flash
@@ -71,6 +72,11 @@ app.add_typer(
     macros_app,
     name="macros",
     help="List, check, rehearse, and track gesture macros.",
+)
+app.add_typer(
+    conductor_app,
+    name="conductor",
+    help="Page-identity tooling: match screens, capture fingerprints.",
 )
 app.add_typer(
     prompt_app,
