@@ -72,18 +72,12 @@ def logs(
 
 
 def _resolve(sessions_dir: Path, query: str) -> Path:
-    """Resolve a session by full id, or by any unique trailing fragment —
-    the sid's 6-hex-digit random suffix is the intended short handle. Exits
-    with the candidates when the fragment is ambiguous."""
-    exact = sessions_dir / query
-    if exact.is_dir():
-        return exact
-    try:
-        matches = sorted(
-            d for d in sessions_dir.iterdir() if d.is_dir() and d.name.endswith(query)
-        )
-    except OSError:
-        matches = []
+    """Resolve a session by full id, or by any unique trailing fragment
+    (`trace.store.find_session_dirs` owns the convention). Exits with the
+    candidates when the fragment is ambiguous."""
+    from physiclaw.agent.trace.store import find_session_dirs
+
+    matches = find_session_dirs(sessions_dir, query)
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
@@ -91,7 +85,7 @@ def _resolve(sessions_dir: Path, query: str) -> Path:
         for m in matches:
             typer.echo(info(m.name))
         raise typer.Exit(1)
-    return exact  # no match — _show_session reports it
+    return sessions_dir / query  # no match — _show_session reports it
 
 
 # ---------- list mode ----------

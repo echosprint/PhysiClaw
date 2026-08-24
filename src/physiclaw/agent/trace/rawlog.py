@@ -156,3 +156,44 @@ class RawLog:
                 return {**b, "content": scrubbed_inner}
             return b
         return b
+
+
+# ---------- reading wire.jsonl back ----------
+
+
+def iter_request_texts(path):
+    """Every ``(message_role, text)`` in a wire.jsonl's request records —
+    the reader beside the writer: `_scrub_block` above encodes the same
+    two wire shapes on the way out (top-level text blocks vs Anthropic
+    `tool_result` blocks whose `content` nests its own block list), so a
+    provider shape added there must be added here in the same edit.
+    Streams the file; skips unparseable lines."""
+    import json as _json
+
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            try:
+                rec = _json.loads(line)
+            except ValueError:
+                continue
+            if rec.get("kind") != "request":
+                continue
+            for msg in rec.get("messages", ()):
+                role = msg.get("role", "")
+                for text in _iter_texts(msg.get("content")):
+                    yield role, text
+
+
+def _iter_texts(content):
+    if isinstance(content, str):
+        yield content
+        return
+    if not isinstance(content, list):
+        return
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        if block.get("type") == "text":
+            yield block.get("text", "")
+        elif block.get("type") == "tool_result":
+            yield from _iter_texts(block.get("content"))

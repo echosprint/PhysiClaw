@@ -22,7 +22,19 @@ from typing import TYPE_CHECKING, ClassVar, TypeVar
 from physiclaw.agent.macros.template import TemplateError, fill
 from physiclaw.common import gesture_vocab
 from physiclaw.common.bbox import Bbox, center_of, inside
-from physiclaw.common.listing import ROW_RE, Element, is_header, parse_row
+
+# Screen/BLANK_SCREEN moved to common.listing (they are a listing codec,
+# not macro behavior); re-exported here so macro-side imports read
+# unchanged. `label_hit` is the shared base text-match rule.
+from physiclaw.common.listing import (
+    BLANK_SCREEN as BLANK_SCREEN,
+)
+from physiclaw.common.listing import (
+    Screen as Screen,
+)
+from physiclaw.common.listing import (
+    label_hit,
+)
 
 MAX_STEPS = 20
 MAX_INPUTS = 8
@@ -152,55 +164,6 @@ if TYPE_CHECKING:  # `Macro` names its steps; `steps` imports this module.
 AND, OR, NOT = "and", "or", "not"
 
 
-@dataclass(frozen=True)
-class Screen:
-    """One reading of the phone screen, parsed once and asked many times.
-
-    Built from the element listing (`id [kind] "label" [l,t,r,b] conf`).
-    Two haystacks fall out of it, and the distinction is load-bearing:
-
-    `content` is what a WHOLE-SCREEN clause matches — labels only, with the
-    listing's own syntax removed. Matching the raw listing meant
-    `require: "conf"` hit the header on every screen and `forbid: "12"`
-    tripped on the coordinate `0.128`; both directions are silent, and a
-    guard that always passes reads exactly like a guard that passed.
-
-    `rows` is what a REGION clause matches — the parsed `Element` per row,
-    so a match can be required to sit where it was rehearsed."""
-
-    text: str
-    content: str
-    rows: tuple[Element, ...]
-
-    @classmethod
-    def read(cls, text: str) -> "Screen":
-        content: list[str] = []
-        rows: list[Element] = []
-        for line in text.splitlines():
-            el = parse_row(line)
-            if el is not None:
-                content.append(el.label)
-                rows.append(el)
-            elif line.strip() and not is_header(line) and not ROW_RE.match(line):
-                # A plain text block: keep it whole, or a clause could never
-                # match non-listing content. A row-SHAPED line that failed
-                # `parse_row` is dropped instead — its coordinate text in the
-                # haystack is the `forbid: "12"` trap `content` exists to
-                # kill.
-                content.append(line)
-        return cls(text=text, content="\n".join(content), rows=tuple(rows))
-
-    @property
-    def readable(self) -> bool:
-        """False for a failed camera read. Every consumer must decide what
-        an unreadable screen means BEFORE evaluating, because `not` is
-        satisfied by an empty haystack."""
-        return bool(self.text)
-
-
-BLANK_SCREEN = Screen(text="", content="", rows=())
-
-
 class Clause(ABC):
     """A boolean expression over the screen — the one shape `require`,
     `forbid`, `expect` and `skip_when` all take.
@@ -257,15 +220,11 @@ class TextClause(Clause):
         return False
 
     def _label_matches(self, label: str) -> bool:
-        """Substring for normal texts; WHOLE-label equality for single
-        characters. Keyboard keys OCR as standalone one-letter elements,
-        while a single char as a substring would match inside almost any
-        chat bubble — exact matching is what makes letter-key anchors
-        usable (parse rejects single chars outside the region form for the
-        same reason)."""
-        if len(self.text) == 1:
-            return label.strip() == self.text
-        return self.text in label
+        """The shared base rule (`common.listing.label_hit`): substring for
+        normal texts, whole-label equality for single characters — parse
+        rejects single chars outside the region form for the same
+        reason."""
+        return label_hit(self.text, label)
 
     def display(self) -> str:
         if self.within is None:

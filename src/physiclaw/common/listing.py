@@ -226,3 +226,66 @@ def format_elements(items: Iterable[Element]) -> str:
     element. Lives beside its inverse (`decode_elements`) so the two
     change in the same edit."""
     return "\n".join([LISTING_HEADER, *(e.row() for e in items)])
+
+
+def label_hit(needle: str, label: str) -> bool:
+    """The base text-match rule every listing consumer shares: substring
+    for normal needles, WHOLE-label equality for single characters.
+    Keyboard keys OCR as standalone one-letter elements, while a single
+    char as a substring would match inside almost any label — exact
+    matching is what makes letter-key anchors usable. One home (macro
+    guards and the page matcher both build on it) so the two can never
+    drift."""
+    if len(needle) == 1:
+        return label.strip() == needle
+    return needle in label
+
+
+@dataclass(frozen=True)
+class Screen:
+    """One reading of the phone screen, parsed once and asked many times.
+
+    Built from the element listing. Two haystacks fall out of it, and the
+    distinction is load-bearing:
+
+    `content` is what a WHOLE-SCREEN check matches — labels only, with the
+    listing's own syntax removed. Matching the raw listing meant
+    `require: "conf"` hit the header on every screen and `forbid: "12"`
+    tripped on the coordinate `0.128`; both directions are silent, and a
+    guard that always passes reads exactly like a guard that passed.
+
+    `rows` is what an ELEMENT-granular check matches — the parsed
+    `Element` per row, so a match can be required to sit where it was
+    rehearsed (macro region clauses) or learned (page anchors)."""
+
+    text: str
+    content: str
+    rows: tuple[Element, ...]
+
+    @classmethod
+    def read(cls, text: str) -> "Screen":
+        content: list[str] = []
+        rows: list[Element] = []
+        for line in text.splitlines():
+            el = parse_row(line)
+            if el is not None:
+                content.append(el.label)
+                rows.append(el)
+            elif line.strip() and not is_header(line) and not ROW_RE.match(line):
+                # A plain text block: keep it whole, or a check could never
+                # match non-listing content. A row-SHAPED line that failed
+                # `parse_row` is dropped instead — its coordinate text in the
+                # haystack is the `forbid: "12"` trap `content` exists to
+                # kill.
+                content.append(line)
+        return cls(text=text, content="\n".join(content), rows=tuple(rows))
+
+    @property
+    def readable(self) -> bool:
+        """False for a failed camera read. Every consumer must decide what
+        an unreadable screen means BEFORE evaluating, because `not` is
+        satisfied by an empty haystack."""
+        return bool(self.text)
+
+
+BLANK_SCREEN = Screen(text="", content="", rows=())

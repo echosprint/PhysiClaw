@@ -187,3 +187,19 @@ Privacy: wire.jsonl carries full prompts (including the user profile /
 memory) and images/ are phone screenshots. Treat a session dir as
 sensitive.
 """
+
+
+def find_session_dirs(root: Path, query: str) -> list[Path]:
+    """Session dirs matching a full id or any trailing fragment — the
+    `physiclaw logs <suffix>` short-handle convention (the sid's 6-hex
+    random suffix is the intended handle), shared by every CLI consumer
+    so the resolution rule exists once. Exact hit wins outright."""
+    exact = root / query
+    if exact.is_dir():
+        return [exact]
+    try:
+        return sorted(
+            d for d in root.iterdir() if d.is_dir() and d.name.endswith(query)
+        )
+    except OSError:
+        return []
