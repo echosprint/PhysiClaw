@@ -8,11 +8,13 @@ import any of them.
 """
 
 from dataclasses import dataclass
+from typing import Callable
 
+from physiclaw.agent.conductor import Conductor
 from physiclaw.agent.engine.builtin_tool import LocalTool
+from physiclaw.agent.engine.dto import CollapsePolicy, Message
 from physiclaw.agent.engine.mcp_tool import McpClient
 from physiclaw.agent.engine.policy import Policies
-from physiclaw.agent.provider import Provider
 from physiclaw.agent.trace import RawLog, Trace
 from physiclaw.common.config import CONFIG
 
@@ -57,11 +59,21 @@ class Settings:
 
 @dataclass(slots=True)
 class EngineRun:
-    """One session's immutable wiring: provider, MCP client, tool surface,
-    logging sinks, settings, and the policy set. Threaded through the loop
-    instead of a parameter list so adding a dependency is a one-line change."""
+    """One session's immutable wiring: conductor (orchestration — who
+    produces each turn), MCP client, tool surface, logging sinks,
+    settings, and the policy set. Threaded through the loop instead of a
+    parameter list so adding a dependency is a one-line change.
 
-    provider: Provider
+    `collapse` and `serialize_wire` are session-management wiring pulled
+    off the provider at construction — the conductor deliberately does
+    not carry them (orchestration only), and the loop deliberately has
+    no provider handle (only the conductor calls the provider)."""
+
+    conductor: Conductor
+    # Vendor-specific compaction cadence (provider.COLLAPSE).
+    collapse: CollapsePolicy
+    # Wire form of a request for the raw log (provider.serialize_history).
+    serialize_wire: Callable[[list[Message]], list[dict]]
     mcp: McpClient
     tool_schemas: list[dict]
     schema_by_name: dict[str, dict]

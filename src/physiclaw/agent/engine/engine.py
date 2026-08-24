@@ -27,6 +27,7 @@ import asyncio
 import logging
 import time
 
+from physiclaw.agent.conductor import Conductor
 from physiclaw.agent.engine import assemble, curate, loop, prompt
 from physiclaw.agent.engine.dto import Message
 from physiclaw.agent.engine.mcp_tool import get_mcp, list_tools_cached
@@ -136,7 +137,7 @@ async def _run_session(
         # `assemble.build_prompt_bundle` is the offline half, shared with the
         # CLI dump.
         bundle = assemble.build_prompt_bundle(provider_id)
-        # Full merged list goes to provider.chat(tools=) for invocation;
+        # Full merged list goes to conductor.advance(tools=) for invocation;
         # the inline `## Tooling` card pulls MCP names from AST so it
         # stays complete even offline. Each source has one consumer.
         tool_schemas = list(mcp_tools) + bundle.local_schemas
@@ -173,7 +174,15 @@ async def _run_session(
             tools=tool_schemas,
         )
         engine_run = EngineRun(
-            provider=provider,
+            # The conductor owns only the turn loop's provider call:
+            # curate's off-transcript pass and the finally-close below
+            # stay on the raw handle, so the conductor never intercepts
+            # side-calls of the very kind its playbooks will later emit.
+            # Session-management wiring (collapse cadence, wire logging)
+            # comes straight off the provider — not the conductor's job.
+            conductor=Conductor(provider),
+            collapse=provider.COLLAPSE,
+            serialize_wire=provider.serialize_history,
             mcp=mcp,
             tool_schemas=tool_schemas,
             schema_by_name=schema_by_name,

@@ -1,7 +1,7 @@
 """The session's working plan — pinned at the tail of every request.
 
 The plan lives on `Session`, never in `messages[]`. Before each
-`provider.chat(...)` call the engine appends `plan.render()` as a final
+`conductor.advance(...)` call the engine appends `plan.render()` as a final
 `UserMessage` so the model sees its current plan on every turn without
 being lost in the scroll of tool_results. After the model responds, the
 plan message is discarded; only the assistant reply lands in history.

@@ -16,6 +16,7 @@ import logging
 import time
 from dataclasses import dataclass
 
+from physiclaw.agent.conductor import Conductor
 from physiclaw.agent.engine import assemble, compact, memory, trajectory
 from physiclaw.agent.engine.dispatch import dispatch
 from physiclaw.agent.engine.dto import (
@@ -26,7 +27,7 @@ from physiclaw.agent.engine.dto import (
 )
 from physiclaw.agent.engine.runspec import EngineRun
 from physiclaw.agent.engine.session import Session
-from physiclaw.agent.provider import Provider, ProviderError, ProviderTransientError
+from physiclaw.agent.provider import ProviderError, ProviderTransientError
 from physiclaw.agent.runtime.sentinel import FAIL, STUCK
 from physiclaw.agent.trace import Trace
 
@@ -63,7 +64,7 @@ async def drive(run: EngineRun, session: Session, messages: list[Message]) -> No
     Each turn runs a fixed pipeline of phase helpers; the control flow between
     them stays here so it's auditable in one place:
       1. `_prepare_request`    — advance clocks, pin tails, log the request.
-      2. `_call_provider`      — chat with retry; None ⇒ STUCK, return.
+      2. `_call_provider`      — conductor advance with retry; None ⇒ STUCK, return.
       3. `_enforce_shape`      — finish_reason + [note, one-other]; may RETRY/ABORT.
       4. gates observe_turn    — accumulate per-turn evidence (memory cues).
       5. `_apply_turn_gates`   — the policy gates in declared order; may RETRY.
@@ -200,7 +201,7 @@ def _prepare_request(
     # scratchpad (enforced by policy.CompactionCheckpoint).
     compaction_imminent = compact.collapse_pending(
         messages,
-        policy=run.provider.COLLAPSE,
+        policy=run.collapse,
         collapsed_once=session.collapsed_once,
     )
     # First-run reminder is empty once learned, and a session that started
@@ -210,16 +211,16 @@ def _prepare_request(
         messages,
         session,
         layout_incomplete=run.layout_incomplete,
-        compaction_keep=(run.provider.COLLAPSE.keep if compaction_imminent else None),
+        compaction_keep=(run.collapse.keep if compaction_imminent else None),
     )
     # Cache markers + the actual wire format are the provider's business now;
     # log the wire form for debugging by asking the provider to serialize once.
-    wire_for_log = run.provider.serialize_history(request_messages)
+    wire_for_log = run.serialize_wire(request_messages)
     run.tr.write(
         {"event": "request", "turn": turn, "message_count": len(request_messages)}
     )
     run.rlog.write_request(turn, wire_for_log)
-    log.info("turn %d: %d messages → provider", turn + 1, len(request_messages))
+    log.info("turn %d: %d messages → conductor", turn + 1, len(request_messages))
     return request_messages, compaction_imminent
 
 
@@ -229,13 +230,14 @@ async def _call_provider(
     request_messages: list[Message],
     turn: int,
 ) -> AssistantMessage | None:
-    """Call the provider (transient-retry), log the response, and return the
-    AssistantMessage. When the provider exhausts its retries: mark the session
-    STUCK, trace it, and return None — the caller returns from the loop."""
+    """Ask the conductor for the turn (transient-retry) — today that is a
+    provider call, the default playbook — log the response, and return the
+    AssistantMessage. When retries exhaust: mark the session STUCK, trace
+    it, and return None — the caller returns from the loop."""
     t0 = time.perf_counter()
     try:
-        asst = await _chat_with_retry(
-            run.provider,
+        asst = await _advance_with_retry(
+            run.conductor,
             request_messages,
             run.tool_schemas,
             attempts=run.settings.provider_retry_attempts,
@@ -467,7 +469,7 @@ def _finalize_turn(
     compact.drop_stale_screens(messages)
     if compact.collapse_old_turns(
         messages,
-        policy=run.provider.COLLAPSE,
+        policy=run.collapse,
         collapsed_once=session.collapsed_once,
     ):
         session.collapsed_once = True
@@ -478,8 +480,8 @@ def _finalize_turn(
 # ---------- helpers ----------
 
 
-async def _chat_with_retry(
-    provider: Provider,
+async def _advance_with_retry(
+    conductor: Conductor,
     messages: list[Message],
     tools: list[dict],
     *,
@@ -490,7 +492,7 @@ async def _chat_with_retry(
     last_err: Exception | None = None
     for attempt in range(1, attempts + 1):
         try:
-            return await provider.chat(messages, tools)
+            return await conductor.advance(messages, tools)
         except ProviderTransientError as e:
             last_err = e
             if attempt < attempts:

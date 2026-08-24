@@ -9,6 +9,7 @@ import uuid
 from typing import Any
 from unittest.mock import MagicMock
 
+from physiclaw.agent.conductor import Conductor
 from physiclaw.agent.engine import policy as policy_mod
 from physiclaw.agent.engine.builtin_tool import LocalTool
 from physiclaw.agent.engine.dto import (
@@ -107,7 +108,21 @@ def _mk_run(
 ) -> EngineRun:
     tool_schemas = tool_schemas if tool_schemas is not None else []
     return EngineRun(
-        provider=provider,
+        # Tests keep passing a bare provider; the run wires it the way
+        # the engine does — conductor + session-management fields pulled
+        # off the provider. None stays None for dispatch tests that
+        # never reach a provider call.
+        conductor=Conductor(provider) if provider is not None else None,
+        collapse=(
+            provider.COLLAPSE
+            if provider is not None
+            else CollapsePolicy(first_at=100, keep=10, interval=100)
+        ),
+        serialize_wire=(
+            provider.serialize_history
+            if provider is not None
+            else (lambda messages: [])
+        ),
         mcp=mcp if mcp is not None else FakeMcpClient(),
         tool_schemas=tool_schemas,
         schema_by_name=(

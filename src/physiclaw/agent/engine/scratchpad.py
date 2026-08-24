@@ -1,7 +1,7 @@
 """Scratchpad — agent's free-form working memory.
 
 Lives on `Session.scratchpad` (string), never in `messages[]`. Before
-each `provider.chat(...)` call the engine appends a
+each `conductor.advance(...)` call the engine appends a
 `<scratchpad>...</scratchpad>` `UserMessage` via `inject_tail`, sitting
 just before the plan tail. Stays out of `messages[]` for the same
 reason the plan does: a write invalidates only the volatile tail, not
