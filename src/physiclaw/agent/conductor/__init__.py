@@ -7,8 +7,27 @@ Layout:
   - `match.py` — the open-set page matcher (match / occluded / unknown).
   - `capture.py` — mine geometry + calibrate thresholds from observations.
   - `corpus.py` — recorded-session listings for offline matching work.
+  - `calls.py` — the code-owned DECIDE call-type declarations.
+  - `_spec.py` — shared spec-file substrate: the YAML loader and the
+    macro layer's scalar rules, bound to each spec's error class.
+  - `playbook.py` — PLAYBOOK.yml model + parser + graph/money lints.
+  - `scaffold.py` — app-pack init templates + playbooks/README.md.
 """
 
-from physiclaw.agent.conductor.conductor import Conductor
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from physiclaw.agent.conductor.conductor import Conductor
 
 __all__ = ["Conductor"]
+
+
+def __getattr__(name: str):
+    # Lazy: `conductor.py` pulls the provider stack (~120ms), which the
+    # parse-only CLI surfaces (`playbooks check`, `conductor match`) never
+    # need — same pattern as the top-level package's lazy `PhysiClaw`.
+    if name == "Conductor":
+        from physiclaw.agent.conductor.conductor import Conductor
+
+        return Conductor
+    raise AttributeError(name)

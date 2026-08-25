@@ -16,6 +16,7 @@ from physiclaw.cli.macros import macros_app
 from physiclaw.cli.mcp_cmd import mcp
 from physiclaw.cli.models import models_app
 from physiclaw.cli.now import now
+from physiclaw.cli.playbooks import playbooks_app
 from physiclaw.cli.prompt import prompt_app
 from physiclaw.cli.reset import reset
 from physiclaw.cli.server import server
@@ -77,6 +78,11 @@ app.add_typer(
     conductor_app,
     name="conductor",
     help="Page-identity tooling: match screens, capture fingerprints.",
+)
+app.add_typer(
+    playbooks_app,
+    name="playbooks",
+    help="Scaffold, list, and validate conductor app packs.",
 )
 app.add_typer(
     prompt_app,

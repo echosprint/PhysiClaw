@@ -19,12 +19,10 @@ which is what lets capture bootstrap from declarations alone.
 import io
 import json
 import logging
-import re
 from dataclasses import dataclass
 from typing import Any
 
-from ruamel.yaml import YAML
-
+from physiclaw.agent.conductor import _spec
 from physiclaw.common import paths
 from physiclaw.common.logger import write_json_atomic
 from physiclaw.common.text import read_text
@@ -38,12 +36,6 @@ MAX_ANCHORS = 12
 MAX_FORBID = 8
 MAX_ANCHOR_LEN = 80
 
-# Page and app names follow the macro/skill folder convention (the same
-# rule as `agent/macros/model.py check_name` — kept in step by the shared
-# spelling and the 64-char cap; a cross-package call would invert the
-# dependency direction the conductor just shed).
-NAME_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
-MAX_NAME_LEN = 64
 
 # Reserved app namespaces: system pages (OS states, the user-channel IM
 # pages) resolve against built-ins shipped in-tree — a pack must never
@@ -67,13 +59,19 @@ REGIONS: dict[str, tuple[float, float, float, float]] = {
 DECL_ONLY_THRESHOLD = 0.75
 DEFAULT_MARGIN = 0.15
 
-_yaml = YAML(typ="safe", pure=True)
+# Shared spec substrate (`_spec`): the macro naming/prose rules bound
+# to this spec's error class; `_yaml` stays a module name so tests can
+# patch per-module.
+_yaml = _spec.yaml_loader
 
 
 class PagesError(ValueError):
     """A pages.yml is invalid. Message is user-facing: the conductor CLI
     prints it verbatim. All-or-nothing — a file failing any check is
     excluded whole, never partially loaded."""
+
+
+_require_str, _prose, _opt_prose, _check_name = _spec.bind(PagesError)
 
 
 @dataclass(frozen=True)
@@ -221,27 +219,12 @@ def _parse_anchor(raw: Any, where: str) -> AnchorDecl:
 
 
 def _anchor_text(value: Any, where: str) -> str:
-    if not isinstance(value, str):
-        raise PagesError(
-            f"{where}: text must be a string, got {type(value).__name__} "
-            f"({value!r}) — quote it"
-        )
-    text = value.strip()
-    if not text:
-        raise PagesError(f"{where}: text must not be blank")
+    text = _require_str(value, f"{where}: text")
     if len(text) > MAX_ANCHOR_LEN:
         raise PagesError(f"{where}: text {len(text)} chars > max {MAX_ANCHOR_LEN}")
     if "".join(text.splitlines()) != text:
         raise PagesError(f"{where}: text must be single-line: {text!r}")
     return text
-
-
-def _check_name(name, where: str) -> None:
-    if not isinstance(name, str) or len(name) > MAX_NAME_LEN or not NAME_RE.match(name):
-        raise PagesError(
-            f"{where} {name!r} must be lowercase letters/digits/hyphens, "
-            f"≤{MAX_NAME_LEN} chars"
-        )
 
 
 # ---------- discovery ----------

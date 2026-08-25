@@ -64,3 +64,15 @@ def exit_error(msg: str, code: int = 1) -> NoReturn:
     network down, corrupt downloads, missing files)."""
     typer.echo(f"error: {msg}", err=True)
     raise typer.Exit(code=code)
+
+
+def state_tag(*, valid: bool, enabled: bool = False) -> str:
+    """The colored invalid/enabled/disabled tag both artifact listings
+    (`macros list`, `playbooks list`) render — one palette, one wording."""
+    import typer
+
+    if not valid:
+        return typer.style("invalid ", fg=typer.colors.RED)
+    if enabled:
+        return typer.style("enabled ", fg=typer.colors.GREEN)
+    return typer.style("disabled", fg=typer.colors.YELLOW)

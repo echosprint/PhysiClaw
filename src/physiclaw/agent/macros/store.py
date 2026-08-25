@@ -83,10 +83,13 @@ def list_dir_names() -> set[str]:
     }
 
 
-def scan() -> list[ScanEntry]:
-    """Every macro directory under ``macros_dir()``, sorted by name —
-    valid or not. The CLI's view; the engine uses `discover_enabled`."""
-    root = paths.macros_dir()
+def scan(root: Path | None = None) -> list[ScanEntry]:
+    """Every macro directory under ``root`` (default ``macros_dir()``),
+    sorted by name — valid or not. The CLI's view; the engine uses
+    `discover_enabled`. Conductor packs point this at their private
+    ``playbooks/<app>/macros/`` root — one scanner, one traversal guard,
+    one broad-except lesson."""
+    root = paths.macros_dir() if root is None else root
     if not root.exists():
         return []
     root_real = root.resolve()

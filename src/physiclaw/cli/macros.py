@@ -23,7 +23,7 @@ from physiclaw.agent.macros import runner as macro_runner
 from physiclaw.agent.macros import stats as macro_stats
 from physiclaw.agent.macros import store as macro_store
 from physiclaw.agent.macros.model import Macro, MacroError
-from physiclaw.cli._format import exit_error, ok, step_fail, warn
+from physiclaw.cli._format import exit_error, ok, state_tag, step_fail, warn
 from physiclaw.common import paths, verdict
 from physiclaw.common.config import CONFIG
 from physiclaw.common.text import read_text
@@ -73,14 +73,14 @@ def list_cmd() -> None:
         )
         return
     for e in entries:
-        if e.spec is None:
-            tag = typer.style("invalid ", fg=typer.colors.RED)
-            detail = e.error or ""
-        else:
-            state = "enabled " if e.spec.enabled else "disabled"
-            color = typer.colors.GREEN if e.spec.enabled else typer.colors.YELLOW
-            tag = typer.style(state, fg=color)
-            detail = f"{e.spec.description} ({len(e.spec.steps)} steps)"
+        tag = state_tag(
+            valid=e.spec is not None, enabled=bool(e.spec and e.spec.enabled)
+        )
+        detail = (
+            (e.error or "")
+            if e.spec is None
+            else f"{e.spec.description} ({len(e.spec.steps)} steps)"
+        )
         typer.echo(f"  {tag} {e.dir_name}  {detail}")
 
 
