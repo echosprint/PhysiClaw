@@ -59,8 +59,13 @@ class RawLog:
         raw: dict[str, Any],
         *,
         elapsed_ms: int,
+        synthesized: bool = False,
     ) -> None:
-        self._emit("response", turn=turn, elapsed_ms=elapsed_ms, raw=raw)
+        # Wire fidelity: a synthesized response was composed by the
+        # conductor — nothing was sent to the provider, and no request
+        # record precedes it (the loop skips the request write entirely).
+        extra = {"synthesized": True} if synthesized else {}
+        self._emit("response", turn=turn, elapsed_ms=elapsed_ms, **extra, raw=raw)
 
     def close(self) -> None:
         if not self._f.closed:

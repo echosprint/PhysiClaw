@@ -23,7 +23,14 @@ from physiclaw.agent.macros import runner as macro_runner
 from physiclaw.agent.macros import stats as macro_stats
 from physiclaw.agent.macros import store as macro_store
 from physiclaw.agent.macros.model import Macro, MacroError
-from physiclaw.cli._format import exit_error, ok, state_tag, step_fail, warn
+from physiclaw.cli._format import (
+    exit_error,
+    ok,
+    parse_inputs,
+    state_tag,
+    step_fail,
+    warn,
+)
 from physiclaw.common import paths, verdict
 from physiclaw.common.config import CONFIG
 from physiclaw.common.text import read_text
@@ -159,7 +166,7 @@ def run(
     """Rehearse a macro against the running server (works while disabled —
     rehearse first, then set `enabled: true`)."""
     spec = _resolve_spec(macro_store.scan(), name)
-    values = _parse_inputs(inputs)
+    values = parse_inputs(inputs)
     try:
         result = asyncio.run(_run_live(spec, values, start_at))
     except MacroError as e:
@@ -384,13 +391,3 @@ def _resolve_spec(entries: list[macro_store.ScanEntry], name: str) -> Macro:
                 exit_error(f"{name}: {e.error}")
             return e.spec
     exit_error(f"no macro named {name!r}")
-
-
-def _parse_inputs(pairs: list[str]) -> dict[str, str]:
-    values: dict[str, str] = {}
-    for pair in pairs:
-        key, sep, value = pair.partition("=")
-        if not sep or not key:
-            exit_error(f"bad --input {pair!r} (want key=value)", code=2)
-        values[key] = value
-    return values

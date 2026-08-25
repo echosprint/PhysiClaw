@@ -114,7 +114,9 @@ in the `env` event / `summary.json.env.utc_offset`.
   stream (schema v1): sid, started_at/ended_at (local ISO), duration_s,
   model_ref ("provider/model"), provider, prompt_hash, triggers,
   outcome {sentinel: DONE|WAIT|IDLE|STUCK|FAIL, recap, crashed},
-  turns, provider_calls, provider_time_ms, tool_time_ms, usage
+  turns, provider_calls, conductor_turns (turns the conductor
+  synthesized from an armed playbook — no provider request sent),
+  provider_time_ms, tool_time_ms, usage
   {input_tokens, output_tokens, cache_read_tokens,
   cache_creation_tokens, cache_hit_pct}, tool_calls {name: count},
   verdicts {changed/unchanged/no_verdict}, errors {blocked_plan,
@@ -128,7 +130,8 @@ in the `env` event / `summary.json.env.utc_offset`.
   line: `{"t": iso-ms, "event": <type>, "turn": <int, when turn-scoped>,
   ...event fields}`. First line is always `env`. Key event types:
   `wake` (triggers), `response` (finish_reason, tool_calls requested,
-  elapsed_ms), `cache` (token usage: total/hit/create/out),
+  elapsed_ms; `synthesized: true` = a conductor playbook turn, no
+  request sent), `cache` (token usage: total/hit/create/out),
   `tool_result` (name, arguments, elapsed_ms, text or result_summary;
   gesture results also carry `changed`: true/false/null, the camera
   verdict as data),
@@ -140,8 +143,10 @@ in the `env` event / `summary.json.env.utc_offset`.
 - `wire.jsonl` — the provider round-trips: `session_start` (provider,
   model, prompt_hash, tool schemas) once, then per turn `request`
   (full message array) and `response` (raw provider reply,
-  elapsed_ms). Inline base64 images are replaced by relative paths
-  into `images/`.
+  elapsed_ms; `synthesized: true` marks a conductor-composed turn —
+  nothing was sent to the provider, and no request record precedes
+  it). Inline base64 images are replaced by relative paths into
+  `images/`.
 
 - `images/<HHMMSS>_<mmm>_t<turn>.<ext>` — screenshots the model saw
   (typically .jpg). The name is the local capture time (hour-minute-

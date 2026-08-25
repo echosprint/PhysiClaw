@@ -1126,3 +1126,19 @@ def test_sessions_readme_refreshed_when_stale(_trace_dirs: Path) -> None:
     text = readme.read_text(encoding="utf-8")
     assert "stale doc" not in text
     assert "events.jsonl" in text
+
+
+def test_summary_splits_conductor_turns_from_provider_calls(
+    _trace_dirs: Path,
+) -> None:
+    t = Trace("s2")
+    t.write({"event": "response", "turn": 0, "elapsed_ms": 3, "synthesized": True})
+    t.write({"event": "response", "turn": 1, "elapsed_ms": 1500})
+    t.close()
+
+    s = json.loads((_trace_dirs / "sessions" / "s2" / "summary.json").read_text())
+    assert s["provider_calls"] == 1
+    assert s["conductor_turns"] == 1
+    # Synthesized turns sent no request — their time never inflates the
+    # provider metric.
+    assert s["provider_time_ms"] == 1500

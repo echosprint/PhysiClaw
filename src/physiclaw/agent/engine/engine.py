@@ -28,6 +28,7 @@ import logging
 import time
 
 from physiclaw.agent.conductor import Conductor
+from physiclaw.agent.conductor import program as conductor_program
 from physiclaw.agent.engine import assemble, curate, loop, prompt
 from physiclaw.agent.engine.dto import Message
 from physiclaw.agent.engine.mcp_tool import get_mcp, list_tools_cached
@@ -130,13 +131,21 @@ async def _run_session(
         )
         mcp = await get_mcp()
         mcp_tools = await list_tools_cached()
+        # An armed playbook loads fail-open: any problem logs one warning
+        # and the session runs as if nothing were armed. Its pack macros
+        # wire into the run_macro handler under qualified names; nothing
+        # model-visible changes.
+        program = conductor_program.load_armed()
         # Built-in skills are inlined full-text into SYSTEM; user skills are
         # indexed and loaded on demand via the Skill tool — so only user
         # skills go into the local registry. The first-run screen-layout skill
         # is dropped once the layout is learned (dead weight after setup).
         # `assemble.build_prompt_bundle` is the offline half, shared with the
         # CLI dump.
-        bundle = assemble.build_prompt_bundle(provider_id)
+        bundle = assemble.build_prompt_bundle(
+            provider_id,
+            pack_macros=program.pack_macros if program is not None else None,
+        )
         # Full merged list goes to conductor.advance(tools=) for invocation;
         # the inline `## Tooling` card pulls MCP names from AST so it
         # stays complete even offline. Each source has one consumer.
@@ -177,10 +186,10 @@ async def _run_session(
             # The conductor owns only the turn loop's provider call:
             # curate's off-transcript pass and the finally-close below
             # stay on the raw handle, so the conductor never intercepts
-            # side-calls of the very kind its playbooks will later emit.
+            # side-calls of the very kind its playbooks emit.
             # Session-management wiring (collapse cadence, wire logging)
             # comes straight off the provider — not the conductor's job.
-            conductor=Conductor(provider),
+            conductor=Conductor(provider, program=program),
             collapse=provider.COLLAPSE,
             serialize_wire=provider.serialize_history,
             mcp=mcp,

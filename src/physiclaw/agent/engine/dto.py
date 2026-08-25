@@ -148,6 +148,12 @@ class AssistantMessage:
     the next turn). Keyed by `PROVIDER_ID` so multiple vendors can
     coexist in mixed-history scenarios. Engine code never reads this;
     only the originating provider does, on serialize.
+
+    `synthesized` marks a turn the conductor composed itself (an armed
+    playbook leg) — no provider request was sent. The loop skips the
+    model-output judgments for it (turn shape, turn gates) and keeps the
+    wire log and token counters honest; dispatch guards that protect the
+    phone still apply in full.
     """
 
     content: str
@@ -156,6 +162,7 @@ class AssistantMessage:
     usage: Usage = field(default_factory=Usage)
     raw: dict[str, Any] = field(default_factory=dict)
     vendor_extra: dict[str, Any] = field(default_factory=dict)
+    synthesized: bool = False
 
     def tool_names(self) -> list[str]:
         return [tc.name for tc in self.tool_calls]

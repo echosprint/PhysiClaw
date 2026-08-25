@@ -1,14 +1,14 @@
-"""PLAYBOOK.yml → a validated `Playbook` — parse and lint only.
+"""PLAYBOOK.yml → a validated `Playbook` — the model, its parser and
+lints, and the ref grammar's two halves (validate + `fill_refs`).
 
 A playbook is one app task as a small node graph: LEG nodes invoke the
 pack's own macros (verified against page fingerprints), DECIDE nodes
 parameterize code-owned decision calls (`calls.py`), CONFIRM parks on
 the user, HUMAN_GATE holds an irreversible step until the user confirms
-over the user channel. Execution belongs to a later phase; this
-module's contract is the macro parser's:
-all-or-nothing validation with errors that name the offending field, so
-a walker never meets an unknown macro, a dangling page id, or an
-unrouted decision.
+over the user channel. Execution lives in `program.py`; this module's
+contract is the macro parser's: all-or-nothing validation with errors
+that name the offending field, so a walker never meets an unknown
+macro, a dangling page id, or an unrouted decision.
 
 The grammar, top-down::
 
@@ -749,6 +749,54 @@ def _check_arg_refs(
     elif isinstance(value, dict):
         for v in value.values():
             _check_arg_refs(v, input_names, payloads, where)
+
+
+def fill_refs(value: Any, values: dict[str, str], where: str) -> Any:
+    """A `with:` value with its `{name}` refs resolved from `values` —
+    the runtime half of the ref grammar, beside REF_RE so no consumer
+    re-derives the braces. Recurses into lists/dicts exactly as
+    `_check_arg_refs` validates them. Raises PlaybookError on a ref it
+    cannot resolve: a dotted `{node.field}` (needs that decision's
+    recorded output) or a name with no value."""
+    if isinstance(value, list):
+        return [fill_refs(v, values, where) for v in value]
+    if isinstance(value, dict):
+        return {k: fill_refs(v, values, where) for k, v in value.items()}
+    if not isinstance(value, str):
+        return value
+
+    def repl(m: re.Match[str]) -> str:
+        token = m.group(0)
+        if token == "{{":
+            return "{"
+        if token == "}}":
+            return "}"
+        ref = m.group(1)
+        if ref is None:
+            raise PlaybookError(f"{where}: stray {token!r} in {value!r}")
+        if "." in ref:
+            raise PlaybookError(
+                f"{where}: {{{ref}}} reads a decision output — no value available"
+            )
+        if ref not in values:
+            raise PlaybookError(f"{where}: no value for input {{{ref}}}")
+        return values[ref]
+
+    return REF_RE.sub(repl, value)
+
+
+def disabled_leg_macros(spec: Playbook, pack: Pack) -> list[str]:
+    """Leg-referenced pack macros still disabled — the live-readiness
+    rule: `playbooks check` warns about it, `arm` refuses on it. Safe
+    unguarded access: parse rejects any LegNode whose macro is missing
+    or broken, so every referenced macro is in `pack.macros`."""
+    return sorted(
+        {
+            n.macro
+            for n in spec.nodes
+            if isinstance(n, LegNode) and not pack.macros[n.macro].enabled
+        }
+    )
 
 
 # ---------- graph lints ----------

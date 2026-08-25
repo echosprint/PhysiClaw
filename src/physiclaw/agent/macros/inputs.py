@@ -9,16 +9,33 @@ over `template`'s tokenizer, nothing more. Clause text templates itself
 (`model.Clause.substituted`); this half handles `with:` tables.
 """
 
-from typing import Any
+from typing import Any, Protocol, Sequence
 
-from physiclaw.agent.macros.model import Macro, MacroError
+from physiclaw.agent.macros.model import MacroError
 from physiclaw.agent.macros.template import fill
 
 
-def resolve_inputs(spec: Macro, provided: dict[str, Any]) -> dict[str, str]:
+class _InputDecl(Protocol):
+    """What resolution needs of one declared input — `Macro.Input` and the
+    conductor's `PlaybookInput` both carry it (same authoring grammar)."""
+
+    @property
+    def name(self) -> str: ...
+    @property
+    def default(self) -> str | None: ...
+
+
+class _HasInputs(Protocol):
+    @property
+    def inputs(self) -> Sequence[_InputDecl]: ...
+
+
+def resolve_inputs(spec: _HasInputs, provided: dict[str, Any]) -> dict[str, str]:
     """Merge provided values over declared defaults. Raises MacroError on an
     unknown name, a missing required input, or a non-string value — before
-    any gesture fires."""
+    any gesture fires. Structural on `spec.inputs`, so a playbook resolves
+    its inputs through the same contract as a macro (the conductor wraps
+    the MacroError into its own error class at that seam)."""
     declared = {i.name: i for i in spec.inputs}
     unknown = sorted(provided.keys() - declared.keys())
     if unknown:

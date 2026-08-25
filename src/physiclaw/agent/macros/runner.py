@@ -85,6 +85,7 @@ async def run_and_record(
     mcp: McpCaller,
     caller: str = "engine",
     start_at: str = "",
+    record_as: str = "",
 ) -> MacroRunResult:
     """The one entry point callers use: replay + fold the outcome into
     stats and the per-step run log. The engine handler and the CLI
@@ -95,15 +96,22 @@ async def run_and_record(
     header, and stats, so one id references the whole run. The prune set
     is derived here from the dirs on disk — a disabled macro keeps its
     stats. Raises MacroError — recorded as bad_input — before any
-    gesture fires."""
+    gesture fires.
+
+    ``record_as`` overrides the name the run is recorded under (default:
+    the spec's own). Pack-private macros record under their qualified
+    ``app/name``, so their decay signal (`consecutive_aborts`) accrues in
+    its own namespace instead of shadowing — or being pruned as — a user
+    macro's."""
+    name = record_as or spec.name
     known = store.list_dir_names()
-    rlog = runlog.RunLogger(spec.name, caller)
+    rlog = runlog.RunLogger(name, caller)
 
     def record(ok: bool, step: int | None, reason: str | None, detail: str) -> None:
         # The one fold both endings share — run log and stats must agree.
         rlog.end(ok=ok, aborted_step=step, reason=reason, detail=detail)
         stats.record(
-            spec.name,
+            name,
             ok=ok,
             known_names=known,
             step=step,

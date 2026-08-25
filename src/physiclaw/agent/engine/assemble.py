@@ -48,9 +48,17 @@ class PromptBundle:
     macro_count: int = 0
 
 
-def build_prompt_bundle(provider_id: str) -> PromptBundle:
+def build_prompt_bundle(
+    provider_id: str,
+    pack_macros: dict | None = None,
+) -> PromptBundle:
     """Discover skills, build the local tool registry, and render the SYSTEM
-    prompt for a session — the offline half of `engine._run_session`'s setup."""
+    prompt for a session — the offline half of `engine._run_session`'s setup.
+
+    `pack_macros` (the armed playbook pack's private macros, qualified
+    `app/name` keys) wire into the run_macro handler only — they never
+    enter the SYSTEM prompt, the macros card, or the tool description, so
+    an armed pack changes zero model-visible bytes."""
     layout_incomplete = not layout.is_learned()
     builtin_skills = layout.prune_builtin_skills(skill.discover_builtin_skills())
     # Inline the learned bboxes into the skill bodies (e.g. im's send sequence)
@@ -58,7 +66,7 @@ def build_prompt_bundle(provider_id: str) -> PromptBundle:
     builtin_skills = layout.fill_builtin_boxes(builtin_skills)
     user_skills = skill.discover_user_skills()
     macros = macro_store.discover_enabled()
-    local_registry = builtin_tool.build_registry(user_skills, macros)
+    local_registry = builtin_tool.build_registry(user_skills, macros, pack_macros)
     local_schemas = builtin_tool.schemas(local_registry)
     pitfall_items = pitfalls.read()  # read once; render + count both use it
     system_prompt = prompt.render_system_prompts(

@@ -344,26 +344,31 @@ def test_keyboard_belief_success_routes_to_tracker(mocker) -> None:
 
 
 def test_plan_gate_overdue_predicate() -> None:
-    # The gate arms only when: past the threshold turn AND the plan is
-    # still undrafted AND not in first-run setup.
+    # The gate arms only when: past the threshold count of MODEL turns
+    # AND the plan is still undrafted AND not in first-run setup.
+    # (Conductor-synthesized turns never advance session.model_turns.)
     n = CONFIG.engine.plan_required_after
     gate = policy_mod.PlanGate(layout_incomplete=False, required_after=n)
     setup_gate = policy_mod.PlanGate(layout_incomplete=True, required_after=n)
 
     fresh = Session()
-    assert gate.overdue(fresh, n)
-    assert not gate.overdue(fresh, n - 1)
-    assert not setup_gate.overdue(fresh, n)
+    fresh.model_turns = n + 1
+    assert gate.overdue(fresh)
+    assert not setup_gate.overdue(fresh)
+    fresh.model_turns = n
+    assert not gate.overdue(fresh)
 
     drafted = Session()
+    drafted.model_turns = n + 1
     drafted.plan.update(user_said="buy yogurt")
-    assert not gate.overdue(drafted, n)
+    assert not gate.overdue(drafted)
 
     steps_only = Session()
+    steps_only.model_turns = n + 1
     steps_only.plan.update(
         steps=[{"content": "reply to user", "status": "in_progress"}]
     )
-    assert not gate.overdue(steps_only, n)
+    assert not gate.overdue(steps_only)
 
 
 # ---------- BurnedMacro: one abort retires a macro for the session ----------
@@ -426,3 +431,22 @@ def test_burned_macro_is_registered_and_runs_before_the_stuck_block() -> None:
 
     assert "BurnedMacro" in kinds
     assert kinds.index("BurnedMacro") < kinds.index("StuckBlock")
+
+
+def test_plan_gate_stands_down_on_a_synthesized_turn() -> None:
+    # The conductor's turns carry no plan and never will — the armed
+    # playbook is their plan. Same call on a model turn stays gated.
+    gate = policy_mod.PlanGate(layout_incomplete=False, required_after=0)
+    session = Session()
+    session.model_turns = 5  # well past the threshold, plan undrafted
+
+    session.synthesized_turn = True
+    assert (
+        gate.check(session, ToolCall(id="c", name="tap", arguments={}), turn=5) is None
+    )
+
+    session.synthesized_turn = False
+    assert (
+        gate.check(session, ToolCall(id="c", name="tap", arguments={}), turn=5)
+        is not None
+    )

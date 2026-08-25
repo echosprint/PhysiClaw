@@ -67,7 +67,11 @@ def record(
     stats behind. Best-effort: a write failure logs and moves on — stats
     must never take down a session."""
     data = load()
-    data = {k: v for k, v in data.items() if k in known_names or k == name}
+    # Qualified `app/name` keys are pack macros: their dirs live under
+    # playbooks/, not macros/, so the dir-derived prune set can never
+    # vouch for them — keep them unconditionally (a deleted pack leaves
+    # a few orphan lines, which beats losing the decay signal).
+    data = {k: v for k, v in data.items() if k in known_names or k == name or "/" in k}
     entry = data.setdefault(name, dict(_COUNTERS))
     if not isinstance(entry, dict):
         # A hand-edited or truncated file can leave a scalar under a macro

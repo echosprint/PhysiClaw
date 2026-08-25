@@ -70,6 +70,9 @@ async def drive(run: EngineRun, session: Session, messages: list[Message]) -> No
       5. `_apply_turn_gates`   — the policy gates in declared order; may RETRY.
       6. `_dispatch_turn`      — run the tool_calls, append their results.
       7. `_finalize_turn`      — snapshot trajectory, compact, reset gates.
+
+    A conductor-synthesized turn (armed playbook) skips 3–5 — those judge
+    model output — and dispatches under `session.synthesized_turn`.
     """
     state = _LoopState()
     for turn in range(run.settings.max_turns):
@@ -92,29 +95,44 @@ async def drive(run: EngineRun, session: Session, messages: list[Message]) -> No
         messages.append(asst)
         called = asst.tool_names()
 
-        shape = _enforce_shape(
-            messages, asst, called, state, session=session, turn=turn, tr=run.tr
-        )
-        if shape is _Turn.ABORT:
-            return
-        if shape is _Turn.RETRY:
-            continue
+        # A synthesized turn is the conductor's own output, not the
+        # model's: the shape is correct by construction and the turn
+        # gates' judgments (plan discipline, checkpoints, stuck
+        # reflection) address model behavior — skip both. Dispatch
+        # guards still see every call, under `session.synthesized_turn`
+        # so the plan gate stands down while phone protection holds.
+        if not asst.synthesized:
+            # The plan gate's meter: turns the MODEL produced. Synthesized
+            # turns must not advance it — a long playbook would otherwise
+            # leave the model instantly plan-gated on its first real turn.
+            session.model_turns += 1
+            shape = _enforce_shape(
+                messages, asst, called, state, session=session, turn=turn, tr=run.tr
+            )
+            if shape is _Turn.ABORT:
+                return
+            if shape is _Turn.RETRY:
+                continue
 
-        for gate in run.policies.turn_gates:
-            gate.observe_turn(session, asst)
+            for gate in run.policies.turn_gates:
+                gate.observe_turn(session, asst)
 
-        if _apply_turn_gates(
-            run,
-            session,
-            messages,
-            asst,
-            called,
-            turn=turn,
-            compaction_imminent=compaction_imminent,
-        ):
-            continue
+            if _apply_turn_gates(
+                run,
+                session,
+                messages,
+                asst,
+                called,
+                turn=turn,
+                compaction_imminent=compaction_imminent,
+            ):
+                continue
 
-        await _dispatch_turn(run, session, messages, asst, turn)
+        session.synthesized_turn = asst.synthesized
+        try:
+            await _dispatch_turn(run, session, messages, asst, turn)
+        finally:
+            session.synthesized_turn = False
         _finalize_turn(run, session, messages, asst, called, turn)
 
         if session.sentinel_status:
@@ -213,13 +231,13 @@ def _prepare_request(
         layout_incomplete=run.layout_incomplete,
         compaction_keep=(run.collapse.keep if compaction_imminent else None),
     )
-    # Cache markers + the actual wire format are the provider's business now;
-    # log the wire form for debugging by asking the provider to serialize once.
-    wire_for_log = run.serialize_wire(request_messages)
+    # The wire-form request record is NOT written here: only turns that
+    # actually reach the provider pay the full-transcript serialization
+    # (`_call_provider`) — a playbook walk of synthesized turns would
+    # otherwise serialize and log the growing history once per leg.
     run.tr.write(
         {"event": "request", "turn": turn, "message_count": len(request_messages)}
     )
-    run.rlog.write_request(turn, wire_for_log)
     log.info("turn %d: %d messages → conductor", turn + 1, len(request_messages))
     return request_messages, compaction_imminent
 
@@ -230,8 +248,8 @@ async def _call_provider(
     request_messages: list[Message],
     turn: int,
 ) -> AssistantMessage | None:
-    """Ask the conductor for the turn (transient-retry) — today that is a
-    provider call, the default playbook — log the response, and return the
+    """Ask the conductor for the turn (transient-retry) — a synthesized
+    playbook turn or a provider call — log the response, and return the
     AssistantMessage. When retries exhaust: mark the session STUCK, trace
     it, and return None — the caller returns from the loop."""
     t0 = time.perf_counter()
@@ -251,13 +269,24 @@ async def _call_provider(
             log.error("provider failed: %s", e)
         else:
             log.exception("provider call crashed")
+        # The failed request's wire form is the forensic record — write
+        # it now (deferred from _prepare_request; see below).
+        run.rlog.write_request(turn, run.serialize_wire(request_messages))
         run.tr.write({"event": "provider_failed", "turn": turn, "error": str(e)})
         session.sentinel_status = STUCK
         session.sentinel_recap = f"provider error: {e}"
         return None
 
     elapsed_ms = int((time.perf_counter() - t0) * 1000)
-    run.rlog.write_response(turn, asst.raw, elapsed_ms=elapsed_ms)
+    if not asst.synthesized:
+        # Cache markers + the actual wire format are the provider's
+        # business; log the wire form by asking it to serialize once.
+        # Deferred to AFTER the advance so a synthesized turn — which
+        # sent no request — never pays the full-transcript serialization.
+        run.rlog.write_request(turn, run.serialize_wire(request_messages))
+    run.rlog.write_response(
+        turn, asst.raw, elapsed_ms=elapsed_ms, synthesized=asst.synthesized
+    )
     run.tr.write(
         {
             "event": "response",
@@ -265,14 +294,21 @@ async def _call_provider(
             "finish_reason": asst.finish_reason,
             "content_len": len(asst.content or ""),
             # Provider round-trip time — the session summary sums these
-            # into provider_time_ms.
+            # into provider_time_ms (synthesized turns count into
+            # conductor_turns instead; no request was sent).
             "elapsed_ms": elapsed_ms,
             "tool_calls": [
                 {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
                 for tc in asst.tool_calls
             ],
+            **({"synthesized": True} if asst.synthesized else {}),
         }
     )
+    if asst.synthesized:
+        # No provider round-trip: no usage to log, and the token/cache
+        # metrics would report zeros that read as data.
+        log.info("turn %d: conductor synthesized calls=%s", turn + 1, asst.tool_names())
+        return asst
     cache_summary = _log_usage(turn, asst, run.tr)
     # Provider round-trip time first, then token/cache — all provider-call
     # metrics grouped in the trailing segment.

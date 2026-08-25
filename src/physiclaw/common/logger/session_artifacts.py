@@ -247,6 +247,7 @@ def build_summary(
     crashed: bool,
     turns: int,
     provider_calls: int,
+    conductor_turns: int | None = None,
     provider_time_ms: int,
     input_tokens: int,
     output_tokens: int,
@@ -266,9 +267,10 @@ def build_summary(
     is stamped here (finalize time). `errors` may carry any subset of
     `_ERROR_KEYS`; the rest render as 0. `cost_usd` (claude-only — the
     CLI reports it) is dropped when None, keeping engine summaries
-    byte-stable; `tool_time_ms` / `verdicts` (engine-only — the claude
-    CLI's stream carries no per-tool timing or camera verdicts) are
-    dropped the same way."""
+    byte-stable; `tool_time_ms` / `verdicts` / `conductor_turns`
+    (engine-only — the claude CLI's stream carries no per-tool timing,
+    camera verdicts, or synthesized playbook turns) are dropped the
+    same way."""
     unknown = set(errors) - set(_ERROR_KEYS)
     if unknown:
         # A counter incremented somewhere without a matching _ERROR_KEYS
@@ -291,6 +293,7 @@ def build_summary(
         },
         "turns": turns,
         "provider_calls": provider_calls,
+        "conductor_turns": conductor_turns,
         "provider_time_ms": provider_time_ms,
         "tool_time_ms": tool_time_ms,
         "usage": {
@@ -312,7 +315,7 @@ def build_summary(
         "images": images,
         "env": env,
     }
-    for optional in ("cost_usd", "tool_time_ms", "verdicts"):
+    for optional in ("cost_usd", "tool_time_ms", "verdicts", "conductor_turns"):
         if summary[optional] is None:
             del summary[optional]
     return summary

@@ -212,13 +212,23 @@ def _handle_skill_factory(skill_registry: dict[str, skill.Skill]) -> Handler:
     return _handle
 
 
-def _handle_run_macro_factory(macro_registry: dict[str, Macro]) -> Handler:
+def _handle_run_macro_factory(
+    macro_registry: dict[str, Macro],
+    pack_macros: dict[str, Macro] | None = None,
+) -> Handler:
     """Execute one enabled macro over the process MCP singleton.
     `run_and_record` owns the stats fold (shared with CLI rehearsal, so a
     successful rehearsal resets `consecutive_aborts` too). Raises on an
     unknown name or bad inputs (dispatch marks is_error); a mid-run abort
     returns normally — the step log + current screen are a substantive
-    result the model must read, not an error to retry."""
+    result the model must read, not an error to retry.
+
+    `pack_macros` are the armed playbook pack's private macros under
+    qualified `app/name` keys — the conductor's hands. They resolve only
+    while the session dispatches a conductor-synthesized turn; a model
+    turn naming one gets the same unknown-macro error as any typo, and
+    the available-list never mentions them."""
+    hidden = pack_macros or {}
 
     async def _handle(session: Session, args: dict) -> str | list[dict]:
         # Local import: mcp_tool pulls the mcp SDK; keep it off the module's
@@ -226,7 +236,15 @@ def _handle_run_macro_factory(macro_registry: dict[str, Macro]) -> Handler:
         from physiclaw.agent.engine.mcp_tool import get_mcp
 
         name = (args.get("name") or "").strip()
-        spec = macro_registry.get(name)
+        # Provenance and namespace are separate facts: the caller label
+        # follows who authored the turn, while the qualified `app/name`
+        # namespace additionally REQUIRES conductor provenance to resolve
+        # at all — that conjunction is the authorization, nothing else.
+        synthesized = session.synthesized_turn
+        if "/" in name:
+            spec = hidden.get(name) if synthesized else None
+        else:
+            spec = macro_registry.get(name)
         if spec is None:
             available = ", ".join(sorted(macro_registry)) or "(none)"
             raise ValueError(f"unknown macro {name!r}. Available: {available}")
@@ -234,15 +252,19 @@ def _handle_run_macro_factory(macro_registry: dict[str, Macro]) -> Handler:
             spec,
             args.get("inputs") or {},
             await get_mcp(),
+            caller="conductor" if synthesized else "engine",
             start_at=(args.get("start_at") or "").strip(),
+            record_as=name,
         )
         if not result.ok:
             # One strike. The rehearsed path stopped matching this screen, so
             # every later call would replay completed steps against a state
             # we already know diverged — which is exactly what the abort
             # header tells the agent not to do. `policy.BurnedMacro` enforces
-            # it from here; bad_input can't reach this line (it raised).
-            session.failed_macros.add(spec.name)
+            # it from here (keyed by the CALLED name, so a burned pack macro
+            # can never shadow a healthy user macro); bad_input can't reach
+            # this line (it raised).
+            session.failed_macros.add(name)
         return result.blocks
 
     return _handle
@@ -718,6 +740,7 @@ def schemas(registry: dict[str, LocalTool]) -> list[dict]:
 def build_registry(
     skill_registry: dict[str, skill.Skill],
     macro_registry: dict[str, Macro] | None = None,
+    pack_macros: dict[str, Macro] | None = None,
 ) -> dict[str, LocalTool]:
     """All local tools keyed by name. Skill / run_macro are included iff
     skills / enabled macros were discovered (keeps the tool surface minimal
@@ -767,16 +790,20 @@ def build_registry(
             input_schema=_SKILL_SCHEMA,
             handler=_handle_skill_factory(skill_registry),
         )
-    if macro_registry:
+    if macro_registry or pack_macros:
         # The constant, not a literal: policy.BurnedMacro, policy._GESTURES
         # and KeyboardTracker all key off gesture_vocab.RUN_MACRO, and every
-        # one of them fails OPEN on a mismatch.
+        # one of them fails OPEN on a mismatch. Registered when EITHER set
+        # exists: the conductor's synthesized legs dispatch through this
+        # tool too, but the model-facing description names user macros
+        # only — pack macros stay the conductor's hands.
         tools[gesture_vocab.RUN_MACRO] = LocalTool(
             name=gesture_vocab.RUN_MACRO,
             returns_blocks=True,
             description=(
                 f"Execute a rehearsed gesture macro "
-                f"({'/'.join(sorted(macro_registry))}) as ONE step — see "
+                f"({'/'.join(sorted(macro_registry or {})) or 'none available'}) "
+                f"as ONE step — see "
                 "`## Available Macros` for what each does and its inputs. "
                 "Use this instead of gesturing a covered stretch turn by "
                 "turn: one call replaces every one of those turns' round "
@@ -787,6 +814,6 @@ def build_registry(
                 "with or without `start_at`."
             ),
             input_schema=_RUN_MACRO_SCHEMA,
-            handler=_handle_run_macro_factory(macro_registry),
+            handler=_handle_run_macro_factory(macro_registry or {}, pack_macros),
         )
     return tools

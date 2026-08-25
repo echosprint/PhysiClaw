@@ -66,6 +66,19 @@ def exit_error(msg: str, code: int = 1) -> NoReturn:
     raise typer.Exit(code=code)
 
 
+def parse_inputs(pairs: list[str]) -> dict[str, str]:
+    """Repeatable ``--input NAME=VALUE`` pairs → dict — the one parser for
+    every command that feeds declared inputs (`macros rehearse`,
+    `playbooks arm`). Exits code 2 on a malformed pair."""
+    values: dict[str, str] = {}
+    for pair in pairs:
+        key, sep, value = pair.partition("=")
+        if not sep or not key:
+            exit_error(f"bad --input {pair!r} (want key=value)", code=2)
+        values[key] = value
+    return values
+
+
 def state_tag(*, valid: bool, enabled: bool = False) -> str:
     """The colored invalid/enabled/disabled tag both artifact listings
     (`macros list`, `playbooks list`) render — one palette, one wording."""

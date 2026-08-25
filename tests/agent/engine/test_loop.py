@@ -1065,3 +1065,102 @@ def test_corrective_for_three_notes() -> None:
     out = _corrective_for_bad_shape(["note", "note", "note"])
 
     assert "called `note` 3 times" in out
+
+
+# ---------- synthesized turns (conductor legs) ----------
+
+
+@pytest.mark.asyncio
+async def test_synthesized_turn_skips_gates_and_flags_dispatch(
+    patched_loop_deps, mocker
+) -> None:
+    """A conductor-synthesized turn dispatches without the turn gates'
+    judgment, under `session.synthesized_turn`; the next (model) turn is
+    gated as usual and the flag is back down."""
+    from physiclaw.agent.engine import policy as policy_mod
+
+    seen_gate_turns: list[list[str]] = []
+
+    class SpyGate(policy_mod.TurnGate):
+        def check(self, session, asst, called, *, turn, compaction_imminent):
+            seen_gate_turns.append(list(called))
+            return None
+
+    flag_during_dispatch: list[bool] = []
+
+    async def peek_handler(session, _args):
+        flag_during_dispatch.append(session.synthesized_turn)
+        return "peek-result"
+
+    registry = _registry()
+    registry["peek"] = LocalTool(
+        name="peek",
+        description="look",
+        input_schema={"type": "object", "additionalProperties": True},
+        handler=peek_handler,
+    )
+
+    synthesized = _asst(
+        tool_calls=[_tc("note", {"summary": "conductor"}), _tc("peek")],
+    )
+    synthesized.synthesized = True
+    closing = _asst(
+        tool_calls=[
+            _tc("note", {"summary": "done"}),
+            _tc("end_session", {"status": DONE, "recap": "ok"}),
+        ],
+    )
+    provider = FakeProvider([synthesized, closing])
+    policies = policy_mod.Policies(
+        turn_gates=[SpyGate()], dispatch_guards=[], result_observers=[]
+    )
+
+    session = Session()
+    messages: list = [SystemMessage(content="sys"), UserMessage(content="trig")]
+    await drive(_loop_run(provider, registry, policies=policies), session, messages)
+
+    assert session.sentinel_status == DONE
+    assert flag_during_dispatch == [True]  # up for the synthesized dispatch...
+    assert session.synthesized_turn is False  # ...and back down after
+    # The gate judged only the model's closing turn.
+    assert seen_gate_turns == [["note", "end_session"]]
+
+
+@pytest.mark.asyncio
+async def test_synthesized_response_is_marked_in_wire_and_trace(
+    patched_loop_deps,
+) -> None:
+    registry = _registry()
+    synthesized = _asst(tool_calls=[_tc("note", {"summary": "c"}), _tc("peek")])
+    synthesized.synthesized = True
+    closing = _asst(
+        tool_calls=[
+            _tc("note", {"summary": "done"}),
+            _tc("end_session", {"status": DONE, "recap": "ok"}),
+        ],
+    )
+    provider = FakeProvider([synthesized, closing])
+    tr, rlog = MagicMock(), MagicMock()
+
+    session = Session()
+    messages: list = [SystemMessage(content="sys"), UserMessage(content="trig")]
+    await drive(_loop_run(provider, registry, tr=tr, rlog=rlog), session, messages)
+
+    by_synth = {
+        c.kwargs.get("synthesized", False): c
+        for c in rlog.write_response.call_args_list
+    }
+    assert set(by_synth) == {True, False}  # one of each, flagged apart
+    response_events = [
+        c.args[0]
+        for c in tr.write.call_args_list
+        if c.args and c.args[0].get("event") == "response"
+    ]
+    assert [e.get("synthesized") for e in response_events] == [True, None]
+    # No cache event for the synthesized turn — zeros would read as data.
+    cache_events = [
+        c.args[0]
+        for c in tr.write.call_args_list
+        if c.args and c.args[0].get("event") == "cache"
+    ]
+    assert len(cache_events) == 1

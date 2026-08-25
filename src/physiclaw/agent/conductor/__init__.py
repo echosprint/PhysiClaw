@@ -11,6 +11,8 @@ Layout:
   - `_spec.py` — shared spec-file substrate: the YAML loader and the
     macro layer's scalar rules, bound to each spec's error class.
   - `playbook.py` — PLAYBOOK.yml model + parser + graph/money lints.
+  - `program.py` — an armed playbook mid-walk: synthesized LEG turns,
+    fingerprint checks, hand-over on anything else; the arm file.
   - `scaffold.py` — app-pack init templates + playbooks/README.md.
 """
 

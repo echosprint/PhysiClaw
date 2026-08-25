@@ -1,16 +1,24 @@
-"""`physiclaw playbooks` — scaffold, list, and validate app packs.
+"""`physiclaw playbooks` — scaffold, list, validate, and arm app packs.
 
-Parse-only tooling: nothing here executes a playbook. Mirrors the macros
-CLI's shapes — init prints the next steps, check is the all-or-nothing
-gate with valid-is-not-live warnings — while the scaffolding itself
-lives in `agent/conductor/scaffold.py` (the `store.init_macro` split:
-the CLI only prints)."""
+Nothing here executes a playbook: `arm` only writes the arm file the
+engine reads at the next wake (`agent/conductor/program.py`). Mirrors
+the macros CLI's shapes — init prints the next steps, check is the
+all-or-nothing gate with valid-is-not-live warnings — while the
+scaffolding itself lives in `agent/conductor/scaffold.py` (the
+`store.init_macro` split: the CLI only prints)."""
 
 from typing import TYPE_CHECKING, Annotated
 
 import typer
 
-from physiclaw.cli._format import exit_error, ok, state_tag, step_fail, warn
+from physiclaw.cli._format import (
+    exit_error,
+    ok,
+    parse_inputs,
+    state_tag,
+    step_fail,
+    warn,
+)
 
 if TYPE_CHECKING:
     from physiclaw.agent.conductor.playbook import Pack, PlaybookEntry
@@ -42,7 +50,7 @@ def init(
 def list_cmd() -> None:
     """List every pack and its playbooks: enabled, disabled, or invalid."""
     from physiclaw.agent.conductor import playbook as pb
-    from physiclaw.agent.conductor import scaffold
+    from physiclaw.agent.conductor import program, scaffold
 
     scaffold.ensure_format_readme()
     apps = pb.list_apps()
@@ -52,6 +60,7 @@ def list_cmd() -> None:
             "(see ~/.physiclaw/playbooks/README.md)"
         )
         return
+    armed = program.armed_ref()
     for app in apps:
         typer.echo(f"{app}/")
         for e in pb.scan_playbooks(app):
@@ -63,7 +72,47 @@ def list_cmd() -> None:
                 if e.spec is None
                 else f"{e.spec.description} ({len(e.spec.nodes)} nodes)"
             )
-            typer.echo(f"  {tag} {e.name}  {detail}")
+            mark = "  [armed]" if (app, e.name) == armed else ""
+            typer.echo(f"  {tag} {e.name}{mark}  {detail}")
+
+
+@playbooks_app.command()
+def arm(
+    ref: Annotated[str, typer.Argument(help="<app>/<playbook> to arm.")],
+    inputs: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--input",
+            "-i",
+            help="NAME=VALUE for a declared playbook input (repeatable).",
+        ),
+    ] = None,
+) -> None:
+    """Arm one playbook: the next engine sessions follow it (legs run as
+    synthesized turns; anything it can't handle hands over to the model).
+    A manual testing surface — one playbook at a time, sticky until
+    `disarm`."""
+    from physiclaw.agent.conductor import program
+    from physiclaw.agent.conductor.playbook import PlaybookError
+
+    app, _, name = ref.partition("/")
+    if not app or not name:
+        exit_error(f"expected <app>/<playbook> (got {ref!r})")
+    values = parse_inputs(inputs or [])
+    try:
+        spec = program.arm(app, name, values)
+    except PlaybookError as e:
+        exit_error(str(e))
+    typer.echo(ok(f"armed {ref} ({len(spec.nodes)} nodes)"))
+    typer.echo("Sticky until `physiclaw playbooks disarm`.")
+
+
+@playbooks_app.command()
+def disarm() -> None:
+    """Disarm — sessions go back to plain model-driven turns."""
+    from physiclaw.agent.conductor import program
+
+    typer.echo(ok("disarmed") if program.disarm() else "nothing was armed")
 
 
 @playbooks_app.command()
@@ -121,7 +170,7 @@ def _report_not_live(
     which playbooks the conductor cannot arm, and why — disabled files,
     and referenced pack macros that are themselves disabled (rehearse,
     then enable; the rehearsal gate itself lands with execution)."""
-    from physiclaw.agent.conductor.playbook import LegNode
+    from physiclaw.agent.conductor.playbook import disabled_leg_macros
 
     if disabled:
         typer.echo(
@@ -130,15 +179,12 @@ def _report_not_live(
                 f"{', '.join(disabled)}. Set `enabled: true` once rehearsed."
             )
         )
-    # Safe unguarded access: parse rejects any LegNode whose macro sits in
-    # pack.macro_errors, so every referenced macro is in pack.macros.
     disabled_macros = sorted(
         {
-            n.macro
+            m
             for e in entries
             if e.spec is not None
-            for n in e.spec.nodes
-            if isinstance(n, LegNode) and not pack.macros[n.macro].enabled
+            for m in disabled_leg_macros(e.spec, pack)
         }
     )
     if disabled_macros:

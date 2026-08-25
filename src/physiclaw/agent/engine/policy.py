@@ -359,11 +359,14 @@ PLAN_GATE_EXEMPT = frozenset({"note", "update_progress", "end_session"})
 
 
 class PlanGate(DispatchGuard):
-    """Drafting the plan is mandatory: past `required_after` turns with no
-    plan drafted, every tool is blocked except the way out. Keyed on the
-    raw turn index (not `turns_since_update`, which any update_progress
-    call resets) so it can't be dodged; off during first-run setup, whose
-    screen-layout flow legitimately runs many plan-less turns."""
+    """Drafting the plan is mandatory: past `required_after` MODEL turns
+    with no plan drafted, every tool is blocked except the way out. Keyed
+    on `session.model_turns` — the count of provider-produced turns, so
+    conductor-synthesized turns never advance the meter (a playbook
+    prefix must not leave the model instantly overdue) and it can't be
+    dodged (unlike `turns_since_update`, which any update_progress call
+    resets); off during first-run setup, whose screen-layout flow
+    legitimately runs many plan-less turns."""
 
     # Fires before schema lookup / validation — a gated call must be told
     # to draft the plan, not to fix its arguments.
@@ -373,15 +376,20 @@ class PlanGate(DispatchGuard):
         self._layout_incomplete = layout_incomplete
         self._required_after = required_after
 
-    def overdue(self, session: "Session", turn: int) -> bool:
+    def overdue(self, session: "Session") -> bool:
         return (
             not self._layout_incomplete
-            and turn >= self._required_after
+            and session.model_turns > self._required_after
             and not session.plan.is_drafted()
         )
 
     def check(self, session, call, *, turn):
-        if call.name in PLAN_GATE_EXEMPT or not self.overdue(session, turn):
+        # A conductor-synthesized turn carries no plan and never will —
+        # the armed playbook is its plan. The phone-protecting guards
+        # below this one still apply to it in full.
+        if session.synthesized_turn:
+            return None
+        if call.name in PLAN_GATE_EXEMPT or not self.overdue(session):
             return None
         return Block(
             content=(

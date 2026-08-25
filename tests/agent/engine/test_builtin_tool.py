@@ -773,3 +773,71 @@ def test_build_registry_drops_report_screen_layout_once_learned(mocker) -> None:
 
     assert "report_screen_layout" not in keys
     assert "note" in keys and "end_session" in keys  # everything else intact
+
+
+# ---------- run_macro: pack macros (the conductor's hands) ----------
+
+
+def test_build_registry_registers_run_macro_for_pack_macros_alone() -> None:
+    reg = build_registry({}, {}, {"demo/leg": _macro_spec("leg")})
+
+    assert "run_macro" in reg
+    # The model-facing description never names pack macros.
+    assert "demo/leg" not in reg["run_macro"].description
+    assert "none available" in reg["run_macro"].description
+
+
+@pytest.mark.asyncio
+async def test_run_macro_pack_macro_only_runs_on_a_synthesized_turn(mocker) -> None:
+    from physiclaw.agent.macros import stats as macro_stats
+
+    class OkMcp:
+        async def call_tool(self, name, args=None):
+            return [{"type": "text", "text": f"{name} ok | screen: changed"}]
+
+    mocker.patch(
+        "physiclaw.agent.engine.mcp_tool.get_mcp",
+        new=mocker.AsyncMock(return_value=OkMcp()),
+    )
+    reg = build_registry({}, {}, {"demo/leg": _macro_spec("leg")})
+
+    # A model turn naming the qualified macro gets the same unknown-macro
+    # error as any typo — pack macros are uncallable by the model.
+    with pytest.raises(ValueError, match="unknown macro 'demo/leg'"):
+        await reg["run_macro"].handler(Session(), {"name": "demo/leg"})
+
+    session = Session()
+    session.synthesized_turn = True
+    blocks = await reg["run_macro"].handler(
+        session, {"name": "demo/leg", "inputs": {"msg": "hi"}}
+    )
+
+    assert "all 1 steps completed" in blocks[0]["text"]
+    # Stats fold under the qualified name — the pack macro's own decay
+    # signal, never shadowing a plain user macro named "leg".
+    assert macro_stats.load()["demo/leg"]["total_successes"] == 1
+    assert "leg" not in macro_stats.load()
+
+
+@pytest.mark.asyncio
+async def test_run_macro_pack_macro_abort_burns_the_called_name(mocker) -> None:
+    class DownMcp:
+        async def call_tool(self, name, args=None):
+            raise RuntimeError("arm busy")
+
+    mocker.patch(
+        "physiclaw.agent.engine.mcp_tool.get_mcp",
+        new=mocker.AsyncMock(return_value=DownMcp()),
+    )
+    reg = build_registry({}, {}, {"demo/leg": _macro_spec("leg")})
+
+    session = Session()
+    session.synthesized_turn = True
+    blocks = await reg["run_macro"].handler(
+        session, {"name": "demo/leg", "inputs": {"msg": "hi"}}
+    )
+
+    assert "ABORTED" in blocks[0]["text"]
+    # Burned under the CALLED name, so a healthy user macro named "leg"
+    # is never shadowed by the pack macro's failure.
+    assert session.failed_macros == {"demo/leg"}

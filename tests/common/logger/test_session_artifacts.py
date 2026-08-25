@@ -161,21 +161,22 @@ def _claude_summary() -> dict:
 def test_both_engines_emit_the_same_summary_key_tree() -> None:
     """The parity contract: `physiclaw logs` / `jq` read both engines'
     summary.json with one schema, modulo the declared per-engine keys:
-    cost_usd is claude-only (the CLI reports it); tool_time_ms and
-    verdicts are engine-only (the claude stream carries no per-tool
-    timing or camera verdicts)."""
+    cost_usd is claude-only (the CLI reports it); tool_time_ms, verdicts,
+    and conductor_turns are engine-only (the claude stream carries no
+    per-tool timing, camera verdicts, or synthesized playbook turns)."""
     engine_full, claude_full = _engine_summary(), _claude_summary()
     engine, claude = _key_tree(engine_full), _key_tree(claude_full)
 
     assert claude.pop("cost_usd", "absent") is None  # present, scalar
     assert engine.pop("tool_time_ms", "absent") is None  # present, scalar
+    assert engine.pop("conductor_turns", "absent") is None  # present, scalar
     assert isinstance(engine.pop("verdicts"), dict)
     # `env` is engine-populated data (the engine relays its env event
     # verbatim), not part of the constructed schema — opaque here.
     assert isinstance(engine.pop("env"), dict) and isinstance(claude.pop("env"), dict)
     assert claude == engine
     # Same top-level ordering too — the files diff cleanly across engines.
-    _PER_ENGINE = {"cost_usd", "tool_time_ms", "verdicts"}
+    _PER_ENGINE = {"cost_usd", "tool_time_ms", "verdicts", "conductor_turns"}
     assert [k for k in claude_full if k not in _PER_ENGINE] == [
         k for k in engine_full if k not in _PER_ENGINE
     ]

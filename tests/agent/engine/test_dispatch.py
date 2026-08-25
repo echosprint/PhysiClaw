@@ -440,6 +440,7 @@ async def test_plan_gate_block_does_not_feed_guard() -> None:
     # Plan-gate-blocked presses never actuate, so they must not count
     # toward the stuck guard's same-target misses.
     session = Session()
+    session.model_turns = CONFIG.engine.plan_required_after + 1
     session.guard._exempt = []
     run = _mk_run(mcp=VerdictMcpClient(), schema_by_name={"tap": _TAP_SCHEMA})
 
@@ -507,6 +508,7 @@ async def _gated_dispatch(session, call, *, turn: int):
 @pytest.mark.asyncio
 async def test_plan_gate_blocks_action_tools_when_overdue() -> None:
     session = Session()
+    session.model_turns = CONFIG.engine.plan_required_after + 1
 
     result = await _gated_dispatch(
         session,
@@ -525,6 +527,7 @@ async def test_plan_gate_exempts_the_way_out(name: str) -> None:
     # Exempt tools reach normal dispatch (anything but the plan-gate
     # BLOCKED text).
     session = Session()
+    session.model_turns = CONFIG.engine.plan_required_after + 1
 
     result = await _gated_dispatch(
         session,

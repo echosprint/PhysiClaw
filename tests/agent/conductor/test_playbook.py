@@ -5,30 +5,11 @@ exact field and rule; the graph/money lints are the safety substance."""
 from __future__ import annotations
 
 import pytest
+from conductor_fakes import write_pack
 
 from physiclaw.agent.conductor import playbook as pb
 from physiclaw.agent.conductor.playbook import PlaybookError
 from physiclaw.common import paths
-
-PAGES = """\
-home:
-  anchors: ["Files"]
-results:
-  anchors: ["综合"]
-"""
-
-# A minimal valid pack macro (message input, one step).
-PACK_MACRO = """\
-name: {name}
-description: test leg
-inputs:
-  message:
-    description: text to use
-steps:
-  - name: go
-    tool: tap
-    with: {{bbox: [0.1, 0.1, 0.2, 0.2]}}
-"""
 
 VALID = """\
 name: buy
@@ -68,21 +49,8 @@ nodes:
 """
 
 
-def _write_pack(
-    app: str = "demo", *, macros: tuple[str, ...] = ("open-app", "add-cart")
-):
-    root = paths.playbooks_dir() / app
-    (root / "macros").mkdir(parents=True, exist_ok=True)
-    (root / "pages.yml").write_text(PAGES, encoding="utf-8")
-    for m in macros:
-        d = root / "macros" / m
-        d.mkdir(parents=True, exist_ok=True)
-        (d / "MACRO.yml").write_text(PACK_MACRO.format(name=m), encoding="utf-8")
-    return root
-
-
 def _pack(app: str = "demo"):
-    _write_pack(app)
+    write_pack(app)
     return pb.load_pack(app)
 
 
@@ -105,7 +73,7 @@ def test_parse_valid_playbook() -> None:
 
 
 def test_scan_playbooks_reads_pack_files() -> None:
-    root = _write_pack()
+    root = write_pack()
     (root / "buy.yml").write_text(VALID, encoding="utf-8")
     (root / "broken.yml").write_text("name: broken\nnodes: []", encoding="utf-8")
 
@@ -291,7 +259,7 @@ def test_leg_missing_required_macro_input_rejected() -> None:
 
 
 def test_load_pack_carries_macro_errors() -> None:
-    root = _write_pack()
+    root = write_pack()
     bad = root / "macros" / "broken"
     bad.mkdir()
     (bad / "MACRO.yml").write_text("name: mismatch\n", encoding="utf-8")
@@ -312,7 +280,7 @@ def test_load_pack_bad_pages_raises_playbook_error() -> None:
 
 
 def test_list_apps_finds_packs() -> None:
-    _write_pack("demo")
+    write_pack("demo")
 
     assert pb.list_apps() == ["demo"]
 
