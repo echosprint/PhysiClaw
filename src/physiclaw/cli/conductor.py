@@ -1,9 +1,11 @@
-"""`physiclaw conductor` — page-identity tooling (matcher, capture).
+"""`physiclaw conductor` — page-identity + decision tooling.
 
 Offline-first: `extract` and `match --session` work from recorded
 sessions with no hardware; `match --live` and `propose --live` do one
 `peek` against a running `physiclaw mcp` server, same connection idiom
-as macro rehearsal. Nothing here touches the engine runtime.
+as macro rehearsal. `micro` replays one decision call over recorded
+listings (needs provider credentials, not hardware) — the threshold-
+tuning surface. Nothing here touches the engine runtime.
 """
 
 import asyncio
@@ -73,6 +75,83 @@ def extract(
         out, [corpus.CorpusItem(label=corpus.UNLABELED, listing=t) for t in listings]
     )
     typer.echo(f"wrote {len(listings)} listings → {out} (edit the '?' labels)")
+
+
+@conductor_app.command()
+def micro(
+    criteria: str = typer.Option("", "--criteria", help="choose_item criteria"),
+    question: str = typer.Option("", "--question", help="decide question"),
+    outs: str = typer.Option(
+        "", "--outs", help="decide answers, comma-separated (escalate auto-added)"
+    ),
+    session: str = typer.Option(None, "--session", help="replay a recorded session"),
+    listing: Path = typer.Option(None, "--listing", help="a listing text file"),
+    live: bool = typer.Option(False, "--live", help="one peek via `physiclaw mcp`"),
+) -> None:
+    """Run one decision micro-call over each input screen — the offline
+    replay surface for tuning `[conductor] micro_confidence`. Prints the
+    outcome, confidence, and token cost per screen."""
+    from physiclaw.agent.conductor.calls import CALLS, ESCALATE
+    from physiclaw.agent.conductor.micro import MicroCaller, build_request
+    from physiclaw.agent.provider import make_provider
+    from physiclaw.common.config import CONFIG, model_ref, parse_model_ref
+
+    if bool(criteria) == bool(question):
+        exit_error("pass exactly one of --criteria (choose_item) / --question (decide)")
+    try:
+        # The canonical resolution (env > [agent] model), with the micro
+        # tier override on top — the same model the engine's wiring picks,
+        # or the tuning replays against the wrong model.
+        ref = CONFIG.conductor.micro_model or model_ref()
+    except RuntimeError as e:
+        exit_error(str(e))
+    if criteria:
+        call, call_outs = "choose_item", CALLS["choose_item"].outs
+        args = {"criteria": criteria}
+    else:
+        answers = [o.strip() for o in outs.split(",") if o.strip()]
+        if ESCALATE not in answers:
+            answers.append(ESCALATE)
+        if len(answers) < 2:
+            exit_error("--outs needs at least one answer besides escalate")
+        call, call_outs = "decide", tuple(answers)
+        args = {"question": question}
+    screens = _input_screens(session, listing, live)
+    requests = [
+        build_request(call, "cli", call_outs, args, screen) for screen in screens
+    ]
+
+    async def _go() -> None:
+        pid, mid = parse_model_ref(ref)
+        provider = make_provider(pid, mid)
+        caller = MicroCaller(
+            provider, confidence_floor=CONFIG.conductor.micro_confidence
+        )
+        gate = asyncio.Semaphore(4)  # bounded fan-out: replays are per-screen
+
+        async def one(req):
+            async with gate:
+                return await caller.run(req)
+
+        try:
+            results = await asyncio.gather(*(one(r) for r in requests))
+        finally:
+            await provider.aclose()
+        for i, res in enumerate(results):
+            cost = (
+                f"{res.usage.prompt_tokens}+{res.usage.completion_tokens}tok "
+                f"{res.elapsed_ms}ms"
+            )
+            if res.outcome is None:
+                typer.echo(f"[{i:3d}] escalate  {res.detail}  ({cost})")
+                continue
+            picked = f" pick={res.outcome.picked.key!r}" if res.outcome.picked else ""
+            typer.echo(
+                f"[{i:3d}] {res.outcome.out:10s} conf={res.outcome.confidence:.2f}"
+                f"{picked}  {res.outcome.reason}  ({cost})"
+            )
+
+    asyncio.run(_go())
 
 
 @conductor_app.command()

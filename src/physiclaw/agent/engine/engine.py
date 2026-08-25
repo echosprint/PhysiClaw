@@ -29,6 +29,7 @@ import time
 
 from physiclaw.agent.conductor import Conductor
 from physiclaw.agent.conductor import program as conductor_program
+from physiclaw.agent.conductor.micro import MicroCaller
 from physiclaw.agent.engine import assemble, curate, loop, prompt
 from physiclaw.agent.engine.dto import Message
 from physiclaw.agent.engine.mcp_tool import get_mcp, list_tools_cached
@@ -40,7 +41,7 @@ from physiclaw.agent.runtime import contract
 from physiclaw.agent.runtime.hook import Trigger
 from physiclaw.agent.runtime.sentinel import STUCK
 from physiclaw.agent.trace import RawLog, Trace, new_sid
-from physiclaw.common.config import CONFIG
+from physiclaw.common.config import CONFIG, parse_model_ref
 
 log = logging.getLogger(__name__)
 
@@ -89,6 +90,39 @@ async def run(triggers: list[Trigger], *, model_ref: str) -> None:
     )
 
 
+def _wire_micro(program, provider, tr, rlog):
+    """The micro-caller for an armed program's DECIDE nodes — (None, None)
+    when nothing is armed or the playbook has no DECIDE node (a pure-LEG
+    walk must not pay for a second provider client). `[conductor]
+    micro_model` selects the cheap decision tier; fail-open to the
+    session provider on any problem. The second return is a
+    separately-owned provider the session's finally block must close
+    (None when the session provider is reused)."""
+    if program is None or not program.needs_micro:
+        return None, None
+    owned = None
+    micro_provider = provider
+    ref = CONFIG.conductor.micro_model
+    if ref:
+        try:
+            pid, mid = parse_model_ref(ref)
+            owned = make_provider(pid, mid)
+            micro_provider = owned
+        except Exception as e:
+            log.warning(
+                "conductor micro_model %r unusable (%s) — using the session model",
+                ref,
+                e,
+            )
+    caller = MicroCaller(
+        micro_provider,
+        confidence_floor=CONFIG.conductor.micro_confidence,
+        tr=tr,
+        rlog=rlog,
+    )
+    return caller, owned
+
+
 async def _run_session(
     triggers: list[Trigger],
     *,
@@ -99,13 +133,12 @@ async def _run_session(
     """One session attempt. Fresh sid / Trace / RawLog / MCP / Provider /
     policy set per call. Writes outcome to `session.sentinel_*`; never
     raises."""
-    from physiclaw.common.config import parse_model_ref
-
     provider_id, model_id = parse_model_ref(model_ref)
     settings = settings or Settings.from_config()
 
     sid = new_sid()
     provider: Provider | None = None
+    micro_provider: Provider | None = None
     tr: Trace | None = None
     rlog: RawLog | None = None
     try:
@@ -175,6 +208,7 @@ async def _run_session(
         )
 
         provider = make_provider(provider_id, model_id)
+        micro_caller, micro_provider = _wire_micro(program, provider, tr, rlog)
         prompt_hash = prompt.prefix_hash(bundle.system_prompt)
         rlog.write_session_start(
             provider=provider_id,
@@ -189,7 +223,7 @@ async def _run_session(
             # side-calls of the very kind its playbooks emit.
             # Session-management wiring (collapse cadence, wire logging)
             # comes straight off the provider — not the conductor's job.
-            conductor=Conductor(provider, program=program),
+            conductor=Conductor(provider, program=program, micro=micro_caller),
             collapse=provider.COLLAPSE,
             serialize_wire=provider.serialize_history,
             mcp=mcp,
@@ -240,9 +274,11 @@ async def _run_session(
         session.sentinel_status = STUCK
         session.sentinel_recap = f"session crashed: {e}"
     finally:
-        if provider is not None:
+        for p in (provider, micro_provider):
+            if p is None:
+                continue
             try:
-                await provider.aclose()
+                await p.aclose()
             except Exception:
                 # A close failure (cancellation landing here, transport
                 # error) must not skip the trace closes below — losing

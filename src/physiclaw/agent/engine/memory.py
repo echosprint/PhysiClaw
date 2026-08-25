@@ -23,7 +23,7 @@ from physiclaw.common.config import CONFIG
 from physiclaw.common.text import append_text, read_text, write_text
 
 MEMORY_DIR = paths.memory_dir()
-MEMORY_FILE = MEMORY_DIR / "memory.md"
+MEMORY_FILE = paths.memory_file()
 USER_FILE = MEMORY_DIR / "USER.md"
 
 # `read_logs` default. Counts entry lines (one log step), not files —

@@ -193,6 +193,7 @@ class _Summary:
         self.max_turn = -1
         self.provider_calls = 0
         self.conductor_turns = 0
+        self.micro_calls = 0
         self.provider_time_ms = 0
         self.tool_time_ms = 0
         self.verdicts: Counter[str] = Counter()
@@ -225,6 +226,13 @@ class _Summary:
             else:
                 self.provider_calls += 1
                 self.provider_time_ms += int(event.get("elapsed_ms") or 0)
+        elif name == "micro_call":
+            # A real provider round-trip on the conductor's side channel:
+            # counted apart from turn-loop calls, tokens folded into the
+            # session's spend (that's the whole point of measuring).
+            self.micro_calls += 1
+            self.input_tokens += int(event.get("prompt_tokens") or 0)
+            self.output_tokens += int(event.get("completion_tokens") or 0)
         elif name == "cache":
             self.input_tokens += int(event.get("total") or 0)
             self.output_tokens += int(event.get("out") or 0)
@@ -281,6 +289,7 @@ class _Summary:
             turns=self.max_turn + 1,
             provider_calls=self.provider_calls,
             conductor_turns=self.conductor_turns,
+            micro_calls=self.micro_calls,
             provider_time_ms=self.provider_time_ms,
             input_tokens=self.input_tokens,
             output_tokens=self.output_tokens,

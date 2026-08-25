@@ -17,12 +17,12 @@ Reuses the session's still-open provider, makes NO tool calls, and is fully
 fail-open: a parse error or empty result leaves the list untouched.
 """
 
-import json
 import logging
 
 from physiclaw.agent.engine import pitfalls
 from physiclaw.agent.engine.dto import SystemMessage, UserMessage
 from physiclaw.common.config import CONFIG
+from physiclaw.common.text import json_span
 
 log = logging.getLogger(__name__)
 
@@ -50,17 +50,11 @@ def _system() -> str:
 
 
 def _parse(text: str) -> list[str] | None:
-    """Parse the model's JSON array reply into a list of strings. Robust to a
-    ```json fence and surrounding prose (parses the outermost `[...]` span).
-    None on anything malformed, so the caller skips and the list is untouched."""
-    s = text or ""
-    start, end = s.find("["), s.rfind("]")
-    if start == -1 or end <= start:
-        return None
-    try:
-        arr = json.loads(s[start : end + 1])
-    except (ValueError, TypeError):
-        return None
+    """Parse the model's JSON array reply into a list of strings (the
+    shared `json_span` idiom: fence/prose-tolerant outermost `[...]`).
+    None on anything malformed, so the caller skips and the list is
+    untouched."""
+    arr = json_span(text or "", "[", "]")
     if not isinstance(arr, list):
         return None
     return [x for x in arr if isinstance(x, str) and x.strip()]

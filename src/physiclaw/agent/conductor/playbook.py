@@ -32,7 +32,8 @@ Unconfirmed → wait and check again, GATE_MAX_CHECKS times in all; still
 unconfirmed → the session is done and parks for the next wake-up, the
 regular-session contract. `escalate` is a reserved target — the
 conductor goes quiet and the model takes over. The only legal cycle is
-a DECIDE routing an out back to itself (bounded by `max_visits`);
+a DECIDE self-routing its call's re-ask arm (choose_item's `scroll` —
+the conductor swipes between re-asks, bounded by `max_visits`);
 anything wider is the model's job, not a playbook's.
 
 Wiring is by placeholder: `{name}` reads a declared input, `{node.field}`
@@ -640,6 +641,18 @@ def _parse_decide(
         out: _require_str(target, f"{where}: `on.{out}`")
         for out, target in on_raw.items()
     }
+    for out, target in on.items():
+        # A self-route is sanctioned only on the call's re-ask arm — the
+        # conductor refreshes the screen (swipes) between those visits.
+        # Any other self-route would re-ask the identical screen with the
+        # identical prompt: a lint-free playbook that can never converge.
+        if target == nid and out != decl.reask_arm:
+            raise PlaybookError(
+                f"{where}: `on.{out}` routes back to this node — only "
+                f"{call}'s re-ask arm "
+                f"({decl.reask_arm or '(none for this call)'}) may "
+                "self-loop; the conductor scrolls between those re-asks"
+            )
 
     max_visits = node.get("max_visits", DEFAULT_MAX_VISITS)
     if (
@@ -752,12 +765,13 @@ def _check_arg_refs(
 
 
 def fill_refs(value: Any, values: dict[str, str], where: str) -> Any:
-    """A `with:` value with its `{name}` refs resolved from `values` —
-    the runtime half of the ref grammar, beside REF_RE so no consumer
-    re-derives the braces. Recurses into lists/dicts exactly as
-    `_check_arg_refs` validates them. Raises PlaybookError on a ref it
-    cannot resolve: a dotted `{node.field}` (needs that decision's
-    recorded output) or a name with no value."""
+    """A `with:` value with its refs resolved from `values` — the runtime
+    half of the ref grammar, beside REF_RE so no consumer re-derives the
+    braces. `values` is keyed by both plain input names and dotted
+    `node.field` output keys, exactly the ref spellings. Recurses into
+    lists/dicts exactly as `_check_arg_refs` validates them. Raises
+    PlaybookError on a ref with no value (e.g. a decision output not yet
+    recorded)."""
     if isinstance(value, list):
         return [fill_refs(v, values, where) for v in value]
     if isinstance(value, dict):
@@ -774,12 +788,8 @@ def fill_refs(value: Any, values: dict[str, str], where: str) -> Any:
         ref = m.group(1)
         if ref is None:
             raise PlaybookError(f"{where}: stray {token!r} in {value!r}")
-        if "." in ref:
-            raise PlaybookError(
-                f"{where}: {{{ref}}} reads a decision output — no value available"
-            )
         if ref not in values:
-            raise PlaybookError(f"{where}: no value for input {{{ref}}}")
+            raise PlaybookError(f"{where}: no value for {{{ref}}}")
         return values[ref]
 
     return REF_RE.sub(repl, value)
@@ -861,8 +871,8 @@ def _check_acyclic(nodes: list[Node], ids: dict[str, int]) -> None:
             if target in visiting:
                 raise PlaybookError(
                     f"cycle via {nid!r} → {target!r} — playbooks are "
-                    "forward-only except a DECIDE's bounded self-loop; "
-                    "wider loops belong to the model"
+                    "forward-only except a DECIDE's bounded re-ask "
+                    "self-loop; wider loops belong to the model"
                 )
             if target not in done:
                 visit(target)

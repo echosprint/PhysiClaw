@@ -1142,3 +1142,27 @@ def test_summary_splits_conductor_turns_from_provider_calls(
     # Synthesized turns sent no request — their time never inflates the
     # provider metric.
     assert s["provider_time_ms"] == 1500
+
+
+def test_summary_counts_micro_calls_and_folds_their_tokens(
+    _trace_dirs: Path,
+) -> None:
+    t = Trace("s3")
+    t.write(
+        {
+            "event": "micro_call",
+            "call": "choose_item",
+            "out": "pick",
+            "prompt_tokens": 1500,
+            "completion_tokens": 30,
+            "elapsed_ms": 400,
+        }
+    )
+    t.close()
+
+    s = json.loads((_trace_dirs / "sessions" / "s3" / "summary.json").read_text())
+    assert s["micro_calls"] == 1
+    assert s["usage"]["input_tokens"] == 1500
+    assert s["usage"]["output_tokens"] == 30
+    # A micro call is not a turn-loop provider call.
+    assert s["provider_calls"] == 0

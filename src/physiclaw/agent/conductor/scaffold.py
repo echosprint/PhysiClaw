@@ -69,7 +69,8 @@ inputs:
     example: "hello"
 
 # Node types (≤ {max_nodes} nodes, forward-only; a DECIDE may self-loop
-# bounded by max_visits):
+# only on its call's re-ask arm — choose_item's `scroll`, the conductor
+# swipes between re-asks — bounded by max_visits):
 #   LEG        — run one of THIS pack's macros ({app}/macros/<name>/),
 #                verified against a declared page (`verify:`)
 #   DECIDE     — one scoped decision call ({calls});
@@ -113,7 +114,8 @@ Rules the checker enforces: a playbook references only its own pack's
 macros and pages (plus the reserved `ios.*` / `channel.*` built-ins);
 every DECIDE out is routed; `{{name}}` refs name declared inputs and
 `{{node.field}}` refs name EARLIER decide outputs; graphs are
-forward-only except a DECIDE's bounded self-loop; `irreversible:
+forward-only except a DECIDE's bounded re-ask self-loop
+(choose_item's `scroll`); `irreversible:
 payment` nodes sit behind a HUMAN_GATE and require a `mandate:`.
 
 Limits: ≤ {max_nodes} nodes, ≤ {max_inputs} inputs per playbook.

@@ -12,7 +12,24 @@ agent/trace, agent/engine/jobs.py) keep an explicit
 file handle in a helper would be more indirection than it's worth.
 """
 
+import json
 from pathlib import Path
+from typing import Any
+
+
+def json_span(text: str, opener: str, closer: str) -> Any | None:
+    """Parse the outermost JSON span (`opener`..`closer`) out of an LLM
+    reply — tolerant of ```json fences and surrounding prose. None on
+    anything malformed; payload validation stays with the caller. The one
+    home for the idiom (curate's list replies, the conductor's decision
+    objects)."""
+    start, end = text.find(opener), text.rfind(closer)
+    if start == -1 or end <= start:
+        return None
+    try:
+        return json.loads(text[start : end + 1])
+    except (ValueError, TypeError):
+        return None
 
 
 def read_text(path: Path) -> str:

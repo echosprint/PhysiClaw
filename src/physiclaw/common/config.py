@@ -250,6 +250,22 @@ class MemoryConfig:
 
 
 @dataclass
+class ConductorConfig:
+    """Micro-call knobs for the conductor's DECIDE nodes.
+
+    ``micro_model`` is a ``provider/model`` ref for the decision calls
+    (the plan's cheap tier); empty = the session's own model. Fail-open:
+    an unbuildable override falls back to the session provider.
+    ``micro_confidence`` is the escalation floor — a validated answer
+    reporting less hands the playbook over to the model instead of
+    guessing. Tune by replaying recorded listings
+    (`physiclaw conductor micro`)."""
+
+    micro_model: str = ""
+    micro_confidence: float = 0.6
+
+
+@dataclass
 class ClaudeConfig:
     timeout_seconds: int = 180
     stream_buffer_mb: int = 10
@@ -330,6 +346,7 @@ class Config:
     provider: ProviderConfig = field(default_factory=ProviderConfig)
     compact: CompactConfig = field(default_factory=CompactConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
+    conductor: ConductorConfig = field(default_factory=ConductorConfig)
     claude: ClaudeConfig = field(default_factory=ClaudeConfig)
     retention: RetentionConfig = field(default_factory=RetentionConfig)
     pitfalls: PitfallsConfig = field(default_factory=PitfallsConfig)

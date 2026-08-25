@@ -67,6 +67,12 @@ class RawLog:
         extra = {"synthesized": True} if synthesized else {}
         self._emit("response", turn=turn, elapsed_ms=elapsed_ms, **extra, raw=raw)
 
+    def write_micro(self, call: str, request: list[dict], raw: dict[str, Any]) -> None:
+        """One conductor micro-call round-trip — the exact prompt and the
+        raw reply in a single record (kind "micro"). Small fixed-shape
+        contexts, no images, so no scrubbing pass is needed."""
+        self._emit("micro", call=call, request=request, raw=raw)
+
     def close(self) -> None:
         if not self._f.closed:
             self._f.close()

@@ -131,6 +131,14 @@ def memory_dir() -> Path:
     return HOME / "memory"
 
 
+def memory_file() -> Path:
+    """`memory/memory.md` — the persistent-fact store. The one spelling of
+    the filename: `engine.memory` reads it for the SYSTEM prompt, the
+    conductor for `memory.*` decision-context slices (which may not
+    import engine behavior)."""
+    return memory_dir() / "memory.md"
+
+
 def skills_dir() -> Path:
     return HOME / "skills"
 

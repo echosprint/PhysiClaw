@@ -170,13 +170,20 @@ def test_both_engines_emit_the_same_summary_key_tree() -> None:
     assert claude.pop("cost_usd", "absent") is None  # present, scalar
     assert engine.pop("tool_time_ms", "absent") is None  # present, scalar
     assert engine.pop("conductor_turns", "absent") is None  # present, scalar
+    assert engine.pop("micro_calls", "absent") is None  # present, scalar
     assert isinstance(engine.pop("verdicts"), dict)
     # `env` is engine-populated data (the engine relays its env event
     # verbatim), not part of the constructed schema — opaque here.
     assert isinstance(engine.pop("env"), dict) and isinstance(claude.pop("env"), dict)
     assert claude == engine
     # Same top-level ordering too — the files diff cleanly across engines.
-    _PER_ENGINE = {"cost_usd", "tool_time_ms", "verdicts", "conductor_turns"}
+    _PER_ENGINE = {
+        "cost_usd",
+        "tool_time_ms",
+        "verdicts",
+        "conductor_turns",
+        "micro_calls",
+    }
     assert [k for k in claude_full if k not in _PER_ENGINE] == [
         k for k in engine_full if k not in _PER_ENGINE
     ]

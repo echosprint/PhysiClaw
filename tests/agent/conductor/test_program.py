@@ -237,7 +237,9 @@ def test_error_result_hands_over() -> None:
     assert p.advance(h) is None
 
 
-def test_decide_node_hands_over() -> None:
+def test_decide_yields_a_request_and_an_unresolved_one_hands_over() -> None:
+    from physiclaw.agent.conductor.micro import DecisionRequest
+
     write_pack(playbooks={"branch": BRANCH})
     program.arm("demo", "branch", {"keyword": "milk"})
     p = _armed_program()
@@ -247,7 +249,9 @@ def test_decide_node_hands_over() -> None:
     _feed(h, p.advance(h), HOME)  # leg open verified
     _feed(h, p.advance(h), RESULTS)  # leg search verified
 
-    assert p.advance(h) is None  # the DECIDE is a later phase's job
+    req = p.advance(h)
+    assert isinstance(req, DecisionRequest)  # the conductor brokers it
+    assert p.resolve(None) is None  # a failed micro-call hands over
 
 
 def test_program_advance_never_raises() -> None:
@@ -259,3 +263,109 @@ def test_program_advance_never_raises() -> None:
     # degrade to a hand-over, not an exception.
     p.advance(_history())
     assert p.advance(_history()) is None
+
+
+# ---------- decisions ----------
+
+PICKY = """\
+name: picky
+description: pick flow
+inputs:
+  keyword:
+    description: what
+nodes:
+  - id: open
+    type: LEG
+    macro: open-app
+    with: {message: "{keyword}"}
+    verify: results
+  - id: choose
+    type: DECIDE
+    call: choose_item
+    with: {criteria: "cheapest {keyword}"}
+    on: {pick: use, scroll: choose, none_fit: escalate, escalate: escalate}
+  - id: use
+    type: LEG
+    macro: add-cart
+    with: {message: "{choose.pick}"}
+    verify: home
+"""
+
+
+def _at_decision():
+    """Arm PICKY and walk it to the choose node's DecisionRequest."""
+    from physiclaw.agent.conductor.micro import DecisionRequest
+
+    write_pack(playbooks={"picky": PICKY})
+    program.arm("demo", "picky", {"keyword": "milk"})
+    p = _armed_program()
+    h = _history()
+    _feed(h, p.advance(h), ELSEWHERE)  # locate: unknown → top
+    _feed(h, p.advance(h), RESULTS)  # leg open verified on results
+    req = p.advance(h)
+    assert isinstance(req, DecisionRequest), req
+    return p, h, req
+
+
+def test_decide_emits_a_request_off_the_decide_time_screen() -> None:
+    _, _, req = _at_decision()
+
+    assert req.node_id == "choose" and req.call == "choose_item"
+    assert req.args == {"criteria": "cheapest milk"}  # {keyword} resolved
+    assert [c.key for c in req.candidates] == ["综合"]  # the RESULTS row
+
+
+def test_pick_taps_the_row_then_output_feeds_the_next_leg() -> None:
+    from physiclaw.agent.conductor.micro import MicroOutcome
+
+    p, h, req = _at_decision()
+    picked = req.candidates[0]
+
+    tap = p.resolve(
+        MicroOutcome(out="pick", reason="cheapest", confidence=0.9, picked=picked)
+    )
+    assert tap is not None and tap.tool_names() == ["note", "tap"]
+    assert tap.tool_calls[1].arguments == {"bbox": list(picked.bbox)}
+    assert "decided choose: pick" in tap.tool_calls[0].arguments["summary"]
+
+    _feed(h, tap, HOME)  # post-tap screen; `use` has no enter check
+    leg = p.advance(h)
+    assert leg is not None
+    assert leg.tool_calls[1].arguments["inputs"] == {"message": "综合"}
+
+
+def test_scroll_self_loop_swipes_and_reasks_until_max_visits() -> None:
+    from physiclaw.agent.conductor.micro import DecisionRequest, MicroOutcome
+
+    p, h, req = _at_decision()  # visit 1
+    scroll = MicroOutcome(out="scroll", reason="maybe below", confidence=0.9)
+
+    for visit in (2, 3):
+        swipe = p.resolve(scroll)
+        assert swipe is not None and swipe.tool_names() == ["note", "swipe"]
+        _feed(h, swipe, RESULTS)
+        req = p.advance(h)
+        assert isinstance(req, DecisionRequest), (visit, req)
+
+    # The default max_visits (3) is spent — the next re-ask hands over.
+    swipe = p.resolve(scroll)
+    assert swipe is not None
+    _feed(h, swipe, RESULTS)
+    assert p.advance(h) is None
+
+
+def test_escalate_routed_outcome_hands_over() -> None:
+    from physiclaw.agent.conductor.micro import MicroOutcome
+
+    p, _, _ = _at_decision()
+
+    assert (
+        p.resolve(MicroOutcome(out="none_fit", reason="nothing", confidence=0.9))
+        is None
+    )
+
+
+def test_failed_micro_call_hands_over() -> None:
+    p, _, _ = _at_decision()
+
+    assert p.resolve(None) is None

@@ -148,6 +148,9 @@ def _mutate(old: str, new: str) -> str:
         (_mutate("id: confirm", "id: escalate"), "reserved routing target"),
         # context inputs.* typo (with: refs are strict; context must be too)
         (_mutate("inputs.keyword", "inputs.keywrod"), "not declared"),
+        # a self-route on anything but the call's re-ask arm can never
+        # converge (same screen, same prompt) — parse-time rejection
+        (_mutate("none_fit: escalate", "none_fit: choose"), "re-ask arm"),
     ],
 )
 def test_rejections_name_the_rule(text: str, fragment: str) -> None:

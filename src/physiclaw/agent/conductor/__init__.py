@@ -8,6 +8,8 @@ Layout:
   - `capture.py` — mine geometry + calibrate thresholds from observations.
   - `corpus.py` — recorded-session listings for offline matching work.
   - `calls.py` — the code-owned DECIDE call-type declarations.
+  - `micro.py` — the scoped decision calls: prompt shapes, validation,
+    the confidence gate; engine-wired with the session's sinks.
   - `_spec.py` — shared spec-file substrate: the YAML loader and the
     macro layer's scalar rules, bound to each spec's error class.
   - `playbook.py` — PLAYBOOK.yml model + parser + graph/money lints.
