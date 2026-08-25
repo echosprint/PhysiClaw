@@ -192,15 +192,16 @@ def _parse_page(name: str, spec: Any) -> PageDecl:
 
 
 def _parse_anchor(raw: Any, where: str) -> AnchorDecl:
+    raw_text: Any  # validated (and narrowed to str) by _anchor_text below
     if isinstance(raw, str):
-        text, region = raw, None
+        raw_text, region = raw, None
     elif isinstance(raw, dict):
         unknown = sorted(set(raw.keys()) - {"text", "region"})
         if unknown:
             raise PagesError(
                 f"{where}: anchor has unknown key(s): {', '.join(map(str, unknown))}"
             )
-        text = raw.get("text")
+        raw_text = raw.get("text")
         region = raw.get("region")
         if region is not None and region not in REGIONS:
             raise PagesError(
@@ -211,7 +212,7 @@ def _parse_anchor(raw: Any, where: str) -> AnchorDecl:
         raise PagesError(
             f"{where}: each anchor must be a string or {{text, region}} mapping"
         )
-    text = _anchor_text(text, f"{where} anchor")
+    text = _anchor_text(raw_text, f"{where} anchor")
     # A single character as a whole-screen anchor would match inside almost
     # any label — the macro grammar's rule, for the same reason.
     if len(text) == 1 and region is None:
