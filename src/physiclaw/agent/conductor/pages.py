@@ -46,8 +46,8 @@ RESERVED_APPS = frozenset({"ios", "channel"})
 CHANNEL_APP = "channel"
 
 # The channel pack's conventions — the three names the conductor knows.
-# Declared HERE (beside CHANNEL_APP) because both program.py and
-# scaffold.py need them and scaffold must not import program: the stubs
+# Declared HERE (beside CHANNEL_APP) because both channel.py and
+# scaffold.py need them and scaffold must not import channel: the stubs
 # interpolate these, never hand-copy them.
 THREAD_PAGE = "thread"  # channel pages.yml must declare this page
 SEND_MACRO = "send"  # nav to the user's thread + paste + send {message}

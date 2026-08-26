@@ -22,7 +22,8 @@ delegation by object identity.
 """
 
 from physiclaw.agent.conductor.micro import DecisionRequest, MicroCaller
-from physiclaw.agent.conductor.program import Activation, Program
+from physiclaw.agent.conductor.program import Program
+from physiclaw.agent.conductor.setup import Activation
 from physiclaw.agent.engine.dto import AssistantMessage, Message
 from physiclaw.agent.provider import Provider
 

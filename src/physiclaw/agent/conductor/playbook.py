@@ -316,6 +316,19 @@ class Pack:
     macro_errors: dict[str, str]
 
 
+def qualified_macro(app: str, name: str) -> str:
+    """The qualified `app/name` dispatch key — the ONE spelling of the
+    convention the run_macro handler resolves (user macro names can
+    never contain "/", so no collision). Lives beside `Pack`, the owner
+    of macro dicts — every pack site (channel included) consumes it."""
+    return f"{app}/{name}"
+
+
+def qualified_pack(app: str, pack: Pack) -> dict[str, Macro]:
+    """A pack's macros under their qualified dispatch keys."""
+    return {qualified_macro(app, n): m for n, m in pack.macros.items()}
+
+
 # ---------- pack loading ----------
 
 

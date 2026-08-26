@@ -15,8 +15,18 @@ Layout:
   - `playbook.py` — PLAYBOOK.yml model + parser + graph/money/ledger lints.
   - `program.py` — a playbook mid-walk: synthesized turns (legs,
     decisions' primitives, channel asks), the HUMAN_GATE ask-and-hold,
-    the ledger loop + cart reconciliation, parking/resume, activation,
-    the money predicates; arm/parked files.
+    the ledger loop + cart reconciliation, parking, money predicates.
+  - `setup.py` — how a Program comes to exist at wake: the armed/parked
+    loaders, Activation (parse_task), and `session_setup`.
+  - `arming.py` — the armed.json / parked.json files: paths, schemas,
+    `arm` validation + warnings, disarm/clear.
+  - `channel.py` — the user-channel pack (thread prints + send/open) and
+    the qualified `app/name` dispatch-key spelling.
+  - `ledger.py` — the buying list: value contract, item state, and the
+    reconciler's cart readers (row match, stepper quantities).
+  - `memory.py` — fail-closed `memory.<slug>` context slices (NOT
+    engine.memory — the conductor reads the file via paths only).
+  - `views.py` — reading tool results out of the transcript.
   - `reply.py` — the gate's deterministic reply tiers: word lists and
     new-incoming-bubble detection.
   - `scaffold.py` — app-pack init templates + playbooks/README.md.

@@ -1,7 +1,7 @@
 """`physiclaw playbooks` — scaffold, list, validate, and arm app packs.
 
 Nothing here executes a playbook: `arm` only writes the arm file the
-engine reads at the next wake (`agent/conductor/program.py`). Mirrors
+engine reads at the next wake (`agent/conductor/arming.py`). Mirrors
 the macros CLI's shapes — init prints the next steps, check is the
 all-or-nothing gate with valid-is-not-live warnings — while the
 scaffolding itself lives in `agent/conductor/scaffold.py` (the
@@ -65,8 +65,8 @@ def init(
 @playbooks_app.command("list")
 def list_cmd() -> None:
     """List every pack and its playbooks: enabled, disabled, or invalid."""
+    from physiclaw.agent.conductor import arming, scaffold
     from physiclaw.agent.conductor import playbook as pb
-    from physiclaw.agent.conductor import program, scaffold
 
     scaffold.ensure_format_readme()
     apps = pb.list_apps()
@@ -76,7 +76,7 @@ def list_cmd() -> None:
             "(see ~/.physiclaw/playbooks/README.md)"
         )
         return
-    armed = program.armed_ref()
+    armed = arming.armed_ref()
     for app in apps:
         typer.echo(f"{app}/")
         for e in pb.scan_playbooks(app):
@@ -108,7 +108,7 @@ def arm(
     synthesized turns; anything it can't handle hands over to the model).
     A manual testing surface — one playbook at a time, sticky until
     `disarm`."""
-    from physiclaw.agent.conductor import program
+    from physiclaw.agent.conductor import arming
     from physiclaw.agent.conductor.playbook import PlaybookError
 
     app, _, name = ref.partition("/")
@@ -116,7 +116,7 @@ def arm(
         exit_error(f"expected <app>/<playbook> (got {ref!r})")
     values = parse_inputs(inputs or [])
     try:
-        spec, warnings = program.arm(app, name, values)
+        spec, warnings = arming.arm(app, name, values)
     except PlaybookError as e:
         exit_error(str(e))
     typer.echo(ok(f"armed {ref} ({len(spec.nodes)} nodes)"))
@@ -128,9 +128,9 @@ def arm(
 @playbooks_app.command()
 def disarm() -> None:
     """Disarm — sessions go back to plain model-driven turns."""
-    from physiclaw.agent.conductor import program
+    from physiclaw.agent.conductor import arming
 
-    typer.echo(ok("disarmed") if program.disarm() else "nothing was armed")
+    typer.echo(ok("disarmed") if arming.disarm() else "nothing was armed")
 
 
 @playbooks_app.command()

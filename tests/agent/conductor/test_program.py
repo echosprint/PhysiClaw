@@ -10,8 +10,8 @@ import json
 import pytest
 from conductor_fakes import LEDGERED, PACK_MACRO, make_screen, write_pack
 
-from physiclaw.agent.conductor import program
-from physiclaw.agent.conductor.playbook import PlaybookError
+from physiclaw.agent.conductor import arming, channel, memory, program, setup
+from physiclaw.agent.conductor.playbook import GATE_MAX_REVISIONS, PlaybookError
 from physiclaw.agent.engine.dto import (
     AssistantMessage,
     Message,
@@ -76,7 +76,7 @@ def _feed(
 
 
 def _armed_program() -> program.Program:
-    p = program.load_armed()
+    p = setup.load_armed()
     assert p is not None
     return p
 
@@ -91,10 +91,10 @@ def _history() -> list[Message]:
 def test_arm_writes_file_and_load_armed_builds_program() -> None:
     write_pack(playbooks={"flow": FLOW})
 
-    spec, warnings = program.arm("demo", "flow", {"keyword": "milk"})
+    spec, warnings = arming.arm("demo", "flow", {"keyword": "milk"})
 
     assert len(spec.nodes) == 2 and warnings == []
-    assert program.armed_ref() == ("demo", "flow")
+    assert arming.armed_ref() == ("demo", "flow")
     p = _armed_program()
     assert p.app == "demo"
     assert p.values == {"keyword": "milk"}
@@ -103,12 +103,12 @@ def test_arm_writes_file_and_load_armed_builds_program() -> None:
 
 def test_disarm_removes_the_file() -> None:
     write_pack(playbooks={"flow": FLOW})
-    program.arm("demo", "flow", {"keyword": "milk"})
+    arming.arm("demo", "flow", {"keyword": "milk"})
 
-    assert program.disarm() is True
-    assert program.disarm() is False
-    assert program.armed_ref() is None
-    assert program.load_armed() is None
+    assert arming.disarm() is True
+    assert arming.disarm() is False
+    assert arming.armed_ref() is None
+    assert setup.load_armed() is None
 
 
 @pytest.mark.parametrize(
@@ -123,14 +123,14 @@ def test_arm_rejections(app, name, inputs, fragment) -> None:
     write_pack(playbooks={"flow": FLOW})
 
     with pytest.raises(PlaybookError, match=fragment):
-        program.arm(app, name, inputs)
+        arming.arm(app, name, inputs)
 
 
 def test_arm_refuses_a_disabled_playbook() -> None:
     write_pack(playbooks={"flow": FLOW + "enabled: false\n"})
 
     with pytest.raises(PlaybookError, match="disabled"):
-        program.arm("demo", "flow", {"keyword": "milk"})
+        arming.arm("demo", "flow", {"keyword": "milk"})
 
 
 def test_arm_refuses_disabled_leg_macros() -> None:
@@ -141,25 +141,25 @@ def test_arm_refuses_disabled_leg_macros() -> None:
     )
 
     with pytest.raises(PlaybookError, match="disabled pack macro"):
-        program.arm("demo", "flow", {"keyword": "milk"})
+        arming.arm("demo", "flow", {"keyword": "milk"})
 
 
 def test_load_armed_fail_open() -> None:
     # No file at all.
-    assert program.load_armed() is None
+    assert setup.load_armed() is None
     # Corrupt file.
     paths.playbooks_dir().mkdir(parents=True, exist_ok=True)
-    (paths.playbooks_dir() / program.ARMED_FILENAME).write_text(
+    (paths.playbooks_dir() / arming.ARMED_FILENAME).write_text(
         "{not json", encoding="utf-8"
     )
-    assert program.load_armed() is None
+    assert setup.load_armed() is None
     # A file naming a playbook that no longer exists.
     write_pack(playbooks={"flow": FLOW})
-    (paths.playbooks_dir() / program.ARMED_FILENAME).write_text(
+    (paths.playbooks_dir() / arming.ARMED_FILENAME).write_text(
         json.dumps({"schema": 1, "app": "demo", "playbook": "gone", "inputs": {}}),
         encoding="utf-8",
     )
-    assert program.load_armed() is None
+    assert setup.load_armed() is None
 
 
 # ---------- the walk ----------
@@ -167,7 +167,7 @@ def test_load_armed_fail_open() -> None:
 
 def test_walk_runs_both_legs_then_completes() -> None:
     write_pack(playbooks={"flow": FLOW})
-    program.arm("demo", "flow", {"keyword": "milk"})
+    arming.arm("demo", "flow", {"keyword": "milk"})
     p = _armed_program()
     h = _history()
 
@@ -196,7 +196,7 @@ def test_locate_resumes_past_completed_legs() -> None:
     # A killed session's next wake: the screen already shows leg 1's
     # verify page, so the walk resumes at leg 2 — no repeated gestures.
     write_pack(playbooks={"flow": FLOW})
-    program.arm("demo", "flow", {"keyword": "milk"})
+    arming.arm("demo", "flow", {"keyword": "milk"})
     p = _armed_program()
     h = _history()
 
@@ -211,7 +211,7 @@ def test_locate_resumes_past_completed_legs() -> None:
 
 def test_verify_mismatch_hands_over() -> None:
     write_pack(playbooks={"flow": FLOW})
-    program.arm("demo", "flow", {"keyword": "milk"})
+    arming.arm("demo", "flow", {"keyword": "milk"})
     p = _armed_program()
     h = _history()
 
@@ -225,7 +225,7 @@ def test_verify_mismatch_hands_over() -> None:
 
 def test_error_result_hands_over() -> None:
     write_pack(playbooks={"flow": FLOW})
-    program.arm("demo", "flow", {"keyword": "milk"})
+    arming.arm("demo", "flow", {"keyword": "milk"})
     p = _armed_program()
     h = _history()
 
@@ -241,7 +241,7 @@ def test_decide_yields_a_request_and_an_unresolved_one_hands_over() -> None:
     from physiclaw.agent.conductor.micro import DecisionRequest
 
     write_pack(playbooks={"branch": BRANCH})
-    program.arm("demo", "branch", {"keyword": "milk"})
+    arming.arm("demo", "branch", {"keyword": "milk"})
     p = _armed_program()
     h = _history()
 
@@ -256,7 +256,7 @@ def test_decide_yields_a_request_and_an_unresolved_one_hands_over() -> None:
 
 def test_program_advance_never_raises() -> None:
     write_pack(playbooks={"flow": FLOW})
-    program.arm("demo", "flow", {"keyword": "milk"})
+    arming.arm("demo", "flow", {"keyword": "milk"})
     p = _armed_program()
 
     # A malformed history (no pending result will ever match) must
@@ -297,7 +297,7 @@ def _at_decision():
     from physiclaw.agent.conductor.micro import DecisionRequest
 
     write_pack(playbooks={"picky": PICKY})
-    program.arm("demo", "picky", {"keyword": "milk"})
+    arming.arm("demo", "picky", {"keyword": "milk"})
     p = _armed_program()
     h = _history()
     _feed(h, p.advance(h), ELSEWHERE)  # locate: unknown → top
@@ -452,8 +452,8 @@ def _at_gate(total: str = "¥45", playbook: str = GATED):
     ask; `total` is what the payment sheet shows."""
     _write_channel()
     write_pack(playbooks={"pay": playbook})
-    program.arm("demo", "pay", {"keyword": "milk"})
-    p = program.load_armed(program.load_channel())
+    arming.arm("demo", "pay", {"keyword": "milk"})
+    p = setup.load_armed(channel.load_channel())
     assert p is not None
     assert p.channel is not None and p.channel.send == "channel/send"
     h = _history()
@@ -518,7 +518,7 @@ def test_arm_warns_when_a_gate_ask_quotes_no_deny_word() -> None:
     _write_channel()
     write_pack(playbooks={"pay": quiet})
 
-    _, warnings = program.arm("demo", "pay", {"keyword": "milk"})
+    _, warnings = arming.arm("demo", "pay", {"keyword": "milk"})
 
     assert len(warnings) == 2  # message and over_message alike
     assert all("LLM check" in w for w in warnings)
@@ -574,8 +574,8 @@ def test_gate_silence_parks_and_resumes_on_next_wake() -> None:
     ask = _park_via_silence(p, h, send)
 
     # Next wake: the parked walk resumes straight into a reply check.
-    resumed = program.load_parked()
-    assert resumed is not None and program.load_parked() is None  # one-shot
+    resumed = setup.load_parked()
+    assert resumed is not None and setup.load_parked() is None  # one-shot
     h2 = _history()
     peek = resumed.advance(h2)
     assert peek.tool_names() == ["note", "peek"]
@@ -588,7 +588,7 @@ def test_gate_resume_off_thread_reopens_via_channel_open() -> None:
     p, h, send = _at_gate()
     ask = _park_via_silence(p, h, send)
 
-    resumed = program.load_parked()
+    resumed = setup.load_parked()
     h2 = _history()
     peek = resumed.advance(h2)
     _feed(h2, peek, ELSEWHERE)  # user left the phone on another app
@@ -627,8 +627,8 @@ nodes:
 def test_confirm_sends_parks_and_resumes_past_itself() -> None:
     _write_channel()
     write_pack(playbooks={"notify": CONFIRMING})
-    program.arm("demo", "notify", {"keyword": "milk"})
-    p = program.load_armed(program.load_channel())
+    arming.arm("demo", "notify", {"keyword": "milk"})
+    p = setup.load_armed(channel.load_channel())
     h = _history()
     _feed(h, p.advance(h), ELSEWHERE)
     _feed(h, p.advance(h), HOME)  # leg open verified
@@ -645,7 +645,7 @@ def test_confirm_sends_parks_and_resumes_past_itself() -> None:
     assert park.tool_calls[1].arguments["status"] == "WAIT"
 
     # Resume: the walk continues PAST the confirm node at its stored idx.
-    resumed = program.load_parked()
+    resumed = setup.load_parked()
     assert resumed is not None
     h2 = _history()
     peek = resumed.advance(h2)
@@ -661,7 +661,7 @@ def test_session_setup_builds_activation_and_hidden_registry() -> None:
     _write_channel()
     write_pack(playbooks={"flow": FLOW})
 
-    prog, activation, hidden = program.session_setup()
+    prog, activation, hidden = setup.session_setup()
 
     assert prog is None
     assert activation is not None
@@ -679,9 +679,9 @@ def test_session_setup_builds_activation_and_hidden_registry() -> None:
 def test_session_setup_prefers_armed_program_over_activation() -> None:
     _write_channel()
     write_pack(playbooks={"flow": FLOW})
-    program.arm("demo", "flow", {"keyword": "milk"})
+    arming.arm("demo", "flow", {"keyword": "milk"})
 
-    prog, activation, hidden = program.session_setup()
+    prog, activation, hidden = setup.session_setup()
 
     assert prog is not None and prog.channel is not None
     assert activation is None
@@ -693,7 +693,7 @@ def test_activation_fires_once_on_the_thread_page() -> None:
 
     _write_channel()
     write_pack(playbooks={"flow": FLOW})
-    _, activation, _ = program.session_setup()
+    _, activation, _ = setup.session_setup()
 
     h = _history()
     h.append(ToolResultMessage(tool_call_id="t1", content=ELSEWHERE))
@@ -724,7 +724,7 @@ def test_activation_rejects_unresolvable_inputs_and_not_a_task() -> None:
 
     _write_channel()
     write_pack(playbooks={"flow": FLOW})
-    _, activation, _ = program.session_setup()
+    _, activation, _ = setup.session_setup()
 
     assert activation.build(None) is None
     assert (
@@ -745,7 +745,7 @@ def test_scaffolded_channel_pack_parses_and_loads_disabled() -> None:
 
     scaffold.init_pack("channel")
 
-    ch = program.load_channel()
+    ch = channel.load_channel()
     # Pages parse and the thread page exists; the macros are scaffolded
     # DISABLED (rehearse, then enable), so the sends stay unavailable.
     assert ch is not None
@@ -788,7 +788,7 @@ def test_park_persists_consent_across_the_wake() -> None:
     assert p._gate.consented == 45.0
     p._park(resume_idx=p._idx, awaiting=False)
 
-    resumed = program.load_parked()
+    resumed = setup.load_parked()
 
     assert resumed is not None and resumed._gate.consented == 45.0
 
@@ -802,6 +802,10 @@ def test_park_status_literal_matches_the_sentinel() -> None:
     assert program.PARK_STATUS == WAIT
 
 
+def _sections(text: str, slugs: list[str]) -> str:
+    return memory.match_sections(memory.split_sections(text), slugs)
+
+
 def test_memory_context_slices_fail_closed_with_token_match() -> None:
     # Least-privilege: only the declared section rides the micro-call —
     # the rest of memory.md never travels to the (possibly third-party)
@@ -811,13 +815,13 @@ def test_memory_context_slices_fail_closed_with_token_match() -> None:
     structured = (
         "## shopping_prefs 购物偏好\n- 只买伊利\n\n## shopping_blacklist\n- 三无"
     )
-    sliced = program.memory_sections(structured, ["shopping_prefs"])
+    sliced = _sections(structured, ["shopping_prefs"])
     assert "只买伊利" in sliced and "三无" not in sliced
     # `shopping` is a substring of both headings but a token of neither.
-    assert program.memory_sections(structured, ["shopping"]) == ""
+    assert _sections(structured, ["shopping"]) == ""
 
     unstructured = "只买伊利，不要临期"
-    assert program.memory_sections(unstructured, ["shopping_prefs"]) == ""
+    assert _sections(unstructured, ["shopping_prefs"]) == ""
 
 
 # ---------- the ledger: loop, reconcile, revise ----------
@@ -895,8 +899,8 @@ def _cart_screen(*items: tuple[str, int]) -> str:
 def _arm_ledger(items: str = LEDGER_ITEMS):
     _write_channel()
     write_pack(playbooks={"shop": LEDGERED})
-    program.arm("demo", "shop", {"items": items})
-    p = program.load_armed(program.load_channel())
+    arming.arm("demo", "shop", {"items": items})
+    p = setup.load_armed(channel.load_channel())
     assert p is not None and p.channel is not None
     return p
 
@@ -1056,7 +1060,7 @@ def test_gate_revisions_are_bounded() -> None:
     from physiclaw.agent.conductor.micro import MicroOutcome
 
     p, h, send = _at_ledger_gate()
-    p._gate.revisions = program.GATE_MAX_REVISIONS
+    p._gate.revisions = GATE_MAX_REVISIONS
 
     _reply_arrives(p, h, send, "change it again, no chips this time")
     handed = p.resolve(MicroOutcome(out="revise", reason="again", confidence=0.9))
@@ -1068,7 +1072,7 @@ def test_park_persists_the_ledger() -> None:
     p, _, _ = _at_ledger_gate()
     p._park(resume_idx=p._idx, awaiting=True)
 
-    resumed = program.load_parked()
+    resumed = setup.load_parked()
 
     assert resumed is not None
     assert [it.query for it in resumed._ledger] == ["eggs", "chips"]
@@ -1080,9 +1084,9 @@ def test_arm_rejects_a_bad_ledger_value() -> None:
     write_pack(playbooks={"shop": LEDGERED})
 
     with pytest.raises(PlaybookError, match="items"):
-        program.arm("demo", "shop", {"items": "not json"})
+        arming.arm("demo", "shop", {"items": "not json"})
     with pytest.raises(PlaybookError, match="qty"):
-        program.arm("demo", "shop", {"items": '[{"query": "egg", "qty": 0}]'})
+        arming.arm("demo", "shop", {"items": '[{"query": "egg", "qty": 0}]'})
 
 
 def test_loop_only_ledger_playbook_needs_no_micro() -> None:
@@ -1121,9 +1125,9 @@ nodes:
     page: results
 """
     write_pack(playbooks={"fetch": loop_only})
-    program.arm("demo", "fetch", {"items": '[{"query": "eggs", "qty": 1}]'})
+    arming.arm("demo", "fetch", {"items": '[{"query": "eggs", "qty": 1}]'})
 
-    p = program.load_armed()
+    p = setup.load_armed()
 
     assert p is not None and p.needs_micro is False
 
@@ -1133,7 +1137,7 @@ nodes:
 
 def test_completed_walk_is_terminal_and_consumes_the_arm() -> None:
     write_pack(playbooks={"flow": FLOW})
-    program.arm("demo", "flow", {"keyword": "milk"})
+    arming.arm("demo", "flow", {"keyword": "milk"})
     p = _armed_program()
     h = _history()
     _feed(h, p.advance(h), ELSEWHERE)
@@ -1143,7 +1147,7 @@ def test_completed_walk_is_terminal_and_consumes_the_arm() -> None:
     assert p.advance(h) is None and p.finished == "complete"
     assert p.origin == "armed"
     # retire happens AT the quiet — no separate call.
-    assert program.armed_ref() is None  # done deals never re-walk
+    assert arming.armed_ref() is None  # done deals never re-walk
 
 
 def test_gate_deny_is_terminal_and_consumes_the_arm() -> None:
@@ -1151,13 +1155,13 @@ def test_gate_deny_is_terminal_and_consumes_the_arm() -> None:
 
     assert _reply_arrives(p, h, send, "不用") is None
     assert p.finished == "deny"
-    assert program.armed_ref() is None
+    assert arming.armed_ref() is None
 
 
 def test_incidental_handover_keeps_the_arm() -> None:
     # A wrong-page landing is a retry-next-wake case, not a done deal.
     write_pack(playbooks={"flow": FLOW})
-    program.arm("demo", "flow", {"keyword": "milk"})
+    arming.arm("demo", "flow", {"keyword": "milk"})
     p = _armed_program()
     h = _history()
     _feed(h, p.advance(h), ELSEWHERE)
@@ -1165,7 +1169,7 @@ def test_incidental_handover_keeps_the_arm() -> None:
     _feed(h, leg, RESULTS)  # verify: home expected — wrong page
 
     assert p.advance(h) is None and p.finished is None
-    assert program.armed_ref() == ("demo", "flow")
+    assert arming.armed_ref() == ("demo", "flow")
 
 
 def test_parked_walk_deny_consumes_the_arm() -> None:
@@ -1174,11 +1178,11 @@ def test_parked_walk_deny_consumes_the_arm() -> None:
     p, h, send = _at_gate()
     ask = _park_via_silence(p, h, send)
 
-    resumed = program.load_parked()
+    resumed = setup.load_parked()
     assert resumed is not None and resumed.origin == "parked"
     h2 = _history()
     peek = resumed.advance(h2)
     _feed(h2, peek, _thread((ask, 0.75, 0.3), ("不用", 0.25, 0.5)))
 
     assert resumed.advance(h2) is None and resumed.finished == "deny"
-    assert program.armed_ref() is None
+    assert arming.armed_ref() is None

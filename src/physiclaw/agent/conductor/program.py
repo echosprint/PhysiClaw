@@ -1,14 +1,15 @@
-"""Armed playbook → synthesized turns — the conductor's first interception.
+"""One playbook mid-walk — the conductor's synthesized turns.
 
-One `Program` is one explicitly armed playbook mid-walk. The conductor
-asks it for each turn; it answers with a synthesized ``[note, one-other]``
-assistant turn (a LEG as ``run_macro``; the opening ``peek``; a decision's
-own tap/swipe primitive), with a ``DecisionRequest`` the conductor brokers
+A `Program` is one playbook being executed. The conductor asks it for
+each turn; it answers with a synthesized ``[note, one-other]`` assistant
+turn (a LEG as ``run_macro``; the opening ``peek``; a decision's own
+tap/swipe primitive), with a ``DecisionRequest`` the conductor brokers
 through the micro-caller and feeds back via ``resolve()``, or with
 ``None`` — "I hand over". ``None`` is permanent for the session: the
 conductor goes quiet and the model takes over with the transcript as the
-handoff, because every synthesized turn and every tool result is ordinary
-history the model can read.
+handoff, because every synthesized turn and every tool result is
+ordinary history the model can read. A TERMINAL quiet — completion, or
+the user's refusal — also consumes the arm file (``retire``).
 
 The walk executes every node type, strictly:
 
@@ -18,73 +19,48 @@ The walk executes every node type, strictly:
     occluded, unknown, a blocked or errored call, a reserved ``ios.*``
     page — hands over. No retries, no recovery legs yet.
   - A DECIDE becomes one micro-call over the decide-time screen. A pick
-    is acted on by a conductor tap primitive at the chosen row (ruled:
-    macros are the hands for rehearsed stretches; a decision's single
-    act — whose bbox only the decide-time screen knows — is the
-    conductor's, and every dispatch guard still applies). A ``scroll``
-    routed back to the same node swipes and re-asks, bounded by
-    ``max_visits``. A failed or under-confident call hands over.
+    is acted on by a conductor tap primitive at the chosen row; a
+    ``scroll`` routed back to the same node swipes and re-asks, bounded
+    by ``max_visits``. A failed or under-confident call hands over.
+    Deterministic calls (``next_item``) are answered by the program
+    itself — no prompt.
   - The opening peek doubles as resume: a killed session's next wake
     fast-forwards past every node whose ``verify`` page already matches
     the screen, so completed gestures are never replayed.
-
   - CONFIRM and HUMAN_GATE send the playbook's ``message:`` VERBATIM
-    over the channel pack (only the author knows the user's language —
-    code composes no prose; for payment gates the parser instead
-    REQUIRES the template to quote ``{gate.total}``, and an
-    ``over_message:`` disclosing ``{gate.cap}``), then park (CONFIRM)
-    or hold for the tiered reply check (the gate). Parks write
-    ``playbooks/parked.json``; ANY next wake resumes at the stored node.
+    over the channel pack (only the author knows the user's language),
+    then park (CONFIRM) or hold for the tiered reply check (the gate).
+    Parks write ``playbooks/parked.json``; ANY next wake resumes.
   - Money runs in code: the parser guarantees a payment leg directly
     follows its ``gate: payment`` HUMAN_GATE; consent binds the quoted
     total; the fire-time predicates re-read the sheet.
-  - The ledger walk (``kind: list`` input): the deterministic
-    ``next_item`` loop shops each item, RECONCILE converges the cart on
-    the list in code (steppers, re-shop, unclaimed rows left alone),
-    and a gate ``revise:`` turns a "yes, but change it" reply into a
-    list rewrite and a fresh ask.
+  - The ledger walk: the deterministic ``next_item`` loop shops each
+    item, RECONCILE converges the cart on the list in code (steppers,
+    re-shop, unclaimed rows left alone), and a gate ``revise:`` turns a
+    "yes, but change it" reply into a list rewrite and a fresh ask.
 
-Arming is a manual testing surface (``physiclaw playbooks arm``): one
-``playbooks/armed.json`` names the playbook and its input values.
-Activation (parse_task on a channel-thread match) arms mid-session.
-All loading is fail-open — a missing, stale, or invalid file degrades
-to a normal session, never takes one down.
+How a Program comes to exist (armed / parked / activation) lives in
+`setup.py`; the persisted files in `arming.py`; the domain helpers in
+`channel.py`, `ledger.py`, `memory.py`, `views.py`.
 """
 
 import json
 import logging
-import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 
-from physiclaw.agent.conductor import reply
-from physiclaw.agent.conductor.calls import CALLS, ESCALATE, LEDGER_FIELDS, NEXT_ITEM
-from physiclaw.agent.conductor.match import (
-    PRICE_RE,
-    Verdict,
-    label_matches,
-    match_screen,
-    normalize,
-)
+from physiclaw.agent.conductor import ledger, memory, reply, views
+from physiclaw.agent.conductor.arming import PARKED_SCHEMA, disarm, parked_path
+from physiclaw.agent.conductor.calls import CALLS, ESCALATE, NEXT_ITEM
+from physiclaw.agent.conductor.channel import Channel
+from physiclaw.agent.conductor.match import PRICE_RE, Verdict, match_screen
 from physiclaw.agent.conductor.micro import (
     CONFIRM_REPLY,
-    LIST_INPUT_MARK,
-    NOT_A_TASK,
-    PARSE_TASK,
     REVISE_LIST,
     DecisionRequest,
     MicroOutcome,
     build_request,
 )
-from physiclaw.agent.conductor.pages import (
-    CHANNEL_APP,
-    OPEN_MACRO,
-    SEND_MACRO,
-    THREAD_ID,
-    THREAD_PAGE,
-    PagePrint,
-    page_id,
-    prints_for_app,
-)
+from physiclaw.agent.conductor.pages import THREAD_ID, PagePrint, page_id
 from physiclaw.agent.conductor.playbook import (
     GATE_MAX_CHECKS,
     GATE_MAX_REVISIONS,
@@ -92,49 +68,29 @@ from physiclaw.agent.conductor.playbook import (
     DecideNode,
     HumanGateNode,
     LegNode,
-    Pack,
     Playbook,
     PlaybookError,
     ReconcileNode,
-    disabled_leg_macros,
     fill_refs,
-    list_apps,
-    load_pack,
-    scan_playbooks,
+    qualified_macro,
 )
 from physiclaw.agent.engine.dto import (
     AssistantMessage,
     FinishReason,
     Message,
-    TextBlock,
     ToolCall,
-    ToolResultMessage,
 )
-from physiclaw.agent.macros import inputs as macro_inputs
-from physiclaw.agent.macros.model import Macro, MacroError
-from physiclaw.common import gesture_vocab, paths
-from physiclaw.common.bbox import center_of
+from physiclaw.agent.macros.model import Macro
+from physiclaw.common import gesture_vocab
 from physiclaw.common.listing import Screen
 from physiclaw.common.logger import write_json_atomic
-from physiclaw.common.text import read_text
 
 log = logging.getLogger(__name__)
-
-ARMED_FILENAME = "armed.json"
-_ARMED_SCHEMA = 1
 
 # Where the scroll-for-more swipe originates: a mid-content band, clear
 # of top chrome and the tab bar, so the drag scrolls the list rather
 # than dismissing or paging anything. Stylus up → page scrolls down.
 SCROLL_BBOX = (0.2, 0.35, 0.8, 0.65)
-
-# ---------- the user channel ----------
-# `playbooks/channel/` is the ONE infrastructure pack: the IM thread's
-# page fingerprint plus rehearsed macros, recorded on-device. The three
-# convention names live in pages.py (the scaffold interpolates them).
-
-PARKED_FILENAME = "parked.json"
-_PARKED_SCHEMA = 1
 
 # HUMAN_GATE ask-and-hold bounds: in-session reply polling cadence, and
 # how many silent rounds before the session parks for the next wake.
@@ -146,90 +102,10 @@ SILENCE_ROUNDS = 3
 # engine runtimes; a test pins the two equal.
 PARK_STATUS = "WAIT"
 
-# Ledger bounds. Items/qty cap what parse_task or the CLI may hand a
-# walk; the action budget bounds the reconciler's tap-and-reread cycle
-# (every divergence costs at least one action, so a converging cart
-# finishes well under it — hitting it means the cart is not converging).
-# The revision budget lives with its sibling gate knob in playbook.py
-# (GATE_MAX_REVISIONS).
-MAX_LEDGER_ITEMS = 8
-MAX_ITEM_QTY = 9
+# The reconciler's action budget: every divergence costs at least one
+# tap-and-reread action, so a converging cart finishes well under it —
+# hitting it means the cart is NOT converging.
 RECONCILE_MAX_ACTIONS = 16
-
-# Cart-row quantity: the numeral between the row's stepper icons,
-# optionally prefixed by a multiplier mark ("2", "x2", "×2").
-_QTY_RE = re.compile(r"^[x×✕]?\s*(\d{1,2})$")
-
-
-@dataclass
-class LedgerItem:
-    """One buying-list entry — desired state. `status` walks
-    pending → picked (the loop chose a row; `label` is what the cart
-    should show) → the cart itself is the in-cart truth (RECONCILE
-    re-reads it rather than trusting a flag). `qty` 0 = remove (a
-    revision took it off the list; the reconciler steps it to zero)."""
-
-    query: str
-    qty: int
-    status: str = "pending"  # "pending" | "picked"
-    label: str | None = None
-
-    def to_dict(self) -> dict:
-        return asdict(self)
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "LedgerItem":
-        return cls(
-            query=str(data.get("query") or ""),
-            qty=int(data.get("qty") or 0),
-            status=("picked" if data.get("status") == "picked" else "pending"),
-            label=(str(data["label"]) if data.get("label") else None),
-        )
-
-
-def parse_ledger(text: str, *, allow_zero: bool = False) -> list[LedgerItem]:
-    """The `kind: list` input's value contract: a JSON array of
-    {query, qty}. Raises PlaybookError naming the defect — arm fails
-    early, activation and revision fall back (log + hand over/None).
-    `allow_zero` is the revision form (qty 0 = remove)."""
-    try:
-        data = json.loads(text)
-    except Exception as e:
-        raise PlaybookError(f"ledger is not valid JSON: {e}") from e
-    if not isinstance(data, list) or not data:
-        raise PlaybookError("ledger must be a non-empty JSON array")
-    if len(data) > MAX_LEDGER_ITEMS:
-        raise PlaybookError(f"ledger has {len(data)} items > max {MAX_LEDGER_ITEMS}")
-    floor = 0 if allow_zero else 1
-    out: list[LedgerItem] = []
-    for entry in data:
-        if not isinstance(entry, dict) or set(entry) - set(LEDGER_FIELDS):
-            raise PlaybookError("each ledger item must be a {query, qty} object")
-        query = entry.get("query")
-        if not isinstance(query, str) or not query.strip():
-            raise PlaybookError("ledger item `query` must be a non-empty string")
-        qty = entry.get("qty")
-        if (
-            isinstance(qty, bool)
-            or not isinstance(qty, int)
-            or not (floor <= qty <= MAX_ITEM_QTY)
-        ):
-            raise PlaybookError(
-                f"ledger item `qty` must be {floor}–{MAX_ITEM_QTY} (got {qty!r})"
-            )
-        out.append(LedgerItem(query=query.strip(), qty=qty))
-    return out
-
-
-def _check_ledger_value(spec: Playbook, values: dict[str, str]) -> None:
-    """The resolved list input parses as a ledger — enforced at arm and
-    activation, the two seams a value enters through."""
-    inp = spec.ledger_input
-    if inp is not None:
-        try:
-            parse_ledger(values[inp.name])
-        except PlaybookError as e:
-            raise PlaybookError(f"input {inp.name!r}: {e}") from e
 
 
 def _amounts(screen: Screen) -> list[float]:
@@ -240,413 +116,6 @@ def _amounts(screen: Screen) -> list[float]:
     for row in screen.rows:
         out.extend(float(m) for m in PRICE_RE.findall(row.label))
     return out
-
-
-def qualified_macro(app: str, name: str) -> str:
-    """The qualified `app/name` dispatch key — the ONE spelling of the
-    convention the run_macro handler resolves (user macro names can
-    never contain "/", so no collision)."""
-    return f"{app}/{name}"
-
-
-def _qualified(app: str, pack: Pack) -> dict[str, Macro]:
-    """A pack's macros under their qualified dispatch keys."""
-    return {qualified_macro(app, n): m for n, m in pack.macros.items()}
-
-
-@dataclass(frozen=True)
-class Channel:
-    """The loaded user-channel infrastructure: thread fingerprints plus
-    the qualified macros. `send`/`open` resolve only when the macro
-    exists AND is enabled — unavailable members degrade to hand-over at
-    the moment they are needed, never earlier."""
-
-    prints: list[PagePrint]
-    macros: dict[str, Macro]  # qualified channel/<name>, enabled or not
-
-    def _live(self, name: str) -> str | None:
-        key = qualified_macro(CHANNEL_APP, name)
-        m = self.macros.get(key)
-        return key if m is not None and m.enabled else None
-
-    @property
-    def send(self) -> str | None:
-        return self._live(SEND_MACRO)
-
-    @property
-    def open(self) -> str | None:
-        return self._live(OPEN_MACRO)
-
-
-def load_channel() -> Channel | None:
-    """The channel pack, fail-open: absent or broken → None (asks and
-    activation degrade; legs run unaffected)."""
-    try:
-        pack = load_pack(CHANNEL_APP)
-        prints = prints_for_app(CHANNEL_APP)
-    except Exception as e:
-        log.warning("channel pack unusable (%s) — asks will hand over", e)
-        return None
-    if not any(p.decl.name == THREAD_PAGE for p in prints):
-        return None
-    return Channel(prints=prints, macros=_qualified(CHANNEL_APP, pack))
-
-
-# ---------- the arm file ----------
-
-
-def _armed_path():
-    return paths.playbooks_dir() / ARMED_FILENAME
-
-
-def arm(app: str, name: str, inputs: dict[str, str]) -> "tuple[Playbook, list[str]]":
-    """Validate and write the arm file; returns (spec, warnings) for the
-    CLI to describe. Raises PlaybookError naming what blocks arming — the
-    same live-readiness rules `playbooks check` warns about (disabled
-    playbook, disabled leg macros) are hard errors here, because an armed
-    playbook is about to drive the phone. Warnings are the actionable
-    non-blockers: a declared `memory.<slug>` slice with no matching
-    `## <slug>` section on THIS device runs empty (fail-closed), and a
-    gate ask quoting no word-tier reply word rides the LLM tier."""
-    spec, _ = _armed_spec(app, name)
-    values = _resolve_inputs(spec, inputs)  # fail at arm time, not first wake
-    _check_ledger_value(spec, values)
-    write_json_atomic(
-        _armed_path(),
-        {"schema": _ARMED_SCHEMA, "app": app, "playbook": name, "inputs": inputs},
-    )
-    return spec, _memory_slice_warnings(spec) + _gate_word_warnings(spec)
-
-
-def _gate_word_warnings(spec: Playbook) -> list[str]:
-    """Advisory, never blocking: a gate ask that quotes no word the
-    deterministic reply tier matches still works — every reply just
-    rides the LLM tier (bounded by GATE_MAX_CHECKS). An ask in a
-    language our word lists don't cover is legal; the author is told
-    the cost, not refused."""
-    out = []
-    for node in spec.nodes:
-        if not isinstance(node, HumanGateNode):
-            continue
-        for key, text in (
-            ("message", node.message),
-            ("over_message", node.over_message),
-        ):
-            if text is None:
-                continue
-            norm = reply.normalize(text)
-            if not any(w in norm for w in reply.CONFIRM_WORDS) or not any(
-                w in norm for w in reply.DENY_WORDS
-            ):
-                out.append(
-                    f"gate {node.id!r} `{key}` quotes no reply word the word "
-                    "tier matches (好的/ok…, 不用/no…) — every reply will "
-                    "spend an LLM check"
-                )
-    return out
-
-
-def _memory_slice_warnings(spec: Playbook) -> list[str]:
-    slugs = sorted(
-        {
-            entry.partition(".")[2]
-            for node in spec.nodes
-            if isinstance(node, DecideNode)
-            for entry in node.context
-            if entry.startswith("memory.")
-        }
-    )
-    if not slugs:
-        return []
-    sections = _split_sections(_read_memory())
-    have = frozenset().union(*(tokens for tokens, _ in sections)) if sections else ()
-    missing = [slug for slug in slugs if slug.casefold() not in have]
-    if not missing:
-        return []
-    return [
-        f"memory slice(s) {', '.join(missing)}: no `## <slug>` section in "
-        "memory.md on this device — those decisions run without memory "
-        "context (fail-closed)"
-    ]
-
-
-def disarm() -> bool:
-    """Remove the arm file; False when nothing was armed."""
-    p = _armed_path()
-    if not p.exists():
-        return False
-    p.unlink()
-    return True
-
-
-def armed_ref() -> tuple[str, str] | None:
-    """The armed ``(app, playbook)`` per the file, without validating the
-    pack — the CLI's list marker. None when nothing is armed / unreadable."""
-    p = _armed_path()
-    if not p.exists():
-        return None
-    try:
-        data = json.loads(read_text(p))
-        return str(data["app"]), str(data["playbook"])
-    except Exception:
-        return None
-
-
-def _armed_spec(app: str, name: str) -> tuple[Playbook, Pack]:
-    """The parsed playbook an arm names, holding it to live-readiness:
-    valid, enabled, and every leg macro enabled."""
-    pack = load_pack(app)
-    entry = next((e for e in scan_playbooks(app, pack) if e.name == name), None)
-    if entry is None:
-        raise PlaybookError(f"no playbook {app}/{name} on disk")
-    if entry.spec is None:
-        raise PlaybookError(f"{app}/{name} is invalid: {entry.error}")
-    if not entry.spec.enabled:
-        raise PlaybookError(
-            f"{app}/{name} is disabled — set `enabled: true` once rehearsed"
-        )
-    disabled = disabled_leg_macros(entry.spec, pack)
-    if disabled:
-        raise PlaybookError(
-            f"{app}/{name} references disabled pack macro(s): "
-            f"{', '.join(disabled)} — rehearse, then enable"
-        )
-    return entry.spec, pack
-
-
-def _resolve_inputs(spec: Playbook, provided: dict[str, str]) -> dict[str, str]:
-    """Provided values against the declared inputs — the macro layer's
-    resolution contract verbatim (unknown keys, missing required, defaults,
-    strings only), translated to this spec's error class at the one seam."""
-    try:
-        return macro_inputs.resolve_inputs(spec, provided)
-    except MacroError as e:
-        raise PlaybookError(str(e)) from e
-
-
-def load_armed(channel: "Channel | None" = None) -> "Program | None":
-    """The armed playbook as a ready `Program`, or None. Fail-open on
-    everything: no arm file, a pack edited out from under it, bad inputs —
-    the session runs as if nothing were armed, with one warning saying
-    why."""
-    p = _armed_path()
-    if not p.exists():
-        return None
-    try:
-        data = json.loads(read_text(p))
-        if data.get("schema") != _ARMED_SCHEMA:
-            raise PlaybookError(f"unknown armed.json schema {data.get('schema')!r}")
-        app = str(data["app"])
-        name = str(data["playbook"])
-        raw_inputs = data.get("inputs") or {}
-        spec, pack = _armed_spec(app, name)
-        values = _resolve_inputs(spec, raw_inputs)
-    except Exception as e:
-        log.warning(
-            "armed playbook could not load (%s) — session runs without it: %s",
-            p,
-            e,
-        )
-        return None
-    log.info("conductor: armed %s/%s (%d nodes)", app, name, len(spec.nodes))
-    return _build_program(app, spec, pack, values, channel, origin="armed")
-
-
-def _build_program(
-    app: str,
-    spec: Playbook,
-    pack: Pack,
-    values: dict[str, str],
-    channel: "Channel | None",
-    *,
-    origin: str,
-) -> "Program":
-    """The one Program constructor call — armed, parked, and activation
-    builds all come through here, channel included: a program is whole at
-    construction, never patched up afterwards. `origin` decides whether a
-    terminal outcome consumes the arm file (see `Program.retire`)."""
-    return Program(
-        app=app,
-        spec=spec,
-        values=values,
-        pack_macros=_qualified(app, pack),
-        prints=prints_for_app(app),
-        channel=channel,
-        origin=origin,
-    )
-
-
-# ---------- parked state ----------
-
-
-def _parked_path():
-    return paths.playbooks_dir() / PARKED_FILENAME
-
-
-def clear_parked() -> bool:
-    p = _parked_path()
-    if not p.exists():
-        return False
-    p.unlink()
-    return True
-
-
-def load_parked(channel: "Channel | None" = None) -> "Program | None":
-    """A parked walk restored at its node, or None. One-shot: the file is
-    consumed on load (a crash mid-resume loses the park, and the next
-    wake runs as a plain session — fail-open, never a loop). The WAIT
-    job that may also fire is just the alarm clock; ANY wake resumes.
-    `channel` avoids a second channel load when the caller (session_setup)
-    already holds one."""
-    p = _parked_path()
-    if not p.exists():
-        return None
-    try:
-        data = json.loads(read_text(p))
-        if data.get("schema") != _PARKED_SCHEMA:
-            raise PlaybookError(f"unknown parked schema {data.get('schema')!r}")
-        app = str(data["app"])
-        name = str(data["playbook"])
-        spec, pack = _armed_spec(app, name)
-        program = _build_program(
-            app,
-            spec,
-            pack,
-            {str(k): str(v) for k, v in (data.get("values") or {}).items()},
-            channel if channel is not None else load_channel(),
-            origin="parked",
-        )
-        program._restore_parked(data)
-    except Exception as e:
-        log.warning("parked playbook could not load (%s) — dropped: %s", p, e)
-        return None
-    finally:
-        clear_parked()  # one-shot: consumed on ANY load outcome
-    log.info(
-        "conductor: resuming parked %s/%s at node %d (%s)",
-        app,
-        name,
-        program._idx + 1,
-        "awaiting reply" if program._gate.awaiting else "walk",
-    )
-    return program
-
-
-# ---------- activation ----------
-
-
-@dataclass
-class Activation:
-    """The parse_task trigger: armed once per session, the first time a
-    screen matches the channel thread page — deterministic, zero cost
-    until then. `entries` is the single source: the answer space is its
-    keys, the menu a render of it, each value the parsed spec+pack so a
-    positive answer activates without re-reading disk."""
-
-    entries: dict[str, tuple[Playbook, Pack]]
-    channel: Channel
-    attempted: bool = False
-
-    def request(self, history: list[Message]) -> DecisionRequest | None:
-        """A parse_task request when the latest screen is the user's
-        thread; None otherwise. Fires at most once per session."""
-        if self.attempted:
-            return None
-        result = _last_result(history)
-        if result is None or result.is_error:
-            return None
-        screen = _screen_of(result)
-        verdict = match_screen(screen, self.channel.prints)
-        if verdict.kind != "match" or verdict.page_id != THREAD_ID:
-            return None
-        self.attempted = True
-        # Playbook refs only — the `not_a_task` escape is the call's own
-        # (its _SPECS row appends it; no caller can forget the exit).
-        return build_request(
-            PARSE_TASK,
-            "activation",
-            tuple(self.entries),
-            {"menu": self._menu()},
-            screen,
-        )
-
-    def _menu(self) -> str:
-        lines = ["Available playbooks:"]
-        for ref, (spec, _pack) in self.entries.items():
-            inputs = ", ".join(
-                # The mark keys the parse_task prompt's JSON-array rule.
-                f"{i.name} {LIST_INPUT_MARK} ({i.description})"
-                if i.kind == "list"
-                else f"{i.name} ({i.description})"
-                for i in spec.inputs
-            )
-            lines.append(
-                f"- {ref}: {spec.description}"
-                + (f" [inputs: {inputs}]" if inputs else "")
-            )
-        return "\n".join(lines)
-
-    def build(self, outcome: MicroOutcome | None) -> "Program | None":
-        """A ready Program from a parse_task outcome, or None (not a
-        task, low confidence, or inputs that don't resolve — all stay in
-        default mode, fail-open)."""
-        if outcome is None or outcome.out == NOT_A_TASK:
-            return None
-        app = outcome.out.partition("/")[0]
-        spec, pack = self.entries[outcome.out]
-        try:
-            values = _resolve_inputs(spec, outcome.payload or {})
-            _check_ledger_value(spec, values)
-        except PlaybookError as e:
-            log.warning("activation %s: inputs did not resolve (%s)", outcome.out, e)
-            return None
-        log.info("conductor: activated %s (%s)", outcome.out, outcome.reason)
-        return _build_program(
-            app, spec, pack, values, self.channel, origin="activation"
-        )
-
-
-def session_setup() -> "tuple[Program | None, Activation | None, dict[str, Macro]]":
-    """The engine's one wake-time conductor call, fail-open throughout:
-    (parked-or-armed program, activation trigger, the hidden qualified
-    macro registry). The registry spans EVERY pack plus the channel —
-    mid-session activation may arm any playbook, so all conductor hands
-    must be dispatchable from the start."""
-    hidden: dict[str, Macro] = {}
-    channel = load_channel()
-    if channel is not None:
-        hidden.update(channel.macros)
-    program = load_parked(channel) or load_armed(channel)
-    if program is not None:
-        # A live program names only its own pack + the channel — the
-        # full cross-pack discovery below is activation's need, and
-        # activation is off while a program drives.
-        hidden.update(program.pack_macros)
-        return program, None, hidden
-    if channel is None:
-        # No channel → no activation trigger; nothing else can consume
-        # the discovery, so skip the every-pack parse entirely.
-        return None, None, hidden
-    entries: dict[str, tuple[Playbook, Pack]] = {}
-    for app in list_apps():
-        if app == CHANNEL_APP:
-            continue
-        try:
-            pack = load_pack(app)
-        except Exception as e:
-            log.warning("pack %s unusable at wake (%s) — skipped", app, e)
-            continue
-        hidden.update(_qualified(app, pack))
-        for entry in scan_playbooks(app, pack):
-            spec = entry.spec
-            if spec is None or not spec.enabled or disabled_leg_macros(spec, pack):
-                continue
-            entries[f"{app}/{entry.name}"] = (spec, pack)
-    activation = Activation(entries=entries, channel=channel) if entries else None
-    return None, activation, hidden
-
-
-# ---------- the walk ----------
 
 
 @dataclass(frozen=True)
@@ -733,6 +202,7 @@ class Program:
         prints: list[PagePrint],
         channel: Channel | None = None,
         origin: str = "activation",
+        parked: dict | None = None,
     ):
         self.app = app
         self.spec = spec
@@ -760,7 +230,8 @@ class Program:
             for n in spec.nodes
         )
         # The user-channel infrastructure (constructor-injected via
-        # _build_program). None degrades to hand-over at the first ask.
+        # setup._build_program). None degrades to hand-over at the first
+        # ask.
         self.channel = channel
         self._idx = 0
         self._pending: _Pending | None = None
@@ -778,18 +249,18 @@ class Program:
         self._journal: str | None = None
         self._screen: Screen | None = None
         self._verdict: Verdict | None = None
-        self._memory: list[tuple[frozenset[str], str]] | None = None
+        self._memory: memory.Sections | None = None
         # The ledger walk: desired state + the loop cursor + the
         # reconciler's action budget. A value that fails to parse
         # degrades to None (fail-open) — the next_item node then hands
         # over; arm/activation validated theirs already.
-        self._ledger: list[LedgerItem] | None = None
+        self._ledger: list[ledger.LedgerItem] | None = None
         self._item = 0
         self._rec_actions = 0
         inp = spec.ledger_input
         if inp is not None:
             try:
-                self._ledger = parse_ledger(values.get(inp.name, ""))
+                self._ledger = ledger.parse_ledger(values.get(inp.name, ""))
             except PlaybookError as e:
                 log.warning("ledger input %r unusable (%s)", inp.name, e)
         # The loop BODY head — where re-shop re-enters (the closer would
@@ -800,12 +271,24 @@ class Program:
             arm = CALLS[loop.call].loop_arm
             assert arm is not None
             self._loop_body_id = loop.on[arm]
+        if parked is not None:
+            # A resumed walk is ALSO whole at construction: the parked
+            # projection overlays the fresh state right here, so no
+            # caller ever patches a program up afterwards.
+            self._restore_parked(parked)
+            log.info(
+                "conductor: resuming parked %s/%s at node %d (%s)",
+                app,
+                spec.name,
+                self._idx + 1,
+                "awaiting reply" if self._gate.awaiting else "walk",
+            )
 
     def _parked_dict(self, resume_idx: int) -> dict:
         """The park projection: walk state here, gate state via
         `_Gate.to_park` — each field list lives beside its fields."""
         return {
-            "schema": _PARKED_SCHEMA,
+            "schema": PARKED_SCHEMA,
             "app": self.app,
             "playbook": self.spec.name,
             "idx": resume_idx,
@@ -830,7 +313,7 @@ class Program:
             # supersedes the arm-value parse from __init__. The cursor
             # clamps HERE — external input — so every reader downstream
             # may index without bounds checks.
-            self._ledger = [LedgerItem.from_dict(d) for d in data["ledger"]]
+            self._ledger = [ledger.LedgerItem.from_dict(d) for d in data["ledger"]]
             self._item = min(max(int(data.get("item") or 0), 0), len(self._ledger) - 1)
         self._gate = _Gate.from_park(data)
         self._resumed = True
@@ -870,12 +353,12 @@ class Program:
         return step
 
     def retire(self) -> None:
-        """The conductor's one call when this walk goes quiet. A TERMINAL
-        outcome — completion, or the user's refusal — consumes the arm
-        file: done deals must not re-walk on the next wake (an armed buy
-        playbook re-asking after the purchase, or after a 不用). An
-        incidental handover keeps the arm: the walk retries when the
-        world may have changed."""
+        """Runs once when this walk goes quiet. A TERMINAL outcome —
+        completion, or the user's refusal — consumes the arm file: done
+        deals must not re-walk on the next wake (an armed buy playbook
+        re-asking after the purchase, or after a 不用). An incidental
+        handover keeps the arm: the walk retries when the world may have
+        changed."""
         if self.finished is None or self.origin not in ("armed", "parked"):
             return
         if disarm():
@@ -907,14 +390,15 @@ class Program:
                 gesture_vocab.PEEK,
                 {},
             )
-        result = _result_for(history, self._pending.call_id)
+        result = views.result_for(history, self._pending.call_id)
         if result is None:
             return self._handover(
                 f"the result of {self._pending.kind} never arrived in history"
             )
         if result.is_error:
             return self._handover(
-                f"{self._pending.kind} was blocked or failed: {_text(result)[:200]}"
+                f"{self._pending.kind} was blocked or failed: "
+                f"{views.text_of(result)[:200]}"
             )
         kind = self._pending.kind
         # One reading, one verdict: channel-facing actions (declared at
@@ -922,7 +406,7 @@ class Program:
         # against the pack's own pages.
         in_channel = self._pending.channel
         self._pending = None
-        self._screen = _screen_of(result)
+        self._screen = views.screen_of(result)
         self._verdict = match_screen(
             self._screen,
             self.channel.prints if in_channel and self.channel else self._prints,
@@ -1073,6 +557,134 @@ class Program:
             vals["item.qty"] = str(it.qty)
         return vals
 
+    def _request(self, node: DecideNode) -> "AssistantMessage | DecisionRequest | None":
+        """One micro-call request off the decide-time screen — or a
+        handover (None, typed as the shared step result) when the ask
+        budget is spent or the walk has nothing to decide over."""
+        self._visits[node.id] = self._visits.get(node.id, 0) + 1
+        if self._visits[node.id] > node.max_visits:
+            return self._handover(
+                f"decide {node.id!r} exceeded max_visits ({node.max_visits})"
+            )
+        if self._screen is None:
+            return self._handover(f"decide {node.id!r} has no screen to decide over")
+        try:
+            args = {
+                k: str(fill_refs(v, self._values(), where=f"decide {node.id!r}"))
+                for k, v in node.args.items()
+            }
+        except PlaybookError as e:
+            return self._handover(str(e))
+        return build_request(
+            node.call, node.id, node.outs, args, self._screen, self._context(node)
+        )
+
+    def _context(self, node: DecideNode) -> str:
+        """The declared context slices, assembled least-privilege:
+        `inputs.*` from the armed values; `memory.<slug>` pulls ONLY the
+        matching `## <slug>` section of memory.md (see `memory.py` for
+        the fail-closed contract)."""
+        parts: list[str] = []
+        memory_slices: list[str] = []
+        for entry in node.context:
+            root, _, member = entry.partition(".")
+            if root == "inputs":
+                parts.append(f"{member}: {self.values.get(member, '')}")
+            else:
+                memory_slices.append(member)
+        if memory_slices:
+            if self._memory is None:
+                # Parsed once for the walk: nothing can rewrite the file
+                # mid-program (the model isn't running).
+                self._memory = memory.read_sections()
+            sliced = memory.match_sections(self._memory, memory_slices)
+            if sliced:
+                parts.append(f"memory (for {', '.join(memory_slices)}):\n{sliced}")
+            else:
+                log.info(
+                    "memory slice(s) %s: no matching `## <slug>` section in "
+                    "memory.md — decision runs without memory context",
+                    memory_slices,
+                )
+        return "\n".join(parts)
+
+    def _resolve(
+        self, outcome: MicroOutcome | None
+    ) -> "AssistantMessage | DecisionRequest | None":
+        if self._gate.revise_pending:
+            return self._apply_revision(outcome)
+        if self._gate.llm_reply is not None:
+            # The gate's LLM tier came back. None/unclear → keep waiting
+            # (this round's check was already counted in _gate_check).
+            judged = self._gate.llm_reply
+            self._gate.llm_reply = None
+            if outcome is not None and outcome.out == "deny":
+                return self._deny()
+            if outcome is not None and outcome.out == "revise":
+                node = self.spec.nodes[self._idx]
+                assert isinstance(node, HumanGateNode)
+                if node.revise is not None and self._ledger is not None:
+                    # A ledger playbook absorbs the change itself:
+                    # revise_list rewrites the desired state, the loop
+                    # shops the additions, RECONCILE fixes the rest,
+                    # and the gate re-asks with the fresh total.
+                    return self._start_revision(node, judged)
+                # No ledger: a change request ("ok, but make it two
+                # boxes") or a question is a TASK change, not a gate
+                # verdict — the model takes over with the thread in the
+                # transcript and acts on the user's words.
+                return self._handover(
+                    f"user asked for changes ({judged!r}) — read the "
+                    "thread and adjust the order before any payment"
+                )
+            if outcome is not None and outcome.out == "confirm":
+                return self._gate_confirmed()
+            return self._synth_wait()
+        node = self.spec.nodes[self._idx]
+        assert isinstance(node, DecideNode)
+        if outcome is None:
+            return self._handover(
+                f"decide {node.id!r}: micro-call failed or under-confident"
+            )
+        self._journal = (
+            f"decided {node.id}: {outcome.out} — {outcome.reason} "
+            f"({outcome.confidence:.2f})"
+        )
+        target = node.on[outcome.out]
+        if target == ESCALATE:
+            return self._handover(
+                f"decide {node.id!r} routed {outcome.out!r} → escalate "
+                f"({outcome.reason})"
+            )
+        decl = CALLS[node.call]
+        if outcome.picked is not None:
+            # Act on the pick: record the declared payload, then the
+            # conductor's own tap at the chosen row — the one gesture a
+            # rehearsed macro cannot know (its bbox exists only on the
+            # decide-time screen). The routed node's enter check judges
+            # the landing.
+            for fld in decl.payload:
+                self._outputs[f"{node.id}.{fld}"] = outcome.picked.key
+            self._idx = self._ids[target]
+            return self._synth(
+                "tap",
+                f"conductor: tapping picked {outcome.picked.key!r}",
+                "tap",
+                {"bbox": list(outcome.picked.bbox)},
+            )
+        if outcome.out == decl.reask_arm and target == node.id:
+            # The sanctioned self-loop (the parser lints self-routes to
+            # exactly this arm): swipe up (page scrolls down), then
+            # re-ask over whatever the fresh screen shows.
+            return self._synth(
+                "swipe",
+                "conductor: scrolling for more candidates",
+                gesture_vocab.SWIPE,
+                {"bbox": list(SCROLL_BBOX), "direction": "up"},
+            )
+        self._idx = self._ids[target]
+        return self._next()
+
     # ---- the ledger loop + reconciliation ----
 
     def _advance_item(
@@ -1147,12 +759,13 @@ class Program:
         if self._rec_actions > RECONCILE_MAX_ACTIONS:
             return self._handover(
                 f"reconcile {node.id!r}: cart not converging after "
-                f"{RECONCILE_MAX_ACTIONS} actions — list: {self._ledger_text()}"
+                f"{RECONCILE_MAX_ACTIONS} actions — list: "
+                f"{ledger.describe(self._ledger)}"
             )
         for idx, item in enumerate(self._ledger):
             if item.status != "picked":
                 continue  # pending items are the loop's, reached via re-shop
-            row = self._cart_row(item)
+            row = ledger.cart_row(self._screen, item)
             if row is None:
                 if item.qty <= 0:
                     continue  # removed and absent — converged
@@ -1167,11 +780,11 @@ class Program:
                 assert self._loop_body_id is not None
                 self._idx = self._ids[self._loop_body_id]
                 return self._next()
-            found = self._row_qty(row)
+            found = ledger.row_qty(self._screen, row)
             if found is None:
                 return self._handover(
                     f"reconcile {node.id!r}: no readable qty/steppers beside "
-                    f"{row.label!r} — list: {self._ledger_text()}"
+                    f"{row.label!r} — list: {ledger.describe(self._ledger)}"
                 )
             have, minus, plus = found
             if have < item.qty:
@@ -1188,59 +801,6 @@ class Program:
             f"conductor: cart stepper — {note}",
             "tap",
             {"bbox": list(el.bbox)},
-        )
-
-    def _cart_row(self, item: LedgerItem):
-        """The cart row showing this item — the shared tiered text match
-        (`match.label_matches`): the pick label came off one OCR reading
-        and the cart row is another, possibly truncated, so the same
-        fuzz that matches page anchors is what matches here."""
-        assert self._screen is not None
-        want = normalize(item.label or item.query)
-        if not want:
-            return None
-        for row in self._screen.rows:
-            if row.kind != "text" or not row.label.strip():
-                continue
-            if label_matches(want, normalize(row.label), ()):
-                return row
-        return None
-
-    def _row_qty(self, row):
-        """(qty, minus, plus) for a cart row, or None when unreadable.
-        The steppers are the icons IMMEDIATELY flanking the quantity
-        numeral — nearest on each side, never the band's extremes: a
-        cart row carries other icons too (the selection checkbox sits
-        far left), and a mis-attributed minus would TAP one. A row that
-        reads otherwise hands over rather than guessing at a
-        money-adjacent tap."""
-        assert self._screen is not None
-        top, bot = row.bbox[1] - 0.01, row.bbox[3] + 0.01
-
-        def in_band(el) -> bool:
-            c = center_of(el.bbox)
-            return c is not None and top <= c[1] <= bot
-
-        icons = sorted(
-            (el for el in self._screen.rows if el.kind == "icon" and in_band(el)),
-            key=lambda el: el.bbox[0],
-        )
-        for el in self._screen.rows:
-            if el.kind != "text" or not in_band(el):
-                continue
-            m = _QTY_RE.match(el.label.strip())
-            if not m:
-                continue
-            left = [ic for ic in icons if ic.bbox[2] <= el.bbox[0]]
-            right = [ic for ic in icons if ic.bbox[0] >= el.bbox[2]]
-            if not left or not right:
-                continue
-            return int(m.group(1)), left[-1], right[0]
-        return None
-
-    def _ledger_text(self) -> str:
-        return ", ".join(
-            f"{it.query}×{it.qty}({it.status})" for it in self._ledger or []
         )
 
     def _start_revision(
@@ -1293,7 +853,7 @@ class Program:
                 "and adjust the order before any payment"
             )
         try:
-            revised = parse_ledger(outcome.payload["ledger"], allow_zero=True)
+            revised = ledger.parse_ledger(outcome.payload["ledger"], allow_zero=True)
         except PlaybookError as e:
             return self._handover(f"revised list unusable ({e}) — read the thread")
         # Old items keep their shopping progress (the reconciler moves
@@ -1308,140 +868,8 @@ class Program:
         self._ledger.extend(revised_by.values())
         self._gate.consented = None  # the old ask no longer covers the order
         self._gate.awaiting = False
-        self._journal = f"revision applied: {self._ledger_text()}"
+        self._journal = f"revision applied: {ledger.describe(self._ledger)}"
         self._idx = self._ids[node.revise]
-        return self._next()
-
-    def _request(self, node: DecideNode) -> "AssistantMessage | DecisionRequest | None":
-        """One micro-call request off the decide-time screen — or a
-        handover (None, typed as the shared step result) when the ask
-        budget is spent or the walk has nothing to decide over."""
-        self._visits[node.id] = self._visits.get(node.id, 0) + 1
-        if self._visits[node.id] > node.max_visits:
-            return self._handover(
-                f"decide {node.id!r} exceeded max_visits ({node.max_visits})"
-            )
-        if self._screen is None:
-            return self._handover(f"decide {node.id!r} has no screen to decide over")
-        try:
-            args = {
-                k: str(fill_refs(v, self._values(), where=f"decide {node.id!r}"))
-                for k, v in node.args.items()
-            }
-        except PlaybookError as e:
-            return self._handover(str(e))
-        return build_request(
-            node.call, node.id, node.outs, args, self._screen, self._context(node)
-        )
-
-    def _context(self, node: DecideNode) -> str:
-        """The declared context slices, assembled least-privilege:
-        `inputs.*` from the armed values; `memory.<slug>` pulls ONLY the
-        matching `## <slug>` section of memory.md — micro-calls may run
-        on a different vendor's cheap tier, so the whole memory file
-        must never ride along for one playbook's shopping preferences.
-        Fail closed: no matching section → no memory context (logged
-        here, warned about at arm time) — a degraded pick escalates
-        safely; a widened privacy boundary does not."""
-        parts: list[str] = []
-        memory_slices: list[str] = []
-        for entry in node.context:
-            root, _, member = entry.partition(".")
-            if root == "inputs":
-                parts.append(f"{member}: {self.values.get(member, '')}")
-            else:
-                memory_slices.append(member)
-        if memory_slices:
-            if self._memory is None:
-                # Parsed once for the walk: nothing can rewrite the file
-                # mid-program (the model isn't running).
-                self._memory = _split_sections(_read_memory())
-            sliced = _match_sections(self._memory, memory_slices)
-            if sliced:
-                parts.append(f"memory (for {', '.join(memory_slices)}):\n{sliced}")
-            else:
-                log.info(
-                    "memory slice(s) %s: no matching `## <slug>` section in "
-                    "memory.md — decision runs without memory context",
-                    memory_slices,
-                )
-        return "\n".join(parts)
-
-    def _resolve(
-        self, outcome: MicroOutcome | None
-    ) -> "AssistantMessage | DecisionRequest | None":
-        if self._gate.revise_pending:
-            return self._apply_revision(outcome)
-        if self._gate.llm_reply is not None:
-            # The gate's LLM tier came back. None/unclear → keep waiting
-            # (this round's check was already counted in _gate_check).
-            judged = self._gate.llm_reply
-            self._gate.llm_reply = None
-            if outcome is not None and outcome.out == "deny":
-                return self._deny()
-            if outcome is not None and outcome.out == "revise":
-                node = self.spec.nodes[self._idx]
-                assert isinstance(node, HumanGateNode)
-                if node.revise is not None and self._ledger is not None:
-                    # A ledger playbook absorbs the change itself:
-                    # revise_list rewrites the desired state, the loop
-                    # shops the additions, RECONCILE fixes the rest,
-                    # and the gate re-asks with the fresh total.
-                    return self._start_revision(node, judged)
-                # No ledger: a change request ("ok, but make it two
-                # boxes") or a question is a TASK change, not a gate
-                # verdict — the model takes over with the thread in the
-                # transcript and acts on the user's words.
-                return self._handover(
-                    f"user asked for changes ({judged!r}) — read the "
-                    "thread and adjust the order before any payment"
-                )
-            if outcome is not None and outcome.out == "confirm":
-                return self._gate_confirmed()
-            return self._synth_wait()
-        node = self.spec.nodes[self._idx]
-        assert isinstance(node, DecideNode)
-        if outcome is None:
-            return self._handover(
-                f"decide {node.id!r}: micro-call failed or under-confident"
-            )
-        self._journal = (
-            f"decided {node.id}: {outcome.out} — {outcome.reason} "
-            f"({outcome.confidence:.2f})"
-        )
-        target = node.on[outcome.out]
-        if target == ESCALATE:
-            return self._handover(
-                f"decide {node.id!r} routed {outcome.out!r} → escalate "
-                f"({outcome.reason})"
-            )
-        decl = CALLS[node.call]
-        if outcome.picked is not None:
-            # Act on the pick: record the declared payload, then the
-            # conductor's own tap at the chosen row — the one gesture a
-            # rehearsed macro cannot know (its bbox exists only on the
-            # decide-time screen). The routed node's enter check judges
-            # the landing.
-            for field in decl.payload:
-                self._outputs[f"{node.id}.{field}"] = outcome.picked.key
-            self._idx = self._ids[target]
-            return self._synth(
-                "tap",
-                f"conductor: tapping picked {outcome.picked.key!r}",
-                "tap",
-                {"bbox": list(outcome.picked.bbox)},
-            )
-        if outcome.out == decl.reask_arm and target == node.id:
-            # The sanctioned self-loop (the parser lints self-routes to
-            # exactly this arm): swipe up (page scrolls down), then
-            # re-ask over whatever the fresh screen shows.
-            return self._synth(
-                "swipe",
-                "conductor: scrolling for more candidates",
-                gesture_vocab.SWIPE,
-                {"bbox": list(SCROLL_BBOX), "direction": "up"},
-            )
-        self._idx = self._ids[target]
         return self._next()
 
     # ---- asks, the gate, parking ----
@@ -1638,7 +1066,7 @@ class Program:
         the follow-up alarm (`contract.drive`) — the file, not the job,
         is what resumes the walk on ANY next wake."""
         self._gate.awaiting = awaiting
-        write_json_atomic(_parked_path(), self._parked_dict(resume_idx))
+        write_json_atomic(parked_path(), self._parked_dict(resume_idx))
         recap = f"waiting for the user's reply on {self.app}/{self.spec.name}"
         return self._synth(
             "park",
@@ -1718,79 +1146,3 @@ class Program:
             reason,
         )
         return None
-
-
-def _read_memory() -> str:
-    """memory.md off the shared path constant, NOT engine.memory: the
-    conductor may import only engine.dto (architecture rule)."""
-    f = paths.memory_file()
-    return read_text(f).strip() if f.exists() else ""
-
-
-def _split_sections(text: str) -> list[tuple[frozenset[str], str]]:
-    """memory.md carved at its `## ` headings: (heading tokens, whole
-    section text) per section — parsed once, matched many times."""
-    sections: list[tuple[frozenset[str], str]] = []
-    tokens: frozenset[str] | None = None
-    body: list[str] = []
-    for line in text.splitlines():
-        if line.startswith("## "):
-            if tokens is not None:
-                sections.append((tokens, "\n".join(body).strip()))
-            tokens = frozenset(line[3:].casefold().split())
-            body = [line]
-        elif tokens is not None:
-            body.append(line)
-    if tokens is not None:
-        sections.append((tokens, "\n".join(body).strip()))
-    return sections
-
-
-def _match_sections(
-    sections: list[tuple[frozenset[str], str]], slugs: list[str]
-) -> str:
-    wanted = {slug.casefold() for slug in slugs}
-    return "\n".join(body for tokens, body in sections if wanted & tokens)
-
-
-def memory_sections(text: str, slugs: list[str]) -> str:
-    """The `## <heading>` sections of memory.md matching the requested
-    slugs — the least-privilege slice, FAIL CLOSED: no match means no
-    memory context (a degraded pick escalates safely; a privacy boundary
-    must never silently widen to the whole file). A slug matches a
-    heading only as a whole whitespace-separated token — `shopping`
-    never bleeds into `## shopping_blacklist`; bilingual headings work
-    as `## shopping_prefs 购物偏好`."""
-    return _match_sections(_split_sections(text), slugs)
-
-
-# ---------- history readers ----------
-
-
-def _last_result(history: list[Message]) -> ToolResultMessage | None:
-    """The most recent tool result of ANY call — what activation reads
-    (model turns included; the conductor is not driving yet)."""
-    for msg in reversed(history):
-        if isinstance(msg, ToolResultMessage):
-            return msg
-    return None
-
-
-def _result_for(history: list[Message], call_id: str) -> ToolResultMessage | None:
-    for msg in reversed(history):
-        if isinstance(msg, ToolResultMessage) and msg.tool_call_id == call_id:
-            return msg
-    return None
-
-
-def _screen_of(result: ToolResultMessage) -> Screen:
-    """The screen a tool result carries — its text blocks parsed as a
-    listing (macro results and peeks both end with the current view)."""
-    return Screen.read(_text(result))
-
-
-def _text(result: ToolResultMessage) -> str:
-    """All text of a tool result, joined."""
-    if isinstance(result.content, str):
-        return result.content
-    return "\n".join(b.text for b in result.content if isinstance(b, TextBlock))

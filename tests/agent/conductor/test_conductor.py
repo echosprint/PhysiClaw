@@ -220,10 +220,11 @@ async def test_unwired_micro_caller_means_decides_hand_over() -> None:
 async def test_advance_activates_a_playbook_off_the_thread_screen() -> None:
     from conductor_fakes import make_screen
 
+    from physiclaw.agent.conductor.channel import Channel
     from physiclaw.agent.conductor.micro import PARSE_TASK, MicroOutcome
     from physiclaw.agent.conductor.pages import AnchorDecl, PageDecl, PagePrint
     from physiclaw.agent.conductor.playbook import Pack, Playbook
-    from physiclaw.agent.conductor.program import Activation, Channel
+    from physiclaw.agent.conductor.setup import Activation
     from physiclaw.agent.engine.dto import ToolResultMessage
 
     channel = Channel(

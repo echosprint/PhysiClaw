@@ -29,7 +29,7 @@ import time
 from functools import partial
 
 from physiclaw.agent.conductor import Conductor
-from physiclaw.agent.conductor import program as conductor_program
+from physiclaw.agent.conductor import setup as conductor_setup
 from physiclaw.agent.conductor.micro import MicroCaller
 from physiclaw.agent.engine import assemble, curate, loop, prompt
 from physiclaw.agent.engine.dto import Message
@@ -170,9 +170,10 @@ async def _run_session(
         # Conductor wake-time setup, fail-open throughout: a parked or
         # armed program, the activation trigger (parse_task fires once
         # if a screen matches the channel thread), and the hidden
-        # qualified macro registry spanning every pack + the channel.
+        # qualified macro registry (every pack + channel on the
+        # activation path; narrower otherwise — see setup.session_setup).
         # Nothing model-visible changes.
-        program, activation, hidden_macros = conductor_program.session_setup()
+        program, activation, hidden_macros = conductor_setup.session_setup()
         # Built-in skills are inlined full-text into SYSTEM; user skills are
         # indexed and loaded on demand via the Skill tool — so only user
         # skills go into the local registry. The first-run screen-layout skill
