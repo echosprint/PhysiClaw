@@ -75,5 +75,7 @@ class Conductor:
                 step = self._program.resolve(outcome)
             if step is not None:
                 return step
-            self._program = None  # quiet is permanent — transcript is the handoff
+            # Quiet is permanent — transcript is the handoff (the program
+            # already retired itself at the moment it went quiet).
+            self._program = None
         return await self._provider.chat(history, tools)

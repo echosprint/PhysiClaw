@@ -20,6 +20,7 @@ from typing import Awaitable, Callable, Union
 
 import httpx
 
+from physiclaw.agent.runtime import contract
 from physiclaw.agent.runtime.hook import Trigger, check_hooks, load_hooks
 from physiclaw.common import platform
 from physiclaw.common.config import CONFIG, server_url
@@ -27,7 +28,18 @@ from physiclaw.common.ready import check_ready
 
 log = logging.getLogger(__name__)
 
-React = Callable[[list[Trigger]], Union[None, Awaitable[None]]]
+# React may return the session's final outcome; None keeps the legacy
+# fire-and-forget contract (no streak bookkeeping either way).
+_ReactResult = Union["contract.SessionOutcome", None]
+React = Callable[[list[Trigger]], Union[_ReactResult, Awaitable[_ReactResult]]]
+
+# Unproductive-streak backoff: a session that closes DONE / WAIT (or asks
+# for a restart) resets the streak; anything else — STUCK, FAIL, IDLE, no
+# clean close — doubles the post-react cooldown, capped here. A dead
+# phone must cost one cheap wake per backoff window, not a full session
+# per watchdog blip (field-measured: 12 sessions / ~1.2M tokens in 25min
+# against a dead bridge).
+BACKOFF_CAP_SECONDS = 600.0
 
 
 async def _maybe_await(value):
@@ -76,6 +88,7 @@ class Runtime:
         # operator sees what's driving the loop without scrolling startup.
         self.label = label
         self._running = False
+        self._streak = 0  # consecutive unproductive sessions — see BACKOFF_CAP
 
     async def start(self) -> None:
         """Run the loop until `stop()` is called or the task is cancelled."""
@@ -107,10 +120,11 @@ class Runtime:
                     if triggers:
                         sources = [t.source or "?" for t in triggers]
                         log.info("triggers fired: %s", sources)
-                        await _maybe_await(self.react(triggers))
+                        outcome = await _maybe_await(self.react(triggers))
                         # Lets screen animations settle + exceeds watchdog
-                        # EMA_STALE so the next poll re-inits its baseline.
-                        await asyncio.sleep(CONFIG.engine.react_cooldown_seconds)
+                        # EMA_STALE so the next poll re-inits its baseline
+                        # — stretched by the unproductive-streak backoff.
+                        await asyncio.sleep(self._react_cooldown(outcome))
                 except asyncio.CancelledError:
                     raise
                 except Exception:
@@ -119,6 +133,26 @@ class Runtime:
         finally:
             self._running = False
             log.info("runtime stopped")
+
+    def _react_cooldown(self, outcome) -> float:
+        """Streak bookkeeping + the post-react sleep. `contract.productive`
+        owns what counts as an earned close; a legacy react that returned
+        None leaves the streak untouched."""
+        if outcome is not None:
+            if contract.productive(outcome):
+                self._streak = 0
+            else:
+                self._streak += 1
+        cooldown = CONFIG.engine.react_cooldown_seconds
+        if self._streak:
+            cooldown = min(cooldown * (2**self._streak), BACKOFF_CAP_SECONDS)
+            log.warning(
+                "%d unproductive session(s) in a row (last: %s) — backing off %.0fs",
+                self._streak,
+                (outcome.status if outcome else None) or "no close",
+                cooldown,
+            )
+        return cooldown
 
     def stop(self) -> None:
         """Signal the loop to exit after the current iteration finishes."""

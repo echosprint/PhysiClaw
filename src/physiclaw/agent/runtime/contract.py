@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from typing import Awaitable, Callable, Collection
 
 from physiclaw.agent.runtime.hook import Trigger
-from physiclaw.agent.runtime.sentinel import WAIT
+from physiclaw.agent.runtime.sentinel import DONE, WAIT
 
 log = logging.getLogger(__name__)
 
@@ -56,6 +56,16 @@ class SessionOutcome:
     created_job: bool = False
     restart_requested: bool = False
     retryable: bool = True
+
+
+def productive(outcome: SessionOutcome) -> bool:
+    """Close-policy predicate for the runtime's wake backoff: DONE and
+    WAIT are earned closes (the task moved, or a resume is scheduled),
+    and a requested restart is progress by definition. Everything else —
+    STUCK, FAIL, IDLE, no clean close — is an unproductive session the
+    wake cadence should back off from. Lives HERE with the rest of the
+    close policy, so the runtime loop cannot silently diverge from it."""
+    return outcome.status in (DONE, WAIT) or outcome.restart_requested
 
 
 # One attempt: (triggers, attempt_number) → outcome. The attempt number

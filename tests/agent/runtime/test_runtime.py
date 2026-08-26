@@ -236,3 +236,87 @@ def _async_returning(value):
         return value
 
     return _coro
+
+
+@pytest.mark.asyncio
+async def test_unproductive_sessions_back_off_the_wake_cadence(mocker) -> None:
+    # STUCK/no-close streaks double the post-react cooldown (capped);
+    # a DONE close resets it. A dead phone costs backoff windows, not a
+    # full session per watchdog blip.
+    from physiclaw.agent.runtime.contract import SessionOutcome
+
+    outcomes = [
+        SessionOutcome(status="STUCK"),
+        SessionOutcome(status="STUCK"),
+        SessionOutcome(status="DONE"),
+    ]
+
+    def _react(_triggers):
+        return outcomes.pop(0)
+
+    rt = runtime.Runtime(react=_react, interval=0.01)
+    sleeps: list[float] = []
+
+    async def _sleep(seconds):
+        sleeps.append(seconds)
+        if not outcomes and len(sleeps) >= 8:
+            rt.stop()
+
+    mocker.patch.object(runtime.asyncio, "sleep", side_effect=_sleep)
+    mocker.patch.object(runtime, "_check_ready", side_effect=_async_returning(True))
+    mocker.patch.object(runtime, "load_hooks")
+    trig = [Trigger(description="x", source="cron")]
+    mocker.patch.object(
+        runtime, "check_hooks", side_effect=[trig, trig, trig] + [[]] * 100
+    )
+
+    await rt.start()
+
+    base = runtime.CONFIG.engine.react_cooldown_seconds
+    cooldowns = [s for s in sleeps if s >= base]
+    # streak 1 → base*2, streak 2 → base*4, DONE → reset to base.
+    assert cooldowns == [base * 2, base * 4, base]
+    assert rt._streak == 0
+
+
+def _backoff_rt(mocker, react, *, stop_after: int):
+    """A Runtime wired for backoff tests: ready, one cron trigger, and a
+    sleep collector that stops the loop after `stop_after` sleeps."""
+    rt = runtime.Runtime(react=react, interval=0.01)
+    sleeps: list[float] = []
+
+    async def _sleep(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) >= stop_after:
+            rt.stop()
+
+    mocker.patch.object(runtime.asyncio, "sleep", side_effect=_sleep)
+    mocker.patch.object(runtime, "_check_ready", side_effect=_async_returning(True))
+    mocker.patch.object(runtime, "load_hooks")
+    trig = [Trigger(description="x", source="cron")]
+    mocker.patch.object(runtime, "check_hooks", side_effect=[trig] + [[]] * 100)
+    return rt, sleeps
+
+
+@pytest.mark.asyncio
+async def test_backoff_caps_at_cap_seconds(mocker) -> None:
+    from physiclaw.agent.runtime.contract import SessionOutcome
+
+    outcome = SessionOutcome(status="STUCK")
+    rt, sleeps = _backoff_rt(mocker, lambda _t: outcome, stop_after=3)
+    rt._streak = 50  # streak math must clamp, not overflow into hours
+
+    await rt.start()
+
+    assert max(sleeps) == runtime.BACKOFF_CAP_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_legacy_none_react_stays_flat(mocker) -> None:
+    # A fire-and-forget react (returns None) never grows a streak.
+    rt, sleeps = _backoff_rt(mocker, lambda _t: None, stop_after=3)
+
+    await rt.start()
+
+    assert rt._streak == 0
+    assert max(sleeps) == runtime.CONFIG.engine.react_cooldown_seconds

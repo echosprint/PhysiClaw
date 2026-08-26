@@ -342,3 +342,47 @@ async def test_parse_task_list_input_rides_as_json() -> None:
 
     assert result.outcome is not None
     assert json.loads(result.outcome.payload["items"]) == [{"query": "eggs", "qty": 2}]
+
+
+@pytest.mark.asyncio
+async def test_transient_provider_error_gets_one_retry(monkeypatch) -> None:
+    # A TRANSIENT blip (the providers' own taxonomy: timeout/429/5xx)
+    # must not cost the walk — one bounded retry, then the normal path.
+    from physiclaw.agent.provider import ProviderTransientError
+
+    async def _nosleep(_s):
+        pass
+
+    monkeypatch.setattr("physiclaw.agent.conductor.micro.asyncio.sleep", _nosleep)
+    result = await _caller(
+        [
+            ProviderTransientError("read timeout"),
+            '{"reason": "banner shown", "answer": "yes", "confidence": 0.8}',
+        ]
+    ).run(_decide_req())
+
+    assert result.outcome is not None and result.outcome.out == "yes"
+
+
+@pytest.mark.asyncio
+async def test_double_transient_error_still_escalates(monkeypatch) -> None:
+    from physiclaw.agent.provider import ProviderTransientError
+
+    async def _nosleep(_s):
+        pass
+
+    monkeypatch.setattr("physiclaw.agent.conductor.micro.asyncio.sleep", _nosleep)
+    result = await _caller(
+        [ProviderTransientError("a"), ProviderTransientError("b")]
+    ).run(_decide_req())
+
+    assert result.outcome is None and result.detail == "provider error"
+
+
+@pytest.mark.asyncio
+async def test_non_transient_error_fails_fast_without_retry() -> None:
+    # Permanent failures (4xx, real bugs) never earn a second paid call
+    # — the scripted list holds ONE item, so a retry would IndexError.
+    result = await _caller([RuntimeError("bad request")]).run(_decide_req())
+
+    assert result.outcome is None and result.detail == "provider error"

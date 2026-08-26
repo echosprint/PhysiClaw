@@ -47,7 +47,7 @@ from physiclaw.common.config import CONFIG, parse_model_ref
 log = logging.getLogger(__name__)
 
 
-async def run(triggers: list[Trigger], *, model_ref: str) -> None:
+async def run(triggers: list[Trigger], *, model_ref: str) -> contract.SessionOutcome:
     """Run engine sessions for `triggers` under the session-outcome contract.
 
     One attempt = one fresh `Session` through `_run_session` (which never
@@ -82,7 +82,10 @@ async def run(triggers: list[Trigger], *, model_ref: str) -> None:
             retryable=not session.budget_exhausted,
         )
 
-    await contract.drive(
+    # The final outcome flows back to the runtime loop, which backs off
+    # its wake cadence on unproductive streaks (a dead phone must not
+    # burn a full session per watchdog blip).
+    return await contract.drive(
         attempt,
         triggers,
         max_attempts=settings.max_session_attempts,

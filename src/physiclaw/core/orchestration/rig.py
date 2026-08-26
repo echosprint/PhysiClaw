@@ -26,6 +26,11 @@ from physiclaw.core.hardware.iphone import AssistiveTouch
 
 log = logging.getLogger(__name__)
 
+# How long a TOOL gesture waits for the hardware lock before reporting
+# busy. Background work (watchdog frames, exposure retune) holds the
+# lock for O(seconds); a session's tap must outwait that, not lose to it.
+TOOL_LOCK_WAIT_SECONDS = 10.0
+
 
 def _layout_learned() -> bool:
     """Read the first-run layout's `learned` marker straight from its JSON.
@@ -149,9 +154,16 @@ class HardwareRig:
 
     # ─── Concurrency ──────────────────────────────────────────
 
-    def acquire(self):
-        """Mark hardware as busy. Raises immediately if already busy."""
-        if not self._lock.acquire(blocking=False):
+    def acquire(self, wait_seconds: float = 0):
+        """Mark hardware as busy. Raises if not acquired within
+        `wait_seconds` (default: immediately). Background work keeps the
+        immediate form and fails open on contention; the TOOL path waits
+        a bounded moment instead — a session gesture must not die because
+        the exposure retune held the lock for two seconds (field-measured:
+        that race killed a conductor walk mid-gate)."""
+        # timeout=0 IS the immediate non-blocking poll — one call form
+        # covers every wait.
+        if not self._lock.acquire(timeout=wait_seconds):
             raise RuntimeError(
                 "PhysiClaw is busy — wait for the current operation to finish, then retry."
             )
@@ -203,7 +215,7 @@ class HardwareRig:
                 self.release()
 
     @contextmanager
-    def locked(self):
+    def locked(self, wait_seconds: float = 0):
         """Hold the hardware lock for the block, releasing on any exit.
 
         The bare acquire→release bracket with no parking and no ready
@@ -217,17 +229,20 @@ class HardwareRig:
         error if the lock is already held — callers that must fail open on
         contention (the background settle) use ``acquire()`` directly and
         catch it."""
-        self.acquire()
+        self.acquire(wait_seconds)
         try:
             yield
         finally:
             self.release()
 
     @contextmanager
-    def engaged(self):
-        """Check hardware, acquire lock, auto-park on exit, then release."""
+    def engaged(self, wait_seconds: float = 0):
+        """Check hardware, acquire lock, auto-park on exit, then release.
+        Tool entries pass TOOL_LOCK_WAIT_SECONDS to wait out short
+        background contention; fail-open callers (the watchdog poll)
+        keep the immediate default and skip on busy."""
         self.require_hardware()
-        with self.locked():
+        with self.locked(wait_seconds=wait_seconds):
             try:
                 yield
             finally:

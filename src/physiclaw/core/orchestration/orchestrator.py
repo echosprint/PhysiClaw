@@ -31,7 +31,7 @@ from physiclaw.core.orchestration.clipboard import (
 )
 from physiclaw.core.orchestration.observation import GestureObserver, GestureResult
 from physiclaw.core.orchestration.perception import Perception
-from physiclaw.core.orchestration.rig import HardwareRig
+from physiclaw.core.orchestration.rig import TOOL_LOCK_WAIT_SECONDS, HardwareRig
 from physiclaw.core.vision.util import (
     decode_image,
     encode_view_jpeg,
@@ -119,7 +119,7 @@ class PhysiClaw:
         screenshot(), but from the camera rather than the phone's own
         screenshot.
         """
-        with self.rig.engaged():
+        with self.rig.engaged(wait_seconds=TOOL_LOCK_WAIT_SECONDS):
             cropped, report, retuned = self._observer.peek_frame()
             listing, annotated = self.perception.detect(cropped)
             warning = self._observer.observe_quality("peek", report, retuned=retuned)
@@ -136,7 +136,7 @@ class PhysiClaw:
         element listing — same shape as peek(), but sourced from the
         phone's own screenshot instead of the camera.
         """
-        with self.rig.engaged():
+        with self.rig.engaged(wait_seconds=TOOL_LOCK_WAIT_SECONDS):
             data = self.rig.take_screenshot(timeout=60.0)
             if data is None:
                 hint = self.rig.require_bridge().connectivity_hint()
@@ -195,7 +195,7 @@ class PhysiClaw:
         """Lock, run `act` (which returns its action text) bracketed by
         the observer's verdict/view frames — the single lock +
         observation bracket every mutating tool goes through."""
-        with self.rig.engaged():
+        with self.rig.engaged(wait_seconds=TOOL_LOCK_WAIT_SECONDS):
             return self._observer.with_view(act)
 
     def _execute(self, step: gestures.Gesture) -> str:
@@ -301,7 +301,7 @@ class PhysiClaw:
 
     def send_to_clipboard(self, text: str) -> str:
         """Copy text to the phone's clipboard via AssistiveTouch long-press."""
-        with self.rig.engaged():
+        with self.rig.engaged(wait_seconds=TOOL_LOCK_WAIT_SECONDS):
             return self._send_to_clipboard(text)
 
     def _run_step(self, tool: str, arg) -> str:

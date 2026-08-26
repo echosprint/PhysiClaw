@@ -342,7 +342,9 @@ async def _stream(proc, slog: _SessionLog) -> dict | None:
     return result_data
 
 
-async def spawn_claude(triggers: list[Trigger], *, model_id: str) -> None:
+async def spawn_claude(
+    triggers: list[Trigger], *, model_id: str
+) -> contract.SessionOutcome:
     sources = [t.source or "?" for t in triggers]
     _warn_stray_context()
 
@@ -471,7 +473,7 @@ async def spawn_claude(triggers: list[Trigger], *, model_id: str) -> None:
 
     # A model-declared STUCK is a considered close on this path — only
     # UNDONE (no clean close at all) earns a re-spawn.
-    await contract.drive(
+    return await contract.drive(
         attempt,
         triggers,
         max_attempts=MAX_ATTEMPTS,

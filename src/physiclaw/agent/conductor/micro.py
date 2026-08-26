@@ -48,6 +48,7 @@ Candidates are content-keyed (the row's own label — never A/B/C) and
 shuffled, so position bias cannot masquerade as preference.
 """
 
+import asyncio
 import json
 import logging
 import random
@@ -57,8 +58,9 @@ from typing import Any, Callable
 
 from physiclaw.agent.conductor.calls import CALLS
 from physiclaw.agent.engine.dto import Message, SystemMessage, Usage, UserMessage
-from physiclaw.agent.provider import Provider
+from physiclaw.agent.provider import Provider, ProviderTransientError
 from physiclaw.common.bbox import Bbox
+from physiclaw.common.config import CONFIG
 from physiclaw.common.listing import Screen
 from physiclaw.common.text import json_span
 
@@ -261,7 +263,23 @@ class MicroCaller:
         err = ""
         usage = Usage()
         for attempts in (1, 2):  # one bounded repair retry
-            asst = await provider.chat(messages, [])
+            try:
+                asst = await provider.chat(messages, [])
+            except ProviderTransientError:
+                # One TRANSIENT retry per attempt (the providers' own
+                # taxonomy: timeout / 429 / 5xx — permanent 4xx and real
+                # bugs fail fast): a blip on the cheap tier is common and
+                # permanent escalation is too big a price for it
+                # (field-measured: a single ReadTimeout killed a walk
+                # mid-decide). A second failure propagates to run()'s
+                # catch-all → "provider error" escalation.
+                log.info(
+                    "micro %s (%s): transient provider error — one retry",
+                    req.call,
+                    req.node_id,
+                )
+                await asyncio.sleep(CONFIG.engine.retry_backoff_seconds)
+                asst = await provider.chat(messages, [])
             prompt_tokens += asst.usage.prompt_tokens
             completion_tokens += asst.usage.completion_tokens
             if self._rlog is not None:

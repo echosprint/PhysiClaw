@@ -142,10 +142,6 @@ _PARKED_SCHEMA = 1
 GATE_WAIT_SECONDS = 45
 SILENCE_ROUNDS = 3
 
-# The one deny disposition — both reply tiers (word list, LLM) hand over
-# with the same instruction, no re-asks.
-_DENY_HANDOVER = "user declined the ask — acknowledge them and wrap up"
-
 # runtime.sentinel.WAIT, spelled literally: the conductor may not import
 # engine runtimes; a test pins the two equal.
 PARK_STATUS = "WAIT"
@@ -453,7 +449,7 @@ def load_armed(channel: "Channel | None" = None) -> "Program | None":
         )
         return None
     log.info("conductor: armed %s/%s (%d nodes)", app, name, len(spec.nodes))
-    return _build_program(app, spec, pack, values, channel)
+    return _build_program(app, spec, pack, values, channel, origin="armed")
 
 
 def _build_program(
@@ -462,10 +458,13 @@ def _build_program(
     pack: Pack,
     values: dict[str, str],
     channel: "Channel | None",
+    *,
+    origin: str,
 ) -> "Program":
     """The one Program constructor call — armed, parked, and activation
     builds all come through here, channel included: a program is whole at
-    construction, never patched up afterwards."""
+    construction, never patched up afterwards. `origin` decides whether a
+    terminal outcome consumes the arm file (see `Program.retire`)."""
     return Program(
         app=app,
         spec=spec,
@@ -473,6 +472,7 @@ def _build_program(
         pack_macros=_qualified(app, pack),
         prints=prints_for_app(app),
         channel=channel,
+        origin=origin,
     )
 
 
@@ -514,6 +514,7 @@ def load_parked(channel: "Channel | None" = None) -> "Program | None":
             pack,
             {str(k): str(v) for k, v in (data.get("values") or {}).items()},
             channel if channel is not None else load_channel(),
+            origin="parked",
         )
         program._restore_parked(data)
     except Exception as e:
@@ -600,7 +601,9 @@ class Activation:
             log.warning("activation %s: inputs did not resolve (%s)", outcome.out, e)
             return None
         log.info("conductor: activated %s (%s)", outcome.out, outcome.reason)
-        return _build_program(app, spec, pack, values, self.channel)
+        return _build_program(
+            app, spec, pack, values, self.channel, origin="activation"
+        )
 
 
 def session_setup() -> "tuple[Program | None, Activation | None, dict[str, Macro]]":
@@ -729,10 +732,19 @@ class Program:
         pack_macros: dict[str, Macro],
         prints: list[PagePrint],
         channel: Channel | None = None,
+        origin: str = "activation",
     ):
         self.app = app
         self.spec = spec
         self.values = values
+        # Who built this walk ("armed" | "parked" | "activation") — a
+        # terminal outcome consumes the arm file only for the first two
+        # (activation has no file). Defaults to the no-op origin, so a
+        # hand-built Program can never eat an arm by accident.
+        self.origin = origin
+        # None while the walk can still continue on a future wake;
+        # "complete" / "deny" mark done deals — see `retire`.
+        self.finished: str | None = None
         # The program's own qualified dispatch contribution — merged into
         # the wake registry by session_setup (armed/parked path).
         self.pack_macros = pack_macros
@@ -832,10 +844,15 @@ class Program:
         handover, not a crashed session (the model finishes the task
         either way)."""
         try:
-            return self._advance(history)
+            step = self._advance(history)
         except Exception:
             log.exception("conductor: program crashed — handing over to the model")
-            return None
+            step = None
+        if step is None:
+            # Quiet is produced RIGHT HERE (crash path included) — the
+            # one moment a terminal outcome may consume the arm.
+            self.retire()
+        return step
 
     def resolve(
         self, outcome: MicroOutcome | None
@@ -844,10 +861,30 @@ class Program:
         failed or was under-confident — hand over). Same return contract
         and same never-raises guarantee as ``advance``."""
         try:
-            return self._resolve(outcome)
+            step = self._resolve(outcome)
         except Exception:
             log.exception("conductor: program crashed — handing over to the model")
-            return None
+            step = None
+        if step is None:
+            self.retire()
+        return step
+
+    def retire(self) -> None:
+        """The conductor's one call when this walk goes quiet. A TERMINAL
+        outcome — completion, or the user's refusal — consumes the arm
+        file: done deals must not re-walk on the next wake (an armed buy
+        playbook re-asking after the purchase, or after a 不用). An
+        incidental handover keeps the arm: the walk retries when the
+        world may have changed."""
+        if self.finished is None or self.origin not in ("armed", "parked"):
+            return
+        if disarm():
+            log.info(
+                "conductor: %s/%s %s — arm consumed",
+                self.app,
+                self.spec.name,
+                self.finished,
+            )
 
     # ---- one advance ----
 
@@ -960,6 +997,7 @@ class Program:
                 self.app,
                 self.spec.name,
             )
+            self.finished = "complete"
             return None
         node = nodes[self._idx]
         if isinstance(node, DecideNode):
@@ -1340,7 +1378,7 @@ class Program:
             judged = self._gate.llm_reply
             self._gate.llm_reply = None
             if outcome is not None and outcome.out == "deny":
-                return self._handover(_DENY_HANDOVER)
+                return self._deny()
             if outcome is not None and outcome.out == "revise":
                 node = self.spec.nodes[self._idx]
                 assert isinstance(node, HumanGateNode)
@@ -1516,7 +1554,7 @@ class Program:
             return self._synth_wait()
         verdict = reply.classify_all(new)
         if verdict == "deny":
-            return self._handover(_DENY_HANDOVER)
+            return self._deny()
         if verdict == "confirm":
             return self._gate_confirmed()
         # Unclear → the LLM tier, bounded; these messages are judged once.
@@ -1535,6 +1573,13 @@ class Program:
             {"ask": self._gate.ask, "reply": joined},
             self._screen,
         )
+
+    def _deny(self) -> "AssistantMessage | None":
+        """The one deny disposition — both reply tiers land here: no
+        re-asks, and TERMINAL (the flag makes retire consume the arm —
+        a refused deal must not re-ask on the next wake)."""
+        self.finished = "deny"
+        return self._handover("user declined the ask — acknowledge them and wrap up")
 
     def _gate_confirmed(self) -> "AssistantMessage | DecisionRequest | None":
         node = self.spec.nodes[self._idx]

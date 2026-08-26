@@ -1126,3 +1126,59 @@ nodes:
     p = program.load_armed()
 
     assert p is not None and p.needs_micro is False
+
+
+# ---------- arm lifecycle (terminal outcomes consume the arm) ----------
+
+
+def test_completed_walk_is_terminal_and_consumes_the_arm() -> None:
+    write_pack(playbooks={"flow": FLOW})
+    program.arm("demo", "flow", {"keyword": "milk"})
+    p = _armed_program()
+    h = _history()
+    _feed(h, p.advance(h), ELSEWHERE)
+    _feed(h, p.advance(h), HOME)
+    _feed(h, p.advance(h), RESULTS)
+
+    assert p.advance(h) is None and p.finished == "complete"
+    assert p.origin == "armed"
+    # retire happens AT the quiet — no separate call.
+    assert program.armed_ref() is None  # done deals never re-walk
+
+
+def test_gate_deny_is_terminal_and_consumes_the_arm() -> None:
+    p, h, send = _at_gate()
+
+    assert _reply_arrives(p, h, send, "不用") is None
+    assert p.finished == "deny"
+    assert program.armed_ref() is None
+
+
+def test_incidental_handover_keeps_the_arm() -> None:
+    # A wrong-page landing is a retry-next-wake case, not a done deal.
+    write_pack(playbooks={"flow": FLOW})
+    program.arm("demo", "flow", {"keyword": "milk"})
+    p = _armed_program()
+    h = _history()
+    _feed(h, p.advance(h), ELSEWHERE)
+    leg = p.advance(h)
+    _feed(h, leg, RESULTS)  # verify: home expected — wrong page
+
+    assert p.advance(h) is None and p.finished is None
+    assert program.armed_ref() == ("demo", "flow")
+
+
+def test_parked_walk_deny_consumes_the_arm() -> None:
+    # armed.json outlives the park; a terminal outcome on the RESUMED
+    # walk must still consume it.
+    p, h, send = _at_gate()
+    ask = _park_via_silence(p, h, send)
+
+    resumed = program.load_parked()
+    assert resumed is not None and resumed.origin == "parked"
+    h2 = _history()
+    peek = resumed.advance(h2)
+    _feed(h2, peek, _thread((ask, 0.75, 0.3), ("不用", 0.25, 0.5)))
+
+    assert resumed.advance(h2) is None and resumed.finished == "deny"
+    assert program.armed_ref() is None

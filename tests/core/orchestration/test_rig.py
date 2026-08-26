@@ -823,3 +823,41 @@ def test_connect_camera_seeds_no_focus_without_a_bundle_value(
     r.connect_camera(0)
 
     ctor.assert_called_once_with(0, focus_value=None)
+
+
+def test_acquire_with_wait_outlasts_short_contention(rig) -> None:
+    # The TOOL path waits out background contention (exposure retune,
+    # watchdog frame) instead of dying busy — the immediate form still
+    # raises, so background work keeps failing open.
+    import threading
+    import time
+
+    rig.acquire()
+
+    def _release_soon():
+        time.sleep(0.05)
+        rig.release()
+
+    t = threading.Thread(target=_release_soon)
+    t.start()
+    with pytest.raises(RuntimeError, match="busy"):
+        rig.acquire()  # immediate form: loses the race, as designed
+    rig.acquire(wait_seconds=2.0)  # bounded wait: wins it
+    rig.release()
+    t.join()
+
+
+def test_engaged_waits_for_the_lock(rig, mocker) -> None:
+    # The TOOL sites pass a wait; fail-open callers keep the immediate
+    # default (engaged() with no wait still raises busy instantly).
+    import threading
+    import time
+
+    mocker.patch.object(rig, "require_hardware")
+    mocker.patch.object(rig, "park")
+    rig.acquire()
+    t = threading.Thread(target=lambda: (time.sleep(0.05), rig.release()))
+    t.start()
+    with rig.engaged(wait_seconds=2.0):
+        pass  # acquired despite the initial holder
+    t.join()
