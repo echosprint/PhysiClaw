@@ -69,7 +69,7 @@ def _one_node_program():
         enabled=True,
         inputs=(),
         mandate=None,
-        nodes=(ConfirmNode(id="c", compose="m", args={}),),
+        nodes=(ConfirmNode(id="c", compose="m", args={}, message="ok done"),),
     )
     return Program(app="demo", spec=spec, values={}, pack_macros={}, prints=[])
 
@@ -134,7 +134,7 @@ def _decide_program(on: dict[str, str]):
         ),
     )
     if "done" in on.values():
-        nodes += (ConfirmNode(id="done", compose="m", args={}),)
+        nodes += (ConfirmNode(id="done", compose="m", args={}, message="ok done"),)
     spec = Playbook(
         app="demo",
         name="x",
@@ -214,3 +214,58 @@ async def test_unwired_micro_caller_means_decides_hand_over() -> None:
     result = await conductor.advance(history, [])
 
     assert result is inner.response  # handed over, provider took the turn
+
+
+@pytest.mark.asyncio
+async def test_advance_activates_a_playbook_off_the_thread_screen() -> None:
+    from conductor_fakes import make_screen
+
+    from physiclaw.agent.conductor.micro import PARSE_TASK, MicroOutcome
+    from physiclaw.agent.conductor.pages import AnchorDecl, PageDecl, PagePrint
+    from physiclaw.agent.conductor.playbook import Pack, Playbook
+    from physiclaw.agent.conductor.program import Activation, Channel
+    from physiclaw.agent.engine.dto import ToolResultMessage
+
+    channel = Channel(
+        prints=[
+            PagePrint(
+                app="channel",
+                decl=PageDecl(name="thread", anchors=(AnchorDecl(text="MyChat"),)),
+            )
+        ],
+        macros={},
+    )
+    spec = Playbook(
+        app="demo",
+        name="flow",
+        description="d",
+        enabled=True,
+        inputs=(),
+        mandate=None,
+        nodes=(),
+    )
+    pack = Pack(app="demo", pages={}, macros={}, macro_errors={})
+    activation = Activation(entries={"demo/flow": (spec, pack)}, channel=channel)
+    micro = FakeMicro(
+        lambda req: MicroOutcome(
+            out="demo/flow", reason="task", confidence=0.9, payload={}
+        )
+    )
+    inner = RecordingProvider()
+    conductor = Conductor(inner, micro=micro, activation=activation)
+    history: list = [SystemMessage(content="s"), UserMessage(content="u")]
+    history.append(
+        ToolResultMessage(
+            tool_call_id="t1",
+            content=make_screen(("MyChat", 0.5, 0.05), ("买牛奶", 0.25, 0.4)).text,
+        )
+    )
+
+    turn = await conductor.advance(history, [])
+
+    # parse_task fired on the thread screen, armed the program, and the
+    # program's first synthesized turn (the locate peek) came back — all
+    # in one advance, zero provider calls.
+    assert len(micro.requests) == 1 and micro.requests[0].call == PARSE_TASK
+    assert turn.synthesized and turn.tool_names() == ["note", "peek"]
+    assert inner.chat_args is None

@@ -22,7 +22,7 @@ delegation by object identity.
 """
 
 from physiclaw.agent.conductor.micro import DecisionRequest, MicroCaller
-from physiclaw.agent.conductor.program import Program
+from physiclaw.agent.conductor.program import Activation, Program
 from physiclaw.agent.engine.dto import AssistantMessage, Message
 from physiclaw.agent.provider import Provider
 
@@ -36,19 +36,34 @@ class Conductor:
         provider: Provider,
         program: Program | None = None,
         micro: MicroCaller | None = None,
+        activation: Activation | None = None,
     ):
         self._provider = provider
         self._program = program
         self._micro = micro
+        self._activation = activation
 
     async def advance(
         self,
         history: list[Message],
         tools: list[dict],
     ) -> AssistantMessage:
-        """Produce the next assistant turn. Program first — brokering any
-        decision requests it raises; no playbook (or a program that handed
-        over) → ask the LLM."""
+        """Produce the next assistant turn. Activation first (the one
+        parse_task ask, when the screen is the user's thread); then the
+        program — brokering any decision requests it raises; no playbook
+        (or a program that handed over) → ask the LLM."""
+        if (
+            self._program is None
+            and self._activation is not None
+            and self._micro is not None
+        ):
+            req = self._activation.request(history)
+            if req is not None:
+                res = await self._micro.run(req)
+                self._program = self._activation.build(res.outcome)
+            if self._activation.attempted:
+                # One-shot consumed — release the parsed pack entries.
+                self._activation = None
         if self._program is not None:
             step = self._program.advance(history)
             while isinstance(step, DecisionRequest):

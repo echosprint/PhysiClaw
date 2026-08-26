@@ -7,7 +7,7 @@ accept threshold from its own genuine-score distribution (per-page
 thresholds — no universal cutoff exists, per the near-duplicate GUI-state
 literature). First-run capture (system pages) and rehearsal-as-capture
 (pack pages) call `capture_app`, the one entry that produces finished
-`LearnedPage`s; the P3 CLI feeds it recorded sessions and live peeks.
+`LearnedPage`s; the conductor CLI feeds it recorded sessions and live peeks.
 """
 
 import statistics

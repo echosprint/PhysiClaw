@@ -19,8 +19,8 @@ The grammar, top-down::
     node      ::= id "LEG" macro [with] [enter] verify
                   [compensate] [irreversible]
                 | id "DECIDE" call [with] [context] [outs] on [max_visits]
-                | id "CONFIRM" compose [with]
-                | id "HUMAN_GATE" gate compose [with]
+                | id "CONFIRM" compose [with] message
+                | id "HUMAN_GATE" gate compose [with] message [over_message] [return]
     on        ::= {out: node-id | "escalate"}                 # total over outs
 
 Control flow: non-DECIDE nodes fall through to the next node in list
@@ -102,8 +102,9 @@ _NODE_KEYS = {
     "LEG": _NODE_COMMON
     | {"macro", "with", "enter", "verify", "compensate", "irreversible"},
     "DECIDE": _NODE_COMMON | {"call", "with", "context", "outs", "on", "max_visits"},
-    "CONFIRM": _NODE_COMMON | {"compose", "with"},
-    "HUMAN_GATE": _NODE_COMMON | {"gate", "compose", "with"},
+    "CONFIRM": _NODE_COMMON | {"compose", "with", "message"},
+    "HUMAN_GATE": _NODE_COMMON
+    | {"gate", "compose", "with", "return", "message", "over_message"},
 }
 
 PACK_MACROS_DIRNAME = "macros"
@@ -178,6 +179,11 @@ class ConfirmNode:
     id: str
     compose: str
     args: dict[str, Any]
+    # The authored ask ({input}/{node.field} refs, parse-validated,
+    # runtime-filled), sent VERBATIM and REQUIRED: only the playbook
+    # author knows the user's language, so the conductor composes no
+    # prose — ever.
+    message: str
 
 
 @dataclass(frozen=True)
@@ -191,6 +197,21 @@ class HumanGateNode:
     gate: str  # what is being authorized, e.g. "payment"
     compose: str
     args: dict[str, Any]
+    # The authored ask, REQUIRED and sent verbatim like
+    # ConfirmNode.message. The consent contract is enforced as lints on
+    # the template, not as appended code prose: a payment gate's
+    # `message` must reference {gate.total} (the ask IS the consent
+    # record), and `over_message` — the ask sent instead when the sheet
+    # total exceeds the mandate cap — must reference {gate.total} AND
+    # {gate.cap} (the breach must be disclosed). Both slots are
+    # runtime-filled from the payment sheet.
+    message: str
+    over_message: str | None
+    # Pack macro run after a confirmed reply to get BACK into the app
+    # (the gate's ask left it for the IM thread); the next node's
+    # `enter:` judges the landing. None = the walk tries the next node
+    # directly and hands over if its enter check fails.
+    return_macro: str | None
 
 
 Node = LegNode | DecideNode | ConfirmNode | HumanGateNode
@@ -214,7 +235,7 @@ class Playbook:
 @dataclass(frozen=True)
 class PlaybookEntry:
     """One playbook file as found on disk — parsed, or the reason it was
-    excluded (the macro ScanEntry shape, named so P5/P7 consumers get
+    excluded (the macro ScanEntry shape, named so downstream consumers get
     fields instead of tuple positions)."""
 
     app: str
@@ -478,15 +499,88 @@ def _parse_node(
         return _parse_leg(where, nid, node, args, pack)
     if ntype == "DECIDE":
         return _parse_decide(where, nid, node, args, input_names)
-    if ntype == "CONFIRM":
-        compose = _require_str(node.get("compose"), f"{where}: `compose`")
-        check_name(compose, f"{where}: `compose`")
-        return ConfirmNode(id=nid, compose=compose, args=dict(args))
-    gate = _require_str(node.get("gate"), f"{where}: `gate`")
-    check_name(gate, f"{where}: `gate`")
     compose = _require_str(node.get("compose"), f"{where}: `compose`")
     check_name(compose, f"{where}: `compose`")
-    return HumanGateNode(id=nid, gate=gate, compose=compose, args=dict(args))
+    if ntype == "CONFIRM":
+        message, _ = _ask_message(where, node, "message", input_names, payloads)
+        return ConfirmNode(id=nid, compose=compose, args=dict(args), message=message)
+    gate = _require_str(node.get("gate"), f"{where}: `gate`")
+    check_name(gate, f"{where}: `gate`")
+    g_payloads = payloads
+    if gate == "payment":
+        # The consent slots, runtime-filled from the payment sheet and
+        # available only here. (A DECIDE literally named `gate` would be
+        # shadowed in this message — the money slots win, both at parse
+        # and at fill.)
+        g_payloads = {**payloads, "gate": ("total", "cap")}
+    message, msg_refs = _ask_message(where, node, "message", input_names, g_payloads)
+    over = _opt_prose(node.get("over_message"), f"{where}: `over_message`")
+    if gate == "payment":
+        if "gate.total" not in msg_refs:
+            raise PlaybookError(
+                f"{where}: a payment gate's `message` must quote the sheet "
+                "total — reference {gate.total} (the ask IS the consent "
+                "record)"
+            )
+        if over is None:
+            raise PlaybookError(
+                f"{where}: a payment gate needs `over_message` — the ask "
+                "sent instead when the total exceeds the mandate cap; it "
+                "must reference {gate.total} and {gate.cap}"
+            )
+        over_refs = _refs(over, f"{where}: `over_message`")
+        _check_refs(over_refs, input_names, g_payloads, f"{where}: `over_message`")
+        missing = sorted({"gate.total", "gate.cap"} - over_refs)
+        if missing:
+            raise PlaybookError(
+                f"{where}: `over_message` must reference "
+                + " and ".join("{" + m + "}" for m in missing)
+                + " — an over-cap ask must disclose the total AND the budget"
+            )
+    elif over is not None:
+        raise PlaybookError(f"{where}: `over_message` is only for `gate: payment`")
+    return_macro = _optional_pack_macro(node, "return", where, pack)
+    return HumanGateNode(
+        id=nid,
+        gate=gate,
+        compose=compose,
+        args=dict(args),
+        message=message,
+        over_message=over,
+        return_macro=return_macro,
+    )
+
+
+def _ask_message(
+    where: str,
+    node: dict,
+    key: str,
+    input_names: set[str],
+    payloads: dict[str, tuple[str, ...]],
+) -> tuple[str, set[str]]:
+    """A REQUIRED authored ask: the exact text sent to the user — only
+    the author knows the user's language, so the conductor composes no
+    prose around it. Refs held to the same defined-before-use rules as
+    `with:` values; returned with them so gate lints can inspect."""
+    text = _prose(node.get(key), f"{where}: `{key}`")
+    refs = _refs(text, f"{where}: `{key}`")
+    _check_refs(refs, input_names, payloads, f"{where}: `{key}`")
+    return text, refs
+
+
+def _optional_pack_macro(node: dict, key: str, where: str, pack: Pack) -> str | None:
+    """An optional node key naming one of THIS pack's macros — the
+    compensate/return idiom, one spelling."""
+    name = node.get(key)
+    if name is None:
+        return None
+    name = _require_str(name, f"{where}: `{key}`")
+    if name not in pack.macros:
+        raise PlaybookError(
+            f"{where}: {key} macro {name!r} not found in this pack's "
+            f"{PACK_MACROS_DIRNAME}/"
+        )
+    return name
 
 
 def _parse_leg(where: str, nid: str, node: dict, args: dict, pack: Pack) -> LegNode:
@@ -530,14 +624,7 @@ def _parse_leg(where: str, nid: str, node: dict, args: dict, pack: Pack) -> LegN
         if "enter" in node
         else None
     )
-    compensate = node.get("compensate")
-    if compensate is not None:
-        compensate = _require_str(compensate, f"{where}: `compensate`")
-        if compensate not in pack.macros:
-            raise PlaybookError(
-                f"{where}: compensate macro {compensate!r} not found in this "
-                f"pack's {PACK_MACROS_DIRNAME}/"
-            )
+    compensate = _optional_pack_macro(node, "compensate", where, pack)
     irreversible = node.get("irreversible")
     if irreversible is not None and irreversible not in IRREVERSIBLE_CLASSES:
         raise PlaybookError(
@@ -900,6 +987,21 @@ def _check_money(
             f"node(s) {', '.join(money)} are irreversible: payment — the "
             "playbook must declare a `mandate` (max_amount)"
         )
+    # Adjacency, not just reachability: the conductor reads the payment
+    # sheet AT the gate (the ask quotes its total) and fires the leg as
+    # the gate's fall-through — a node in between would desynchronize
+    # the consent from the sheet. The gate must also DECLARE the class
+    # (`gate: payment`), so the runtime keys off the declaration.
+    for i, n in enumerate(nodes):
+        if isinstance(n, LegNode) and n.irreversible == "payment":
+            prev = nodes[i - 1] if i > 0 else None
+            if not (isinstance(prev, HumanGateNode) and prev.gate == "payment"):
+                raise PlaybookError(
+                    f"node {n.id!r} (irreversible: payment) must DIRECTLY "
+                    "follow a HUMAN_GATE with `gate: payment` — the gate "
+                    "reads the sheet its ask quotes, and consent must not "
+                    "desynchronize from it"
+                )
     # DFS over (node, gate_passed) states; a money node seen with
     # gate_passed False is reachable around the human.
     seen: set[tuple[str, bool]] = set()

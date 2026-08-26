@@ -37,10 +37,40 @@ MAX_FORBID = 8
 MAX_ANCHOR_LEN = 80
 
 
-# Reserved app namespaces: system pages (OS states, the user-channel IM
-# pages) resolve against built-ins shipped in-tree — a pack must never
-# redefine or shadow them.
+# Reserved app namespaces a pack's page refs may cross into. `ios` is
+# reserved-unimplemented (OS states, someday). `channel` is the ONE
+# loadable infrastructure pack: the user-channel IM pages + send
+# macros, recorded on-device under playbooks/channel/ like any pack —
+# but playbooks never name it (conductor infrastructure via node types).
 RESERVED_APPS = frozenset({"ios", "channel"})
+CHANNEL_APP = "channel"
+
+# The channel pack's conventions — the three names the conductor knows.
+# Declared HERE (beside CHANNEL_APP) because both program.py and
+# scaffold.py need them and scaffold must not import program: the stubs
+# interpolate these, never hand-copy them.
+THREAD_PAGE = "thread"  # channel pages.yml must declare this page
+SEND_MACRO = "send"  # nav to the user's thread + paste + send {message}
+OPEN_MACRO = "open"  # nav to the thread only (resume reads)
+
+
+def page_id(app: str, page: str) -> str:
+    """The `app.page` spelling — the ONE format matcher verdicts carry
+    and every expectation is compared against."""
+    return f"{app}.{page}"
+
+
+# The thread page's full id, precomputed: what the gate's peeks and the
+# activation trigger match against.
+THREAD_ID = page_id(CHANNEL_APP, THREAD_PAGE)
+
+
+def reserved_unloadable(app: str) -> bool:
+    """Reserved AND not loadable — `ios` today. The channel is reserved
+    as a page-ref namespace but IS the one loadable infrastructure pack;
+    this predicate is the single spelling of that exception."""
+    return app in RESERVED_APPS and app != CHANNEL_APP
+
 
 # Coarse region hints — bands, not bboxes: exact geometry is learned, the
 # hint only disambiguates before capture and pins chrome that must not
@@ -122,7 +152,7 @@ class PagePrint:
 
     @property
     def page_id(self) -> str:
-        return f"{self.app}.{self.decl.name}"
+        return page_id(self.app, self.decl.name)
 
     @property
     def threshold(self) -> float:
@@ -236,7 +266,7 @@ def scan_app_decls(app: str) -> dict[str, PageDecl]:
     CLI surfaces it; runtime callers catch and treat the app as
     undeclared). The name is validated BEFORE any path is built from it."""
     _check_name(app, "app name")
-    if app in RESERVED_APPS:
+    if reserved_unloadable(app):
         raise PagesError(f"{app!r} is a reserved namespace (built-in pages)")
     p = paths.playbooks_dir() / app / PAGES_FILENAME
     if not p.exists():

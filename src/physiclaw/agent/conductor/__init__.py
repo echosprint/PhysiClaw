@@ -13,8 +13,11 @@ Layout:
   - `_spec.py` — shared spec-file substrate: the YAML loader and the
     macro layer's scalar rules, bound to each spec's error class.
   - `playbook.py` — PLAYBOOK.yml model + parser + graph/money lints.
-  - `program.py` — an armed playbook mid-walk: synthesized LEG turns,
-    fingerprint checks, hand-over on anything else; the arm file.
+  - `program.py` — a playbook mid-walk: synthesized turns (legs,
+    decisions' primitives, channel asks), the HUMAN_GATE ask-and-hold,
+    parking/resume, activation, the money predicates; arm/parked files.
+  - `reply.py` — the gate's deterministic reply tiers: word lists and
+    new-incoming-bubble detection.
   - `scaffold.py` — app-pack init templates + playbooks/README.md.
 """
 

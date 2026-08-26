@@ -202,3 +202,88 @@ def test_contract_orders_reason_before_answer() -> None:
         < _CONTRACT.index('"answer"')
         < _CONTRACT.index('"confidence"')
     )
+
+
+@pytest.mark.asyncio
+async def test_parse_task_row_extracts_inputs_payload() -> None:
+    from physiclaw.agent.conductor.micro import PARSE_TASK
+
+    # Playbook refs only: the not_a_task escape is the row's own.
+    req = build_request(
+        PARSE_TASK,
+        "activation",
+        ("taobao/buy",),
+        {"menu": "Available playbooks:\n- taobao/buy: 买东西 [inputs: keyword]"},
+        make_screen(("买牛奶", 0.3, 0.5)),
+    )
+    assert "买牛奶" in req.listing  # the thread text rides as data
+
+    result = await _caller(
+        [
+            '{"reason": "assigns a purchase", "answer": "taobao/buy", '
+            '"inputs": {"keyword": "牛奶"}, "confidence": 0.9}'
+        ]
+    ).run(req)
+
+    assert result.outcome is not None
+    assert result.outcome.out == "taobao/buy"
+    assert result.outcome.payload == {"keyword": "牛奶"}
+
+
+@pytest.mark.asyncio
+async def test_parse_task_not_a_task_carries_no_payload() -> None:
+    from physiclaw.agent.conductor.micro import NOT_A_TASK, PARSE_TASK
+
+    req = build_request(
+        PARSE_TASK,
+        "activation",
+        ("taobao/buy",),
+        {"menu": "menu"},
+        make_screen(("你好", 0.3, 0.5)),
+    )
+    result = await _caller(
+        ['{"reason": "just a greeting", "answer": "not_a_task", "confidence": 0.9}']
+    ).run(req)
+
+    assert result.outcome is not None
+    assert result.outcome.out == NOT_A_TASK and result.outcome.payload is None
+
+
+@pytest.mark.asyncio
+async def test_confirm_reply_row_judges_the_reply() -> None:
+    from physiclaw.agent.conductor.micro import CONFIRM_REPLY
+
+    # Empty outs: the verdict space is fixed whole in the _SPECS row.
+    req = build_request(
+        CONFIRM_REPLY,
+        "gate",
+        (),
+        {"ask": "回复 好的 确认支付", "reply": "那就来一份吧"},
+        make_screen(("x", 0.3, 0.5)),
+    )
+    result = await _caller(
+        ['{"reason": "colloquial yes", "answer": "confirm", "confidence": 0.8}']
+    ).run(req)
+
+    assert result.outcome is not None and result.outcome.out == "confirm"
+
+
+@pytest.mark.asyncio
+async def test_confirm_reply_revise_is_a_legal_answer() -> None:
+    from physiclaw.agent.conductor.micro import CONFIRM_REPLY
+
+    req = build_request(
+        CONFIRM_REPLY,
+        "gate",
+        (),
+        {"ask": "回复 好的 确认支付", "reply": "好的，但是买两盒"},
+        make_screen(("x", 0.3, 0.5)),
+    )
+    result = await _caller(
+        [
+            '{"reason": "approves a MODIFIED order", "answer": "revise", '
+            '"confidence": 0.9}'
+        ]
+    ).run(req)
+
+    assert result.outcome is not None and result.outcome.out == "revise"

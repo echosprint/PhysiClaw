@@ -26,6 +26,7 @@ messages, tails) lives in `assemble.py`, shared with the CLI dump.
 import asyncio
 import logging
 import time
+from functools import partial
 
 from physiclaw.agent.conductor import Conductor
 from physiclaw.agent.conductor import program as conductor_program
@@ -90,37 +91,36 @@ async def run(triggers: list[Trigger], *, model_ref: str) -> None:
     )
 
 
-def _wire_micro(program, provider, tr, rlog):
-    """The micro-caller for an armed program's DECIDE nodes — (None, None)
-    when nothing is armed or the playbook has no DECIDE node (a pure-LEG
-    walk must not pay for a second provider client). `[conductor]
-    micro_model` selects the cheap decision tier; fail-open to the
-    session provider on any problem. The second return is a
-    separately-owned provider the session's finally block must close
-    (None when the session provider is reused)."""
-    if program is None or not program.needs_micro:
-        return None, None
-    owned = None
-    micro_provider = provider
+def _wire_micro(program, activation, provider, tr, rlog):
+    """The micro-caller for the conductor's decision calls — None when
+    nothing can need one: no program and no activation trigger, or a
+    pure-LEG program (which must not pay for a second provider client).
+    `[conductor] micro_model` selects the cheap decision tier; the
+    caller builds that client lazily on the FIRST call (an activation
+    trigger usually never fires) and owns it — the session's finally
+    block closes it via `MicroCaller.aclose()`. Fail-open to the session
+    provider on any problem, at parse time or build time."""
+    if activation is None and (program is None or not program.needs_micro):
+        return None
+    factory = None
     ref = CONFIG.conductor.micro_model
     if ref:
         try:
             pid, mid = parse_model_ref(ref)
-            owned = make_provider(pid, mid)
-            micro_provider = owned
+            factory = partial(make_provider, pid, mid)
         except Exception as e:
             log.warning(
                 "conductor micro_model %r unusable (%s) — using the session model",
                 ref,
                 e,
             )
-    caller = MicroCaller(
-        micro_provider,
+    return MicroCaller(
+        provider,
         confidence_floor=CONFIG.conductor.micro_confidence,
         tr=tr,
         rlog=rlog,
+        owned_factory=factory,
     )
-    return caller, owned
 
 
 async def _run_session(
@@ -138,7 +138,7 @@ async def _run_session(
 
     sid = new_sid()
     provider: Provider | None = None
-    micro_provider: Provider | None = None
+    micro_caller: MicroCaller | None = None
     tr: Trace | None = None
     rlog: RawLog | None = None
     try:
@@ -164,11 +164,12 @@ async def _run_session(
         )
         mcp = await get_mcp()
         mcp_tools = await list_tools_cached()
-        # An armed playbook loads fail-open: any problem logs one warning
-        # and the session runs as if nothing were armed. Its pack macros
-        # wire into the run_macro handler under qualified names; nothing
-        # model-visible changes.
-        program = conductor_program.load_armed()
+        # Conductor wake-time setup, fail-open throughout: a parked or
+        # armed program, the activation trigger (parse_task fires once
+        # if a screen matches the channel thread), and the hidden
+        # qualified macro registry spanning every pack + the channel.
+        # Nothing model-visible changes.
+        program, activation, hidden_macros = conductor_program.session_setup()
         # Built-in skills are inlined full-text into SYSTEM; user skills are
         # indexed and loaded on demand via the Skill tool — so only user
         # skills go into the local registry. The first-run screen-layout skill
@@ -177,7 +178,7 @@ async def _run_session(
         # CLI dump.
         bundle = assemble.build_prompt_bundle(
             provider_id,
-            pack_macros=program.pack_macros if program is not None else None,
+            pack_macros=hidden_macros or None,
         )
         # Full merged list goes to conductor.advance(tools=) for invocation;
         # the inline `## Tooling` card pulls MCP names from AST so it
@@ -208,7 +209,7 @@ async def _run_session(
         )
 
         provider = make_provider(provider_id, model_id)
-        micro_caller, micro_provider = _wire_micro(program, provider, tr, rlog)
+        micro_caller = _wire_micro(program, activation, provider, tr, rlog)
         prompt_hash = prompt.prefix_hash(bundle.system_prompt)
         rlog.write_session_start(
             provider=provider_id,
@@ -223,7 +224,12 @@ async def _run_session(
             # side-calls of the very kind its playbooks emit.
             # Session-management wiring (collapse cadence, wire logging)
             # comes straight off the provider — not the conductor's job.
-            conductor=Conductor(provider, program=program, micro=micro_caller),
+            conductor=Conductor(
+                provider,
+                program=program,
+                micro=micro_caller,
+                activation=activation,
+            ),
             collapse=provider.COLLAPSE,
             serialize_wire=provider.serialize_history,
             mcp=mcp,
@@ -274,11 +280,12 @@ async def _run_session(
         session.sentinel_status = STUCK
         session.sentinel_recap = f"session crashed: {e}"
     finally:
-        for p in (provider, micro_provider):
-            if p is None:
-                continue
+        closers = [provider.aclose] if provider is not None else []
+        if micro_caller is not None:
+            closers.append(micro_caller.aclose)
+        for close in closers:
             try:
-                await p.aclose()
+                await close()
             except Exception:
                 # A close failure (cancellation landing here, transport
                 # error) must not skip the trace closes below — losing

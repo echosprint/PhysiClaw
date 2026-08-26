@@ -42,10 +42,13 @@ nodes:
   - id: confirm
     type: CONFIRM
     compose: order-summary
+    message: "已加入购物车，稍后下单"
   - id: pay
     type: HUMAN_GATE
     gate: payment
     compose: payment-request
+    message: "合计 ¥{gate.total}，回复 好的 支付，或 不用 取消"
+    over_message: "合计 ¥{gate.total}，超出预算 ¥{gate.cap}，回复 好的 支付，或 不用 取消"
 """
 
 
@@ -228,6 +231,69 @@ def test_unreachable_node_rejected() -> None:
 
     with pytest.raises(PlaybookError, match="unreachable"):
         pb.parse_playbook(text, "buy", pack)
+
+
+def test_payment_leg_must_directly_follow_its_gate() -> None:
+    # Reachability is not enough: the conductor reads the sheet AT the
+    # gate and fires the leg as its fall-through — a node in between
+    # desynchronizes consent from the sheet, so the parser rejects it.
+    pack = _pack()
+    text = (
+        VALID
+        + """  - id: detour
+    type: LEG
+    macro: add-cart
+    with: {message: "x"}
+    verify: results
+  - id: do-pay
+    type: LEG
+    macro: add-cart
+    with: {message: "pay"}
+    verify: results
+    irreversible: payment
+"""
+    )
+
+    with pytest.raises(PlaybookError, match="DIRECTLY follow"):
+        pb.parse_playbook(text, "buy", pack)
+
+
+@pytest.mark.parametrize(
+    "old, new, fragment",
+    [
+        # Asks are REQUIRED — the conductor composes no user-facing
+        # prose (only the author knows the user's language).
+        ('    message: "已加入购物车，稍后下单"\n', "", "is required"),
+        # A payment gate's ask must quote the sheet total…
+        (
+            '    message: "合计 ¥{gate.total}，回复 好的 支付，或 不用 取消"\n',
+            '    message: "回复 好的 支付，或 不用 取消"\n',
+            "must quote the sheet",
+        ),
+        # …and carry the over-cap variant…
+        (
+            '    over_message: "合计 ¥{gate.total}，超出预算 ¥{gate.cap}，'
+            '回复 好的 支付，或 不用 取消"\n',
+            "",
+            "needs `over_message`",
+        ),
+        # …which must disclose the breached budget too.
+        ("超出预算 ¥{gate.cap}，", "超出预算，", "total AND the budget"),
+        # over_message is meaningless outside a payment gate.
+        (
+            "gate: payment\n    compose: payment-request\n"
+            '    message: "合计 ¥{gate.total}，回复 好的 支付，或 不用 取消"',
+            "gate: handoff\n    compose: payment-request\n"
+            '    message: "回复 好的 继续，或 不用 取消"',
+            "only for `gate: payment`",
+        ),
+    ],
+)
+def test_ask_template_lints(old, new, fragment) -> None:
+    pack = _pack()
+
+    with pytest.raises(PlaybookError, match=fragment):
+        pb.parse_playbook(_mutate(old, new), "buy", pack)
 
 
 def test_payment_leg_behind_gate_parses() -> None:

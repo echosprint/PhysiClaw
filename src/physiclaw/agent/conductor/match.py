@@ -60,9 +60,13 @@ OVERLAY_MIN_LABELS = 3
 # by this much when counting the overlay's own labels.
 OVERLAY_PAD = 0.08
 
+# The one spelling of "a ¥/￥ amount": the matcher class-tokenizes with
+# it, the money predicates (program.py) extract its group.
+PRICE_RE = re.compile(r"[¥￥]\s*(\d+(?:\.\d+)?)")
+
 # Volatile-content class tokens — "the clock is still a clock".
 _NORM_SUBS: tuple[tuple[re.Pattern, str], ...] = (
-    (re.compile(r"[¥￥]\s*\d+(?:\.\d+)?"), "<PRICE>"),
+    (PRICE_RE, "<PRICE>"),
     (re.compile(r"\b\d{1,2}:\d{2}\b"), "<TIME>"),
     (re.compile(r"\d+"), "<NUM>"),
 )

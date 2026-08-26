@@ -33,6 +33,7 @@ def init(
     """Scaffold a new app pack: pages.yml, an example playbook, and an
     example pack macro — all parse-clean, all disabled."""
     from physiclaw.agent.conductor import scaffold
+    from physiclaw.agent.conductor.pages import CHANNEL_APP, THREAD_PAGE
     from physiclaw.agent.conductor.playbook import PlaybookError
 
     try:
@@ -41,9 +42,24 @@ def init(
         exit_error(str(e))
     typer.echo(ok(str(root)))
     typer.echo("Next:")
-    typer.echo("  1. declare pages in pages.yml (physiclaw conductor propose --live)")
-    typer.echo("  2. write pack macros + the playbook, then: physiclaw playbooks check")
-    typer.echo("  3. capture geometry: physiclaw conductor calibrate " + app)
+    if app == CHANNEL_APP:
+        typer.echo(
+            f"  1. anchor the `{THREAD_PAGE}` page on YOUR chat header in pages.yml"
+        )
+        typer.echo("  2. record the send/open gesture paths in macros/*/MACRO.yml")
+        typer.echo("  3. rehearse both (physiclaw macros rehearse is per-user-macro;")
+        typer.echo("     drive them via an armed test playbook), then enable")
+        typer.echo(
+            f"  4. capture geometry: physiclaw conductor calibrate {CHANNEL_APP}"
+        )
+    else:
+        typer.echo(
+            "  1. declare pages in pages.yml (physiclaw conductor propose --live)"
+        )
+        typer.echo(
+            "  2. write pack macros + the playbook, then: physiclaw playbooks check"
+        )
+        typer.echo("  3. capture geometry: physiclaw conductor calibrate " + app)
 
 
 @playbooks_app.command("list")
@@ -100,10 +116,12 @@ def arm(
         exit_error(f"expected <app>/<playbook> (got {ref!r})")
     values = parse_inputs(inputs or [])
     try:
-        spec = program.arm(app, name, values)
+        spec, warnings = program.arm(app, name, values)
     except PlaybookError as e:
         exit_error(str(e))
     typer.echo(ok(f"armed {ref} ({len(spec.nodes)} nodes)"))
+    for w in warnings:
+        typer.echo(warn(w))
     typer.echo("Sticky until `physiclaw playbooks disarm`.")
 
 
