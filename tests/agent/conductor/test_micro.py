@@ -287,3 +287,58 @@ async def test_confirm_reply_revise_is_a_legal_answer() -> None:
     ).run(req)
 
     assert result.outcome is not None and result.outcome.out == "revise"
+
+
+@pytest.mark.asyncio
+async def test_revise_list_row_returns_the_updated_ledger() -> None:
+    import json
+
+    from physiclaw.agent.conductor.micro import REVISE_LIST
+
+    req = build_request(
+        REVISE_LIST,
+        "gate",
+        (),
+        {
+            "ask": "total ¥45, reply ok to pay",
+            "reply": "one egg is enough",
+            "ledger": '[{"query": "eggs", "qty": 2}]',
+        },
+        make_screen(("x", 0.3, 0.5)),
+    )
+    result = await _caller(
+        [
+            '{"reason": "fewer eggs", "answer": "updated", '
+            '"items": [{"query": "eggs", "qty": 1}], "confidence": 0.9}'
+        ]
+    ).run(req)
+
+    assert result.outcome is not None and result.outcome.out == "updated"
+    assert json.loads(result.outcome.payload["ledger"]) == [{"query": "eggs", "qty": 1}]
+
+
+@pytest.mark.asyncio
+async def test_parse_task_list_input_rides_as_json() -> None:
+    # A structured input value must reach the payload as JSON, not a
+    # Python repr — the ledger parser reads it downstream.
+    import json
+
+    from physiclaw.agent.conductor.micro import PARSE_TASK
+
+    req = build_request(
+        PARSE_TASK,
+        "activation",
+        ("demo/shop",),
+        {"menu": "menu"},
+        make_screen(("buy 2 eggs", 0.3, 0.5)),
+    )
+    result = await _caller(
+        [
+            '{"reason": "a purchase list", "answer": "demo/shop", '
+            '"inputs": {"items": [{"query": "eggs", "qty": 2}]}, '
+            '"confidence": 0.9}'
+        ]
+    ).run(req)
+
+    assert result.outcome is not None
+    assert json.loads(result.outcome.payload["items"]) == [{"query": "eggs", "qty": 2}]

@@ -17,6 +17,11 @@ concrete escape arm.
 from dataclasses import dataclass
 
 ESCALATE = "escalate"
+NEXT_ITEM = "next_item"
+
+# The ledger item's field vocabulary — one spelling for the value
+# parser, the `{item.*}` pseudo-payload, and the prompt templates.
+LEDGER_FIELDS = ("query", "qty")
 
 
 @dataclass(frozen=True)
@@ -32,6 +37,13 @@ class CallDecl:
     # The one arm whose SELF-route refreshes the screen between re-asks
     # (the conductor swipes); the parser sanctions self-loops only here.
     reask_arm: str | None = None
+    # Answered by the program itself, never prompted (`micro.py` has no
+    # row); the parser rejects `context:`/`max_visits:` as dead config.
+    deterministic: bool = False
+    # The one arm sanctioned as a BACKWARD edge (the ledger loop): the
+    # acyclic check exempts it, the ledger lint pins it backward, the
+    # runtime routes it — all off THIS field, never a re-derived name.
+    loop_arm: str | None = None
 
     @property
     def escapes(self) -> tuple[str, ...]:
@@ -52,5 +64,17 @@ CALLS: dict[str, CallDecl] = {
         outs=(),  # node-declared; parser enforces `escalate` membership
         payload=(),
         params=("question",),
+    ),
+    # The ledger-loop closer. `next` consumes a pending ledger item per
+    # pass, so the loop terminates by construction. `picked` wires the
+    # body's chosen row label into the ledger (the reconciler matches
+    # cart rows against it). No escalate arm: code that pops a list has
+    # no uncertain outcome.
+    NEXT_ITEM: CallDecl(
+        outs=("next", "done"),
+        payload=(),
+        params=("picked",),
+        deterministic=True,
+        loop_arm="next",
     ),
 }

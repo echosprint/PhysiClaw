@@ -5,7 +5,7 @@ exact field and rule; the graph/money lints are the safety substance."""
 from __future__ import annotations
 
 import pytest
-from conductor_fakes import write_pack
+from conductor_fakes import LEDGERED, write_pack
 
 from physiclaw.agent.conductor import playbook as pb
 from physiclaw.agent.conductor.playbook import PlaybookError
@@ -42,13 +42,13 @@ nodes:
   - id: confirm
     type: CONFIRM
     compose: order-summary
-    message: "已加入购物车，稍后下单"
+    message: "Added to the cart, ordering soon"
   - id: pay
     type: HUMAN_GATE
     gate: payment
     compose: payment-request
-    message: "合计 ¥{gate.total}，回复 好的 支付，或 不用 取消"
-    over_message: "合计 ¥{gate.total}，超出预算 ¥{gate.cap}，回复 好的 支付，或 不用 取消"
+    message: "Total ¥{gate.total}, reply ok to pay, or no to cancel"
+    over_message: "Total ¥{gate.total}, over budget ¥{gate.cap}, reply ok to pay, or no to cancel"
 """
 
 
@@ -263,28 +263,28 @@ def test_payment_leg_must_directly_follow_its_gate() -> None:
     [
         # Asks are REQUIRED — the conductor composes no user-facing
         # prose (only the author knows the user's language).
-        ('    message: "已加入购物车，稍后下单"\n', "", "is required"),
+        ('    message: "Added to the cart, ordering soon"\n', "", "is required"),
         # A payment gate's ask must quote the sheet total…
         (
-            '    message: "合计 ¥{gate.total}，回复 好的 支付，或 不用 取消"\n',
-            '    message: "回复 好的 支付，或 不用 取消"\n',
+            '    message: "Total ¥{gate.total}, reply ok to pay, or no to cancel"\n',
+            '    message: "reply ok to pay, or no to cancel"\n',
             "must quote the sheet",
         ),
         # …and carry the over-cap variant…
         (
-            '    over_message: "合计 ¥{gate.total}，超出预算 ¥{gate.cap}，'
-            '回复 好的 支付，或 不用 取消"\n',
+            '    over_message: "Total ¥{gate.total}, over budget ¥{gate.cap}, '
+            'reply ok to pay, or no to cancel"\n',
             "",
             "needs `over_message`",
         ),
         # …which must disclose the breached budget too.
-        ("超出预算 ¥{gate.cap}，", "超出预算，", "total AND the budget"),
+        (", over budget ¥{gate.cap}", "", "total AND the budget"),
         # over_message is meaningless outside a payment gate.
         (
             "gate: payment\n    compose: payment-request\n"
-            '    message: "合计 ¥{gate.total}，回复 好的 支付，或 不用 取消"',
+            '    message: "Total ¥{gate.total}, reply ok to pay, or no to cancel"',
             "gate: handoff\n    compose: payment-request\n"
-            '    message: "回复 好的 继续，或 不用 取消"',
+            '    message: "reply ok to continue, or no to cancel"',
             "only for `gate: payment`",
         ),
     ],
@@ -294,6 +294,75 @@ def test_ask_template_lints(old, new, fragment) -> None:
 
     with pytest.raises(PlaybookError, match=fragment):
         pb.parse_playbook(_mutate(old, new), "buy", pack)
+
+
+def test_ledger_playbook_parses_with_the_sanctioned_backward_edge() -> None:
+    p = pb.parse_playbook(LEDGERED, "shop", _pack())
+
+    assert p.inputs[0].kind == "list"
+    loop = p.nodes[4]
+    assert loop.call == "next_item" and loop.on == {"next": "search", "done": "fix"}
+    assert type(p.nodes[5]).__name__ == "ReconcileNode" and p.nodes[5].page == "results"
+    assert p.nodes[7].revise == "advance"
+
+
+@pytest.mark.parametrize(
+    "old, new, fragment",
+    [
+        ("kind: list", "kind: tuple", "`kind` must be one of"),
+        # The loop closer must route its `next` arm backward.
+        (
+            "on: {next: search, done: fix}",
+            "on: {next: fix, done: sheet}",
+            "must route BACKWARD",
+        ),
+        # `revise` re-enters THE loop, nothing else.
+        ("revise: advance", "revise: choose", "must target the next_item"),
+        # The ledger JSON is not a template value.
+        ('with: {message: "{item.query}"}', 'with: {message: "{items}"}', "items"),
+        # next_item's pick wiring is required.
+        (
+            '    with: {picked: "{choose.pick}"}\n',
+            "",
+            "requires `with.picked`",
+        ),
+        # A dropped loop strands the list input.
+        (
+            "  - id: advance\n"
+            "    type: DECIDE\n"
+            "    call: next_item\n"
+            '    with: {picked: "{choose.pick}"}\n'
+            "    on: {next: search, done: fix}\n",
+            "",
+            "no next_item",
+        ),
+    ],
+)
+def test_ledger_lints(old, new, fragment) -> None:
+    pack = _pack()
+    assert LEDGERED.count(old) == 1, old
+
+    with pytest.raises(PlaybookError, match=fragment):
+        pb.parse_playbook(LEDGERED.replace(old, new), "shop", pack)
+
+
+def test_two_list_inputs_rejected() -> None:
+    pack = _pack()
+    text = LEDGERED.replace(
+        "mandate:",
+        "  extra:\n    description: another list\n    kind: list\nmandate:",
+    )
+
+    with pytest.raises(PlaybookError, match="at most one `kind: list`"):
+        pb.parse_playbook(text, "shop", pack)
+
+
+def test_reconcile_without_the_loop_rejected() -> None:
+    pack = _pack()
+    text = VALID + "  - id: fix\n    type: RECONCILE\n    page: results\n"
+
+    with pytest.raises(PlaybookError, match="RECONCILE needs the next_item"):
+        pb.parse_playbook(text, "buy", pack)
 
 
 def test_payment_leg_behind_gate_parses() -> None:

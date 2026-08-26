@@ -70,3 +70,66 @@ def write_pack(
     for name, text in (playbooks or {}).items():
         (root / f"{name}.yml").write_text(text, encoding="utf-8")
     return root
+
+
+# The canonical ledger playbook — the full P8 stack (list input,
+# next_item loop, RECONCILE, payment gate with revise) — shared by the
+# parser and walk test files so grammar changes are edited ONCE.
+LEDGERED = """\
+name: shop
+description: shop the list
+inputs:
+  items:
+    description: the buying list
+    kind: list
+mandate:
+  max_amount: 100
+nodes:
+  - id: open
+    type: LEG
+    macro: open-app
+    with: {message: "cart"}
+    verify: home
+  - id: search
+    type: LEG
+    macro: open-app
+    with: {message: "{item.query}"}
+    verify: results
+  - id: choose
+    type: DECIDE
+    call: choose_item
+    with: {criteria: "cheapest {item.query}"}
+    on: {pick: add, scroll: choose, none_fit: escalate, escalate: escalate}
+  - id: add
+    type: LEG
+    macro: add-cart
+    with: {message: "add"}
+    verify: results
+  - id: advance
+    type: DECIDE
+    call: next_item
+    with: {picked: "{choose.pick}"}
+    on: {next: search, done: fix}
+  - id: fix
+    type: RECONCILE
+    page: results
+  - id: sheet
+    type: LEG
+    macro: open-app
+    with: {message: "sheet"}
+    verify: results
+  - id: gate
+    type: HUMAN_GATE
+    gate: payment
+    compose: payment-request
+    message: "List ready, total ¥{gate.total}. Reply ok to pay, or no to cancel."
+    over_message: "Total ¥{gate.total}, over the ¥{gate.cap} budget. Reply ok to pay, or no to cancel."
+    revise: advance
+  - id: pay
+    type: LEG
+    macro: add-cart
+    with: {message: "pay"}
+    enter: results
+    verify: home
+    irreversible: payment
+"""

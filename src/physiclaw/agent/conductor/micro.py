@@ -1,11 +1,13 @@
 """Micro-calls — the conductor's scoped decision calls.
 
-Four call types ride one channel: the playbook-authorable `choose_item`
-and `decide` (vocabulary declared in `calls.py`), plus two
+Five call types ride one channel: the playbook-authorable `choose_item`
+and `decide` (vocabulary declared in `calls.py`), plus three
 conductor-internal calls playbooks can never name — `parse_task`
-(activation: does the user's thread assign a task a playbook covers?)
-and `confirm_reply` (the HUMAN_GATE's LLM tier when the word lists can't
-classify a reply). Per-call shape lives in ONE table (`_SPECS`) — role
+(activation: does the user's thread assign a task a playbook covers?),
+`confirm_reply` (the HUMAN_GATE's LLM tier when the word lists can't
+classify a reply), and `revise_list` (a "yes, but change it" reply →
+the updated buying list). `next_item` is deterministic and never
+prompted — no row here. Per-call shape lives in ONE table (`_SPECS`) — role
 sentence, answer space, prompt body, outcome mapping — never as boolean
 proxies scattered through the module.
 
@@ -46,6 +48,7 @@ Candidates are content-keyed (the row's own label — never A/B/C) and
 shuffled, so position bias cannot masquerade as preference.
 """
 
+import json
 import logging
 import random
 import time
@@ -70,8 +73,18 @@ MAX_CANDIDATES = 40
 # `call` against CALLS alone).
 PARSE_TASK = "parse_task"
 CONFIRM_REPLY = "confirm_reply"
+REVISE_LIST = "revise_list"
 NOT_A_TASK = "not_a_task"
 CONFIRM_OUTS = ("confirm", "deny", "revise", "unclear")
+REVISE_OUTS = ("updated", "unclear")
+
+# The two halves of the list-input handshake, ONE spelling each: the
+# marker `_menu` prints beside a `kind: list` input and this module's
+# parse_task prompt interprets, and the ledger-item JSON template both
+# list prompts show (fields = calls.LEDGER_FIELDS). `{{`/`}}` because
+# answer_spec strings go through .format().
+LIST_INPUT_MARK = "(list)"
+_ITEM_JSON = '{{"query": "<item>", "qty": <count>}}'
 
 
 @dataclass(frozen=True)
@@ -378,10 +391,10 @@ def _parse_task_space(req: DecisionRequest) -> tuple[str, ...]:
     return req.outs + (NOT_A_TASK,)
 
 
-def _confirm_space(req: DecisionRequest) -> tuple[str, ...]:
-    # Fixed whole: the gate verdicts are nobody's to vary (callers pass
-    # empty outs).
-    return CONFIRM_OUTS
+def _fixed(outs: tuple[str, ...]) -> "Callable[[DecisionRequest], tuple[str, ...]]":
+    """An answer space fixed whole in the row — nobody's to vary, and
+    callers pass empty outs."""
+    return lambda req: outs
 
 
 def _choose_outcome(
@@ -401,12 +414,34 @@ def _parse_task_outcome(
     req: DecisionRequest, answer: str, reason: str, confidence: float, obj: dict
 ) -> MicroOutcome:
     raw = obj.get("inputs")
-    inputs = {str(k): str(v) for k, v in raw.items()} if isinstance(raw, dict) else {}
+    # Payload values are strings by contract; a structured value (a
+    # `kind: list` input's item array) rides as ITS JSON — str() would
+    # produce a Python repr no ledger parser accepts.
+    inputs: dict[str, str] = {}
+    if isinstance(raw, dict):
+        inputs = {
+            str(k): (v if isinstance(v, str) else json.dumps(v, ensure_ascii=False))
+            for k, v in raw.items()
+        }
     return MicroOutcome(
         out=answer,
         reason=reason,
         confidence=confidence,
         payload=None if answer == NOT_A_TASK else inputs,
+    )
+
+
+def _revise_outcome(
+    req: DecisionRequest, answer: str, reason: str, confidence: float, obj: dict
+) -> MicroOutcome:
+    raw = obj.get("items")
+    payload = None
+    if answer == "updated" and isinstance(raw, list):
+        # Shape validation (parse_ledger) happens at the consumer — the
+        # program hands over on an unusable list, escalation as default.
+        payload = {"ledger": json.dumps(raw, ensure_ascii=False)}
+    return MicroOutcome(
+        out=answer, reason=reason, confidence=confidence, payload=payload
     )
 
 
@@ -448,7 +483,7 @@ _SPECS: dict[str, _CallSpec] = {
             "a pending action the assistant just asked them about."
         ),
         material="none",
-        answer_space=_confirm_space,
+        answer_space=_fixed(CONFIRM_OUTS),
         answer_spec=(
             '"answer" is "confirm" ONLY if the reply approves the asked '
             'action AS-IS; "deny" if it clearly rejects or cancels it; '
@@ -476,13 +511,37 @@ _SPECS: dict[str, _CallSpec] = {
             "for greetings, chat, questions, or anything no playbook "
             'covers (when unsure, "not_a_task"). When you answer with a '
             'playbook, ALSO add a fourth field "inputs": an object filling '
-            "that playbook's declared inputs from the user's own words."
+            "that playbook's declared inputs from the user's own words. "
+            f"An input marked {LIST_INPUT_MARK} takes a JSON array of "
+            f"{_ITEM_JSON} objects."
         ),
         user_parts=lambda req: [
             req.args.get("menu", ""),
             _data_block("The user's message thread", req.listing),
         ],
         to_outcome=_parse_task_outcome,
+    ),
+    REVISE_LIST: _CallSpec(
+        role=(
+            "You update a shopping list from the user's instant-message "
+            "reply revising a pending order."
+        ),
+        material="none",
+        answer_space=_fixed(REVISE_OUTS),
+        answer_spec=(
+            '"answer" is "updated" when the reply changes the list — ALSO '
+            'add a fourth field "items": the FULL updated list as a JSON '
+            f"array of {_ITEM_JSON}, echoing "
+            "unchanged items VERBATIM and using qty 0 for a removed item; "
+            '"unclear" when the reply does not describe a change to the '
+            "list."
+        ),
+        user_parts=lambda req: [
+            f"The assistant asked: {req.args.get('ask', '')}",
+            _data_block("The current list (JSON)", req.args.get("ledger", "")),
+            _data_block("The user's revision reply", req.args.get("reply", "")),
+        ],
+        to_outcome=_revise_outcome,
     ),
 }
 

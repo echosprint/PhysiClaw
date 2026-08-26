@@ -75,15 +75,20 @@ inputs:
     description: EDIT ME — what this value means
     example: "hello"
 
-# Node types (≤ {max_nodes} nodes, forward-only; a DECIDE may self-loop
-# only on its call's re-ask arm — choose_item's `scroll`, the conductor
-# swipes between re-asks — bounded by max_visits):
+# Node types (≤ {max_nodes} nodes, forward-only; the two sanctioned
+# loops: a DECIDE self-routing its call's re-ask arm — choose_item's
+# `scroll`, bounded by max_visits — and next_item's backward `next`
+# arm, bounded by the ledger):
 #   LEG        — run one of THIS pack's macros ({app}/macros/<name>/),
 #                verified against a declared page (`verify:`)
 #   DECIDE     — one scoped decision call ({calls});
 #                `on:` must route EVERY out; outputs wire forward as
 #                {{node.field}}. `context: [memory.<slug>]` shares ONLY
 #                the `## <slug>` section of memory.md (fail-closed)
+#   RECONCILE  — converge the cart (observed) on the `kind: list`
+#                ledger input (desired), in code: quantities via the
+#                row's +/- steppers, a missing item re-enters the
+#                next_item loop, unclaimed cart rows are left alone
 #   CONFIRM    — send `message:` to the user (the EXACT text sent —
 #                write it in the user's language), then park
 #   HUMAN_GATE — send `message:`, then hold: continue only on a
@@ -94,7 +99,9 @@ inputs:
 #                `over_message:` (sent when the total exceeds the cap)
 #                must quote both. Optional `return: <macro>` runs after
 #                the confirm to get back into the app (the ask left it
-#                for the IM thread)
+#                for the IM thread); optional `revise: <next_item id>`
+#                turns a "yes, but change it" reply into a list rewrite
+#                and a fresh ask instead of a hand-over
 # A LEG doing real damage carries `irreversible: <{classes}>`;
 # `payment` must sit behind a HUMAN_GATE and requires a `mandate:`.
 nodes:
@@ -132,7 +139,7 @@ macros and pages (plus the reserved `ios.*` / `channel.*` built-ins);
 every DECIDE out is routed; `{{name}}` refs name declared inputs and
 `{{node.field}}` refs name EARLIER decide outputs; graphs are
 forward-only except a DECIDE's bounded re-ask self-loop
-(choose_item's `scroll`); `irreversible:
+(choose_item's `scroll`) and next_item's ledger loop; `irreversible:
 payment` nodes sit behind a HUMAN_GATE and require a `mandate:`.
 
 Limits: ≤ {max_nodes} nodes, ≤ {max_inputs} inputs per playbook.

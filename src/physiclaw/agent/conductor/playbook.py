@@ -13,15 +13,26 @@ macro, a dangling page id, or an unrouted decision.
 The grammar, top-down::
 
     playbook  ::= name description [enabled] [inputs] [mandate] nodes
-    inputs    ::= {id: {description, [default], [example]}}   # ≤ MAX_INPUTS
+    inputs    ::= {id: {description, [default], [example], [kind]}}  # ≤ MAX_INPUTS
     mandate   ::= {max_amount, [expires_minutes]}
     nodes     ::= [node, ...]                                 # 1–MAX_NODES
     node      ::= id "LEG" macro [with] [enter] verify
                   [compensate] [irreversible]
                 | id "DECIDE" call [with] [context] [outs] on [max_visits]
+                | id "RECONCILE" page
                 | id "CONFIRM" compose [with] message
-                | id "HUMAN_GATE" gate compose [with] message [over_message] [return]
+                | id "HUMAN_GATE" gate compose [with] message [over_message]
+                  [return] [revise]
     on        ::= {out: node-id | "escalate"}                 # total over outs
+
+The ledger stack (`kind: list` input + `next_item` loop + RECONCILE +
+gate `revise:`) is one unit — `_check_ledger` holds its pieces
+together: the ONE list input is the buying list (desired state), the
+`next_item` DECIDE closes the shopping loop over it (its `next` arm is
+the one sanctioned backward edge; body nodes read loop-scoped
+`{item.query}`/`{item.qty}`), RECONCILE diffs the cart (observed state)
+against the ledger in code, and a payment gate's `revise:` routes a
+"yes, but change it" reply back into the loop instead of handing over.
 
 Control flow: non-DECIDE nodes fall through to the next node in list
 order (past the last node = done); DECIDE routes every one of its outs
@@ -31,10 +42,12 @@ waits for a reply, and a micro-call judges whether the reply confirms.
 Unconfirmed → wait and check again, GATE_MAX_CHECKS times in all; still
 unconfirmed → the session is done and parks for the next wake-up, the
 regular-session contract. `escalate` is a reserved target — the
-conductor goes quiet and the model takes over. The only legal cycle is
-a DECIDE self-routing its call's re-ask arm (choose_item's `scroll` —
-the conductor swipes between re-asks, bounded by `max_visits`);
-anything wider is the model's job, not a playbook's.
+conductor goes quiet and the model takes over. The only legal cycles
+are a DECIDE self-routing its call's re-ask arm (choose_item's
+`scroll` — the conductor swipes between re-asks, bounded by
+`max_visits`) and the ledger loop's declared backward arm
+(`CallDecl.loop_arm`, terminating by item consumption); anything wider
+is the model's job, not a playbook's.
 
 Wiring is by placeholder: `{name}` reads a declared input, `{node.field}`
 reads an EARLIER decide node's declared payload field. Dotted refs are
@@ -52,7 +65,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from physiclaw.agent.conductor import _spec
-from physiclaw.agent.conductor.calls import CALLS, ESCALATE
+from physiclaw.agent.conductor.calls import CALLS, ESCALATE, LEDGER_FIELDS, NEXT_ITEM
 from physiclaw.agent.conductor.pages import (
     PAGES_FILENAME,
     RESERVED_APPS,
@@ -70,9 +83,12 @@ MAX_INPUTS = 8
 MAX_VISITS_CAP = 10
 DEFAULT_MAX_VISITS = 3
 # How many reply-check rounds a HUMAN_GATE gets before the session parks
-# for the next wake-up. Fixed, not authorable: the patience budget is the
-# conductor's contract with the user, not a per-playbook knob.
+# for the next wake-up, and how many "yes, but change it" revision cycles
+# one gate absorbs before the model takes over. Fixed, not authorable:
+# the patience budget is the conductor's contract with the user, not a
+# per-playbook knob.
 GATE_MAX_CHECKS = 3
+GATE_MAX_REVISIONS = 2
 
 # `{name}` or `{node.field}` — the playbook's own ref grammar. Dotted
 # refs are deliberately NOT part of the macro template layer (its
@@ -95,16 +111,18 @@ CONTEXT_RE = re.compile(rf"^({'|'.join(CONTEXT_ROOTS)})\.[a-z][a-z0-9_]*$")
 RESERVED_TARGETS = frozenset({ESCALATE})
 
 _TOP_KEYS = {"name", "description", "enabled", "inputs", "mandate", "nodes"}
-_INPUT_KEYS = {"description", "default", "example"}
+_INPUT_KEYS = {"description", "default", "example", "kind"}
+_INPUT_KINDS = ("scalar", "list")
 _MANDATE_KEYS = {"max_amount", "expires_minutes"}
 _NODE_COMMON = {"id", "type"}
 _NODE_KEYS = {
     "LEG": _NODE_COMMON
     | {"macro", "with", "enter", "verify", "compensate", "irreversible"},
     "DECIDE": _NODE_COMMON | {"call", "with", "context", "outs", "on", "max_visits"},
+    "RECONCILE": _NODE_COMMON | {"page"},
     "CONFIRM": _NODE_COMMON | {"compose", "with", "message"},
     "HUMAN_GATE": _NODE_COMMON
-    | {"gate", "compose", "with", "return", "message", "over_message"},
+    | {"gate", "compose", "with", "return", "message", "over_message", "revise"},
 }
 
 PACK_MACROS_DIRNAME = "macros"
@@ -137,6 +155,11 @@ class PlaybookInput:
     description: str
     default: str | None = None  # present → optional
     example: str | None = None
+    # "scalar" (a template string) or "list" — the buying-list ledger:
+    # its VALUE is a JSON array string ([{query, qty}], validated at
+    # arm/activation), consumed by the next_item loop as {item.*} refs,
+    # never referenced as a bare {name} template.
+    kind: str = "scalar"
 
     @property
     def required(self) -> bool:
@@ -172,6 +195,19 @@ class DecideNode:
     outs: tuple[str, ...]  # resolved: fixed for choose_item, authored for decide
     on: dict[str, str]  # out → node id | reserved target
     max_visits: int
+
+
+@dataclass(frozen=True)
+class ReconcileNode:
+    """Desired-state convergence, zero LLM: on the cart page, diff the
+    cart rows (observed) against the ledger (desired) in code and act —
+    quantity via the row's +/− steppers, removal is minus-to-zero, a
+    missing picked item re-enters the shopping loop. Cart rows matching
+    no ledger item are LEFT ALONE: they may be the user's own, and the
+    conductor never destroys what it cannot attribute to itself."""
+
+    id: str
+    page: str  # this pack's cart page — re-read after every action
 
 
 @dataclass(frozen=True)
@@ -212,9 +248,14 @@ class HumanGateNode:
     # `enter:` judges the landing. None = the walk tries the next node
     # directly and hands over if its enter check fails.
     return_macro: str | None
+    # Ledger playbooks only: a "yes, but change it" reply routes HERE
+    # (linted: the next_item node) after revise_list updates the ledger
+    # — shop the additions, reconcile the changes, and re-ask with the
+    # fresh total. None = a revise hands over (non-list behavior).
+    revise: str | None
 
 
-Node = LegNode | DecideNode | ConfirmNode | HumanGateNode
+Node = LegNode | DecideNode | ReconcileNode | ConfirmNode | HumanGateNode
 
 
 @dataclass(frozen=True)
@@ -230,6 +271,26 @@ class Playbook:
     inputs: tuple[PlaybookInput, ...]
     mandate: Mandate | None
     nodes: tuple[Node, ...]
+
+    # The ledger stack's two anchors, derived HERE so lint (playbook)
+    # and runtime (program) can never disagree on what counts as "the"
+    # ledger input or "the" loop — `_check_ledger` guarantees at most
+    # one of each.
+
+    @property
+    def ledger_input(self) -> PlaybookInput | None:
+        return next((i for i in self.inputs if i.kind == "list"), None)
+
+    @property
+    def loop(self) -> DecideNode | None:
+        return next(
+            (
+                n
+                for n in self.nodes
+                if isinstance(n, DecideNode) and CALLS[n.call].loop_arm is not None
+            ),
+            None,
+        )
 
 
 @dataclass(frozen=True)
@@ -347,14 +408,17 @@ def parse_playbook(text: str, name: str, pack: Pack) -> Playbook:
         raise PlaybookError("`enabled` must be true or false")
 
     inputs = _parse_inputs(data.get("inputs", {}))
-    input_names = {i.name for i in inputs}
-    mandate = (
-        _parse_mandate(data["mandate"], input_names) if "mandate" in data else None
-    )
-    nodes = _parse_nodes(data.get("nodes"), input_names, pack)
+    # Refs resolve SCALAR inputs only: a `kind: list` value is a JSON
+    # ledger, consumed by the next_item loop as {item.*} — splicing it
+    # into a template would paste raw JSON into a gesture argument.
+    ref_names = {i.name for i in inputs if i.kind == "scalar"}
+    has_ledger = any(i.kind == "list" for i in inputs)
+    mandate = _parse_mandate(data["mandate"], ref_names) if "mandate" in data else None
+    nodes = _parse_nodes(data.get("nodes"), ref_names, pack, has_ledger=has_ledger)
     ids = {n.id: i for i, n in enumerate(nodes)}
     _check_graph(nodes, ids)
     _check_money(nodes, ids, mandate)
+    _check_ledger(nodes, ids, inputs)
     return Playbook(
         app=pack.app,
         name=name,
@@ -383,6 +447,12 @@ def _parse_inputs(raw: Any) -> tuple[PlaybookInput, ...]:
         unknown = sorted(set(spec.keys()) - _INPUT_KEYS)
         if unknown:
             raise PlaybookError(f"input {name!r}: unknown key(s): {', '.join(unknown)}")
+        kind = spec.get("kind", "scalar")
+        if kind not in _INPUT_KINDS:
+            raise PlaybookError(
+                f"input {name!r}: `kind` must be one of {', '.join(_INPUT_KINDS)} "
+                f"(got {kind!r})"
+            )
         out.append(
             PlaybookInput(
                 name=name,
@@ -391,6 +461,7 @@ def _parse_inputs(raw: Any) -> tuple[PlaybookInput, ...]:
                 ),
                 default=_opt_prose(spec.get("default"), f"input {name!r}: `default`"),
                 example=_opt_prose(spec.get("example"), f"input {name!r}: `example`"),
+                kind=kind,
             )
         )
     return tuple(out)
@@ -434,15 +505,24 @@ def _parse_mandate(raw: Any, input_names: set[str]) -> Mandate:
 # ---------- nodes ----------
 
 
-def _parse_nodes(raw: Any, input_names: set[str], pack: Pack) -> list[Node]:
+def _parse_nodes(
+    raw: Any, input_names: set[str], pack: Pack, *, has_ledger: bool
+) -> list[Node]:
     if not isinstance(raw, list) or not raw:
         raise PlaybookError("`nodes` must be a non-empty list")
     if len(raw) > MAX_NODES:
         raise PlaybookError(f"too many nodes ({len(raw)} > {MAX_NODES})")
     seen: dict[str, int] = {}
     # Grows as the single pass advances, so `{node.field}` refs are
-    # defined-before-use by construction (list order).
-    payload_so_far: dict[str, tuple[str, ...]] = {}
+    # defined-before-use by construction (list order). With a ledger,
+    # the loop-scoped `{item.*}` refs are available everywhere as a
+    # pseudo-payload (the loop closer sits AFTER the body in list
+    # order, so per-body scoping cannot ride the single pass); a node
+    # literally named `item` would be shadowed — both at parse and at
+    # fill, consistently.
+    payload_so_far: dict[str, tuple[str, ...]] = (
+        {"item": LEDGER_FIELDS} if has_ledger else {}
+    )
     out: list[Node] = []
     for i, node in enumerate(raw, start=1):
         parsed = _parse_node(i, node, input_names, pack, seen, payload_so_far)
@@ -499,6 +579,9 @@ def _parse_node(
         return _parse_leg(where, nid, node, args, pack)
     if ntype == "DECIDE":
         return _parse_decide(where, nid, node, args, input_names)
+    if ntype == "RECONCILE":
+        page = _page_ref(node.get("page"), f"{where}: `page`", pack, own_pack_only=True)
+        return ReconcileNode(id=nid, page=page)
     compose = _require_str(node.get("compose"), f"{where}: `compose`")
     check_name(compose, f"{where}: `compose`")
     if ntype == "CONFIRM":
@@ -540,6 +623,10 @@ def _parse_node(
     elif over is not None:
         raise PlaybookError(f"{where}: `over_message` is only for `gate: payment`")
     return_macro = _optional_pack_macro(node, "return", where, pack)
+    revise = node.get("revise")
+    if revise is not None:
+        revise = _require_str(revise, f"{where}: `revise`")
+        check_name(revise, f"{where}: `revise`")
     return HumanGateNode(
         id=nid,
         gate=gate,
@@ -548,6 +635,7 @@ def _parse_node(
         message=message,
         over_message=over,
         return_macro=return_macro,
+        revise=revise,
     )
 
 
@@ -651,6 +739,11 @@ def _parse_decide(
             f"{where}: `call` must be one of {', '.join(sorted(CALLS))} (got {call!r})"
         )
     decl = CALLS[call]
+    if decl.deterministic and ("context" in node or "max_visits" in node):
+        raise PlaybookError(
+            f"{where}: {call} is deterministic — `context`/`max_visits` "
+            "would be dead config (no prompt, no visit budget)"
+        )
     unknown_params = sorted(set(args.keys()) - set(decl.params))
     if unknown_params:
         raise PlaybookError(
@@ -761,16 +854,24 @@ def _parse_decide(
     )
 
 
-def _page_ref(value: Any, where: str, pack: Pack) -> str:
+def _page_ref(
+    value: Any, where: str, pack: Pack, *, own_pack_only: bool = False
+) -> str:
     """A page reference: bare `<page>` (this pack) or `<app>.<page>` where
     the app is a reserved built-in namespace. Own-pack pages must be
     declared; reserved pages resolve against built-ins later, so only the
-    namespace is checked here."""
+    namespace is checked here. `own_pack_only` closes the reserved door
+    (RECONCILE acts on the page — a built-in it cannot act on is out)."""
     ref = _require_str(value, where)
     if "." in ref:
         app, _, page = ref.partition(".")
         if app == pack.app:
             ref = page  # normalize the self-qualified spelling
+        elif own_pack_only:
+            raise PlaybookError(
+                f"{where}: must be THIS pack's page — the node re-reads "
+                "and acts on it, so a reserved namespace cannot serve"
+            )
         elif app in RESERVED_APPS:
             check_name(page, f"{where}: page")
             return ref
@@ -945,21 +1046,31 @@ def _check_graph(nodes: list[Node], ids: dict[str, int]) -> None:
 
 
 def _check_acyclic(nodes: list[Node], ids: dict[str, int]) -> None:
-    """DFS cycle detection, self-edges excluded (the one sanctioned,
-    bounded loop). Wider cycles are the model's job."""
+    """DFS cycle detection. Excluded as sanctioned: self-edges (the
+    bounded re-ask loop) and next_item's `next` arm — the ledger loop,
+    which terminates by construction (each `next` consumes a pending
+    item; `_check_ledger` pins it backward). Wider cycles are the
+    model's job."""
     visiting: set[str] = set()
     done: set[str] = set()
 
     def visit(nid: str) -> None:
         visiting.add(nid)
+        node = nodes[ids[nid]]
+        loop_edge = None
+        if isinstance(node, DecideNode):
+            arm = CALLS[node.call].loop_arm
+            if arm is not None:
+                loop_edge = node.on.get(arm)
         for target in _successors(nodes, ids[nid]):
-            if target == nid:
+            if target == nid or target == loop_edge:
                 continue
             if target in visiting:
                 raise PlaybookError(
                     f"cycle via {nid!r} → {target!r} — playbooks are "
                     "forward-only except a DECIDE's bounded re-ask "
-                    "self-loop; wider loops belong to the model"
+                    "self-loop and next_item's ledger loop; wider loops "
+                    "belong to the model"
                 )
             if target not in done:
                 visit(target)
@@ -1020,3 +1131,71 @@ def _check_money(
         passed = gated or isinstance(node, HumanGateNode)
         for target in _successors(nodes, ids[nid]):
             stack.append((target, passed))
+
+
+def _check_ledger(
+    nodes: list[Node], ids: dict[str, int], inputs: tuple[PlaybookInput, ...]
+) -> None:
+    """The ledger stack is all-or-nothing: the ONE `kind: list` input,
+    the ONE next_item loop consuming it, and the optional RECONCILE /
+    gate `revise:` that both lean on the loop. Half a stack is a walk
+    that stalls at runtime — rejected here instead."""
+    list_inputs = [i.name for i in inputs if i.kind == "list"]
+    if len(list_inputs) > 1:
+        raise PlaybookError(
+            f"at most one `kind: list` input (the ledger) — got: "
+            f"{', '.join(list_inputs)}"
+        )
+    loops = [
+        n
+        for n in nodes
+        if isinstance(n, DecideNode) and CALLS[n.call].loop_arm is not None
+    ]
+    if len(loops) > 1:
+        raise PlaybookError(
+            f"at most one {NEXT_ITEM} node — RECONCILE re-shop and gate "
+            f"`revise:` both route through THE loop"
+        )
+    if loops and not list_inputs:
+        raise PlaybookError(
+            f"node {loops[0].id!r}: {NEXT_ITEM} walks the ledger — declare "
+            "a `kind: list` input"
+        )
+    if list_inputs and not loops:
+        raise PlaybookError(
+            f"input {list_inputs[0]!r} is `kind: list` but no {NEXT_ITEM} "
+            "node consumes it"
+        )
+    if not loops:
+        stranded = next((n for n in nodes if isinstance(n, ReconcileNode)), None)
+        if stranded is not None:
+            raise PlaybookError(
+                f"node {stranded.id!r}: RECONCILE needs the {NEXT_ITEM} loop "
+                "— a missing item re-enters it to be shopped again"
+            )
+    else:
+        loop = loops[0]
+        idx = ids[loop.id]
+        arm = CALLS[loop.call].loop_arm
+        assert arm is not None
+        for out, target in loop.on.items():
+            if out == arm:
+                if target == ESCALATE or ids[target] >= idx:
+                    raise PlaybookError(
+                        f"node {loop.id!r}: `on.{out}` must route BACKWARD "
+                        "to the loop body head (the closer sits at the "
+                        "loop's bottom)"
+                    )
+            elif target != ESCALATE and ids[target] <= idx:
+                raise PlaybookError(
+                    f"node {loop.id!r}: `on.{out}` must route FORWARD — "
+                    "the ledger is spent"
+                )
+    for n in nodes:
+        if isinstance(n, HumanGateNode) and n.revise is not None:
+            if not loops or n.revise != loops[0].id:
+                raise PlaybookError(
+                    f"node {n.id!r}: `revise` must target the {NEXT_ITEM} "
+                    "node — a revision re-enters the loop for the added "
+                    "items, then reconciles the rest"
+                )

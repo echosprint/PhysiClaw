@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from conductor_fakes import PACK_MACRO, make_screen, write_pack
+from conductor_fakes import LEDGERED, PACK_MACRO, make_screen, write_pack
 
 from physiclaw.agent.conductor import program
 from physiclaw.agent.conductor.playbook import PlaybookError
@@ -818,3 +818,311 @@ def test_memory_context_slices_fail_closed_with_token_match() -> None:
 
     unstructured = "只买伊利，不要临期"
     assert program.memory_sections(unstructured, ["shopping_prefs"]) == ""
+
+
+# ---------- the ledger: loop, reconcile, revise ----------
+
+
+LEDGER_ITEMS = '[{"query": "eggs", "qty": 2}, {"query": "chips", "qty": 1}]'
+
+PRODUCTS = make_screen(
+    ("综合", 0.5, 0.1), ("farm eggs", 0.5, 0.3), ("lays chips", 0.5, 0.4)
+).text
+
+
+def _cart_screen(*items: tuple[str, int]) -> str:
+    """A cart listing in the real layout: per item a far-left selection
+    CHECKBOX icon, the label, then the qty numeral flanked by the two
+    stepper ICONS — `_row_qty` must attribute minus/plus to the flanking
+    pair, never to the checkbox. Anchored on 综合 so it matches page
+    `results`."""
+    from physiclaw.common.listing import Element, Screen, format_elements
+
+    els = [
+        Element(id=0, kind="text", label="综合", bbox=(0.45, 0.06, 0.55, 0.1), conf=0.9)
+    ]
+    y = 0.3
+    for label, qty in items:
+        els.append(
+            Element(
+                id=len(els),
+                kind="icon",  # the selection checkbox — NOT a stepper
+                label="",
+                bbox=(0.01, y - 0.015, 0.04, y + 0.015),
+                conf=0.9,
+            )
+        )
+        els.append(
+            Element(
+                id=len(els),
+                kind="text",
+                label=label,
+                bbox=(0.06, y - 0.02, 0.45, y + 0.02),
+                conf=0.9,
+            )
+        )
+        els.append(
+            Element(
+                id=len(els),
+                kind="icon",
+                label="",
+                bbox=(0.6, y - 0.015, 0.65, y + 0.015),
+                conf=0.9,
+            )
+        )
+        els.append(
+            Element(
+                id=len(els),
+                kind="text",
+                label=str(qty),
+                bbox=(0.68, y - 0.015, 0.72, y + 0.015),
+                conf=0.9,
+            )
+        )
+        els.append(
+            Element(
+                id=len(els),
+                kind="icon",
+                label="",
+                bbox=(0.75, y - 0.015, 0.8, y + 0.015),
+                conf=0.9,
+            )
+        )
+        y += 0.1
+    return Screen.read(format_elements(els)).text
+
+
+def _arm_ledger(items: str = LEDGER_ITEMS):
+    _write_channel()
+    write_pack(playbooks={"shop": LEDGERED})
+    program.arm("demo", "shop", {"items": items})
+    p = program.load_armed(program.load_channel())
+    assert p is not None and p.channel is not None
+    return p
+
+
+def _shop_item(p, h, req, label: str):
+    """Resolve one choose_item pick and drive tap + add-cart; returns
+    the step after the loop closer routed (next search, or rec-peek)."""
+    from physiclaw.agent.conductor.micro import MicroOutcome
+
+    cand = next(c for c in req.candidates if c.key == label)
+    tap = p.resolve(MicroOutcome(out="pick", reason="r", confidence=0.9, picked=cand))
+    _feed(h, tap, PRODUCTS)
+    add = p.advance(h)
+    assert add.tool_calls[1].arguments["name"] == "demo/add-cart"
+    _feed(h, add, PRODUCTS)
+    return p.advance(h)
+
+
+def _to_reconcile(p):
+    """Drive a fresh ledger walk to the reconcile peek; returns (h, peek)."""
+    from physiclaw.agent.conductor.micro import DecisionRequest
+
+    h = _history()
+    _feed(h, p.advance(h), ELSEWHERE)
+    _feed(h, p.advance(h), HOME)  # leg open
+    search = p.advance(h)
+    assert search.tool_calls[1].arguments["inputs"]["message"] == "eggs"
+    _feed(h, search, PRODUCTS)
+    req = p.advance(h)
+    assert isinstance(req, DecisionRequest)
+    step = _shop_item(p, h, req, "farm eggs")
+    # The sanctioned backward edge: the loop re-enters `search`.
+    assert step.tool_calls[1].arguments["inputs"]["message"] == "chips"
+    _feed(h, step, PRODUCTS)
+    req2 = p.advance(h)
+    peek = _shop_item(p, h, req2, "lays chips")
+    assert peek.tool_names() == ["note", "peek"]  # ledger spent → reconcile
+    return h, peek
+
+
+def _at_ledger_gate():
+    """A converged cart driven to the gate's sent ask."""
+    p = _arm_ledger()
+    h, peek = _to_reconcile(p)
+    _feed(h, peek, _cart_screen(("farm eggs", 2), ("lays chips", 1)))
+    sheet = p.advance(h)  # converged → the to-sheet leg
+    assert sheet.tool_calls[1].arguments["inputs"]["message"] == "sheet"
+    _feed(h, sheet, _sheet())
+    send = p.advance(h)
+    assert send.tool_calls[1].arguments["name"] == "channel/send"
+    return p, h, send
+
+
+def test_ledger_walk_shops_reconciles_and_asks() -> None:
+    p, _, send = _at_ledger_gate()
+
+    ask = send.tool_calls[1].arguments["inputs"]["message"]
+    assert "¥45" in ask and "ok" in ask
+    assert [it.status for it in p._ledger] == ["picked", "picked"]
+    assert p._ledger[0].label == "farm eggs"
+
+
+def test_reconcile_steps_quantity_to_the_list() -> None:
+    p = _arm_ledger()
+    h, peek = _to_reconcile(p)
+
+    _feed(h, peek, _cart_screen(("farm eggs", 1), ("lays chips", 1)))  # egg short
+    tap = p.advance(h)
+    assert tap.tool_names() == ["note", "tap"]
+    assert tap.tool_calls[1].arguments["bbox"][0] > 0.7  # the PLUS (right) icon
+
+    _feed(h, tap, _cart_screen(("farm eggs", 2), ("lays chips", 1)))
+    nxt = p.advance(h)  # converged on the tap's own result screen
+    assert nxt.tool_calls[1].arguments["inputs"]["message"] == "sheet"
+
+
+def test_reconcile_missing_item_reshops_it() -> None:
+    p = _arm_ledger()
+    h, peek = _to_reconcile(p)
+
+    _feed(h, peek, _cart_screen(("farm eggs", 2)))  # 薯片 vanished
+    step = p.advance(h)
+
+    # Back into the loop BODY for that item — a fresh search, not a tap.
+    assert step.tool_calls[1].arguments["inputs"]["message"] == "chips"
+    assert p._ledger[1].status == "pending"
+
+
+def test_gate_revise_rewrites_the_ledger_and_reasks() -> None:
+    from physiclaw.agent.conductor.micro import (
+        CONFIRM_REPLY,
+        REVISE_LIST,
+        DecisionRequest,
+        MicroOutcome,
+    )
+
+    p, h, send = _at_ledger_gate()
+
+    req = _reply_arrives(p, h, send, "ok, but one egg is enough")
+    assert isinstance(req, DecisionRequest) and req.call == CONFIRM_REPLY
+    req2 = p.resolve(MicroOutcome(out="revise", reason="fewer eggs", confidence=0.9))
+    assert isinstance(req2, DecisionRequest) and req2.call == REVISE_LIST
+    assert "eggs" in req2.args["ledger"]
+
+    step = p.resolve(
+        MicroOutcome(
+            out="updated",
+            reason="one egg",
+            confidence=0.9,
+            payload={
+                "ledger": '[{"query": "eggs", "qty": 1}, {"query": "chips", "qty": 1}]'
+            },
+        )
+    )
+    # Quantity-only change: nothing pending, straight back to reconcile.
+    assert step.tool_names() == ["note", "peek"]
+    assert p._gate.consented is None  # the old ask no longer covers the order
+
+    _feed(h, step, _cart_screen(("farm eggs", 2), ("lays chips", 1)))
+    tap = p.advance(h)
+    # The MINUS: the icon flanking the numeral — NOT the far-left checkbox.
+    assert 0.5 < tap.tool_calls[1].arguments["bbox"][0] < 0.7
+    _feed(h, tap, _cart_screen(("farm eggs", 1), ("lays chips", 1)))
+    sheet = p.advance(h)
+    _feed(h, sheet, _sheet("¥30"))
+    resend = p.advance(h)
+
+    ask = resend.tool_calls[1].arguments["inputs"]["message"]
+    assert "¥30" in ask  # fresh consent binds the NEW total
+
+
+def test_gate_revise_added_item_reenters_the_loop() -> None:
+    from physiclaw.agent.conductor.micro import MicroOutcome
+
+    p, h, send = _at_ledger_gate()
+    _reply_arrives(p, h, send, "ok, and add a bottle of oil")
+    p.resolve(MicroOutcome(out="revise", reason="add oil", confidence=0.9))
+
+    step = p.resolve(
+        MicroOutcome(
+            out="updated",
+            reason="r",
+            confidence=0.9,
+            payload={
+                "ledger": '[{"query": "eggs", "qty": 2}, '
+                '{"query": "chips", "qty": 1}, {"query": "oil", "qty": 1}]'
+            },
+        )
+    )
+
+    # The new item is pending → the loop re-enters `search` for it.
+    assert step.tool_calls[1].arguments["inputs"]["message"] == "oil"
+    assert [it.qty for it in p._ledger] == [2, 1, 1]
+
+
+def test_gate_revisions_are_bounded() -> None:
+    from physiclaw.agent.conductor.micro import MicroOutcome
+
+    p, h, send = _at_ledger_gate()
+    p._gate.revisions = program.GATE_MAX_REVISIONS
+
+    _reply_arrives(p, h, send, "change it again, no chips this time")
+    handed = p.resolve(MicroOutcome(out="revise", reason="again", confidence=0.9))
+
+    assert handed is None  # budget spent — the model settles the order
+
+
+def test_park_persists_the_ledger() -> None:
+    p, _, _ = _at_ledger_gate()
+    p._park(resume_idx=p._idx, awaiting=True)
+
+    resumed = program.load_parked()
+
+    assert resumed is not None
+    assert [it.query for it in resumed._ledger] == ["eggs", "chips"]
+    assert resumed._ledger[0].status == "picked"
+    assert resumed._ledger[0].label == "farm eggs"
+
+
+def test_arm_rejects_a_bad_ledger_value() -> None:
+    write_pack(playbooks={"shop": LEDGERED})
+
+    with pytest.raises(PlaybookError, match="items"):
+        program.arm("demo", "shop", {"items": "not json"})
+    with pytest.raises(PlaybookError, match="qty"):
+        program.arm("demo", "shop", {"items": '[{"query": "egg", "qty": 0}]'})
+
+
+def test_loop_only_ledger_playbook_needs_no_micro() -> None:
+    # next_item is deterministic — a ledger walk with no prompted
+    # decision and no gate must not make the engine wire a micro client.
+    loop_only = """\
+name: fetch
+description: shop the list, fixed picks
+inputs:
+  items:
+    description: the buying list
+    kind: list
+nodes:
+  - id: open
+    type: LEG
+    macro: open-app
+    with: {message: "cart"}
+    verify: home
+  - id: search
+    type: LEG
+    macro: open-app
+    with: {message: "{item.query}"}
+    verify: results
+  - id: add
+    type: LEG
+    macro: add-cart
+    with: {message: "add"}
+    verify: results
+  - id: advance
+    type: DECIDE
+    call: next_item
+    with: {picked: "{item.query}"}
+    on: {next: search, done: fix}
+  - id: fix
+    type: RECONCILE
+    page: results
+"""
+    write_pack(playbooks={"fetch": loop_only})
+    program.arm("demo", "fetch", {"items": '[{"query": "eggs", "qty": 1}]'})
+
+    p = program.load_armed()
+
+    assert p is not None and p.needs_micro is False

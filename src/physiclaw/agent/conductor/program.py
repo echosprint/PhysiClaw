@@ -28,14 +28,21 @@ The walk executes every node type, strictly:
     fast-forwards past every node whose ``verify`` page already matches
     the screen, so completed gestures are never replayed.
 
-  - CONFIRM and HUMAN_GATE message the user over the channel pack
-    (authored ``message:`` body or a generic fallback, plus the code
-    envelope: money disclosure and reply instructions), then park
-    (CONFIRM) or hold for the tiered reply check (the gate). Parks write
+  - CONFIRM and HUMAN_GATE send the playbook's ``message:`` VERBATIM
+    over the channel pack (only the author knows the user's language —
+    code composes no prose; for payment gates the parser instead
+    REQUIRES the template to quote ``{gate.total}``, and an
+    ``over_message:`` disclosing ``{gate.cap}``), then park (CONFIRM)
+    or hold for the tiered reply check (the gate). Parks write
     ``playbooks/parked.json``; ANY next wake resumes at the stored node.
   - Money runs in code: the parser guarantees a payment leg directly
     follows its ``gate: payment`` HUMAN_GATE; consent binds the quoted
     total; the fire-time predicates re-read the sheet.
+  - The ledger walk (``kind: list`` input): the deterministic
+    ``next_item`` loop shops each item, RECONCILE converges the cart on
+    the list in code (steppers, re-shop, unclaimed rows left alone),
+    and a gate ``revise:`` turns a "yes, but change it" reply into a
+    list rewrite and a fresh ask.
 
 Arming is a manual testing surface (``physiclaw playbooks arm``): one
 ``playbooks/armed.json`` names the playbook and its input values.
@@ -46,15 +53,24 @@ to a normal session, never takes one down.
 
 import json
 import logging
-from dataclasses import dataclass, field
+import re
+from dataclasses import asdict, dataclass, field
 
 from physiclaw.agent.conductor import reply
-from physiclaw.agent.conductor.calls import CALLS, ESCALATE
-from physiclaw.agent.conductor.match import PRICE_RE, Verdict, match_screen
+from physiclaw.agent.conductor.calls import CALLS, ESCALATE, LEDGER_FIELDS, NEXT_ITEM
+from physiclaw.agent.conductor.match import (
+    PRICE_RE,
+    Verdict,
+    label_matches,
+    match_screen,
+    normalize,
+)
 from physiclaw.agent.conductor.micro import (
     CONFIRM_REPLY,
+    LIST_INPUT_MARK,
     NOT_A_TASK,
     PARSE_TASK,
+    REVISE_LIST,
     DecisionRequest,
     MicroOutcome,
     build_request,
@@ -71,6 +87,7 @@ from physiclaw.agent.conductor.pages import (
 )
 from physiclaw.agent.conductor.playbook import (
     GATE_MAX_CHECKS,
+    GATE_MAX_REVISIONS,
     ConfirmNode,
     DecideNode,
     HumanGateNode,
@@ -78,6 +95,7 @@ from physiclaw.agent.conductor.playbook import (
     Pack,
     Playbook,
     PlaybookError,
+    ReconcileNode,
     disabled_leg_macros,
     fill_refs,
     list_apps,
@@ -95,6 +113,7 @@ from physiclaw.agent.engine.dto import (
 from physiclaw.agent.macros import inputs as macro_inputs
 from physiclaw.agent.macros.model import Macro, MacroError
 from physiclaw.common import gesture_vocab, paths
+from physiclaw.common.bbox import center_of
 from physiclaw.common.listing import Screen
 from physiclaw.common.logger import write_json_atomic
 from physiclaw.common.text import read_text
@@ -130,6 +149,91 @@ _DENY_HANDOVER = "user declined the ask — acknowledge them and wrap up"
 # runtime.sentinel.WAIT, spelled literally: the conductor may not import
 # engine runtimes; a test pins the two equal.
 PARK_STATUS = "WAIT"
+
+# Ledger bounds. Items/qty cap what parse_task or the CLI may hand a
+# walk; the action budget bounds the reconciler's tap-and-reread cycle
+# (every divergence costs at least one action, so a converging cart
+# finishes well under it — hitting it means the cart is not converging).
+# The revision budget lives with its sibling gate knob in playbook.py
+# (GATE_MAX_REVISIONS).
+MAX_LEDGER_ITEMS = 8
+MAX_ITEM_QTY = 9
+RECONCILE_MAX_ACTIONS = 16
+
+# Cart-row quantity: the numeral between the row's stepper icons,
+# optionally prefixed by a multiplier mark ("2", "x2", "×2").
+_QTY_RE = re.compile(r"^[x×✕]?\s*(\d{1,2})$")
+
+
+@dataclass
+class LedgerItem:
+    """One buying-list entry — desired state. `status` walks
+    pending → picked (the loop chose a row; `label` is what the cart
+    should show) → the cart itself is the in-cart truth (RECONCILE
+    re-reads it rather than trusting a flag). `qty` 0 = remove (a
+    revision took it off the list; the reconciler steps it to zero)."""
+
+    query: str
+    qty: int
+    status: str = "pending"  # "pending" | "picked"
+    label: str | None = None
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "LedgerItem":
+        return cls(
+            query=str(data.get("query") or ""),
+            qty=int(data.get("qty") or 0),
+            status=("picked" if data.get("status") == "picked" else "pending"),
+            label=(str(data["label"]) if data.get("label") else None),
+        )
+
+
+def parse_ledger(text: str, *, allow_zero: bool = False) -> list[LedgerItem]:
+    """The `kind: list` input's value contract: a JSON array of
+    {query, qty}. Raises PlaybookError naming the defect — arm fails
+    early, activation and revision fall back (log + hand over/None).
+    `allow_zero` is the revision form (qty 0 = remove)."""
+    try:
+        data = json.loads(text)
+    except Exception as e:
+        raise PlaybookError(f"ledger is not valid JSON: {e}") from e
+    if not isinstance(data, list) or not data:
+        raise PlaybookError("ledger must be a non-empty JSON array")
+    if len(data) > MAX_LEDGER_ITEMS:
+        raise PlaybookError(f"ledger has {len(data)} items > max {MAX_LEDGER_ITEMS}")
+    floor = 0 if allow_zero else 1
+    out: list[LedgerItem] = []
+    for entry in data:
+        if not isinstance(entry, dict) or set(entry) - set(LEDGER_FIELDS):
+            raise PlaybookError("each ledger item must be a {query, qty} object")
+        query = entry.get("query")
+        if not isinstance(query, str) or not query.strip():
+            raise PlaybookError("ledger item `query` must be a non-empty string")
+        qty = entry.get("qty")
+        if (
+            isinstance(qty, bool)
+            or not isinstance(qty, int)
+            or not (floor <= qty <= MAX_ITEM_QTY)
+        ):
+            raise PlaybookError(
+                f"ledger item `qty` must be {floor}–{MAX_ITEM_QTY} (got {qty!r})"
+            )
+        out.append(LedgerItem(query=query.strip(), qty=qty))
+    return out
+
+
+def _check_ledger_value(spec: Playbook, values: dict[str, str]) -> None:
+    """The resolved list input parses as a ledger — enforced at arm and
+    activation, the two seams a value enters through."""
+    inp = spec.ledger_input
+    if inp is not None:
+        try:
+            parse_ledger(values[inp.name])
+        except PlaybookError as e:
+            raise PlaybookError(f"input {inp.name!r}: {e}") from e
 
 
 def _amounts(screen: Screen) -> list[float]:
@@ -209,7 +313,8 @@ def arm(app: str, name: str, inputs: dict[str, str]) -> "tuple[Playbook, list[st
     `## <slug>` section on THIS device runs empty (fail-closed), and a
     gate ask quoting no word-tier reply word rides the LLM tier."""
     spec, _ = _armed_spec(app, name)
-    _resolve_inputs(spec, inputs)  # fail at arm time, not first wake
+    values = _resolve_inputs(spec, inputs)  # fail at arm time, not first wake
+    _check_ledger_value(spec, values)
     write_json_atomic(
         _armed_path(),
         {"schema": _ARMED_SCHEMA, "app": app, "playbook": name, "inputs": inputs},
@@ -467,7 +572,13 @@ class Activation:
     def _menu(self) -> str:
         lines = ["Available playbooks:"]
         for ref, (spec, _pack) in self.entries.items():
-            inputs = ", ".join(f"{i.name} ({i.description})" for i in spec.inputs)
+            inputs = ", ".join(
+                # The mark keys the parse_task prompt's JSON-array rule.
+                f"{i.name} {LIST_INPUT_MARK} ({i.description})"
+                if i.kind == "list"
+                else f"{i.name} ({i.description})"
+                for i in spec.inputs
+            )
             lines.append(
                 f"- {ref}: {spec.description}"
                 + (f" [inputs: {inputs}]" if inputs else "")
@@ -484,6 +595,7 @@ class Activation:
         spec, pack = self.entries[outcome.out]
         try:
             values = _resolve_inputs(spec, outcome.payload or {})
+            _check_ledger_value(spec, values)
         except PlaybookError as e:
             log.warning("activation %s: inputs did not resolve (%s)", outcome.out, e)
             return None
@@ -568,12 +680,18 @@ class _Gate:
     awaiting: bool = False  # ask sent, polling for the reply
     llm_reply: str | None = None
     tried_open: bool = False
+    # Bounded "yes, but change it" cycles (persists — a parked revision
+    # spree must not reset its budget); True while a revise_list request
+    # is outstanding and owns the next resolve().
+    revisions: int = 0
+    revise_pending: bool = False
 
     def to_park(self) -> dict:
         """The persisted projection — the one field list, beside the
         fields. Counters and the in-flight handshake deliberately reset
         on resume; `consented` persists so a post-consent park can never
-        resume into a refused payment."""
+        resume into a refused payment, `revisions` so a park cannot
+        refill the revision budget."""
         return {
             "ask_text": self.ask,
             "baseline": sorted(self.baseline),
@@ -581,6 +699,7 @@ class _Gate:
             "cap": self.cap,
             "consented": self.consented,
             "awaiting": self.awaiting,
+            "revisions": self.revisions,
         }
 
     @classmethod
@@ -592,6 +711,7 @@ class _Gate:
             cap=data.get("cap"),
             consented=data.get("consented"),
             awaiting=bool(data.get("awaiting")),
+            revisions=int(data.get("revisions") or 0),
         )
 
 
@@ -618,10 +738,14 @@ class Program:
         self.pack_macros = pack_macros
         self._prints = prints
         self._ids = {n.id: i for i, n in enumerate(spec.nodes)}
-        # Read by the engine: decisions AND gate reply checks ride the
-        # micro channel — either kind of node means wiring one up.
+        # Read by the engine: prompted decisions AND gate reply checks
+        # ride the micro channel — either kind of node means wiring one
+        # up. Deterministic calls (next_item) never prompt, so a
+        # legs+loop-only playbook must not pay for a client.
         self.needs_micro = any(
-            isinstance(n, (DecideNode, HumanGateNode)) for n in spec.nodes
+            (isinstance(n, DecideNode) and not CALLS[n.call].deterministic)
+            or isinstance(n, HumanGateNode)
+            for n in spec.nodes
         )
         # The user-channel infrastructure (constructor-injected via
         # _build_program). None degrades to hand-over at the first ask.
@@ -643,6 +767,27 @@ class Program:
         self._screen: Screen | None = None
         self._verdict: Verdict | None = None
         self._memory: list[tuple[frozenset[str], str]] | None = None
+        # The ledger walk: desired state + the loop cursor + the
+        # reconciler's action budget. A value that fails to parse
+        # degrades to None (fail-open) — the next_item node then hands
+        # over; arm/activation validated theirs already.
+        self._ledger: list[LedgerItem] | None = None
+        self._item = 0
+        self._rec_actions = 0
+        inp = spec.ledger_input
+        if inp is not None:
+            try:
+                self._ledger = parse_ledger(values.get(inp.name, ""))
+            except PlaybookError as e:
+                log.warning("ledger input %r unusable (%s)", inp.name, e)
+        # The loop BODY head — where re-shop re-enters (the closer would
+        # re-bind a stale pick label).
+        self._loop_body_id: str | None = None
+        loop = spec.loop
+        if loop is not None:
+            arm = CALLS[loop.call].loop_arm
+            assert arm is not None
+            self._loop_body_id = loop.on[arm]
 
     def _parked_dict(self, resume_idx: int) -> dict:
         """The park projection: walk state here, gate state via
@@ -655,6 +800,12 @@ class Program:
             "values": self.values,
             "outputs": self._outputs,
             "visits": self._visits,
+            "ledger": (
+                [it.to_dict() for it in self._ledger]
+                if self._ledger is not None
+                else None
+            ),
+            "item": self._item,
             **self._gate.to_park(),
         }
 
@@ -662,6 +813,13 @@ class Program:
         self._idx = int(data["idx"])
         self._outputs = {str(k): str(v) for k, v in (data.get("outputs") or {}).items()}
         self._visits = {str(k): int(v) for k, v in (data.get("visits") or {}).items()}
+        if data.get("ledger"):  # non-empty — [] would leave no valid cursor
+            # The parked ledger (statuses, labels, revisions applied)
+            # supersedes the arm-value parse from __init__. The cursor
+            # clamps HERE — external input — so every reader downstream
+            # may index without bounds checks.
+            self._ledger = [LedgerItem.from_dict(d) for d in data["ledger"]]
+            self._item = min(max(int(data.get("item") or 0), 0), len(self._ledger) - 1)
         self._gate = _Gate.from_park(data)
         self._resumed = True
 
@@ -775,6 +933,9 @@ class Program:
             return self._synth_gate_peek()
         elif kind in ("gate-peek", "gate-open"):
             return self._gate_check()
+        elif kind in ("rec-peek", "rec-tap"):
+            # The tap's own result screen is the re-read — no extra peek.
+            return self._reconcile_step()
         elif kind not in ("tap", "gate-return"):
             # A typo'd kind at a _synth site must fail loudly, never
             # silently walk the next node.
@@ -802,7 +963,14 @@ class Program:
             return None
         node = nodes[self._idx]
         if isinstance(node, DecideNode):
+            if CALLS[node.call].deterministic:
+                # The program answers it itself — no prompt, no
+                # confidence, no visit budget (the finite ledger is the
+                # bound).
+                return self._advance_item(node)
             return self._request(node)
+        if isinstance(node, ReconcileNode):
+            return self._start_reconcile(node)
         if isinstance(node, (ConfirmNode, HumanGateNode)):
             # Both ask nodes share the one precondition: a live send.
             if self.channel is None or self.channel.send is None:
@@ -856,8 +1024,255 @@ class Program:
 
     def _values(self) -> dict[str, str]:
         """Ref-resolution values: armed inputs plus every recorded
-        decision output (keyed `node.field`, exactly the dotted ref)."""
-        return {**self.values, **self._outputs}
+        decision output (keyed `node.field`, exactly the dotted ref),
+        plus the loop-scoped `{item.*}` slots when a ledger walk has a
+        current item (last wins — the same shadowing the parser
+        documents)."""
+        vals = {**self.values, **self._outputs}
+        if self._ledger is not None:
+            it = self._ledger[self._item]  # cursor valid by construction
+            vals["item.query"] = it.query
+            vals["item.qty"] = str(it.qty)
+        return vals
+
+    # ---- the ledger loop + reconciliation ----
+
+    def _advance_item(
+        self, node: DecideNode
+    ) -> "AssistantMessage | DecisionRequest | None":
+        """The next_item closer: record the pick for the item just
+        shopped, move the cursor to the next pending item (`next`, the
+        sanctioned backward edge) or fall through spent (`done`)."""
+        if self._ledger is None:
+            return self._handover(f"{NEXT_ITEM} {node.id!r}: no usable ledger")
+        cur = self._ledger[self._item]
+        if cur.status == "pending":
+            # Idempotent: a re-entry (re-shop, revision) whose current
+            # item is already picked must not re-bind a stale label.
+            try:
+                picked = fill_refs(
+                    node.args.get("picked", ""),
+                    self._values(),
+                    where=f"{NEXT_ITEM} {node.id!r} `with.picked`",
+                )
+            except PlaybookError as e:
+                return self._handover(str(e))
+            cur.status, cur.label = "picked", picked.strip() or cur.query
+        loop_arm = CALLS[node.call].loop_arm
+        assert loop_arm is not None
+        done_arm = next(o for o in node.outs if o != loop_arm)
+        nxt = next(
+            (
+                i
+                for i, it in enumerate(self._ledger)
+                if it.status == "pending" and it.qty > 0
+            ),
+            None,
+        )
+        shopped = sum(1 for it in self._ledger if it.status == "picked")
+        self._journal = f"ledger: {shopped}/{len(self._ledger)} items shopped"
+        if nxt is None:
+            target = node.on[done_arm]
+        else:
+            self._item = nxt
+            target = node.on[loop_arm]
+        if target == ESCALATE:
+            return self._handover(f"{NEXT_ITEM} {node.id!r} routed to escalate")
+        self._idx = self._ids[target]
+        return self._next()
+
+    def _start_reconcile(self, node: ReconcileNode) -> AssistantMessage:
+        self._rec_actions = 0
+        return self._synth(
+            "rec-peek",
+            f"conductor: reconciling the cart against the list ({node.id})",
+            gesture_vocab.PEEK,
+            {},
+        )
+
+    def _reconcile_step(self) -> "AssistantMessage | DecisionRequest | None":
+        """One divergence, one action, re-read — the tap's own result
+        screen is the verification (there is no other). Converged =
+        every picked item reads at its wanted quantity; cart rows the
+        ledger does not claim are LEFT ALONE (they may be the user's
+        own — the conductor never destroys what it cannot attribute to
+        itself)."""
+        node = self.spec.nodes[self._idx]
+        assert isinstance(node, ReconcileNode)
+        assert self._verdict is not None and self._screen is not None
+        wrong = self._mismatch(self._verdict, page_id(self.app, node.page))
+        if wrong is not None:
+            return self._handover(f"reconcile {node.id!r} expects the cart ({wrong})")
+        if self._ledger is None:
+            return self._handover(f"reconcile {node.id!r}: no usable ledger")
+        self._rec_actions += 1
+        if self._rec_actions > RECONCILE_MAX_ACTIONS:
+            return self._handover(
+                f"reconcile {node.id!r}: cart not converging after "
+                f"{RECONCILE_MAX_ACTIONS} actions — list: {self._ledger_text()}"
+            )
+        for idx, item in enumerate(self._ledger):
+            if item.status != "picked":
+                continue  # pending items are the loop's, reached via re-shop
+            row = self._cart_row(item)
+            if row is None:
+                if item.qty <= 0:
+                    continue  # removed and absent — converged
+                # Picked but not in the cart: back into the loop for THIS
+                # item — the body head, not the closer (the closer would
+                # re-bind a stale pick label).
+                item.status, item.label = "pending", None
+                self._item = idx
+                self._journal = (
+                    f"reconcile: {item.query!r} missing from the cart — re-shopping"
+                )
+                assert self._loop_body_id is not None
+                self._idx = self._ids[self._loop_body_id]
+                return self._next()
+            found = self._row_qty(row)
+            if found is None:
+                return self._handover(
+                    f"reconcile {node.id!r}: no readable qty/steppers beside "
+                    f"{row.label!r} — list: {self._ledger_text()}"
+                )
+            have, minus, plus = found
+            if have < item.qty:
+                return self._synth_rec_tap(plus, f"{item.query} {have}→{item.qty}")
+            if have > item.qty:
+                return self._synth_rec_tap(minus, f"{item.query} {have}→{item.qty}")
+        self._journal = "reconcile: cart matches the list"
+        self._idx += 1
+        return self._next()
+
+    def _synth_rec_tap(self, el, note: str) -> AssistantMessage:
+        return self._synth(
+            "rec-tap",
+            f"conductor: cart stepper — {note}",
+            "tap",
+            {"bbox": list(el.bbox)},
+        )
+
+    def _cart_row(self, item: LedgerItem):
+        """The cart row showing this item — the shared tiered text match
+        (`match.label_matches`): the pick label came off one OCR reading
+        and the cart row is another, possibly truncated, so the same
+        fuzz that matches page anchors is what matches here."""
+        assert self._screen is not None
+        want = normalize(item.label or item.query)
+        if not want:
+            return None
+        for row in self._screen.rows:
+            if row.kind != "text" or not row.label.strip():
+                continue
+            if label_matches(want, normalize(row.label), ()):
+                return row
+        return None
+
+    def _row_qty(self, row):
+        """(qty, minus, plus) for a cart row, or None when unreadable.
+        The steppers are the icons IMMEDIATELY flanking the quantity
+        numeral — nearest on each side, never the band's extremes: a
+        cart row carries other icons too (the selection checkbox sits
+        far left), and a mis-attributed minus would TAP one. A row that
+        reads otherwise hands over rather than guessing at a
+        money-adjacent tap."""
+        assert self._screen is not None
+        top, bot = row.bbox[1] - 0.01, row.bbox[3] + 0.01
+
+        def in_band(el) -> bool:
+            c = center_of(el.bbox)
+            return c is not None and top <= c[1] <= bot
+
+        icons = sorted(
+            (el for el in self._screen.rows if el.kind == "icon" and in_band(el)),
+            key=lambda el: el.bbox[0],
+        )
+        for el in self._screen.rows:
+            if el.kind != "text" or not in_band(el):
+                continue
+            m = _QTY_RE.match(el.label.strip())
+            if not m:
+                continue
+            left = [ic for ic in icons if ic.bbox[2] <= el.bbox[0]]
+            right = [ic for ic in icons if ic.bbox[0] >= el.bbox[2]]
+            if not left or not right:
+                continue
+            return int(m.group(1)), left[-1], right[0]
+        return None
+
+    def _ledger_text(self) -> str:
+        return ", ".join(
+            f"{it.query}×{it.qty}({it.status})" for it in self._ledger or []
+        )
+
+    def _start_revision(
+        self, node: HumanGateNode, judged: str
+    ) -> "AssistantMessage | DecisionRequest | None":
+        """Hand the quoted reply and the current list to revise_list —
+        bounded: a user still revising after GATE_MAX_REVISIONS rounds
+        is negotiating, and negotiation is the model's job."""
+        assert self._ledger is not None
+        self._gate.revisions += 1
+        if self._gate.revisions > GATE_MAX_REVISIONS:
+            return self._handover(
+                f"gate {node.id!r}: {self._gate.revisions - 1} revisions "
+                "already applied — read the thread and settle the order "
+                "with the user"
+            )
+        self._gate.revise_pending = True
+        assert self._screen is not None
+        return build_request(
+            REVISE_LIST,
+            node.id,
+            (),
+            {
+                "ask": self._gate.ask,
+                "reply": judged,
+                "ledger": json.dumps(
+                    [{"query": it.query, "qty": it.qty} for it in self._ledger],
+                    ensure_ascii=False,
+                ),
+            },
+            self._screen,
+        )
+
+    def _apply_revision(
+        self, outcome: MicroOutcome | None
+    ) -> "AssistantMessage | DecisionRequest | None":
+        """The revised desired state, code-validated, merged onto the
+        walk's ledger: known queries keep their shopping progress (the
+        reconciler moves their quantities), new queries enter pending,
+        dropped queries go to qty 0 (the reconciler steps them out).
+        Then back into the loop via the gate's revise target — consent
+        is void until the gate re-asks over the new total."""
+        node = self.spec.nodes[self._idx]
+        assert isinstance(node, HumanGateNode) and node.revise is not None
+        assert self._ledger is not None
+        self._gate.revise_pending = False
+        if outcome is None or outcome.out != "updated" or not outcome.payload:
+            return self._handover(
+                "the revision reply could not be applied — read the thread "
+                "and adjust the order before any payment"
+            )
+        try:
+            revised = parse_ledger(outcome.payload["ledger"], allow_zero=True)
+        except PlaybookError as e:
+            return self._handover(f"revised list unusable ({e}) — read the thread")
+        # Old items keep their shopping progress (the reconciler moves
+        # quantities; a query the revision dropped goes to 0); genuinely
+        # new queries append pending. Old-ledger order is preserved —
+        # friendlier to the `_item` cursor, and nothing reads revised
+        # order.
+        revised_by = {r.query: r for r in revised}
+        for it in self._ledger:
+            r = revised_by.pop(it.query, None)
+            it.qty = r.qty if r is not None else 0
+        self._ledger.extend(revised_by.values())
+        self._gate.consented = None  # the old ask no longer covers the order
+        self._gate.awaiting = False
+        self._journal = f"revision applied: {self._ledger_text()}"
+        self._idx = self._ids[node.revise]
+        return self._next()
 
     def _request(self, node: DecideNode) -> "AssistantMessage | DecisionRequest | None":
         """One micro-call request off the decide-time screen — or a
@@ -917,6 +1332,8 @@ class Program:
     def _resolve(
         self, outcome: MicroOutcome | None
     ) -> "AssistantMessage | DecisionRequest | None":
+        if self._gate.revise_pending:
+            return self._apply_revision(outcome)
         if self._gate.llm_reply is not None:
             # The gate's LLM tier came back. None/unclear → keep waiting
             # (this round's check was already counted in _gate_check).
@@ -925,8 +1342,16 @@ class Program:
             if outcome is not None and outcome.out == "deny":
                 return self._handover(_DENY_HANDOVER)
             if outcome is not None and outcome.out == "revise":
-                # A change request ("ok, but make it two boxes" / remove
-                # an item) or a question is a TASK change, not a gate
+                node = self.spec.nodes[self._idx]
+                assert isinstance(node, HumanGateNode)
+                if node.revise is not None and self._ledger is not None:
+                    # A ledger playbook absorbs the change itself:
+                    # revise_list rewrites the desired state, the loop
+                    # shops the additions, RECONCILE fixes the rest,
+                    # and the gate re-asks with the fresh total.
+                    return self._start_revision(node, judged)
+                # No ledger: a change request ("ok, but make it two
+                # boxes") or a question is a TASK change, not a gate
                 # verdict — the model takes over with the thread in the
                 # transcript and acts on the user's words.
                 return self._handover(
