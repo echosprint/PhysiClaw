@@ -1,16 +1,21 @@
 """Wake-time setup — how a `Program` comes to exist.
 
-Three doors into a walk, all fail-open (a missing, stale, or invalid
-file degrades to a normal session, never takes one down):
+Two doors into a walk, both fail-open (a missing, stale, or invalid file
+degrades to a normal session, never takes one down):
 
-  - ``load_suspended`` — a suspended walk resumes at its stored node
-    (one-shot; ANY wake resumes, the WAIT job is just the alarm clock).
-  - ``Overture`` — nothing armed, but playbooks exist: the conductor
+  - ``load_suspended`` — a walk that asked the user something resumes at
+    its stored node (one-shot; ANY wake resumes, the WAIT job is just the
+    alarm clock).
+  - ``Overture`` — nothing suspended, but playbooks exist: the conductor
     boots to the user's thread and fires ONE parse_task micro-call over
     the playbook menu (``overture.py``); a positive answer builds the
     program on the spot. ``Activation`` is that last half — menu, call,
     and build — with the overture owning the navigation that reaches a
     thread screen to ask over.
+
+A playbook on disk IS the grant; there is nothing to pre-declare. (There
+used to be a third door, ``armed.json``, naming the playbook to run next
+— the overture retired it.)
 
 ``session_setup`` is the engine's single wake-time conductor call: it
 resolves those doors in priority order and assembles the hidden
@@ -92,10 +97,6 @@ def load_suspended(channel: "Channel | None" = None) -> "Program | None":
             pack,
             {str(k): str(v) for k, v in (data.get("values") or {}).items()},
             channel if channel is not None else load_channel(),
-            # The suspension carries its lineage: an activation-built walk's
-            # terminal outcome must never consume an arm file it never
-            # owned, even when a same-named arm exists by coincidence.
-            # (Absent in older suspends — those were armed-lineage only.)
             suspended=data,
         )
     except Exception as e:
@@ -321,15 +322,15 @@ class Activation:
 
 def session_setup() -> "tuple[Program | None, Overture | None, dict[str, Macro]]":
     """The engine's one wake-time conductor call, fail-open throughout:
-    (suspended-or-armed program, the overture, the hidden qualified macro
+    (a resumed suspension, the overture, the hidden qualified macro
     registry). The registry spans every pack plus the channel ON THE
     OVERTURE PATH — the boot may activate any playbook, so all conductor
     hands must be dispatchable; a live program narrows it to its own pack
     + channel, and no channel means the channel-less registry only.
 
     A playbook on disk IS the grant: with any enabled playbook and a
-    channel, the overture drives. Nothing armed and nothing enabled means
-    a plain model session, exactly as before."""
+    channel, the overture drives. Nothing suspended and nothing enabled
+    means a plain model session, exactly as before."""
     hidden: dict[str, Macro] = {}
     channel = load_channel()
     if channel is not None:

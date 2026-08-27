@@ -2,8 +2,8 @@
 
 A `kind: list` playbook input's VALUE is a JSON array of {query, qty}
 (fields = `calls.LEDGER_FIELDS`). `parse_ledger` is the one value gate:
-arm and activation call it strictly (raise / reject), the walk calls it
-fail-open (a broken value degrades to a hand-over at the loop). The
+activation and the CLI rehearsal call it strictly (raise / reject), the
+walk calls it fail-open (a broken value degrades to a hand-over at the loop). The
 walk's items then track pending → picked; the cart itself stays the
 in-cart truth — RECONCILE re-reads it rather than trusting a flag.
 
@@ -100,8 +100,9 @@ def parse_ledger(text: str, *, allow_zero: bool = False) -> list[LedgerItem]:
 
 
 def check_ledger_value(spec: Playbook, values: dict[str, str]) -> None:
-    """The resolved list input parses as a ledger — enforced at arm and
-    activation, the two seams a value enters through."""
+    """The resolved list input parses as a ledger — enforced at both seams
+    a value enters through: the overture's activation, and the CLI
+    rehearsal."""
     inp = spec.ledger_input
     if inp is not None:
         try:

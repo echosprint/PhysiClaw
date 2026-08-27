@@ -583,7 +583,7 @@ def _system(req: DecisionRequest, allowed: tuple[str, ...]) -> str:
 def _user(req: DecisionRequest) -> str:
     parts = list(_SPECS[req.call].user_parts(req))
     if req.context:
-        # Context slices (memory.md, armed inputs) are agent-curated but
+        # Context slices (memory.md, the walk's inputs) are agent-curated but
         # ultimately screen-derived too — same stamp.
         parts.append(_data_block("Context", req.context))
     return "\n".join(p for p in parts if p)

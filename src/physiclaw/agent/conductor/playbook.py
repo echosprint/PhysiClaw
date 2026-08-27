@@ -998,7 +998,8 @@ def fill_refs(value: Any, values: dict[str, str], where: str) -> Any:
 
 def disabled_leg_macros(spec: Playbook, pack: Pack) -> list[str]:
     """Referenced pack macros still disabled — the live-readiness rule:
-    `playbooks check` warns about it, `arm` refuses on it. Covers legs,
+    `playbooks check` warns about it and the overture will not offer such
+    a playbook at all. Covers legs,
     `compensate:`, and gate `return:` (all dispatch at walk time). Safe
     unguarded access: parse validated every one against `pack.macros`."""
     named: set[str] = set()

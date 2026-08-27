@@ -52,8 +52,8 @@ def init(
             f"  1. anchor the `{THREAD_PAGE}` page on YOUR chat header in pages.yml"
         )
         typer.echo("  2. record the send/open gesture paths in macros/*/MACRO.yml")
-        typer.echo("  3. rehearse both (physiclaw macros rehearse is per-user-macro;")
-        typer.echo("     drive them via an armed test playbook), then enable")
+        typer.echo("  3. rehearse both, then enable (physiclaw macros run is")
+        typer.echo("     per-user-macro; drive a pack's via physiclaw playbooks run)")
         typer.echo(
             f"  4. capture geometry: physiclaw conductor calibrate {CHANNEL_APP}"
         )
@@ -120,8 +120,8 @@ def run(
     Drives the real walk on the real phone: legs run their macros, DECIDE
     nodes spend real micro-calls, and a HUMAN_GATE really messages you and
     waits for your reply. Works while the playbook is disabled — rehearse
-    first, enable after. Nothing is persisted: no arm, and a walk that
-    suspends here stops instead of leaving a file for the next wake."""
+    first, enable after. Nothing is persisted: a walk that suspends here
+    stops instead of leaving a file for the next wake."""
     from physiclaw.agent.conductor.playbook import PlaybookError
 
     app, _, name = ref.partition("/")
@@ -135,7 +135,7 @@ def run(
         # `mcp`, not `server`: both serve the same endpoint, but `server`
         # also spawns the agent runtime, which would wake on its own hooks
         # and drive the phone mid-rehearsal. A rehearsal wants the rig to
-        # itself. (Same arm as `macros run`.)
+        # itself. (Same branch as `macros run`.)
         exit_error(f"{e}. Start it first: physiclaw mcp")
     typer.echo(outcome)
 
@@ -186,10 +186,10 @@ def _check_app(app: str) -> bool:
     for entry in entries:
         if entry.spec is None:
             continue
-        # Advisories that used to fire only at arm time, so almost nobody
-        # saw them: a memory slice with no section on THIS device, a gate
-        # ask quoting no word-tier reply word, a gate with no way back
-        # into the app.
+        # Advisories that used to be reachable only by arming, so almost
+        # nobody saw them: a memory slice with no section on THIS device,
+        # a gate ask quoting no word-tier reply word, a gate with no way
+        # back into the app.
         for line in conductor_setup.readiness_warnings(entry.spec):
             typer.echo(warn(f"{app}/{entry.name}: {line}"))
     return bad
@@ -250,12 +250,17 @@ async def _rehearse(app: str, name: str, values: dict[str, str]) -> str:
     exercises the real walk rather than a simulation of it."""
     from physiclaw.agent.conductor import channel as channel_mod
     from physiclaw.agent.conductor import setup as conductor_setup
+    from physiclaw.agent.conductor.ledger import check_ledger_value
     from physiclaw.agent.conductor.micro import DecisionRequest
     from physiclaw.agent.engine.dto import SystemMessage, ToolResultMessage, UserMessage
     from physiclaw.agent.engine.mcp_tool import McpClient
 
     spec, pack = conductor_setup.load_spec(app, name, require_live=False)
     values = conductor_setup.resolve_inputs(spec, values)
+    # A `kind: list` value is a JSON ledger — hold it to the same contract
+    # the overture's activation does, so a typo'd list fails here rather
+    # than mid-walk at the shopping loop.
+    check_ledger_value(spec, values)
     if not spec.enabled:
         typer.echo(warn(f"{app}/{name} is disabled — rehearsing it anyway"))
     for line in conductor_setup.readiness_warnings(spec):
