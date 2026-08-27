@@ -218,10 +218,15 @@ async def test_unwired_micro_caller_means_decides_hand_over() -> None:
 
 @pytest.mark.asyncio
 async def test_advance_activates_a_playbook_off_the_thread_screen() -> None:
+    """Stand-by mode: this channel has NO `open` macro, so the overture
+    cannot drive — it watches the transcript and reads the intent the
+    moment the MODEL lands on the thread, which is exactly what
+    `Activation` did before the overture existed."""
     from conductor_fakes import make_screen
 
     from physiclaw.agent.conductor.channel import Channel
     from physiclaw.agent.conductor.micro import PARSE_TASK, MicroOutcome
+    from physiclaw.agent.conductor.overture import Overture
     from physiclaw.agent.conductor.pages import AnchorDecl, PageDecl, PagePrint
     from physiclaw.agent.conductor.playbook import Pack, Playbook
     from physiclaw.agent.conductor.setup import Activation
@@ -247,13 +252,16 @@ async def test_advance_activates_a_playbook_off_the_thread_screen() -> None:
     )
     pack = Pack(app="demo", pages={}, macros={}, macro_errors={})
     activation = Activation(entries={"demo/flow": (spec, pack)}, channel=channel)
+    overture = Overture(
+        channel=channel, activation=activation, prints=list(channel.prints)
+    )
     micro = FakeMicro(
         lambda req: MicroOutcome(
             out="demo/flow", reason="task", confidence=0.9, payload={}
         )
     )
     inner = RecordingProvider()
-    conductor = Conductor(inner, micro=micro, activation=activation)
+    conductor = Conductor(inner, micro=micro, overture=overture)
     history: list = [SystemMessage(content="s"), UserMessage(content="u")]
     history.append(
         ToolResultMessage(

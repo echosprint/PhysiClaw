@@ -5,8 +5,8 @@ dispatched calls by tool name and unpack `sequence` steps; the
 orchestrator executes those same steps. Both sides used to hold private
 copies of these names held together by "keep in sync" comments — this
 module is the single source. It also owns the non-gesture tool names the
-agent layer references (PEEK, SEND_TO_CLIPBOARD — macro whitelists and
-recovery views), so those renames fail the same pin, and RUN_MACRO: the
+agent layer references (PEEK, SEND_TO_CLIPBOARD, UNLOCK_PHONE — macro whitelists,
+recovery views, and the conductor's boot), so those renames fail the same pin, and RUN_MACRO: the
 one LOCAL (non-MCP) tool the classifiers must name, deliberately outside
 that pin, with a test asserting the exclusion. FastMCP registration in
 `core/server/tools.py` deliberately does NOT consume it: names there
@@ -35,6 +35,12 @@ SEQUENCE = "sequence"
 # them like any gesture name.
 PEEK = "peek"
 SEND_TO_CLIPBOARD = "send_to_clipboard"
+# Security-sensitive and deliberately NOT macro-able (see
+# `agent.macros.model.ALLOWED_STEP_TOOLS`), but the agent layer names it in
+# two places — the engine's screen-tool classifier and the conductor's boot,
+# which synthesizes the call directly. Here so a rename fails the
+# registration pin instead of silently unclassifying it.
+UNLOCK_PHONE = "unlock_phone"
 
 # The one LOCAL engine tool the classifiers must name. NOT an MCP tool, so
 # it is deliberately outside the registration ⊇ vocabulary pin — the test

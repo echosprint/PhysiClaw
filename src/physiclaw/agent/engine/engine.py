@@ -94,16 +94,16 @@ async def run(triggers: list[Trigger], *, model_ref: str) -> contract.SessionOut
     )
 
 
-def _wire_micro(program, activation, provider, tr, rlog):
+def _wire_micro(program, overture, provider, tr, rlog):
     """The micro-caller for the conductor's decision calls — None when
-    nothing can need one: no program and no activation trigger, or a
-    pure-LEG program (which must not pay for a second provider client).
+    nothing can need one: no program and no overture, or a pure-LEG
+    program (which must not pay for a second provider client).
     `[conductor] micro_model` selects the cheap decision tier; the
-    caller builds that client lazily on the FIRST call (an activation
-    trigger usually never fires) and owns it — the session's finally
-    block closes it via `MicroCaller.aclose()`. Fail-open to the session
-    provider on any problem, at parse time or build time."""
-    if activation is None and (program is None or not program.needs_micro):
+    caller builds that client lazily on the FIRST call (an overture that
+    cannot reach the thread never asks) and owns it — the session's
+    finally block closes it via `MicroCaller.aclose()`. Fail-open to the
+    session provider on any problem, at parse time or build time."""
+    if overture is None and (program is None or not program.needs_micro):
         return None
     factory = None
     ref = CONFIG.conductor.micro_model
@@ -173,7 +173,7 @@ async def _run_session(
         # qualified macro registry (every pack + channel on the
         # activation path; narrower otherwise — see setup.session_setup).
         # Nothing model-visible changes.
-        program, activation, hidden_macros = conductor_setup.session_setup()
+        program, overture, hidden_macros = conductor_setup.session_setup()
         # Built-in skills are inlined full-text into SYSTEM; user skills are
         # indexed and loaded on demand via the Skill tool — so only user
         # skills go into the local registry. The first-run screen-layout skill
@@ -213,7 +213,7 @@ async def _run_session(
         )
 
         provider = make_provider(provider_id, model_id)
-        micro_caller = _wire_micro(program, activation, provider, tr, rlog)
+        micro_caller = _wire_micro(program, overture, provider, tr, rlog)
         prompt_hash = prompt.prefix_hash(bundle.system_prompt)
         rlog.write_session_start(
             provider=provider_id,
@@ -232,7 +232,7 @@ async def _run_session(
                 provider,
                 program=program,
                 micro=micro_caller,
-                activation=activation,
+                overture=overture,
             ),
             collapse=provider.COLLAPSE,
             serialize_wire=provider.serialize_history,

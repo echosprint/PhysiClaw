@@ -47,6 +47,7 @@ from physiclaw.common.gesture_vocab import (
     RUN_MACRO,
     SEQUENCE,
     SWIPE,
+    UNLOCK_PHONE,
 )
 
 if TYPE_CHECKING:
@@ -495,7 +496,7 @@ class StuckBlock(DispatchGuard):
 # keyboard state unproven. A failed local tool (note, Skill, jobs) says
 # nothing about the phone, and demoting belief on it would disarm the
 # layout lint mid-typing.
-_SCREEN_TOOLS = _GESTURES | NAV_TOOLS | {"unlock_phone"}
+_SCREEN_TOOLS = _GESTURES | NAV_TOOLS | {UNLOCK_PHONE}
 
 
 class KeyboardBelief(ResultObserver):

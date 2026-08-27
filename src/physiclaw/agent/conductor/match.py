@@ -195,17 +195,33 @@ class PageScore:
 def candidate_rows(
     anchor: AnchorDecl, rows: tuple[Element, ...], variants: tuple[str, ...]
 ) -> list[Element]:
-    anchor_norm = normalize(anchor.text)
+    """Rows satisfying one anchor. ANY of its declared readings matches
+    (`AnchorDecl.readings` — the canonical text plus authored alts),
+    exactly as any mined `variant` does; the anchor still counts once, so
+    declaring two spellings of one label never halves the page's score."""
+    anchor_norms = [normalize(t) for t in anchor.readings]
+    sole = anchor_norms[0] if len(anchor_norms) == 1 else None
+    # Hoisted out of the row loop: the band is per anchor, not per row.
+    band = list(REGIONS[anchor.region]) if anchor.region is not None else None
     out = []
     for row in rows:
         if not row.label:
             continue
-        if not label_matches(anchor_norm, normalize(row.label), variants):
-            continue
-        if anchor.region is not None:
+        if band is not None:
+            # Geometry BEFORE text: a bare centre-in-band test is far
+            # cheaper than normalize + the fuzzy tiers, and both filters
+            # are ANDed — so rejecting here skips the expensive half.
             c = center_of(row.bbox)
-            if c is None or not inside(c, list(REGIONS[anchor.region]), margin=0.0):
+            if c is None or not inside(c, band, margin=0.0):
                 continue
+        label_norm = normalize(row.label)
+        if sole is not None:
+            # The overwhelmingly common shape (one declared reading) —
+            # kept off the generator to stay a plain call per row.
+            if not label_matches(sole, label_norm, variants):
+                continue
+        elif not any(label_matches(a, label_norm, variants) for a in anchor_norms):
+            continue
         out.append(row)
     return out
 
@@ -304,6 +320,13 @@ class Verdict:
     runner_up: float
     dy: float
     detail: str
+
+    def matches(self, expected_id: str) -> bool:
+        """Is this a confident read of exactly `expected_id` (`app.page`)?
+        The ONE spelling of that question — pack pages, the channel
+        thread, and OS states are all judged by it, so no caller
+        re-derives "match AND the right page"."""
+        return self.kind == "match" and self.page_id == expected_id
 
 
 def match_screen(screen: Screen, candidates: list[PagePrint]) -> Verdict:

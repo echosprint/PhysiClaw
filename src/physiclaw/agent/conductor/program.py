@@ -88,12 +88,8 @@ from physiclaw.agent.conductor.playbook import (
     fill_refs,
     qualified_macro,
 )
-from physiclaw.agent.engine.dto import (
-    AssistantMessage,
-    FinishReason,
-    Message,
-    ToolCall,
-)
+from physiclaw.agent.conductor.turns import Turnsmith
+from physiclaw.agent.engine.dto import AssistantMessage, Message
 from physiclaw.agent.macros.model import Macro
 from physiclaw.common import gesture_vocab
 from physiclaw.common.listing import Screen
@@ -130,21 +126,6 @@ def _amounts(screen: Screen) -> list[float]:
     for row in screen.rows:
         out.extend(float(m) for m in PRICE_RE.findall(row.label))
     return out
-
-
-@dataclass(frozen=True)
-class _Pending:
-    """The synthesized action whose result the next advance() must read.
-    The cursor never moves while an action is pending, so a pending leg
-    (or the decide a "swipe" re-asks) is always ``nodes[self._idx]``; a
-    pending "tap" already had its cursor routed at resolve time.
-    `channel` marks actions that land on the user thread — the synth
-    site declares it, so the reader never re-derives it from kind
-    names."""
-
-    kind: str  # "peek"|"leg"|"tap"|"swipe"|"gate-*"|"confirm-*"|"rec-*"|"suspend"
-    call_id: str
-    channel: bool = False
 
 
 @dataclass
@@ -252,8 +233,9 @@ class Program:
         # ask.
         self.channel = channel
         self._idx = 0
-        self._pending: _Pending | None = None
-        self._seq = 0
+        # Turn minting + the one action in flight (`turns.py`) — the walk
+        # keeps its own vocabulary (journal, acted) around it.
+        self._turns = Turnsmith()
         self._gate = _Gate()
         self._resumed = False
         # True once any device-changing action was synthesized (peeks
@@ -435,7 +417,7 @@ class Program:
     def _advance(
         self, history: list[Message]
     ) -> "AssistantMessage | DecisionRequest | None":
-        if self._pending is None:
+        if self._turns.pending is None:
             if self._gate.awaiting:
                 # Suspended-at-gate resume: go straight to reading the
                 # thread — the ask was sent before the suspension.
@@ -462,35 +444,22 @@ class Program:
                 gesture_vocab.PEEK,
                 {},
             )
-        result = views.result_for(history, self._pending.call_id)
-        if result is None:
-            if self._pending.kind == "suspend":
-                # The suspension file is already written; without its
-                # end_session result the session may run on — a dead
-                # walk must not resurrect on the next wake.
+        pending, result, failed = self._turns.settle(history)
+        kind = pending.kind
+        if failed is not None:
+            if kind == "suspend":
+                # The suspension file is already written; whether the
+                # end_session was blocked or its result never arrived,
+                # the session may run on — a dead walk must not
+                # resurrect on the next wake.
                 clear_suspended()
-            return self._handover(
-                f"the result of {self._pending.kind} never arrived in history"
-            )
-        if result.is_error:
-            if self._pending.kind == "suspend":
-                # end_session was blocked — the suspension file is already
-                # written and would resurrect this walk after the model
-                # finishes the task in-session. Drop it.
-                clear_suspended()
-                return self._handover(
-                    "suspend end_session was blocked — suspension dropped"
-                )
-            return self._handover(
-                f"{self._pending.kind} was blocked or failed: "
-                f"{views.text_of(result)[:200]}"
-            )
-        kind = self._pending.kind
+                return self._handover(f"{failed} — suspension dropped")
+            return self._handover(failed)
+        assert result is not None  # settle: exactly one of result/failed
         # One reading, one verdict: channel-facing actions (declared at
         # the synth site) match against the thread; everything else
         # against the pack's own pages.
-        in_channel = self._pending.channel
-        self._pending = None
+        in_channel = pending.channel
         self._screen = views.screen_of(result)
         self._verdict = match_screen(
             self._screen,
@@ -1394,29 +1363,20 @@ class Program:
     def _synth(
         self, kind: str, summary: str, tool: str, args: dict, *, channel: bool = False
     ) -> AssistantMessage:
-        """One synthesized [note, one-other] turn — exactly the shape the
-        loop enforces on model turns, so dispatch, guards, compaction, and
-        the wire log see an ordinary turn — with its action registered as
-        the pending one. A fresh decision outcome journals into this
-        note's summary (record-don't-replay: the transcript carries the
-        decision, never a re-ask)."""
+        """The walk's synthesized turn: fold in anything journaled, note
+        whether this one touched the phone, then mint it (`turns.py`
+        owns the shape and the call-id convention).
+
+        A fresh decision outcome journals into this note's summary
+        (record-don't-replay: the transcript carries the decision, never
+        a re-ask), and any non-peek tool marks the walk as having acted —
+        a "completion" that never acted must not consume the arm."""
         if self._journal is not None:
             summary = f"{summary} | {self._journal}"
             self._journal = None
         if tool != gesture_vocab.PEEK:
             self._acted = True
-        self._seq += 1
-        cid = f"conductor-{self._seq}"
-        self._pending = _Pending(kind=kind, call_id=f"{cid}-act", channel=channel)
-        return AssistantMessage(
-            content="",
-            tool_calls=[
-                ToolCall(id=f"{cid}-note", name="note", arguments={"summary": summary}),
-                ToolCall(id=f"{cid}-act", name=tool, arguments=args),
-            ],
-            finish_reason=FinishReason.TOOL_CALLS,
-            synthesized=True,
-        )
+        return self._turns.synth(kind, summary, tool, args, channel=channel)
 
     def _handover(self, reason: str) -> AssistantMessage | None:
         """Always None — typed as the advance result so call sites read

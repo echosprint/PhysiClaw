@@ -13,6 +13,11 @@ Layout:
   - `_spec.py` — shared spec-file substrate: the YAML loader and the
     macro layer's scalar rules, bound to each spec's error class.
   - `playbook.py` — PLAYBOOK.yml model + parser + graph/money/ledger lints.
+  - `turns.py` — minting a synthesized turn: the `[note, one-other]`
+    shape, the call-id convention, and the one action in flight.
+  - `overture.py` — what plays before the program: the deterministic
+    boot to the user's thread (unlock, open, verify) and the one
+    parse_task ask that either hands a Program back or goes quiet.
   - `program.py` — a playbook mid-walk: synthesized turns (legs,
     decisions' primitives, channel asks), the HUMAN_GATE ask-and-hold,
     the ledger loop + cart reconciliation, suspending, money predicates.

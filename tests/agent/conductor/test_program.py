@@ -8,17 +8,25 @@ from __future__ import annotations
 import json
 
 import pytest
-from conductor_fakes import LEDGERED, PACK_MACRO, make_screen, write_pack
+from conductor_fakes import (
+    ELSEWHERE,
+    LEDGERED,
+    PACK_MACRO,
+    make_screen,
+    write_pack,
+)
+from conductor_fakes import (
+    feed as _feed,
+)
+from conductor_fakes import (
+    history as _history,
+)
+from conductor_fakes import (
+    thread_screen as _thread,
+)
 
 from physiclaw.agent.conductor import arming, channel, memory, program, setup
 from physiclaw.agent.conductor.playbook import GATE_MAX_REVISIONS, PlaybookError
-from physiclaw.agent.engine.dto import (
-    AssistantMessage,
-    Message,
-    SystemMessage,
-    ToolResultMessage,
-    UserMessage,
-)
 from physiclaw.common import paths
 
 FLOW = """\
@@ -55,34 +63,12 @@ BRANCH = (
 
 HOME = make_screen(("Files", 0.5, 0.1)).text
 RESULTS = make_screen(("综合", 0.5, 0.1)).text
-ELSEWHERE = make_screen(("Nothing known", 0.5, 0.5)).text
-
-
-def _feed(
-    history: list[Message],
-    turn: AssistantMessage,
-    text: str = "",
-    *,
-    error: bool = False,
-) -> None:
-    """Append the synthesized turn plus its action's tool result — the
-    loop's contract (one result per call, in the very next messages)."""
-    history.append(turn)
-    history.append(
-        ToolResultMessage(
-            tool_call_id=turn.tool_calls[1].id, content=text, is_error=error
-        )
-    )
 
 
 def _armed_program() -> program.Program:
     p = setup.load_armed()
     assert p is not None
     return p
-
-
-def _history() -> list[Message]:
-    return [SystemMessage(content="sys"), UserMessage(content="wake")]
 
 
 # ---------- arming ----------
@@ -219,6 +205,21 @@ def test_verify_mismatch_hands_over() -> None:
     leg1 = p.advance(h)
     assert leg1 is not None
     _feed(h, leg1, RESULTS)  # landed on the WRONG known page
+
+    assert p.advance(h) is None
+
+
+def test_leg_verifying_a_builtin_page_hands_over() -> None:
+    # `ios` pages LOAD now — the conductor matches against them itself —
+    # but a playbook still may not ACT on one: legs run this pack's
+    # macros and land on this pack's pages. The loader change made this
+    # guarantee easy to lose by accident, so pin it.
+    write_pack(playbooks={"flow": FLOW.replace("verify: home", "verify: ios.locked")})
+    arming.arm("demo", "flow", {"keyword": "milk"})
+    p = _armed_program()
+    h = _history()
+
+    _feed(h, p.advance(h), ELSEWHERE)
 
     assert p.advance(h) is None
 
@@ -441,10 +442,6 @@ def _write_channel() -> None:
 
 def _sheet(total: str = "¥45") -> str:
     return make_screen(("综合", 0.5, 0.1), (f"合计 {total}", 0.5, 0.5)).text
-
-
-def _thread(*bubbles: tuple) -> str:
-    return make_screen(("MyChat", 0.5, 0.05), *bubbles).text
 
 
 def _at_gate(total: str = "¥45", playbook: str = GATED):
@@ -715,14 +712,15 @@ def test_suspended_confirm_resume_off_thread_reopens_then_continues() -> None:
 # ---------- activation / session_setup ----------
 
 
-def test_session_setup_builds_activation_and_hidden_registry() -> None:
+def test_session_setup_builds_the_overture_and_hidden_registry() -> None:
     _write_channel()
     write_pack(playbooks={"flow": FLOW})
 
-    prog, activation, hidden = setup.session_setup()
+    prog, overture, hidden = setup.session_setup()
 
     assert prog is None
-    assert activation is not None
+    assert overture is not None
+    activation = overture._activation
     assert tuple(activation.entries) == ("demo/flow",)
     menu = activation._menu()
     assert "demo/flow" in menu and "keyword" in menu
@@ -734,36 +732,32 @@ def test_session_setup_builds_activation_and_hidden_registry() -> None:
     }
 
 
-def test_session_setup_prefers_armed_program_over_activation() -> None:
+def test_session_setup_prefers_armed_program_over_the_overture() -> None:
     _write_channel()
     write_pack(playbooks={"flow": FLOW})
     arming.arm("demo", "flow", {"keyword": "milk"})
 
-    prog, activation, hidden = setup.session_setup()
+    prog, overture, hidden = setup.session_setup()
 
     assert prog is not None and prog.channel is not None
-    assert activation is None
+    assert overture is None
 
 
-def test_activation_fires_once_on_the_thread_page() -> None:
+def test_activation_builds_a_request_over_the_thread_screen() -> None:
     from physiclaw.agent.conductor.micro import PARSE_TASK, MicroOutcome
-    from physiclaw.agent.engine.dto import ToolResultMessage
+    from physiclaw.common.listing import Screen
 
     _write_channel()
     write_pack(playbooks={"flow": FLOW})
-    _, activation, _ = setup.session_setup()
+    _, overture, _ = setup.session_setup()
+    assert overture is not None
+    activation = overture._activation
 
-    h = _history()
-    h.append(ToolResultMessage(tool_call_id="t1", content=ELSEWHERE))
-    assert activation.request(h) is None  # not the thread — free
-
-    h.append(
-        ToolResultMessage(tool_call_id="t2", content=_thread(("买牛奶", 0.25, 0.4)))
-    )
-    req = activation.request(h)
+    # The caller establishes the screen IS the thread (the overture drove
+    # there, or watched the model arrive) — this turns it into the call.
+    req = activation.request(Screen.read(_thread(("买牛奶", 0.25, 0.4))))
     assert req is not None and req.call == PARSE_TASK
     assert "买牛奶" in req.listing and "demo/flow" in req.args["menu"]
-    assert activation.request(h) is None  # once per session
 
     prog = activation.build(
         MicroOutcome(
@@ -782,7 +776,9 @@ def test_activation_rejects_unresolvable_inputs_and_not_a_task() -> None:
 
     _write_channel()
     write_pack(playbooks={"flow": FLOW})
-    _, activation, _ = setup.session_setup()
+    _, overture, _ = setup.session_setup()
+    assert overture is not None
+    activation = overture._activation
 
     assert activation.build(None) is None
     assert (

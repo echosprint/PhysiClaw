@@ -27,6 +27,37 @@ def make_screen(*rows: tuple) -> Screen:
     return Screen.read(format_elements(els))
 
 
+# The three screens every driver test needs, and the loop contract for
+# feeding a synthesized turn's result back. One home: the conductor's own
+# `turns.py` centralized this on the src side, so the tests must not
+# re-spell "the result is keyed to tool_calls[1]" per file.
+ELSEWHERE = make_screen(("Nothing known", 0.5, 0.5)).text
+
+
+def thread_screen(*bubbles: tuple) -> str:
+    """The user-channel thread, anchored on the demo contact name."""
+    return make_screen(("MyChat", 0.5, 0.05), *bubbles).text
+
+
+def history() -> list:
+    from physiclaw.agent.engine.dto import SystemMessage, UserMessage
+
+    return [SystemMessage(content="sys"), UserMessage(content="wake")]
+
+
+def feed(history: list, turn, text: str = "", *, error: bool = False) -> None:
+    """Append the synthesized turn plus its ACTION's tool result — the
+    loop's contract (one result per call, in the very next messages)."""
+    from physiclaw.agent.engine.dto import ToolResultMessage
+
+    history.append(turn)
+    history.append(
+        ToolResultMessage(
+            tool_call_id=turn.tool_calls[1].id, content=text, is_error=error
+        )
+    )
+
+
 # One canonical demo pack for the pack-consuming test files (playbook,
 # program): two declared pages, two enabled macros.
 

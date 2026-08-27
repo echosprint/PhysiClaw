@@ -33,7 +33,7 @@ def init(
     """Scaffold a new app pack: pages.yml, an example playbook, and an
     example pack macro — all parse-clean, all disabled."""
     from physiclaw.agent.conductor import scaffold
-    from physiclaw.agent.conductor.pages import CHANNEL_APP, THREAD_PAGE
+    from physiclaw.agent.conductor.pages import CHANNEL_APP, IOS_APP, THREAD_PAGE
     from physiclaw.agent.conductor.playbook import PlaybookError
 
     try:
@@ -51,6 +51,12 @@ def init(
         typer.echo("     drive them via an armed test playbook), then enable")
         typer.echo(
             f"  4. capture geometry: physiclaw conductor calibrate {CHANNEL_APP}"
+        )
+    elif app == IOS_APP:
+        typer.echo("  1. check the lock-screen reading matches your phone's language")
+        typer.echo("     (lock it, then: physiclaw conductor propose --live)")
+        typer.echo(
+            f"  2. capture geometry: physiclaw conductor calibrate {IOS_APP} --guided"
         )
     else:
         typer.echo(

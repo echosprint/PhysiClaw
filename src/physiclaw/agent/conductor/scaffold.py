@@ -5,16 +5,18 @@ The scaffold IS the format reference a new user edits in place
 ``playbooks/README.md`` via ``ensure_readme``. Caps and vocabularies
 interpolate from `playbook`/`calls` constants, never hand-copied."""
 
+import logging
 from pathlib import Path
 
 from physiclaw.agent.conductor.calls import CALLS
 from physiclaw.agent.conductor.pages import (
     CHANNEL_APP,
+    IOS_APP,
+    LOCKED_PAGE,
     OPEN_MACRO,
     PAGES_FILENAME,
     SEND_MACRO,
     THREAD_PAGE,
-    reserved_unloadable,
 )
 from physiclaw.agent.conductor.playbook import (
     GATE_MAX_CHECKS,
@@ -27,6 +29,8 @@ from physiclaw.agent.conductor.playbook import (
 )
 from physiclaw.agent.macros import scaffold as macro_scaffold
 from physiclaw.agent.macros.model import MACRO_FILENAME
+
+log = logging.getLogger(__name__)
 
 EXAMPLE_MACRO = "example-leg"
 EXAMPLE_PLAYBOOK = "example"
@@ -43,6 +47,10 @@ home:
   anchors:
     - "EDIT ME"                    # a label text that identifies this page
     # - {text: "tab", region: bottom}   # coarse band: top/bottom/left/right
+    # - {text: ["Search", "搜索"]}      # ONE anchor, either reading matches.
+    #   Alternates belong here, NOT as a second anchor: every declared
+    #   anchor is a share of the page's score, so a second spelling of the
+    #   same label would halve it.
   # forbid: ["popup text"]         # veto terms — kills look-alike takeovers
   # scrollable: true               # content may scroll under fixed chrome
 """
@@ -247,14 +255,21 @@ def ensure_format_readme() -> None:
 def init_pack(app: str) -> Path:
     """Scaffold ``playbooks/<app>/`` — pages stub, disabled example
     playbook, example pack macro — and return the pack root. Raises
-    PlaybookError on a bad/reserved name or an existing directory."""
+    PlaybookError on a bad name or an existing directory; `ios` is the
+    exception, being idempotent (see below)."""
     from physiclaw.common import paths
     from physiclaw.common.text import write_text
 
     check_name(app, "app name")
-    if reserved_unloadable(app):
-        raise PlaybookError(f"{app!r} is a reserved namespace (built-in pages)")
     root = paths.playbooks_dir() / app
+    if app == IOS_APP:
+        # Idempotent on purpose: `session_setup` materializes this pack on
+        # the first qualifying wake, so by the time anyone runs
+        # `playbooks init ios` it usually exists — and erroring there would
+        # withhold the next-steps text, which is the command's whole value.
+        ensure_ios_pack()
+        ensure_format_readme()
+        return root
     if root.exists():
         raise PlaybookError(f"pack directory already exists: {root}")
     if app == CHANNEL_APP:
@@ -266,3 +281,63 @@ def init_pack(app: str) -> Path:
     write_text(macro_dir / MACRO_FILENAME, render_example_macro())
     ensure_format_readme()
     return root
+
+
+# ---------- the ios pack (OS states the conductor must name) ----------
+
+IOS_PAGES_STUB = f"""\
+# Page DECLARATIONS for iOS system states — semantics only, never
+# geometry (that is captured on YOUR device, like any pack:
+# `physiclaw conductor calibrate ios --guided`).
+#
+# Unlike an app pack this one holds no playbooks and no macros: the
+# conductor reads these pages itself, to tell one OS state from another.
+
+# The lock screen. It earns a declaration for ONE reason: to tell
+# "locked" apart from "a screen I don't recognize". Those demand
+# opposite actions — `unlock_phone` costs 20-40s and does nothing on an
+# unlocked phone, while a recovery macro's taps land uselessly on a lock
+# screen. Every other unrecognized screen collapses into one arm, which
+# is why no other system page is declared yet.
+{LOCKED_PAGE}:
+  anchors:
+    # ONE anchor, several acceptable readings — never separate anchors:
+    # each declared anchor is a share of the page's score, so a second
+    # spelling of the same label would halve it.
+    #
+    # The reading below is what an English-system iPhone prints. If
+    # yours is set to another language, lock it and run
+    # `physiclaw conductor propose --live` to see what it actually says,
+    # then add that reading beside this one:
+    #
+    #     - text: ["Swipe up for Face ID or Enter Passcode", "<yours>"]
+    - text: ["Swipe up for Face ID or Enter Passcode"]
+      region: top
+"""
+
+
+def ensure_ios_pack() -> None:
+    """Materialize `playbooks/ios/` if it does not exist — the
+    `ensure_format_readme` pattern, called the first time the conductor
+    goes looking for OS pages.
+
+    It is a template the user OWNS and edits (the lock-screen reading
+    depends on their phone's language), so it must exist on disk rather
+    than be read out of the wheel — but it must not depend on them having
+    run `playbooks init ios` either, because the conductor needs those
+    pages on the very first wake. Written once, then never touched:
+    a user file, including a deliberately emptied one, is theirs.
+
+    Fail-open: a read-only home degrades to "no ios pages", which the
+    conductor already handles (every OS state reads as unknown)."""
+    from physiclaw.common import paths
+    from physiclaw.common.text import write_text
+
+    root = paths.playbooks_dir() / IOS_APP
+    if root.exists():
+        return
+    try:
+        root.mkdir(parents=True)
+        write_text(root / PAGES_FILENAME, IOS_PAGES_STUB)
+    except OSError:
+        log.warning("could not scaffold %s — OS pages unavailable", root, exc_info=True)

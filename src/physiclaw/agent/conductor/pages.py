@@ -35,15 +35,30 @@ MAX_PAGES = 30
 MAX_ANCHORS = 12
 MAX_FORBID = 8
 MAX_ANCHOR_LEN = 80
+# Acceptable readings of ONE anchor, canonical included (see `AnchorDecl`).
+# A handful covers the real cases — a bilingual label plus a known OCR
+# confusion; more than that is usually two anchors wearing one coat.
+MAX_ANCHOR_READINGS = 4
 
 
-# Reserved app namespaces a pack's page refs may cross into. `ios` is
-# reserved-unimplemented (OS states, someday). `channel` is the ONE
-# loadable infrastructure pack: the user-channel IM pages + send
-# macros, recorded on-device under playbooks/channel/ like any pack —
-# but playbooks never name it (conductor infrastructure via node types).
-RESERVED_APPS = frozenset({"ios", "channel"})
+# Reserved app namespaces a pack's page refs may cross into. Neither is
+# a task pack, and both are scaffolded into playbooks/<app>/ like any
+# other: `channel` is the user-channel IM pages + send macros, `ios` is
+# OS-level state. Playbooks never name either — the conductor reaches
+# them through node types, which is what "reserved" buys.
 CHANNEL_APP = "channel"
+
+# The OS-state pack. Same shape as any other pack — a scaffolded
+# `playbooks/ios/` the user owns and edits — but the conductor knows its
+# name, because telling "locked" from "a screen I don't recognize" is
+# its own job, not a playbook's. `scaffold.IOS_PAGES_STUB` is the
+# starting text; absent (never scaffolded) simply means the conductor
+# cannot name those states, and every one of them reads as unknown.
+IOS_APP = "ios"
+
+# Derived, never re-spelled: renaming either constant must not leave this
+# set pointing at the old string.
+RESERVED_APPS = frozenset({CHANNEL_APP, IOS_APP})
 
 # The channel pack's conventions — the three names the conductor knows.
 # Declared HERE (beside CHANNEL_APP) because both channel.py and
@@ -53,6 +68,11 @@ THREAD_PAGE = "thread"  # channel pages.yml must declare this page
 SEND_MACRO = "send"  # nav to the user's thread + paste + send {message}
 OPEN_MACRO = "open"  # nav to the thread only (resume reads)
 
+# The ios pack's one convention, here for the same reason: the boot
+# matches this page and `scaffold.IOS_PAGES_STUB` declares it, so the two
+# interpolate one constant instead of both spelling "locked".
+LOCKED_PAGE = "locked"
+
 
 def page_id(app: str, page: str) -> str:
     """The `app.page` spelling — the ONE format matcher verdicts carry
@@ -60,16 +80,10 @@ def page_id(app: str, page: str) -> str:
     return f"{app}.{page}"
 
 
-# The thread page's full id, precomputed: what the gate's peeks and the
-# activation trigger match against.
+# The full ids, precomputed: what the gate's peeks and the boot match
+# against.
 THREAD_ID = page_id(CHANNEL_APP, THREAD_PAGE)
-
-
-def reserved_unloadable(app: str) -> bool:
-    """Reserved AND not loadable — `ios` today. The channel is reserved
-    as a page-ref namespace but IS the one loadable infrastructure pack;
-    this predicate is the single spelling of that exception."""
-    return app in RESERVED_APPS and app != CHANNEL_APP
+LOCKED_ID = page_id(IOS_APP, LOCKED_PAGE)
 
 
 # Coarse region hints — bands, not bboxes: exact geometry is learned, the
@@ -106,11 +120,35 @@ _require_str, _prose, _opt_prose, _check_name = _spec.bind(PagesError)
 
 @dataclass(frozen=True)
 class AnchorDecl:
-    """One declared identity anchor: a label text that should be on the
-    page, optionally pinned to a coarse region band."""
+    """One declared identity anchor: the label text that should be on the
+    page, optionally pinned to a coarse region band.
+
+    `alts` are further acceptable READINGS of that SAME anchor — any one
+    satisfies it, and it still counts ONCE toward the page score. They are
+    the authored counterpart of `LearnedAnchor.variants` (the readings
+    capture mines on-device), and carry that same field shape on purpose:
+    a mixed-locale phone (English system UI, Chinese apps) or a known OCR
+    confusion is declared up front instead of waiting for capture to find
+    it. The two converge — an alternate that does show up on this device
+    gets mined into `variants` as well.
+
+    Alternates must never be written as separate anchors: scoring is a
+    weighted fraction over ALL declared anchors, so two spellings of one
+    label would halve the page's score on every device — below the
+    declaration-only threshold, on a page that is in fact right there.
+
+    `text` stays the canonical reading: learned geometry keys off it, and
+    it is the name hits/missing report.
+    """
 
     text: str
+    alts: tuple[str, ...] = ()
     region: str | None = None  # key into REGIONS
+
+    @property
+    def readings(self) -> tuple[str, ...]:
+        """Canonical first, then the alternates — what the matcher tries."""
+        return (self.text, *self.alts)
 
 
 @dataclass(frozen=True)
@@ -240,12 +278,31 @@ def _parse_anchor(raw: Any, where: str) -> AnchorDecl:
         raise PagesError(
             f"{where}: each anchor must be a string or {{text, region}} mapping"
         )
-    text = _anchor_text(raw_text, f"{where} anchor")
-    # A single character as a whole-screen anchor would match inside almost
-    # any label — the macro grammar's rule, for the same reason.
-    if len(text) == 1 and region is None:
-        raise PagesError(f"{where}: single-character anchor {text!r} needs a `region`")
-    return AnchorDecl(text=text, region=region)
+    # `text:` takes one reading, or a list of alternate readings of the SAME
+    # anchor — any one satisfies it, and it counts once (see `AnchorDecl`).
+    readings = list(raw_text) if isinstance(raw_text, list) else [raw_text]
+    if not readings:
+        raise PagesError(f"{where}: anchor `text` list is empty")
+    if len(readings) > MAX_ANCHOR_READINGS:
+        raise PagesError(
+            f"{where}: anchor has {len(readings)} readings > max {MAX_ANCHOR_READINGS}"
+        )
+    texts: list[str] = []
+    for one in readings:
+        text = _anchor_text(one, f"{where} anchor")
+        # A single character as a whole-screen anchor would match inside almost
+        # any label — the macro grammar's rule, for the same reason. Checked
+        # per reading: one loose alternate opens the same door as one loose
+        # anchor.
+        if len(text) == 1 and region is None:
+            raise PagesError(
+                f"{where}: single-character anchor {text!r} needs a `region`"
+            )
+        if text in texts:
+            raise PagesError(f"{where}: anchor repeats the reading {text!r}")
+        texts.append(text)
+    # First reading is canonical — the learned-geometry key (see AnchorDecl).
+    return AnchorDecl(text=texts[0], alts=tuple(texts[1:]), region=region)
 
 
 def _anchor_text(value: Any, where: str) -> str:
@@ -264,10 +321,10 @@ def scan_app_decls(app: str) -> dict[str, PageDecl]:
     """The declared pages of one app pack — {} when the pack or its
     pages.yml doesn't exist. Raises PagesError on a malformed file (the
     CLI surfaces it; runtime callers catch and treat the app as
-    undeclared). The name is validated BEFORE any path is built from it."""
+    undeclared). The name is validated BEFORE any path is built from it.
+    Every pack reads the same way, `ios` included — declarations live on
+    disk, under the user's hand, never in the wheel."""
     _check_name(app, "app name")
-    if reserved_unloadable(app):
-        raise PagesError(f"{app!r} is a reserved namespace (built-in pages)")
     p = paths.playbooks_dir() / app / PAGES_FILENAME
     if not p.exists():
         return {}

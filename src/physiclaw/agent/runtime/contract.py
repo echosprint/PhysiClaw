@@ -17,6 +17,12 @@ containment — the engine converts crashes to STUCK internally, the
 claude path lets construction errors propagate (a broken spawn is an
 operator problem, not a retry case) — so ``drive()`` never catches.
 
+One divergence is deliberate, not drift: the in-process engine runs a
+conductor (armed playbooks, and the overture's boot to the user's thread
+at wake); the claude path does not. The conductor's payoff is
+eliminating metered provider calls, and that path is subscription-metered
+— so it keeps the doctrine-in-prose version, executed by the model.
+
 Retry semantics stay per-engine via ``retry_on``: the engine retries
 STUCK (its harness-detected dead ends — max turns, provider exhausted,
 crash — are worth a fresh session), while the claude path retries only

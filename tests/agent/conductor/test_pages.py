@@ -70,9 +70,81 @@ def test_single_char_anchor_allowed_with_region() -> None:
     assert out["results"].anchors[0].text == "x"
 
 
-def test_reserved_app_rejected_by_scan() -> None:
-    with pytest.raises(PagesError, match="reserved"):
-        pages.scan_app_decls("ios")
+# ---------- anchor alternates ----------
+
+
+def test_bare_string_anchor_has_no_alternates() -> None:
+    # Every pages.yml written before alternates existed must parse to
+    # exactly what it did before.
+    a = parse_pages(VALID, "taobao")["results"].anchors[0]
+
+    assert (a.text, a.alts) == ("综合", ())
+    assert a.readings == ("综合",)
+
+
+def test_anchor_alternates_parse_as_one_anchor() -> None:
+    out = parse_pages(
+        'lock:\n  anchors: [{text: ["Swipe up", "轻扫以打开"], region: top}]', "ios2"
+    )
+    (a,) = out["lock"].anchors
+
+    # First reading is canonical — the learned-geometry key; the rest are
+    # alternates, mirroring LearnedAnchor's text/variants split.
+    assert a.text == "Swipe up"
+    assert a.alts == ("轻扫以打开",)
+    assert a.readings == ("Swipe up", "轻扫以打开")
+    assert a.region == "top"
+
+
+@pytest.mark.parametrize(
+    "text, fragment",
+    [
+        ("p:\n  anchors: [{text: []}]", "list is empty"),
+        (
+            "p:\n  anchors: [{text: ['a1','b2','c3','d4','e5']}]",
+            "5 readings > max 4",
+        ),
+        ("p:\n  anchors: [{text: ['dup', 'dup']}]", "repeats the reading"),
+        # The single-char rule is per reading — one loose alternate opens
+        # the same door as one loose anchor.
+        ("p:\n  anchors: [{text: ['Search', 'x']}]", "needs a `region`"),
+        ("p:\n  anchors: [{text: ['ok', 123]}]", "must be a string"),
+    ],
+)
+def test_alternates_rejected_with_named_error(text: str, fragment: str) -> None:
+    with pytest.raises(PagesError, match=fragment):
+        parse_pages(text, "app")
+
+
+# ---------- the ios pack (scaffolded like any other) ----------
+
+
+def test_ios_pack_is_scaffolded_then_read_from_disk() -> None:
+    # `ios` used to be reserved-and-unloadable. It is now an ordinary
+    # pack directory the user owns — scaffolded by the CLI, read from
+    # disk like every other, never shipped in the wheel.
+    from physiclaw.agent.conductor import scaffold
+
+    assert pages.scan_app_decls(pages.IOS_APP) == {}  # nothing until scaffolded
+
+    scaffold.init_pack(pages.IOS_APP)
+    decls = pages.scan_app_decls(pages.IOS_APP)
+
+    assert "locked" in decls
+    assert decls["locked"].anchors  # semantics only — geometry is captured
+
+
+def test_scaffolded_ios_pages_are_matchable_prints_without_geometry() -> None:
+    from physiclaw.agent.conductor import scaffold
+
+    scaffold.init_pack(pages.IOS_APP)
+
+    prints = pages.prints_for_app(pages.IOS_APP)
+
+    assert [p.page_id for p in prints] == ["ios.locked"]
+    # No learned file until `calibrate` runs — declaration-only threshold.
+    assert prints[0].learned is None
+    assert prints[0].threshold == pages.DECL_ONLY_THRESHOLD
 
 
 # ---------- discovery + learned store ----------

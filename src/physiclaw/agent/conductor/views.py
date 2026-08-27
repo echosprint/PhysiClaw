@@ -3,10 +3,11 @@
 The conductor never actuates and never holds an MCP client; everything
 it knows about the world arrives as ordinary ``ToolResultMessage``s in
 the session history. These four readers are the whole vocabulary: the
-latest result of any call (activation's view, before the conductor
-drives), the result of one specific synthesized call (the walk's view),
-and a result's text/screen extraction. One home, because Program and
-Activation must read history identically.
+latest result of any call (what the boot watches when it has no hand to
+navigate with), the result of one specific synthesized call (every
+driver's view, via `Turnsmith.settle`), and a result's text/screen
+extraction. One home, because Program and Overture must read history
+identically.
 """
 
 from physiclaw.agent.engine.dto import Message, TextBlock, ToolResultMessage

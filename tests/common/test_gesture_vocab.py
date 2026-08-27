@@ -23,6 +23,7 @@ from physiclaw.common.gesture_vocab import (
     STEP_ARG,
     STEP_TOOL,
     SWIPE,
+    UNLOCK_PHONE,
 )
 
 
@@ -63,7 +64,17 @@ def test_registered_tool_names_cover_the_vocabulary(mocker) -> None:
     mocker.patch.object(tools_mod, "save_tool_call")
     tools_mod.register(mcp, MagicMock())
 
-    vocabulary = PRESS_TOOLS | NAV_TOOLS | {SWIPE, SEQUENCE, PEEK, SEND_TO_CLIPBOARD}
+    vocabulary = (
+        PRESS_TOOLS
+        | NAV_TOOLS
+        | {
+            SWIPE,
+            SEQUENCE,
+            PEEK,
+            SEND_TO_CLIPBOARD,
+            UNLOCK_PHONE,
+        }
+    )
     assert vocabulary <= mcp.names
     # RUN_MACRO lives in this module because the engine's classifiers have to
     # name it, but it is a LOCAL tool — it must never appear in the server

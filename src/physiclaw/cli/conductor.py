@@ -176,23 +176,51 @@ def match(
         )
 
 
+# Guided capture: enough observations per page for a median position and
+# a real spread (capture floors the tolerance below 2, and MIN_FREQ needs
+# an anchor in most of them), while staying a short chore at the desk.
+GUIDED_SHOTS = 4
+
+
 @conductor_app.command()
 def calibrate(
     app: str = typer.Argument(help="app pack to calibrate"),
-    corpus_file: Path = typer.Argument(help="labeled corpus JSONL"),
+    corpus_file: Path = typer.Argument(None, help="labeled corpus JSONL"),
+    guided: bool = typer.Option(
+        False, "--guided", help="capture live, page by page, with prompts"
+    ),
+    shots: int = typer.Option(
+        GUIDED_SHOTS, "--shots", help="live peeks per page (--guided)"
+    ),
 ) -> None:
-    """Capture geometry + thresholds for an app from a labeled corpus.
+    """Capture geometry + thresholds for an app.
 
-    Lines labeled `<app>.<page>` are that page's genuine observations;
-    any other non-'?' label is a hard negative. Writes
-    `learned/pages/<app>.json` and prints the per-page report."""
+    From a labeled corpus: lines labeled `<app>.<page>` are that page's
+    genuine observations; any other non-'?' label is a hard negative.
+
+    With `--guided`: put the phone on each declared page when asked and
+    it peeks live — the way to calibrate pages a recorded session can't
+    easily contain (the lock screen, say). Needs `physiclaw mcp` running.
+
+    Either way, writes `learned/pages/<app>.json` and prints the per-page
+    report."""
     from physiclaw.agent.conductor import capture, corpus, pages
 
     decls = pages.scan_app_decls(app)
     if not decls:
         exit_error(f"no pages declared for app {app!r}")
-    items = corpus.read_corpus(corpus_file)
-    by_page, negatives = corpus.partition(items, app, set(decls))
+    if guided:
+        if corpus_file is not None:
+            exit_error("--guided captures live; drop the corpus argument", code=2)
+        negatives: list = []
+        by_page = _guided_capture(app, sorted(decls), shots)
+        if not by_page:
+            exit_error("no pages captured")
+    else:
+        if corpus_file is None:
+            exit_error("need a corpus file, or --guided", code=2)
+        items = corpus.read_corpus(corpus_file)
+        by_page, negatives = corpus.partition(items, app, set(decls))
 
     learned, reports, warnings = capture.capture_app(app, decls, by_page, negatives)
     for w in warnings:
@@ -202,6 +230,37 @@ def calibrate(
     if learned:
         pages.save_learned(app, learned)
         typer.echo(f"saved learned/pages/{app}.json ({len(learned)} pages)")
+
+
+def _guided_capture(app: str, page_names: list[str], shots: int) -> dict[str, list]:
+    """Walk the operator through each declared page, peeking `shots`
+    times per page. A page can be skipped (an OS state you can't stage
+    right now) — capture treats absent observations as "not calibrated",
+    which is exactly right, so a partial run is useful rather than
+    broken."""
+    by_page: dict[str, list] = {}
+    typer.echo(f"Guided capture for {app!r} — {shots} peeks per page.")
+    for name in page_names:
+        typer.echo(f"\n{app}.{name}")
+        answer = typer.prompt(
+            "  put the phone on this page, then press Enter ('s' to skip)",
+            default="",
+            show_default=False,
+        )
+        if answer.strip().lower() == "s":
+            typer.echo("  skipped")
+            continue
+        screens = []
+        for i in range(shots):
+            (screen,) = _input_screens(None, None, True)
+            if not screen.readable:
+                typer.echo(f"  [{i + 1}/{shots}] unreadable view — skipping this peek")
+                continue
+            screens.append(screen)
+            typer.echo(f"  [{i + 1}/{shots}] {len(screen.rows)} rows")
+        if screens:
+            by_page[name] = screens
+    return by_page
 
 
 def _report_line(r) -> str:

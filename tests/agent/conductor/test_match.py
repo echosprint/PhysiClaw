@@ -151,6 +151,49 @@ def test_score_region_hint_rejects_out_of_band_row() -> None:
     assert s.score == 0.0
 
 
+# ---------- anchor alternates ----------
+
+
+def test_alternate_readings_match_either_way() -> None:
+    pp = _print(anchors=[AnchorDecl("Search", alts=("搜索",))])
+
+    for label in ("Search", "搜索"):
+        assert m.score_page(pp, make_screen((label, 0.5, 0.1))).score == 1.0
+
+
+def test_alternates_count_as_one_anchor_where_two_anchors_would_halve() -> None:
+    """The regression alternates exist to prevent: a mixed-locale device
+    shows ONE of the two spellings, so declaring them as separate anchors
+    scores 0.5 — under the declaration-only threshold, on the right page."""
+    screen = make_screen(("Search", 0.5, 0.1), ("other", 0.5, 0.5))
+
+    together = _print(anchors=[AnchorDecl("Search", alts=("搜索",))])
+    apart = _print(anchors=[AnchorDecl("Search"), AnchorDecl("搜索")])
+
+    assert m.score_page(together, screen).score == 1.0
+    assert m.score_page(apart, screen).score == 0.5
+
+
+def test_alternate_reading_still_gets_the_fuzzy_tiers() -> None:
+    # 综台 is the classic one-character OCR confusion for 综合; an alternate
+    # must be held to the same tiers as a lone anchor, not exact-matched.
+    pp = _print(anchors=[AnchorDecl("Sort", alts=("综合",))])
+
+    assert m.score_page(pp, make_screen(("综台", 0.5, 0.1))).score == 1.0
+
+
+def test_alternates_report_the_canonical_reading() -> None:
+    # hits/missing name the canonical spelling whichever alternate landed,
+    # so learned geometry and reports key off one string.
+    pp = _print(anchors=[AnchorDecl("Search", alts=("搜索",))])
+
+    hit = m.score_page(pp, make_screen(("搜索", 0.5, 0.1)))
+    miss = m.score_page(pp, make_screen(("nothing", 0.5, 0.1)))
+
+    assert [h.anchor for h in hit.hits] == ["Search"]
+    assert miss.missing == ("Search",)
+
+
 # ---------- open-set decision ----------
 
 

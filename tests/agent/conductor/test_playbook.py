@@ -233,6 +233,17 @@ def test_send_leg_behind_any_gate_parses() -> None:
     assert p.nodes[-1].irreversible == "send_message"
 
 
+def test_scaffolded_ios_pack_parses_clean() -> None:
+    # The OS-state pack: declarations only — no playbooks, no macros.
+    from physiclaw.agent.conductor import pages, scaffold
+
+    root = scaffold.init_pack(pages.IOS_APP)
+
+    assert set(pb.load_pack(pages.IOS_APP).pages) == {"locked"}
+    assert pb.scan_playbooks(pages.IOS_APP) == []
+    assert not (root / pb.PACK_MACROS_DIRNAME).exists()
+
+
 def test_scaffolded_pack_parses_clean() -> None:
     from physiclaw.agent.conductor import scaffold
     from physiclaw.common.text import write_text
