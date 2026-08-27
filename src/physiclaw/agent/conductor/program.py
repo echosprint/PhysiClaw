@@ -8,8 +8,7 @@ through the micro-caller and feeds back via ``resolve()``, or with
 ``None`` — "I hand over". ``None`` is permanent for the session: the
 conductor goes quiet and the model takes over with the transcript as the
 handoff, because every synthesized turn and every tool result is
-ordinary history the model can read. A TERMINAL quiet — completion, or
-the user's refusal — also consumes the arm file (``retire``).
+ordinary history the model can read.
 
 The walk executes every node type, strictly:
 
@@ -39,9 +38,10 @@ The walk executes every node type, strictly:
     re-shop, unclaimed rows left alone), and a gate ``revise:`` turns a
     "yes, but change it" reply into a list rewrite and a fresh ask.
 
-How a Program comes to exist (armed / suspended / activation) lives in
-`setup.py`; the persisted files in `arming.py`; the domain helpers in
-`channel.py`, `ledger.py`, `memory.py`, `views.py`.
+How a Program comes to exist (the overture's activation, a resumed
+suspension, the CLI rehearsal) lives in `setup.py`; the suspension file
+in `suspension.py`; the domain helpers in `channel.py`, `ledger.py`,
+`memory.py`, `views.py`.
 """
 
 import json
@@ -49,15 +49,6 @@ import logging
 from dataclasses import dataclass, field
 
 from physiclaw.agent.conductor import ledger, memory, reply, views
-from physiclaw.agent.conductor.arming import (
-    SUSPENDED_SCHEMA,
-    armed_path,
-    armed_ref,
-    clear_suspended,
-    disarm,
-    read_armed,
-    suspended_path,
-)
 from physiclaw.agent.conductor.calls import CALLS, ESCALATE, NEXT_ITEM
 from physiclaw.agent.conductor.channel import Channel
 from physiclaw.agent.conductor.match import (
@@ -87,6 +78,11 @@ from physiclaw.agent.conductor.playbook import (
     ReconcileNode,
     fill_refs,
     qualified_macro,
+)
+from physiclaw.agent.conductor.suspension import (
+    SUSPENDED_SCHEMA,
+    clear_suspended,
+    suspended_path,
 )
 from physiclaw.agent.conductor.turns import Turnsmith
 from physiclaw.agent.engine.dto import AssistantMessage, Message
@@ -187,8 +183,8 @@ class _Gate:
 
 
 class Program:
-    """One armed playbook mid-walk. Constructed per session (the engine
-    loads it at wake), so the cursor state lives for exactly one attempt;
+    """One playbook mid-walk. Constructed per session (the engine builds
+    it at wake), so the cursor state lives for exactly one attempt;
     persistence across wakes is the locate peek, not saved state."""
 
     def __init__(
@@ -200,22 +196,13 @@ class Program:
         pack_macros: dict[str, Macro],
         prints: list[PagePrint],
         channel: Channel | None = None,
-        origin: str = "activation",
         suspended: dict | None = None,
     ):
         self.app = app
         self.spec = spec
         self.values = values
-        # Who built this walk ("armed" | "suspended" | "activation") — a
-        # terminal outcome consumes the arm file only for the first two
-        # (activation has no file). Defaults to the no-op origin, so a
-        # hand-built Program can never eat an arm by accident.
-        self.origin = origin
-        # None while the walk can still continue on a future wake;
-        # "complete" / "deny" mark done deals — see `retire`.
-        self.finished: str | None = None
         # The program's own qualified dispatch contribution — merged into
-        # the wake registry by session_setup (armed/suspended path).
+        # the wake registry by session_setup.
         self.pack_macros = pack_macros
         self._prints = prints
         self._ids = {n.id: i for i, n in enumerate(spec.nodes)}
@@ -304,10 +291,6 @@ class Program:
             "schema": SUSPENDED_SCHEMA,
             "app": self.app,
             "playbook": self.spec.name,
-            # Lineage, not the literal origin: retire must know whether
-            # this walk ever owned an arm file (an activation-built walk
-            # that suspends and completes must not eat a same-named arm).
-            "origin": "activation" if self.origin == "activation" else "armed",
             "idx": resume_idx,
             "values": self.values,
             "outputs": self._outputs,
@@ -362,10 +345,6 @@ class Program:
         except Exception:
             log.exception("conductor: program crashed — handing over to the model")
             step = None
-        if step is None:
-            # Quiet is produced RIGHT HERE (crash path included) — the
-            # one moment a terminal outcome may consume the arm.
-            self.retire()
         return step
 
     def resolve(
@@ -379,38 +358,7 @@ class Program:
         except Exception:
             log.exception("conductor: program crashed — handing over to the model")
             step = None
-        if step is None:
-            self.retire()
         return step
-
-    def retire(self) -> None:
-        """Runs once when this walk goes quiet. A TERMINAL outcome —
-        completion, or the user's refusal — consumes the arm file: done
-        deals must not re-walk on the next wake (an armed buy playbook
-        re-asking after the purchase, or after a 不用). An incidental
-        handover keeps the arm: the walk retries when the world may have
-        changed."""
-        if self.finished is None or self.origin not in ("armed", "suspended"):
-            return
-        if armed_ref() != (self.app, self.spec.name):
-            # The arm file may belong to a DIFFERENT playbook by now (a
-            # suspended walk outlives arm/disarm cycles) — never consume a
-            # standing order this walk does not own.
-            return
-        try:
-            removed = disarm()
-        except Exception:
-            # retire runs OUTSIDE the never-raises wrappers; a filesystem
-            # race here must not crash the turn.
-            log.exception("conductor: disarm failed during retire")
-            return
-        if removed:
-            log.info(
-                "conductor: %s/%s %s — arm consumed",
-                self.app,
-                self.spec.name,
-                self.finished,
-            )
 
     # ---- one advance ----
 
@@ -569,7 +517,6 @@ class Program:
                 self.app,
                 self.spec.name,
             )
-            self.finished = "complete"
             return None
         node = nodes[self._idx]
         if isinstance(node, DecideNode):
@@ -649,7 +596,7 @@ class Program:
     # ---- decisions ----
 
     def _values(self) -> dict[str, str]:
-        """Ref-resolution values: armed inputs plus every recorded
+        """Ref-resolution values: the walk's inputs plus every recorded
         decision output (keyed `node.field`, exactly the dotted ref),
         plus the loop-scoped `{item.*}` slots when a ledger walk has a
         current item (last wins — the same shadowing the parser
@@ -689,7 +636,7 @@ class Program:
 
     def _context(self, node: DecideNode) -> str:
         """The declared context slices, assembled least-privilege:
-        `inputs.*` from the armed values; `memory.<slug>` pulls ONLY the
+        `inputs.*` from the walk's values; `memory.<slug>` pulls ONLY the
         matching `## <slug>` section of memory.md (see `memory.py` for
         the fail-closed contract)."""
         parts: list[str] = []
@@ -1016,7 +963,6 @@ class Program:
             hit = matched.get(i)
             it.qty = hit.qty if hit is not None else 0
         self._ledger.extend(remaining)
-        self._persist_revision()
         self._gate.consented = None  # the old ask no longer covers the order
         self._gate.awaiting = False
         self._journal = f"revision applied: {ledger.describe(self._ledger)}"
@@ -1031,37 +977,6 @@ class Program:
                 {"name": qualified_macro(self.app, node.return_macro)},
             )
         return self._next()
-
-    def _persist_revision(self) -> None:
-        """Best-effort durability for an applied revision: the revised
-        desired state rides the ARM FILE (qty>0 items only — the arm
-        value contract has no zeros). The next suspension is many turns away
-        (return, shop, reconcile, re-ask); a crash before it would
-        otherwise rebuild the walk from the ORIGINAL list and silently
-        revert the user's change. Never blocks the walk."""
-        inp = self.spec.ledger_input
-        if inp is None or self.origin not in ("armed", "suspended"):
-            return
-        try:
-            data = read_armed()
-            if data is None or armed_ref() != (self.app, self.spec.name):
-                return  # never clobber a foreign standing order
-            assert self._ledger is not None
-            value = json.dumps(
-                [
-                    {"query": it.query, "qty": it.qty}
-                    for it in self._ledger
-                    if it.qty > 0
-                ],
-                ensure_ascii=False,
-            )
-            inputs = dict(data.get("inputs") or {})
-            inputs[inp.name] = value
-            data["inputs"] = inputs
-            write_json_atomic(armed_path(), data)
-            self.values[inp.name] = value  # `inputs.*` context slices follow
-        except Exception:
-            log.exception("conductor: could not persist the revised list")
 
     # ---- asks, the gate, suspending ----
 
@@ -1212,9 +1127,7 @@ class Program:
 
     def _deny(self) -> "AssistantMessage | None":
         """The one deny disposition — both reply tiers land here: no
-        re-asks, and TERMINAL (the flag makes retire consume the arm —
-        a refused deal must not re-ask on the next wake)."""
-        self.finished = "deny"
+        re-asks, and no second chance this session."""
         return self._handover(
             "user declined the ask — acknowledge them, back out of any "
             "open checkout or cart state this task created, and wrap up"

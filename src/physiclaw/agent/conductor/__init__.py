@@ -21,10 +21,11 @@ Layout:
   - `program.py` — a playbook mid-walk: synthesized turns (legs,
     decisions' primitives, channel asks), the HUMAN_GATE ask-and-hold,
     the ledger loop + cart reconciliation, suspending, money predicates.
-  - `setup.py` — how a Program comes to exist at wake: the armed/suspended
-    loaders, Activation (parse_task), and `session_setup`.
-  - `arming.py` — the armed.json / suspended.json files: paths, schemas,
-    `arm` validation + warnings, disarm/clear.
+  - `setup.py` — how a Program comes to exist: `build_program` and the
+    spec/input/readiness rules behind it, the suspended loader,
+    Activation (parse_task), and `session_setup`.
+  - `suspension.py` — the suspended.json file: the ONE piece of
+    cross-wake state a walk leaves behind.
   - `channel.py` — the user-channel pack (thread prints + send/open) and
     the qualified `app/name` dispatch-key spelling.
   - `ledger.py` — the buying list: value contract, item state, and the

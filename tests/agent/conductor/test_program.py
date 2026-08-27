@@ -11,7 +11,6 @@ import pytest
 from conductor_fakes import (
     ELSEWHERE,
     LEDGERED,
-    PACK_MACRO,
     make_screen,
     write_pack,
 )
@@ -25,7 +24,7 @@ from conductor_fakes import (
     thread_screen as _thread,
 )
 
-from physiclaw.agent.conductor import arming, channel, memory, program, setup
+from physiclaw.agent.conductor import channel, memory, program, setup, suspension
 from physiclaw.agent.conductor.playbook import GATE_MAX_REVISIONS, PlaybookError
 from physiclaw.common import paths
 
@@ -65,87 +64,13 @@ HOME = make_screen(("Files", 0.5, 0.1)).text
 RESULTS = make_screen(("综合", 0.5, 0.1)).text
 
 
-def _armed_program() -> program.Program:
-    p = setup.load_armed()
-    assert p is not None
-    return p
-
-
-# ---------- arming ----------
-
-
-def test_arm_writes_file_and_load_armed_builds_program() -> None:
-    write_pack(playbooks={"flow": FLOW})
-
-    spec, warnings = arming.arm("demo", "flow", {"keyword": "milk"})
-
-    assert len(spec.nodes) == 2 and warnings == []
-    assert arming.armed_ref() == ("demo", "flow")
-    p = _armed_program()
-    assert p.app == "demo"
-    assert p.values == {"keyword": "milk"}
-    assert set(p.pack_macros) == {"demo/open-app", "demo/add-cart"}
-
-
-def test_disarm_removes_the_file() -> None:
-    write_pack(playbooks={"flow": FLOW})
-    arming.arm("demo", "flow", {"keyword": "milk"})
-
-    assert arming.disarm() is True
-    assert arming.disarm() is False
-    assert arming.armed_ref() is None
-    assert setup.load_armed() is None
-
-
-@pytest.mark.parametrize(
-    "app, name, inputs, fragment",
-    [
-        ("demo", "ghost", {}, "no playbook"),
-        ("demo", "flow", {}, "missing required input"),
-        ("demo", "flow", {"keyword": "x", "typo": "y"}, "unknown input"),
-    ],
-)
-def test_arm_rejections(app, name, inputs, fragment) -> None:
-    write_pack(playbooks={"flow": FLOW})
-
-    with pytest.raises(PlaybookError, match=fragment):
-        arming.arm(app, name, inputs)
-
-
-def test_arm_refuses_a_disabled_playbook() -> None:
-    write_pack(playbooks={"flow": FLOW + "enabled: false\n"})
-
-    with pytest.raises(PlaybookError, match="disabled"):
-        arming.arm("demo", "flow", {"keyword": "milk"})
-
-
-def test_arm_refuses_disabled_leg_macros() -> None:
-    write_pack(playbooks={"flow": FLOW})
-    macro = paths.playbooks_dir() / "demo" / "macros" / "open-app" / "MACRO.yml"
-    macro.write_text(
-        PACK_MACRO.format(name="open-app") + "enabled: false\n", encoding="utf-8"
+def _program(app: str = "demo", name: str = "flow", **values) -> program.Program:
+    """Build the walk the way `playbooks run` does — the factory that
+    replaced arming as the way to get a Program without a wake."""
+    spec, pack = setup.load_spec(app, name, require_live=False)
+    return setup.build_program(
+        app, spec, pack, setup.resolve_inputs(spec, values), channel.load_channel()
     )
-
-    with pytest.raises(PlaybookError, match="disabled pack macro"):
-        arming.arm("demo", "flow", {"keyword": "milk"})
-
-
-def test_load_armed_fail_open() -> None:
-    # No file at all.
-    assert setup.load_armed() is None
-    # Corrupt file.
-    paths.playbooks_dir().mkdir(parents=True, exist_ok=True)
-    (paths.playbooks_dir() / arming.ARMED_FILENAME).write_text(
-        "{not json", encoding="utf-8"
-    )
-    assert setup.load_armed() is None
-    # A file naming a playbook that no longer exists.
-    write_pack(playbooks={"flow": FLOW})
-    (paths.playbooks_dir() / arming.ARMED_FILENAME).write_text(
-        json.dumps({"schema": 1, "app": "demo", "playbook": "gone", "inputs": {}}),
-        encoding="utf-8",
-    )
-    assert setup.load_armed() is None
 
 
 # ---------- the walk ----------
@@ -153,8 +78,7 @@ def test_load_armed_fail_open() -> None:
 
 def test_walk_runs_both_legs_then_completes() -> None:
     write_pack(playbooks={"flow": FLOW})
-    arming.arm("demo", "flow", {"keyword": "milk"})
-    p = _armed_program()
+    p = _program(keyword="milk")
     h = _history()
 
     peek = p.advance(h)
@@ -182,8 +106,7 @@ def test_locate_resumes_past_completed_legs() -> None:
     # A killed session's next wake: the screen already shows leg 1's
     # verify page, so the walk resumes at leg 2 — no repeated gestures.
     write_pack(playbooks={"flow": FLOW})
-    arming.arm("demo", "flow", {"keyword": "milk"})
-    p = _armed_program()
+    p = _program(keyword="milk")
     h = _history()
 
     peek = p.advance(h)
@@ -197,8 +120,7 @@ def test_locate_resumes_past_completed_legs() -> None:
 
 def test_verify_mismatch_hands_over() -> None:
     write_pack(playbooks={"flow": FLOW})
-    arming.arm("demo", "flow", {"keyword": "milk"})
-    p = _armed_program()
+    p = _program(keyword="milk")
     h = _history()
 
     _feed(h, p.advance(h), ELSEWHERE)
@@ -215,8 +137,7 @@ def test_leg_verifying_a_builtin_page_hands_over() -> None:
     # macros and land on this pack's pages. The loader change made this
     # guarantee easy to lose by accident, so pin it.
     write_pack(playbooks={"flow": FLOW.replace("verify: home", "verify: ios.locked")})
-    arming.arm("demo", "flow", {"keyword": "milk"})
-    p = _armed_program()
+    p = _program(keyword="milk")
     h = _history()
 
     _feed(h, p.advance(h), ELSEWHERE)
@@ -226,8 +147,7 @@ def test_leg_verifying_a_builtin_page_hands_over() -> None:
 
 def test_error_result_hands_over() -> None:
     write_pack(playbooks={"flow": FLOW})
-    arming.arm("demo", "flow", {"keyword": "milk"})
-    p = _armed_program()
+    p = _program(keyword="milk")
     h = _history()
 
     _feed(h, p.advance(h), ELSEWHERE)
@@ -242,8 +162,7 @@ def test_decide_yields_a_request_and_an_unresolved_one_hands_over() -> None:
     from physiclaw.agent.conductor.micro import DecisionRequest
 
     write_pack(playbooks={"branch": BRANCH})
-    arming.arm("demo", "branch", {"keyword": "milk"})
-    p = _armed_program()
+    p = _program(name="branch", **{"keyword": "milk"})
     h = _history()
 
     _feed(h, p.advance(h), ELSEWHERE)
@@ -257,8 +176,7 @@ def test_decide_yields_a_request_and_an_unresolved_one_hands_over() -> None:
 
 def test_program_advance_never_raises() -> None:
     write_pack(playbooks={"flow": FLOW})
-    arming.arm("demo", "flow", {"keyword": "milk"})
-    p = _armed_program()
+    p = _program(keyword="milk")
 
     # A malformed history (no pending result will ever match) must
     # degrade to a hand-over, not an exception.
@@ -298,8 +216,7 @@ def _at_decision():
     from physiclaw.agent.conductor.micro import DecisionRequest
 
     write_pack(playbooks={"picky": PICKY})
-    arming.arm("demo", "picky", {"keyword": "milk"})
-    p = _armed_program()
+    p = _program(name="picky", **{"keyword": "milk"})
     h = _history()
     _feed(h, p.advance(h), ELSEWHERE)  # locate: unknown → top
     _feed(h, p.advance(h), RESULTS)  # leg open verified on results
@@ -449,9 +366,7 @@ def _at_gate(total: str = "¥45", playbook: str = GATED):
     ask; `total` is what the payment sheet shows."""
     _write_channel()
     write_pack(playbooks={"pay": playbook})
-    arming.arm("demo", "pay", {"keyword": "milk"})
-    p = setup.load_armed(channel.load_channel())
-    assert p is not None
+    p = _program(name="pay", keyword="milk")
     assert p.channel is not None and p.channel.send == "channel/send"
     h = _history()
     _feed(h, p.advance(h), ELSEWHERE)  # locate → top
@@ -515,7 +430,8 @@ def test_arm_warns_when_a_gate_ask_quotes_no_deny_word() -> None:
     _write_channel()
     write_pack(playbooks={"pay": quiet})
 
-    _, warnings = arming.arm("demo", "pay", {"keyword": "milk"})
+    spec, _ = setup.load_spec("demo", "pay", require_live=False)
+    warnings = setup.readiness_warnings(spec)
 
     assert len(warnings) == 2  # message and over_message alike
     assert all("LLM check" in w for w in warnings)
@@ -624,8 +540,7 @@ nodes:
 def test_confirm_sends_suspends_and_resumes_past_itself() -> None:
     _write_channel()
     write_pack(playbooks={"notify": CONFIRMING})
-    arming.arm("demo", "notify", {"keyword": "milk"})
-    p = setup.load_armed(channel.load_channel())
+    p = _program(name="notify", keyword="milk")
     h = _history()
     _feed(h, p.advance(h), ELSEWHERE)
     _feed(h, p.advance(h), HOME)  # leg open verified
@@ -661,8 +576,7 @@ def test_suspended_confirm_resume_reads_a_cancel() -> None:
     # not barrel on into the remaining legs.
     _write_channel()
     write_pack(playbooks={"notify": CONFIRMING})
-    arming.arm("demo", "notify", {"keyword": "milk"})
-    p = setup.load_armed(channel.load_channel())
+    p = _program(name="notify", keyword="milk")
     h = _history()
     _feed(h, p.advance(h), ELSEWHERE)
     _feed(h, p.advance(h), HOME)
@@ -677,8 +591,6 @@ def test_suspended_confirm_resume_reads_a_cancel() -> None:
     check = resumed.advance(h2)
     _feed(h2, check, _thread((text, 0.75, 0.3), ("cancel", 0.25, 0.5)))
     assert resumed.advance(h2) is None  # deny — the walk stops
-    assert resumed.finished == "deny"
-    assert not arming.armed_path().exists()  # terminal: arm consumed
 
 
 def test_suspended_confirm_resume_off_thread_reopens_then_continues() -> None:
@@ -686,8 +598,7 @@ def test_suspended_confirm_resume_off_thread_reopens_then_continues() -> None:
     # thread once; with no cancel there, the walk resumes normally.
     _write_channel()
     write_pack(playbooks={"notify": CONFIRMING})
-    arming.arm("demo", "notify", {"keyword": "milk"})
-    p = setup.load_armed(channel.load_channel())
+    p = _program(name="notify", keyword="milk")
     h = _history()
     _feed(h, p.advance(h), ELSEWHERE)
     _feed(h, p.advance(h), HOME)
@@ -732,10 +643,21 @@ def test_session_setup_builds_the_overture_and_hidden_registry() -> None:
     }
 
 
-def test_session_setup_prefers_armed_program_over_the_overture() -> None:
+def test_session_setup_prefers_a_suspended_walk_over_the_overture() -> None:
+    from physiclaw.common.logger import write_json_atomic
+
     _write_channel()
     write_pack(playbooks={"flow": FLOW})
-    arming.arm("demo", "flow", {"keyword": "milk"})
+    write_json_atomic(
+        suspension.suspended_path(),
+        {
+            "schema": suspension.SUSPENDED_SCHEMA,
+            "app": "demo",
+            "playbook": "flow",
+            "idx": 0,
+            "values": {"keyword": "milk"},
+        },
+    )
 
     prog, overture, hidden = setup.session_setup()
 
@@ -953,8 +875,7 @@ def _cart_screen(*items: tuple[str, int]) -> str:
 def _arm_ledger(items: str = LEDGER_ITEMS):
     _write_channel()
     write_pack(playbooks={"shop": LEDGERED})
-    arming.arm("demo", "shop", {"items": items})
-    p = setup.load_armed(channel.load_channel())
+    p = _program(name="shop", **{"items": items})
     assert p is not None and p.channel is not None
     return p
 
@@ -1145,13 +1066,19 @@ def test_suspension_persists_the_ledger() -> None:
     assert resumed._ledger[0].label == "farm eggs"
 
 
-def test_arm_rejects_a_bad_ledger_value() -> None:
-    write_pack(playbooks={"shop": LEDGERED})
+def test_a_bad_ledger_value_is_rejected_at_the_input_seam() -> None:
+    from physiclaw.agent.conductor.ledger import check_ledger_value
 
-    with pytest.raises(PlaybookError, match="items"):
-        arming.arm("demo", "shop", {"items": "not json"})
-    with pytest.raises(PlaybookError, match="qty"):
-        arming.arm("demo", "shop", {"items": '[{"query": "egg", "qty": 0}]'})
+    write_pack(playbooks={"shop": LEDGERED})
+    spec, _ = setup.load_spec("demo", "shop", require_live=False)
+
+    for bad, fragment in (
+        ("not json", "items"),
+        ('[{"query": "egg", "qty": 0}]', "qty"),
+        ('[{"query": "eggs", "qty": 1}, {"query": "eggs", "qty": 2}]', "appears twice"),
+    ):
+        with pytest.raises(PlaybookError, match=fragment):
+            check_ledger_value(spec, setup.resolve_inputs(spec, {"items": bad}))
 
 
 def test_loop_only_ledger_playbook_needs_no_micro() -> None:
@@ -1190,67 +1117,9 @@ nodes:
     page: results
 """
     write_pack(playbooks={"fetch": loop_only})
-    arming.arm("demo", "fetch", {"items": '[{"query": "eggs", "qty": 1}]'})
+    p = _program(name="fetch", items='[{"query": "eggs", "qty": 1}]')
 
-    p = setup.load_armed()
-
-    assert p is not None and p.needs_micro is False
-
-
-# ---------- arm lifecycle (terminal outcomes consume the arm) ----------
-
-
-def test_completed_walk_is_terminal_and_consumes_the_arm() -> None:
-    write_pack(playbooks={"flow": FLOW})
-    arming.arm("demo", "flow", {"keyword": "milk"})
-    p = _armed_program()
-    h = _history()
-    _feed(h, p.advance(h), ELSEWHERE)
-    _feed(h, p.advance(h), HOME)
-    _feed(h, p.advance(h), RESULTS)
-
-    assert p.advance(h) is None and p.finished == "complete"
-    assert p.origin == "armed"
-    # retire happens AT the quiet — no separate call.
-    assert arming.armed_ref() is None  # done deals never re-walk
-
-
-def test_gate_deny_is_terminal_and_consumes_the_arm() -> None:
-    p, h, send = _at_gate()
-
-    assert _reply_arrives(p, h, send, "不用") is None
-    assert p.finished == "deny"
-    assert arming.armed_ref() is None
-
-
-def test_incidental_handover_keeps_the_arm() -> None:
-    # A wrong-page landing is a retry-next-wake case, not a done deal.
-    write_pack(playbooks={"flow": FLOW})
-    arming.arm("demo", "flow", {"keyword": "milk"})
-    p = _armed_program()
-    h = _history()
-    _feed(h, p.advance(h), ELSEWHERE)
-    leg = p.advance(h)
-    _feed(h, leg, RESULTS)  # verify: home expected — wrong page
-
-    assert p.advance(h) is None and p.finished is None
-    assert arming.armed_ref() == ("demo", "flow")
-
-
-def test_suspended_walk_deny_consumes_the_arm() -> None:
-    # armed.json outlives the suspension; a terminal outcome on the RESUMED
-    # walk must still consume it.
-    p, h, send = _at_gate()
-    ask = _suspend_via_silence(p, h, send)
-
-    resumed = setup.load_suspended()
-    assert resumed is not None and resumed.origin == "suspended"
-    h2 = _history()
-    peek = resumed.advance(h2)
-    _feed(h2, peek, _thread((ask, 0.75, 0.3), ("不用", 0.25, 0.5)))
-
-    assert resumed.advance(h2) is None and resumed.finished == "deny"
-    assert arming.armed_ref() is None
+    assert p.needs_micro is False
 
 
 # ---------- bug-hunt regressions ----------
@@ -1316,52 +1185,17 @@ def test_budget_suspend_does_not_swallow_the_final_batch() -> None:
     assert "make it two boxes then" in req.args["reply"]
 
 
-def test_retire_never_disarms_a_foreign_playbook() -> None:
-    # Walk A suspends; the user disarms and arms B; A's terminal outcome
-    # must not eat B's standing order.
-    p, h, send = _at_gate()
-    _suspend_via_silence(p, h, send)
-    arming.disarm()
-    write_pack(playbooks={"pay": GATED, "flow": FLOW})
-    arming.arm("demo", "flow", {"keyword": "milk"})
-
-    resumed = setup.load_suspended()
-    h2 = _history()
-    ask = send.tool_calls[1].arguments["inputs"]["message"]
-    peek = resumed.advance(h2)
-    _feed(h2, peek, _thread((ask, 0.75, 0.3), ("不用", 0.25, 0.5)))
-
-    assert resumed.advance(h2) is None and resumed.finished == "deny"
-    assert arming.armed_ref() == ("demo", "flow")  # B untouched
-
-
 def test_suspended_idx_outside_the_spec_drops_the_suspension() -> None:
     p, h, send = _at_gate()
     _suspend_via_silence(p, h, send)
     import json as _json
 
-    susp_file = arming.suspended_path()
+    susp_file = suspension.suspended_path()
     data = _json.loads(susp_file.read_text(encoding="utf-8"))
     data["idx"] = 99  # spec edited shorter between wakes
     susp_file.write_text(_json.dumps(data), encoding="utf-8")
 
     assert setup.load_suspended() is None  # dropped, not a fake completion
-    assert arming.armed_ref() is not None  # arm intact
-
-
-def test_zero_action_instant_complete_keeps_the_arm() -> None:
-    # First peek coincidentally matches the LAST leg's verify page —
-    # the walk did nothing, so it must hand over WITHOUT consuming.
-    write_pack(playbooks={"flow": FLOW})
-    arming.arm("demo", "flow", {"keyword": "milk"})
-    p = _armed_program()
-    h = _history()
-
-    _feed(h, p.advance(h), RESULTS)  # last leg's verify page at wake
-
-    assert p.advance(h) is None
-    assert p.finished is None
-    assert arming.armed_ref() == ("demo", "flow")
 
 
 def test_blocked_suspend_end_session_drops_the_suspension() -> None:
@@ -1401,7 +1235,7 @@ def test_all_zero_revision_is_a_deny() -> None:
         )
     )
 
-    assert handed is None and p.finished == "deny"
+    assert handed is None
 
 
 def test_reconciler_never_cross_matches_similar_items() -> None:
@@ -1452,15 +1286,14 @@ def test_payment_gate_total_is_quoted_only_off_a_verified_page() -> None:
 
     _write_channel()
     write_pack(playbooks={"shop": LEDGERED})
-    arming.arm("demo", "shop", {"items": LEDGER_ITEMS})
-    spec, _ = arming.armed_spec("demo", "shop")
+    spec, _ = setup.load_spec("demo", "shop")
     gate_idx = next(
         i for i, n in enumerate(spec.nodes) if type(n).__name__ == "HumanGateNode"
     )
     write_json_atomic(
-        arming.suspended_path(),
+        suspension.suspended_path(),
         {
-            "schema": arming.SUSPENDED_SCHEMA,
+            "schema": suspension.SUSPENDED_SCHEMA,
             "app": "demo",
             "playbook": "shop",
             "idx": gate_idx,
@@ -1487,7 +1320,6 @@ def test_payment_gate_total_is_quoted_only_off_a_verified_page() -> None:
     _feed(h, p.advance(h), ELSEWHERE)  # unknown screen at the gate
 
     assert p.advance(h) is None  # handover — no ask was sent
-    assert p.finished is None and arming.armed_path().exists()
 
 
 def test_reask_send_reads_a_deny_sent_meanwhile() -> None:
@@ -1519,8 +1351,6 @@ def test_reask_send_reads_a_deny_sent_meanwhile() -> None:
     _feed(h, resend, _thread((ask2, 0.75, 0.7), ("cancel", 0.25, 0.5)))
 
     assert p.advance(h) is None
-    assert p.finished == "deny"
-    assert not arming.armed_path().exists()
 
 
 def test_failed_reply_judgment_keeps_the_batch_visible() -> None:
@@ -1607,40 +1437,13 @@ def test_second_reshop_of_an_item_hands_over() -> None:
     _feed(h, peek2, _cart_screen(("farm eggs", 2)))  # STILL missing
 
     assert p.advance(h) is None
-    assert p.finished is None and arming.armed_path().exists()  # incidental
-
-
-def test_applied_revision_survives_via_the_arm_file() -> None:
-    # The next suspension is many turns away; a crash in between must rebuild
-    # from the REVISED list, not silently revert the user's change.
-    from physiclaw.agent.conductor.micro import MicroOutcome
-
-    p, h, send = _at_ledger_gate()
-    _reply_arrives(p, h, send, "ok, drop the chips and add oil")
-    p.resolve(MicroOutcome(out="revise", reason="swap", confidence=0.9))
-    p.resolve(
-        MicroOutcome(
-            out="updated",
-            reason="r",
-            confidence=0.9,
-            payload={
-                "ledger": '[{"query": "eggs", "qty": 2}, '
-                '{"query": "chips", "qty": 0}, {"query": "oil", "qty": 1}]'
-            },
-        )
-    )
-
-    data = json.loads(arming.armed_path().read_text(encoding="utf-8"))
-    stored = json.loads(data["inputs"]["items"])
-    assert stored == [{"query": "eggs", "qty": 2}, {"query": "oil", "qty": 1}]
 
 
 def _suspend_a_confirm() -> None:
     """Drive the CONFIRMING playbook to its written suspension."""
     _write_channel()
     write_pack(playbooks={"notify": CONFIRMING})
-    arming.arm("demo", "notify", {"keyword": "milk"})
-    p = setup.load_armed(channel.load_channel())
+    p = _program(name="notify", keyword="milk")
     h = _history()
     _feed(h, p.advance(h), ELSEWHERE)
     _feed(h, p.advance(h), HOME)
@@ -1648,19 +1451,7 @@ def _suspend_a_confirm() -> None:
     text = send.tool_calls[1].arguments["inputs"]["message"]
     _feed(h, send, _thread((text, 0.75, 0.3)))
     p.advance(h)  # suspension written
-    assert arming.suspended_path().exists()
-
-
-def test_stand_down_drops_the_suspension() -> None:
-    # `disarm` means stop: a surviving suspension would resume — and keep
-    # acting — on the very next wake.
-    _suspend_a_confirm()
-
-    was_armed, dropped = arming.stand_down()
-
-    assert was_armed and dropped == ("demo", "notify")
-    assert not arming.suspended_path().exists()
-    assert not arming.armed_path().exists()
+    assert suspension.suspended_path().exists()
 
 
 def test_rearming_the_same_playbook_drops_its_stale_suspension() -> None:
@@ -1668,51 +1459,8 @@ def test_rearming_the_same_playbook_drops_its_stale_suspension() -> None:
     # resume first and then consume the fresh standing order.
     _suspend_a_confirm()
 
-    _, warnings = arming.arm("demo", "notify", {"keyword": "bread"})
-
-    assert not arming.suspended_path().exists()
-    assert any("suspended walk" in w for w in warnings)
-
-
-def test_activation_lineage_suspension_never_consumes_the_arm() -> None:
-    from physiclaw.common.logger import write_json_atomic
-
-    _write_channel()
-    write_pack(playbooks={"notify": CONFIRMING})
-    arming.arm("demo", "notify", {"keyword": "milk"})
-    spec, _ = arming.armed_spec("demo", "notify")
-    base = {
-        "schema": arming.SUSPENDED_SCHEMA,
-        "app": "demo",
-        "playbook": "notify",
-        "idx": len(spec.nodes),  # resumes straight into completion
-        "values": {"keyword": "milk"},
-        "outputs": {},
-        "visits": {},
-        "ledger": None,
-        "item": 0,
-        "ask_text": "",
-        "baseline": [],
-        "quoted": None,
-        "cap": None,
-        "consented": None,
-        "awaiting": False,
-        "revisions": 0,
-    }
-    write_json_atomic(arming.suspended_path(), {**base, "origin": "activation"})
-    p = setup.load_suspended(channel.load_channel())
-    h = _history()
-    _feed(h, p.advance(h), HOME)
-    assert p.advance(h) is None and p.finished == "complete"
-    assert arming.armed_path().exists()  # never owned an arm — kept
-
-    # Control: armed lineage consumes it.
-    write_json_atomic(arming.suspended_path(), {**base, "origin": "armed"})
-    p2 = setup.load_suspended(channel.load_channel())
-    h2 = _history()
-    _feed(h2, p2.advance(h2), HOME)
-    assert p2.advance(h2) is None and p2.finished == "complete"
-    assert not arming.armed_path().exists()
+    assert suspension.clear_suspended() is True
+    assert not suspension.suspended_path().exists()
 
 
 def test_missing_suspend_result_drops_the_suspension_file() -> None:
@@ -1720,8 +1468,7 @@ def test_missing_suspend_result_drops_the_suspension_file() -> None:
     # lands, the session may run on — a dead walk must not resurrect.
     _write_channel()
     write_pack(playbooks={"notify": CONFIRMING})
-    arming.arm("demo", "notify", {"keyword": "milk"})
-    p = setup.load_armed(channel.load_channel())
+    p = _program(name="notify", keyword="milk")
     h = _history()
     _feed(h, p.advance(h), ELSEWHERE)
     _feed(h, p.advance(h), HOME)
@@ -1730,26 +1477,14 @@ def test_missing_suspend_result_drops_the_suspension_file() -> None:
     _feed(h, send, _thread((text, 0.75, 0.3)))
     susp = p.advance(h)
     assert susp.tool_names() == ["note", "end_session"]
-    assert arming.suspended_path().exists()
+    assert suspension.suspended_path().exists()
     h.append(susp)  # the end_session result never arrives
 
     assert p.advance(h) is None
-    assert not arming.suspended_path().exists()
+    assert not suspension.suspended_path().exists()
 
 
-def test_duplicate_ledger_queries_rejected_at_arm() -> None:
-    _write_channel()
-    write_pack(playbooks={"shop": LEDGERED})
-
-    with pytest.raises(PlaybookError, match="appears twice"):
-        arming.arm(
-            "demo",
-            "shop",
-            {"items": '[{"query": "eggs", "qty": 1}, {"query": "eggs", "qty": 2}]'},
-        )
-
-
-def test_arm_warns_when_a_gate_reenters_blind() -> None:
+def test_check_warns_when_a_gate_reenters_blind() -> None:
     # Non-payment gates: no `return:` and a fall-through leg without
     # `enter:` means the first post-consent action runs off the IM
     # thread — advisory (the payment case is a parse error).
@@ -1779,6 +1514,6 @@ nodes:
 """
     write_pack(playbooks={"handoff": text})
 
-    _, warnings = arming.arm("demo", "handoff", {"keyword": "milk"})
+    spec, _ = setup.load_spec("demo", "handoff", require_live=False)
 
-    assert any("off the IM thread" in w for w in warnings)
+    assert any("off the IM thread" in w for w in setup.readiness_warnings(spec))

@@ -1,12 +1,17 @@
-"""`physiclaw playbooks` — scaffold, list, validate, and arm app packs.
+"""`physiclaw playbooks` — scaffold, list, validate, and rehearse app packs.
 
-Nothing here executes a playbook: `arm` only writes the arm file the
-engine reads at the next wake (`agent/conductor/arming.py`). Mirrors
-the macros CLI's shapes — init prints the next steps, check is the
-all-or-nothing gate with valid-is-not-live warnings — while the
-scaffolding itself lives in `agent/conductor/scaffold.py` (the
-`store.init_macro` split: the CLI only prints)."""
+Mirrors the macros CLI's shapes throughout: `init` prints the next
+steps, `check` is the all-or-nothing gate with valid-is-not-live
+warnings, and `run` rehearses one playbook against the live server the
+way `macros run` rehearses one macro — the test you do BEFORE enabling.
+The scaffolding itself lives in `agent/conductor/scaffold.py` (the
+`store.init_macro` split: the CLI only prints).
 
+Nothing here writes cross-wake state. A rehearsal drives the phone now
+and stops; the conductor's own doors at wake are the suspension file and
+the overture."""
+
+import asyncio
 from typing import TYPE_CHECKING, Annotated
 
 import typer
@@ -71,8 +76,8 @@ def init(
 @playbooks_app.command("list")
 def list_cmd() -> None:
     """List every pack and its playbooks: enabled, disabled, or invalid."""
-    from physiclaw.agent.conductor import arming, scaffold
     from physiclaw.agent.conductor import playbook as pb
+    from physiclaw.agent.conductor import scaffold
 
     scaffold.ensure_format_readme()
     apps = pb.list_apps()
@@ -82,7 +87,6 @@ def list_cmd() -> None:
             "(see ~/.physiclaw/playbooks/README.md)"
         )
         return
-    armed = arming.armed_ref()
     for app in apps:
         typer.echo(f"{app}/")
         for e in pb.scan_playbooks(app):
@@ -94,13 +98,12 @@ def list_cmd() -> None:
                 if e.spec is None
                 else f"{e.spec.description} ({len(e.spec.nodes)} nodes)"
             )
-            mark = "  [armed]" if (app, e.name) == armed else ""
-            typer.echo(f"  {tag} {e.name}{mark}  {detail}")
+            typer.echo(f"  {tag} {e.name}  {detail}")
 
 
 @playbooks_app.command()
-def arm(
-    ref: Annotated[str, typer.Argument(help="<app>/<playbook> to arm.")],
+def run(
+    ref: Annotated[str, typer.Argument(help="<app>/<playbook> to rehearse.")],
     inputs: Annotated[
         list[str] | None,
         typer.Option(
@@ -110,42 +113,31 @@ def arm(
         ),
     ] = None,
 ) -> None:
-    """Arm one playbook: the next engine sessions follow it (legs run as
-    synthesized turns; anything it can't handle hands over to the model).
-    A manual testing surface — one playbook at a time, sticky until
-    `disarm`."""
-    from physiclaw.agent.conductor import arming
+    """Rehearse one playbook against the running server — the mirror of
+    `physiclaw macros run`, and the way to test a walk without waiting for
+    a wake or hoping the boot picks it.
+
+    Drives the real walk on the real phone: legs run their macros, DECIDE
+    nodes spend real micro-calls, and a HUMAN_GATE really messages you and
+    waits for your reply. Works while the playbook is disabled — rehearse
+    first, enable after. Nothing is persisted: no arm, and a walk that
+    suspends here stops instead of leaving a file for the next wake."""
     from physiclaw.agent.conductor.playbook import PlaybookError
 
     app, _, name = ref.partition("/")
     if not app or not name:
         exit_error(f"expected <app>/<playbook> (got {ref!r})")
-    values = parse_inputs(inputs or [])
     try:
-        spec, warnings = arming.arm(app, name, values)
+        outcome = asyncio.run(_rehearse(app, name, parse_inputs(inputs or [])))
     except PlaybookError as e:
         exit_error(str(e))
-    typer.echo(ok(f"armed {ref} ({len(spec.nodes)} nodes)"))
-    for w in warnings:
-        typer.echo(warn(w))
-    typer.echo("Sticky until `physiclaw playbooks disarm`.")
-
-
-@playbooks_app.command()
-def disarm() -> None:
-    """Disarm — sessions go back to plain model-driven turns. Also drops
-    a suspended walk: disarming means stop, and a surviving suspension
-    would resume on the next wake."""
-    from physiclaw.agent.conductor import arming
-
-    was_armed, dropped = arming.stand_down()
-    if not was_armed and dropped is None:
-        typer.echo("nothing was armed")
-        return
-    if was_armed:
-        typer.echo(ok("disarmed"))
-    if dropped is not None:
-        typer.echo(ok(f"dropped the suspended walk for {dropped[0]}/{dropped[1]}"))
+    except ConnectionError as e:
+        # `mcp`, not `server`: both serve the same endpoint, but `server`
+        # also spawns the agent runtime, which would wake on its own hooks
+        # and drive the phone mid-rehearsal. A rehearsal wants the rig to
+        # itself. (Same arm as `macros run`.)
+        exit_error(f"{e}. Start it first: physiclaw mcp")
+    typer.echo(outcome)
 
 
 @playbooks_app.command()
@@ -167,6 +159,7 @@ def check() -> None:
 def _check_app(app: str) -> bool:
     """Report one pack; True when anything in it is invalid."""
     from physiclaw.agent.conductor import playbook as pb
+    from physiclaw.agent.conductor import setup as conductor_setup
 
     try:
         pack = pb.load_pack(app)
@@ -190,6 +183,15 @@ def _check_app(app: str) -> bool:
         if not entry.spec.enabled:
             disabled.append(entry.name)
     _report_not_live(app, pack, entries, disabled)
+    for entry in entries:
+        if entry.spec is None:
+            continue
+        # Advisories that used to fire only at arm time, so almost nobody
+        # saw them: a memory slice with no section on THIS device, a gate
+        # ask quoting no word-tier reply word, a gate with no way back
+        # into the app.
+        for line in conductor_setup.readiness_warnings(entry.spec):
+            typer.echo(warn(f"{app}/{entry.name}: {line}"))
     return bad
 
 
@@ -200,15 +202,15 @@ def _report_not_live(
     disabled: list[str],
 ) -> None:
     """Valid is not live: a green check invites the wrong assumption. Say
-    which playbooks the conductor cannot arm, and why — disabled files,
-    and referenced pack macros that are themselves disabled (rehearse,
-    then enable; the rehearsal gate itself lands with execution)."""
+    which playbooks the boot will not offer, and why — disabled files,
+    and referenced pack macros that are themselves disabled. Rehearse
+    them (`playbooks run`), then enable."""
     from physiclaw.agent.conductor.playbook import disabled_leg_macros
 
     if disabled:
         typer.echo(
             warn(
-                f"{app}: disabled, so the conductor cannot arm: "
+                f"{app}: disabled, so the boot will not offer: "
                 f"{', '.join(disabled)}. Set `enabled: true` once rehearsed."
             )
         )
@@ -227,3 +229,123 @@ def _report_not_live(
                 f"{', '.join(disabled_macros)} — rehearse, then enable."
             )
         )
+
+
+# ---------- rehearsal (`playbooks run`) ----------
+
+# A rehearsal is a person watching, so the bound is "long enough for a
+# real walk" rather than the engine's session budget. A gate polling for
+# a reply is the long pole.
+REHEARSE_MAX_TURNS = 60
+
+
+async def _rehearse(app: str, name: str, values: dict[str, str]) -> str:
+    """Drive one playbook to its end on the live phone, printing each
+    synthesized turn as it goes.
+
+    This is the engine's turn loop with everything session-shaped removed:
+    no policy gates, no compaction, no trace, no sentinel. What remains is
+    exactly the conductor's contract — ask the Program for a turn,
+    dispatch its one action, feed the result back — so a rehearsal
+    exercises the real walk rather than a simulation of it."""
+    from physiclaw.agent.conductor import channel as channel_mod
+    from physiclaw.agent.conductor import setup as conductor_setup
+    from physiclaw.agent.conductor.micro import DecisionRequest
+    from physiclaw.agent.engine.dto import SystemMessage, ToolResultMessage, UserMessage
+    from physiclaw.agent.engine.mcp_tool import McpClient
+
+    spec, pack = conductor_setup.load_spec(app, name, require_live=False)
+    values = conductor_setup.resolve_inputs(spec, values)
+    if not spec.enabled:
+        typer.echo(warn(f"{app}/{name} is disabled — rehearsing it anyway"))
+    for line in conductor_setup.readiness_warnings(spec):
+        typer.echo(warn(line))
+    program = conductor_setup.build_program(
+        app, spec, pack, values, channel_mod.load_channel()
+    )
+    history: list = [
+        SystemMessage(content="rehearsal"),
+        UserMessage(content=f"rehearse {app}/{name}"),
+    ]
+    micro = None
+    try:
+        async with McpClient() as mcp:
+            # Built AFTER the connection, so "start the server first" is
+            # what a user without one hears — not a model-config error for
+            # a provider the rehearsal never got to use.
+            micro = _micro_caller() if program.needs_micro else None
+            for _ in range(REHEARSE_MAX_TURNS):
+                step = program.advance(history)
+                while isinstance(step, DecisionRequest):
+                    outcome = (await micro.run(step)).outcome if micro else None
+                    step = program.resolve(outcome)
+                if step is None:
+                    return "walk finished or handed over — see the notes above"
+                note, act = step.tool_calls
+                typer.echo(f"  {note.arguments['summary']}")
+                if act.name == "end_session":
+                    # The walk wants to suspend for a later wake. A
+                    # rehearsal has no later wake, and `_suspend` already
+                    # wrote the file — drop it so it cannot ambush the
+                    # next real session.
+                    from physiclaw.agent.conductor.suspension import clear_suspended
+
+                    clear_suspended()
+                    return "walk suspended waiting on you — suspension dropped"
+                text, is_error = await _dispatch(mcp, act, pack, app)
+                history.append(step)
+                history.append(
+                    ToolResultMessage(
+                        tool_call_id=act.id, content=text, is_error=is_error
+                    )
+                )
+        return f"stopped after {REHEARSE_MAX_TURNS} turns"
+    finally:
+        if micro is not None:
+            await micro.aclose()
+
+
+async def _dispatch(mcp, call, pack: "Pack", app: str) -> tuple[str, bool]:
+    """One synthesized action → the text its result carries.
+
+    Routes the way the engine does: `run_macro` is the LOCAL tool (it
+    runs a macro through the macro runner, which drives the same MCP
+    connection step by step), everything else is a plain MCP call. The
+    reply text is what the Program reads a screen out of, so both arms
+    must hand back the same listing shape."""
+    from physiclaw.agent.macros import runner as macro_runner
+    from physiclaw.common import gesture_vocab, verdict
+
+    try:
+        if call.name == gesture_vocab.RUN_MACRO:
+            qualified = call.arguments.get("name", "")
+            spec = pack.macros.get(qualified.partition("/")[2])
+            if spec is None:
+                return f"unknown pack macro {qualified!r}", True
+            result = await macro_runner.run_and_record(
+                spec, call.arguments.get("inputs") or {}, mcp, caller="cli"
+            )
+            return verdict.screen_text(result.blocks), not result.ok
+        return verdict.screen_text(
+            await mcp.call_tool(call.name, call.arguments)
+        ), False
+    except Exception as e:  # a rehearsal reports, it does not crash
+        return f"{call.name} failed: {e}", True
+
+
+def _micro_caller():
+    """The decision channel a rehearsal needs — same resolution as the
+    engine's (`[conductor] micro_model`, else the session model), so a
+    rehearsal spends the model a real wake would."""
+    from physiclaw.agent.conductor.micro import MicroCaller
+    from physiclaw.agent.provider import make_provider
+    from physiclaw.common.config import CONFIG, model_ref, parse_model_ref
+
+    try:
+        ref = CONFIG.conductor.micro_model or model_ref()
+    except RuntimeError as e:
+        exit_error(str(e))
+    pid, mid = parse_model_ref(ref)
+    return MicroCaller(
+        make_provider(pid, mid), confidence_floor=CONFIG.conductor.micro_confidence
+    )

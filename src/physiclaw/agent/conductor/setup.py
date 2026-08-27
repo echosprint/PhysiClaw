@@ -5,7 +5,6 @@ file degrades to a normal session, never takes one down):
 
   - ``load_suspended`` — a suspended walk resumes at its stored node
     (one-shot; ANY wake resumes, the WAIT job is just the alarm clock).
-  - ``load_armed`` — the standing order from `physiclaw playbooks arm`.
   - ``Overture`` — nothing armed, but playbooks exist: the conductor
     boots to the user's thread and fires ONE parse_task micro-call over
     the playbook menu (``overture.py``); a positive answer builds the
@@ -19,15 +18,18 @@ qualified-macro registry — every pack plus the channel on the overture
 path (the boot may activate any playbook, so all conductor hands must be
 dispatchable); a live program narrows it to its own pack + channel, and
 no channel means a channel-less registry.
-``_build_program`` is the one Program constructor call — a program is
-whole at construction: channel, origin, and any suspended state included.
+``build_program`` is the one Program constructor call — a program is
+whole at construction, suspended state included — and the one place a
+playbook's spec, inputs and live-readiness are resolved. The CLI's
+rehearsal (`physiclaw playbooks run`) and the tests build through it too,
+so nothing gets to assemble a walk by a private route.
 """
 
 import json
 import logging
 from dataclasses import dataclass
 
-from physiclaw.agent.conductor import arming, scaffold
+from physiclaw.agent.conductor import memory, reply, scaffold, suspension
 from physiclaw.agent.conductor.channel import Channel, load_channel
 from physiclaw.agent.conductor.ledger import check_ledger_value
 from physiclaw.agent.conductor.micro import (
@@ -45,6 +47,10 @@ from physiclaw.agent.conductor.pages import (
     prints_for_app,
 )
 from physiclaw.agent.conductor.playbook import (
+    ConfirmNode,
+    DecideNode,
+    HumanGateNode,
+    LegNode,
     Pack,
     Playbook,
     PlaybookError,
@@ -55,41 +61,12 @@ from physiclaw.agent.conductor.playbook import (
     scan_playbooks,
 )
 from physiclaw.agent.conductor.program import Program
-from physiclaw.agent.macros.model import Macro
+from physiclaw.agent.macros import inputs as macro_inputs
+from physiclaw.agent.macros.model import Macro, MacroError
 from physiclaw.common.listing import Screen
 from physiclaw.common.text import read_text
 
 log = logging.getLogger(__name__)
-
-
-def load_armed(channel: "Channel | None" = None) -> "Program | None":
-    """The armed playbook as a ready `Program`, or None. Fail-open on
-    everything: no arm file, a pack edited out from under it, bad inputs —
-    the session runs as if nothing were armed, with one warning saying
-    why."""
-    try:
-        data = arming.read_armed()
-        if data is None:
-            return None
-        if data.get("schema") != arming.ARMED_SCHEMA:
-            raise PlaybookError(f"unknown armed.json schema {data.get('schema')!r}")
-        app = str(data["app"])
-        name = str(data["playbook"])
-        raw_inputs = data.get("inputs") or {}
-        spec, pack = arming.armed_spec(app, name)
-        values = arming.resolve_inputs(spec, raw_inputs)
-        # `arm` validated the value it wrote, but the file is on disk —
-        # re-hold a hand-edited ledger to the same caps.
-        check_ledger_value(spec, values)
-    except Exception as e:
-        log.warning(
-            "armed playbook could not load (%s) — session runs without it: %s",
-            arming.armed_path(),
-            e,
-        )
-        return None
-    log.info("conductor: armed %s/%s (%d nodes)", app, name, len(spec.nodes))
-    return _build_program(app, spec, pack, values, channel, origin="armed")
 
 
 def load_suspended(channel: "Channel | None" = None) -> "Program | None":
@@ -99,17 +76,17 @@ def load_suspended(channel: "Channel | None" = None) -> "Program | None":
     job that may also fire is just the alarm clock; ANY wake resumes.
     `channel` avoids a second channel load when the caller (session_setup)
     already holds one."""
-    p = arming.suspended_path()
+    p = suspension.suspended_path()
     if not p.exists():
         return None
     try:
         data = json.loads(read_text(p))
-        if data.get("schema") != arming.SUSPENDED_SCHEMA:
+        if data.get("schema") != suspension.SUSPENDED_SCHEMA:
             raise PlaybookError(f"unknown suspended schema {data.get('schema')!r}")
         app = str(data["app"])
         name = str(data["playbook"])
-        spec, pack = arming.armed_spec(app, name)
-        program = _build_program(
+        spec, pack = load_spec(app, name)
+        program = build_program(
             app,
             spec,
             pack,
@@ -119,32 +96,29 @@ def load_suspended(channel: "Channel | None" = None) -> "Program | None":
             # terminal outcome must never consume an arm file it never
             # owned, even when a same-named arm exists by coincidence.
             # (Absent in older suspends — those were armed-lineage only.)
-            origin="activation" if data.get("origin") == "activation" else "suspended",
             suspended=data,
         )
     except Exception as e:
         log.warning("suspended playbook could not load (%s) — dropped: %s", p, e)
         return None
     finally:
-        arming.clear_suspended()  # one-shot: consumed on ANY load outcome
+        suspension.clear_suspended()  # one-shot: consumed on ANY load outcome
     return program
 
 
-def _build_program(
+def build_program(
     app: str,
     spec: Playbook,
     pack: Pack,
     values: dict[str, str],
     channel: "Channel | None",
     *,
-    origin: str,
     suspended: dict | None = None,
 ) -> "Program":
-    """The one Program constructor call — armed, suspended, and activation
-    builds all come through here: a program is whole at construction
-    (channel, origin, and any suspended state included), never patched up
-    afterwards. `origin` decides whether a terminal outcome consumes the
-    arm file (see `Program.retire`)."""
+    """The one Program constructor call — the overture's activation, a
+    resumed suspension, and the CLI rehearsal all come through here, so a
+    program is whole at construction (channel and any suspended state
+    included) and never patched up afterwards."""
     return Program(
         app=app,
         spec=spec,
@@ -152,9 +126,134 @@ def _build_program(
         pack_macros=qualified_pack(app, pack),
         prints=prints_for_app(app),
         channel=channel,
-        origin=origin,
         suspended=suspended,
     )
+
+
+def load_spec(
+    app: str, name: str, *, require_live: bool = True
+) -> tuple[Playbook, Pack]:
+    """The parsed playbook and its pack. `require_live` additionally holds
+    it to what a real wake needs — enabled, with every leg macro enabled —
+    which a resuming suspension must satisfy but a rehearsal deliberately
+    need not (`physiclaw macros run` rehearses disabled macros for the same
+    reason: you rehearse BEFORE you enable)."""
+    pack = load_pack(app)
+    entry = next((e for e in scan_playbooks(app, pack) if e.name == name), None)
+    if entry is None:
+        raise PlaybookError(f"no playbook {app}/{name} on disk")
+    if entry.spec is None:
+        raise PlaybookError(f"{app}/{name} is invalid: {entry.error}")
+    if require_live:
+        if not entry.spec.enabled:
+            raise PlaybookError(
+                f"{app}/{name} is disabled — set `enabled: true` once rehearsed"
+            )
+        disabled = disabled_leg_macros(entry.spec, pack)
+        if disabled:
+            raise PlaybookError(
+                f"{app}/{name} references disabled pack macro(s): "
+                f"{', '.join(disabled)} — rehearse, then enable"
+            )
+    return entry.spec, pack
+
+
+def resolve_inputs(spec: Playbook, provided: dict[str, str]) -> dict[str, str]:
+    """Provided values against the declared inputs — the macro layer's
+    resolution contract verbatim (unknown keys, missing required, defaults,
+    strings only), translated to this spec's error class at the one seam."""
+    try:
+        return macro_inputs.resolve_inputs(spec, provided)
+    except MacroError as e:
+        raise PlaybookError(str(e)) from e
+
+
+def readiness_warnings(spec: Playbook) -> list[str]:
+    """The actionable non-blockers `playbooks check` prints: things that
+    let a walk start and then quietly under-perform. Advisory by design —
+    each is legal, and the author is told the cost rather than refused."""
+    return (
+        _memory_slice_warnings(spec)
+        + _gate_word_warnings(spec)
+        + _gate_reentry_warnings(spec)
+    )
+
+
+def _memory_slice_warnings(spec: Playbook) -> list[str]:
+    """A declared `memory.<slug>` slice with no matching `## <slug>`
+    section on THIS device runs empty (fail-closed — memory.py owns the
+    contract; this is its check-time projection)."""
+    slugs = sorted(
+        {
+            entry.partition(".")[2]
+            for node in spec.nodes
+            if isinstance(node, DecideNode)
+            for entry in node.context
+            if entry.startswith("memory.")
+        }
+    )
+    if not slugs:
+        return []
+    sections = memory.read_sections()
+    have = frozenset().union(*(tokens for tokens, _ in sections)) if sections else ()
+    missing = [slug for slug in slugs if slug.casefold() not in have]
+    if not missing:
+        return []
+    return [
+        f"memory slice(s) {', '.join(missing)}: no `## <slug>` section in "
+        "memory.md on this device — those decisions run without memory "
+        "context (fail-closed)"
+    ]
+
+
+def _gate_word_warnings(spec: Playbook) -> list[str]:
+    """A gate ask that quotes no word the deterministic reply tier matches
+    still works — every reply just rides the LLM tier (bounded by
+    GATE_MAX_CHECKS). An ask in a language our word lists don't cover is
+    legal; the author is told the cost, not refused."""
+    out = []
+    for node in spec.nodes:
+        if not isinstance(node, HumanGateNode):
+            continue
+        for key, text in (
+            ("message", node.message),
+            ("over_message", node.over_message),
+        ):
+            if text is None:
+                continue
+            norm = reply.normalize(text)
+            if not any(w in norm for w in reply.CONFIRM_WORDS) or not any(
+                w in norm for w in reply.DENY_WORDS
+            ):
+                out.append(
+                    f"gate {node.id!r} `{key}` quotes no reply word the word "
+                    "tier matches (好的/ok…, 不用/no…) — every reply will "
+                    "spend an LLM check"
+                )
+    return out
+
+
+def _gate_reentry_warnings(spec: Playbook) -> list[str]:
+    """After any gate's confirmed reply the phone shows the IM thread. The
+    payment case is a parse ERROR; for other gates a fall-through leg with
+    no `enter:` (and no gate `return:`) runs its macro blind off the
+    thread — the verify check catches the landing, but the gestures
+    already happened on the messenger."""
+    out = []
+    nodes = spec.nodes
+    for i, node in enumerate(nodes):
+        if not isinstance(node, HumanGateNode) or node.return_macro is not None:
+            continue
+        nxt = nodes[i + 1] if i + 1 < len(nodes) else None
+        if nxt is None or isinstance(nxt, (ConfirmNode, HumanGateNode)):
+            continue
+        if not (isinstance(nxt, LegNode) and nxt.enter is not None):
+            out.append(
+                f"gate {node.id!r}: no `return:` and {nxt.id!r} declares no "
+                "`enter:` — after a confirmed reply the first action runs "
+                "off the IM thread"
+            )
+    return out
 
 
 @dataclass
@@ -211,15 +310,13 @@ class Activation:
         app = outcome.out.partition("/")[0]
         spec, pack = self.entries[outcome.out]
         try:
-            values = arming.resolve_inputs(spec, outcome.payload or {})
+            values = resolve_inputs(spec, outcome.payload or {})
             check_ledger_value(spec, values)
         except PlaybookError as e:
             log.warning("activation %s: inputs did not resolve (%s)", outcome.out, e)
             return None
         log.info("conductor: activated %s (%s)", outcome.out, outcome.reason)
-        return _build_program(
-            app, spec, pack, values, self.channel, origin="activation"
-        )
+        return build_program(app, spec, pack, values, self.channel)
 
 
 def session_setup() -> "tuple[Program | None, Overture | None, dict[str, Macro]]":
@@ -237,7 +334,7 @@ def session_setup() -> "tuple[Program | None, Overture | None, dict[str, Macro]]
     channel = load_channel()
     if channel is not None:
         hidden.update(channel.macros)
-    program = load_suspended(channel) or load_armed(channel)
+    program = load_suspended(channel)
     if program is not None:
         # A live program names only its own pack + the channel — the
         # full cross-pack discovery below is the overture's need, and
