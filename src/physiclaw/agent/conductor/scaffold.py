@@ -90,10 +90,10 @@ inputs:
 #                row's +/- steppers, a missing item re-enters the
 #                next_item loop, unclaimed cart rows are left alone
 #   CONFIRM    — send `message:` to the user (the EXACT text sent —
-#                write it in the user's language), then park
+#                write it in the user's language), then suspend
 #   HUMAN_GATE — send `message:`, then hold: continue only on a
 #                confirmed reply; after {gate_checks} unconfirmed checks
-#                the session parks for the next wake-up. `gate: payment`
+#                the session suspends for the next wake-up. `gate: payment`
 #                fills {{gate.total}}/{{gate.cap}} at runtime; its
 #                `message:` must quote {{gate.total}} and an
 #                `over_message:` (sent when the total exceeds the cap)

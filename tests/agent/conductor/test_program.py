@@ -371,7 +371,7 @@ def test_failed_micro_call_hands_over() -> None:
     assert p.resolve(None) is None
 
 
-# ---------- the gate, parking, activation ----------
+# ---------- the gate, suspending, activation ----------
 
 CHANNEL_PAGES = """\
 thread:
@@ -477,8 +477,8 @@ def _reply_arrives(p, h, send, bubble: str):
     return p.advance(h)
 
 
-def _park_via_silence(p, h, send) -> str:
-    """Drive the full silent-round cycle to the park; returns the ask."""
+def _suspend_via_silence(p, h, send) -> str:
+    """Drive the full silent-round cycle to the suspension; returns the ask."""
     ask = send.tool_calls[1].arguments["inputs"]["message"]
     thread = _thread((ask, 0.75, 0.3))
     _feed(h, send, thread)
@@ -569,13 +569,13 @@ def test_gate_unclear_reply_goes_to_the_llm_tier() -> None:
     assert back.tool_calls[1].arguments["name"] == "demo/open-app"
 
 
-def test_gate_silence_parks_and_resumes_on_next_wake() -> None:
+def test_gate_silence_suspends_and_resumes_on_next_wake() -> None:
     p, h, send = _at_gate()
-    ask = _park_via_silence(p, h, send)
+    ask = _suspend_via_silence(p, h, send)
 
-    # Next wake: the parked walk resumes straight into a reply check.
-    resumed = setup.load_parked()
-    assert resumed is not None and setup.load_parked() is None  # one-shot
+    # Next wake: the suspended walk resumes straight into a reply check.
+    resumed = setup.load_suspended()
+    assert resumed is not None and setup.load_suspended() is None  # one-shot
     h2 = _history()
     peek = resumed.advance(h2)
     assert peek.tool_names() == ["note", "peek"]
@@ -586,9 +586,9 @@ def test_gate_silence_parks_and_resumes_on_next_wake() -> None:
 
 def test_gate_resume_off_thread_reopens_via_channel_open() -> None:
     p, h, send = _at_gate()
-    ask = _park_via_silence(p, h, send)
+    ask = _suspend_via_silence(p, h, send)
 
-    resumed = setup.load_parked()
+    resumed = setup.load_suspended()
     h2 = _history()
     peek = resumed.advance(h2)
     _feed(h2, peek, ELSEWHERE)  # user left the phone on another app
@@ -624,7 +624,7 @@ nodes:
 """
 
 
-def test_confirm_sends_parks_and_resumes_past_itself() -> None:
+def test_confirm_sends_suspends_and_resumes_past_itself() -> None:
     _write_channel()
     write_pack(playbooks={"notify": CONFIRMING})
     arming.arm("demo", "notify", {"keyword": "milk"})
@@ -640,16 +640,74 @@ def test_confirm_sends_parks_and_resumes_past_itself() -> None:
     assert text == "已下单milk，稍后汇报进度"
 
     _feed(h, send, _thread((text, 0.75, 0.3)))
-    park = p.advance(h)
-    assert park.tool_names() == ["note", "end_session"]
-    assert park.tool_calls[1].arguments["status"] == "WAIT"
+    susp = p.advance(h)
+    assert susp.tool_names() == ["note", "end_session"]
+    assert susp.tool_calls[1].arguments["status"] == "WAIT"
 
-    # Resume: the walk continues PAST the confirm node at its stored idx.
-    resumed = setup.load_parked()
+    # Resume: one thread read first (the wake may BE a cancel reply),
+    # then the walk continues PAST the confirm node at its stored idx.
+    resumed = setup.load_suspended()
     assert resumed is not None
     h2 = _history()
+    check = resumed.advance(h2)
+    assert check.tool_names() == ["note", "peek"]
+    _feed(h2, check, _thread((text, 0.75, 0.3)))  # nothing new since the send
     peek = resumed.advance(h2)
     _feed(h2, peek, HOME)  # wherever the phone is; stored cursor is trusted
+    leg = resumed.advance(h2)
+    assert leg.tool_calls[1].arguments["name"] == "demo/add-cart"
+
+
+def test_suspended_confirm_resume_reads_a_cancel() -> None:
+    # The user replies "cancel" to the CONFIRM's message; the reply
+    # itself wakes the device. The resumed walk must read it and stop —
+    # not barrel on into the remaining legs.
+    _write_channel()
+    write_pack(playbooks={"notify": CONFIRMING})
+    arming.arm("demo", "notify", {"keyword": "milk"})
+    p = setup.load_armed(channel.load_channel())
+    h = _history()
+    _feed(h, p.advance(h), ELSEWHERE)
+    _feed(h, p.advance(h), HOME)
+    send = p.advance(h)
+    text = send.tool_calls[1].arguments["inputs"]["message"]
+    _feed(h, send, _thread((text, 0.75, 0.3)))
+    p.advance(h)  # suspend
+
+    resumed = setup.load_suspended()
+    assert resumed is not None
+    h2 = _history()
+    check = resumed.advance(h2)
+    _feed(h2, check, _thread((text, 0.75, 0.3), ("cancel", 0.25, 0.5)))
+    assert resumed.advance(h2) is None  # deny — the walk stops
+    assert resumed.finished == "deny"
+    assert not arming.armed_path().exists()  # terminal: arm consumed
+
+
+def test_suspended_confirm_resume_off_thread_reopens_then_continues() -> None:
+    # Banner wake: the screen is some other app. The check reopens the
+    # thread once; with no cancel there, the walk resumes normally.
+    _write_channel()
+    write_pack(playbooks={"notify": CONFIRMING})
+    arming.arm("demo", "notify", {"keyword": "milk"})
+    p = setup.load_armed(channel.load_channel())
+    h = _history()
+    _feed(h, p.advance(h), ELSEWHERE)
+    _feed(h, p.advance(h), HOME)
+    send = p.advance(h)
+    text = send.tool_calls[1].arguments["inputs"]["message"]
+    _feed(h, send, _thread((text, 0.75, 0.3)))
+    p.advance(h)  # suspend
+
+    resumed = setup.load_suspended()
+    h2 = _history()
+    check = resumed.advance(h2)
+    _feed(h2, check, HOME)  # not the thread
+    reopen = resumed.advance(h2)
+    assert reopen.tool_calls[1].arguments["name"] == "channel/open"
+    _feed(h2, reopen, _thread((text, 0.75, 0.3)))
+    peek = resumed.advance(h2)
+    _feed(h2, peek, HOME)
     leg = resumed.advance(h2)
     assert leg.tool_calls[1].arguments["name"] == "demo/add-cart"
 
@@ -780,26 +838,26 @@ def test_gate_ask_is_the_filled_template_exactly() -> None:
     assert ask == "已选好milk，合计 ¥45。回复 好的 确认支付，或 不用 取消。"
 
 
-def test_park_persists_consent_across_the_wake() -> None:
-    # A post-consent park must not resume into a refused payment: the
-    # consented total rides parked.json (the _Gate.to_park projection).
+def test_suspension_persists_consent_across_the_wake() -> None:
+    # A post-consent suspension must not resume into a refused payment: the
+    # consented total rides suspended.json (the _Gate.to_suspended projection).
     p, h, send = _at_gate()
     _reply_arrives(p, h, send, "好的")
     assert p._gate.consented == 45.0
-    p._park(resume_idx=p._idx, awaiting=False)
+    p._suspend(resume_idx=p._idx, awaiting=False)
 
-    resumed = setup.load_parked()
+    resumed = setup.load_suspended()
 
     assert resumed is not None and resumed._gate.consented == 45.0
 
 
-def test_park_status_literal_matches_the_sentinel() -> None:
+def test_suspend_status_literal_matches_the_sentinel() -> None:
     # program.py spells WAIT literally (the conductor may not import
     # engine runtimes); this pins its constant to the sentinel's spelling
-    # (_park emits PARK_STATUS; the park tests assert the emitted value).
+    # (_suspend emits SUSPEND_STATUS; the suspend tests assert the emitted value).
     from physiclaw.agent.runtime.sentinel import WAIT
 
-    assert program.PARK_STATUS == WAIT
+    assert program.SUSPEND_STATUS == WAIT
 
 
 def _sections(text: str, slugs: list[str]) -> str:
@@ -1015,11 +1073,17 @@ def test_gate_revise_rewrites_the_ledger_and_reasks() -> None:
             },
         )
     )
-    # Quantity-only change: nothing pending, straight back to reconcile.
-    assert step.tool_names() == ["note", "peek"]
+    # The reply was read on the IM thread — the walk returns to the
+    # app FIRST (the gate's return macro), then reconciles.
+    assert step.tool_names() == ["note", "run_macro"]
+    assert step.tool_calls[1].arguments["name"] == "demo/open-app"
     assert p._gate.consented is None  # the old ask no longer covers the order
 
-    _feed(h, step, _cart_screen(("farm eggs", 2), ("lays chips", 1)))
+    _feed(h, step, RESULTS)  # back in the app
+    peek = p.advance(h)
+    # Quantity-only change: nothing pending, straight back to reconcile.
+    assert peek.tool_names() == ["note", "peek"]
+    _feed(h, peek, _cart_screen(("farm eggs", 2), ("lays chips", 1)))
     tap = p.advance(h)
     # The MINUS: the icon flanking the numeral — NOT the far-left checkbox.
     assert 0.5 < tap.tool_calls[1].arguments["bbox"][0] < 0.7
@@ -1050,9 +1114,14 @@ def test_gate_revise_added_item_reenters_the_loop() -> None:
             },
         )
     )
+    # Return to the app first, then the loop re-enters `search` for the
+    # new pending item.
+    assert step.tool_calls[1].arguments["name"] == "demo/open-app"
+    h2 = h
+    _feed(h2, step, RESULTS)
+    search = p.advance(h2)
 
-    # The new item is pending → the loop re-enters `search` for it.
-    assert step.tool_calls[1].arguments["inputs"]["message"] == "oil"
+    assert search.tool_calls[1].arguments["inputs"]["message"] == "oil"
     assert [it.qty for it in p._ledger] == [2, 1, 1]
 
 
@@ -1068,11 +1137,11 @@ def test_gate_revisions_are_bounded() -> None:
     assert handed is None  # budget spent — the model settles the order
 
 
-def test_park_persists_the_ledger() -> None:
+def test_suspension_persists_the_ledger() -> None:
     p, _, _ = _at_ledger_gate()
-    p._park(resume_idx=p._idx, awaiting=True)
+    p._suspend(resume_idx=p._idx, awaiting=True)
 
-    resumed = setup.load_parked()
+    resumed = setup.load_suspended()
 
     assert resumed is not None
     assert [it.query for it in resumed._ledger] == ["eggs", "chips"]
@@ -1172,17 +1241,548 @@ def test_incidental_handover_keeps_the_arm() -> None:
     assert arming.armed_ref() == ("demo", "flow")
 
 
-def test_parked_walk_deny_consumes_the_arm() -> None:
-    # armed.json outlives the park; a terminal outcome on the RESUMED
+def test_suspended_walk_deny_consumes_the_arm() -> None:
+    # armed.json outlives the suspension; a terminal outcome on the RESUMED
     # walk must still consume it.
     p, h, send = _at_gate()
-    ask = _park_via_silence(p, h, send)
+    ask = _suspend_via_silence(p, h, send)
 
-    resumed = setup.load_parked()
-    assert resumed is not None and resumed.origin == "parked"
+    resumed = setup.load_suspended()
+    assert resumed is not None and resumed.origin == "suspended"
     h2 = _history()
     peek = resumed.advance(h2)
     _feed(h2, peek, _thread((ask, 0.75, 0.3), ("不用", 0.25, 0.5)))
 
     assert resumed.advance(h2) is None and resumed.finished == "deny"
     assert arming.armed_ref() is None
+
+
+# ---------- bug-hunt regressions ----------
+
+
+def test_payment_never_fires_off_an_unverified_screen() -> None:
+    # The gate's own ask bubble quotes the consented total — if the
+    # return macro fails to leave the thread, the money predicates must
+    # not be satisfied by our own message.
+    p, h, send = _at_gate()
+    back = _reply_arrives(p, h, send, "好的")  # confirmed → return macro
+
+    # The return macro FAILS to leave the messenger: the walk sees the
+    # chat list (¥ amounts may sit in previews) — no verified demo page.
+    _feed(
+        h,
+        back,
+        make_screen(("Weixin", 0.5, 0.05), ("合计 ¥45 昨天", 0.3, 0.2)).text,
+    )
+
+    assert p.advance(h) is None  # blind money refused, hand over
+
+
+def test_pay_consumes_the_consent() -> None:
+    p, h, send = _at_gate()
+    back = _reply_arrives(p, h, send, "好的")
+    _feed(h, back, _sheet())
+    pay = p.advance(h)
+
+    assert pay.tool_calls[1].arguments["name"] == "demo/add-cart"
+    assert p._gate.consented is None  # spent at fire — no leftovers
+
+
+def test_budget_suspend_does_not_swallow_the_final_batch() -> None:
+    # The 4th unclear message suspends WITHOUT being baselined, so the
+    # resuming wake still sees it (judged once, eventually).
+    from physiclaw.agent.conductor.micro import MicroOutcome
+
+    p, h, send = _at_gate()
+    ask = send.tool_calls[1].arguments["inputs"]["message"]
+    _feed(h, send, _thread((ask, 0.75, 0.3)))
+    step = p.advance(h)  # first wait
+    for i in range(3):  # three unclear rounds spend the checks budget
+        _feed(h, step, "waited")
+        peek = p.advance(h)
+        _feed(h, peek, _thread((ask, 0.75, 0.3), (f"hmm what about {i}", 0.25, 0.5)))
+        req = p.advance(h)
+        step = p.resolve(MicroOutcome(out="unclear", reason="?", confidence=0.9))
+    _feed(h, step, "waited")
+    peek = p.advance(h)
+    _feed(h, peek, _thread((ask, 0.75, 0.3), ("make it two boxes then", 0.25, 0.5)))
+    susp = p.advance(h)  # budget spent → suspend
+
+    assert susp.tool_calls[1].arguments["status"] == "WAIT"
+    assert "make it two boxes then" not in p._gate.baseline  # NOT swallowed
+
+    resumed = setup.load_suspended()
+    h2 = _history()
+    peek2 = resumed.advance(h2)
+    _feed(h2, peek2, _thread((ask, 0.75, 0.3), ("make it two boxes then", 0.25, 0.5)))
+    req = resumed.advance(h2)  # the message reaches the LLM tier now
+
+    assert "make it two boxes then" in req.args["reply"]
+
+
+def test_retire_never_disarms_a_foreign_playbook() -> None:
+    # Walk A suspends; the user disarms and arms B; A's terminal outcome
+    # must not eat B's standing order.
+    p, h, send = _at_gate()
+    _suspend_via_silence(p, h, send)
+    arming.disarm()
+    write_pack(playbooks={"pay": GATED, "flow": FLOW})
+    arming.arm("demo", "flow", {"keyword": "milk"})
+
+    resumed = setup.load_suspended()
+    h2 = _history()
+    ask = send.tool_calls[1].arguments["inputs"]["message"]
+    peek = resumed.advance(h2)
+    _feed(h2, peek, _thread((ask, 0.75, 0.3), ("不用", 0.25, 0.5)))
+
+    assert resumed.advance(h2) is None and resumed.finished == "deny"
+    assert arming.armed_ref() == ("demo", "flow")  # B untouched
+
+
+def test_suspended_idx_outside_the_spec_drops_the_suspension() -> None:
+    p, h, send = _at_gate()
+    _suspend_via_silence(p, h, send)
+    import json as _json
+
+    susp_file = arming.suspended_path()
+    data = _json.loads(susp_file.read_text(encoding="utf-8"))
+    data["idx"] = 99  # spec edited shorter between wakes
+    susp_file.write_text(_json.dumps(data), encoding="utf-8")
+
+    assert setup.load_suspended() is None  # dropped, not a fake completion
+    assert arming.armed_ref() is not None  # arm intact
+
+
+def test_zero_action_instant_complete_keeps_the_arm() -> None:
+    # First peek coincidentally matches the LAST leg's verify page —
+    # the walk did nothing, so it must hand over WITHOUT consuming.
+    write_pack(playbooks={"flow": FLOW})
+    arming.arm("demo", "flow", {"keyword": "milk"})
+    p = _armed_program()
+    h = _history()
+
+    _feed(h, p.advance(h), RESULTS)  # last leg's verify page at wake
+
+    assert p.advance(h) is None
+    assert p.finished is None
+    assert arming.armed_ref() == ("demo", "flow")
+
+
+def test_blocked_suspend_end_session_drops_the_suspension() -> None:
+    p, h, send = _at_gate()
+    ask = send.tool_calls[1].arguments["inputs"]["message"]
+    thread = _thread((ask, 0.75, 0.3))
+    _feed(h, send, thread)
+    step = p.advance(h)
+    for _ in range(program.SILENCE_ROUNDS):  # silent rounds → suspend turn
+        _feed(h, step, "waited")
+        peek = p.advance(h)
+        _feed(h, peek, thread)
+        step = p.advance(h)
+    assert step.tool_names() == ["note", "end_session"]
+
+    _feed(h, step, "BLOCKED", error=True)  # end_session refused
+
+    assert p.advance(h) is None
+    assert setup.load_suspended() is None  # stale suspension not resurrected
+
+
+def test_all_zero_revision_is_a_deny() -> None:
+    from physiclaw.agent.conductor.micro import MicroOutcome
+
+    p, h, send = _at_ledger_gate()
+    _reply_arrives(p, h, send, "drop everything, remove it all")
+    p.resolve(MicroOutcome(out="revise", reason="cancel all", confidence=0.9))
+
+    handed = p.resolve(
+        MicroOutcome(
+            out="updated",
+            reason="all zero",
+            confidence=0.9,
+            payload={
+                "ledger": '[{"query": "eggs", "qty": 0}, {"query": "chips", "qty": 0}]'
+            },
+        )
+    )
+
+    assert handed is None and p.finished == "deny"
+
+
+def test_reconciler_never_cross_matches_similar_items() -> None:
+    # "coke" must not claim "coke zero"'s row when both are converged.
+    from physiclaw.agent.conductor.ledger import LedgerItem, assign_rows
+    from physiclaw.common.listing import Screen
+
+    screen_text = _cart_screen(("coke zero", 1), ("coke", 2))
+    screen = Screen.read(screen_text)
+    items = [
+        LedgerItem(query="coke zero", qty=1, status="picked", label="coke zero"),
+        LedgerItem(query="coke", qty=2, status="picked", label="coke"),
+    ]
+
+    rows = assign_rows(screen, items)
+
+    assert rows[0] is not None and rows[0].label == "coke zero"
+    assert rows[1] is not None and rows[1].label == "coke"
+
+
+# ---------- deep-sweep regressions: state-machine holes ----------
+
+
+def test_locate_never_skips_work_nodes() -> None:
+    # A fresh wake whose screen matches a LATE leg's verify page must
+    # not fast-forward past the loop/reconcile/gate: a page match proves
+    # navigation, never that the work ran — the gate would quote ¥45
+    # for a never-shopped list.
+    from physiclaw.agent.conductor.micro import DecisionRequest
+
+    p = _arm_ledger()
+    h = _history()
+    peek = p.advance(h)
+    _feed(h, peek, _sheet())  # reads as `results` — the sheet leg's verify
+
+    step = p.advance(h)
+
+    # The cursor stops at the end of the LEADING leg run: the choose
+    # DECIDE — never the gate.
+    assert isinstance(step, DecisionRequest) and step.call == "choose_item"
+    assert all(it.status == "pending" for it in p._ledger)
+
+
+def test_payment_gate_total_is_quoted_only_off_a_verified_page() -> None:
+    # A suspended resume straight onto the gate with an unknown screen must
+    # hand over, not quote max(¥) off whatever the camera saw.
+    from physiclaw.common.logger import write_json_atomic
+
+    _write_channel()
+    write_pack(playbooks={"shop": LEDGERED})
+    arming.arm("demo", "shop", {"items": LEDGER_ITEMS})
+    spec, _ = arming.armed_spec("demo", "shop")
+    gate_idx = next(
+        i for i, n in enumerate(spec.nodes) if type(n).__name__ == "HumanGateNode"
+    )
+    write_json_atomic(
+        arming.suspended_path(),
+        {
+            "schema": arming.SUSPENDED_SCHEMA,
+            "app": "demo",
+            "playbook": "shop",
+            "idx": gate_idx,
+            "values": {"items": LEDGER_ITEMS},
+            "outputs": {},
+            "visits": {},
+            "ledger": [
+                {"query": "eggs", "qty": 2, "status": "picked", "label": "farm eggs"},
+                {"query": "chips", "qty": 1, "status": "picked", "label": "lays chips"},
+            ],
+            "item": 1,
+            "ask_text": "",
+            "baseline": [],
+            "quoted": None,
+            "cap": None,
+            "consented": None,
+            "awaiting": False,
+            "revisions": 0,
+        },
+    )
+    p = setup.load_suspended(channel.load_channel())
+    assert p is not None
+    h = _history()
+    _feed(h, p.advance(h), ELSEWHERE)  # unknown screen at the gate
+
+    assert p.advance(h) is None  # handover — no ask was sent
+    assert p.finished is None and arming.armed_path().exists()
+
+
+def test_reask_send_reads_a_deny_sent_meanwhile() -> None:
+    # The user cancels while the walk is off shopping a revision; the
+    # "cancel" sits on the thread when the re-ask lands. Overwriting the
+    # baseline would swallow it forever — the send must read it first.
+    from physiclaw.agent.conductor.micro import MicroOutcome
+
+    p, h, send = _at_ledger_gate()
+    _reply_arrives(p, h, send, "ok, but one egg is enough")
+    p.resolve(MicroOutcome(out="revise", reason="fewer", confidence=0.9))
+    step = p.resolve(
+        MicroOutcome(
+            out="updated",
+            reason="one egg",
+            confidence=0.9,
+            payload={
+                "ledger": '[{"query": "eggs", "qty": 1}, {"query": "chips", "qty": 1}]'
+            },
+        )
+    )
+    _feed(h, step, RESULTS)  # gate-return landed
+    peek = p.advance(h)
+    _feed(h, peek, _cart_screen(("farm eggs", 1), ("lays chips", 1)))
+    sheet = p.advance(h)  # converged → the to-sheet leg
+    _feed(h, sheet, _sheet("¥30"))
+    resend = p.advance(h)
+    ask2 = resend.tool_calls[1].arguments["inputs"]["message"]
+    _feed(h, resend, _thread((ask2, 0.75, 0.7), ("cancel", 0.25, 0.5)))
+
+    assert p.advance(h) is None
+    assert p.finished == "deny"
+    assert not arming.armed_path().exists()
+
+
+def test_failed_reply_judgment_keeps_the_batch_visible() -> None:
+    # A provider failure on the LLM tier must NOT baseline the reply —
+    # the next round re-reads and re-judges it ("judged once,
+    # eventually"), instead of suspending on false silence forever.
+    from physiclaw.agent.conductor.micro import CONFIRM_REPLY, DecisionRequest
+
+    p, h, send = _at_gate()
+    req = _reply_arrives(p, h, send, "ok, buy it now??")
+    assert isinstance(req, DecisionRequest)
+
+    wait = p.resolve(None)  # the micro-call failed
+    assert wait.tool_names() == ["note", "wait"]
+    assert "ok, buy it now??" not in p._gate.baseline
+
+    _feed(h, wait, "waited")
+    peek = p.advance(h)
+    ask = send.tool_calls[1].arguments["inputs"]["message"]
+    _feed(h, peek, _thread((ask, 0.75, 0.3), ("ok, buy it now??", 0.25, 0.5)))
+    again = p.advance(h)
+
+    assert isinstance(again, DecisionRequest) and again.call == CONFIRM_REPLY
+
+
+def test_revision_rephrase_lands_on_the_shopped_item() -> None:
+    # revise_list is asked to echo unchanged items verbatim, but a
+    # rephrase ("eggs" → "fresh eggs") must merge onto the existing item
+    # — not zero a correct cart row and re-shop the same product.
+    from physiclaw.agent.conductor.micro import MicroOutcome
+
+    p, h, send = _at_ledger_gate()
+    _reply_arrives(p, h, send, "make it fresh eggs instead")
+    p.resolve(MicroOutcome(out="revise", reason="rephrase", confidence=0.9))
+    p.resolve(
+        MicroOutcome(
+            out="updated",
+            reason="r",
+            confidence=0.9,
+            payload={
+                "ledger": '[{"query": "fresh eggs", "qty": 2}, '
+                '{"query": "chips", "qty": 1}]'
+            },
+        )
+    )
+
+    assert [it.qty for it in p._ledger] == [2, 1]  # no phantom third item
+    assert p._ledger[0].status == "picked" and p._ledger[0].label == "farm eggs"
+
+
+def test_ledger_longer_than_max_visits_completes() -> None:
+    # The loop body's decide legitimately runs once per item — the visit
+    # budget is per (node, item), or a 4-item list could never finish
+    # under the default max_visits of 3.
+    from physiclaw.agent.conductor.micro import DecisionRequest
+
+    items = json.dumps([{"query": q, "qty": 1} for q in ("a1", "b2", "c3", "d4")])
+    p = _arm_ledger(items)
+    h = _history()
+    _feed(h, p.advance(h), ELSEWHERE)
+    _feed(h, p.advance(h), HOME)
+    step = p.advance(h)
+    for _ in range(4):
+        assert step.tool_names() == ["note", "run_macro"]  # the search leg
+        _feed(h, step, PRODUCTS)
+        req = p.advance(h)
+        assert isinstance(req, DecisionRequest), "visit budget must be per item"
+        step = _shop_item(p, h, req, "farm eggs")
+
+    assert step.tool_names() == ["note", "peek"]  # all four shopped → reconcile
+
+
+def test_second_reshop_of_an_item_hands_over() -> None:
+    # An item still missing after one re-shop will never read as a cart
+    # row — hand over instead of duplicating real adds forever.
+    p = _arm_ledger()
+    h, peek = _to_reconcile(p)
+    _feed(h, peek, _cart_screen(("farm eggs", 2)))  # chips missing
+    step = p.advance(h)  # re-shop #1
+    assert step.tool_calls[1].arguments["inputs"]["message"] == "chips"
+    _feed(h, step, PRODUCTS)
+    req = p.advance(h)
+    peek2 = _shop_item(p, h, req, "lays chips")
+    _feed(h, peek2, _cart_screen(("farm eggs", 2)))  # STILL missing
+
+    assert p.advance(h) is None
+    assert p.finished is None and arming.armed_path().exists()  # incidental
+
+
+def test_applied_revision_survives_via_the_arm_file() -> None:
+    # The next suspension is many turns away; a crash in between must rebuild
+    # from the REVISED list, not silently revert the user's change.
+    from physiclaw.agent.conductor.micro import MicroOutcome
+
+    p, h, send = _at_ledger_gate()
+    _reply_arrives(p, h, send, "ok, drop the chips and add oil")
+    p.resolve(MicroOutcome(out="revise", reason="swap", confidence=0.9))
+    p.resolve(
+        MicroOutcome(
+            out="updated",
+            reason="r",
+            confidence=0.9,
+            payload={
+                "ledger": '[{"query": "eggs", "qty": 2}, '
+                '{"query": "chips", "qty": 0}, {"query": "oil", "qty": 1}]'
+            },
+        )
+    )
+
+    data = json.loads(arming.armed_path().read_text(encoding="utf-8"))
+    stored = json.loads(data["inputs"]["items"])
+    assert stored == [{"query": "eggs", "qty": 2}, {"query": "oil", "qty": 1}]
+
+
+def _suspend_a_confirm() -> None:
+    """Drive the CONFIRMING playbook to its written suspension."""
+    _write_channel()
+    write_pack(playbooks={"notify": CONFIRMING})
+    arming.arm("demo", "notify", {"keyword": "milk"})
+    p = setup.load_armed(channel.load_channel())
+    h = _history()
+    _feed(h, p.advance(h), ELSEWHERE)
+    _feed(h, p.advance(h), HOME)
+    send = p.advance(h)
+    text = send.tool_calls[1].arguments["inputs"]["message"]
+    _feed(h, send, _thread((text, 0.75, 0.3)))
+    p.advance(h)  # suspension written
+    assert arming.suspended_path().exists()
+
+
+def test_stand_down_drops_the_suspension() -> None:
+    # `disarm` means stop: a surviving suspension would resume — and keep
+    # acting — on the very next wake.
+    _suspend_a_confirm()
+
+    was_armed, dropped = arming.stand_down()
+
+    assert was_armed and dropped == ("demo", "notify")
+    assert not arming.suspended_path().exists()
+    assert not arming.armed_path().exists()
+
+
+def test_rearming_the_same_playbook_drops_its_stale_suspension() -> None:
+    # Re-arm with new inputs: the suspended old-values walk must not
+    # resume first and then consume the fresh standing order.
+    _suspend_a_confirm()
+
+    _, warnings = arming.arm("demo", "notify", {"keyword": "bread"})
+
+    assert not arming.suspended_path().exists()
+    assert any("suspended walk" in w for w in warnings)
+
+
+def test_activation_lineage_suspension_never_consumes_the_arm() -> None:
+    from physiclaw.common.logger import write_json_atomic
+
+    _write_channel()
+    write_pack(playbooks={"notify": CONFIRMING})
+    arming.arm("demo", "notify", {"keyword": "milk"})
+    spec, _ = arming.armed_spec("demo", "notify")
+    base = {
+        "schema": arming.SUSPENDED_SCHEMA,
+        "app": "demo",
+        "playbook": "notify",
+        "idx": len(spec.nodes),  # resumes straight into completion
+        "values": {"keyword": "milk"},
+        "outputs": {},
+        "visits": {},
+        "ledger": None,
+        "item": 0,
+        "ask_text": "",
+        "baseline": [],
+        "quoted": None,
+        "cap": None,
+        "consented": None,
+        "awaiting": False,
+        "revisions": 0,
+    }
+    write_json_atomic(arming.suspended_path(), {**base, "origin": "activation"})
+    p = setup.load_suspended(channel.load_channel())
+    h = _history()
+    _feed(h, p.advance(h), HOME)
+    assert p.advance(h) is None and p.finished == "complete"
+    assert arming.armed_path().exists()  # never owned an arm — kept
+
+    # Control: armed lineage consumes it.
+    write_json_atomic(arming.suspended_path(), {**base, "origin": "armed"})
+    p2 = setup.load_suspended(channel.load_channel())
+    h2 = _history()
+    _feed(h2, p2.advance(h2), HOME)
+    assert p2.advance(h2) is None and p2.finished == "complete"
+    assert not arming.armed_path().exists()
+
+
+def test_missing_suspend_result_drops_the_suspension_file() -> None:
+    # The suspension file is written before end_session; if that result never
+    # lands, the session may run on — a dead walk must not resurrect.
+    _write_channel()
+    write_pack(playbooks={"notify": CONFIRMING})
+    arming.arm("demo", "notify", {"keyword": "milk"})
+    p = setup.load_armed(channel.load_channel())
+    h = _history()
+    _feed(h, p.advance(h), ELSEWHERE)
+    _feed(h, p.advance(h), HOME)
+    send = p.advance(h)
+    text = send.tool_calls[1].arguments["inputs"]["message"]
+    _feed(h, send, _thread((text, 0.75, 0.3)))
+    susp = p.advance(h)
+    assert susp.tool_names() == ["note", "end_session"]
+    assert arming.suspended_path().exists()
+    h.append(susp)  # the end_session result never arrives
+
+    assert p.advance(h) is None
+    assert not arming.suspended_path().exists()
+
+
+def test_duplicate_ledger_queries_rejected_at_arm() -> None:
+    _write_channel()
+    write_pack(playbooks={"shop": LEDGERED})
+
+    with pytest.raises(PlaybookError, match="appears twice"):
+        arming.arm(
+            "demo",
+            "shop",
+            {"items": '[{"query": "eggs", "qty": 1}, {"query": "eggs", "qty": 2}]'},
+        )
+
+
+def test_arm_warns_when_a_gate_reenters_blind() -> None:
+    # Non-payment gates: no `return:` and a fall-through leg without
+    # `enter:` means the first post-consent action runs off the IM
+    # thread — advisory (the payment case is a parse error).
+    _write_channel()
+    text = """\
+name: handoff
+description: gate then blind leg
+inputs:
+  keyword:
+    description: what
+nodes:
+  - id: open
+    type: LEG
+    macro: open-app
+    with: {message: "{keyword}"}
+    verify: home
+  - id: addr
+    type: HUMAN_GATE
+    gate: address
+    compose: addr-check
+    message: "address ok? reply ok or no"
+  - id: finish
+    type: LEG
+    macro: add-cart
+    with: {message: "x"}
+    verify: results
+"""
+    write_pack(playbooks={"handoff": text})
+
+    _, warnings = arming.arm("demo", "handoff", {"keyword": "milk"})
+
+    assert any("off the IM thread" in w for w in warnings)

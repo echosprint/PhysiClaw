@@ -25,10 +25,11 @@ from collections.abc import Set as AbstractSet
 from physiclaw.common.bbox import center_of
 from physiclaw.common.listing import Element
 
-# Incoming bubbles' centers sit left of this; our own sit right. A
-# forgiving threshold: centered system rows (timestamps) land near 0.5
-# and are excluded by it too.
-INCOMING_MAX_CX = 0.55
+# Incoming bubbles' centers sit left of this; our own sit right, and
+# centered system rows (timestamps, at ~0.5) fall OUTSIDE it — they
+# would otherwise burn an LLM check per fresh timestamp after a
+# suspension.
+INCOMING_MAX_CX = 0.45
 
 # A row is treated as a wrapped LINE of our own ask only above this
 # length. Shorter fragments must never be excluded: the ask itself
@@ -183,11 +184,37 @@ def new_incoming(
     rows: tuple[Element, ...],
     baseline: AbstractSet[str],
     own_text: str,
+    *,
+    after_ask: bool = True,
 ) -> list[str]:
     """The user's new bubbles since the baseline snapshot, in screen
     order. Incoming = left of center; new = label not in the baseline
     set; our own ask is excluded (whole, or as a wrapped line — but only
-    fragments long enough to BE lines, see _OWN_FRAGMENT_MIN)."""
+    fragments long enough to BE lines, see _OWN_FRAGMENT_MIN).
+
+    `after_ask` (the default): when the ask bubble is visible, only rows
+    BELOW it count. The baseline is a snapshot of one screen, and a
+    keyboard hides bubbles without disturbing the thread page's anchors
+    — when it dismisses, pre-ask history reappears as "not in baseline"
+    and a stale confirm word from another conversation would open the
+    gate. A
+    real reply is chronologically after the ask, so it renders below it;
+    if the ask has scrolled off the top, everything visible is newer
+    than it and the filter stands down. Pass False for a sweep that must
+    see bubbles ABOVE a just-sent ask (the re-ask deny sweep)."""
+    ask_bottom: float | None = None
+    if own_text and after_ask:
+        for row in rows:
+            label = row.label.strip()
+            if not label:
+                continue
+            c = center_of(row.bbox)
+            if c is None or c[0] <= INCOMING_MAX_CX:
+                continue  # ask lines render as OUR bubbles, right of center
+            if own_text in label or (
+                len(label) >= _OWN_FRAGMENT_MIN and label in own_text
+            ):
+                ask_bottom = c[1] if ask_bottom is None else max(ask_bottom, c[1])
     out: list[str] = []
     for row in rows:
         label = row.label.strip()
@@ -195,6 +222,18 @@ def new_incoming(
             continue
         c = center_of(row.bbox)
         if c is None or c[0] > INCOMING_MAX_CX:
+            continue
+        if ask_bottom is not None and c[1] <= ask_bottom:
+            # Above the visible ask = older than the ask — stale history
+            # resurfacing, never this ask's reply.
+            continue
+        norm = normalize(label)
+        if norm in CONFIRM_WORDS or norm in DENY_WORDS:
+            # A verbatim reply word is ALWAYS a reply, even when the ask
+            # quotes it ("reply confirm to pay" + reply "confirm") — the
+            # own-line exclusion must never swallow the very words the
+            # check exists to catch.
+            out.append(label)
             continue
         if own_text and (
             own_text in label or (len(label) >= _OWN_FRAGMENT_MIN and label in own_text)

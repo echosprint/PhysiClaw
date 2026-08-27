@@ -21,11 +21,15 @@ loop calling the provider itself; ``tests/agent/conductor`` pins the
 delegation by object identity.
 """
 
+import logging
+
 from physiclaw.agent.conductor.micro import DecisionRequest, MicroCaller
 from physiclaw.agent.conductor.program import Program
 from physiclaw.agent.conductor.setup import Activation
 from physiclaw.agent.engine.dto import AssistantMessage, Message
 from physiclaw.agent.provider import Provider
+
+log = logging.getLogger(__name__)
 
 
 class Conductor:
@@ -58,11 +62,18 @@ class Conductor:
             and self._activation is not None
             and self._micro is not None
         ):
-            req = self._activation.request(history)
-            if req is not None:
-                res = await self._micro.run(req)
-                self._program = self._activation.build(res.outcome)
-            if self._activation.attempted:
+            try:
+                req = self._activation.request(history)
+                if req is not None:
+                    res = await self._micro.run(req)
+                    self._program = self._activation.build(res.outcome)
+                drop = self._activation.attempted
+            except Exception:
+                # Fail-open like every conductor surface: a broken pack
+                # edited mid-session must not crash the turn.
+                log.exception("conductor: activation failed — continuing without it")
+                drop = True
+            if drop:
                 # One-shot consumed — release the parsed pack entries.
                 self._activation = None
         if self._program is not None:

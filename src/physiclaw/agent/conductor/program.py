@@ -29,8 +29,8 @@ The walk executes every node type, strictly:
     the screen, so completed gestures are never replayed.
   - CONFIRM and HUMAN_GATE send the playbook's ``message:`` VERBATIM
     over the channel pack (only the author knows the user's language),
-    then park (CONFIRM) or hold for the tiered reply check (the gate).
-    Parks write ``playbooks/parked.json``; ANY next wake resumes.
+    then suspend (CONFIRM) or hold for the tiered reply check (the gate).
+    Suspends write ``playbooks/suspended.json``; ANY next wake resumes.
   - Money runs in code: the parser guarantees a payment leg directly
     follows its ``gate: payment`` HUMAN_GATE; consent binds the quoted
     total; the fire-time predicates re-read the sheet.
@@ -39,7 +39,7 @@ The walk executes every node type, strictly:
     re-shop, unclaimed rows left alone), and a gate ``revise:`` turns a
     "yes, but change it" reply into a list rewrite and a fresh ask.
 
-How a Program comes to exist (armed / parked / activation) lives in
+How a Program comes to exist (armed / suspended / activation) lives in
 `setup.py`; the persisted files in `arming.py`; the domain helpers in
 `channel.py`, `ledger.py`, `memory.py`, `views.py`.
 """
@@ -49,10 +49,24 @@ import logging
 from dataclasses import dataclass, field
 
 from physiclaw.agent.conductor import ledger, memory, reply, views
-from physiclaw.agent.conductor.arming import PARKED_SCHEMA, disarm, parked_path
+from physiclaw.agent.conductor.arming import (
+    SUSPENDED_SCHEMA,
+    armed_path,
+    armed_ref,
+    clear_suspended,
+    disarm,
+    read_armed,
+    suspended_path,
+)
 from physiclaw.agent.conductor.calls import CALLS, ESCALATE, NEXT_ITEM
 from physiclaw.agent.conductor.channel import Channel
-from physiclaw.agent.conductor.match import PRICE_RE, Verdict, match_screen
+from physiclaw.agent.conductor.match import (
+    PRICE_RE,
+    Verdict,
+    label_matches,
+    match_screen,
+    normalize,
+)
 from physiclaw.agent.conductor.micro import (
     CONFIRM_REPLY,
     REVISE_LIST,
@@ -93,14 +107,14 @@ log = logging.getLogger(__name__)
 SCROLL_BBOX = (0.2, 0.35, 0.8, 0.65)
 
 # HUMAN_GATE ask-and-hold bounds: in-session reply polling cadence, and
-# how many silent rounds before the session parks for the next wake.
+# how many silent rounds before the session suspends for the next wake.
 # (Unclear-reply rounds are bounded separately by GATE_MAX_CHECKS.)
 GATE_WAIT_SECONDS = 45
 SILENCE_ROUNDS = 3
 
 # runtime.sentinel.WAIT, spelled literally: the conductor may not import
 # engine runtimes; a test pins the two equal.
-PARK_STATUS = "WAIT"
+SUSPEND_STATUS = "WAIT"
 
 # The reconciler's action budget: every divergence costs at least one
 # tap-and-reread action, so a converging cart finishes well under it —
@@ -128,14 +142,14 @@ class _Pending:
     site declares it, so the reader never re-derives it from kind
     names."""
 
-    kind: str  # "peek"|"leg"|"tap"|"swipe"|"gate-*"|"confirm-sent"|"park"
+    kind: str  # "peek"|"leg"|"tap"|"swipe"|"gate-*"|"confirm-*"|"rec-*"|"suspend"
     call_id: str
     channel: bool = False
 
 
 @dataclass
 class _Gate:
-    """The ask-and-hold state — one object, one park projection. The
+    """The ask-and-hold state — one object, one suspension projection. The
     walk owns the cursor; this owns everything between "ask sent" and
     "consent bound": the ask text, the thread snapshot it is diffed
     against, the money numbers, the two bounded counters, and the
@@ -151,18 +165,22 @@ class _Gate:
     checks: int = 0
     awaiting: bool = False  # ask sent, polling for the reply
     llm_reply: str | None = None
+    # The batch behind llm_reply, held UNBASELINED until a judgment
+    # actually arrives — a provider failure must leave the reply visible
+    # to the next round ("judged once, eventually"), never swallowed.
+    llm_batch: list[str] = field(default_factory=list)
     tried_open: bool = False
-    # Bounded "yes, but change it" cycles (persists — a parked revision
+    # Bounded "yes, but change it" cycles (persists — a suspended revision
     # spree must not reset its budget); True while a revise_list request
     # is outstanding and owns the next resolve().
     revisions: int = 0
     revise_pending: bool = False
 
-    def to_park(self) -> dict:
+    def to_suspended(self) -> dict:
         """The persisted projection — the one field list, beside the
         fields. Counters and the in-flight handshake deliberately reset
-        on resume; `consented` persists so a post-consent park can never
-        resume into a refused payment, `revisions` so a park cannot
+        on resume; `consented` persists so a post-consent suspension can never
+        resume into a refused payment, `revisions` so a suspension cannot
         refill the revision budget."""
         return {
             "ask_text": self.ask,
@@ -175,7 +193,7 @@ class _Gate:
         }
 
     @classmethod
-    def from_park(cls, data: dict) -> "_Gate":
+    def from_suspended(cls, data: dict) -> "_Gate":
         return cls(
             ask=str(data.get("ask_text") or ""),
             baseline=set(data.get("baseline") or []),
@@ -202,12 +220,12 @@ class Program:
         prints: list[PagePrint],
         channel: Channel | None = None,
         origin: str = "activation",
-        parked: dict | None = None,
+        suspended: dict | None = None,
     ):
         self.app = app
         self.spec = spec
         self.values = values
-        # Who built this walk ("armed" | "parked" | "activation") — a
+        # Who built this walk ("armed" | "suspended" | "activation") — a
         # terminal outcome consumes the arm file only for the first two
         # (activation has no file). Defaults to the no-op origin, so a
         # hand-built Program can never eat an arm by accident.
@@ -216,7 +234,7 @@ class Program:
         # "complete" / "deny" mark done deals — see `retire`.
         self.finished: str | None = None
         # The program's own qualified dispatch contribution — merged into
-        # the wake registry by session_setup (armed/parked path).
+        # the wake registry by session_setup (armed/suspended path).
         self.pack_macros = pack_macros
         self._prints = prints
         self._ids = {n.id: i for i, n in enumerate(spec.nodes)}
@@ -238,6 +256,19 @@ class Program:
         self._seq = 0
         self._gate = _Gate()
         self._resumed = False
+        # True once any device-changing action was synthesized (peeks
+        # don't count). A walk that "completes" without ever acting hit
+        # a coincidental page match — that must not consume the arm.
+        self._acted = False
+        # A suspended CONFIRM's resume owes the user one thread read before
+        # walk continues: the wake that resumes it may BE their cancel
+        # reply (the IM banner wakes the device), and barreling on would
+        # ignore it. Set only by _restore_suspended.
+        self._confirm_check = False
+        # Reconcile re-shop bound, per item index: one re-shop is a
+        # failed add, a second means the pick's label will never match
+        # its cart row — hand over instead of duplicating adds forever.
+        self._reshops: dict[int, int] = {}
         # Decision state: recorded outputs (`{node.field}` refs read
         # them), per-node ask counts (max_visits bound), the journal line
         # the next synthesized note carries (record-don't-replay), the
@@ -271,26 +302,30 @@ class Program:
             arm = CALLS[loop.call].loop_arm
             assert arm is not None
             self._loop_body_id = loop.on[arm]
-        if parked is not None:
-            # A resumed walk is ALSO whole at construction: the parked
+        if suspended is not None:
+            # A resumed walk is ALSO whole at construction: the suspended
             # projection overlays the fresh state right here, so no
             # caller ever patches a program up afterwards.
-            self._restore_parked(parked)
+            self._restore_suspended(suspended)
             log.info(
-                "conductor: resuming parked %s/%s at node %d (%s)",
+                "conductor: resuming suspended %s/%s at node %d (%s)",
                 app,
                 spec.name,
                 self._idx + 1,
                 "awaiting reply" if self._gate.awaiting else "walk",
             )
 
-    def _parked_dict(self, resume_idx: int) -> dict:
-        """The park projection: walk state here, gate state via
-        `_Gate.to_park` — each field list lives beside its fields."""
+    def _suspended_dict(self, resume_idx: int) -> dict:
+        """The suspension projection: walk state here, gate state via
+        `_Gate.to_suspended` — each field list lives beside its fields."""
         return {
-            "schema": PARKED_SCHEMA,
+            "schema": SUSPENDED_SCHEMA,
             "app": self.app,
             "playbook": self.spec.name,
+            # Lineage, not the literal origin: retire must know whether
+            # this walk ever owned an arm file (an activation-built walk
+            # that suspends and completes must not eat a same-named arm).
+            "origin": "activation" if self.origin == "activation" else "armed",
             "idx": resume_idx,
             "values": self.values,
             "outputs": self._outputs,
@@ -301,22 +336,36 @@ class Program:
                 else None
             ),
             "item": self._item,
-            **self._gate.to_park(),
+            **self._gate.to_suspended(),
         }
 
-    def _restore_parked(self, data: dict) -> None:
-        self._idx = int(data["idx"])
+    def _restore_suspended(self, data: dict) -> None:
+        idx = int(data["idx"])
+        if not (0 <= idx <= len(self.spec.nodes)):
+            # The spec changed under the suspension (edited shorter) — a stale
+            # cursor must not fake a completion. Raising drops the suspension
+            # (load_suspended is fail-open).
+            raise PlaybookError(f"suspended idx {idx} is outside the playbook")
+        self._idx = idx
+        self._acted = True  # the suspended session acted; completion is real
         self._outputs = {str(k): str(v) for k, v in (data.get("outputs") or {}).items()}
         self._visits = {str(k): int(v) for k, v in (data.get("visits") or {}).items()}
         if data.get("ledger"):  # non-empty — [] would leave no valid cursor
-            # The parked ledger (statuses, labels, revisions applied)
+            # The suspended ledger (statuses, labels, revisions applied)
             # supersedes the arm-value parse from __init__. The cursor
             # clamps HERE — external input — so every reader downstream
             # may index without bounds checks.
             self._ledger = [ledger.LedgerItem.from_dict(d) for d in data["ledger"]]
             self._item = min(max(int(data.get("item") or 0), 0), len(self._ledger) - 1)
-        self._gate = _Gate.from_park(data)
+        self._gate = _Gate.from_suspended(data)
         self._resumed = True
+        # A suspended CONFIRM (message away, not awaiting a reply) resumes
+        # mid-walk — read the thread for a cancel before continuing.
+        self._confirm_check = (
+            not self._gate.awaiting
+            and bool(self._gate.ask)
+            and self._idx < len(self.spec.nodes)
+        )
 
     def advance(
         self, history: list[Message]
@@ -359,9 +408,21 @@ class Program:
         re-asking after the purchase, or after a 不用). An incidental
         handover keeps the arm: the walk retries when the world may have
         changed."""
-        if self.finished is None or self.origin not in ("armed", "parked"):
+        if self.finished is None or self.origin not in ("armed", "suspended"):
             return
-        if disarm():
+        if armed_ref() != (self.app, self.spec.name):
+            # The arm file may belong to a DIFFERENT playbook by now (a
+            # suspended walk outlives arm/disarm cycles) — never consume a
+            # standing order this walk does not own.
+            return
+        try:
+            removed = disarm()
+        except Exception:
+            # retire runs OUTSIDE the never-raises wrappers; a filesystem
+            # race here must not crash the turn.
+            log.exception("conductor: disarm failed during retire")
+            return
+        if removed:
             log.info(
                 "conductor: %s/%s %s — arm consumed",
                 self.app,
@@ -376,9 +437,20 @@ class Program:
     ) -> "AssistantMessage | DecisionRequest | None":
         if self._pending is None:
             if self._gate.awaiting:
-                # Parked-at-gate resume: go straight to reading the
-                # thread — the ask was sent before the park.
+                # Suspended-at-gate resume: go straight to reading the
+                # thread — the ask was sent before the suspension.
                 return self._synth_gate_peek()
+            if self._confirm_check and self.channel is not None:
+                # Suspended-CONFIRM resume: this wake may BE the user's
+                # cancel reply — read the thread before the walk acts.
+                self._confirm_check = False
+                return self._synth(
+                    "confirm-peek",
+                    "conductor: checking the thread for a reply before continuing",
+                    gesture_vocab.PEEK,
+                    {},
+                    channel=True,
+                )
             # Observe before acting. The peek is also how a killed
             # session resumes: _locate fast-forwards past legs whose
             # verify page already matches, so completed gestures are
@@ -392,10 +464,23 @@ class Program:
             )
         result = views.result_for(history, self._pending.call_id)
         if result is None:
+            if self._pending.kind == "suspend":
+                # The suspension file is already written; without its
+                # end_session result the session may run on — a dead
+                # walk must not resurrect on the next wake.
+                clear_suspended()
             return self._handover(
                 f"the result of {self._pending.kind} never arrived in history"
             )
         if result.is_error:
+            if self._pending.kind == "suspend":
+                # end_session was blocked — the suspension file is already
+                # written and would resurrect this walk after the model
+                # finishes the task in-session. Drop it.
+                clear_suspended()
+                return self._handover(
+                    "suspend end_session was blocked — suspension dropped"
+                )
             return self._handover(
                 f"{self._pending.kind} was blocked or failed: "
                 f"{views.text_of(result)[:200]}"
@@ -413,7 +498,7 @@ class Program:
         )
         if kind == "peek":
             if self._resumed:
-                # A parked walk trusts its stored cursor — the next
+                # A suspended walk trusts its stored cursor — the next
                 # node's own checks judge whether the world still fits.
                 self._resumed = False
             else:
@@ -439,13 +524,28 @@ class Program:
                 return self._handover(
                     f"channel send did not land on the thread ({wrong})"
                 )
+            if self._gate.baseline:
+                # A previous ask baselined this thread; anything the user
+                # sent while the walk was off in the app (a revision
+                # cycle, an earlier gate) lands here as new. A deny among
+                # it must stop the walk NOW — overwriting the baseline
+                # would swallow it forever. Deny only: an old confirm
+                # word above the fresh ask is never treated as consent.
+                stale = reply.new_incoming(
+                    self._screen.rows,
+                    self._gate.baseline,
+                    self._gate.ask,
+                    after_ask=False,
+                )
+                if reply.classify_all(stale) == "deny":
+                    return self._deny()
             self._gate.baseline = {
                 r.label.strip() for r in self._screen.rows if r.label.strip()
             }
             if kind == "confirm-sent":
-                # CONFIRM: message away → park; the walk continues past
+                # CONFIRM: message away → suspend; the walk continues past
                 # this node on the resuming wake.
-                return self._park(resume_idx=self._idx + 1, awaiting=False)
+                return self._suspend(resume_idx=self._idx + 1, awaiting=False)
             self._gate.awaiting = True
             self._gate.silence = 0
             self._gate.checks = 0
@@ -454,9 +554,19 @@ class Program:
             return self._synth_gate_peek()
         elif kind in ("gate-peek", "gate-open"):
             return self._gate_check()
+        elif kind in ("confirm-peek", "confirm-open"):
+            return self._confirm_check_step()
         elif kind in ("rec-peek", "rec-tap"):
             # The tap's own result screen is the re-read — no extra peek.
             return self._reconcile_step()
+        elif kind == "suspend":
+            # end_session was blocked/failed — the suspension file is already
+            # written and would resurrect this walk after the model
+            # finishes the task in-session. Drop it.
+            clear_suspended()
+            return self._handover(
+                "suspend end_session was blocked — suspension dropped"
+            )
         elif kind not in ("tap", "gate-return"):
             # A typo'd kind at a _synth site must fail loudly, never
             # silently walk the next node.
@@ -476,6 +586,15 @@ class Program:
             return self._handover("no screen observed yet")
         nodes = self.spec.nodes
         if self._idx >= len(nodes):
+            if not self._acted:
+                # The opening locate fast-forwarded past EVERYTHING off
+                # one page match — a coincidence (common pages recur),
+                # not evidence the task ran. Hand over without consuming
+                # the arm; the model verifies.
+                return self._handover(
+                    "screen already reads as the final page but this walk "
+                    "did nothing — verify the task state before trusting it"
+                )
             log.info(
                 "conductor: playbook %s/%s complete — handing over",
                 self.app,
@@ -518,6 +637,17 @@ class Program:
                     f"leg {node.id!r} expects page {node.enter!r} ({wrong})"
                 )
         if node.irreversible == "payment":
+            # Money fires only off a VERIFIED own-pack page: the ask was
+            # sent on the IM thread and quotes the consented total, so an
+            # unverified screen could satisfy the predicates with the
+            # conductor's own ask bubble.
+            if verdict.kind != "match" or not (verdict.page_id or "").startswith(
+                f"{self.app}."
+            ):
+                return self._handover(
+                    f"payment leg {node.id!r}: current screen is not a "
+                    f"verified {self.app} page — money never fires blind"
+                )
             # The fire-time money predicates — in code, on the current
             # screen, after the human's consent: staleness (the sheet
             # must still show the consented total) and the bound.
@@ -534,6 +664,11 @@ class Program:
         args: dict = {"name": qualified_macro(self.app, node.macro)}
         if inputs:
             args["inputs"] = inputs
+        if node.irreversible == "payment":
+            # Consent is CONSUMED by firing: a later payment leg needs
+            # its own gate's fresh confirm, never this one's leftovers.
+            self._gate.consented = None
+            self._gate.quoted = None
         return self._synth(
             "leg",
             f"conductor: leg {node.id} ({self._idx + 1}/{len(nodes)}) — "
@@ -561,8 +696,12 @@ class Program:
         """One micro-call request off the decide-time screen — or a
         handover (None, typed as the shared step result) when the ask
         budget is spent or the walk has nothing to decide over."""
-        self._visits[node.id] = self._visits.get(node.id, 0) + 1
-        if self._visits[node.id] > node.max_visits:
+        # In a ledger walk the loop body's decide legitimately runs once
+        # per item — the budget is per (node, item), or an 8-item list
+        # could never finish under the default max_visits.
+        key = node.id if self._ledger is None else f"{node.id}@{self._item}"
+        self._visits[key] = self._visits.get(key, 0) + 1
+        if self._visits[key] > node.max_visits:
             return self._handover(
                 f"decide {node.id!r} exceeded max_visits ({node.max_visits})"
             )
@@ -617,7 +756,14 @@ class Program:
             # The gate's LLM tier came back. None/unclear → keep waiting
             # (this round's check was already counted in _gate_check).
             judged = self._gate.llm_reply
+            batch = self._gate.llm_batch
             self._gate.llm_reply = None
+            self._gate.llm_batch = []
+            if outcome is not None:
+                # Baseline only what was actually judged: a provider
+                # failure leaves the batch visible to the next round —
+                # the user's reply is never silently swallowed.
+                self._gate.baseline |= set(batch)
             if outcome is not None and outcome.out == "deny":
                 return self._deny()
             if outcome is not None and outcome.out == "revise":
@@ -762,16 +908,25 @@ class Program:
                 f"{RECONCILE_MAX_ACTIONS} actions — list: "
                 f"{ledger.describe(self._ledger)}"
             )
+        assigned = ledger.assign_rows(self._screen, self._ledger)
         for idx, item in enumerate(self._ledger):
             if item.status != "picked":
                 continue  # pending items are the loop's, reached via re-shop
-            row = ledger.cart_row(self._screen, item)
+            row = assigned[idx]
             if row is None:
                 if item.qty <= 0:
                     continue  # removed and absent — converged
                 # Picked but not in the cart: back into the loop for THIS
                 # item — the body head, not the closer (the closer would
-                # re-bind a stale pick label).
+                # re-bind a stale pick label). Bounded per item: a second
+                # miss means the pick's label will never read as a cart
+                # row, and re-shopping again just duplicates real adds.
+                self._reshops[idx] = self._reshops.get(idx, 0) + 1
+                if self._reshops[idx] > 1:
+                    return self._handover(
+                        f"reconcile {node.id!r}: {item.query!r} still missing "
+                        f"after a re-shop — list: {ledger.describe(self._ledger)}"
+                    )
                 item.status, item.label = "pending", None
                 self._item = idx
                 self._journal = (
@@ -856,23 +1011,90 @@ class Program:
             revised = ledger.parse_ledger(outcome.payload["ledger"], allow_zero=True)
         except PlaybookError as e:
             return self._handover(f"revised list unusable ({e}) — read the thread")
+        if all(r.qty == 0 for r in revised):
+            # "Remove everything" is a cancellation, not a revision.
+            return self._deny()
         # Old items keep their shopping progress (the reconciler moves
         # quantities; a query the revision dropped goes to 0); genuinely
         # new queries append pending. Old-ledger order is preserved —
         # friendlier to the `_item` cursor, and nothing reads revised
-        # order.
-        revised_by = {r.query: r for r in revised}
-        for it in self._ledger:
-            r = revised_by.pop(it.query, None)
-            it.qty = r.qty if r is not None else 0
-        self._ledger.extend(revised_by.values())
+        # order. Matching mirrors assign_rows — exact normalized first,
+        # then fuzzy against the query OR the picked label: revise_list
+        # is asked to echo unchanged items verbatim, but a rephrase
+        # ("eggs" → "fresh eggs") must land on the existing item, not
+        # zero out a correct cart row and re-shop the same product.
+        remaining = list(revised)
+        matched: dict[int, ledger.LedgerItem] = {}
+        for i, it in enumerate(self._ledger):  # pass 1: exact
+            want = normalize(it.query)
+            for r in remaining:
+                if normalize(r.query) == want:
+                    matched[i] = r
+                    remaining.remove(r)
+                    break
+        for i, it in enumerate(self._ledger):  # pass 2: fuzzy
+            if i in matched:
+                continue
+            for r in remaining:
+                rn = normalize(r.query)
+                if label_matches(normalize(it.query), rn, ()) or (
+                    it.label and label_matches(normalize(it.label), rn, ())
+                ):
+                    matched[i] = r
+                    remaining.remove(r)
+                    break
+        for i, it in enumerate(self._ledger):
+            hit = matched.get(i)
+            it.qty = hit.qty if hit is not None else 0
+        self._ledger.extend(remaining)
+        self._persist_revision()
         self._gate.consented = None  # the old ask no longer covers the order
         self._gate.awaiting = False
         self._journal = f"revision applied: {ledger.describe(self._ledger)}"
         self._idx = self._ids[node.revise]
+        # The reply was read on the IM thread — re-enter the app before
+        # the loop shops (the parser lints `revise` requires `return:`).
+        if node.return_macro is not None:
+            return self._synth(
+                "gate-return",
+                f"conductor: back to the app via {node.return_macro}",
+                gesture_vocab.RUN_MACRO,
+                {"name": qualified_macro(self.app, node.return_macro)},
+            )
         return self._next()
 
-    # ---- asks, the gate, parking ----
+    def _persist_revision(self) -> None:
+        """Best-effort durability for an applied revision: the revised
+        desired state rides the ARM FILE (qty>0 items only — the arm
+        value contract has no zeros). The next suspension is many turns away
+        (return, shop, reconcile, re-ask); a crash before it would
+        otherwise rebuild the walk from the ORIGINAL list and silently
+        revert the user's change. Never blocks the walk."""
+        inp = self.spec.ledger_input
+        if inp is None or self.origin not in ("armed", "suspended"):
+            return
+        try:
+            data = read_armed()
+            if data is None or armed_ref() != (self.app, self.spec.name):
+                return  # never clobber a foreign standing order
+            assert self._ledger is not None
+            value = json.dumps(
+                [
+                    {"query": it.query, "qty": it.qty}
+                    for it in self._ledger
+                    if it.qty > 0
+                ],
+                ensure_ascii=False,
+            )
+            inputs = dict(data.get("inputs") or {})
+            inputs[inp.name] = value
+            data["inputs"] = inputs
+            write_json_atomic(armed_path(), data)
+            self.values[inp.name] = value  # `inputs.*` context slices follow
+        except Exception:
+            log.exception("conductor: could not persist the revised list")
+
+    # ---- asks, the gate, suspending ----
 
     def _start_confirm(self, node: ConfirmNode) -> "AssistantMessage | None":
         # `message:` verbatim, refs filled — the playbook owns every
@@ -899,6 +1121,19 @@ class Program:
         # this number (the ask IS the consent record).
         template, values = node.message, self._values()
         if node.gate == "payment":
+            # The ask IS the consent record — its total must be read off
+            # a VERIFIED own-pack page (the sheet the lints put before
+            # the gate), never whatever screen happened to come last.
+            verdict = self._verdict
+            if (
+                verdict is None
+                or verdict.kind != "match"
+                or not (verdict.page_id or "").startswith(f"{self.app}.")
+            ):
+                return self._handover(
+                    f"gate {node.id!r}: the total must be quoted off a "
+                    f"verified {self.app} page — refusing to ask blind"
+                )
             cap = self._mandate_cap()
             if cap is None:
                 return self._handover(
@@ -978,20 +1213,24 @@ class Program:
         if not new:
             self._gate.silence += 1
             if self._gate.silence >= SILENCE_ROUNDS:
-                return self._park(resume_idx=self._idx, awaiting=True)
+                return self._suspend(resume_idx=self._idx, awaiting=True)
             return self._synth_wait()
         verdict = reply.classify_all(new)
         if verdict == "deny":
             return self._deny()
         if verdict == "confirm":
             return self._gate_confirmed()
-        # Unclear → the LLM tier, bounded; these messages are judged once.
-        self._gate.baseline |= set(new)
-        joined = " / ".join(new)
+        # Unclear → the LLM tier, bounded; a batch is baselined ONLY
+        # when a judgment actually arrives (see _resolve) — the round
+        # that exhausts the budget suspends with the batch still unread,
+        # and a failed judgment leaves it for the next round, so the
+        # reply is judged once, eventually.
         self._gate.checks += 1
         if self._gate.checks > GATE_MAX_CHECKS:
-            return self._park(resume_idx=self._idx, awaiting=True)
+            return self._suspend(resume_idx=self._idx, awaiting=True)
+        joined = " / ".join(new)
         self._gate.llm_reply = joined
+        self._gate.llm_batch = new
         # Empty outs: confirm_reply's answer space is fixed whole in its
         # _SPECS row, never caller-supplied.
         return build_request(
@@ -1007,7 +1246,10 @@ class Program:
         re-asks, and TERMINAL (the flag makes retire consume the arm —
         a refused deal must not re-ask on the next wake)."""
         self.finished = "deny"
-        return self._handover("user declined the ask — acknowledge them and wrap up")
+        return self._handover(
+            "user declined the ask — acknowledge them, back out of any "
+            "open checkout or cart state this task created, and wrap up"
+        )
 
     def _gate_confirmed(self) -> "AssistantMessage | DecisionRequest | None":
         node = self.spec.nodes[self._idx]
@@ -1026,6 +1268,41 @@ class Program:
                 {"name": qualified_macro(self.app, node.return_macro)},
             )
         return self._next()
+
+    def _confirm_check_step(self) -> "AssistantMessage | None":
+        """The suspended CONFIRM resume's one thread read: a deny among the
+        replies since the confirm's baseline ends the walk (the user
+        cancelled into a fire-and-forget message — honor it); anything
+        else falls through to the normal resume peek. Word tier only —
+        a CONFIRM has no consent contract, so an unclear reply is the
+        model's to read from the transcript if the walk hands over."""
+        wrong = self._thread_mismatch()
+        if wrong is None:
+            assert self._screen is not None
+            new = reply.new_incoming(
+                self._screen.rows, self._gate.baseline, self._gate.ask
+            )
+            if reply.classify_all(new) == "deny":
+                return self._deny()
+        elif self.channel and self.channel.open and not self._gate.tried_open:
+            self._gate.tried_open = True
+            return self._synth(
+                "confirm-open",
+                "conductor: reopening the user thread",
+                gesture_vocab.RUN_MACRO,
+                {"name": self.channel.open},
+                channel=True,
+            )
+        else:
+            log.info("conductor: confirm reply check skipped — %s", wrong)
+        # No cancel (or no thread): resume the walk with a fresh plain
+        # peek — _resumed is still set, so the stored cursor is trusted.
+        return self._synth(
+            "peek",
+            f"conductor: observing the screen to locate {self.app}/{self.spec.name}",
+            gesture_vocab.PEEK,
+            {},
+        )
 
     def _thread_mismatch(self) -> str | None:
         if self.channel is None:
@@ -1060,19 +1337,19 @@ class Program:
             channel=True,
         )
 
-    def _park(self, *, resume_idx: int, awaiting: bool) -> AssistantMessage:
-        """Write the parked state and close the session WAIT. No job is
+    def _suspend(self, *, resume_idx: int, awaiting: bool) -> AssistantMessage:
+        """Write the suspended state and close the session WAIT. No job is
         synthesized: a WAIT without a session-created job auto-schedules
         the follow-up alarm (`contract.drive`) — the file, not the job,
         is what resumes the walk on ANY next wake."""
         self._gate.awaiting = awaiting
-        write_json_atomic(parked_path(), self._parked_dict(resume_idx))
+        write_json_atomic(suspended_path(), self._suspended_dict(resume_idx))
         recap = f"waiting for the user's reply on {self.app}/{self.spec.name}"
         return self._synth(
-            "park",
-            f"conductor: parking — {recap}",
+            "suspend",
+            f"conductor: suspending — {recap}",
             "end_session",
-            {"status": PARK_STATUS, "recap": recap},
+            {"status": SUSPEND_STATUS, "recap": recap},
         )
 
     # ---- page identity ----
@@ -1087,18 +1364,21 @@ class Program:
         return f"screen reads as {verdict.kind}: {seen} — {verdict.detail}"
 
     def _locate(self, verdict: Verdict) -> int:
-        """Cursor for the current screen: just past the LAST leg whose
-        verify page matches it (that page proves the leg's outcome holds),
-        else the top."""
+        """Cursor for the current screen: just past the LAST leg of the
+        playbook's LEADING LEG RUN whose verify page matches it (that
+        page proves the leg's outcome holds), else the top. The scan
+        stops at the first non-leg node: a page match proves navigation
+        happened, never that a decision, loop pass, reconcile, or ask
+        ran — fast-forwarding past work off one page coincidence would
+        quote a gate total for a list that was never shopped."""
         if verdict.kind != "match":
             log.info("conductor: screen is %s — starting from the top", verdict.kind)
             return 0
         resume = 0
         for i, node in enumerate(self.spec.nodes):
-            if (
-                isinstance(node, LegNode)
-                and page_id(self.app, node.verify) == verdict.page_id
-            ):
+            if not isinstance(node, LegNode):
+                break
+            if page_id(self.app, node.verify) == verdict.page_id:
                 resume = i + 1
         if resume:
             log.info(
@@ -1123,6 +1403,8 @@ class Program:
         if self._journal is not None:
             summary = f"{summary} | {self._journal}"
             self._journal = None
+        if tool != gesture_vocab.PEEK:
+            self._acted = True
         self._seq += 1
         cid = f"conductor-{self._seq}"
         self._pending = _Pending(kind=kind, call_id=f"{cid}-act", channel=channel)

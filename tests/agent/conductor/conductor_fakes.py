@@ -124,6 +124,7 @@ nodes:
     compose: payment-request
     message: "List ready, total ¥{gate.total}. Reply ok to pay, or no to cancel."
     over_message: "Total ¥{gate.total}, over the ¥{gate.cap} budget. Reply ok to pay, or no to cancel."
+    return: open-app
     revise: advance
   - id: pay
     type: LEG

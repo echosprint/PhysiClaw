@@ -15,10 +15,10 @@ Layout:
   - `playbook.py` — PLAYBOOK.yml model + parser + graph/money/ledger lints.
   - `program.py` — a playbook mid-walk: synthesized turns (legs,
     decisions' primitives, channel asks), the HUMAN_GATE ask-and-hold,
-    the ledger loop + cart reconciliation, parking, money predicates.
-  - `setup.py` — how a Program comes to exist at wake: the armed/parked
+    the ledger loop + cart reconciliation, suspending, money predicates.
+  - `setup.py` — how a Program comes to exist at wake: the armed/suspended
     loaders, Activation (parse_task), and `session_setup`.
-  - `arming.py` — the armed.json / parked.json files: paths, schemas,
+  - `arming.py` — the armed.json / suspended.json files: paths, schemas,
     `arm` validation + warnings, disarm/clear.
   - `channel.py` — the user-channel pack (thread prints + send/open) and
     the qualified `app/name` dispatch-key spelling.

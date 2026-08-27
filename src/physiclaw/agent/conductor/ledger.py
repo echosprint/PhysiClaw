@@ -8,9 +8,9 @@ walk's items then track pending → picked; the cart itself stays the
 in-cart truth — RECONCILE re-reads it rather than trusting a flag.
 
 The two screen readers are the reconciler's deterministic senses:
-`cart_row` finds an item's row by the shared tiered text match, and
-`row_qty` reads the quantity numeral between its flanking stepper
-icons. Pure functions over a Screen — testable without a walk.
+`assign_rows` maps picked items to cart rows (exclusive, exact-first),
+and `row_qty` reads the quantity numeral between a row's flanking
+stepper icons. Pure functions over a Screen — testable without a walk.
 """
 
 import json
@@ -73,6 +73,7 @@ def parse_ledger(text: str, *, allow_zero: bool = False) -> list[LedgerItem]:
         raise PlaybookError(f"ledger has {len(data)} items > max {MAX_LEDGER_ITEMS}")
     floor = 0 if allow_zero else 1
     out: list[LedgerItem] = []
+    seen: set[str] = set()
     for entry in data:
         if not isinstance(entry, dict) or set(entry) - set(LEDGER_FIELDS):
             raise PlaybookError("each ledger item must be a {query, qty} object")
@@ -88,6 +89,12 @@ def parse_ledger(text: str, *, allow_zero: bool = False) -> list[LedgerItem]:
             raise PlaybookError(
                 f"ledger item `qty` must be {floor}–{MAX_ITEM_QTY} (got {qty!r})"
             )
+        norm = normalize(query)
+        if norm in seen:
+            # Duplicates would collapse silently at the revision merge
+            # and fight over one cart row at reconcile.
+            raise PlaybookError(f"ledger item {query.strip()!r} appears twice")
+        seen.add(norm)
         out.append(LedgerItem(query=query.strip(), qty=qty))
     return out
 
@@ -103,20 +110,44 @@ def check_ledger_value(spec: Playbook, values: dict[str, str]) -> None:
             raise PlaybookError(f"input {inp.name!r}: {e}") from e
 
 
-def cart_row(screen: Screen, item: LedgerItem) -> Element | None:
-    """The cart row showing this item — the shared tiered text match
-    (`match.label_matches`): the pick label came off one OCR reading
-    and the cart row is another, possibly truncated, so the same fuzz
-    that matches page anchors is what matches here."""
-    want = normalize(item.label or item.query)
-    if not want:
-        return None
-    for row in screen.rows:
-        if row.kind != "text" or not row.label.strip():
+def assign_rows(screen: Screen, items: list[LedgerItem]) -> list[Element | None]:
+    """Each PICKED item's cart row, assigned EXCLUSIVELY — exact
+    normalized equality claims first, then the shared tiered fuzz
+    (`match.label_matches`: the pick label came off one OCR reading and
+    the cart row is another, possibly truncated) over the unclaimed
+    rest. Exclusivity matters: with overlapping labels ("coke" /
+    "coke zero") a first-match scan lets the shorter item claim the
+    other's row and the reconciler taps the wrong stepper. Non-picked
+    items get None (they are the loop's, not the reconciler's)."""
+    rows = [r for r in screen.rows if r.kind == "text" and r.label.strip()]
+    wants = [
+        normalize(it.label or it.query) if it.status == "picked" else "" for it in items
+    ]
+    # Wanted items claim before qty-0 (removed) ones: after a revision
+    # both can name near-identical products, and a removed item claiming
+    # the kept item's row would step a wanted quantity to zero.
+    order = sorted(range(len(items)), key=lambda i: (items[i].qty <= 0, i))
+    out: list[Element | None] = [None] * len(items)
+    claimed: set[int] = set()
+    for i in order:  # pass 1: exact
+        want = wants[i]
+        if not want:
             continue
-        if label_matches(want, normalize(row.label), ()):
-            return row
-    return None
+        for j, row in enumerate(rows):
+            if j not in claimed and normalize(row.label) == want:
+                out[i] = row
+                claimed.add(j)
+                break
+    for i in order:  # pass 2: fuzzy over the unclaimed
+        want = wants[i]
+        if not want or out[i] is not None:
+            continue
+        for j, row in enumerate(rows):
+            if j not in claimed and label_matches(want, normalize(row.label), ()):
+                out[i] = row
+                claimed.add(j)
+                break
+    return out
 
 
 def row_qty(screen: Screen, row: Element) -> tuple[int, Element, Element] | None:

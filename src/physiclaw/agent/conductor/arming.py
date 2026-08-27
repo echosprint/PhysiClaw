@@ -1,4 +1,4 @@
-"""The arm and park files — what survives between wakes.
+"""The arm and suspension files — what survives between wakes.
 
 Two files under `playbooks/`, each with one lifecycle:
 
@@ -6,10 +6,10 @@ Two files under `playbooks/`, each with one lifecycle:
     which playbook drives the next wakes, with which inputs. Sticky
     across incidental handovers; consumed by a TERMINAL walk outcome
     (`Program.retire`) or by `disarm`.
-  - ``parked.json`` — one suspended walk (a CONFIRM sent, or a gate
+  - ``suspended.json`` — one suspended walk (a CONFIRM sent, or a gate
     still waiting). One-shot: consumed on load, whatever the outcome —
-    a crash mid-resume loses the park and the wake runs plain, never a
-    loop.
+    a crash mid-resume loses the suspension and the wake runs plain,
+    never a loop.
 
 `arm` is the strict validation seam (an armed playbook is about to
 drive the phone, so live-readiness problems are hard errors and the
@@ -24,8 +24,10 @@ from pathlib import Path
 from physiclaw.agent.conductor import memory, reply
 from physiclaw.agent.conductor.ledger import check_ledger_value
 from physiclaw.agent.conductor.playbook import (
+    ConfirmNode,
     DecideNode,
     HumanGateNode,
+    LegNode,
     Pack,
     Playbook,
     PlaybookError,
@@ -44,16 +46,16 @@ log = logging.getLogger(__name__)
 ARMED_FILENAME = "armed.json"
 ARMED_SCHEMA = 1
 
-PARKED_FILENAME = "parked.json"
-PARKED_SCHEMA = 1
+SUSPENDED_FILENAME = "suspended.json"
+SUSPENDED_SCHEMA = 1
 
 
 def armed_path() -> Path:
     return paths.playbooks_dir() / ARMED_FILENAME
 
 
-def parked_path() -> Path:
-    return paths.playbooks_dir() / PARKED_FILENAME
+def suspended_path() -> Path:
+    return paths.playbooks_dir() / SUSPENDED_FILENAME
 
 
 def read_armed() -> dict | None:
@@ -82,20 +84,49 @@ def arm(app: str, name: str, inputs: dict[str, str]) -> "tuple[Playbook, list[st
     spec, _ = armed_spec(app, name)
     values = resolve_inputs(spec, inputs)  # fail at arm time, not first wake
     check_ledger_value(spec, values)
+    warnings = []
+    suspended = suspended_ref()
+    if suspended == (app, name):
+        # A suspended walk of this same playbook would resume FIRST on
+        # the next wake, with its old values — the new order must win.
+        clear_suspended()
+        warnings.append(
+            "dropped a suspended walk of this playbook — the new arm starts fresh"
+        )
+    elif suspended is not None:
+        warnings.append(
+            f"a suspended walk for {suspended[0]}/{suspended[1]} resumes first on "
+            "the next wake — this arm runs after it settles"
+        )
     write_json_atomic(
         armed_path(),
         {"schema": ARMED_SCHEMA, "app": app, "playbook": name, "inputs": inputs},
     )
-    return spec, _memory_slice_warnings(spec) + _gate_word_warnings(spec)
+    return spec, warnings + _memory_slice_warnings(spec) + _gate_word_warnings(
+        spec
+    ) + _gate_reentry_warnings(spec)
 
 
 def disarm() -> bool:
-    """Remove the arm file; False when nothing was armed."""
+    """Remove the arm file; False when nothing was armed. The arm file
+    ONLY — `Program.retire` consumes done deals through here, and a
+    suspension present at that moment belongs to some other walk."""
     p = armed_path()
     if not p.exists():
         return False
     p.unlink()
     return True
+
+
+def stand_down() -> "tuple[bool, tuple[str, str] | None]":
+    """The CLI's full stop: disarm AND drop any suspended walk — a user
+    disarming means "stop driving", and a surviving suspension would resume
+    (and keep acting) on the very next wake. Returns (was_armed, the
+    dropped suspension's (app, playbook) or None)."""
+    dropped = suspended_ref()
+    if not clear_suspended():
+        dropped = None
+    return disarm(), dropped
 
 
 def armed_ref() -> tuple[str, str] | None:
@@ -142,12 +173,25 @@ def resolve_inputs(spec: Playbook, provided: dict[str, str]) -> dict[str, str]:
         raise PlaybookError(str(e)) from e
 
 
-def clear_parked() -> bool:
-    p = parked_path()
+def clear_suspended() -> bool:
+    p = suspended_path()
     if not p.exists():
         return False
     p.unlink()
     return True
+
+
+def suspended_ref() -> tuple[str, str] | None:
+    """The suspended walk's ``(app, playbook)`` per the file, without
+    validating anything else. None when nothing is suspended / unreadable."""
+    p = suspended_path()
+    try:
+        if not p.exists():
+            return None
+        data = json.loads(read_text(p))
+        return str(data["app"]), str(data["playbook"])
+    except Exception:
+        return None
 
 
 def _memory_slice_warnings(spec: Playbook) -> list[str]:
@@ -202,4 +246,27 @@ def _gate_word_warnings(spec: Playbook) -> list[str]:
                     "tier matches (好的/ok…, 不用/no…) — every reply will "
                     "spend an LLM check"
                 )
+    return out
+
+
+def _gate_reentry_warnings(spec: Playbook) -> list[str]:
+    """Advisory: after any gate's confirmed reply the phone shows the IM
+    thread. The payment case is a parse ERROR; for other gates a
+    fall-through leg with no `enter:` (and no gate `return:`) runs its
+    macro blind off the thread — the verify check catches the landing,
+    but the gestures already happened on the messenger."""
+    out = []
+    nodes = spec.nodes
+    for i, node in enumerate(nodes):
+        if not isinstance(node, HumanGateNode) or node.return_macro is not None:
+            continue
+        nxt = nodes[i + 1] if i + 1 < len(nodes) else None
+        if nxt is None or isinstance(nxt, (ConfirmNode, HumanGateNode)):
+            continue
+        if not (isinstance(nxt, LegNode) and nxt.enter is not None):
+            out.append(
+                f"gate {node.id!r}: no `return:` and {nxt.id!r} declares no "
+                "`enter:` — after a confirmed reply the first action runs "
+                "off the IM thread"
+            )
     return out

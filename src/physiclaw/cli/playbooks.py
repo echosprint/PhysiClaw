@@ -127,10 +127,19 @@ def arm(
 
 @playbooks_app.command()
 def disarm() -> None:
-    """Disarm — sessions go back to plain model-driven turns."""
+    """Disarm — sessions go back to plain model-driven turns. Also drops
+    a suspended walk: disarming means stop, and a surviving suspension
+    would resume on the next wake."""
     from physiclaw.agent.conductor import arming
 
-    typer.echo(ok("disarmed") if arming.disarm() else "nothing was armed")
+    was_armed, dropped = arming.stand_down()
+    if not was_armed and dropped is None:
+        typer.echo("nothing was armed")
+        return
+    if was_armed:
+        typer.echo(ok("disarmed"))
+    if dropped is not None:
+        typer.echo(ok(f"dropped the suspended walk for {dropped[0]}/{dropped[1]}"))
 
 
 @playbooks_app.command()

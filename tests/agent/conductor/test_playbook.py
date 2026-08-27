@@ -38,7 +38,6 @@ nodes:
     with: {message: "{choose.pick}"}
     enter: results
     verify: results
-    irreversible: send_message
   - id: confirm
     type: CONFIRM
     compose: order-summary
@@ -70,8 +69,7 @@ def test_parse_valid_playbook() -> None:
     choose = p.nodes[1]
     assert choose.outs == ("pick", "scroll", "none_fit", "escalate")
     assert choose.on["scroll"] == "choose"  # bounded self-loop
-    # send_message needs no gate; only `payment` does.
-    assert p.nodes[2].irreversible == "send_message"
+    assert p.nodes[2].irreversible is None
     assert p.nodes[4].gate == "payment" and p.nodes[4].compose == "payment-request"
 
 
@@ -142,7 +140,10 @@ def _mutate(old: str, new: str) -> str:
         ),
         # unknown irreversible class
         (
-            _mutate("irreversible: send_message", "irreversible: nuclear"),
+            _mutate(
+                "enter: results\n    verify: results",
+                "enter: results\n    verify: results\n    irreversible: nuclear",
+            ),
             "`irreversible` must be one of",
         ),
         # stray brace
@@ -177,7 +178,10 @@ def test_decide_call_requires_authored_outs_with_escalate() -> None:
 def test_money_requires_gate_on_every_path() -> None:
     pack = _pack()
     # Make to-cart a payment node: pay gate sits AFTER it → unguarded.
-    text = _mutate("irreversible: send_message", "irreversible: payment")
+    text = _mutate(
+        "enter: results\n    verify: results",
+        "enter: results\n    verify: results\n    irreversible: payment",
+    )
 
     with pytest.raises(PlaybookError, match="HUMAN_GATE"):
         pb.parse_playbook(text, "buy", pack)
@@ -185,11 +189,48 @@ def test_money_requires_gate_on_every_path() -> None:
 
 def test_money_requires_mandate() -> None:
     pack = _pack()
-    text = _mutate("irreversible: send_message", "irreversible: payment")
+    text = _mutate(
+        "enter: results\n    verify: results",
+        "enter: results\n    verify: results\n    irreversible: payment",
+    )
     text = text.replace("mandate:\n  max_amount: 100\n", "")
 
     with pytest.raises(PlaybookError, match="mandate"):
         pb.parse_playbook(text, "buy", pack)
+
+
+def test_any_irreversible_class_requires_its_gate() -> None:
+    # send_message was previously declared but unenforced — a cancel
+    # replied to a CONFIRM is never read, so nothing consequential may
+    # hide behind one: every irreversible class runs as a gate's
+    # fall-through.
+    pack = _pack()
+    text = _mutate(
+        "enter: results\n    verify: results",
+        "enter: results\n    verify: results\n    irreversible: send_message",
+    )
+
+    with pytest.raises(PlaybookError, match="DIRECTLY follow a HUMAN_GATE"):
+        pb.parse_playbook(text, "buy", pack)
+
+
+def test_send_leg_behind_any_gate_parses() -> None:
+    pack = _pack()
+    text = (
+        VALID
+        + """  - id: notify
+    type: LEG
+    macro: add-cart
+    with: {message: "sent"}
+    enter: results
+    verify: results
+    irreversible: send_message
+"""
+    )
+
+    p = pb.parse_playbook(text, "buy", pack)
+
+    assert p.nodes[-1].irreversible == "send_message"
 
 
 def test_scaffolded_pack_parses_clean() -> None:
@@ -249,6 +290,7 @@ def test_payment_leg_must_directly_follow_its_gate() -> None:
     type: LEG
     macro: add-cart
     with: {message: "pay"}
+    enter: results
     verify: results
     irreversible: payment
 """
@@ -375,6 +417,7 @@ def test_payment_leg_behind_gate_parses() -> None:
     type: LEG
     macro: add-cart
     with: {message: "pay"}
+    enter: results
     verify: results
     irreversible: payment
 """
@@ -450,3 +493,110 @@ def test_mandate_rejections(amount: str, fragment: str) -> None:
 
     with pytest.raises(PlaybookError, match=fragment):
         pb.parse_playbook(VALID.replace("max_amount: 100", amount), "buy", pack)
+
+
+# ---------- money lints (bug-hunt regressions) ----------
+
+
+def test_non_payment_gate_does_not_satisfy_the_money_dfs() -> None:
+    # An address/handoff gate must NOT open the gate-passed flag: a
+    # DECIDE arm skipping the PAYMENT gate has to be rejected even when
+    # another gate class sits upstream.
+    pack = _pack()
+    text = """\
+name: buy
+description: bypass probe
+inputs:
+  keyword:
+    description: what
+mandate:
+  max_amount: 100
+nodes:
+  - id: open
+    type: LEG
+    macro: open-app
+    with: {message: "{keyword}"}
+    verify: home
+  - id: addr
+    type: HUMAN_GATE
+    gate: address
+    compose: addr-check
+    message: "address ok? reply ok or no"
+  - id: route
+    type: DECIDE
+    call: decide
+    with: {question: "ready?"}
+    outs: [go, ask, escalate]
+    on: {go: pay, ask: paygate, escalate: escalate}
+  - id: paygate
+    type: HUMAN_GATE
+    gate: payment
+    compose: pay-confirm
+    message: "Total ¥{gate.total}, reply ok or no"
+    over_message: "Total ¥{gate.total} over ¥{gate.cap}, reply ok or no"
+    return: open-app
+  - id: pay
+    type: LEG
+    macro: add-cart
+    with: {message: "pay"}
+    enter: results
+    verify: home
+    irreversible: payment
+"""
+    with pytest.raises(PlaybookError, match="irreversible leg is entered ONLY"):
+        pb.parse_playbook(text, "buy", pack)
+
+
+def test_routed_in_edge_to_payment_leg_rejected() -> None:
+    # Even after a real payment gate, a second payment leg reachable via
+    # a DECIDE arm would fire under the FIRST gate's consent.
+    pack = _pack()
+    text = (
+        VALID
+        + """  - id: do-pay
+    type: LEG
+    macro: add-cart
+    with: {message: "pay"}
+    enter: results
+    verify: results
+    irreversible: payment
+"""
+    )
+    text = text.replace("none_fit: escalate,", "none_fit: do-pay,")
+
+    with pytest.raises(PlaybookError, match="entered ONLY"):
+        pb.parse_playbook(text, "buy", pack)
+
+
+def test_payment_gate_requires_reentry_into_the_app() -> None:
+    # After the ask the phone shows the IM thread; without `return:` on
+    # the gate or `enter:` on the leg, money would fire blind.
+    pack = _pack()
+    text = (
+        VALID
+        + """  - id: do-pay
+    type: LEG
+    macro: add-cart
+    with: {message: "pay"}
+    enter: results
+    verify: results
+    irreversible: payment
+"""
+    )
+    text = text.replace(
+        "    enter: results\n    verify: results\n    irreversible: payment",
+        "    verify: results\n    irreversible: payment",
+    )
+
+    with pytest.raises(PlaybookError, match="declare `return:`"):
+        pb.parse_playbook(text, "buy", pack)
+
+
+def test_revise_requires_return() -> None:
+    from conductor_fakes import LEDGERED
+
+    pack = _pack()
+    text = LEDGERED.replace("    return: open-app\n", "")
+
+    with pytest.raises(PlaybookError, match="`revise` needs `return:`"):
+        pb.parse_playbook(text, "shop", pack)

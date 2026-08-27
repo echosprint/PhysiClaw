@@ -264,22 +264,30 @@ class MicroCaller:
         usage = Usage()
         for attempts in (1, 2):  # one bounded repair retry
             try:
-                asst = await provider.chat(messages, [])
-            except ProviderTransientError:
-                # One TRANSIENT retry per attempt (the providers' own
-                # taxonomy: timeout / 429 / 5xx — permanent 4xx and real
-                # bugs fail fast): a blip on the cheap tier is common and
-                # permanent escalation is too big a price for it
-                # (field-measured: a single ReadTimeout killed a walk
-                # mid-decide). A second failure propagates to run()'s
-                # catch-all → "provider error" escalation.
-                log.info(
-                    "micro %s (%s): transient provider error — one retry",
-                    req.call,
-                    req.node_id,
+                try:
+                    asst = await provider.chat(messages, [])
+                except ProviderTransientError:
+                    # One TRANSIENT retry per attempt (the providers' own
+                    # taxonomy: timeout / 429 / 5xx — permanent 4xx and
+                    # real bugs fail fast): a blip on the cheap tier is
+                    # common and permanent escalation is too big a price
+                    # for it (field-measured: a single ReadTimeout killed
+                    # a walk mid-decide).
+                    log.info(
+                        "micro %s (%s): transient provider error — one retry",
+                        req.call,
+                        req.node_id,
+                    )
+                    await asyncio.sleep(CONFIG.engine.retry_backoff_seconds)
+                    asst = await provider.chat(messages, [])
+            except Exception as e:
+                # Escalate HERE, not via run()'s catch-all: a failure on
+                # the repair attempt must not erase the first attempt's
+                # real token spend from the trace and session usage.
+                log.warning(
+                    "micro %s (%s): provider failed — %s", req.call, req.node_id, e
                 )
-                await asyncio.sleep(CONFIG.engine.retry_backoff_seconds)
-                asst = await provider.chat(messages, [])
+                return None, "provider error", attempts, usage
             prompt_tokens += asst.usage.prompt_tokens
             completion_tokens += asst.usage.completion_tokens
             if self._rlog is not None:

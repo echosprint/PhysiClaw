@@ -49,3 +49,51 @@ def test_new_incoming_filters_side_baseline_and_own_ask() -> None:
     new = reply.new_incoming(screen.rows, {"MyChat"}, ask)
 
     assert new == ["好的"]
+
+
+def test_quoted_reply_words_are_never_swallowed_as_own_lines() -> None:
+    # The ask quotes "confirm"/"cancel" (≥ _OWN_FRAGMENT_MIN chars); a
+    # verbatim reply must still register — a swallowed yes reads as
+    # silence and the gate suspend-loops past explicit consent.
+    ask = 'Total ¥45. Reply "confirm" to pay, or "cancel" to stop.'
+    screen = make_screen(
+        ("MyChat", 0.5, 0.05),
+        (ask[:20], 0.75, 0.3),
+        ("confirm", 0.25, 0.5),
+    )
+
+    assert reply.new_incoming(screen.rows, {"MyChat"}, ask) == ["confirm"]
+
+
+def test_bubbles_above_the_visible_ask_never_count() -> None:
+    # A keyboard hides bubbles without touching the thread's anchors, so
+    # the baseline can miss old history; when it dismisses, a stale "ok"
+    # from another conversation resurfaces as "not in baseline". A real
+    # reply is chronologically after the ask — below it on screen.
+    ask = 'Total ¥45. Reply "ok" to pay, or "no" to cancel.'
+    screen = make_screen(
+        ("MyChat", 0.5, 0.05),
+        ("ok", 0.25, 0.2),  # STALE — an old confirm above the ask
+        (ask[:20], 0.75, 0.5),  # our ask bubble
+        ("ok", 0.25, 0.8),  # the real reply, below the ask
+    )
+
+    new = reply.new_incoming(screen.rows, {"MyChat"}, ask)
+
+    assert len(new) == 1  # only the reply below the ask
+
+    # The re-ask deny sweep runs with the filter OFF — it must see what
+    # arrived above a just-sent ask.
+    swept = reply.new_incoming(screen.rows, {"MyChat"}, ask, after_ask=False)
+    assert len(swept) == 2
+
+
+def test_centered_timestamp_rows_are_not_incoming() -> None:
+    # System rows (timestamps) sit centered ~0.5 — outside the incoming
+    # band, or every fresh timestamp after a suspension burns an LLM check.
+    screen = make_screen(
+        ("昨天 14:32", 0.5, 0.2),
+        ("好的", 0.25, 0.4),
+    )
+
+    assert reply.new_incoming(screen.rows, set(), "ask text") == ["好的"]

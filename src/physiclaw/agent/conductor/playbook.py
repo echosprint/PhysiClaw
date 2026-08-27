@@ -3,7 +3,7 @@ lints, and the ref grammar's two halves (validate + `fill_refs`).
 
 A playbook is one app task as a small node graph: LEG nodes invoke the
 pack's own macros (verified against page fingerprints), DECIDE nodes
-parameterize code-owned decision calls (`calls.py`), CONFIRM parks on
+parameterize code-owned decision calls (`calls.py`), CONFIRM suspends on
 the user, HUMAN_GATE holds an irreversible step until the user confirms
 over the user channel. Execution lives in `program.py`; this module's
 contract is the macro parser's: all-or-nothing validation with errors
@@ -40,7 +40,7 @@ explicitly. A HUMAN_GATE falls through only once the user has confirmed:
 it composes and sends the full-context message over the user channel,
 waits for a reply, and a micro-call judges whether the reply confirms.
 Unconfirmed → wait and check again, GATE_MAX_CHECKS times in all; still
-unconfirmed → the session is done and parks for the next wake-up, the
+unconfirmed → the session is done and suspends for the next wake-up, the
 regular-session contract. `escalate` is a reserved target — the
 conductor goes quiet and the model takes over. The only legal cycles
 are a DECIDE self-routing its call's re-ask arm (choose_item's
@@ -82,7 +82,7 @@ MAX_NODES = 20
 MAX_INPUTS = 8
 MAX_VISITS_CAP = 10
 DEFAULT_MAX_VISITS = 3
-# How many reply-check rounds a HUMAN_GATE gets before the session parks
+# How many reply-check rounds a HUMAN_GATE gets before the session suspends
 # for the next wake-up, and how many "yes, but change it" revision cycles
 # one gate absorbs before the model takes over. Fixed, not authorable:
 # the patience budget is the conductor's contract with the user, not a
@@ -226,7 +226,7 @@ class ConfirmNode:
 class HumanGateNode:
     """Ask-and-hold: compose the full-context message, send it over the
     user channel, and fall through only on a micro-call-confirmed reply.
-    GATE_MAX_CHECKS unconfirmed rounds park the session (regular wake-up
+    GATE_MAX_CHECKS unconfirmed rounds suspend the session (regular wake-up
     contract) — so the node after a gate runs human-approved or not at all."""
 
     id: str
@@ -997,17 +997,19 @@ def fill_refs(value: Any, values: dict[str, str], where: str) -> Any:
 
 
 def disabled_leg_macros(spec: Playbook, pack: Pack) -> list[str]:
-    """Leg-referenced pack macros still disabled — the live-readiness
-    rule: `playbooks check` warns about it, `arm` refuses on it. Safe
-    unguarded access: parse rejects any LegNode whose macro is missing
-    or broken, so every referenced macro is in `pack.macros`."""
-    return sorted(
-        {
-            n.macro
-            for n in spec.nodes
-            if isinstance(n, LegNode) and not pack.macros[n.macro].enabled
-        }
-    )
+    """Referenced pack macros still disabled — the live-readiness rule:
+    `playbooks check` warns about it, `arm` refuses on it. Covers legs,
+    `compensate:`, and gate `return:` (all dispatch at walk time). Safe
+    unguarded access: parse validated every one against `pack.macros`."""
+    named: set[str] = set()
+    for n in spec.nodes:
+        if isinstance(n, LegNode):
+            named.add(n.macro)
+            if n.compensate is not None:
+                named.add(n.compensate)
+        elif isinstance(n, HumanGateNode) and n.return_macro is not None:
+            named.add(n.return_macro)
+    return sorted(m for m in named if not pack.macros[m].enabled)
 
 
 # ---------- graph lints ----------
@@ -1015,7 +1017,7 @@ def disabled_leg_macros(spec: Playbook, pack: Pack) -> list[str]:
 
 def _successors(nodes: list[Node], idx: int) -> list[str]:
     """Outgoing edges of one node: DECIDE routes explicitly; everything
-    else (HUMAN_GATE included — its unconfirmed path parks the session,
+    else (HUMAN_GATE included — its unconfirmed path suspends the session,
     which is no edge) falls through to the next node in list order."""
     node = nodes[idx]
     if isinstance(node, DecideNode):
@@ -1098,15 +1100,16 @@ def _check_acyclic(nodes: list[Node], ids: dict[str, int]) -> None:
 def _check_money(
     nodes: list[Node], ids: dict[str, int], mandate: Mandate | None
 ) -> None:
-    """A `payment`-tagged node must be unreachable except through a
-    HUMAN_GATE, and its playbook must carry a mandate. Walked over the
-    real edges with a gate-passed flag, so the guarantee is structural."""
+    """An irreversible-tagged node must be unreachable except through a
+    HUMAN_GATE, and a payment playbook must carry a mandate. Walked over
+    the real edges with a gate-passed flag, so the guarantee is
+    structural."""
+    if not any(isinstance(n, LegNode) and n.irreversible for n in nodes):
+        return
     money = [
         n.id for n in nodes if isinstance(n, LegNode) and n.irreversible == "payment"
     ]
-    if not money:
-        return
-    if mandate is None:
+    if money and mandate is None:
         raise PlaybookError(
             f"node(s) {', '.join(money)} are irreversible: payment — the "
             "playbook must declare a `mandate` (max_amount)"
@@ -1115,16 +1118,45 @@ def _check_money(
     # sheet AT the gate (the ask quotes its total) and fires the leg as
     # the gate's fall-through — a node in between would desynchronize
     # the consent from the sheet. The gate must also DECLARE the class
-    # (`gate: payment`), so the runtime keys off the declaration.
+    # (`gate: payment`), so the runtime keys off the declaration. Other
+    # irreversible classes take any gate: the human said go, adjacently.
     for i, n in enumerate(nodes):
-        if isinstance(n, LegNode) and n.irreversible == "payment":
-            prev = nodes[i - 1] if i > 0 else None
+        if not (isinstance(n, LegNode) and n.irreversible):
+            continue
+        prev = nodes[i - 1] if i > 0 else None
+        if n.irreversible == "payment":
             if not (isinstance(prev, HumanGateNode) and prev.gate == "payment"):
                 raise PlaybookError(
                     f"node {n.id!r} (irreversible: payment) must DIRECTLY "
                     "follow a HUMAN_GATE with `gate: payment` — the gate "
                     "reads the sheet its ask quotes, and consent must not "
                     "desynchronize from it"
+                )
+            # After the ask the phone shows the IM thread; the walk must
+            # re-enter the app on a VERIFIED page before money fires, or
+            # the fire-time predicates would read the thread — where the
+            # ask itself quotes the consented total.
+            if prev.return_macro is None and n.enter is None:
+                raise PlaybookError(
+                    f"gate {prev.id!r} → {n.id!r}: after the ask the phone "
+                    "is on the IM thread — declare `return:` on the gate "
+                    "or `enter:` on the payment leg"
+                )
+        elif not isinstance(prev, HumanGateNode):
+            raise PlaybookError(
+                f"node {n.id!r} (irreversible: {n.irreversible}) must "
+                "DIRECTLY follow a HUMAN_GATE — an irreversible act runs "
+                "human-approved or not at all"
+            )
+        # The gate's fall-through is the leg's ONLY door: a routed
+        # in-edge (a DECIDE arm, the ledger loop) would enter it with
+        # another gate's consent still bound — or with none.
+        for other in nodes:
+            if isinstance(other, DecideNode) and n.id in other.on.values():
+                raise PlaybookError(
+                    f"node {other.id!r} routes to {n.id!r} "
+                    f"(irreversible: {n.irreversible}) — an irreversible "
+                    "leg is entered ONLY as its own gate's fall-through"
                 )
     # DFS over (node, gate_passed) states; a money node seen with
     # gate_passed False is reachable around the human.
@@ -1141,7 +1173,7 @@ def _check_money(
                 f"node {nid!r} (irreversible: payment) is reachable without "
                 "passing a HUMAN_GATE — money always goes through the human"
             )
-        passed = gated or isinstance(node, HumanGateNode)
+        passed = gated or (isinstance(node, HumanGateNode) and node.gate == "payment")
         for target in _successors(nodes, ids[nid]):
             stack.append((target, passed))
 
@@ -1211,4 +1243,10 @@ def _check_ledger(
                     f"node {n.id!r}: `revise` must target the {NEXT_ITEM} "
                     "node — a revision re-enters the loop for the added "
                     "items, then reconciles the rest"
+                )
+            if n.return_macro is None:
+                raise PlaybookError(
+                    f"node {n.id!r}: `revise` needs `return:` — the reply "
+                    "was read on the IM thread, and the loop must re-enter "
+                    "the app before it can shop"
                 )

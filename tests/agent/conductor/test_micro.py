@@ -386,3 +386,20 @@ async def test_non_transient_error_fails_fast_without_retry() -> None:
     result = await _caller([RuntimeError("bad request")]).run(_decide_req())
 
     assert result.outcome is None and result.detail == "provider error"
+
+
+@pytest.mark.asyncio
+async def test_repair_attempt_failure_keeps_first_attempt_usage(monkeypatch) -> None:
+    # Attempt 1 spends real tokens; a provider failure on the repair
+    # attempt must not erase them from the trace and session usage.
+    async def _nosleep(_s):
+        pass
+
+    monkeypatch.setattr("physiclaw.agent.conductor.micro.asyncio.sleep", _nosleep)
+    result = await _caller(
+        ['{"answer": "ghost", "reason": "?", "confidence": 0.9}', RuntimeError("down")]
+    ).run(_decide_req())
+
+    assert result.outcome is None and result.detail == "provider error"
+    assert result.usage.prompt_tokens == 100  # attempt 1 still counted
+    assert result.attempts == 2

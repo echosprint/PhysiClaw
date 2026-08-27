@@ -3,7 +3,7 @@
 Three doors into a walk, all fail-open (a missing, stale, or invalid
 file degrades to a normal session, never takes one down):
 
-  - ``load_parked`` — a suspended walk resumes at its stored node
+  - ``load_suspended`` — a suspended walk resumes at its stored node
     (one-shot; ANY wake resumes, the WAIT job is just the alarm clock).
   - ``load_armed`` — the standing order from `physiclaw playbooks arm`.
   - ``Activation`` — mid-session: the first screen that matches the
@@ -17,7 +17,7 @@ activation path (mid-session activation may arm any playbook, so all
 conductor hands must be dispatchable); a live program narrows it to its
 own pack + channel, and no channel means a channel-less registry.
 ``_build_program`` is the one Program constructor call — a program is
-whole at construction: channel, origin, and any parked state included.
+whole at construction: channel, origin, and any suspended state included.
 """
 
 import json
@@ -72,6 +72,9 @@ def load_armed(channel: "Channel | None" = None) -> "Program | None":
         raw_inputs = data.get("inputs") or {}
         spec, pack = arming.armed_spec(app, name)
         values = arming.resolve_inputs(spec, raw_inputs)
+        # `arm` validated the value it wrote, but the file is on disk —
+        # re-hold a hand-edited ledger to the same caps.
+        check_ledger_value(spec, values)
     except Exception as e:
         log.warning(
             "armed playbook could not load (%s) — session runs without it: %s",
@@ -83,20 +86,20 @@ def load_armed(channel: "Channel | None" = None) -> "Program | None":
     return _build_program(app, spec, pack, values, channel, origin="armed")
 
 
-def load_parked(channel: "Channel | None" = None) -> "Program | None":
-    """A parked walk restored at its node, or None. One-shot: the file is
-    consumed on load (a crash mid-resume loses the park, and the next
+def load_suspended(channel: "Channel | None" = None) -> "Program | None":
+    """A suspended walk restored at its node, or None. One-shot: the file is
+    consumed on load (a crash mid-resume loses the suspension, and the next
     wake runs as a plain session — fail-open, never a loop). The WAIT
     job that may also fire is just the alarm clock; ANY wake resumes.
     `channel` avoids a second channel load when the caller (session_setup)
     already holds one."""
-    p = arming.parked_path()
+    p = arming.suspended_path()
     if not p.exists():
         return None
     try:
         data = json.loads(read_text(p))
-        if data.get("schema") != arming.PARKED_SCHEMA:
-            raise PlaybookError(f"unknown parked schema {data.get('schema')!r}")
+        if data.get("schema") != arming.SUSPENDED_SCHEMA:
+            raise PlaybookError(f"unknown suspended schema {data.get('schema')!r}")
         app = str(data["app"])
         name = str(data["playbook"])
         spec, pack = arming.armed_spec(app, name)
@@ -106,14 +109,18 @@ def load_parked(channel: "Channel | None" = None) -> "Program | None":
             pack,
             {str(k): str(v) for k, v in (data.get("values") or {}).items()},
             channel if channel is not None else load_channel(),
-            origin="parked",
-            parked=data,
+            # The suspension carries its lineage: an activation-built walk's
+            # terminal outcome must never consume an arm file it never
+            # owned, even when a same-named arm exists by coincidence.
+            # (Absent in older suspends — those were armed-lineage only.)
+            origin="activation" if data.get("origin") == "activation" else "suspended",
+            suspended=data,
         )
     except Exception as e:
-        log.warning("parked playbook could not load (%s) — dropped: %s", p, e)
+        log.warning("suspended playbook could not load (%s) — dropped: %s", p, e)
         return None
     finally:
-        arming.clear_parked()  # one-shot: consumed on ANY load outcome
+        arming.clear_suspended()  # one-shot: consumed on ANY load outcome
     return program
 
 
@@ -125,11 +132,11 @@ def _build_program(
     channel: "Channel | None",
     *,
     origin: str,
-    parked: dict | None = None,
+    suspended: dict | None = None,
 ) -> "Program":
-    """The one Program constructor call — armed, parked, and activation
+    """The one Program constructor call — armed, suspended, and activation
     builds all come through here: a program is whole at construction
-    (channel, origin, and any parked state included), never patched up
+    (channel, origin, and any suspended state included), never patched up
     afterwards. `origin` decides whether a terminal outcome consumes the
     arm file (see `Program.retire`)."""
     return Program(
@@ -140,7 +147,7 @@ def _build_program(
         prints=prints_for_app(app),
         channel=channel,
         origin=origin,
-        parked=parked,
+        suspended=suspended,
     )
 
 
@@ -217,7 +224,7 @@ class Activation:
 
 def session_setup() -> "tuple[Program | None, Activation | None, dict[str, Macro]]":
     """The engine's one wake-time conductor call, fail-open throughout:
-    (parked-or-armed program, activation trigger, the hidden qualified
+    (suspended-or-armed program, activation trigger, the hidden qualified
     macro registry). The registry spans every pack plus the channel ON
     THE ACTIVATION PATH — mid-session activation may arm any playbook,
     so all conductor hands must be dispatchable; a live program narrows
@@ -227,7 +234,7 @@ def session_setup() -> "tuple[Program | None, Activation | None, dict[str, Macro
     channel = load_channel()
     if channel is not None:
         hidden.update(channel.macros)
-    program = load_parked(channel) or load_armed(channel)
+    program = load_suspended(channel) or load_armed(channel)
     if program is not None:
         # A live program names only its own pack + the channel — the
         # full cross-pack discovery below is activation's need, and

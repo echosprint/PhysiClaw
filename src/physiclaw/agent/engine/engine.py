@@ -167,7 +167,7 @@ async def _run_session(
         )
         mcp = await get_mcp()
         mcp_tools = await list_tools_cached()
-        # Conductor wake-time setup, fail-open throughout: a parked or
+        # Conductor wake-time setup, fail-open throughout: a suspended or
         # armed program, the activation trigger (parse_task fires once
         # if a screen matches the channel thread), and the hidden
         # qualified macro registry (every pack + channel on the
