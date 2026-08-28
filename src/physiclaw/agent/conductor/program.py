@@ -934,11 +934,18 @@ class Program:
         # quantities; a query the revision dropped goes to 0); genuinely
         # new queries append pending. Old-ledger order is preserved —
         # friendlier to the `_item` cursor, and nothing reads revised
-        # order. Matching mirrors assign_rows — exact normalized first,
-        # then fuzzy against the query OR the picked label: revise_list
-        # is asked to echo unchanged items verbatim, but a rephrase
-        # ("eggs" → "fresh eggs") must land on the existing item, not
-        # zero out a correct cart row and re-shop the same product.
+        # order. Matching is assign_rows' two passes — exact normalized
+        # first, then fuzzy against the query OR the picked label:
+        # revise_list is asked to echo unchanged items verbatim, but a
+        # rephrase ("eggs" → "fresh eggs") must land on the existing
+        # item, not zero out a correct cart row and re-shop the same
+        # product. It does NOT carry assign_rows' `_query_present` second
+        # key, on purpose: there both sides are screen text, so a rival's
+        # row could be claimed outright, while here the revision's own
+        # wording IS the thing being matched and demanding it contain the
+        # old query would defeat the rephrase case above. A cross-match
+        # here costs a wrong quantity, not a wrong tap, and the gate
+        # re-earns consent (`_gate.consented = None`) before any payment.
         remaining = list(revised)
         matched: dict[int, ledger.LedgerItem] = {}
         for i, it in enumerate(self._ledger):  # pass 1: exact

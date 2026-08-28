@@ -191,6 +191,36 @@ def test_untrusted_text_always_carries_the_data_label() -> None:
     assert _user(decide).count(label) == 1  # listing
 
 
+def test_parse_task_prompt_scopes_the_request_it_may_activate() -> None:
+    # Two halves of one rule, both load-bearing, both learned from live
+    # wakes — a wording edit that drops either is a behavior change:
+    #
+    #   1. A wake is usually the user's SECOND prod. Reading only the
+    #      newest line answered `not_a_task` to a thread whose newest
+    #      line was a bare "继续" and whose request two lines up was
+    #      exactly the playbook on the menu.
+    #   2. Widening to "look above the nudge" is only safe because the
+    #      assistant reports finished tasks into the same thread. Without
+    #      the finished-request veto the same widening re-runs a paid
+    #      order.
+    from physiclaw.agent.conductor.micro import NOT_A_TASK, PARSE_TASK, _system
+
+    req = build_request(
+        PARSE_TASK,
+        "activation",
+        ("taobao/buy",),
+        {"menu": "menu"},
+        make_screen(("继续", 0.3, 0.9)),
+    )
+
+    prompt = _system(req, ("taobao/buy", NOT_A_TASK))
+
+    assert "OUTSTANDING" in prompt  # which request is in scope at all
+    assert "nudge" in prompt  # 1: the newest line may only point back
+    assert "FINISHED" in prompt  # 2: and a done one is out of scope
+    assert "money twice" in prompt  # ...with the reason it matters
+
+
 def test_contract_orders_reason_before_answer() -> None:
     # Field order is load-bearing: the model generates left to right, so
     # reason-first is chain-of-thought baked into the schema. A reorder
@@ -342,6 +372,75 @@ async def test_parse_task_list_input_rides_as_json() -> None:
 
     assert result.outcome is not None
     assert json.loads(result.outcome.payload["items"]) == [{"query": "eggs", "qty": 2}]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "filled",
+    [
+        '"criteria": null, "cap": null',
+        '"criteria": "null", "cap": "NULL"',
+        '"criteria": "none", "cap": "n/a"',
+        '"criteria": "", "cap": "   "',
+        '"criteria": "nil", "cap": "undefined"',
+    ],
+)
+async def test_parse_task_drops_unfilled_inputs(filled: str) -> None:
+    # Asked for an object over the DECLARED inputs, a model emits a key
+    # for every one and fills the unmentioned with a null spelling. Those
+    # must NOT reach the payload: `resolve_inputs` resolves on PRESENCE,
+    # so a present "null" shadows the declared default — `criteria`
+    # becomes the literal string "null" in the picking decision, and a
+    # `{cap}` mandate stops resolving to a number at all (observed live
+    # against kimi-k2.6, which sent `"null"` for both).
+    from physiclaw.agent.conductor.micro import PARSE_TASK
+
+    req = build_request(
+        PARSE_TASK,
+        "activation",
+        ("taobao/buy",),
+        {"menu": "menu"},
+        make_screen(("buy tissues", 0.3, 0.5)),
+    )
+    result = await _caller(
+        [
+            '{"reason": "a purchase", "answer": "taobao/buy", '
+            f'"inputs": {{"keyword": "tissues", {filled}}}, '
+            '"confidence": 0.9}'
+        ]
+    ).run(req)
+
+    assert result.outcome is not None
+    # Only what the message actually said — the rest falls to defaults.
+    assert result.outcome.payload == {"keyword": "tissues"}
+
+
+@pytest.mark.asyncio
+async def test_parse_task_keeps_values_that_merely_contain_a_null_word() -> None:
+    # The unfilled test is an EXACT match on the whole value: a real
+    # criteria that happens to contain one of the words stays.
+    from physiclaw.agent.conductor.micro import PARSE_TASK
+
+    req = build_request(
+        PARSE_TASK,
+        "activation",
+        ("taobao/buy",),
+        {"menu": "menu"},
+        make_screen(("buy the sugar-free one", 0.3, 0.5)),
+    )
+    result = await _caller(
+        [
+            '{"reason": "a purchase", "answer": "taobao/buy", '
+            '"inputs": {"keyword": "none-brand tissue", "criteria": "no nulls"}, '
+            '"confidence": 0.9}'
+        ]
+    ).run(req)
+
+    assert result.outcome is not None
+    assert result.outcome.payload == {
+        "keyword": "none-brand tissue",
+        "criteria": "no nulls",
+    }
 
 
 @pytest.mark.asyncio

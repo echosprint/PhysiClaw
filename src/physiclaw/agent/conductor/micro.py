@@ -436,6 +436,24 @@ def _choose_outcome(
     return MicroOutcome(out=answer, reason=reason, confidence=confidence)
 
 
+# What a model writes when it means "the message didn't say". Asked for
+# an object over the DECLARED inputs, models emit a key for every one of
+# them and fill the unmentioned with a null spelling rather than omitting
+# it. Those must not reach `resolve_inputs`, which resolves on PRESENCE:
+# a present `"null"` shadows the declared default, so `criteria` becomes
+# the literal string "null" in the picking decision and a `{cap}` mandate
+# stops resolving to a number at all. Empty is included for the same
+# reason — an input filled with "" was not filled.
+_UNFILLED = frozenset({"", "null", "none", "nil", "n/a", "undefined"})
+
+
+def _is_unfilled(value: object) -> bool:
+    """JSON `null` arrives as None; everything else is a spelling of it."""
+    if value is None:
+        return True
+    return isinstance(value, str) and value.strip().casefold() in _UNFILLED
+
+
 def _parse_task_outcome(
     req: DecisionRequest, answer: str, reason: str, confidence: float, obj: dict
 ) -> MicroOutcome:
@@ -448,6 +466,9 @@ def _parse_task_outcome(
         inputs = {
             str(k): (v if isinstance(v, str) else json.dumps(v, ensure_ascii=False))
             for k, v in raw.items()
+            # Gates the value arm above: an unfilled `null` reaching it
+            # would serialize to the string "null" and read as real.
+            if not _is_unfilled(v)
         }
     return MicroOutcome(
         out=answer,
@@ -526,18 +547,41 @@ _SPECS: dict[str, _CallSpec] = {
     ),
     PARSE_TASK: _CallSpec(
         role=(
-            "You read the LATEST user message in an instant-message thread "
-            "and decide whether it assigns a concrete phone task that one "
-            "of the available playbooks performs."
+            "You read an instant-message thread, oldest line first and "
+            "newest last, and decide whether the user has a request still "
+            "OUTSTANDING that one of the available playbooks performs."
         ),
         material="listing",
         answer_space=_parse_task_space,
         answer_spec=(
             '"answer" is one playbook EXACTLY as listed, or "not_a_task" '
             "for greetings, chat, questions, or anything no playbook "
-            'covers (when unsure, "not_a_task"). When you answer with a '
+            'covers (when unsure, "not_a_task"). '
+            # A wake is usually the user's SECOND prod, not their first:
+            # the run they asked for was cut short, so the newest line is
+            # a nudge and the request it refers to sits above it. Reading
+            # only the newest line answered `not_a_task` to a user who
+            # was asking for exactly the playbook on the menu.
+            "WHICH request: normally the user's newest one — but when "
+            "their newest message is only a nudge to carry on (a bare "
+            '"go on" / "继续" / "any update?"), it refers to their most '
+            "recent request above it that is still outstanding. "
+            # The completion reply is what makes this safe to widen: the
+            # assistant reports every finished task into this same
+            # thread, so "already done" is visible rather than inferred.
+            "A request is FINISHED — never answer it with a playbook — "
+            "once the assistant has reported it done or the user "
+            "cancelled it; only a request with no such reply after it is "
+            "still outstanding. Re-running a finished task can spend "
+            "money twice, so on any doubt about which it is, answer "
+            '"not_a_task". '
+            "When you answer with a "
             'playbook, ALSO add a fourth field "inputs": an object filling '
-            "that playbook's declared inputs from the user's own words. "
+            "that playbook's declared inputs from the words of THAT "
+            "request. "
+            "OMIT any input the message does not specify — leave the key "
+            "out entirely rather than filling it with null or an empty "
+            "string; each omitted input falls back to its own default. "
             f"An input marked {LIST_INPUT_MARK} takes a JSON array of "
             f"{_ITEM_JSON} objects."
         ),

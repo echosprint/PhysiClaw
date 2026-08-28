@@ -21,7 +21,7 @@ from physiclaw.agent.conductor.calls import LEDGER_FIELDS
 from physiclaw.agent.conductor.match import label_matches, normalize
 from physiclaw.agent.conductor.playbook import Playbook, PlaybookError
 from physiclaw.common.bbox import center_of
-from physiclaw.common.listing import Element, Screen
+from physiclaw.common.listing import Element, Screen, label_hit
 
 # Items/qty cap what parse_task or the CLI may hand a walk.
 MAX_LEDGER_ITEMS = 8
@@ -116,10 +116,11 @@ def assign_rows(screen: Screen, items: list[LedgerItem]) -> list[Element | None]
     normalized equality claims first, then the shared tiered fuzz
     (`match.label_matches`: the pick label came off one OCR reading and
     the cart row is another, possibly truncated) over the unclaimed
-    rest. Exclusivity matters: with overlapping labels ("coke" /
-    "coke zero") a first-match scan lets the shorter item claim the
-    other's row and the reconciler taps the wrong stepper. Non-picked
-    items get None (they are the loop's, not the reconciler's)."""
+    rest, gated by `_query_present`. Exclusivity matters: with
+    overlapping labels ("coke" / "coke zero") a first-match scan lets
+    the shorter item claim the other's row and the reconciler taps the
+    wrong stepper. Non-picked items get None (they are the loop's, not
+    the reconciler's)."""
     rows = [r for r in screen.rows if r.kind == "text" and r.label.strip()]
     wants = [
         normalize(it.label or it.query) if it.status == "picked" else "" for it in items
@@ -143,12 +144,72 @@ def assign_rows(screen: Screen, items: list[LedgerItem]) -> list[Element | None]
         want = wants[i]
         if not want or out[i] is not None:
             continue
+        # Hoisted beside `want` for the same reason: the item's own key
+        # does not vary over the rows it is tried against.
+        query = normalize(items[i].query)
         for j, row in enumerate(rows):
-            if j not in claimed and label_matches(want, normalize(row.label), ()):
+            if j in claimed:
+                continue
+            row_norm = normalize(row.label)
+            # The containment gate first: it can only reject, and does so
+            # for a substring check — no point paying the fuzzy tiers for
+            # a row the gate would refuse anyway.
+            if _query_present(query, row_norm) and label_matches(want, row_norm, ()):
                 out[i] = row
                 claimed.add(j)
                 break
     return out
+
+
+def _query_present(query_norm: str, row_norm: str) -> bool:
+    """The fuzzy pass's second key: the item's OWN query must be readable
+    in the row it claims. Both arguments arrive `match.normalize`d — the
+    caller already holds both.
+
+    `label_matches` is a recall-oriented sameness gate built for
+    `match_screen`, where a false positive is absorbed by a per-page
+    threshold, the runner-up margin, multi-anchor weighting and learned
+    geometry. `assign_rows` has none of that: it is the SOLE
+    discriminator in an exclusive assignment among mutually similar
+    siblings, so it needs a second, independent key. That is this.
+
+    Two ways a rival's row got claimed, and they have different causes —
+    which matters, because only one of them looks like a `normalize` bug:
+
+      - Genuine shared boilerplate. Two brands of one carton size agree
+        on the words that are not the brand, reaching Dice 0.74. Strip
+        every class token and it is still 0.65 — nothing about the
+        tokenizer causes this one.
+      - Class-token overlap. `match.normalize` collapses volatile spans
+        to long literal tokens (`<PRICE>` is 7 characters, `<NUM>` 5),
+        and those characters are shared bigrams. A short total row is
+        mostly token once normalized, so any pick label ending in a
+        price scores 0.57 against it. For PAGE anchoring — what the
+        tiers were built for — that insensitivity is the point ("the
+        clock is still a clock").
+
+    So discounting the tokens in `match` would fix the second and leave
+    the first, which is why the second key lives here instead.
+
+    Containment via `listing.label_hit`, NOT `label_matches`: a short
+    query would reach the one-substitution window tier, where a
+    two-character brand matches any two characters inside a rival's
+    name — the very theft this gate exists to stop. `label_hit` is the
+    shared base rule, and its single-character clause matters here too:
+    a one-char query as a raw substring would read inside almost any
+    row.
+
+    It can only REJECT a claim, never create one, so the failure
+    direction is a query that describes rather than quotes the title
+    ("sugar-free cola" against `Coke Zero 330ml`): the item reads as
+    missing and re-enters the `next_item` loop, which may duplicate a
+    cart add before handing over. `_reshops` bounds that at one, and on
+    a money path it beats stepping a stranger's quantity.
+    """
+    if not query_norm:
+        return False
+    # Either direction: a cart that truncates mid-brand still counts.
+    return label_hit(query_norm, row_norm) or label_hit(row_norm, query_norm)
 
 
 def row_qty(screen: Screen, row: Element) -> tuple[int, Element, Element] | None:

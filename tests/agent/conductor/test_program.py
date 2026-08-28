@@ -1256,6 +1256,53 @@ def test_reconciler_never_cross_matches_similar_items() -> None:
     assert rows[1] is not None and rows[1].label == "coke"
 
 
+def test_reconciler_never_claims_another_products_row() -> None:
+    # `label_matches` is recall-oriented, and two brands of one carton
+    # size agree on every word that is not the brand — Dice 0.74. With
+    # the first item's row absent from the cart and the second's
+    # TRUNCATED (so neither claims exactly), the first went first in the
+    # fuzzy pass and took the second's row: the reconciler would have
+    # stepped a rival's quantity from 3 down to 1, in a cart about to be
+    # paid. An unassigned item must read as missing and re-enter the
+    # loop. Note this one is NOT a class-token artifact — strip every
+    # `<NUM>` and it still scores 0.65 (see the total-row test below for
+    # the case that is).
+    from physiclaw.agent.conductor.ledger import LedgerItem, assign_rows
+    from physiclaw.common.listing import Screen
+
+    screen = Screen.read(_cart_screen(("yolo fresh milk 250ml*16", 3)))
+    items = [
+        LedgerItem(
+            query="acme", qty=1, status="picked", label="acme fresh milk 250ml*16 case"
+        ),
+        LedgerItem(
+            query="yolo", qty=3, status="picked", label="yolo fresh milk 250ml*16 case"
+        ),
+    ]
+
+    rows = assign_rows(screen, items)
+
+    assert rows[0] is None  # not in this cart — say so
+    assert rows[1] is not None and rows[1].label == "yolo fresh milk 250ml*16"
+
+
+def test_reconciler_never_claims_the_sheets_total_row() -> None:
+    # The other victim, and this one IS a class-token artifact:
+    # `match.normalize` collapses an amount to the 7-character `<PRICE>`,
+    # so a short total row is mostly token once normalized
+    # (`total<PRICE>`, 7 of 12 characters) and ANY pick label ending in a
+    # price scores 0.57 against it. Claiming the total row turned a
+    # recoverable "item missing from the cart" into a hand-over
+    # reporting unreadable steppers.
+    from physiclaw.agent.conductor.ledger import LedgerItem, assign_rows
+
+    # bbox is irrelevant here — `assign_rows` reads only kind and label.
+    screen = make_screen(("total ¥104.7", 0.25, 0.875))
+    items = [LedgerItem(query="cola", qty=2, status="picked", label="cola ¥3.5")]
+
+    assert assign_rows(screen, items) == [None]
+
+
 # ---------- deep-sweep regressions: state-machine holes ----------
 
 
