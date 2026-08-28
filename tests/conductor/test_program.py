@@ -1564,3 +1564,141 @@ nodes:
     spec, _ = setup.load_spec("demo", "handoff", require_live=False)
 
     assert any("off the IM thread" in w for w in setup.readiness_warnings(spec))
+
+
+# ---------- decide context slices ----------
+
+
+def _context_decide_program(context: tuple[str, ...]) -> program.Program:
+    """A one-decision walk with declared context, built directly — the
+    context assembly is program behavior, not parser behavior, so no
+    pack on disk is needed. `criteria` IS declared: the parser rejects a
+    context entry naming an undeclared input, so the hand-built spec
+    must stay a shape the parser could have produced."""
+    from physiclaw.conductor.calls import CALLS
+    from physiclaw.conductor.playbook import DecideNode, Playbook, PlaybookInput
+
+    spec = Playbook(
+        app="demo",
+        name="ctx",
+        description="d",
+        enabled=True,
+        inputs=(PlaybookInput(name="criteria", description="pick rule"),),
+        mandate=None,
+        nodes=(
+            DecideNode(
+                id="choose",
+                call="choose_item",
+                args={"criteria": "cheapest"},
+                context=context,
+                outs=CALLS["choose_item"].outs,
+                on={
+                    "pick": "escalate",
+                    "scroll": "choose",
+                    "none_fit": "escalate",
+                    "escalate": "escalate",
+                },
+                max_visits=3,
+            ),
+        ),
+    )
+    return program.Program(
+        app="demo",
+        spec=spec,
+        values={"criteria": "cheapest"},
+        pack_macros={},
+        prints=[],
+    )
+
+
+def _write_memory(text: str) -> None:
+    paths.memory_dir().mkdir(parents=True, exist_ok=True)
+    paths.memory_file().write_text(text, encoding="utf-8")
+
+
+def test_decide_context_assembles_inputs_and_memory_slices() -> None:
+    from physiclaw.conductor.micro import DecisionRequest
+
+    _write_memory("## shopping\nbuy oat milk\n\n## other\nunrelated\n")
+    p = _context_decide_program(("inputs.criteria", "memory.shopping"))
+    h = _history()
+    _feed(h, p.advance(h), make_screen(("牛奶", 0.5, 0.3)).text)
+
+    req = p.advance(h)
+
+    assert isinstance(req, DecisionRequest)
+    assert "criteria: cheapest" in req.context
+    assert "buy oat milk" in req.context
+    assert "unrelated" not in req.context  # only the matching section
+
+
+def test_decide_memory_slice_without_match_stays_fail_closed(caplog) -> None:
+    # No `## shopping` heading anywhere: the decision runs WITHOUT
+    # memory context (never the whole file — the privacy boundary must
+    # not silently widen), and the degradation is logged.
+    from physiclaw.conductor.micro import DecisionRequest
+
+    _write_memory("## other\nsecret fact\n")
+    p = _context_decide_program(("memory.shopping",))
+    h = _history()
+    _feed(h, p.advance(h), make_screen(("牛奶", 0.5, 0.3)).text)
+
+    with caplog.at_level("INFO"):
+        req = p.advance(h)
+
+    assert isinstance(req, DecisionRequest)
+    assert "secret fact" not in req.context
+    assert "without memory context" in caplog.text
+
+
+# ---------- payment gate: cap and total edges ----------
+
+
+def test_gate_over_cap_consent_binds_to_the_quoted_total() -> None:
+    # Quoted ¥145 against the mandate's ¥100. The over_message WORDING
+    # pin lives in `test_gate_over_cap_ask_discloses_the_breach`; this
+    # one drives the half no test owned: the SAME plain-consent reply
+    # opens an over-cap gate, and consent binds to the QUOTED total —
+    # never the cap.
+    p, h, send = _at_gate("¥145")
+    assert "已超出预算" in send.tool_calls[1].arguments["inputs"]["message"]
+
+    _reply_arrives(p, h, send, "好的")
+
+    assert p._gate.consented == 145.0
+
+
+def test_gate_hands_over_when_no_total_is_readable(caplog) -> None:
+    # The sheet page verified but shows no ¥ amount: the ask IS the
+    # consent record, so with nothing to quote the gate refuses to ask.
+    _write_channel()
+    write_pack(playbooks={"pay": GATED})
+    p = _program(name="pay", keyword="milk")
+    h = _history()
+    _feed(h, p.advance(h), ELSEWHERE)  # locate → top
+    _feed(h, p.advance(h), RESULTS)  # the verified results page — no ¥ on it
+
+    with caplog.at_level("INFO"):
+        assert p.advance(h) is None  # handover, no ask sent
+    # THIS guard, not a sibling: every handover returns None, so the
+    # reason is what tells them apart.
+    assert "no total readable" in caplog.text
+
+
+def test_gate_hands_over_when_the_cap_cannot_resolve(caplog) -> None:
+    # A `{cap}` mandate whose input turns out non-numeric: no cap means
+    # no over-budget rule, so the gate hands over rather than asking
+    # with an unenforceable mandate.
+    ref_cap = GATED.replace("max_amount: 100", 'max_amount: "{cap}"').replace(
+        "inputs:\n", "inputs:\n  cap:\n    description: budget\n"
+    )
+    _write_channel()
+    write_pack(playbooks={"pay": ref_cap})
+    p = _program(name="pay", keyword="milk", cap="oops")
+    h = _history()
+    _feed(h, p.advance(h), ELSEWHERE)
+    _feed(h, p.advance(h), _sheet())
+
+    with caplog.at_level("INFO"):
+        assert p.advance(h) is None  # handover, no ask sent
+    assert "cap could not be resolved" in caplog.text
