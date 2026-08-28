@@ -17,7 +17,8 @@ A playbook on disk IS the grant; there is nothing to pre-declare. (There
 used to be a third door, ``armed.json``, naming the playbook to run next
 — the overture retired it.)
 
-``session_setup`` is the engine's single wake-time conductor call: it
+``session_setup`` is the plugin's single wake-time setup call
+(`plugin.py` runs it behind the seam): it
 resolves those doors in priority order and assembles the hidden
 qualified-macro registry — every pack plus the channel on the overture
 path (the boot may activate any playbook, so all conductor hands must be
@@ -321,7 +322,7 @@ class Activation:
 
 
 def session_setup() -> "tuple[Program | None, Overture | None, dict[str, Macro]]":
-    """The engine's one wake-time conductor call, fail-open throughout:
+    """The plugin's one wake-time setup call, fail-open throughout:
     (a resumed suspension, the overture, the hidden qualified macro
     registry). The registry spans every pack plus the channel ON THE
     OVERTURE PATH — the boot may activate any playbook, so all conductor

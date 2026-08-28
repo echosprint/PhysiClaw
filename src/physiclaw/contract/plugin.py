@@ -39,13 +39,18 @@ from physiclaw.macros.model import Macro
 class ChatProvider(Protocol):
     """The slice of the session's provider a plugin may hold — enough to
     fall back to the session model (e.g. a cheap-tier decision call whose
-    configured tier failed to build). The full provider interface stays
-    in `physiclaw.provider`; this protocol exists so the contract need
-    not import it (provider imports contract, never the reverse)."""
+    configured tier failed to build) and to wire-log its own scoped
+    round-trips verbatim. Deliberately NOT the full provider: session
+    management (collapse cadence, lifecycle close) stays the engine's.
+    The full interface lives in `physiclaw.provider`; this protocol
+    exists so the contract need not import it (provider imports
+    contract, never the reverse)."""
 
     async def chat(
         self, history: list[Message], tools: list[dict]
     ) -> AssistantMessage: ...
+
+    def serialize_history(self, messages: list[Message]) -> list[dict]: ...
 
 
 class EventSink(Protocol):

@@ -36,13 +36,13 @@ The call vocabulary is read off `calls.py`'s declarations (`CallDecl`
 pick/re-ask arms and escapes), never re-listed here — parser and runner
 cannot disagree about what a call offers.
 
-Engine-wired like the provider itself: the engine constructs it with the
-session's sinks, so the conductor stays orchestration-only while every
-micro round-trip is captured — a `micro_call` trace event with token
-counts (folded into the session's usage), and a `micro` wire record with
-the exact prompt and raw reply for replay/debugging. `run()` also
-returns the stats with the answer (`MicroResult`), so tooling reads the
-result instead of impersonating a sink.
+Wired by `plugin.py` off the setup context (the session's provider and
+sinks arrive through the plugin seam), so every micro round-trip is
+captured — a `micro_call` trace event with token counts (folded into
+the session's usage), and a `micro` wire record with the exact prompt
+and raw reply for replay/debugging. `run()` also returns the stats with
+the answer (`MicroResult`), so tooling reads the result instead of
+impersonating a sink.
 
 Candidates are content-keyed (the row's own label — never A/B/C) and
 shuffled, so position bias cannot masquerade as preference.
@@ -62,6 +62,7 @@ from physiclaw.common.listing import Screen
 from physiclaw.common.text import json_span
 from physiclaw.conductor.calls import CALLS
 from physiclaw.contract.dto import Message, SystemMessage, Usage, UserMessage
+from physiclaw.contract.plugin import ChatProvider
 from physiclaw.provider import Provider, ProviderTransientError
 
 log = logging.getLogger(__name__)
@@ -193,7 +194,10 @@ class MicroCaller:
 
     def __init__(
         self,
-        provider: Provider,
+        # The fail-open floor only ever answers `chat` — the structural
+        # contract slice, so the seam can hand us the session provider
+        # without the conductor demanding the full Provider surface.
+        provider: ChatProvider,
         *,
         confidence_floor: float,
         tr=None,
@@ -211,7 +215,7 @@ class MicroCaller:
         self._owned_factory = owned_factory
         self._owned: Provider | None = None
 
-    def _live_provider(self) -> Provider:
+    def _live_provider(self) -> ChatProvider:
         if self._owned_factory is not None:
             factory, self._owned_factory = self._owned_factory, None
             try:

@@ -40,8 +40,12 @@ The walk executes every node type, strictly:
 
 How a Program comes to exist (the overture's activation, a resumed
 suspension, the CLI rehearsal) lives in `setup.py`; the suspension file
-in `suspension.py`; the domain helpers in `channel.py`, `ledger.py`,
-`memory.py`, `views.py`.
+in `suspension.py`. The decision kernels this walk applies are pure
+functions next door — `money.py` (the payment predicates),
+`reconcile.py` (the cart step planner), `ledger.py` (list state, cart
+readers, revision merge) — with `channel.py`, `memory.py`, `reply.py`,
+`views.py` as the remaining senses. This file is the state machine
+alone: cursor, pending action, and who does what next.
 """
 
 import json
@@ -51,16 +55,10 @@ from dataclasses import dataclass, field
 from physiclaw.common import gesture_vocab
 from physiclaw.common.listing import Screen
 from physiclaw.common.logger import write_json_atomic
-from physiclaw.conductor import ledger, memory, reply, views
+from physiclaw.conductor import ledger, memory, money, reconcile, reply, views
 from physiclaw.conductor.calls import CALLS, ESCALATE, NEXT_ITEM
 from physiclaw.conductor.channel import Channel
-from physiclaw.conductor.match import (
-    PRICE_RE,
-    Verdict,
-    label_matches,
-    match_screen,
-    normalize,
-)
+from physiclaw.conductor.match import Verdict, match_screen
 from physiclaw.conductor.micro import (
     CONFIRM_REPLY,
     REVISE_LIST,
@@ -107,21 +105,6 @@ SILENCE_ROUNDS = 3
 # runtime.sentinel.WAIT, spelled literally: the conductor may not import
 # engine runtimes; a test pins the two equal.
 SUSPEND_STATUS = "WAIT"
-
-# The reconciler's action budget: every divergence costs at least one
-# tap-and-reread action, so a converging cart finishes well under it —
-# hitting it means the cart is NOT converging.
-RECONCILE_MAX_ACTIONS = 16
-
-
-def _amounts(screen: Screen) -> list[float]:
-    """Every ¥/￥ amount visible on the screen — `match.PRICE_RE`, the
-    one spelling of a currency amount, run over raw row labels; never a
-    model."""
-    out: list[float] = []
-    for row in screen.rows:
-        out.extend(float(m) for m in PRICE_RE.findall(row.label))
-    return out
 
 
 @dataclass
@@ -183,9 +166,10 @@ class _Gate:
 
 
 class Program:
-    """One playbook mid-walk. Constructed per session (the engine builds
-    it at wake), so the cursor state lives for exactly one attempt;
-    persistence across wakes is the locate peek, not saved state."""
+    """One playbook mid-walk. Constructed per session (the conductor
+    plugin's wake setup builds it), so the cursor state lives for
+    exactly one attempt; persistence across wakes is the locate peek,
+    not saved state."""
 
     def __init__(
         self,
@@ -206,10 +190,10 @@ class Program:
         self.pack_macros = pack_macros
         self._prints = prints
         self._ids = {n.id: i for i, n in enumerate(spec.nodes)}
-        # Read by the engine: prompted decisions AND gate reply checks
-        # ride the micro channel — either kind of node means wiring one
-        # up. Deterministic calls (next_item) never prompt, so a
-        # legs+loop-only playbook must not pay for a client.
+        # Read by the plugin's micro wiring: prompted decisions AND gate
+        # reply checks ride the micro channel — either kind of node
+        # means wiring one up. Deterministic calls (next_item) never
+        # prompt, so a legs+loop-only playbook must not pay for a client.
         self.needs_micro = any(
             (isinstance(n, DecideNode) and not CALLS[n.call].deterministic)
             or isinstance(n, HumanGateNode)
@@ -565,11 +549,16 @@ class Program:
                     f"verified {self.app} page — money never fires blind"
                 )
             # The fire-time money predicates — in code, on the current
-            # screen, after the human's consent: staleness (the sheet
-            # must still show the consented total) and the bound.
-            blocked = self._money_block(node)
+            # screen, after the human's consent (`money.py` owns the
+            # rules): staleness and the bound.
+            assert self._screen is not None  # a matched verdict was read off it
+            blocked = money.fire_block(
+                consented=self._gate.consented,
+                cap=self._gate.cap,
+                screen=self._screen,
+            )
             if blocked is not None:
-                return self._handover(blocked)
+                return self._handover(f"payment leg {node.id!r}: {blocked}")
         try:
             inputs = {
                 k: fill_refs(v, self._values(), where=f"leg {node.id!r} `with.{k}`")
@@ -804,11 +793,9 @@ class Program:
 
     def _reconcile_step(self) -> "AssistantMessage | DecisionRequest | None":
         """One divergence, one action, re-read — the tap's own result
-        screen is the verification (there is no other). Converged =
-        every picked item reads at its wanted quantity; cart rows the
-        ledger does not claim are LEFT ALONE (they may be the user's
-        own — the conductor never destroys what it cannot attribute to
-        itself)."""
+        screen is the verification (there is no other). The rules live
+        in `reconcile.plan`; the walk owns the action budget, the
+        re-shop counts, and the cursor."""
         node = self.spec.nodes[self._idx]
         assert isinstance(node, ReconcileNode)
         assert self._verdict is not None and self._screen is not None
@@ -818,50 +805,30 @@ class Program:
         if self._ledger is None:
             return self._handover(f"reconcile {node.id!r}: no usable ledger")
         self._rec_actions += 1
-        if self._rec_actions > RECONCILE_MAX_ACTIONS:
-            return self._handover(
-                f"reconcile {node.id!r}: cart not converging after "
-                f"{RECONCILE_MAX_ACTIONS} actions — list: "
-                f"{ledger.describe(self._ledger)}"
+        step = reconcile.plan(
+            self._screen, self._ledger, self._reshops, self._rec_actions
+        )
+        if isinstance(step, reconcile.Blocked):
+            return self._handover(f"reconcile {node.id!r}: {step.reason}")
+        if isinstance(step, reconcile.Reshop):
+            # Back into the loop for THIS item — the body head, not the
+            # closer (the closer would re-bind a stale pick label).
+            item = self._ledger[step.item_idx]
+            self._reshops[step.item_idx] = self._reshops.get(step.item_idx, 0) + 1
+            item.status, item.label = "pending", None
+            self._item = step.item_idx
+            self._journal = (
+                f"reconcile: {item.query!r} missing from the cart — re-shopping"
             )
-        assigned = ledger.assign_rows(self._screen, self._ledger)
-        for idx, item in enumerate(self._ledger):
-            if item.status != "picked":
-                continue  # pending items are the loop's, reached via re-shop
-            row = assigned[idx]
-            if row is None:
-                if item.qty <= 0:
-                    continue  # removed and absent — converged
-                # Picked but not in the cart: back into the loop for THIS
-                # item — the body head, not the closer (the closer would
-                # re-bind a stale pick label). Bounded per item: a second
-                # miss means the pick's label will never read as a cart
-                # row, and re-shopping again just duplicates real adds.
-                self._reshops[idx] = self._reshops.get(idx, 0) + 1
-                if self._reshops[idx] > 1:
-                    return self._handover(
-                        f"reconcile {node.id!r}: {item.query!r} still missing "
-                        f"after a re-shop — list: {ledger.describe(self._ledger)}"
-                    )
-                item.status, item.label = "pending", None
-                self._item = idx
-                self._journal = (
-                    f"reconcile: {item.query!r} missing from the cart — re-shopping"
-                )
-                assert self._loop_body_id is not None
-                self._idx = self._ids[self._loop_body_id]
-                return self._next()
-            found = ledger.row_qty(self._screen, row)
-            if found is None:
-                return self._handover(
-                    f"reconcile {node.id!r}: no readable qty/steppers beside "
-                    f"{row.label!r} — list: {ledger.describe(self._ledger)}"
-                )
-            have, minus, plus = found
-            if have < item.qty:
-                return self._synth_rec_tap(plus, f"{item.query} {have}→{item.qty}")
-            if have > item.qty:
-                return self._synth_rec_tap(minus, f"{item.query} {have}→{item.qty}")
+            assert self._loop_body_id is not None
+            self._idx = self._ids[self._loop_body_id]
+            return self._next()
+        if isinstance(step, reconcile.Tap):
+            return self._synth_rec_tap(step.el, step.note)
+        if step is not None:
+            # A new Step variant must fail loudly, never silently read
+            # as convergence (same rule as unknown pending kinds).
+            return self._handover(f"unknown reconcile step {step!r}")
         self._journal = "reconcile: cart matches the list"
         self._idx += 1
         return self._next()
@@ -930,46 +897,10 @@ class Program:
         if all(r.qty == 0 for r in revised):
             # "Remove everything" is a cancellation, not a revision.
             return self._deny()
-        # Old items keep their shopping progress (the reconciler moves
-        # quantities; a query the revision dropped goes to 0); genuinely
-        # new queries append pending. Old-ledger order is preserved —
-        # friendlier to the `_item` cursor, and nothing reads revised
-        # order. Matching is assign_rows' two passes — exact normalized
-        # first, then fuzzy against the query OR the picked label:
-        # revise_list is asked to echo unchanged items verbatim, but a
-        # rephrase ("eggs" → "fresh eggs") must land on the existing
-        # item, not zero out a correct cart row and re-shop the same
-        # product. It does NOT carry assign_rows' `_query_present` second
-        # key, on purpose: there both sides are screen text, so a rival's
-        # row could be claimed outright, while here the revision's own
-        # wording IS the thing being matched and demanding it contain the
-        # old query would defeat the rephrase case above. A cross-match
-        # here costs a wrong quantity, not a wrong tap, and the gate
-        # re-earns consent (`_gate.consented = None`) before any payment.
-        remaining = list(revised)
-        matched: dict[int, ledger.LedgerItem] = {}
-        for i, it in enumerate(self._ledger):  # pass 1: exact
-            want = normalize(it.query)
-            for r in remaining:
-                if normalize(r.query) == want:
-                    matched[i] = r
-                    remaining.remove(r)
-                    break
-        for i, it in enumerate(self._ledger):  # pass 2: fuzzy
-            if i in matched:
-                continue
-            for r in remaining:
-                rn = normalize(r.query)
-                if label_matches(normalize(it.query), rn, ()) or (
-                    it.label and label_matches(normalize(it.label), rn, ())
-                ):
-                    matched[i] = r
-                    remaining.remove(r)
-                    break
-        for i, it in enumerate(self._ledger):
-            hit = matched.get(i)
-            it.qty = hit.qty if hit is not None else 0
-        self._ledger.extend(remaining)
+        # The merge rules (progress kept, drops to 0, rephrases matched,
+        # and why there is no `_query_present` second key here) live with
+        # the list: `ledger.merge_revision`.
+        ledger.merge_revision(self._ledger, revised)
         self._gate.consented = None  # the old ask no longer covers the order
         self._gate.awaiting = False
         self._journal = f"revision applied: {ledger.describe(self._ledger)}"
@@ -1025,12 +956,12 @@ class Program:
                     f"gate {node.id!r}: the total must be quoted off a "
                     f"verified {self.app} page — refusing to ask blind"
                 )
-            cap = self._mandate_cap()
+            cap = money.mandate_cap(self.spec.mandate, self.values)
             if cap is None:
                 return self._handover(
                     f"gate {node.id!r}: mandate cap could not be resolved"
                 )
-            amts = _amounts(self._screen) if self._screen else []
+            amts = money.amounts(self._screen) if self._screen else []
             if not amts:
                 return self._handover(
                     f"gate {node.id!r}: no total readable on the sheet"
@@ -1051,36 +982,6 @@ class Program:
         self._gate.ask = text
         self._gate.tried_open = False
         return self._synth_send("gate-sent", text)
-
-    def _mandate_cap(self) -> float | None:
-        m = self.spec.mandate
-        if m is None:
-            return None
-        if isinstance(m.max_amount, float):
-            return m.max_amount
-        try:
-            return float(self.values[m.max_amount.name])
-        except (KeyError, ValueError):
-            return None
-
-    def _money_block(self, node: LegNode) -> str | None:
-        """The two fire-time predicates. None = pay; else the logged
-        reason to block and hand over."""
-        if self._gate.consented is None:
-            return f"payment leg {node.id!r} reached without a confirmed total"
-        assert self._screen is not None
-        consented = self._gate.consented
-        amts = _amounts(self._screen)
-        if not any(abs(a - consented) < 0.01 for a in amts):
-            return (
-                f"sheet changed after consent: confirmed ¥{consented:g}, "
-                f"now sees {amts or 'no amounts'}"
-            )
-        bound = max(self._gate.cap or 0.0, consented)
-        over = [a for a in amts if a > bound + 0.005]
-        if over:
-            return f"amount(s) {over} exceed the consented bound ¥{bound:g}"
-        return None
 
     def _gate_check(self) -> "AssistantMessage | DecisionRequest | None":
         """One reply-evaluation round over the freshly peeked thread —

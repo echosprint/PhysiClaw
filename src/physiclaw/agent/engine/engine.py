@@ -40,6 +40,7 @@ from physiclaw.agent.trace import RawLog, Trace, new_sid
 from physiclaw.common.config import CONFIG, parse_model_ref
 from physiclaw.contract.dto import Message
 from physiclaw.contract.plugin import SetupContext, TurnPlugin
+from physiclaw.macros.model import Macro
 from physiclaw.provider import Provider, make_provider
 
 log = logging.getLogger(__name__)
@@ -149,7 +150,7 @@ async def _run_session(
             events=tr,
             wire=rlog,
         )
-        gated_macros = {}
+        gated_macros: dict[str, Macro] = {}
         for plug in plugins:
             try:
                 contribution = await plug.session_setup(setup_ctx)

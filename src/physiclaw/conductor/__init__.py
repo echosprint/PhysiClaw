@@ -13,7 +13,9 @@ The seam:
 
 Driving:
     overture.py    boot to the user's thread, read the intent there
-    program.py     one playbook mid-walk: legs, gates, ledger, money rules
+    program.py     one playbook mid-walk: the state machine alone
+    money.py       the payment predicates, pure
+    reconcile.py   the cart step planner, pure
     setup.py       how a Program comes to exist (activation, resume)
     turns.py       minting a synthesized turn
     suspension.py  suspended.json, the one cross-wake file
@@ -31,7 +33,7 @@ Specs and the user:
     playbook.py    PLAYBOOK.yml model, parser, lints
     _spec.py       shared YAML substrate
     channel.py     the user-channel pack (thread, send, open)
-    ledger.py      the buying list and its cart readers
+    ledger.py      the buying list: cart readers, revision merge
     reply.py       deterministic confirm/deny reply reading
     memory.py      fail-closed memory slices for decisions
     scaffold.py    pack templates and playbooks/README.md

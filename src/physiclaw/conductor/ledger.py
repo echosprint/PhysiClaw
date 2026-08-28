@@ -11,6 +11,9 @@ The two screen readers are the reconciler's deterministic senses:
 `assign_rows` maps picked items to cart rows (exclusive, exact-first),
 and `row_qty` reads the quantity numeral between a row's flanking
 stepper icons. Pure functions over a Screen — testable without a walk.
+`merge_revision` folds a gate revision's new desired state onto the
+list, beside `assign_rows` so their deliberately different matching
+rules read side by side.
 """
 
 import json
@@ -247,3 +250,48 @@ def row_qty(screen: Screen, row: Element) -> tuple[int, Element, Element] | None
 def describe(items: "list[LedgerItem] | None") -> str:
     """The list, terse, for handover reasons and journal lines."""
     return ", ".join(f"{it.query}×{it.qty}({it.status})" for it in items or [])
+
+
+def merge_revision(items: list[LedgerItem], revised: list[LedgerItem]) -> None:
+    """The revised desired state merged onto the walk's ledger, in
+    place: known queries keep their shopping progress (the reconciler
+    moves their quantities), new queries append pending, dropped queries
+    go to qty 0 (the reconciler steps them out). Old-ledger order is
+    preserved — friendlier to the walk's item cursor, and nothing reads
+    revised order.
+
+    Matching is two passes — exact normalized first, then fuzzy against
+    the query OR the picked label: revise_list is asked to echo
+    unchanged items verbatim, but a rephrase ("eggs" → "fresh eggs")
+    must land on the existing item, not zero out a correct cart row and
+    re-shop the same product. It does NOT carry `assign_rows`'
+    `_query_present` second key, on purpose: there both sides are screen
+    text, so a rival's row could be claimed outright, while here the
+    revision's own wording IS the thing being matched and demanding it
+    contain the old query would defeat the rephrase case above. A
+    cross-match here costs a wrong quantity, not a wrong tap, and the
+    gate re-earns consent before any payment."""
+    remaining = list(revised)
+    matched: dict[int, LedgerItem] = {}
+    for i, it in enumerate(items):  # pass 1: exact
+        want = normalize(it.query)
+        for r in remaining:
+            if normalize(r.query) == want:
+                matched[i] = r
+                remaining.remove(r)
+                break
+    for i, it in enumerate(items):  # pass 2: fuzzy
+        if i in matched:
+            continue
+        for r in remaining:
+            rn = normalize(r.query)
+            if label_matches(normalize(it.query), rn, ()) or (
+                it.label and label_matches(normalize(it.label), rn, ())
+            ):
+                matched[i] = r
+                remaining.remove(r)
+                break
+    for i, it in enumerate(items):
+        hit = matched.get(i)
+        it.qty = hit.qty if hit is not None else 0
+    items.extend(remaining)
