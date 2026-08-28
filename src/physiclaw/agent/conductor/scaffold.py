@@ -293,26 +293,35 @@ IOS_PAGES_STUB = f"""\
 # Unlike an app pack this one holds no playbooks and no macros: the
 # conductor reads these pages itself, to tell one OS state from another.
 
-# The lock screen. It earns a declaration for ONE reason: to tell
-# "locked" apart from "a screen I don't recognize". Those demand
-# opposite actions — `unlock_phone` costs 20-40s and does nothing on an
-# unlocked phone, while a recovery macro's taps land uselessly on a lock
-# screen. Every other unrecognized screen collapses into one arm, which
-# is why no other system page is declared yet.
+# The lock screen. Telling "locked" apart from "a screen I don't
+# recognize" matters because they demand opposite actions —
+# `unlock_phone` costs 20-40s and does nothing on an unlocked phone,
+# while a recovery macro's taps land uselessly on a lock screen. Every
+# other unrecognized screen collapses into one arm, which is why no
+# other system page is declared yet.
+#
+# THIS DECLARATION IS A BONUS, NOT THE MECHANISM. Measured across every
+# state a real iPhone's cover can be put in — resting Always-On Display,
+# woken and fully lit, and after a swipe — iOS printed no hint text at
+# all, so the anchor below has nothing to match and the page scores 0.
+# The conductor therefore recognizes the cover by its SHAPE instead (a
+# clock and nothing else — `match.reads_as_cover`), which needs no
+# declaration and no calibration. Keep this page: on a device or version
+# that DOES print a hint it is the sharper signal, and it costs nothing
+# when it never matches.
 {LOCKED_PAGE}:
   anchors:
     # ONE anchor, several acceptable readings — never separate anchors:
     # each declared anchor is a share of the page's score, so a second
     # spelling of the same label would halve it.
     #
-    # The reading below is what an English-system iPhone prints. If
-    # yours is set to another language, lock it and run
-    # `physiclaw conductor propose --live` to see what it actually says,
-    # then add that reading beside this one:
+    # Verify this reading against YOUR phone before trusting it — lock
+    # it and run `physiclaw conductor propose --live` to see what it
+    # actually prints, then put that beside this one:
     #
     #     - text: ["Swipe up for Face ID or Enter Passcode", "<yours>"]
     - text: ["Swipe up for Face ID or Enter Passcode"]
-      region: top
+      region: bottom
 """
 
 

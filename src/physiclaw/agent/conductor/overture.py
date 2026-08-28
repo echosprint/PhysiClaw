@@ -15,7 +15,7 @@ being conditional on the model happening to navigate somewhere: before,
 `Activation` could only fire if the latest tool result was already the
 thread, so on a wake where the model took another route it never fired.
 
-Two rules earn their place, both learned from recorded sessions:
+Three rules earn their place, all learned from recorded sessions:
 
   - **A verdict gates the confirmation, never the attempt.** The
     recovery action (`channel/open`) begins with `home_screen` and
@@ -27,6 +27,13 @@ Two rules earn their place, both learned from recorded sessions:
     failure is a dead phone bridge answering every call in a
     millisecond; retrying against it just burns tokens proving the phone
     is gone.
+  - **A sleeping phone is recognized by shape, not by text.** The rule
+    above is right about acting on an unknown screen, but a locked one
+    is the exception the field found: taps do not reach it at all, so
+    the recovery is not merely unhelpful, it is inert. The cover carries
+    no anchorable hint on a real iPhone, so `match.reads_as_cover` reads
+    its shape (a clock and nothing else) and routes to `unlock_phone`
+    before the recovery arm gets it.
 
 Everything is bounded and every failure is a hand-over — the overture
 owns no files, writes nothing, and can end no session. It issues four
@@ -46,7 +53,7 @@ import logging
 
 from physiclaw.agent.conductor import views
 from physiclaw.agent.conductor.channel import Channel
-from physiclaw.agent.conductor.match import Verdict, match_screen
+from physiclaw.agent.conductor.match import Verdict, match_screen, reads_as_cover
 from physiclaw.agent.conductor.micro import DecisionRequest, MicroOutcome
 from physiclaw.agent.conductor.pages import LOCKED_ID, THREAD_ID, PagePrint
 from physiclaw.agent.conductor.program import Program
@@ -157,17 +164,31 @@ class Overture:
         """A landed view → where it sends us. Shared by both modes: the
         boot reads its own action's result, the watcher reads the
         model's."""
-        self._screen = views.screen_of(result)
-        return self._route(match_screen(self._screen, self._prints))
+        screen = views.screen_of(result)
+        self._screen = screen
+        return self._route(match_screen(screen, self._prints), screen)
 
-    def _route(self, verdict: Verdict) -> "AssistantMessage | DecisionRequest | None":
-        """Where the screen sends us. Only two verdicts are actionable;
-        EVERYTHING else — a known app page, occluded, unknown, unreadable
-        — takes the recovery arm, because the recovery is unconditional
-        and an unrecognized screen is not a reason to quit."""
+    def _route(
+        self, verdict: Verdict, screen: Screen
+    ) -> "AssistantMessage | DecisionRequest | None":
+        """Where the screen sends us. Only the thread and a locked phone
+        are actionable; EVERYTHING else — a known app page, occluded,
+        unknown, unreadable — takes the recovery arm, because the
+        recovery is unconditional and an unrecognized screen is not a
+        reason to quit.
+
+        "Locked" is read two ways, and the SHAPE is the one that fires in
+        practice. A declared `ios.locked` page is honoured first, but on
+        a real iPhone it never matches: the cover prints no hint text for
+        an anchor to find (`match.reads_as_cover`). Without the shape
+        read, a sleeping phone scored `unknown` and fell to the recovery
+        arm, which spent both `OPEN_TRIES` driving a macro's taps into a
+        screen that was not awake to receive them — twice measured at
+        ~45s per attempt, then a hand-over, on a wake whose only real
+        obstacle was the lock."""
         if verdict.matches(THREAD_ID):
             return self._read_intent()
-        if verdict.matches(LOCKED_ID):
+        if verdict.matches(LOCKED_ID) or reads_as_cover(screen):
             return self._unlock()
         return self._open(verdict)
 

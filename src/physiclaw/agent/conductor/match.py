@@ -65,9 +65,12 @@ OVERLAY_PAD = 0.08
 PRICE_RE = re.compile(r"[¥￥]\s*(\d+(?:\.\d+)?)")
 
 # Volatile-content class tokens — "the clock is still a clock".
+# `TIME_TOKEN` is named because `reads_as_cover` tests a row against it:
+# one spelling, so the tokenizer and its reader cannot drift apart.
+TIME_TOKEN = "<TIME>"
 _NORM_SUBS: tuple[tuple[re.Pattern, str], ...] = (
     (PRICE_RE, "<PRICE>"),
-    (re.compile(r"\b\d{1,2}:\d{2}\b"), "<TIME>"),
+    (re.compile(r"\b\d{1,2}:\d{2}\b"), TIME_TOKEN),
     (re.compile(r"\d+"), "<NUM>"),
 )
 
@@ -164,6 +167,51 @@ def _window_match(anchor_norm: str, label_norm: str) -> bool:
                 if bad > 1:
                     break
         if bad <= 1:
+            return True
+    return False
+
+
+# ---------- the cover, which has no page ----------
+
+# The iOS lock screen cannot be declared as a page: measured on-device
+# across every state it can be put in — resting Always-On Display, woken
+# and fully lit, and after a swipe — iOS prints NO "swipe up to unlock"
+# hint, so a text anchor has nothing to match. (`unlock_phone` never
+# identified it by text either: `core/orchestration/unlock.py` wakes,
+# swipes, and then OCR-polls for the passcode keypad.)
+#
+# What it does have is a SHAPE: the hero clock, which is enormous. Its
+# WIDTH is the signal, not the row count — a cover showing notifications
+# has as many rows as a app screen, so counting them missed exactly the
+# frames a busy phone produces.
+#
+# Measured over 8 on-device readings: the cover's clock spans 0.686-0.753
+# of the screen, an app's status-bar clock 0.108-0.122. The floor sits in
+# that 5.6x gap, ~2.8x clear of the widest status bar and ~1.7x under the
+# narrowest hero — wide enough that OCR clipping a digit cannot cross it.
+COVER_CLOCK_MIN_WIDTH = 0.4
+
+
+def reads_as_cover(screen: Screen) -> bool:
+    """True when a screen shows the iOS cover's hero clock — locked,
+    asleep, or Always-On Display, a state no `PagePrint` can describe.
+
+    A bare `<TIME>` row alone is NOT enough: every app screen carries a
+    status-bar clock that normalizes identically. Width separates them,
+    and it holds whether the display is dim or fully lit — the camera's
+    own brightness verdict does not (a woken cover raises no dark
+    warning), which is why that cannot be the signal.
+
+    Deliberately not fail-closed. A full-screen clock or timer app would
+    read as cover here, and the caller then spends an `unlock_phone` that
+    does nothing on an unlocked phone — seconds, no state change.
+    Cheaper than the alternative it exists to prevent: driving a recovery
+    macro's taps into a screen that is not awake to receive them.
+    """
+    for row in screen.rows:
+        if row.kind != "text" or normalize(row.label) != TIME_TOKEN:
+            continue
+        if row.bbox[2] - row.bbox[0] >= COVER_CLOCK_MIN_WIDTH:
             return True
     return False
 

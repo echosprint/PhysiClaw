@@ -13,7 +13,7 @@ from physiclaw.agent.conductor.pages import (
     PageDecl,
     PagePrint,
 )
-from physiclaw.common.listing import Screen
+from physiclaw.common.listing import LISTING_HEADER, Screen
 
 
 def _learned(text: str, cx: float, cy: float, *, weight=1.0, variants=()):
@@ -270,3 +270,83 @@ def test_match_screen_occluded_when_missing_anchors_share_a_band() -> None:
 
     assert v.kind == "occluded"
     assert v.page_id == "app.thread"
+
+
+# ---------- the cover, which has no page ----------
+
+# Captured live off the rig (`physiclaw mcp -H`, iPhone locked), because
+# the whole point of `reads_as_cover` is that the cover's real shape is
+# not what a synthetic fixture would guess. Note the clock's width: the
+# hero clock spans most of the screen, the status bar's spans a tenth.
+COVER_RESTING = f"""{LISTING_HEADER}
+0 [text] "Thu Aug 27" [0.341,0.079,0.591,0.110] 0.94
+1 [text] "21:45" [0.121,0.095,0.828,0.248] 0.98"""
+
+# Same phone, woken by a tap and fully lit — no dark warning on this one,
+# which is why the camera's brightness verdict cannot be the signal.
+COVER_WOKEN = f"""{LISTING_HEADER}
+0 [icon] "" [0.282,0.000,0.332,0.025] 0.56
+1 [text] "Thu Aug 27" [0.335,0.065,0.596,0.099] 0.94
+2 [text] "21:46" [0.093,0.086,0.846,0.239] 0.99"""
+
+# The cover with a notification stack — the frame a row-count rule got
+# wrong: as many rows as an app screen, but still unmistakably the cover.
+COVER_WITH_NOTIFICATION = f"""{LISTING_HEADER}
+0 [text] "Thu Aug 27" [0.335,0.065,0.597,0.099] 0.94
+1 [text] "21:35" [0.101,0.084,0.842,0.239] 0.97
+2 [icon] "" [0.412,0.109,0.473,0.160] 0.33
+3 [text] "1m ago" [0.818,0.791,0.915,0.807] 0.93
+4 [text] "WeChat" [0.231,0.804,0.364,0.826] 0.99
+5 [text] "Notification" [0.233,0.822,0.413,0.845] 0.99"""
+
+# An ordinary unlocked screen. Row 0 normalizes to `<TIME>` exactly like
+# the cover's clock, so the token alone can never be the discriminator.
+UNLOCKED_APP = f"""{LISTING_HEADER}
+0 [text] "19:31" [0.111,0.004,0.219,0.027] 0.98
+1 [text] "Camera" [0.743,0.152,0.847,0.169] 0.99
+2 [text] "Photos" [0.532,0.156,0.628,0.172] 0.98
+3 [text] "Calendar" [0.302,0.158,0.425,0.177] 0.99"""
+
+
+def test_reads_as_cover_on_every_captured_cover_state() -> None:
+    for name, text in (
+        ("resting", COVER_RESTING),
+        ("woken", COVER_WOKEN),
+        ("with a notification stack", COVER_WITH_NOTIFICATION),
+    ):
+        assert m.reads_as_cover(Screen.read(text)), name
+
+
+def test_reads_as_cover_rejects_an_ordinary_app_screen() -> None:
+    # The status-bar clock is a `<TIME>` row like the cover's; its WIDTH
+    # (0.11 vs 0.75) is what separates them.
+    assert not m.reads_as_cover(Screen.read(UNLOCKED_APP))
+
+
+def test_reads_as_cover_needs_a_clock_not_just_a_sparse_screen() -> None:
+    assert not m.reads_as_cover(make_screen(("Loading", 0.5, 0.4)))
+
+
+def test_reads_as_cover_needs_a_bare_clock() -> None:
+    # A timestamp EMBEDDED in a longer label (a chat bubble's "20:53
+    # delivered") does not normalize to the token alone — and a wide
+    # bubble would otherwise clear the width floor.
+    row = '0 [text] "20:53 delivered" [0.100,0.400,0.900,0.430] 0.97'
+    assert not m.reads_as_cover(Screen.read(f"{LISTING_HEADER}\n{row}"))
+
+
+def test_reads_as_cover_is_false_on_a_failed_read() -> None:
+    # An empty listing is a failed camera read, not a cover — the caller
+    # must not spend an unlock on it.
+    assert not m.reads_as_cover(Screen.read(""))
+
+
+def test_reads_as_cover_width_floor_sits_between_the_two_clocks() -> None:
+    # Pin the gap the floor lives in: narrower than any hero clock
+    # measured (0.686) and wider than any status bar (0.122).
+    def clock(width: float) -> Screen:
+        row = f'0 [text] "21:45" [0.100,0.100,{0.100 + width:.3f},0.250] 0.98'
+        return Screen.read(f"{LISTING_HEADER}\n{row}")
+
+    assert m.reads_as_cover(clock(0.686))  # narrowest hero clock seen
+    assert not m.reads_as_cover(clock(0.122))  # widest status bar seen
