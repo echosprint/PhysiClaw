@@ -25,7 +25,7 @@ from conductor_fakes import (
 )
 
 from physiclaw.common import paths
-from physiclaw.conductor import channel, memory, program, setup, suspension
+from physiclaw.conductor import channel, memory, program, reconcile, setup, suspension
 from physiclaw.conductor.playbook import GATE_MAX_REVISIONS, PlaybookError
 
 FLOW = """\
@@ -1326,40 +1326,52 @@ def test_locate_never_skips_work_nodes() -> None:
     assert all(it.status == "pending" for it in p._ledger)
 
 
+def _write_suspended(playbook: str, idx: int, **over) -> None:
+    """suspended.json with the boilerplate defaulted — tests pass only
+    their deltas. The production shape is `Program._suspended_dict`; a
+    schema change is edited here once beside the tests that fake it."""
+    from physiclaw.common.logger import write_json_atomic
+
+    data = {
+        "schema": suspension.SUSPENDED_SCHEMA,
+        "app": "demo",
+        "playbook": playbook,
+        "idx": idx,
+        "values": {},
+        "outputs": {},
+        "visits": {},
+        "ledger": None,
+        "item": 0,
+        "ask_text": "",
+        "baseline": [],
+        "quoted": None,
+        "cap": None,
+        "consented": None,
+        "awaiting": False,
+        "revisions": 0,
+    }
+    data.update(over)
+    write_json_atomic(suspension.suspended_path(), data)
+
+
 def test_payment_gate_total_is_quoted_only_off_a_verified_page() -> None:
     # A suspended resume straight onto the gate with an unknown screen must
     # hand over, not quote max(¥) off whatever the camera saw.
-    from physiclaw.common.logger import write_json_atomic
-
     _write_channel()
     write_pack(playbooks={"shop": LEDGERED})
     spec, _ = setup.load_spec("demo", "shop")
     gate_idx = next(
         i for i, n in enumerate(spec.nodes) if type(n).__name__ == "HumanGateNode"
     )
-    write_json_atomic(
-        suspension.suspended_path(),
-        {
-            "schema": suspension.SUSPENDED_SCHEMA,
-            "app": "demo",
-            "playbook": "shop",
-            "idx": gate_idx,
-            "values": {"items": LEDGER_ITEMS},
-            "outputs": {},
-            "visits": {},
-            "ledger": [
-                {"query": "eggs", "qty": 2, "status": "picked", "label": "farm eggs"},
-                {"query": "chips", "qty": 1, "status": "picked", "label": "lays chips"},
-            ],
-            "item": 1,
-            "ask_text": "",
-            "baseline": [],
-            "quoted": None,
-            "cap": None,
-            "consented": None,
-            "awaiting": False,
-            "revisions": 0,
-        },
+    _write_suspended(
+        "shop",
+        gate_idx,
+        values={"items": LEDGER_ITEMS},
+        ledger=[
+            {"query": "eggs", "qty": 2, "status": "picked", "label": "farm eggs"},
+            {"query": "chips", "qty": 1, "status": "picked", "label": "lays chips"},
+        ],
+        item=1,
     )
     p = setup.load_suspended(channel.load_channel())
     assert p is not None
@@ -1702,3 +1714,51 @@ def test_gate_hands_over_when_the_cap_cannot_resolve(caplog) -> None:
     with caplog.at_level("INFO"):
         assert p.advance(h) is None  # handover, no ask sent
     assert "cap could not be resolved" in caplog.text
+
+
+def test_payment_leg_without_consent_hands_over(caplog) -> None:
+    # A resume landing directly ON the payment leg with no consent
+    # recorded (the gate never confirmed): money never fires. This is
+    # `money.fire_block`'s first predicate — the last line of defense
+    # if every earlier guard were somehow skipped.
+    _write_channel()
+    write_pack(playbooks={"pay": GATED})
+    spec, _ = setup.load_spec("demo", "pay")
+    pay_idx = next(
+        i for i, n in enumerate(spec.nodes) if getattr(n, "irreversible", None)
+    )
+    _write_suspended(
+        "pay",
+        pay_idx,
+        values={"keyword": "milk"},
+        quoted=45.0,
+        cap=100.0,
+        # consented stays None — the gate never opened.
+    )
+    p = setup.load_suspended(channel.load_channel())
+    assert p is not None
+    h = _history()
+    _feed(h, p.advance(h), _sheet())  # verified sheet at the pay leg
+
+    with caplog.at_level("INFO"):
+        assert p.advance(h) is None  # money never fires blind
+    assert "without a confirmed total" in caplog.text
+
+
+def test_reconcile_hands_over_when_the_cart_never_converges(caplog) -> None:
+    # A stepper whose taps never change the read qty (sticky UI, wrong
+    # element) must exhaust `reconcile.MAX_ACTIONS` and hand over — the
+    # runaway backstop, not an infinite tap loop.
+    p = _arm_ledger()
+    h, step = _to_reconcile(p)
+
+    stuck = _cart_screen(("farm eggs", 1), ("lays chips", 1))  # egg stays short
+    with caplog.at_level("INFO"):
+        for _ in range(reconcile.MAX_ACTIONS + 1):
+            _feed(h, step, stuck)
+            step = p.advance(h)
+            if step is None:
+                break
+            assert step.tool_names() == ["note", "tap"]  # keeps stepping until spent
+    assert step is None
+    assert "cart not converging" in caplog.text
