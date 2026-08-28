@@ -27,10 +27,10 @@ import json
 import logging
 from typing import NotRequired, TypedDict
 
-from physiclaw.agent.engine.dto import Message, UserMessage
 from physiclaw.common import paths
 from physiclaw.common.bbox import inside
 from physiclaw.common.text import read_text, write_text
+from physiclaw.contract.dto import Message, UserMessage
 
 log = logging.getLogger(__name__)
 

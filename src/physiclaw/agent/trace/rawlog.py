@@ -6,6 +6,7 @@ from typing import Any
 
 from physiclaw.agent.trace import store
 from physiclaw.common.logger import iso_now, save_image
+from physiclaw.contract import wire
 
 log = logging.getLogger(__name__)
 
@@ -51,7 +52,8 @@ class RawLog:
 
     def write_request(self, turn: int, messages: list[dict]) -> None:
         self._turn = turn
-        self._emit("request", turn=turn, messages=self._scrub_images(messages))
+        scrubbed = wire.scrub_messages(messages, self._persist_image)
+        self._emit("request", turn=turn, messages=scrubbed)
 
     def write_response(
         self,
@@ -98,113 +100,3 @@ class RawLog:
         byte-count stub."""
         name = save_image(self._image_dir, self._turn, mime, b64_data)
         return f"images/{name}" if name else ""
-
-    def _scrub_images(self, messages: list[dict]) -> list[dict]:
-        """Copy of `messages` with inline base64 image data replaced by
-        a reference to an on-disk file under `images/<HHMMSS>_<mmm>_t<turn>.ext`
-        in the session dir. No cross-request dedup, by design: a screen still
-        in context is re-persisted each request it appears in (a fresh stamp
-        each time), so the frames sort chronologically on disk for debugging.
-
-        Handles two wire shapes (recognized at the block level, not the
-        provider level):
-
-          - OpenAI: `{"type": "image_url", "image_url": {"url": "data:..."}}`
-          - Anthropic: `{"type": "image", "source": {"type": "base64",
-            "media_type": "...", "data": "..."}}`
-
-        On decode failure, falls back to a byte-count stub so the raw
-        log still distinguishes an image from a tap result."""
-        out: list[dict] = []
-        for m in messages:
-            c = m.get("content")
-            if not isinstance(c, list):
-                out.append(m)
-                continue
-            new_c: list[dict] = []
-            for b in c:
-                if isinstance(b, dict):
-                    new_c.append(self._scrub_block(b))
-                else:
-                    new_c.append(b)
-            out.append({**m, "content": new_c})
-        return out
-
-    def _scrub_block(self, b: dict) -> dict:
-        """Scrub one content block; handles OpenAI `image_url`, Anthropic
-        `image`, and Anthropic `tool_result` (whose nested `content` may
-        itself contain image blocks). Pass-through for everything else
-        (text, tool_use, …)."""
-        bt = b.get("type")
-        if bt == "image_url":
-            url = (b.get("image_url") or {}).get("url", "")
-            if not url.startswith("data:"):
-                return b
-            head, _, data = url.partition(",")
-            mime = head[5:].partition(";")[0]
-            rel = self._persist_image(mime, data) if data else ""
-            scrubbed = rel or f"{head},<{len(data)}b unreadable>"
-            return {"type": "image_url", "image_url": {"url": scrubbed}}
-        if bt == "image":
-            src = b.get("source") or {}
-            if src.get("type") != "base64":
-                return b
-            data = src.get("data") or ""
-            mime = src.get("media_type") or "image/jpeg"
-            rel = self._persist_image(mime, data) if data else ""
-            scrubbed_src = (
-                {"type": "ref", "ref": rel}
-                if rel
-                else {"type": "base64", "byte_count": len(data)}
-            )
-            return {"type": "image", "source": scrubbed_src}
-        if bt == "tool_result":
-            inner = b.get("content")
-            if isinstance(inner, list):
-                scrubbed_inner = [
-                    self._scrub_block(x) if isinstance(x, dict) else x for x in inner
-                ]
-                return {**b, "content": scrubbed_inner}
-            return b
-        return b
-
-
-# ---------- reading wire.jsonl back ----------
-
-
-def iter_request_texts(path):
-    """Every ``(message_role, text)`` in a wire.jsonl's request records —
-    the reader beside the writer: `_scrub_block` above encodes the same
-    two wire shapes on the way out (top-level text blocks vs Anthropic
-    `tool_result` blocks whose `content` nests its own block list), so a
-    provider shape added there must be added here in the same edit.
-    Streams the file; skips unparseable lines."""
-    import json as _json
-
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            try:
-                rec = _json.loads(line)
-            except ValueError:
-                continue
-            if rec.get("kind") != "request":
-                continue
-            for msg in rec.get("messages", ()):
-                role = msg.get("role", "")
-                for text in _iter_texts(msg.get("content")):
-                    yield role, text
-
-
-def _iter_texts(content):
-    if isinstance(content, str):
-        yield content
-        return
-    if not isinstance(content, list):
-        return
-    for block in content:
-        if not isinstance(block, dict):
-            continue
-        if block.get("type") == "text":
-            yield block.get("text", "")
-        elif block.get("type") == "tool_result":
-            yield from _iter_texts(block.get("content"))

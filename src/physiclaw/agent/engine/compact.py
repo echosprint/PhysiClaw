@@ -30,7 +30,8 @@ import json
 import logging
 
 from physiclaw.agent.engine import memory
-from physiclaw.agent.engine.dto import (
+from physiclaw.common.listing import is_header, parse_row
+from physiclaw.contract.dto import (
     AssistantMessage,
     CollapsePolicy,
     ContentBlock,
@@ -41,7 +42,6 @@ from physiclaw.agent.engine.dto import (
     ToolResultMessage,
     UserMessage,
 )
-from physiclaw.common.listing import is_header, parse_row
 
 log = logging.getLogger(__name__)
 

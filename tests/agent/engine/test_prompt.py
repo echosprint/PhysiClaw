@@ -212,7 +212,7 @@ def test_render_tooling_skipped_for_provider_that_opts_out(
     class _NativeOnly:
         INLINE_TOOL_INDEX = False
 
-    from physiclaw.agent import provider as provider_pkg
+    from physiclaw import provider as provider_pkg
 
     monkeypatch.setattr(provider_pkg, "provider_class", lambda pid: _NativeOnly)
 
@@ -222,7 +222,7 @@ def test_render_tooling_skipped_for_provider_that_opts_out(
 def test_render_tooling_kept_for_unknown_provider(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from physiclaw.agent import provider as provider_pkg
+    from physiclaw import provider as provider_pkg
 
     monkeypatch.setattr(provider_pkg, "provider_class", lambda pid: None)
 
@@ -332,7 +332,7 @@ def test_render_examples_returns_non_empty_block() -> None:
 def test_render_reasoning_format_empty_when_provider_unknown(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from physiclaw.agent import provider as provider_pkg
+    from physiclaw import provider as provider_pkg
 
     monkeypatch.setattr(provider_pkg, "provider_class", lambda pid: None)
 
@@ -347,7 +347,7 @@ def test_render_reasoning_format_empty_when_fragment_blank(
         def system_prompt_fragment(cls) -> str:
             return ""
 
-    from physiclaw.agent.provider import registry
+    from physiclaw.provider import registry
 
     monkeypatch.setattr(registry, "provider_class", lambda pid: _FakeProvider)
 

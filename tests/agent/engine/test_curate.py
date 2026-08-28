@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from physiclaw.agent.engine import curate, pitfalls
-from physiclaw.agent.engine.dto import AssistantMessage, FinishReason
+from physiclaw.contract.dto import AssistantMessage, FinishReason
 
 
 class _FakeProvider:

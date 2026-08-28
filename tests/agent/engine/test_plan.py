@@ -22,7 +22,6 @@ from __future__ import annotations
 import pytest
 
 from physiclaw.agent.engine import plan as plan_mod
-from physiclaw.agent.engine.dto import UserMessage
 from physiclaw.agent.engine.plan import (
     COMPLETED,
     DEFAULT_SEED_STEP,
@@ -36,6 +35,7 @@ from physiclaw.agent.engine.plan import (
     Step,
     inject_tail,
 )
+from physiclaw.contract.dto import UserMessage
 
 # ---------- protocol constants ----------
 

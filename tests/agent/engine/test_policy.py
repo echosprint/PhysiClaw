@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from physiclaw.agent import layout
 from physiclaw.agent.engine import policy as policy_mod
-from physiclaw.agent.engine.dto import AssistantMessage, FinishReason, ToolCall, Usage
 from physiclaw.agent.engine.session import Session
 from physiclaw.common.config import CONFIG
+from physiclaw.contract.dto import AssistantMessage, FinishReason, ToolCall, Usage
 
 
 def _asst(tool_calls: list[ToolCall]) -> AssistantMessage:

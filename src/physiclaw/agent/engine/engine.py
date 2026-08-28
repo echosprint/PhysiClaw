@@ -26,23 +26,21 @@ messages, tails) lives in `assemble.py`, shared with the CLI dump.
 import asyncio
 import logging
 import time
-from functools import partial
 
-from physiclaw.agent.conductor import Conductor
-from physiclaw.agent.conductor import setup as conductor_setup
-from physiclaw.agent.conductor.micro import MicroCaller
 from physiclaw.agent.engine import assemble, curate, loop, prompt
-from physiclaw.agent.engine.dto import Message
+from physiclaw.agent.engine import plugins as plugin_loader
 from physiclaw.agent.engine.mcp_tool import get_mcp, list_tools_cached
 from physiclaw.agent.engine.policy import default_policies
 from physiclaw.agent.engine.runspec import EngineRun, Settings
 from physiclaw.agent.engine.session import Session
-from physiclaw.agent.provider import Provider, make_provider
 from physiclaw.agent.runtime import contract
 from physiclaw.agent.runtime.hook import Trigger
 from physiclaw.agent.runtime.sentinel import STUCK
 from physiclaw.agent.trace import RawLog, Trace, new_sid
 from physiclaw.common.config import CONFIG, parse_model_ref
+from physiclaw.contract.dto import Message
+from physiclaw.contract.plugin import SetupContext, TurnPlugin
+from physiclaw.provider import Provider, make_provider
 
 log = logging.getLogger(__name__)
 
@@ -94,38 +92,6 @@ async def run(triggers: list[Trigger], *, model_ref: str) -> contract.SessionOut
     )
 
 
-def _wire_micro(program, overture, provider, tr, rlog):
-    """The micro-caller for the conductor's decision calls — None when
-    nothing can need one: no program and no overture, or a pure-LEG
-    program (which must not pay for a second provider client).
-    `[conductor] micro_model` selects the cheap decision tier; the
-    caller builds that client lazily on the FIRST call (an overture that
-    cannot reach the thread never asks) and owns it — the session's
-    finally block closes it via `MicroCaller.aclose()`. Fail-open to the
-    session provider on any problem, at parse time or build time."""
-    if overture is None and (program is None or not program.needs_micro):
-        return None
-    factory = None
-    ref = CONFIG.conductor.micro_model
-    if ref:
-        try:
-            pid, mid = parse_model_ref(ref)
-            factory = partial(make_provider, pid, mid)
-        except Exception as e:
-            log.warning(
-                "conductor micro_model %r unusable (%s) — using the session model",
-                ref,
-                e,
-            )
-    return MicroCaller(
-        provider,
-        confidence_floor=CONFIG.conductor.micro_confidence,
-        tr=tr,
-        rlog=rlog,
-        owned_factory=factory,
-    )
-
-
 async def _run_session(
     triggers: list[Trigger],
     *,
@@ -141,7 +107,7 @@ async def _run_session(
 
     sid = new_sid()
     provider: Provider | None = None
-    micro_caller: MicroCaller | None = None
+    plugins: tuple[TurnPlugin, ...] = ()
     tr: Trace | None = None
     rlog: RawLog | None = None
     try:
@@ -167,13 +133,40 @@ async def _run_session(
         )
         mcp = await get_mcp()
         mcp_tools = await list_tools_cached()
-        # Conductor wake-time setup, fail-open throughout: a suspended or
-        # armed program, the activation trigger (parse_task fires once
-        # if a screen matches the channel thread), and the hidden
-        # qualified macro registry (every pack + channel on the
-        # activation path; narrower otherwise — see setup.session_setup).
-        # Nothing model-visible changes.
-        program, overture, hidden_macros = conductor_setup.session_setup()
+        # The provider client exists before plugin setup so the setup
+        # context can offer it (a plugin's decision calls fall back to
+        # the session model). Construction is cheap; nothing is sent
+        # until the first chat call.
+        provider = make_provider(provider_id, model_id)
+        # Turn-plugin wake-time setup, fail-open throughout: each
+        # config-listed plugin loads blindly and contributes its gated
+        # macros (dispatchable only on plugin-minted turns). Nothing
+        # model-visible changes. The conductor rides this seam; the
+        # engine no longer knows its name.
+        plugins = plugin_loader.load_plugins()
+        setup_ctx = SetupContext(
+            session_provider=provider,
+            events=tr,
+            wire=rlog,
+        )
+        gated_macros = {}
+        for plug in plugins:
+            try:
+                contribution = await plug.session_setup(setup_ctx)
+            except Exception:
+                log.exception("turn plugin setup crashed — plugin skipped")
+                continue
+            if contribution is not None:
+                # Last-wins on a cross-plugin name collision, but never
+                # silently — two plugins claiming one qualified macro is
+                # a config error worth a trace.
+                taken = gated_macros.keys() & contribution.gated_macros.keys()
+                if taken:
+                    log.warning(
+                        "gated macro name collision (last wins): %s",
+                        sorted(taken),
+                    )
+                gated_macros.update(contribution.gated_macros)
         # Built-in skills are inlined full-text into SYSTEM; user skills are
         # indexed and loaded on demand via the Skill tool — so only user
         # skills go into the local registry. The first-run screen-layout skill
@@ -182,11 +175,11 @@ async def _run_session(
         # CLI dump.
         bundle = assemble.build_prompt_bundle(
             provider_id,
-            pack_macros=hidden_macros or None,
+            pack_macros=gated_macros or None,
         )
-        # Full merged list goes to conductor.advance(tools=) for invocation;
-        # the inline `## Tooling` card pulls MCP names from AST so it
-        # stays complete even offline. Each source has one consumer.
+        # Full merged list rides `EngineRun.tool_schemas` to the provider
+        # call; the inline `## Tooling` card pulls MCP names from AST so
+        # it stays complete even offline. Each source has one consumer.
         tool_schemas = list(mcp_tools) + bundle.local_schemas
         schema_by_name = {s["name"]: s for s in tool_schemas}
         tr.write(
@@ -212,8 +205,6 @@ async def _run_session(
             bundle.system_prompt,
         )
 
-        provider = make_provider(provider_id, model_id)
-        micro_caller = _wire_micro(program, overture, provider, tr, rlog)
         prompt_hash = prompt.prefix_hash(bundle.system_prompt)
         rlog.write_session_start(
             provider=provider_id,
@@ -222,18 +213,14 @@ async def _run_session(
             tools=tool_schemas,
         )
         engine_run = EngineRun(
-            # The conductor owns only the turn loop's provider call:
+            # Plugins arbitrate only the turn loop's provider call:
             # curate's off-transcript pass and the finally-close below
-            # stay on the raw handle, so the conductor never intercepts
+            # stay on the raw handle, so a plugin never intercepts
             # side-calls of the very kind its playbooks emit.
             # Session-management wiring (collapse cadence, wire logging)
-            # comes straight off the provider — not the conductor's job.
-            conductor=Conductor(
-                provider,
-                program=program,
-                micro=micro_caller,
-                overture=overture,
-            ),
+            # comes straight off the provider — not a plugin's job.
+            plugins=plugins,
+            chat=provider.chat,
             collapse=provider.COLLAPSE,
             serialize_wire=provider.serialize_history,
             mcp=mcp,
@@ -285,8 +272,7 @@ async def _run_session(
         session.sentinel_recap = f"session crashed: {e}"
     finally:
         closers = [provider.aclose] if provider is not None else []
-        if micro_caller is not None:
-            closers.append(micro_caller.aclose)
+        closers += [plug.aclose for plug in plugins]
         for close in closers:
             try:
                 await close()

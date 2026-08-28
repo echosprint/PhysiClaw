@@ -11,7 +11,7 @@ loop.
 Two engines, one hook loop, one config knob:
 
   - `physiclaw`   — in-process tool-call loop (agent/engine/). Drives one
-                    of the providers in agent/provider/.
+                    of the providers in provider/.
   - `claude-code` — subprocess to Anthropic's `claude` CLI. Lives under
                     agent/claude/. Loaded lazily — if the package is
                     deleted, any `claude-code/...` ref errors out; the
@@ -35,10 +35,6 @@ import sys
 from functools import partial
 
 from physiclaw.agent.engine.mcp_tool import close_mcp
-from physiclaw.agent.provider import (
-    CLAUDE_CODE_ID,
-    in_process_provider_ids,
-)
 from physiclaw.agent.runtime import Runtime
 from physiclaw.common import paths
 from physiclaw.common.config import (
@@ -49,6 +45,10 @@ from physiclaw.common.config import (
 )
 from physiclaw.common.logger import setup_logging
 from physiclaw.common.proxy import normalize_proxy_env
+from physiclaw.provider import (
+    CLAUDE_CODE_ID,
+    in_process_provider_ids,
+)
 
 log = logging.getLogger(__name__)
 

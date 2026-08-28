@@ -23,8 +23,8 @@ def _input_screens(session: str | None, listing: Path | None, live: bool) -> lis
     """Screens from exactly one input source: a recorded session (suffix
     resolved via the shared `logs <suffix>` convention), a listing file,
     or one live peek."""
-    from physiclaw.agent.conductor import corpus
     from physiclaw.common.listing import Screen
+    from physiclaw.conductor import corpus
 
     if live:
         listings = [asyncio.run(_live_listing())]
@@ -68,7 +68,7 @@ def extract(
     out: Path = typer.Option(..., "--out", help="corpus JSONL to write"),
 ) -> None:
     """Dump a session's listings to a corpus file with '?' labels to edit."""
-    from physiclaw.agent.conductor import corpus
+    from physiclaw.conductor import corpus
 
     listings = corpus.session_listings(_resolve_sid(session))
     corpus.write_corpus(
@@ -91,10 +91,10 @@ def micro(
     """Run one decision micro-call over each input screen — the offline
     replay surface for tuning `[conductor] micro_confidence`. Prints the
     outcome, confidence, and token cost per screen."""
-    from physiclaw.agent.conductor.calls import CALLS, ESCALATE
-    from physiclaw.agent.conductor.micro import MicroCaller, build_request
-    from physiclaw.agent.provider import make_provider
     from physiclaw.common.config import CONFIG, model_ref, parse_model_ref
+    from physiclaw.conductor.calls import CALLS, ESCALATE
+    from physiclaw.conductor.micro import MicroCaller, build_request
+    from physiclaw.provider import make_provider
 
     if bool(criteria) == bool(question):
         exit_error("pass exactly one of --criteria (choose_item) / --question (decide)")
@@ -162,8 +162,8 @@ def match(
     live: bool = typer.Option(False, "--live", help="one peek via `physiclaw mcp`"),
 ) -> None:
     """Print the matcher's verdict for each input screen."""
-    from physiclaw.agent.conductor import pages
-    from physiclaw.agent.conductor.match import match_screen
+    from physiclaw.conductor import pages
+    from physiclaw.conductor.match import match_screen
 
     prints = pages.prints_for_app(app)
     if not prints:
@@ -204,7 +204,7 @@ def calibrate(
 
     Either way, writes `learned/pages/<app>.json` and prints the per-page
     report."""
-    from physiclaw.agent.conductor import capture, corpus, pages
+    from physiclaw.conductor import capture, corpus, pages
 
     decls = pages.scan_app_decls(app)
     if not decls:
@@ -281,7 +281,7 @@ def propose(
 ) -> None:
     """Suggest anchor declarations from screens — prune by eye into
     pages.yml."""
-    from physiclaw.agent.conductor.capture import propose_anchors
+    from physiclaw.conductor.capture import propose_anchors
 
     for i, screen in enumerate(_input_screens(session, listing, live)):
         candidates = propose_anchors(screen)

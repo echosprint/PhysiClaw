@@ -201,9 +201,18 @@ class AgentConfig:
     engine + provider; the second is the model id passed to that
     provider verbatim. Empty string means "use ``PHYSICLAW_MODEL`` env
     var, then fail loudly" — there is no universal default.
+
+    ``plugins`` lists the engine's turn plugins as comma-separated
+    ``module:factory`` paths (`contract.plugin.TurnPlugin`), asked in
+    order each turn before the LLM. Empty string (the default) means
+    the engine's built-in plugin set (`engine/plugins.py` owns that
+    default — this neutral layer names no plugin); ``"none"`` disables
+    them all, making every turn a plain provider call. The engine loads
+    these blindly and fail-open: it knows the protocol, not the names.
     """
 
     model: str = ""
+    plugins: str = ""
 
 
 @dataclass
@@ -476,6 +485,10 @@ _FIELD_COMMENTS: dict[tuple[str, str], str] = {
     ): "dump each snapshot frame (rotated, with bbox overlay)",
     ("server", "save_screenshots"): "dump every raw phone-own screenshot",
     ("server", "save_raw_camera"): "dump every raw camera frame at capture",
+    (
+        "agent",
+        "plugins",
+    ): "turn plugins, comma-separated module:factory; '' = built-in set, 'none' = off",
     ("memory", "default_log_entries"): "on-demand `read_logs` default size (max 200)",
     (
         "memory",

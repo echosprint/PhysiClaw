@@ -24,10 +24,10 @@ from physiclaw.agent.engine import (
     skill,
 )
 from physiclaw.agent.engine.builtin_tool import LocalTool
-from physiclaw.agent.engine.dto import Message, SystemMessage, UserMessage
 from physiclaw.agent.engine.session import Session
-from physiclaw.agent.macros import store as macro_store
 from physiclaw.agent.runtime.hook import Trigger
+from physiclaw.contract.dto import Message, SystemMessage, UserMessage
+from physiclaw.macros import store as macro_store
 
 
 @dataclass(slots=True)

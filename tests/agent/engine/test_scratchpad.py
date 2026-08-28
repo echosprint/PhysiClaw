@@ -15,9 +15,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from physiclaw.agent.engine.dto import UserMessage
 from physiclaw.agent.engine.scratchpad import MAX_CHARS, inject_tail, write
 from physiclaw.common.config import CONFIG
+from physiclaw.contract.dto import UserMessage
 
 
 def test_max_chars_tracks_config() -> None:

@@ -457,7 +457,7 @@ def _patch_doctor_environment(
     )
     mocker.patch.dict(
         "sys.modules",
-        {"physiclaw.agent.provider": fake_provider},
+        {"physiclaw.provider": fake_provider},
     )
 
     fake_grbl = MagicMock()
@@ -669,7 +669,7 @@ def test_probe_provider_deep_setup_error_returns_warn(mocker) -> None:
     fake_provider.make_provider.side_effect = ValueError("missing api key")
     mocker.patch.dict(
         "sys.modules",
-        {"physiclaw.agent.provider": fake_provider},
+        {"physiclaw.provider": fake_provider},
     )
 
     out = doctor_mod._probe_provider_deep("openai", "gpt-5")
@@ -689,7 +689,7 @@ def test_probe_provider_deep_chat_exception_returns_warn(mocker) -> None:
     fake_module.make_provider.return_value = fake_prov
     mocker.patch.dict(
         "sys.modules",
-        {"physiclaw.agent.provider": fake_module},
+        {"physiclaw.provider": fake_module},
     )
 
     out = doctor_mod._probe_provider_deep("openai", "gpt-5")
@@ -699,7 +699,7 @@ def test_probe_provider_deep_chat_exception_returns_warn(mocker) -> None:
 
 
 def test_probe_provider_deep_empty_reply_returns_warn(mocker) -> None:
-    from physiclaw.agent.engine.dto import (
+    from physiclaw.contract.dto import (
         AssistantMessage,
         FinishReason,
     )
@@ -717,7 +717,7 @@ def test_probe_provider_deep_empty_reply_returns_warn(mocker) -> None:
     fake_module.make_provider.return_value = fake_prov
     mocker.patch.dict(
         "sys.modules",
-        {"physiclaw.agent.provider": fake_module},
+        {"physiclaw.provider": fake_module},
     )
 
     out = doctor_mod._probe_provider_deep("openai", "gpt-5")
@@ -726,7 +726,7 @@ def test_probe_provider_deep_empty_reply_returns_warn(mocker) -> None:
 
 
 def test_probe_provider_deep_vision_check_fails(mocker) -> None:
-    from physiclaw.agent.engine.dto import (
+    from physiclaw.contract.dto import (
         AssistantMessage,
         FinishReason,
         Usage,
@@ -746,7 +746,7 @@ def test_probe_provider_deep_vision_check_fails(mocker) -> None:
     fake_module.make_provider.return_value = fake_prov
     mocker.patch.dict(
         "sys.modules",
-        {"physiclaw.agent.provider": fake_module},
+        {"physiclaw.provider": fake_module},
     )
 
     out = doctor_mod._probe_provider_deep("openai", "gpt-5")
@@ -756,7 +756,7 @@ def test_probe_provider_deep_vision_check_fails(mocker) -> None:
 
 
 def test_probe_provider_deep_success_with_usage(mocker) -> None:
-    from physiclaw.agent.engine.dto import (
+    from physiclaw.contract.dto import (
         AssistantMessage,
         FinishReason,
         Usage,
@@ -776,7 +776,7 @@ def test_probe_provider_deep_success_with_usage(mocker) -> None:
     fake_module.make_provider.return_value = fake_prov
     mocker.patch.dict(
         "sys.modules",
-        {"physiclaw.agent.provider": fake_module},
+        {"physiclaw.provider": fake_module},
     )
 
     out = doctor_mod._probe_provider_deep("openai", "gpt-5")
@@ -787,7 +787,7 @@ def test_probe_provider_deep_success_with_usage(mocker) -> None:
 
 
 def test_probe_provider_deep_success_no_usage(mocker) -> None:
-    from physiclaw.agent.engine.dto import (
+    from physiclaw.contract.dto import (
         AssistantMessage,
         FinishReason,
         Usage,
@@ -807,7 +807,7 @@ def test_probe_provider_deep_success_no_usage(mocker) -> None:
     fake_module.make_provider.return_value = fake_prov
     mocker.patch.dict(
         "sys.modules",
-        {"physiclaw.agent.provider": fake_module},
+        {"physiclaw.provider": fake_module},
     )
 
     out = doctor_mod._probe_provider_deep("openai", "gpt-5")

@@ -202,7 +202,7 @@ def _wants_tool_index(provider_id: str) -> bool:
     """Whether the active provider needs the inline `## Tooling` card.
     Unknown or unset provider → True (dumps and new vendors keep the
     redundant anchor; only vendors that opt out lose it)."""
-    from physiclaw.agent.provider import provider_class
+    from physiclaw.provider import provider_class
 
     cls = provider_class(provider_id)
     return cls is None or cls.INLINE_TOOL_INDEX
@@ -263,7 +263,7 @@ def _render_reasoning_format(provider_id: str) -> list[str]:
     """Provider-specific reasoning fragment (e.g. Qwen's `<think>` wrapper),
     pulled from the vendor class's `system_prompt_fragment()` classmethod.
     Empty when the provider doesn't override it."""
-    from physiclaw.agent.provider import provider_class
+    from physiclaw.provider import provider_class
 
     cls = provider_class(provider_id)
     if cls is None:

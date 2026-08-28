@@ -323,15 +323,15 @@ def _probe_provider_deep(provider_id: str, model_id: str) -> str:
     import asyncio
     import time
 
-    from physiclaw.agent.engine.dto import (
+    from physiclaw.agent.trace import brief
+    from physiclaw.contract.dto import (
         ImageBlock,
         Message,
         SystemMessage,
         TextBlock,
         UserMessage,
     )
-    from physiclaw.agent.provider import make_provider
-    from physiclaw.agent.trace import brief
+    from physiclaw.provider import make_provider
 
     try:
         prov = make_provider(provider_id, model_id)
@@ -579,7 +579,7 @@ def doctor(
     # Surface the active provider's key status. In `--deep` mode, send a
     # real `chat()` round-trip on the active provider (proves network +
     # auth + billing + model response).
-    from physiclaw.agent.provider import CLAUDE_CODE_ID, provider_key_status
+    from physiclaw.provider import CLAUDE_CODE_ID, provider_key_status
 
     if active_provider and active_provider != CLAUDE_CODE_ID:
         masked, source = provider_key_status(active_provider)

@@ -39,7 +39,6 @@ from physiclaw.agent.engine import (
     pitfalls,
     trajectory,
 )
-from physiclaw.agent.engine.dto import AssistantMessage, ToolCall
 from physiclaw.common.config import CONFIG
 from physiclaw.common.gesture_vocab import (
     NAV_TOOLS,
@@ -49,6 +48,7 @@ from physiclaw.common.gesture_vocab import (
     SWIPE,
     UNLOCK_PHONE,
 )
+from physiclaw.contract.dto import AssistantMessage, ToolCall
 
 if TYPE_CHECKING:
     from physiclaw.agent.engine.session import Session

@@ -8,15 +8,15 @@ import any of them.
 """
 
 from dataclasses import dataclass
-from typing import Callable
+from typing import Awaitable, Callable
 
-from physiclaw.agent.conductor import Conductor
 from physiclaw.agent.engine.builtin_tool import LocalTool
-from physiclaw.agent.engine.dto import CollapsePolicy, Message
 from physiclaw.agent.engine.mcp_tool import McpClient
 from physiclaw.agent.engine.policy import Policies
 from physiclaw.agent.trace import RawLog, Trace
 from physiclaw.common.config import CONFIG
+from physiclaw.contract.dto import AssistantMessage, CollapsePolicy, Message
+from physiclaw.contract.plugin import TurnPlugin
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,17 +59,22 @@ class Settings:
 
 @dataclass(slots=True)
 class EngineRun:
-    """One session's immutable wiring: conductor (orchestration — who
-    produces each turn), MCP client, tool surface, logging sinks,
-    settings, and the policy set. Threaded through the loop instead of a
-    parameter list so adding a dependency is a one-line change.
+    """One session's immutable wiring: turn plugins (arbitration — who
+    produces each turn), the provider's chat callable, MCP client, tool
+    surface, logging sinks, settings, and the policy set. Threaded
+    through the loop instead of a parameter list so adding a dependency
+    is a one-line change.
 
     `collapse` and `serialize_wire` are session-management wiring pulled
-    off the provider at construction — the conductor deliberately does
-    not carry them (orchestration only), and the loop deliberately has
-    no provider handle (only the conductor calls the provider)."""
+    off the provider at construction — a plugin deliberately does not
+    carry them (arbitration only), and `chat` is the loop's ONLY
+    provider handle: every other provider use (curate, close) stays in
+    the session lifecycle."""
 
-    conductor: Conductor
+    plugins: tuple[TurnPlugin, ...]
+    # The session provider's chat call — the fallback when every plugin
+    # passes (and the whole story when `plugins` is empty).
+    chat: Callable[[list[Message], list[dict]], Awaitable[AssistantMessage]]
     # Vendor-specific compaction cadence (provider.COLLAPSE).
     collapse: CollapsePolicy
     # Wire form of a request for the raw log (provider.serialize_history).

@@ -16,20 +16,19 @@ import logging
 import time
 from dataclasses import dataclass
 
-from physiclaw.agent.conductor import Conductor
 from physiclaw.agent.engine import assemble, compact, memory, trajectory
 from physiclaw.agent.engine.dispatch import dispatch
-from physiclaw.agent.engine.dto import (
+from physiclaw.agent.engine.runspec import EngineRun
+from physiclaw.agent.engine.session import Session
+from physiclaw.agent.runtime.sentinel import FAIL, STUCK
+from physiclaw.agent.trace import Trace
+from physiclaw.contract.dto import (
     AssistantMessage,
     FinishReason,
     Message,
     UserMessage,
 )
-from physiclaw.agent.engine.runspec import EngineRun
-from physiclaw.agent.engine.session import Session
-from physiclaw.agent.provider import ProviderError, ProviderTransientError
-from physiclaw.agent.runtime.sentinel import FAIL, STUCK
-from physiclaw.agent.trace import Trace
+from physiclaw.provider import ProviderError, ProviderTransientError
 
 log = logging.getLogger(__name__)
 
@@ -64,15 +63,17 @@ async def drive(run: EngineRun, session: Session, messages: list[Message]) -> No
     Each turn runs a fixed pipeline of phase helpers; the control flow between
     them stays here so it's auditable in one place:
       1. `_prepare_request`    — advance clocks, pin tails, log the request.
-      2. `_call_provider`      — conductor advance with retry; None ⇒ STUCK, return.
+      2. `_call_provider`      — plugin arbitration, then the provider
+                                 with retry; None ⇒ STUCK, return.
       3. `_enforce_shape`      — finish_reason + [note, one-other]; may RETRY/ABORT.
       4. gates observe_turn    — accumulate per-turn evidence (memory cues).
       5. `_apply_turn_gates`   — the policy gates in declared order; may RETRY.
       6. `_dispatch_turn`      — run the tool_calls, append their results.
       7. `_finalize_turn`      — snapshot trajectory, compact, reset gates.
 
-    A conductor-synthesized turn (armed playbook) skips 3–5 — those judge
-    model output — and dispatches under `session.synthesized_turn`.
+    A plugin-synthesized turn (e.g. the conductor's playbook walk) skips
+    3–5 — those judge model output — and dispatches under
+    `session.synthesized_turn`.
     """
     state = _LoopState()
     for turn in range(run.settings.max_turns):
@@ -95,7 +96,7 @@ async def drive(run: EngineRun, session: Session, messages: list[Message]) -> No
         messages.append(asst)
         called = asst.tool_names()
 
-        # A synthesized turn is the conductor's own output, not the
+        # A synthesized turn is a plugin's own output, not the
         # model's: the shape is correct by construction and the turn
         # gates' judgments (plan discipline, checkpoints, stuck
         # reflection) address model behavior — skip both. Dispatch
@@ -248,14 +249,16 @@ async def _call_provider(
     request_messages: list[Message],
     turn: int,
 ) -> AssistantMessage | None:
-    """Ask the conductor for the turn (transient-retry) — a synthesized
-    playbook turn or a provider call — log the response, and return the
-    AssistantMessage. When retries exhaust: mark the session STUCK, trace
-    it, and return None — the caller returns from the loop."""
+    """Ask the plugins, then the provider, for the turn (transient-retry
+    on the provider only) — a synthesized plugin turn or a provider call
+    — log the response, and return the AssistantMessage. When retries
+    exhaust: mark the session STUCK, trace it, and return None — the
+    caller returns from the loop."""
     t0 = time.perf_counter()
     try:
         asst = await _advance_with_retry(
-            run.conductor,
+            run.plugins,
+            run.chat,
             request_messages,
             run.tool_schemas,
             attempts=run.settings.provider_retry_attempts,
@@ -517,18 +520,35 @@ def _finalize_turn(
 
 
 async def _advance_with_retry(
-    conductor: Conductor,
+    plugins,
+    chat,
     messages: list[Message],
     tools: list[dict],
     *,
     attempts: int,
     backoff: float,
 ) -> AssistantMessage:
-    """Retry transient errors only (principle 3: permanent 4xx fails fast)."""
+    """Plugin arbitration, then the provider with transient-retry.
+
+    Plugins are asked in registration order; the first to return a turn
+    has spoken and the provider is never called (arbitration, not a
+    chain — see `contract.plugin`). The protocol says a plugin never
+    raises; the wrapper here is the seam's own belt: a plugin bug must
+    degrade to "the LLM speaks", not kill the session. Only the provider
+    call retries — transient errors only (principle 3: permanent 4xx
+    fails fast)."""
+    for plug in plugins:
+        try:
+            turn = await plug.advance(messages)
+        except Exception:
+            log.exception("turn plugin advance crashed — passing to the next")
+            turn = None
+        if turn is not None:
+            return turn
     last_err: Exception | None = None
     for attempt in range(1, attempts + 1):
         try:
-            return await conductor.advance(messages, tools)
+            return await chat(messages, tools)
         except ProviderTransientError as e:
             last_err = e
             if attempt < attempts:

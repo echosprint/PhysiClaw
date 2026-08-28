@@ -20,7 +20,6 @@ import pytest
 from freezegun import freeze_time
 
 from physiclaw.agent import trace
-from physiclaw.agent.engine.dto import ImageBlock, TextBlock
 from physiclaw.agent.trace import (
     RawLog,
     Trace,
@@ -31,6 +30,8 @@ from physiclaw.agent.trace import (
     format_call_result,
 )
 from physiclaw.common import paths
+from physiclaw.contract import wire
+from physiclaw.contract.dto import ImageBlock, TextBlock
 
 
 @pytest.fixture(autouse=True)
@@ -463,7 +464,7 @@ def test_rawlog_close_is_idempotent(_trace_dirs: Path) -> None:
     log.close()
 
 
-# ---------- RawLog._scrub_images / _scrub_block ----------
+# ---------- the wire scrub codec, through RawLog's persist ----------
 
 
 def test_rawlog_scrubs_openai_image_url_data_to_disk(_trace_dirs: Path) -> None:
@@ -483,7 +484,7 @@ def test_rawlog_scrubs_openai_image_url_data_to_disk(_trace_dirs: Path) -> None:
         }
     ]
 
-    out = log._scrub_images(messages)
+    out = wire.scrub_messages(messages, log._persist_image)
 
     # The image_url is replaced with a session-relative turn-tagged path
     # (turn defaults to -1 when scrubbing outside write_request).
@@ -513,7 +514,7 @@ def test_rawlog_scrubs_anthropic_image_block_to_ref(_trace_dirs: Path) -> None:
         }
     ]
 
-    out = log._scrub_images(messages)
+    out = wire.scrub_messages(messages, log._persist_image)
 
     src = out[0]["content"][0]["source"]
     assert src["type"] == "ref"
@@ -548,7 +549,7 @@ def test_rawlog_scrubs_anthropic_tool_result_inner_content(_trace_dirs: Path) ->
         }
     ]
 
-    out = log._scrub_images(messages)
+    out = wire.scrub_messages(messages, log._persist_image)
 
     inner = out[0]["content"][0]["content"]
     assert inner[0] == {"type": "text", "text": "caption"}
@@ -564,7 +565,7 @@ def test_rawlog_passes_through_non_data_image_url(_trace_dirs: Path) -> None:
         ],
     }
 
-    out = log._scrub_images([msg])
+    out = wire.scrub_messages([msg], log._persist_image)
 
     assert out[0]["content"][0]["image_url"]["url"] == "https://x/img.jpg"
 
@@ -580,7 +581,7 @@ def test_rawlog_passes_through_non_base64_anthropic_image(
         ],
     }
 
-    out = log._scrub_images([msg])
+    out = wire.scrub_messages([msg], log._persist_image)
 
     assert out[0]["content"][0]["source"]["type"] == "url"
 
@@ -603,7 +604,7 @@ def test_rawlog_falls_back_to_byte_count_stub_on_decode_failure(
         ],
     }
 
-    out = log._scrub_images([msg])
+    out = wire.scrub_messages([msg], log._persist_image)
 
     # base64.b64decode with validate=False is permissive — won't raise
     # on most strings. Confirm we end up with either a ref or a stub
@@ -618,7 +619,7 @@ def test_rawlog_passes_through_messages_with_string_content(
     log = RawLog("s")
     msg = {"role": "user", "content": "plain string"}
 
-    out = log._scrub_images([msg])
+    out = wire.scrub_messages([msg], log._persist_image)
 
     assert out == [msg]
 
@@ -629,7 +630,7 @@ def test_rawlog_passes_through_unknown_block_types(
     log = RawLog("s")
     msg = {"role": "user", "content": [{"type": "tool_use", "name": "tap"}]}
 
-    out = log._scrub_images([msg])
+    out = wire.scrub_messages([msg], log._persist_image)
 
     assert out[0]["content"][0] == {"type": "tool_use", "name": "tap"}
 
@@ -645,7 +646,7 @@ def test_rawlog_empty_data_field_returns_unreadable_stub(
         ],
     }
 
-    out = log._scrub_images([msg])
+    out = wire.scrub_messages([msg], log._persist_image)
 
     url = out[0]["content"][0]["image_url"]["url"]
     assert "unreadable" in url

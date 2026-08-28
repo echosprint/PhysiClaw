@@ -58,7 +58,7 @@ def brief_content(content: Any) -> str:
     blocks list (raw dicts). Handles both because `dispatch.dispatch`
     summarizes after MCP→DTO conversion, but tools that bypass that path
     still pass raw blocks through."""
-    from physiclaw.agent.engine.dto import ImageBlock, TextBlock
+    from physiclaw.contract.dto import ImageBlock, TextBlock
 
     if isinstance(content, str):
         return brief(content, 80)

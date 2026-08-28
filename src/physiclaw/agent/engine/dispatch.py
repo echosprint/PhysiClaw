@@ -16,23 +16,23 @@ into an error ToolResult.
 import logging
 import time
 
-from physiclaw.agent.engine.dto import (
-    ContentBlock,
-    TextBlock,
-    ToolCall,
-    ToolResultMessage,
-)
 from physiclaw.agent.engine.policy import DispatchGuard
 from physiclaw.agent.engine.runspec import EngineRun
 from physiclaw.agent.engine.session import Session
 from physiclaw.agent.engine.validator import ValidationError, validate_arguments
-from physiclaw.agent.provider import mcp_blocks_to_content_blocks
 from physiclaw.agent.trace import (
     brief_content,
     format_call_args,
     format_call_result,
 )
 from physiclaw.common import verdict
+from physiclaw.contract.dto import (
+    ContentBlock,
+    TextBlock,
+    ToolCall,
+    ToolResultMessage,
+)
+from physiclaw.provider import mcp_blocks_to_content_blocks
 
 log = logging.getLogger(__name__)
 

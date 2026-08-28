@@ -42,7 +42,7 @@ from physiclaw.cli._format import exit_error, next_hint, ok, section, warn
 from physiclaw.common import config as _config
 
 # Provider package imports happen inside command bodies — pulling
-# `agent.provider` at module load drags httpx (~80ms) into every
+# `physiclaw.provider` at module load drags httpx (~80ms) into every
 # `physiclaw --help` invocation.
 
 # Provider-id aliases for discovery cache + API key sourcing.
@@ -50,7 +50,7 @@ from physiclaw.common import config as _config
 # claude-code routes through the `claude` CLI, which talks to the
 # Anthropic API — its model ids and key live under anthropic.
 # Hardcoded (rather than imported as `CLAUDE_CODE_ID`) to keep this
-# module's load cost independent of `agent.provider`.
+# module's load cost independent of `physiclaw.provider`.
 _PROVIDER_ALIAS: dict[str, str] = {
     "claude-code": "anthropic",
 }
@@ -64,8 +64,8 @@ def _discovery_source(provider_id: str) -> str:
 
 def _known_provider_ids() -> tuple[str, ...]:
     """All provider ids the CLI accepts — in-process + alias keys.
-    Lazy-imports `agent.provider` so `physiclaw --help` stays fast."""
-    from physiclaw.agent.provider import in_process_provider_ids
+    Lazy-imports `physiclaw.provider` so `physiclaw --help` stays fast."""
+    from physiclaw.provider import in_process_provider_ids
 
     return (*in_process_provider_ids(), *_PROVIDER_ALIAS.keys())
 
@@ -87,7 +87,7 @@ def _key_config_path(provider_id: str) -> str:
 def _format_key_row(provider_id: str, *, indent: int = 2) -> str:
     """One-line key status for a provider, masked. Resolution lives in
     `provider.provider_key_status` — same source the runtime uses."""
-    from physiclaw.agent.provider import provider_key_status
+    from physiclaw.provider import provider_key_status
 
     pad = " " * indent
     masked, source = provider_key_status(provider_id)
@@ -140,7 +140,7 @@ def _list(
     `claude-code` reuses anthropic's catalog — the `claude` CLI talks to
     the Anthropic API, so its accepted model ids are anthropic's.
     """
-    from physiclaw.agent.provider import discovered
+    from physiclaw.provider import discovered
 
     known_all = _known_provider_ids()
     if provider is not None and provider not in known_all:
@@ -168,7 +168,7 @@ def _use_impl(ref: str) -> None:
     """Switch the active model — validates the `provider/model` ref
     against the discovery cache and writes to `[agent] model`. Run
     `physiclaw models discover <provider>` first if the cache is empty."""
-    from physiclaw.agent.provider import discovered
+    from physiclaw.provider import discovered
 
     if "/" not in ref:
         exit_error(
@@ -277,7 +277,7 @@ def _fetch_live_models(provider: str) -> list[dict]:
     on any failure (caller decides whether fatal)."""
     import asyncio
 
-    from physiclaw.agent.provider import provider_class
+    from physiclaw.provider import provider_class
 
     cls = provider_class(provider)
     if cls is None:
@@ -306,7 +306,7 @@ def _print_live_models_table(
     Diverges only for aliases like `claude-code → anthropic`, where the
     user typed `claude-code` and should see that name echoed back.
     """
-    from physiclaw.agent.provider import discovered
+    from physiclaw.provider import discovered
 
     discovered.save(provider, models)
     label = display or provider
@@ -328,7 +328,7 @@ def _keys() -> None:
     """List every provider's API-key status (masked, with source —
     env var or config file). Mirrors `BaseProvider._api_key()`
     resolution so what's shown is what the server will use."""
-    from physiclaw.agent.provider import in_process_provider_ids
+    from physiclaw.provider import in_process_provider_ids
 
     typer.echo(section("Provider API keys"))
     for pid in in_process_provider_ids():

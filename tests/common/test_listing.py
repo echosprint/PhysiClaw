@@ -311,7 +311,7 @@ def test_macro_screen_consumption_agrees_with_the_codec() -> None:
     """`Screen.read` — what region-scoped macro guards match against —
     pulls the same labels and bboxes out of a composed listing that the
     codec decodes: consumer and producer share one format."""
-    from physiclaw.agent.macros.model import Screen
+    from physiclaw.macros.model import Screen
 
     screen = Screen.read(format_elements(_ELEMENTS))
 

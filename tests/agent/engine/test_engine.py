@@ -39,10 +39,10 @@ from physiclaw.agent.engine import (
 from physiclaw.agent.engine import (
     skill as skill_mod,
 )
-from physiclaw.agent.engine.dto import UserMessage
 from physiclaw.agent.engine.session import Session
 from physiclaw.agent.runtime.hook import Trigger
 from physiclaw.agent.runtime.sentinel import DONE, IDLE, STUCK, WAIT
+from physiclaw.contract.dto import UserMessage
 
 # ---------- _run_session ----------
 

@@ -4,7 +4,7 @@ Mirrors the macros CLI's shapes throughout: `init` prints the next
 steps, `check` is the all-or-nothing gate with valid-is-not-live
 warnings, and `run` rehearses one playbook against the live server the
 way `macros run` rehearses one macro — the test you do BEFORE enabling.
-The scaffolding itself lives in `agent/conductor/scaffold.py` (the
+The scaffolding itself lives in `conductor/scaffold.py` (the
 `store.init_macro` split: the CLI only prints).
 
 Nothing here writes cross-wake state. A rehearsal drives the phone now
@@ -26,7 +26,7 @@ from physiclaw.cli._format import (
 )
 
 if TYPE_CHECKING:
-    from physiclaw.agent.conductor.playbook import Pack, PlaybookEntry
+    from physiclaw.conductor.playbook import Pack, PlaybookEntry
 
 playbooks_app = typer.Typer(no_args_is_help=True)
 
@@ -37,9 +37,9 @@ def init(
 ) -> None:
     """Scaffold a new app pack: pages.yml, an example playbook, and an
     example pack macro — all parse-clean, all disabled."""
-    from physiclaw.agent.conductor import scaffold
-    from physiclaw.agent.conductor.pages import CHANNEL_APP, IOS_APP, THREAD_PAGE
-    from physiclaw.agent.conductor.playbook import PlaybookError
+    from physiclaw.conductor import scaffold
+    from physiclaw.conductor.pages import CHANNEL_APP, IOS_APP, THREAD_PAGE
+    from physiclaw.conductor.playbook import PlaybookError
 
     try:
         root = scaffold.init_pack(app)
@@ -76,8 +76,8 @@ def init(
 @playbooks_app.command("list")
 def list_cmd() -> None:
     """List every pack and its playbooks: enabled, disabled, or invalid."""
-    from physiclaw.agent.conductor import playbook as pb
-    from physiclaw.agent.conductor import scaffold
+    from physiclaw.conductor import playbook as pb
+    from physiclaw.conductor import scaffold
 
     scaffold.ensure_format_readme()
     apps = pb.list_apps()
@@ -122,7 +122,7 @@ def run(
     waits for your reply. Works while the playbook is disabled — rehearse
     first, enable after. Nothing is persisted: a walk that suspends here
     stops instead of leaving a file for the next wake."""
-    from physiclaw.agent.conductor.playbook import PlaybookError
+    from physiclaw.conductor.playbook import PlaybookError
 
     app, _, name = ref.partition("/")
     if not app or not name:
@@ -144,8 +144,8 @@ def run(
 def check() -> None:
     """Validate every pack: pages, pack macros, playbooks. Exit 1 if any
     is invalid."""
-    from physiclaw.agent.conductor import playbook as pb
-    from physiclaw.agent.conductor import scaffold
+    from physiclaw.conductor import playbook as pb
+    from physiclaw.conductor import scaffold
 
     scaffold.ensure_format_readme()
     apps = pb.list_apps()
@@ -158,8 +158,8 @@ def check() -> None:
 
 def _check_app(app: str) -> bool:
     """Report one pack; True when anything in it is invalid."""
-    from physiclaw.agent.conductor import playbook as pb
-    from physiclaw.agent.conductor import setup as conductor_setup
+    from physiclaw.conductor import playbook as pb
+    from physiclaw.conductor import setup as conductor_setup
 
     try:
         pack = pb.load_pack(app)
@@ -205,7 +205,7 @@ def _report_not_live(
     which playbooks the boot will not offer, and why — disabled files,
     and referenced pack macros that are themselves disabled. Rehearse
     them (`playbooks run`), then enable."""
-    from physiclaw.agent.conductor.playbook import disabled_leg_macros
+    from physiclaw.conductor.playbook import disabled_leg_macros
 
     if disabled:
         typer.echo(
@@ -248,12 +248,12 @@ async def _rehearse(app: str, name: str, values: dict[str, str]) -> str:
     exactly the conductor's contract — ask the Program for a turn,
     dispatch its one action, feed the result back — so a rehearsal
     exercises the real walk rather than a simulation of it."""
-    from physiclaw.agent.conductor import channel as channel_mod
-    from physiclaw.agent.conductor import setup as conductor_setup
-    from physiclaw.agent.conductor.ledger import check_ledger_value
-    from physiclaw.agent.conductor.micro import DecisionRequest
-    from physiclaw.agent.engine.dto import SystemMessage, ToolResultMessage, UserMessage
     from physiclaw.agent.engine.mcp_tool import McpClient
+    from physiclaw.conductor import channel as channel_mod
+    from physiclaw.conductor import setup as conductor_setup
+    from physiclaw.conductor.ledger import check_ledger_value
+    from physiclaw.conductor.micro import DecisionRequest
+    from physiclaw.contract.dto import SystemMessage, ToolResultMessage, UserMessage
 
     spec, pack = conductor_setup.load_spec(app, name, require_live=False)
     values = conductor_setup.resolve_inputs(spec, values)
@@ -293,7 +293,7 @@ async def _rehearse(app: str, name: str, values: dict[str, str]) -> str:
                     # rehearsal has no later wake, and `_suspend` already
                     # wrote the file — drop it so it cannot ambush the
                     # next real session.
-                    from physiclaw.agent.conductor.suspension import clear_suspended
+                    from physiclaw.conductor.suspension import clear_suspended
 
                     clear_suspended()
                     return "walk suspended waiting on you — suspension dropped"
@@ -318,8 +318,8 @@ async def _dispatch(mcp, call, pack: "Pack", app: str) -> tuple[str, bool]:
     connection step by step), everything else is a plain MCP call. The
     reply text is what the Program reads a screen out of, so both arms
     must hand back the same listing shape."""
-    from physiclaw.agent.macros import runner as macro_runner
     from physiclaw.common import gesture_vocab, verdict
+    from physiclaw.macros import runner as macro_runner
 
     try:
         if call.name == gesture_vocab.RUN_MACRO:
@@ -342,9 +342,9 @@ def _micro_caller():
     """The decision channel a rehearsal needs — same resolution as the
     engine's (`[conductor] micro_model`, else the session model), so a
     rehearsal spends the model a real wake would."""
-    from physiclaw.agent.conductor.micro import MicroCaller
-    from physiclaw.agent.provider import make_provider
     from physiclaw.common.config import CONFIG, model_ref, parse_model_ref
+    from physiclaw.conductor.micro import MicroCaller
+    from physiclaw.provider import make_provider
 
     try:
         ref = CONFIG.conductor.micro_model or model_ref()

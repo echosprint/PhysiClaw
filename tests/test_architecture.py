@@ -130,33 +130,104 @@ def test_common_is_a_leaf() -> None:
 # The agent packages that ARE the engine or drive it directly — they may
 # import engine internals freely. Everything else under `agent/`
 # (provider, trace, layout, and whatever lands next) is shared across
-# runtimes: its only legal engine edge is the type vocabulary
-# `engine.dto` (safe because `engine/__init__` is deliberately lazy).
-# Stated as the exception set so a new shared package is guarded from
-# birth, with no test edit to remember.
+# runtimes: the type vocabulary they used to take from `engine.dto` now
+# lives in `physiclaw.contract`, so they have NO legal engine edge at
+# all. Stated as the exception set so a new shared package is guarded
+# from birth, with no test edit to remember.
 _ENGINE_RUNTIMES = frozenset({"engine", "claude", "hooks", "runtime"})
 
 
-def test_shared_agent_packages_import_only_dto_from_engine() -> None:
-    """Anything under `agent/` that isn't an engine runtime imports at
-    most `engine.dto` from the engine — engine behavior stays out of the
-    shared packages (shared behavior belongs in `common`, e.g.
-    `common.image`). Bare `from physiclaw.agent.engine import X`
-    resolves to the package here and fails too: import dto by its full
-    path."""
+def test_shared_agent_packages_do_not_import_the_engine() -> None:
+    """Anything under `agent/` that isn't an engine runtime imports
+    nothing from the engine — the message shapes live in
+    `physiclaw.contract.dto`, engine behavior stays in the engine, and
+    shared behavior belongs in `common` (e.g. `common.image`)."""
     bad = []
     for pkg_dir in sorted((PKG_ROOT / "agent").iterdir()):
         if not pkg_dir.is_dir() or pkg_dir.name in _ENGINE_RUNTIMES | {"__pycache__"}:
             continue
-        bad += [
-            v
-            for v in _violations(f"agent/{pkg_dir.name}", "physiclaw.agent.engine")
-            if not v.endswith("-> physiclaw.agent.engine.dto")
-        ]
+        bad += _violations(f"agent/{pkg_dir.name}", "physiclaw.agent.engine")
     assert not bad, (
-        "shared agent packages may import only physiclaw.agent.engine.dto "
-        "from the engine:\n" + "\n".join(bad)
+        "shared agent packages must not import the engine "
+        "(message shapes are physiclaw.contract.dto):\n" + "\n".join(bad)
     )
+
+
+# ─── The plugin seam: conductor / contract / macros / provider ───────
+#
+# The conductor is a peer of the agent behind the turn-plugin seam
+# (`contract.plugin`): the engine loads it from a config-listed dotted
+# path and knows the protocol, never the name. These allowlists pin
+# each package's TOTAL first-party import surface so no edge grows back
+# silently; the two directional guards below them are the seam itself.
+
+_EDGE_ALLOWLISTS = {
+    # package dir → allowed physiclaw import prefixes (self always allowed)
+    # contract may name macro types (SessionSetup.gated_macros) — data
+    # shapes only, never agent or conductor (both import contract).
+    "contract": ("physiclaw.common", "physiclaw.macros.model"),
+    "macros": ("physiclaw.common",),
+    "provider": (
+        "physiclaw.common",
+        "physiclaw.contract",
+    ),
+    "conductor": (
+        "physiclaw.common",
+        "physiclaw.contract",
+        "physiclaw.macros",
+        "physiclaw.provider",
+    ),
+}
+
+
+def test_package_edge_allowlists() -> None:
+    """Each seam package imports only its pinned prefixes."""
+    bad: list[str] = []
+    for pkg, allowed in _EDGE_ALLOWLISTS.items():
+        prefixes = (*allowed, "physiclaw." + pkg)
+        for f in _files(pkg):
+            for mod in _imported_modules(f):
+                if mod.startswith("physiclaw") and not any(
+                    mod == p or mod.startswith(p + ".") for p in prefixes
+                ):
+                    bad.append(f"{f.relative_to(SRC_ROOT)} -> {mod}")
+    assert not bad, "migration allowlist violated:\n" + "\n".join(bad)
+
+
+def test_agent_does_not_import_the_conductor() -> None:
+    """The seam's own rule: the agent reaches the conductor ONLY through
+    the plugin loader's dotted-path import (`[agent] plugins` — a config
+    string, invisible to this AST scan by design). A static import
+    anywhere under `agent/` would re-couple what the seam decoupled. The
+    reverse direction is covered by the conductor's allowlist above; the
+    CLI is the composition root and may import both."""
+    bad = _violations("agent", "physiclaw.conductor")
+    assert not bad, "agent must not import the conductor:\n" + "\n".join(bad)
+
+
+def test_agent_does_not_touch_conductor_owned_storage() -> None:
+    """Data ownership across the seam: `playbooks/` (packs, playbooks,
+    suspended.json) belongs to the conductor; the agent must reach that
+    state only through the plugin protocol, never the disk. Scanned as
+    identifiers (`paths.playbooks_dir` / `suspended` attribute or name
+    references), so comments don't count but any code path does."""
+    owned = {"playbooks_dir", "suspended_path", "clear_suspended", "suspended_ref"}
+    bad: list[str] = []
+    for f in _files("agent"):
+        tree = _strip_type_checking(
+            ast.parse(f.read_text(encoding="utf-8"), filename=str(f))
+        )
+        for node in ast.walk(tree):
+            name = (
+                node.attr
+                if isinstance(node, ast.Attribute)
+                else node.id
+                if isinstance(node, ast.Name)
+                else None
+            )
+            if name in owned:
+                bad.append(f"{f.relative_to(SRC_ROOT)} -> {name}")
+    assert not bad, "agent must not touch conductor-owned storage:\n" + "\n".join(bad)
 
 
 # ─── Intra-core layering ─────────────────────────────────────

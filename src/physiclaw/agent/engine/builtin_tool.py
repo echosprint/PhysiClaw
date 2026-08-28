@@ -26,10 +26,10 @@ from physiclaw.agent.engine.job_store import (
     load_jobs,
 )
 from physiclaw.agent.engine.session import Session
-from physiclaw.agent.macros import runner as macro_runner
-from physiclaw.agent.macros.model import Macro
 from physiclaw.agent.runtime.sentinel import IDLE, STATUSES
 from physiclaw.common import gesture_vocab
+from physiclaw.macros import runner as macro_runner
+from physiclaw.macros.model import Macro
 
 # A handler returns either plain text, or raw MCP-style blocks (run_macro's
 # step log + final view) — dispatch routes a block list through the same

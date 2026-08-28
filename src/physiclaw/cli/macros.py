@@ -1,6 +1,6 @@
 """``physiclaw macros`` — author, rehearse, and track gesture macros.
 
-The user's side of `agent.macros`: `init` scaffolds one, `list` shows
+The user's side of `physiclaw.macros`: `init` scaffolds one, `list` shows
 what's on disk, `check` lints every ``MACRO.yml`` (printing exactly why a
 file is excluded), `runs` replays a past run's per-step log,
 `run` rehearses one macro against the live server — the mandatory test
@@ -18,11 +18,6 @@ from typing import Annotated
 
 import typer
 
-from physiclaw.agent.macros import runlog as macro_runlog
-from physiclaw.agent.macros import runner as macro_runner
-from physiclaw.agent.macros import stats as macro_stats
-from physiclaw.agent.macros import store as macro_store
-from physiclaw.agent.macros.model import Macro, MacroError
 from physiclaw.cli._format import (
     exit_error,
     ok,
@@ -34,6 +29,11 @@ from physiclaw.cli._format import (
 from physiclaw.common import paths, verdict
 from physiclaw.common.config import CONFIG
 from physiclaw.common.text import read_text
+from physiclaw.macros import runlog as macro_runlog
+from physiclaw.macros import runner as macro_runner
+from physiclaw.macros import stats as macro_stats
+from physiclaw.macros import store as macro_store
+from physiclaw.macros.model import Macro, MacroError
 
 macros_app = typer.Typer(
     no_args_is_help=True,

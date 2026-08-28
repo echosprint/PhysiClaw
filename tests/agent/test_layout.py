@@ -224,7 +224,7 @@ def test_tail_reminder_empty_when_all_captured() -> None:
 
 
 def test_inject_tail_appends_reminder_when_incomplete() -> None:
-    from physiclaw.agent.engine.dto import UserMessage
+    from physiclaw.contract.dto import UserMessage
 
     out = layout.inject_tail([])
 

@@ -20,9 +20,9 @@ fail-open: a parse error or empty result leaves the list untouched.
 import logging
 
 from physiclaw.agent.engine import pitfalls
-from physiclaw.agent.engine.dto import SystemMessage, UserMessage
 from physiclaw.common.config import CONFIG
 from physiclaw.common.text import json_span
+from physiclaw.contract.dto import SystemMessage, UserMessage
 
 log = logging.getLogger(__name__)
 

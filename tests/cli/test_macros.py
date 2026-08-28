@@ -8,12 +8,12 @@ import re
 import typer
 from typer.testing import CliRunner
 
-from physiclaw.agent.macros import runlog as macro_runlog
-from physiclaw.agent.macros import runner as macro_runner
-from physiclaw.agent.macros import stats as macro_stats
 from physiclaw.cli.macros import macros_app
 from physiclaw.common import paths, verdict
 from physiclaw.common.config import CONFIG
+from physiclaw.macros import runlog as macro_runlog
+from physiclaw.macros import runner as macro_runner
+from physiclaw.macros import stats as macro_stats
 
 app = typer.Typer()
 app.add_typer(macros_app, name="macros")

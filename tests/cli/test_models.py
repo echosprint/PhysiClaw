@@ -31,7 +31,7 @@ def test_key_config_path_format() -> None:
 
 def test_known_provider_ids_includes_aliases(mocker) -> None:
     mocker.patch(
-        "physiclaw.agent.provider.in_process_provider_ids",
+        "physiclaw.provider.in_process_provider_ids",
         return_value=("openai", "anthropic"),
     )
 
@@ -124,7 +124,7 @@ def test_list_specific_provider_shows_models(mocker) -> None:
         return_value=("openai",),
     )
     fake_discovered = mocker.patch(
-        "physiclaw.agent.provider.discovered",
+        "physiclaw.provider.discovered",
     )
     fake_discovered.model_ids.return_value = ["gpt-5", "gpt-5-mini"]
 
@@ -141,7 +141,7 @@ def test_list_empty_cache_prints_hint(mocker) -> None:
         return_value=("openai",),
     )
     fake_discovered = mocker.patch(
-        "physiclaw.agent.provider.discovered",
+        "physiclaw.provider.discovered",
     )
     fake_discovered.model_ids.return_value = []
 
@@ -157,7 +157,7 @@ def test_list_all_iterates_known_providers(mocker) -> None:
         return_value=("openai", "anthropic"),
     )
     fake_discovered = mocker.patch(
-        "physiclaw.agent.provider.discovered",
+        "physiclaw.provider.discovered",
     )
     fake_discovered.model_ids.return_value = ["m1"]
 
@@ -218,7 +218,7 @@ def test_use_model_not_in_cache_exits_1(mocker) -> None:
         "_known_provider_ids",
         return_value=("openai",),
     )
-    fake_disc = mocker.patch("physiclaw.agent.provider.discovered")
+    fake_disc = mocker.patch("physiclaw.provider.discovered")
     fake_disc.is_cached.return_value = False
 
     result = runner.invoke(models_app, ["use", "openai/ghost"])
@@ -241,7 +241,7 @@ def test_use_claude_code_with_empty_cache_writes_config(mocker) -> None:
         "_known_provider_ids",
         return_value=("claude-code",),
     )
-    fake_disc = mocker.patch("physiclaw.agent.provider.discovered")
+    fake_disc = mocker.patch("physiclaw.provider.discovered")
     fake_disc.is_cached.return_value = False
     fake_disc.model_ids.return_value = set()
     spy = mocker.patch.object(models_mod._config, "set_dotted")
@@ -263,7 +263,7 @@ def test_use_claude_code_with_populated_cache_still_validates(mocker) -> None:
         "_known_provider_ids",
         return_value=("claude-code",),
     )
-    fake_disc = mocker.patch("physiclaw.agent.provider.discovered")
+    fake_disc = mocker.patch("physiclaw.provider.discovered")
     fake_disc.is_cached.return_value = False
     fake_disc.model_ids.return_value = {"claude-sonnet-4-6"}
 
@@ -284,7 +284,7 @@ def test_use_happy_path_writes_config(mocker) -> None:
         "_known_provider_ids",
         return_value=("openai",),
     )
-    fake_disc = mocker.patch("physiclaw.agent.provider.discovered")
+    fake_disc = mocker.patch("physiclaw.provider.discovered")
     fake_disc.is_cached.return_value = True
     spy = mocker.patch.object(models_mod._config, "set_dotted")
 
@@ -307,7 +307,7 @@ def test_use_alias_set_works_too(mocker) -> None:
         "_known_provider_ids",
         return_value=("openai",),
     )
-    fake_disc = mocker.patch("physiclaw.agent.provider.discovered")
+    fake_disc = mocker.patch("physiclaw.provider.discovered")
     fake_disc.is_cached.return_value = True
     mocker.patch.object(models_mod._config, "set_dotted")
 
@@ -327,7 +327,7 @@ def test_use_config_error_exits_1(mocker) -> None:
         "_known_provider_ids",
         return_value=("openai",),
     )
-    fake_disc = mocker.patch("physiclaw.agent.provider.discovered")
+    fake_disc = mocker.patch("physiclaw.provider.discovered")
     fake_disc.is_cached.return_value = True
     mocker.patch.object(
         models_mod._config,
@@ -449,7 +449,7 @@ def test_key_prompts_when_value_omitted(mocker) -> None:
 
 def test_keys_lists_all_providers(mocker) -> None:
     mocker.patch(
-        "physiclaw.agent.provider.in_process_provider_ids",
+        "physiclaw.provider.in_process_provider_ids",
         return_value=("openai", "anthropic"),
     )
     mocker.patch.object(
@@ -545,7 +545,7 @@ def test_discover_alias_uses_target_cache(mocker) -> None:
 
 def test_format_key_row_unset(mocker) -> None:
     mocker.patch(
-        "physiclaw.agent.provider.provider_key_status",
+        "physiclaw.provider.provider_key_status",
         return_value=(None, "config"),
     )
 
@@ -556,7 +556,7 @@ def test_format_key_row_unset(mocker) -> None:
 
 def test_format_key_row_set_with_source(mocker) -> None:
     mocker.patch(
-        "physiclaw.agent.provider.provider_key_status",
+        "physiclaw.provider.provider_key_status",
         return_value=("sk-***x", "env"),
     )
 
@@ -583,7 +583,7 @@ def test_fetch_live_models_calls_provider_class(mocker) -> None:
 
     fake_cls = mocker.MagicMock(return_value=fake_provider)
     mocker.patch(
-        "physiclaw.agent.provider.provider_class",
+        "physiclaw.provider.provider_class",
         return_value=fake_cls,
     )
 
@@ -596,7 +596,7 @@ def test_fetch_live_models_calls_provider_class(mocker) -> None:
 
 
 def test_print_live_models_table_saves_and_prints(mocker, capsys) -> None:
-    fake_disc = mocker.patch("physiclaw.agent.provider.discovered")
+    fake_disc = mocker.patch("physiclaw.provider.discovered")
 
     models_mod._print_live_models_table("openai", [{"id": "gpt-5"}])
     out = capsys.readouterr().out
@@ -607,7 +607,7 @@ def test_print_live_models_table_saves_and_prints(mocker, capsys) -> None:
 
 
 def test_print_live_models_table_uses_display_label(mocker, capsys) -> None:
-    mocker.patch("physiclaw.agent.provider.discovered")
+    mocker.patch("physiclaw.provider.discovered")
 
     models_mod._print_live_models_table(
         "anthropic",

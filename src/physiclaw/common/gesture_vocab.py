@@ -36,7 +36,7 @@ SEQUENCE = "sequence"
 PEEK = "peek"
 SEND_TO_CLIPBOARD = "send_to_clipboard"
 # Security-sensitive and deliberately NOT macro-able (see
-# `agent.macros.model.ALLOWED_STEP_TOOLS`), but the agent layer names it in
+# `macros.model.ALLOWED_STEP_TOOLS`), but the agent layer names it in
 # two places — the engine's screen-tool classifier and the conductor's boot,
 # which synthesizes the call directly. Here so a rename fails the
 # registration pin instead of silently unclassifying it.
@@ -48,8 +48,8 @@ UNLOCK_PHONE = "unlock_phone"
 # It belongs here anyway: a macro replays real gestures, so the classifiers
 # that reason about gesture names have to reason about it too. (The macro
 # settle step `wait` deliberately does NOT live here: nothing outside
-# `agent.macros` names it, and the engine has an unrelated local tool that
-# also answers to "wait" — see `agent.macros.model.WAIT`.)
+# `physiclaw.macros` names it, and the engine has an unrelated local tool that
+# also answers to "wait" — see `macros.model.WAIT`.)
 RUN_MACRO = "run_macro"
 
 # `sequence` argument shape: {"actions": [{"tool_name": ..., "arg": ...}]}.

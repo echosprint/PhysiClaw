@@ -12,8 +12,8 @@ tool — every turn already calls `note`, so a write costs no turn slot.
 The note handler delegates to `write()` here.
 """
 
-from physiclaw.agent.engine.dto import Message, UserMessage
 from physiclaw.common.config import CONFIG
+from physiclaw.contract.dto import Message, UserMessage
 
 # Scratchpad ships in every prompt for the rest of the session, so its size is
 # a per-turn token cost — this cap is a working-memory ceiling, not a dumping

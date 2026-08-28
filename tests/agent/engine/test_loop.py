@@ -25,15 +25,6 @@ from engine_fakes import (
 from physiclaw.agent.engine import compact as compact_mod
 from physiclaw.agent.engine import memory as memory_mod
 from physiclaw.agent.engine.builtin_tool import LocalTool
-from physiclaw.agent.engine.dto import (
-    AssistantMessage,
-    CollapsePolicy,
-    FinishReason,
-    SystemMessage,
-    ToolResultMessage,
-    Usage,
-    UserMessage,
-)
 from physiclaw.agent.engine.loop import (
     CORRECTIVE_LIMIT,
     _advance_with_retry,
@@ -45,12 +36,21 @@ from physiclaw.agent.engine.loop import (
 )
 from physiclaw.agent.engine.runspec import EngineRun
 from physiclaw.agent.engine.session import Session
-from physiclaw.agent.provider.provider_base import (
+from physiclaw.agent.runtime.sentinel import DONE, FAIL, IDLE, STUCK
+from physiclaw.agent.trace import Trace
+from physiclaw.contract.dto import (
+    AssistantMessage,
+    CollapsePolicy,
+    FinishReason,
+    SystemMessage,
+    ToolResultMessage,
+    Usage,
+    UserMessage,
+)
+from physiclaw.provider.provider_base import (
     ProviderError,
     ProviderTransientError,
 )
-from physiclaw.agent.runtime.sentinel import DONE, FAIL, IDLE, STUCK
-from physiclaw.agent.trace import Trace
 
 # ---------- drive ----------
 
@@ -846,33 +846,25 @@ def test_log_external_stop_never_raises(mem_paths, monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_advance_with_retry_returns_immediately_on_success(mocker) -> None:
-    conductor = mocker.MagicMock()
-    asst = AssistantMessage(
-        content="ok", tool_calls=[], finish_reason=FinishReason.STOP
-    )
-    conductor.advance = mocker.AsyncMock(return_value=asst)
+    asst = _asst(content="ok", finish=FinishReason.STOP)
+    chat = mocker.AsyncMock(return_value=asst)
 
-    out = await _advance_with_retry(conductor, [], [], attempts=3, backoff=0.0)
+    out = await _advance_with_retry((), chat, [], [], attempts=3, backoff=0.0)
 
     assert out is asst
-    assert conductor.advance.await_count == 1
+    assert chat.await_count == 1
 
 
 @pytest.mark.asyncio
 async def test_advance_with_retry_retries_then_succeeds(mocker) -> None:
     mocker.patch("asyncio.sleep")
-    conductor = mocker.MagicMock()
-    asst = AssistantMessage(
-        content="ok", tool_calls=[], finish_reason=FinishReason.STOP
-    )
-    conductor.advance = mocker.AsyncMock(
-        side_effect=[ProviderTransientError("transient"), asst]
-    )
+    asst = _asst(content="ok", finish=FinishReason.STOP)
+    chat = mocker.AsyncMock(side_effect=[ProviderTransientError("transient"), asst])
 
-    out = await _advance_with_retry(conductor, [], [], attempts=3, backoff=0.0)
+    out = await _advance_with_retry((), chat, [], [], attempts=3, backoff=0.0)
 
     assert out is asst
-    assert conductor.advance.await_count == 2
+    assert chat.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -880,22 +872,62 @@ async def test_advance_with_retry_raises_provider_error_after_max_attempts(
     mocker,
 ) -> None:
     mocker.patch("asyncio.sleep")
-    conductor = mocker.MagicMock()
-    conductor.advance = mocker.AsyncMock(side_effect=ProviderTransientError("nope"))
+    chat = mocker.AsyncMock(side_effect=ProviderTransientError("nope"))
 
     # Typed (ProviderError, not bare RuntimeError) so _call_provider logs
     # expected exhaustion as one line instead of a traceback.
     with pytest.raises(ProviderError, match=r"^gave up after 2 attempts:"):
-        await _advance_with_retry(conductor, [], [], attempts=2, backoff=0.0)
+        await _advance_with_retry((), chat, [], [], attempts=2, backoff=0.0)
 
 
 @pytest.mark.asyncio
 async def test_advance_with_retry_does_not_catch_permanent_errors(mocker) -> None:
-    conductor = mocker.MagicMock()
-    conductor.advance = mocker.AsyncMock(side_effect=RuntimeError("permanent"))
+    chat = mocker.AsyncMock(side_effect=RuntimeError("permanent"))
 
     with pytest.raises(RuntimeError, match=r"^permanent$"):
-        await _advance_with_retry(conductor, [], [], attempts=3, backoff=0.0)
+        await _advance_with_retry((), chat, [], [], attempts=3, backoff=0.0)
+
+
+@pytest.mark.asyncio
+async def test_first_plugin_turn_wins_and_provider_is_never_called(mocker) -> None:
+    # Arbitration, not a chain: the first plugin to speak ends the turn —
+    # later plugins are not consulted and no provider round-trip is paid.
+    turn = _asst(content="plugin turn", finish=FinishReason.STOP)
+    first = mocker.MagicMock()
+    first.advance = mocker.AsyncMock(return_value=turn)
+    second = mocker.MagicMock()
+    second.advance = mocker.AsyncMock()
+    chat = mocker.AsyncMock()
+
+    out = await _advance_with_retry(
+        (first, second), chat, [], [], attempts=3, backoff=0.0
+    )
+
+    assert out is turn
+    second.advance.assert_not_awaited()
+    chat.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_plugin_pass_and_crash_both_fall_through_to_the_provider(
+    mocker,
+) -> None:
+    # A plugin that passes (None) and one that crashes both degrade the
+    # same way: the LLM speaks. A plugin bug must never kill the session.
+    passing = mocker.MagicMock()
+    passing.advance = mocker.AsyncMock(return_value=None)
+    crashing = mocker.MagicMock()
+    crashing.advance = mocker.AsyncMock(side_effect=RuntimeError("plugin bug"))
+    asst = _asst(content="ok", finish=FinishReason.STOP)
+    chat = mocker.AsyncMock(return_value=asst)
+
+    out = await _advance_with_retry(
+        (passing, crashing), chat, [], [], attempts=3, backoff=0.0
+    )
+
+    assert out is asst
+    assert passing.advance.await_count == 1
+    assert crashing.advance.await_count == 1
 
 
 # ---------- _log_usage ----------

@@ -16,8 +16,8 @@ step is `in_progress` at a time — matching Claude Code's TodoWrite rule.
 
 from dataclasses import dataclass, field
 
-from physiclaw.agent.engine.dto import Message, UserMessage
 from physiclaw.common.config import CONFIG
+from physiclaw.contract.dto import Message, UserMessage
 
 PENDING = "pending"
 IN_PROGRESS = "in_progress"

@@ -613,7 +613,7 @@ def test_build_registry_returns_local_tool_instances() -> None:
 
 
 def _macro_spec(name: str = "demo"):
-    from physiclaw.agent.macros.parse import parse_macro
+    from physiclaw.macros.parse import parse_macro
 
     return parse_macro(
         f"name: {name}\ndescription: d\nenabled: true\n"
@@ -647,7 +647,7 @@ async def test_run_macro_handler_unknown_name_raises_with_available() -> None:
 
 @pytest.mark.asyncio
 async def test_run_macro_handler_runs_and_records_success(mocker) -> None:
-    from physiclaw.agent.macros import stats as macro_stats
+    from physiclaw.macros import stats as macro_stats
 
     class OkMcp:
         async def call_tool(self, name, args=None):
@@ -672,7 +672,7 @@ async def test_run_macro_handler_runs_and_records_success(mocker) -> None:
 
 @pytest.mark.asyncio
 async def test_run_macro_handler_records_abort(mocker) -> None:
-    from physiclaw.agent.macros import stats as macro_stats
+    from physiclaw.macros import stats as macro_stats
 
     class DownMcp:
         async def call_tool(self, name, args=None):
@@ -701,8 +701,8 @@ async def test_run_macro_handler_records_abort(mocker) -> None:
 
 @pytest.mark.asyncio
 async def test_run_macro_handler_bad_input_records_and_raises(mocker) -> None:
-    from physiclaw.agent.macros import stats as macro_stats
-    from physiclaw.agent.macros.model import MacroError
+    from physiclaw.macros import stats as macro_stats
+    from physiclaw.macros.model import MacroError
 
     mocker.patch(
         "physiclaw.agent.engine.mcp_tool.get_mcp",
@@ -789,7 +789,7 @@ def test_build_registry_registers_run_macro_for_pack_macros_alone() -> None:
 
 @pytest.mark.asyncio
 async def test_run_macro_pack_macro_only_runs_on_a_synthesized_turn(mocker) -> None:
-    from physiclaw.agent.macros import stats as macro_stats
+    from physiclaw.macros import stats as macro_stats
 
     class OkMcp:
         async def call_tool(self, name, args=None):

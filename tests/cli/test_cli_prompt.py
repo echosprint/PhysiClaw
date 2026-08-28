@@ -16,17 +16,17 @@ from typer.testing import CliRunner
 
 from physiclaw.agent.engine import assemble as assemble_mod
 from physiclaw.agent.engine import engine as engine_mod
-from physiclaw.agent.engine.dto import (
+from physiclaw.agent.engine.session import Session
+from physiclaw.agent.runtime.hook import Trigger
+from physiclaw.agent.runtime.sentinel import DONE
+from physiclaw.cli.prompt import prompt_app
+from physiclaw.contract.dto import (
     AssistantMessage,
     CollapsePolicy,
     FinishReason,
     ToolCall,
     Usage,
 )
-from physiclaw.agent.engine.session import Session
-from physiclaw.agent.runtime.hook import Trigger
-from physiclaw.agent.runtime.sentinel import DONE
-from physiclaw.cli.prompt import prompt_app
 
 runner = CliRunner()
 

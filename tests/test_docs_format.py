@@ -39,8 +39,8 @@ import re
 from collections import Counter
 from pathlib import Path
 
-from physiclaw.agent.macros.model import Macro
-from physiclaw.agent.macros.parse import parse_macro
+from physiclaw.macros.model import Macro
+from physiclaw.macros.parse import parse_macro
 
 REPO = Path(__file__).resolve().parents[1]
 DOCS = REPO / "docs"

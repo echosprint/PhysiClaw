@@ -36,7 +36,8 @@ from physiclaw.agent.engine.compact import (
     new_skills_placeholder,
     new_summary_placeholder,
 )
-from physiclaw.agent.engine.dto import (
+from physiclaw.common.listing import LISTING_HEADER, ROW_RE, format_row, is_header
+from physiclaw.contract.dto import (
     AssistantMessage,
     CollapsePolicy,
     FinishReason,
@@ -48,7 +49,6 @@ from physiclaw.agent.engine.dto import (
     ToolResultMessage,
     UserMessage,
 )
-from physiclaw.common.listing import LISTING_HEADER, ROW_RE, format_row, is_header
 
 # Canonical tight cadence for collapse tests: first collapse at 3
 # complete turns, keep 1. Tests exercising a DIFFERENT triple
