@@ -67,11 +67,13 @@ class _FakeMcp:
         return False
 
 
-def _pack():
+def _registry():
+    """The qualified dispatch registry a rehearsal builds — the pack's
+    macros under `app/name` keys, exactly like the engine's hidden set."""
     write_pack(playbooks={"flow": FLOW}, macros=("open-app", "add-cart"))
-    from physiclaw.conductor.playbook import load_pack
+    from physiclaw.conductor.playbook import load_pack, qualified_pack
 
-    return load_pack("demo")
+    return qualified_pack("demo", load_pack("demo"))
 
 
 # ---------- _dispatch: the engine's routing, reproduced ----------
@@ -81,7 +83,7 @@ async def test_dispatch_sends_an_ordinary_gesture_to_mcp() -> None:
     mcp = _FakeMcp()
     call = ToolCall(id="c", name="peek", arguments={})
 
-    text, is_error = await cli._dispatch(mcp, call, _pack(), "demo")
+    text, is_error = await cli._dispatch(mcp, call, _registry())
 
     assert is_error is False
     assert mcp.calls == [("peek", {})]
@@ -110,7 +112,7 @@ async def test_dispatch_routes_run_macro_to_the_macro_runner(mocker) -> None:
         arguments={"name": "demo/open-app", "inputs": {"message": "hi"}},
     )
 
-    text, is_error = await cli._dispatch(mcp, call, _pack(), "demo")
+    text, is_error = await cli._dispatch(mcp, call, _registry())
 
     assert is_error is False and "综合" in text
     assert mcp.calls == []  # never went over MCP
@@ -123,7 +125,7 @@ async def test_dispatch_reports_an_unknown_pack_macro() -> None:
         id="c", name=gesture_vocab.RUN_MACRO, arguments={"name": "demo/nope"}
     )
 
-    text, is_error = await cli._dispatch(mcp, call, _pack(), "demo")
+    text, is_error = await cli._dispatch(mcp, call, _registry())
 
     assert is_error is True and "nope" in text
 
@@ -135,7 +137,7 @@ async def test_dispatch_turns_a_raised_error_into_a_result(mocker) -> None:
     mocker.patch.object(mcp, "call_tool", side_effect=RuntimeError("bridge down"))
     call = ToolCall(id="c", name="peek", arguments={})
 
-    text, is_error = await cli._dispatch(mcp, call, _pack(), "demo")
+    text, is_error = await cli._dispatch(mcp, call, _registry())
 
     assert is_error is True and "bridge down" in text
 
@@ -198,7 +200,7 @@ async def test_rehearse_runs_a_disabled_playbook() -> None:
 
 
 def test_pack_macro_fixture_is_wired() -> None:
-    # Guards the fixture the routing tests lean on: the pack really does
-    # carry the macros by bare name (qualification happens at dispatch).
-    assert set(_pack().macros) == {"open-app", "add-cart"}
+    # Guards the fixture the routing tests lean on: the registry carries
+    # the pack's macros under their qualified dispatch keys.
+    assert set(_registry()) == {"demo/open-app", "demo/add-cart"}
     assert PACK_MACRO  # the template the fixture writes
