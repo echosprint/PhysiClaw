@@ -173,7 +173,7 @@ def app_document_frequency(decls: dict[str, PageDecl]) -> dict[str, int]:
 def propose_anchors(screen: Screen, *, limit: int = 14) -> list[str]:
     """Anchor-declaration candidates from one screen: short, letter-bearing
     labels — chrome-shaped, not content-shaped. A human prunes the list
-    into pages.yml; this only narrows the haystack."""
+    into the pack's `pages:`; this only narrows the haystack."""
     out: list[str] = []
     for row in screen.rows:
         label = row.label.strip()

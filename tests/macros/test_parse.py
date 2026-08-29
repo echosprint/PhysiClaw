@@ -1097,3 +1097,15 @@ def test_a_scoped_single_char_is_accepted() -> None:
 def test_a_region_leaf_still_needs_a_region_from_somewhere() -> None:
     with pytest.raises(MacroError, match="needs `within`"):
         _clause('        {text: "x"}\n')
+
+
+def test_parse_rejects_unpopulated_template_placeholder() -> None:
+    # A `<<TOKEN>>` means the pack was hand-copied instead of installed —
+    # parsing on would bake the literal token into gestures and guards.
+    text = (
+        "name: m\ndescription: d\nsteps:\n"
+        '  - name: clip\n    tool: send_to_clipboard\n    with: {text: "<<CONTACT>>"}\n'
+    )
+
+    with pytest.raises(MacroError, match="unpopulated template placeholder.*CONTACT"):
+        parse_macro(text, "m")

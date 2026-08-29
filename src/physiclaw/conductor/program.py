@@ -56,7 +56,7 @@ from physiclaw.common import gesture_vocab
 from physiclaw.common.listing import Screen
 from physiclaw.common.logger import write_json_atomic
 from physiclaw.conductor import ledger, memory, money, reconcile, reply, views
-from physiclaw.conductor.calls import CALLS, ESCALATE, NEXT_ITEM
+from physiclaw.conductor.calls import CALLS, ESCALATE, LEDGER_FIELDS, NEXT_ITEM
 from physiclaw.conductor.channel import Channel
 from physiclaw.conductor.match import Verdict, match_screen
 from physiclaw.conductor.micro import (
@@ -185,6 +185,9 @@ class Program:
         self.app = app
         self.spec = spec
         self.values = values
+        # The `inputs.<name>` half of the ref-resolution dict, built once:
+        # `values` never mutates after construction.
+        self._input_vals = {f"inputs.{k}": v for k, v in values.items()}
         # The program's own qualified dispatch contribution — merged into
         # the wake registry by session_setup.
         self.pack_macros = pack_macros
@@ -254,7 +257,7 @@ class Program:
         if loop is not None:
             arm = CALLS[loop.call].loop_arm
             assert arm is not None
-            self._loop_body_id = loop.on[arm]
+            self._loop_body_id = loop.routes[arm]
         if suspended is not None:
             # A resumed walk is ALSO whole at construction: the suspended
             # projection overlays the fresh state right here, so no
@@ -560,8 +563,9 @@ class Program:
             if blocked is not None:
                 return self._handover(f"payment leg {node.id!r}: {blocked}")
         try:
+            vals = self._values()
             inputs = {
-                k: fill_refs(v, self._values(), where=f"leg {node.id!r} `with.{k}`")
+                k: fill_refs(v, vals, where=f"leg {node.id!r} `with.{k}`")
                 for k, v in node.args.items()
             }
         except PlaybookError as e:
@@ -585,16 +589,16 @@ class Program:
     # ---- decisions ----
 
     def _values(self) -> dict[str, str]:
-        """Ref-resolution values: the walk's inputs plus every recorded
-        decision output (keyed `node.field`, exactly the dotted ref),
-        plus the loop-scoped `{item.*}` slots when a ledger walk has a
-        current item (last wins — the same shadowing the parser
-        documents)."""
-        vals = {**self.values, **self._outputs}
+        """Ref-resolution values, keyed by the dotted ref spellings: the
+        walk's inputs under `inputs.<name>`, every recorded decision
+        output under `node.field`, plus the loop-scoped `{item.*}` slots
+        when a ledger walk has a current item. The roots can never
+        collide: the parser reserves `inputs`/`item` as node ids."""
+        vals = {**self._input_vals, **self._outputs}
         if self._ledger is not None:
             it = self._ledger[self._item]  # cursor valid by construction
-            vals["item.query"] = it.query
-            vals["item.qty"] = str(it.qty)
+            for f in LEDGER_FIELDS:
+                vals[f"item.{f}"] = str(getattr(it, f))
         return vals
 
     def _request(self, node: DecideNode) -> "AssistantMessage | DecisionRequest | None":
@@ -613,14 +617,15 @@ class Program:
         if self._screen is None:
             return self._handover(f"decide {node.id!r} has no screen to decide over")
         try:
+            vals = self._values()
             args = {
-                k: str(fill_refs(v, self._values(), where=f"decide {node.id!r}"))
+                k: str(fill_refs(v, vals, where=f"decide {node.id!r}"))
                 for k, v in node.args.items()
             }
         except PlaybookError as e:
             return self._handover(str(e))
         return build_request(
-            node.call, node.id, node.outs, args, self._screen, self._context(node)
+            node.call, node.id, node.outcomes, args, self._screen, self._context(node)
         )
 
     def _context(self, node: DecideNode) -> str:
@@ -701,7 +706,7 @@ class Program:
             f"decided {node.id}: {outcome.out} — {outcome.reason} "
             f"({outcome.confidence:.2f})"
         )
-        target = node.on[outcome.out]
+        target = node.routes[outcome.out]
         if target == ESCALATE:
             return self._handover(
                 f"decide {node.id!r} routed {outcome.out!r} → escalate "
@@ -761,7 +766,7 @@ class Program:
             cur.status, cur.label = "picked", picked.strip() or cur.query
         loop_arm = CALLS[node.call].loop_arm
         assert loop_arm is not None
-        done_arm = next(o for o in node.outs if o != loop_arm)
+        done_arm = next(o for o in node.outcomes if o != loop_arm)
         nxt = next(
             (
                 i
@@ -773,10 +778,10 @@ class Program:
         shopped = sum(1 for it in self._ledger if it.status == "picked")
         self._journal = f"ledger: {shopped}/{len(self._ledger)} items shopped"
         if nxt is None:
-            target = node.on[done_arm]
+            target = node.routes[done_arm]
         else:
             self._item = nxt
-            target = node.on[loop_arm]
+            target = node.routes[loop_arm]
         if target == ESCALATE:
             return self._handover(f"{NEXT_ITEM} {node.id!r} routed to escalate")
         self._idx = self._ids[target]
@@ -1023,7 +1028,7 @@ class Program:
         joined = " / ".join(new)
         self._gate.llm_reply = joined
         self._gate.llm_batch = new
-        # Empty outs: confirm_reply's answer space is fixed whole in its
+        # Empty outcomes: confirm_reply's answer space is fixed whole in its
         # _SPECS row, never caller-supplied.
         return build_request(
             CONFIRM_REPLY,

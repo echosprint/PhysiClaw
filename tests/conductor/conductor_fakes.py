@@ -3,6 +3,8 @@ pattern: sibling module, imported bare thanks to pytest's rootdir path)."""
 
 from __future__ import annotations
 
+from textwrap import indent
+
 from physiclaw.common.listing import Element, Screen, format_elements
 
 # One bbox convention for every fake row: ±0.05 × ±0.02 around the center.
@@ -81,11 +83,26 @@ steps:
 """
 
 
+def compose_pack_doc(
+    app: str, pages: str, playbooks: dict[str, str] | None = None
+) -> str:
+    """One unified PLAYBOOK.yml from the fixtures' historical pieces —
+    pages text + full playbook docs, indented under their map keys (the
+    keys ARE the names; entries carry no inner `name:`)."""
+    doc = f"name: {app}\ndescription: test pack\npages:\n{indent(pages, '  ')}\n"
+    if playbooks:
+        doc += "playbooks:\n"
+        for name, text in playbooks.items():
+            doc += f"  {name}:\n{indent(text, '    ')}\n"
+    return doc
+
+
 def write_pack(
     app: str = "demo",
     *,
     macros: tuple[str, ...] = ("open-app", "add-cart"),
     playbooks: dict[str, str] | None = None,
+    pages: str = PAGES,
 ):
     """Write a pack under the (fixture-scoped) playbooks dir; returns its
     root."""
@@ -93,13 +110,13 @@ def write_pack(
 
     root = paths.playbooks_dir() / app
     (root / "macros").mkdir(parents=True, exist_ok=True)
-    (root / "pages.yml").write_text(PAGES, encoding="utf-8")
+    (root / "PLAYBOOK.yml").write_text(
+        compose_pack_doc(app, pages, playbooks), encoding="utf-8"
+    )
     for m in macros:
         d = root / "macros" / m
         d.mkdir(parents=True, exist_ok=True)
         (d / "MACRO.yml").write_text(PACK_MACRO.format(name=m), encoding="utf-8")
-    for name, text in (playbooks or {}).items():
-        (root / f"{name}.yml").write_text(text, encoding="utf-8")
     return root
 
 
@@ -107,7 +124,6 @@ def write_pack(
 # next_item loop, RECONCILE, payment gate with revise) — shared by the
 # parser and walk test files so grammar changes are edited ONCE.
 LEDGERED = """\
-name: shop
 description: shop the list
 inputs:
   items:
@@ -120,35 +136,35 @@ nodes:
     type: LEG
     macro: open-app
     with: {message: "cart"}
-    verify: home
+    verify: pages.home
   - id: search
     type: LEG
     macro: open-app
     with: {message: "{item.query}"}
-    verify: results
+    verify: pages.results
   - id: choose
     type: DECIDE
     call: choose_item
     with: {criteria: "cheapest {item.query}"}
-    on: {pick: add, scroll: choose, none_fit: escalate, escalate: escalate}
+    routes: {pick: add, scroll: choose, none_fit: escalate, escalate: escalate}
   - id: add
     type: LEG
     macro: add-cart
     with: {message: "add"}
-    verify: results
+    verify: pages.results
   - id: advance
     type: DECIDE
     call: next_item
     with: {picked: "{choose.pick}"}
-    on: {next: search, done: fix}
+    routes: {next: search, done: fix}
   - id: fix
     type: RECONCILE
-    page: results
+    page: pages.results
   - id: sheet
     type: LEG
     macro: open-app
     with: {message: "sheet"}
-    verify: results
+    verify: pages.results
   - id: gate
     type: HUMAN_GATE
     gate: payment
@@ -161,7 +177,7 @@ nodes:
     type: LEG
     macro: add-cart
     with: {message: "pay"}
-    enter: results
-    verify: home
+    enter: pages.results
+    verify: pages.home
     irreversible: payment
 """

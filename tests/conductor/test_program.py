@@ -29,7 +29,6 @@ from physiclaw.conductor import channel, memory, program, reconcile, setup, susp
 from physiclaw.conductor.playbook import GATE_MAX_REVISIONS, PlaybookError
 
 FLOW = """\
-name: flow
 description: two legs
 inputs:
   keyword:
@@ -38,14 +37,14 @@ nodes:
   - id: open
     type: LEG
     macro: open-app
-    with: {message: "{keyword}"}
-    verify: home
+    with: {message: "{inputs.keyword}"}
+    verify: pages.home
   - id: search
     type: LEG
     macro: add-cart
     with: {message: "go"}
-    enter: home
-    verify: results
+    enter: pages.home
+    verify: pages.results
 """
 
 # Same legs, then a DECIDE.
@@ -56,7 +55,7 @@ BRANCH = (
     type: DECIDE
     call: choose_item
     with: {criteria: "cheapest"}
-    on: {pick: escalate, scroll: escalate, none_fit: escalate, escalate: escalate}
+    routes: {pick: escalate, scroll: escalate, none_fit: escalate, escalate: escalate}
 """
 )
 
@@ -90,15 +89,17 @@ def test_walk_runs_both_legs_then_completes() -> None:
     assert leg1 is not None and leg1.tool_names() == ["note", "run_macro"]
     assert leg1.tool_calls[1].arguments == {
         "name": "demo/open-app",
-        "inputs": {"message": "milk"},  # {keyword} resolved from the arm
+        "inputs": {"message": "milk"},  # {inputs.keyword} resolved from the arm
     }
 
-    _feed(h, leg1, HOME)  # verify: home holds → next leg (enter: home holds too)
+    _feed(
+        h, leg1, HOME
+    )  # verify: pages.home holds → next leg (enter: pages.home holds too)
     leg2 = p.advance(h)
     assert leg2 is not None
     assert leg2.tool_calls[1].arguments["name"] == "demo/add-cart"
 
-    _feed(h, leg2, RESULTS)  # verify: results holds → playbook complete
+    _feed(h, leg2, RESULTS)  # verify: pages.results holds → playbook complete
     assert p.advance(h) is None
 
 
@@ -136,7 +137,9 @@ def test_leg_verifying_a_builtin_page_hands_over() -> None:
     # but a playbook still may not ACT on one: legs run this pack's
     # macros and land on this pack's pages. The loader change made this
     # guarantee easy to lose by accident, so pin it.
-    write_pack(playbooks={"flow": FLOW.replace("verify: home", "verify: ios.locked")})
+    write_pack(
+        playbooks={"flow": FLOW.replace("verify: pages.home", "verify: ios.locked")}
+    )
     p = _program(keyword="milk")
     h = _history()
 
@@ -187,7 +190,6 @@ def test_program_advance_never_raises() -> None:
 # ---------- decisions ----------
 
 PICKY = """\
-name: picky
 description: pick flow
 inputs:
   keyword:
@@ -196,18 +198,18 @@ nodes:
   - id: open
     type: LEG
     macro: open-app
-    with: {message: "{keyword}"}
-    verify: results
+    with: {message: "{inputs.keyword}"}
+    verify: pages.results
   - id: choose
     type: DECIDE
     call: choose_item
-    with: {criteria: "cheapest {keyword}"}
-    on: {pick: use, scroll: choose, none_fit: escalate, escalate: escalate}
+    with: {criteria: "cheapest {inputs.keyword}"}
+    routes: {pick: use, scroll: choose, none_fit: escalate, escalate: escalate}
   - id: use
     type: LEG
     macro: add-cart
     with: {message: "{choose.pick}"}
-    verify: home
+    verify: pages.home
 """
 
 
@@ -229,7 +231,7 @@ def test_decide_emits_a_request_off_the_decide_time_screen() -> None:
     _, _, req = _at_decision()
 
     assert req.node_id == "choose" and req.call == "choose_item"
-    assert req.args == {"criteria": "cheapest milk"}  # {keyword} resolved
+    assert req.args == {"criteria": "cheapest milk"}  # {inputs.keyword} resolved
     assert [c.key for c in req.candidates] == ["综合"]  # the RESULTS row
 
 
@@ -318,7 +320,6 @@ steps:
 """
 
 GATED = """\
-name: pay
 description: 买牛奶
 inputs:
   keyword:
@@ -329,30 +330,34 @@ nodes:
   - id: open
     type: LEG
     macro: open-app
-    with: {message: "{keyword}"}
-    verify: results
+    with: {message: "{inputs.keyword}"}
+    verify: pages.results
   - id: gate
     type: HUMAN_GATE
     gate: payment
     compose: payment-request
-    message: "已选好{keyword}，合计 ¥{gate.total}。回复 好的 确认支付，或 不用 取消。"
-    over_message: "已选好{keyword}，合计 ¥{gate.total}，已超出预算 ¥{gate.cap}。回复 好的 确认支付，或 不用 取消。"
+    message: "已选好{inputs.keyword}，合计 ¥{gate.total}。回复 好的 确认支付，或 不用 取消。"
+    over_message: "已选好{inputs.keyword}，合计 ¥{gate.total}，已超出预算 ¥{gate.cap}。回复 好的 确认支付，或 不用 取消。"
     return: open-app
   - id: pay
     type: LEG
     macro: add-cart
     with: {message: "pay"}
-    enter: results
-    verify: home
+    enter: pages.results
+    verify: pages.home
     irreversible: payment
 """
 
 
 def _write_channel() -> None:
+    from conductor_fakes import compose_pack_doc
+
     root = paths.playbooks_dir() / "channel"
     (root / "macros" / "send").mkdir(parents=True, exist_ok=True)
     (root / "macros" / "open").mkdir(parents=True, exist_ok=True)
-    (root / "pages.yml").write_text(CHANNEL_PAGES, encoding="utf-8")
+    (root / "PLAYBOOK.yml").write_text(
+        compose_pack_doc("channel", CHANNEL_PAGES), encoding="utf-8"
+    )
     (root / "macros" / "send" / "MACRO.yml").write_text(CHANNEL_SEND, encoding="utf-8")
     (root / "macros" / "open" / "MACRO.yml").write_text(CHANNEL_OPEN, encoding="utf-8")
 
@@ -514,7 +519,6 @@ def test_gate_resume_off_thread_reopens_via_channel_open() -> None:
 
 
 CONFIRMING = """\
-name: notify
 description: 汇报进展
 inputs:
   keyword:
@@ -523,17 +527,17 @@ nodes:
   - id: open
     type: LEG
     macro: open-app
-    with: {message: "{keyword}"}
-    verify: home
+    with: {message: "{inputs.keyword}"}
+    verify: pages.home
   - id: tell
     type: CONFIRM
     compose: status-update
-    message: "已下单{keyword}，稍后汇报进度"
+    message: "已下单{inputs.keyword}，稍后汇报进度"
   - id: wrap
     type: LEG
     macro: add-cart
     with: {message: "done"}
-    verify: results
+    verify: pages.results
 """
 
 
@@ -766,7 +770,7 @@ def test_gate_revise_hands_over_with_the_request() -> None:
 
 def test_gate_ask_is_the_filled_template_exactly() -> None:
     # The playbook owns every word; the conductor owns only the slots:
-    # the ask is `message:` with {keyword} and {gate.total} filled —
+    # the ask is `message:` with {inputs.keyword} and {gate.total} filled —
     # nothing appended, nothing reworded.
     _, _, send = _at_gate()
 
@@ -1103,7 +1107,6 @@ def test_loop_only_ledger_playbook_needs_no_micro() -> None:
     # next_item is deterministic — a ledger walk with no prompted
     # decision and no gate must not make the engine wire a micro client.
     loop_only = """\
-name: fetch
 description: shop the list, fixed picks
 inputs:
   items:
@@ -1114,25 +1117,25 @@ nodes:
     type: LEG
     macro: open-app
     with: {message: "cart"}
-    verify: home
+    verify: pages.home
   - id: search
     type: LEG
     macro: open-app
     with: {message: "{item.query}"}
-    verify: results
+    verify: pages.results
   - id: add
     type: LEG
     macro: add-cart
     with: {message: "add"}
-    verify: results
+    verify: pages.results
   - id: advance
     type: DECIDE
     call: next_item
     with: {picked: "{item.query}"}
-    on: {next: search, done: fix}
+    routes: {next: search, done: fix}
   - id: fix
     type: RECONCILE
-    page: results
+    page: pages.results
 """
     write_pack(playbooks={"fetch": loop_only})
     p = _program(name="fetch", items='[{"query": "eggs", "qty": 1}]')
@@ -1567,7 +1570,6 @@ def test_check_warns_when_a_gate_reenters_blind() -> None:
     # thread — advisory (the payment case is a parse error).
     _write_channel()
     text = """\
-name: handoff
 description: gate then blind leg
 inputs:
   keyword:
@@ -1576,8 +1578,8 @@ nodes:
   - id: open
     type: LEG
     macro: open-app
-    with: {message: "{keyword}"}
-    verify: home
+    with: {message: "{inputs.keyword}"}
+    verify: pages.home
   - id: addr
     type: HUMAN_GATE
     gate: address
@@ -1587,7 +1589,7 @@ nodes:
     type: LEG
     macro: add-cart
     with: {message: "x"}
-    verify: results
+    verify: pages.results
 """
     write_pack(playbooks={"handoff": text})
 
@@ -1621,8 +1623,8 @@ def _context_decide_program(context: tuple[str, ...]) -> program.Program:
                 call="choose_item",
                 args={"criteria": "cheapest"},
                 context=context,
-                outs=CALLS["choose_item"].outs,
-                on={
+                outcomes=CALLS["choose_item"].outcomes,
+                routes={
                     "pick": "escalate",
                     "scroll": "choose",
                     "none_fit": "escalate",
@@ -1716,10 +1718,10 @@ def test_gate_hands_over_when_no_total_is_readable(caplog) -> None:
 
 
 def test_gate_hands_over_when_the_cap_cannot_resolve(caplog) -> None:
-    # A `{cap}` mandate whose input turns out non-numeric: no cap means
+    # A `{inputs.cap}` mandate whose input turns out non-numeric: no cap means
     # no over-budget rule, so the gate hands over rather than asking
     # with an unenforceable mandate.
-    ref_cap = GATED.replace("max_amount: 100", 'max_amount: "{cap}"').replace(
+    ref_cap = GATED.replace("max_amount: 100", 'max_amount: "{inputs.cap}"').replace(
         "inputs:\n", "inputs:\n  cap:\n    description: budget\n"
     )
     _write_channel()

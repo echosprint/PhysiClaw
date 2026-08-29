@@ -81,8 +81,10 @@ def extract(
 def micro(
     criteria: str = typer.Option("", "--criteria", help="choose_item criteria"),
     question: str = typer.Option("", "--question", help="decide question"),
-    outs: str = typer.Option(
-        "", "--outs", help="decide answers, comma-separated (escalate auto-added)"
+    outcomes: str = typer.Option(
+        "",
+        "--outcomes",
+        help="decide answers, comma-separated (escalate auto-added)",
     ),
     session: str = typer.Option(None, "--session", help="replay a recorded session"),
     listing: Path = typer.Option(None, "--listing", help="a listing text file"),
@@ -106,19 +108,19 @@ def micro(
     except RuntimeError as e:
         exit_error(str(e))
     if criteria:
-        call, call_outs = "choose_item", CALLS["choose_item"].outs
+        call, call_outcomes = "choose_item", CALLS["choose_item"].outcomes
         args = {"criteria": criteria}
     else:
-        answers = [o.strip() for o in outs.split(",") if o.strip()]
+        answers = [o.strip() for o in outcomes.split(",") if o.strip()]
         if ESCALATE not in answers:
             answers.append(ESCALATE)
         if len(answers) < 2:
-            exit_error("--outs needs at least one answer besides escalate")
-        call, call_outs = "decide", tuple(answers)
+            exit_error("--outcomes needs at least one answer besides escalate")
+        call, call_outcomes = "decide", tuple(answers)
         args = {"question": question}
     screens = _input_screens(session, listing, live)
     requests = [
-        build_request(call, "cli", call_outs, args, screen) for screen in screens
+        build_request(call, "cli", call_outcomes, args, screen) for screen in screens
     ]
 
     async def _go() -> None:
@@ -162,12 +164,15 @@ def match(
     live: bool = typer.Option(False, "--live", help="one peek via `physiclaw mcp`"),
 ) -> None:
     """Print the matcher's verdict for each input screen."""
+    from physiclaw.common.paths import PACK_FILENAME
     from physiclaw.conductor import pages
     from physiclaw.conductor.match import match_screen
 
     prints = pages.prints_for_app(app)
     if not prints:
-        exit_error(f"no pages declared for app {app!r} (playbooks/{app}/pages.yml)")
+        exit_error(
+            f"no pages declared for app {app!r} (playbooks/{app}/{PACK_FILENAME} `pages:`)"
+        )
     for i, screen in enumerate(_input_screens(session, listing, live)):
         v = match_screen(screen, prints)
         typer.echo(
@@ -280,7 +285,7 @@ def propose(
     live: bool = typer.Option(False, "--live", help="one peek via `physiclaw mcp`"),
 ) -> None:
     """Suggest anchor declarations from screens — prune by eye into
-    pages.yml."""
+    the pack's `pages:` section."""
     from physiclaw.conductor.capture import propose_anchors
 
     for i, screen in enumerate(_input_screens(session, listing, live)):

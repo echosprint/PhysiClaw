@@ -1,0 +1,108 @@
+# The pack spec — one file, the whole pack (the `action.yml` shape):
+# meta, `pages:` (the eyes), `playbooks:` (the walks). The hands are
+# recorded beside it in macros/<name>/MACRO.yml.
+name: taobao
+description: >-
+  Buy one item on 淘宝 (Taobao) by keyword, deterministically — search →
+  pick by criteria → buy sheet → human payment gate → pay. Adopt for
+  淘宝 purchases without freeform driving.
+placeholders:
+  CONTACT:
+    description: the IM contact name of YOUR user thread, exactly as the chat app shows it
+    example: QiaoQian
+
+# The eyes — screen fingerprints, referenced from nodes below as
+# `pages.<name>`. Semantics only; geometry is learned on-device
+# (`conductor calibrate`).
+pages:
+  results:
+    anchors:
+      - "综合"
+      - "销量"
+    scrollable: true
+  detail:
+    # 百亿补贴 items label the buy button 领券购买, plain items 立即购买
+    # — alt readings of one anchor. `forbid: 有货` kills the SKU-sheet
+    # lookalike, whose bottom bar can carry the same buttons.
+    anchors:
+      - {text: "加入购物车", region: bottom}
+      - {text: ["领券购买", "立即购买"], region: bottom}
+    forbid: ["有货"]
+  skusheet:
+    # The spec-choosing overlay; the buy walk hands over here (choosing
+    # a spec beyond the pick is the model's job). NOT "有货": 2-char
+    # anchors ride the one-substitution window, and 有货 ≈ 退货(宝)
+    # would fake this page onto the payment sheet. `forbid: 订单备注`
+    # is the structural kill: only the payment sheet carries it.
+    anchors:
+      - "规格"
+      - {text: ["加入购物车", "确定", "立即购买"], region: bottom}
+    forbid: ["订单备注"]
+  paysheet:
+    anchors:
+      - "实付"
+      - "订单备注"
+  paid:
+    anchors:
+      - "支付成功"
+
+playbooks:
+  buy:
+    description: 淘宝按关键词买一件东西
+    enabled: false  # rehearse on YOUR device, then enable
+    inputs:
+      keyword:
+        description: 纯商品搜索关键词（品名+规格；不含数量词，如“一袋/两盒”）
+        example: "五常大米 5kg"
+      criteria:
+        description: 挑选标准
+        default: "单件装且规格与搜索词一致（不要多件套装/组合装），标题带百亿补贴的，销量高、价格便宜的"
+      cap:
+        description: 预算上限（元）
+        default: "50"
+    mandate:
+      max_amount: "{inputs.cap}"
+    nodes:
+      - id: search
+        type: LEG
+        macro: search                  # the recorded gesture (macros/search/)
+        with: {keyword: "{inputs.keyword}"}
+        verify: pages.results          # landing check — hand over if not reached
+      - id: choose
+        type: DECIDE
+        call: choose_item
+        with: {criteria: "{inputs.criteria}"}
+        context: [inputs.keyword]
+        routes: {pick: buysheet, scroll: choose, none_fit: escalate, escalate: escalate}
+      - id: buysheet
+        type: LEG
+        macro: buy-sheet
+        enter: pages.detail            # precondition — screen must read as this
+        verify: pages.paysheet
+      - id: gate
+        type: HUMAN_GATE
+        gate: payment
+        compose: pay-confirm
+        message: "「买{inputs.keyword}」已选好，实付合计 ¥{gate.total}。回复 好的 确认支付，或 不用 取消。"
+        over_message: "「买{inputs.keyword}」实付合计 ¥{gate.total}，已超出预算 ¥{gate.cap}。回复 好的 确认支付，或 不用 取消。"
+        return: reopen
+      - id: pay
+        type: LEG
+        macro: pay
+        enter: pages.paysheet
+        verify: pages.paid
+        irreversible: payment
+
+# Adapting to your device
+# - Gesture coordinates were recorded on the authoring device (iPhone,
+#   zh apps / en system). Same model usually replays as-is; rehearse
+#   and re-record the steps that miss.
+# - Page anchors were measured on 百亿补贴 listings (the buy button
+#   reads 领券购买 there, 立即购买 elsewhere — both declared). Verify:
+#   `physiclaw conductor match taobao --live` on each page, then
+#   `calibrate` to learn geometry.
+#
+# Rehearse, then enable
+#   physiclaw playbooks run taobao/buy --input "keyword=五常大米 5kg"
+# Walk it to the gate at least once (reply 不用 to back out without
+# paying) before flipping `enabled: true` here and in the macros.

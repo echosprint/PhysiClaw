@@ -1,0 +1,18 @@
+name: reopen
+description: bring taobao back to the foreground (returns to the buy sheet)
+enabled: false
+steps:
+  - name: go-home
+    tool: home_screen
+  - name: settle-home
+    tool: wait
+    with: {seconds: 1}
+  - name: dismiss-switcher    # home_screen FROM home can open the app switcher
+    tool: tap
+    with: {bbox: [0.42, 0.855, 0.58, 0.885]}
+  - name: open-taobao
+    tool: tap
+    with: {bbox: [0.720, 0.425, 0.909, 0.551]}
+  - name: settle
+    tool: wait
+    with: {seconds: 2}

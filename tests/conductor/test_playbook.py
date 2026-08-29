@@ -12,7 +12,6 @@ from physiclaw.conductor import playbook as pb
 from physiclaw.conductor.playbook import PlaybookError
 
 VALID = """\
-name: buy
 description: test playbook
 enabled: false
 inputs:
@@ -24,20 +23,20 @@ nodes:
   - id: open
     type: LEG
     macro: open-app
-    with: {message: "{keyword}"}
-    verify: home
+    with: {message: "{inputs.keyword}"}
+    verify: pages.home
   - id: choose
     type: DECIDE
     call: choose_item
-    with: {criteria: "cheapest {keyword}"}
+    with: {criteria: "cheapest {inputs.keyword}"}
     context: [memory.shopping_prefs, inputs.keyword]
-    on: {pick: to-cart, scroll: choose, none_fit: escalate, escalate: escalate}
+    routes: {pick: to-cart, scroll: choose, none_fit: escalate, escalate: escalate}
   - id: to-cart
     type: LEG
     macro: add-cart
     with: {message: "{choose.pick}"}
-    enter: results
-    verify: results
+    enter: pages.results
+    verify: pages.results
   - id: confirm
     type: CONFIRM
     compose: order-summary
@@ -67,22 +66,19 @@ def test_parse_valid_playbook() -> None:
     kinds = [type(n).__name__ for n in p.nodes]
     assert kinds == ["LegNode", "DecideNode", "LegNode", "ConfirmNode", "HumanGateNode"]
     choose = p.nodes[1]
-    assert choose.outs == ("pick", "scroll", "none_fit", "escalate")
-    assert choose.on["scroll"] == "choose"  # bounded self-loop
+    assert choose.outcomes == ("pick", "scroll", "none_fit", "escalate")
+    assert choose.routes["scroll"] == "choose"  # bounded self-loop
     assert p.nodes[2].irreversible is None
     assert p.nodes[4].gate == "payment" and p.nodes[4].compose == "payment-request"
 
 
 def test_scan_playbooks_reads_pack_files() -> None:
-    root = write_pack()
-    (root / "buy.yml").write_text(VALID, encoding="utf-8")
-    (root / "broken.yml").write_text("name: broken\nnodes: []", encoding="utf-8")
+    write_pack(playbooks={"buy": VALID, "broken": "description: d\nnodes: []"})
 
     entries = {e.name: e for e in pb.scan_playbooks("demo")}
 
     assert entries["buy"].spec is not None
     assert entries["broken"].spec is None and entries["broken"].error
-    assert "pages" not in entries  # pages.yml excluded
 
 
 # ---------- rejection lints ----------
@@ -98,8 +94,13 @@ def _mutate(old: str, new: str) -> str:
 @pytest.mark.parametrize(
     "text, fragment",
     [
-        # name/filename mismatch
-        (_mutate("name: buy", "name: other"), "filename stem"),
+        # inner `name:` is gone — the map key IS the name
+        (
+            _mutate(
+                "description: test playbook", "name: buy\ndescription: test playbook"
+            ),
+            "unknown key",
+        ),
         # unknown top key
         (VALID + "bogus: 1\n", "unknown key"),
         # duplicate node id
@@ -107,51 +108,77 @@ def _mutate(old: str, new: str) -> str:
         # unknown node type
         (_mutate("type: CONFIRM", "type: NOPE"), "`type` must be one of"),
         # unroutable target
-        (_mutate("on: {pick: to-cart,", "on: {pick: nowhere,"), "unknown node"),
-        # non-total on:
+        (_mutate("routes: {pick: to-cart,", "routes: {pick: nowhere,"), "unknown node"),
+        # non-total routes:
         (_mutate("none_fit: escalate, ", ""), "route EVERY out"),
         # unknown macro
         (_mutate("macro: add-cart", "macro: ghost"), "not found in this pack"),
         # unknown page
-        (_mutate("verify: home", "verify: mars"), "not declared"),
+        (_mutate("verify: pages.home", "verify: pages.mars"), "not declared"),
         # foreign app page
-        (_mutate("verify: home", "verify: jd.home"), "reserved namespaces"),
+        (_mutate("verify: pages.home", "verify: jd.home"), "reserved namespace"),
         # undeclared placeholder
         (
-            _mutate('with: {message: "{keyword}"}', 'with: {message: "{typo}"}'),
+            _mutate(
+                'with: {message: "{inputs.keyword}"}',
+                'with: {message: "{inputs.typo}"}',
+            ),
             "not declared under `inputs`",
         ),
         # dotted ref to a non-earlier node
         (
-            _mutate('with: {message: "{keyword}"}', 'with: {message: "{choose.pick}"}'),
+            _mutate(
+                'with: {message: "{inputs.keyword}"}',
+                'with: {message: "{choose.pick}"}',
+            ),
             "EARLIER decide node",
         ),
         # dotted ref to unknown payload field
         (_mutate("{choose.pick}", "{choose.nope}"), "no output"),
         # LEG with: key not a macro input
         (
-            _mutate('with: {message: "{keyword}"}', 'with: {bogus: "x", message: "m"}'),
+            _mutate(
+                'with: {message: "{inputs.keyword}"}',
+                'with: {bogus: "x", message: "m"}',
+            ),
             "inputs of macro",
         ),
-        # choose_item may not author outs
+        # choose_item may not author outcomes
         (
-            _mutate("call: choose_item", "call: choose_item\n    outs: [a, escalate]"),
-            "declares its outs itself",
+            _mutate(
+                "call: choose_item", "call: choose_item\n    outcomes: [a, escalate]"
+            ),
+            "declares its outcomes itself",
         ),
         # unknown irreversible class
         (
             _mutate(
-                "enter: results\n    verify: results",
-                "enter: results\n    verify: results\n    irreversible: nuclear",
+                "enter: pages.results\n    verify: pages.results",
+                "enter: pages.results\n    verify: pages.results\n    irreversible: nuclear",
             ),
             "`irreversible` must be one of",
         ),
         # stray brace
-        (_mutate('"cheapest {keyword}"', '"cheapest {Keyword}"'), "stray"),
+        (_mutate('"cheapest {inputs.keyword}"', '"cheapest {Keyword}"'), "stray"),
+        # bare ref: `{inputs.name}` is the ONE written form, like page refs
+        (
+            _mutate(
+                'with: {message: "{inputs.keyword}"}', 'with: {message: "{keyword}"}'
+            ),
+            "every ref is dotted",
+        ),
+        # a node named `inputs` would shadow the input ref root
+        (_mutate("id: open", "id: inputs"), "ref root"),
         # reserved routing target as a node id
         (_mutate("id: confirm", "id: escalate"), "reserved routing target"),
         # context inputs.* typo (with: refs are strict; context must be too)
-        (_mutate("inputs.keyword", "inputs.keywrod"), "not declared"),
+        (
+            _mutate(
+                "context: [memory.shopping_prefs, inputs.keyword]",
+                "context: [memory.shopping_prefs, inputs.keywrod]",
+            ),
+            "not declared",
+        ),
         # a self-route on anything but the call's re-ask arm can never
         # converge (same screen, same prompt) — parse-time rejection
         (_mutate("none_fit: escalate", "none_fit: choose"), "re-ask arm"),
@@ -164,14 +191,14 @@ def test_rejections_name_the_rule(text: str, fragment: str) -> None:
         pb.parse_playbook(text, "buy", pack)
 
 
-def test_decide_call_requires_authored_outs_with_escalate() -> None:
+def test_decide_call_requires_authored_outcomes_with_escalate() -> None:
     pack = _pack()
     text = _mutate("call: choose_item", "call: decide").replace(
-        'with: {criteria: "cheapest {keyword}"}', 'with: {question: "which?"}'
+        'with: {criteria: "cheapest {inputs.keyword}"}', 'with: {question: "which?"}'
     )
 
     with pytest.raises(PlaybookError, match="escalate"):
-        # decide with no outs at all
+        # decide with no outcomes at all
         pb.parse_playbook(text, "buy", pack)
 
 
@@ -179,8 +206,8 @@ def test_money_requires_gate_on_every_path() -> None:
     pack = _pack()
     # Make to-cart a payment node: pay gate sits AFTER it → unguarded.
     text = _mutate(
-        "enter: results\n    verify: results",
-        "enter: results\n    verify: results\n    irreversible: payment",
+        "enter: pages.results\n    verify: pages.results",
+        "enter: pages.results\n    verify: pages.results\n    irreversible: payment",
     )
 
     with pytest.raises(PlaybookError, match="HUMAN_GATE"):
@@ -190,8 +217,8 @@ def test_money_requires_gate_on_every_path() -> None:
 def test_money_requires_mandate() -> None:
     pack = _pack()
     text = _mutate(
-        "enter: results\n    verify: results",
-        "enter: results\n    verify: results\n    irreversible: payment",
+        "enter: pages.results\n    verify: pages.results",
+        "enter: pages.results\n    verify: pages.results\n    irreversible: payment",
     )
     text = text.replace("mandate:\n  max_amount: 100\n", "")
 
@@ -206,8 +233,8 @@ def test_any_irreversible_class_requires_its_gate() -> None:
     # fall-through.
     pack = _pack()
     text = _mutate(
-        "enter: results\n    verify: results",
-        "enter: results\n    verify: results\n    irreversible: send_message",
+        "enter: pages.results\n    verify: pages.results",
+        "enter: pages.results\n    verify: pages.results\n    irreversible: send_message",
     )
 
     with pytest.raises(PlaybookError, match="DIRECTLY follow a HUMAN_GATE"):
@@ -222,8 +249,8 @@ def test_send_leg_behind_any_gate_parses() -> None:
     type: LEG
     macro: add-cart
     with: {message: "sent"}
-    enter: results
-    verify: results
+    enter: pages.results
+    verify: pages.results
     irreversible: send_message
 """
     )
@@ -250,11 +277,7 @@ def test_scaffolded_pack_parses_clean() -> None:
 
     root = paths.playbooks_dir() / "newapp"
     (root / pb.PACK_MACROS_DIRNAME / scaffold.EXAMPLE_MACRO).mkdir(parents=True)
-    write_text(root / "pages.yml", scaffold.render_pages_stub())
-    write_text(
-        root / f"{scaffold.EXAMPLE_PLAYBOOK}.yml",
-        scaffold.render_playbook_stub("newapp"),
-    )
+    write_text(root / "PLAYBOOK.yml", scaffold.render_pack_stub("newapp"))
     write_text(
         root / pb.PACK_MACROS_DIRNAME / scaffold.EXAMPLE_MACRO / "MACRO.yml",
         scaffold.render_example_macro(),
@@ -279,7 +302,7 @@ def test_unreachable_node_rejected() -> None:
     pack = _pack()
     # DECIDE routes explicitly (no fall-through), so routing `pick` past
     # to-cart leaves to-cart with no incoming edge at all.
-    text = _mutate("on: {pick: to-cart,", "on: {pick: confirm,")
+    text = _mutate("routes: {pick: to-cart,", "routes: {pick: confirm,")
 
     with pytest.raises(PlaybookError, match="unreachable"):
         pb.parse_playbook(text, "buy", pack)
@@ -296,13 +319,13 @@ def test_payment_leg_must_directly_follow_its_gate() -> None:
     type: LEG
     macro: add-cart
     with: {message: "x"}
-    verify: results
+    verify: pages.results
   - id: do-pay
     type: LEG
     macro: add-cart
     with: {message: "pay"}
-    enter: results
-    verify: results
+    enter: pages.results
+    verify: pages.results
     irreversible: payment
 """
     )
@@ -354,7 +377,7 @@ def test_ledger_playbook_parses_with_the_sanctioned_backward_edge() -> None:
 
     assert p.inputs[0].kind == "list"
     loop = p.nodes[4]
-    assert loop.call == "next_item" and loop.on == {"next": "search", "done": "fix"}
+    assert loop.call == "next_item" and loop.routes == {"next": "search", "done": "fix"}
     assert type(p.nodes[5]).__name__ == "ReconcileNode" and p.nodes[5].page == "results"
     assert p.nodes[7].revise == "advance"
 
@@ -365,14 +388,18 @@ def test_ledger_playbook_parses_with_the_sanctioned_backward_edge() -> None:
         ("kind: list", "kind: tuple", "`kind` must be one of"),
         # The loop closer must route its `next` arm backward.
         (
-            "on: {next: search, done: fix}",
-            "on: {next: fix, done: sheet}",
+            "routes: {next: search, done: fix}",
+            "routes: {next: fix, done: sheet}",
             "must route BACKWARD",
         ),
         # `revise` re-enters THE loop, nothing else.
         ("revise: advance", "revise: choose", "must target the next_item"),
         # The ledger JSON is not a template value.
-        ('with: {message: "{item.query}"}', 'with: {message: "{items}"}', "items"),
+        (
+            'with: {message: "{item.query}"}',
+            'with: {message: "{inputs.items}"}',
+            "items",
+        ),
         # next_item's pick wiring is required.
         (
             '    with: {picked: "{choose.pick}"}\n',
@@ -385,7 +412,7 @@ def test_ledger_playbook_parses_with_the_sanctioned_backward_edge() -> None:
             "    type: DECIDE\n"
             "    call: next_item\n"
             '    with: {picked: "{choose.pick}"}\n'
-            "    on: {next: search, done: fix}\n",
+            "    routes: {next: search, done: fix}\n",
             "",
             "no next_item",
         ),
@@ -412,7 +439,7 @@ def test_two_list_inputs_rejected() -> None:
 
 def test_reconcile_without_the_loop_rejected() -> None:
     pack = _pack()
-    text = VALID + "  - id: fix\n    type: RECONCILE\n    page: results\n"
+    text = VALID + "  - id: fix\n    type: RECONCILE\n    page: pages.results\n"
 
     with pytest.raises(PlaybookError, match="RECONCILE needs the next_item"):
         pb.parse_playbook(text, "buy", pack)
@@ -428,8 +455,8 @@ def test_payment_leg_behind_gate_parses() -> None:
     type: LEG
     macro: add-cart
     with: {message: "pay"}
-    enter: results
-    verify: results
+    enter: pages.results
+    verify: pages.results
     irreversible: payment
 """
     )
@@ -441,7 +468,10 @@ def test_payment_leg_behind_gate_parses() -> None:
 
 def test_leg_missing_required_macro_input_rejected() -> None:
     pack = _pack()
-    text = _mutate('with: {message: "{keyword}"}\n    verify: home', "verify: home")
+    text = _mutate(
+        'with: {message: "{inputs.keyword}"}\n    verify: pages.home',
+        "verify: pages.home",
+    )
 
     with pytest.raises(PlaybookError, match="requires input"):
         pb.parse_playbook(text, "buy", pack)
@@ -463,11 +493,15 @@ def test_load_pack_carries_macro_errors() -> None:
 
 
 def test_load_pack_bad_pages_raises_playbook_error() -> None:
+    from conductor_fakes import compose_pack_doc
+
     root = paths.playbooks_dir() / "demo"
     root.mkdir(parents=True)
-    (root / "pages.yml").write_text("Bad Name:\n  anchors: ['x']", encoding="utf-8")
+    (root / "PLAYBOOK.yml").write_text(
+        compose_pack_doc("demo", "Bad Name:\n  anchors: ['x']"), encoding="utf-8"
+    )
 
-    with pytest.raises(PlaybookError, match="pages.yml"):
+    with pytest.raises(PlaybookError, match="`pages`"):
         pb.load_pack("demo")
 
 
@@ -482,7 +516,7 @@ def test_list_apps_finds_packs() -> None:
 
 def test_mandate_accepts_input_ref() -> None:
     pack = _pack()
-    text = VALID.replace("max_amount: 100", 'max_amount: "{keyword}"')
+    text = VALID.replace("max_amount: 100", 'max_amount: "{inputs.keyword}"')
 
     p = pb.parse_playbook(text, "buy", pack)
 
@@ -495,8 +529,8 @@ def test_mandate_accepts_input_ref() -> None:
     [
         ("max_amount: -5", "positive"),
         ("max_amount: true", "number or exactly one"),
-        ('max_amount: "up to {keyword} yuan"', "exactly one"),
-        ('max_amount: "{typo}"', "not declared"),
+        ('max_amount: "up to {inputs.keyword} yuan"', "exactly one"),
+        ('max_amount: "{inputs.typo}"', "not declared"),
     ],
 )
 def test_mandate_rejections(amount: str, fragment: str) -> None:
@@ -515,7 +549,6 @@ def test_non_payment_gate_does_not_satisfy_the_money_dfs() -> None:
     # another gate class sits upstream.
     pack = _pack()
     text = """\
-name: buy
 description: bypass probe
 inputs:
   keyword:
@@ -526,8 +559,8 @@ nodes:
   - id: open
     type: LEG
     macro: open-app
-    with: {message: "{keyword}"}
-    verify: home
+    with: {message: "{inputs.keyword}"}
+    verify: pages.home
   - id: addr
     type: HUMAN_GATE
     gate: address
@@ -537,8 +570,8 @@ nodes:
     type: DECIDE
     call: decide
     with: {question: "ready?"}
-    outs: [go, ask, escalate]
-    on: {go: pay, ask: paygate, escalate: escalate}
+    outcomes: [go, ask, escalate]
+    routes: {go: pay, ask: paygate, escalate: escalate}
   - id: paygate
     type: HUMAN_GATE
     gate: payment
@@ -550,8 +583,8 @@ nodes:
     type: LEG
     macro: add-cart
     with: {message: "pay"}
-    enter: results
-    verify: home
+    enter: pages.results
+    verify: pages.home
     irreversible: payment
 """
     with pytest.raises(PlaybookError, match="irreversible leg is entered ONLY"):
@@ -568,8 +601,8 @@ def test_routed_in_edge_to_payment_leg_rejected() -> None:
     type: LEG
     macro: add-cart
     with: {message: "pay"}
-    enter: results
-    verify: results
+    enter: pages.results
+    verify: pages.results
     irreversible: payment
 """
     )
@@ -589,14 +622,14 @@ def test_payment_gate_requires_reentry_into_the_app() -> None:
     type: LEG
     macro: add-cart
     with: {message: "pay"}
-    enter: results
-    verify: results
+    enter: pages.results
+    verify: pages.results
     irreversible: payment
 """
     )
     text = text.replace(
-        "    enter: results\n    verify: results\n    irreversible: payment",
-        "    verify: results\n    irreversible: payment",
+        "    enter: pages.results\n    verify: pages.results\n    irreversible: payment",
+        "    verify: pages.results\n    irreversible: payment",
     )
 
     with pytest.raises(PlaybookError, match="declare `return:`"):
@@ -611,3 +644,28 @@ def test_revise_requires_return() -> None:
 
     with pytest.raises(PlaybookError, match="`revise` needs `return:`"):
         pb.parse_playbook(text, "shop", pack)
+
+
+def test_scan_of_a_walkless_pack_is_empty() -> None:
+    # A pack may be infrastructure-only (channel, ios): no `playbooks:`
+    # section means no entries — never an error.
+    from physiclaw.conductor.playbook import scan_playbooks
+
+    write_pack(playbooks={})
+
+    assert scan_playbooks("demo") == []
+
+
+def test_pages_dot_ref_is_the_one_written_form() -> None:
+    # Every page ref is `<root>.<page>` over a closed root set — the
+    # `pages.` form resolves to the declared page, and a bare name is
+    # rejected WITH the fix spelled out (one spelling, no drift).
+    pack = _pack()
+
+    spec = pb.parse_playbook(VALID, "buy", pack)
+    assert spec.nodes[0].verify == "home"  # pages.home → the declared page
+
+    with pytest.raises(PlaybookError, match="write pages.home"):
+        pb.parse_playbook(
+            VALID.replace("verify: pages.home", "verify: home"), "buy", pack
+        )

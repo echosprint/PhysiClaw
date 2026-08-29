@@ -1,0 +1,27 @@
+# The pack spec — one file, the whole pack. The hands (open/send) are
+# recorded beside it in macros/<name>/MACRO.yml.
+name: channel
+description: >-
+  The user-channel pack for WeChat — reach YOUR user's thread by in-app
+  search (list-order independent) and send messages there. Required by
+  any pack whose playbooks ask for confirmation.
+placeholders:
+  CONTACT:
+    description: the IM contact name of YOUR user thread, exactly as the chat app shows it
+    example: QiaoQian
+
+# The ONE page the conductor must recognize: your chat thread.
+pages:
+  thread:
+    anchors:
+      - {text: "<<CONTACT>>", region: top}
+    forbid: ["Weixin"]   # the chat LIST header — kills the list lookalike
+
+# Adapting to your device
+# - `open`/`send` navigate via WeChat's search, never by chat-list
+#   position; both abort on a guard mismatch, and `send` refuses to
+#   type unless the thread title matches — never message the wrong chat.
+# - Recorded on an English-system WeChat (guards accept Contacts and
+#   联系人). Rehearse once; re-record the search/paste taps if yours
+#   differs, then `physiclaw conductor calibrate channel` and enable
+#   both macros.

@@ -86,7 +86,7 @@ class FakeMicro:
         )
 
 
-def _decide_program(on: dict[str, str]):
+def _decide_program(routes: dict[str, str]):
     """A one-decision Program (plus a `done` sink when routed to) — the
     shared scaffolding of the broker tests; only the routing differs."""
     from physiclaw.conductor.calls import CALLS
@@ -99,12 +99,12 @@ def _decide_program(on: dict[str, str]):
             call="choose_item",
             args={"criteria": "cheapest"},
             context=(),
-            outs=CALLS["choose_item"].outs,
-            on=on,
+            outcomes=CALLS["choose_item"].outcomes,
+            routes=routes,
             max_visits=3,
         ),
     )
-    if "done" in on.values():
+    if "done" in routes.values():
         nodes += (ConfirmNode(id="done", compose="m", args={}, message="ok done"),)
     spec = Playbook(
         app="demo",

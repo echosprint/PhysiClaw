@@ -1,0 +1,11 @@
+name: buy-sheet
+description: open the buy sheet from an item detail page (立即购买/领券购买)
+enabled: false
+steps:
+  - name: buy-button
+    tool: tap
+    with: {bbox: [0.66, 0.905, 0.93, 0.945]}
+  - name: settle              # the sheet animates in and lazy-loads its rows;
+    tool: wait                # `expect` re-peeks AFTER the sleep, so the macro
+    with: {seconds: 3}        # both waits out the render and fails loudly if
+    expect: "实付"              # no payment sheet opened

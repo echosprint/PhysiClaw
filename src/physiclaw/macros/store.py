@@ -68,28 +68,29 @@ class ScanEntry:
 
 
 def list_dir_names() -> set[str]:
-    """The macro directories on disk (a MACRO.yml present) — identity only,
-    no read, no parse. The stats prune set: `run_and_record` needs just
-    the names, so it must not pay `scan()`'s full-parse of every file."""
-    root = paths.macros_dir()
-    if not root.exists():
-        return set()
-    return {
-        d.name
-        for d in root.iterdir()
-        if d.is_dir()
-        and not d.name.startswith(("_", "."))
-        and (d / MACRO_FILENAME).exists()
-    }
+    """The macro directories on disk (a MACRO.yml present) across the
+    search path — identity only, no read, no parse. The stats prune set:
+    `run_and_record` needs just the names, so it must not pay `scan()`'s
+    full-parse of every file."""
+    return paths.marked_subdirs(paths.macros_dirs(), MACRO_FILENAME)
 
 
 def scan(root: Path | None = None) -> list[ScanEntry]:
-    """Every macro directory under ``root`` (default ``macros_dir()``),
-    sorted by name — valid or not. The CLI's view; the engine uses
-    `discover_enabled`. Conductor packs point this at their private
+    """Every macro directory, sorted by name — valid or not. With no
+    ``root``, unions the search path (first dir wins per name — the
+    `paths.playbooks_dirs` layering rule). The CLI's view; the engine
+    uses `discover_enabled`. Conductor packs point this at their private
     ``playbooks/<app>/macros/`` root — one scanner, one traversal guard,
     one broad-except lesson."""
-    root = paths.macros_dir() if root is None else root
+    if root is None:
+        seen: set[str] = set()
+        merged: list[ScanEntry] = []
+        for r in paths.macros_dirs():
+            for e in scan(r):
+                if e.dir_name not in seen:
+                    seen.add(e.dir_name)
+                    merged.append(e)
+        return sorted(merged, key=lambda e: e.dir_name)
     if not root.exists():
         return []
     root_real = root.resolve()

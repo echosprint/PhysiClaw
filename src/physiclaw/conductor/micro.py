@@ -14,7 +14,7 @@ proxies scattered through the module.
 One `MicroCaller` serves them all. Each call is a tiny
 fixed-shape prompt (playbooks parameterize, never define prompt shapes),
 strict JSON out, and hard code-side validation: the answer must be one
-of the presented candidate keys / declared outs — the constraint tax
+of the presented candidate keys / declared outcomes — the constraint tax
 that makes a hallucinated option impossible rather than unlikely. One
 repair retry with the validation error injected; a required one-line
 reason plus a self-reported confidence judged against the config floor.
@@ -107,7 +107,7 @@ class DecisionRequest:
 
     call: str  # key into CALLS
     node_id: str  # for logs/trace
-    outs: tuple[str, ...]  # resolved arms (node-authored for decide)
+    outcomes: tuple[str, ...]  # resolved arms (node-authored for decide)
     args: dict[str, str]  # resolved `with:` (criteria / question)
     candidates: tuple[Candidate, ...]  # pick-style calls only
     listing: str  # label text of the screen (decide only)
@@ -117,7 +117,7 @@ class DecisionRequest:
 @dataclass(frozen=True)
 class MicroOutcome:
     """A validated, confident answer. `out` is the routing arm the
-    playbook's `on:` map is keyed by; `picked` carries the chosen
+    playbook's `routes:` map is keyed by; `picked` carries the chosen
     candidate for a pick arm."""
 
     out: str
@@ -144,7 +144,7 @@ class MicroResult:
 def build_request(
     call: str,
     node_id: str,
-    outs: tuple[str, ...],
+    outcomes: tuple[str, ...],
     args: dict[str, str],
     screen: Screen,
     context: str = "",
@@ -157,7 +157,7 @@ def build_request(
     return DecisionRequest(
         call=call,
         node_id=node_id,
-        outs=outs,
+        outcomes=outcomes,
         args=args,
         candidates=(
             _candidates(call, screen.rows) if spec.material == "candidates" else ()
@@ -411,20 +411,20 @@ def _choose_space(req: DecisionRequest) -> tuple[str, ...]:
     return tuple(c.key for c in req.candidates) + CALLS[req.call].escapes
 
 
-def _outs_space(req: DecisionRequest) -> tuple[str, ...]:
-    return req.outs
+def _outcomes_space(req: DecisionRequest) -> tuple[str, ...]:
+    return req.outcomes
 
 
 def _parse_task_space(req: DecisionRequest) -> tuple[str, ...]:
     # The escape is the ROW's own — a caller (activation, replay CLI)
     # passes only the playbook refs and can never forget the exit.
-    return req.outs + (NOT_A_TASK,)
+    return req.outcomes + (NOT_A_TASK,)
 
 
-def _fixed(outs: tuple[str, ...]) -> "Callable[[DecisionRequest], tuple[str, ...]]":
+def _fixed(outcomes: tuple[str, ...]) -> "Callable[[DecisionRequest], tuple[str, ...]]":
     """An answer space fixed whole in the row — nobody's to vary, and
-    callers pass empty outs."""
-    return lambda req: outs
+    callers pass empty outcomes."""
+    return lambda req: outcomes
 
 
 def _choose_outcome(
@@ -521,7 +521,7 @@ _SPECS: dict[str, _CallSpec] = {
     "decide": _CallSpec(
         role="You answer ONE scoped question about a phone screen.",
         material="listing",
-        answer_space=_outs_space,
+        answer_space=_outcomes_space,
         answer_spec='"answer" must be exactly one of: {allowed}.',
         user_parts=lambda req: [
             f"Question: {req.args.get('question', '')}",

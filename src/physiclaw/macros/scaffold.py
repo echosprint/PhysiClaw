@@ -184,6 +184,8 @@ Scaffold one with `physiclaw macros init <name>`, edit it, then:
 - `steps` — a list; each step: `tool` (one of:
   {", ".join(sorted(ALLOWED_STEP_TOOLS))}); `with:` mapping of arguments,
   `{{input}}` placeholders in strings (`{{{{`/`}}}}` for a literal brace);
+  `<<UPPERCASE>>` is reserved for install-time pack placeholders
+  (filled from playbooks/placeholders.yml at load, never typed literally);
   and `name` (required, unique per macro, lowercase/digits/hyphens with no
   spaces — the identifier `start_at` uses and the label in logs).
   Max {MAX_STEPS} steps.

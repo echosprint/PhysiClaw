@@ -2,7 +2,7 @@
 
 A page fingerprint is split by audience:
 
-  - DECLARATIONS (``playbooks/<app>/pages.yml``, human-authored): the page's
+  - DECLARATIONS (the pack file's ``pages:`` section, human-authored): the page's
     name, which label texts identify it, forbid terms, coarse region hints.
     Semantics only — portable across devices and app versions.
   - LEARNED (``learned/pages/<app>.json``, machine-written by capture):
@@ -16,7 +16,6 @@ geometry yet still matches, text-only, at a stricter default threshold —
 which is what lets capture bootstrap from declarations alone.
 """
 
-import io
 import json
 import logging
 from dataclasses import dataclass
@@ -28,8 +27,6 @@ from physiclaw.common.text import read_text
 from physiclaw.conductor import _spec
 
 log = logging.getLogger(__name__)
-
-PAGES_FILENAME = "pages.yml"
 
 MAX_PAGES = 30
 MAX_ANCHORS = 12
@@ -64,7 +61,7 @@ RESERVED_APPS = frozenset({CHANNEL_APP, IOS_APP})
 # Declared HERE (beside CHANNEL_APP) because both channel.py and
 # scaffold.py need them and scaffold must not import channel: the stubs
 # interpolate these, never hand-copy them.
-THREAD_PAGE = "thread"  # channel pages.yml must declare this page
+THREAD_PAGE = "thread"  # the channel pack's `pages:` must declare this
 SEND_MACRO = "send"  # nav to the user's thread + paste + send {message}
 OPEN_MACRO = "open"  # nav to the thread only (resume reads)
 
@@ -103,18 +100,15 @@ REGIONS: dict[str, tuple[float, float, float, float]] = {
 DECL_ONLY_THRESHOLD = 0.75
 DEFAULT_MARGIN = 0.15
 
-# Shared spec substrate (`_spec`): the macro naming/prose rules bound
-# to this spec's error class; `_yaml` stays a module name so tests can
-# patch per-module.
-_yaml = _spec.yaml_loader
-
 
 class PagesError(ValueError):
-    """A pages.yml is invalid. Message is user-facing: the conductor CLI
-    prints it verbatim. All-or-nothing — a file failing any check is
-    excluded whole, never partially loaded."""
+    """A `pages:` section is invalid. Message is user-facing: the
+    conductor CLI prints it verbatim. All-or-nothing — a pack failing
+    any check is excluded whole, never partially loaded."""
 
 
+# Shared spec substrate (`_spec`): the macro naming/prose rules bound
+# to this spec's error class.
 _require_str, _prose, _opt_prose, _check_name = _spec.bind(PagesError)
 
 
@@ -199,25 +193,25 @@ class PagePrint:
         return DECL_ONLY_THRESHOLD
 
 
-# ---------- pages.yml parsing ----------
+# ---------- `pages:` parsing ----------
 
 
 def parse_pages(text: str, app: str) -> dict[str, PageDecl]:
-    """Parse + validate one pages.yml. Raises PagesError naming the
+    """Parse + validate one `pages:` section given as YAML text — the
+    text-shaped door tests and tooling use; `scan_app_decls` reads the
+    live section out of the pack file. Raises PagesError naming the
     offending field; never returns a partially-valid set."""
+    data = _spec.load_yaml(text, PagesError)
+    return parse_pages_data(data, app)
+
+
+def parse_pages_data(data, app: str) -> dict[str, PageDecl]:
+    """The `pages:` section of a pack file → validated declarations."""
     _check_name(app, "app name")
-    try:
-        data = _yaml.load(io.StringIO(text))
-    except Exception as e:
-        # Deliberately broad, like macro discovery: the YAML loader does
-        # not confine itself to YAMLError (deep nesting surfaces as
-        # RecursionError), and this module's contract is PagesError-only.
-        # BaseException still propagates.
-        raise PagesError(f"invalid YAML: {e or type(e).__name__}") from e
     if data is None:
         return {}
     if not isinstance(data, dict):
-        raise PagesError("pages.yml must be a YAML mapping of page name → spec")
+        raise PagesError("`pages` must be a YAML mapping of page name → spec")
     if len(data) > MAX_PAGES:
         raise PagesError(f"{len(data)} pages > max {MAX_PAGES}")
 
@@ -318,17 +312,18 @@ def _anchor_text(value: Any, where: str) -> str:
 
 
 def scan_app_decls(app: str) -> dict[str, PageDecl]:
-    """The declared pages of one app pack — {} when the pack or its
-    pages.yml doesn't exist. Raises PagesError on a malformed file (the
-    CLI surfaces it; runtime callers catch and treat the app as
-    undeclared). The name is validated BEFORE any path is built from it.
-    Every pack reads the same way, `ios` included — declarations live on
-    disk, under the user's hand, never in the wheel."""
+    """The declared pages of one app pack — the `pages:` section of its
+    PLAYBOOK.yml; {} when the pack doesn't exist or declares none.
+    Raises PagesError on a malformed file (the CLI surfaces it; runtime
+    callers catch and treat the app as undeclared). The name is
+    validated BEFORE any path is built from it. Every pack reads the
+    same way, `ios` included — declarations live on disk, under the
+    user's hand, never in the wheel."""
     _check_name(app, "app name")
-    p = paths.playbooks_dir() / app / PAGES_FILENAME
-    if not p.exists():
+    doc = _spec.load_pack_doc(app, PagesError)
+    if doc is None:
         return {}
-    return parse_pages(read_text(p), app)
+    return parse_pages_data(doc.get("pages"), app)
 
 
 # ---------- learned store ----------
@@ -401,10 +396,15 @@ def save_learned(app: str, pages: dict[str, LearnedPage]) -> None:
     write_json_atomic(paths.learned_pages_dir() / f"{app}.json", obj)
 
 
-def prints_for_app(app: str) -> list[PagePrint]:
+def prints_for_app(
+    app: str, decls: dict[str, PageDecl] | None = None
+) -> list[PagePrint]:
     """Declarations merged with learned geometry — the matcher's candidate
-    set for one app."""
-    decls = scan_app_decls(app)
+    set for one app. Callers already holding the Pack pass
+    `decls=pack.pages` so the spec file is not re-read (the
+    `scan_playbooks` rule)."""
+    if decls is None:
+        decls = scan_app_decls(app)
     learned = load_learned(app)
     return [
         PagePrint(app=app, decl=d, learned=learned.get(name))

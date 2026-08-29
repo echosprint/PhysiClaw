@@ -18,12 +18,12 @@ The grammar, top-down::
     nodes     ::= [node, ...]                                 # 1–MAX_NODES
     node      ::= id "LEG" macro [with] [enter] verify
                   [compensate] [irreversible]
-                | id "DECIDE" call [with] [context] [outs] on [max_visits]
+                | id "DECIDE" call [with] [context] [outcomes] routes [max_visits]
                 | id "RECONCILE" page
                 | id "CONFIRM" compose [with] message
                 | id "HUMAN_GATE" gate compose [with] message [over_message]
                   [return] [revise]
-    on        ::= {out: node-id | "escalate"}                 # total over outs
+    routes    ::= {outcome: node-id | "escalate"}             # total over outcomes
 
 The ledger stack (`kind: list` input + `next_item` loop + RECONCILE +
 gate `revise:`) is one unit — `_check_ledger` holds its pieces
@@ -35,7 +35,7 @@ against the ledger in code, and a payment gate's `revise:` routes a
 "yes, but change it" reply back into the loop instead of handing over.
 
 Control flow: non-DECIDE nodes fall through to the next node in list
-order (past the last node = done); DECIDE routes every one of its outs
+order (past the last node = done); DECIDE routes every one of its outcomes
 explicitly. A HUMAN_GATE falls through only once the user has confirmed:
 it composes and sends the full-context message over the user channel,
 waits for a reply, and a micro-call judges whether the reply confirms.
@@ -49,8 +49,15 @@ are a DECIDE self-routing its call's re-ask arm (choose_item's
 (`CallDecl.loop_arm`, terminating by item consumption); anything wider
 is the model's job, not a playbook's.
 
-Wiring is by placeholder: `{name}` reads a declared input, `{node.field}`
-reads an EARLIER decide node's declared payload field. Dotted refs are
+Wiring is by placeholder, and every ref is dotted — the same
+`<root>.<name>` rule as page references: `{inputs.name}` reads a
+declared input, `{node.field}` reads an EARLIER decide node's declared
+payload field, `{item.field}` the ledger loop's current item. A bare
+`{name}` is a load error. Page references
+(`enter:`/`verify:`/`page:`) are always `<root>.<page>` over a closed
+root set: `pages.<name>` points at the pack file's own `pages:`
+section, `ios.<page>`/`channel.<page>` reach the reserved built-ins —
+one required spelling, so every ref names its section. Dotted refs are
 playbook-level — they are resolved to plain strings before any macro
 sees them, so pack macros keep the stock single-name template grammar.
 
@@ -59,21 +66,19 @@ Money is a parse-time lint, not doctrine: a node tagged
 and its playbook must carry a `mandate:`.
 """
 
-import io
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from physiclaw.common import paths
-from physiclaw.common.text import read_text
+from physiclaw.common.paths import PACK_FILENAME
 from physiclaw.conductor import _spec
 from physiclaw.conductor.calls import CALLS, ESCALATE, LEDGER_FIELDS, NEXT_ITEM
 from physiclaw.conductor.pages import (
-    PAGES_FILENAME,
     RESERVED_APPS,
     PageDecl,
     PagesError,
-    scan_app_decls,
+    parse_pages_data,
 )
 from physiclaw.macros import store as macro_store
 from physiclaw.macros.model import Macro
@@ -90,13 +95,14 @@ DEFAULT_MAX_VISITS = 3
 GATE_MAX_CHECKS = 3
 GATE_MAX_REVISIONS = 2
 
-# `{name}` or `{node.field}` — the playbook's own ref grammar. Dotted
-# refs are deliberately NOT part of the macro template layer (its
-# tokenizer rejects them); same `{{`/`}}` escapes, same
+# `{root.name}` — the playbook's own ref grammar, always dotted
+# (`inputs.` / `item.` / an earlier decide node's id). Dotted refs are
+# deliberately NOT part of the macro template layer (its tokenizer
+# rejects them); same `{{`/`}}` escapes, same
 # fail-at-load-on-stray-brace rule.
-REF_RE = re.compile(r"\{\{|\}\}|\{([a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)?)\}|[{}]")
+REF_RE = re.compile(r"\{\{|\}\}|\{([a-z][a-z0-9_]*\.[a-z][a-z0-9_]*)\}|[{}]")
 # A string that is EXACTLY one input ref (the mandate's string form).
-_SOLE_REF = re.compile(r"^\{([a-z][a-z0-9_]*)\}$")
+_SOLE_REF = re.compile(r"^\{inputs\.([a-z][a-z0-9_]*)\}$")
 
 IRREVERSIBLE_CLASSES = ("payment", "send_message")
 # `context:` entries are prompt-slice ids a decision call may receive.
@@ -110,7 +116,12 @@ CONTEXT_RE = re.compile(rf"^({'|'.join(CONTEXT_ROOTS)})\.[a-z][a-z0-9_]*$")
 # over). Rejected as node ids so a node can never shadow the sink.
 RESERVED_TARGETS = frozenset({ESCALATE})
 
-_TOP_KEYS = {"name", "description", "enabled", "inputs", "mandate", "nodes"}
+# The ref grammar's global roots — rejected as node ids so a decide's
+# `{node.field}` outputs can never shadow `{inputs.*}` or the ledger's
+# `{item.*}`. (`gate` is not global: it exists only inside a payment
+# gate's own messages, where the money slots win.)
+RESERVED_REF_ROOTS = frozenset({"inputs", "item"})
+
 _INPUT_KEYS = {"description", "default", "example", "kind"}
 _INPUT_KINDS = ("scalar", "list")
 _MANDATE_KEYS = {"max_amount", "expires_minutes"}
@@ -118,7 +129,8 @@ _NODE_COMMON = {"id", "type"}
 _NODE_KEYS = {
     "LEG": _NODE_COMMON
     | {"macro", "with", "enter", "verify", "compensate", "irreversible"},
-    "DECIDE": _NODE_COMMON | {"call", "with", "context", "outs", "on", "max_visits"},
+    "DECIDE": _NODE_COMMON
+    | {"call", "with", "context", "outcomes", "routes", "max_visits"},
     "RECONCILE": _NODE_COMMON | {"page"},
     "CONFIRM": _NODE_COMMON | {"compose", "with", "message"},
     "HUMAN_GATE": _NODE_COMMON
@@ -127,9 +139,7 @@ _NODE_KEYS = {
 
 PACK_MACROS_DIRNAME = "macros"
 
-# Shared scalar layer: macro naming/prose rules bound to this spec's
-# error class; `_yaml` stays a module name so tests can patch per-module.
-_yaml = _spec.yaml_loader
+_PLAY_KEYS = {"description", "enabled", "inputs", "mandate", "nodes"}
 
 
 class PlaybookError(ValueError):
@@ -143,8 +153,9 @@ INPUT_NAME_RE = _spec.INPUT_NAME_RE
 
 @dataclass(frozen=True)
 class InputRef:
-    """A `{input}` reference resolved at parse time — the consumer (the
-    mandate check, of all places) must never re-derive the brace grammar."""
+    """A `{inputs.name}` reference resolved at parse time — the consumer
+    (the mandate check, of all places) must never re-derive the brace
+    grammar."""
 
     name: str
 
@@ -158,7 +169,7 @@ class PlaybookInput:
     # "scalar" (a template string) or "list" — the buying-list ledger:
     # its VALUE is a JSON array string ([{query, qty}], validated at
     # arm/activation), consumed by the next_item loop as {item.*} refs,
-    # never referenced as a bare {name} template.
+    # never referenced as an {inputs.name} template.
     kind: str = "scalar"
 
     @property
@@ -192,8 +203,8 @@ class DecideNode:
     call: str
     args: dict[str, Any]
     context: tuple[str, ...]
-    outs: tuple[str, ...]  # resolved: fixed for choose_item, authored for decide
-    on: dict[str, str]  # out → node id | reserved target
+    outcomes: tuple[str, ...]  # resolved: fixed for choose_item, authored for decide
+    routes: dict[str, str]  # out → node id | reserved target
     max_visits: int
 
 
@@ -215,7 +226,7 @@ class ConfirmNode:
     id: str
     compose: str
     args: dict[str, Any]
-    # The authored ask ({input}/{node.field} refs, parse-validated,
+    # The authored ask ({inputs.name}/{node.field} refs, parse-validated,
     # runtime-filled), sent VERBATIM and REQUIRED: only the playbook
     # author knows the user's language, so the conductor composes no
     # prose — ever.
@@ -314,6 +325,9 @@ class Pack:
     pages: dict[str, PageDecl]
     macros: dict[str, Macro]
     macro_errors: dict[str, str]
+    # The `playbooks:` map, raw — parsed per-entry by `scan_playbooks`
+    # so one broken walk excludes itself, never the pack.
+    playbook_docs: dict = field(default_factory=dict)
 
 
 def qualified_macro(app: str, name: str) -> str:
@@ -341,16 +355,25 @@ def qualified_pack(app: str, pack: Pack) -> dict[str, Macro]:
 
 
 def load_pack(app: str) -> Pack:
-    """The app pack's shared assets. Page declarations may raise
-    PagesError (surfaced by `check`); a broken pack macro is carried as
-    its error string so the playbook referencing it fails with the cause."""
+    """The app pack, whole, from its one spec file: validated meta, page
+    declarations, the raw `playbooks:` docs (parsed per-entry by
+    `scan_playbooks`), and the recorded macros. A broken pack macro is
+    carried as its error string so the playbook referencing it fails
+    with the cause."""
+    doc = _spec.load_pack_doc(app, PlaybookError)
+    if doc is None:
+        raise PlaybookError(f"no pack {app!r} on disk (missing {PACK_FILENAME})")
+    _check_pack_meta(doc, app)
     try:
-        pages = scan_app_decls(app)
+        pages = parse_pages_data(doc.get("pages"), app)
     except PagesError as e:
-        raise PlaybookError(f"{app}/{PAGES_FILENAME}: {e}") from e
+        raise PlaybookError(f"{app}/{PACK_FILENAME} `pages`: {e}") from e
+    raw_playbooks = doc.get("playbooks") or {}
+    if not isinstance(raw_playbooks, dict):
+        raise PlaybookError("`playbooks` must be a mapping of name → playbook")
     macros: dict[str, Macro] = {}
     errors: dict[str, str] = {}
-    root = paths.playbooks_dir() / app / PACK_MACROS_DIRNAME
+    root = paths.pack_root(app) / PACK_MACROS_DIRNAME
     if root.is_dir():
         # One scanner for both macro roots: traversal guard, dot-dir
         # convention, and the broad-except lesson live in `store.scan`.
@@ -359,25 +382,53 @@ def load_pack(app: str) -> Pack:
                 macros[entry.dir_name] = entry.spec
             else:
                 errors[entry.dir_name] = entry.error or "invalid"
-    return Pack(app=app, pages=pages, macros=macros, macro_errors=errors)
+    return Pack(
+        app=app,
+        pages=pages,
+        macros=macros,
+        macro_errors=errors,
+        playbook_docs=dict(raw_playbooks),
+    )
+
+
+def _check_pack_meta(doc: dict, app: str) -> None:
+    """The manifest half of the pack file: `name` equals the directory,
+    `description` is real prose, `placeholders` (install-time constants,
+    validated here so `check` catches a malformed map before install
+    prompts read it) is name → {description, [example]}."""
+    declared = _require_str(doc.get("name"), "`name`")
+    if declared != app:
+        raise PlaybookError(f"name {declared!r} must equal the pack directory {app!r}")
+    if app == "pages":
+        raise PlaybookError(
+            "a pack cannot be named 'pages' — it is the page-reference root"
+        )
+    _prose(doc.get("description"), "`description`")
+    ph = doc.get("placeholders")
+    if ph is None:
+        return
+    if not isinstance(ph, dict):
+        raise PlaybookError("`placeholders` must be a mapping of TOKEN → spec")
+    for key, spec in ph.items():
+        where = f"placeholder {key!r}"
+        if not isinstance(spec, dict) or set(spec) - {"description", "example"}:
+            raise PlaybookError(f"{where} must be a {{description, example}} mapping")
+        _prose(spec.get("description"), f"{where}: `description`")
 
 
 def scan_playbooks(app: str, pack: Pack | None = None) -> list[PlaybookEntry]:
-    """Every `<name>.yml` in the pack (pages.yml excluded), parsed against
-    the pack. Callers that already hold the Pack thread it through so its
-    macros are not re-parsed."""
-    root = paths.playbooks_dir() / app
-    if not root.is_dir():
-        return []
+    """Every entry of the pack's `playbooks:` map, parsed against the
+    pack. Callers that already hold the Pack thread it through so the
+    spec file and macros are not re-read."""
     if pack is None:
+        if not (paths.pack_root(app) / PACK_FILENAME).exists():
+            return []
         pack = load_pack(app)
     out: list[PlaybookEntry] = []
-    for f in sorted(root.glob("*.yml")):
-        if f.name == PAGES_FILENAME:
-            continue
-        name = f.stem
+    for name, data in pack.playbook_docs.items():
+        name = str(name)
         try:
-            spec = parse_playbook(read_text(f), name, pack)
+            spec = _parse_playbook_data(data, name, pack)
             out.append(PlaybookEntry(app=app, name=name, spec=spec))
         except Exception as e:  # broad: exclude whole, never take a session down
             out.append(
@@ -387,40 +438,34 @@ def scan_playbooks(app: str, pack: Pack | None = None) -> list[PlaybookEntry]:
 
 
 def list_apps() -> list[str]:
-    """Packs on disk (any pages.yml or *.yml present), sorted."""
-    root = paths.playbooks_dir()
-    if not root.is_dir():
-        return []
-    return sorted(
-        d.name
-        for d in root.iterdir()
-        if d.is_dir() and not d.name.startswith(("_", ".")) and any(d.glob("*.yml"))
-    )
+    """Packs across the search path (the `paths.playbooks_dirs` layering),
+    sorted — a PLAYBOOK.yml marks a pack."""
+    return sorted(paths.marked_subdirs(paths.playbooks_dirs(), PACK_FILENAME))
 
 
 # ---------- parsing ----------
 
 
 def parse_playbook(text: str, name: str, pack: Pack) -> Playbook:
-    """Parse + validate one playbook file against its pack. Raises
-    PlaybookError naming the offending field; never a partial spec."""
-    try:
-        data = _yaml.load(io.StringIO(text))
-    except Exception as e:  # broad: loader errors are not confined to YAMLError
-        raise PlaybookError(f"invalid YAML: {e or type(e).__name__}") from e
+    """One playbook given as YAML text — the text-shaped door tests and
+    tooling use; the live path is `scan_playbooks` over the pack file's
+    `playbooks:` map. Raises PlaybookError naming the offending field;
+    never a partial spec."""
+    data = _spec.load_yaml(text, PlaybookError)
+    return _parse_playbook_data(data, name, pack)
+
+
+def _parse_playbook_data(data, name: str, pack: Pack) -> Playbook:
+    """One entry of the `playbooks:` map → a validated Playbook. The map
+    key IS the name — there is no inner `name:` key to drift from it."""
     if not isinstance(data, dict):
         raise PlaybookError("a playbook must be a YAML mapping (key: value pairs)")
 
-    unknown = sorted(set(data.keys()) - _TOP_KEYS)
+    unknown = sorted(set(map(str, data.keys())) - _PLAY_KEYS)
     if unknown:
-        raise PlaybookError(f"unknown key(s): {', '.join(map(str, unknown))}")
+        raise PlaybookError(f"unknown key(s): {', '.join(unknown)}")
 
-    declared_name = _require_str(data.get("name"), "`name`")
-    if declared_name != name:
-        raise PlaybookError(
-            f"name {declared_name!r} must equal the filename stem {name!r}"
-        )
-    check_name(name, "`name`")
+    check_name(name, "playbook key")
 
     description = _prose(data.get("description"), "`description`")
 
@@ -507,13 +552,13 @@ def _parse_mandate(raw: Any, input_names: set[str]) -> Mandate:
         name = m.group(1)
         if name not in input_names:
             raise PlaybookError(
-                f"{where}.max_amount: placeholder {{{name}}} not declared "
-                "under `inputs`"
+                f"{where}.max_amount: placeholder {{inputs.{name}}} not "
+                "declared under `inputs`"
             )
         max_amount = InputRef(name=name)
     else:
         raise PlaybookError(
-            f"{where}.max_amount must be a number or exactly one `{{input}}` ref"
+            f"{where}.max_amount must be a number or exactly one `{{inputs.name}}` ref"
         )
     expires = raw.get("expires_minutes")
     if expires is not None and (
@@ -538,9 +583,8 @@ def _parse_nodes(
     # defined-before-use by construction (list order). With a ledger,
     # the loop-scoped `{item.*}` refs are available everywhere as a
     # pseudo-payload (the loop closer sits AFTER the body in list
-    # order, so per-body scoping cannot ride the single pass); a node
-    # literally named `item` would be shadowed — both at parse and at
-    # fill, consistently.
+    # order, so per-body scoping cannot ride the single pass); no node
+    # can shadow it — `item` is a reserved ref root.
     payload_so_far: dict[str, tuple[str, ...]] = (
         {"item": LEDGER_FIELDS} if has_ledger else {}
     )
@@ -582,6 +626,11 @@ def _parse_node(
         raise PlaybookError(
             f"{where}: id {nid!r} is a reserved routing target — a node "
             "must not shadow the escalation sink"
+        )
+    if nid in RESERVED_REF_ROOTS:
+        raise PlaybookError(
+            f"{where}: id {nid!r} is a reserved ref root — {{inputs.*}} and "
+            "{item.*} always read the declared inputs and the ledger item"
         )
     if nid in seen:
         raise PlaybookError(
@@ -795,61 +844,61 @@ def _parse_decide(
             )
         context.append(c)
 
-    if decl.outs:
-        if "outs" in node:
+    if decl.outcomes:
+        if "outcomes" in node:
             raise PlaybookError(
-                f"{where}: {call} declares its outs itself "
-                f"({', '.join(decl.outs)}) — remove `outs`"
+                f"{where}: {call} declares its outcomes itself "
+                f"({', '.join(decl.outcomes)}) — remove `outcomes`"
             )
-        outs = decl.outs
+        outcomes = decl.outcomes
     else:
-        raw_outs = node.get("outs")
-        if not isinstance(raw_outs, list) or len(raw_outs) < 2:
+        raw_outcomes = node.get("outcomes")
+        if not isinstance(raw_outcomes, list) or len(raw_outcomes) < 2:
             raise PlaybookError(
-                f"{where}: {call} needs `outs` — the answers this question "
+                f"{where}: {call} needs `outcomes` — the answers this question "
                 "can have (at least 2, including `escalate`)"
             )
-        outs_list = []
-        for o in raw_outs:
-            o = _require_str(o, f"{where}: `outs` item")
-            check_name(o, f"{where}: `outs` item")
-            if o in outs_list:
-                raise PlaybookError(f"{where}: duplicate out {o!r}")
-            outs_list.append(o)
-        if ESCALATE not in outs_list:
+        outcomes_list = []
+        for o in raw_outcomes:
+            o = _require_str(o, f"{where}: `outcomes` item")
+            check_name(o, f"{where}: `outcomes` item")
+            if o in outcomes_list:
+                raise PlaybookError(f"{where}: duplicate outcome {o!r}")
+            outcomes_list.append(o)
+        if ESCALATE not in outcomes_list:
             raise PlaybookError(
-                f"{where}: `outs` must include {ESCALATE!r} — every closed "
+                f"{where}: `outcomes` must include {ESCALATE!r} — every closed "
                 "choice needs the concrete escape arm"
             )
-        outs = tuple(outs_list)
+        outcomes = tuple(outcomes_list)
 
-    on_raw = node.get("on")
-    if not isinstance(on_raw, dict) or not on_raw:
+    routes_raw = node.get("routes")
+    if not isinstance(routes_raw, dict) or not routes_raw:
         raise PlaybookError(
-            f"{where}: `on` must map every out to a node id (or {ESCALATE!r})"
+            f"{where}: `routes` must map every out to a node id (or {ESCALATE!r})"
         )
-    extra = sorted(set(on_raw.keys()) - set(outs))
+    extra = sorted(set(routes_raw.keys()) - set(outcomes))
     if extra:
         raise PlaybookError(
-            f"{where}: `on` routes unknown out(s): {', '.join(map(str, extra))}"
+            f"{where}: `routes` names unknown outcome(s): {', '.join(map(str, extra))}"
         )
-    unrouted = sorted(set(outs) - set(on_raw.keys()))
+    unrouted = sorted(set(outcomes) - set(routes_raw.keys()))
     if unrouted:
         raise PlaybookError(
-            f"{where}: `on` must route EVERY out — missing: {', '.join(unrouted)}"
+            f"{where}: `routes` must route EVERY outcome — missing: {', '.join(unrouted)}"
         )
-    on = {
-        out: _require_str(target, f"{where}: `on.{out}`")
-        for out, target in on_raw.items()
+    routes = {
+        out: _require_str(target, f"{where}: `routes.{out}`")
+        for out, target in routes_raw.items()
     }
-    for out, target in on.items():
+    for out, target in routes.items():
         # A self-route is sanctioned only on the call's re-ask arm — the
         # conductor refreshes the screen (swipes) between those visits.
         # Any other self-route would re-ask the identical screen with the
         # identical prompt: a lint-free playbook that can never converge.
         if target == nid and out != decl.reask_arm:
             raise PlaybookError(
-                f"{where}: `on.{out}` routes back to this node — only "
+                f"{where}: `routes.{out}` routes back to this node — only "
                 f"{call}'s re-ask arm "
                 f"({decl.reask_arm or '(none for this call)'}) may "
                 "self-loop; the conductor scrolls between those re-asks"
@@ -869,8 +918,8 @@ def _parse_decide(
         call=call,
         args=dict(args),
         context=tuple(context),
-        outs=outs,
-        on=on,
+        outcomes=outcomes,
+        routes=routes,
         max_visits=max_visits,
     )
 
@@ -878,40 +927,48 @@ def _parse_decide(
 def _page_ref(
     value: Any, where: str, pack: Pack, *, own_pack_only: bool = False
 ) -> str:
-    """A page reference: bare `<page>` (this pack) or `<app>.<page>` where
-    the app is a reserved built-in namespace. Own-pack pages must be
-    declared; reserved pages resolve against built-ins later, so only the
-    namespace is checked here. `own_pack_only` closes the reserved door
-    (RECONCILE acts on the page — a built-in it cannot act on is out)."""
+    """A page reference — always `<root>.<page>`, one uniform shape over
+    a closed root vocabulary: `pages` (this pack file's own `pages:`
+    section) or a reserved built-in namespace (`ios`/`channel`). One
+    spelling, required: a bare name is rejected with the fix spelled
+    out, so every ref a reader meets points at its section. Own-pack
+    pages must be declared; reserved pages resolve against built-ins
+    later, so only the namespace is checked here. `own_pack_only` closes
+    the reserved door (RECONCILE acts on the page — a built-in it cannot
+    act on is out)."""
     ref = _require_str(value, where)
-    if "." in ref:
-        app, _, page = ref.partition(".")
-        if app == pack.app:
-            ref = page  # normalize the self-qualified spelling
-        elif own_pack_only:
-            raise PlaybookError(
-                f"{where}: must be THIS pack's page — the node re-reads "
-                "and acts on it, so a reserved namespace cannot serve"
-            )
-        elif app in RESERVED_APPS:
-            check_name(page, f"{where}: page")
-            return ref
-        else:
-            raise PlaybookError(
-                f"{where}: {ref!r} references app {app!r} — playbooks may "
-                f"reference only their own pack's pages or the reserved "
-                f"namespaces ({', '.join(sorted(RESERVED_APPS))})"
-            )
+    if "." not in ref:
+        raise PlaybookError(
+            f"{where}: page references are written `pages.<name>` — write pages.{ref}"
+        )
+    app, _, page = ref.partition(".")
+    if app == "pages":
+        ref = page
+    elif own_pack_only:
+        raise PlaybookError(
+            f"{where}: must be THIS pack's page (`pages.<name>`) — the "
+            "node re-reads and acts on it, so a reserved namespace "
+            "cannot serve"
+        )
+    elif app in RESERVED_APPS:
+        check_name(page, f"{where}: page")
+        return ref
+    else:
+        raise PlaybookError(
+            f"{where}: {ref!r} — page references are `pages.<name>` "
+            f"(this pack) or a reserved namespace "
+            f"({', '.join(sorted(RESERVED_APPS))}).<page>"
+        )
     if ref not in pack.pages:
         declared = ", ".join(sorted(pack.pages)) or "(none)"
         raise PlaybookError(
-            f"{where}: page {ref!r} not declared in "
-            f"{pack.app}/{PAGES_FILENAME}. Declared: {declared}"
+            f"{where}: page {ref!r} not declared under `pages:` in "
+            f"{pack.app}/{PACK_FILENAME}. Declared: {declared}"
         )
     return ref
 
 
-# ---------- refs (`{name}` / `{node.field}`) ----------
+# ---------- refs (`{inputs.name}` / `{node.field}`) ----------
 
 
 def _refs(text: str, where: str) -> set[str]:
@@ -923,9 +980,9 @@ def _refs(text: str, where: str) -> set[str]:
             continue
         if m.group(1) is None:
             raise PlaybookError(
-                f"{where}: stray {m.group(0)!r} — use {{name}} for an input, "
-                "{node.field} for an earlier decision's output, or "
-                "{{ / }} for a literal brace"
+                f"{where}: stray {m.group(0)!r} — every ref is dotted: "
+                "{inputs.name} for an input, {node.field} for an earlier "
+                "decision's output, {{ / }} for a literal brace"
             )
         names.add(m.group(1))
     return names
@@ -938,22 +995,20 @@ def _check_refs(
     where: str,
 ) -> None:
     for ref in sorted(refs):
-        if "." in ref:
-            node_id, _, fld = ref.partition(".")
-            if node_id not in payloads:
-                raise PlaybookError(
-                    f"{where}: {{{ref}}} references node {node_id!r}, which "
-                    "is not an EARLIER decide node — outputs wire forward "
-                    "only, in list order"
-                )
-            if fld not in payloads[node_id]:
-                raise PlaybookError(
-                    f"{where}: {{{ref}}}: node {node_id!r} has no output "
-                    f"{fld!r} (has: {', '.join(payloads[node_id]) or '(none)'})"
-                )
-        elif ref not in input_names:
+        root, _, fld = ref.partition(".")
+        if root == "inputs":
+            if fld not in input_names:
+                raise PlaybookError(f"{where}: {{{ref}}} not declared under `inputs`")
+        elif root not in payloads:
             raise PlaybookError(
-                f"{where}: placeholder {{{ref}}} not declared under `inputs`"
+                f"{where}: {{{ref}}} references node {root!r}, which "
+                "is not an EARLIER decide node — outputs wire forward "
+                "only, in list order"
+            )
+        elif fld not in payloads[root]:
+            raise PlaybookError(
+                f"{where}: {{{ref}}}: node {root!r} has no output "
+                f"{fld!r} (has: {', '.join(payloads[root]) or '(none)'})"
             )
 
 
@@ -976,8 +1031,8 @@ def _check_arg_refs(
 def fill_refs(value: Any, values: dict[str, str], where: str) -> Any:
     """A `with:` value with its refs resolved from `values` — the runtime
     half of the ref grammar, beside REF_RE so no consumer re-derives the
-    braces. `values` is keyed by both plain input names and dotted
-    `node.field` output keys, exactly the ref spellings. Recurses into
+    braces. `values` is keyed by the dotted ref spellings themselves
+    (`inputs.name`, `node.field`, `item.field`). Recurses into
     lists/dicts exactly as `_check_arg_refs` validates them. Raises
     PlaybookError on a ref with no value (e.g. a decision output not yet
     recorded)."""
@@ -1030,7 +1085,7 @@ def _successors(nodes: list[Node], idx: int) -> list[str]:
     which is no edge) falls through to the next node in list order."""
     node = nodes[idx]
     if isinstance(node, DecideNode):
-        return [t for t in node.on.values() if t != ESCALATE]
+        return [t for t in node.routes.values() if t != ESCALATE]
     if idx + 1 < len(nodes):
         return [nodes[idx + 1].id]
     return []
@@ -1042,7 +1097,7 @@ def _check_graph(nodes: list[Node], ids: dict[str, int]) -> None:
     # so "only a DECIDE may self-loop" needs no check of its own.)
     for node in nodes:
         if isinstance(node, DecideNode):
-            for out, target in node.on.items():
+            for out, target in node.routes.items():
                 if target in RESERVED_TARGETS:
                     continue
                 if target not in ids:
@@ -1085,7 +1140,7 @@ def _check_acyclic(nodes: list[Node], ids: dict[str, int]) -> None:
         if isinstance(node, DecideNode):
             arm = CALLS[node.call].loop_arm
             if arm is not None:
-                loop_edge = node.on.get(arm)
+                loop_edge = node.routes.get(arm)
         for target in _successors(nodes, ids[nid]):
             if target == nid or target == loop_edge:
                 continue
@@ -1161,7 +1216,7 @@ def _check_money(
         # in-edge (a DECIDE arm, the ledger loop) would enter it with
         # another gate's consent still bound — or with none.
         for other in nodes:
-            if isinstance(other, DecideNode) and n.id in other.on.values():
+            if isinstance(other, DecideNode) and n.id in other.routes.values():
                 raise PlaybookError(
                     f"node {other.id!r} routes to {n.id!r} "
                     f"(irreversible: {n.irreversible}) — an irreversible "
@@ -1232,7 +1287,7 @@ def _check_ledger(
         idx = ids[loop.id]
         arm = CALLS[loop.call].loop_arm
         assert arm is not None
-        for out, target in loop.on.items():
+        for out, target in loop.routes.items():
             if out == arm:
                 if target == ESCALATE or ids[target] >= idx:
                     raise PlaybookError(

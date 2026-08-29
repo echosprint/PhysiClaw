@@ -10,5 +10,9 @@ def write_channel_pages(anchors: tuple[str, ...] = ("MyChat",)) -> None:
     renderer draws anchors from and the matcher scores against."""
     root = paths.playbooks_dir() / "channel"
     root.mkdir(parents=True, exist_ok=True)
-    lines = "".join(f'    - "{a}"\n' for a in anchors)
-    (root / "pages.yml").write_text(f"thread:\n  anchors:\n{lines}", encoding="utf-8")
+    lines = "".join(f'      - "{a}"\n' for a in anchors)
+    (root / "PLAYBOOK.yml").write_text(
+        "name: channel\ndescription: test channel\n"
+        f"pages:\n  thread:\n    anchors:\n{lines}",
+        encoding="utf-8",
+    )

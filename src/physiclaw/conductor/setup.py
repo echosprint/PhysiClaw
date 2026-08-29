@@ -126,7 +126,7 @@ def build_program(
         spec=spec,
         values=values,
         pack_macros=qualified_pack(app, pack),
-        prints=prints_for_app(app),
+        prints=prints_for_app(app, decls=pack.pages),
         channel=channel,
         suspended=suspended,
     )

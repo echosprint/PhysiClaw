@@ -50,6 +50,7 @@ from typing import Any
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
+from physiclaw.common.placeholders import resolve_placeholders
 from physiclaw.macros.model import (
     ALLOWED_STEP_TOOLS,
     COMBINATORS,
@@ -87,6 +88,7 @@ _yaml = YAML(typ="safe", pure=True)
 def parse_macro(text: str, dir_name: str) -> Macro:
     """Parse + validate one MACRO.yml. Raises MacroError with a message
     that names the offending field — never a partially-valid spec."""
+    text = resolve_placeholders(text, MacroError)
     try:
         data = _yaml.load(io.StringIO(text))
     except YAMLError as e:

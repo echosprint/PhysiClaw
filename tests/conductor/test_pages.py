@@ -151,9 +151,11 @@ def test_scaffolded_ios_pages_are_matchable_prints_without_geometry() -> None:
 
 
 def _write_pack(app: str, text: str) -> None:
+    from conductor_fakes import compose_pack_doc
+
     d = paths.playbooks_dir() / app
     d.mkdir(parents=True)
-    (d / "pages.yml").write_text(text, encoding="utf-8")
+    (d / "PLAYBOOK.yml").write_text(compose_pack_doc(app, text), encoding="utf-8")
 
 
 def test_scan_app_decls_reads_pack_or_empty() -> None:
@@ -171,7 +173,9 @@ def test_scan_app_decls_validates_name_before_touching_paths() -> None:
 def test_parse_wraps_any_loader_error_as_pages_error(mocker) -> None:
     # The YAML loader does not confine itself to YAMLError (deep nesting
     # surfaces as RecursionError) — the contract is PagesError-only.
-    mocker.patch.object(pages._yaml, "load", side_effect=RecursionError("deep"))
+    from physiclaw.conductor import _spec
+
+    mocker.patch.object(_spec.yaml_loader, "load", side_effect=RecursionError("deep"))
 
     with pytest.raises(pages.PagesError, match="invalid YAML"):
         pages.parse_pages("x: {anchors: ['a']}", "app")
@@ -214,3 +218,8 @@ def test_load_learned_missing_or_garbage_is_empty() -> None:
     (paths.learned_pages_dir() / "bad.json").write_text("{nope", encoding="utf-8")
 
     assert pages.load_learned("bad") == {}
+
+
+def test_parse_pages_rejects_unpopulated_placeholder() -> None:
+    with pytest.raises(PagesError, match="unpopulated template placeholder.*CONTACT"):
+        parse_pages('thread:\n  anchors: ["<<CONTACT>>"]\n', "channel")

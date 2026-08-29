@@ -12,7 +12,8 @@ and stops; the conductor's own doors at wake are the suspension file and
 the overture."""
 
 import asyncio
-from typing import TYPE_CHECKING, Annotated
+from pathlib import Path
+from typing import TYPE_CHECKING, Annotated, Optional
 
 import typer
 
@@ -35,8 +36,9 @@ playbooks_app = typer.Typer(no_args_is_help=True)
 def init(
     app: Annotated[str, typer.Argument(help="App name (lowercase/digits/hyphens).")],
 ) -> None:
-    """Scaffold a new app pack: pages.yml, an example playbook, and an
-    example pack macro — all parse-clean, all disabled."""
+    """Scaffold a new app pack: one PLAYBOOK.yml (meta + pages + an
+    example walk) and an example pack macro — parse-clean, disabled."""
+    from physiclaw.common.paths import PACK_FILENAME
     from physiclaw.conductor import scaffold
     from physiclaw.conductor.pages import CHANNEL_APP, IOS_APP, THREAD_PAGE
     from physiclaw.conductor.playbook import PlaybookError
@@ -49,7 +51,7 @@ def init(
     typer.echo("Next:")
     if app == CHANNEL_APP:
         typer.echo(
-            f"  1. anchor the `{THREAD_PAGE}` page on YOUR chat header in pages.yml"
+            f"  1. anchor the `{THREAD_PAGE}` page on YOUR chat header in {PACK_FILENAME}"
         )
         typer.echo("  2. record the send/open gesture paths in macros/*/MACRO.yml")
         typer.echo("  3. rehearse both, then enable (physiclaw macros run is")
@@ -65,12 +67,143 @@ def init(
         )
     else:
         typer.echo(
-            "  1. declare pages in pages.yml (physiclaw conductor propose --live)"
+            f"  1. declare `pages:` in {PACK_FILENAME} (physiclaw conductor propose --live)"
         )
         typer.echo(
             "  2. write pack macros + the playbook, then: physiclaw playbooks check"
         )
         typer.echo("  3. capture geometry: physiclaw conductor calibrate " + app)
+
+
+@playbooks_app.command()
+def install(
+    src: Annotated[
+        Path,
+        typer.Argument(
+            help="A template pack directory (e.g. the repo's playbooks/taobao)."
+        ),
+    ],
+    set_values: Annotated[
+        Optional[list[str]],
+        typer.Option(
+            "--set",
+            help="Fill a placeholder non-interactively: KEY=VALUE (repeatable).",
+        ),
+    ] = None,
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Replace an already-installed pack wholesale."),
+    ] = False,
+) -> None:
+    """Install a shared template pack into ~/.physiclaw/playbooks/<app>
+    verbatim — `<<PLACEHOLDER>>` tokens stay in the files (diffable
+    against the template); their values — per-installation constants
+    like the IM contact name — go to playbooks/placeholders.yml, where
+    every parser fills them at load. Everything lands disabled:
+    rehearse, then enable."""
+    import shutil
+
+    from physiclaw.common import paths
+    from physiclaw.common.placeholders import (
+        PLACEHOLDER_VALUES_FILENAME,
+        find_placeholders,
+        placeholder_values,
+        write_placeholder_values,
+    )
+    from physiclaw.common.text import read_text, write_text
+    from physiclaw.conductor import scaffold
+    from physiclaw.conductor.playbook import PlaybookError
+
+    if not src.is_dir():
+        exit_error(f"{src} is not a directory")
+    app = src.name
+    dest = paths.playbooks_dir() / app
+
+    files = sorted(src.rglob("*.yml"))
+    if not files:
+        exit_error(f"{src} contains no pack files")
+    texts = {f: read_text(f) for f in files}
+    # PLAYBOOK.yml is the pack manifest — the `action.yml` analog:
+    # `name`/`description` plus the `placeholders:` map that drives the
+    # prompts below. It installs WITH the pack, tokens intact.
+    try:
+        meta = scaffold.read_template_manifest(src)
+    except PlaybookError as e:
+        exit_error(str(e))
+    if meta.get("description"):
+        typer.echo(meta["description"])
+    tokens = list(
+        dict.fromkeys(t for text in texts.values() for t in find_placeholders(text))
+    )
+    try:
+        existing = placeholder_values()
+    except ValueError as e:
+        exit_error(str(e))
+    new_values = _gather_values(
+        tokens, meta.get("placeholders") or {}, set_values, existing
+    )
+
+    if dest.exists():
+        if not force:
+            exit_error(
+                f"{dest} already exists — remove it or pass --force to replace it"
+            )
+        shutil.rmtree(dest)
+    if new_values:
+        write_placeholder_values({**existing, **new_values})
+        typer.echo(
+            f"values recorded in playbooks/{PLACEHOLDER_VALUES_FILENAME}: "
+            + ", ".join(sorted(new_values))
+        )
+    for f in files:
+        # Tokens stay in the copied files: the parsers fill them from
+        # placeholders.yml at load (and `_check_app` below proves it).
+        out = dest / f.relative_to(src)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        write_text(out, texts[f])
+    typer.echo(f"installed {app} → {dest} ({len(files)} file(s))")
+
+    # The check's own output surfaces real errors; its disabled-state
+    # warnings are a fresh install's EXPECTED shape, so the next steps
+    # print unconditionally.
+    _check_app(app)
+    typer.echo(
+        "next: rehearse (`physiclaw playbooks run`), capture pages "
+        f"(`physiclaw conductor calibrate {app}`), then set `enabled: true`."
+    )
+
+
+def _gather_values(
+    tokens: list[str],
+    manifest: dict,
+    set_values: list[str] | None,
+    existing: dict[str, str],
+) -> dict[str, str]:
+    """The values to ADD to placeholders.yml: `--set` pairs first (they
+    may override an existing value), a prompt (with the manifest's
+    prose) for tokens with no value yet — every value plain and
+    non-empty."""
+    from physiclaw.common.placeholders import find_placeholders
+
+    values = parse_inputs(set_values or [], flag="--set")
+    unknown = sorted(set(values) - set(tokens))
+    if unknown:
+        exit_error(
+            f"--set names no placeholder in this pack: {', '.join(unknown)} "
+            f"(pack has: {', '.join(tokens) or '(none)'})"
+        )
+    for tok in tokens:
+        if tok in values or tok in existing:
+            continue
+        meta = manifest.get(tok) or {}
+        prompt = f"{tok} — {meta.get('description', 'value')}"
+        if meta.get("example"):
+            prompt += f" (e.g. {meta['example']})"
+        values[tok] = typer.prompt(prompt).strip()
+    for tok, value in values.items():
+        if not value or find_placeholders(value):
+            exit_error(f"placeholder {tok} needs a plain non-empty value")
+    return values
 
 
 @playbooks_app.command("list")
@@ -83,8 +216,9 @@ def list_cmd() -> None:
     apps = pb.list_apps()
     if not apps:
         typer.echo(
-            "No app packs found. Scaffold one: physiclaw playbooks init <app> "
-            "(see ~/.physiclaw/playbooks/README.md)"
+            "No app packs found. Scaffold one (physiclaw playbooks init "
+            "<app>) or install a shared template (physiclaw playbooks "
+            "install <dir>) — see ~/.physiclaw/playbooks/README.md"
         )
         return
     for app in apps:

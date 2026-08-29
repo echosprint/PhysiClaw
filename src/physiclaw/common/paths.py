@@ -13,7 +13,8 @@ Layout::
     ├── models/omniparser_icon_detect/model.onnx
     ├── skills/<name>/SKILL.md           (user-authored; overrides built-in)
     ├── macros/{README.md, <name>/MACRO.yml, stats.json}  (gesture macros + run stats)
-    ├── playbooks/<app>/{pages.yml, <playbook>.yml, macros/}  (self-contained app packs)
+    ├── playbooks/<app>/{PLAYBOOK.yml, macros/}  (self-contained app packs)
+    ├── playbooks/placeholders.yml       (per-install <<TOKEN>> values, filled at load)
     ├── official/{source.json, skills/, .sync-state.json}  (synced official pack)
     ├── cache/update.json                (update-notice stage marker; Phase B→A)
     ├── learned/pitfalls/{pitfalls.md, history.jsonl}  (agent-flagged traps; add_pitfall)
@@ -36,7 +37,7 @@ machines write):
 
     config.toml     the ONE user-edited settings file → TOML
     MACRO.yml,      the deliberate YAML exceptions: user-edited automation
-    pages.yml       specs (macro step flows, playbook page declarations)
+    PLAYBOOK.yml    specs (macro step flows, pack pages + playbooks)
                     follow the GitHub-Actions shape, and YAML's
                     implicit-typing hazards are fenced by a 1.2 parser +
                     strict type checks (macros/parse.py,
@@ -50,6 +51,7 @@ New files follow this rule; don't convert one format to another for
 uniformity's sake.
 """
 
+import functools
 import json
 import os
 from pathlib import Path
@@ -58,6 +60,83 @@ from physiclaw.common.text import read_text
 
 HOME: Path = Path(os.environ.get("PHYSICLAW_HOME", "~/.physiclaw")).expanduser()
 LOG_DIR: Path = HOME / "log"
+
+# Whether the source-tree pack layer is eligible — decided ONCE at
+# import, beside HOME and by the same knob: setting PHYSICLAW_HOME
+# means "this exact home and nothing layered under it" (tests, probes).
+# Tests toggle it with monkeypatch.setattr, like HOME itself.
+SOURCE_LAYER: bool = "PHYSICLAW_HOME" not in os.environ
+
+# The one spelling of a pack's spec filename (playbooks/<app>/PLAYBOOK.yml).
+PACK_FILENAME = "PLAYBOOK.yml"
+
+
+@functools.cache
+def _checkout_root() -> Path | None:
+    root = Path(__file__).resolve().parents[3]
+    if (root / "pyproject.toml").exists() and (root / "playbooks").is_dir():
+        return root
+    return None
+
+
+def source_root() -> Path | None:
+    """The repo checkout physiclaw runs from (editable install, `uv run`
+    in the tree) — None on an installed wheel or when ``SOURCE_LAYER``
+    is off."""
+    return _checkout_root() if SOURCE_LAYER else None
+
+
+def _layered(primary: Path, sub: str) -> list[Path]:
+    dirs = [primary]
+    root = source_root()
+    if root is not None and (root / sub).is_dir():
+        dirs.append(root / sub)
+    return dirs
+
+
+def playbooks_dirs() -> list[Path]:
+    """The pack search path, precedence first: the local home (an
+    installed pack shadows the same-named tree pack — this is THE
+    layering rule; `macros_dirs` and the artifact listers follow it),
+    then the source tree's ``playbooks/`` when running from a checkout —
+    so repo edits are live in dev without an install step. Writes always
+    target ``playbooks_dir()`` (the home)."""
+    return _layered(playbooks_dir(), "playbooks")
+
+
+def pack_root(app: str) -> Path:
+    """The directory pack ``app`` loads from — the first search dir
+    carrying ``<app>/PLAYBOOK.yml``; the home dir (the write target)
+    when none does."""
+    for d in playbooks_dirs():
+        if (d / app / PACK_FILENAME).exists():
+            return d / app
+    return playbooks_dir() / app
+
+
+def macros_dirs() -> list[Path]:
+    """The standalone-macro search path — home, then the source tree's
+    ``macros/`` (the `playbooks_dirs` layering rule). Writes —
+    recordings, stats — always target ``macros_dir()``."""
+    return _layered(macros_dir(), "macros")
+
+
+def marked_subdirs(dirs: list[Path], marker: str) -> set[str]:
+    """Subdir names bearing ``marker`` across a search path — the one
+    union both artifact listers (packs, macros) share, with one skip
+    convention."""
+    names: set[str] = set()
+    for root in dirs:
+        if not root.is_dir():
+            continue
+        names.update(
+            d.name
+            for d in root.iterdir()
+            if d.is_dir()
+            and not d.name.startswith(("_", "."))
+            and (d / marker).exists()
+        )
+    return names
 
 
 def ensure_dirs() -> None:
@@ -154,8 +233,8 @@ def macros_dir() -> Path:
 
 def playbooks_dir() -> Path:
     """Self-contained conductor app packs — one ``<app>/`` dir per app
-    holding its ``pages.yml`` (page declarations, human-authored), one
-    ``<playbook>.yml`` per playbook, and the pack's private ``macros/``.
+    holding its ``PLAYBOOK.yml`` (meta + page declarations + the walks,
+    human-authored) and the pack's private ``macros/``.
     Geometry never lives here; it is captured on-device into
     ``learned_pages_dir()`` — device variance (iPhone models, iOS and app
     versions) makes shipped or authored geometry infeasible."""

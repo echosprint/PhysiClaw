@@ -1,0 +1,65 @@
+name: send
+description: open the <<CONTACT>> WeChat thread via in-app search and send {message}
+enabled: false
+inputs:
+  message:
+    description: the text to send to the user
+steps:
+  - name: go-home
+    tool: home_screen
+  - name: settle-home
+    tool: wait
+    with: {seconds: 1}
+  - name: dismiss-switcher    # home_screen FROM home can open the app switcher
+    tool: tap
+    with: {bbox: [0.42, 0.855, 0.58, 0.885]}
+  - name: open-wechat
+    tool: tap
+    with: {bbox: [0.348, 0.893, 0.510, 0.973]}
+  - name: settle
+    tool: wait
+    with: {seconds: 2}
+  - name: pop-to-list          # in a thread -> pops to the chat list; on the list -> harmless edge bounce
+    tool: go_back
+  - name: open-search          # search is position-independent: the chat list
+    tool: tap                  # reorders itself (Official Accounts folder, new
+    with: {bbox: [0.30, 0.098, 0.65, 0.132]}   # chats), so never tap a list row blind
+  - name: clip-name
+    tool: send_to_clipboard
+    with: {text: "<<CONTACT>>"}
+  - name: hold-search-field
+    tool: long_press
+    with: {bbox: [0.15, 0.063, 0.60, 0.100]}
+  - name: paste-name
+    tool: tap
+    with: {bbox: [0.036, 0.114, 0.197, 0.162]}
+  - name: results-settle
+    tool: wait
+    with: {seconds: 1}
+  - name: open-contact         # first row under the Contacts header
+    tool: tap
+    with: {bbox: [0.031, 0.185, 0.900, 0.235]}
+    guard:
+      # Only the row being tapped matters: section headers (Top Hits /
+      # Contacts / 联系人) shuffle with search history, but the first
+      # result stays in this band - and it must BE the contact.
+      require: {text: "<<CONTACT>>", within: [0.0, 0.16, 1.0, 0.25]}
+      hint: "WeChat search's first result is not <<CONTACT>> - check the contact name"
+  - name: raise-keyboard       # NEVER type into an unverified chat
+    tool: tap
+    with: {bbox: [0.15, 0.925, 0.60, 0.965]}
+    guard:
+      require: {text: "<<CONTACT>>", within: [0.20, 0.03, 0.80, 0.10]}
+      hint: "not on the <<CONTACT>> thread - refusing to type into the wrong chat"
+  - name: clip
+    tool: send_to_clipboard
+    with: {text: "{message}"}
+  - name: hold-input           # input field sits above the keyboard
+    tool: long_press
+    with: {bbox: [0.10, 0.585, 0.45, 0.625]}
+  - name: paste
+    tool: tap
+    with: {bbox: [0.122, 0.545, 0.214, 0.572]}
+  - name: send
+    tool: tap
+    with: {bbox: [0.822, 0.865, 0.912, 0.893]}

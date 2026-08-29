@@ -1,6 +1,6 @@
 """Shared scalar layer for the conductor's YAML spec files.
 
-`pages.yml` and playbook files follow the MACRO.yml conventions — same
+A pack's spec file (PLAYBOOK.yml) follows the MACRO.yml conventions — same
 naming rule, same prose caps, same strict-string coercion hints, same
 YAML 1.2 pure loader. The rules' one true home is the macro layer
 (`macros/model.py` constants, `check_name`'s wording); this module
@@ -15,6 +15,10 @@ from typing import Any, Callable
 
 from ruamel.yaml import YAML
 
+from physiclaw.common import paths
+from physiclaw.common.paths import PACK_FILENAME
+from physiclaw.common.placeholders import resolve_placeholders
+from physiclaw.common.text import read_text
 from physiclaw.macros.model import (
     INPUT_NAME_RE as INPUT_NAME_RE,
 )
@@ -31,9 +35,48 @@ from physiclaw.macros.model import MacroError
 from physiclaw.macros.model import check_name as _model_check_name
 
 # YAML 1.2 safe loader, pure-python, load-only — the same construction as
-# `macros/parse.py`. Each spec module aliases this as its own `_yaml` so
-# tests can keep patching per-module.
+# `macros/parse.py`. `load_yaml` below is the resolved-spec door; the
+# install flow's raw template read (`scaffold.read_template_manifest`)
+# shares the instance.
 yaml_loader = YAML(typ="safe", pure=True)
+
+
+_PACK_TOP_KEYS = frozenset(
+    {"name", "description", "placeholders", "pages", "playbooks"}
+)
+
+
+def load_yaml(text: str, error_cls: type[Exception], where: str = "") -> Any:
+    """The one load ritual every spec door shares: fill `<<TOKEN>>`s
+    from the local values file (rejecting survivors), YAML 1.2 load,
+    wrap loader errors in the door's own error class."""
+    text = resolve_placeholders(text, error_cls)
+    prefix = f"{where}: " if where else ""
+    try:
+        return yaml_loader.load(text)
+    except Exception as e:  # loader errors are not confined to YAMLError
+        raise error_cls(f"{prefix}invalid YAML: {e or type(e).__name__}") from e
+
+
+def load_pack_doc(app: str, error_cls: type[Exception]) -> dict | None:
+    """`playbooks/<app>/PLAYBOOK.yml`, loaded and top-checked: a mapping
+    with only the known top-level sections, no unpopulated template
+    placeholders. None when the file doesn't exist (not a pack).
+    Section contents are validated by their owners (`pages.py`,
+    `playbook.py`) — this is just the shared front door."""
+    path = paths.pack_root(app) / PACK_FILENAME
+    if not path.exists():
+        return None
+    data = load_yaml(read_text(path), error_cls, where=f"{app}/{PACK_FILENAME}")
+    if not isinstance(data, dict):
+        raise error_cls(f"{app}/{PACK_FILENAME} must be a YAML mapping")
+    unknown = sorted(set(map(str, data.keys())) - _PACK_TOP_KEYS)
+    if unknown:
+        raise error_cls(
+            f"{app}/{PACK_FILENAME}: unknown key(s): {', '.join(unknown)} "
+            f"(sections: {', '.join(sorted(_PACK_TOP_KEYS))})"
+        )
+    return data
 
 
 def bind(

@@ -37,7 +37,7 @@ def _choose_req(*labels: str):
     return build_request(
         "choose_item",
         "choose",
-        CALLS["choose_item"].outs,
+        CALLS["choose_item"].outcomes,
         {"criteria": "cheapest"},
         screen,
     )
@@ -155,7 +155,7 @@ def test_candidates_are_content_keyed_and_deduped() -> None:
     )
 
     req = build_request(
-        "choose_item", "c", CALLS["choose_item"].outs, {"criteria": "x"}, screen
+        "choose_item", "c", CALLS["choose_item"].outcomes, {"criteria": "x"}, screen
     )
 
     assert sorted(c.key for c in req.candidates) == ["beer", "牛奶"]
@@ -180,7 +180,7 @@ def test_untrusted_text_always_carries_the_data_label() -> None:
     choose = build_request(
         "choose_item",
         "c",
-        CALLS["choose_item"].outs,
+        CALLS["choose_item"].outcomes,
         {"criteria": "x"},
         make_screen(("牛奶", 0.5, 0.2)),
         context="prefers: whole milk",
@@ -299,7 +299,7 @@ async def test_parse_task_not_a_task_carries_no_payload() -> None:
 async def test_confirm_reply_row_judges_the_reply() -> None:
     from physiclaw.conductor.micro import CONFIRM_REPLY
 
-    # Empty outs: the verdict space is fixed whole in the _SPECS row.
+    # Empty outcomes: the verdict space is fixed whole in the _SPECS row.
     req = build_request(
         CONFIRM_REPLY,
         "gate",
@@ -407,7 +407,7 @@ async def test_parse_task_drops_unfilled_inputs(filled: str) -> None:
     # must NOT reach the payload: `resolve_inputs` resolves on PRESENCE,
     # so a present "null" shadows the declared default — `criteria`
     # becomes the literal string "null" in the picking decision, and a
-    # `{cap}` mandate stops resolving to a number at all (observed live
+    # `{inputs.cap}` mandate stops resolving to a number at all (observed live
     # against kimi-k2.6, which sent `"null"` for both).
     from physiclaw.conductor.micro import PARSE_TASK
 

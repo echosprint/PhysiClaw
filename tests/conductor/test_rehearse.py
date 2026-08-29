@@ -24,7 +24,6 @@ HOME = make_screen(("Files", 0.5, 0.1)).text
 RESULTS = make_screen(("综合", 0.5, 0.1)).text
 
 FLOW = """\
-name: flow
 description: two legs
 inputs:
   keyword:
@@ -33,14 +32,14 @@ nodes:
   - id: open
     type: LEG
     macro: open-app
-    with: {message: "{keyword}"}
-    verify: home
+    with: {message: "{inputs.keyword}"}
+    verify: pages.home
   - id: search
     type: LEG
     macro: add-cart
     with: {message: "go"}
-    enter: home
-    verify: results
+    enter: pages.home
+    verify: pages.results
 """
 
 

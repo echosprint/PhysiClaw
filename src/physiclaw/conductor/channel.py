@@ -57,7 +57,7 @@ def load_channel() -> Channel | None:
     activation degrade; legs run unaffected)."""
     try:
         pack = load_pack(CHANNEL_APP)
-        prints = prints_for_app(CHANNEL_APP)
+        prints = prints_for_app(CHANNEL_APP, decls=pack.pages)
     except Exception as e:
         log.warning("channel pack unusable (%s) — asks will hand over", e)
         return None
