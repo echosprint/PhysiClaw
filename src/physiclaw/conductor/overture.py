@@ -97,7 +97,7 @@ class Overture:
         self.done = False
         self._activation = activation
         self._prints = prints
-        self._turns = Turnsmith()
+        self._turns = Turnsmith("boot")
         self._unlocks = 0
         self._opens = 0
         self._screen: Screen | None = None

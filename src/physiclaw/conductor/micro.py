@@ -586,6 +586,11 @@ _SPECS: dict[str, _CallSpec] = {
             "OMIT any input the message does not specify — leave the key "
             "out entirely rather than filling it with null or an empty "
             "string; each omitted input falls back to its own default. "
+            "Each value contains ONLY what that input's description asks "
+            "for — a search-keyword input takes the bare product/search "
+            "term (follow its e.g. example when shown), never quantity or "
+            "count words; those belong only in an input that asks for "
+            "them. "
             f"An input marked {LIST_INPUT_MARK} takes a JSON array of "
             f"{_ITEM_JSON} objects."
         ),

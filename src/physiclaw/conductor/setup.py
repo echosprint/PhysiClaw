@@ -258,6 +258,28 @@ def _gate_reentry_warnings(spec: Playbook) -> list[str]:
     return out
 
 
+def walk_registry(program: "Program", channel: "Channel | None") -> dict[str, Macro]:
+    """The qualified dispatch registry one live walk needs — its own
+    pack's macros plus the channel's. The ONE spelling of that rule:
+    `session_setup` arms a real wake with it and the CLI rehearsal
+    dispatches through it, so the two can never drift."""
+    registry: dict[str, Macro] = {}
+    if channel is not None:
+        registry.update(channel.macros)
+    registry.update(program.pack_macros)
+    return registry
+
+
+def _menu_input(i) -> str:
+    """One declared input on the parse_task menu: name, list mark (keys
+    the prompt's JSON-array rule), description — and the authored
+    `example:`, which is the extraction hint ("五常大米 5kg" shows the
+    shape a value should take better than any rule prose)."""
+    mark = f" {LIST_INPUT_MARK}" if i.kind == "list" else ""
+    example = f"; e.g. {i.example}" if i.example else ""
+    return f"{i.name}{mark} ({i.description}{example})"
+
+
 @dataclass
 class Activation:
     """The parse_task half of the boot: turn a THREAD screen into one
@@ -290,13 +312,7 @@ class Activation:
     def _menu(self) -> str:
         lines = ["Available playbooks:"]
         for ref, (spec, _pack) in self.entries.items():
-            inputs = ", ".join(
-                # The mark keys the parse_task prompt's JSON-array rule.
-                f"{i.name} {LIST_INPUT_MARK} ({i.description})"
-                if i.kind == "list"
-                else f"{i.name} ({i.description})"
-                for i in spec.inputs
-            )
+            inputs = ", ".join(_menu_input(i) for i in spec.inputs)
             lines.append(
                 f"- {ref}: {spec.description}"
                 + (f" [inputs: {inputs}]" if inputs else "")
@@ -332,18 +348,17 @@ def session_setup() -> "tuple[Program | None, Overture | None, dict[str, Macro]]
     A playbook on disk IS the grant: with any enabled playbook and a
     channel, the overture drives. Nothing suspended and nothing enabled
     means a plain model session, exactly as before."""
-    hidden: dict[str, Macro] = {}
     channel = load_channel()
-    if channel is not None:
-        hidden.update(channel.macros)
     program = load_suspended(channel)
     if program is not None:
         # A live program names only its own pack + the channel — the
         # full cross-pack discovery below is the overture's need, and
         # the overture is off while a program drives (a suspended walk
         # navigates to the thread on its own account).
-        hidden.update(program.pack_macros)
-        return program, None, hidden
+        return program, None, walk_registry(program, channel)
+    hidden: dict[str, Macro] = {}
+    if channel is not None:
+        hidden.update(channel.macros)
     if channel is None:
         # No channel → nothing to boot to and nothing to ask over; no
         # consumer for the discovery, so skip the every-pack parse.

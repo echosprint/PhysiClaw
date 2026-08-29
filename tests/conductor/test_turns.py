@@ -9,7 +9,7 @@ from physiclaw.contract.dto import FinishReason, TextBlock, ToolResultMessage
 
 
 def test_synth_is_a_note_plus_one_other_marked_synthesized() -> None:
-    asst = Turnsmith().synth("peek", "looking", "peek", {})
+    asst = Turnsmith("walk").synth("peek", "looking", "peek", {})
 
     assert [c.name for c in asst.tool_calls] == ["note", "peek"]
     assert asst.tool_calls[0].arguments == {"summary": "looking"}
@@ -21,7 +21,7 @@ def test_synth_is_a_note_plus_one_other_marked_synthesized() -> None:
 def test_pending_points_at_the_action_call_not_the_note() -> None:
     # The coupling that makes result lookup work: a driver reads the
     # ACTION's result, and the note's result must never satisfy it.
-    t = Turnsmith()
+    t = Turnsmith("walk")
     asst = t.synth("leg", "running", "run_macro", {"name": "app/x"})
 
     assert t.pending is not None
@@ -32,7 +32,7 @@ def test_pending_points_at_the_action_call_not_the_note() -> None:
 
 def test_pending_call_id_resolves_against_real_history() -> None:
     # End-to-end with the reader the drivers actually use.
-    t = Turnsmith()
+    t = Turnsmith("walk")
     asst = t.synth("peek", "looking", "peek", {})
     assert t.pending is not None
     history = [
@@ -49,7 +49,7 @@ def test_pending_call_id_resolves_against_real_history() -> None:
 
 
 def test_call_ids_are_unique_per_turn() -> None:
-    t = Turnsmith()
+    t = Turnsmith("walk")
 
     ids = {c.id for _ in range(3) for c in t.synth("peek", "s", "peek", {}).tool_calls}
 
@@ -57,7 +57,7 @@ def test_call_ids_are_unique_per_turn() -> None:
 
 
 def test_latest_synth_replaces_the_pending_action() -> None:
-    t = Turnsmith()
+    t = Turnsmith("walk")
     t.synth("peek", "s", "peek", {})
     second = t.synth("tap", "s", "tap", {"bbox": [0, 0, 1, 1]})
 
@@ -67,9 +67,24 @@ def test_latest_synth_replaces_the_pending_action() -> None:
 
 
 def test_channel_flag_is_declared_at_the_synth_site() -> None:
-    t = Turnsmith()
+    t = Turnsmith("walk")
 
     assert t.synth("peek", "s", "peek", {}) and t.pending is not None
     assert t.pending.channel is False
     assert t.synth("gate-peek", "s", "peek", {}, channel=True) and t.pending is not None
     assert t.pending.channel is True
+
+
+def test_driver_scopes_keep_ids_unique_across_smiths() -> None:
+    # The overture and the program each run a private Turnsmith; the
+    # scope is what keeps their id sequences disjoint — without it a
+    # driver whose result never landed could adopt the OTHER driver's
+    # stale one (result_for is exact-match, newest-first).
+    boot = Turnsmith("boot").synth("peek", "s", "peek", {})
+    walk = Turnsmith("walk").synth("peek", "s", "peek", {})
+
+    boot_ids = {c.id for c in boot.tool_calls}
+    walk_ids = {c.id for c in walk.tool_calls}
+
+    assert boot_ids.isdisjoint(walk_ids)
+    assert all(i.startswith("conductor-") for i in boot_ids | walk_ids)

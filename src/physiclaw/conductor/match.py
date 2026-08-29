@@ -216,6 +216,15 @@ def reads_as_cover(screen: Screen) -> bool:
     return False
 
 
+def reads_as_locked(screen: Screen) -> bool:
+    """The cover OR the passcode keypad — everything `unlock_phone` can
+    handle. The keypad state (post-swipe, hero clock gone) prints the
+    one hint line the cover never does; its spelling follows the
+    device's system locale, so the shape read stays the primary signal
+    and the text is the keypad-state belt."""
+    return reads_as_cover(screen) or "Enter Passcode" in screen.content
+
+
 # ---------- per-page scoring ----------
 
 

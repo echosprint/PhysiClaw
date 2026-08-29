@@ -234,6 +234,22 @@ def test_contract_orders_reason_before_answer() -> None:
     )
 
 
+def test_parse_task_prompt_pins_value_hygiene() -> None:
+    # The extraction rule that keeps quantity words out of search-term
+    # inputs — prompt prose is behavior here, so the load-bearing line
+    # is pinned like the outstanding-request rules above.
+    from physiclaw.conductor.micro import NOT_A_TASK, PARSE_TASK, _system
+
+    req = build_request(
+        PARSE_TASK, "activation", ("taobao/buy",), {"menu": "m"}, make_screen()
+    )
+
+    prompt = _system(req, ("taobao/buy", NOT_A_TASK))
+
+    assert "never quantity or count words" in prompt
+    assert "ONLY what that input's description asks" in prompt
+
+
 @pytest.mark.asyncio
 async def test_parse_task_row_extracts_inputs_payload() -> None:
     from physiclaw.conductor.micro import PARSE_TASK

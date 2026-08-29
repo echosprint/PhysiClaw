@@ -693,6 +693,24 @@ def test_activation_builds_a_request_over_the_thread_screen() -> None:
     assert prog.values == {"keyword": "牛奶"} and prog.channel is activation.channel
 
 
+def test_activation_menu_renders_the_input_example() -> None:
+    # The authored `example:` is the extraction hint — it must reach the
+    # parse_task menu, or a keyword input has only prose to shape its
+    # value ("五常大米 5kg" beats any rule about quantity words).
+    _write_channel()
+    spec = FLOW.replace(
+        "    description: what to search\n",
+        "    description: what to search\n    example: rice 5kg\n",
+    )
+    write_pack(playbooks={"flow": spec})
+    _, overture, _ = setup.session_setup()
+    assert overture is not None
+
+    menu = overture._activation._menu()
+
+    assert "keyword (what to search; e.g. rice 5kg)" in menu
+
+
 def test_activation_rejects_unresolvable_inputs_and_not_a_task() -> None:
     from physiclaw.conductor.micro import MicroOutcome
 

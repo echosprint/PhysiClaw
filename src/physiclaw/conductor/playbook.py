@@ -324,6 +324,14 @@ def qualified_macro(app: str, name: str) -> str:
     return f"{app}/{name}"
 
 
+def macro_app(name: str) -> str:
+    """The app half of a qualified dispatch key — `qualified_macro`'s
+    inverse, kept beside it so the "/" convention has one spelling.
+    "" for an unqualified name (user macros never carry an app)."""
+    app, sep, _ = name.partition("/")
+    return app if sep else ""
+
+
 def qualified_pack(app: str, pack: Pack) -> dict[str, Macro]:
     """A pack's macros under their qualified dispatch keys."""
     return {qualified_macro(app, n): m for n, m in pack.macros.items()}

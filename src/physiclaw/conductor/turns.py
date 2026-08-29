@@ -39,7 +39,15 @@ from physiclaw.contract.dto import (
 )
 
 # Call-id prefix for every synthesized action. Stable on purpose: it is
-# how a recorded session's tool calls are recognized as conductor-made.
+# what lets a reader of a recorded session (wire.jsonl, traces) tell
+# conductor-made tool calls apart — in-process code never parses ids;
+# provenance there is the session's structural `synthesized` bit.
+# The full id is `conductor-<scope>-<seq>-<role>`: each driver mints
+# under its own scope, so ids stay unique across the session even
+# though the overture and the program each run a private Turnsmith —
+# without the scope, both sequences start at 1 and `views.result_for`
+# (exact-match, newest-first) could hand a driver the OTHER driver's
+# stale result whenever its own failed to land.
 CALL_PREFIX = "conductor"
 
 # How much of a blocked call's text a hand-over reason quotes. Enough to
@@ -64,9 +72,15 @@ class Pending:
 
 
 class Turnsmith:
-    """Mints synthesized turns and remembers the one action in flight."""
+    """Mints synthesized turns and remembers the one action in flight.
 
-    def __init__(self) -> None:
+    `scope` names the driver this smith belongs to ("boot" for the
+    overture, "walk" for the program) and rides every call id — required
+    rather than defaulted so a future third driver cannot silently
+    collide with an existing sequence."""
+
+    def __init__(self, scope: str) -> None:
+        self.scope = scope
         self.pending: Pending | None = None
         self._seq = 0
 
@@ -111,7 +125,7 @@ class Turnsmith:
         compose their own prose, so this stays free of any driver's
         vocabulary."""
         self._seq += 1
-        cid = f"{CALL_PREFIX}-{self._seq}"
+        cid = f"{CALL_PREFIX}-{self.scope}-{self._seq}"
         self.pending = Pending(kind=kind, call_id=f"{cid}-act", channel=channel)
         return AssistantMessage(
             content="",

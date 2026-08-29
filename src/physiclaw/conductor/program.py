@@ -206,7 +206,7 @@ class Program:
         self._idx = 0
         # Turn minting + the one action in flight (`turns.py`) — the walk
         # keeps its own vocabulary (journal, acted) around it.
-        self._turns = Turnsmith()
+        self._turns = Turnsmith("walk")
         self._gate = _Gate()
         self._resumed = False
         # True once any device-changing action was synthesized (peeks
