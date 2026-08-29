@@ -1,10 +1,10 @@
 """Run wiring — the settings and per-session context dataclasses shared
-by `engine` (session lifecycle), `loop` (turn driver), and `dispatch`
-(tool-call execution).
+by `engine` (session lifecycle), `loop` (turn driver), `dispatch`
+(tool-call execution), and `plugins` (the dotted-path loaders).
 
-Leaf of the engine's internal split: the three sibling modules all
-depend on this one, never on each other through it, so it must not
-import any of them.
+Leaf of the engine's internal split: the sibling modules all depend on
+this one, never on each other through it, so it must not import any of
+them.
 """
 
 from dataclasses import dataclass

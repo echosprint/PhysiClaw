@@ -13,9 +13,13 @@ The built-in default lives HERE, not in config: the config layer stays
 neutral (it names no plugin) and the rendered template does not
 advertise internals. An empty config value means this default set;
 ``"none"`` is the explicit off switch — every turn a plain provider
-call. The name below is the one place agent-side code spells a plugin's
-module, and it is data to `importlib`, never an import — the AST guards
-in `tests/test_architecture.py` stay honest.
+call.
+
+The debug harness rides the same blindness rule through its own loader
+(`load_debug_intercept`, gated on the `--debug` env). This module is
+the ONE place agent-side code spells a dotted module path — always as
+data to `importlib`, never an import — so the AST guards in
+`tests/test_architecture.py` stay honest.
 """
 
 import importlib
