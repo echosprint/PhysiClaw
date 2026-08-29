@@ -243,3 +243,28 @@ def test_read_live_returns_none_when_pid_lookup_raises_oserror(
     mocker.patch("os.kill", side_effect=OSError("EINVAL"))
 
     assert runtime_state.read_live() is None
+
+
+# ---------- request_shutdown ----------
+
+
+def test_request_shutdown_signals_the_live_pid(mocker) -> None:
+    import signal
+
+    from physiclaw.common import runtime_state
+
+    mocker.patch.object(runtime_state, "read_live", return_value={"pid": 4242})
+    kill = mocker.patch.object(runtime_state.os, "kill")
+
+    assert runtime_state.request_shutdown() is True
+    kill.assert_called_once_with(4242, signal.SIGINT)
+
+
+def test_request_shutdown_without_a_live_server_is_false(mocker) -> None:
+    from physiclaw.common import runtime_state
+
+    mocker.patch.object(runtime_state, "read_live", return_value=None)
+    kill = mocker.patch.object(runtime_state.os, "kill")
+
+    assert runtime_state.request_shutdown() is False
+    kill.assert_not_called()

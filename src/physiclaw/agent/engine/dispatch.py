@@ -187,6 +187,25 @@ def _blocks_result(
 ) -> ToolResultMessage:
     """Raw MCP-style blocks → observed ToolResultMessage — the shared tail
     of the MCP path and the local block-returning path (run_macro)."""
+    if run.debug_intercept is not None:
+        # The e2e debug harness (debug mode, env-only): the call RAN for
+        # real — a gate's send genuinely reaches the phone — and only its
+        # observation may be rewritten to the virtual thread. Success path
+        # only (errors never reach this tail), riding the same verdict /
+        # observer / trace machinery — marked, so a forensic read can
+        # never mistake a virtual thread for a real one.
+        faked = run.debug_intercept(call, session.synthesized_turn, blocks)
+        if faked is not None:
+            run.tr.write(
+                {
+                    "event": "debug_faked",
+                    "turn": turn,
+                    "name": call.name,
+                    "id": call.id,
+                    "arguments": call.arguments,
+                }
+            )
+            blocks = faked
     content = mcp_blocks_to_content_blocks(blocks)
     changed = verdict.parse(verdict.action_text(blocks))
     content = _observe_result(

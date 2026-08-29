@@ -744,6 +744,16 @@ def set_dotted(dotted: str, raw_value: str, path: Path | None = None) -> None:
 
 SERVER_ENV_VAR = "PHYSICLAW_SERVER"
 
+# The debug-harness switches — deliberately env-only, never config
+# fields: `physiclaw debug` exports them in the server process it
+# starts, the runtime subprocess inherits them, and they die with the
+# run — debug mode can't be left armed in a deployment. DEBUG
+# virtualizes the user's side of the IM thread (`--task --reply`
+# scripts it); MACRO_FAILURE halts on the first macro abort for
+# inspection (the debug default; `--no-macro-failure` opts out).
+DEBUG_ENV_VAR = "PHYSICLAW_DEBUG"
+MACRO_FAILURE_ENV_VAR = "PHYSICLAW_MACRO_FAILURE"
+
 
 # The wildcard bind addresses. One contract, several consumers: a server
 # can listen on these but a client can't dial them (URL builders map them
@@ -853,6 +863,8 @@ __all__ = [
     "CONFIG",
     "Config",
     "ConfigError",
+    "DEBUG_ENV_VAR",
+    "MACRO_FAILURE_ENV_VAR",
     "MODEL_ENV_VAR",
     "SERVER_ENV_VAR",
     "config_path",

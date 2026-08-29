@@ -9,6 +9,7 @@ from physiclaw.cli.auto import auto
 from physiclaw.cli.clear import clear
 from physiclaw.cli.conductor import conductor_app
 from physiclaw.cli.config import config_app
+from physiclaw.cli.debug import debug
 from physiclaw.cli.doctor import doctor
 from physiclaw.cli.flash import flash
 from physiclaw.cli.logs import logs
@@ -44,6 +45,7 @@ app.command()(status)
 app.command()(update)
 app.command()(flash)
 app.command()(testdrive)
+app.command()(debug)
 app.command()(logs)
 app.command()(clear)
 app.command()(reset)

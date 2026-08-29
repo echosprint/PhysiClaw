@@ -8,6 +8,8 @@ order in `tools[]` and exploits LLM position bias.
 """
 
 import asyncio
+import logging
+import os
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
@@ -27,14 +29,41 @@ from physiclaw.agent.engine.job_store import (
 )
 from physiclaw.agent.engine.session import Session
 from physiclaw.agent.runtime.sentinel import IDLE, STATUSES
-from physiclaw.common import gesture_vocab
+from physiclaw.common import gesture_vocab, runtime_state
+from physiclaw.common.config import MACRO_FAILURE_ENV_VAR
 from physiclaw.macros import runner as macro_runner
 from physiclaw.macros.model import Macro
+from physiclaw.macros.runlog import run_dir
+
+log = logging.getLogger(__name__)
 
 # A handler returns either plain text, or raw MCP-style blocks (run_macro's
 # step log + final view) — dispatch routes a block list through the same
 # verdict/observer path as an MCP result.
 Handler = Callable[[Session, dict], Awaitable[str | list[dict]]]
+
+
+def _maybe_halt_on_macro_failure(name: str, result) -> None:
+    """A macro abort freezes the world for inspection instead of the
+    agent driving past it (the `physiclaw debug` default; opt out with
+    `--no-macro-failure` — per-run env, deliberately never a config
+    field, so a debug halt cannot survive into a deployment). The
+    per-step record's path is logged CRITICAL, then the server is asked
+    to shut down gracefully (`runtime_state.request_shutdown` — arm
+    parks, this runtime is reaped, the phone screen stays exactly as
+    the abort saw it); no live server degrades to the log alone."""
+    if not os.environ.get(MACRO_FAILURE_ENV_VAR):
+        return
+    log.critical(
+        "macro %r aborted at step %s (%s) — halting for inspection. "
+        "Per-step record: %s. The phone screen is left as the abort saw it.",
+        name,
+        result.aborted_step,
+        result.reason,
+        run_dir(result.run_id),
+    )
+    if not runtime_state.request_shutdown():
+        log.critical("server not signalled — stop the runtime yourself")
 
 
 @dataclass(frozen=True)
@@ -265,6 +294,7 @@ def _handle_run_macro_factory(
             # can never shadow a healthy user macro); bad_input can't reach
             # this line (it raised).
             session.failed_macros.add(name)
+            _maybe_halt_on_macro_failure(name, result)
         return result.blocks
 
     return _handle

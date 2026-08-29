@@ -15,8 +15,14 @@ from physiclaw.agent.engine.mcp_tool import McpClient
 from physiclaw.agent.engine.policy import Policies
 from physiclaw.agent.trace import RawLog, Trace
 from physiclaw.common.config import CONFIG
-from physiclaw.contract.dto import AssistantMessage, CollapsePolicy, Message
+from physiclaw.contract.dto import AssistantMessage, CollapsePolicy, Message, ToolCall
 from physiclaw.contract.plugin import TurnPlugin
+
+# The debug harness's result transformer (one spelling here; the loader
+# in `plugins.py` returns it): (call that RAN for real, the session's
+# synthesized-turn bit, the real result blocks) → replacement blocks or
+# None (keep the real result).
+DebugIntercept = Callable[[ToolCall, bool, list[dict]], "list[dict] | None"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,3 +97,9 @@ class EngineRun:
     # Wall-clock cutoff (time.monotonic() value) for this session, or None
     # when `settings.max_session_seconds` is 0 — see `loop.drive`.
     deadline: float | None = None
+    # The e2e debug harness's result transformer (debug mode —
+    # `physiclaw debug`, env-only; loaded by dotted path like the turn
+    # plugins). The synthesized-turn bit it receives is structural
+    # provenance — the same bit the phone-protection policies key on.
+    # None here (production) leaves dispatch untouched.
+    debug_intercept: DebugIntercept | None = None

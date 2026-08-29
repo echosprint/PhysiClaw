@@ -716,6 +716,92 @@ async def test_run_macro_handler_bad_input_records_and_raises(mocker) -> None:
     assert macro_stats.load()["demo"]["last_abort"]["reason"] == "bad_input"
 
 
+class _DownMcp:
+    async def call_tool(self, name, args=None):
+        raise RuntimeError("arm busy")
+
+
+@pytest.mark.asyncio
+async def test_macro_abort_halts_the_server_when_flagged(mocker, monkeypatch) -> None:
+    from physiclaw.common import runtime_state
+    from physiclaw.common.config import MACRO_FAILURE_ENV_VAR
+
+    mocker.patch(
+        "physiclaw.agent.engine.mcp_tool.get_mcp",
+        new=mocker.AsyncMock(return_value=_DownMcp()),
+    )
+    monkeypatch.setenv(MACRO_FAILURE_ENV_VAR, "1")
+    shutdown = mocker.patch.object(runtime_state, "request_shutdown", return_value=True)
+    reg = build_registry({}, {"demo": _macro_spec()})
+
+    await reg["run_macro"].handler(Session(), {"name": "demo", "inputs": {"msg": "x"}})
+
+    shutdown.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+async def test_macro_abort_without_the_flag_never_signals(mocker) -> None:
+    from physiclaw.common import runtime_state
+
+    mocker.patch(
+        "physiclaw.agent.engine.mcp_tool.get_mcp",
+        new=mocker.AsyncMock(return_value=_DownMcp()),
+    )
+    shutdown = mocker.patch.object(runtime_state, "request_shutdown")
+    reg = build_registry({}, {"demo": _macro_spec()})
+
+    await reg["run_macro"].handler(Session(), {"name": "demo", "inputs": {"msg": "x"}})
+
+    shutdown.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_halt_with_no_live_server_degrades_to_the_log(
+    mocker, monkeypatch
+) -> None:
+    from physiclaw.agent.engine import builtin_tool
+    from physiclaw.common import runtime_state
+    from physiclaw.common.config import MACRO_FAILURE_ENV_VAR
+
+    mocker.patch(
+        "physiclaw.agent.engine.mcp_tool.get_mcp",
+        new=mocker.AsyncMock(return_value=_DownMcp()),
+    )
+    monkeypatch.setenv(MACRO_FAILURE_ENV_VAR, "1")
+    monkeypatch.setattr(runtime_state, "read_live", lambda: None)
+    kill = mocker.patch.object(builtin_tool.os, "kill")
+    reg = build_registry({}, {"demo": _macro_spec()})
+
+    blocks = await reg["run_macro"].handler(
+        Session(), {"name": "demo", "inputs": {"msg": "x"}}
+    )
+
+    kill.assert_not_called()
+    assert "ABORTED" in blocks[0]["text"]  # the result still returns normally
+
+
+@pytest.mark.asyncio
+async def test_macro_success_never_consults_the_halt(mocker, monkeypatch) -> None:
+    from physiclaw.common import runtime_state
+    from physiclaw.common.config import MACRO_FAILURE_ENV_VAR
+
+    class OkMcp:
+        async def call_tool(self, name, args=None):
+            return [{"type": "text", "text": f"{name} ok | screen: changed"}]
+
+    mocker.patch(
+        "physiclaw.agent.engine.mcp_tool.get_mcp",
+        new=mocker.AsyncMock(return_value=OkMcp()),
+    )
+    monkeypatch.setenv(MACRO_FAILURE_ENV_VAR, "1")
+    shutdown = mocker.patch.object(runtime_state, "request_shutdown")
+    reg = build_registry({}, {"demo": _macro_spec()})
+
+    await reg["run_macro"].handler(Session(), {"name": "demo", "inputs": {"msg": "x"}})
+
+    shutdown.assert_not_called()
+
+
 @pytest.mark.asyncio
 async def test_add_pitfall_handler_appends_and_sets_flag() -> None:
     from physiclaw.agent.engine import pitfalls

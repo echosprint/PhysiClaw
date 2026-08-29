@@ -238,6 +238,7 @@ async def _run_session(
                 if settings.max_session_seconds > 0
                 else None
             ),
+            debug_intercept=plugin_loader.load_debug_intercept(),
         )
         tr.write({"event": "prefix_pinned", "hash": prompt_hash})
         await loop.drive(engine_run, session, messages)

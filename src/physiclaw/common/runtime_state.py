@@ -10,12 +10,16 @@ check in :func:`read_live`.
 """
 
 import json
+import logging
 import os
+import signal
 import sys
 import time
 
 from physiclaw.common import paths
 from physiclaw.common.text import read_text, write_text
+
+log = logging.getLogger(__name__)
 
 
 def write(
@@ -88,6 +92,30 @@ def read_live() -> dict | None:
     if not isinstance(pid, int) or not _pid_alive(pid):
         return None
     return state
+
+
+def request_shutdown() -> bool:
+    """Ask the recorded live server to shut down gracefully; True when
+    the signal was sent. Owns the platform signal choice the way
+    `_pid_alive` owns the liveness probe: SIGINT takes uvicorn's
+    graceful path (arm parks, atexit reaps the runtime) on POSIX, and on
+    Windows — where os.kill with SIGINT would TerminateProcess — the
+    caller just gets False and a log line instead of a hard kill."""
+    state = read_live()
+    if state is None:
+        log.warning("no live server recorded — nothing to shut down")
+        return False
+    if sys.platform == "win32":
+        log.warning(
+            "graceful remote shutdown unsupported on Windows — stop it yourself"
+        )
+        return False
+    try:
+        os.kill(int(state["pid"]), signal.SIGINT)
+        return True
+    except Exception:
+        log.warning("could not signal server pid %s", state.get("pid"), exc_info=True)
+        return False
 
 
 def _pid_alive(pid: int) -> bool:

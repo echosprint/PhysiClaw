@@ -177,6 +177,16 @@ _EDGE_ALLOWLISTS = {
         "physiclaw.macros",
         "physiclaw.provider",
     ),
+    # The e2e debug harness: renders the virtual thread against the
+    # channel pack's fingerprint (conductor) and speaks contract shapes.
+    # The engine reaches it only via debug mode's dotted-path
+    # load (`agent.engine.plugins.load_debug_intercept`) — never an
+    # import, same blindness as the conductor plugin.
+    "debug": (
+        "physiclaw.common",
+        "physiclaw.contract",
+        "physiclaw.conductor",
+    ),
 }
 
 
@@ -197,12 +207,18 @@ def test_package_edge_allowlists() -> None:
 def test_agent_does_not_import_the_conductor() -> None:
     """The seam's own rule: the agent reaches the conductor ONLY through
     the plugin loader's dotted-path import (`[agent] plugins` — a config
-    string, invisible to this AST scan by design). A static import
-    anywhere under `agent/` would re-couple what the seam decoupled. The
-    reverse direction is covered by the conductor's allowlist above; the
-    CLI is the composition root and may import both."""
-    bad = _violations("agent", "physiclaw.conductor")
-    assert not bad, "agent must not import the conductor:\n" + "\n".join(bad)
+    string, invisible to this AST scan by design). The debug harness
+    rides the same seam (debug mode → dotted path), so it
+    gets the same guard. A static import anywhere under `agent/` would
+    re-couple what the seams decoupled. The reverse direction is covered
+    by each package's allowlist above; the CLI is the composition root
+    and may import both."""
+    bad = _violations("agent", "physiclaw.conductor") + _violations(
+        "agent", "physiclaw.debug"
+    )
+    assert not bad, (
+        "agent must not import the conductor or the debug harness:\n" + "\n".join(bad)
+    )
 
 
 def test_agent_does_not_touch_conductor_owned_storage() -> None:

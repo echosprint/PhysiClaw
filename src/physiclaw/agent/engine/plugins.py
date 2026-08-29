@@ -20,8 +20,10 @@ in `tests/test_architecture.py` stay honest.
 
 import importlib
 import logging
+import os
 
-from physiclaw.common.config import CONFIG
+from physiclaw.agent.engine.runspec import DebugIntercept
+from physiclaw.common.config import CONFIG, DEBUG_ENV_VAR
 from physiclaw.contract.plugin import TurnPlugin
 
 log = logging.getLogger(__name__)
@@ -64,3 +66,28 @@ def load_plugins() -> tuple[TurnPlugin, ...]:
 
 def _paths(raw: str) -> list[str]:
     return [p.strip() for p in raw.split(",") if p.strip()]
+
+
+# The debug fake-channel factory — data to `importlib` like the plugin
+# default above, so the AST guards stay honest. Gated on debug mode
+# (`physiclaw debug` exports DEBUG_ENV_VAR — env-only, per-run, never
+# a config field); production sessions never touch it.
+DEBUG_INTERCEPT = "physiclaw.debug.interceptor:build"
+
+
+def load_debug_intercept() -> DebugIntercept | None:
+    """The dispatch result transformer for the e2e debug harness, or
+    None (the production answer). Fail-open like plugin loading — a
+    broken harness degrades to a real session, logged. The active case
+    logs a WARNING: a session whose user channel is virtual must be
+    unmistakable in the session log."""
+    if not os.environ.get(DEBUG_ENV_VAR):
+        return None
+    try:
+        mod_name, _, attr = DEBUG_INTERCEPT.partition(":")
+        interceptor = getattr(importlib.import_module(mod_name), attr)()
+    except Exception:
+        log.warning("debug fake-channel failed to load — running real", exc_info=True)
+        return None
+    log.warning("DEBUG fake-channel active — user-channel actions are virtual")
+    return interceptor.intercept

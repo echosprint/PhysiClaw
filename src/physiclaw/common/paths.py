@@ -20,6 +20,7 @@ Layout::
     ├── learned/pages/<app>.json         (captured page geometry: anchors, thresholds, variants)
     ├── screen-layout/{layout.json, layout.md}  (learned on first run by the `screen-layout` skill)
     ├── snapshots/, screenshots/, tool_calls/, raw_camera/  (debug dumps; `physiclaw clear`)
+    ├── debug/{thread.json, wake.json}   (e2e harness: virtual thread + one-shot wake)
     ├── run/server.json                  (live server pid+host+port; cleared on exit)
     └── log/
         ├── macros/macro-run-<hex6>/{events.jsonl, images/}  (per-step macro-run records)
@@ -159,6 +160,16 @@ def playbooks_dir() -> Path:
     ``learned_pages_dir()`` — device variance (iPhone models, iOS and app
     versions) makes shipped or authored geometry infeasible."""
     return HOME / "playbooks"
+
+
+def debug_dir() -> Path:
+    """The e2e debug harness's files (`physiclaw debug`) —
+    ``thread.json`` (the virtual user-channel thread) and ``wake.json``
+    (the one-shot debug wake trigger). Seeded by the ``physiclaw debug``
+    CLI; the runtime consumes the wake and keeps the thread current
+    (agent sends, released replies). Deleting the directory resets the
+    harness."""
+    return HOME / "debug"
 
 
 def learned_pages_dir() -> Path:
