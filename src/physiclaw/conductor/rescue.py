@@ -306,7 +306,7 @@ def find_dismiss(
     lo, hi = band
     rows = [r for r in screen.rows if _in_band(r, lo, hi)]
     texts = [r for r in rows if r.kind == "text" and not _denied(r.label)]
-    by_norm = {}
+    by_norm: dict[str, Element] = {}
     for r in texts:
         by_norm.setdefault(normalize(r.label), r)
     for word in DISMISS_WORDS + tuple(normalize(w) for w in learned):

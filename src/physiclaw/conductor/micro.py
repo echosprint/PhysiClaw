@@ -231,7 +231,7 @@ def _candidates(call: str, rows) -> tuple[Candidate, ...]:
         (
             Candidate(
                 key=card.title.label.strip(),
-                bbox=tuple(card.title.bbox),
+                bbox=card.title.bbox,
                 meta=card.meta,
             )
             for card in cards.group_cards(rows)

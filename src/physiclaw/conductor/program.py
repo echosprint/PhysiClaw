@@ -1269,7 +1269,7 @@ class Program:
 
     def _rescue_or_handover(
         self, node, expected_id: str, mode: str, reason: str
-    ) -> "AssistantMessage | None":
+    ) -> "AssistantMessage | DecisionRequest | None":
         """Try the ladder before the model: a mechanical deviation
         (popup, lock, wandered deeper) is recoverable in code toward the
         page the frozen cursor already requires — the cursor, decision
