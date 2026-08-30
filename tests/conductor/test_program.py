@@ -2288,3 +2288,49 @@ def test_failed_decision_records_handover_with_micro_count() -> None:
     assert row["outcome"] == "handover"
     assert row["node"] == "choose"
     assert row["micros"] == 1
+
+
+# ---------- inline macros (a LEG's embedded body) ----------
+
+
+# FLOW's first leg with the body embedded in place of `macro: open-app`.
+INLINE_FLOW = FLOW.replace(
+    "    macro: open-app\n",
+    "    macro:\n"
+    "      inputs:\n"
+    "        message: {description: the text}\n"
+    "      steps:\n"
+    "        - {name: go, tool: home_screen}\n",
+)
+
+
+def test_inline_leg_dispatches_under_its_synthesized_name() -> None:
+    # The whole wiring in one walk: parse synthesizes `flow.open`,
+    # build_program merges it into the dispatch registry, and the leg's
+    # run_macro turn is name-keyed like any pack macro — refs filled
+    # through the node's `with:` exactly as on the directory path.
+    write_pack(playbooks={"flow": INLINE_FLOW})
+    p = _program(keyword="milk")
+    h = _history()
+    _feed(h, p.advance(h), ELSEWHERE)  # unknown page → start from the top
+
+    leg = p.advance(h)
+
+    assert leg is not None and leg.tool_calls[1].arguments == {
+        "name": "demo/flow.open",
+        "inputs": {"message": "milk"},
+    }
+    assert "demo/flow.open" in p.pack_macros
+
+
+def test_session_setup_hidden_registry_carries_inline_macros() -> None:
+    # The registry is handed to the engine ONCE at wake — an activation
+    # mid-session dispatches inline legs out of `hidden`, so they must
+    # ride it beside the directory macros.
+    _write_channel()
+    write_pack(playbooks={"flow": INLINE_FLOW})
+
+    _, overture, hidden = setup.session_setup()
+
+    assert overture is not None
+    assert "demo/flow.open" in hidden

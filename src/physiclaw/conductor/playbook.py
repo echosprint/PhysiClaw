@@ -24,7 +24,28 @@ The grammar, top-down::
                 | id "CONFIRM" compose [with] message
                 | id "HUMAN_GATE" gate compose [with] message [over_message]
                   [return] [revise]
+    macro     ::= name                    # macros/<name>/ — a directory macro
+                | {[inputs] steps}        # inline — MACRO.yml grammar minus
+                                          # name/description/enabled
+                                          # (`compensate:`/`return:` take the same
+                                          #  form; both dispatch with no arguments,
+                                          #  so required inputs are rejected there
+                                          #  — either spelling)
     routes    ::= {outcome: node-id | "escalate"}             # total over outcomes
+
+An inline macro is single-use by construction — an anonymous body has
+no name for another site to reference: its name is synthesized
+`<playbook>.<node-id>` (a leg) or `<playbook>.<node-id>.<role>`
+(a compensate/return body) — dot-joined, a spelling no directory macro
+or node id can take, so the pack-wide dispatch namespace stays
+collision-free by construction. It is enabled iff its playbook is, and
+it records stats/runs under that synthesized name like any pack macro.
+The one role that must stay a directory macro is the rescue ladder's
+`open`: it is pack-level — resolved by name with no node to hang a body
+on. Grammar boundary: everything under an inline `macro:` IS a macro
+(single-name `{x}` templates, fed by the node's `with:`), everything
+outside stays dotted — the same split as the file boundary, moved to
+the key.
 
 The ledger stack (`kind: list` input + `next_item` loop + RECONCILE +
 gate `revise:`) is one unit — `_check_ledger` holds its pieces
@@ -68,6 +89,7 @@ and its playbook must carry a `mandate:`.
 """
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -82,7 +104,8 @@ from physiclaw.conductor.pages import (
     parse_pages_data,
 )
 from physiclaw.macros import store as macro_store
-from physiclaw.macros.model import Macro
+from physiclaw.macros.model import Macro, MacroError
+from physiclaw.macros.parse import parse_inline_macro
 
 MAX_NODES = 20
 MAX_INPUTS = 8
@@ -286,6 +309,11 @@ class Playbook:
     # Memory slices the ACTIVATION's parse_task receives (fail-closed,
     # the decide `context:` contract) — e.g. `memory.shopping_prefs`.
     parse_context: tuple[str, ...] = ()
+    # The embedded macros — LEG bodies (`<playbook>.<node>`) and
+    # compensate/return bodies (`<playbook>.<node>.<role>`). The node
+    # field holds the same synthesized name, so dispatch is name-keyed
+    # either way. `qualified_inline` is the registry door.
+    inline_macros: dict[str, Macro] = field(default_factory=dict)
 
     # The ledger stack's two anchors, derived HERE so lint (playbook)
     # and runtime (program) can never disagree on what counts as "the"
@@ -353,6 +381,13 @@ def macro_app(name: str) -> str:
 def qualified_pack(app: str, pack: Pack) -> dict[str, Macro]:
     """A pack's macros under their qualified dispatch keys."""
     return {qualified_macro(app, n): m for n, m in pack.macros.items()}
+
+
+def qualified_inline(app: str, spec: Playbook) -> dict[str, Macro]:
+    """A playbook's inline macros under their qualified dispatch keys —
+    `qualified_pack`'s sibling for the hands that live in the playbook
+    itself. Every registry a walk can dispatch through takes both."""
+    return {qualified_macro(app, n): m for n, m in spec.inline_macros.items()}
 
 
 # ---------- pack loading ----------
@@ -500,7 +535,11 @@ def _parse_playbook_data(data, name: str, pack: Pack) -> Playbook:
     ref_names = {i.name for i in inputs if i.kind == "scalar"}
     has_ledger = any(i.kind == "list" for i in inputs)
     mandate = _parse_mandate(data["mandate"], ref_names) if "mandate" in data else None
-    nodes = _parse_nodes(data.get("nodes"), ref_names, pack, has_ledger=has_ledger)
+    inline: dict[str, Macro] = {}
+    resolve = _macro_resolver(name, pack, inline)
+    nodes = _parse_nodes(
+        data.get("nodes"), ref_names, pack, resolve, has_ledger=has_ledger
+    )
     ids = {n.id: i for i, n in enumerate(nodes)}
     _check_graph(nodes, ids)
     _check_money(nodes, ids, mandate)
@@ -514,6 +553,7 @@ def _parse_playbook_data(data, name: str, pack: Pack) -> Playbook:
         mandate=mandate,
         nodes=tuple(nodes),
         parse_context=tuple(parse_context),
+        inline_macros=inline,
     )
 
 
@@ -593,7 +633,12 @@ def _parse_mandate(raw: Any, input_names: set[str]) -> Mandate:
 
 
 def _parse_nodes(
-    raw: Any, input_names: set[str], pack: Pack, *, has_ledger: bool
+    raw: Any,
+    input_names: set[str],
+    pack: Pack,
+    resolve: "_MacroResolve",
+    *,
+    has_ledger: bool,
 ) -> list[Node]:
     if not isinstance(raw, list) or not raw:
         raise PlaybookError("`nodes` must be a non-empty list")
@@ -611,7 +656,7 @@ def _parse_nodes(
     )
     out: list[Node] = []
     for i, node in enumerate(raw, start=1):
-        parsed = _parse_node(i, node, input_names, pack, seen, payload_so_far)
+        parsed = _parse_node(i, node, input_names, pack, seen, payload_so_far, resolve)
         if isinstance(parsed, DecideNode):
             decl = CALLS[parsed.call]
             payload_so_far[parsed.id] = decl.payload
@@ -626,6 +671,7 @@ def _parse_node(
     pack: Pack,
     seen: dict[str, int],
     payloads: dict[str, tuple[str, ...]],
+    resolve: "_MacroResolve",
 ) -> Node:
     where = f"node {i}"
     if not isinstance(node, dict):
@@ -667,7 +713,7 @@ def _parse_node(
     _check_arg_refs(args, input_names, payloads, where)
 
     if ntype == "LEG":
-        return _parse_leg(where, nid, node, args, pack)
+        return _parse_leg(where, nid, node, args, pack, resolve)
     if ntype == "DECIDE":
         return _parse_decide(where, nid, node, args, input_names)
     if ntype == "RECONCILE":
@@ -713,7 +759,7 @@ def _parse_node(
             )
     elif over is not None:
         raise PlaybookError(f"{where}: `over_message` is only for `gate: payment`")
-    return_macro = _optional_pack_macro(node, "return", where, pack)
+    return_macro = _optional_pack_macro(node, "return", where, nid, resolve)
     revise = node.get("revise")
     if revise is not None:
         revise = _require_str(revise, f"{where}: `revise`")
@@ -747,35 +793,91 @@ def _ask_message(
     return text, refs
 
 
-def _optional_pack_macro(node: dict, key: str, where: str, pack: Pack) -> str | None:
-    """An optional node key naming one of THIS pack's macros — the
-    compensate/return idiom, one spelling."""
-    name = node.get(key)
-    if name is None:
+# The shape `_macro_resolver` returns; a string annotation at the use
+# sites keeps the forward reference cheap.
+_MacroResolve = Callable[..., Macro]
+
+
+def _macro_resolver(
+    playbook: str, pack: Pack, inline: dict[str, Macro]
+) -> _MacroResolve:
+    """The name-or-inline resolution every macro-carrying slot shares —
+    a LEG's `macro:`, a leg's `compensate:`, a gate's `return:`. ONE
+    home for the whole idiom: the synthesized-name rule
+    (`<playbook>.<node>[.<role>]`, dot-joined so it can never collide
+    with a directory macro — `check_name` rejects dots), the MacroError
+    framing, the inline registry, and the directory validation (a
+    broken macro reports its cause, an unknown one lists what exists) —
+    so the three slots can never drift. Returns the resolved Macro; its
+    `.name` is the dispatch name either way (a directory macro's name
+    IS its directory)."""
+
+    def resolve(raw: Any, where: str, nid: str, role: str | None = None) -> Macro:
+        slot = role or "macro"
+        if isinstance(raw, dict):
+            mname = f"{playbook}.{nid}" + (f".{role}" if role else "")
+            try:
+                spec = parse_inline_macro(raw, mname)
+            except MacroError as e:
+                raise PlaybookError(f"{where}: inline `{slot}`: {e}") from e
+            inline[mname] = spec
+            return spec
+        if raw is not None and not isinstance(raw, str):
+            raise PlaybookError(
+                f"{where}: `{slot}` must be a pack macro name or an inline "
+                "mapping with `steps:`"
+            )
+        mname = _require_str(raw, f"{where}: `{slot}`")
+        if mname in pack.macro_errors:
+            raise PlaybookError(
+                f"{where}: pack macro {mname!r} is invalid: {pack.macro_errors[mname]}"
+            )
+        if mname not in pack.macros:
+            available = ", ".join(sorted(pack.macros)) or "(none)"
+            raise PlaybookError(
+                f"{where}: {slot} {mname!r} not found in this pack's "
+                f"{PACK_MACROS_DIRNAME}/ — playbooks reference only their own "
+                f"pack's macros. Available: {available}"
+            )
+        return pack.macros[mname]
+
+    return resolve
+
+
+def _optional_pack_macro(
+    node: dict, key: str, where: str, nid: str, resolve: _MacroResolve
+) -> str | None:
+    """An optional node key holding one of THIS pack's macros — the
+    compensate/return idiom, resolved exactly like a LEG's `macro:`
+    (directory name or embedded body). One lint of its own, on the
+    RESOLVED macro so it holds for either spelling: both roles dispatch
+    with no arguments, so a required input could only abort at run time
+    — right after a confirmed ask, at the worst moment."""
+    raw = node.get(key)
+    if raw is None:
         return None
-    name = _require_str(name, f"{where}: `{key}`")
-    if name not in pack.macros:
+    spec = resolve(raw, where, nid, key)
+    required = sorted(i.name for i in spec.inputs if i.required)
+    if required:
         raise PlaybookError(
-            f"{where}: {key} macro {name!r} not found in this pack's "
-            f"{PACK_MACROS_DIRNAME}/"
+            f"{where}: `{key}` macro {spec.name!r} requires input(s) "
+            f"{', '.join(required)} — the walk dispatches {key} with no "
+            "arguments"
         )
-    return name
+    return spec.name
 
 
-def _parse_leg(where: str, nid: str, node: dict, args: dict, pack: Pack) -> LegNode:
-    macro = _require_str(node.get("macro"), f"{where}: `macro`")
-    if macro in pack.macro_errors:
-        raise PlaybookError(
-            f"{where}: pack macro {macro!r} is invalid: {pack.macro_errors[macro]}"
-        )
-    if macro not in pack.macros:
-        available = ", ".join(sorted(pack.macros)) or "(none)"
-        raise PlaybookError(
-            f"{where}: macro {macro!r} not found in this pack's "
-            f"{PACK_MACROS_DIRNAME}/ — playbooks reference only their own "
-            f"pack's macros. Available: {available}"
-        )
-    declared = {inp.name: inp for inp in pack.macros[macro].inputs}
+def _parse_leg(
+    where: str,
+    nid: str,
+    node: dict,
+    args: dict,
+    pack: Pack,
+    resolve: _MacroResolve,
+) -> LegNode:
+    spec = resolve(node.get("macro"), where, nid)
+    macro = spec.name
+    declared = {inp.name: inp for inp in spec.inputs}
     unknown_args = sorted(set(args.keys()) - set(declared))
     if unknown_args:
         raise PlaybookError(
@@ -803,7 +905,7 @@ def _parse_leg(where: str, nid: str, node: dict, args: dict, pack: Pack) -> LegN
         if "enter" in node
         else None
     )
-    compensate = _optional_pack_macro(node, "compensate", where, pack)
+    compensate = _optional_pack_macro(node, "compensate", where, nid, resolve)
     irreversible = node.get("irreversible")
     if irreversible is not None and irreversible not in IRREVERSIBLE_CLASSES:
         raise PlaybookError(
@@ -1085,7 +1187,8 @@ def disabled_leg_macros(spec: Playbook, pack: Pack) -> list[str]:
     `playbooks check` warns about it and the overture will not offer such
     a playbook at all. Covers legs,
     `compensate:`, and gate `return:` (all dispatch at walk time). Safe
-    unguarded access: parse validated every one against `pack.macros`."""
+    unguarded access: parse validated every directory name against
+    `pack.macros`."""
     named: set[str] = set()
     for n in spec.nodes:
         if isinstance(n, LegNode):
@@ -1094,7 +1197,13 @@ def disabled_leg_macros(spec: Playbook, pack: Pack) -> list[str]:
                 named.add(n.compensate)
         elif isinstance(n, HumanGateNode) and n.return_macro is not None:
             named.add(n.return_macro)
-    return sorted(m for m in named if not pack.macros[m].enabled)
+    # One rule, no inline special case: each name resolves through the
+    # merged view, and an inline macro is enabled by construction — its
+    # gate is the playbook's own `enabled:` — so only directory names
+    # can report.
+    return sorted(
+        m for m in named if not (spec.inline_macros.get(m) or pack.macros[m]).enabled
+    )
 
 
 # ---------- graph lints ----------

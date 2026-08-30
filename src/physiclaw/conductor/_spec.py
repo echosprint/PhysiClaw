@@ -33,6 +33,7 @@ from physiclaw.macros.model import (
 )
 from physiclaw.macros.model import MacroError
 from physiclaw.macros.model import check_name as _model_check_name
+from physiclaw.macros.parse import reject_aliases
 
 # YAML 1.2 safe loader, pure-python, load-only — the same construction as
 # `macros/parse.py`. `load_yaml` below is the resolved-spec door; the
@@ -49,13 +50,23 @@ _PACK_TOP_KEYS = frozenset(
 def load_yaml(text: str, error_cls: type[Exception], where: str = "") -> Any:
     """The one load ritual every spec door shares: fill `<<TOKEN>>`s
     from the local values file (rejecting survivors), YAML 1.2 load,
-    wrap loader errors in the door's own error class."""
+    reject anchors/aliases document-wide, wrap errors in the door's own
+    error class. The alias guard is the macro parser's: inline macros
+    put clause parsing — which materializes a Clause per path, the
+    alias-bomb ride — behind these doors, and running it HERE keeps the
+    grammar door-independent (a text that parses at the test/tooling
+    door must not fail only at the live pack file)."""
     text = resolve_placeholders(text, error_cls)
     prefix = f"{where}: " if where else ""
     try:
-        return yaml_loader.load(text)
+        data = yaml_loader.load(text)
     except Exception as e:  # loader errors are not confined to YAMLError
         raise error_cls(f"{prefix}invalid YAML: {e or type(e).__name__}") from e
+    try:
+        reject_aliases(data)
+    except MacroError as e:
+        raise error_cls(f"{prefix}{e}") from e
+    return data
 
 
 def load_pack_doc(app: str, error_cls: type[Exception]) -> dict | None:

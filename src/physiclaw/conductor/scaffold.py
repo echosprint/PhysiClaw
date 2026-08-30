@@ -118,7 +118,13 @@ pages:
 # arm, bounded by the ledger):
 #   LEG        — run one of THIS pack's macros ({app}/macros/<name>/);
 #                `verify: pages.<name>` is the landing check against the
-#                `pages:` section above, optional `enter:` the precondition
+#                `pages:` section above, optional `enter:` the precondition.
+#                The body may embed instead of a name (`macro:
+#                {{steps: [...]}}` — MACRO.yml grammar minus
+#                name/description/enabled, enabled with the playbook;
+#                `compensate:`/gate `return:` embed the same way).
+#                Directory macros remain for anything shared across
+#                playbooks — and the pack-level `open` must be one
 #   DECIDE     — one scoped decision call ({calls});
 #                `routes:` must route EVERY outcome; outputs wire forward as
 #                {{node.field}}. `context: [memory.<slug>]` shares ONLY
@@ -198,6 +204,14 @@ Two optional conventions: a playbook-level `parse_context:`
 receives, fail-closed), and a pack macro named `open` that launches
 the app to a home state — the rescue ladder's reset rung re-enters
 through it after a force-quit (absent → that rung is skipped).
+
+A LEG's `macro:` may embed its body instead of a name
+(`macro: {{steps: [...]}}` — the MACRO.yml grammar minus
+name/description/enabled, enabled with its playbook); a leg's
+`compensate:` and a gate's `return:` take the same form (they dispatch
+argument-less — required inputs are rejected, either spelling).
+Directory macros remain for anything shared across playbooks; the
+pack-level `open` must be one.
 
 Limits: ≤ {max_nodes} nodes, ≤ {max_inputs} inputs per playbook.
 Macro format: see ~/.physiclaw/macros/README.md (identical grammar).

@@ -88,6 +88,7 @@ description: test leg
 inputs:
   message:
     description: text to use
+    default: hi
 steps:
   - name: go
     tool: tap

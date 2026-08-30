@@ -20,7 +20,7 @@ from physiclaw.macros.model import (
     OrClause,
     TextClause,
 )
-from physiclaw.macros.parse import parse_macro
+from physiclaw.macros.parse import parse_inline_macro, parse_macro
 
 VALID = """
 name: notify-user
@@ -1109,3 +1109,59 @@ def test_parse_rejects_unpopulated_template_placeholder() -> None:
 
     with pytest.raises(MacroError, match="unpopulated template placeholder.*CONTACT"):
         parse_macro(text, "m")
+
+
+# ---------- parse_inline_macro (a playbook LEG's embedded body) ----------
+
+
+INLINE = {
+    "inputs": {"message": {"description": "text to use"}},
+    "steps": [
+        {"name": "go", "tool": "send_to_clipboard", "with": {"text": "{message}"}}
+    ],
+}
+
+
+def test_inline_macro_parses_under_the_caller_synthesized_name() -> None:
+    m = parse_inline_macro(INLINE, "buy.open")
+
+    assert m.name == "buy.open" and m.enabled is True
+    assert [i.name for i in m.inputs] == ["message"]
+    assert [s.name for s in m.steps] == ["go"]
+    assert "buy.open" in m.description
+
+
+def test_inline_macro_requires_a_mapping() -> None:
+    with pytest.raises(MacroError, match="must be a YAML mapping"):
+        parse_inline_macro(["steps"], "buy.open")
+
+
+@pytest.mark.parametrize("key", ["name", "description", "enabled"])
+def test_inline_macro_rejects_identity_and_gating_keys(key: str) -> None:
+    # Identity is synthesized and the gate is the playbook's `enabled:` —
+    # a body carrying its own would silently mean nothing.
+    body = {**INLINE, key: "x"}
+
+    with pytest.raises(MacroError, match="directory macro"):
+        parse_inline_macro(body, "buy.open")
+
+
+def test_inline_macro_shares_the_macro_step_budget() -> None:
+    # One grammar, one budget: an inline body rides the same MAX_STEPS
+    # bound a MACRO.yml gets — no inline-private cap.
+    steps = [{"name": f"go-{i}", "tool": "home_screen"} for i in range(MAX_STEPS + 1)]
+
+    with pytest.raises(MacroError, match="too many steps"):
+        parse_inline_macro({"steps": steps}, "buy.open")
+
+    within = parse_inline_macro({"steps": steps[:MAX_STEPS]}, "buy.open")
+    assert len(within.steps) == MAX_STEPS
+
+
+def test_inline_macro_rejects_aliases() -> None:
+    # The same materialization bomb the file-level guard kills — an inline
+    # body arrives as parsed data, so the guard must run on the mapping.
+    shared = {"name": "go", "tool": "home_screen"}
+
+    with pytest.raises(MacroError, match="aliases"):
+        parse_inline_macro({"steps": [shared, shared]}, "buy.open")

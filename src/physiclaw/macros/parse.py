@@ -96,7 +96,7 @@ def parse_macro(text: str, dir_name: str) -> Macro:
     if not isinstance(data, dict):
         raise MacroError("MACRO.yml must be a YAML mapping (key: value pairs)")
 
-    _reject_aliases(data)
+    reject_aliases(data)
 
     unknown = sorted(set(data.keys()) - _TOP_KEYS)
     if unknown:
@@ -122,6 +122,46 @@ def parse_macro(text: str, dir_name: str) -> Macro:
         name=name,
         description=description,
         enabled=enabled,
+        inputs=inputs,
+        steps=tuple(steps),
+    )
+
+
+# What an embedded body must NOT carry: `name` (the caller synthesizes
+# it), `description` (the node it sits on is the context), `enabled` (an
+# inline macro goes live with its playbook, never on its own). The inline
+# vocabulary is derived by subtraction so a key added to the MACRO.yml
+# grammar reaches the inline form without a second edit.
+_IDENTITY_KEYS = frozenset({"name", "description", "enabled"})
+_INLINE_KEYS = frozenset(_TOP_KEYS) - _IDENTITY_KEYS
+
+
+def parse_inline_macro(data: Any, name: str) -> Macro:
+    """A macro embedded where a name was expected (a playbook LEG's
+    `macro:` mapping) → a validated `Macro` under the caller-synthesized
+    `name`. Same `inputs`/`steps` grammar and budgets as a MACRO.yml —
+    one step parser, so the two homes can never drift — and always
+    enabled (the embedding playbook's own `enabled:` is its gate).
+    Raises MacroError; the caller frames it with the node's address."""
+    if not isinstance(data, dict):
+        raise MacroError(
+            "an inline macro must be a YAML mapping with `steps:` "
+            "(a string names a directory macro instead)"
+        )
+    reject_aliases(data)
+    unknown = sorted(set(map(str, data.keys())) - _INLINE_KEYS)
+    if unknown:
+        raise MacroError(
+            f"unknown key(s): {', '.join(unknown)} — an inline macro takes "
+            "only `steps` and `inputs`; name, description and enabled "
+            "belong to a directory macro"
+        )
+    inputs = _parse_inputs(data.get("inputs", {}))
+    steps = _parse_steps(data.get("steps"), {i.name for i in inputs})
+    return Macro(
+        name=name,
+        description=f"inline macro {name}",
+        enabled=True,
         inputs=inputs,
         steps=tuple(steps),
     )
@@ -660,7 +700,7 @@ def _opt_prose(value: Any, where: str) -> str | None:
     return None if value is None else _prose(value, where)
 
 
-def _reject_aliases(
+def reject_aliases(
     value: Any, seen: dict[int, Any] | None = None, path: str = ""
 ) -> None:
     """Refuse YAML anchors/aliases anywhere in the document, once.
@@ -683,16 +723,22 @@ def _reject_aliases(
     Rejected rather than skipped: sharing identity means an alias (two
     look-alike nodes parse to two distinct objects), aliases buy a
     20-step file nothing, and refusing them keeps every later consumer a
-    plain tree walk instead of making each one alias-safe."""
+    plain tree walk instead of making each one alias-safe.
+
+    Public because the guard is document-shaped, not macro-shaped: the
+    conductor's spec doors run it over PLAYBOOK.yml too (inline macros
+    put clause parsing — the materializer the bomb rides — behind every
+    spec door; `_spec.load_yaml` calls it after every load, and
+    `parse_inline_macro` guards its own data-shaped door)."""
     if not isinstance(value, (dict, list)):
         return
     seen = {} if seen is None else seen
     if id(value) in seen:
         raise MacroError(
-            f"{path or 'MACRO.yml'}: YAML anchors/aliases (`&name` / `*name`) "
+            f"{path or 'the document'}: YAML anchors/aliases (`&name` / `*name`) "
             "are not supported — write the value out in full"
         )
     seen[id(value)] = value
     items = value.items() if isinstance(value, dict) else enumerate(value)
     for key, child in items:
-        _reject_aliases(child, seen, f"{path}.{key}" if path else str(key))
+        reject_aliases(child, seen, f"{path}.{key}" if path else str(key))

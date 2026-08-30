@@ -1,6 +1,7 @@
-# The pack spec — one file, the whole pack (the `action.yml` shape):
-# meta, `pages:` (the eyes), `playbooks:` (the walks). The hands are
-# recorded beside it in macros/<name>/MACRO.yml.
+# The pack spec — ONE file, the whole pack (the `action.yml` shape):
+# meta, `pages:` (the eyes), `playbooks:` (the walks), and the hands —
+# every macro is embedded in the node that runs it (the search/buysheet/
+# pay legs, the gate's return), so nothing lives beside this file.
 name: taobao
 description: >-
   Buy one item on 淘宝 (Taobao) by keyword, deterministically — search →
@@ -65,7 +66,80 @@ playbooks:
     nodes:
       - id: search
         type: LEG
-        macro: search                  # the recorded gesture (macros/search/)
+        # Embedded (buy.search): cold-start taobao and search for {keyword}.
+        # Recorded on the authoring device — inside the body the macro
+        # template grammar applies ({keyword}), fed by the node's `with:`.
+        macro:
+          inputs:
+            keyword:
+              description: what to search for
+          steps:
+            - name: go-home
+              tool: home_screen
+            - name: settle-home
+              tool: wait
+              with: {seconds: 1}
+            - name: open-taobao
+              tool: tap
+              with: {bbox: [0.720, 0.425, 0.909, 0.551]}
+            - name: settle
+              tool: wait
+              with: {seconds: 2}
+            - name: kill-stale-state   # taobao restores its last page; a cold start is the only known state
+              tool: force_quit
+            - name: kill-settle        # reopening too fast resumes WARM - the restored page survives
+              tool: wait
+              with: {seconds: 2}
+            - name: reopen-taobao
+              tool: tap
+              with: {bbox: [0.720, 0.425, 0.909, 0.551]}
+            - name: cold-launch
+              tool: wait
+              with: {seconds: 5}
+            - name: skip-splash        # a cold launch may open on a full-screen ad
+              tool: tap
+              with: {bbox: [0.79, 0.030, 0.87, 0.065]}
+              skip_when: {not: {text: "跳过", within: [0.70, 0.0, 1.0, 0.12]}}
+            - name: retry-kill         # force_quit is timing-flaky; when the home feed
+              tool: force_quit         # (推荐/关注 tabs) is not up, run the kill once more
+              skip_when: {or: [{text: "推荐", within: [0.0, 0.0, 0.35, 0.12]}, {text: "关注", within: [0.0, 0.0, 0.35, 0.12]}]}
+            - name: retry-reopen
+              tool: tap
+              with: {bbox: [0.720, 0.425, 0.909, 0.551]}
+              skip_when: {or: [{text: "推荐", within: [0.0, 0.0, 0.35, 0.12]}, {text: "关注", within: [0.0, 0.0, 0.35, 0.12]}]}
+            - name: retry-launch
+              tool: wait
+              with: {seconds: 5}
+              skip_when: {or: [{text: "推荐", within: [0.0, 0.0, 0.35, 0.12]}, {text: "关注", within: [0.0, 0.0, 0.35, 0.12]}]}
+            - name: dismiss-banner     # an incoming-IM banner hijacks top taps
+              tool: swipe
+              with: {bbox: [0.30, 0.03, 0.70, 0.08], direction: "up", size: "s"}
+              skip_when: {not: {text: "<<CONTACT>>", within: [0.0, 0.0, 1.0, 0.15]}}
+            - name: tap-search-bar     # only ever tap the search bar on the HOME feed -
+              tool: tap                # a failed reset must abort, not ghost-tap onward
+              with: {bbox: [0.30, 0.092, 0.70, 0.128]}
+              guard:
+                require: {or: [{text: "推荐", within: [0.0, 0.0, 0.35, 0.12]}, {text: "关注", within: [0.0, 0.0, 0.35, 0.12]}]}
+                hint: "taobao did not cold-start to the home feed - the state reset failed"
+            - name: clip
+              tool: send_to_clipboard
+              with: {text: "{keyword}"}
+            - name: hold-field
+              tool: long_press
+              with: {bbox: [0.08, 0.115, 0.55, 0.148]}
+            - name: paste
+              tool: tap
+              with: {bbox: [0.066, 0.070, 0.163, 0.098]}
+            - name: go-search
+              tool: tap
+              with: {bbox: [0.811, 0.865, 0.923, 0.895]}
+            - name: load
+              tool: wait
+              with: {seconds: 2}
+            - name: close-vip-overlay  # post-search 88VIP/coupon promo covers results
+              tool: tap
+              with: {bbox: [0.858, 0.069, 0.901, 0.104]}
+              skip_when: {not: {or: ["确认领取", "消费券"]}}
         with: {keyword: "{inputs.keyword}"}
         verify: pages.results          # landing check — hand over if not reached
       - id: choose
@@ -76,7 +150,17 @@ playbooks:
         routes: {pick: buysheet, scroll: choose, none_fit: escalate, escalate: escalate}
       - id: buysheet
         type: LEG
-        macro: buy-sheet
+        # Embedded body — single-use glue (dispatches as buy.buysheet,
+        # enabled with this playbook). Recorded/reused hands stay in macros/.
+        macro:
+          steps:
+            - name: buy-button      # 立即购买 / 领券购买 — one bbox serves both
+              tool: tap
+              with: {bbox: [0.66, 0.905, 0.93, 0.945]}
+            - name: settle          # the sheet animates in and lazy-loads its
+              tool: wait            # rows; `expect` re-peeks AFTER the sleep, so
+              with: {seconds: 3}    # it waits out the render and fails loudly
+              expect: "实付"          # if no payment sheet opened
         enter: pages.detail            # precondition — screen must read as this
         verify: pages.paysheet
       - id: gate
@@ -85,10 +169,35 @@ playbooks:
         compose: pay-confirm
         message: "「买{inputs.keyword}」已选好，实付合计 ¥{gate.total}。回复 好的 确认支付，或 不用 取消。"
         over_message: "「买{inputs.keyword}」实付合计 ¥{gate.total}，已超出预算 ¥{gate.cap}。回复 好的 确认支付，或 不用 取消。"
-        return: reopen
+        # Embedded (buy.gate.return): bring taobao back to the foreground
+        # after the ask left it for the IM thread — returns to the buy sheet.
+        return:
+          steps:
+            - name: go-home
+              tool: home_screen
+            - name: settle-home
+              tool: wait
+              with: {seconds: 1}
+            - name: dismiss-switcher   # home_screen FROM home can open the app switcher
+              tool: tap
+              with: {bbox: [0.42, 0.855, 0.58, 0.885]}
+            - name: open-taobao
+              tool: tap
+              with: {bbox: [0.720, 0.425, 0.909, 0.551]}
+            - name: settle
+              tool: wait
+              with: {seconds: 2}
       - id: pay
         type: LEG
-        macro: pay
+        # Embedded (buy.pay): confirm payment on the buy sheet (免密支付).
+        macro:
+          steps:
+            - name: pay-button
+              tool: tap
+              with: {bbox: [0.39, 0.915, 0.69, 0.958]}
+            - name: settle
+              tool: wait
+              with: {seconds: 4}
         enter: pages.paysheet
         verify: pages.paid
         irreversible: payment
@@ -105,4 +214,5 @@ playbooks:
 # Rehearse, then enable
 #   physiclaw playbooks run taobao/buy --input "keyword=五常大米 5kg"
 # Walk it to the gate at least once (reply 不用 to back out without
-# paying) before flipping `enabled: true` here and in the macros.
+# paying) before flipping `enabled: true` here — the one switch now
+# gates every embedded macro too.

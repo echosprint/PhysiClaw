@@ -67,6 +67,7 @@ from physiclaw.conductor.playbook import (
     disabled_leg_macros,
     list_apps,
     load_pack,
+    qualified_inline,
     qualified_pack,
     scan_playbooks,
 )
@@ -127,7 +128,7 @@ def build_program(
         app=app,
         spec=spec,
         values=values,
-        pack_macros=qualified_pack(app, pack),
+        pack_macros=qualified_pack(app, pack) | qualified_inline(app, spec),
         prints=prints_for_app(app, decls=pack.pages),
         channel=channel,
         suspended=suspended,
@@ -385,7 +386,14 @@ def session_setup() -> "tuple[Program | None, Overture | None, dict[str, Macro]]
         hidden.update(qualified_pack(app, pack))
         for entry in scan_playbooks(app, pack):
             spec = entry.spec
-            if spec is None or not spec.enabled or disabled_leg_macros(spec, pack):
+            if spec is None:
+                continue
+            # Inline macros ride the registry alongside directory macros
+            # — disabled playbooks included, mirroring `qualified_pack`
+            # (which carries disabled macros too; gating is the entries
+            # filter below, not the dispatch table).
+            hidden.update(qualified_inline(app, spec))
+            if not spec.enabled or disabled_leg_macros(spec, pack):
                 continue
             entries[f"{app}/{entry.name}"] = (spec, pack)
     if not entries:

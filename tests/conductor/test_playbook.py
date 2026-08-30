@@ -55,6 +55,19 @@ def _pack(app: str = "demo"):
     return pb.load_pack(app)
 
 
+def _required_message_pack(app: str = "demo"):
+    """The pack with `open-app.message` made REQUIRED again — the shared
+    fixture defaults it (a role macro must carry no required inputs), so
+    tests exercising the missing-required lints strip the default here."""
+    root = write_pack(app)
+    mp = root / "macros" / "open-app" / "MACRO.yml"
+    mp.write_text(
+        mp.read_text(encoding="utf-8").replace("    default: hi\n", ""),
+        encoding="utf-8",
+    )
+    return pb.load_pack(app)
+
+
 # ---------- happy path ----------
 
 
@@ -492,7 +505,7 @@ def test_payment_leg_behind_gate_parses() -> None:
 
 
 def test_leg_missing_required_macro_input_rejected() -> None:
-    pack = _pack()
+    pack = _required_message_pack()
     text = _mutate(
         'with: {message: "{inputs.keyword}"}\n    verify: pages.home',
         "verify: pages.home",
@@ -694,3 +707,159 @@ def test_pages_dot_ref_is_the_one_written_form() -> None:
         pb.parse_playbook(
             VALID.replace("verify: pages.home", "verify: home"), "buy", pack
         )
+
+
+# ---------- inline macros (a LEG's embedded body) ----------
+
+
+# VALID's `open` leg with the body embedded — `with:` still feeds the
+# (now inline-declared) `message` input from the playbook's dotted ref.
+INLINE_OPEN = """\
+    macro:
+      inputs:
+        message: {description: the text}
+      steps:
+        - {name: go, tool: home_screen}
+"""
+
+
+def _inline(text: str = VALID) -> str:
+    assert text.count("    macro: open-app\n") == 1
+    return text.replace("    macro: open-app\n", INLINE_OPEN)
+
+
+def test_leg_macro_may_embed_the_body() -> None:
+    p = pb.parse_playbook(_inline(), "buy", _pack())
+
+    node = p.nodes[0]
+    assert node.macro == "buy.open"  # synthesized: <playbook>.<node-id>
+    m = p.inline_macros["buy.open"]
+    assert m.enabled is True  # the playbook's own `enabled:` is the gate
+    assert [s.name for s in m.steps] == ["go"]
+
+
+def test_inline_leg_with_keys_validate_against_the_body() -> None:
+    text = _inline().replace(
+        'with: {message: "{inputs.keyword}"}\n    verify: pages.home',
+        'with: {wrong: "x"}\n    verify: pages.home',
+    )
+
+    with pytest.raises(PlaybookError, match="wrong.*not.*inputs of macro 'buy.open'"):
+        pb.parse_playbook(text, "buy", _pack())
+
+
+def test_inline_leg_missing_required_input_is_rejected() -> None:
+    text = _inline().replace(
+        '    with: {message: "{inputs.keyword}"}\n    verify: pages.home',
+        "    verify: pages.home",
+    )
+
+    with pytest.raises(PlaybookError, match="requires input\\(s\\) message"):
+        pb.parse_playbook(text, "buy", _pack())
+
+
+def test_inline_body_errors_are_framed_with_the_node() -> None:
+    text = _inline().replace("tool: home_screen", "tool: rm_rf")
+
+    with pytest.raises(PlaybookError, match="node 'open': inline `macro`.*`tool`"):
+        pb.parse_playbook(text, "buy", _pack())
+
+
+def test_leg_macro_rejects_a_non_string_non_mapping() -> None:
+    text = VALID.replace("macro: open-app", "macro: 3")
+
+    with pytest.raises(PlaybookError, match="pack macro name or an inline mapping"):
+        pb.parse_playbook(text, "buy", _pack())
+
+
+def test_disabled_leg_macros_skips_inline_legs() -> None:
+    # An inline macro is not in `pack.macros` — the readiness check must
+    # neither KeyError on it nor report it (its gate is the playbook's).
+    root = write_pack()
+    mp = root / "macros" / "add-cart" / "MACRO.yml"
+    mp.write_text(mp.read_text(encoding="utf-8") + "enabled: false\n", encoding="utf-8")
+    pack = pb.load_pack("demo")
+
+    spec = pb.parse_playbook(_inline(), "buy", pack)
+
+    assert pb.disabled_leg_macros(spec, pack) == ["add-cart"]
+
+
+def test_qualified_inline_mints_dispatch_keys() -> None:
+    spec = pb.parse_playbook(_inline(), "buy", _pack())
+
+    assert pb.qualified_inline("demo", spec) == {
+        "demo/buy.open": spec.inline_macros["buy.open"]
+    }
+
+
+def test_pack_doc_rejects_yaml_aliases() -> None:
+    # Inline macros put clause parsing (which materializes per path — the
+    # alias-bomb ride) inside the pack file, so the pack door inherits
+    # the MACRO.yml document-wide guard.
+    root = write_pack()
+    (root / "PLAYBOOK.yml").write_text(
+        "name: demo\ndescription: d\n"
+        "pages: &a {home: {anchors: [Files]}}\nplaybooks: *a\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PlaybookError, match="aliases"):
+        pb.load_pack("demo")
+
+
+def test_gate_return_may_embed_the_body() -> None:
+    text = VALID + (
+        "    return:\n      steps:\n        - {name: back-to-app, tool: home_screen}\n"
+    )
+    pack = _pack()
+
+    spec = pb.parse_playbook(text, "buy", pack)
+
+    gate = spec.nodes[4]
+    assert gate.return_macro == "buy.pay.return"  # <playbook>.<node>.<role>
+    assert [s.name for s in spec.inline_macros["buy.pay.return"].steps] == [
+        "back-to-app"
+    ]
+    # The readiness check must skip the role body, not KeyError on it.
+    assert pb.disabled_leg_macros(spec, pack) == []
+
+
+def test_leg_compensate_may_embed_the_body() -> None:
+    text = _mutate(
+        "    enter: pages.results\n    verify: pages.results\n",
+        "    enter: pages.results\n    verify: pages.results\n"
+        "    compensate:\n"
+        "      steps:\n"
+        "        - {name: undo, tool: home_screen}\n",
+    )
+
+    spec = pb.parse_playbook(text, "buy", _pack())
+
+    assert spec.nodes[2].compensate == "buy.to-cart.compensate"
+    assert "buy.to-cart.compensate" in spec.inline_macros
+
+
+def test_inline_role_body_with_required_input_rejected() -> None:
+    # compensate/return dispatch with no arguments — a required input
+    # could only abort at run time (right after a confirmed ask), so the
+    # lint runs on the RESOLVED macro.
+    text = VALID + (
+        "    return:\n"
+        "      inputs:\n"
+        "        x: {description: d}\n"
+        "      steps:\n"
+        "        - {name: back, tool: home_screen}\n"
+    )
+
+    with pytest.raises(PlaybookError, match=r"requires input\(s\) x"):
+        pb.parse_playbook(text, "buy", _pack())
+
+
+def test_directory_role_macro_with_required_input_rejected() -> None:
+    # The same lint, directory spelling: the rule is role-shaped, not
+    # embedding-shaped — moving a body out to macros/ must not lose it.
+    text = VALID + "    return: open-app\n"
+
+    with pytest.raises(PlaybookError, match=r"requires input\(s\) message"):
+        pb.parse_playbook(text, "buy", _required_message_pack())
