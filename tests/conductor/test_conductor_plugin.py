@@ -58,6 +58,18 @@ async def test_aclose_closes_the_owned_micro_client(mocker) -> None:
 # ---------- _wire_micro ----------
 
 
+@pytest.mark.asyncio
+async def test_aclose_abandons_the_in_flight_walk(mocker) -> None:
+    # Teardown runs on every session end — a walk cut short mid-flight
+    # gets its abandoned record here (log_external_stop's twin).
+    plug = plugin_mod.build()
+    plug._conductor = mocker.Mock()
+
+    await plug.aclose()
+
+    plug._conductor.abandon.assert_called_once()
+
+
 def test_wire_micro_none_when_nothing_can_need_one() -> None:
     assert plugin_mod._wire_micro(None, None, _ctx()) is None
 

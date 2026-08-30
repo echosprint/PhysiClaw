@@ -260,6 +260,28 @@ def learned_pages_dir() -> Path:
     return HOME / "learned" / "pages"
 
 
+def live_session_id() -> str | None:
+    """The engine session currently running, per the cross-process
+    marker the runtime maintains — None when no session is live (CLI
+    rehearsals, probes). One reader spelling: macro run logs and walk
+    telemetry both tag their records with it."""
+    try:
+        marker = active_session_marker()
+        if marker.exists():
+            return marker.read_text(encoding="utf-8").strip() or None
+    except OSError:
+        pass
+    return None
+
+
+def learned_dismiss_dir() -> Path:
+    """Machine-learned popup dismissals per app — ``<app>.json``, labels
+    the rescue micro tier (`clear_overlay`) successfully tapped, so the
+    free vocabulary tier handles the same popup next time. Deny-list
+    gated at USE, not just at write; deleting a file resets the app."""
+    return HOME / "learned" / "dismiss"
+
+
 def official_dir() -> Path:
     """Official skill pack synced from the site (``physiclaw skills sync
     official``). Kept separate from ``skills_dir()`` (user-authored): the

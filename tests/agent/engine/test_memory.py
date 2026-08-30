@@ -70,7 +70,11 @@ def test_user_file_basename_is_USER_md(tmp_path: Path) -> None:
 
 
 def test_lookback_days_ceiling_is_365() -> None:
-    assert memory._LOOKBACK_DAYS_CEILING == 365
+    # The primitive moved to the shared home (`common.daylog`) — the
+    # engine delegates; the ceiling is pinned where it now lives.
+    from physiclaw.common import daylog
+
+    assert daylog._LOOKBACK_DAYS_CEILING == 365
 
 
 def test_bootstrap_log_entries_is_a_positive_integer() -> None:

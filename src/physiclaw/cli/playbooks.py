@@ -275,6 +275,80 @@ def run(
 
 
 @playbooks_app.command()
+def stats(
+    last: Annotated[
+        int,
+        typer.Option("--last", help="How many recent runs to list (0 = none)."),
+    ] = 10,
+) -> None:
+    """Per-playbook walk outcomes from playbooks/runs.jsonl — the
+    escalation-rate KPI. A playbook that keeps handing over at one node
+    is a rehearsal bug this table points at."""
+    from physiclaw.conductor import walklog
+
+    rows = walklog.load()
+    if not rows:
+        typer.echo(
+            "No walks recorded yet — runs land in playbooks/runs.jsonl "
+            "as playbooks execute (wakes and rehearsals alike)."
+        )
+        return
+    for key, st in sorted(walklog.summarize(rows).items()):
+        typer.echo(
+            f"{key}: runs={st.runs} completed={st.completed} "
+            f"suspended={st.suspended} handover={st.handover} "
+            f"crashed={st.crashed} abandoned={st.abandoned} "
+            f"escalation={st.escalation_rate:.0%} "
+            f"micros={st.micros} rescues={st.rescues}"
+        )
+        for node, count, reason in st.hot_nodes():
+            typer.echo(f"  ✗ {node} ×{count}  {reason}")
+    if last > 0:
+        typer.echo("\nrecent:")
+        for rec in rows[-last:]:
+            where = rec.get("node") or "(end)"
+            reason = str(rec.get("reason") or "")
+            typer.echo(
+                f"  [{rec.get('ts', '?')}] {rec.get('app', '?')}/"
+                f"{rec.get('playbook', '?')} {rec.get('outcome', '?')} "
+                f"at {where}" + (f" — {reason}" if reason else "")
+            )
+
+
+@playbooks_app.command()
+def propose(
+    top: Annotated[
+        int,
+        typer.Option("--top", help="How many escalation sites to triage."),
+    ] = 3,
+) -> None:
+    """Turn the hottest escalation sites into concrete authoring work:
+    where walks keep handing over, why, and the exact mining commands
+    that make a pack patch out of the recorded evidence. Nothing
+    self-applies — every escalation the author fixes here prevents the
+    next one."""
+    from physiclaw.conductor import walklog
+
+    sites = walklog.escalation_sites(walklog.load(), top=top)
+    if not sites:
+        typer.echo("No escalations recorded — nothing to propose.")
+        return
+    for s in sites:
+        typer.echo(f"{s.app}/{s.playbook} escalates at {s.node} ×{s.count}")
+        typer.echo(f"  last reason: {s.reason}")
+        sid = s.sessions[-1] if s.sessions else "<session-id>"
+        if s.sessions:
+            typer.echo(f"  sessions to mine: {', '.join(s.sessions)}")
+        typer.echo("  work it:")
+        typer.echo(f"    physiclaw conductor match {s.app} --session {sid}")
+        typer.echo(f"    physiclaw conductor extract {sid} --out {s.app}-corpus.jsonl")
+        typer.echo(
+            f"    physiclaw conductor calibrate {s.app} {s.app}-corpus.jsonl"
+            "  (after labeling)"
+        )
+
+
+@playbooks_app.command()
 def check() -> None:
     """Validate every pack: pages, pack macros, playbooks. Exit 1 if any
     is invalid."""
@@ -416,14 +490,17 @@ async def _rehearse(app: str, name: str, values: dict[str, str]) -> str:
             # locked between runs (the runtime's overture does this at
             # every real wake; a rehearsal owes the walk the same floor).
             await _unlock_if_covered(mcp)
-            # Built AFTER the connection, so "start the server first" is
-            # what a user without one hears — not a model-config error for
-            # a provider the rehearsal never got to use.
-            micro = _micro_caller() if program.needs_micro else None
             for _ in range(REHEARSE_MAX_TURNS):
                 step = program.advance(history)
                 while isinstance(step, DecisionRequest):
-                    outcome = (await micro.run(step)).outcome if micro else None
+                    # Built on FIRST use (a rescue clear_overlay can fire
+                    # even on a pure-LEG walk), and after the connection —
+                    # so "start the server first" is what a user without
+                    # one hears, and a walk that never decides never pays
+                    # a model-config error either.
+                    if micro is None:
+                        micro = _micro_caller()
+                    outcome = (await micro.run(step)).outcome
                     step = program.resolve(outcome)
                 if step is None:
                     return "walk finished or handed over — see the notes above"
@@ -447,6 +524,10 @@ async def _rehearse(app: str, name: str, values: dict[str, str]) -> str:
                 )
         return f"stopped after {REHEARSE_MAX_TURNS} turns"
     finally:
+        # A rehearsal cut short (Ctrl-C, the turn cap) records its
+        # abandoned row like a real wake's teardown would — latched, so
+        # a walk that closed properly is a no-op.
+        program.abandon()
         if micro is not None:
             await micro.aclose()
 

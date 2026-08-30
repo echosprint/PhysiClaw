@@ -359,6 +359,28 @@ async def test_run_step_one_guard_failure_aborts_with_no_gesture() -> None:
     assert all(name == "peek" for name, _ in mcp.calls)
 
 
+async def test_zero_gesture_abort_counts_none_and_marks_retry_safe() -> None:
+    from physiclaw.macros.model import NO_GESTURES_NOTE
+
+    mcp = FakeCaller([_gesture("current", changed=None, listing="Lock screen")])
+
+    result = await run(_spec(GUARD_FIRST), {}, mcp)
+
+    assert result.gestures == 0
+    assert NO_GESTURES_NOTE in result.blocks[0]["text"]
+    assert "re-run is safe" in result.blocks[0]["text"]
+    assert "Do NOT re-run" not in result.blocks[0]["text"]
+
+
+async def test_acted_abort_counts_gestures_and_keeps_the_no_rerun_steer() -> None:
+    mcp = FakeCaller([_gesture("went home", listing="Settings only")])
+
+    result = await run(_guarded(GUARDED), {}, mcp)
+
+    assert result.gestures == 1  # home_screen actuated before the guard miss
+    assert "Do NOT re-run" in result.blocks[0]["text"]
+
+
 async def test_run_guard_checks_once_and_does_not_poll() -> None:
     # A guard is a predicate now. The free check misses and that is the
     # answer — no second look, no camera cycle spent hoping.

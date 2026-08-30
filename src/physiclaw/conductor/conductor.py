@@ -6,9 +6,10 @@ decision: while a program or the overture is live, IT synthesizes the
 turn (``overture.py`` — boot to the user's thread and read the intent
 there; ``program.py`` — legs as ``run_macro``, verified against page
 fingerprints) and the conductor brokers their decision requests through
-the wired micro-caller (``micro.py``); the moment they complete or hand
-over, ``advance()`` returns None — "not mine" — and the loop calls the
-provider with the context the runtime curated. It holds no session
+the wired micro-caller (``micro.py``); when they complete or hand over
+— one final synthesized brief turn (``brief.py``), then None — "not
+mine" — the loop calls the provider with the context the runtime
+curated. It holds no session
 state and does no session management — context assembly, compaction
 policy, and wire logging stay with the engine (the micro-caller carries
 its own sinks for the same reason).
@@ -65,6 +66,24 @@ class Conductor:
         self._program = program
         self._micro = micro
         self._overture = overture
+
+    def abandon(self) -> None:
+        """Session teardown (the plugin's aclose): a walk still in
+        flight records its abandoned row and breadcrumb —
+        `Program.abandon` is latched, so a walk that closed properly is
+        a no-op. The overture's un-taken baton counts too (built at
+        resolve, session died before the next advance). Fail-open:
+        teardown must never raise."""
+        for program in (
+            self._program,
+            self._overture.program if self._overture is not None else None,
+        ):
+            if program is None:
+                continue
+            try:
+                program.abandon()
+            except Exception:
+                log.exception("conductor: abandon record failed — ignored")
 
     async def advance(self, history: list[Message]) -> AssistantMessage | None:
         """Produce the next assistant turn, or None ("the LLM speaks").

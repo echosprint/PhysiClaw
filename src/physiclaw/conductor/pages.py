@@ -63,7 +63,11 @@ RESERVED_APPS = frozenset({CHANNEL_APP, IOS_APP})
 # interpolate these, never hand-copy them.
 THREAD_PAGE = "thread"  # the channel pack's `pages:` must declare this
 SEND_MACRO = "send"  # nav to the user's thread + paste + send {message}
-OPEN_MACRO = "open"  # nav to the thread only (resume reads)
+# `open` serves twice, one spelling: the channel's (nav to the thread —
+# resume reads) and every TASK pack's (launch ITS app to a home state —
+# the rescue ladder's reset rung re-enters through it after force_quit;
+# a pack without one simply skips that rung).
+OPEN_MACRO = "open"
 
 # The ios pack's one convention, here for the same reason: the boot
 # matches this page and `scaffold.IOS_PAGES_STUB` declares it, so the two

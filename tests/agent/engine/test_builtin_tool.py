@@ -700,6 +700,39 @@ async def test_run_macro_handler_records_abort(mocker) -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_macro_zero_gesture_abort_does_not_burn(mocker) -> None:
+    # "Failed before acting" is not "burned": a first-guard miss moved
+    # nothing, the abort header says a retry is safe, and the one-strike
+    # rule must stand down (the conductor's leg retry depends on it).
+    from physiclaw.macros.parse import parse_macro
+
+    guarded = parse_macro(
+        "name: demo\ndescription: d\nsteps:\n"
+        "  - name: open-app\n    tool: tap\n"
+        "    with: {bbox: [0.1, 0.2, 0.3, 0.4]}\n"
+        '    guard: {require: "Home"}\n',
+        "demo",
+    )
+
+    class PeekMcp:
+        async def call_tool(self, name, args=None):
+            return [{"type": "text", "text": "Lock screen"}]
+
+    mocker.patch(
+        "physiclaw.agent.engine.mcp_tool.get_mcp",
+        new=mocker.AsyncMock(return_value=PeekMcp()),
+    )
+    reg = build_registry({}, {"demo": guarded})
+
+    session = Session()
+    blocks = await reg["run_macro"].handler(session, {"name": "demo"})
+
+    assert "ABORTED" in blocks[0]["text"]
+    assert "before any gesture ran" in blocks[0]["text"]
+    assert session.failed_macros == set()  # nothing moved — nothing burns
+
+
+@pytest.mark.asyncio
 async def test_run_macro_handler_bad_input_records_and_raises(mocker) -> None:
     from physiclaw.macros import stats as macro_stats
     from physiclaw.macros.model import MacroError

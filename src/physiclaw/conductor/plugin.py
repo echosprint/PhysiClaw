@@ -6,12 +6,12 @@ the conductor's name. Everything the engine used to wire by hand lands
 here instead — `setup.session_setup()` at wake, the micro-caller with
 its cheap-tier client, and the `Conductor` arbiter per turn.
 
-The micro-caller wiring keeps its old contract exactly: None when
-nothing can need one (no program and no overture, or a pure-LEG
-program, which must not pay for a second provider client);
-`[conductor] micro_model` selects the cheap decision tier, built lazily
-on the FIRST call and ours to close (`aclose`); fail-open to the
-session provider on any problem, at parse time or build time.
+The micro-caller wiring: None only when nothing drives (no program and
+no overture — with the rescue ladder's clear_overlay call, any live
+walk can need one, and the owned client is built lazily on the FIRST
+call, so wiring costs nothing at wake); `[conductor] micro_model`
+selects the cheap decision tier, ours to close (`aclose`); fail-open to
+the session provider on any problem, at parse time or build time.
 """
 
 import logging
@@ -61,16 +61,26 @@ class ConductorPlugin:
         return await self._conductor.advance(history)
 
     async def aclose(self) -> None:
+        # Teardown runs on EVERY session end (the engine's finally): a
+        # walk cut short mid-flight (Ctrl-C, wall-clock budget) records
+        # its abandoned row + breadcrumb here — the conductor's
+        # counterpart of `loop.log_external_stop`, which only covers
+        # model sessions (it keys on a drafted plan).
+        if self._conductor is not None:
+            self._conductor.abandon()
         if self._micro is not None:
             await self._micro.aclose()
 
 
 def _wire_micro(program, overture, ctx: SetupContext) -> MicroCaller | None:
-    """The micro-caller for the conductor's decision calls — None when
-    nothing can need one. The session provider (off the setup context)
-    is the fail-open floor; the configured cheap tier is a lazily built
-    client this caller owns."""
-    if overture is None and (program is None or not program.needs_micro):
+    """The micro-caller for the conductor's decision calls — None only
+    when NOTHING drives (no program and no overture). A pure-LEG walk
+    used to skip it too, but the rescue ladder's clear_overlay call
+    means any live walk can need one — and the owned cheap-tier client
+    is built lazily on the FIRST call, so wiring the caller costs
+    nothing at wake. The session provider (off the setup context) is
+    the fail-open floor."""
+    if overture is None and program is None:
         return None
     factory = None
     ref = CONFIG.conductor.micro_model

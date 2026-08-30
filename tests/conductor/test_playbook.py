@@ -58,6 +58,31 @@ def _pack(app: str = "demo"):
 # ---------- happy path ----------
 
 
+def test_parse_context_is_parsed_onto_the_playbook() -> None:
+    text = VALID.replace(
+        "description: test playbook\n",
+        "description: test playbook\nparse_context: [memory.shopping_prefs]\n",
+    )
+
+    p = pb.parse_playbook(text, "buy", _pack())
+
+    assert p.parse_context == ("memory.shopping_prefs",)
+
+
+@pytest.mark.parametrize(
+    "entry",
+    ["inputs.keyword", "shopping", "memory.", "memory.Bad-Slug"],
+)
+def test_parse_context_rejects_non_memory_entries(entry: str) -> None:
+    text = VALID.replace(
+        "description: test playbook\n",
+        f'description: test playbook\nparse_context: ["{entry}"]\n',
+    )
+
+    with pytest.raises(PlaybookError, match="memory"):
+        pb.parse_playbook(text, "buy", _pack())
+
+
 def test_parse_valid_playbook() -> None:
     p = pb.parse_playbook(VALID, "buy", _pack())
 

@@ -41,7 +41,7 @@ from physiclaw.common import paths
 from physiclaw.common.config import CONFIG
 from physiclaw.common.logger import iso_now, save_image
 from physiclaw.common.logger.retention import purge_old_sessions
-from physiclaw.common.text import append_text, read_text
+from physiclaw.common.text import append_text, clip
 
 log = logging.getLogger(__name__)
 
@@ -89,8 +89,8 @@ class RunLogger:
         self._emit(
             "start",
             caller=self.caller,
-            session=_live_session_id(),
-            inputs={k: _clip(v, _TRUNCATE_INPUT) for k, v in inputs.items()},
+            session=paths.live_session_id(),
+            inputs={k: clip(v, _TRUNCATE_INPUT) for k, v in inputs.items()},
             start_at=start_at,
         )
 
@@ -122,7 +122,7 @@ class RunLogger:
         if detail:
             fields["detail"] = detail
         if screen_text:
-            fields["screen_text"] = _clip(screen_text, _TRUNCATE_SCREEN)
+            fields["screen_text"] = clip(screen_text, _TRUNCATE_SCREEN)
         image = self._save_view(i, view) if view else None
         if image:
             fields["image"] = image
@@ -180,23 +180,7 @@ class RunLogger:
             log.warning("macros run log write failed", exc_info=True)
 
 
-def _live_session_id() -> str | None:
-    """The engine session this run belongs to, via the cross-process
-    marker the runtime maintains — null for CLI rehearsals (no session)."""
-    try:
-        marker = paths.active_session_marker()
-        if marker.exists():
-            return read_text(marker).strip() or None
-    except OSError:
-        pass
-    return None
-
-
 def _verdict_str(changed: bool | None) -> str | None:
     if changed is None:
         return None
     return "changed" if changed else "unchanged"
-
-
-def _clip(text: str, limit: int) -> str:
-    return text if len(text) <= limit else text[: limit - 1] + "…"

@@ -46,3 +46,11 @@ def write_text(path: Path, data: str) -> None:
 def append_text(path: Path, data: str) -> None:
     with open(path, "a", encoding="utf-8") as f:
         f.write(data)
+
+
+def clip(text: str, limit: int) -> str:
+    """Truncate with a trailing ellipsis — the one spelling of the
+    log-line trimmer (several modules used to hand-roll it)."""
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1] + "…"

@@ -44,9 +44,11 @@ from physiclaw.macros import runlog, stats, store
 from physiclaw.macros.inputs import resolve_inputs
 from physiclaw.macros.model import (
     MAX_RUN_SECONDS,
+    NO_GESTURES_NOTE,
     REASON_BAD_INPUT,
     REASON_TIMEOUT,
     REASON_TOOL_ERROR,
+    WAIT,
     Macro,
     MacroError,
 )
@@ -73,6 +75,11 @@ class MacroRunResult:
     aborted_step: int | None = None  # 1-based; None on success
     reason: str | None = None
     detail: str = ""
+    # How many steps actually ACTUATED a gesture (wait steps and
+    # pre-actuation failures excluded). Zero on an abort means the phone
+    # did not move — "failed before acting" is not "burned", so the
+    # engine's one-strike rule stands down (`builtin_tool`).
+    gestures: int = 0
     # `macro-run-<hex6>`, set by `run_and_record`. Returned rather than left
     # for the caller to scrape back out of the composed header — that would
     # make the header's wording a wire format.
@@ -161,6 +168,7 @@ async def run(
     total = len(spec.steps)
     log_lines = _skipped_prefix(spec, start, start_at, rlog)
 
+    gestures = 0
     for i, raw_step in enumerate(spec.steps[start - 1 :], start=start):
         # Checks are templated exactly like `with:` tables: a macro that
         # pastes to `{contact}` wants to VERIFY it landed in `{contact}`'s
@@ -169,6 +177,8 @@ async def run(
         ctx.reads = 0
         t_step = time.monotonic()
         outcome = await _run_step(step, ctx)
+        if outcome.outcome in _ACTUATED and step.tool != WAIT:
+            gestures += 1
         log_lines.append(_numbered(outcome.log_line, i))
         if rlog:
             rlog.step(
@@ -185,11 +195,19 @@ async def run(
                 view=outcome.view,
             )
         if outcome.stop:
-            return await _aborted(ctx, spec, ident, log_lines, i, outcome, start)
+            return await _aborted(
+                ctx, spec, ident, log_lines, i, outcome, start, gestures
+            )
         if outcome.verdict is not None:
             ctx.last_verdict = outcome.verdict
 
-    return await _completed(ctx, spec, ident, log_lines, start, total)
+    return await _completed(ctx, spec, ident, log_lines, start, total, gestures)
+
+
+# Step outcomes that mean the tool actually fired (or attempted to):
+# `ok`, a tool error mid-actuation, a timeout of the call itself. A
+# guard/skip/expect miss never reached the phone.
+_ACTUATED = ("ok", "tool_error", "timeout")
 
 
 async def _run_step(step: Step, ctx: RunContext) -> StepOutcome:
@@ -304,6 +322,7 @@ async def _completed(
     log_lines: list[str],
     start: int,
     total: int,
+    gestures: int,
 ) -> MacroRunResult:
     """The success result — `_aborted`'s twin, so the two ways a run ends
     compose their reply the same way (header, step log, current view)."""
@@ -315,7 +334,9 @@ async def _completed(
     )
     header = f"macro {spec.name}{ident}: {ran} — {view_note}."
     return MacroRunResult(
-        blocks=_compose(header, log_lines, view, ctx.last_verdict), ok=True
+        blocks=_compose(header, log_lines, view, ctx.last_verdict),
+        ok=True,
+        gestures=gestures,
     )
 
 
@@ -327,6 +348,7 @@ async def _aborted(
     step_no: int,
     outcome: StepOutcome,
     start: int,
+    gestures: int,
 ) -> MacroRunResult:
     reason = outcome.reason or ""
     # Steer the recovery: completed steps already moved the phone, so a
@@ -343,10 +365,20 @@ async def _aborted(
     # A failed gesture may have actuated before erroring, so the retained
     # view can be stale; a failed check fired nothing, so it stays current.
     view, view_note = await _current_view(ctx, stale=reason == REASON_TOOL_ERROR)
+    if gestures == 0:
+        # "Failed before acting" is not "burned": nothing moved, so the
+        # steering flips — clearing the blocker makes a retry safe. The
+        # marker is one spelling (`model.NO_GESTURES_NOTE`); the
+        # conductor's leg-retry reads it off this very text.
+        steer = (
+            f"{NO_GESTURES_NOTE} — the phone did not move; clear the "
+            "blocker and a re-run is safe."
+        )
+    else:
+        steer = "Do NOT re-run the macro; continue manually from here."
     header = (
         f"macro {spec.name}{ident}: ABORTED at step {step_no}/{len(spec.steps)} "
-        f"({reason}) — {completed}; {view_note}. Do NOT re-run the macro; "
-        "continue manually from here."
+        f"({reason}) — {completed}; {view_note}. {steer}"
     )
     return MacroRunResult(
         blocks=_compose(header, log_lines, view, ctx.last_verdict),
@@ -354,6 +386,7 @@ async def _aborted(
         aborted_step=step_no,
         reason=reason,
         detail=outcome.detail,
+        gestures=gestures,
     )
 
 

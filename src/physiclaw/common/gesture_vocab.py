@@ -23,8 +23,12 @@ constants only, importable from either side of the MCP boundary.
 PRESS_TOOLS = frozenset({"tap", "double_tap", "long_press"})
 
 # Whole-screen navigation gestures — no target argument; each provably
-# dismisses the keyboard (keyboard-tracker doctrine).
-NAV_TOOLS = frozenset({"go_back", "home_screen", "force_quit"})
+# dismisses the keyboard (keyboard-tracker doctrine). GO_BACK is named
+# because the conductor's rescue ladder synthesizes it directly (the
+# UNLOCK_PHONE precedent); the others stay set-only until someone does.
+GO_BACK = "go_back"
+FORCE_QUIT = "force_quit"
+NAV_TOOLS = frozenset({GO_BACK, "home_screen", FORCE_QUIT})
 
 SWIPE = "swipe"
 SEQUENCE = "sequence"

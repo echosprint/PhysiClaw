@@ -272,6 +272,34 @@ def test_match_screen_occluded_when_missing_anchors_share_a_band() -> None:
     assert v.page_id == "app.thread"
 
 
+def test_occluded_verdict_carries_the_overlay_band() -> None:
+    # The band is the rescue dismissal tier's scope — padded around the
+    # missing anchors' learned positions (here 0.85/0.90 ± OVERLAY_PAD).
+    pp = _print(
+        name="thread",
+        anchors=[AnchorDecl("妈妈"), AnchorDecl("发送"), AnchorDecl("语音")],
+        learned_anchors=[
+            _learned("妈妈", 0.5, 0.05),
+            _learned("发送", 0.9, 0.85),
+            _learned("语音", 0.1, 0.90),
+        ],
+        threshold=0.9,
+    )
+    screen = make_screen(
+        ("妈妈", 0.5, 0.05),
+        ("qwerty", 0.5, 0.80),
+        ("asdfgh", 0.5, 0.88),
+        ("zxcvbn", 0.5, 0.95),
+    )
+
+    v = m.match_screen(screen, [pp])
+
+    assert v.overlay_band is not None
+    lo, hi = v.overlay_band
+    assert abs(lo - (0.85 - m.OVERLAY_PAD)) < 1e-9
+    assert abs(hi - (0.90 + m.OVERLAY_PAD)) < 1e-9
+
+
 # ---------- the cover, which has no page ----------
 
 # Captured live off the rig (`physiclaw mcp -H`, iPhone locked), because

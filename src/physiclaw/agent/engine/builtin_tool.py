@@ -286,14 +286,18 @@ def _handle_run_macro_factory(
             record_as=name,
         )
         if not result.ok:
-            # One strike. The rehearsed path stopped matching this screen, so
-            # every later call would replay completed steps against a state
-            # we already know diverged — which is exactly what the abort
-            # header tells the agent not to do. `policy.BurnedMacro` enforces
-            # it from here (keyed by the CALLED name, so a burned pack macro
-            # can never shadow a healthy user macro); bad_input can't reach
-            # this line (it raised).
-            session.failed_macros.add(name)
+            if result.gestures:
+                # One strike — but only when the run ACTED. The rehearsed
+                # path stopped matching this screen, so every later call
+                # would replay completed steps against a state we already
+                # know diverged — which is exactly what the abort header
+                # tells the agent not to do. `policy.BurnedMacro` enforces
+                # it from here (keyed by the CALLED name, so a burned pack
+                # macro can never shadow a healthy user macro); bad_input
+                # can't reach this line (it raised). A zero-gesture abort
+                # (first-guard miss under a popup) moved nothing: the
+                # header says a retry is safe, so it must not burn.
+                session.failed_macros.add(name)
             _maybe_halt_on_macro_failure(name, result)
         return result.blocks
 

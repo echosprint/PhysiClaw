@@ -102,6 +102,14 @@ WAIT = "wait"
 # keys, not arguments — see `parse`.
 WAIT_SECONDS_ARG = "seconds"
 
+# Abort-header marker for a run that stopped before ANY gesture actuated
+# (a first-guard miss, a wait that timed out): the phone did not move, so
+# a retry replays nothing. One spelling, three consumers: the runner
+# composes it, the engine's burn rule reads the structural field beside
+# it (`MacroRunResult.gestures`), and the conductor's leg-retry reads
+# THIS marker off the transcript text (its only channel).
+NO_GESTURES_NOTE = "stopped before any gesture ran"
+
 # The gesture/perception surface a step may call — rehearsable physical
 # actions only, composed from the shared tool-name vocabulary (no private
 # name copies). Session control, memory, jobs (local tools) and

@@ -170,6 +170,61 @@ def test_decide_requests_carry_the_listing_not_candidates() -> None:
     assert req.candidates == () and "banner" in req.listing
 
 
+def test_stacked_rows_collapse_into_one_card_candidate() -> None:
+    # A result-page item is a stack: title + price + sales. Pre-cards
+    # every row was its own candidate (the price fragment included);
+    # now the stack is ONE candidate keyed by the title, tapping the
+    # title's bbox, with the rest as prompt-only metadata.
+    from physiclaw.common.listing import Element, Screen, format_elements
+
+    els = [
+        Element(
+            id=0,
+            kind="text",
+            label="acme fresh milk 1L carton",
+            bbox=(0.05, 0.30, 0.45, 0.34),
+            conf=0.9,
+        ),
+        Element(
+            id=1, kind="text", label="¥12.9", bbox=(0.05, 0.35, 0.15, 0.38), conf=0.9
+        ),
+        Element(
+            id=2,
+            kind="text",
+            label="1000+ sold",
+            bbox=(0.25, 0.35, 0.45, 0.38),
+            conf=0.9,
+        ),
+    ]
+    screen = Screen.read(format_elements(els))
+
+    req = build_request(
+        "choose_item", "c", CALLS["choose_item"].outcomes, {"criteria": "x"}, screen
+    )
+
+    (cand,) = req.candidates
+    assert cand.key == "acme fresh milk 1L carton"
+    assert cand.bbox[1] == 0.30  # the TITLE row's bbox — the tap target
+    assert cand.meta == ("¥12.9", "1000+ sold")
+
+
+def test_candidate_prompt_lines_quote_the_name_and_bracket_the_meta() -> None:
+    from physiclaw.conductor.micro import _user
+
+    els_text = make_screen(("milk 1L", 0.5, 0.2)).text
+    from physiclaw.common.listing import Screen
+
+    req = build_request(
+        "choose_item",
+        "c",
+        CALLS["choose_item"].outcomes,
+        {"criteria": "x"},
+        Screen.read(els_text),
+    )
+
+    assert '- "milk 1L"' in _user(req)  # quoted name = the answer shape
+
+
 def test_untrusted_text_always_carries_the_data_label() -> None:
     # The injection-labeling is a mechanism (`_data_block`), not a
     # convention — pin that every untrusted insertion route (candidates,
@@ -189,6 +244,137 @@ def test_untrusted_text_always_carries_the_data_label() -> None:
 
     assert _user(choose).count(label) == 2  # candidates + context
     assert _user(decide).count(label) == 1  # listing
+
+
+# ---------- the cascade (cheap tier → session model → escalate) ----------
+
+
+def _cascaded(cheap_replies, session_replies, floor: float = 0.7) -> MicroCaller:
+    session = ScriptedProvider(session_replies)
+    return MicroCaller(
+        session,
+        confidence_floor=floor,
+        owned_factory=lambda: ScriptedProvider(cheap_replies),
+    )
+
+
+def _ok(answer: str, confidence: float = 0.9) -> str:
+    return f'{{"reason": "r", "answer": "{answer}", "confidence": {confidence}}}'
+
+
+@pytest.mark.asyncio
+async def test_cascade_retries_a_floor_miss_on_the_session_model() -> None:
+    caller = _cascaded([_ok("yes", 0.2)], [_ok("yes", 0.9)])
+
+    result = await caller.run(_decide_req())
+
+    assert result.outcome is not None and result.outcome.out == "yes"
+    assert result.tier == "session"
+    assert result.agreement is True  # both tiers committed the same answer
+    assert result.usage.prompt_tokens == 200  # both tiers' spend summed
+
+
+@pytest.mark.asyncio
+async def test_cascade_retries_a_double_invalid_on_the_session_model() -> None:
+    caller = _cascaded(["not json", "still not json"], [_ok("no")])
+
+    result = await caller.run(_decide_req())
+
+    assert result.outcome is not None and result.outcome.out == "no"
+    assert result.tier == "session"
+    assert result.agreement is None  # the cheap tier never committed an answer
+
+
+@pytest.mark.asyncio
+async def test_cascade_disagreement_is_recorded() -> None:
+    caller = _cascaded([_ok("yes", 0.2)], [_ok("no", 0.9)])
+
+    result = await caller.run(_decide_req())
+
+    assert result.outcome is not None and result.outcome.out == "no"
+    assert result.agreement is False
+
+
+@pytest.mark.asyncio
+async def test_cascade_both_tiers_failing_escalates_with_both_details() -> None:
+    caller = _cascaded([_ok("yes", 0.2)], [_ok("no", 0.1)])
+
+    result = await caller.run(_decide_req())
+
+    assert result.outcome is None
+    assert "below floor" in result.detail and "session retry" in result.detail
+
+
+@pytest.mark.asyncio
+async def test_no_owned_tier_means_no_cascade() -> None:
+    # The session model IS the micro tier (no cheap client built):
+    # retrying the same model on a floor miss would just pay twice.
+    provider = ScriptedProvider([_ok("yes", 0.2)])
+
+    result = await MicroCaller(provider, confidence_floor=0.7).run(_decide_req())
+
+    assert result.outcome is None and result.tier == "micro"
+    assert not provider._replies  # exactly one reply consumed
+
+
+# ---------- clear_overlay ----------
+
+
+@pytest.mark.asyncio
+async def test_clear_overlay_pick_maps_to_the_dismiss_arm() -> None:
+    from physiclaw.conductor.micro import CLEAR_OVERLAY, DISMISS_ARM
+
+    req = build_request(
+        CLEAR_OVERLAY, "rescue", (), {}, make_screen(("check details", 0.5, 0.5))
+    )
+    provider = ScriptedProvider([_ok("check details")])
+
+    result = await MicroCaller(provider, confidence_floor=0.5).run(req)
+
+    assert result.outcome is not None
+    assert result.outcome.out == DISMISS_ARM
+    assert result.outcome.picked is not None
+    assert result.outcome.picked.key == "check details"
+
+
+@pytest.mark.asyncio
+async def test_clear_overlay_none_safe_is_the_escape() -> None:
+    from physiclaw.conductor.micro import CLEAR_OVERLAY, NONE_SAFE
+
+    req = build_request(
+        CLEAR_OVERLAY, "rescue", (), {}, make_screen(("check details", 0.5, 0.5))
+    )
+    provider = ScriptedProvider([_ok(NONE_SAFE)])
+
+    result = await MicroCaller(provider, confidence_floor=0.5).run(req)
+
+    assert result.outcome is not None
+    assert result.outcome.out == NONE_SAFE and result.outcome.picked is None
+
+
+@pytest.mark.asyncio
+async def test_parse_task_scroll_up_is_a_legal_answer_with_no_payload() -> None:
+    from physiclaw.conductor.micro import PARSE_TASK, MicroCaller
+
+    req = build_request(
+        PARSE_TASK,
+        "activation",
+        ("demo/flow",),
+        {"menu": "- demo/flow: buy things"},
+        make_screen(("继续", 0.25, 0.4)),
+    )
+    provider = ScriptedProvider(
+        [
+            '{"reason": "nudge, request above", "answer": "scroll_up", '
+            '"confidence": 0.9, "inputs": {"keyword": "stale"}}'
+        ]
+    )
+
+    result = await MicroCaller(provider, confidence_floor=0.5).run(req)
+
+    assert result.outcome is not None
+    assert result.outcome.out == "scroll_up"
+    assert result.outcome.payload is None  # never inputs from a half-read thread
 
 
 def test_parse_task_prompt_scopes_the_request_it_may_activate() -> None:

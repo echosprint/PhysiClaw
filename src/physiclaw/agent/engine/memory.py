@@ -13,12 +13,16 @@ Write paths used by the local tool handlers: `append_log`, `save_fact`,
 `update_fact`. After a save/update, `render_result` builds the tool result —
 the action line plus the full current store (so the agent sees the whole
 updated memory, since the injected snapshot goes stale mid-session).
+
+The daily-log FILE FORMAT (append shape, date-stamp rewrite, lookback)
+lives in `common.daylog` — the conductor writes and reads the same
+files and may not import this package — this module keeps the engine's
+policy: the config-tuned window sizes and the tool-facing API.
 """
 
-import datetime as dt
 import re
 
-from physiclaw.common import paths
+from physiclaw.common import daylog, paths
 from physiclaw.common.config import CONFIG
 from physiclaw.common.text import append_text, read_text, write_text
 
@@ -37,16 +41,6 @@ DEFAULT_LOG_ENTRIES = CONFIG.memory.default_log_entries
 # the agent can always call `read_logs` for a deeper window. User-
 # tunable via `[memory] bootstrap_log_entries` in config.toml.
 BOOTSTRAP_LOG_ENTRIES = CONFIG.memory.bootstrap_log_entries
-
-# Hard ceiling on how far back to scan when collecting entries. Guards
-# against an indefinite loop on a near-empty memory dir; missing days
-# are skipped cheaply so the cost is just calendar arithmetic.
-_LOOKBACK_DAYS_CEILING = 365
-
-# `append_log` writes `[HH:MM] …`. `read_logs` rewrites the prefix to
-# `[YYYY-MM-DD HH:MM] …` using the file's date so a merged-day view
-# stays unambiguous about cross-day order.
-_TIME_PREFIX_RE = re.compile(r"^\[(\d{2}:\d{2})\]\s*(.*)$")
 
 
 def load_user() -> str:
@@ -68,69 +62,16 @@ def load_persistent() -> str:
 
 
 def load_recent_entries(n: int = DEFAULT_LOG_ENTRIES) -> str:
-    """Last N log entries across daily files, most recent first.
-
-    Walks `memory/YYYY-MM-DD.md` from today backward, accumulating
-    non-empty content lines. If today's file has fewer than N entries,
-    yesterday's is read too, and so on, up to `_LOOKBACK_DAYS_CEILING`.
-    The `# YYYY-MM-DD` header line and blank lines are skipped — only
-    actual entries count toward N.
-
-    Each line's `[HH:MM]` prefix is rewritten to `[YYYY-MM-DD HH:MM]`
-    using the file's date so the merged stream is unambiguous about
-    when each entry happened. Lines without a time prefix pass through
-    unchanged.
-
-    Returns "" if no entries are found within the ceiling.
-    """
-    today = dt.date.today()
-    collected: list[str] = []
-    for i in range(_LOOKBACK_DAYS_CEILING):
-        if len(collected) >= n:
-            break
-        d = today - dt.timedelta(days=i)
-        p = MEMORY_DIR / f"{d.isoformat()}.md"
-        try:
-            text = read_text(p)
-        except FileNotFoundError:
-            continue
-        # Files are append-order (oldest line first). Reverse before
-        # taking from a single file so the most recent line in that
-        # file appears first in the merged output.
-        per_file: list[str] = []
-        for line in text.splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#"):
-                continue
-            per_file.append(_stamp_date(stripped, d))
-        for line in reversed(per_file):
-            collected.append(line)
-            if len(collected) >= n:
-                break
-    if not collected:
-        return ""
-    return "\n".join(collected)
-
-
-def _stamp_date(line: str, d: dt.date) -> str:
-    m = _TIME_PREFIX_RE.match(line)
-    if not m:
-        return line
-    return f"[{d.isoformat()} {m.group(1)}] {m.group(2)}"
+    """Last N log entries across daily files, most recent first — the
+    shared reader (`common.daylog`), with the engine's config-tuned
+    default window and its import-frozen memory dir."""
+    return daylog.load_recent_entries(n, root=MEMORY_DIR)
 
 
 def append_log(entry: str) -> None:
-    """Append a log line to today's daily file. Creates the file if needed."""
-    entry = entry.strip()
-    if not entry:
-        return
-    MEMORY_DIR.mkdir(parents=True, exist_ok=True)
-    path = MEMORY_DIR / f"{dt.date.today().isoformat()}.md"
-    is_new = not path.exists()
-    with open(path, "a", encoding="utf-8") as f:
-        if is_new:
-            f.write(f"# {dt.date.today().isoformat()}\n\n")
-        f.write(entry + "\n")
+    """Append a log line to today's daily file — the shared writer
+    (`common.daylog`), against the engine's import-frozen memory dir."""
+    daylog.append_log(entry, root=MEMORY_DIR)
 
 
 def save_fact(text: str) -> None:

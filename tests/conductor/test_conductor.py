@@ -58,8 +58,12 @@ async def test_advance_prefers_the_program_then_quiet_is_permanent() -> None:
     first = await conductor.advance(history)
     assert first.synthesized and first.tool_names() == ["note", "peek"]
 
-    # The peek's result never arrives → the program hands over; from here
-    # every advance is a pass — program dropped for good, never retried.
+    # The peek's result never arrives → the program hands over with one
+    # final brief turn; from there every advance is a pass — program
+    # dropped for good, never retried.
+    briefed = await conductor.advance(history)
+    assert briefed.synthesized and briefed.tool_names() == ["note", "peek"]
+    assert "conductor handing over" in briefed.tool_calls[0].arguments["summary"]
     assert await conductor.advance(history) is None
     assert await conductor.advance(history) is None
 
@@ -181,7 +185,10 @@ async def test_unwired_micro_caller_means_decides_hand_over() -> None:
 
     result = await conductor.advance(history)
 
-    assert result is None  # handed over — the LLM takes the turn
+    # Handed over via the one final brief turn; then the LLM takes over.
+    assert result.synthesized and result.tool_names() == ["note", "peek"]
+    assert "conductor handing over" in result.tool_calls[0].arguments["summary"]
+    assert await conductor.advance(history) is None
 
 
 @pytest.mark.asyncio

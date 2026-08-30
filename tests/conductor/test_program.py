@@ -18,6 +18,9 @@ from conductor_fakes import (
     feed as _feed,
 )
 from conductor_fakes import (
+    finish as _finish,
+)
+from conductor_fakes import (
     history as _history,
 )
 from conductor_fakes import (
@@ -100,7 +103,8 @@ def test_walk_runs_both_legs_then_completes() -> None:
     assert leg2.tool_calls[1].arguments["name"] == "demo/add-cart"
 
     _feed(h, leg2, RESULTS)  # verify: pages.results holds → playbook complete
-    assert p.advance(h) is None
+    summary = _finish(p, h, p.advance(h))
+    assert "walk demo/flow completed" in summary
 
 
 def test_locate_resumes_past_completed_legs() -> None:
@@ -119,7 +123,9 @@ def test_locate_resumes_past_completed_legs() -> None:
     assert nxt.tool_calls[1].arguments["name"] == "demo/add-cart"
 
 
-def test_verify_mismatch_hands_over() -> None:
+def test_verify_mismatch_rescues_then_hands_over() -> None:
+    # A wrong known page at verify is a mechanical deviation: the back
+    # rung tries to pop out of it (bounded) before the model is woken.
     write_pack(playbooks={"flow": FLOW})
     p = _program(keyword="milk")
     h = _history()
@@ -129,7 +135,18 @@ def test_verify_mismatch_hands_over() -> None:
     assert leg1 is not None
     _feed(h, leg1, RESULTS)  # landed on the WRONG known page
 
-    assert p.advance(h) is None
+    settle = p.advance(h)  # rung 0: maybe just mid-transition
+    assert settle is not None and settle.tool_names() == ["note", "peek"]
+    _feed(h, settle, RESULTS)  # settled — genuinely the wrong page
+    back1 = p.advance(h)
+    assert back1 is not None and back1.tool_names() == ["note", "go_back"]
+    _feed(h, back1, RESULTS)
+    back2 = p.advance(h)
+    assert back2 is not None and back2.tool_names() == ["note", "go_back"]
+    _feed(h, back2, RESULTS)
+
+    summary = _finish(p, h, p.advance(h))
+    assert "did not land" in summary and "rescue tried: back×2" in summary
 
 
 def test_leg_verifying_a_builtin_page_hands_over() -> None:
@@ -145,7 +162,7 @@ def test_leg_verifying_a_builtin_page_hands_over() -> None:
 
     _feed(h, p.advance(h), ELSEWHERE)
 
-    assert p.advance(h) is None
+    _finish(p, h, p.advance(h))
 
 
 def test_error_result_hands_over() -> None:
@@ -158,7 +175,8 @@ def test_error_result_hands_over() -> None:
     assert leg1 is not None
     _feed(h, leg1, "BLOCKED — not executed", error=True)
 
-    assert p.advance(h) is None
+    summary = _finish(p, h, p.advance(h))
+    assert "blocked or failed" in summary
 
 
 def test_decide_yields_a_request_and_an_unresolved_one_hands_over() -> None:
@@ -174,7 +192,7 @@ def test_decide_yields_a_request_and_an_unresolved_one_hands_over() -> None:
 
     req = p.advance(h)
     assert isinstance(req, DecisionRequest)  # the conductor brokers it
-    assert p.resolve(None) is None  # a failed micro-call hands over
+    _finish(p, h, p.resolve(None))  # a failed micro-call hands over
 
 
 def test_program_advance_never_raises() -> None:
@@ -184,7 +202,9 @@ def test_program_advance_never_raises() -> None:
     # A malformed history (no pending result will ever match) must
     # degrade to a hand-over, not an exception.
     p.advance(_history())
-    assert p.advance(_history()) is None
+    step = p.advance(_history())  # missing result → the handover brief
+    assert step is not None and step.tool_names() == ["note", "peek"]
+    assert p.advance(_history()) is None  # then permanently quiet
 
 
 # ---------- decisions ----------
@@ -271,24 +291,26 @@ def test_scroll_self_loop_swipes_and_reasks_until_max_visits() -> None:
     swipe = p.resolve(scroll)
     assert swipe is not None
     _feed(h, swipe, RESULTS)
-    assert p.advance(h) is None
+    summary = _finish(p, h, p.advance(h))
+    assert "max_visits" in summary
 
 
 def test_escalate_routed_outcome_hands_over() -> None:
     from physiclaw.conductor.micro import MicroOutcome
 
-    p, _, _ = _at_decision()
+    p, h, _ = _at_decision()
 
-    assert (
-        p.resolve(MicroOutcome(out="none_fit", reason="nothing", confidence=0.9))
-        is None
-    )
+    step = p.resolve(MicroOutcome(out="none_fit", reason="nothing", confidence=0.9))
+
+    summary = _finish(p, h, step)
+    assert "escalate" in summary
 
 
 def test_failed_micro_call_hands_over() -> None:
-    p, _, _ = _at_decision()
+    p, h, _ = _at_decision()
 
-    assert p.resolve(None) is None
+    summary = _finish(p, h, p.resolve(None))
+    assert "failed or under-confident" in summary
 
 
 # ---------- the gate, suspending, activation ----------
@@ -461,13 +483,17 @@ def test_gate_blocks_when_the_sheet_changed_after_consent() -> None:
 
     _feed(h, back, _sheet("¥69"))  # the total drifted after the confirm
 
-    assert p.advance(h) is None  # staleness predicate → hand over
+    summary = _finish(p, h, p.advance(h))  # staleness predicate → hand over
+    assert "sheet changed after consent" in summary
 
 
 def test_gate_deny_hands_over_without_reasking() -> None:
     p, h, send = _at_gate()
 
-    assert _reply_arrives(p, h, send, "不用") is None
+    step = _reply_arrives(p, h, send, "不用")
+
+    summary = _finish(p, h, step)
+    assert "user declined" in summary and "back out" in summary
 
 
 def test_gate_unclear_reply_goes_to_the_llm_tier() -> None:
@@ -594,7 +620,8 @@ def test_suspended_confirm_resume_reads_a_cancel() -> None:
     h2 = _history()
     check = resumed.advance(h2)
     _feed(h2, check, _thread((text, 0.75, 0.3), ("cancel", 0.25, 0.5)))
-    assert resumed.advance(h2) is None  # deny — the walk stops
+    summary = _finish(resumed, h2, resumed.advance(h2))  # deny — the walk stops
+    assert "user declined" in summary
 
 
 def test_suspended_confirm_resume_off_thread_reopens_then_continues() -> None:
@@ -765,7 +792,8 @@ def test_gate_revise_hands_over_with_the_request() -> None:
     assert isinstance(req, DecisionRequest)
 
     handed = p.resolve(MicroOutcome(out="revise", reason="wants two", confidence=0.9))
-    assert handed is None  # hand over — the model adjusts the order
+    summary = _finish(p, h, handed)  # hand over — the model adjusts the order
+    assert "asked for changes" in summary
 
 
 def test_gate_ask_is_the_filled_template_exactly() -> None:
@@ -986,6 +1014,25 @@ def test_reconcile_missing_item_reshops_it() -> None:
     assert p._ledger[1].status == "pending"
 
 
+def test_ledger_decide_carries_default_item_context() -> None:
+    # The current item rides as DEFAULT context — authors kept
+    # forgetting to template {item.query} into criteria, the exact
+    # starved-subagent failure the context plan names.
+    from physiclaw.conductor.micro import DecisionRequest
+
+    p = _arm_ledger()
+    h = _history()
+    _feed(h, p.advance(h), ELSEWHERE)
+    _feed(h, p.advance(h), HOME)
+    search = p.advance(h)
+    _feed(h, search, PRODUCTS)
+
+    req = p.advance(h)
+
+    assert isinstance(req, DecisionRequest)
+    assert "current buying-list item: eggs (want 2)" in req.context
+
+
 def test_gate_revise_rewrites_the_ledger_and_reasks() -> None:
     from physiclaw.conductor.micro import (
         CONFIRM_REPLY,
@@ -1073,7 +1120,8 @@ def test_gate_revisions_are_bounded() -> None:
     _reply_arrives(p, h, send, "change it again, no chips this time")
     handed = p.resolve(MicroOutcome(out="revise", reason="again", confidence=0.9))
 
-    assert handed is None  # budget spent — the model settles the order
+    summary = _finish(p, h, handed)  # budget spent — the model settles the order
+    assert "revisions" in summary
 
 
 def test_suspension_persists_the_ledger() -> None:
@@ -1103,44 +1151,9 @@ def test_a_bad_ledger_value_is_rejected_at_the_input_seam() -> None:
             check_ledger_value(spec, setup.resolve_inputs(spec, {"items": bad}))
 
 
-def test_loop_only_ledger_playbook_needs_no_micro() -> None:
-    # next_item is deterministic — a ledger walk with no prompted
-    # decision and no gate must not make the engine wire a micro client.
-    loop_only = """\
-description: shop the list, fixed picks
-inputs:
-  items:
-    description: the buying list
-    kind: list
-nodes:
-  - id: open
-    type: LEG
-    macro: open-app
-    with: {message: "cart"}
-    verify: pages.home
-  - id: search
-    type: LEG
-    macro: open-app
-    with: {message: "{item.query}"}
-    verify: pages.results
-  - id: add
-    type: LEG
-    macro: add-cart
-    with: {message: "add"}
-    verify: pages.results
-  - id: advance
-    type: DECIDE
-    call: next_item
-    with: {picked: "{item.query}"}
-    routes: {next: search, done: fix}
-  - id: fix
-    type: RECONCILE
-    page: pages.results
-"""
-    write_pack(playbooks={"fetch": loop_only})
-    p = _program(name="fetch", items='[{"query": "eggs", "qty": 1}]')
-
-    assert p.needs_micro is False
+# (`needs_micro` was deleted with the `_wire_micro` relaxation: the
+# micro CLIENT is lazily built on first call, so "who needs one" no
+# longer has a consumer — the rescue ladder means any walk can.)
 
 
 # ---------- bug-hunt regressions ----------
@@ -1161,7 +1174,10 @@ def test_payment_never_fires_off_an_unverified_screen() -> None:
         make_screen(("Weixin", 0.5, 0.05), ("合计 ¥45 昨天", 0.3, 0.2)).text,
     )
 
-    assert p.advance(h) is None  # blind money refused, hand over
+    summary = _finish(p, h, p.advance(h))  # blind money refused, hand over
+    assert "leg 'pay' expects page" in summary
+    # Consent was bound but never consumed — the brief must say so.
+    assert "consented to ¥45" in summary and "NOT been made" in summary
 
 
 def test_pay_consumes_the_consent() -> None:
@@ -1234,7 +1250,8 @@ def test_blocked_suspend_end_session_drops_the_suspension() -> None:
 
     _feed(h, step, "BLOCKED", error=True)  # end_session refused
 
-    assert p.advance(h) is None
+    summary = _finish(p, h, p.advance(h))
+    assert "suspension dropped" in summary
     assert setup.load_suspended() is None  # stale suspension not resurrected
 
 
@@ -1256,7 +1273,8 @@ def test_all_zero_revision_is_a_deny() -> None:
         )
     )
 
-    assert handed is None
+    summary = _finish(p, h, handed)
+    assert "user declined" in summary
 
 
 def test_reconciler_never_cross_matches_similar_items() -> None:
@@ -1399,7 +1417,8 @@ def test_payment_gate_total_is_quoted_only_off_a_verified_page() -> None:
     h = _history()
     _feed(h, p.advance(h), ELSEWHERE)  # unknown screen at the gate
 
-    assert p.advance(h) is None  # handover — no ask was sent
+    summary = _finish(p, h, p.advance(h))  # handover — no ask was sent
+    assert "refusing to ask blind" in summary
 
 
 def test_reask_send_reads_a_deny_sent_meanwhile() -> None:
@@ -1430,7 +1449,8 @@ def test_reask_send_reads_a_deny_sent_meanwhile() -> None:
     ask2 = resend.tool_calls[1].arguments["inputs"]["message"]
     _feed(h, resend, _thread((ask2, 0.75, 0.7), ("cancel", 0.25, 0.5)))
 
-    assert p.advance(h) is None
+    summary = _finish(p, h, p.advance(h))
+    assert "user declined" in summary
 
 
 def test_failed_reply_judgment_keeps_the_batch_visible() -> None:
@@ -1516,7 +1536,8 @@ def test_second_reshop_of_an_item_hands_over() -> None:
     peek2 = _shop_item(p, h, req, "lays chips")
     _feed(h, peek2, _cart_screen(("farm eggs", 2)))  # STILL missing
 
-    assert p.advance(h) is None
+    summary = _finish(p, h, p.advance(h))
+    assert "still missing after a re-shop" in summary
 
 
 def _suspend_a_confirm() -> None:
@@ -1560,7 +1581,8 @@ def test_missing_suspend_result_drops_the_suspension_file() -> None:
     assert suspension.suspended_path().exists()
     h.append(susp)  # the end_session result never arrives
 
-    assert p.advance(h) is None
+    summary = _finish(p, h, p.advance(h))
+    assert "suspension dropped" in summary
     assert not suspension.suspended_path().exists()
 
 
@@ -1711,10 +1733,9 @@ def test_gate_hands_over_when_no_total_is_readable(caplog) -> None:
     _feed(h, p.advance(h), RESULTS)  # the verified results page — no ¥ on it
 
     with caplog.at_level("INFO"):
-        assert p.advance(h) is None  # handover, no ask sent
-    # THIS guard, not a sibling: every handover returns None, so the
-    # reason is what tells them apart.
-    assert "no total readable" in caplog.text
+        step = p.advance(h)  # handover, no ask sent
+    # THIS guard, not a sibling: the brief's reason tells them apart.
+    assert "no total readable" in _finish(p, h, step)
 
 
 def test_gate_hands_over_when_the_cap_cannot_resolve(caplog) -> None:
@@ -1732,8 +1753,8 @@ def test_gate_hands_over_when_the_cap_cannot_resolve(caplog) -> None:
     _feed(h, p.advance(h), _sheet())
 
     with caplog.at_level("INFO"):
-        assert p.advance(h) is None  # handover, no ask sent
-    assert "cap could not be resolved" in caplog.text
+        step = p.advance(h)  # handover, no ask sent
+    assert "cap could not be resolved" in _finish(p, h, step)
 
 
 def test_payment_leg_without_consent_hands_over(caplog) -> None:
@@ -1761,8 +1782,8 @@ def test_payment_leg_without_consent_hands_over(caplog) -> None:
     _feed(h, p.advance(h), _sheet())  # verified sheet at the pay leg
 
     with caplog.at_level("INFO"):
-        assert p.advance(h) is None  # money never fires blind
-    assert "without a confirmed total" in caplog.text
+        step = p.advance(h)  # money never fires blind
+    assert "without a confirmed total" in _finish(p, h, step)
 
 
 def test_reconcile_hands_over_when_the_cart_never_converges(caplog) -> None:
@@ -1777,8 +1798,493 @@ def test_reconcile_hands_over_when_the_cart_never_converges(caplog) -> None:
         for _ in range(reconcile.MAX_ACTIONS + 1):
             _feed(h, step, stuck)
             step = p.advance(h)
-            if step is None:
+            if step.tool_names() != ["note", "tap"]:  # kept stepping until spent
                 break
-            assert step.tool_names() == ["note", "tap"]  # keeps stepping until spent
-    assert step is None
-    assert "cart not converging" in caplog.text
+    assert "cart not converging" in _finish(p, h, step)
+
+
+# ---------- the rescue ladder ----------
+
+RESCUE_PAGES = """\
+home:
+  anchors: ["Files", "Recent"]
+results:
+  anchors: ["综合"]
+"""
+
+# home with both anchors visible — matches against the learned geometry.
+HOME2 = make_screen(("Files", 0.5, 0.10), ("Recent", 0.5, 0.50)).text
+
+# A popup band over home: Files still visible, Recent hidden under four
+# unexpected labels clustered where Recent should be — reads `occluded`
+# with the band around cy 0.50 (± OVERLAY_PAD).
+POPUP_OVER_HOME = make_screen(
+    ("Files", 0.5, 0.10),
+    ("new user gift pack", 0.4, 0.44),
+    ("mega deal inside", 0.6, 0.48),
+    ("one free with one", 0.5, 0.52),
+    ("以后再说", 0.5, 0.56),
+).text
+
+LOCKED_MID = make_screen(("Enter Passcode", 0.5, 0.5)).text
+
+
+def _learn_home() -> None:
+    from physiclaw.conductor.pages import LearnedAnchor, LearnedPage, save_learned
+
+    save_learned(
+        "demo",
+        {
+            "home": LearnedPage(
+                anchors={
+                    "Files": LearnedAnchor("Files", 0.5, 0.10, 0.05, 1.0, 1.0),
+                    "Recent": LearnedAnchor("Recent", 0.5, 0.50, 0.05, 1.0, 1.0),
+                },
+                threshold=0.9,
+                observations=4,
+            )
+        },
+    )
+
+
+def _rescue_walk(flow: str = FLOW):
+    """A FLOW walk over pages with learned `home` geometry (the occluded
+    verdict needs it), driven past the opening peek to leg 1."""
+    write_pack(pages=RESCUE_PAGES, playbooks={"flow": flow})
+    _learn_home()
+    p = _program(keyword="milk")
+    h = _history()
+    _feed(h, p.advance(h), ELSEWHERE)
+    leg1 = p.advance(h)
+    assert leg1 is not None and leg1.tool_names() == ["note", "run_macro"]
+    return p, h, leg1
+
+
+def test_popup_at_verify_is_dismissed_and_the_walk_continues() -> None:
+    p, h, leg1 = _rescue_walk()
+    _feed(h, leg1, POPUP_OVER_HOME)  # verify blocked by an overlay
+
+    dismiss = p.advance(h)
+    assert dismiss is not None and dismiss.tool_names() == ["note", "tap"]
+    assert "以后再说" in dismiss.tool_calls[0].arguments["summary"]
+
+    _feed(h, dismiss, HOME2)  # overlay gone — home restored, verify holds
+    leg2 = p.advance(h)
+    assert leg2 is not None
+    assert leg2.tool_calls[1].arguments["name"] == "demo/add-cart"
+    assert "rescue: restored demo.home" in leg2.tool_calls[0].arguments["summary"]
+
+
+def test_wrong_page_at_enter_goes_back_then_runs_the_leg() -> None:
+    # leg 2 expects `results` but the walk stands on `home` — wandered
+    # relative to the leg's precondition. go_back pops, the enter check
+    # re-runs on the restored page, and the leg fires: the cursor never
+    # moved (I1).
+    p, h, leg1 = _rescue_walk(FLOW.replace("enter: pages.home", "enter: pages.results"))
+    _feed(h, leg1, HOME2)  # verify home holds; enter results does not
+
+    settle = p.advance(h)  # rung 0: the free settle re-peek
+    assert settle is not None and settle.tool_names() == ["note", "peek"]
+    _feed(h, settle, HOME2)  # settled — still the wrong page
+    back = p.advance(h)
+    assert back is not None and back.tool_names() == ["note", "go_back"]
+
+    _feed(h, back, RESULTS)
+    leg2 = p.advance(h)
+    assert leg2 is not None
+    assert leg2.tool_calls[1].arguments["name"] == "demo/add-cart"
+
+
+def test_locked_mid_walk_unlocks_then_continues() -> None:
+    p, h, leg1 = _rescue_walk()
+    _feed(h, leg1, LOCKED_MID)
+
+    unlock = p.advance(h)
+    assert unlock is not None and unlock.tool_names() == ["note", "unlock_phone"]
+
+    _feed(h, unlock, HOME2)
+    leg2 = p.advance(h)
+    assert leg2 is not None
+    assert leg2.tool_calls[1].arguments["name"] == "demo/add-cart"
+
+
+# A popup whose buttons match NO vocabulary word — rung 1 has nothing,
+# the micro tier gets asked. Four unexpected labels around Recent's
+# learned position keep the occluded verdict firing.
+WORDLESS_POPUP = make_screen(
+    ("Files", 0.5, 0.10),
+    ("limited offer", 0.4, 0.44),
+    ("mega deal inside", 0.6, 0.48),
+    ("one free with one", 0.5, 0.52),
+    ("continue browsing", 0.5, 0.56),
+).text
+
+
+def test_wordless_popup_asks_the_micro_tier_then_taps_and_learns() -> None:
+    from physiclaw.conductor import rescue
+    from physiclaw.conductor.micro import (
+        CLEAR_OVERLAY,
+        DISMISS_ARM,
+        DecisionRequest,
+        MicroOutcome,
+    )
+
+    p, h, leg1 = _rescue_walk()
+    _feed(h, leg1, WORDLESS_POPUP)
+
+    req = p.advance(h)
+    assert isinstance(req, DecisionRequest) and req.call == CLEAR_OVERLAY
+    picked = next(c for c in req.candidates if c.key == "continue browsing")
+
+    tap = p.resolve(
+        MicroOutcome(
+            out=DISMISS_ARM, reason="pure close", confidence=0.9, picked=picked
+        )
+    )
+    assert tap is not None and tap.tool_names() == ["note", "tap"]
+
+    _feed(h, tap, HOME2)  # dismissed — home restored
+    leg2 = p.advance(h)
+    assert leg2 is not None
+    assert leg2.tool_calls[1].arguments["name"] == "demo/add-cart"
+    # The micro tier taught the free tier: the label is learned.
+    assert rescue.load_dismiss("demo") == ("continue browsing",)
+
+
+def test_micro_none_safe_continues_the_ladder_with_back() -> None:
+    from physiclaw.conductor.micro import NONE_SAFE, DecisionRequest, MicroOutcome
+
+    p, h, leg1 = _rescue_walk()
+    _feed(h, leg1, WORDLESS_POPUP)
+    req = p.advance(h)
+    assert isinstance(req, DecisionRequest)
+
+    step = p.resolve(MicroOutcome(out=NONE_SAFE, reason="nothing safe", confidence=0.9))
+
+    assert step is not None and step.tool_names() == ["note", "peek"]  # settle first
+    _feed(h, step, WORDLESS_POPUP)  # settled — the popup is genuinely there
+    nxt = p.advance(h)
+    assert nxt is not None and nxt.tool_names() == ["note", "go_back"]
+
+
+def test_zero_gesture_leg_abort_under_an_overlay_retries_once() -> None:
+    # The I6 one-shot: the leg's macro guard-failed BEFORE any gesture
+    # (the runner's marker) with a popup over the page — dismiss it and
+    # re-run the leg. Nothing was burned engine-side either (the
+    # zero-gesture rule), so the retry actually dispatches.
+    from physiclaw.macros.model import NO_GESTURES_NOTE
+
+    p, h, leg1 = _rescue_walk()
+    abort_text = (
+        "macro demo/open-app: ABORTED at step 1/1 (guard_failed) — no steps "
+        f"executed by this run. {NO_GESTURES_NOTE} — the phone did not move.\n"
+        + POPUP_OVER_HOME
+    )
+    _feed(h, leg1, abort_text, error=True)
+
+    dismiss = p.advance(h)
+    assert dismiss is not None and dismiss.tool_names() == ["note", "tap"]
+    assert "以后再说" in dismiss.tool_calls[0].arguments["summary"]
+
+    _feed(h, dismiss, HOME2)  # popup gone — the page the guard needed
+    retry = p.advance(h)
+    assert retry is not None and retry.tool_names() == ["note", "run_macro"]
+    assert retry.tool_calls[1].arguments["name"] == "demo/open-app"  # SAME leg
+
+    _feed(h, retry, HOME2)  # this time the leg lands
+    leg2 = p.advance(h)
+    assert leg2 is not None
+    assert leg2.tool_calls[1].arguments["name"] == "demo/add-cart"
+
+
+def test_acted_leg_abort_still_hands_over() -> None:
+    # No marker = gestures ran = the one-strike world stands: hard
+    # handover, never a blind retry (I6).
+    p, h, leg1 = _rescue_walk()
+    _feed(
+        h,
+        leg1,
+        "macro demo/open-app: ABORTED at step 2/3 (guard_failed) — "
+        "steps 1–1 already executed. Do NOT re-run.",
+        error=True,
+    )
+
+    summary = _finish(p, h, p.advance(h))
+    assert "blocked or failed" in summary
+
+
+def test_reset_rung_force_quits_reopens_and_relocates() -> None:
+    # The big hammer: back budget spent with a pack `open` macro on
+    # hand → force_quit, reopen, then locate from the top — the
+    # killed-session resume path, so leg 1 (whose verify page the open
+    # landed on) is fast-forwarded, never replayed.
+    write_pack(
+        pages=RESCUE_PAGES,
+        macros=("open-app", "add-cart", "open"),
+        playbooks={"flow": FLOW},
+    )
+    _learn_home()
+    p = _program(keyword="milk")
+    h = _history()
+    _feed(h, p.advance(h), ELSEWHERE)
+    leg1 = p.advance(h)
+    _feed(h, leg1, ELSEWHERE)  # verify fails on an unknown screen
+    settle = p.advance(h)
+    assert settle.tool_names() == ["note", "peek"]  # rung 0
+    _feed(h, settle, ELSEWHERE)
+    back1 = p.advance(h)
+    assert back1.tool_names() == ["note", "go_back"]
+    _feed(h, back1, ELSEWHERE)
+    back2 = p.advance(h)
+    _feed(h, back2, ELSEWHERE)
+
+    quit_ = p.advance(h)
+    assert quit_ is not None and quit_.tool_names() == ["note", "force_quit"]
+
+    _feed(h, quit_, ELSEWHERE)  # the springboard — never judged
+    reopen = p.advance(h)
+    assert reopen is not None and reopen.tool_names() == ["note", "run_macro"]
+    assert reopen.tool_calls[1].arguments == {"name": "demo/open"}
+
+    _feed(h, reopen, HOME2)  # app home = leg 1's verify page
+    leg2 = p.advance(h)
+    assert leg2 is not None
+    assert leg2.tool_calls[1].arguments["name"] == "demo/add-cart"
+    assert "rescue: demo reset" in leg2.tool_calls[0].arguments["summary"]
+
+
+def test_rescue_back_budget_exhausts_into_a_handover_naming_the_rungs() -> None:
+    from physiclaw.conductor import walklog
+
+    p, h, leg1 = _rescue_walk()
+    _feed(h, leg1, ELSEWHERE)  # unknown — settle first, then the back rung
+    settle = p.advance(h)
+    assert settle is not None and settle.tool_names() == ["note", "peek"]
+    _feed(h, settle, ELSEWHERE)
+    back1 = p.advance(h)
+    assert back1 is not None and back1.tool_names() == ["note", "go_back"]
+    _feed(h, back1, ELSEWHERE)
+    back2 = p.advance(h)
+    assert back2 is not None and back2.tool_names() == ["note", "go_back"]
+    _feed(h, back2, ELSEWHERE)
+
+    summary = _finish(p, h, p.advance(h))
+
+    assert "rescue tried: back×2" in summary
+    (row,) = walklog.load()
+    assert row["rescues"] == 2 and row["outcome"] == "handover"
+
+
+# ---------- walk telemetry (runs.jsonl) ----------
+
+
+def test_completed_walk_records_one_completed_run_line() -> None:
+    from physiclaw.conductor import walklog
+
+    write_pack(playbooks={"flow": FLOW})
+    p = _program(keyword="milk")
+    h = _history()
+    _feed(h, p.advance(h), ELSEWHERE)
+    _feed(h, p.advance(h), HOME)
+    _feed(h, p.advance(h), RESULTS)
+
+    _finish(p, h, p.advance(h))
+
+    (row,) = walklog.load()
+    assert row["outcome"] == "completed"
+    assert (row["app"], row["playbook"]) == ("demo", "flow")
+    assert row["node"] is None  # cursor past the last node
+    assert row["micros"] == 0
+
+
+def test_handover_records_run_line_at_the_failing_node() -> None:
+    from physiclaw.conductor import walklog
+
+    write_pack(playbooks={"flow": FLOW})
+    p = _program(keyword="milk")
+    h = _history()
+    _feed(h, p.advance(h), ELSEWHERE)
+    _feed(h, p.advance(h), RESULTS)  # leg 1 landed on the WRONG page
+    _feed(h, p.advance(h), RESULTS)  # rung 0 settle re-peek — still wrong
+    _feed(h, p.advance(h), RESULTS)  # rescue back #1 — still wrong
+    _feed(h, p.advance(h), RESULTS)  # rescue back #2 — still wrong
+
+    _finish(p, h, p.advance(h))
+
+    (row,) = walklog.load()
+    assert row["outcome"] == "handover"
+    assert row["node"] == "open"
+    assert "did not land" in row["reason"]
+    assert row["rescues"] == 2
+
+
+def test_completed_payment_walk_records_history_fields() -> None:
+    # The completed line carries the structured fields (telemetry +
+    # last_picks): inputs, the fired total (consent is consumed at fire —
+    # this is where it survives), picks.
+    from physiclaw.conductor import walklog
+
+    p, h, send = _at_ledger_gate()
+    back = _reply_arrives(p, h, send, "ok")
+    _feed(h, back, _sheet())
+    pay = p.advance(h)
+    assert pay.tool_calls[1].arguments["name"] == "demo/add-cart"
+    _feed(h, pay, HOME)  # the pay leg's verify page
+
+    _finish(p, h, p.advance(h))
+
+    (row,) = walklog.load()
+    assert row["outcome"] == "completed"
+    assert row["total"] == 45.0
+    assert row["picks"] == {"eggs": "farm eggs", "chips": "lays chips"}
+    assert "items" in row["values"]
+
+
+def test_payment_fire_writes_the_doctrine_purchase_log_line() -> None:
+    # PERSISTENCE § When to write: "append_log after every major step
+    # (purchase…)" — the conductor is the one doing the purchasing, so
+    # it writes the line itself (the log_external_stop precedent), the
+    # moment the payment leg's result lands.
+    from physiclaw.common import daylog
+
+    p, h, send = _at_ledger_gate()
+    back = _reply_arrives(p, h, send, "ok")
+    _feed(h, back, _sheet())
+    pay = p.advance(h)
+    _feed(h, pay, HOME)
+    p.advance(h)  # the settle that judges the pay leg — and logs
+
+    entries = daylog.load_recent_entries(5)
+
+    assert "conductor: demo: paid ¥45 (playbook demo/shop)" in entries
+    assert "farm eggs ×2, lays chips ×1" in entries
+
+
+def test_suspend_writes_the_close_routine_log_line() -> None:
+    # A conductor-suspended wake never runs the model, and the walk has
+    # no per-step logs — without this line the suspension is invisible
+    # to the next wake's memory window.
+    from physiclaw.common import daylog
+
+    p, h, send = _at_gate()
+    _suspend_via_silence(p, h, send)
+
+    entries = daylog.load_recent_entries(5)
+
+    assert "conductor: demo/pay suspended" in entries
+    assert "any wake resumes it" in entries
+
+
+def test_ledger_decide_context_quotes_the_previous_picks() -> None:
+    from physiclaw.conductor import walklog
+    from physiclaw.conductor.micro import DecisionRequest
+
+    walklog.record(
+        app="demo",
+        playbook="shop",
+        outcome="completed",
+        idx=9,
+        nodes=9,
+        node=None,
+        picks={"eggs": "farm eggs 30ct"},
+    )
+    p = _arm_ledger()
+    h = _history()
+    _feed(h, p.advance(h), ELSEWHERE)
+    _feed(h, p.advance(h), HOME)
+    _feed(h, p.advance(h), PRODUCTS)
+
+    req = p.advance(h)
+
+    assert isinstance(req, DecisionRequest)
+    assert (
+        "previously picked (last completed run): eggs → farm eggs 30ct" in req.context
+    )
+
+
+def test_session_setup_assembles_the_activation_context() -> None:
+    # The agent's OWN memory convention feeds parse_task: declared
+    # memory slices (fail-closed) + the recent daily-log window — the
+    # same record the model reads at wake, never a conductor-private
+    # store (runs.jsonl stays telemetry).
+    from physiclaw.common import daylog
+
+    _write_channel()
+    _write_memory("## shopping\nprefers oat milk\n\n## other\nsecret\n")
+    daylog.append_log("[11:02] demo: bought milk ¥45 — reported to the user")
+    spec = FLOW.replace(
+        "description: two legs\n",
+        "description: two legs\nparse_context: [memory.shopping]\n",
+    )
+    write_pack(playbooks={"flow": spec})
+
+    _, overture, _ = setup.session_setup()
+
+    assert overture is not None
+    ctx = overture._activation.context
+    assert "prefers oat milk" in ctx and "secret" not in ctx
+    assert "Recent daily-log entries" in ctx
+    assert "bought milk ¥45" in ctx
+
+
+def test_abandon_records_a_mid_flight_walk_and_breadcrumbs_it() -> None:
+    # The killed-session path (`log_external_stop`'s twin): the plugin's
+    # teardown abandons a walk cut short — one telemetry row plus the
+    # daily-log breadcrumb, since this walk had acted.
+    from physiclaw.common import daylog
+    from physiclaw.conductor import walklog
+
+    write_pack(playbooks={"flow": FLOW})
+    p = _program(keyword="milk")
+    h = _history()
+    _feed(h, p.advance(h), ELSEWHERE)
+    p.advance(h)  # leg 1 synthesized — the walk acted, then the session dies
+
+    p.abandon()
+
+    (row,) = walklog.load()
+    assert row["outcome"] == "abandoned"
+    assert row["node"] == "open"
+    assert "cut short mid-walk at node open" in daylog.load_recent_entries(5)
+
+
+def test_abandon_is_a_no_op_for_unstarted_and_closed_walks() -> None:
+    from physiclaw.conductor import walklog
+
+    write_pack(playbooks={"flow": FLOW})
+    fresh = _program(keyword="milk")
+    fresh.abandon()  # never advanced — not a run
+    assert walklog.load() == []
+
+    p = _program(keyword="milk")
+    h = _history()
+    _feed(h, p.advance(h), ELSEWHERE)
+    _feed(h, p.advance(h), HOME)
+    _feed(h, p.advance(h), RESULTS)
+    _finish(p, h, p.advance(h))  # completed — latched
+
+    p.abandon()
+
+    (row,) = walklog.load()
+    assert row["outcome"] == "completed"  # still exactly one row
+
+
+def test_failed_decision_records_handover_with_micro_count() -> None:
+    from physiclaw.conductor import walklog
+    from physiclaw.conductor.micro import DecisionRequest
+
+    write_pack(playbooks={"branch": BRANCH})
+    p = _program(name="branch", keyword="milk")
+    h = _history()
+    _feed(h, p.advance(h), ELSEWHERE)
+    _feed(h, p.advance(h), HOME)
+    _feed(h, p.advance(h), RESULTS)
+    step = p.advance(h)
+    assert isinstance(step, DecisionRequest)
+
+    _finish(p, h, p.resolve(None))  # the brokered call failed → handover
+
+    (row,) = walklog.load()
+    assert row["outcome"] == "handover"
+    assert row["node"] == "choose"
+    assert row["micros"] == 1

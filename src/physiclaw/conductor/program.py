@@ -8,15 +8,21 @@ through the micro-caller and feeds back via ``resolve()``, or with
 ``None`` — "I hand over". ``None`` is permanent for the session: the
 conductor goes quiet and the model takes over with the transcript as the
 handoff, because every synthesized turn and every tool result is
-ordinary history the model can read.
+ordinary history the model can read. Every hand-over (and completion) is
+preceded by ONE final synthesized ``[note, peek]`` turn carrying the
+brief (`brief.py`) — the distilled report of why the walk stopped and
+where its state stands — so the model never resumes blind.
 
 The walk executes every node type, strictly:
 
   - Before a leg: its ``enter:`` page (when declared) must match the
     current screen. After a leg: its ``verify:`` page must match the
-    screen the macro result carries. Anything else — wrong page,
-    occluded, unknown, a blocked or errored call, a reserved ``ios.*``
-    page — hands over. No retries, no recovery legs yet.
+    screen the macro result carries. A mechanical deviation — a popup
+    band, a locked phone, a wandered-into page — goes to the rescue
+    ladder first (`rescue.py`: dismiss / unlock / back / reset, hard
+    budgets, cursor frozen); only what the ladder cannot restore — and
+    every blocked or errored call, and any reserved ``ios.*`` page ref —
+    hands over.
   - A DECIDE becomes one micro-call over the decide-time screen. A pick
     is acted on by a conductor tap primitive at the chosen row; a
     ``scroll`` routed back to the same node swipes and re-asks, bounded
@@ -52,10 +58,20 @@ import json
 import logging
 from dataclasses import dataclass, field
 
-from physiclaw.common import gesture_vocab
+from physiclaw.common import daylog, gesture_vocab
 from physiclaw.common.listing import Screen
 from physiclaw.common.logger import write_json_atomic
-from physiclaw.conductor import ledger, memory, money, reconcile, reply, views
+from physiclaw.conductor import (
+    brief,
+    ledger,
+    memory,
+    money,
+    reconcile,
+    reply,
+    rescue,
+    views,
+    walklog,
+)
 from physiclaw.conductor.calls import CALLS, ESCALATE, LEDGER_FIELDS, NEXT_ITEM
 from physiclaw.conductor.channel import Channel
 from physiclaw.conductor.match import Verdict, match_screen
@@ -66,7 +82,7 @@ from physiclaw.conductor.micro import (
     MicroOutcome,
     build_request,
 )
-from physiclaw.conductor.pages import THREAD_ID, PagePrint, page_id
+from physiclaw.conductor.pages import OPEN_MACRO, THREAD_ID, PagePrint, page_id
 from physiclaw.conductor.playbook import (
     GATE_MAX_CHECKS,
     GATE_MAX_REVISIONS,
@@ -87,7 +103,7 @@ from physiclaw.conductor.suspension import (
 )
 from physiclaw.conductor.turns import Turnsmith
 from physiclaw.contract.dto import AssistantMessage, Message
-from physiclaw.macros.model import Macro
+from physiclaw.macros.model import NO_GESTURES_NOTE, Macro
 
 log = logging.getLogger(__name__)
 
@@ -193,15 +209,6 @@ class Program:
         self.pack_macros = pack_macros
         self._prints = prints
         self._ids = {n.id: i for i, n in enumerate(spec.nodes)}
-        # Read by the plugin's micro wiring: prompted decisions AND gate
-        # reply checks ride the micro channel — either kind of node
-        # means wiring one up. Deterministic calls (next_item) never
-        # prompt, so a legs+loop-only playbook must not pay for a client.
-        self.needs_micro = any(
-            (isinstance(n, DecideNode) and not CALLS[n.call].deterministic)
-            or isinstance(n, HumanGateNode)
-            for n in spec.nodes
-        )
         # The user-channel infrastructure (constructor-injected via
         # setup._build_program). None degrades to hand-over at the first
         # ask.
@@ -216,6 +223,46 @@ class Program:
         # don't count). A walk that "completes" without ever acting hit
         # a coincidental page match — that must not consume the arm.
         self._acted = False
+        # The telemetry pair (`walklog`): decision outcomes brokered to
+        # this walk, and the one-shot latch so exactly one runs.jsonl
+        # line lands per walk whatever terminal path fires.
+        self._micros = 0
+        self._run_recorded = False
+        # The rescue ladder (`rescue.py`): the one rescue in flight (a
+        # failed page check being recovered) and the walk-lifetime action
+        # count the telemetry reports.
+        self._rescue: rescue.State | None = None
+        self._rescues_total = 0
+        self._dismiss_labels: "tuple[str, ...] | None" = None  # lazy, per walk
+        # The reset rung's hands and its once-per-WALK latch: the pack's
+        # own `open` macro (enabled), or None — absent means the rung is
+        # skipped, the ladder degrades, never breaks.
+        open_macro = pack_macros.get(qualified_macro(app, OPEN_MACRO))
+        self._open_macro = (
+            qualified_macro(app, OPEN_MACRO)
+            if open_macro is not None and open_macro.enabled
+            else None
+        )
+        self._reset_used = False
+        # The I6 one-shot: legs whose zero-gesture abort already earned
+        # their single rescue-and-retry this walk.
+        self._leg_retries: set[str] = set()
+        # True once advance() was ever called — `abandon` records only
+        # walks that actually started (a built-but-never-driven program
+        # is not a run).
+        self._started = False
+        # The amount a payment leg actually fired with (consent is
+        # consumed at fire, so this is the only place it survives to the
+        # completed history line), and the once-read runs.jsonl rows for
+        # the "usual brand" decide context (the memory-sections idiom:
+        # nothing rewrites the file while the walk drives).
+        self._paid: float | None = None
+        self._history_rows: "list[dict] | None" = None
+        # Terminal: the brief turn (handover or completion) was minted.
+        # The NEXT advance is the permanent None the conductor drops the
+        # program on — "quiet is permanent" now happens one turn later,
+        # with the report in the transcript.
+        self._done = False
         # A suspended CONFIRM's resume owes the user one thread read before
         # walk continues: the wake that resumes it may BE their cancel
         # reply (the IM banner wakes the device), and barreling on would
@@ -327,10 +374,12 @@ class Program:
         over to the model. Never raises: a program bug degrades to a
         handover, not a crashed session (the model finishes the task
         either way)."""
+        self._started = True
         try:
             step = self._advance(history)
         except Exception:
             log.exception("conductor: program crashed — handing over to the model")
+            self._record_run("crashed", "program crashed")
             step = None
         return step
 
@@ -340,10 +389,12 @@ class Program:
         """Continue the walk with a micro-call's outcome (None = the call
         failed or was under-confident — hand over). Same return contract
         and same never-raises guarantee as ``advance``."""
+        self._micros += 1
         try:
             step = self._resolve(outcome)
         except Exception:
             log.exception("conductor: program crashed — handing over to the model")
+            self._record_run("crashed", "program crashed")
             step = None
         return step
 
@@ -352,6 +403,10 @@ class Program:
     def _advance(
         self, history: list[Message]
     ) -> "AssistantMessage | DecisionRequest | None":
+        if self._done:
+            # The brief turn was the walk's last word; its peek result is
+            # ordinary history. Quiet from here — the conductor drops us.
+            return None
         if self._turns.pending is None:
             if self._gate.awaiting:
                 # Suspended-at-gate resume: go straight to reading the
@@ -389,6 +444,10 @@ class Program:
                 # resurrect on the next wake.
                 clear_suspended()
                 return self._handover(f"{failed} — suspension dropped")
+            if kind == "leg":
+                retry = self._retry_leg_after_abort(history)
+                if retry is not None:
+                    return retry
             return self._handover(failed)
         assert result is not None  # settle: exactly one of result/failed
         # One reading, one verdict: channel-facing actions (declared at
@@ -410,10 +469,19 @@ class Program:
         elif kind == "leg":
             node = self.spec.nodes[self._idx]
             assert isinstance(node, LegNode)
+            if node.irreversible == "payment" and self._paid is not None:
+                # The doctrine's purchase line (PERSISTENCE § Format),
+                # harness-written the moment the payment leg's result
+                # lands — whatever the verify check says next, money may
+                # have moved, and the daily log is the cross-wake record.
+                self._log_day(self._purchase_line())
             wrong = self._mismatch(self._verdict, page_id(self.app, node.verify))
             if wrong is not None:
-                return self._handover(
-                    f"leg {node.id!r} did not land on {node.verify!r} ({wrong})"
+                return self._rescue_or_handover(
+                    node,
+                    page_id(self.app, node.verify),
+                    rescue.MODE_VERIFY,
+                    f"leg {node.id!r} did not land on {node.verify!r} ({wrong})",
                 )
             self._idx += 1
         elif kind == "swipe":
@@ -463,6 +531,13 @@ class Program:
         elif kind in ("rec-peek", "rec-tap"):
             # The tap's own result screen is the re-read — no extra peek.
             return self._reconcile_step()
+        elif kind.startswith("rescue-"):
+            # Every rescue kind is `rescue-<rung>` minted by _rescue_act
+            # (plus the reset pair's follow-up "rescue-open") — one
+            # prefix, so a new rung cannot miss this dispatch arm. Same
+            # rule as reconcile: the action's own result view is the
+            # re-read the ladder judges.
+            return self._rescue_landed(kind)
         elif kind == "suspend":
             # end_session was blocked/failed — the suspension file is already
             # written and would resurrect this walk after the model
@@ -504,7 +579,16 @@ class Program:
                 self.app,
                 self.spec.name,
             )
-            return None
+            self._record_run("completed")
+            self._done = True
+            return self._synth(
+                "brief",
+                brief.completion_brief(
+                    self.app, self.spec.name, len(nodes), self._ledger
+                ),
+                gesture_vocab.PEEK,
+                {},
+            )
         node = nodes[self._idx]
         if isinstance(node, DecideNode):
             if CALLS[node.call].deterministic:
@@ -536,8 +620,11 @@ class Program:
         if node.enter is not None:
             wrong = self._mismatch(verdict, page_id(self.app, node.enter))
             if wrong is not None:
-                return self._handover(
-                    f"leg {node.id!r} expects page {node.enter!r} ({wrong})"
+                return self._rescue_or_handover(
+                    node,
+                    page_id(self.app, node.enter),
+                    rescue.MODE_ENTER,
+                    f"leg {node.id!r} expects page {node.enter!r} ({wrong})",
                 )
         if node.irreversible == "payment":
             # Money fires only off a VERIFIED own-pack page: the ask was
@@ -576,6 +663,8 @@ class Program:
         if node.irreversible == "payment":
             # Consent is CONSUMED by firing: a later payment leg needs
             # its own gate's fresh confirm, never this one's leftovers.
+            # The amount survives only into the history line.
+            self._paid = self._gate.consented
             self._gate.consented = None
             self._gate.quoted = None
         return self._synth(
@@ -632,8 +721,20 @@ class Program:
         """The declared context slices, assembled least-privilege:
         `inputs.*` from the walk's values; `memory.<slug>` pulls ONLY the
         matching `## <slug>` section of memory.md (see `memory.py` for
-        the fail-closed contract)."""
+        the fail-closed contract). A ledger walk's current item rides as
+        DEFAULT context — authors kept forgetting to template
+        `{item.query}` into `criteria`, the exact starved-subagent
+        failure, so the walk supplies it itself."""
         parts: list[str] = []
+        if self._ledger is not None:
+            it = self._ledger[self._item]  # cursor valid by construction
+            parts.append(f"current buying-list item: {it.query} (want {it.qty})")
+        if self._history_rows is None:
+            self._history_rows = walklog.load()
+        prior = walklog.last_picks(self._history_rows, self.app, self.spec.name)
+        if prior:
+            picked = "; ".join(f"{q} → {label}" for q, label in prior.items())
+            parts.append(f"previously picked (last completed run): {picked}")
         memory_slices: list[str] = []
         for entry in node.context:
             root, _, member = entry.partition(".")
@@ -660,6 +761,8 @@ class Program:
     def _resolve(
         self, outcome: MicroOutcome | None
     ) -> "AssistantMessage | DecisionRequest | None":
+        if self._rescue is not None and self._rescue.micro_pending:
+            return self._resolve_rescue(outcome)
         if self._gate.revise_pending:
             return self._apply_revision(outcome)
         if self._gate.llm_reply is not None:
@@ -806,7 +909,12 @@ class Program:
         assert self._verdict is not None and self._screen is not None
         wrong = self._mismatch(self._verdict, page_id(self.app, node.page))
         if wrong is not None:
-            return self._handover(f"reconcile {node.id!r} expects the cart ({wrong})")
+            return self._rescue_or_handover(
+                node,
+                page_id(self.app, node.page),
+                rescue.MODE_RECONCILE,
+                f"reconcile {node.id!r} expects the cart ({wrong})",
+            )
         if self._ledger is None:
             return self._handover(f"reconcile {node.id!r}: no usable ledger")
         self._rec_actions += 1
@@ -1140,12 +1248,227 @@ class Program:
         self._gate.awaiting = awaiting
         write_json_atomic(suspended_path(), self._suspended_dict(resume_idx))
         recap = f"waiting for the user's reply on {self.app}/{self.spec.name}"
+        self._record_run("suspended", recap)
+        # The close-routine's log line, harness-written (the
+        # `log_external_stop` precedent): the conductor synthesizes
+        # end_session directly, so the model never runs this wake — with
+        # no per-step logs either, the suspension would be invisible to
+        # the next wake's memory window.
+        self._log_day(
+            f"conductor: {self.app}/{self.spec.name} suspended — {recap}; "
+            "any wake resumes it"
+        )
         return self._synth(
             "suspend",
             f"conductor: suspending — {recap}",
             "end_session",
             {"status": SUSPEND_STATUS, "recap": recap},
         )
+
+    # ---- the rescue ladder ----
+
+    def _rescue_or_handover(
+        self, node, expected_id: str, mode: str, reason: str
+    ) -> "AssistantMessage | None":
+        """Try the ladder before the model: a mechanical deviation
+        (popup, lock, wandered deeper) is recoverable in code toward the
+        page the frozen cursor already requires — the cursor, decision
+        outputs, ledger, and consent are untouched throughout (I1).
+        Never with consent bound, mid-gate, or for an irreversible leg
+        (I3): money keeps the hard handover."""
+        if (
+            self._gate.consented is not None
+            or self._gate.awaiting
+            or (isinstance(node, LegNode) and node.irreversible)
+        ):
+            return self._handover(reason)
+        if self._rescue is None:
+            self._rescue = rescue.State(target=expected_id, mode=mode, reason=reason)
+        return self._rescue_step()
+
+    def _rescue_step(self) -> "AssistantMessage | DecisionRequest | None":
+        """One rung: ask the ladder (`rescue.plan`) for the next action
+        and synthesize it — or broker its ONE clear_overlay micro call;
+        Exhausted → handover carrying the ORIGINAL check failure plus
+        what was tried (the brief quotes it)."""
+        st = self._rescue
+        assert st is not None
+        assert self._verdict is not None and self._screen is not None
+        if self._dismiss_labels is None:
+            self._dismiss_labels = rescue.load_dismiss(self.app)
+        step = rescue.plan(
+            self._verdict,
+            self._screen,
+            st.tries,
+            st.actions,
+            self._dismiss_labels,
+            can_reset=self._open_macro is not None and not self._reset_used,
+        )
+        if isinstance(step, rescue.Settle):
+            # Free — verification hygiene, not recovery: no action
+            # budget, no rescue count, just the one re-peek marker.
+            st.tries[rescue.RUNG_SETTLE] = 1
+            return self._synth(
+                f"rescue-{rescue.RUNG_SETTLE}",
+                f"conductor: re-reading a possibly mid-transition screen "
+                f"before rescuing toward {st.target}",
+                gesture_vocab.PEEK,
+                {},
+            )
+        if isinstance(step, rescue.AskDismiss):
+            st.micro_pending = True
+            st.tries[rescue.RUNG_MICRO] = 1  # a call, not a phone action
+            return step.request
+        if isinstance(step, rescue.Exhausted):
+            note = st.note()
+            self._rescue = None
+            return self._handover(
+                f"{st.reason} — {step.reason}"
+                + (f" (rescue tried: {note})" if note else "")
+            )
+        if isinstance(step, rescue.Dismiss):
+            return self._rescue_act(
+                rescue.RUNG_DISMISS,
+                f"conductor: overlay on {st.target} — {step.note}",
+                "tap",
+                {"bbox": list(step.el.bbox)},
+            )
+        if isinstance(step, rescue.Unlock):
+            return self._rescue_act(
+                rescue.RUNG_UNLOCK,
+                "conductor: phone locked mid-walk — unlocking",
+                gesture_vocab.UNLOCK_PHONE,
+                {},
+            )
+        if isinstance(step, rescue.Reset):
+            self._reset_used = True
+            return self._rescue_act(
+                rescue.RUNG_RESET,
+                f"conductor: {self.app} unrecoverable in place — force "
+                "quitting to restart it",
+                gesture_vocab.FORCE_QUIT,
+                {},
+            )
+        assert isinstance(step, rescue.Back)
+        return self._rescue_act(
+            rescue.RUNG_BACK,
+            f"conductor: backing out to reach {st.target}",
+            gesture_vocab.GO_BACK,
+            {},
+        )
+
+    def _rescue_act(
+        self, rung: str, note: str, tool: str, args: dict
+    ) -> AssistantMessage:
+        """One rescue action's shared bookkeeping — the rung counter,
+        both budgets, and the `rescue-<rung>` pending kind, in one home
+        so no arm can forget a counter."""
+        st = self._rescue
+        assert st is not None
+        st.tries[rung] = st.tries.get(rung, 0) + 1
+        st.actions += 1
+        self._rescues_total += 1
+        return self._synth(f"rescue-{rung}", note, tool, args)
+
+    def _retry_leg_after_abort(
+        self, history: list[Message]
+    ) -> "AssistantMessage | DecisionRequest | None":
+        """The I6 one-shot: a leg whose macro aborted BEFORE any gesture
+        ran (the runner's marker) moved nothing — when the abort's own
+        view reads as an overlay on a known page, rescue the page and
+        re-run the leg, once per leg per walk. Everything else keeps the
+        hard handover. None = not this case; the caller hands over.
+
+        The marker is read off the RAW result text, not the settle
+        failure string — that one is clipped (`turns.MAX_ERROR_CHARS`)
+        and the marker sits late in a header that grows with macro name
+        and view notes."""
+        node = self.spec.nodes[self._idx]
+        if not isinstance(node, LegNode) or node.id in self._leg_retries:
+            return None
+        pending = self._turns.pending
+        raw = views.result_for(history, pending.call_id) if pending else None
+        if raw is None or NO_GESTURES_NOTE not in views.text_of(raw):
+            return None
+        screen = views.screen_of(raw)
+        verdict = match_screen(screen, self._prints)
+        if verdict.kind != "occluded" or verdict.page_id is None:
+            return None
+        self._leg_retries.add(node.id)
+        self._turns.pending = None  # the abort is handled, not retried blind
+        self._screen, self._verdict = screen, verdict
+        return self._rescue_or_handover(
+            node,
+            verdict.page_id,
+            rescue.MODE_ENTER,
+            f"leg {node.id!r} aborted before any gesture under an overlay "
+            f"on {verdict.page_id}",
+        )
+
+    def _resolve_rescue(
+        self, outcome: MicroOutcome | None
+    ) -> "AssistantMessage | DecisionRequest | None":
+        """clear_overlay came back. A pick becomes the dismissal tap
+        (its label held for learning until the page actually restores);
+        none_safe or a failed call continues the ladder — the micro try
+        is spent, so `plan` falls through to the back rung."""
+        st = self._rescue
+        assert st is not None
+        st.micro_pending = False
+        if outcome is not None and outcome.picked is not None:
+            st.pending_learn = outcome.picked.key
+            st.tries["dismiss"] = st.tries.get("dismiss", 0) + 1
+            st.actions += 1
+            self._rescues_total += 1
+            return self._synth(
+                "rescue-dismiss",
+                f"conductor: overlay on {st.target} — "
+                f"tapping {outcome.picked.key!r} (micro pick)",
+                "tap",
+                {"bbox": list(outcome.picked.bbox)},
+            )
+        return self._rescue_step()
+
+    def _rescue_landed(self, kind: str) -> "AssistantMessage | DecisionRequest | None":
+        """The rescue action's result view, judged. Restored → resume
+        exactly where the walk stood: an interrupted `enter:` re-checks
+        and runs its leg; an interrupted `verify:` is satisfied by the
+        restored page (the macro already ran — never re-run it, I6); an
+        interrupted reconcile re-reads the cart. Still off → next rung.
+        The reset pair is different: force_quit's landing (the
+        springboard) is never judged — the open macro follows — and the
+        open's landing restarts the walk via `_locate` from the top,
+        byte-for-byte the killed-session resume path (I2)."""
+        st = self._rescue
+        assert st is not None and self._verdict is not None
+        if kind == f"rescue-{rescue.RUNG_RESET}":
+            assert self._open_macro is not None
+            return self._synth(
+                "rescue-open",
+                f"conductor: reopening {self.app} via {self._open_macro}",
+                gesture_vocab.RUN_MACRO,
+                {"name": self._open_macro},
+            )
+        if kind == "rescue-open":
+            self._journal = f"rescue: {self.app} reset ({st.note()})"
+            self._rescue = None
+            self._idx = self._locate(self._verdict)
+            return self._next()
+        if not self._verdict.matches(st.target):
+            st.pending_learn = None  # that pick did not restore — unlearned
+            return self._rescue_step()
+        if st.pending_learn:
+            # The micro tier's pick restored the page — the free tier
+            # handles this popup next time (deny-gated at use anyway).
+            rescue.learn_dismiss(self.app, st.pending_learn)
+            self._dismiss_labels = None  # re-read on the next rescue
+        self._journal = f"rescue: restored {st.target} ({st.note()})"
+        self._rescue = None
+        if st.mode == rescue.MODE_VERIFY:
+            self._idx += 1
+        if st.mode == rescue.MODE_RECONCILE:
+            return self._reconcile_step()
+        return self._next()
 
     # ---- page identity ----
 
@@ -1205,12 +1528,108 @@ class Program:
         return self._turns.synth(kind, summary, tool, args, channel=channel)
 
     def _handover(self, reason: str) -> AssistantMessage | None:
-        """Always None — typed as the advance result so call sites read
-        `return self._handover(...)`."""
+        """The walk's exit: log and record, then mint the ONE final
+        synthesized [note, peek] brief turn (`brief.walk_brief`) — the
+        distilled report the model resumes from, instead of the log-only
+        reason it used to never see. `_done` makes the NEXT advance the
+        permanent None the conductor drops the program on. Call sites
+        keep reading `return self._handover(...)`."""
         log.warning(
             "conductor: handing %s/%s over to the model — %s",
             self.app,
             self.spec.name,
             reason,
         )
-        return None
+        self._record_run("handover", reason)
+        self._done = True
+        nodes = self.spec.nodes
+        return self._synth(
+            "brief",
+            brief.walk_brief(
+                reason,
+                app=self.app,
+                playbook=self.spec.name,
+                node=nodes[self._idx].id if self._idx < len(nodes) else None,
+                idx=self._idx,
+                nodes=len(nodes),
+                outputs=self._outputs,
+                ledger_items=self._ledger,
+                consented=self._gate.consented,
+            ),
+            gesture_vocab.PEEK,
+            {},
+        )
+
+    def abandon(self) -> None:
+        """The killed-session record — `log_external_stop`'s twin for
+        walks. The engine's breadcrumb needs a drafted plan, which a
+        walk never has (its plan is the playbook and its recovery is
+        the locate peek), so the plugin calls this from session
+        teardown instead: one telemetry row, plus the daily-log
+        breadcrumb when the walk actually moved the phone. Latched like
+        every terminal moment — a walk that already closed is a no-op,
+        and so is one that never started."""
+        if not self._started or self._run_recorded:
+            return
+        nodes = self.spec.nodes
+        node = nodes[self._idx].id if self._idx < len(nodes) else "(end)"
+        self._record_run("abandoned", "session ended mid-walk")
+        if self._acted:
+            self._log_day(
+                f"conductor: {self.app}/{self.spec.name} cut short mid-walk "
+                f"at node {node} — the next wake re-locates from the screen"
+            )
+
+    def _purchase_line(self) -> str:
+        """The purchase entry, doctrine format ("merchant, brand, spec,
+        qty, price"): the app is the merchant, the ledger's picked
+        labels are the brands, the consented amount the price."""
+        assert self._paid is not None
+        picked = ", ".join(
+            f"{it.label or it.query} ×{it.qty}"
+            for it in (self._ledger or [])
+            if it.status == "picked"
+        )
+        return (
+            f"conductor: {self.app}: paid ¥{self._paid:g} "
+            f"(playbook {self.app}/{self.spec.name})"
+            + (f" — {picked}" if picked else "")
+        )
+
+    def _log_day(self, entry: str) -> None:
+        """One daily-log line in the agent's own convention
+        (`common.daylog`), stamped, fail-open — the walk's activity must
+        land in the same record the model reads at wake, and a logging
+        failure must never take the walk down."""
+        try:
+            daylog.append_log(daylog.stamped(entry))
+        except OSError:
+            log.warning("conductor daily-log write failed", exc_info=True)
+
+    def _record_run(self, outcome: str, reason: str = "") -> None:
+        """The walk's one runs.jsonl line (`walklog`) — first terminal
+        moment wins, so a suspension whose end_session is later blocked
+        stays recorded as suspended."""
+        if self._run_recorded:
+            return
+        self._run_recorded = True
+        nodes = self.spec.nodes
+        picks = {
+            it.query: it.label
+            for it in (self._ledger or [])
+            if it.status == "picked" and it.label
+        }
+        walklog.record(
+            app=self.app,
+            playbook=self.spec.name,
+            outcome=outcome,
+            idx=self._idx,
+            nodes=len(nodes),
+            node=nodes[self._idx].id if self._idx < len(nodes) else None,
+            reason=reason,
+            micros=self._micros,
+            rescues=self._rescues_total,
+            values=self.values,
+            total=self._paid,
+            picks=picks or None,
+        )

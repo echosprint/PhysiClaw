@@ -10,7 +10,6 @@ tool-call execution lives in `dispatch.py`.
 """
 
 import asyncio
-import datetime as dt
 import enum
 import logging
 import time
@@ -22,6 +21,7 @@ from physiclaw.agent.engine.runspec import EngineRun
 from physiclaw.agent.engine.session import Session
 from physiclaw.agent.runtime.sentinel import FAIL, STUCK
 from physiclaw.agent.trace import Trace
+from physiclaw.common import daylog
 from physiclaw.contract.dto import (
     AssistantMessage,
     FinishReason,
@@ -182,9 +182,10 @@ def log_external_stop(
         step = session.plan.current_step() or "(none in_progress)"
         done, total = session.plan.progress()
         memory.append_log(
-            f"[{dt.datetime.now():%H:%M}] engine: {cause} mid-task "
-            f"({done}/{total} steps done) — in-progress: "
-            f"{step}. Verify app state before resuming."
+            daylog.stamped(
+                f"engine: {cause} mid-task ({done}/{total} steps done) — "
+                f"in-progress: {step}. Verify app state before resuming."
+            )
         )
         if tr is not None and event:
             tr.write({"event": event})

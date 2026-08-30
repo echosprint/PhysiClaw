@@ -8,6 +8,7 @@ from __future__ import annotations
 import pytest
 from conductor_fakes import ELSEWHERE, make_screen, thread_screen
 from conductor_fakes import feed as _feed
+from conductor_fakes import finish as _finish
 from conductor_fakes import history as _history
 
 from physiclaw.common import gesture_vocab
@@ -237,7 +238,8 @@ def test_a_blocked_call_spends_no_retry_budget() -> None:
 
     _feed(h, o.advance(h), "peek failed: Session terminated", error=True)
 
-    assert o.advance(h) is None
+    summary = _finish(o, h, o.advance(h))
+    assert "blocked or failed" in summary
     assert o.done is True and o.program is None
     assert o._opens == 0 and o._unlocks == 0
 
@@ -252,7 +254,8 @@ def test_open_attempts_are_bounded() -> None:
         assert step is not None
         _feed(h, step, ELSEWHERE)  # never lands on the thread
 
-    assert o.advance(h) is None
+    summary = _finish(o, h, o.advance(h))
+    assert "could not reach the user's thread" in summary
     assert o.done is True
 
 
@@ -266,7 +269,8 @@ def test_unlock_attempts_are_bounded() -> None:
         assert step is not None
         _feed(h, step, LOCKED)  # unlock keeps losing the keypad race
 
-    assert o.advance(h) is None
+    summary = _finish(o, h, o.advance(h))
+    assert "still locked" in summary
     assert o.done is True
 
 
@@ -275,7 +279,8 @@ def test_a_missing_result_ends_the_boot() -> None:
     h = _history()
     h.append(o.advance(h))  # the turn, but never its result
 
-    assert o.advance(h) is None
+    summary = _finish(o, h, o.advance(h))
+    assert "never arrived" in summary
     assert o.done is True
 
 
@@ -287,6 +292,70 @@ def test_a_crash_hands_over_instead_of_raising(mocker) -> None:
 
     assert o.advance(h) is None
     assert o.done is True
+
+
+# ---------- scroll-for-history ----------
+
+# The thread scrolled UP one notch: the older request appears above,
+# and the bottom of this reading overlaps the top of the previous one
+# (the nudge bubble) — the seam `_merge_labels` finds.
+OLDER_THREAD = thread_screen(("买两盒鸡蛋", 0.25, 0.3), ("继续", 0.25, 0.5))
+NUDGE_THREAD = thread_screen(("继续", 0.25, 0.4))
+
+
+def _scroll_up_outcome() -> MicroOutcome:
+    from physiclaw.conductor.micro import SCROLL_UP
+
+    return MicroOutcome(out=SCROLL_UP, reason="request above", confidence=0.9)
+
+
+def test_scroll_up_swipes_the_thread_and_reasks_merged() -> None:
+    o = _overture()
+    h = _history()
+    _feed(h, o.advance(h), NUDGE_THREAD)
+    assert isinstance(o.advance(h), DecisionRequest)
+
+    swipe = o.resolve(_scroll_up_outcome())
+    assert swipe is not None and swipe.tool_names() == ["note", "swipe"]
+    assert swipe.tool_calls[1].arguments["direction"] == "down"
+    assert o.done is False  # not spent — the re-ask is coming
+
+    _feed(h, swipe, OLDER_THREAD)
+    req = o.advance(h)
+
+    assert isinstance(req, DecisionRequest)
+    # Seamed at the overlapping rows, oldest first, duplicates intact.
+    assert req.listing == "MyChat\n买两盒鸡蛋\n继续"
+
+
+def test_scroll_budget_spent_resolves_as_no_task() -> None:
+    o = _overture()
+    h = _history()
+    _feed(h, o.advance(h), NUDGE_THREAD)
+    o.advance(h)
+    swipe1 = o.resolve(_scroll_up_outcome())
+    _feed(h, swipe1, NUDGE_THREAD)
+    o.advance(h)
+    swipe2 = o.resolve(_scroll_up_outcome())
+    _feed(h, swipe2, NUDGE_THREAD)
+    o.advance(h)
+
+    step = o.resolve(_scroll_up_outcome())  # third — budget spent
+
+    assert step is None
+    assert o.done is True and o.program is None
+
+
+def test_stand_by_scroll_up_resolves_as_no_task() -> None:
+    o = _overture(open_macro=None)
+    h = _history()
+    h.append(ToolResultMessage(tool_call_id="t1", content=NUDGE_THREAD))
+    assert isinstance(o.advance(h), DecisionRequest)
+
+    step = o.resolve(_scroll_up_outcome())  # no hand to scroll with
+
+    assert step is None
+    assert o.done is True and o.program is None
 
 
 # ---------- stand-by (no `open` macro to drive with) ----------

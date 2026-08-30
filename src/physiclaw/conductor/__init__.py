@@ -16,8 +16,10 @@ Driving:
     program.py     one playbook mid-walk: the state machine alone
     money.py       the payment predicates, pure
     reconcile.py   the cart step planner, pure
+    rescue.py      the recovery-ladder planner, pure
     setup.py       how a Program comes to exist (activation, resume)
     turns.py       minting a synthesized turn
+    brief.py       the handover report a driver's last turn carries
     suspension.py  suspended.json, the one cross-wake file
     micro.py       scoped cheap-tier decision calls
     calls.py       the DECIDE call-type table
@@ -25,6 +27,7 @@ Driving:
 Seeing the screen:
     pages.py       declared and learned page fingerprints
     match.py       the open-set page matcher
+    cards.py       clustering result rows into item cards
     views.py       reading tool results out of the transcript
     capture.py     mining fingerprints from recorded observations
     corpus.py      recorded-session listings for offline matching
@@ -37,6 +40,10 @@ Specs and the user:
     reply.py       deterministic confirm/deny reply reading
     memory.py      fail-closed memory slices for decisions
     scaffold.py    pack templates and playbooks/README.md
+
+Telemetry and tuning:
+    walklog.py     runs.jsonl — per-walk outcomes, the escalation KPI
+    evalset.py     labeled replay cases for `conductor eval`
 """
 
 # No re-exports: consumers import their module directly, so parse-only

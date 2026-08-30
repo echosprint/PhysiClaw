@@ -1,15 +1,16 @@
 """Micro-calls — the conductor's scoped decision calls.
 
-Five call types ride one channel: the playbook-authorable `choose_item`
-and `decide` (vocabulary declared in `calls.py`), plus three
+Six call types ride one channel: the playbook-authorable `choose_item`
+and `decide` (vocabulary declared in `calls.py`), plus four
 conductor-internal calls playbooks can never name — `parse_task`
 (activation: does the user's thread assign a task a playbook covers?),
 `confirm_reply` (the HUMAN_GATE's LLM tier when the word lists can't
-classify a reply), and `revise_list` (a "yes, but change it" reply →
-the updated buying list). `next_item` is deterministic and never
-prompted — no row here. Per-call shape lives in ONE table (`_SPECS`) — role
-sentence, answer space, prompt body, outcome mapping — never as boolean
-proxies scattered through the module.
+classify a reply), `revise_list` (a "yes, but change it" reply → the
+updated buying list), and `clear_overlay` (the rescue ladder's "which
+band control dismisses this popup"). `next_item` is deterministic and
+never prompted — no row here. Per-call shape lives in ONE table
+(`_SPECS`) — role sentence, answer space, prompt body, outcome mapping —
+never as boolean proxies scattered through the module.
 
 One `MicroCaller` serves them all. Each call is a tiny
 fixed-shape prompt (playbooks parameterize, never define prompt shapes),
@@ -44,8 +45,10 @@ and raw reply for replay/debugging. `run()` also returns the stats with
 the answer (`MicroResult`), so tooling reads the result instead of
 impersonating a sink.
 
-Candidates are content-keyed (the row's own label — never A/B/C) and
-shuffled, so position bias cannot masquerade as preference.
+Candidates are content-keyed (the card's own title label — never A/B/C)
+and shuffled, so position bias cannot masquerade as preference; result
+rows are clustered into item cards first (`cards.py`), so a price
+fragment is metadata on its card, never a candidate itself.
 """
 
 import asyncio
@@ -60,6 +63,7 @@ from physiclaw.common.bbox import Bbox
 from physiclaw.common.config import CONFIG
 from physiclaw.common.listing import Screen
 from physiclaw.common.text import json_span
+from physiclaw.conductor import cards
 from physiclaw.conductor.calls import CALLS
 from physiclaw.contract.dto import Message, SystemMessage, Usage, UserMessage
 from physiclaw.contract.plugin import ChatProvider
@@ -78,6 +82,17 @@ PARSE_TASK = "parse_task"
 CONFIRM_REPLY = "confirm_reply"
 REVISE_LIST = "revise_list"
 NOT_A_TASK = "not_a_task"
+# parse_task's second escape: the newest message is a nudge whose
+# request sits ABOVE the visible thread — the overture scrolls up
+# (bounded) and re-asks over the accumulated listing.
+SCROLL_UP = "scroll_up"
+# The rescue ladder's micro tier: which band row dismisses this overlay
+# (deny-list-filtered candidates, `rescue.overlay_request`); the escape
+# when nothing is safely tappable.
+CLEAR_OVERLAY = "clear_overlay"
+NONE_SAFE = "none_safe"
+# The routing arm a clear_overlay pick maps to.
+DISMISS_ARM = "dismiss"
 CONFIRM_OUTS = ("confirm", "deny", "revise", "unclear")
 REVISE_OUTS = ("updated", "unclear")
 
@@ -92,11 +107,14 @@ _ITEM_JSON = '{{"query": "<item>", "qty": <count>}}'
 
 @dataclass(frozen=True)
 class Candidate:
-    """One choosable screen row: content key (its label) + the bbox the
-    conductor taps if it is picked."""
+    """One choosable item CARD (`cards.py`): content key (the title
+    row's label, verbatim — it flows into `{node.field}` refs and cart
+    matching) + the title row's bbox the conductor taps if picked +
+    the card's other labels, prompt-only."""
 
     key: str
     bbox: Bbox
+    meta: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -131,14 +149,26 @@ class MicroOutcome:
 @dataclass(frozen=True)
 class MicroResult:
     """One call's full account: the outcome (None = escalate) plus the
-    stats every consumer needs — the trace event, the replay CLI, and a
-    future eval harness all read the same fields."""
+    stats every consumer needs — the trace event, the replay CLI, and
+    the eval harness all read the same fields. `tier` names who answered
+    ("micro" or, after a cascade retry, "session"); `agreement` is
+    whether both tiers committed the same answer when both did — logged
+    for the eval to study, never acted on."""
 
     outcome: MicroOutcome | None
     detail: str  # the outcome's reason, or why there is none
     attempts: int
     usage: Usage
     elapsed_ms: int
+    tier: str = "micro"
+    agreement: bool | None = None
+
+
+def call_names() -> tuple[str, ...]:
+    """Every call type this channel serves — playbook-namable and
+    conductor-internal alike. The validation set for tooling that names
+    calls as data (the eval harness), so it can never drift from _SPECS."""
+    return tuple(_SPECS)
 
 
 def build_request(
@@ -154,38 +184,82 @@ def build_request(
     walk, activation, and the replay CLI. What a call consumes is read
     off its `_SPECS` row."""
     spec = _SPECS[call]
+    if spec.material == "candidates":
+        candidates = _candidates(call, screen.rows)
+    elif spec.material == "buttons":
+        # Flat per-row candidates — a popup's buttons must stay
+        # individual choices, never card-clustered under a title.
+        candidates = _button_candidates(screen.rows)
+    else:
+        candidates = ()
     return DecisionRequest(
         call=call,
         node_id=node_id,
         outcomes=outcomes,
         args=args,
-        candidates=(
-            _candidates(call, screen.rows) if spec.material == "candidates" else ()
-        ),
+        candidates=candidates,
         listing=screen.content if spec.material == "listing" else "",
         context=context,
     )
 
 
-def _candidates(call: str, rows) -> tuple[Candidate, ...]:
-    """Screen rows → shuffled, content-keyed candidates. Unlabeled rows
-    (icons), duplicate labels beyond the first, and labels colliding with
-    the call's escape answers are dropped — the key set must stay
-    unambiguous."""
-    reserved = CALLS[call].escapes
+def _keyed(raw, reserved: tuple[str, ...], cap: int | None) -> tuple[Candidate, ...]:
+    """The key hygiene every candidate set shares: content-keyed, first
+    occurrence wins, escape-answer collisions dropped, optionally
+    capped, always shuffled (position bias must not masquerade as
+    preference). One home, so the two builders below cannot drift."""
     seen: set[str] = set()
     out: list[Candidate] = []
-    for row in rows:
-        key = row.label.strip()
-        if not key or key in seen or key in reserved:
+    for cand in raw:
+        if not cand.key or cand.key in seen or cand.key in reserved:
             continue
-        seen.add(key)
-        out.append(Candidate(key=key, bbox=tuple(row.bbox)))
-    if len(out) > MAX_CANDIDATES:
-        log.info("micro: %d candidates capped to %d", len(out), MAX_CANDIDATES)
-        out = out[:MAX_CANDIDATES]
+        seen.add(cand.key)
+        out.append(cand)
+    if cap is not None and len(out) > cap:
+        log.info("micro: %d candidates capped to %d", len(out), cap)
+        out = out[:cap]
     random.shuffle(out)
     return tuple(out)
+
+
+def _candidates(call: str, rows) -> tuple[Candidate, ...]:
+    """Screen rows → clustered cards (`cards.group_cards`) → keyed
+    candidates. A card's title label is the key; its other rows ride as
+    prompt-only metadata, so price/sales fragments stop being
+    candidates themselves."""
+    return _keyed(
+        (
+            Candidate(
+                key=card.title.label.strip(),
+                bbox=tuple(card.title.bbox),
+                meta=card.meta,
+            )
+            for card in cards.group_cards(rows)
+        ),
+        CALLS[call].escapes,
+        MAX_CANDIDATES,
+    )
+
+
+def _button_candidates(rows) -> tuple[Candidate, ...]:
+    """One candidate per labeled row, verbatim — the clear_overlay
+    material (popup buttons must stay individual, never card-clustered).
+    Uncapped on purpose: an overlay band holds a handful of rows."""
+    return _keyed(
+        (Candidate(key=row.label.strip(), bbox=tuple(row.bbox)) for row in rows),
+        (NONE_SAFE,),
+        None,
+    )
+
+
+def _candidate_line(c: Candidate) -> str:
+    """One prompt line per card: the quoted NAME (the answer), then the
+    card's other facts in parentheses (context, never part of the name —
+    the answer spec says so, and the allowed-set validation rejects a
+    full-line copy anyway)."""
+    if not c.meta:
+        return f'- "{c.key}"'
+    return f'- "{c.key}" ({", ".join(c.meta)})'
 
 
 class MicroCaller:
@@ -239,25 +313,74 @@ class MicroCaller:
         escalate. Never raises."""
         t0 = time.perf_counter()
         try:
-            outcome, detail, attempts, usage = await self._run(req)
+            outcome, detail, attempts, usage, tier, agreement = await self._run(req)
         except Exception as e:
             log.warning("micro %s (%s): provider failed — %s", req.call, req.node_id, e)
             outcome, detail, attempts, usage = None, "provider error", 0, Usage()
+            tier, agreement = "micro", None
         result = MicroResult(
             outcome=outcome,
             detail=detail,
             attempts=attempts,
             usage=usage,
             elapsed_ms=int((time.perf_counter() - t0) * 1000),
+            tier=tier,
+            agreement=agreement,
         )
         self._trace(req, result)
         return result
 
     async def _run(
         self, req: DecisionRequest
-    ) -> tuple[MicroOutcome | None, str, int, Usage]:
-        provider = self._live_provider()
+    ) -> "tuple[MicroOutcome | None, str, int, Usage, str, bool | None]":
+        """One decision through the tiers: the cheap tier, then — on a
+        floor miss or a double-invalid, when a distinct cheap tier
+        exists — ONE session-model retry before escalating (the
+        FrugalGPT cascade: ~500 tokens against the full session a
+        handover costs). `agreement` compares the two tiers' committed
+        answers when both committed one — recorded for the eval,
+        never acted on."""
         allowed = _SPECS[req.call].answer_space(req)
+        provider = self._live_provider()
+        outcome, detail, attempts, usage, answer, retryable = await self._tier(
+            provider, req, allowed
+        )
+        tier = "micro"
+        agreement: bool | None = None
+        if outcome is None and self._owned is not None and retryable:
+            log.info(
+                "micro %s (%s): cheap tier gave no outcome (%s) — one "
+                "session-model retry",
+                req.call,
+                req.node_id,
+                detail,
+            )
+            s_outcome, s_detail, s_attempts, s_usage, s_answer, _ = await self._tier(
+                self._provider, req, allowed
+            )
+            attempts += s_attempts
+            usage = Usage(
+                prompt_tokens=usage.prompt_tokens + s_usage.prompt_tokens,
+                completion_tokens=usage.completion_tokens + s_usage.completion_tokens,
+            )
+            if answer is not None and s_answer is not None:
+                agreement = answer == s_answer
+            if s_outcome is not None:
+                outcome, detail, tier = s_outcome, s_detail, "session"
+            else:
+                detail = f"{detail}; session retry: {s_detail}"
+        return outcome, detail, attempts, usage, tier, agreement
+
+    async def _tier(
+        self, provider: ChatProvider, req: DecisionRequest, allowed: tuple[str, ...]
+    ) -> "tuple[MicroOutcome | None, str, int, Usage, str | None, bool]":
+        """One tier's full attempt (the original loop): fresh messages,
+        one repair retry, floor judgment. The two trailing elements are
+        the ANSWER the model committed even when the floor refused it
+        (the cascade's agreement signal) and whether the failure is one
+        a stronger tier may fix (`retryable`: a floor miss or a
+        double-invalid — never a provider error) — structured, so the
+        cascade's trigger can never depend on the detail's wording."""
         messages: list[Message] = [
             SystemMessage(content=_system(req, allowed)),
             UserMessage(content=_user(req)),
@@ -291,7 +414,7 @@ class MicroCaller:
                 log.warning(
                     "micro %s (%s): provider failed — %s", req.call, req.node_id, e
                 )
-                return None, "provider error", attempts, usage
+                return None, "provider error", attempts, usage, None, False
             prompt_tokens += asst.usage.prompt_tokens
             completion_tokens += asst.usage.completion_tokens
             if self._rlog is not None:
@@ -331,10 +454,17 @@ class MicroCaller:
                     confidence,
                     self._floor,
                 )
-                return None, f"confidence {confidence:.2f} below floor", attempts, usage
+                return (
+                    None,
+                    f"confidence {confidence:.2f} below floor",
+                    attempts,
+                    usage,
+                    answer,
+                    True,
+                )
             outcome = _SPECS[req.call].to_outcome(req, answer, reason, confidence, obj)
-            return outcome, reason, attempts, usage
-        return None, f"invalid after repair retry: {err}", attempts, usage
+            return outcome, reason, attempts, usage, answer, False
+        return None, f"invalid after repair retry: {err}", attempts, usage, None, True
 
     def _trace(self, req: DecisionRequest, result: MicroResult) -> None:
         if self._tr is None:
@@ -351,6 +481,8 @@ class MicroCaller:
                 "elapsed_ms": result.elapsed_ms,
                 "prompt_tokens": result.usage.prompt_tokens,
                 "completion_tokens": result.usage.completion_tokens,
+                "tier": result.tier,
+                "agreement": result.agreement,
             }
         )
 
@@ -416,9 +548,9 @@ def _outcomes_space(req: DecisionRequest) -> tuple[str, ...]:
 
 
 def _parse_task_space(req: DecisionRequest) -> tuple[str, ...]:
-    # The escape is the ROW's own — a caller (activation, replay CLI)
-    # passes only the playbook refs and can never forget the exit.
-    return req.outcomes + (NOT_A_TASK,)
+    # The escapes are the ROW's own — a caller (activation, replay CLI)
+    # passes only the playbook refs and can never forget the exits.
+    return req.outcomes + (SCROLL_UP, NOT_A_TASK)
 
 
 def _fixed(outcomes: tuple[str, ...]) -> "Callable[[DecisionRequest], tuple[str, ...]]":
@@ -478,7 +610,24 @@ def _parse_task_outcome(
         out=answer,
         reason=reason,
         confidence=confidence,
-        payload=None if answer == NOT_A_TASK else inputs,
+        payload=None if answer in (NOT_A_TASK, SCROLL_UP) else inputs,
+    )
+
+
+def _clear_overlay_space(req: DecisionRequest) -> tuple[str, ...]:
+    # Not `_choose_space`: clear_overlay is not in CALLS (playbooks may
+    # never name it), so its one escape is spelled here.
+    return tuple(c.key for c in req.candidates) + (NONE_SAFE,)
+
+
+def _clear_overlay_outcome(
+    req: DecisionRequest, answer: str, reason: str, confidence: float, obj: dict
+) -> MicroOutcome:
+    if answer == NONE_SAFE:
+        return MicroOutcome(out=NONE_SAFE, reason=reason, confidence=confidence)
+    picked = next(c for c in req.candidates if c.key == answer)
+    return MicroOutcome(
+        out=DISMISS_ARM, reason=reason, confidence=confidence, picked=picked
     )
 
 
@@ -500,12 +649,16 @@ _SPECS: dict[str, _CallSpec] = {
     "choose_item": _CallSpec(
         role=(
             "You pick ONE item from a list read off a phone screen, "
-            "judged ONLY by the given criteria."
+            "judged ONLY by the given criteria. Prefer an item whose "
+            "brand and spec match the criteria exactly; a listing that "
+            "is an ad or a live-stream room when the criteria do not "
+            "ask for one is not a fit."
         ),
         material="candidates",
         answer_space=_choose_space,
         answer_spec=(
-            '"answer" is one candidate copied EXACTLY as listed; or '
+            '"answer" is one candidate NAME copied EXACTLY as quoted — '
+            "the name alone, never the parenthesized details after it; or "
             '"scroll" if a better match may sit further down the list; or '
             '"none_fit" if none matches the criteria.'
         ),
@@ -513,7 +666,7 @@ _SPECS: dict[str, _CallSpec] = {
             f"Criteria: {req.args.get('criteria', '')}",
             _data_block(
                 "Candidates — order carries no meaning",
-                "\n".join(f"- {c.key}" for c in req.candidates),
+                "\n".join(_candidate_line(c) for c in req.candidates),
             ),
         ],
         to_outcome=_choose_outcome,
@@ -558,9 +711,12 @@ _SPECS: dict[str, _CallSpec] = {
         material="listing",
         answer_space=_parse_task_space,
         answer_spec=(
-            '"answer" is one playbook EXACTLY as listed, or "not_a_task" '
+            '"answer" is one playbook EXACTLY as listed; or "not_a_task" '
             "for greetings, chat, questions, or anything no playbook "
-            'covers (when unsure, "not_a_task"). '
+            'covers (when unsure, "not_a_task"); or "scroll_up" when the '
+            "newest message refers to an earlier request that is NOT "
+            "visible in this thread — older messages sit above the fold "
+            "and must be read before deciding. "
             # A wake is usually the user's SECOND prod, not their first:
             # the run they asked for was cut short, so the newest line is
             # a nudge and the request it refers to sits above it. Reading
@@ -599,6 +755,28 @@ _SPECS: dict[str, _CallSpec] = {
             _data_block("The user's message thread", req.listing),
         ],
         to_outcome=_parse_task_outcome,
+    ),
+    CLEAR_OVERLAY: _CallSpec(
+        role=(
+            "You find the one control that DISMISSES a popup overlay on "
+            "a phone screen without accepting, subscribing to, or "
+            "purchasing anything."
+        ),
+        material="buttons",
+        answer_space=_clear_overlay_space,
+        answer_spec=(
+            '"answer" is the one candidate copied EXACTLY as listed that '
+            "closes the popup and nothing more (a close, skip, or later "
+            'control); or "none_safe" when no candidate is clearly a '
+            'pure dismissal (when unsure, "none_safe").'
+        ),
+        user_parts=lambda req: [
+            _data_block(
+                "Overlay controls — order carries no meaning",
+                "\n".join(_candidate_line(c) for c in req.candidates),
+            ),
+        ],
+        to_outcome=_clear_overlay_outcome,
     ),
     REVISE_LIST: _CallSpec(
         role=(

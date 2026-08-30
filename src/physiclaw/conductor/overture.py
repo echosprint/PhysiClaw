@@ -36,12 +36,13 @@ Three rules earn their place, all learned from recorded sessions:
     before the recovery arm gets it.
 
 Everything is bounded and every failure is a hand-over — the overture
-owns no files, writes nothing, and can end no session. It issues four
+owns no files, writes nothing, and can end no session. It issues five
 kinds of action and **never chooses a tap target**: `peek`,
 `home_screen` (inside the macro), the user's own rehearsed
-`channel/open`, and `unlock_phone`, which grounds its own keypad taps in
-`core/orchestration/unlock.py`. The worst case of a misfire is a press
-of the home button on the wrong screen.
+`channel/open`, `unlock_phone` (which grounds its own keypad taps in
+`core/orchestration/unlock.py`), and the fixed-band history swipe the
+`scroll_up` escape mints. The worst case of a misfire is a press of the
+home button on the wrong screen.
 
 Without a live `channel/open` macro there is nothing to drive WITH, so
 the overture stands by instead: it watches the transcript and reads the
@@ -50,15 +51,16 @@ intent the moment the model reaches the thread — exactly what
 """
 
 import logging
+from dataclasses import replace
 
 from physiclaw.common import gesture_vocab
 from physiclaw.common.listing import Screen
-from physiclaw.conductor import views
+from physiclaw.conductor import brief, views
 from physiclaw.conductor.channel import Channel
 from physiclaw.conductor.match import Verdict, match_screen, reads_as_cover
-from physiclaw.conductor.micro import DecisionRequest, MicroOutcome
+from physiclaw.conductor.micro import SCROLL_UP, DecisionRequest, MicroOutcome
 from physiclaw.conductor.pages import LOCKED_ID, THREAD_ID, PagePrint
-from physiclaw.conductor.program import Program
+from physiclaw.conductor.program import SCROLL_BBOX, Program
 from physiclaw.conductor.turns import Turnsmith
 from physiclaw.contract.dto import AssistantMessage, Message
 
@@ -69,9 +71,15 @@ log = logging.getLogger(__name__)
 # retry once or twice; the open macro is deterministic, so a second miss
 # means the world is not what the pack describes.
 # Together these ARE the turn budget: the boot mints one opening peek and
-# then only unlocks and opens, so it can never exceed 1 + 2 + 2 turns.
+# then only unlocks, opens, and scrolls for history, so it can never
+# exceed 1 + 2 + 2 + 2 turns (plus the one [note, peek] quit brief when
+# it gives up).
 UNLOCK_TRIES = 2
 OPEN_TRIES = 2
+# How many times parse_task's `scroll_up` escape may scroll the thread
+# for older messages before the cautious read (no full request in view →
+# no activation) stands.
+HISTORY_SCROLLS = 2
 
 
 class Overture:
@@ -101,6 +109,11 @@ class Overture:
         self._unlocks = 0
         self._opens = 0
         self._screen: Screen | None = None
+        # The scroll-for-history accumulation: how many scroll_up rounds
+        # ran, and the merged thread labels (oldest first) the re-ask
+        # reads — None until the first scroll.
+        self._scrolls = 0
+        self._merged: list[str] | None = None
 
     def advance(
         self, history: list[Message]
@@ -121,9 +134,28 @@ class Overture:
     def resolve(
         self, outcome: MicroOutcome | None
     ) -> "AssistantMessage | DecisionRequest | None":
-        """Finish with the parse_task answer. Either way the overture is
-        spent: a matched playbook becomes `program`, anything else leaves
-        the model the thread it is already standing on."""
+        """Finish with the parse_task answer — or scroll for the rest of
+        it: a `scroll_up` answer in drive mode (bounded) swipes the
+        thread up and re-asks over the accumulated listing. Any other
+        answer spends the overture: a matched playbook becomes
+        `program`, anything else leaves the model the thread it is
+        already standing on."""
+        if outcome is not None and outcome.out == SCROLL_UP:
+            if self.open_macro is not None and self._scrolls < HISTORY_SCROLLS:
+                self._scrolls += 1
+                if self._merged is None and self._screen is not None:
+                    self._merged = _labels(self._screen)
+                return self._turns.synth(
+                    "scroll",
+                    "conductor: the request sits above the fold — scrolling up",
+                    gesture_vocab.SWIPE,
+                    {"bbox": list(SCROLL_BBOX), "direction": "down"},
+                    channel=True,
+                )
+            # Stand-by (no hand to scroll with) or budget spent: the
+            # cautious read — a request we cannot fully see activates
+            # nothing, exactly the `not_a_task` disposition.
+            outcome = None
         self.done = True
         try:
             self.program = self._activation.build(outcome)
@@ -145,6 +177,10 @@ class Overture:
     def _advance(
         self, history: list[Message]
     ) -> "AssistantMessage | DecisionRequest | None":
+        if self.done:
+            # The quit brief was the boot's last word; its peek result is
+            # ordinary history. Quiet from here.
+            return None
         if self.open_macro is None:
             return self._stand_by(history)
         if self._turns.pending is None:
@@ -226,9 +262,16 @@ class Overture:
         )
 
     def _read_intent(self) -> "AssistantMessage | DecisionRequest | None":
-        """On the thread: the one micro-call this whole walk exists for."""
+        """On the thread: the one micro-call this whole walk exists for.
+        After a scroll round the request reads the ACCUMULATED listing —
+        the newly revealed older labels seamed onto the already-seen
+        ones — not just the current viewport."""
         assert self._screen is not None
-        return self._activation.request(self._screen)
+        req = self._activation.request(self._screen)
+        if self._merged is not None:
+            self._merged = _merge_labels(_labels(self._screen), self._merged)
+            req = replace(req, listing="\n".join(self._merged))
+        return req
 
     def _stand_by(
         self, history: list[Message]
@@ -250,10 +293,39 @@ class Overture:
     # ---- synthesis ----
 
     def _quit(self, reason: str) -> "AssistantMessage | None":
-        """Always None — typed as the advance result so call sites read
-        `return self._quit(...)` (`Program._handover`'s idiom). The
-        overture is spent; the model takes the session from wherever the
-        phone now is."""
+        """The boot's exit (`Program._handover`'s idiom): one final
+        synthesized [note, peek] brief turn so the reason reaches the
+        model instead of only the log, then spent — the next advance is
+        None and the conductor drops the overture. The model takes the
+        session from wherever the peek shows the phone to be."""
         self.done = True
         log.warning("conductor: overture handing over to the model — %s", reason)
-        return None
+        return self._turns.synth(
+            "brief",
+            brief.boot_brief(reason),
+            gesture_vocab.PEEK,
+            {},
+        )
+
+
+def _labels(screen: Screen) -> list[str]:
+    return [r.label for r in screen.rows if r.label.strip()]
+
+
+def _merge_labels(newer: list[str], previous: list[str]) -> list[str]:
+    """Seam two thread readings. Two-step because chrome pins: the
+    contact-name header tops BOTH readings, so first strip the common
+    PREFIX (rows the scroll did not move — chrome, or an unmoved top),
+    then seam the scrollable remainders: after a scroll UP the screen
+    shows OLDER content whose bottom overlaps the previous remainder's
+    top — the longest suffix-equals-prefix run is the seam. Overlap
+    matching (not set dedup) on purpose: a thread legitimately repeats
+    labels, and dedup would eat the second of two identical bubbles."""
+    p = 0
+    while p < min(len(newer), len(previous)) and newer[p] == previous[p]:
+        p += 1
+    head, newer_rest, prev_rest = newer[:p], newer[p:], previous[p:]
+    for k in range(min(len(newer_rest), len(prev_rest)), 0, -1):
+        if newer_rest[-k:] == prev_rest[:k]:
+            return head + newer_rest + prev_rest[k:]
+    return head + newer_rest + prev_rest

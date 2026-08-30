@@ -60,6 +60,18 @@ def feed(history: list, turn, text: str = "", *, error: bool = False) -> None:
     )
 
 
+def finish(driver, history: list, step) -> str:
+    """The terminal contract: a handover/completion/quit mints ONE final
+    synthesized [note, peek] brief turn; feed its peek result and the
+    driver is permanently quiet. Returns the brief's note summary so
+    tests can assert on the report itself."""
+    assert step is not None, "expected the terminal brief turn, got quiet"
+    assert step.synthesized and step.tool_names() == ["note", "peek"]
+    feed(history, step, ELSEWHERE)
+    assert driver.advance(history) is None
+    return step.tool_calls[0].arguments["summary"]
+
+
 # One canonical demo pack for the pack-consuming test files (playbook,
 # program): two declared pages, two enabled macros.
 

@@ -12,7 +12,8 @@ macro, a dangling page id, or an unrouted decision.
 
 The grammar, top-down::
 
-    playbook  ::= name description [enabled] [inputs] [mandate] nodes
+    playbook  ::= name description [enabled] [inputs] [mandate]
+                  [parse_context] nodes
     inputs    ::= {id: {description, [default], [example], [kind]}}  # ≤ MAX_INPUTS
     mandate   ::= {max_amount, [expires_minutes]}
     nodes     ::= [node, ...]                                 # 1–MAX_NODES
@@ -139,7 +140,7 @@ _NODE_KEYS = {
 
 PACK_MACROS_DIRNAME = "macros"
 
-_PLAY_KEYS = {"description", "enabled", "inputs", "mandate", "nodes"}
+_PLAY_KEYS = {"description", "enabled", "inputs", "mandate", "nodes", "parse_context"}
 
 
 class PlaybookError(ValueError):
@@ -282,6 +283,9 @@ class Playbook:
     inputs: tuple[PlaybookInput, ...]
     mandate: Mandate | None
     nodes: tuple[Node, ...]
+    # Memory slices the ACTIVATION's parse_task receives (fail-closed,
+    # the decide `context:` contract) — e.g. `memory.shopping_prefs`.
+    parse_context: tuple[str, ...] = ()
 
     # The ledger stack's two anchors, derived HERE so lint (playbook)
     # and runtime (program) can never disagree on what counts as "the"
@@ -473,6 +477,22 @@ def _parse_playbook_data(data, name: str, pack: Pack) -> Playbook:
     if not isinstance(enabled, bool):
         raise PlaybookError("`enabled` must be true or false")
 
+    raw_ctx = data.get("parse_context", [])
+    if not isinstance(raw_ctx, list):
+        raise PlaybookError("`parse_context` must be a list")
+    parse_context = []
+    for c in raw_ctx:
+        # The decide `context:` grammar (CONTEXT_RE), memory root only —
+        # activation runs before any walk, so `inputs.*` cannot exist.
+        if not isinstance(c, str) or not (
+            CONTEXT_RE.match(c) and c.startswith("memory.")
+        ):
+            raise PlaybookError(
+                f"`parse_context` entry {c!r} must look like `memory.<slug>` "
+                "(activation runs before any walk, so only memory slices exist)"
+            )
+        parse_context.append(c)
+
     inputs = _parse_inputs(data.get("inputs", {}))
     # Refs resolve SCALAR inputs only: a `kind: list` value is a JSON
     # ledger, consumed by the next_item loop as {item.*} — splicing it
@@ -493,6 +513,7 @@ def _parse_playbook_data(data, name: str, pack: Pack) -> Playbook:
         inputs=inputs,
         mandate=mandate,
         nodes=tuple(nodes),
+        parse_context=tuple(parse_context),
     )
 
 

@@ -193,6 +193,12 @@ forward-only except a DECIDE's bounded re-ask self-loop
 (choose_item's `scroll`) and next_item's ledger loop; `irreversible:
 payment` nodes sit behind a HUMAN_GATE and require a `mandate:`.
 
+Two optional conventions: a playbook-level `parse_context:`
+(`[memory.<slug>, …]` — memory sections the wake-time task reading
+receives, fail-closed), and a pack macro named `open` that launches
+the app to a home state — the rescue ladder's reset rung re-enters
+through it after a force-quit (absent → that rung is skipped).
+
 Limits: ≤ {max_nodes} nodes, ≤ {max_inputs} inputs per playbook.
 Macro format: see ~/.physiclaw/macros/README.md (identical grammar).
 """.format(max_nodes=MAX_NODES, max_inputs=MAX_INPUTS)
@@ -328,6 +334,13 @@ def init_pack(app: str) -> Path:
     macro_dir.mkdir(parents=True)
     write_text(root / PACK_FILENAME, render_pack_stub(app))
     write_text(macro_dir / MACRO_FILENAME, render_example_macro())
+    # The reset-rung convention (`pages.OPEN_MACRO`): a macro named
+    # `open` that launches THIS app to a home state. Scaffolded disabled
+    # like everything; a pack that never records it just loses the
+    # rescue ladder's force-quit rung, nothing else.
+    open_dir = root / PACK_MACROS_DIRNAME / OPEN_MACRO
+    open_dir.mkdir(parents=True)
+    write_text(open_dir / MACRO_FILENAME, macro_scaffold.render_init(OPEN_MACRO))
     ensure_format_readme()
     return root
 

@@ -35,6 +35,8 @@ import json
 import logging
 from dataclasses import dataclass
 
+from physiclaw.common import daylog
+from physiclaw.common.config import CONFIG
 from physiclaw.common.listing import Screen
 from physiclaw.common.text import read_text
 from physiclaw.conductor import memory, reply, scaffold, suspension
@@ -291,6 +293,10 @@ class Activation:
 
     entries: dict[str, tuple[Playbook, Pack]]
     channel: Channel
+    # parse_task's context: the entries' declared `parse_context:`
+    # memory slices plus the recent completed-walk history — assembled
+    # once at wake by `session_setup` (`_activation_context`).
+    context: str = ""
 
     def request(self, screen: Screen) -> DecisionRequest:
         """The parse_task request for a thread screen. The CALLER
@@ -307,6 +313,7 @@ class Activation:
             tuple(self.entries),
             {"menu": self._menu()},
             screen,
+            self.context,
         )
 
     def _menu(self) -> str:
@@ -402,7 +409,42 @@ def session_setup() -> "tuple[Program | None, Overture | None, dict[str, Macro]]
             )
     overture = Overture(
         channel=channel,
-        activation=Activation(entries=entries, channel=channel),
+        activation=Activation(
+            entries=entries,
+            channel=channel,
+            context=_activation_context(entries),
+        ),
         prints=prints,
     )
     return None, overture, hidden
+
+
+def _activation_context(entries: dict[str, tuple[Playbook, Pack]]) -> str:
+    """parse_task's context, assembled once at wake, from the agent's
+    OWN memory convention (never a conductor-private store): the union
+    of the offered playbooks' `parse_context:` memory slices
+    (fail-closed — no matching `## <slug>` section means no memory, the
+    decide contract) plus the recent daily-log entries — the same
+    window the engine preloads into the model's wake context
+    (`[memory] bootstrap_log_entries`), which is where completed
+    purchases and suspensions are recorded, so "never re-run a finished
+    task" reads off the same record the model would."""
+    parts: list[str] = []
+    slugs = sorted(
+        {
+            entry.partition(".")[2]
+            for spec, _pack in entries.values()
+            for entry in spec.parse_context
+        }
+    )
+    if slugs:
+        sliced = memory.match_sections(memory.read_sections(), slugs)
+        if sliced:
+            parts.append(f"memory (for {', '.join(slugs)}):\n{sliced}")
+    recent = daylog.load_recent_entries(CONFIG.memory.bootstrap_log_entries)
+    if recent:
+        parts.append(
+            "Recent daily-log entries (the assistant's own activity "
+            f"record, newest first):\n{recent}"
+        )
+    return "\n".join(parts)

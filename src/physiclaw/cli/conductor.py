@@ -77,6 +77,48 @@ def extract(
     typer.echo(f"wrote {len(listings)} listings → {out} (edit the '?' labels)")
 
 
+# Bounded replay fan-out shared by `micro` and `eval`.
+_MICRO_FANOUT = 4
+
+
+def _resolve_micro_ref(override: str | None = None) -> str:
+    """The model the micro tier actually runs — the engine wiring's own
+    resolution (`[conductor] micro_model`, else the session model),
+    optionally overridden. One spelling for `micro` and `eval`, so a
+    replay can never silently measure a different model than the
+    runtime wires."""
+    from physiclaw.common.config import CONFIG, model_ref
+
+    if override:
+        return override
+    try:
+        return CONFIG.conductor.micro_model or model_ref()
+    except RuntimeError as e:
+        exit_error(str(e))
+
+
+async def _micro_batch(ref: str, requests: list) -> list:
+    """Run decision requests through one MicroCaller with the shared
+    fan-out — the one replay executor `micro` and `eval` both use."""
+    from physiclaw.common.config import CONFIG, parse_model_ref
+    from physiclaw.conductor.micro import MicroCaller
+    from physiclaw.provider import make_provider
+
+    pid, mid = parse_model_ref(ref)
+    provider = make_provider(pid, mid)
+    caller = MicroCaller(provider, confidence_floor=CONFIG.conductor.micro_confidence)
+    gate = asyncio.Semaphore(_MICRO_FANOUT)
+
+    async def one(req):
+        async with gate:
+            return await caller.run(req)
+
+    try:
+        return await asyncio.gather(*(one(r) for r in requests))
+    finally:
+        await provider.aclose()
+
+
 @conductor_app.command()
 def micro(
     criteria: str = typer.Option("", "--criteria", help="choose_item criteria"),
@@ -93,20 +135,12 @@ def micro(
     """Run one decision micro-call over each input screen — the offline
     replay surface for tuning `[conductor] micro_confidence`. Prints the
     outcome, confidence, and token cost per screen."""
-    from physiclaw.common.config import CONFIG, model_ref, parse_model_ref
     from physiclaw.conductor.calls import CALLS, ESCALATE
-    from physiclaw.conductor.micro import MicroCaller, build_request
-    from physiclaw.provider import make_provider
+    from physiclaw.conductor.micro import build_request
 
     if bool(criteria) == bool(question):
         exit_error("pass exactly one of --criteria (choose_item) / --question (decide)")
-    try:
-        # The canonical resolution (env > [agent] model), with the micro
-        # tier override on top — the same model the engine's wiring picks,
-        # or the tuning replays against the wrong model.
-        ref = CONFIG.conductor.micro_model or model_ref()
-    except RuntimeError as e:
-        exit_error(str(e))
+    ref = _resolve_micro_ref()
     if criteria:
         call, call_outcomes = "choose_item", CALLS["choose_item"].outcomes
         args = {"criteria": criteria}
@@ -123,37 +157,20 @@ def micro(
         build_request(call, "cli", call_outcomes, args, screen) for screen in screens
     ]
 
-    async def _go() -> None:
-        pid, mid = parse_model_ref(ref)
-        provider = make_provider(pid, mid)
-        caller = MicroCaller(
-            provider, confidence_floor=CONFIG.conductor.micro_confidence
+    results = asyncio.run(_micro_batch(ref, requests))
+    for i, res in enumerate(results):
+        cost = (
+            f"{res.usage.prompt_tokens}+{res.usage.completion_tokens}tok "
+            f"{res.elapsed_ms}ms"
         )
-        gate = asyncio.Semaphore(4)  # bounded fan-out: replays are per-screen
-
-        async def one(req):
-            async with gate:
-                return await caller.run(req)
-
-        try:
-            results = await asyncio.gather(*(one(r) for r in requests))
-        finally:
-            await provider.aclose()
-        for i, res in enumerate(results):
-            cost = (
-                f"{res.usage.prompt_tokens}+{res.usage.completion_tokens}tok "
-                f"{res.elapsed_ms}ms"
-            )
-            if res.outcome is None:
-                typer.echo(f"[{i:3d}] escalate  {res.detail}  ({cost})")
-                continue
-            picked = f" pick={res.outcome.picked.key!r}" if res.outcome.picked else ""
-            typer.echo(
-                f"[{i:3d}] {res.outcome.out:10s} conf={res.outcome.confidence:.2f}"
-                f"{picked}  {res.outcome.reason}  ({cost})"
-            )
-
-    asyncio.run(_go())
+        if res.outcome is None:
+            typer.echo(f"[{i:3d}] escalate  {res.detail}  ({cost})")
+            continue
+        picked = f" pick={res.outcome.picked.key!r}" if res.outcome.picked else ""
+        typer.echo(
+            f"[{i:3d}] {res.outcome.out:10s} conf={res.outcome.confidence:.2f}"
+            f"{picked}  {res.outcome.reason}  ({cost})"
+        )
 
 
 @conductor_app.command()
@@ -276,6 +293,55 @@ def _report_line(r) -> str:
         f"thr={r.threshold:.2f} genuine_min={r.genuine_min:.2f} "
         f"impostor_max={imax}{flag}"
     )
+
+
+@conductor_app.command("eval")
+def eval_cmd(
+    cases: Path = typer.Argument(
+        help="eval case file (JSONL — see conductor/evalset.py)"
+    ),
+    model: str = typer.Option(
+        None,
+        "--model",
+        help="provider/model to run against (default: the micro tier, "
+        "else the session model — run twice to compare tiers)",
+    ),
+) -> None:
+    """Replay labeled decision cases and report per-call accuracy, the
+    micro-escalation rate, token cost, and a confidence-reliability
+    table — the Goal-2 KPI surface. Baseline it before prompt changes,
+    re-run after."""
+    from physiclaw.conductor import evalset
+
+    try:
+        suite = evalset.read_cases(cases)
+    except (OSError, ValueError) as e:
+        exit_error(str(e))
+    ref = _resolve_micro_ref(model)
+    requests = [evalset.build(c, f"eval-{i}") for i, c in enumerate(suite)]
+
+    typer.echo(f"model: {ref}   cases: {len(suite)}")
+    results = asyncio.run(_micro_batch(ref, requests))
+    scored = [evalset.score(case, result) for case, result in zip(suite, results)]
+    for i, s in enumerate(scored):
+        mark = "ok " if s.correct else ("esc" if s.answer is None else "✗  ")
+        got = s.answer if s.answer is not None else f"(escalate: {s.detail})"
+        conf = f" conf={s.confidence:.2f}" if s.confidence is not None else ""
+        typer.echo(
+            f"[{i:3d}] {mark} {s.case.call:13s} expect={s.case.expect!r} "
+            f"got={got!r}{conf}"
+        )
+    typer.echo("")
+    for r in evalset.summarize(scored):
+        typer.echo(
+            f"{r.call:13s} n={r.n:3d} acc={r.accuracy:.0%} wrong={r.wrong} "
+            f"escalated={r.escalated} ({r.escalation_rate:.0%})  "
+            f"{r.prompt_tokens}+{r.completion_tokens}tok {r.elapsed_ms}ms"
+        )
+    typer.echo("\nreliability (confidence → correct, answered cases):")
+    for lo, hi, n, correct in evalset.reliability(scored):
+        rate = f"{correct / n:.0%}" if n else "-"
+        typer.echo(f"  [{lo:.1f},{hi:.1f}) n={n:3d} correct={rate}")
 
 
 @conductor_app.command()
