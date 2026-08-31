@@ -54,7 +54,7 @@ class StudioSession:
 
     def __init__(self, mcp_url: str | None = None, app: str | None = None):
         # Accept the URL with or without the /mcp suffix — McpClient
-        # appends it, and the plan's example spells it with.
+        # appends it, and users naturally paste the full endpoint.
         self._base = mcp_url.rstrip("/").removesuffix("/mcp") if mcp_url else None
         self.app = app
         self._client: McpClient | None = None

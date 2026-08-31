@@ -39,8 +39,8 @@ def _fresh(app: str) -> dict:
         "shots": {},
         "controls": {},
         "next_shot": 1,
-        # P3/P4 additions ride the same schema (the alpha rule: additive
-        # fields, older drafts read them via setdefault/.get).
+        # Later-added fields ride the same schema (the alpha rule:
+        # additive fields, older drafts read them via setdefault/.get).
         "macros": {},
         "recording": None,
         "playbooks": {},

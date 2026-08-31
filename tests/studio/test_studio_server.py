@@ -156,7 +156,7 @@ async def test_build_app_routes_and_closes_the_session_on_shutdown() -> None:
     assert session.closed is True
 
 
-# ---------- draft endpoints (P2) ----------
+# ---------- draft endpoints (page curation) ----------
 
 LISTING = '1 [text] "首页" [0.100,0.900,0.200,0.950] 0.95'
 
@@ -261,7 +261,7 @@ async def test_shot_view_404_for_an_unknown_shot() -> None:
     assert resp.status_code == 404
 
 
-# ---------- recording through /api/act (P3) ----------
+# ---------- recording through /api/act ----------
 
 
 def _armed_macro(app: str = "taobao") -> None:
@@ -402,7 +402,7 @@ async def test_macro_save_writes_and_echoes_the_yaml() -> None:
     assert payload["path"].endswith("taobao/macros/search/MACRO.yml")
 
 
-# ---------- route assembly endpoints (P4) ----------
+# ---------- route assembly endpoints ----------
 
 
 @pytest.mark.asyncio
