@@ -1,6 +1,7 @@
 """OpenAI-compatible base — `/chat/completions` wire format.
 
-Vendors that speak this shape (Qwen/DashScope, OpenAI, Moonshot, Google)
+Vendors that speak this shape (Qwen/DashScope, OpenAI, Moonshot,
+DeepSeek, Google)
 inherit from `OpenAICompatibleProvider` and declare `BASE_URL` plus
 any auth quirks. This file owns:
 
@@ -14,9 +15,9 @@ any auth quirks. This file owns:
     identity here)
   - response parsing (`_parse_response` + `_parse_usage` methods).
     `_parse_usage` tolerates the known shape drift among OpenAI-compat
-    endpoints (top-level `cached_tokens` when the nested location is
-    empty); a vendor whose `usage` shape differs beyond that overrides
-    `_parse_usage` on its own class.
+    endpoints (top-level `cached_tokens` / `prompt_cache_hit_tokens`
+    when the nested location is empty); a vendor whose `usage` shape
+    differs beyond that overrides `_parse_usage` on its own class.
 
 Cache-control marker layout — this shape marks two anchors (of the
 template's four), chosen so cached bytes survive turns AND wakes:
@@ -243,16 +244,20 @@ class OpenAICompatibleProvider(BaseProvider):
         """OpenAI-standard `usage` block → normalized `Usage`. Cache
         stats live under `prompt_tokens_details.cached_tokens` and
         `prompt_tokens_details.cache_creation_input_tokens`; when the
-        nested location is empty, `cached_tokens` is also probed at the
-        top of the block — Moonshot K2 sometimes surfaces it there, and
-        the probe is a no-op for vendors that never do (standard OpenAI
-        shapes carry no top-level key). Vendors whose shape differs
-        beyond that override this method on the vendor class."""
+        nested location is empty, two top-of-block spellings are also
+        probed — `cached_tokens` (Moonshot K2 sometimes surfaces it
+        there) and `prompt_cache_hit_tokens` (DeepSeek's documented
+        spelling). Both probes are no-ops for vendors that never emit
+        them (standard OpenAI shapes carry no top-level key). Vendors
+        whose shape differs beyond that override this method on the
+        vendor class."""
         u = (raw or {}).get("usage") or {}
         details = u.get("prompt_tokens_details") or {}
         cached = int(details.get("cached_tokens", 0) or 0)
         if not cached:
-            cached = int(u.get("cached_tokens", 0) or 0)
+            cached = int(
+                u.get("cached_tokens", 0) or u.get("prompt_cache_hit_tokens", 0) or 0
+            )
         return Usage(
             prompt_tokens=int(u.get("prompt_tokens", 0) or 0),
             completion_tokens=int(u.get("completion_tokens", 0) or 0),

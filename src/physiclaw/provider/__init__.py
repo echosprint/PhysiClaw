@@ -30,7 +30,7 @@ Layout:
       - `qwen.py`      — `QwenProvider` (DashScope)   — OpenAI-compat
       - `moonshot.py`  — `MoonshotProvider` (Kimi)    — OpenAI-compat
       - `openai.py`    — `OpenAIProvider` (GPT-5)     — OpenAI-compat
-      - `deepseek.py`  — `DeepSeekProvider` (stub)    — OpenAI-compat
+      - `deepseek.py`  — `DeepSeekProvider` (V4)      — OpenAI-compat
       - `google.py`    — `GoogleProvider` (Gemini)    — OpenAI-compat
                          with shim-quirk overrides
       - `anthropic.py` — `AnthropicProvider` (Claude) — Anthropic-compat

@@ -4,7 +4,7 @@ This file is the slim core: no wire-format, no HTTP request flow. Two
 concrete bases sit on top of `BaseProvider`:
   - `OpenAICompatibleProvider` (in `openai_compat.py`) — vendors
     speaking the OpenAI `/chat/completions` shape (Qwen, OpenAI,
-    Moonshot, Google).
+    Moonshot, DeepSeek, Google).
   - `AnthropicCompatibleProvider` (in `anthropic_compat.py`) —
     vendors speaking Anthropic's `/v1/messages` shape (Anthropic).
 

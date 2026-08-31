@@ -776,12 +776,13 @@ def test_parse_usage_handles_none_when_passed_a_none_raw(
     assert provider._parse_usage(None) == Usage()
 
 
-# ---------- _parse_usage: top-level cached_tokens fallback ----------
+# ---------- _parse_usage: top-of-block cache-hit fallbacks ----------
 #
 # Moonshot K2 sometimes surfaces `cached_tokens` at the top of the
-# `usage` block instead of nested under `prompt_tokens_details`; the
-# base parser probes there only when the nested read came up empty, so
-# the fallback is a no-op for vendors that never do this.
+# `usage` block instead of nested under `prompt_tokens_details`, and
+# DeepSeek's documented spelling is top-level `prompt_cache_hit_tokens`;
+# the base parser probes both only when the nested read came up empty,
+# so the fallbacks are no-ops for vendors that never do this.
 
 
 def test_parse_usage_falls_through_to_top_level_cached_tokens_when_nested_empty(
@@ -836,6 +837,46 @@ def test_parse_usage_handles_string_top_level_cached_tokens(
     out = provider._parse_usage(raw)
 
     assert out.cached_tokens == 42
+
+
+def test_parse_usage_falls_through_to_prompt_cache_hit_tokens(
+    provider: _TestOpenAI,
+) -> None:
+    """DeepSeek's spelling: top-level `prompt_cache_hit_tokens`
+    (`prompt_tokens` = hit + miss). Misses are ordinary-priced input
+    (auto-stored, no write premium), so they must NOT surface as
+    `cache_creation_tokens`."""
+    raw = {
+        "usage": {
+            "prompt_tokens": 1000,
+            "completion_tokens": 50,
+            "prompt_cache_hit_tokens": 800,
+            "prompt_cache_miss_tokens": 200,
+        },
+    }
+
+    out = provider._parse_usage(raw)
+
+    assert out.cached_tokens == 800
+    assert out.cache_creation_tokens == 0
+
+
+def test_parse_usage_nested_wins_over_prompt_cache_hit_tokens(
+    provider: _TestOpenAI,
+) -> None:
+    """DeepSeek live responses carry both spellings; the standard
+    nested location wins and the fallback never fires."""
+    raw = {
+        "usage": {
+            "prompt_tokens": 100,
+            "prompt_tokens_details": {"cached_tokens": 60},
+            "prompt_cache_hit_tokens": 40,
+        },
+    }
+
+    out = provider._parse_usage(raw)
+
+    assert out.cached_tokens == 60
 
 
 @pytest.mark.asyncio

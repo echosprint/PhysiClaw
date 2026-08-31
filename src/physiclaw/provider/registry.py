@@ -29,9 +29,9 @@ _PROVIDER_CLASSES: dict[str, type[BaseProvider]] = {
 
 
 def in_process_provider_ids() -> tuple[str, ...]:
-    """Provider ids handled by the in-process engine. Stubs are
-    included — they fail at instantiation with a clear message rather
-    than silently disappearing from the menu."""
+    """Provider ids handled by the in-process engine. Should a vendor
+    ever regress to a stub, keep it listed — failing at instantiation
+    with a clear message beats silently disappearing from the menu."""
     return tuple(_PROVIDER_CLASSES)
 
 
@@ -66,8 +66,7 @@ def make_provider(provider_id: str, model_id: str) -> Provider:
 
     `model_id` is passed through verbatim — the provider's API rejects
     unknown ids on the first chat. Credentials come from the provider's
-    own `_api_key()` lookup in `__init__`; stubs raise
-    `NotImplementedError` from there with a setup pointer."""
+    own `_api_key()` lookup in `__init__`."""
     cls = _PROVIDER_CLASSES.get(provider_id)
     if cls is None:
         raise ValueError(
