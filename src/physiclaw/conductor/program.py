@@ -234,15 +234,20 @@ class Program:
         self._rescue: rescue.State | None = None
         self._rescues_total = 0
         self._dismiss_labels: "tuple[str, ...] | None" = None  # lazy, per walk
-        # The reset rung's hands and its once-per-WALK latch: the pack's
-        # own `open` macro (enabled), or None — absent means the rung is
-        # skipped, the ladder degrades, never breaks.
-        open_macro = pack_macros.get(qualified_macro(app, OPEN_MACRO))
-        self._open_macro = (
-            qualified_macro(app, OPEN_MACRO)
-            if open_macro is not None and open_macro.enabled
-            else None
-        )
+        # The reset rung's hands and its once-per-WALK latch: the start
+        # page's own `open:` body first (it launches to exactly the page
+        # the route starts at), else the pack's directory `open` macro
+        # (enabled), else None — absent means the rung is skipped, the
+        # ladder degrades, never breaks. The walk's boot init IS this
+        # ladder: the first move's derived enter is the start page, so a
+        # wrong screen at wake climbs back → force_quit → open before
+        # anything else runs.
+        self._open_macro: "str | None" = None
+        for cand in filter(None, (spec.open_macro, OPEN_MACRO)):
+            found = pack_macros.get(qualified_macro(app, cand))
+            if found is not None and found.enabled:
+                self._open_macro = qualified_macro(app, cand)
+                break
         self._reset_used = False
         # The I6 one-shot: legs whose zero-gesture abort already earned
         # their single rescue-and-retry this walk.
@@ -612,20 +617,19 @@ class Program:
             return self._handover(
                 f"node {node.id!r} is a {type(node).__name__} — not executable"
             )
-        if "." in node.verify or (node.enter is not None and "." in node.enter):
+        if "." in node.verify or "." in node.enter:
             return self._handover(
                 f"leg {node.id!r} references a reserved built-in page — "
                 "not supported in this phase"
             )
-        if node.enter is not None:
-            wrong = self._mismatch(verdict, page_id(self.app, node.enter))
-            if wrong is not None:
-                return self._rescue_or_handover(
-                    node,
-                    page_id(self.app, node.enter),
-                    rescue.MODE_ENTER,
-                    f"leg {node.id!r} expects page {node.enter!r} ({wrong})",
-                )
+        wrong = self._mismatch(verdict, page_id(self.app, node.enter))
+        if wrong is not None:
+            return self._rescue_or_handover(
+                node,
+                page_id(self.app, node.enter),
+                rescue.MODE_ENTER,
+                f"leg {node.id!r} expects page {node.enter!r} ({wrong})",
+            )
         if node.irreversible == "payment":
             # Money fires only off a VERIFIED own-pack page: the ask was
             # sent on the IM thread and quotes the consented total, so an
@@ -1051,8 +1055,8 @@ class Program:
 
     def _start_gate(self, node: HumanGateNode) -> "AssistantMessage | None":
         # All prose is the playbook's; code fills the consent slots the
-        # parser required. For a payment gate: read the sheet NOW — the
-        # ask quotes it via {gate.total}, and consent binds to exactly
+        # parser required. For a payment ask: read the sheet NOW — the
+        # ask quotes it via {ask.total}, and consent binds to exactly
         # this number (the ask IS the consent record).
         template, values = node.message, self._values()
         if node.gate == "payment":
@@ -1081,7 +1085,7 @@ class Program:
                 )
             quoted = max(amts)
             self._gate.quoted, self._gate.cap = quoted, cap
-            values = {**values, "gate.total": f"{quoted:g}", "gate.cap": f"{cap:g}"}
+            values = {**values, "ask.total": f"{quoted:g}", "ask.cap": f"{cap:g}"}
             if quoted > cap:
                 # Over-cap (ruled): the SAME plain-consent reply opens
                 # the gate, but the breach must be disclosed — the

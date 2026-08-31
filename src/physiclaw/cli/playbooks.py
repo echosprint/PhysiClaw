@@ -252,7 +252,7 @@ def run(
     a wake or hoping the boot picks it.
 
     Drives the real walk on the real phone: legs run their macros, DECIDE
-    nodes spend real micro-calls, and a HUMAN_GATE really messages you and
+    moves spend real micro-calls, and an `ask` really messages you and
     waits for your reply. Works while the playbook is disabled — rehearse
     first, enable after. Nothing is persisted: a walk that suspends here
     stops instead of leaving a file for the next wake."""
@@ -465,7 +465,7 @@ async def _rehearse(app: str, name: str, values: dict[str, str]) -> str:
 
     spec, pack = conductor_setup.load_spec(app, name, require_live=False)
     values = conductor_setup.resolve_inputs(spec, values)
-    # A `kind: list` value is a JSON ledger — hold it to the same contract
+    # A `type: list` value is a JSON ledger — hold it to the same contract
     # the overture's activation does, so a typo'd list fails here rather
     # than mid-walk at the shopping loop.
     check_ledger_value(spec, values)

@@ -45,7 +45,7 @@ def _one_node_program():
         enabled=True,
         inputs=(),
         mandate=None,
-        nodes=(ConfirmNode(id="c", compose="m", args={}, message="ok done"),),
+        nodes=(ConfirmNode(id="c", message="ok done"),),
     )
     return Program(app="demo", spec=spec, values={}, pack_macros={}, prints=[])
 
@@ -109,7 +109,7 @@ def _decide_program(routes: dict[str, str]):
         ),
     )
     if "done" in routes.values():
-        nodes += (ConfirmNode(id="done", compose="m", args={}, message="ok done"),)
+        nodes += (ConfirmNode(id="done", message="ok done"),)
     spec = Playbook(
         app="demo",
         name="x",

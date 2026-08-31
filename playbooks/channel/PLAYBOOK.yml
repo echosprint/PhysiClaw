@@ -1,6 +1,6 @@
 # The pack spec — one file, the whole pack. The hands (open/send) are
 # recorded beside it in macros/<name>/MACRO.yml.
-name: channel
+app: channel
 description: >-
   The user-channel pack for WeChat — reach YOUR user's thread by in-app
   search (list-order independent) and send messages there. Required by

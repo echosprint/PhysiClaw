@@ -1,96 +1,120 @@
 """PLAYBOOK.yml → a validated `Playbook` — the model, its parser and
 lints, and the ref grammar's two halves (validate + `fill_refs`).
 
-A playbook is one app task as a small node graph: LEG nodes invoke the
-pack's own macros (verified against page fingerprints), DECIDE nodes
-parameterize code-owned decision calls (`calls.py`), CONFIRM suspends on
-the user, HUMAN_GATE holds an irreversible step until the user confirms
-over the user channel. Execution lives in `program.py`; this module's
-contract is the macro parser's: all-or-nothing validation with errors
-that name the offending field, so a walker never meets an unknown
-macro, a dangling page id, or an unrouted decision.
+A playbook is one app task written as a ROUTE: a top-down alternation
+of waypoints (`page:` — where the walk must BE, checked every time) and
+moves (what it DOES). `do` runs a gesture macro, `decide` brokers one
+bounded question to a model call (`calls.py`), `ask` messages the user
+and holds for approval, `tell` messages and pauses, `sync` converges
+the preceding page onto the shopping list in code. Execution lives in
+`program.py`; this module's contract is the macro parser's:
+all-or-nothing validation with errors that name the offending field, so
+a walker never meets an unknown macro, a dangling page, or an unrouted
+decision.
 
-The grammar, top-down::
+The grammar, top-down (YAML keys are the user vocabulary — the model
+classes below keep their historical field names, each commented with
+the key it parses from)::
 
-    playbook  ::= name description [enabled] [inputs] [mandate]
-                  [parse_context] nodes
-    inputs    ::= {id: {description, [default], [example], [kind]}}  # ≤ MAX_INPUTS
-    mandate   ::= {max_amount, [expires_minutes]}
-    nodes     ::= [node, ...]                                 # 1–MAX_NODES
-    node      ::= id "LEG" macro [with] [enter] verify
-                  [compensate] [irreversible]
-                | id "DECIDE" call [with] [context] [outcomes] routes [max_visits]
-                | id "RECONCILE" page
-                | id "CONFIRM" compose [with] message
-                | id "HUMAN_GATE" gate compose [with] message [over_message]
+    playbook  ::= description [enabled] [inputs] [budget] [context] route
+    inputs    ::= {id: {description, [default], [example], [type]}}  # ≤ MAX_INPUTS
+                  # type: text | list ("list" is the buying-list ledger)
+    budget    ::= number | "{inputs.x}"                # scalar = max_amount
+                | {max_amount, [expires_minutes]}
+    context   ::= [memory.<slug>, ...]      # memory the task reading receives
+    route     ::= [entry, ...]              # first entry MUST be a page
+    entry     ::= "page" name [anchors] [forbid] [scrollable] [open]
+                | "do" name [with] [macro] [undo] [irreversible]
+                | "decide" name uses [with] [context] [answers] routes [max_asks]
+                | "ask" name approve message [over_budget_message]
                   [return] [revise]
+                | "tell" name message
+                | "sync" name
     macro     ::= name                    # macros/<name>/ — a directory macro
                 | {[inputs] steps}        # inline — MACRO.yml grammar minus
                                           # name/description/enabled
-                                          # (`compensate:`/`return:` take the same
-                                          #  form; both dispatch with no arguments,
-                                          #  so required inputs are rejected there
-                                          #  — either spelling)
-    routes    ::= {outcome: node-id | "escalate"}             # total over outcomes
+    routes    ::= {answer: move-id | page-name | "escalate"}  # total over answers
+
+Route semantics — how the alternation compiles onto the node graph:
+
+  - The FIRST entry is the start page. It IS the first move's derived
+    enter, so a wrong screen at walk start climbs the init ladder
+    (go_back, then force_quit + the start page's `open:` body — or the
+    pack's directory `open` macro) via the rescue machinery before the
+    first `do` runs. (A decide/ask/tell first move reads the screen as
+    it is — those moves have no precondition, as before the route
+    grammar.) `open:` is legal only on the start page.
+  - A `do`'s precondition (`enter`) is the nearest preceding page; its
+    landing check (`verify`) is the page entry that MUST immediately
+    follow it — the reflector, enforced by shape.
+  - A `page:` entry either DECLARES the page in place (anchors/forbid/
+    scrollable beside it — merged into the pack's page namespace by
+    `pages.collect_page_decls`, so the matcher sees it through every
+    door) or references one declared elsewhere (this pack's `pages:`
+    appendix, or another waypoint).
+  - A route target may name a move, `escalate`, or a page — a page
+    target means "this answer lands there" and resolves to the move
+    after that waypoint (ambiguous if the page recurs on the route:
+    name the move instead).
+  - `sync` acts on the page it follows; `ask`/`tell`/`decide` sit on
+    the current page and fall through (decide: route) to the next entry.
+  - A `do`'s name IS its macro: the directory macro of that name, or
+    the `macro:` body beside it (`macro: <other-name>` overrides when
+    one directory macro serves two moves).
 
 An inline macro is single-use by construction — an anonymous body has
 no name for another site to reference: its name is synthesized
-`<playbook>.<node-id>` (a leg) or `<playbook>.<node-id>.<role>`
-(a compensate/return body) — dot-joined, a spelling no directory macro
-or node id can take, so the pack-wide dispatch namespace stays
-collision-free by construction. It is enabled iff its playbook is, and
-it records stats/runs under that synthesized name like any pack macro.
-The one role that must stay a directory macro is the rescue ladder's
-`open`: it is pack-level — resolved by name with no node to hang a body
-on. Grammar boundary: everything under an inline `macro:` IS a macro
-(single-name `{x}` templates, fed by the node's `with:`), everything
-outside stays dotted — the same split as the file boundary, moved to
-the key.
+`<playbook>.<move>` (a do body) or `<playbook>.<name>.<role>` (an
+undo/return/open body) — dot-joined, a spelling no directory macro or
+move can take, so the pack-wide dispatch namespace stays collision-free
+by construction. It is enabled iff its playbook is, and it records
+stats/runs under that synthesized name like any pack macro. Grammar
+boundary: everything under an inline `macro:` IS a macro (single-name
+`{x}` templates, fed by the move's `with:`), everything outside stays
+dotted — the same split as the file boundary, moved to the key.
 
-The ledger stack (`kind: list` input + `next_item` loop + RECONCILE +
+The ledger stack (`type: list` input + `next_item` loop + `sync` +
 gate `revise:`) is one unit — `_check_ledger` holds its pieces
-together: the ONE list input is the buying list (desired state), the
-`next_item` DECIDE closes the shopping loop over it (its `next` arm is
-the one sanctioned backward edge; body nodes read loop-scoped
-`{item.query}`/`{item.qty}`), RECONCILE diffs the cart (observed state)
-against the ledger in code, and a payment gate's `revise:` routes a
-"yes, but change it" reply back into the loop instead of handing over.
+together: the ONE `type: list` input is the buying list (desired
+state), the `next_item` decide closes the shopping loop over it (its
+`next` arm is the one sanctioned backward edge; body moves read
+loop-scoped `{item.query}`/`{item.qty}`), `sync` diffs the cart
+(observed state) against the ledger in code, and a payment ask's
+`revise:` routes a "yes, but change it" reply back into the loop
+instead of handing over.
 
-Control flow: non-DECIDE nodes fall through to the next node in list
-order (past the last node = done); DECIDE routes every one of its outcomes
-explicitly. A HUMAN_GATE falls through only once the user has confirmed:
-it composes and sends the full-context message over the user channel,
-waits for a reply, and a micro-call judges whether the reply confirms.
-Unconfirmed → wait and check again, GATE_MAX_CHECKS times in all; still
-unconfirmed → the session is done and suspends for the next wake-up, the
-regular-session contract. `escalate` is a reserved target — the
-conductor goes quiet and the model takes over. The only legal cycles
-are a DECIDE self-routing its call's re-ask arm (choose_item's
-`scroll` — the conductor swipes between re-asks, bounded by
-`max_visits`) and the ledger loop's declared backward arm
+Control flow: moves fall through in route order (past the last entry =
+done); a decide routes every one of its answers explicitly. An `ask`
+falls through only once the user has approved: it sends the authored
+message over the user channel, waits for a reply, and a micro-call
+judges whether the reply confirms. Unconfirmed → wait and check again,
+GATE_MAX_CHECKS times in all; still unconfirmed → the session suspends
+for the next wake-up, the regular-session contract. `escalate` is a
+reserved target — the conductor goes quiet and the model takes over.
+The only legal cycles are a decide self-routing its call's re-ask arm
+(choose_item's `scroll` — the conductor swipes between re-asks, bounded
+by `max_asks`) and the ledger loop's declared backward arm
 (`CallDecl.loop_arm`, terminating by item consumption); anything wider
 is the model's job, not a playbook's.
 
-Wiring is by placeholder, and every ref is dotted — the same
-`<root>.<name>` rule as page references: `{inputs.name}` reads a
-declared input, `{node.field}` reads an EARLIER decide node's declared
-payload field, `{item.field}` the ledger loop's current item. A bare
-`{name}` is a load error. Page references
-(`enter:`/`verify:`/`page:`) are always `<root>.<page>` over a closed
-root set: `pages.<name>` points at the pack file's own `pages:`
-section, `ios.<page>`/`channel.<page>` reach the reserved built-ins —
-one required spelling, so every ref names its section. Dotted refs are
-playbook-level — they are resolved to plain strings before any macro
-sees them, so pack macros keep the stock single-name template grammar.
+Wiring is by placeholder, and every ref is dotted: `{inputs.name}`
+reads a declared input, `{move.field}` reads an EARLIER decide's
+declared payload field, `{item.field}` the ledger loop's current item,
+`{ask.total}`/`{ask.cap}` a payment ask's money slots. A bare `{name}`
+is a load error. Waypoints name this pack's pages bare (declaration and
+reference share the route's context); the reserved built-ins stay
+dotted (`ios.<page>`/`channel.<page>`). Dotted refs are playbook-level
+— resolved to plain strings before any macro sees them, so pack macros
+keep the stock single-name template grammar.
 
-Money is a parse-time lint, not doctrine: a node tagged
-`irreversible: payment` must be unreachable except through a HUMAN_GATE,
-and its playbook must carry a `mandate:`.
+Money is a parse-time lint, not doctrine: a move tagged
+`irreversible: payment` must be unreachable except through an `ask`
+that approves payment, and its playbook must carry a `budget:`.
 """
 
 import re
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from physiclaw.common import paths
@@ -98,22 +122,27 @@ from physiclaw.common.paths import PACK_FILENAME
 from physiclaw.conductor import _spec
 from physiclaw.conductor.calls import CALLS, ESCALATE, LEDGER_FIELDS, NEXT_ITEM
 from physiclaw.conductor.pages import (
+    PAGE_DECL_FIELDS,
     RESERVED_APPS,
     PageDecl,
     PagesError,
+    collect_page_decls,
     parse_pages_data,
+    route_decl,
 )
 from physiclaw.macros import store as macro_store
 from physiclaw.macros.model import Macro, MacroError
 from physiclaw.macros.parse import parse_inline_macro
 
+# The cap counts MOVES (compiled nodes) — waypoints ride free, bounded
+# by the pack's own MAX_PAGES.
 MAX_NODES = 20
 MAX_INPUTS = 8
 MAX_VISITS_CAP = 10
 DEFAULT_MAX_VISITS = 3
-# How many reply-check rounds a HUMAN_GATE gets before the session suspends
+# How many reply-check rounds an `ask` gets before the session suspends
 # for the next wake-up, and how many "yes, but change it" revision cycles
-# one gate absorbs before the model takes over. Fixed, not authorable:
+# one ask absorbs before the model takes over. Fixed, not authorable:
 # the patience budget is the conductor's contract with the user, not a
 # per-playbook knob.
 GATE_MAX_CHECKS = 3
@@ -140,30 +169,33 @@ CONTEXT_RE = re.compile(rf"^({'|'.join(CONTEXT_ROOTS)})\.[a-z][a-z0-9_]*$")
 # over). Rejected as node ids so a node can never shadow the sink.
 RESERVED_TARGETS = frozenset({ESCALATE})
 
-# The ref grammar's global roots — rejected as node ids so a decide's
-# `{node.field}` outputs can never shadow `{inputs.*}` or the ledger's
-# `{item.*}`. (`gate` is not global: it exists only inside a payment
-# gate's own messages, where the money slots win.)
+# The ref grammar's global roots — rejected as move names so a decide's
+# `{move.field}` outputs can never shadow `{inputs.*}` or the ledger's
+# `{item.*}`. (`ask` is not global: it exists only inside a payment
+# ask's own messages, where the money slots win.)
 RESERVED_REF_ROOTS = frozenset({"inputs", "item"})
 
-_INPUT_KEYS = {"description", "default", "example", "kind"}
-_INPUT_KINDS = ("scalar", "list")
-_MANDATE_KEYS = {"max_amount", "expires_minutes"}
-_NODE_COMMON = {"id", "type"}
-_NODE_KEYS = {
-    "LEG": _NODE_COMMON
-    | {"macro", "with", "enter", "verify", "compensate", "irreversible"},
-    "DECIDE": _NODE_COMMON
-    | {"call", "with", "context", "outcomes", "routes", "max_visits"},
-    "RECONCILE": _NODE_COMMON | {"page"},
-    "CONFIRM": _NODE_COMMON | {"compose", "with", "message"},
-    "HUMAN_GATE": _NODE_COMMON
-    | {"gate", "compose", "with", "return", "message", "over_message", "revise"},
+_INPUT_KEYS = {"description", "default", "example", "type"}
+_INPUT_KINDS = ("text", "list")
+_BUDGET_KEYS = {"max_amount", "expires_minutes"}
+# Route entry vocabularies. An entry's KIND is its leading key and the
+# value is the entry's name — the map-key-is-the-name doctrine, applied
+# to the route. Page-declaration fields come from `pages.py`'s ONE
+# spelling (PAGE_DECL_FIELDS) — their content is validated there; they
+# appear here only so the unknown-key check names them as legal.
+ENTRY_KINDS = ("page", "do", "decide", "ask", "tell", "sync")
+_ENTRY_KEYS = {
+    "page": {"page", "open", *PAGE_DECL_FIELDS},
+    "do": {"do", "with", "macro", "undo", "irreversible"},
+    "decide": {"decide", "uses", "with", "context", "answers", "routes", "max_asks"},
+    "ask": {"ask", "approve", "message", "over_budget_message", "return", "revise"},
+    "tell": {"tell", "message"},
+    "sync": {"sync"},
 }
 
 PACK_MACROS_DIRNAME = "macros"
 
-_PLAY_KEYS = {"description", "enabled", "inputs", "mandate", "nodes", "parse_context"}
+_PLAY_KEYS = {"description", "enabled", "inputs", "budget", "route", "context"}
 
 
 class PlaybookError(ValueError):
@@ -178,7 +210,7 @@ INPUT_NAME_RE = _spec.INPUT_NAME_RE
 @dataclass(frozen=True)
 class InputRef:
     """A `{inputs.name}` reference resolved at parse time — the consumer
-    (the mandate check, of all places) must never re-derive the brace
+    (the budget check, of all places) must never re-derive the brace
     grammar."""
 
     name: str
@@ -190,11 +222,11 @@ class PlaybookInput:
     description: str
     default: str | None = None  # present → optional
     example: str | None = None
-    # "scalar" (a template string) or "list" — the buying-list ledger:
-    # its VALUE is a JSON array string ([{query, qty}], validated at
-    # arm/activation), consumed by the next_item loop as {item.*} refs,
-    # never referenced as an {inputs.name} template.
-    kind: str = "scalar"
+    # `type:` — "text" (a template string) or "list", the buying-list
+    # ledger: its VALUE is a JSON array string ([{query, qty}],
+    # validated at arm/activation), consumed by the next_item loop as
+    # {item.*} refs, never referenced as an {inputs.name} template.
+    kind: str = "text"
 
     @property
     def required(self) -> bool:
@@ -203,8 +235,9 @@ class PlaybookInput:
 
 @dataclass(frozen=True)
 class Mandate:
-    """The user-authorized spend bound, enforced by the conductor in code
-    at checkout-class nodes — never trusted to any model call."""
+    """`budget:` — the user-authorized spend bound, enforced by the
+    conductor in code at checkout-class moves — never trusted to any
+    model call."""
 
     max_amount: float | InputRef
     expires_minutes: int | None
@@ -212,45 +245,52 @@ class Mandate:
 
 @dataclass(frozen=True)
 class LegNode:
+    """A `do` entry: run one gesture macro, land on the next waypoint."""
+
     id: str
-    macro: str
-    args: dict[str, Any]
-    enter: str | None  # page id that must match before the leg
-    verify: str  # page id the leg must land on — the reflector, mandatory
-    compensate: str | None  # pack macro that undoes this node
+    macro: str  # the do-name itself, a `macro:` override, or a synthesized inline name
+    args: dict[str, Any]  # `with:`
+    enter: str  # derived: the nearest preceding waypoint (always exists — routes start at one)
+    verify: str  # derived: the waypoint that follows — the reflector, mandatory
+    compensate: str | None  # `undo:` — the macro that reverses this move
     irreversible: str | None  # one of IRREVERSIBLE_CLASSES
 
 
 @dataclass(frozen=True)
 class DecideNode:
+    """A `decide` entry: one bounded question about the current screen."""
+
     id: str
-    call: str
-    args: dict[str, Any]
+    call: str  # `uses:` — the registered decision call
+    args: dict[str, Any]  # `with:`
     context: tuple[str, ...]
-    outcomes: tuple[str, ...]  # resolved: fixed for choose_item, authored for decide
-    routes: dict[str, str]  # out → node id | reserved target
-    max_visits: int
+    outcomes: tuple[str, ...]  # `answers:` — fixed for choose_item, authored for decide
+    routes: dict[
+        str, str
+    ]  # answer → move id | reserved target (page targets resolved at parse)
+    max_visits: int  # `max_asks:`
 
 
 @dataclass(frozen=True)
 class ReconcileNode:
-    """Desired-state convergence, zero LLM: on the cart page, diff the
-    cart rows (observed) against the ledger (desired) in code and act —
-    quantity via the row's +/− steppers, removal is minus-to-zero, a
-    missing picked item re-enters the shopping loop. Cart rows matching
-    no ledger item are LEFT ALONE: they may be the user's own, and the
-    conductor never destroys what it cannot attribute to itself."""
+    """A `sync` entry — desired-state convergence, zero LLM: on the cart
+    page it follows, diff the cart rows (observed) against the ledger
+    (desired) in code and act — quantity via the row's +/− steppers,
+    removal is minus-to-zero, a missing picked item re-enters the
+    shopping loop. Cart rows matching no ledger item are LEFT ALONE:
+    they may be the user's own, and the conductor never destroys what it
+    cannot attribute to itself."""
 
     id: str
-    page: str  # this pack's cart page — re-read after every action
+    page: str  # derived: the waypoint this sync follows — re-read after every action
 
 
 @dataclass(frozen=True)
 class ConfirmNode:
+    """A `tell` entry: message the user, then pause until any reply."""
+
     id: str
-    compose: str
-    args: dict[str, Any]
-    # The authored ask ({inputs.name}/{node.field} refs, parse-validated,
+    # The authored text ({inputs.name}/{move.field} refs, parse-validated,
     # runtime-filled), sent VERBATIM and REQUIRED: only the playbook
     # author knows the user's language, so the conductor composes no
     # prose — ever.
@@ -259,34 +299,32 @@ class ConfirmNode:
 
 @dataclass(frozen=True)
 class HumanGateNode:
-    """Ask-and-hold: compose the full-context message, send it over the
+    """An `ask` entry — ask-and-hold: send the authored message over the
     user channel, and fall through only on a micro-call-confirmed reply.
     GATE_MAX_CHECKS unconfirmed rounds suspend the session (regular wake-up
-    contract) — so the node after a gate runs human-approved or not at all."""
+    contract) — so the move after an ask runs human-approved or not at all."""
 
     id: str
-    gate: str  # what is being authorized, e.g. "payment"
-    compose: str
-    args: dict[str, Any]
+    gate: str  # `approve:` — what a yes authorizes, e.g. "payment"
     # The authored ask, REQUIRED and sent verbatim like
     # ConfirmNode.message. The consent contract is enforced as lints on
-    # the template, not as appended code prose: a payment gate's
-    # `message` must reference {gate.total} (the ask IS the consent
-    # record), and `over_message` — the ask sent instead when the sheet
-    # total exceeds the mandate cap — must reference {gate.total} AND
-    # {gate.cap} (the breach must be disclosed). Both slots are
+    # the template, not as appended code prose: a payment ask's
+    # `message` must reference {ask.total} (the ask IS the consent
+    # record), and `over_budget_message` — sent instead when the sheet
+    # total exceeds the budget cap — must reference {ask.total} AND
+    # {ask.cap} (the breach must be disclosed). Both slots are
     # runtime-filled from the payment sheet.
     message: str
-    over_message: str | None
-    # Pack macro run after a confirmed reply to get BACK into the app
-    # (the gate's ask left it for the IM thread); the next node's
-    # `enter:` judges the landing. None = the walk tries the next node
+    over_message: str | None  # `over_budget_message:`
+    # `return:` — macro run after a confirmed reply to get BACK into the
+    # app (the ask left it for the IM thread); the next move's derived
+    # enter judges the landing. None = the walk tries the next move
     # directly and hands over if its enter check fails.
     return_macro: str | None
     # Ledger playbooks only: a "yes, but change it" reply routes HERE
-    # (linted: the next_item node) after revise_list updates the ledger
-    # — shop the additions, reconcile the changes, and re-ask with the
-    # fresh total. None = a revise hands over (non-list behavior).
+    # (linted: the next_item move) after revise_list updates the ledger
+    # — shop the additions, sync the changes, and re-ask with the fresh
+    # total. None = a revise hands over (non-list behavior).
     revise: str | None
 
 
@@ -304,13 +342,23 @@ class Playbook:
     description: str
     enabled: bool
     inputs: tuple[PlaybookInput, ...]
-    mandate: Mandate | None
-    nodes: tuple[Node, ...]
-    # Memory slices the ACTIVATION's parse_task receives (fail-closed,
-    # the decide `context:` contract) — e.g. `memory.shopping_prefs`.
-    parse_context: tuple[str, ...] = ()
-    # The embedded macros — LEG bodies (`<playbook>.<node>`) and
-    # compensate/return bodies (`<playbook>.<node>.<role>`). The node
+    mandate: Mandate | None  # `budget:`
+    nodes: tuple[Node, ...]  # the route's MOVES, compiled (waypoints derived away)
+    # The route's first waypoint — where the walk must be at start (it
+    # is also the first move's derived enter, which is what the runtime
+    # actually checks; a mismatch runs the init ladder — back, then
+    # force_quit + open — before the first `do`).
+    start: str = ""
+    # The start waypoint's `open:` body under its synthesized name
+    # (`<playbook>.<start>.open`), or None — the walk's cold-launch,
+    # preferred over the pack's directory `open` macro by the rescue
+    # reset rung and the boot init alike.
+    open_macro: str | None = None
+    # `context:` — memory slices the ACTIVATION's parse_task receives
+    # (fail-closed, the decide contract) — e.g. `memory.shopping_prefs`.
+    context: tuple[str, ...] = ()
+    # The embedded macros — do bodies (`<playbook>.<move>`) and
+    # undo/return/open bodies (`<playbook>.<name>.<role>`). The node
     # field holds the same synthesized name, so dispatch is name-keyed
     # either way. `qualified_inline` is the registry door.
     inline_macros: dict[str, Macro] = field(default_factory=dict)
@@ -404,9 +452,11 @@ def load_pack(app: str) -> Pack:
         raise PlaybookError(f"no pack {app!r} on disk (missing {PACK_FILENAME})")
     _check_pack_meta(doc, app)
     try:
-        pages = parse_pages_data(doc.get("pages"), app)
+        # Appendix + route-declared waypoints, one namespace — the
+        # matcher and every playbook validate against the same set.
+        pages = parse_pages_data(collect_page_decls(doc), app)
     except PagesError as e:
-        raise PlaybookError(f"{app}/{PACK_FILENAME} `pages`: {e}") from e
+        raise PlaybookError(f"{app}/{PACK_FILENAME} pages: {e}") from e
     raw_playbooks = doc.get("playbooks") or {}
     if not isinstance(raw_playbooks, dict):
         raise PlaybookError("`playbooks` must be a mapping of name → playbook")
@@ -431,13 +481,14 @@ def load_pack(app: str) -> Pack:
 
 
 def _check_pack_meta(doc: dict, app: str) -> None:
-    """The manifest half of the pack file: `name` equals the directory,
-    `description` is real prose, `placeholders` (install-time constants,
-    validated here so `check` catches a malformed map before install
-    prompts read it) is name → {description, [example]}."""
-    declared = _require_str(doc.get("name"), "`name`")
+    """The manifest half of the pack file: `app` (which app this pack
+    automates) equals the directory, `description` is real prose,
+    `placeholders` (install-time constants, validated here so `check`
+    catches a malformed map before install prompts read it) is
+    name → {description, [example]}."""
+    declared = _require_str(doc.get("app"), "`app`")
     if declared != app:
-        raise PlaybookError(f"name {declared!r} must equal the pack directory {app!r}")
+        raise PlaybookError(f"app {declared!r} must equal the pack directory {app!r}")
     if app == "pages":
         raise PlaybookError(
             "a pack cannot be named 'pages' — it is the page-reference root"
@@ -512,10 +563,10 @@ def _parse_playbook_data(data, name: str, pack: Pack) -> Playbook:
     if not isinstance(enabled, bool):
         raise PlaybookError("`enabled` must be true or false")
 
-    raw_ctx = data.get("parse_context", [])
+    raw_ctx = data.get("context", [])
     if not isinstance(raw_ctx, list):
-        raise PlaybookError("`parse_context` must be a list")
-    parse_context = []
+        raise PlaybookError("`context` must be a list")
+    context = []
     for c in raw_ctx:
         # The decide `context:` grammar (CONTEXT_RE), memory root only —
         # activation runs before any walk, so `inputs.*` cannot exist.
@@ -523,22 +574,22 @@ def _parse_playbook_data(data, name: str, pack: Pack) -> Playbook:
             CONTEXT_RE.match(c) and c.startswith("memory.")
         ):
             raise PlaybookError(
-                f"`parse_context` entry {c!r} must look like `memory.<slug>` "
+                f"`context` entry {c!r} must look like `memory.<slug>` "
                 "(activation runs before any walk, so only memory slices exist)"
             )
-        parse_context.append(c)
+        context.append(c)
 
     inputs = _parse_inputs(data.get("inputs", {}))
-    # Refs resolve SCALAR inputs only: a `kind: list` value is a JSON
+    # Refs resolve TEXT inputs only: a `type: list` value is a JSON
     # ledger, consumed by the next_item loop as {item.*} — splicing it
     # into a template would paste raw JSON into a gesture argument.
-    ref_names = {i.name for i in inputs if i.kind == "scalar"}
+    ref_names = {i.name for i in inputs if i.kind == "text"}
     has_ledger = any(i.kind == "list" for i in inputs)
-    mandate = _parse_mandate(data["mandate"], ref_names) if "mandate" in data else None
+    mandate = _parse_budget(data["budget"], ref_names) if "budget" in data else None
     inline: dict[str, Macro] = {}
     resolve = _macro_resolver(name, pack, inline)
-    nodes = _parse_nodes(
-        data.get("nodes"), ref_names, pack, resolve, has_ledger=has_ledger
+    nodes, start, open_macro = _parse_route(
+        data.get("route"), ref_names, pack, resolve, has_ledger=has_ledger
     )
     ids = {n.id: i for i, n in enumerate(nodes)}
     _check_graph(nodes, ids)
@@ -552,7 +603,9 @@ def _parse_playbook_data(data, name: str, pack: Pack) -> Playbook:
         inputs=inputs,
         mandate=mandate,
         nodes=tuple(nodes),
-        parse_context=tuple(parse_context),
+        start=start,
+        open_macro=open_macro,
+        context=tuple(context),
         inline_macros=inline,
     )
 
@@ -574,10 +627,10 @@ def _parse_inputs(raw: Any) -> tuple[PlaybookInput, ...]:
         unknown = sorted(set(spec.keys()) - _INPUT_KEYS)
         if unknown:
             raise PlaybookError(f"input {name!r}: unknown key(s): {', '.join(unknown)}")
-        kind = spec.get("kind", "scalar")
+        kind = spec.get("type", "text")
         if kind not in _INPUT_KINDS:
             raise PlaybookError(
-                f"input {name!r}: `kind` must be one of {', '.join(_INPUT_KINDS)} "
+                f"input {name!r}: `type` must be one of {', '.join(_INPUT_KINDS)} "
                 f"(got {kind!r})"
             )
         out.append(
@@ -594,33 +647,21 @@ def _parse_inputs(raw: Any) -> tuple[PlaybookInput, ...]:
     return tuple(out)
 
 
-def _parse_mandate(raw: Any, input_names: set[str]) -> Mandate:
-    where = "`mandate`"
+def _parse_budget(raw: Any, input_names: set[str]) -> Mandate:
+    """`budget:` — a bare number or `{inputs.x}` ref IS the max amount
+    (the common case reads as one line); the mapping form adds
+    `expires_minutes`."""
+    where = "`budget`"
     if not isinstance(raw, dict):
-        raise PlaybookError(f"{where} must be a mapping")
-    unknown = sorted(set(raw.keys()) - _MANDATE_KEYS)
+        return Mandate(
+            max_amount=_budget_amount(raw, where, input_names), expires_minutes=None
+        )
+    unknown = sorted(set(raw.keys()) - _BUDGET_KEYS)
     if unknown:
         raise PlaybookError(f"{where}: unknown key(s): {', '.join(map(str, unknown))}")
     if "max_amount" not in raw:
         raise PlaybookError(f"{where} needs `max_amount`")
-    amount = raw["max_amount"]
-    max_amount: float | InputRef
-    if isinstance(amount, (int, float)) and not isinstance(amount, bool):
-        if amount <= 0:
-            raise PlaybookError(f"{where}.max_amount must be positive (got {amount})")
-        max_amount = float(amount)
-    elif isinstance(amount, str) and (m := _SOLE_REF.match(amount.strip())):
-        name = m.group(1)
-        if name not in input_names:
-            raise PlaybookError(
-                f"{where}.max_amount: placeholder {{inputs.{name}}} not "
-                "declared under `inputs`"
-            )
-        max_amount = InputRef(name=name)
-    else:
-        raise PlaybookError(
-            f"{where}.max_amount must be a number or exactly one `{{inputs.name}}` ref"
-        )
+    max_amount = _budget_amount(raw["max_amount"], f"{where}.max_amount", input_names)
     expires = raw.get("expires_minutes")
     if expires is not None and (
         isinstance(expires, bool) or not isinstance(expires, int) or expires <= 0
@@ -629,146 +670,352 @@ def _parse_mandate(raw: Any, input_names: set[str]) -> Mandate:
     return Mandate(max_amount=max_amount, expires_minutes=expires)
 
 
-# ---------- nodes ----------
+def _budget_amount(
+    amount: Any, where: str, input_names: set[str]
+) -> "float | InputRef":
+    if isinstance(amount, (int, float)) and not isinstance(amount, bool):
+        if amount <= 0:
+            raise PlaybookError(f"{where} must be positive (got {amount})")
+        return float(amount)
+    if isinstance(amount, str) and (m := _SOLE_REF.match(amount.strip())):
+        name = m.group(1)
+        if name not in input_names:
+            raise PlaybookError(
+                f"{where}: placeholder {{inputs.{name}}} not declared under `inputs`"
+            )
+        return InputRef(name=name)
+    raise PlaybookError(
+        f"{where} must be a number or exactly one `{{inputs.name}}` ref"
+    )
 
 
-def _parse_nodes(
+# ---------- the route ----------
+
+
+def _parse_route(
     raw: Any,
     input_names: set[str],
     pack: Pack,
     resolve: "_MacroResolve",
     *,
     has_ledger: bool,
-) -> list[Node]:
+) -> "tuple[list[Node], str, str | None]":
+    """`route:` → (compiled moves, start page, open-macro name).
+
+    Waypoints do not become nodes — they become the adjacent moves'
+    checks: a `do`'s enter is the nearest preceding page, its verify
+    the page that must immediately follow it (the reflector, enforced
+    by shape), a `sync`'s page is the one it follows. The first entry
+    is the start page; its optional `open:` is the walk's cold-launch.
+    A decide route target naming a page resolves to the move after that
+    waypoint, so `pick: detail` reads as the landing it is."""
     if not isinstance(raw, list) or not raw:
-        raise PlaybookError("`nodes` must be a non-empty list")
-    if len(raw) > MAX_NODES:
-        raise PlaybookError(f"too many nodes ({len(raw)} > {MAX_NODES})")
-    seen: dict[str, int] = {}
-    # Grows as the single pass advances, so `{node.field}` refs are
-    # defined-before-use by construction (list order). With a ledger,
-    # the loop-scoped `{item.*}` refs are available everywhere as a
-    # pseudo-payload (the loop closer sits AFTER the body in list
-    # order, so per-body scoping cannot ride the single pass); no node
-    # can shadow it — `item` is a reserved ref root.
-    payload_so_far: dict[str, tuple[str, ...]] = (
-        {"item": LEDGER_FIELDS} if has_ledger else {}
-    )
-    out: list[Node] = []
-    for i, node in enumerate(raw, start=1):
-        parsed = _parse_node(i, node, input_names, pack, seen, payload_so_far, resolve)
-        if isinstance(parsed, DecideNode):
-            decl = CALLS[parsed.call]
-            payload_so_far[parsed.id] = decl.payload
-        out.append(parsed)
-    return out
-
-
-def _parse_node(
-    i: int,
-    node: Any,
-    input_names: set[str],
-    pack: Pack,
-    seen: dict[str, int],
-    payloads: dict[str, tuple[str, ...]],
-    resolve: "_MacroResolve",
-) -> Node:
-    where = f"node {i}"
-    if not isinstance(node, dict):
-        raise PlaybookError(f"{where} must be a mapping")
-    ntype = node.get("type")
-    if ntype not in _NODE_KEYS:
+        raise PlaybookError("`route` must be a non-empty list")
+    entries = [_classify_entry(i, e) for i, e in enumerate(raw, start=1)]
+    if entries[0][0] != "page":
         raise PlaybookError(
-            f"{where}: `type` must be one of {', '.join(sorted(_NODE_KEYS))} "
-            f"(got {ntype!r})"
+            "the route must START at a page — the walk's start contract: not "
+            "there at wake, the conductor runs the init ladder (go_back, then "
+            "force_quit + `open`) before its first `do` runs"
         )
-    unknown = sorted(set(node.keys()) - _NODE_KEYS[ntype])
+    if all(kind == "page" for kind, _, _ in entries):
+        raise PlaybookError(
+            "the route needs at least one move (do/decide/ask/tell/sync)"
+        )
+
+    # Waypoint prepass: every page id resolved and its in-place
+    # declaration validated up front (`_waypoint_id` — one grammar at
+    # every door), so a `do` can read the page that follows it in one
+    # forward look. `pages.route_decl` is the one declaration predicate,
+    # shared with `collect_page_decls` so the two doors cannot disagree.
+    declared_here = {
+        name
+        for kind, name, entry in entries
+        if kind == "page" and route_decl(entry) is not None
+    }
+    wp_ids: list[str | None] = []
+    page_pos: dict[str, list[int]] = {}
+    for i, (kind, name, entry) in enumerate(entries):
+        if kind != "page":
+            wp_ids.append(None)
+            continue
+        pid = _waypoint_id(i + 1, name, entry, pack, declared_here)
+        wp_ids.append(pid)
+        page_pos.setdefault(pid, []).append(i)
+    start = wp_ids[0]
+    assert start is not None  # the first entry is a page, checked above
+
+    moves: list[Node] = []
+    seen: dict[str, int] = {}
+    # Grows as the single pass advances, so `{move.field}` refs are
+    # defined-before-use by construction (route order). With a ledger,
+    # the loop-scoped `{item.*}` refs are available everywhere as a
+    # pseudo-payload; no move can shadow it — `item` is a reserved root.
+    payloads: dict[str, tuple[str, ...]] = {"item": LEDGER_FIELDS} if has_ledger else {}
+    current_page: str | None = None
+    # `open:` is the undo/return idiom on the start waypoint — same
+    # resolution, same argument-less lint, one home.
+    open_macro = _optional_pack_macro(
+        entries[0][2], "open", f"start page {start!r}", start, resolve
+    )
+    for i, (kind, name, entry) in enumerate(entries):
+        pos = i + 1
+        if kind == "page":
+            current_page = wp_ids[i]
+            if i > 0 and "open" in entry:
+                raise PlaybookError(
+                    f"route entry {pos}: `open` belongs to the START page "
+                    "only — it is the walk's cold-launch, and the init "
+                    "ladder runs it toward exactly one place"
+                )
+            continue
+        where = f"route entry {pos}"
+        check_name(name, f"{where}: `{kind}`")
+        if name in RESERVED_TARGETS:
+            raise PlaybookError(
+                f"{where}: name {name!r} is a reserved routing target — a "
+                "move must not shadow the escalation sink"
+            )
+        if name in RESERVED_REF_ROOTS:
+            raise PlaybookError(
+                f"{where}: name {name!r} is a reserved ref root — "
+                "{inputs.*} and {item.*} always read the declared inputs "
+                "and the ledger item"
+            )
+        if name in page_pos:
+            raise PlaybookError(
+                f"{where}: {name!r} is also a page on this route — moves "
+                "and pages share the routing namespace, so the names must "
+                "not collide"
+            )
+        if name in seen:
+            raise PlaybookError(
+                f"{where}: duplicate move name {name!r} (entry {seen[name]} "
+                "already uses it) — routing addresses moves by name, so "
+                "they must be unique"
+            )
+        seen[name] = pos
+        where = f"move {name!r}"
+        args = entry.get("with", {})
+        if not isinstance(args, dict):
+            raise PlaybookError(f"{where}: `with` must be a mapping of arguments")
+        _check_arg_refs(args, input_names, payloads, where)
+        if kind == "do":
+            nxt = wp_ids[i + 1] if i + 1 < len(entries) else None
+            if nxt is None:
+                raise PlaybookError(
+                    f"{where}: a `do` must be followed by the page it lands "
+                    "on — the landing check is what proves the move ran"
+                )
+            assert current_page is not None  # the route starts at a page
+            moves.append(
+                _parse_do(where, name, entry, args, current_page, nxt, resolve)
+            )
+        elif kind == "decide":
+            node = _parse_decide(where, name, entry, args, input_names)
+            payloads[node.id] = CALLS[node.call].payload
+            moves.append(node)
+        elif kind == "ask":
+            moves.append(_parse_ask(where, name, entry, input_names, payloads, resolve))
+        elif kind == "tell":
+            message, _ = _entry_message(where, entry, input_names, payloads)
+            moves.append(ConfirmNode(id=name, message=message))
+        else:  # sync
+            assert current_page is not None  # the route starts at a page
+            if "." in current_page:
+                raise PlaybookError(
+                    f"{where}: `sync` acts on the page it follows, and "
+                    f"{current_page!r} is a reserved built-in it cannot act on"
+                )
+            moves.append(ReconcileNode(id=name, page=current_page))
+    if len(moves) > MAX_NODES:
+        raise PlaybookError(f"too many moves ({len(moves)} > {MAX_NODES})")
+    _resolve_targets(moves, entries, page_pos)
+    return moves, start, open_macro
+
+
+def _classify_entry(i: int, entry: Any) -> tuple[str, str, dict]:
+    """(kind, name, entry) for one route entry — the kind is its leading
+    key, the value the name; exactly one kind key, and only that kind's
+    field vocabulary beside it."""
+    where = f"route entry {i}"
+    if not isinstance(entry, dict):
+        raise PlaybookError(f"{where} must be a mapping")
+    kinds = [k for k in ENTRY_KINDS if k in entry]
+    if len(kinds) != 1:
+        raise PlaybookError(
+            f"{where} must carry exactly one of {', '.join(ENTRY_KINDS)} "
+            f"(got: {', '.join(map(str, sorted(entry))) or '(empty)'})"
+        )
+    kind = kinds[0]
+    unknown = sorted(set(map(str, entry.keys())) - _ENTRY_KEYS[kind])
     if unknown:
         raise PlaybookError(
-            f"{where}: unknown key(s) for {ntype}: {', '.join(map(str, unknown))}"
+            f"{where}: unknown key(s) for `{kind}`: {', '.join(unknown)}"
         )
-    nid = _require_str(node.get("id"), f"{where}: `id`")
-    check_name(nid, f"{where}: `id`")
-    if nid in RESERVED_TARGETS:
-        raise PlaybookError(
-            f"{where}: id {nid!r} is a reserved routing target — a node "
-            "must not shadow the escalation sink"
-        )
-    if nid in RESERVED_REF_ROOTS:
-        raise PlaybookError(
-            f"{where}: id {nid!r} is a reserved ref root — {{inputs.*}} and "
-            "{item.*} always read the declared inputs and the ledger item"
-        )
-    if nid in seen:
-        raise PlaybookError(
-            f"{where}: duplicate node id {nid!r} (node {seen[nid]} already "
-            "uses it) — routing addresses nodes by id, so they must be unique"
-        )
-    seen[nid] = i
-    where = f"node {nid!r}"
+    return kind, _require_str(entry.get(kind), f"{where}: `{kind}`"), entry
 
-    args = node.get("with", {})
-    if not isinstance(args, dict):
-        raise PlaybookError(f"{where}: `with` must be a mapping of arguments")
-    _check_arg_refs(args, input_names, payloads, where)
 
-    if ntype == "LEG":
-        return _parse_leg(where, nid, node, args, pack, resolve)
-    if ntype == "DECIDE":
-        return _parse_decide(where, nid, node, args, input_names)
-    if ntype == "RECONCILE":
-        page = _page_ref(node.get("page"), f"{where}: `page`", pack, own_pack_only=True)
-        return ReconcileNode(id=nid, page=page)
-    compose = _require_str(node.get("compose"), f"{where}: `compose`")
-    check_name(compose, f"{where}: `compose`")
-    if ntype == "CONFIRM":
-        message, _ = _ask_message(where, node, "message", input_names, payloads)
-        return ConfirmNode(id=nid, compose=compose, args=dict(args), message=message)
-    gate = _require_str(node.get("gate"), f"{where}: `gate`")
-    check_name(gate, f"{where}: `gate`")
+def _waypoint_id(pos: int, name: str, entry: dict, pack: Pack, declared: set) -> str:
+    """One page waypoint's id. Own-pack pages are written bare (the route
+    IS the pack's context); the reserved built-ins stay dotted
+    (`ios.<page>`/`channel.<page>`) and can only be referenced, never
+    declared or opened here."""
+    where = f"route entry {pos}"
+    if "." in name:
+        app, _, page = name.partition(".")
+        if app not in RESERVED_APPS:
+            raise PlaybookError(
+                f"{where}: page {name!r} — waypoints name this pack's pages "
+                f"bare, or a reserved namespace "
+                f"({', '.join(sorted(RESERVED_APPS))}).<page>"
+            )
+        check_name(page, f"{where}: page")
+        if not entry.keys().isdisjoint(("open", *PAGE_DECL_FIELDS)):
+            raise PlaybookError(
+                f"{where}: {name!r} is a reserved built-in — it cannot be "
+                "declared or opened from a pack"
+            )
+        return name
+    check_name(name, f"{where}: `page`")
+    decl = route_decl(entry)
+    if decl is not None:
+        # Validate the in-place declaration's CONTENT here too, so the
+        # text door (`parse_playbook` — tests, tooling) enforces the
+        # same page grammar the pack door does via `collect_page_decls`;
+        # a playbook green at one door must not go red at the other.
+        try:
+            parse_pages_data({name: decl}, pack.app)
+        except PagesError as e:
+            raise PlaybookError(f"{where}: {e}") from e
+    elif name not in pack.pages and name not in declared:
+        known = ", ".join(sorted(pack.pages)) or "(none)"
+        raise PlaybookError(
+            f"{where}: page {name!r} is not declared — declare it here "
+            "(anchors beside the waypoint), in this pack's `pages:` "
+            f"section, or on another route. Declared: {known}"
+        )
+    return name
+
+
+def _resolve_targets(
+    moves: list[Node],
+    entries: list[tuple],
+    page_pos: dict[str, list[int]],
+) -> None:
+    """Decide route targets, resolved in place: a move name stands as
+    written; a page name becomes the move after that waypoint ("this
+    answer lands there"). Applied AFTER the full pass so a target may
+    point anywhere on the route — including the ledger loop's backward
+    arm."""
+    move_ids = {n.id for n in moves}
+    # entry index → the id of the first move at-or-after it
+    next_move: "list[str | None]" = [None] * len(entries)
+    later: str | None = None
+    for i in range(len(entries) - 1, -1, -1):
+        if entries[i][0] != "page":
+            later = entries[i][1]
+        next_move[i] = later
+    for at, node in enumerate(moves):
+        if not isinstance(node, DecideNode):
+            continue
+        resolved: dict[str, str] = {}
+        for out, target in node.routes.items():
+            if target == ESCALATE or target in move_ids:
+                resolved[out] = target
+                continue
+            where = f"move {node.id!r}: `routes.{out}`"
+            positions = page_pos.get(target)
+            if positions is None:
+                raise PlaybookError(
+                    f"{where}: {target!r} is neither a move nor a page on "
+                    f"this route (or {ESCALATE!r})"
+                )
+            if len(positions) > 1:
+                raise PlaybookError(
+                    f"{where}: page {target!r} appears more than once on the "
+                    "route — name the move this answer should land on instead"
+                )
+            landing = next_move[positions[0]]
+            if landing is None:
+                raise PlaybookError(
+                    f"{where}: nothing follows page {target!r} — route this "
+                    "answer to a move, or to `escalate`"
+                )
+            resolved[out] = landing
+        # A self-route is sanctioned only on the call's re-ask arm — the
+        # conductor refreshes the screen (swipes) between those visits.
+        # Any other self-route would re-ask the identical screen with the
+        # identical prompt: a lint-free playbook that can never converge.
+        reask = CALLS[node.call].reask_arm
+        for out, target in resolved.items():
+            if target == node.id and out != reask:
+                raise PlaybookError(
+                    f"move {node.id!r}: `routes.{out}` routes back to this "
+                    f"move — only {node.call}'s re-ask arm "
+                    f"({reask or '(none for this call)'}) may self-loop; the "
+                    "conductor scrolls between those re-asks"
+                )
+        moves[at] = replace(node, routes=resolved)
+
+
+def _parse_ask(
+    where: str,
+    nid: str,
+    entry: dict,
+    input_names: set[str],
+    payloads: dict[str, tuple[str, ...]],
+    resolve: "_MacroResolve",
+) -> HumanGateNode:
+    approve = _require_str(entry.get("approve"), f"{where}: `approve`")
+    check_name(approve, f"{where}: `approve`")
     g_payloads = payloads
-    if gate == "payment":
+    if approve == "payment":
         # The consent slots, runtime-filled from the payment sheet and
-        # available only here. (A DECIDE literally named `gate` would be
+        # available only here. (A move literally named `ask` would be
         # shadowed in this message — the money slots win, both at parse
         # and at fill.)
-        g_payloads = {**payloads, "gate": ("total", "cap")}
-    message, msg_refs = _ask_message(where, node, "message", input_names, g_payloads)
-    over = _opt_prose(node.get("over_message"), f"{where}: `over_message`")
-    if gate == "payment":
-        if "gate.total" not in msg_refs:
+        g_payloads = {**payloads, "ask": ("total", "cap")}
+    message, msg_refs = _entry_message(where, entry, input_names, g_payloads)
+    over = _opt_prose(
+        entry.get("over_budget_message"), f"{where}: `over_budget_message`"
+    )
+    if approve == "payment":
+        if "ask.total" not in msg_refs:
             raise PlaybookError(
-                f"{where}: a payment gate's `message` must quote the sheet "
-                "total — reference {gate.total} (the ask IS the consent "
+                f"{where}: a payment ask's `message` must quote the sheet "
+                "total — reference {ask.total} (the ask IS the consent "
                 "record)"
             )
         if over is None:
             raise PlaybookError(
-                f"{where}: a payment gate needs `over_message` — the ask "
-                "sent instead when the total exceeds the mandate cap; it "
-                "must reference {gate.total} and {gate.cap}"
+                f"{where}: a payment ask needs `over_budget_message` — sent "
+                "instead when the total exceeds the budget cap; it must "
+                "reference {ask.total} and {ask.cap}"
             )
-        over_refs = _refs(over, f"{where}: `over_message`")
-        _check_refs(over_refs, input_names, g_payloads, f"{where}: `over_message`")
-        missing = sorted({"gate.total", "gate.cap"} - over_refs)
+        over_refs = _refs(over, f"{where}: `over_budget_message`")
+        _check_refs(
+            over_refs, input_names, g_payloads, f"{where}: `over_budget_message`"
+        )
+        missing = sorted({"ask.total", "ask.cap"} - over_refs)
         if missing:
             raise PlaybookError(
-                f"{where}: `over_message` must reference "
+                f"{where}: `over_budget_message` must reference "
                 + " and ".join("{" + m + "}" for m in missing)
-                + " — an over-cap ask must disclose the total AND the budget"
+                + " — an over-budget ask must disclose the total AND the cap"
             )
     elif over is not None:
-        raise PlaybookError(f"{where}: `over_message` is only for `gate: payment`")
-    return_macro = _optional_pack_macro(node, "return", where, nid, resolve)
-    revise = node.get("revise")
+        raise PlaybookError(
+            f"{where}: `over_budget_message` is only for `approve: payment`"
+        )
+    return_macro = _optional_pack_macro(entry, "return", where, nid, resolve)
+    revise = entry.get("revise")
     if revise is not None:
         revise = _require_str(revise, f"{where}: `revise`")
         check_name(revise, f"{where}: `revise`")
     return HumanGateNode(
         id=nid,
-        gate=gate,
-        compose=compose,
-        args=dict(args),
+        gate=approve,
         message=message,
         over_message=over,
         return_macro=return_macro,
@@ -776,20 +1023,19 @@ def _parse_node(
     )
 
 
-def _ask_message(
+def _entry_message(
     where: str,
-    node: dict,
-    key: str,
+    entry: dict,
     input_names: set[str],
     payloads: dict[str, tuple[str, ...]],
 ) -> tuple[str, set[str]]:
-    """A REQUIRED authored ask: the exact text sent to the user — only
-    the author knows the user's language, so the conductor composes no
-    prose around it. Refs held to the same defined-before-use rules as
-    `with:` values; returned with them so gate lints can inspect."""
-    text = _prose(node.get(key), f"{where}: `{key}`")
-    refs = _refs(text, f"{where}: `{key}`")
-    _check_refs(refs, input_names, payloads, f"{where}: `{key}`")
+    """A REQUIRED authored `message:` — the exact text sent to the user;
+    only the author knows the user's language, so the conductor composes
+    no prose around it. Refs held to the same defined-before-use rules
+    as `with:` values; returned with them so the ask lints can inspect."""
+    text = _prose(entry.get("message"), f"{where}: `message`")
+    refs = _refs(text, f"{where}: `message`")
+    _check_refs(refs, input_names, payloads, f"{where}: `message`")
     return text, refs
 
 
@@ -867,15 +1113,20 @@ def _optional_pack_macro(
     return spec.name
 
 
-def _parse_leg(
+def _parse_do(
     where: str,
     nid: str,
-    node: dict,
+    entry: dict,
     args: dict,
-    pack: Pack,
+    enter: str,
+    verify: str,
     resolve: _MacroResolve,
 ) -> LegNode:
-    spec = resolve(node.get("macro"), where, nid)
+    """A `do` move. Its name IS its macro — the directory macro of that
+    name, or the `macro:` beside it (an inline body, or another name
+    when one directory macro serves two moves). `enter`/`verify` arrive
+    derived from the route's waypoints."""
+    spec = resolve(entry.get("macro", nid), where, nid)
     macro = spec.name
     declared = {inp.name: inp for inp in spec.inputs}
     unknown_args = sorted(set(args.keys()) - set(declared))
@@ -893,20 +1144,8 @@ def _parse_leg(
             f"{where}: macro {macro!r} requires input(s) "
             f"{', '.join(missing_args)} — supply them under `with`"
         )
-    if "verify" not in node:
-        raise PlaybookError(
-            f"{where}: `verify` is required — a leg without a landing-page "
-            "check cannot prove it ran (the reflector is what breaks silent "
-            "per-step error compounding)"
-        )
-    verify = _page_ref(node.get("verify"), f"{where}: `verify`", pack)
-    enter = (
-        _page_ref(node.get("enter"), f"{where}: `enter`", pack)
-        if "enter" in node
-        else None
-    )
-    compensate = _optional_pack_macro(node, "compensate", where, nid, resolve)
-    irreversible = node.get("irreversible")
+    compensate = _optional_pack_macro(entry, "undo", where, nid, resolve)
+    irreversible = entry.get("irreversible")
     if irreversible is not None and irreversible not in IRREVERSIBLE_CLASSES:
         raise PlaybookError(
             f"{where}: `irreversible` must be one of "
@@ -924,18 +1163,21 @@ def _parse_leg(
 
 
 def _parse_decide(
-    where: str, nid: str, node: dict, args: dict, input_names: set[str]
+    where: str, nid: str, entry: dict, args: dict, input_names: set[str]
 ) -> DecideNode:
-    call = node.get("call")
+    """A `decide` move. Its `routes:` are returned RAW — page-name
+    targets resolve to moves in `_resolve_targets`, after the whole
+    route is known."""
+    call = entry.get("uses")
     if not isinstance(call, str) or call not in CALLS:
         raise PlaybookError(
-            f"{where}: `call` must be one of {', '.join(sorted(CALLS))} (got {call!r})"
+            f"{where}: `uses` must be one of {', '.join(sorted(CALLS))} (got {call!r})"
         )
     decl = CALLS[call]
-    if decl.deterministic and ("context" in node or "max_visits" in node):
+    if decl.deterministic and ("context" in entry or "max_asks" in entry):
         raise PlaybookError(
-            f"{where}: {call} is deterministic — `context`/`max_visits` "
-            "would be dead config (no prompt, no visit budget)"
+            f"{where}: {call} is deterministic — `context`/`max_asks` "
+            "would be dead config (no prompt, no ask budget)"
         )
     unknown_params = sorted(set(args.keys()) - set(decl.params))
     if unknown_params:
@@ -947,7 +1189,7 @@ def _parse_decide(
     if missing:
         raise PlaybookError(f"{where}: {call} requires `with.{missing[0]}`")
 
-    context_raw = node.get("context", [])
+    context_raw = entry.get("context", [])
     if not isinstance(context_raw, list):
         raise PlaybookError(f"{where}: `context` must be a list")
     context = []
@@ -968,73 +1210,62 @@ def _parse_decide(
         context.append(c)
 
     if decl.outcomes:
-        if "outcomes" in node:
+        if "answers" in entry:
             raise PlaybookError(
-                f"{where}: {call} declares its outcomes itself "
-                f"({', '.join(decl.outcomes)}) — remove `outcomes`"
+                f"{where}: {call} declares its answers itself "
+                f"({', '.join(decl.outcomes)}) — remove `answers`"
             )
         outcomes = decl.outcomes
     else:
-        raw_outcomes = node.get("outcomes")
-        if not isinstance(raw_outcomes, list) or len(raw_outcomes) < 2:
+        raw_answers = entry.get("answers")
+        if not isinstance(raw_answers, list) or len(raw_answers) < 2:
             raise PlaybookError(
-                f"{where}: {call} needs `outcomes` — the answers this question "
-                "can have (at least 2, including `escalate`)"
+                f"{where}: {call} needs `answers` — what this question can "
+                "answer (at least 2, including `escalate`)"
             )
-        outcomes_list = []
-        for o in raw_outcomes:
-            o = _require_str(o, f"{where}: `outcomes` item")
-            check_name(o, f"{where}: `outcomes` item")
-            if o in outcomes_list:
-                raise PlaybookError(f"{where}: duplicate outcome {o!r}")
-            outcomes_list.append(o)
-        if ESCALATE not in outcomes_list:
+        answers_list = []
+        for o in raw_answers:
+            o = _require_str(o, f"{where}: `answers` item")
+            check_name(o, f"{where}: `answers` item")
+            if o in answers_list:
+                raise PlaybookError(f"{where}: duplicate answer {o!r}")
+            answers_list.append(o)
+        if ESCALATE not in answers_list:
             raise PlaybookError(
-                f"{where}: `outcomes` must include {ESCALATE!r} — every closed "
+                f"{where}: `answers` must include {ESCALATE!r} — every closed "
                 "choice needs the concrete escape arm"
             )
-        outcomes = tuple(outcomes_list)
+        outcomes = tuple(answers_list)
 
-    routes_raw = node.get("routes")
+    routes_raw = entry.get("routes")
     if not isinstance(routes_raw, dict) or not routes_raw:
         raise PlaybookError(
-            f"{where}: `routes` must map every out to a node id (or {ESCALATE!r})"
+            f"{where}: `routes` must map every answer to a move, a page, "
+            f"or {ESCALATE!r}"
         )
     extra = sorted(set(routes_raw.keys()) - set(outcomes))
     if extra:
         raise PlaybookError(
-            f"{where}: `routes` names unknown outcome(s): {', '.join(map(str, extra))}"
+            f"{where}: `routes` names unknown answer(s): {', '.join(map(str, extra))}"
         )
     unrouted = sorted(set(outcomes) - set(routes_raw.keys()))
     if unrouted:
         raise PlaybookError(
-            f"{where}: `routes` must route EVERY outcome — missing: {', '.join(unrouted)}"
+            f"{where}: `routes` must route EVERY answer — missing: {', '.join(unrouted)}"
         )
     routes = {
         out: _require_str(target, f"{where}: `routes.{out}`")
         for out, target in routes_raw.items()
     }
-    for out, target in routes.items():
-        # A self-route is sanctioned only on the call's re-ask arm — the
-        # conductor refreshes the screen (swipes) between those visits.
-        # Any other self-route would re-ask the identical screen with the
-        # identical prompt: a lint-free playbook that can never converge.
-        if target == nid and out != decl.reask_arm:
-            raise PlaybookError(
-                f"{where}: `routes.{out}` routes back to this node — only "
-                f"{call}'s re-ask arm "
-                f"({decl.reask_arm or '(none for this call)'}) may "
-                "self-loop; the conductor scrolls between those re-asks"
-            )
 
-    max_visits = node.get("max_visits", DEFAULT_MAX_VISITS)
+    max_asks = entry.get("max_asks", DEFAULT_MAX_VISITS)
     if (
-        isinstance(max_visits, bool)
-        or not isinstance(max_visits, int)
-        or not 1 <= max_visits <= MAX_VISITS_CAP
+        isinstance(max_asks, bool)
+        or not isinstance(max_asks, int)
+        or not 1 <= max_asks <= MAX_VISITS_CAP
     ):
         raise PlaybookError(
-            f"{where}: `max_visits` must be 1–{MAX_VISITS_CAP} (got {max_visits!r})"
+            f"{where}: `max_asks` must be 1–{MAX_VISITS_CAP} (got {max_asks!r})"
         )
     return DecideNode(
         id=nid,
@@ -1043,52 +1274,8 @@ def _parse_decide(
         context=tuple(context),
         outcomes=outcomes,
         routes=routes,
-        max_visits=max_visits,
+        max_visits=max_asks,
     )
-
-
-def _page_ref(
-    value: Any, where: str, pack: Pack, *, own_pack_only: bool = False
-) -> str:
-    """A page reference — always `<root>.<page>`, one uniform shape over
-    a closed root vocabulary: `pages` (this pack file's own `pages:`
-    section) or a reserved built-in namespace (`ios`/`channel`). One
-    spelling, required: a bare name is rejected with the fix spelled
-    out, so every ref a reader meets points at its section. Own-pack
-    pages must be declared; reserved pages resolve against built-ins
-    later, so only the namespace is checked here. `own_pack_only` closes
-    the reserved door (RECONCILE acts on the page — a built-in it cannot
-    act on is out)."""
-    ref = _require_str(value, where)
-    if "." not in ref:
-        raise PlaybookError(
-            f"{where}: page references are written `pages.<name>` — write pages.{ref}"
-        )
-    app, _, page = ref.partition(".")
-    if app == "pages":
-        ref = page
-    elif own_pack_only:
-        raise PlaybookError(
-            f"{where}: must be THIS pack's page (`pages.<name>`) — the "
-            "node re-reads and acts on it, so a reserved namespace "
-            "cannot serve"
-        )
-    elif app in RESERVED_APPS:
-        check_name(page, f"{where}: page")
-        return ref
-    else:
-        raise PlaybookError(
-            f"{where}: {ref!r} — page references are `pages.<name>` "
-            f"(this pack) or a reserved namespace "
-            f"({', '.join(sorted(RESERVED_APPS))}).<page>"
-        )
-    if ref not in pack.pages:
-        declared = ", ".join(sorted(pack.pages)) or "(none)"
-        raise PlaybookError(
-            f"{where}: page {ref!r} not declared under `pages:` in "
-            f"{pack.app}/{PACK_FILENAME}. Declared: {declared}"
-        )
-    return ref
 
 
 # ---------- refs (`{inputs.name}` / `{node.field}`) ----------
@@ -1124,8 +1311,8 @@ def _check_refs(
                 raise PlaybookError(f"{where}: {{{ref}}} not declared under `inputs`")
         elif root not in payloads:
             raise PlaybookError(
-                f"{where}: {{{ref}}} references node {root!r}, which "
-                "is not an EARLIER decide node — outputs wire forward "
+                f"{where}: {{{ref}}} references move {root!r}, which "
+                "is not an EARLIER decide move — outputs wire forward "
                 "only, in list order"
             )
         elif fld not in payloads[root]:
@@ -1185,11 +1372,13 @@ def fill_refs(value: Any, values: dict[str, str], where: str) -> Any:
 def disabled_leg_macros(spec: Playbook, pack: Pack) -> list[str]:
     """Referenced pack macros still disabled — the live-readiness rule:
     `playbooks check` warns about it and the overture will not offer such
-    a playbook at all. Covers legs,
-    `compensate:`, and gate `return:` (all dispatch at walk time). Safe
-    unguarded access: parse validated every directory name against
+    a playbook at all. Covers every dispatching role: do moves, `undo:`,
+    ask `return:`, and the start page's `open:` (the init ladder's hand).
+    Safe unguarded access: parse validated every directory name against
     `pack.macros`."""
     named: set[str] = set()
+    if spec.open_macro is not None:
+        named.add(spec.open_macro)
     for n in spec.nodes:
         if isinstance(n, LegNode):
             named.add(n.macro)
@@ -1232,8 +1421,8 @@ def _check_graph(nodes: list[Node], ids: dict[str, int]) -> None:
                     continue
                 if target not in ids:
                     raise PlaybookError(
-                        f"node {node.id!r}: `on.{out}` routes to unknown "
-                        f"node {target!r} (or a reserved target: "
+                        f"move {node.id!r}: `routes.{out}` routes to unknown "
+                        f"move {target!r} (or a reserved target: "
                         f"{', '.join(sorted(RESERVED_TARGETS))})"
                     )
     # Reachability from the first node.
@@ -1248,7 +1437,7 @@ def _check_graph(nodes: list[Node], ids: dict[str, int]) -> None:
     unreachable = [n.id for n in nodes if n.id not in reachable]
     if unreachable:
         raise PlaybookError(
-            f"unreachable node(s): {', '.join(unreachable)} — every node "
+            f"unreachable move(s): {', '.join(unreachable)} — every move "
             "must be reachable from the first"
         )
     _check_acyclic(nodes, ids)
@@ -1294,10 +1483,13 @@ def _check_acyclic(nodes: list[Node], ids: dict[str, int]) -> None:
 def _check_money(
     nodes: list[Node], ids: dict[str, int], mandate: Mandate | None
 ) -> None:
-    """An irreversible-tagged node must be unreachable except through a
-    HUMAN_GATE, and a payment playbook must carry a mandate. Walked over
-    the real edges with a gate-passed flag, so the guarantee is
-    structural."""
+    """An irreversible-tagged move must be unreachable except through an
+    `ask` that approves its class, and a payment playbook must carry a
+    budget. Walked over the real edges with an approved flag, so the
+    guarantee is structural. (The route's derived `enter` — always the
+    waypoint before the ask — is what guarantees money fires on a
+    verified app page, never on the IM thread the ask left the phone
+    on.)"""
     if not any(isinstance(n, LegNode) and n.irreversible for n in nodes):
         return
     money = [
@@ -1305,15 +1497,16 @@ def _check_money(
     ]
     if money and mandate is None:
         raise PlaybookError(
-            f"node(s) {', '.join(money)} are irreversible: payment — the "
-            "playbook must declare a `mandate` (max_amount)"
+            f"move(s) {', '.join(money)} are irreversible: payment — the "
+            "playbook must declare a `budget`"
         )
     # Adjacency, not just reachability: the conductor reads the payment
-    # sheet AT the gate (the ask quotes its total) and fires the leg as
-    # the gate's fall-through — a node in between would desynchronize
-    # the consent from the sheet. The gate must also DECLARE the class
-    # (`gate: payment`), so the runtime keys off the declaration. Other
-    # irreversible classes take any gate: the human said go, adjacently.
+    # sheet AT the ask (the message quotes its total) and fires the move
+    # as the ask's fall-through — a move in between would desynchronize
+    # the consent from the sheet. The ask must also DECLARE the class
+    # (`approve: payment`), so the runtime keys off the declaration.
+    # Other irreversible classes take any ask: the human said go,
+    # adjacently.
     for i, n in enumerate(nodes):
         if not (isinstance(n, LegNode) and n.irreversible):
             continue
@@ -1321,39 +1514,29 @@ def _check_money(
         if n.irreversible == "payment":
             if not (isinstance(prev, HumanGateNode) and prev.gate == "payment"):
                 raise PlaybookError(
-                    f"node {n.id!r} (irreversible: payment) must DIRECTLY "
-                    "follow a HUMAN_GATE with `gate: payment` — the gate "
-                    "reads the sheet its ask quotes, and consent must not "
-                    "desynchronize from it"
-                )
-            # After the ask the phone shows the IM thread; the walk must
-            # re-enter the app on a VERIFIED page before money fires, or
-            # the fire-time predicates would read the thread — where the
-            # ask itself quotes the consented total.
-            if prev.return_macro is None and n.enter is None:
-                raise PlaybookError(
-                    f"gate {prev.id!r} → {n.id!r}: after the ask the phone "
-                    "is on the IM thread — declare `return:` on the gate "
-                    "or `enter:` on the payment leg"
+                    f"move {n.id!r} (irreversible: payment) must DIRECTLY "
+                    "follow an `ask` with `approve: payment` — the ask "
+                    "reads the sheet its message quotes, and consent must "
+                    "not desynchronize from it"
                 )
         elif not isinstance(prev, HumanGateNode):
             raise PlaybookError(
-                f"node {n.id!r} (irreversible: {n.irreversible}) must "
-                "DIRECTLY follow a HUMAN_GATE — an irreversible act runs "
+                f"move {n.id!r} (irreversible: {n.irreversible}) must "
+                "DIRECTLY follow an `ask` — an irreversible act runs "
                 "human-approved or not at all"
             )
-        # The gate's fall-through is the leg's ONLY door: a routed
-        # in-edge (a DECIDE arm, the ledger loop) would enter it with
-        # another gate's consent still bound — or with none.
+        # The ask's fall-through is the move's ONLY door: a routed
+        # in-edge (a decide arm, the ledger loop) would enter it with
+        # another ask's consent still bound — or with none.
         for other in nodes:
             if isinstance(other, DecideNode) and n.id in other.routes.values():
                 raise PlaybookError(
-                    f"node {other.id!r} routes to {n.id!r} "
+                    f"move {other.id!r} routes to {n.id!r} "
                     f"(irreversible: {n.irreversible}) — an irreversible "
-                    "leg is entered ONLY as its own gate's fall-through"
+                    "move is entered ONLY as its own ask's fall-through"
                 )
-    # DFS over (node, gate_passed) states; a money node seen with
-    # gate_passed False is reachable around the human.
+    # DFS over (move, approved) states; a money move seen with the flag
+    # down is reachable around the human.
     seen: set[tuple[str, bool]] = set()
     stack: list[tuple[str, bool]] = [(nodes[0].id, False)]
     while stack:
@@ -1364,8 +1547,8 @@ def _check_money(
         node = nodes[ids[nid]]
         if isinstance(node, LegNode) and node.irreversible == "payment" and not gated:
             raise PlaybookError(
-                f"node {nid!r} (irreversible: payment) is reachable without "
-                "passing a HUMAN_GATE — money always goes through the human"
+                f"move {nid!r} (irreversible: payment) is reachable without "
+                "passing an `ask` — money always goes through the human"
             )
         passed = gated or (isinstance(node, HumanGateNode) and node.gate == "payment")
         for target in _successors(nodes, ids[nid]):
@@ -1375,14 +1558,14 @@ def _check_money(
 def _check_ledger(
     nodes: list[Node], ids: dict[str, int], inputs: tuple[PlaybookInput, ...]
 ) -> None:
-    """The ledger stack is all-or-nothing: the ONE `kind: list` input,
-    the ONE next_item loop consuming it, and the optional RECONCILE /
-    gate `revise:` that both lean on the loop. Half a stack is a walk
+    """The ledger stack is all-or-nothing: the ONE `type: list` input,
+    the ONE next_item loop consuming it, and the optional `sync` /
+    ask `revise:` that both lean on the loop. Half a stack is a walk
     that stalls at runtime — rejected here instead."""
     list_inputs = [i.name for i in inputs if i.kind == "list"]
     if len(list_inputs) > 1:
         raise PlaybookError(
-            f"at most one `kind: list` input (the ledger) — got: "
+            f"at most one `type: list` input (the ledger) — got: "
             f"{', '.join(list_inputs)}"
         )
     loops = [
@@ -1392,24 +1575,24 @@ def _check_ledger(
     ]
     if len(loops) > 1:
         raise PlaybookError(
-            f"at most one {NEXT_ITEM} node — RECONCILE re-shop and gate "
+            f"at most one {NEXT_ITEM} move — `sync` re-shop and ask "
             f"`revise:` both route through THE loop"
         )
     if loops and not list_inputs:
         raise PlaybookError(
-            f"node {loops[0].id!r}: {NEXT_ITEM} walks the ledger — declare "
-            "a `kind: list` input"
+            f"move {loops[0].id!r}: {NEXT_ITEM} walks the ledger — declare "
+            "a `type: list` input"
         )
     if list_inputs and not loops:
         raise PlaybookError(
-            f"input {list_inputs[0]!r} is `kind: list` but no {NEXT_ITEM} "
-            "node consumes it"
+            f"input {list_inputs[0]!r} is `type: list` but no {NEXT_ITEM} "
+            "move consumes it"
         )
     if not loops:
         stranded = next((n for n in nodes if isinstance(n, ReconcileNode)), None)
         if stranded is not None:
             raise PlaybookError(
-                f"node {stranded.id!r}: RECONCILE needs the {NEXT_ITEM} loop "
+                f"move {stranded.id!r}: `sync` needs the {NEXT_ITEM} loop "
                 "— a missing item re-enters it to be shopped again"
             )
     else:
@@ -1421,26 +1604,26 @@ def _check_ledger(
             if out == arm:
                 if target == ESCALATE or ids[target] >= idx:
                     raise PlaybookError(
-                        f"node {loop.id!r}: `on.{out}` must route BACKWARD "
-                        "to the loop body head (the closer sits at the "
-                        "loop's bottom)"
+                        f"move {loop.id!r}: `routes.{out}` must route "
+                        "BACKWARD to the loop body head (the closer sits "
+                        "at the loop's bottom)"
                     )
             elif target != ESCALATE and ids[target] <= idx:
                 raise PlaybookError(
-                    f"node {loop.id!r}: `on.{out}` must route FORWARD — "
+                    f"move {loop.id!r}: `routes.{out}` must route FORWARD — "
                     "the ledger is spent"
                 )
     for n in nodes:
         if isinstance(n, HumanGateNode) and n.revise is not None:
             if not loops or n.revise != loops[0].id:
                 raise PlaybookError(
-                    f"node {n.id!r}: `revise` must target the {NEXT_ITEM} "
-                    "node — a revision re-enters the loop for the added "
-                    "items, then reconciles the rest"
+                    f"move {n.id!r}: `revise` must target the {NEXT_ITEM} "
+                    "move — a revision re-enters the loop for the added "
+                    "items, then syncs the rest"
                 )
             if n.return_macro is None:
                 raise PlaybookError(
-                    f"node {n.id!r}: `revise` needs `return:` — the reply "
+                    f"move {n.id!r}: `revise` needs `return:` — the reply "
                     "was read on the IM thread, and the loop must re-enter "
                     "the app before it can shop"
                 )

@@ -31,32 +31,32 @@ from physiclaw.common import paths
 from physiclaw.conductor import channel, memory, program, reconcile, setup, suspension
 from physiclaw.conductor.playbook import GATE_MAX_REVISIONS, PlaybookError
 
+# The shared fixture pages are three DISTINCT pages so `_locate`
+# (resume past matching verifies) never fast-forwards a freshly booted
+# walk: the start page matches no move's landing.
 FLOW = """\
-description: two legs
+description: two moves
 inputs:
   keyword:
     description: what to search
-nodes:
-  - id: open
-    type: LEG
+route:
+  - page: home
+  - do: open
     macro: open-app
     with: {message: "{inputs.keyword}"}
-    verify: pages.home
-  - id: search
-    type: LEG
+  - page: results
+  - do: search
     macro: add-cart
     with: {message: "go"}
-    enter: pages.home
-    verify: pages.results
+  - page: done
 """
 
-# Same legs, then a DECIDE.
+# Same moves, then a decide.
 BRANCH = (
-    FLOW.replace("name: flow", "name: branch")
+    FLOW
     + """\
-  - id: choose
-    type: DECIDE
-    call: choose_item
+  - decide: choose
+    uses: choose_item
     with: {criteria: "cheapest"}
     routes: {pick: escalate, scroll: escalate, none_fit: escalate, escalate: escalate}
 """
@@ -64,6 +64,7 @@ BRANCH = (
 
 HOME = make_screen(("Files", 0.5, 0.1)).text
 RESULTS = make_screen(("综合", 0.5, 0.1)).text
+DONE = make_screen(("AllDone", 0.5, 0.1)).text
 
 
 def _program(app: str = "demo", name: str = "flow", **values) -> program.Program:
@@ -87,7 +88,7 @@ def test_walk_runs_both_legs_then_completes() -> None:
     assert peek is not None and peek.synthesized
     assert peek.tool_names() == ["note", "peek"]
 
-    _feed(h, peek, ELSEWHERE)  # unknown page → start from the top
+    _feed(h, peek, HOME)  # the start page — the walk begins
     leg1 = p.advance(h)
     assert leg1 is not None and leg1.tool_names() == ["note", "run_macro"]
     assert leg1.tool_calls[1].arguments == {
@@ -95,14 +96,12 @@ def test_walk_runs_both_legs_then_completes() -> None:
         "inputs": {"message": "milk"},  # {inputs.keyword} resolved from the arm
     }
 
-    _feed(
-        h, leg1, HOME
-    )  # verify: pages.home holds → next leg (enter: pages.home holds too)
+    _feed(h, leg1, RESULTS)  # landed on `results` → next move (enter holds too)
     leg2 = p.advance(h)
     assert leg2 is not None
     assert leg2.tool_calls[1].arguments["name"] == "demo/add-cart"
 
-    _feed(h, leg2, RESULTS)  # verify: pages.results holds → playbook complete
+    _feed(h, leg2, DONE)  # landed on `done` → playbook complete
     summary = _finish(p, h, p.advance(h))
     assert "walk demo/flow completed" in summary
 
@@ -116,7 +115,7 @@ def test_locate_resumes_past_completed_legs() -> None:
 
     peek = p.advance(h)
     assert peek is not None
-    _feed(h, peek, HOME)
+    _feed(h, peek, RESULTS)  # leg 1's landing page — its outcome holds
     nxt = p.advance(h)
 
     assert nxt is not None
@@ -130,20 +129,20 @@ def test_verify_mismatch_rescues_then_hands_over() -> None:
     p = _program(keyword="milk")
     h = _history()
 
-    _feed(h, p.advance(h), ELSEWHERE)
+    _feed(h, p.advance(h), HOME)
     leg1 = p.advance(h)
     assert leg1 is not None
-    _feed(h, leg1, RESULTS)  # landed on the WRONG known page
+    _feed(h, leg1, HOME)  # landed on the WRONG known page
 
     settle = p.advance(h)  # rung 0: maybe just mid-transition
     assert settle is not None and settle.tool_names() == ["note", "peek"]
-    _feed(h, settle, RESULTS)  # settled — genuinely the wrong page
+    _feed(h, settle, HOME)  # settled — genuinely the wrong page
     back1 = p.advance(h)
     assert back1 is not None and back1.tool_names() == ["note", "go_back"]
-    _feed(h, back1, RESULTS)
+    _feed(h, back1, HOME)
     back2 = p.advance(h)
     assert back2 is not None and back2.tool_names() == ["note", "go_back"]
-    _feed(h, back2, RESULTS)
+    _feed(h, back2, HOME)
 
     summary = _finish(p, h, p.advance(h))
     assert "did not land" in summary and "rescue tried: back×2" in summary
@@ -155,12 +154,14 @@ def test_leg_verifying_a_builtin_page_hands_over() -> None:
     # macros and land on this pack's pages. The loader change made this
     # guarantee easy to lose by accident, so pin it.
     write_pack(
-        playbooks={"flow": FLOW.replace("verify: pages.home", "verify: ios.locked")}
+        playbooks={
+            "flow": FLOW.replace("  - page: results\n", "  - page: ios.locked\n")
+        }
     )
     p = _program(keyword="milk")
     h = _history()
 
-    _feed(h, p.advance(h), ELSEWHERE)
+    _feed(h, p.advance(h), HOME)
 
     _finish(p, h, p.advance(h))
 
@@ -170,7 +171,7 @@ def test_error_result_hands_over() -> None:
     p = _program(keyword="milk")
     h = _history()
 
-    _feed(h, p.advance(h), ELSEWHERE)
+    _feed(h, p.advance(h), HOME)
     leg1 = p.advance(h)
     assert leg1 is not None
     _feed(h, leg1, "BLOCKED — not executed", error=True)
@@ -186,9 +187,9 @@ def test_decide_yields_a_request_and_an_unresolved_one_hands_over() -> None:
     p = _program(name="branch", **{"keyword": "milk"})
     h = _history()
 
-    _feed(h, p.advance(h), ELSEWHERE)
-    _feed(h, p.advance(h), HOME)  # leg open verified
-    _feed(h, p.advance(h), RESULTS)  # leg search verified
+    _feed(h, p.advance(h), HOME)  # the start page
+    _feed(h, p.advance(h), RESULTS)  # move open landed
+    _feed(h, p.advance(h), DONE)  # move search landed
 
     req = p.advance(h)
     assert isinstance(req, DecisionRequest)  # the conductor brokers it
@@ -214,34 +215,32 @@ description: pick flow
 inputs:
   keyword:
     description: what
-nodes:
-  - id: open
-    type: LEG
+route:
+  - page: home
+  - do: open
     macro: open-app
     with: {message: "{inputs.keyword}"}
-    verify: pages.results
-  - id: choose
-    type: DECIDE
-    call: choose_item
+  - page: results
+  - decide: choose
+    uses: choose_item
     with: {criteria: "cheapest {inputs.keyword}"}
     routes: {pick: use, scroll: choose, none_fit: escalate, escalate: escalate}
-  - id: use
-    type: LEG
+  - do: use
     macro: add-cart
     with: {message: "{choose.pick}"}
-    verify: pages.home
+  - page: done
 """
 
 
 def _at_decision():
-    """Arm PICKY and walk it to the choose node's DecisionRequest."""
+    """Arm PICKY and walk it to the choose move's DecisionRequest."""
     from physiclaw.conductor.micro import DecisionRequest
 
     write_pack(playbooks={"picky": PICKY})
     p = _program(name="picky", **{"keyword": "milk"})
     h = _history()
-    _feed(h, p.advance(h), ELSEWHERE)  # locate: unknown → top
-    _feed(h, p.advance(h), RESULTS)  # leg open verified on results
+    _feed(h, p.advance(h), HOME)  # the start page
+    _feed(h, p.advance(h), RESULTS)  # move open landed on results
     req = p.advance(h)
     assert isinstance(req, DecisionRequest), req
     return p, h, req
@@ -268,7 +267,7 @@ def test_pick_taps_the_row_then_output_feeds_the_next_leg() -> None:
     assert tap.tool_calls[1].arguments == {"bbox": list(picked.bbox)}
     assert "decided choose: pick" in tap.tool_calls[0].arguments["summary"]
 
-    _feed(h, tap, HOME)  # post-tap screen; `use` has no enter check
+    _feed(h, tap, RESULTS)  # post-tap screen still reads results — `use` enters
     leg = p.advance(h)
     assert leg is not None
     assert leg.tool_calls[1].arguments["inputs"] == {"message": "综合"}
@@ -338,7 +337,7 @@ description: open the thread
 steps:
   - name: go
     tool: tap
-    with: {bbox: [0.1, 0.1, 0.2, 0.2]}
+    with: {label: t, bbox: [0.1, 0.1, 0.2, 0.2]}
 """
 
 GATED = """\
@@ -346,28 +345,23 @@ description: 买牛奶
 inputs:
   keyword:
     description: what
-mandate:
-  max_amount: 100
-nodes:
-  - id: open
-    type: LEG
+budget: 100
+route:
+  - page: home
+  - do: open
     macro: open-app
     with: {message: "{inputs.keyword}"}
-    verify: pages.results
-  - id: gate
-    type: HUMAN_GATE
-    gate: payment
-    compose: payment-request
-    message: "已选好{inputs.keyword}，合计 ¥{gate.total}。回复 好的 确认支付，或 不用 取消。"
-    over_message: "已选好{inputs.keyword}，合计 ¥{gate.total}，已超出预算 ¥{gate.cap}。回复 好的 确认支付，或 不用 取消。"
+  - page: results
+  - ask: gate
+    approve: payment
+    message: "已选好{inputs.keyword}，合计 ¥{ask.total}。回复 好的 确认支付，或 不用 取消。"
+    over_budget_message: "已选好{inputs.keyword}，合计 ¥{ask.total}，已超出预算 ¥{ask.cap}。回复 好的 确认支付，或 不用 取消。"
     return: open-app
-  - id: pay
-    type: LEG
+  - do: pay
     macro: add-cart
     with: {message: "pay"}
-    enter: pages.results
-    verify: pages.home
     irreversible: payment
+  - page: home
 """
 
 
@@ -396,8 +390,8 @@ def _at_gate(total: str = "¥45", playbook: str = GATED):
     p = _program(name="pay", keyword="milk")
     assert p.channel is not None and p.channel.send == "channel/send"
     h = _history()
-    _feed(h, p.advance(h), ELSEWHERE)  # locate → top
-    _feed(h, p.advance(h), _sheet(total))  # leg open verified on the sheet
+    _feed(h, p.advance(h), HOME)  # the start page
+    _feed(h, p.advance(h), _sheet(total))  # move open landed on the sheet
     send = p.advance(h)
     assert send is not None and send.tool_names() == ["note", "run_macro"]
     assert send.tool_calls[1].arguments["name"] == "channel/send"
@@ -549,21 +543,18 @@ description: 汇报进展
 inputs:
   keyword:
     description: what
-nodes:
-  - id: open
-    type: LEG
+route:
+  - page: home
+  - do: open
     macro: open-app
     with: {message: "{inputs.keyword}"}
-    verify: pages.home
-  - id: tell
-    type: CONFIRM
-    compose: status-update
+  - page: results
+  - tell: tell
     message: "已下单{inputs.keyword}，稍后汇报进度"
-  - id: wrap
-    type: LEG
+  - do: wrap
     macro: add-cart
     with: {message: "done"}
-    verify: pages.results
+  - page: done
 """
 
 
@@ -572,8 +563,8 @@ def test_confirm_sends_suspends_and_resumes_past_itself() -> None:
     write_pack(playbooks={"notify": CONFIRMING})
     p = _program(name="notify", keyword="milk")
     h = _history()
-    _feed(h, p.advance(h), ELSEWHERE)
-    _feed(h, p.advance(h), HOME)  # leg open verified
+    _feed(h, p.advance(h), HOME)  # the start page
+    _feed(h, p.advance(h), RESULTS)  # move open landed
 
     send = p.advance(h)
     assert send.tool_calls[1].arguments["name"] == "channel/send"
@@ -595,7 +586,7 @@ def test_confirm_sends_suspends_and_resumes_past_itself() -> None:
     assert check.tool_names() == ["note", "peek"]
     _feed(h2, check, _thread((text, 0.75, 0.3)))  # nothing new since the send
     peek = resumed.advance(h2)
-    _feed(h2, peek, HOME)  # wherever the phone is; stored cursor is trusted
+    _feed(h2, peek, RESULTS)  # `wrap` enters where the walk left off
     leg = resumed.advance(h2)
     assert leg.tool_calls[1].arguments["name"] == "demo/add-cart"
 
@@ -608,8 +599,8 @@ def test_suspended_confirm_resume_reads_a_cancel() -> None:
     write_pack(playbooks={"notify": CONFIRMING})
     p = _program(name="notify", keyword="milk")
     h = _history()
-    _feed(h, p.advance(h), ELSEWHERE)
     _feed(h, p.advance(h), HOME)
+    _feed(h, p.advance(h), RESULTS)
     send = p.advance(h)
     text = send.tool_calls[1].arguments["inputs"]["message"]
     _feed(h, send, _thread((text, 0.75, 0.3)))
@@ -631,8 +622,8 @@ def test_suspended_confirm_resume_off_thread_reopens_then_continues() -> None:
     write_pack(playbooks={"notify": CONFIRMING})
     p = _program(name="notify", keyword="milk")
     h = _history()
-    _feed(h, p.advance(h), ELSEWHERE)
     _feed(h, p.advance(h), HOME)
+    _feed(h, p.advance(h), RESULTS)
     send = p.advance(h)
     text = send.tool_calls[1].arguments["inputs"]["message"]
     _feed(h, send, _thread((text, 0.75, 0.3)))
@@ -646,7 +637,7 @@ def test_suspended_confirm_resume_off_thread_reopens_then_continues() -> None:
     assert reopen.tool_calls[1].arguments["name"] == "channel/open"
     _feed(h2, reopen, _thread((text, 0.75, 0.3)))
     peek = resumed.advance(h2)
-    _feed(h2, peek, HOME)
+    _feed(h2, peek, RESULTS)
     leg = resumed.advance(h2)
     assert leg.tool_calls[1].arguments["name"] == "demo/add-cart"
 
@@ -949,8 +940,8 @@ def _to_reconcile(p):
     from physiclaw.conductor.micro import DecisionRequest
 
     h = _history()
-    _feed(h, p.advance(h), ELSEWHERE)
-    _feed(h, p.advance(h), HOME)  # leg open
+    _feed(h, p.advance(h), HOME)  # the start page
+    _feed(h, p.advance(h), PRODUCTS)  # `goto` landed on results
     search = p.advance(h)
     assert search.tool_calls[1].arguments["inputs"]["message"] == "eggs"
     _feed(h, search, PRODUCTS)
@@ -1022,8 +1013,8 @@ def test_ledger_decide_carries_default_item_context() -> None:
 
     p = _arm_ledger()
     h = _history()
-    _feed(h, p.advance(h), ELSEWHERE)
     _feed(h, p.advance(h), HOME)
+    _feed(h, p.advance(h), PRODUCTS)  # `goto` landed
     search = p.advance(h)
     _feed(h, search, PRODUCTS)
 
@@ -1510,8 +1501,8 @@ def test_ledger_longer_than_max_visits_completes() -> None:
     items = json.dumps([{"query": q, "qty": 1} for q in ("a1", "b2", "c3", "d4")])
     p = _arm_ledger(items)
     h = _history()
-    _feed(h, p.advance(h), ELSEWHERE)
     _feed(h, p.advance(h), HOME)
+    _feed(h, p.advance(h), PRODUCTS)  # `goto` landed
     step = p.advance(h)
     for _ in range(4):
         assert step.tool_names() == ["note", "run_macro"]  # the search leg
@@ -1546,8 +1537,8 @@ def _suspend_a_confirm() -> None:
     write_pack(playbooks={"notify": CONFIRMING})
     p = _program(name="notify", keyword="milk")
     h = _history()
-    _feed(h, p.advance(h), ELSEWHERE)
     _feed(h, p.advance(h), HOME)
+    _feed(h, p.advance(h), RESULTS)
     send = p.advance(h)
     text = send.tool_calls[1].arguments["inputs"]["message"]
     _feed(h, send, _thread((text, 0.75, 0.3)))
@@ -1571,8 +1562,8 @@ def test_missing_suspend_result_drops_the_suspension_file() -> None:
     write_pack(playbooks={"notify": CONFIRMING})
     p = _program(name="notify", keyword="milk")
     h = _history()
-    _feed(h, p.advance(h), ELSEWHERE)
     _feed(h, p.advance(h), HOME)
+    _feed(h, p.advance(h), RESULTS)
     send = p.advance(h)
     text = send.tool_calls[1].arguments["inputs"]["message"]
     _feed(h, send, _thread((text, 0.75, 0.3)))
@@ -1584,40 +1575,6 @@ def test_missing_suspend_result_drops_the_suspension_file() -> None:
     summary = _finish(p, h, p.advance(h))
     assert "suspension dropped" in summary
     assert not suspension.suspended_path().exists()
-
-
-def test_check_warns_when_a_gate_reenters_blind() -> None:
-    # Non-payment gates: no `return:` and a fall-through leg without
-    # `enter:` means the first post-consent action runs off the IM
-    # thread — advisory (the payment case is a parse error).
-    _write_channel()
-    text = """\
-description: gate then blind leg
-inputs:
-  keyword:
-    description: what
-nodes:
-  - id: open
-    type: LEG
-    macro: open-app
-    with: {message: "{inputs.keyword}"}
-    verify: pages.home
-  - id: addr
-    type: HUMAN_GATE
-    gate: address
-    compose: addr-check
-    message: "address ok? reply ok or no"
-  - id: finish
-    type: LEG
-    macro: add-cart
-    with: {message: "x"}
-    verify: pages.results
-"""
-    write_pack(playbooks={"handoff": text})
-
-    spec, _ = setup.load_spec("demo", "handoff", require_live=False)
-
-    assert any("off the IM thread" in w for w in setup.readiness_warnings(spec))
 
 
 # ---------- decide context slices ----------
@@ -1729,7 +1686,7 @@ def test_gate_hands_over_when_no_total_is_readable(caplog) -> None:
     write_pack(playbooks={"pay": GATED})
     p = _program(name="pay", keyword="milk")
     h = _history()
-    _feed(h, p.advance(h), ELSEWHERE)  # locate → top
+    _feed(h, p.advance(h), HOME)  # the start page
     _feed(h, p.advance(h), RESULTS)  # the verified results page — no ¥ on it
 
     with caplog.at_level("INFO"):
@@ -1742,14 +1699,14 @@ def test_gate_hands_over_when_the_cap_cannot_resolve(caplog) -> None:
     # A `{inputs.cap}` mandate whose input turns out non-numeric: no cap means
     # no over-budget rule, so the gate hands over rather than asking
     # with an unenforceable mandate.
-    ref_cap = GATED.replace("max_amount: 100", 'max_amount: "{inputs.cap}"').replace(
+    ref_cap = GATED.replace("budget: 100", 'budget: "{inputs.cap}"').replace(
         "inputs:\n", "inputs:\n  cap:\n    description: budget\n"
     )
     _write_channel()
     write_pack(playbooks={"pay": ref_cap})
     p = _program(name="pay", keyword="milk", cap="oops")
     h = _history()
-    _feed(h, p.advance(h), ELSEWHERE)
+    _feed(h, p.advance(h), HOME)
     _feed(h, p.advance(h), _sheet())
 
     with caplog.at_level("INFO"):
@@ -1805,21 +1762,35 @@ def test_reconcile_hands_over_when_the_cart_never_converges(caplog) -> None:
 
 # ---------- the rescue ladder ----------
 
+# Both walk pages carry learned geometry (the occluded verdict needs
+# it); `done` keeps the route's last landing distinct so `_locate`
+# never fast-forwards a booted walk.
 RESCUE_PAGES = """\
 home:
   anchors: ["Files", "Recent"]
 results:
-  anchors: ["综合"]
+  anchors: ["综合", "销量"]
+done:
+  anchors: ["AllDone"]
 """
 
-# home with both anchors visible — matches against the learned geometry.
+# Screens with both anchors visible — match against learned geometry.
 HOME2 = make_screen(("Files", 0.5, 0.10), ("Recent", 0.5, 0.50)).text
+RESULTS2 = make_screen(("综合", 0.5, 0.10), ("销量", 0.5, 0.50)).text
 
-# A popup band over home: Files still visible, Recent hidden under four
-# unexpected labels clustered where Recent should be — reads `occluded`
-# with the band around cy 0.50 (± OVERLAY_PAD).
+# A popup band over a page: the top anchor still visible, the lower one
+# hidden under four unexpected labels clustered at its learned position
+# — reads `occluded` with the band around cy 0.50 (± OVERLAY_PAD).
 POPUP_OVER_HOME = make_screen(
     ("Files", 0.5, 0.10),
+    ("new user gift pack", 0.4, 0.44),
+    ("mega deal inside", 0.6, 0.48),
+    ("one free with one", 0.5, 0.52),
+    ("以后再说", 0.5, 0.56),
+).text
+
+POPUP_OVER_RESULTS = make_screen(
+    ("综合", 0.5, 0.10),
     ("new user gift pack", 0.4, 0.44),
     ("mega deal inside", 0.6, 0.48),
     ("one free with one", 0.5, 0.52),
@@ -1829,7 +1800,7 @@ POPUP_OVER_HOME = make_screen(
 LOCKED_MID = make_screen(("Enter Passcode", 0.5, 0.5)).text
 
 
-def _learn_home() -> None:
+def _learn_pages() -> None:
     from physiclaw.conductor.pages import LearnedAnchor, LearnedPage, save_learned
 
     save_learned(
@@ -1842,19 +1813,27 @@ def _learn_home() -> None:
                 },
                 threshold=0.9,
                 observations=4,
-            )
+            ),
+            "results": LearnedPage(
+                anchors={
+                    "综合": LearnedAnchor("综合", 0.5, 0.10, 0.05, 1.0, 1.0),
+                    "销量": LearnedAnchor("销量", 0.5, 0.50, 0.05, 1.0, 1.0),
+                },
+                threshold=0.9,
+                observations=4,
+            ),
         },
     )
 
 
-def _rescue_walk(flow: str = FLOW):
-    """A FLOW walk over pages with learned `home` geometry (the occluded
-    verdict needs it), driven past the opening peek to leg 1."""
-    write_pack(pages=RESCUE_PAGES, playbooks={"flow": flow})
-    _learn_home()
+def _rescue_walk(flow: str = FLOW, *, macros: tuple = ("open-app", "add-cart")):
+    """A FLOW walk over pages with learned geometry (the occluded
+    verdict needs it), driven past the opening peek to move 1."""
+    write_pack(pages=RESCUE_PAGES, macros=macros, playbooks={"flow": flow})
+    _learn_pages()
     p = _program(keyword="milk")
     h = _history()
-    _feed(h, p.advance(h), ELSEWHERE)
+    _feed(h, p.advance(h), HOME2)  # the start page
     leg1 = p.advance(h)
     assert leg1 is not None and leg1.tool_names() == ["note", "run_macro"]
     return p, h, leg1
@@ -1862,26 +1841,31 @@ def _rescue_walk(flow: str = FLOW):
 
 def test_popup_at_verify_is_dismissed_and_the_walk_continues() -> None:
     p, h, leg1 = _rescue_walk()
-    _feed(h, leg1, POPUP_OVER_HOME)  # verify blocked by an overlay
+    _feed(h, leg1, POPUP_OVER_RESULTS)  # the landing check blocked by an overlay
 
     dismiss = p.advance(h)
     assert dismiss is not None and dismiss.tool_names() == ["note", "tap"]
     assert "以后再说" in dismiss.tool_calls[0].arguments["summary"]
 
-    _feed(h, dismiss, HOME2)  # overlay gone — home restored, verify holds
+    _feed(h, dismiss, RESULTS2)  # overlay gone — results restored, landing holds
     leg2 = p.advance(h)
     assert leg2 is not None
     assert leg2.tool_calls[1].arguments["name"] == "demo/add-cart"
-    assert "rescue: restored demo.home" in leg2.tool_calls[0].arguments["summary"]
+    assert "rescue: restored demo.results" in leg2.tool_calls[0].arguments["summary"]
 
 
-def test_wrong_page_at_enter_goes_back_then_runs_the_leg() -> None:
-    # leg 2 expects `results` but the walk stands on `home` — wandered
-    # relative to the leg's precondition. go_back pops, the enter check
-    # re-runs on the restored page, and the leg fires: the cursor never
-    # moved (I1).
-    p, h, leg1 = _rescue_walk(FLOW.replace("enter: pages.home", "enter: pages.results"))
-    _feed(h, leg1, HOME2)  # verify home holds; enter results does not
+def test_wrong_page_on_resume_goes_back_then_runs_the_move() -> None:
+    # A resumed walk stands on `home` while its move expects `results` —
+    # wandered relative to the derived precondition. go_back pops, the
+    # enter check re-runs on the restored page, and the move fires: the
+    # cursor never moved (I1).
+    write_pack(pages=RESCUE_PAGES, playbooks={"flow": FLOW})
+    _learn_pages()
+    _write_suspended("flow", 1, values={"keyword": "milk"})
+    p = setup.load_suspended(channel.load_channel())
+    assert p is not None
+    h = _history()
+    _feed(h, p.advance(h), HOME2)  # `search` enters at results — wrong page
 
     settle = p.advance(h)  # rung 0: the free settle re-peek
     assert settle is not None and settle.tool_names() == ["note", "peek"]
@@ -1889,7 +1873,7 @@ def test_wrong_page_at_enter_goes_back_then_runs_the_leg() -> None:
     back = p.advance(h)
     assert back is not None and back.tool_names() == ["note", "go_back"]
 
-    _feed(h, back, RESULTS)
+    _feed(h, back, RESULTS2)
     leg2 = p.advance(h)
     assert leg2 is not None
     assert leg2.tool_calls[1].arguments["name"] == "demo/add-cart"
@@ -1902,17 +1886,17 @@ def test_locked_mid_walk_unlocks_then_continues() -> None:
     unlock = p.advance(h)
     assert unlock is not None and unlock.tool_names() == ["note", "unlock_phone"]
 
-    _feed(h, unlock, HOME2)
+    _feed(h, unlock, RESULTS2)
     leg2 = p.advance(h)
     assert leg2 is not None
     assert leg2.tool_calls[1].arguments["name"] == "demo/add-cart"
 
 
 # A popup whose buttons match NO vocabulary word — rung 1 has nothing,
-# the micro tier gets asked. Four unexpected labels around Recent's
-# learned position keep the occluded verdict firing.
+# the micro tier gets asked. Four unexpected labels around the lower
+# anchor's learned position keep the occluded verdict firing.
 WORDLESS_POPUP = make_screen(
-    ("Files", 0.5, 0.10),
+    ("综合", 0.5, 0.10),
     ("limited offer", 0.4, 0.44),
     ("mega deal inside", 0.6, 0.48),
     ("one free with one", 0.5, 0.52),
@@ -1943,7 +1927,7 @@ def test_wordless_popup_asks_the_micro_tier_then_taps_and_learns() -> None:
     )
     assert tap is not None and tap.tool_names() == ["note", "tap"]
 
-    _feed(h, tap, HOME2)  # dismissed — home restored
+    _feed(h, tap, RESULTS2)  # dismissed — results restored
     leg2 = p.advance(h)
     assert leg2 is not None
     assert leg2.tool_calls[1].arguments["name"] == "demo/add-cart"
@@ -1989,9 +1973,9 @@ def test_zero_gesture_leg_abort_under_an_overlay_retries_once() -> None:
     _feed(h, dismiss, HOME2)  # popup gone — the page the guard needed
     retry = p.advance(h)
     assert retry is not None and retry.tool_names() == ["note", "run_macro"]
-    assert retry.tool_calls[1].arguments["name"] == "demo/open-app"  # SAME leg
+    assert retry.tool_calls[1].arguments["name"] == "demo/open-app"  # SAME move
 
-    _feed(h, retry, HOME2)  # this time the leg lands
+    _feed(h, retry, RESULTS2)  # this time the move lands
     leg2 = p.advance(h)
     assert leg2 is not None
     assert leg2.tool_calls[1].arguments["name"] == "demo/add-cart"
@@ -2016,18 +2000,9 @@ def test_acted_leg_abort_still_hands_over() -> None:
 def test_reset_rung_force_quits_reopens_and_relocates() -> None:
     # The big hammer: back budget spent with a pack `open` macro on
     # hand → force_quit, reopen, then locate from the top — the
-    # killed-session resume path, so leg 1 (whose verify page the open
-    # landed on) is fast-forwarded, never replayed.
-    write_pack(
-        pages=RESCUE_PAGES,
-        macros=("open-app", "add-cart", "open"),
-        playbooks={"flow": FLOW},
-    )
-    _learn_home()
-    p = _program(keyword="milk")
-    h = _history()
-    _feed(h, p.advance(h), ELSEWHERE)
-    leg1 = p.advance(h)
+    # killed-session resume path. The open lands on the START page, so
+    # the walk restarts from move 1.
+    p, h, leg1 = _rescue_walk(macros=("open-app", "add-cart", "open"))
     _feed(h, leg1, ELSEWHERE)  # verify fails on an unknown screen
     settle = p.advance(h)
     assert settle.tool_names() == ["note", "peek"]  # rung 0
@@ -2046,11 +2021,11 @@ def test_reset_rung_force_quits_reopens_and_relocates() -> None:
     assert reopen is not None and reopen.tool_names() == ["note", "run_macro"]
     assert reopen.tool_calls[1].arguments == {"name": "demo/open"}
 
-    _feed(h, reopen, HOME2)  # app home = leg 1's verify page
-    leg2 = p.advance(h)
-    assert leg2 is not None
-    assert leg2.tool_calls[1].arguments["name"] == "demo/add-cart"
-    assert "rescue: demo reset" in leg2.tool_calls[0].arguments["summary"]
+    _feed(h, reopen, HOME2)  # the open landed on the START page
+    redo = p.advance(h)  # locate from the top — the walk restarts cleanly
+    assert redo is not None
+    assert redo.tool_calls[1].arguments["name"] == "demo/open-app"
+    assert "rescue: demo reset" in redo.tool_calls[0].arguments["summary"]
 
 
 def test_rescue_back_budget_exhausts_into_a_handover_naming_the_rungs() -> None:
@@ -2084,9 +2059,9 @@ def test_completed_walk_records_one_completed_run_line() -> None:
     write_pack(playbooks={"flow": FLOW})
     p = _program(keyword="milk")
     h = _history()
-    _feed(h, p.advance(h), ELSEWHERE)
     _feed(h, p.advance(h), HOME)
     _feed(h, p.advance(h), RESULTS)
+    _feed(h, p.advance(h), DONE)
 
     _finish(p, h, p.advance(h))
 
@@ -2103,11 +2078,11 @@ def test_handover_records_run_line_at_the_failing_node() -> None:
     write_pack(playbooks={"flow": FLOW})
     p = _program(keyword="milk")
     h = _history()
-    _feed(h, p.advance(h), ELSEWHERE)
-    _feed(h, p.advance(h), RESULTS)  # leg 1 landed on the WRONG page
-    _feed(h, p.advance(h), RESULTS)  # rung 0 settle re-peek — still wrong
-    _feed(h, p.advance(h), RESULTS)  # rescue back #1 — still wrong
-    _feed(h, p.advance(h), RESULTS)  # rescue back #2 — still wrong
+    _feed(h, p.advance(h), HOME)
+    _feed(h, p.advance(h), HOME)  # move 1 landed on the WRONG page
+    _feed(h, p.advance(h), HOME)  # rung 0 settle re-peek — still wrong
+    _feed(h, p.advance(h), HOME)  # rescue back #1 — still wrong
+    _feed(h, p.advance(h), HOME)  # rescue back #2 — still wrong
 
     _finish(p, h, p.advance(h))
 
@@ -2190,10 +2165,9 @@ def test_ledger_decide_context_quotes_the_previous_picks() -> None:
     )
     p = _arm_ledger()
     h = _history()
-    _feed(h, p.advance(h), ELSEWHERE)
     _feed(h, p.advance(h), HOME)
-    _feed(h, p.advance(h), PRODUCTS)
-
+    _feed(h, p.advance(h), PRODUCTS)  # `goto` landed
+    _feed(h, p.advance(h), PRODUCTS)  # `search` landed
     req = p.advance(h)
 
     assert isinstance(req, DecisionRequest)
@@ -2213,8 +2187,8 @@ def test_session_setup_assembles_the_activation_context() -> None:
     _write_memory("## shopping\nprefers oat milk\n\n## other\nsecret\n")
     daylog.append_log("[11:02] demo: bought milk ¥45 — reported to the user")
     spec = FLOW.replace(
-        "description: two legs\n",
-        "description: two legs\nparse_context: [memory.shopping]\n",
+        "description: two moves\n",
+        "description: two moves\ncontext: [memory.shopping]\n",
     )
     write_pack(playbooks={"flow": spec})
 
@@ -2237,8 +2211,8 @@ def test_abandon_records_a_mid_flight_walk_and_breadcrumbs_it() -> None:
     write_pack(playbooks={"flow": FLOW})
     p = _program(keyword="milk")
     h = _history()
-    _feed(h, p.advance(h), ELSEWHERE)
-    p.advance(h)  # leg 1 synthesized — the walk acted, then the session dies
+    _feed(h, p.advance(h), HOME)
+    p.advance(h)  # move 1 synthesized — the walk acted, then the session dies
 
     p.abandon()
 
@@ -2258,9 +2232,9 @@ def test_abandon_is_a_no_op_for_unstarted_and_closed_walks() -> None:
 
     p = _program(keyword="milk")
     h = _history()
-    _feed(h, p.advance(h), ELSEWHERE)
     _feed(h, p.advance(h), HOME)
     _feed(h, p.advance(h), RESULTS)
+    _feed(h, p.advance(h), DONE)
     _finish(p, h, p.advance(h))  # completed — latched
 
     p.abandon()
@@ -2276,9 +2250,9 @@ def test_failed_decision_records_handover_with_micro_count() -> None:
     write_pack(playbooks={"branch": BRANCH})
     p = _program(name="branch", keyword="milk")
     h = _history()
-    _feed(h, p.advance(h), ELSEWHERE)
     _feed(h, p.advance(h), HOME)
     _feed(h, p.advance(h), RESULTS)
+    _feed(h, p.advance(h), DONE)
     step = p.advance(h)
     assert isinstance(step, DecisionRequest)
 
@@ -2312,7 +2286,7 @@ def test_inline_leg_dispatches_under_its_synthesized_name() -> None:
     write_pack(playbooks={"flow": INLINE_FLOW})
     p = _program(keyword="milk")
     h = _history()
-    _feed(h, p.advance(h), ELSEWHERE)  # unknown page → start from the top
+    _feed(h, p.advance(h), HOME)  # the start page
 
     leg = p.advance(h)
 

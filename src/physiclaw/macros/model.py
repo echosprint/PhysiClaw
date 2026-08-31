@@ -89,6 +89,28 @@ REASON_EXPECT_FAILED = "expect_failed"
 REASON_BAD_INPUT = "bad_input"
 REASON_TIMEOUT = "timeout"
 
+# The gesture target's two halves: a `bbox` never travels alone — the
+# REQUIRED `label` beside it says what the coordinates ARE, and lets the
+# runner heal a press to where that text sits today. Full rules live in
+# the format README (`scaffold.README_CONTENT`). The cap is the ONE
+# alts-per-target number — `pages.MAX_ANCHOR_READINGS` re-exports it
+# (the `_spec` doctrine: the macro layer is the rules' true home).
+TARGET_LABEL = "label"
+TARGET_BBOX = "bbox"
+MAX_LABEL_READINGS = 4
+
+
+def label_readings(args: dict) -> "tuple[str, ...]":
+    """A target's `label` as the tuple of its readings — the ONE reader
+    of the string-or-list shape. Parse validates through it and the
+    runner heals through it, so the two can never disagree on what
+    counts as a reading. () when the step carries no label."""
+    raw = args.get(TARGET_LABEL)
+    if raw is None:
+        return ()
+    return tuple(raw) if isinstance(raw, list) else (raw,)
+
+
 # The macro-local settle step. NOT an MCP tool — the runner sleeps
 # in-process rather than paying a round trip to block the arm server — and
 # NOT in the shared gesture vocabulary: no classifier outside this package

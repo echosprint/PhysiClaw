@@ -2,7 +2,7 @@
 
 The IM thread's page fingerprint plus rehearsed send/open macros,
 recorded on-device like any pack — but playbooks never name it: asks
-(CONFIRM / HUMAN_GATE) and activation reach it through the conductor's
+(tell / ask) and activation reach it through the conductor's
 node types. The three convention names live in pages.py (the scaffold
 interpolates them).
 """

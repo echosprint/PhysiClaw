@@ -44,6 +44,8 @@ steps:
   - name: open-wechat
     tool: tap
     with:
+      # 每个 bbox 旁必须写 `label`，说明这组坐标是什么
+      label: "微信图标"
       # [左, 上, 右, 下]，归一化的屏幕坐标。
       bbox: [0.62, 0.18, 0.85, 0.30]
 
@@ -60,6 +62,7 @@ steps:
   - name: open-chat
     tool: tap
     with:
+      label: "用户昵称"
       bbox: [0.05, 0.10, 0.95, 0.20]
     # 如果已经在聊天界面就跳过此步。
     skip_when:
@@ -76,6 +79,7 @@ steps:
   - name: focus-input
     tool: tap
     with:
+      label: "消息输入框"
       bbox: [0.05, 0.90, 0.75, 0.96]
     # 如果键盘已弹起（能看到空格键），跳过此步。
     skip_when:
@@ -84,12 +88,14 @@ steps:
   - name: paste-menu
     tool: long_press
     with:
+      label: "消息输入框（键盘弹起后）"
       # 键盘弹起后输入框上移。
       bbox: [0.05, 0.56, 0.75, 0.62]
 
   - name: paste
     tool: tap
     with:
+      label: "粘贴"
       bbox: [0.10, 0.54, 0.20, 0.57]
     guard:
       require: {text: "粘贴", within: [0.03, 0.50, 0.35, 0.62]}
@@ -125,5 +131,7 @@ physiclaw macros run notify-user-wechat -i message=hi
 **让智能体来写。** 把 `claude` 或 `codex` 接到你的 MCP 服务上，让它替你生成宏。
 
 **先跑通，再启用。** 写死的 bbox 之所以可靠，是因为你在这台设备、这部手机、这套布局上真跑过一遍。
+
+**文字目标的 `label` 要写真实的屏幕文字。** 按钮挪位后点按会跟着文字走；图标和空白区域则写一句描述。
 
 **关注统计。** `physiclaw macros stats` 会列出每个宏的运行次数，据此确认宏有没有正常执行。

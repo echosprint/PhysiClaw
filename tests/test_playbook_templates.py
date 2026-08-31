@@ -40,11 +40,11 @@ def test_templates_exist() -> None:
 
 @pytest.mark.parametrize("app", PACKS)
 def test_manifest_is_the_canonical_entry(app: str) -> None:
-    # The `action.yml` contract: one manifest, `name` matching the
+    # The `action.yml` contract: one manifest, `app` matching the
     # folder, a description that says what AND when.
     meta = _manifest(app)
 
-    assert meta.get("name") == app
+    assert meta.get("app") == app
     assert meta.get("description", "").strip(), "description is the tier-1 index"
 
 

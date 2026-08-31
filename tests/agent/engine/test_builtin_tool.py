@@ -709,7 +709,7 @@ async def test_run_macro_zero_gesture_abort_does_not_burn(mocker) -> None:
     guarded = parse_macro(
         "name: demo\ndescription: d\nsteps:\n"
         "  - name: open-app\n    tool: tap\n"
-        "    with: {bbox: [0.1, 0.2, 0.3, 0.4]}\n"
+        "    with: {label: t, bbox: [0.1, 0.2, 0.3, 0.4]}\n"
         '    guard: {require: "Home"}\n',
         "demo",
     )

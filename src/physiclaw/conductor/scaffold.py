@@ -79,10 +79,11 @@ def render_pack_stub(app: str) -> str:
 
 
 PACK_TEMPLATE = """\
-# The pack spec — ONE file, the whole pack (the `action.yml` shape):
-# meta, `pages:` (the eyes), `playbooks:` (the walks). Macros — the
-# hands — are recorded beside it in macros/<name>/MACRO.yml.
-name: {app}          # must equal the directory name
+# The pack spec — ONE file, read top-down: meta, then each walk as a
+# ROUTE (page → move → page → move …), then `pages:` for anything off
+# the route. Directory macros (macros/<name>/MACRO.yml) hold hands
+# shared across playbooks; single-use hands embed in their moves.
+app: {app}           # which app this pack automates = the directory name
 description: EDIT ME — what this pack automates, and when to adopt it
 
 # Per-installation constants — mark them in any file below as the
@@ -94,76 +95,68 @@ description: EDIT ME — what this pack automates, and when to adopt it
 #     description: EDIT ME — what to fill in
 #     example: SomeOne
 
-# Page DECLARATIONS — semantics only, never geometry. Positions,
-# tolerances, and thresholds are captured on YOUR device
-# (`physiclaw conductor calibrate`); this section says which label
-# texts identify each page. Use `physiclaw conductor propose --live`
-# on each page for anchor candidates.
-pages:
-  home:
-    anchors:
-      - "EDIT ME"                  # a label text that identifies this page
-      # - {{text: "tab", region: bottom}}  # coarse band: top/bottom/left/right
-      # - {{text: ["Search", "搜索"]}}     # ONE anchor, either reading matches.
-      #   Alternates belong here, NOT as a second anchor: every declared
-      #   anchor is a share of the page's score, so a second spelling of
-      #   the same label would halve it.
-    # forbid: ["popup text"]       # veto terms — kills look-alike takeovers
-    # scrollable: true             # content may scroll under fixed chrome
-
-# The walks. Key = playbook name (referenced as {app}/<name>).
-# Node types (≤ {max_nodes} nodes, forward-only; the two sanctioned
-# loops: a DECIDE self-routing its call's re-ask arm — choose_item's
-# `scroll`, bounded by max_visits — and next_item's backward `next`
-# arm, bounded by the ledger):
-#   LEG        — run one of THIS pack's macros ({app}/macros/<name>/);
-#                `verify: pages.<name>` is the landing check against the
-#                `pages:` section above, optional `enter:` the precondition.
-#                The body may embed instead of a name (`macro:
-#                {{steps: [...]}}` — MACRO.yml grammar minus
-#                name/description/enabled, enabled with the playbook;
-#                `compensate:`/gate `return:` embed the same way).
-#                Directory macros remain for anything shared across
-#                playbooks — and the pack-level `open` must be one
-#   DECIDE     — one scoped decision call ({calls});
-#                `routes:` must route EVERY outcome; outputs wire forward as
-#                {{node.field}}. `context: [memory.<slug>]` shares ONLY
-#                the `## <slug>` section of memory.md (fail-closed)
-#   RECONCILE  — converge the cart (observed) on the `kind: list`
-#                ledger input (desired), in code
-#   CONFIRM    — send `message:` to the user (the EXACT text sent —
-#                write it in the user's language), then suspend
-#   HUMAN_GATE — send `message:`, then hold: continue only on a
-#                confirmed reply; after {gate_checks} unconfirmed checks
-#                the session suspends for the next wake-up. `gate: payment`
-#                fills {{gate.total}}/{{gate.cap}}; its `message:` must
-#                quote {{gate.total}}, and `over_message:` (sent when the
-#                total exceeds the cap) must quote both. Optional
-#                `return: <macro>` re-enters the app after the confirm;
-#                optional `revise: <next_item id>` turns "yes, but change
-#                it" into a list rewrite instead of a hand-over.
-# A LEG doing real damage carries `irreversible: <{classes}>`;
-# `payment` must sit behind a HUMAN_GATE and requires a `mandate:`.
+# The walks. Key = playbook name (referenced as {app}/<name>). A route
+# alternates WHERE (page — checked every time) with WHAT (a move);
+# ≤ {max_nodes} moves, forward-only except a decide's bounded re-ask
+# self-loop and next_item's backward `next` arm. Entry kinds:
+#   page   — where the walk must BE. Declare it in place (anchors
+#            beside the waypoint — semantics only; geometry is captured
+#            on YOUR device via `physiclaw conductor calibrate`), or
+#            reference a page declared elsewhere bare. The FIRST page
+#            is the start: not there at wake → go_back, then
+#            force_quit + its `open:` body, before any move runs.
+#   do     — run a gesture macro. The name IS the macro (the directory
+#            macro of that name, or the `macro:` body beside it — the
+#            MACRO.yml grammar minus name/description/enabled); the
+#            page that FOLLOWS is its landing check. `undo:` names the
+#            reverser. A move doing real damage carries
+#            `irreversible: <{classes}>` — `payment` must directly
+#            follow an `ask` that approves it, and needs a `budget:`.
+#   decide — the AI answers one bounded question ({calls});
+#            `routes:` maps EVERY answer to a move, a page ("this
+#            answer lands there"), or `escalate` (the model takes
+#            over). `context: [memory.<slug>]` shares ONLY that
+#            memory.md section (fail-closed); `max_asks` bounds re-asks.
+#   ask    — message the user and WAIT for approval; after
+#            {gate_checks} unconfirmed checks the session suspends.
+#            `approve: payment` fills {{ask.total}}/{{ask.cap}}; its
+#            `message:` must quote {{ask.total}}, and
+#            `over_budget_message:` (sent when the total exceeds the
+#            budget) must quote both. `return:` re-enters the app
+#            after the reply.
+#   tell   — message the user, then pause until any reply.
+#   sync   — converge the page it follows onto the `type: list` input
+#            (the shopping ledger), in code.
 playbooks:
   {playbook}:
     description: EDIT ME — one line saying what task this playbook does
     # A valid playbook is enabled by default; this scaffold starts off.
     enabled: false
-    # Inputs the conductor fills at activation; reference them as
-    # {{inputs.name}} in `with:` values. ≤ {max_inputs}; `default` = optional.
+    # Values filled at activation; reference them as {{inputs.name}} in
+    # `with:` values. ≤ {max_inputs}; `default` present = optional.
     inputs:
       message:
         description: EDIT ME — what this value means
         example: "hello"
-    nodes:
-      - id: open
-        type: LEG
-        macro: {macro}               # the recorded gesture (macros/{macro}/)
+    route:
+      - page: home              # ── START — not here → back, force_quit, open
+        anchors:
+          - "EDIT ME"           # a label text that identifies this page
+          # - {{text: "tab", region: bottom}}  # coarse band: top/bottom/left/right
+          # - {{text: ["Search", "搜索"]}}     # ONE anchor, either reading —
+          #   alternates belong here, NOT as a second anchor: every
+          #   declared anchor is a share of the page's score.
+        # forbid: ["popup text"]  # veto terms — kills look-alike takeovers
+        # scrollable: true        # content may scroll under fixed chrome
+        # open:                   # cold-launch the app to this page
+        #   steps:
+        #     - {{name: go-home, tool: home_screen}}
+        #     - {{name: open-app, tool: tap,
+#        with: {{label: "the app icon", bbox: [0.1, 0.1, 0.3, 0.2]}}}}
+      - do: {macro}             # the recorded gesture (macros/{macro}/)
         with: {{message: "{{inputs.message}}"}}
-        verify: pages.home           # landing check — hand over if not reached
-      - id: confirm
-        type: CONFIRM
-        compose: status-update
+      - page: home              # the landing check — hand over if not reached
+      - tell: done
         # The EXACT text sent to the user — write it in THEIR language.
         message: "EDIT ME — done with {{inputs.message}}, reply to continue"
 """
@@ -175,14 +168,17 @@ README_CONTENT = """\
 One directory per app, self-contained — everything its playbooks use:
 
     playbooks/<app>/
-      PLAYBOOK.yml         the whole pack in one file: meta (name,
-                           description, placeholders), `pages:` (page
-                           declarations — semantics; geometry is
-                           captured on-device into learned/pages/),
-                           and `playbooks:` (the walks; key = name)
-      macros/<n>/MACRO.yml pack-private macros (same format as
-                           ~/.physiclaw/macros/, but never shown to the
-                           model's macro list — the conductor's hands)
+      PLAYBOOK.yml         the whole pack in one file: meta (app,
+                           description, placeholders), `playbooks:`
+                           (each walk a ROUTE: page → move → page →
+                           move, top-down), and an optional `pages:`
+                           appendix for pages off any route. Anchors
+                           are semantics; geometry is captured
+                           on-device into learned/pages/.
+      macros/<n>/MACRO.yml pack-private macros shared across playbooks
+                           (same format as ~/.physiclaw/macros/, never
+                           shown to the model's macro list); single-use
+                           hands embed in their moves instead.
 
 Validate everything: `physiclaw playbooks check`. Scaffold a pack:
 `physiclaw playbooks init <app>` — or start from a shared template
@@ -191,29 +187,26 @@ values in `playbooks/placeholders.yml`; the repo's `playbooks/`
 directory ships some, and when physiclaw runs from a source checkout
 those load directly — home packs shadow same-named tree packs).
 
-Rules the checker enforces: a playbook references only its own pack's
-macros and pages (plus the reserved `ios.*` / `channel.*` built-ins);
-every DECIDE outcome is routed; `{{inputs.name}}` refs name declared inputs
-and `{{node.field}}` refs name EARLIER decide outputs; graphs are
-forward-only except a DECIDE's bounded re-ask self-loop
-(choose_item's `scroll`) and next_item's ledger loop; `irreversible:
-payment` nodes sit behind a HUMAN_GATE and require a `mandate:`.
+The route's shape IS the contract the checker enforces: the first
+entry is the start page (not there at wake → go_back, force_quit,
+its `open:`), every `do` is followed by the page it lands on, a
+`decide` routes EVERY answer (to a move, a page, or `escalate`),
+`{{inputs.name}}` refs name declared inputs and `{{move.field}}` refs
+name EARLIER decide outputs, routes are forward-only except a decide's
+bounded re-ask self-loop and next_item's ledger loop, and
+`irreversible: payment` moves directly follow an `ask` with
+`approve: payment` and require a `budget:`.
 
-Two optional conventions: a playbook-level `parse_context:`
-(`[memory.<slug>, …]` — memory sections the wake-time task reading
-receives, fail-closed), and a pack macro named `open` that launches
-the app to a home state — the rescue ladder's reset rung re-enters
-through it after a force-quit (absent → that rung is skipped).
+A page is declared ONCE — beside its waypoint, in the `pages:`
+appendix, or on another route — and referenced bare everywhere else.
+Macros embed as `macro: {{steps: [...]}}` (the MACRO.yml grammar minus
+name/description/enabled, enabled with the playbook); `undo:`,
+`return:`, and the start page's `open:` take the same form and
+dispatch argument-less. A playbook-level `context:`
+(`[memory.<slug>, …]`) names memory sections the wake-time task
+reading receives, fail-closed.
 
-A LEG's `macro:` may embed its body instead of a name
-(`macro: {{steps: [...]}}` — the MACRO.yml grammar minus
-name/description/enabled, enabled with its playbook); a leg's
-`compensate:` and a gate's `return:` take the same form (they dispatch
-argument-less — required inputs are rejected, either spelling).
-Directory macros remain for anything shared across playbooks; the
-pack-level `open` must be one.
-
-Limits: ≤ {max_nodes} nodes, ≤ {max_inputs} inputs per playbook.
+Limits: ≤ {max_nodes} moves, ≤ {max_inputs} inputs per playbook.
 Macro format: see ~/.physiclaw/macros/README.md (identical grammar).
 """.format(max_nodes=MAX_NODES, max_inputs=MAX_INPUTS)
 
@@ -221,7 +214,7 @@ Macro format: see ~/.physiclaw/macros/README.md (identical grammar).
 # ---------- the channel pack (conductor infrastructure) ----------
 
 CHANNEL_PACK_STUB = f"""\
-name: {CHANNEL_APP}
+app: {CHANNEL_APP}
 description: >-
   The user-channel pack — the conductor's route to YOUR user's IM
   thread. Holds the thread page + the send/open macros its asks run;
@@ -251,25 +244,25 @@ steps:
     tool: home_screen
   - name: open-im
     tool: tap
-    with: {{bbox: [0.1, 0.9, 0.2, 0.98]}}    # EDIT ME: the IM app's dock icon
+    with: {{label: "the IM app's dock icon", bbox: [0.1, 0.9, 0.2, 0.98]}}    # EDIT ME
   - name: open-thread
     tool: tap
-    with: {{bbox: [0.1, 0.15, 0.9, 0.22]}}   # EDIT ME: your thread's row
+    with: {{label: "your user's chat-row name", bbox: [0.1, 0.15, 0.9, 0.22]}}   # EDIT ME
   - name: raise-keyboard
     tool: tap
-    with: {{bbox: [0.1, 0.9, 0.7, 0.96]}}    # EDIT ME: the input box (hidden)
+    with: {{label: "the input box (hidden)", bbox: [0.1, 0.9, 0.7, 0.96]}}   # EDIT ME
   - name: clip
     tool: send_to_clipboard
     with: {{text: "{{message}}"}}
   - name: hold-input
     tool: long_press
-    with: {{bbox: [0.1, 0.5, 0.7, 0.56]}}    # EDIT ME: the input box (visible)
+    with: {{label: "the input box (visible)", bbox: [0.1, 0.5, 0.7, 0.56]}}  # EDIT ME
   - name: paste
     tool: tap
-    with: {{bbox: [0.1, 0.44, 0.3, 0.5]}}    # EDIT ME: the Paste button
+    with: {{label: "Paste", bbox: [0.1, 0.44, 0.3, 0.5]}}    # EDIT ME: the Paste button
   - name: send
     tool: tap
-    with: {{bbox: [0.8, 0.5, 0.98, 0.56]}}   # EDIT ME: the Send key
+    with: {{label: "Send", bbox: [0.8, 0.5, 0.98, 0.56]}}    # EDIT ME: the Send key
 """
 
 CHANNEL_OPEN_STUB = f"""\
@@ -281,10 +274,10 @@ steps:
     tool: home_screen
   - name: open-im
     tool: tap
-    with: {{bbox: [0.1, 0.9, 0.2, 0.98]}}    # EDIT ME: the IM app's dock icon
+    with: {{label: "the IM app's dock icon", bbox: [0.1, 0.9, 0.2, 0.98]}}    # EDIT ME
   - name: open-thread
     tool: tap
-    with: {{bbox: [0.1, 0.15, 0.9, 0.22]}}   # EDIT ME: your thread's row
+    with: {{label: "your user's chat-row name", bbox: [0.1, 0.15, 0.9, 0.22]}}   # EDIT ME
 """
 
 
@@ -348,13 +341,10 @@ def init_pack(app: str) -> Path:
     macro_dir.mkdir(parents=True)
     write_text(root / PACK_FILENAME, render_pack_stub(app))
     write_text(macro_dir / MACRO_FILENAME, render_example_macro())
-    # The reset-rung convention (`pages.OPEN_MACRO`): a macro named
-    # `open` that launches THIS app to a home state. Scaffolded disabled
-    # like everything; a pack that never records it just loses the
-    # rescue ladder's force-quit rung, nothing else.
-    open_dir = root / PACK_MACROS_DIRNAME / OPEN_MACRO
-    open_dir.mkdir(parents=True)
-    write_text(open_dir / MACRO_FILENAME, macro_scaffold.render_init(OPEN_MACRO))
+    # No `open` directory macro is scaffolded anymore: the start page's
+    # `open:` body (commented in the stub) is the primary spelling of
+    # the cold-launch; a directory `open` remains legal for packs whose
+    # playbooks share one.
     ensure_format_readme()
     return root
 
@@ -362,7 +352,7 @@ def init_pack(app: str) -> Path:
 # ---------- the ios pack (OS states the conductor must name) ----------
 
 IOS_PACK_STUB = f"""\
-name: {IOS_APP}
+app: {IOS_APP}
 description: >-
   iOS system states the conductor must name — no playbooks, no macros.
   Geometry is captured on YOUR device (conductor calibrate ios --guided).

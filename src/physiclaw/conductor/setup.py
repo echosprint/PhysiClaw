@@ -57,10 +57,8 @@ from physiclaw.conductor.pages import (
     prints_for_app,
 )
 from physiclaw.conductor.playbook import (
-    ConfirmNode,
     DecideNode,
     HumanGateNode,
-    LegNode,
     Pack,
     Playbook,
     PlaybookError,
@@ -177,11 +175,10 @@ def readiness_warnings(spec: Playbook) -> list[str]:
     """The actionable non-blockers `playbooks check` prints: things that
     let a walk start and then quietly under-perform. Advisory by design —
     each is legal, and the author is told the cost rather than refused."""
-    return (
-        _memory_slice_warnings(spec)
-        + _gate_word_warnings(spec)
-        + _gate_reentry_warnings(spec)
-    )
+    # (A third warning — an ask with no `return:` followed by a blind
+    # move — retired with the route grammar: a move's enter is DERIVED
+    # from its preceding waypoint, so no move can run blind anymore.)
+    return _memory_slice_warnings(spec) + _gate_word_warnings(spec)
 
 
 def _memory_slice_warnings(spec: Playbook) -> list[str]:
@@ -238,29 +235,6 @@ def _gate_word_warnings(spec: Playbook) -> list[str]:
     return out
 
 
-def _gate_reentry_warnings(spec: Playbook) -> list[str]:
-    """After any gate's confirmed reply the phone shows the IM thread. The
-    payment case is a parse ERROR; for other gates a fall-through leg with
-    no `enter:` (and no gate `return:`) runs its macro blind off the
-    thread — the verify check catches the landing, but the gestures
-    already happened on the messenger."""
-    out = []
-    nodes = spec.nodes
-    for i, node in enumerate(nodes):
-        if not isinstance(node, HumanGateNode) or node.return_macro is not None:
-            continue
-        nxt = nodes[i + 1] if i + 1 < len(nodes) else None
-        if nxt is None or isinstance(nxt, (ConfirmNode, HumanGateNode)):
-            continue
-        if not (isinstance(nxt, LegNode) and nxt.enter is not None):
-            out.append(
-                f"gate {node.id!r}: no `return:` and {nxt.id!r} declares no "
-                "`enter:` — after a confirmed reply the first action runs "
-                "off the IM thread"
-            )
-    return out
-
-
 def walk_registry(program: "Program", channel: "Channel | None") -> dict[str, Macro]:
     """The qualified dispatch registry one live walk needs — its own
     pack's macros plus the channel's. The ONE spelling of that rule:
@@ -294,7 +268,7 @@ class Activation:
 
     entries: dict[str, tuple[Playbook, Pack]]
     channel: Channel
-    # parse_task's context: the entries' declared `parse_context:`
+    # parse_task's context: the entries' declared `context:`
     # memory slices plus the recent completed-walk history — assembled
     # once at wake by `session_setup` (`_activation_context`).
     context: str = ""
@@ -430,7 +404,7 @@ def session_setup() -> "tuple[Program | None, Overture | None, dict[str, Macro]]
 def _activation_context(entries: dict[str, tuple[Playbook, Pack]]) -> str:
     """parse_task's context, assembled once at wake, from the agent's
     OWN memory convention (never a conductor-private store): the union
-    of the offered playbooks' `parse_context:` memory slices
+    of the offered playbooks' `context:` memory slices
     (fail-closed — no matching `## <slug>` section means no memory, the
     decide contract) plus the recent daily-log entries — the same
     window the engine preloads into the model's wake context
@@ -442,7 +416,7 @@ def _activation_context(entries: dict[str, tuple[Playbook, Pack]]) -> str:
         {
             entry.partition(".")[2]
             for spec, _pack in entries.values()
-            for entry in spec.parse_context
+            for entry in spec.context
         }
     )
     if slugs:

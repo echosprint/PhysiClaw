@@ -9,11 +9,13 @@ hand-copied, so a whitelist or limit change updates every surface in the
 same edit.
 """
 
+from physiclaw.common import gesture_vocab
 from physiclaw.macros.model import (
     ALLOWED_STEP_TOOLS,
     MACRO_FILENAME,
     MAX_CLAUSE_DEPTH,
     MAX_INPUTS,
+    MAX_LABEL_READINGS,
     MAX_PROSE_LEN,
     MAX_RUN_SECONDS,
     MAX_STEPS,
@@ -62,7 +64,12 @@ steps:
 
   - name: open-wechat
     tool: tap
-    with:
+    with:                    # every bbox carries a `label` saying what it IS:
+                             # the element's own on-screen text when it has
+                             # any (the runner then heals the tap to where
+                             # that text sits today), or a plain description
+                             # for icons and blank areas (annotation only)
+      label: "WeChat dock icon"
       bbox: [0.317, 0.893, 0.488, 0.98]   # ← the dock icon; move to YOURS
                                # No guard here. A guard runs BEFORE its own
                                # step, so "WeChat is open" is a claim about
@@ -86,6 +93,8 @@ steps:
   - name: open-chat
     tool: tap
     with:
+      label: "your-user-name"              # ← EDIT — the row's own text, so
+                                           # the tap follows it if rows shift
       bbox: [0.066, 0.086, 0.249, 0.186]   # ← the top chat row; move to YOURS
     skip_when:                 # WeChat often reopens INSIDE the last chat —
                                # when the title bar already shows your user,
@@ -108,6 +117,7 @@ steps:
   - name: focus-input-box      # the keyboard slides up after this tap
     tool: tap
     with:
+      label: "message input box"
       bbox: [0.1, 0.915, 0.69, 0.955]
     skip_when:                 # idempotence: this step's POSTCONDITION is
                                # "keyboard up" — if it already is, the box
@@ -122,6 +132,7 @@ steps:
   - name: paste-menu           # box sits higher with keyboard up
     tool: long_press
     with:
+      label: "message input box (keyboard up)"
       bbox: [0.118, 0.578, 0.893, 0.637]
     guard:                     # last check before the paste chain: still in
       require:                 # the right chat, whichever way we got here
@@ -131,6 +142,7 @@ steps:
   - name: paste
     tool: tap
     with:
+      label: "Paste"           # the menu bubble's own text — a healing target
       bbox: [0.099, 0.544, 0.197, 0.564]
     guard:
       require:                 # region-scoped: THE paste bubble, not the
@@ -189,6 +201,17 @@ Scaffold one with `physiclaw macros init <name>`, edit it, then:
   and `name` (required, unique per macro, lowercase/digits/hyphens with no
   spaces — the identifier `start_at` uses and the label in logs).
   Max {MAX_STEPS} steps.
+- `with.bbox` REQUIRES `with.label` beside it — a bbox never travels
+  alone. The label says what the coordinates ARE: the element's own
+  on-screen text when it has any, or a plain description for icons and
+  blank areas. When the label IS on-screen text, a press
+  ({" / ".join(sorted(gesture_vocab.PRESS_TOOLS))}) HEALS: it taps
+  where that text sits today if a match lies near the recorded spot,
+  falling back to the recorded bbox otherwise — never asserting
+  (presence checks stay `guard`'s job). One string, or a list of up to
+  {MAX_LABEL_READINGS} alternate readings of ONE target. A step that
+  heals on every run wants re-recording — the step log names each heal,
+  and the run log records the coordinates that actually fired.
 - `steps[].guard` — checked BEFORE the step fires, so it describes the
   screen the step NEEDS, never the screen the step produces. To wait on an
   app you just launched, use a `wait` step carrying an `expect`.
@@ -269,6 +292,10 @@ Habit: quote every text value.
   whatever step tripped three lines later.
 - Guard the steps where drift would hurt: taps at a FIXED position in a
   list that can reorder, and anything just short of a commit.
+- Give text targets their REAL on-screen text as `label` — that is what
+  lets the tap follow a button that moved. Volatile text (prices,
+  times, item titles) makes a bad label for the same reason it makes a
+  bad anchor.
 - Point a guard's `within` at the SAME region the step is about to tap.
   Checking that the label is somewhere in a wider band, then tapping a
   fixed bbox elsewhere, passes the guard and still hits the wrong row.

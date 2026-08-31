@@ -25,6 +25,7 @@ from physiclaw.common import paths
 from physiclaw.common.logger import write_json_atomic
 from physiclaw.common.text import read_text
 from physiclaw.conductor import _spec
+from physiclaw.macros.model import MAX_LABEL_READINGS
 
 log = logging.getLogger(__name__)
 
@@ -35,7 +36,10 @@ MAX_ANCHOR_LEN = 80
 # Acceptable readings of ONE anchor, canonical included (see `AnchorDecl`).
 # A handful covers the real cases — a bilingual label plus a known OCR
 # confusion; more than that is usually two anchors wearing one coat.
-MAX_ANCHOR_READINGS = 4
+# The VALUE is the macro layer's one alts-per-target cap (`_spec`
+# doctrine): anchors and gesture labels follow the same convention, so
+# the two caps can never drift.
+MAX_ANCHOR_READINGS = MAX_LABEL_READINGS
 
 
 # Reserved app namespaces a pack's page refs may cross into. Neither is
@@ -209,6 +213,68 @@ def parse_pages(text: str, app: str) -> dict[str, PageDecl]:
     return parse_pages_data(data, app)
 
 
+# The page-declaration field vocabulary, spelled ONCE: `_parse_page`
+# validates exactly these keys, `route_decl` decides whether a route
+# waypoint declares (vs merely references), and playbook.py derives its
+# waypoint key set from it — a new page field lands here and reaches
+# every door.
+PAGE_DECL_FIELDS = ("anchors", "forbid", "scrollable")
+
+
+def route_decl(entry: dict) -> "dict | None":
+    """The declaration half of one route waypoint — its PAGE_DECL_FIELDS
+    subset, or None for a bare reference. The ONE predicate for "does
+    this waypoint declare": `collect_page_decls` (the pack door) and the
+    playbook parser's prepass (the text door) must never disagree on
+    it."""
+    decl = {k: entry[k] for k in PAGE_DECL_FIELDS if k in entry}
+    return decl or None
+
+
+def collect_page_decls(doc: dict) -> dict:
+    """The pack's RAW page declarations, wherever they were written: the
+    `pages:` appendix plus every playbook-route waypoint carrying
+    declaration fields beside its `page:` key. Data-level on purpose —
+    this runs at the pack door (`scan_app_decls`, `load_pack`) before
+    any playbook parses, so the matcher sees route-declared pages
+    through every door and playbook.py never re-owns the page grammar.
+    A page is DECLARED exactly once per pack; a second site raises with
+    both named. Malformed playbook shapes are skipped here — each
+    playbook excludes itself at its own parse, never the pack."""
+    out: dict[str, Any] = {}
+    sites: dict[str, str] = {}
+    appendix = doc.get("pages")
+    if appendix is not None:
+        if not isinstance(appendix, dict):
+            raise PagesError("`pages` must be a YAML mapping of page name → spec")
+        for name, spec in appendix.items():
+            out[str(name)] = spec
+            sites[str(name)] = "the `pages:` section"
+    raw_playbooks = doc.get("playbooks")
+    if not isinstance(raw_playbooks, dict):
+        return out
+    for pb_name, pb in raw_playbooks.items():
+        route = pb.get("route") if isinstance(pb, dict) else None
+        if not isinstance(route, list):
+            continue
+        for entry in route:
+            if not isinstance(entry, dict) or "page" not in entry:
+                continue
+            decl = route_decl(entry)
+            if decl is None:
+                continue  # bare waypoint — a reference, not a declaration
+            name = str(entry["page"])
+            site = f"playbook {pb_name!r}'s route"
+            if name in out:
+                raise PagesError(
+                    f"page {name!r} declared twice — in {sites[name]} and on "
+                    f"{site}; declare once, reference it bare everywhere else"
+                )
+            out[name] = decl
+            sites[name] = site
+    return out
+
+
 def parse_pages_data(data, app: str) -> dict[str, PageDecl]:
     """The `pages:` section of a pack file → validated declarations."""
     _check_name(app, "app name")
@@ -230,7 +296,7 @@ def _parse_page(name: str, spec: Any) -> PageDecl:
     where = f"page `{name}`"
     if not isinstance(spec, dict):
         raise PagesError(f"{where}: spec must be a mapping")
-    unknown = sorted(set(spec.keys()) - {"anchors", "forbid", "scrollable"})
+    unknown = sorted(set(spec.keys()) - set(PAGE_DECL_FIELDS))
     if unknown:
         raise PagesError(f"{where}: unknown key(s): {', '.join(map(str, unknown))}")
 
@@ -316,18 +382,19 @@ def _anchor_text(value: Any, where: str) -> str:
 
 
 def scan_app_decls(app: str) -> dict[str, PageDecl]:
-    """The declared pages of one app pack — the `pages:` section of its
-    PLAYBOOK.yml; {} when the pack doesn't exist or declares none.
-    Raises PagesError on a malformed file (the CLI surfaces it; runtime
-    callers catch and treat the app as undeclared). The name is
-    validated BEFORE any path is built from it. Every pack reads the
-    same way, `ios` included — declarations live on disk, under the
-    user's hand, never in the wheel."""
+    """The declared pages of one app pack — the `pages:` appendix PLUS
+    every route-declared waypoint (`collect_page_decls`); {} when the
+    pack doesn't exist or declares none. Raises PagesError on a
+    malformed file (the CLI surfaces it; runtime callers catch and
+    treat the app as undeclared). The name is validated BEFORE any path
+    is built from it. Every pack reads the same way, `ios` included —
+    declarations live on disk, under the user's hand, never in the
+    wheel."""
     _check_name(app, "app name")
     doc = _spec.load_pack_doc(app, PagesError)
     if doc is None:
         return {}
-    return parse_pages_data(doc.get("pages"), app)
+    return parse_pages_data(collect_page_decls(doc), app)
 
 
 # ---------- learned store ----------

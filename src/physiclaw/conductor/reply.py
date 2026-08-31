@@ -1,4 +1,4 @@
-"""Gate reply reading — the deterministic tiers of the HUMAN_GATE check.
+"""Gate reply reading — the deterministic tiers of the ask's reply check.
 
 Ruled order: (0) there must be a NEW incoming message at all — no new
 bubble, no check, no budget spent; (1) exact word match on the WHOLE

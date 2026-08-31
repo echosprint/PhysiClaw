@@ -309,7 +309,7 @@ def test_parse_macro_undeclared_placeholder_raises() -> None:
 def test_parse_macro_placeholder_in_nested_list_checked() -> None:
     text = (
         "name: m\ndescription: d\nsteps:\n  - name: tap-1\n    tool: tap\n"
-        '    with:\n      bbox: ["{missing}", 0.1, 0.2, 0.3]\n'
+        '    with:\n      label: t\n      bbox: ["{missing}", 0.1, 0.2, 0.3]\n'
     )
 
     with pytest.raises(MacroError, match="placeholder.*missing"):
@@ -341,7 +341,7 @@ def test_local_step_tools_are_deliberately_absent_from_the_server() -> None:
 def test_parse_macro_skip_when_parsed_with_clause_grammar() -> None:
     text = (
         "name: m\ndescription: d\nsteps:\n  - name: peek-16\n    tool: peek\n"
-        "  - name: tap-2\n    tool: tap\n    with:\n      bbox: [0.1, 0.9, 0.7, 0.96]\n"
+        "  - name: tap-2\n    tool: tap\n    with:\n      label: t\n      bbox: [0.1, 0.9, 0.7, 0.96]\n"
         "    skip_when:\n"
         '      {or: [{text: "空格", within: [0.2, 0.83, 0.85, 0.96]}, {text: "space", within: [0.2, 0.83, 0.85, 0.96]}]}\n'
     )
@@ -503,7 +503,7 @@ def test_parse_macro_expect_is_rejected_outside_a_wait_step() -> None:
     # on one frame. The message has to show the fix, not only the rule.
     text = (
         "name: m\ndescription: d\nsteps:\n  - name: tap-1\n    tool: tap\n"
-        "    with: {bbox: [0.1, 0.2, 0.3, 0.4]}\n"
+        "    with: {label: t, bbox: [0.1, 0.2, 0.3, 0.4]}\n"
         '    expect: {text: "WeChat", within: [0.1, 0.0, 0.9, 0.2]}\n'
     )
 
@@ -1165,3 +1165,71 @@ def test_inline_macro_rejects_aliases() -> None:
 
     with pytest.raises(MacroError, match="aliases"):
         parse_inline_macro({"steps": [shared, shared]}, "buy.open")
+
+
+# ---------- the gesture target (`with: {label, bbox}`) ----------
+
+
+def test_parse_macro_bbox_requires_label() -> None:
+    # A bbox never travels alone — the label says what the coordinates
+    # are, so the file stays readable and the press can heal.
+    text = (
+        "name: m\ndescription: d\nsteps:\n  - name: tap-1\n    tool: tap\n"
+        "    with: {bbox: [0.1, 0.1, 0.2, 0.2]}\n"
+    )
+
+    with pytest.raises(MacroError, match="`bbox` needs a `label`"):
+        parse_macro(text, "m")
+
+
+def test_parse_macro_label_requires_bbox() -> None:
+    text = (
+        "name: m\ndescription: d\nsteps:\n  - name: tap-1\n    tool: tap\n"
+        '    with: {label: "x"}\n'
+    )
+
+    with pytest.raises(MacroError, match="nothing to label"):
+        parse_macro(text, "m")
+
+
+def test_parse_macro_label_alt_readings_are_one_target() -> None:
+    text = (
+        "name: m\ndescription: d\nsteps:\n  - name: tap-1\n    tool: tap\n"
+        '    with: {label: ["Buy now", "Buy with coupon"], bbox: [0.1, 0.1, 0.2, 0.2]}\n'
+    )
+
+    spec = parse_macro(text, "m")
+
+    assert spec.steps[0].args["label"] == ["Buy now", "Buy with coupon"]
+
+
+@pytest.mark.parametrize(
+    "label, fragment",
+    [
+        ("[]", "one string or up to"),
+        ('["a", "b", "c", "d", "e"]', "one string or up to"),
+        ('["a", "a"]', "duplicate `label` reading"),
+        ("[true]", "quote it"),
+    ],
+)
+def test_parse_macro_bad_label_readings_rejected(label: str, fragment: str) -> None:
+    text = (
+        "name: m\ndescription: d\nsteps:\n  - name: tap-1\n    tool: tap\n"
+        f"    with: {{label: {label}, bbox: [0.1, 0.1, 0.2, 0.2]}}\n"
+    )
+
+    with pytest.raises(MacroError, match=fragment):
+        parse_macro(text, "m")
+
+
+def test_parse_macro_literal_bbox_is_shape_checked() -> None:
+    # The runner reads the target's bbox now (healing measures drift
+    # from its center) — a malformed literal must fail at parse, not
+    # heal itself past the server's backstop.
+    text = (
+        "name: m\ndescription: d\nsteps:\n  - name: tap-1\n    tool: tap\n"
+        '    with: {label: "x", bbox: [0.5, 0.44, 0.4, 0.4]}\n'
+    )
+
+    with pytest.raises(MacroError, match="must satisfy"):
+        parse_macro(text, "m")

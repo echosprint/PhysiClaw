@@ -9,10 +9,10 @@ steps:
     with: {seconds: 1}
   - name: dismiss-switcher    # home_screen FROM home can open the app switcher
     tool: tap
-    with: {bbox: [0.42, 0.855, 0.58, 0.885]}
+    with: {label: "blank area below the app cards", bbox: [0.42, 0.855, 0.58, 0.885]}
   - name: open-wechat
     tool: tap
-    with: {bbox: [0.348, 0.893, 0.510, 0.973]}
+    with: {label: "the WeChat dock icon", bbox: [0.348, 0.893, 0.510, 0.973]}
   - name: settle
     tool: wait
     with: {seconds: 2}
@@ -20,22 +20,22 @@ steps:
     tool: go_back
   - name: open-search          # search is position-independent: the chat list
     tool: tap                  # reorders itself (Official Accounts folder, new
-    with: {bbox: [0.30, 0.098, 0.65, 0.132]}   # chats), so never tap a list row blind
+    with: {label: "Search", bbox: [0.30, 0.098, 0.65, 0.132]}  # chats), so never tap a list row blind
   - name: clip-name
     tool: send_to_clipboard
     with: {text: "<<CONTACT>>"}
   - name: hold-search-field
     tool: long_press
-    with: {bbox: [0.15, 0.063, 0.60, 0.100]}
+    with: {label: "the search input field", bbox: [0.15, 0.063, 0.60, 0.100]}
   - name: paste
     tool: tap
-    with: {bbox: [0.036, 0.114, 0.197, 0.162]}
+    with: {label: "Paste", bbox: [0.036, 0.114, 0.197, 0.162]}
   - name: results-settle
     tool: wait
     with: {seconds: 1}
   - name: open-contact         # first row under the Contacts header
     tool: tap
-    with: {bbox: [0.031, 0.185, 0.900, 0.235]}
+    with: {label: "<<CONTACT>>", bbox: [0.031, 0.185, 0.900, 0.235]}
     guard:
       # Only the row being tapped matters: section headers (Top Hits /
       # Contacts / 联系人) shuffle with search history, but the first

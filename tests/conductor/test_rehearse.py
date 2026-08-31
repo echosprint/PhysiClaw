@@ -24,22 +24,20 @@ HOME = make_screen(("Files", 0.5, 0.1)).text
 RESULTS = make_screen(("综合", 0.5, 0.1)).text
 
 FLOW = """\
-description: two legs
+description: two moves
 inputs:
   keyword:
     description: what to search
-nodes:
-  - id: open
-    type: LEG
+route:
+  - page: home
+  - do: open
     macro: open-app
     with: {message: "{inputs.keyword}"}
-    verify: pages.home
-  - id: search
-    type: LEG
+  - page: home
+  - do: search
     macro: add-cart
     with: {message: "go"}
-    enter: pages.home
-    verify: pages.results
+  - page: results
 """
 
 
@@ -187,7 +185,7 @@ async def test_rehearse_runs_a_disabled_playbook() -> None:
     write_pack(
         playbooks={
             "flow": FLOW.replace(
-                "description: two legs", "enabled: false\ndescription: two legs"
+                "description: two moves", "enabled: false\ndescription: two moves"
             )
         },
         macros=("open-app", "add-cart"),

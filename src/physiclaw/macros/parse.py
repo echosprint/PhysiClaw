@@ -25,6 +25,10 @@ recursive-descent style, sharing the scalar terminals at the bottom:
                 | {and|or: [clause × 2+]} | {not: clause}   # may carry within
                   # combinators nest ≤ MAX_CLAUSE_DEPTH levels
     bbox      ::= [left, top, right, bottom]      # unit floats, l<r, t<b
+                  # a `with.bbox` REQUIRES `with.label` beside it — what
+                  # the coordinates are (on-screen text heals the press
+                  # to where that text sits today; a description merely
+                  # documents). One string or ≤ MAX_LABEL_READINGS alts.
 
 Validation is all-or-nothing (a file failing ANY check is excluded
 whole, never partially loaded), so the runner never meets an unknown
@@ -57,10 +61,13 @@ from physiclaw.macros.model import (
     INPUT_NAME_RE,
     MAX_CLAUSE_DEPTH,
     MAX_INPUTS,
+    MAX_LABEL_READINGS,
     MAX_PROSE_LEN,
     MAX_RUN_SECONDS,
     MAX_STEPS,
     MAX_WAIT_SECONDS,
+    TARGET_BBOX,
+    TARGET_LABEL,
     WAIT,
     WAIT_SECONDS_ARG,
     Bbox,
@@ -71,6 +78,7 @@ from physiclaw.macros.model import (
     MacroInput,
     TextClause,
     check_name,
+    label_readings,
 )
 from physiclaw.macros.steps import GestureStep, Step, WaitStep
 from physiclaw.macros.template import TemplateError, placeholders
@@ -243,6 +251,7 @@ def _parse_step(
     if not isinstance(args, dict):
         raise MacroError(f"step {i}: `with` must be a mapping of arguments")
     _check_placeholders(args, input_names, i)
+    _check_target(args, i)
     if tool == WAIT:
         _check_wait_args(args, i, "expect" in step)
     # Required, identifier-shaped, and unique. A step name is what
@@ -318,6 +327,48 @@ def _parse_step(
     return GestureStep(
         name=name, guard=guard, skip_when=skip_when, mcp_tool=tool, args=dict(args)
     )
+
+
+def _check_target(args: dict, step_no: int) -> None:
+    """The gesture-target pairing rule: a `bbox` never travels alone —
+    the `label` beside it says what the coordinates ARE (and lets the
+    runner heal a press to where that text sits today), and a `label`
+    without a `bbox` has nothing to describe. Enforced on the `with:`
+    shape, not per tool: every bbox-taking gesture reads the same way."""
+    where = f"step {step_no}"
+    has_bbox, has_label = TARGET_BBOX in args, TARGET_LABEL in args
+    if has_bbox and not has_label:
+        raise MacroError(
+            f"{where}: `bbox` needs a `label` beside it — the label says "
+            "what the coordinates are (the element's own on-screen text, "
+            "or a plain description for icons and blank areas)"
+        )
+    if has_label and not has_bbox:
+        raise MacroError(
+            f"{where}: `label` describes a `bbox` — it has nothing to label without one"
+        )
+    if not has_label:
+        return
+    raw_bbox = args[TARGET_BBOX]
+    if not (isinstance(raw_bbox, list) and any(isinstance(v, str) for v in raw_bbox)):
+        # The runner now READS this value (healing measures drift from
+        # its center), so a literal target must not reach it malformed —
+        # the same argument `_check_wait_args` makes for `wait`. A bbox
+        # carrying `{placeholder}` strings stays server-checked (the
+        # placeholder pass above already vetted the names).
+        _bbox(raw_bbox, f"{where}: `bbox`")
+    readings = label_readings(args)
+    if not readings or len(readings) > MAX_LABEL_READINGS:
+        raise MacroError(
+            f"{where}: `label` takes one string or up to "
+            f"{MAX_LABEL_READINGS} alternate readings of ONE target"
+        )
+    seen: list[str] = []
+    for r in readings:
+        text = _require_str(r, f"{where}: `label`")
+        if text in seen:
+            raise MacroError(f"{where}: duplicate `label` reading {text!r}")
+        seen.append(text)
 
 
 def _check_wait_args(args: dict, step_no: int, has_expect: bool) -> None:

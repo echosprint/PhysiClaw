@@ -24,27 +24,44 @@ screen to work from), not an error to retry.
 
 import asyncio
 import logging
+import math
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 
 from physiclaw.common import gesture_vocab, verdict
+from physiclaw.common.bbox import center_of
+from physiclaw.common.listing import label_hit
 from physiclaw.macros.inputs import substitute
 from physiclaw.macros.model import (
     BLANK_SCREEN,
     REASON_EXPECT_FAILED,
     REASON_GUARD_FAILED,
     REASON_TOOL_ERROR,
+    TARGET_BBOX,
+    TARGET_LABEL,
     WAIT,
     Clause,
     MacroGuard,
     Screen,
+    label_readings,
     sub,
 )
 from physiclaw.macros.template import fill
 
 log = logging.getLogger(__name__)
+
+# How far (normalized screen distance between centers) a label match may
+# sit from the recorded bbox and still count as the SAME element. The
+# healing rule from the self-healing-locator literature, adapted: heal
+# small drift (a banner pushed content down, a layout shifted), refuse
+# teleports — a matching label far across the screen is more likely a
+# DIFFERENT element (another dialog's confirm button) than a moved one,
+# and off-radius falls back to the recorded coordinates exactly like a
+# miss. Fixed, not authorable: the trust boundary is the format's, not a
+# per-macro knob.
+HEAL_RADIUS = 0.2
 
 
 class McpCaller(Protocol):
@@ -146,6 +163,11 @@ class StepOutcome:
     verdict: bool | None = None
     view: list[dict] | None = None  # blocks worth logging for this step
     screen_text: str = ""  # the haystack a failed check actually saw
+    # Set when the step FIRED with different coordinates than authored
+    # (a healed press) — the forensic run log records these instead, so
+    # `macros runs` answers "where did the tap actually land". None =
+    # the authored args are the truth.
+    fired_args: dict[str, Any] | None = None
 
     @property
     def reason(self) -> str | None:
@@ -223,8 +245,9 @@ class GestureStep(Step):
         return self.args
 
     async def execute(self, ctx: RunContext) -> StepOutcome:
+        args, heal_note = self._lowered(ctx.screen)
         try:
-            blocks = await ctx.mcp.call_tool(self.mcp_tool, self.args)
+            blocks = await ctx.mcp.call_tool(self.mcp_tool, args)
         except Exception as e:
             log.warning("macro step %s (%s) failed: %s", self.name, self.tool, e)
             return StepOutcome(
@@ -237,12 +260,71 @@ class GestureStep(Step):
         # cannot forge.
         changed = verdict.parse(verdict.action_text(blocks))
         ctx.adopt_view(blocks, touched_screen=self.touches_screen)
+        healed = args.get(TARGET_BBOX) != self.args.get(TARGET_BBOX)
         return StepOutcome(
-            log_line=f"✓ {self.display()}{_verdict_note(changed)}",
+            log_line=f"✓ {self.display()}{_verdict_note(changed)}{heal_note}",
             outcome="ok",
             verdict=changed,
             view=blocks,
+            # Label kept beside the HEALED bbox: the forensic record stays
+            # an annotated target, just at the coordinates that fired.
+            fired_args={**self.args, TARGET_BBOX: args[TARGET_BBOX]}
+            if healed
+            else None,
         )
+
+    def _lowered(self, screen: Screen) -> tuple[dict[str, Any], str]:
+        """The wire arguments plus the log note explaining them.
+
+        `label` is the author's half of the target — the server knows
+        only `bbox`, so it is always stripped. For a PRESS gesture with a
+        readable screen it first gets its chance to HEAL: if a text row
+        matching a declared reading sits within HEAL_RADIUS of the
+        recorded center, the press goes where that text is TODAY (the
+        recorded bbox is the fallback, never the assertion — asserting
+        presence is `guard`'s job). A heal is always noted in the step
+        log: a step that heals every run is a step waiting to be
+        re-recorded.
+
+        Matching is the base rule (`label_hit`) ONLY — deliberately the
+        same regime every `guard`/`skip_when` clause sees, so a heal can
+        never match text a guard could not. The richer tiers (normalize,
+        variants, fuzzy) are the conductor's, behind the macros-never-
+        import-conductor boundary; an OCR-mangled label simply doesn't
+        heal, which the silent fallback absorbs by design."""
+        if TARGET_LABEL not in self.args:
+            return self.args, ""
+        args = dict(self.args)
+        del args[TARGET_LABEL]
+        if self.mcp_tool not in gesture_vocab.PRESS_TOOLS or not screen.readable:
+            return args, ""
+        readings = label_readings(self.args)
+        recorded = center_of(args[TARGET_BBOX])
+        if recorded is None:
+            # Only a substituted-placeholder bbox can get here (literal
+            # targets are `_bbox`-validated at parse) — no target center,
+            # no healing; the server judges the value.
+            return args, ""
+        best: tuple[float, Any] | None = None
+        for row in screen.rows:
+            if row.kind != "text":
+                continue
+            if not any(label_hit(t, row.label) for t in readings):
+                continue
+            c = center_of(row.bbox)
+            assert c is not None  # Element bboxes are valid by construction
+            d = math.dist(c, recorded)
+            if best is None or d < best[0]:
+                best = (d, row)
+        if best is None:
+            return args, ""
+        dist, row = best
+        if dist > HEAL_RADIUS:
+            # A matching label far from the recorded spot is suspicious,
+            # not a heal — noted so a wrong-element story is debuggable.
+            return args, f" (label {row.label.strip()!r} off-radius — recorded bbox)"
+        args[TARGET_BBOX] = list(row.bbox)
+        return args, f" (label {row.label.strip()!r} healed, drift {dist:.2f})"
 
     @property
     def touches_screen(self) -> bool:

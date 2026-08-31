@@ -80,6 +80,8 @@ home:
   anchors: ["Files"]
 results:
   anchors: ["综合"]
+done:
+  anchors: ["AllDone"]
 """
 
 PACK_MACRO = """\
@@ -92,7 +94,7 @@ inputs:
 steps:
   - name: go
     tool: tap
-    with: {{bbox: [0.1, 0.1, 0.2, 0.2]}}
+    with: {{label: t, bbox: [0.1, 0.1, 0.2, 0.2]}}
 """
 
 
@@ -102,7 +104,7 @@ def compose_pack_doc(
     """One unified PLAYBOOK.yml from the fixtures' historical pieces —
     pages text + full playbook docs, indented under their map keys (the
     keys ARE the names; entries carry no inner `name:`)."""
-    doc = f"name: {app}\ndescription: test pack\npages:\n{indent(pages, '  ')}\n"
+    doc = f"app: {app}\ndescription: test pack\npages:\n{indent(pages, '  ')}\n"
     if playbooks:
         doc += "playbooks:\n"
         for name, text in playbooks.items():
@@ -134,63 +136,55 @@ def write_pack(
 
 
 # The canonical ledger playbook — the full P8 stack (list input,
-# next_item loop, RECONCILE, payment gate with revise) — shared by the
-# parser and walk test files so grammar changes are edited ONCE.
+# next_item loop, sync, payment ask with revise) — shared by the
+# parser and walk test files so grammar changes are edited ONCE. Route
+# form: `goto` hops from the start page to `results` so the loop head
+# (`search`) ENTERS at the loop's own page — the backward `next:` arm
+# re-runs it from `results` on every later iteration, and a derived
+# enter of `home` would rescue instead of searching.
 LEDGERED = """\
 description: shop the list
 inputs:
   items:
     description: the buying list
-    kind: list
-mandate:
-  max_amount: 100
-nodes:
-  - id: open
-    type: LEG
+    type: list
+budget: 100
+route:
+  - page: home
+  - do: goto
     macro: open-app
-    with: {message: "cart"}
-    verify: pages.home
-  - id: search
-    type: LEG
+    with: {message: "go"}
+  - page: results
+  - do: search
     macro: open-app
     with: {message: "{item.query}"}
-    verify: pages.results
-  - id: choose
-    type: DECIDE
-    call: choose_item
+  - page: results
+  - decide: choose
+    uses: choose_item
     with: {criteria: "cheapest {item.query}"}
     routes: {pick: add, scroll: choose, none_fit: escalate, escalate: escalate}
-  - id: add
-    type: LEG
+  - do: add
     macro: add-cart
     with: {message: "add"}
-    verify: pages.results
-  - id: advance
-    type: DECIDE
-    call: next_item
+  - page: results
+  - decide: advance
+    uses: next_item
     with: {picked: "{choose.pick}"}
     routes: {next: search, done: fix}
-  - id: fix
-    type: RECONCILE
-    page: pages.results
-  - id: sheet
-    type: LEG
+  - sync: fix
+  - do: sheet
     macro: open-app
     with: {message: "sheet"}
-    verify: pages.results
-  - id: gate
-    type: HUMAN_GATE
-    gate: payment
-    compose: payment-request
-    message: "List ready, total ¥{gate.total}. Reply ok to pay, or no to cancel."
-    over_message: "Total ¥{gate.total}, over the ¥{gate.cap} budget. Reply ok to pay, or no to cancel."
+  - page: results
+  - ask: gate
+    approve: payment
+    message: "List ready, total ¥{ask.total}. Reply ok to pay, or no to cancel."
+    over_budget_message: "Total ¥{ask.total}, over the ¥{ask.cap} budget. Reply ok to pay, or no to cancel."
     return: open-app
     revise: advance
-  - id: pay
-    type: LEG
+  - do: pay
     macro: add-cart
     with: {message: "pay"}
-    enter: pages.results
-    verify: pages.home
     irreversible: payment
+  - page: home
 """

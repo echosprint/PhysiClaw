@@ -12,7 +12,7 @@ def write_channel_pages(anchors: tuple[str, ...] = ("MyChat",)) -> None:
     root.mkdir(parents=True, exist_ok=True)
     lines = "".join(f'      - "{a}"\n' for a in anchors)
     (root / "PLAYBOOK.yml").write_text(
-        "name: channel\ndescription: test channel\n"
+        "app: channel\ndescription: test channel\n"
         f"pages:\n  thread:\n    anchors:\n{lines}",
         encoding="utf-8",
     )

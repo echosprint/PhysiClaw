@@ -9,7 +9,7 @@ routing) sits behind these same declarations, so parser and runner can
 never disagree about a call's vocabulary.
 
 `decide` is the one open call: its outcomes are authored per node (the
-question defines the answers), so the node declares `outcomes:` itself —
+question defines the answers), so the move declares `answers:` itself —
 with `escalate` mandatory, because every closed choice needs the
 concrete escape arm.
 """
@@ -26,7 +26,9 @@ LEDGER_FIELDS = ("query", "qty")
 
 @dataclass(frozen=True)
 class CallDecl:
-    outcomes: tuple[str, ...]  # fixed routing arms; () = node-declared (decide)
+    outcomes: tuple[
+        str, ...
+    ]  # fixed routing arms; () = move-authored `answers` (decide)
     payload: tuple[str, ...]  # fields `{node.field}` refs may read
     params: tuple[str, ...]  # `with:` keys — all required until a call
     #   actually grows an optional one
@@ -38,7 +40,7 @@ class CallDecl:
     # (the conductor swipes); the parser sanctions self-loops only here.
     reask_arm: str | None = None
     # Answered by the program itself, never prompted (`micro.py` has no
-    # row); the parser rejects `context:`/`max_visits:` as dead config.
+    # row); the parser rejects `context:`/`max_asks:` as dead config.
     deterministic: bool = False
     # The one arm sanctioned as a BACKWARD edge (the ledger loop): the
     # acyclic check exempts it, the ledger lint pins it backward, the

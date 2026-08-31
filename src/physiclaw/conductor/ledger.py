@@ -1,11 +1,11 @@
 """The buying-list ledger — desired state, and how the cart is read.
 
-A `kind: list` playbook input's VALUE is a JSON array of {query, qty}
+A `type: list` playbook input's VALUE is a JSON array of {query, qty}
 (fields = `calls.LEDGER_FIELDS`). `parse_ledger` is the one value gate:
 activation and the CLI rehearsal call it strictly (raise / reject), the
 walk calls it fail-open (a broken value degrades to a hand-over at the loop). The
 walk's items then track pending → picked; the cart itself stays the
-in-cart truth — RECONCILE re-reads it rather than trusting a flag.
+in-cart truth — `sync` re-reads it rather than trusting a flag.
 
 The two screen readers are the reconciler's deterministic senses:
 `assign_rows` maps picked items to cart rows (exclusive, exact-first),
@@ -39,7 +39,7 @@ _QTY_RE = re.compile(r"^[x×✕]?\s*(\d{1,2})$")
 class LedgerItem:
     """One buying-list entry — desired state. `status` walks
     pending → picked (the loop chose a row; `label` is what the cart
-    should show) → the cart itself is the in-cart truth (RECONCILE
+    should show) → the cart itself is the in-cart truth (`sync`
     re-reads it rather than trusting a flag). `qty` 0 = remove (a
     revision took it off the list; the reconciler steps it to zero)."""
 
@@ -62,7 +62,7 @@ class LedgerItem:
 
 
 def parse_ledger(text: str, *, allow_zero: bool = False) -> list[LedgerItem]:
-    """The `kind: list` input's value contract: a JSON array of
+    """The `type: list` input's value contract: a JSON array of
     {query, qty}. Raises PlaybookError naming the defect — arm fails
     early, activation and revision fall back (log + hand over/None).
     `allow_zero` is the revision form (qty 0 = remove)."""

@@ -44,6 +44,7 @@ steps:
   - name: tap-1
     tool: tap
     with:
+      label: t
       bbox: [0.12, 0.04, 0.34, 0.10]
 """
 
@@ -387,7 +388,10 @@ def test_runs_shows_the_arguments_each_step_fired_with(mocker) -> None:
     result = runner.invoke(app, ["macros", "runs", hex6])
 
     assert result.exit_code == 0
-    assert "args: bbox: [0.12, 0.04, 0.34, 0.1]" in result.output
+    # The label renders WITH the bbox — the annotated target is what the
+    # author reads when a tap lands wrong.
+    assert 'label: "t"' in result.output
+    assert "bbox: [0.12, 0.04, 0.34, 0.1]" in result.output
 
 
 def test_runs_shows_arguments_after_substitution(mocker) -> None:

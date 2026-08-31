@@ -4,7 +4,7 @@ Six call types ride one channel: the playbook-authorable `choose_item`
 and `decide` (vocabulary declared in `calls.py`), plus four
 conductor-internal calls playbooks can never name — `parse_task`
 (activation: does the user's thread assign a task a playbook covers?),
-`confirm_reply` (the HUMAN_GATE's LLM tier when the word lists can't
+`confirm_reply` (the ask's LLM tier when the word lists can't
 classify a reply), `revise_list` (a "yes, but change it" reply → the
 updated buying list), and `clear_overlay` (the rescue ladder's "which
 band control dismisses this popup"). `next_item` is deterministic and
@@ -97,7 +97,7 @@ CONFIRM_OUTS = ("confirm", "deny", "revise", "unclear")
 REVISE_OUTS = ("updated", "unclear")
 
 # The two halves of the list-input handshake, ONE spelling each: the
-# marker `_menu` prints beside a `kind: list` input and this module's
+# marker `_menu` prints beside a `type: list` input and this module's
 # parse_task prompt interprets, and the ledger-item JSON template both
 # list prompts show (fields = calls.LEDGER_FIELDS). `{{`/`}}` because
 # answer_spec strings go through .format().
@@ -125,7 +125,7 @@ class DecisionRequest:
 
     call: str  # key into CALLS
     node_id: str  # for logs/trace
-    outcomes: tuple[str, ...]  # resolved arms (node-authored for decide)
+    outcomes: tuple[str, ...]  # resolved arms (move-authored `answers` for decide)
     args: dict[str, str]  # resolved `with:` (criteria / question)
     candidates: tuple[Candidate, ...]  # pick-style calls only
     listing: str  # label text of the screen (decide only)
@@ -595,7 +595,7 @@ def _parse_task_outcome(
 ) -> MicroOutcome:
     raw = obj.get("inputs")
     # Payload values are strings by contract; a structured value (a
-    # `kind: list` input's item array) rides as ITS JSON — str() would
+    # `type: list` input's item array) rides as ITS JSON — str() would
     # produce a Python repr no ledger parser accepts.
     inputs: dict[str, str] = {}
     if isinstance(raw, dict):

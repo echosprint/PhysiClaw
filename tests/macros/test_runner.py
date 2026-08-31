@@ -80,6 +80,7 @@ def _guarded(guard_body: str):
         "  - name: open-app\n"
         "    tool: tap\n"
         "    with:\n"
+        "      label: t\n"
         "      bbox: [0.1, 0.2, 0.3, 0.4]\n"
         f"    guard:\n{indented}"
     )
@@ -95,6 +96,7 @@ steps:
   - name: entry
     tool: tap
     with:
+      label: t
       bbox: [0.1, 0.2, 0.3, 0.4]
     guard:
       require: "Home"
@@ -127,6 +129,7 @@ steps:
   - name: open-app
     tool: tap
     with:
+      label: t
       bbox: [0.1, 0.2, 0.3, 0.4]
     guard:
       require: "WeChat"
@@ -528,6 +531,7 @@ steps:
   - name: focus-input-box
     tool: tap
     with:
+      label: t
       bbox: [0.1, 0.915, 0.69, 0.955]
     skip_when: {or: ["空格", "space"]}
   - name: stage
@@ -574,6 +578,7 @@ async def test_run_skip_when_on_first_step_peeks_once() -> None:
     spec = _spec(
         "name: demo\ndescription: d\nsteps:\n"
         "  - name: entry\n    tool: tap\n    with:\n"
+        "      label: t\n"
         "      bbox: [0.1, 0.2, 0.3, 0.4]\n"
         '    skip_when: "already there"\n'
     )
@@ -592,6 +597,7 @@ async def test_run_skipped_step_bypasses_its_guard() -> None:
         "name: demo\ndescription: d\nsteps:\n"
         "  - name: home-screen-2\n    tool: home_screen\n"
         "  - name: focus\n    tool: tap\n    with:\n"
+        "      label: t\n"
         "      bbox: [0.1, 0.9, 0.7, 0.96]\n"
         '    skip_when: "空格"\n'
         '    guard:\n      require: "never-on-screen"\n'
@@ -890,13 +896,13 @@ description: d
 steps:
   - name: tap-1
     tool: tap
-    with: {bbox: [0.1, 0.1, 0.2, 0.2]}
+    with: {label: t, bbox: [0.1, 0.1, 0.2, 0.2]}
   - name: send-to-clipboard-1
     tool: send_to_clipboard
     with: {text: hi}
   - name: tap-2
     tool: tap
-    with: {bbox: [0.3, 0.3, 0.4, 0.4]}
+    with: {label: t, bbox: [0.3, 0.3, 0.4, 0.4]}
     guard: {require: "Paste", forbid: "boom"}
 """
 
@@ -928,11 +934,11 @@ description: d
 steps:
   - name: tap-3
     tool: tap
-    with: {bbox: [0.1, 0.9, 0.6, 0.95]}
+    with: {label: t, bbox: [0.1, 0.9, 0.6, 0.95]}
     skip_when: {text: "A", within: [0.0, 0.5, 1.0, 1.0]}
   - name: tap-4
     tool: tap
-    with: {bbox: [0.3, 0.3, 0.4, 0.4]}
+    with: {label: t, bbox: [0.3, 0.3, 0.4, 0.4]}
     guard: {require: "Paste"}
 """
 
@@ -956,7 +962,7 @@ description: d
 steps:
   - name: tap-5
     tool: tap
-    with: {bbox: [0.1, 0.1, 0.2, 0.2]}
+    with: {label: t, bbox: [0.1, 0.1, 0.2, 0.2]}
     guard: {require: "Settings"}
 """
 
@@ -1011,7 +1017,7 @@ description: d
 steps:
   - name: tap-6
     tool: tap
-    with: {bbox: [0.1, 0.1, 0.2, 0.2]}
+    with: {label: t, bbox: [0.1, 0.1, 0.2, 0.2]}
     guard: {forbid: "Upgrade now"}
 """
 
@@ -1038,10 +1044,10 @@ description: d
 steps:
   - name: tap-7
     tool: tap
-    with: {bbox: [0.1, 0.1, 0.2, 0.2]}
+    with: {label: t, bbox: [0.1, 0.1, 0.2, 0.2]}
   - name: tap-8
     tool: tap
-    with: {bbox: [0.3, 0.3, 0.4, 0.4]}
+    with: {label: t, bbox: [0.3, 0.3, 0.4, 0.4]}
     guard: {require: "Payment confirmed"}
 """
 
@@ -1087,10 +1093,10 @@ steps:
     tool: home_screen
   - name: open-app
     tool: tap
-    with: {bbox: [0.1, 0.1, 0.2, 0.2]}
+    with: {label: t, bbox: [0.1, 0.1, 0.2, 0.2]}
   - name: focus-input-box
     tool: tap
-    with: {bbox: [0.1, 0.9, 0.7, 0.95]}
+    with: {label: t, bbox: [0.1, 0.9, 0.7, 0.95]}
     guard: {require: "Chat"}
 """
 
@@ -1189,7 +1195,7 @@ async def test_no_start_at_runs_the_whole_macro() -> None:
 # the engine task for half a session.
 
 BUDGET_STEPS = "name: demo\ndescription: d\nsteps:\n" + "".join(
-    f"  - name: s{i}\n    tool: tap\n    with: {{bbox: [0.1, 0.1, 0.2, 0.2]}}\n"
+    f"  - name: s{i}\n    tool: tap\n    with: {{label: t, bbox: [0.1, 0.1, 0.2, 0.2]}}\n"
     for i in range(1, 11)
 )
 
@@ -1252,6 +1258,7 @@ steps:
   - name: tap-dock
     tool: tap
     with:
+      label: t
       bbox: [0.1, 0.2, 0.3, 0.4]
   - name: await-app
     tool: wait
@@ -1342,7 +1349,7 @@ async def test_expect_adopts_the_screen_it_read_for_the_next_step(mocker) -> Non
         "name: demo\ndescription: d\nsteps:\n"
         "  - name: settle\n    tool: wait\n    with: {seconds: 1}\n"
         '    expect: {text: "WeChat", within: [0.15, 0.0, 0.85, 0.15]}\n'
-        "  - name: tap-row\n    tool: tap\n    with: {bbox: [0.1, 0.2, 0.3, 0.4]}\n"
+        "  - name: tap-row\n    tool: tap\n    with: {label: t, bbox: [0.1, 0.2, 0.3, 0.4]}\n"
         '    guard:\n      require: {text: "WeChat", within: [0.15, 0.0, 0.85, 0.15]}\n'
     )
     mcp = FakeCaller([_gesture("peeked", listing=_OPEN), _gesture("tapped")])
@@ -1395,7 +1402,7 @@ async def test_skip_when_will_not_skip_on_an_unreadable_screen() -> None:
     # a gesture. No screen text means no skip.
     spec = _spec(
         "name: demo\ndescription: d\nsteps:\n"
-        "  - name: dismiss\n    tool: tap\n    with: {bbox: [0.1, 0.1, 0.2, 0.2]}\n"
+        "  - name: dismiss\n    tool: tap\n    with: {label: t, bbox: [0.1, 0.1, 0.2, 0.2]}\n"
         '    skip_when: {not: "popup"}\n'
     )
     mcp = FakeCaller([RuntimeError("camera busy"), _gesture("tapped")])
@@ -1405,3 +1412,104 @@ async def test_skip_when_will_not_skip_on_an_unreadable_screen() -> None:
     assert result.ok
     # The tap FIRED rather than being skipped on an unread screen.
     assert ("tap", {"bbox": [0.1, 0.1, 0.2, 0.2]}) in mcp.calls
+
+
+# ---------- the label target: annotation + healing ----------
+
+
+HEAL_SPEC = """
+name: demo
+description: d
+steps:
+  - name: entry
+    tool: home_screen
+  - name: press
+    tool: tap
+    with: {label: "Buy", bbox: [0.40, 0.40, 0.50, 0.44]}
+"""
+
+
+async def test_label_heals_the_press_to_where_the_text_sits_today() -> None:
+    # The row matching the label drifted a little from the recorded spot
+    # — the tap follows the TEXT, and the wire never sees `label`.
+    listing = format_row(0, "text", "Buy now", [0.42, 0.50, 0.52, 0.54], 0.9)
+    mcp = FakeCaller([_gesture("home", listing=listing), _gesture("tapped")])
+
+    result = await run(_spec(HEAL_SPEC), {}, mcp)
+
+    assert result.ok
+    name, args = mcp.calls[1]
+    assert name == "tap"
+    assert args == {"bbox": [0.42, 0.5, 0.52, 0.54]}
+    assert "healed" in result.blocks[0]["text"]
+
+
+async def test_label_off_radius_falls_back_to_the_recorded_bbox() -> None:
+    # A matching label far across the screen is a DIFFERENT element, not
+    # drift — the recorded coordinates stand, and the log says so.
+    listing = format_row(0, "text", "Buy now", [0.42, 0.85, 0.52, 0.89], 0.9)
+    mcp = FakeCaller([_gesture("home", listing=listing), _gesture("tapped")])
+
+    result = await run(_spec(HEAL_SPEC), {}, mcp)
+
+    assert result.ok
+    assert mcp.calls[1] == ("tap", {"bbox": [0.4, 0.4, 0.5, 0.44]})
+    assert "off-radius" in result.blocks[0]["text"]
+
+
+async def test_label_not_found_uses_the_recorded_bbox_silently() -> None:
+    # A description that never appears on screen is annotation, not a
+    # broken promise — the recorded bbox fires with no note.
+    listing = format_row(0, "text", "Something else", [0.1, 0.1, 0.2, 0.14], 0.9)
+    mcp = FakeCaller([_gesture("home", listing=listing), _gesture("tapped")])
+
+    result = await run(_spec(HEAL_SPEC), {}, mcp)
+
+    assert result.ok
+    assert mcp.calls[1] == ("tap", {"bbox": [0.4, 0.4, 0.5, 0.44]})
+    assert "healed" not in result.blocks[0]["text"]
+
+
+async def test_swipe_label_is_stripped_but_never_heals() -> None:
+    # A swipe's bbox is a region, not an element: the label documents it
+    # and is lowered off the wire, but the coordinates never move.
+    spec = _spec(
+        "name: demo\ndescription: d\nsteps:\n"
+        "  - name: entry\n    tool: home_screen\n"
+        "  - name: fling\n    tool: swipe\n"
+        '    with: {label: "Buy", bbox: [0.40, 0.40, 0.50, 0.44], direction: "up", size: "s"}\n'
+    )
+    listing = format_row(0, "text", "Buy now", [0.42, 0.50, 0.52, 0.54], 0.9)
+    mcp = FakeCaller([_gesture("home", listing=listing), _gesture("swiped")])
+
+    result = await run(spec, {}, mcp)
+
+    assert result.ok
+    assert mcp.calls[1] == (
+        "swipe",
+        {"bbox": [0.4, 0.4, 0.5, 0.44], "direction": "up", "size": "s"},
+    )
+
+
+async def test_healed_press_records_the_fired_coordinates(tmp_path) -> None:
+    # The forensic contract: `macros runs` must answer "where did the
+    # tap actually land" — a healed press logs the coordinates it FIRED
+    # with (label kept beside them), not the authored ones.
+    import json
+
+    from physiclaw.macros import runlog
+
+    listing = format_row(0, "text", "Buy now", [0.42, 0.50, 0.52, 0.54], 0.9)
+    mcp = FakeCaller([_gesture("home", listing=listing), _gesture("tapped")])
+
+    result = await run_and_record(_spec(HEAL_SPEC), {}, mcp, caller="cli")
+
+    events = [
+        json.loads(line)
+        for line in (runlog.run_dir(result.run_id) / "events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    (press,) = [e for e in events if e.get("name") == "press"]
+    assert press["args"]["bbox"] == [0.42, 0.5, 0.52, 0.54]
+    assert press["args"]["label"] == "Buy"

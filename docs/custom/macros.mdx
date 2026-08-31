@@ -44,6 +44,10 @@ steps:
   - name: open-whatsapp
     tool: tap
     with:
+      # Every bbox carries a `label` saying what it is — on-screen
+      # text when the target has any (the tap then follows that text
+      # if it moves), a plain description otherwise.
+      label: "the WhatsApp icon"
       # [left, top, right, bottom] as 0–1 screen fractions.
       bbox: [0.31, 0.893, 0.491, 0.974]
 
@@ -59,6 +63,7 @@ steps:
   - name: open-chat
     tool: tap
     with:
+      label: "your-user-name"
       bbox: [0.03, 0.32, 0.60, 0.42]
     # Skip if we are already in the chat.
     skip_when:
@@ -75,6 +80,7 @@ steps:
   - name: focus-input
     tool: tap
     with:
+      label: "the message input box"
       bbox: [0.2, 0.928, 0.6, 0.962]
     # Skip if the keyboard is up. Its space bar has no label, so use "123".
     skip_when:
@@ -83,12 +89,14 @@ steps:
   - name: paste-menu
     tool: long_press
     with:
+      label: "the message input box (keyboard up)"
       # The input box sits higher once the keyboard is up.
       bbox: [0.2, 0.59, 0.6, 0.62]
 
   - name: paste
     tool: tap
     with:
+      label: "Paste"
       bbox: [0.10, 0.545, 0.21, 0.566]
     guard:
       require: {text: "Paste", within: [0.03, 0.52, 0.40, 0.59]}
@@ -122,5 +130,7 @@ physiclaw macros run notify-user-whatsapp -i message=hi
 **Let an agent draft it.** Connect `claude` or `codex` to your MCP server, then ask it to write the macro.
 
 **Rehearse before enabling.** Hard-coded bboxes are trustworthy only because you tested them on this rig, this phone, this layout.
+
+**Give text targets their real on-screen text as `label`.** That is what lets a press follow a button that moved; icons and blank areas get a plain description instead.
 
 **Watch the stats.** `physiclaw macros stats` shows per-macro counters. A rising `consecutive_aborts` streak means the app layout changed under the macro; re-rehearse and update the bboxes.
