@@ -1,0 +1,1144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PhysiClaw Studio</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1d2026; --edge: #2c313a; --ink: #d8dde6;
+    --dim: #8a93a2; --accent: #5aa9e6; --ok: #4cc38a; --bad: #e5534b;
+    --warn: #d4a72c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.45 -apple-system, "SF Pro Text", "Segoe UI", sans-serif;
+    height: 100vh; display: flex; flex-direction: column;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px; padding: 8px 14px;
+    background: var(--panel); border-bottom: 1px solid var(--edge);
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  .badge {
+    font-size: 11px; padding: 2px 8px; border-radius: 10px;
+    border: 1px solid var(--edge); color: var(--dim);
+  }
+  .badge.mode { color: var(--accent); border-color: var(--accent); }
+  .badge.marking { color: var(--warn); border-color: var(--warn); }
+  #dot { width: 9px; height: 9px; border-radius: 50%; background: var(--dim); }
+  #dot.on { background: var(--ok); }
+  #banner {
+    display: none; padding: 6px 14px; background: #3a2426;
+    color: #f0b8b4; border-bottom: 1px solid var(--bad); font-size: 13px;
+  }
+  main {
+    flex: 1; display: grid; grid-template-columns: 1fr 1fr 340px;
+    gap: 10px; padding: 10px; min-height: 0;
+  }
+  .pane {
+    background: var(--panel); border: 1px solid var(--edge);
+    border-radius: 8px; display: flex; flex-direction: column;
+    min-height: 0; overflow: hidden;
+  }
+  .pane h2 {
+    font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--dim); margin: 0; padding: 8px 12px 4px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .stage {
+    flex: 1; position: relative; margin: 6px; min-height: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #frame-wrap, #virt { position: relative; max-width: 100%; max-height: 100%; }
+  #frame { display: block; max-width: 100%; max-height: 100%; }
+  #frame-wrap { cursor: crosshair; user-select: none; }
+  #mark-rect {
+    position: absolute; border: 1.5px dashed var(--warn); display: none;
+    pointer-events: none;
+  }
+  #virt { background: #0d0f12; border: 1px solid var(--edge); }
+  .row-el {
+    position: absolute; border: 1px solid #3d4a5c; border-radius: 2px;
+    font-size: 10px; color: #b9c4d4; overflow: hidden; cursor: pointer;
+    display: flex; align-items: center; padding: 0 2px; white-space: nowrap;
+  }
+  .row-el.icon { border-color: #6b5c3d; }
+  .row-el.selected { border-color: var(--accent); color: var(--accent); }
+  .empty { color: var(--dim); font-size: 13px; text-align: center; padding: 30px; }
+  nav {
+    display: flex; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--edge);
+    align-items: center; flex-wrap: wrap;
+  }
+  button {
+    background: #262b33; color: var(--ink); border: 1px solid var(--edge);
+    border-radius: 6px; padding: 5px 11px; font-size: 13px; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { border-color: var(--accent); color: var(--accent); }
+  button.tiny { padding: 1px 6px; font-size: 11px; }
+  input[type=text], select {
+    background: #262b33; color: var(--ink); border: 1px solid var(--edge);
+    border-radius: 6px; padding: 4px 8px; font-size: 13px;
+  }
+  #rail { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
+  .card {
+    margin: 6px 10px 0; padding: 8px 10px; background: #22262d;
+    border: 1px solid var(--edge); border-radius: 6px; font-size: 12px;
+    flex-shrink: 0;
+  }
+  .card b { color: var(--accent); }
+  .kv { color: var(--dim); }
+  .chip {
+    display: inline-flex; align-items: center; gap: 4px; margin: 2px 3px 2px 0;
+    padding: 1px 7px; background: #191c21; border: 1px solid var(--edge);
+    border-radius: 9px; font-size: 11px;
+  }
+  .chip .x { cursor: pointer; color: var(--dim); }
+  .chip .x:hover { color: var(--bad); }
+  .b-ok { color: var(--ok); } .b-warn { color: var(--warn); } .b-bad { color: var(--bad); }
+  .page-item {
+    padding: 5px 8px; margin: 3px 0; border: 1px solid var(--edge);
+    border-radius: 6px; cursor: pointer;
+  }
+  .page-item.sel { border-color: var(--accent); }
+  .page-item .head { display: flex; align-items: center; gap: 6px; }
+  .page-item .head b { flex: 1; }
+  .shots { display: flex; gap: 4px; flex-wrap: wrap; margin: 6px 0; }
+  .shots .thumb { position: relative; }
+  .shots img {
+    width: 44px; height: 78px; object-fit: cover; border: 1px solid var(--edge);
+    border-radius: 4px; cursor: pointer;
+  }
+  .shots img.viewing { border-color: var(--accent); }
+  .shots .x {
+    position: absolute; top: -4px; right: -4px; background: var(--panel);
+    border: 1px solid var(--edge); border-radius: 50%; width: 14px; height: 14px;
+    line-height: 12px; text-align: center; font-size: 10px; cursor: pointer;
+  }
+  table.matrix { border-collapse: collapse; font-size: 11px; margin-top: 6px; }
+  table.matrix th, table.matrix td {
+    border: 1px solid var(--edge); padding: 2px 6px; text-align: center;
+  }
+  table.matrix td.own { color: var(--ok); }
+  table.matrix td.clash { background: #3a2426; color: #f0b8b4; }
+  table.matrix td.near { color: var(--warn); }
+  #log {
+    flex: 1; overflow-y: auto; margin: 6px 10px 10px; font-size: 12px;
+    display: flex; flex-direction: column; gap: 6px; min-height: 60px;
+  }
+  .entry {
+    padding: 6px 8px; background: #191c21; border-left: 2px solid var(--edge);
+    border-radius: 4px; white-space: pre-wrap; word-break: break-word;
+    flex-shrink: 0;
+  }
+  .entry.err { border-left-color: var(--bad); }
+  #busy {
+    display: none; position: fixed; inset: 0; background: rgba(10,12,15,.55);
+    align-items: center; justify-content: center; z-index: 10;
+  }
+  #busy .box {
+    background: var(--panel); border: 1px solid var(--edge); border-radius: 8px;
+    padding: 18px 26px; font-size: 14px; color: var(--ink);
+  }
+  #busy .box .spin {
+    display: inline-block; width: 12px; height: 12px; margin-right: 10px;
+    border: 2px solid var(--dim); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 0.9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<header>
+  <h1>PhysiClaw Studio</h1>
+  <span class="badge" id="app-badge">no app</span>
+  <span class="badge mode" id="mode-badge">EXPLORE</span>
+  <span style="flex:1"></span>
+  <span id="dot"></span>
+  <span class="badge" id="conn-label">disconnected</span>
+</header>
+<div id="banner"></div>
+<main>
+  <section class="pane">
+    <h2>Camera</h2>
+    <div class="stage">
+      <div id="frame-wrap" style="display:none">
+        <img id="frame" alt="annotated camera frame">
+        <div id="mark-rect"></div>
+      </div>
+      <div class="empty" id="frame-empty">
+        No view yet — press <b>&#10227; Peek</b> to look at the phone.<br><br>
+        Click the image to tap. Drag to swipe.
+      </div>
+    </div>
+    <nav>
+      <button class="primary" data-tool="peek" title="fresh camera look">&#10227; Peek</button>
+      <button data-tool="home_screen" title="home screen">&#8962; Home</button>
+      <button data-tool="go_back" title="edge-swipe back">&#9665; Back</button>
+      <button data-tool="unlock_phone" title="wake and unlock">&#128275; Unlock</button>
+      <button data-tool="force_quit" title="force-quit the front app">&#10005; Force quit</button>
+    </nav>
+  </section>
+
+  <section class="pane">
+    <h2>Virtual screen (OCR)</h2>
+    <div class="stage">
+      <div id="virt" style="display:none"></div>
+      <div class="empty" id="virt-empty">Element rows appear here after a peek.<br>Click a row to select it.</div>
+    </div>
+    <nav><span class="kv" id="row-count"></span></nav>
+  </section>
+
+  <section class="pane" id="rail">
+    <h2>Session</h2>
+    <div class="card" id="conn-card">connecting&hellip;</div>
+    <div class="card" id="sel-card" style="display:none"></div>
+    <div id="curation" style="display:none">
+      <h2>Pages</h2>
+      <div class="card" id="pages-card"></div>
+      <h2>Controls</h2>
+      <div class="card" id="controls-card"></div>
+      <h2>Macros</h2>
+      <div class="card" id="macros-card"></div>
+      <h2>Playbooks</h2>
+      <div class="card" id="playbooks-card"></div>
+      <h2>Prove</h2>
+      <div class="card" id="prove-card"></div>
+    </div>
+    <h2>Actions</h2>
+    <div id="log"></div>
+  </section>
+</main>
+<div id="busy"><div class="box"><span class="spin"></span><span id="busy-what"></span></div></div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const state = {
+  busy: false, rows: [], selected: null, imgW: 0, imgH: 0,
+  app: null, draft: null, evidence: {}, page: null, viewingShot: null,
+  marking: null, matrix: null, macro: null,
+  playbook: null, validation: {}, pack: { pages: [], macros: [], error: null },
+  limits: { max_steps: 50, min_freq: 0.6, lookalike: 0.75 },
+};
+
+const recording = () => state.draft && state.draft.recording;
+
+// ---------- plumbing ----------
+
+function banner(msg) {
+  const el = $("banner");
+  if (!msg) { el.style.display = "none"; return; }
+  el.textContent = msg;
+  el.style.display = "block";
+}
+
+function setBusy(what) {
+  state.busy = !!what;
+  $("busy").style.display = what ? "flex" : "none";
+  $("busy-what").textContent = what || "";
+  document.querySelectorAll("button").forEach(b => b.disabled = state.busy);
+}
+
+function logEntry(text, isErr) {
+  const div = document.createElement("div");
+  div.className = "entry" + (isErr ? " err" : "");
+  div.textContent = text;
+  $("log").prepend(div);
+  while ($("log").children.length > 40) $("log").lastChild.remove();
+}
+
+async function api(path, body) {
+  const resp = await fetch(path, body === undefined ? undefined : {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await resp.json().catch(() => ({ status: "error", message: "unreadable reply" }));
+  data.httpOk = resp.ok;
+  return data;
+}
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+// ---------- acting on the phone ----------
+
+async function act(tool, args, label) {
+  if (state.busy) return;
+  setBusy(label || tool);
+  banner("");
+  try {
+    const data = await api("/api/act", { tool, args: args || {} });
+    if (data.status !== "ok") {
+      banner(data.message || "request failed");
+      logEntry((label || tool) + " — " + (data.message || "failed"), true);
+      refreshState();
+      return;
+    }
+    setConnected(true);
+    if (data.text) logEntry(data.text); else logEntry(label || tool);
+    if (data.image) { state.viewingShot = null; renderView(data); }
+    if (data.recorded) {
+      const r = data.recorded;
+      logEntry("● recorded step " + (r.index + 1) + "/" + r.steps + " → " + r.macro
+        + (r.page ? " (on page " + r.page + ")" : ""));
+      if (r.page_changed)
+        logEntry("⚠ the screen crossed into page “" + r.page
+          + "” — consider cutting the macro here (one do per route move)");
+      applyFeedback(data);
+    }
+  } catch (e) {
+    banner("studio server unreachable: " + e.message);
+  } finally {
+    setBusy(null);
+  }
+}
+
+// ---------- rendering the panes ----------
+
+function renderView(data) {
+  const img = $("frame");
+  img.onload = () => {
+    state.imgW = img.naturalWidth; state.imgH = img.naturalHeight;
+    sizeVirtual();
+    renderRows();
+  };
+  img.src = "data:" + (data.image.mime_type || "image/jpeg") + ";base64," + data.image.data;
+  $("frame-wrap").style.display = "block";
+  $("frame-empty").style.display = "none";
+  state.rows = data.rows || [];
+  state.selected = null;
+  renderSelected();
+  renderPages();
+}
+
+function sizeVirtual() {
+  const virt = $("virt"), stage = virt.parentElement;
+  const ar = state.imgW / state.imgH;
+  let w = stage.clientWidth, h = w / ar;
+  if (h > stage.clientHeight) { h = stage.clientHeight; w = h * ar; }
+  virt.style.width = w + "px";
+  virt.style.height = h + "px";
+  virt.style.display = "block";
+  $("virt-empty").style.display = "none";
+}
+
+function renderRows() {
+  const virt = $("virt");
+  virt.innerHTML = "";
+  const w = virt.clientWidth, h = virt.clientHeight;
+  state.rows.forEach((row, i) => {
+    const box = el("div", "row-el " + row.kind + (state.selected === i ? " selected" : ""), row.label);
+    const [l, t, r, b] = row.bbox;
+    box.style.left = (l * w) + "px";
+    box.style.top = (t * h) + "px";
+    box.style.width = Math.max(6, (r - l) * w) + "px";
+    box.style.height = Math.max(6, (b - t) * h) + "px";
+    box.title = row.label || row.kind;
+    box.onclick = () => { state.selected = i; renderRows(); renderSelected(); };
+    virt.appendChild(box);
+  });
+  $("row-count").textContent = state.rows.length + " element(s)";
+}
+
+function renderSelected() {
+  const card = $("sel-card");
+  if (state.selected === null) { card.style.display = "none"; return; }
+  const row = state.rows[state.selected];
+  card.style.display = "block";
+  card.innerHTML = "";
+  card.appendChild(el("div", null, "")).appendChild(el("b", null, row.label || "(" + row.kind + ")"));
+  card.appendChild(el("div", "kv", row.kind + " · [" + row.bbox.join(", ") + "] · conf " + row.conf));
+
+  const acts = el("div");
+  acts.style.marginTop = "6px";
+  const tap = el("button", "tiny", "Tap");
+  tap.onclick = () => {
+    const args = { bbox: row.bbox };
+    if (recording() && row.label) args.label = row.label;  // free label from OCR
+    act("tap", args, "tap " + (row.label || row.kind));
+  };
+  acts.appendChild(tap);
+  if (state.macro && row.label) {
+    const exp = el("button", "tiny", "✓ Expect on " + state.macro);
+    exp.title = "assertion mode: this text proves the macro landed — appends a wait step requiring it here";
+    exp.onclick = () => draftEdit({ op: "step_expect", macro: state.macro, text: row.label, bbox: row.bbox });
+    acts.append(" ", exp);
+  }
+  if (state.app && state.page && row.label) {
+    const region = document.createElement("select");
+    for (const r of ["", "top", "bottom", "left", "right"])
+      region.appendChild(new Option(r || "(no region)", r));
+    const addA = el("button", "tiny", "+ Anchor on " + state.page);
+    addA.onclick = () => {
+      const p = state.draft.pages[state.page];
+      const entry = region.value ? { text: row.label, region: region.value } : row.label;
+      draftEdit({ op: "page_update", page: state.page, anchors: [...p.anchors, entry] });
+    };
+    const addF = el("button", "tiny", "+ Forbid");
+    addF.onclick = () => {
+      const p = state.draft.pages[state.page];
+      draftEdit({ op: "page_update", page: state.page, forbid: [...p.forbid, row.label] });
+    };
+    acts.append(" ", addA, region, " ", addF);
+  }
+  card.appendChild(acts);
+}
+
+// ---------- gestures / marking on the camera pane ----------
+
+const clamp01 = v => Math.min(1, Math.max(0, v));
+const r3 = v => Math.round(v * 1000) / 1000;
+
+function pointOf(ev) {
+  const rect = $("frame").getBoundingClientRect();
+  return {
+    x: clamp01((ev.clientX - rect.left) / rect.width),
+    y: clamp01((ev.clientY - rect.top) / rect.height),
+    px: ev.clientX, py: ev.clientY, w: rect.width, h: rect.height,
+  };
+}
+
+function tapBbox(p) {
+  const r = 0.02;
+  return [clamp01(p.x - r), clamp01(p.y - r), clamp01(p.x + r), clamp01(p.y + r)].map(r3);
+}
+
+let dragStart = null;
+$("frame-wrap").addEventListener("pointerdown", ev => {
+  if (state.busy) return;
+  dragStart = pointOf(ev);
+});
+$("frame-wrap").addEventListener("pointermove", ev => {
+  if (!dragStart || !state.marking) return;
+  const p = pointOf(ev), rect = $("frame").getBoundingClientRect(), mr = $("mark-rect");
+  mr.style.display = "block";
+  mr.style.left = (Math.min(dragStart.x, p.x) * rect.width) + "px";
+  mr.style.top = (Math.min(dragStart.y, p.y) * rect.height) + "px";
+  mr.style.width = (Math.abs(p.x - dragStart.x) * rect.width) + "px";
+  mr.style.height = (Math.abs(p.y - dragStart.y) * rect.height) + "px";
+});
+$("frame-wrap").addEventListener("pointerup", ev => {
+  if (state.busy || !dragStart) return;
+  const start = dragStart, end = pointOf(ev);
+  dragStart = null;
+  if (state.marking) { finishMark(start, end); return; }
+  const dx = end.px - start.px, dy = end.py - start.py;
+  const dist = Math.hypot(dx, dy);
+  if (dist < 12) {
+    const args = { bbox: tapBbox(start) };
+    if (recording()) {
+      // Design rule 3, enforced at record time: a press without its
+      // label is illegal — say what these coordinates ARE.
+      const label = prompt("Recording — label this tap (on-screen text, or a plain description):");
+      if (!label) { logEntry("tap not sent — a recorded press needs a label", true); return; }
+      args.label = label;
+    }
+    act("tap", args, "tap @ " + start.x.toFixed(2) + "," + start.y.toFixed(2));
+    return;
+  }
+  const horizontal = Math.abs(dx) > Math.abs(dy);
+  const direction = horizontal ? (dx > 0 ? "right" : "left") : (dy > 0 ? "down" : "up");
+  const frac = dist / (horizontal ? start.w : start.h);
+  const size = frac < 0.08 ? "s" : frac < 0.18 ? "m" : frac < 0.35 ? "l" : frac < 0.55 ? "xl" : "xxl";
+  act("swipe", { bbox: tapBbox(start), direction, size },
+      "swipe " + direction + " (" + size + ")");
+});
+
+function startMark(name) {
+  state.marking = name;
+  $("mode-badge").textContent = "MARK " + name.toUpperCase();
+  $("mode-badge").className = "badge marking";
+  logEntry("drag a rectangle over the " + name + " area on the camera pane (click = small box)");
+}
+
+function stopMark() {
+  state.marking = null;
+  $("mark-rect").style.display = "none";
+  updateModeBadge();
+}
+
+function finishMark(start, end) {
+  const name = state.marking;
+  stopMark();
+  let [l, t, r, b] = [
+    Math.min(start.x, end.x), Math.min(start.y, end.y),
+    Math.max(start.x, end.x), Math.max(start.y, end.y),
+  ];
+  if (r - l < 0.01 || b - t < 0.01) { [l, t, r, b] = tapBbox(start); }
+  const hint = name === "back" ? "e.g. back chevron (top-left)" : "e.g. scrim above the bottom sheet";
+  const label = prompt("Label this " + name + " control — on-screen text, or a plain description (" + hint + "):");
+  if (!label) { logEntry("mark " + name + " cancelled"); return; }
+  draftEdit({ op: "control_set", name, label, bbox: [l, t, r, b].map(r3) });
+}
+
+// ---------- draft curation ----------
+
+function applyFeedback(data) {
+  state.draft = data.draft; state.evidence = data.evidence;
+  state.validation = data.validation || {};
+  state.pack = data.pack || state.pack;
+  state.matrix = null;
+  renderAll();
+}
+
+async function draftEdit(body, quiet) {
+  const data = await apiOr("/api/draft/edit", body, body.op);
+  if (!data) return null;
+  if (!quiet) logEntry(body.op + " ok");
+  applyFeedback(data);
+  return data;
+}
+
+// The one error-display convention: banner + red log entry on refusal.
+async function apiOr(path, body, label) {
+  const data = await api(path, body);
+  if (data.status !== "ok") {
+    banner(data.message || "request failed");
+    logEntry(label + " — " + (data.message || "failed"), true);
+    return null;
+  }
+  banner("");
+  return data;
+}
+
+function renderAll() {
+  renderPages(); renderControls(); renderMacros(); renderPlaybooks();
+  renderProve(); renderSelected(); updateModeBadge();
+}
+
+function updateModeBadge() {
+  if (state.marking) return; // marking owns the badge until it ends
+  const rec = recording();
+  const b = $("mode-badge");
+  b.textContent = rec ? "REC → " + rec.macro : "EXPLORE";
+  b.className = rec ? "badge marking" : "badge mode";
+}
+
+async function refreshDraft() {
+  if (!state.app) return;
+  const data = await api("/api/draft");
+  if (data.status !== "ok") { banner(data.message); return; }
+  applyFeedback(data);
+}
+
+async function addShot() {
+  if (state.busy || !state.page) return;
+  setBusy("peek → shot of " + state.page);
+  try {
+    const data = await apiOr("/api/draft/shot", { page: state.page }, "shot");
+    if (!data) return;
+    setConnected(true);
+    state.viewingShot = data.shot;
+    logEntry("shot " + data.shot + " → " + state.page);
+    applyFeedback(data);
+    renderView(data);
+  } finally {
+    setBusy(null);
+  }
+}
+
+async function viewShot(sid) {
+  const data = await api("/api/shot/" + sid + "/view");
+  if (data.status !== "ok") { banner(data.message); return; }
+  state.viewingShot = sid;
+  renderView(data);
+  logEntry("viewing stored shot " + sid + " (" + data.page + ")");
+}
+
+function badgeFor(text) {
+  const ev = (state.evidence[state.page] || {})[text];
+  if (!ev) return null;
+  const span = el("span");
+  const freq = el("span",
+    ev.shots && ev.seen / ev.shots >= state.limits.min_freq ? "b-ok" : "b-warn",
+    " " + ev.seen + "/" + ev.shots);
+  freq.title = "shots of this page containing the anchor (≥"
+    + Math.round(state.limits.min_freq * 100) + "% earns geometry)";
+  span.appendChild(freq);
+  if (ev.other_pages > 0) {
+    const shared = el("span", "b-warn", " ⚠" + ev.other_pages);
+    shared.title = "also appears in shots of " + ev.other_pages + " other page(s) — shared chrome discriminates poorly";
+    span.appendChild(shared);
+  }
+  return span;
+}
+
+function renderPages() {
+  if (!state.draft) return;
+  const card = $("pages-card");
+  card.innerHTML = "";
+  const names = Object.keys(state.draft.pages);
+  if (!names.length) card.appendChild(el("div", "kv", "no pages drafted yet"));
+  for (const name of names) {
+    const page = state.draft.pages[name];
+    const item = el("div", "page-item" + (state.page === name ? " sel" : ""));
+    const head = el("div", "head");
+    head.appendChild(el("b", null, name));
+    head.appendChild(el("span", "kv", page.shots.length + " shot(s)"));
+    const del = el("button", "tiny", "✕");
+    del.onclick = ev => { ev.stopPropagation();
+      if (confirm("Delete drafted page " + name + " and its shots?"))
+        draftEdit({ op: "page_delete", page: name }).then(() => { if (state.page === name) state.page = null; });
+    };
+    head.appendChild(del);
+    item.appendChild(head);
+    item.onclick = () => { state.page = state.page === name ? null : name; renderPages(); renderSelected(); };
+
+    if (state.page === name) {
+      const shots = el("div", "shots");
+      for (const sid of page.shots) {
+        const th = el("div", "thumb");
+        const img = document.createElement("img");
+        img.src = "/api/shot/" + sid;
+        img.className = state.viewingShot === sid ? "viewing" : "";
+        img.title = sid;
+        img.onclick = ev => { ev.stopPropagation(); viewShot(sid); };
+        const x = el("div", "x", "✕");
+        x.onclick = ev => { ev.stopPropagation(); draftEdit({ op: "shot_delete", shot: sid }); };
+        th.append(img, x);
+        shots.appendChild(th);
+      }
+      const plus = el("button", "tiny", "+ Shot (peek)");
+      plus.onclick = ev => { ev.stopPropagation(); addShot(); };
+      shots.appendChild(plus);
+      item.appendChild(shots);
+
+      const anchors = el("div");
+      anchors.appendChild(el("span", "kv", "anchors: "));
+      if (!page.anchors.length) anchors.appendChild(el("span", "kv", "none — click a row, then “+ Anchor”"));
+      page.anchors.forEach((a, i) => {
+        const text = typeof a === "string" ? a : a.text;
+        const chip = el("span", "chip");
+        chip.appendChild(el("span", null, typeof a === "string" ? text : text + " @" + a.region));
+        const b = badgeFor(Array.isArray(text) ? text[0] : text);
+        if (b) chip.appendChild(b);
+        const x = el("span", "x", "✕");
+        x.onclick = ev => { ev.stopPropagation();
+          draftEdit({ op: "page_update", page: name, anchors: page.anchors.filter((_, j) => j !== i) });
+        };
+        chip.appendChild(x);
+        anchors.appendChild(chip);
+      });
+      item.appendChild(anchors);
+
+      const forbid = el("div");
+      forbid.appendChild(el("span", "kv", "forbid: "));
+      if (!page.forbid.length) forbid.appendChild(el("span", "kv", "none"));
+      page.forbid.forEach((t, i) => {
+        const chip = el("span", "chip");
+        chip.appendChild(el("span", null, t));
+        const x = el("span", "x", "✕");
+        x.onclick = ev => { ev.stopPropagation();
+          draftEdit({ op: "page_update", page: name, forbid: page.forbid.filter((_, j) => j !== i) });
+        };
+        chip.appendChild(x);
+        forbid.appendChild(chip);
+      });
+      item.appendChild(forbid);
+
+      const scroll = el("label", "kv");
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = page.scrollable;
+      cb.onchange = () => draftEdit({ op: "page_update", page: name, scrollable: cb.checked });
+      scroll.append(cb, " scrollable");
+      scroll.onclick = ev => ev.stopPropagation();
+      item.appendChild(scroll);
+    }
+    card.appendChild(item);
+  }
+  card.appendChild(addNameRow("page_add", "new page name", "+ Page", n => state.page = n));
+}
+
+function addNameRow(op, placeholder, label, select) {
+  const row = el("div");
+  row.style.marginTop = "6px";
+  const input = document.createElement("input");
+  input.type = "text"; input.placeholder = placeholder; input.size = 14;
+  const btn = el("button", "tiny", label);
+  btn.onclick = () => {
+    const n = input.value.trim();
+    if (n) draftEdit({ op, name: n }).then(d => { if (d) { select(n); renderAll(); } });
+  };
+  row.append(input, " ", btn);
+  return row;
+}
+
+function renderControls() {
+  if (!state.draft) return;
+  const card = $("controls-card");
+  card.innerHTML = "";
+  for (const name of ["back", "dismiss"]) {
+    const line = el("div");
+    line.appendChild(el("b", null, name + ": "));
+    const c = state.draft.controls[name];
+    if (c) {
+      const chip = el("span", "chip");
+      chip.appendChild(el("span", null,
+        (Array.isArray(c.label) ? c.label[0] : c.label) + " [" + c.bbox.map(v => v.toFixed(2)).join(",") + "]"));
+      const x = el("span", "x", "✕");
+      x.onclick = () => draftEdit({ op: "control_clear", name });
+      chip.appendChild(x);
+      line.appendChild(chip);
+    } else {
+      const mark = el("button", "tiny", "Mark on camera…");
+      mark.onclick = () => startMark(name);
+      line.appendChild(mark);
+    }
+    card.appendChild(line);
+  }
+  card.appendChild(el("div", "kv",
+    "back = the app's own back affordance · dismiss = the scrim a modal closes from"));
+}
+
+// ---------- macro recording + step editor ----------
+
+function stepSummary(s) {
+  if (s.tool === "wait") {
+    const exp = s.expect ? " expect " + JSON.stringify(s.expect.text || s.expect) : "";
+    return "wait " + ((s.with || {}).seconds ?? "") + "s" + exp;
+  }
+  const w = s.with || {};
+  const label = Array.isArray(w.label) ? w.label[0] : w.label;
+  let out = s.tool;
+  if (label) out += " “" + label + "”";
+  else if (w.bbox) out += " @ [" + w.bbox.map(v => v.toFixed ? v.toFixed(2) : v).join(",") + "]";
+  if (w.direction) out += " " + w.direction + " (" + (w.size || "m") + ")";
+  if (w.text) out += " " + JSON.stringify(w.text);
+  return out;
+}
+
+function renderMacros() {
+  if (!state.draft) return;
+  const card = $("macros-card");
+  card.innerHTML = "";
+  const macros = state.draft.macros || {};
+  const rec = recording();
+  for (const [name, m] of Object.entries(macros)) {
+    const item = el("div", "page-item" + (state.macro === name ? " sel" : ""));
+    const head = el("div", "head");
+    head.appendChild(el("b", null, name));
+    head.appendChild(el("span", "kv", m.steps.length + "/" + state.limits.max_steps));
+    if (rec && rec.macro === name) head.appendChild(el("span", "b-bad", "● REC"));
+    const del = el("button", "tiny", "✕");
+    del.onclick = ev => { ev.stopPropagation();
+      if (confirm("Delete drafted macro " + name + "?"))
+        draftEdit({ op: "macro_delete", name }).then(() => { if (state.macro === name) state.macro = null; });
+    };
+    head.appendChild(del);
+    item.appendChild(head);
+    item.onclick = () => { state.macro = state.macro === name ? null : name; renderMacros(); renderSelected(); };
+
+    if (state.macro === name) {
+      m.steps.forEach((s, i) => {
+        const row = el("div", "chip");
+        row.style.display = "flex";
+        row.title = (s.comment || "") + (s.page ? " · page: " + s.page : "");
+        if (s.snap) {
+          const img = document.createElement("img");
+          img.src = "/api/shot/" + s.snap;
+          img.style.cssText = "width:18px;height:32px;object-fit:cover;cursor:pointer;border-radius:2px";
+          img.onclick = ev => { ev.stopPropagation(); viewShot(s.snap); };
+          row.appendChild(img);
+        }
+        row.appendChild(el("span", null, (i + 1) + " " + s.name + ": " + stepSummary(s)));
+        if (s.skip_when) row.appendChild(el("span", "b-warn", "skip?"));
+        const menu = el("span", "x", "⋯");
+        menu.onclick = ev => { ev.stopPropagation(); stepMenu(name, i, s); };
+        const x = el("span", "x", "✕");
+        x.onclick = ev => { ev.stopPropagation(); draftEdit({ op: "step_delete", macro: name, index: i }); };
+        row.append(menu, x);
+        item.appendChild(row);
+      });
+
+      const controls = el("div");
+      controls.style.marginTop = "4px";
+      if (rec && rec.macro === name) {
+        const stop = el("button", "tiny", "■ Stop recording");
+        stop.onclick = ev => { ev.stopPropagation(); draftEdit({ op: "record_stop" }); };
+        controls.appendChild(stop);
+      } else if (!rec) {
+        const start = el("button", "tiny", "● Record");
+        start.title = "every gesture you make appends a step (with its after-screen snapshot)";
+        start.onclick = ev => { ev.stopPropagation(); draftEdit({ op: "record_start", macro: name }); };
+        controls.appendChild(start);
+      }
+      const save = el("button", "tiny", "Save MACRO.yml");
+      save.onclick = ev => { ev.stopPropagation(); saveMacro(name); };
+      const reh = el("button", "tiny primary", "▶ Rehearse");
+      reh.onclick = ev => { ev.stopPropagation(); rehearseMacro(name, m); };
+      const target = document.createElement("select");
+      for (const t of ["pack", "global"]) target.appendChild(new Option(t, t, false, m.target === t));
+      target.onchange = () => draftEdit({ op: "macro_update", macro: name, target: target.value });
+      target.onclick = ev => ev.stopPropagation();
+      const inp = el("button", "tiny", "+ Input");
+      inp.title = "declare an input, then edit a step arg to {name} (the MACRO.yml placeholder spelling)";
+      inp.onclick = ev => { ev.stopPropagation(); addInput(name, m); };
+      controls.append(" ", save, " ", reh, " ", target, " ", inp);
+      item.appendChild(controls);
+      if (Object.keys(m.inputs || {}).length)
+        item.appendChild(el("div", "kv", "inputs: " + Object.keys(m.inputs).join(", ")));
+    }
+    card.appendChild(item);
+  }
+  card.appendChild(addNameRow("macro_add", "new macro name", "+ Macro", n => state.macro = n));
+}
+
+function stepMenu(macro, index, s) {
+  const choice = prompt(
+    "Step " + (index + 1) + " (" + s.name + ") — type one:\n" +
+    "rename · comment · args · dismissal · rerecord · rehearse-from", "");
+  if (!choice) return;
+  if (choice === "rename") {
+    const name = prompt("new step name (lowercase/digits/hyphens):", s.name);
+    if (name) draftEdit({ op: "step_update", macro, index, fields: { name } });
+  } else if (choice === "comment") {
+    const comment = prompt("step comment (emitted as a YAML comment):", s.comment || "");
+    if (comment !== null) draftEdit({ op: "step_update", macro, index, fields: { comment: comment || null } });
+  } else if (choice === "args") {
+    const raw = prompt("edit `with` as JSON ({name} in a string = declared-input placeholder):",
+      JSON.stringify(s.with || {}));
+    if (raw) {
+      try { draftEdit({ op: "step_update", macro, index, fields: { with: JSON.parse(raw) } }); }
+      catch (e) { banner("not JSON: " + e.message); }
+    }
+  } else if (choice === "dismissal") {
+    draftEdit({ op: "step_dismissal", macro, index });
+  } else if (choice === "rerecord") {
+    draftEdit({ op: "record_start", macro, replace: index });
+    logEntry("re-recording step " + (index + 1) + " — the next gesture replaces it in place");
+  } else if (choice === "rehearse-from") {
+    rehearseMacro(macro, state.draft.macros[macro], s.name);
+  } else {
+    banner("unknown step action “" + choice + "”");
+  }
+}
+
+function addInput(macro, m) {
+  const added = promptNewInput();
+  if (added) draftEdit({ op: "macro_update", macro, inputs: { ...m.inputs, [added[0]]: added[1] } });
+}
+
+async function saveMacro(name) {
+  const data = await apiOr("/api/macro/save", { macro: name }, "save");
+  if (data) logEntry("saved → " + data.path + "\n" + data.yaml);
+}
+
+function promptValues(inputs) {
+  const values = {};
+  for (const [iname, spec] of Object.entries(inputs || {})) {
+    const v = prompt("input “" + iname + "”" + (spec.example ? " (e.g. " + spec.example + ")" : "") + ":",
+      spec.default || "");
+    if (v === null) return null;
+    values[iname] = v;
+  }
+  return values;
+}
+
+function promptNewInput() {
+  const iname = prompt("input name (lowercase/digits/hyphens):");
+  if (!iname) return null;
+  const example = prompt("example value:") || undefined;
+  return [iname, { description: "studio-declared input", example }];
+}
+
+async function rehearseMacro(name, m, startAt) {
+  const values = promptValues(m.inputs);
+  if (values === null) return;
+  if (state.busy) return;
+  setBusy("rehearse " + name);
+  try {
+    const data = await apiOr("/api/macro/rehearse",
+      { macro: name, values, start_at: startAt || "" }, "rehearse");
+    if (!data) return;
+    setConnected(true);
+    logEntry((data.ok ? "✓ rehearsal green" : "✗ rehearsal failed at step " + data.aborted_step)
+      + " (" + data.run_id + ")\n" + data.text);
+    if (data.image) { state.viewingShot = null; renderView(data); }
+  } finally {
+    setBusy(null);
+  }
+}
+
+// ---------- route assembly (playbooks) ----------
+
+const ENTRY_TEMPLATES = {
+  page: name => ({ page: name }),
+  do: name => ({ do: name, macro: { steps: [] } }),
+  tell: name => ({ tell: name, message: "EDIT ME — write it in the user's language" }),
+  ask: name => ({ ask: name, message: "EDIT ME — what you are asking approval for" }),
+  decide: name => ({
+    decide: name, uses: "decide", with: { question: "EDIT ME?" },
+    answers: ["yes", "no"], routes: { yes: "EDIT", no: "EDIT", escalate: "escalate" },
+  }),
+  sync: name => ({ sync: name }),
+};
+
+function entrySummary(e) {
+  const kind = ["page", "do", "decide", "ask", "tell", "sync"].find(k => k in e);
+  let out = kind + ": " + e[kind];
+  if (kind === "page" && e.anchors) out += " (declared here)";
+  if (kind === "page" && e.open) out += " · open";
+  if (kind === "do" && e.macro) out += " · inline ×" + (e.macro.steps || []).length;
+  if (kind === "do" && e.irreversible) out += " · " + e.irreversible + "!";
+  if (kind === "decide") out += " → " + Object.keys(e.routes || {}).join("/");
+  if (kind === "ask" && e.approve) out += " · approve " + e.approve;
+  return out;
+}
+
+function renderPlaybooks() {
+  if (!state.draft) return;
+  const card = $("playbooks-card");
+  card.innerHTML = "";
+  const books = state.draft.playbooks || {};
+  if (state.pack.error)
+    card.appendChild(el("div", "b-warn", "pack: " + state.pack.error));
+  for (const [name, p] of Object.entries(books)) {
+    const item = el("div", "page-item" + (state.playbook === name ? " sel" : ""));
+    const err = state.validation[name];
+    const head = el("div", "head");
+    head.appendChild(el("b", null, name));
+    head.appendChild(el("span", err === null ? "b-ok" : "b-warn", err === null ? "compiles" : "draft"));
+    const del = el("button", "tiny", "✕");
+    del.onclick = ev => { ev.stopPropagation();
+      if (confirm("Delete drafted playbook " + name + "?"))
+        draftEdit({ op: "playbook_delete", name }).then(() => { if (state.playbook === name) state.playbook = null; });
+    };
+    head.appendChild(del);
+    item.appendChild(head);
+    item.onclick = () => { state.playbook = state.playbook === name ? null : name; renderPlaybooks(); };
+
+    if (state.playbook === name) {
+      p.route.forEach((e, i) => {
+        const row = el("div", "chip");
+        row.style.display = "flex";
+        row.appendChild(el("span", null, (i + 1) + " " + entrySummary(e)));
+        const up = el("span", "x", "↑"), dn = el("span", "x", "↓"), ed = el("span", "x", "✎"), x = el("span", "x", "✕");
+        up.onclick = ev => { ev.stopPropagation(); draftEdit({ op: "route_move", playbook: name, index: i, delta: -1 }); };
+        dn.onclick = ev => { ev.stopPropagation(); draftEdit({ op: "route_move", playbook: name, index: i, delta: 1 }); };
+        ed.onclick = ev => { ev.stopPropagation();
+          const raw = prompt("edit route entry as JSON:", JSON.stringify(e));
+          if (raw) {
+            try { draftEdit({ op: "route_update", playbook: name, index: i, entry: JSON.parse(raw) }); }
+            catch (err2) { banner("not JSON: " + err2.message); }
+          }
+        };
+        x.onclick = ev => { ev.stopPropagation(); draftEdit({ op: "route_delete", playbook: name, index: i }); };
+        row.append(up, dn, ed, x);
+        item.appendChild(row);
+      });
+      if (err) item.appendChild(el("div", "b-warn", err));
+      else if (p.route.length) item.appendChild(el("div", "b-ok", "compiles clean"));
+
+      const addRow = el("div");
+      addRow.style.marginTop = "4px";
+      const kindSel = document.createElement("select");
+      for (const k of ["page", "do", "tell", "ask", "decide", "sync"]) kindSel.appendChild(new Option(k, k));
+      const nameIn = document.createElement("input");
+      nameIn.type = "text"; nameIn.size = 10; nameIn.placeholder = "name";
+      nameIn.setAttribute("list", "known-names");
+      const dl = document.createElement("datalist");
+      dl.id = "known-names";
+      for (const pg of state.pack.pages) dl.appendChild(new Option(pg));
+      for (const mc of Object.keys(state.draft.macros || {})) dl.appendChild(new Option(mc));
+      const add = el("button", "tiny", "+ entry");
+      add.onclick = ev => {
+        ev.stopPropagation();
+        const n = nameIn.value.trim();
+        if (!n) return;
+        const kind = kindSel.value;
+        if (kind === "do" && (state.draft.macros || {})[n]) {
+          draftEdit({ op: "route_embed", playbook: name, macro: n });  // inline by default
+        } else {
+          draftEdit({ op: "route_insert", playbook: name, entry: ENTRY_TEMPLATES[kind](n) });
+        }
+        nameIn.value = "";
+      };
+      addRow.append(kindSel, " ", nameIn, dl, " ", add);
+      addRow.onclick = ev => ev.stopPropagation();
+      item.appendChild(addRow);
+
+      const controls = el("div");
+      controls.style.marginTop = "4px";
+      const desc = el("button", "tiny", "Describe");
+      desc.onclick = ev => { ev.stopPropagation();
+        const d = prompt("playbook description:", p.description || "");
+        if (d !== null) draftEdit({ op: "playbook_update", playbook: name, fields: { description: d } });
+      };
+      const inp = el("button", "tiny", "+ Input");
+      inp.onclick = ev => { ev.stopPropagation();
+        const added = promptNewInput();
+        if (added)
+          draftEdit({ op: "playbook_update", playbook: name,
+            fields: { inputs: { ...p.inputs, [added[0]]: added[1] } } });
+      };
+      const bud = el("button", "tiny", "Budget");
+      bud.onclick = ev => { ev.stopPropagation();
+        const raw = prompt("budget as JSON ({\"max_amount\": 500} or {inputs.x} ref; empty clears):",
+          JSON.stringify(p.budget || {}));
+        if (raw === null) return;
+        try { draftEdit({ op: "playbook_update", playbook: name, fields: { budget: raw.trim() && raw.trim() !== "{}" ? JSON.parse(raw) : null } }); }
+        catch (e2) { banner("not JSON: " + e2.message); }
+      };
+      const commit = el("button", "tiny primary", "Commit");
+      commit.onclick = ev => { ev.stopPropagation(); commitPlaybook(name); };
+      const reh = el("button", "tiny primary", "▶ Rehearse");
+      reh.title = "walks the COMMITTED playbook on the live phone";
+      reh.onclick = ev => { ev.stopPropagation(); rehearsePlaybook(name, p); };
+      controls.append(desc, " ", inp, " ", bud, " ", commit, " ", reh);
+      item.appendChild(controls);
+      if (Object.keys(p.inputs || {}).length)
+        item.appendChild(el("div", "kv", "inputs: " + Object.keys(p.inputs).join(", ")));
+    }
+    card.appendChild(item);
+  }
+  card.appendChild(addNameRow("playbook_add", "new playbook name", "+ Playbook", n => state.playbook = n));
+}
+
+async function commitPlaybook(name) {
+  if (!confirm("Write playbook " + name + " into PLAYBOOK.yml (disabled)?")) return;
+  const data = await apiOr("/api/playbook/commit", { playbook: name }, "commit");
+  if (data) logEntry("committed playbook → " + data.pack_file + "\npack check: " + data.check);
+}
+
+async function rehearsePlaybook(name, p) {
+  const values = promptValues(p.inputs);
+  if (values === null) return;
+  if (state.busy) return;
+  setBusy("walking " + name + " — watch the phone");
+  try {
+    const data = await apiOr("/api/playbook/rehearse", { playbook: name, values }, "rehearse");
+    if (!data) return;
+    setConnected(true);
+    logEntry("walk: " + data.outcome + "\n" + (data.lines || []).join("\n"));
+  } finally {
+    setBusy(null);
+  }
+}
+
+async function runMatrix() {
+  const data = await apiOr("/api/draft/matrix", undefined, "matrix");
+  if (!data) return;
+  state.matrix = data;
+  renderProve();
+}
+
+async function commitDraft() {
+  if (!confirm("Write pages + controls into PLAYBOOK.yml and merge learned geometry?")) return;
+  const data = await apiOr("/api/draft/commit", {}, "commit");
+  if (!data) return;
+  logEntry("committed → " + data.pack_file + "\npages: " + data.pages_written.join(", ")
+    + (data.controls_written.length ? "\ncontrols: " + data.controls_written.join(", ") : "")
+    + "\npack check: " + data.check);
+  state.matrix = data.dry_run;
+  renderProve();
+}
+
+function renderProve() {
+  if (!state.draft) return;
+  const card = $("prove-card");
+  card.innerHTML = "";
+  const row = el("div");
+  const score = el("button", "tiny", "Score draft (dry run)");
+  score.onclick = runMatrix;
+  const commit = el("button", "tiny primary", "Commit to pack");
+  commit.onclick = commitDraft;
+  row.append(score, " ", commit);
+  card.appendChild(row);
+  const m = state.matrix;
+  if (!m) return;
+
+  for (const [name, info] of Object.entries(m.pages)) {
+    const line = el("div");
+    line.appendChild(el("b", null, name + " "));
+    line.appendChild(el("span", "kv", "thr " + info.threshold + " · " + info.anchors_learned + " anchors learned · "));
+    line.appendChild(el("span", info.separable ? "b-ok" : "b-bad",
+      info.separable ? "separable" : "CLASHES with " + info.impostor_shot + " (" + info.impostor_max + ")"));
+    card.appendChild(line);
+  }
+  const pages = Object.keys(m.pages);
+  if (pages.length && m.matrix.length) {
+    const table = el("table", "matrix");
+    const hr = el("tr");
+    hr.appendChild(el("th", null, "shot"));
+    pages.forEach(p => hr.appendChild(el("th", null, p)));
+    table.appendChild(hr);
+    for (const cell of m.matrix) {
+      const tr = el("tr");
+      tr.appendChild(el("th", null, cell.shot + " (" + cell.page + ")"));
+      for (const p of pages) {
+        const s = cell.scores[p], thr = m.pages[p].threshold;
+        const td = el("td", null, s.toFixed(2));
+        if (cell.page === p) td.className = "own";
+        else if (s >= thr) td.className = "clash";
+        else if (s >= thr * state.limits.lookalike) td.className = "near";
+        tr.appendChild(td);
+      }
+      table.appendChild(tr);
+    }
+    card.appendChild(table);
+  }
+  for (const [page, terms] of Object.entries(m.forbid_suggestions || {})) {
+    const line = el("div");
+    line.appendChild(el("span", "kv", "forbid for " + page + "? "));
+    for (const t of terms) {
+      const b = el("button", "tiny", "+ " + t);
+      b.onclick = () => draftEdit({
+        op: "page_update", page,
+        forbid: [...state.draft.pages[page].forbid, t],
+      });
+      line.append(b, " ");
+    }
+    card.appendChild(line);
+  }
+  for (const w of m.warnings || []) card.appendChild(el("div", "b-warn", w));
+}
+
+// ---------- session state ----------
+
+function setConnected(on) {
+  $("dot").className = on ? "on" : "";
+  $("conn-label").textContent = on ? "connected" : "disconnected";
+}
+
+async function refreshState() {
+  try {
+    const s = await api("/api/state");
+    setConnected(s.connected);
+    state.app = s.app;
+    if (s.limits) state.limits = s.limits;
+    $("app-badge").textContent = s.app || "no app";
+    $("curation").style.display = s.app ? "block" : "none";
+    $("conn-card").innerHTML = "";
+    $("conn-card").appendChild(el("div", "kv", s.mcp_url));
+    $("conn-card").appendChild(el("div", "kv",
+      s.connected ? s.tools.length + " tools published" : "first action connects"));
+    if (s.app && !state.draft) refreshDraft();
+  } catch (e) {
+    setConnected(false);
+    banner("studio server unreachable: " + e.message);
+  }
+}
+
+window.addEventListener("resize", () => {
+  if (state.imgW) { sizeVirtual(); renderRows(); }
+});
+window.addEventListener("keydown", ev => {
+  if (ev.key === "Escape" && state.marking) { stopMark(); logEntry("mark cancelled"); }
+});
+document.querySelectorAll("nav button[data-tool]").forEach(btn => {
+  btn.onclick = () => act(btn.dataset.tool, {}, btn.textContent.trim());
+});
+refreshState();
+</script>
+</body>
+</html>

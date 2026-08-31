@@ -24,6 +24,7 @@ from physiclaw.cli.server import server
 from physiclaw.cli.setup import setup_app
 from physiclaw.cli.skills import skills_app
 from physiclaw.cli.status import status
+from physiclaw.cli.studio import studio
 from physiclaw.cli.testdrive import testdrive
 from physiclaw.cli.uninstall import uninstall
 from physiclaw.cli.update import update
@@ -42,6 +43,7 @@ app.command()(now)
 app.command()(auto)
 app.command()(mcp)
 app.command()(status)
+app.command()(studio)
 app.command()(update)
 app.command()(flash)
 app.command()(testdrive)

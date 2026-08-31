@@ -396,7 +396,7 @@ def _check_wait_args(args: dict, step_no: int, has_expect: bool) -> None:
 
 def _check_wait_budget(steps: list[Step]) -> None:
     """Declared sleep alone must fit the run budget. `MAX_WAIT_SECONDS` x
-    `MAX_STEPS` is 600s against a 300s cap, and the cap is only checked
+    `MAX_STEPS` is 1500s against a 300s cap, and the cap is only checked
     BETWEEN steps — so without this a macro can be authored that always
     times out, after physically executing half its gestures."""
     total = sum(s.declared_seconds for s in steps)

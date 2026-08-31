@@ -260,6 +260,15 @@ def learned_pages_dir() -> Path:
     return HOME / "learned" / "pages"
 
 
+def studio_dir() -> Path:
+    """The studio's per-app authoring drafts — ``<app>/draft.json``
+    (declarations-in-progress, shot listings, control picks) beside
+    ``<app>/shots/*.jpg``. Browser-refresh-safe scratch space: nothing
+    here is read by the runtime; committing writes the real pack and
+    learned files. Deleting an app's directory abandons its draft."""
+    return HOME / "studio"
+
+
 def live_session_id() -> str | None:
     """The engine session currently running, per the cross-process
     marker the runtime maintains — None when no session is live (CLI

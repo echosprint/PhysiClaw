@@ -36,7 +36,7 @@ from physiclaw.common.listing import (
 )
 from physiclaw.macros.template import TemplateError, fill
 
-MAX_STEPS = 20
+MAX_STEPS = 50
 MAX_INPUTS = 8
 MAX_NAME_LEN = 64
 # `description` / input `description` / `example` are rendered verbatim into

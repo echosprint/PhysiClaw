@@ -1,5 +1,6 @@
-"""Tests for `physiclaw.cli.playbooks`'s rehearsal harness (`playbooks
-run`) — the surface that replaced arming as the way to test a walk.
+"""Tests for the rehearsal harness (`conductor.rehearsal` behind
+`playbooks run`) — the surface that replaced arming as the way to
+test a walk.
 
 Lives beside the conductor tests, not under `tests/cli/`, because it
 drives a real `Program` over the shared pack fixtures in
@@ -17,7 +18,7 @@ from conductor_fakes import PACK_MACRO, make_screen, write_pack
 
 from physiclaw.cli import playbooks as cli
 from physiclaw.common import gesture_vocab
-from physiclaw.conductor import suspension
+from physiclaw.conductor import rehearsal, suspension
 from physiclaw.contract.dto import ToolCall
 
 HOME = make_screen(("Files", 0.5, 0.1)).text
@@ -80,7 +81,7 @@ async def test_dispatch_sends_an_ordinary_gesture_to_mcp() -> None:
     mcp = _FakeMcp()
     call = ToolCall(id="c", name="peek", arguments={})
 
-    text, is_error = await cli._dispatch(mcp, call, _registry())
+    text, is_error = await rehearsal.dispatch(mcp, call, _registry())
 
     assert is_error is False
     assert mcp.calls == [("peek", {})]
@@ -109,7 +110,7 @@ async def test_dispatch_routes_run_macro_to_the_macro_runner(mocker) -> None:
         arguments={"name": "demo/open-app", "inputs": {"message": "hi"}},
     )
 
-    text, is_error = await cli._dispatch(mcp, call, _registry())
+    text, is_error = await rehearsal.dispatch(mcp, call, _registry())
 
     assert is_error is False and "综合" in text
     assert mcp.calls == []  # never went over MCP
@@ -122,7 +123,7 @@ async def test_dispatch_reports_an_unknown_pack_macro() -> None:
         id="c", name=gesture_vocab.RUN_MACRO, arguments={"name": "demo/nope"}
     )
 
-    text, is_error = await cli._dispatch(mcp, call, _registry())
+    text, is_error = await rehearsal.dispatch(mcp, call, _registry())
 
     assert is_error is True and "nope" in text
 
@@ -134,7 +135,7 @@ async def test_dispatch_turns_a_raised_error_into_a_result(mocker) -> None:
     mocker.patch.object(mcp, "call_tool", side_effect=RuntimeError("bridge down"))
     call = ToolCall(id="c", name="peek", arguments={})
 
-    text, is_error = await cli._dispatch(mcp, call, _registry())
+    text, is_error = await rehearsal.dispatch(mcp, call, _registry())
 
     assert is_error is True and "bridge down" in text
 
