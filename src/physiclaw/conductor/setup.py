@@ -130,6 +130,7 @@ def build_program(
         prints=prints_for_app(app, decls=pack.pages),
         channel=channel,
         suspended=suspended,
+        controls=pack.controls,
     )
 
 

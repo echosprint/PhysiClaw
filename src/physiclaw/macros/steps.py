@@ -24,7 +24,6 @@ screen to work from), not an error to retry.
 
 import asyncio
 import logging
-import math
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, replace
@@ -32,7 +31,7 @@ from typing import Any, Protocol
 
 from physiclaw.common import gesture_vocab, verdict
 from physiclaw.common.bbox import center_of
-from physiclaw.common.listing import label_hit
+from physiclaw.common.listing import nearest_labeled_row
 from physiclaw.macros.inputs import substitute
 from physiclaw.macros.model import (
     BLANK_SCREEN,
@@ -298,24 +297,13 @@ class GestureStep(Step):
         del args[TARGET_LABEL]
         if self.mcp_tool not in gesture_vocab.PRESS_TOOLS or not screen.readable:
             return args, ""
-        readings = label_readings(self.args)
         recorded = center_of(args[TARGET_BBOX])
         if recorded is None:
             # Only a substituted-placeholder bbox can get here (literal
             # targets are `_bbox`-validated at parse) — no target center,
             # no healing; the server judges the value.
             return args, ""
-        best: tuple[float, Any] | None = None
-        for row in screen.rows:
-            if row.kind != "text":
-                continue
-            if not any(label_hit(t, row.label) for t in readings):
-                continue
-            c = center_of(row.bbox)
-            assert c is not None  # Element bboxes are valid by construction
-            d = math.dist(c, recorded)
-            if best is None or d < best[0]:
-                best = (d, row)
+        best = nearest_labeled_row(screen.rows, label_readings(self.args), recorded)
         if best is None:
             return args, ""
         dist, row = best

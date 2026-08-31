@@ -61,7 +61,6 @@ from physiclaw.macros.model import (
     INPUT_NAME_RE,
     MAX_CLAUSE_DEPTH,
     MAX_INPUTS,
-    MAX_LABEL_READINGS,
     MAX_PROSE_LEN,
     MAX_RUN_SECONDS,
     MAX_STEPS,
@@ -78,7 +77,7 @@ from physiclaw.macros.model import (
     MacroInput,
     TextClause,
     check_name,
-    label_readings,
+    checked_readings,
 )
 from physiclaw.macros.steps import GestureStep, Step, WaitStep
 from physiclaw.macros.template import TemplateError, placeholders
@@ -357,18 +356,7 @@ def _check_target(args: dict, step_no: int) -> None:
         # carrying `{placeholder}` strings stays server-checked (the
         # placeholder pass above already vetted the names).
         _bbox(raw_bbox, f"{where}: `bbox`")
-    readings = label_readings(args)
-    if not readings or len(readings) > MAX_LABEL_READINGS:
-        raise MacroError(
-            f"{where}: `label` takes one string or up to "
-            f"{MAX_LABEL_READINGS} alternate readings of ONE target"
-        )
-    seen: list[str] = []
-    for r in readings:
-        text = _require_str(r, f"{where}: `label`")
-        if text in seen:
-            raise MacroError(f"{where}: duplicate `label` reading {text!r}")
-        seen.append(text)
+    checked_readings(args, where, _require_str, MacroError)
 
 
 def _check_wait_args(args: dict, step_no: int, has_expect: bool) -> None:

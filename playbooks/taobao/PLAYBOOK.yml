@@ -13,6 +13,20 @@ placeholders:
     description: the IM contact name of YOUR user thread, exactly as the chat app shows it
     example: QiaoQian
 
+# App chrome the author KNOWS sits at a fixed place — prior knowledge
+# the rescue ladder spends before the model is woken. `back` replaces
+# the generic go_back gesture on the back rung (located by its label
+# live when readable); `dismiss` is the scrim area sheets and modals
+# close from, tapped only when it lies OUTSIDE the detected overlay.
+# Verify both positions at rehearsal like any recorded coordinate.
+controls:
+  back:
+    label: "back chevron (top-left)"     # an icon — no on-screen text
+    bbox: [0.015, 0.045, 0.095, 0.095]
+  dismiss:
+    label: "scrim above a bottom sheet"  # below the IM-banner zone (y < 0.15)
+    bbox: [0.35, 0.16, 0.65, 0.24]
+
 playbooks:
   buy:
     description: 淘宝按关键词买一件东西

@@ -42,7 +42,9 @@ from physiclaw.macros.parse import reject_aliases
 yaml_loader = YAML(typ="safe", pure=True)
 
 
-_PACK_TOP_KEYS = frozenset({"app", "description", "placeholders", "pages", "playbooks"})
+_PACK_TOP_KEYS = frozenset(
+    {"app", "description", "placeholders", "pages", "playbooks", "controls"}
+)
 
 
 def load_yaml(text: str, error_cls: type[Exception], where: str = "") -> Any:

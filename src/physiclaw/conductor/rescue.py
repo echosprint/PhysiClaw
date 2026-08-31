@@ -7,7 +7,8 @@ owns the state: it increments the counters this module consults,
 synthesizes the action, and re-checks on the action's own result screen
 (the reconcile rule: the tap's result view IS the re-read).
 
-The ladder, safest-and-cheapest first:
+The ladder, safest-and-cheapest first (the field's recovery hierarchy:
+explicit close affordances, then the scrim, then back, then reset):
 
   locked (the cover or the passcode keypad) → ``unlock_phone``. Read
       before anything else: taps do not reach a sleeping phone, so
@@ -16,10 +17,16 @@ The ladder, safest-and-cheapest first:
       dismissal inside the band: a vocabulary word (关闭 / 我知道了 /
       以后再说 / skip / not now …), the close glyph, or the band's
       top-right icon — deny-listed so nothing money-shaped is ever
-      tappable, whatever the popup says.
+      tappable, whatever the popup says. When none is in sight and the
+      pack declares a `dismiss` control (the scrim area modals close
+      from), tap THAT — author-trusted prior knowledge, free, taken
+      before the micro tier is paid; it only fires when the declared
+      spot lies OUTSIDE the overlay band (a scrim tap, literally).
   anything else (wandered deeper: a live-stream room, a product page,
-      an ad landing; or unknown) → ``go_back``, which only pops the
-      navigation stack and cannot mutate app state.
+      an ad landing; or unknown) → back. The pack's declared `back`
+      control (the app's own affordance, located by its label live)
+      when one exists, else the generic ``go_back`` gesture — either
+      only pops the navigation stack and cannot mutate app state.
 
 Everything is bounded twice — per rung and by one global budget — and
 the counters only ever go up (the rebinding-attack lesson: recovery
@@ -33,8 +40,8 @@ from dataclasses import dataclass, field
 from typing import Mapping
 
 from physiclaw.common import paths
-from physiclaw.common.bbox import center_of
-from physiclaw.common.listing import Element, Screen
+from physiclaw.common.bbox import Bbox, center_of
+from physiclaw.common.listing import Element, Screen, nearest_labeled_row
 from physiclaw.common.logger import write_json_atomic
 from physiclaw.common.text import read_text
 from physiclaw.conductor.match import PRICE_RE, Verdict, reads_as_locked
@@ -43,7 +50,9 @@ from physiclaw.conductor.micro import (
     DecisionRequest,
     build_request,
 )
+from physiclaw.conductor.pages import CONTROL_BACK, CONTROL_DISMISS, Control
 from physiclaw.conductor.reply import normalize
+from physiclaw.macros.steps import HEAL_RADIUS
 
 log = logging.getLogger(__name__)
 
@@ -138,10 +147,11 @@ _ICON_MIN_CX = 0.75
 
 @dataclass(frozen=True)
 class Dismiss:
-    """Tap this element to dismiss the overlay; `note` names why it was
-    chosen (the journal line's material)."""
+    """Tap this bbox to dismiss the overlay; `note` names why it was
+    chosen (the journal line's material — it embeds the tapped label
+    when one exists, so nothing downstream needs a fabricated row)."""
 
-    el: Element
+    bbox: Bbox
     note: str
 
 
@@ -172,7 +182,11 @@ class Unlock:
 
 @dataclass(frozen=True)
 class Back:
-    pass
+    """Pop the navigation stack — via the pack's declared `back` control
+    (the app's own affordance) when one exists, else the generic
+    ``go_back`` gesture. Same rung, same budget either way."""
+
+    control: Control | None = None
 
 
 @dataclass(frozen=True)
@@ -232,12 +246,16 @@ def plan(
     actions: int,
     learned: tuple[str, ...] = (),
     can_reset: bool = False,
+    controls: Mapping[str, Control] | None = None,
 ) -> Step:
     """The next rescue action for this reading of the screen. Read-only
     over the walk's counters (the `reconcile.plan` contract). `learned`
     is the app's mined dismissal labels — an extra vocabulary tier.
     `can_reset` says the walk still has its once-per-walk reset (a pack
-    `open` macro exists and the hammer is unswung)."""
+    `open` macro exists and the hammer is unswung). `controls` is the
+    pack's declared app chrome — author-trusted prior knowledge the
+    ladder spends before the model is woken."""
+    controls = controls or {}
     if actions >= GLOBAL_BUDGET:
         return Exhausted(f"rescue budget ({GLOBAL_BUDGET} actions) spent")
     if reads_as_locked(screen):
@@ -252,6 +270,13 @@ def plan(
         step = find_dismiss(screen, verdict.overlay_band, learned)
         if step is not None:
             return step
+        scrim = _scrim_dismiss(controls.get(CONTROL_DISMISS), verdict.overlay_band)
+        if scrim is not None:
+            # Free and deterministic beats one paid micro call — and the
+            # scrim tap only fires OUTSIDE the band, so a modal that
+            # blocks tap-outside (a confirmation dialog) merely wastes
+            # one bounded try, never taps content.
+            return scrim
         if not tries.get(RUNG_MICRO, 0):
             # The micro tier, once: ask which band control is a pure
             # dismissal. Candidates deny-filtered HERE, so nothing
@@ -260,7 +285,7 @@ def plan(
             req = overlay_request(screen, verdict.overlay_band)
             if req.candidates:
                 return AskDismiss(request=req)
-        # No safe dismissal in the band — fall through: go_back closes
+        # No safe dismissal in the band — fall through: back closes
         # many sheets too, and is state-safe either way.
     if tries.get(RUNG_BACK, 0) >= BACK_TRIES:
         if can_reset:
@@ -274,7 +299,40 @@ def plan(
         # mid-transition — re-peek once, free, and judge the settled
         # screen instead of spending a real recovery action on it.
         return Settle()
-    return Back()
+    return Back(control=controls.get(CONTROL_BACK))
+
+
+def _scrim_dismiss(
+    control: Control | None, band: tuple[float, float]
+) -> Dismiss | None:
+    """The declared `dismiss` control as a Dismiss step — only when its
+    center lies OUTSIDE the overlay band (a scrim tap, literally; a
+    full-height modal leaves no scrim to tap and the rung stands down)."""
+    if control is None:
+        return None
+    lo, hi = band
+    cy = (control.bbox[1] + control.bbox[3]) / 2
+    if lo <= cy <= hi:
+        return None
+    return Dismiss(
+        bbox=control.bbox, note="tapping the declared dismiss area outside the modal"
+    )
+
+
+def locate_control(control: Control, screen: Screen) -> "tuple[Bbox, str]":
+    """Where a declared control IS right now: the text row matching one
+    of its label readings nearest the declared spot (`nearest_labeled_row`
+    — the one search the macro heal rides too, within the one
+    HEAL_RADIUS), else the declared bbox. Returns the bbox to tap and a
+    short note for the journal."""
+    if not screen.readable:
+        return control.bbox, ""
+    declared = center_of(control.bbox)
+    assert declared is not None  # Control bboxes are parse-validated
+    best = nearest_labeled_row(screen.rows, control.label, declared)
+    if best is None or best[0] > HEAL_RADIUS:
+        return control.bbox, ""
+    return best[1].bbox, f" (located {best[1].label.strip()!r} on screen)"
 
 
 def overlay_request(screen: Screen, band: tuple[float, float]) -> DecisionRequest:
@@ -312,17 +370,17 @@ def find_dismiss(
     for word in DISMISS_WORDS + tuple(normalize(w) for w in learned):
         row = by_norm.get(word)
         if row is not None:
-            return Dismiss(el=row, note=f"tapping {row.label.strip()!r}")
+            return Dismiss(bbox=row.bbox, note=f"tapping {row.label.strip()!r}")
     for r in texts:
         if r.label.strip() in _GLYPHS:
-            return Dismiss(el=r, note="tapping the close glyph")
+            return Dismiss(bbox=r.bbox, note="tapping the close glyph")
     icon_hi = lo + (hi - lo) * _ICON_TOP_FRACTION
     for r in rows:
         if r.kind != "icon":
             continue
         c = center_of(r.bbox)
         if c is not None and c[0] >= _ICON_MIN_CX and c[1] <= icon_hi:
-            return Dismiss(el=r, note="tapping the band's top-right icon")
+            return Dismiss(bbox=r.bbox, note="tapping the band's top-right icon")
     return None
 
 

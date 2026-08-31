@@ -22,10 +22,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from physiclaw.common import paths
+from physiclaw.common.bbox import Bbox, validate_bbox
 from physiclaw.common.logger import write_json_atomic
 from physiclaw.common.text import read_text
 from physiclaw.conductor import _spec
-from physiclaw.macros.model import MAX_LABEL_READINGS
+from physiclaw.macros.model import MAX_LABEL_READINGS, checked_readings
 
 log = logging.getLogger(__name__)
 
@@ -161,6 +162,28 @@ class PageDecl:
     scrollable: bool = False
 
 
+# The pack-level `controls:` vocabulary — app chrome the AUTHOR knows
+# sits at a fixed place (the field's recovery hierarchy: explicit close
+# affordances, then the scrim, then back, then reset). Closed on
+# purpose: every declared control has a code consumer in the rescue
+# ladder, so an unconsumed name is dead config the parser refuses.
+CONTROL_BACK = "back"  # the app's own back affordance (iOS: top-left chevron)
+CONTROL_DISMISS = "dismiss"  # empty scrim area a modal/sheet dismisses from
+CONTROL_KEYS = (CONTROL_BACK, CONTROL_DISMISS)
+
+
+@dataclass(frozen=True)
+class Control:
+    """One declared app control — the gesture-target shape ({label,
+    bbox}) as PACK knowledge: prior the author holds about the app's
+    fixed chrome, consumed by the rescue ladder (never by money paths).
+    `label` is the readings tuple; on-screen text lets the tap be
+    located live, a description documents the coordinates."""
+
+    label: tuple[str, ...]
+    bbox: Bbox
+
+
 @dataclass(frozen=True)
 class LearnedAnchor:
     """Captured geometry for one declared anchor on this device."""
@@ -272,6 +295,36 @@ def collect_page_decls(doc: dict) -> dict:
                 )
             out[name] = decl
             sites[name] = site
+    return out
+
+
+def parse_controls(data: Any) -> dict[str, Control]:
+    """The pack's `controls:` section → validated Controls. Each entry is
+    the gesture-target shape (`{label, bbox}` — the macro grammar's
+    pairing rule, at pack level), under the closed CONTROL_KEYS
+    vocabulary."""
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise PagesError("`controls` must be a mapping of control name → target")
+    unknown = sorted(set(data) - set(CONTROL_KEYS))
+    if unknown:
+        raise PagesError(
+            f"`controls`: unknown key(s): {', '.join(map(str, unknown))} — "
+            f"the vocabulary is closed ({', '.join(CONTROL_KEYS)}): every "
+            "declared control has a rescue-ladder consumer"
+        )
+    out: dict[str, Control] = {}
+    for name, spec in data.items():
+        where = f"control {name!r}"
+        if not isinstance(spec, dict) or set(spec.keys()) != {"label", "bbox"}:
+            raise PagesError(f"{where} must be a {{label, bbox}} mapping")
+        label = checked_readings(spec, where, _require_str, PagesError)
+        try:
+            left, top, right, bottom = map(float, validate_bbox(spec["bbox"]))
+        except ValueError as e:
+            raise PagesError(f"{where}: {e}") from e
+        out[name] = Control(label=label, bbox=(left, top, right, bottom))
     return out
 
 

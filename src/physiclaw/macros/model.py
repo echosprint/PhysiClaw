@@ -111,6 +111,32 @@ def label_readings(args: dict) -> "tuple[str, ...]":
     return tuple(raw) if isinstance(raw, list) else (raw,)
 
 
+def checked_readings(
+    args: dict,
+    where: str,
+    require_str: "Callable[[object, str], str]",
+    err: type[Exception],
+) -> "tuple[str, ...]":
+    """`label_readings` plus the grammar over them — the ONE validator
+    of a readings list (non-empty, ≤ MAX_LABEL_READINGS, each a string
+    via the caller's own scalar terminal, no duplicates), raising the
+    caller's error class. Macro targets and pack controls must never
+    disagree on what a legal readings list is."""
+    readings = label_readings(args)
+    if not readings or len(readings) > MAX_LABEL_READINGS:
+        raise err(
+            f"{where}: `label` takes one string or up to "
+            f"{MAX_LABEL_READINGS} alternate readings of ONE target"
+        )
+    seen: list[str] = []
+    for r in readings:
+        text = require_str(r, f"{where}: `label`")
+        if text in seen:
+            raise err(f"{where}: duplicate `label` reading {text!r}")
+        seen.append(text)
+    return tuple(seen)
+
+
 # The macro-local settle step. NOT an MCP tool — the runner sleeps
 # in-process rather than paying a round trip to block the arm server — and
 # NOT in the shared gesture vocabulary: no classifier outside this package

@@ -82,7 +82,13 @@ from physiclaw.conductor.micro import (
     MicroOutcome,
     build_request,
 )
-from physiclaw.conductor.pages import OPEN_MACRO, THREAD_ID, PagePrint, page_id
+from physiclaw.conductor.pages import (
+    OPEN_MACRO,
+    THREAD_ID,
+    Control,
+    PagePrint,
+    page_id,
+)
 from physiclaw.conductor.playbook import (
     GATE_MAX_CHECKS,
     GATE_MAX_REVISIONS,
@@ -197,6 +203,7 @@ class Program:
         prints: list[PagePrint],
         channel: Channel | None = None,
         suspended: dict | None = None,
+        controls: "dict[str, Control] | None" = None,
     ):
         self.app = app
         self.spec = spec
@@ -234,6 +241,9 @@ class Program:
         self._rescue: rescue.State | None = None
         self._rescues_total = 0
         self._dismiss_labels: "tuple[str, ...] | None" = None  # lazy, per walk
+        # The pack's declared app chrome (back / dismiss) — the rescue
+        # ladder's author-trusted prior knowledge.
+        self._controls: dict[str, Control] = controls or {}
         # The reset rung's hands and its once-per-WALK latch: the start
         # page's own `open:` body first (it launches to exactly the page
         # the route starts at), else the pack's directory `open` macro
@@ -1307,6 +1317,7 @@ class Program:
             st.actions,
             self._dismiss_labels,
             can_reset=self._open_macro is not None and not self._reset_used,
+            controls=self._controls,
         )
         if isinstance(step, rescue.Settle):
             # Free — verification hygiene, not recovery: no action
@@ -1335,7 +1346,7 @@ class Program:
                 rescue.RUNG_DISMISS,
                 f"conductor: overlay on {st.target} — {step.note}",
                 "tap",
-                {"bbox": list(step.el.bbox)},
+                {"bbox": list(step.bbox)},
             )
         if isinstance(step, rescue.Unlock):
             return self._rescue_act(
@@ -1354,6 +1365,18 @@ class Program:
                 {},
             )
         assert isinstance(step, rescue.Back)
+        if step.control is not None:
+            # The app's OWN back affordance, located by its label first
+            # (the labeled-target heal, conductor-side) — more precise
+            # than the generic gesture on apps whose chrome we know.
+            bbox, located = rescue.locate_control(step.control, self._screen)
+            return self._rescue_act(
+                rescue.RUNG_BACK,
+                f"conductor: backing out via the app's back control toward "
+                f"{st.target}{located}",
+                "tap",
+                {"bbox": list(bbox)},
+            )
         return self._rescue_act(
             rescue.RUNG_BACK,
             f"conductor: backing out to reach {st.target}",

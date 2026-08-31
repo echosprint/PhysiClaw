@@ -2308,3 +2308,37 @@ def test_session_setup_hidden_registry_carries_inline_macros() -> None:
 
     assert overture is not None
     assert "demo/flow.open" in hidden
+
+
+# ---------- declared app chrome (`controls:`) ----------
+
+
+CONTROLS = """\
+back:
+  label: "back chevron"
+  bbox: [0.02, 0.05, 0.10, 0.10]
+dismiss:
+  label: "scrim above the sheet"
+  bbox: [0.35, 0.10, 0.65, 0.20]
+"""
+
+
+def test_back_rung_taps_the_declared_back_control() -> None:
+    # A pack declaring its own back affordance backs out by TAPPING it
+    # (located by label when readable) instead of the generic gesture.
+    write_pack(pages=RESCUE_PAGES, playbooks={"flow": FLOW}, controls=CONTROLS)
+    _learn_pages()
+    p = _program(keyword="milk")
+    h = _history()
+    _feed(h, p.advance(h), HOME2)
+    leg1 = p.advance(h)
+    _feed(h, leg1, ELSEWHERE)  # unknown landing
+    settle = p.advance(h)
+    assert settle.tool_names() == ["note", "peek"]
+    _feed(h, settle, ELSEWHERE)
+
+    back = p.advance(h)
+
+    assert back is not None and back.tool_names() == ["note", "tap"]
+    assert back.tool_calls[1].arguments == {"bbox": [0.02, 0.05, 0.10, 0.10]}
+    assert "back control" in back.tool_calls[0].arguments["summary"]

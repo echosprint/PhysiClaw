@@ -95,6 +95,19 @@ description: EDIT ME — what this pack automates, and when to adopt it
 #     description: EDIT ME — what to fill in
 #     example: SomeOne
 
+# App chrome at a KNOWN fixed place — prior knowledge the rescue ladder
+# spends before the model is woken (closed vocabulary: every control
+# has a code consumer). `back` = the app's own back affordance, used on
+# the back rung instead of the generic gesture; `dismiss` = the scrim
+# area modals close from, tapped only OUTSIDE a detected overlay.
+# controls:
+#   back:
+#     label: "back chevron (top-left)"
+#     bbox: [0.015, 0.045, 0.095, 0.095]
+#   dismiss:
+#     label: "scrim above a bottom sheet"
+#     bbox: [0.35, 0.16, 0.65, 0.24]
+
 # The walks. Key = playbook name (referenced as {app}/<name>). A route
 # alternates WHERE (page — checked every time) with WHAT (a move);
 # ≤ {max_nodes} moves, forward-only except a decide's bounded re-ask
@@ -196,6 +209,13 @@ name EARLIER decide outputs, routes are forward-only except a decide's
 bounded re-ask self-loop and next_item's ledger loop, and
 `irreversible: payment` moves directly follow an `ask` with
 `approve: payment` and require a `budget:`.
+
+A pack may declare `controls:` — app chrome at a known fixed place
+(closed vocabulary: `back`, the app's own back affordance the rescue
+ladder taps instead of the generic gesture; `dismiss`, the scrim area
+modals close from, tapped only outside a detected overlay). Each is
+the gesture-target shape ({{label, bbox}}); author-trusted prior
+knowledge, spent before the model is woken.
 
 A page is declared ONCE — beside its waypoint, in the `pages:`
 appendix, or on another route — and referenced bare everywhere else.

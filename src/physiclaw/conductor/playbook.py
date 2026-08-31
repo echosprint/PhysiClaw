@@ -124,9 +124,11 @@ from physiclaw.conductor.calls import CALLS, ESCALATE, LEDGER_FIELDS, NEXT_ITEM
 from physiclaw.conductor.pages import (
     PAGE_DECL_FIELDS,
     RESERVED_APPS,
+    Control,
     PageDecl,
     PagesError,
     collect_page_decls,
+    parse_controls,
     parse_pages_data,
     route_decl,
 )
@@ -408,6 +410,9 @@ class Pack:
     # The `playbooks:` map, raw — parsed per-entry by `scan_playbooks`
     # so one broken walk excludes itself, never the pack.
     playbook_docs: dict = field(default_factory=dict)
+    # The pack's declared app chrome (`controls:` — back / dismiss),
+    # consumed by the rescue ladder. See `pages.Control`.
+    controls: dict[str, Control] = field(default_factory=dict)
 
 
 def qualified_macro(app: str, name: str) -> str:
@@ -457,6 +462,10 @@ def load_pack(app: str) -> Pack:
         pages = parse_pages_data(collect_page_decls(doc), app)
     except PagesError as e:
         raise PlaybookError(f"{app}/{PACK_FILENAME} pages: {e}") from e
+    try:
+        controls = parse_controls(doc.get("controls"))
+    except PagesError as e:
+        raise PlaybookError(f"{app}/{PACK_FILENAME} controls: {e}") from e
     raw_playbooks = doc.get("playbooks") or {}
     if not isinstance(raw_playbooks, dict):
         raise PlaybookError("`playbooks` must be a mapping of name → playbook")
@@ -477,6 +486,7 @@ def load_pack(app: str) -> Pack:
         macros=macros,
         macro_errors=errors,
         playbook_docs=dict(raw_playbooks),
+        controls=controls,
     )
 
 

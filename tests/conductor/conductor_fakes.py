@@ -99,12 +99,17 @@ steps:
 
 
 def compose_pack_doc(
-    app: str, pages: str, playbooks: dict[str, str] | None = None
+    app: str,
+    pages: str,
+    playbooks: dict[str, str] | None = None,
+    controls: str | None = None,
 ) -> str:
     """One unified PLAYBOOK.yml from the fixtures' historical pieces —
     pages text + full playbook docs, indented under their map keys (the
     keys ARE the names; entries carry no inner `name:`)."""
     doc = f"app: {app}\ndescription: test pack\npages:\n{indent(pages, '  ')}\n"
+    if controls:
+        doc += f"controls:\n{indent(controls, '  ')}\n"
     if playbooks:
         doc += "playbooks:\n"
         for name, text in playbooks.items():
@@ -118,6 +123,7 @@ def write_pack(
     macros: tuple[str, ...] = ("open-app", "add-cart"),
     playbooks: dict[str, str] | None = None,
     pages: str = PAGES,
+    controls: str | None = None,
 ):
     """Write a pack under the (fixture-scoped) playbooks dir; returns its
     root."""
@@ -126,7 +132,7 @@ def write_pack(
     root = paths.playbooks_dir() / app
     (root / "macros").mkdir(parents=True, exist_ok=True)
     (root / "PLAYBOOK.yml").write_text(
-        compose_pack_doc(app, pages, playbooks), encoding="utf-8"
+        compose_pack_doc(app, pages, playbooks, controls), encoding="utf-8"
     )
     for m in macros:
         d = root / "macros" / m

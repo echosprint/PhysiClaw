@@ -54,7 +54,7 @@ def test_plan_occluded_with_a_safe_word_dismisses() -> None:
     step = rescue.plan(_v("occluded", "demo.home", BAND), POPUP, {}, 0)
 
     assert isinstance(step, rescue.Dismiss)
-    assert step.el.label == "以后再说"
+    assert "以后再说" in step.note
 
 
 def test_plan_occluded_without_a_safe_hit_falls_through_to_back() -> None:
@@ -113,7 +113,7 @@ def test_find_dismiss_prefers_vocabulary_priority_order() -> None:
 
     step = rescue.find_dismiss(screen, BAND)
 
-    assert step is not None and step.el.label == "关闭"  # earlier in the vocab
+    assert step is not None and "关闭" in step.note  # earlier in the vocab
 
 
 def test_find_dismiss_never_taps_money_shaped_rows() -> None:
@@ -223,7 +223,7 @@ def test_find_dismiss_uses_learned_labels_after_the_vocab() -> None:
 
     step = rescue.find_dismiss(screen, BAND, learned=("开心收下",))
 
-    assert step is not None and step.el.label == "开心收下"
+    assert step is not None and "开心收下" in step.note
 
 
 def test_learn_dismiss_round_trips_dedupes_and_caps() -> None:
@@ -248,3 +248,91 @@ def test_learn_dismiss_drops_oldest_past_the_cap() -> None:
 
     assert len(learned) == rescue.MAX_LEARNED
     assert learned[-1] == labels[-1] and labels[0] not in learned
+
+
+# ---------- declared app chrome (`controls:`) ----------
+
+
+def _controls(**kw):
+    from physiclaw.conductor.pages import Control
+
+    return {k: Control(label=(v[0],), bbox=v[1]) for k, v in kw.items()}
+
+
+def test_scrim_dismiss_fires_outside_the_band_when_nothing_safer_exists() -> None:
+    # No vocab word, no glyph, no icon in the band — the declared scrim
+    # area (outside the overlay) is tapped before the micro tier is paid.
+    screen = make_screen(("mystery offer", 0.5, 0.6), ("act fast", 0.5, 0.7))
+    controls = _controls(dismiss=("scrim above the sheet", (0.35, 0.1, 0.65, 0.2)))
+
+    step = rescue.plan(
+        _v("occluded", page="demo.home", band=(0.5, 0.9)),
+        screen,
+        {},
+        0,
+        controls=controls,
+    )
+
+    assert isinstance(step, rescue.Dismiss)
+    assert "outside the modal" in step.note
+    assert step.bbox == (0.35, 0.1, 0.65, 0.2)
+
+
+def test_scrim_dismiss_stands_down_inside_the_band() -> None:
+    # A full-height modal leaves no scrim: the declared spot falls inside
+    # the overlay band, so tapping it would hit modal content — skipped.
+    screen = make_screen(("mystery offer", 0.5, 0.6))
+    controls = _controls(dismiss=("scrim", (0.35, 0.1, 0.65, 0.2)))
+
+    step = rescue.plan(
+        _v("occluded", page="demo.home", band=(0.05, 0.9)),
+        screen,
+        {},
+        0,
+        controls=controls,
+    )
+
+    assert not isinstance(step, rescue.Dismiss)
+
+
+def test_vocab_dismissal_still_beats_the_scrim() -> None:
+    # Explicit close affordances first — the field's hierarchy.
+    screen = make_screen(("以后再说", 0.5, 0.6))
+    controls = _controls(dismiss=("scrim", (0.35, 0.1, 0.65, 0.2)))
+
+    step = rescue.plan(
+        _v("occluded", page="demo.home", band=(0.5, 0.9)),
+        screen,
+        {},
+        0,
+        controls=controls,
+    )
+
+    assert isinstance(step, rescue.Dismiss)
+    assert "以后再说" in step.note
+
+
+def test_back_rung_carries_the_declared_back_control() -> None:
+    screen = make_screen(("Nothing known", 0.5, 0.5))
+    controls = _controls(back=("back chevron", (0.02, 0.05, 0.1, 0.1)))
+
+    step = rescue.plan(
+        _v("unknown"), screen, {rescue.RUNG_SETTLE: 1}, 1, controls=controls
+    )
+
+    assert isinstance(step, rescue.Back)
+    assert step.control is not None and step.control.bbox == (0.02, 0.05, 0.1, 0.1)
+
+
+def test_locate_control_follows_the_label_within_radius() -> None:
+    from physiclaw.conductor.pages import Control
+
+    control = Control(label=("返回",), bbox=(0.02, 0.05, 0.1, 0.1))
+    screen = make_screen(("返回", 0.1, 0.12))  # drifted a little
+
+    bbox, note = rescue.locate_control(control, screen)
+
+    assert note and bbox != control.bbox
+    control_far = Control(label=("返回",), bbox=(0.8, 0.8, 0.9, 0.9))
+    bbox2, note2 = rescue.locate_control(control_far, screen)
+    assert bbox2 == control_far.bbox and note2 == ""  # off-radius → declared
