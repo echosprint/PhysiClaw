@@ -308,7 +308,7 @@ function renderView(data) {
   const img = $("frame");
   img.onload = () => {
     state.imgW = img.naturalWidth; state.imgH = img.naturalHeight;
-    sizeVirtual();
+    sizePanes();
     renderRows();
   };
   img.src = "data:" + (data.image.mime_type || "image/jpeg") + ";base64," + data.image.data;
@@ -320,11 +320,24 @@ function renderView(data) {
   renderPages();
 }
 
-function sizeVirtual() {
-  const virt = $("virt"), stage = virt.parentElement;
+function fitted(stage) {
+  // The one aspect-fit computation both panes use. CSS max-height
+  // can't do this: the image's wrapper is auto-height, so a
+  // percentage max-height computes to none and a portrait frame
+  // would render full-width and crop at the pane's overflow.
   const ar = state.imgW / state.imgH;
   let w = stage.clientWidth, h = w / ar;
   if (h > stage.clientHeight) { h = stage.clientHeight; w = h * ar; }
+  return [w, h];
+}
+
+function sizePanes() {
+  const frame = $("frame");
+  const [fw, fh] = fitted($("frame-wrap").parentElement);
+  frame.style.width = fw + "px";
+  frame.style.height = fh + "px";
+  const virt = $("virt");
+  const [w, h] = fitted(virt.parentElement);
   virt.style.width = w + "px";
   virt.style.height = h + "px";
   virt.style.display = "block";
@@ -1130,7 +1143,7 @@ async function refreshState() {
 }
 
 window.addEventListener("resize", () => {
-  if (state.imgW) { sizeVirtual(); renderRows(); }
+  if (state.imgW) { sizePanes(); renderRows(); }
 });
 window.addEventListener("keydown", ev => {
   if (ev.key === "Escape" && state.marking) { stopMark(); logEntry("mark cancelled"); }
