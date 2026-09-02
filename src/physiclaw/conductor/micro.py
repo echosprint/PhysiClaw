@@ -167,19 +167,13 @@ class MicroOutcome:
 @dataclass(frozen=True)
 class MicroResult:
     """One call's full account: the outcome (None = escalate) plus the
-    stats every consumer needs — the trace event, the replay CLI, and
-    the eval harness all read the same fields. `tier` names who answered
-    ("micro" or, after a cascade retry, "session"); `agreement` is
-    whether both tiers committed the same answer when both did — logged
-    for the eval to study, never acted on."""
+    stats the trace event records."""
 
     outcome: MicroOutcome | None
     detail: str  # the outcome's reason, or why there is none
     attempts: int
     usage: Usage
     elapsed_ms: int
-    tier: str = "micro"
-    agreement: bool | None = None
 
 
 def build_request(
@@ -191,8 +185,7 @@ def build_request(
     context: str = "",
 ) -> DecisionRequest:
     """The one assembler of a one-shot request's screen material — the
-    label text when the call reads the screen (`_SPECS` says which) —
-    shared by activation and the eval replay.
+    label text when the call reads the screen (`_SPECS` says which).
     (Episode requests are assembled by the agent step: they carry
     replayed history and granted candidates this cannot produce.)"""
     return DecisionRequest(
@@ -283,74 +276,28 @@ class MicroCaller:
         escalate. Never raises."""
         t0 = time.perf_counter()
         try:
-            outcome, detail, attempts, usage, tier, agreement = await self._run(req)
+            outcome, detail, attempts, usage = await self._ask(req)
         except Exception as e:
             log.warning("micro %s (%s): provider failed — %s", req.call, req.node_id, e)
             outcome, detail, attempts, usage = None, "provider error", 0, Usage()
-            tier, agreement = "micro", None
         result = MicroResult(
             outcome=outcome,
             detail=detail,
             attempts=attempts,
             usage=usage,
             elapsed_ms=int((time.perf_counter() - t0) * 1000),
-            tier=tier,
-            agreement=agreement,
         )
         self._trace(req, result)
         return result
 
-    async def _run(
+    async def _ask(
         self, req: DecisionRequest
-    ) -> "tuple[MicroOutcome | None, str, int, Usage, str, bool | None]":
-        """One decision through the tiers: the cheap tier, then — on a
-        floor miss or a double-invalid, when a distinct cheap tier
-        exists — ONE session-model retry before escalating (the
-        FrugalGPT cascade: ~500 tokens against the full session a
-        handover costs). `agreement` compares the two tiers' committed
-        answers when both committed one — recorded for the eval,
-        never acted on."""
+    ) -> "tuple[MicroOutcome | None, str, int, Usage]":
+        """One decision on the live provider: fresh messages, one repair
+        retry, floor judgment. No outcome means escalate — the walk hands
+        over rather than asking a second model the same question."""
         allowed = _SPECS[req.call].answer_space(req)
         provider = self._live_provider()
-        outcome, detail, attempts, usage, answer, retryable = await self._tier(
-            provider, req, allowed
-        )
-        tier = "micro"
-        agreement: bool | None = None
-        if outcome is None and self._owned is not None and retryable:
-            log.info(
-                "micro %s (%s): cheap tier gave no outcome (%s) — one "
-                "session-model retry",
-                req.call,
-                req.node_id,
-                detail,
-            )
-            s_outcome, s_detail, s_attempts, s_usage, s_answer, _ = await self._tier(
-                self._provider, req, allowed
-            )
-            attempts += s_attempts
-            usage = Usage(
-                prompt_tokens=usage.prompt_tokens + s_usage.prompt_tokens,
-                completion_tokens=usage.completion_tokens + s_usage.completion_tokens,
-            )
-            if answer is not None and s_answer is not None:
-                agreement = answer == s_answer
-            if s_outcome is not None:
-                outcome, detail, tier = s_outcome, s_detail, "session"
-            else:
-                detail = f"{detail}; session retry: {s_detail}"
-        return outcome, detail, attempts, usage, tier, agreement
-
-    async def _tier(
-        self, provider: ChatProvider, req: DecisionRequest, allowed: tuple[str, ...]
-    ) -> "tuple[MicroOutcome | None, str, int, Usage, str | None, bool]":
-        """One tier's full attempt (the original loop): fresh messages,
-        one repair retry, floor judgment. The two trailing elements are
-        the ANSWER the model committed even when the floor refused it
-        (the cascade's agreement signal) and whether the failure is one
-        a stronger tier may fix (`retryable`: a floor miss or a
-        double-invalid — never a provider error) — structured, so the
-        cascade's trigger can never depend on the detail's wording."""
         messages: list[Message] = [SystemMessage(content=_system(req, allowed))]
         for role, text in req.history:
             # An episode's prior turns, replayed verbatim (append-only —
@@ -392,7 +339,7 @@ class MicroCaller:
                 log.warning(
                     "micro %s (%s): provider failed — %s", req.call, req.node_id, e
                 )
-                return None, "provider error", attempts, usage, None, False
+                return None, "provider error", attempts, usage
             prompt_tokens += asst.usage.prompt_tokens
             completion_tokens += asst.usage.completion_tokens
             if self._rlog is not None:
@@ -443,17 +390,10 @@ class MicroCaller:
                     confidence,
                     self._floor,
                 )
-                return (
-                    None,
-                    f"confidence {confidence:.2f} below floor",
-                    attempts,
-                    usage,
-                    answer,
-                    True,
-                )
+                return None, f"confidence {confidence:.2f} below floor", attempts, usage
             outcome = _SPECS[req.call].to_outcome(req, answer, reason, confidence, obj)
-            return outcome, reason, attempts, usage, answer, False
-        return None, f"invalid after repair retry: {err}", attempts, usage, None, True
+            return outcome, reason, attempts, usage
+        return None, f"invalid after repair retry: {err}", attempts, usage
 
     def _trace(self, req: DecisionRequest, result: MicroResult) -> None:
         if self._tr is None:
@@ -470,8 +410,6 @@ class MicroCaller:
                 "elapsed_ms": result.elapsed_ms,
                 "prompt_tokens": result.usage.prompt_tokens,
                 "completion_tokens": result.usage.completion_tokens,
-                "tier": result.tier,
-                "agreement": result.agreement,
             }
         )
 
@@ -531,7 +469,7 @@ class _CallSpec:
 
 
 def _parse_task_space(req: DecisionRequest) -> tuple[str, ...]:
-    # The escapes are the ROW's own — a caller (activation, replay CLI)
+    # The escapes are the ROW's own — a caller (activation)
     # passes only the playbook refs and can never forget the exits.
     return req.outcomes + (SCROLL_UP, NOT_A_TASK)
 
@@ -768,12 +706,6 @@ _SPECS: dict[str, _CallSpec] = {
         to_outcome=_act_outcome,
     ),
 }
-
-
-# Every call type this channel serves — the validation set for tooling
-# that names calls as data (the eval harness), so it can never drift
-# from the table.
-CALL_NAMES = tuple(_SPECS)
 
 
 def _system(req: DecisionRequest, allowed: tuple[str, ...]) -> str:

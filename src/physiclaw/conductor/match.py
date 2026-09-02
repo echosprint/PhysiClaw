@@ -377,10 +377,6 @@ class Verdict:
     runner_up: float
     dy: float
     detail: str
-    # The padded (lo, hi) y-band the overlay hypothesis found — set only
-    # on "occluded" (the retry-after-abort rule reads the verdict kind;
-    # the band itself is diagnostic).
-    overlay_band: tuple[float, float] | None = None
 
     def matches(self, expected_id: str) -> bool:
         """Is this a confident read of exactly `expected_id` (`app.page`)?
@@ -419,8 +415,7 @@ def match_screen(screen: Screen, candidates: list[PagePrint]) -> Verdict:
             f"{len(best.hits)}/{len(best.hits) + len(best.missing)} anchors",
         )
 
-    band = _overlay_band(best, screen) if best.score >= OCCLUDED_FLOOR else None
-    if band is not None:
+    if best.score >= OCCLUDED_FLOOR and _under_overlay(best, screen):
         return Verdict(
             "occluded",
             best.page_id,
@@ -428,7 +423,6 @@ def match_screen(screen: Screen, candidates: list[PagePrint]) -> Verdict:
             runner,
             best.dy,
             f"missing anchors cluster in one band: {', '.join(best.missing)}",
-            overlay_band=band,
         )
 
     return Verdict(
@@ -441,22 +435,22 @@ def match_screen(screen: Screen, candidates: list[PagePrint]) -> Verdict:
     )
 
 
-def _overlay_band(best: PageScore, screen: Screen) -> tuple[float, float] | None:
+def _under_overlay(best: PageScore, screen: Screen) -> bool:
     """Overlay test (keyboard/dialog/scroll are events on a page, not new
     pages): the page's MISSING learned anchors all fall inside one
-    horizontal band (≤ OVERLAY_MAX_HEIGHT tall) that also holds unexpected
-    labels — a dialog or keyboard over a known page. Needs learned
-    geometry; declaration-only pages can't hypothesize overlays. Returns
-    the padded (lo, hi) band — the overlay's own extent — or None."""
+    horizontal band (≤ OVERLAY_MAX_HEIGHT tall) that, padded by
+    OVERLAY_PAD, also holds unexpected labels — a dialog or keyboard
+    over a known page. Needs learned geometry; declaration-only pages
+    can't hypothesize overlays."""
     learned = best.print_.learned
     if learned is None or not best.missing:
-        return None
+        return False
     ys = [learned.anchors[t].cy + best.dy for t in best.missing if t in learned.anchors]
     if not ys:
-        return None
+        return False
     lo, hi = min(ys), max(ys)
     if (hi - lo) > OVERLAY_MAX_HEIGHT:
-        return None
+        return False
     lo, hi = lo - OVERLAY_PAD, hi + OVERLAY_PAD
     hit_norms = {normalize(h.anchor) for h in best.hits}
     unexpected = 0
@@ -468,4 +462,4 @@ def _overlay_band(best: PageScore, screen: Screen) -> tuple[float, float] | None
             continue
         if normalize(row.label) not in hit_norms:
             unexpected += 1
-    return (lo, hi) if unexpected >= OVERLAY_MIN_LABELS else None
+    return unexpected >= OVERLAY_MIN_LABELS

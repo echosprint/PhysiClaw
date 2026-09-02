@@ -3,9 +3,7 @@
 Offline-first: `extract` and `match --session` work from recorded
 sessions with no hardware; `match --live` and `propose --live` do one
 `peek` against a running `physiclaw mcp` server, same connection idiom
-as macro rehearsal. `eval` replays labeled model calls (needs provider
-credentials, not hardware) — the threshold-tuning surface. Nothing here
-touches the engine runtime.
+as macro rehearsal. Nothing here touches the engine runtime.
 """
 
 import asyncio
@@ -77,46 +75,6 @@ def extract(
         out, [corpus.CorpusItem(label=corpus.UNLABELED, listing=t) for t in listings]
     )
     typer.echo(f"wrote {len(listings)} listings → {out} (edit the '?' labels)")
-
-
-# Bounded replay fan-out for `eval`.
-_MICRO_FANOUT = 4
-
-
-def _resolve_micro_ref(override: str | None = None) -> str:
-    """The model the micro tier actually runs — the engine wiring's own
-    resolution (`[conductor] micro_model`, else the session model),
-    optionally overridden — so a replay can never silently measure a
-    different model than the runtime wires."""
-    from physiclaw.common.config import CONFIG, model_ref
-
-    if override:
-        return override
-    try:
-        return CONFIG.conductor.micro_model or model_ref()
-    except RuntimeError as e:
-        exit_error(str(e))
-
-
-async def _micro_batch(ref: str, requests: list) -> list:
-    """Run requests through one MicroCaller with the shared fan-out."""
-    from physiclaw.common.config import CONFIG, parse_model_ref
-    from physiclaw.conductor.micro import MicroCaller
-    from physiclaw.provider import make_provider
-
-    pid, mid = parse_model_ref(ref)
-    provider = make_provider(pid, mid)
-    caller = MicroCaller(provider, confidence_floor=CONFIG.conductor.micro_confidence)
-    gate = asyncio.Semaphore(_MICRO_FANOUT)
-
-    async def one(req):
-        async with gate:
-            return await caller.run(req)
-
-    try:
-        return await asyncio.gather(*(one(r) for r in requests))
-    finally:
-        await provider.aclose()
 
 
 @conductor_app.command()
@@ -239,55 +197,6 @@ def _report_line(r) -> str:
         f"thr={r.threshold:.2f} genuine_min={r.genuine_min:.2f} "
         f"impostor_max={imax}{flag}"
     )
-
-
-@conductor_app.command("eval")
-def eval_cmd(
-    cases: Path = typer.Argument(
-        help="eval case file (JSONL — see conductor/evalset.py)"
-    ),
-    model: str = typer.Option(
-        None,
-        "--model",
-        help="provider/model to run against (default: the micro tier, "
-        "else the session model — run twice to compare tiers)",
-    ),
-) -> None:
-    """Replay labeled decision cases and report per-call accuracy, the
-    micro-escalation rate, token cost, and a confidence-reliability
-    table — the Goal-2 KPI surface. Baseline it before prompt changes,
-    re-run after."""
-    from physiclaw.conductor import evalset
-
-    try:
-        suite = evalset.read_cases(cases)
-    except (OSError, ValueError) as e:
-        exit_error(str(e))
-    ref = _resolve_micro_ref(model)
-    requests = [evalset.build(c, f"eval-{i}") for i, c in enumerate(suite)]
-
-    typer.echo(f"model: {ref}   cases: {len(suite)}")
-    results = asyncio.run(_micro_batch(ref, requests))
-    scored = [evalset.score(case, result) for case, result in zip(suite, results)]
-    for i, s in enumerate(scored):
-        mark = "ok " if s.correct else ("esc" if s.answer is None else "✗  ")
-        got = s.answer if s.answer is not None else f"(escalate: {s.detail})"
-        conf = f" conf={s.confidence:.2f}" if s.confidence is not None else ""
-        typer.echo(
-            f"[{i:3d}] {mark} {s.case.call:13s} expect={s.case.expect!r} "
-            f"got={got!r}{conf}"
-        )
-    typer.echo("")
-    for r in evalset.summarize(scored):
-        typer.echo(
-            f"{r.call:13s} n={r.n:3d} acc={r.accuracy:.0%} wrong={r.wrong} "
-            f"escalated={r.escalated} ({r.escalation_rate:.0%})  "
-            f"{r.prompt_tokens}+{r.completion_tokens}tok {r.elapsed_ms}ms"
-        )
-    typer.echo("\nreliability (confidence → correct, answered cases):")
-    for lo, hi, n, correct in evalset.reliability(scored):
-        rate = f"{correct / n:.0%}" if n else "-"
-        typer.echo(f"  [{lo:.1f},{hi:.1f}) n={n:3d} correct={rate}")
 
 
 @conductor_app.command()

@@ -287,71 +287,28 @@ async def test_episode_history_is_replayed_verbatim_before_the_newest_block() ->
     assert '- "牛奶"' in messages[-1].content
 
 
-# ---------- the cascade (cheap tier → session model → escalate) ----------
+# ---------- one tier, then escalate ----------
 
 
-def _cascaded(cheap_replies, session_replies, floor: float = 0.7) -> MicroCaller:
-    session = ScriptedProvider(session_replies)
-    return MicroCaller(
+@pytest.mark.asyncio
+async def test_a_floor_miss_on_the_cheap_tier_escalates_without_a_second_model() -> (
+    None
+):
+    # The cheap tier answers under the floor: no outcome, and the session
+    # model is never asked the same question — escalation is the walk's
+    # declared exit, not another model's guess.
+    session = ScriptedProvider([_ok("done", 0.9)])
+    caller = MicroCaller(
         session,
-        confidence_floor=floor,
-        owned_factory=lambda: ScriptedProvider(cheap_replies),
+        confidence_floor=0.7,
+        owned_factory=lambda: ScriptedProvider([_ok("done", 0.2)]),
     )
 
-
-@pytest.mark.asyncio
-async def test_cascade_retries_a_floor_miss_on_the_session_model() -> None:
-    caller = _cascaded([_ok("done", 0.2)], [_ok("done", 0.9)])
-
     result = await caller.run(_fields_req())
 
-    assert result.outcome is not None and result.outcome.out == "done"
-    assert result.tier == "session"
-    assert result.agreement is True  # both tiers committed the same answer
-    assert result.usage.prompt_tokens == 200  # both tiers' spend summed
-
-
-@pytest.mark.asyncio
-async def test_cascade_retries_a_double_invalid_on_the_session_model() -> None:
-    caller = _cascaded(["not json", "still not json"], [_ok("escalate")])
-
-    result = await caller.run(_fields_req())
-
-    assert result.outcome is not None and result.outcome.out == "escalate"
-    assert result.tier == "session"
-    assert result.agreement is None  # the cheap tier never committed an answer
-
-
-@pytest.mark.asyncio
-async def test_cascade_disagreement_is_recorded() -> None:
-    caller = _cascaded([_ok("done", 0.2)], [_ok("escalate", 0.9)])
-
-    result = await caller.run(_fields_req())
-
-    assert result.outcome is not None and result.outcome.out == "escalate"
-    assert result.agreement is False
-
-
-@pytest.mark.asyncio
-async def test_cascade_both_tiers_failing_escalates_with_both_details() -> None:
-    caller = _cascaded([_ok("done", 0.2)], [_ok("escalate", 0.1)])
-
-    result = await caller.run(_fields_req())
-
-    assert result.outcome is None
-    assert "below floor" in result.detail and "session retry" in result.detail
-
-
-@pytest.mark.asyncio
-async def test_no_owned_tier_means_no_cascade() -> None:
-    # The session model IS the micro tier (no cheap client built):
-    # retrying the same model on a floor miss would just pay twice.
-    provider = ScriptedProvider([_ok("done", 0.2)])
-
-    result = await MicroCaller(provider, confidence_floor=0.7).run(_fields_req())
-
-    assert result.outcome is None and result.tier == "micro"
-    assert not provider._replies  # exactly one reply consumed
+    assert result.outcome is None and "below floor" in result.detail
+    assert session.calls == []  # untouched
+    assert result.usage.prompt_tokens == 100  # one tier's spend
 
 
 # ---------- the call rows ----------

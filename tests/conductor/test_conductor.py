@@ -177,10 +177,8 @@ async def test_unwired_micro_caller_means_agent_steps_hand_over() -> None:
 
 @pytest.mark.asyncio
 async def test_advance_activates_a_playbook_off_the_thread_screen() -> None:
-    """Stand-by mode: this channel has NO `open` macro, so the overture
-    cannot drive — it watches the transcript and reads the intent the
-    moment the MODEL lands on the thread, which is exactly what
-    `Activation` did before the overture existed."""
+    """The boot peeks, finds the thread, fires parse_task, and the armed
+    program's first turn comes back — all through the one arbiter."""
     from conductor_fakes import make_screen
 
     from physiclaw.conductor.channel import Channel
@@ -190,6 +188,7 @@ async def test_advance_activates_a_playbook_off_the_thread_screen() -> None:
     from physiclaw.conductor.playbook import Pack, Playbook
     from physiclaw.conductor.setup import Activation
     from physiclaw.contract.dto import ToolResultMessage
+    from physiclaw.macros.model import Macro
 
     channel = Channel(
         prints=[
@@ -198,7 +197,11 @@ async def test_advance_activates_a_playbook_off_the_thread_screen() -> None:
                 decl=PageDecl(name="thread", anchors=(AnchorDecl(text="MyChat"),)),
             )
         ],
-        macros={},
+        macros={
+            "channel/open": Macro(
+                name="open", description="d", enabled=True, inputs=(), steps=()
+            )
+        },
     )
     spec = Playbook(
         app="demo",
@@ -220,9 +223,13 @@ async def test_advance_activates_a_playbook_off_the_thread_screen() -> None:
     )
     conductor = Conductor(micro=micro, overture=overture)
     history: list = [SystemMessage(content="s"), UserMessage(content="u")]
+
+    boot = await conductor.advance(history)  # the boot's opening peek
+    assert boot.synthesized and boot.tool_names() == ["note", "peek"]
+    history.append(boot)
     history.append(
         ToolResultMessage(
-            tool_call_id="t1",
+            tool_call_id=boot.tool_calls[1].id,
             content=make_screen(("MyChat", 0.5, 0.05), ("买牛奶", 0.25, 0.4)).text,
         )
     )
@@ -230,7 +237,7 @@ async def test_advance_activates_a_playbook_off_the_thread_screen() -> None:
     turn = await conductor.advance(history)
 
     # parse_task fired on the thread screen, armed the program, and the
-    # program's first synthesized turn (the locate peek) came back — all
+    # program's first synthesized turn (its opening peek) came back — all
     # in one advance, zero provider calls.
     assert len(micro.requests) == 1 and micro.requests[0].call == PARSE_TASK
     assert turn.synthesized and turn.tool_names() == ["note", "peek"]

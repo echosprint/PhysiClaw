@@ -19,9 +19,6 @@ from physiclaw.conductor.micro import DecisionRequest, MicroOutcome
 from physiclaw.conductor.pages import AnchorDecl, PageDecl, PagePrint
 from physiclaw.conductor.playbook import Pack, Playbook
 from physiclaw.conductor.setup import Activation
-from physiclaw.contract.dto import (
-    ToolResultMessage,
-)
 
 THREAD = thread_screen(("买牛奶", 0.25, 0.4))
 # y=0.93: where an iPhone actually prints the hint — the bottom band, not
@@ -61,15 +58,19 @@ def _spec() -> Playbook:
     )
 
 
-def _overture(*, open_macro: str | None = "channel/open") -> ov.Overture:
+def _channel(*, open_macro: bool = True) -> Channel:
     macros = {}
-    if open_macro is not None:
+    if open_macro:
         from physiclaw.macros.model import Macro
 
         macros["channel/open"] = Macro(
             name="open", description="d", enabled=True, inputs=(), steps=()
         )
-    channel = Channel(prints=_prints()[:1], macros=macros)
+    return Channel(prints=_prints()[:1], macros=macros)
+
+
+def _overture() -> ov.Overture:
+    channel = _channel()
     activation = Activation(
         entries={"demo/flow": (_spec(), Pack("demo", {}, {}, {}))}, channel=channel
     )
@@ -345,33 +346,16 @@ def test_scroll_budget_spent_resolves_as_no_task() -> None:
     assert o.done is True and o.program is None
 
 
-def test_stand_by_scroll_up_resolves_as_no_task() -> None:
-    o = _overture(open_macro=None)
-    h = _history()
-    h.append(ToolResultMessage(tool_call_id="t1", content=NUDGE_THREAD))
-    assert isinstance(o.advance(h), DecisionRequest)
-
-    step = o.resolve(_scroll_up_outcome())  # no hand to scroll with
-
-    assert step is None
-    assert o.done is True and o.program is None
+# ---------- no `open` macro: no boot ----------
 
 
-# ---------- stand-by (no `open` macro to drive with) ----------
-
-
-def test_without_an_open_macro_it_watches_instead_of_driving() -> None:
-    o = _overture(open_macro=None)
-    h = _history()
-
-    # No turn synthesized, and NOT done — it may still act later.
-    assert o.advance(h) is None
-    assert o.done is False
-
-    h.append(ToolResultMessage(tool_call_id="t1", content=ELSEWHERE))
-    assert o.advance(h) is None
-    assert o.done is False
-
-    # The model reaches the thread on its own — now it asks.
-    h.append(ToolResultMessage(tool_call_id="t2", content=THREAD))
-    assert isinstance(o.advance(h), DecisionRequest)
+def test_overture_refuses_a_channel_without_an_open_macro() -> None:
+    # The boot drives or it does not exist: `setup` builds no overture
+    # for a channel that cannot open the thread, and the class refuses
+    # one outright rather than watching the transcript on the side.
+    channel = _channel(open_macro=False)
+    activation = Activation(
+        entries={"demo/flow": (_spec(), Pack("demo", {}, {}, {}))}, channel=channel
+    )
+    with pytest.raises(ValueError, match="`open` macro"):
+        ov.Overture(channel=channel, activation=activation, prints=_prints())

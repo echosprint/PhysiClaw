@@ -44,10 +44,8 @@ kinds of action and **never chooses a tap target**: `peek`,
 `scroll_up` escape mints. The worst case of a misfire is a press of the
 home button on the wrong screen.
 
-Without a live `channel/open` macro there is nothing to drive WITH, so
-the overture stands by instead: it watches the transcript and reads the
-intent the moment the model reaches the thread — exactly what
-`Activation` did before, so a channel without `open` loses nothing.
+The boot needs the channel's `open` macro to drive with; `setup` builds
+no overture without one (a channel is declared, like everything else).
 """
 
 import logging
@@ -83,9 +81,8 @@ HISTORY_SCROLLS = 2
 
 
 class Overture:
-    """One boot to the thread, constructed per session. Spent once in
-    drive mode; in stand-by it may watch the whole session without ever
-    being spent, which is what `done` distinguishes."""
+    """One boot to the thread, constructed per session and spent once:
+    `done` marks the turn after which it answers None forever."""
 
     def __init__(
         self,
@@ -94,14 +91,15 @@ class Overture:
         activation,
         prints: list[PagePrint],
     ):
-        # Fixed at construction: `Channel` is frozen, so whether there is
-        # a hand to navigate with cannot change mid-session.
-        self.open_macro = channel.open
+        # Fixed at construction: `Channel` is frozen, so the hand to
+        # navigate with cannot change mid-session — and it must exist.
+        if channel.open is None:
+            raise ValueError("the overture needs the channel's `open` macro")
+        self.open_macro: str = channel.open
         # The baton: a Program when parse_task matched a playbook, else
         # None. Read by the conductor once `done` is set.
         self.program: Program | None = None
-        # False while the overture may still act on a later turn — the
-        # stand-by mode below leans on it.
+        # True once spent: the next advance is None for good.
         self.done = False
         self._activation = activation
         self._prints = prints
@@ -119,9 +117,7 @@ class Overture:
         self, history: list[Message]
     ) -> "AssistantMessage | DecisionRequest | None":
         """The next synthesized turn, a DecisionRequest for the conductor
-        to broker, or None. None means "not mine": check `done` to tell a
-        finished overture (hand the baton over, or go quiet) from one
-        still standing by for a later turn.
+        to broker, or None — spent: hand the baton over, or go quiet.
 
         Never raises — a bug here degrades to a plain model session."""
         try:
@@ -135,13 +131,13 @@ class Overture:
         self, outcome: MicroOutcome | None
     ) -> "AssistantMessage | DecisionRequest | None":
         """Finish with the parse_task answer — or scroll for the rest of
-        it: a `scroll_up` answer in drive mode (bounded) swipes the
-        thread up and re-asks over the accumulated listing. Any other
+        it: a `scroll_up` answer (bounded) swipes the thread up and
+        re-asks over the accumulated listing. Any other
         answer spends the overture: a matched playbook becomes
         `program`, anything else leaves the model the thread it is
         already standing on."""
         if outcome is not None and outcome.out == SCROLL_UP:
-            if self.open_macro is not None and self._scrolls < HISTORY_SCROLLS:
+            if self._scrolls < HISTORY_SCROLLS:
                 self._scrolls += 1
                 if self._merged is None and self._screen is not None:
                     self._merged = _labels(self._screen)
@@ -152,9 +148,8 @@ class Overture:
                     {"bbox": list(SCROLL_BBOX), "direction": "down"},
                     channel=True,
                 )
-            # Stand-by (no hand to scroll with) or budget spent: the
-            # cautious read — a request we cannot fully see activates
-            # nothing, exactly the `not_a_task` disposition.
+            # Budget spent: the cautious read — a request we cannot fully
+            # see activates nothing, exactly the `not_a_task` disposition.
             outcome = None
         self.done = True
         try:
@@ -181,8 +176,6 @@ class Overture:
             # The quit brief was the boot's last word; its peek result is
             # ordinary history. Quiet from here.
             return None
-        if self.open_macro is None:
-            return self._stand_by(history)
         if self._turns.pending is None:
             return self._turns.synth(
                 "peek", "conductor: looking for the user's thread", "peek", {}
@@ -197,9 +190,7 @@ class Overture:
         return self._on_screen(result)
 
     def _on_screen(self, result) -> "AssistantMessage | DecisionRequest | None":
-        """A landed view → where it sends us. Shared by both modes: the
-        boot reads its own action's result, the watcher reads the
-        model's."""
+        """A landed view → where it sends us."""
         screen = views.screen_of(result)
         self._screen = screen
         return self._route(match_screen(screen, self._prints), screen)
@@ -245,7 +236,6 @@ class Overture:
         )
 
     def _open(self, verdict: Verdict) -> "AssistantMessage | None":
-        assert self.open_macro is not None  # drive mode only
         self._opens += 1
         if self._opens > OPEN_TRIES:
             return self._quit(
@@ -272,23 +262,6 @@ class Overture:
             self._merged = _merge_labels(_labels(self._screen), self._merged)
             req = replace(req, listing="\n".join(self._merged))
         return req
-
-    def _stand_by(
-        self, history: list[Message]
-    ) -> "AssistantMessage | DecisionRequest | None":
-        """No `channel/open` to navigate with: watch instead of drive.
-        Read the intent the moment the MODEL lands on the thread — the
-        behaviour `Activation` had before the overture existed, kept so a
-        channel missing its `open` macro is no worse off than it was."""
-        result = views.last_result(history)
-        if result is None or result.is_error:
-            return None
-        self._screen = views.screen_of(result)
-        # Watch only: an unrecognized screen is the model's business, so
-        # the drive-mode recovery arm must not fire here.
-        if not match_screen(self._screen, self._prints).matches(THREAD_ID):
-            return None
-        return self._read_intent()
 
     # ---- synthesis ----
 

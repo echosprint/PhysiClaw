@@ -539,6 +539,24 @@ def test_session_setup_builds_the_overture_and_hidden_registry() -> None:
     }
 
 
+def test_session_setup_builds_no_overture_without_an_open_macro() -> None:
+    # A channel that cannot open the thread has no hand to boot with:
+    # a plain model session, and no pack discovery paid for nothing.
+    write_channel()  # send only
+    write_pack(
+        playbooks={
+            "flow": FLOW.replace(
+                "description: two moves", "description: two moves\nenabled: true"
+            )
+        }
+    )
+
+    prog, overture, hidden = setup.session_setup()
+
+    assert prog is None and overture is None
+    assert set(hidden) == {"channel/send"}
+
+
 def test_session_setup_prefers_a_suspended_walk_over_the_overture() -> None:
     from physiclaw.common.logger import write_json_atomic
 
@@ -572,7 +590,7 @@ def test_activation_builds_a_request_over_the_thread_screen() -> None:
     activation = overture._activation
 
     # The caller establishes the screen IS the thread (the overture drove
-    # there, or watched the model arrive) — this turns it into the call.
+    # there) — this turns it into the call.
     req = activation.request(Screen.read(_thread(("买牛奶", 0.25, 0.4))))
     assert req is not None and req.call == PARSE_TASK
     assert "买牛奶" in req.listing and "demo/flow" in req.args["menu"]

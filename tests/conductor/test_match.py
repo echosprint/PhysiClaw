@@ -272,9 +272,9 @@ def test_match_screen_occluded_when_missing_anchors_share_a_band() -> None:
     assert v.page_id == "app.thread"
 
 
-def test_occluded_verdict_carries_the_overlay_band() -> None:
-    # The band is the rescue dismissal tier's scope — padded around the
-    # missing anchors' learned positions (here 0.85/0.90 ± OVERLAY_PAD).
+def test_overlay_band_is_padded_around_the_missing_anchors() -> None:
+    # Only the padding (0.85/0.90 ± OVERLAY_PAD) makes three unexpected
+    # rows fall inside the band — without it the verdict is unknown.
     pp = _print(
         name="thread",
         anchors=[AnchorDecl("妈妈"), AnchorDecl("发送"), AnchorDecl("语音")],
@@ -294,10 +294,7 @@ def test_occluded_verdict_carries_the_overlay_band() -> None:
 
     v = m.match_screen(screen, [pp])
 
-    assert v.overlay_band is not None
-    lo, hi = v.overlay_band
-    assert abs(lo - (0.85 - m.OVERLAY_PAD)) < 1e-9
-    assert abs(hi - (0.90 + m.OVERLAY_PAD)) < 1e-9
+    assert v.kind == "occluded" and v.page_id == "app.thread"
 
 
 # ---------- the cover, which has no page ----------

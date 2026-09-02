@@ -32,8 +32,8 @@ log = logging.getLogger(__name__)
 class Channel:
     """The loaded user-channel infrastructure: thread fingerprints plus
     the qualified macros. `send`/`open` resolve only when the macro
-    exists AND is enabled — unavailable members degrade to hand-over at
-    the moment they are needed, never earlier."""
+    exists AND is enabled — a missing `send` degrades to hand-over at
+    the ask that needs it; a missing `open` means no boot at wake."""
 
     prints: list[PagePrint]
     macros: dict[str, Macro]  # qualified channel/<name>, enabled or not

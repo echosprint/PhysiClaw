@@ -6,10 +6,10 @@ degrades to a normal session, never takes one down):
   - ``load_suspended`` — a walk that asked the user something resumes at
     its stored node (one-shot; ANY wake resumes, the WAIT job is just the
     alarm clock).
-  - ``Overture`` — nothing suspended, but playbooks exist: the conductor
-    boots to the user's thread and fires ONE parse_task micro-call over
-    the playbook menu (``overture.py``); a positive answer builds the
-    program on the spot. ``Activation`` is that last half — menu, call,
+  - ``Overture`` — nothing suspended, but playbooks exist and the
+    channel has its `open` macro: the conductor boots to the user's
+    thread and fires ONE parse_task micro-call over the playbook menu
+    (``overture.py``); a positive answer builds the program on the spot. ``Activation`` is that last half — menu, call,
     and build — with the overture owning the navigation that reaches a
     thread screen to ask over.
 
@@ -262,8 +262,8 @@ class Activation:
     def request(self, screen: Screen) -> DecisionRequest:
         """The parse_task request for a thread screen. The CALLER
         establishes that the screen IS the thread — the overture knows,
-        because it either drove there or watched the model arrive — so
-        this is now purely "turn the menu and this screen into a call".
+        because it drove there — so this is purely "turn the menu and
+        this screen into a call".
         `entries` is non-empty by construction — `session_setup` stands
         down before building an Activation with nothing to offer."""
         # Playbook refs only — the `not_a_task` escape is the call's own
@@ -312,8 +312,9 @@ def session_setup() -> "tuple[Program | None, Overture | None, dict[str, Macro]]
     + channel, and no channel means the channel-less registry only.
 
     A playbook on disk IS the grant: with any enabled playbook and a
-    channel, the overture drives. Nothing suspended and nothing enabled
-    means a plain model session, exactly as before."""
+    channel that can open the thread, the overture drives. Nothing
+    suspended, nothing enabled, or no hand to open with means a plain
+    model session."""
     channel = load_channel()
     program = load_suspended(channel)
     if program is not None:
@@ -325,9 +326,12 @@ def session_setup() -> "tuple[Program | None, Overture | None, dict[str, Macro]]
     hidden: dict[str, Macro] = {}
     if channel is not None:
         hidden.update(channel.macros)
-    if channel is None:
+    if channel is None or channel.open is None:
         # No channel → nothing to boot to and nothing to ask over; no
-        # consumer for the discovery, so skip the every-pack parse.
+        # `open` macro → no hand to boot with. No consumer for the
+        # discovery either way, so skip the every-pack parse.
+        if channel is not None:
+            log.info("conductor: channel has no enabled `open` macro — no boot")
         return None, None, hidden
     entries: dict[str, tuple[Playbook, Pack]] = {}
     for app in list_apps():
@@ -362,17 +366,11 @@ def session_setup() -> "tuple[Program | None, Overture | None, dict[str, Macro]]
     # having run `playbooks init ios`; both loads are fail-open, and
     # missing prints just mean more screens read as unknown.
     prints = list(channel.prints)
-    if channel.open is not None:
-        # Drive mode only: stand-by never routes on an OS state, so a
-        # channel with no `open` macro must not pay the disk read at wake
-        # — nor score a candidate page it can never act on, every turn.
-        try:
-            scaffold.ensure_ios_pack()
-            prints += prints_for_app(IOS_APP)
-        except Exception as e:
-            log.warning(
-                "ios pages unavailable (%s) — a locked phone reads as unknown", e
-            )
+    try:
+        scaffold.ensure_ios_pack()
+        prints += prints_for_app(IOS_APP)
+    except Exception as e:
+        log.warning("ios pages unavailable (%s) — a locked phone reads as unknown", e)
     overture = Overture(
         channel=channel,
         activation=Activation(

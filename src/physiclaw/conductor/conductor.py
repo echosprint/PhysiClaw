@@ -16,11 +16,9 @@ its own sinks for the same reason).
 
 Going quiet is permanent for the session: a driver that handed over is
 dropped, not retried — the transcript of its synthesized turns and their
-results IS the handoff the model resumes from. The one exception is an
-overture that produced no turn but is not ``done``: it has no hand to
-navigate with and is watching for the model to reach the thread, so it
-is kept. With no driver left, every ``advance()`` is None — behavior
-identical to a session that never had a conductor.
+results IS the handoff the model resumes from. With no driver left,
+every ``advance()`` is None — behavior identical to a session that never
+had a conductor.
 """
 
 import logging
@@ -95,12 +93,10 @@ class Conductor:
             turn = await self._drive(self._overture, history)
             if turn is not None:
                 return turn
-            if self._overture.done:
-                # Spent: take the baton if there is one, then release the
-                # parsed pack entries. Not done = standing by for a later
-                # turn (no `open` macro to drive with).
-                self._program = self._overture.program
-                self._overture = None
+            # Spent: take the baton if there is one, then release the
+            # parsed pack entries.
+            self._program = self._overture.program
+            self._overture = None
         if self._program is not None:
             turn = await self._drive(self._program, history)
             if turn is not None:
@@ -114,8 +110,8 @@ class Conductor:
         self, driver: Driver, history: list[Message]
     ) -> AssistantMessage | None:
         """Run one driver for one turn, brokering every decision request
-        it raises. None = it produced no turn (it went quiet, or is
-        standing by) and the caller decides what that means.
+        it raises. None = it produced no turn (it went quiet) and the
+        caller decides what that means.
 
         Both drivers speak this contract — synthesize, or ask, or go
         quiet — so the brokering rule lives here once. In particular the

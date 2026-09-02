@@ -68,9 +68,8 @@ Specs and the user:
     reply.py       deterministic confirm/deny reply reading
     scaffold.py    pack templates and playbooks/README.md
 
-Telemetry and tuning:
+Telemetry:
     walklog.py     runs.jsonl — per-walk outcomes, the escalation KPI
-    evalset.py     labeled replay cases for `conductor eval`
 """
 
 # No re-exports: consumers import their module directly, so parse-only
