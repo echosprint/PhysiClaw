@@ -3,150 +3,191 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f4f1eb">
 <title>PhysiClaw Studio</title>
 <style>
   :root {
-    --bg: #14161a; --panel: #1d2026; --edge: #2c313a; --ink: #d8dde6;
-    --dim: #8a93a2; --accent: #5aa9e6; --ok: #4cc38a; --bad: #e5534b;
-    --warn: #d4a72c;
+    /* Warm paper neutrals with the terracotta brand accent — the same
+       family as the hardware setup page's light theme. */
+    --bg: #f4f1eb; --card: #ffffff; --card2: #f7f4ee;
+    --line: #e7e1d7; --line2: #d7cfc2;
+    --txt: #26211c; --muted: #6e675e; --faint: #a59d91;
+    --accent: #d4511a; --accent-lt: #e8804f; --accent-ink: #fff6f0;
+    --ok: #2f9e6a; --red: #c8483f; --blue: #5b86b3; --amber: #c98d1f;
+    --screen: #ffffff; --screen-ink: #1a1714; --bezel: #1f1d22;
+    --shadow: 0 10px 28px rgba(70, 50, 30, .10), 0 1px 2px rgba(70, 50, 30, .06);
+    --phone-shadow: 0 18px 40px rgba(40, 30, 20, .28);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16151a; --card: #212026; --card2: #292831;
+      --line: #33323b; --line2: #413f4a;
+      --txt: #efece7; --muted: #a6a199; --faint: #736e66;
+      --ok: #4cc98a; --red: #e0685f; --blue: #7099c2; --amber: #e0a93f;
+      --bezel: #0b0a0d;
+      --shadow: 0 10px 28px rgba(0, 0, 0, .35);
+      --phone-shadow: 0 18px 40px rgba(0, 0, 0, .55);
+    }
   }
   * { box-sizing: border-box; }
+  html, body { height: 100%; }
   body {
-    margin: 0; background: var(--bg); color: var(--ink);
-    font: 14px/1.45 -apple-system, "SF Pro Text", "Segoe UI", sans-serif;
-    height: 100vh; display: flex; flex-direction: column;
-  }
-  header {
-    display: flex; align-items: center; gap: 12px; padding: 8px 14px;
-    background: var(--panel); border-bottom: 1px solid var(--edge);
-  }
-  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
-  .badge {
-    font-size: 11px; padding: 2px 8px; border-radius: 10px;
-    border: 1px solid var(--edge); color: var(--dim);
-  }
-  .badge.mode { color: var(--accent); border-color: var(--accent); }
-  .badge.marking { color: var(--warn); border-color: var(--warn); }
-  #dot { width: 9px; height: 9px; border-radius: 50%; background: var(--dim); }
-  #dot.on { background: var(--ok); }
-  #banner {
-    display: none; padding: 6px 14px; background: #3a2426;
-    color: #f0b8b4; border-bottom: 1px solid var(--bad); font-size: 13px;
-  }
-  main {
-    flex: 1; display: grid; grid-template-columns: 1fr 1fr 340px;
-    gap: 10px; padding: 10px; min-height: 0;
-  }
-  .pane {
-    background: var(--panel); border: 1px solid var(--edge);
-    border-radius: 8px; display: flex; flex-direction: column;
-    min-height: 0; overflow: hidden;
-  }
-  .pane h2 {
-    font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
-    color: var(--dim); margin: 0; padding: 8px 12px 4px;
-    display: flex; align-items: center; gap: 8px;
-  }
-  .stage {
-    flex: 1; position: relative; margin: 6px; min-height: 0;
-    display: flex; align-items: center; justify-content: center;
-  }
-  #frame-wrap, #virt { position: relative; max-width: 100%; max-height: 100%; }
-  #frame { display: block; max-width: 100%; max-height: 100%; }
-  #frame-wrap { cursor: crosshair; user-select: none; }
-  #mark-rect {
-    position: absolute; border: 1.5px dashed var(--warn); display: none;
-    pointer-events: none;
-  }
-  #virt { background: #0d0f12; border: 1px solid var(--edge); }
-  .row-el {
-    position: absolute; border: 1px solid #3d4a5c; border-radius: 2px;
-    font-size: 10px; color: #b9c4d4; overflow: hidden; cursor: pointer;
-    display: flex; align-items: center; padding: 0 2px; white-space: nowrap;
-  }
-  .row-el.icon { border-color: #6b5c3d; }
-  .row-el.selected { border-color: var(--accent); color: var(--accent); }
-  .empty { color: var(--dim); font-size: 13px; text-align: center; padding: 30px; }
-  nav {
-    display: flex; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--edge);
-    align-items: center; flex-wrap: wrap;
+    margin: 0; background: var(--bg); color: var(--txt);
+    font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    display: flex; flex-direction: column; -webkit-font-smoothing: antialiased;
   }
   button {
-    background: #262b33; color: var(--ink); border: 1px solid var(--edge);
-    border-radius: 6px; padding: 5px 11px; font-size: 13px; cursor: pointer;
+    font: inherit; color: var(--txt); background: var(--card);
+    border: 1px solid var(--line2); border-radius: 9px; padding: 6px 12px;
+    cursor: pointer; white-space: nowrap; transition: border-color .12s, background .12s;
   }
-  button:hover { border-color: var(--accent); }
-  button:disabled { opacity: .45; cursor: default; }
-  button.primary { border-color: var(--accent); color: var(--accent); }
-  button.tiny { padding: 1px 6px; font-size: 11px; }
+  button:hover { border-color: var(--muted); background: var(--card2); }
+  button:disabled { opacity: .38; cursor: default; }
+  button:disabled:hover { border-color: var(--line2); background: var(--card); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  button.primary:hover { background: var(--accent-lt); border-color: var(--accent-lt); }
   input[type=text], select {
-    background: #262b33; color: var(--ink); border: 1px solid var(--edge);
-    border-radius: 6px; padding: 4px 8px; font-size: 13px;
+    font: inherit; color: var(--txt); background: var(--card);
+    border: 1px solid var(--line2); border-radius: 9px; padding: 6px 9px;
   }
-  #rail { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
-  .card {
-    margin: 6px 10px 0; padding: 8px 10px; background: #22262d;
-    border: 1px solid var(--edge); border-radius: 6px; font-size: 12px;
-    flex-shrink: 0;
+  input[type=text]:focus { outline: none; border-color: var(--accent-lt); }
+  kbd {
+    font: inherit; font-size: 10px; padding: 0 4px; border: 1px solid var(--line2);
+    border-radius: 4px; color: var(--faint); background: var(--card2);
   }
-  .card b { color: var(--accent); }
-  .kv { color: var(--dim); }
-  .chip {
-    display: inline-flex; align-items: center; gap: 4px; margin: 2px 3px 2px 0;
-    padding: 1px 7px; background: #191c21; border: 1px solid var(--edge);
-    border-radius: 9px; font-size: 11px;
+
+  /* ── Header ── */
+  header {
+    display: flex; align-items: center; gap: 8px; padding: 10px 16px;
+    background: var(--card); border-bottom: 1px solid var(--line); flex-wrap: wrap;
   }
-  .chip .x { cursor: pointer; color: var(--dim); }
-  .chip .x:hover { color: var(--bad); }
-  .b-ok { color: var(--ok); } .b-warn { color: var(--warn); } .b-bad { color: var(--bad); }
-  .page-item {
-    padding: 5px 8px; margin: 3px 0; border: 1px solid var(--edge);
-    border-radius: 6px; cursor: pointer;
+  header h1 { font-size: 15px; font-weight: 650; letter-spacing: -.01em; margin: 0 8px 0 0; }
+  #conn { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; margin-right: 10px; }
+  #dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+  #dot.on { background: var(--ok); box-shadow: 0 0 0 3px rgba(47,158,106,.18); }
+  #dot.busy { background: var(--amber); animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  .sep { width: 1px; height: 22px; background: var(--line); margin: 0 4px; }
+  #clip { display: flex; gap: 6px; margin-left: auto; }
+  #clip input { width: 230px; }
+  #banner {
+    display: none; padding: 7px 16px; background: #fbe9e6; color: #8f2f27;
+    border-bottom: 1px solid #efc6c0; cursor: pointer;
   }
-  .page-item.sel { border-color: var(--accent); }
-  .page-item .head { display: flex; align-items: center; gap: 6px; }
-  .page-item .head b { flex: 1; }
-  .shots { display: flex; gap: 4px; flex-wrap: wrap; margin: 6px 0; }
-  .shots .thumb { position: relative; }
-  .shots img {
-    width: 44px; height: 78px; object-fit: cover; border: 1px solid var(--edge);
-    border-radius: 4px; cursor: pointer;
+
+  /* ── Action bar: the line under the header, always present ── */
+  #actbar {
+    display: flex; align-items: center; gap: 8px; padding: 7px 16px;
+    background: var(--card2); border-bottom: 1px solid var(--line); flex-wrap: wrap;
   }
-  .shots img.viewing { border-color: var(--accent); }
-  .shots .x {
-    position: absolute; top: -4px; right: -4px; background: var(--panel);
-    border: 1px solid var(--edge); border-radius: 50%; width: 14px; height: 14px;
-    line-height: 12px; text-align: center; font-size: 10px; cursor: pointer;
+  #actbar .cap { display: flex; align-items: baseline; gap: 8px; color: var(--muted); font-size: 12px; max-width: 40%; }
+  #actbar .cap b { color: var(--txt); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #actbar .cap span { white-space: nowrap; }
+  #actbar.idle .cap { color: var(--faint); }
+  #actbar kbd { margin-left: 6px; }
+  #actbar .swipe-hint { color: var(--accent); font-size: 12px; white-space: nowrap; }
+  #actbar button.armed { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  #actbar button.armed kbd { color: #f6d2c2; background: transparent; border-color: rgba(255,255,255,.35); }
+  #actbar select { padding: 5px 7px; font-size: 12px; }
+  #actbar .x { margin-left: auto; }
+
+  /* ── Panes ── */
+  main {
+    flex: 1; display: grid; grid-template-columns: 1fr 1fr 300px; gap: 14px;
+    padding: 14px; min-height: 0; position: relative;
   }
-  table.matrix { border-collapse: collapse; font-size: 11px; margin-top: 6px; }
-  table.matrix th, table.matrix td {
-    border: 1px solid var(--edge); padding: 2px 6px; text-align: center;
+  .pane {
+    background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+    box-shadow: var(--shadow); display: flex; flex-direction: column; min-height: 0; overflow: hidden;
   }
-  table.matrix td.own { color: var(--ok); }
-  table.matrix td.clash { background: #3a2426; color: #f0b8b4; }
-  table.matrix td.near { color: var(--warn); }
+  .pane h2 {
+    font-size: 13px; font-weight: 600; color: var(--txt); margin: 0; padding: 12px 16px 6px;
+    display: flex; align-items: baseline; gap: 10px;
+  }
+  .pane h2 .hint { color: var(--faint); font-weight: 400; font-size: 12px; }
+  .pane h2 .count { margin-left: auto; color: var(--faint); font-weight: 400; font-size: 12px; }
+  .stage {
+    flex: 1; position: relative; margin: 6px 14px 16px; min-height: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  /* The phone: a dark bezel around the screen, both panes alike. */
+  .device {
+    display: none; padding: 9px; background: var(--bezel); border-radius: 30px;
+    box-shadow: var(--phone-shadow);
+  }
+  .wrap { position: relative; cursor: crosshair; user-select: none; touch-action: none; }
+  #frame { display: block; border-radius: 22px; -webkit-user-drag: none; user-select: none; pointer-events: none; }
+  #virt { background: var(--screen); border-radius: 22px; overflow: hidden; }
+  .empty { color: var(--faint); text-align: center; padding: 30px; line-height: 1.9; }
+
+  /* Virtual screen elements — the OCR listing laid out as the screen
+     would look: black text sized to its box, icons as soft tiles. */
+  .el { position: absolute; pointer-events: none; overflow: hidden; }
+  .el.text {
+    color: var(--screen-ink); white-space: nowrap; display: flex; align-items: center;
+    padding: 0 1px; font-family: -apple-system, "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", system-ui, sans-serif;
+  }
+  .el.text span { display: inline-block; transform-origin: left center; }
+  .el.text.faint { color: #8b857c; }
+  /* An icon is a soft blank tile, the way an app icon looks before it
+     loads: a faint gradient, no border, nothing drawn inside. */
+  .el.icon {
+    background: linear-gradient(145deg, #ece8e1, #ddd7cd);
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,.035);
+  }
+  /* A region the detector boxed (a header, a search bar, a card) is
+     not a tile: a faint tint keeps the text inside legible. */
+  .el.icon.region { background: rgba(0,0,0,.025); box-shadow: none; }
+
+  /* Hover / selection overlays — one of each per pane, geometry-driven
+     so the camera frame and the virtual screen highlight the same spot. */
+  .hover, .sel, .drag { position: absolute; pointer-events: none; border-radius: 4px; display: none; }
+  .hover { border: 1.5px solid var(--blue); background: rgba(91,134,179,.12); }
+  .sel { border: 2px solid var(--accent); box-shadow: 0 0 0 3px rgba(212,81,26,.25); }
+  .drag { border: 1.5px dashed var(--accent-lt); }
+  /* The live swipe: an arrow from the box center, as long as the stroke
+     the arm will make (the drag snaps to the served ladder). */
+  .arrow {
+    position: absolute; pointer-events: none; display: none; height: 3px;
+    background: var(--accent); border-radius: 2px; transform-origin: 0 50%;
+    box-shadow: 0 0 0 2px rgba(212,81,26,.25);
+  }
+  .arrow::after {
+    content: ""; position: absolute; right: -2px; top: 50%; transform: translateY(-50%);
+    border: 7px solid transparent; border-left: 12px solid var(--accent); border-right: 0;
+  }
+  .arrow-tag {
+    position: absolute; pointer-events: none; display: none; padding: 3px 9px;
+    background: var(--txt); color: var(--bg); border-radius: 7px; font-size: 12px;
+    white-space: nowrap; transform: translate(-50%, -50%); box-shadow: var(--shadow);
+  }
+
+  /* ── Log ── */
   #log {
-    flex: 1; overflow-y: auto; margin: 6px 10px 10px; font-size: 12px;
-    display: flex; flex-direction: column; gap: 6px; min-height: 60px;
+    flex: 1; overflow-y: auto; padding: 2px 16px 12px; min-height: 0;
+    font-size: 12px; display: flex; flex-direction: column;
   }
   .entry {
-    padding: 6px 8px; background: #191c21; border-left: 2px solid var(--edge);
-    border-radius: 4px; white-space: pre-wrap; word-break: break-word;
-    flex-shrink: 0;
+    white-space: pre-wrap; word-break: break-word; color: var(--txt);
+    padding: 7px 0; border-bottom: 1px solid var(--line);
   }
-  .entry.err { border-left-color: var(--bad); }
+  .entry time { display: block; color: var(--faint); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .entry.err { color: var(--red); }
+  .entry.dim { color: var(--muted); }
+
   #busy {
-    display: none; position: fixed; inset: 0; background: rgba(10,12,15,.55);
-    align-items: center; justify-content: center; z-index: 10;
+    display: none; position: absolute; inset: 14px; border-radius: 16px;
+    background: rgba(244,241,235,.55); align-items: center; justify-content: center; z-index: 20;
   }
+  @media (prefers-color-scheme: dark) { #busy { background: rgba(22,21,26,.55); } }
   #busy .box {
-    background: var(--panel); border: 1px solid var(--edge); border-radius: 8px;
-    padding: 18px 26px; font-size: 14px; color: var(--ink);
+    display: flex; align-items: center; gap: 10px; padding: 12px 20px;
+    background: var(--card); border: 1px solid var(--line2); border-radius: 12px; box-shadow: var(--shadow);
   }
-  #busy .box .spin {
-    display: inline-block; width: 12px; height: 12px; margin-right: 10px;
-    border: 2px solid var(--dim); border-top-color: var(--accent);
-    border-radius: 50%; animation: spin 0.9s linear infinite;
+  .spin {
+    width: 12px; height: 12px; border: 2px solid var(--line2); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin .9s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
 </style>
@@ -154,119 +195,135 @@
 <body>
 <header>
   <h1>PhysiClaw Studio</h1>
-  <span class="badge" id="app-badge">no app</span>
-  <span class="badge mode" id="mode-badge">EXPLORE</span>
-  <span style="flex:1"></span>
-  <span id="dot"></span>
-  <span class="badge" id="conn-label">disconnected</span>
+  <span id="conn"><span id="dot"></span><span id="conn-label">connecting…</span></span>
+  <button class="primary" data-tool="peek" title="fresh camera look (P)">&#10227; Peek</button>
+  <button data-tool="screenshot" title="the phone's own screenshot — pixel-perfect, but the app sees it">Screenshot</button>
+  <span class="sep"></span>
+  <button data-tool="home_screen" title="swipe up from the bottom">&#8962; Home</button>
+  <button data-tool="go_back" title="left-edge swipe back">&#9665; Back</button>
+  <button data-tool="unlock_phone" title="wake and enter the passcode">&#128275; Unlock</button>
+  <button data-tool="force_quit" title="force-quit the front app">&#10005; Force quit</button>
+  <form id="clip" title="copies to the phone's clipboard — then long-press a field and tap Paste">
+    <input type="text" id="clip-text" placeholder="text to paste on the phone…">
+    <button type="submit">Send to clipboard</button>
+  </form>
 </header>
-<div id="banner"></div>
+<div id="actbar">
+  <span class="cap"><b id="cap-label"></b><span id="cap-geo"></span></span>
+  <button data-press="tap">Tap<kbd>T</kbd></button>
+  <button data-press="double_tap">Double tap<kbd>D</kbd></button>
+  <button data-press="long_press">Long press<kbd>L</kbd></button>
+  <span class="sep"></span>
+  <button id="swipe-btn" title="then drag on the screen — the drag is the stroke">Swipe<kbd>S</kbd></button>
+  <span class="swipe-hint" id="swipe-hint"></span>
+  <select id="swipe-speed" title="stroke speed"></select>
+  <button class="x" id="cap-x" title="clear the selection (Esc)">&#10005; Clear</button>
+</div>
+<div id="banner" title="click to dismiss"></div>
+
 <main>
   <section class="pane">
-    <h2>Camera</h2>
+    <h2>Camera <span class="hint">click an element, or hold and drag a box</span></h2>
     <div class="stage">
-      <div id="frame-wrap" style="display:none">
-        <img id="frame" alt="annotated camera frame">
-        <div id="mark-rect"></div>
-      </div>
-      <div class="empty" id="frame-empty">
-        No view yet — press <b>&#10227; Peek</b> to look at the phone.<br><br>
-        Click the image to tap. Drag to swipe.
-      </div>
+      <div class="device"><div class="wrap" id="cam-wrap">
+        <img id="frame" alt="camera frame" draggable="false">
+        <div class="hover"></div><div class="sel"></div><div class="drag"></div>
+        <div class="arrow"></div><div class="arrow-tag"></div>
+      </div></div>
+      <div class="empty" id="cam-empty">Looking at the phone…</div>
     </div>
-    <nav>
-      <button class="primary" data-tool="peek" title="fresh camera look">&#10227; Peek</button>
-      <button data-tool="home_screen" title="home screen">&#8962; Home</button>
-      <button data-tool="go_back" title="edge-swipe back">&#9665; Back</button>
-      <button data-tool="unlock_phone" title="wake and unlock">&#128275; Unlock</button>
-      <button data-tool="force_quit" title="force-quit the front app">&#10005; Force quit</button>
-    </nav>
   </section>
-
   <section class="pane">
-    <h2>Virtual screen (OCR)</h2>
+    <h2>Screen <span class="hint">what the detector read</span><span class="count" id="count"></span></h2>
     <div class="stage">
-      <div id="virt" style="display:none"></div>
-      <div class="empty" id="virt-empty">Element rows appear here after a peek.<br>Click a row to select it.</div>
+      <div class="device"><div class="wrap" id="virt-wrap">
+        <div id="virt"></div>
+        <div class="hover"></div><div class="sel"></div><div class="drag"></div>
+        <div class="arrow"></div><div class="arrow-tag"></div>
+      </div></div>
+      <div class="empty" id="virt-empty">
+        Elements appear here after a look.<br>
+        <kbd>T</kbd> tap · <kbd>D</kbd> double tap · <kbd>L</kbd> long press ·
+        <kbd>S</kbd> swipe, then drag · <kbd>Esc</kbd> clear
+      </div>
     </div>
-    <nav><span class="kv" id="row-count"></span></nav>
   </section>
-
-  <section class="pane" id="rail">
-    <h2>Session</h2>
-    <div class="card" id="conn-card">connecting&hellip;</div>
-    <div class="card" id="sel-card" style="display:none"></div>
-    <div id="curation" style="display:none">
-      <h2>Pages</h2>
-      <div class="card" id="pages-card"></div>
-      <h2>Landmarks</h2>
-      <div class="card" id="landmarks-card"></div>
-      <h2>Macros</h2>
-      <div class="card" id="macros-card"></div>
-      <h2>Playbooks</h2>
-      <div class="card" id="playbooks-card"></div>
-      <h2>Prove</h2>
-      <div class="card" id="prove-card"></div>
-    </div>
-    <h2>Actions</h2>
+  <section class="pane">
+    <h2>Log <span class="hint">newest first</span></h2>
     <div id="log"></div>
   </section>
+  <div id="busy"><div class="box"><span class="spin"></span><span id="busy-what"></span></div></div>
 </main>
-<div id="busy"><div class="box"><span class="spin"></span><span id="busy-what"></span></div></div>
 
 <script>
 "use strict";
 const $ = id => document.getElementById(id);
 const state = {
-  busy: false, rows: [], selected: null, imgW: 0, imgH: 0,
-  app: null, draft: null, evidence: {}, page: null, viewingShot: null,
-  marking: null, matrix: null, macro: null,
-  playbook: null, validation: {}, pack: { pages: [], macros: [], error: null },
-  limits: { max_steps: 50, min_freq: 0.6, lookalike: 0.75 },
+  busy: false, rows: [],
+  // The phone screen's width/height. Every bbox is a fraction of the
+  // screen, so both panes are drawn at this shape — the phone's own
+  // screenshot fixes it exactly once seen; until then the calibrated
+  // camera crop stands in (a percent or two off).
+  aspect: 0, aspectExact: false,
+  sel: null,     // {bbox:[l,t,r,b], label} — the one selection both panes show
+  hover: null,   // row index under the pointer, or null
+  swipeArmed: false,  // Swipe pressed: the next drag on a pane is the stroke
+  swipe: { sizes: {}, speeds: [] },  // the stroke ladder, served by /api/state
 };
-
-const recording = () => state.draft && state.draft.recording;
+// Each pane's wrap and its overlay elements, resolved once.
+const PANES = {};
+for (const key of ["cam", "virt"]) {
+  const wrap = $(key + "-wrap");
+  PANES[key] = { wrap };
+  for (const cls of ["hover", "sel", "drag", "arrow", "arrow-tag"])
+    PANES[key][cls] = wrap.querySelector("." + cls);
+}
+const wraps = () => Object.values(PANES).map(p => p.wrap);
+const VIEW_TOOLS = new Set(["peek", "screenshot"]);
+const bboxText = bbox => "[" + bbox.map(v => v.toFixed(2)).join(", ") + "]";
+const clamp01 = v => Math.min(1, Math.max(0, v));
+const r3 = v => Math.round(v * 1000) / 1000;
 
 // ---------- plumbing ----------
 
 function banner(msg) {
-  const el = $("banner");
-  if (!msg) { el.style.display = "none"; return; }
-  el.textContent = msg;
-  el.style.display = "block";
+  const b = $("banner");
+  b.textContent = msg || "";
+  b.style.display = msg ? "block" : "none";
+}
+$("banner").onclick = () => banner("");
+
+function logEntry(text, cls) {
+  const div = document.createElement("div");
+  div.className = "entry" + (cls ? " " + cls : "");
+  const t = document.createElement("time");
+  t.textContent = new Date().toTimeString().slice(0, 8);
+  div.append(t, text);
+  $("log").prepend(div);
+  while ($("log").children.length > 80) $("log").lastChild.remove();
 }
 
 function setBusy(what) {
   state.busy = !!what;
   $("busy").style.display = what ? "flex" : "none";
   $("busy-what").textContent = what || "";
-  document.querySelectorAll("button").forEach(b => b.disabled = state.busy);
+  $("dot").classList.toggle("busy", state.busy);
+  document.querySelectorAll("button").forEach(b => b.disabled = state.busy || b.dataset.unpublished === "1");
+  renderActbar();
 }
 
-function logEntry(text, isErr) {
-  const div = document.createElement("div");
-  div.className = "entry" + (isErr ? " err" : "");
-  div.textContent = text;
-  $("log").prepend(div);
-  while ($("log").children.length > 40) $("log").lastChild.remove();
+let connectedOnce = false;
+function setConnected(on) {
+  $("dot").classList.toggle("on", on);
+  $("conn-label").textContent = on ? "connected" : "not connected";
 }
 
 async function api(path, body) {
   const resp = await fetch(path, body === undefined ? undefined : {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
   });
   const data = await resp.json().catch(() => ({ status: "error", message: "unreadable reply" }));
-  data.httpOk = resp.ok;
   return data;
-}
-
-function el(tag, cls, text) {
-  const e = document.createElement(tag);
-  if (cls) e.className = cls;
-  if (text !== undefined) e.textContent = text;
-  return e;
 }
 
 // ---------- acting on the phone ----------
@@ -279,22 +336,16 @@ async function act(tool, args, label) {
     const data = await api("/api/act", { tool, args: args || {} });
     if (data.status !== "ok") {
       banner(data.message || "request failed");
-      logEntry((label || tool) + " — " + (data.message || "failed"), true);
+      logEntry((label || tool) + " — " + (data.message || "failed"), "err");
       refreshState();
       return;
     }
-    setConnected(true);
-    if (data.text) logEntry(data.text); else logEntry(label || tool);
-    if (data.image) { state.viewingShot = null; renderView(data); }
-    if (data.recorded) {
-      const r = data.recorded;
-      logEntry("● recorded step " + (r.index + 1) + "/" + r.steps + " → " + r.macro
-        + (r.page ? " (on page " + r.page + ")" : ""));
-      if (r.page_changed)
-        logEntry("⚠ the screen crossed into page “" + r.page
-          + "” — consider cutting the macro here (one do per route move)");
-      applyFeedback(data);
-    }
+    if (!connectedOnce) { connectedOnce = true; refreshState(); }
+    logEntry(data.text || (label || tool), data.text ? "" : "dim");
+    // A gesture acted on the selection; the new screen starts clean. A
+    // view (peek, screenshot) re-reads the same screen and keeps it.
+    if (data.image && !VIEW_TOOLS.has(tool)) state.sel = null;
+    if (data.image) renderView(data);
   } catch (e) {
     banner("studio server unreachable: " + e.message);
   } finally {
@@ -305,845 +356,361 @@ async function act(tool, args, label) {
 // ---------- rendering the panes ----------
 
 function renderView(data) {
-  const img = $("frame");
+  const img = $("frame"), exact = data.tool === "screenshot";
   img.onload = () => {
-    state.imgW = img.naturalWidth; state.imgH = img.naturalHeight;
-    sizePanes();
-    renderRows();
+    const ar = img.naturalWidth / img.naturalHeight;
+    if (exact) { state.aspect = ar; state.aspectExact = true; }
+    else if (!state.aspectExact) state.aspect = ar;
+    layout();
   };
   img.src = "data:" + (data.image.mime_type || "image/jpeg") + ";base64," + data.image.data;
-  $("frame-wrap").style.display = "block";
-  $("frame-empty").style.display = "none";
   state.rows = data.rows || [];
-  state.selected = null;
-  renderSelected();
-  renderPages();
+  state.hover = null;
+  if (state.sel) state.sel.label = matchLabel(state.sel.bbox);
 }
+
+const BEZEL = 9;  // .device padding, each side
 
 function fitted(stage) {
-  // The one aspect-fit computation both panes use. CSS max-height
-  // can't do this: the image's wrapper is auto-height, so a
-  // percentage max-height computes to none and a portrait frame
-  // would render full-width and crop at the pane's overflow.
-  const ar = state.imgW / state.imgH;
-  let w = stage.clientWidth, h = w / ar;
-  if (h > stage.clientHeight) { h = stage.clientHeight; w = h * ar; }
-  return [w, h];
+  // Aspect-fit inside the stage, bezel included; CSS max-height can't
+  // do this under an auto-height wrapper, so both panes size
+  // explicitly from one rule.
+  const ar = state.aspect;
+  let w = stage.clientWidth - 2 * BEZEL, h = w / ar;
+  const maxH = stage.clientHeight - 2 * BEZEL;
+  if (h > maxH) { h = maxH; w = h * ar; }
+  return [Math.floor(w), Math.floor(h)];
 }
 
-function sizePanes() {
-  const frame = $("frame");
-  const [fw, fh] = fitted($("frame-wrap").parentElement);
-  frame.style.width = fw + "px";
-  frame.style.height = fh + "px";
-  const virt = $("virt");
-  const [w, h] = fitted(virt.parentElement);
-  virt.style.width = w + "px";
-  virt.style.height = h + "px";
-  virt.style.display = "block";
+function layout() {
+  if (!state.aspect) return;
+  $("count").textContent = state.rows.length + " element" + (state.rows.length === 1 ? "" : "s")
+    + " · screen 9:" + (9 / state.aspect).toFixed(1) + (state.aspectExact ? "" : " (camera crop)");
+  for (const [key, pane] of Object.entries(PANES)) {
+    const device = pane.wrap.parentElement;
+    const [w, h] = fitted(device.parentElement);
+    const surface = key === "cam" ? $("frame") : $("virt");
+    surface.style.width = w + "px";
+    surface.style.height = h + "px";
+    device.style.display = "block";
+  }
+  $("cam-empty").style.display = "none";
   $("virt-empty").style.display = "none";
+  renderVirt();
+  renderOverlays();
 }
 
-function renderRows() {
+function renderVirt() {
   const virt = $("virt");
   virt.innerHTML = "";
-  const w = virt.clientWidth, h = virt.clientHeight;
-  state.rows.forEach((row, i) => {
-    const box = el("div", "row-el " + row.kind + (state.selected === i ? " selected" : ""), row.label);
+  const W = virt.clientWidth, H = virt.clientHeight;
+  const spans = [];
+  // Icons first, text on top: a label inside a boxed region must win.
+  const ordered = [...state.rows].sort((a, b) => (a.kind === "text") - (b.kind === "text"));
+  ordered.forEach(row => {
     const [l, t, r, b] = row.bbox;
-    box.style.left = (l * w) + "px";
-    box.style.top = (t * h) + "px";
-    box.style.width = Math.max(6, (r - l) * w) + "px";
-    box.style.height = Math.max(6, (b - t) * h) + "px";
-    box.title = row.label || row.kind;
-    box.onclick = () => { state.selected = i; renderRows(); renderSelected(); };
-    virt.appendChild(box);
-  });
-  $("row-count").textContent = state.rows.length + " element(s)";
-}
-
-function renderSelected() {
-  const card = $("sel-card");
-  if (state.selected === null) { card.style.display = "none"; return; }
-  const row = state.rows[state.selected];
-  card.style.display = "block";
-  card.innerHTML = "";
-  card.appendChild(el("div", null, "")).appendChild(el("b", null, row.label || "(" + row.kind + ")"));
-  card.appendChild(el("div", "kv", row.kind + " · [" + row.bbox.join(", ") + "] · conf " + row.conf));
-
-  const acts = el("div");
-  acts.style.marginTop = "6px";
-  const tap = el("button", "tiny", "Tap");
-  tap.onclick = () => {
-    const args = { bbox: row.bbox };
-    if (recording() && row.label) args.label = row.label;  // free label from OCR
-    act("tap", args, "tap " + (row.label || row.kind));
-  };
-  acts.appendChild(tap);
-  if (state.macro && row.label) {
-    const exp = el("button", "tiny", "✓ Expect on " + state.macro);
-    exp.title = "assertion mode: this text proves the macro landed — appends a wait step requiring it here";
-    exp.onclick = () => draftEdit({ op: "step_expect", macro: state.macro, text: row.label, bbox: row.bbox });
-    acts.append(" ", exp);
-  }
-  if (state.app && state.page && row.label) {
-    const region = document.createElement("select");
-    for (const r of ["", "top", "bottom", "left", "right"])
-      region.appendChild(new Option(r || "(no region)", r));
-    const addA = el("button", "tiny", "+ Anchor on " + state.page);
-    addA.onclick = () => {
-      const p = state.draft.pages[state.page];
-      const entry = region.value ? { text: row.label, region: region.value } : row.label;
-      draftEdit({ op: "page_update", page: state.page, anchors: [...p.anchors, entry] });
-    };
-    const addF = el("button", "tiny", "+ Forbid");
-    addF.onclick = () => {
-      const p = state.draft.pages[state.page];
-      draftEdit({ op: "page_update", page: state.page, forbid: [...p.forbid, row.label] });
-    };
-    acts.append(" ", addA, region, " ", addF);
-  }
-  card.appendChild(acts);
-}
-
-// ---------- gestures / marking on the camera pane ----------
-
-const clamp01 = v => Math.min(1, Math.max(0, v));
-const r3 = v => Math.round(v * 1000) / 1000;
-
-function pointOf(ev) {
-  const rect = $("frame").getBoundingClientRect();
-  return {
-    x: clamp01((ev.clientX - rect.left) / rect.width),
-    y: clamp01((ev.clientY - rect.top) / rect.height),
-    px: ev.clientX, py: ev.clientY, w: rect.width, h: rect.height,
-  };
-}
-
-function tapBbox(p) {
-  const r = 0.02;
-  return [clamp01(p.x - r), clamp01(p.y - r), clamp01(p.x + r), clamp01(p.y + r)].map(r3);
-}
-
-let dragStart = null;
-$("frame-wrap").addEventListener("pointerdown", ev => {
-  if (state.busy) return;
-  dragStart = pointOf(ev);
-});
-$("frame-wrap").addEventListener("pointermove", ev => {
-  if (!dragStart || !state.marking) return;
-  const p = pointOf(ev), rect = $("frame").getBoundingClientRect(), mr = $("mark-rect");
-  mr.style.display = "block";
-  mr.style.left = (Math.min(dragStart.x, p.x) * rect.width) + "px";
-  mr.style.top = (Math.min(dragStart.y, p.y) * rect.height) + "px";
-  mr.style.width = (Math.abs(p.x - dragStart.x) * rect.width) + "px";
-  mr.style.height = (Math.abs(p.y - dragStart.y) * rect.height) + "px";
-});
-$("frame-wrap").addEventListener("pointerup", ev => {
-  if (state.busy || !dragStart) return;
-  const start = dragStart, end = pointOf(ev);
-  dragStart = null;
-  if (state.marking) { finishMark(start, end); return; }
-  const dx = end.px - start.px, dy = end.py - start.py;
-  const dist = Math.hypot(dx, dy);
-  if (dist < 12) {
-    const args = { bbox: tapBbox(start) };
-    if (recording()) {
-      // Design rule 3, enforced at record time: a press without its
-      // label is illegal — say what these coordinates ARE.
-      const label = prompt("Recording — label this tap (on-screen text, or a plain description):");
-      if (!label) { logEntry("tap not sent — a recorded press needs a label", true); return; }
-      args.label = label;
+    const w = Math.max(2, (r - l) * W), h = Math.max(2, (b - t) * H);
+    const d = document.createElement("div");
+    d.className = "el " + row.kind + (row.kind === "text" && row.conf < 0.6 ? " faint" : "");
+    d.style.left = (l * W) + "px";
+    d.style.top = (t * H) + "px";
+    d.style.width = w + "px";
+    d.style.height = h + "px";
+    if (row.kind === "icon") {
+      // App-icon-shaped boxes get the rounded-tile look; anything wide,
+      // tall, or big is a region.
+      const tile = w / h < 1.6 && h / w < 1.6 && (r - l) < 0.3 && (b - t) < 0.15;
+      d.style.borderRadius = tile ? (Math.min(w, h) * 0.22) + "px" : "6px";
+      if (!tile) d.classList.add("region");
     }
-    act("tap", args, "tap @ " + start.x.toFixed(2) + "," + start.y.toFixed(2));
-    return;
+    if (row.kind === "text") {
+      d.style.fontSize = Math.min(48, Math.max(6, (b - t) * H * 0.72)) + "px";
+      const span = document.createElement("span");
+      span.textContent = row.label;
+      d.appendChild(span);
+      spans.push(span);
+    }
+    virt.appendChild(d);
+  });
+  // Second pass: a label wider than its box is squeezed, never clipped —
+  // the layout stays truthful to where the text sits on the phone.
+  const squeeze = spans.map(span => [span, span.parentElement.clientWidth - 2, span.scrollWidth]);
+  for (const [span, avail, width] of squeeze)
+    if (width > avail && avail > 0) span.style.transform = "scaleX(" + (avail / width) + ")";
+}
+
+function place(box, bbox) {
+  const wrap = box.parentElement, W = wrap.clientWidth, H = wrap.clientHeight;
+  const [l, t, r, b] = bbox;
+  box.style.left = (l * W) + "px";
+  box.style.top = (t * H) + "px";
+  box.style.width = ((r - l) * W) + "px";
+  box.style.height = ((b - t) * H) + "px";
+  box.style.display = "block";
+}
+
+function renderHover() {
+  for (const pane of Object.values(PANES)) {
+    if (state.hover !== null) place(pane.hover, state.rows[state.hover].bbox);
+    else pane.hover.style.display = "none";
   }
+}
+
+function renderOverlays() {
+  renderHover();
+  for (const pane of Object.values(PANES)) {
+    if (state.sel) place(pane.sel, state.sel.bbox); else pane.sel.style.display = "none";
+  }
+  renderActbar();
+}
+
+function renderActbar() {
+  const bar = $("actbar"), on = !!state.sel;
+  bar.classList.toggle("idle", !on);
+  $("cap-label").textContent = on ? (state.sel.label || "box") : "no selection";
+  $("cap-geo").textContent = on ? bboxText(state.sel.bbox) : "click an element or drag a box";
+  bar.querySelectorAll("button").forEach(b => b.disabled = state.busy || !on);
+  if (!on) state.swipeArmed = false;
+  $("swipe-btn").classList.toggle("armed", state.swipeArmed);
+  $("swipe-hint").textContent = state.swipeArmed ? "drag on the screen — the drag is the stroke" : "";
+  for (const w of wraps()) w.style.cursor = state.swipeArmed ? "grab" : "crosshair";
+}
+
+function armSwipe(on) {
+  if (!state.sel) return;
+  state.swipeArmed = on;
+  renderActbar();
+}
+
+// ---------- selecting: click an element, or drag a box ----------
+
+function pointOf(ev, wrap) {
+  const rect = wrap.getBoundingClientRect();
+  return { x: clamp01((ev.clientX - rect.left) / rect.width),
+           y: clamp01((ev.clientY - rect.top) / rect.height), px: ev.clientX, py: ev.clientY };
+}
+
+function rowAt(p) {
+  // The smallest element containing the point — a word inside a card
+  // wins over the card.
+  let best = null, bestArea = Infinity;
+  state.rows.forEach((row, i) => {
+    const [l, t, r, b] = row.bbox;
+    if (p.x < l || p.x > r || p.y < t || p.y > b) return;
+    const area = (r - l) * (b - t);
+    if (area < bestArea) { best = i; bestArea = area; }
+  });
+  return best;
+}
+
+function matchLabel(bbox) {
+  // After a fresh view, keep the caption only if the same text still
+  // sits in (roughly) the same box.
+  const i = rowAt({ x: (bbox[0] + bbox[2]) / 2, y: (bbox[1] + bbox[3]) / 2 });
+  if (i === null) return null;
+  const [l, t, r, b] = state.rows[i].bbox;
+  const near = Math.abs(l - bbox[0]) < 0.03 && Math.abs(t - bbox[1]) < 0.03
+            && Math.abs(r - bbox[2]) < 0.03 && Math.abs(b - bbox[3]) < 0.03;
+  return near ? state.rows[i].label : null;
+}
+
+function select(bbox, label) {
+  state.sel = { bbox: bbox.map(r3), label: label || null };
+  renderOverlays();
+}
+
+function clearSelection() {
+  state.sel = null;
+  renderOverlays();
+}
+
+// The stroke nearest to how far the box was dragged, as a fraction of
+// the screen — the ladder is the swipe tool's own (`state.swipe.sizes`),
+// so the arrow drawn is the stroke the arm makes.
+function sizeFor(frac) {
+  let best = null;
+  for (const [size, dist] of Object.entries(state.swipe.sizes))
+    if (best === null || Math.abs(dist - frac) < Math.abs(best[1] - frac)) best = [size, dist];
+  return best || ["m", frac];
+}
+
+function swipeFrom(p, start) {
+  // Direction is the dominant axis; length is the drag along it.
+  const dx = p.x - start.x, dy = p.y - start.y;
   const horizontal = Math.abs(dx) > Math.abs(dy);
   const direction = horizontal ? (dx > 0 ? "right" : "left") : (dy > 0 ? "down" : "up");
-  const frac = dist / (horizontal ? start.w : start.h);
-  const size = frac < 0.08 ? "s" : frac < 0.18 ? "m" : frac < 0.35 ? "l" : frac < 0.55 ? "xl" : "xxl";
-  act("swipe", { bbox: tapBbox(start), direction, size },
-      "swipe " + direction + " (" + size + ")");
+  const [size, dist] = sizeFor(Math.abs(horizontal ? dx : dy));
+  return { direction, size, dist, dx, dy, horizontal };
+}
+
+function showArrow(pane, sw) {
+  const wrap = pane.wrap, W = wrap.clientWidth, H = wrap.clientHeight;
+  const [l, t, r, b] = state.sel.bbox;
+  const cx = (l + r) / 2 * W, cy = (t + b) / 2 * H;
+  // The arrow is the stroke the arm will make, snapped to the ladder.
+  const len = sw.dist * (sw.horizontal ? W : H);
+  const angle = { right: 0, down: 90, left: 180, up: 270 }[sw.direction];
+  const sign = (sw.direction === "right" || sw.direction === "down") ? 1 : -1;
+  const arrow = pane.arrow, tag = pane["arrow-tag"];
+  arrow.style.left = cx + "px"; arrow.style.top = (cy - 1.5) + "px";
+  arrow.style.width = Math.max(0, len - 10) + "px";
+  arrow.style.transform = "rotate(" + angle + "deg)";
+  arrow.style.display = "block";
+  tag.textContent = "swipe " + sw.direction + " · " + sw.size + " · " + Math.round(sw.dist * 100) + "%";
+  // The tag rides beside the arrow, never over it.
+  tag.style.left = (cx + (sw.horizontal ? sign * len / 2 : 76)) + "px";
+  tag.style.top = (cy + (sw.horizontal ? -22 : sign * len / 2)) + "px";
+  tag.style.display = "block";
+}
+
+function hideDragFeedback() {
+  for (const pane of Object.values(PANES))
+    for (const cls of ["drag", "arrow", "arrow-tag"]) pane[cls].style.display = "none";
+}
+
+let drag = null;
+for (const [key, pane] of Object.entries(PANES)) {
+  const wrap = pane.wrap;
+  wrap.addEventListener("dragstart", ev => ev.preventDefault());
+  wrap.addEventListener("pointerdown", ev => {
+    if (state.busy || ev.button !== 0) return;
+    ev.preventDefault();
+    // With Swipe armed the drag is the stroke (from the selected box);
+    // otherwise it draws a new box.
+    drag = { pane: key, start: pointOf(ev, wrap), moved: false, swipe: state.swipeArmed };
+    wrap.setPointerCapture(ev.pointerId);
+  });
+  wrap.addEventListener("pointermove", ev => {
+    const p = pointOf(ev, wrap);
+    if (drag && drag.pane === key) {
+      if (!drag.moved && Math.hypot(p.px - drag.start.px, p.py - drag.start.py) < 6) return;
+      drag.moved = true;
+      if (drag.swipe) { showArrow(pane, swipeFrom(p, drag.start)); return; }
+      const bbox = [Math.min(drag.start.x, p.x), Math.min(drag.start.y, p.y),
+                    Math.max(drag.start.x, p.x), Math.max(drag.start.y, p.y)];
+      for (const q of Object.values(PANES)) place(q.drag, bbox);
+      return;
+    }
+    const i = state.busy || state.swipeArmed ? null : rowAt(p);
+    if (i !== state.hover) { state.hover = i; renderHover(); }
+  });
+  wrap.addEventListener("pointerleave", () => {
+    if (state.hover !== null) { state.hover = null; renderHover(); }
+  });
+  wrap.addEventListener("pointerup", ev => {
+    if (!drag || drag.pane !== key) return;
+    const d = drag; drag = null;
+    hideDragFeedback();
+    if (state.busy) return;
+    const p = pointOf(ev, wrap);
+    if (d.swipe) {
+      // Armed: a real drag is the stroke; a mere click leaves it armed.
+      if (d.moved) { const sw = swipeFrom(p, d.start); armSwipe(false); swipe(sw.direction, sw.size); }
+      return;
+    }
+    if (d.moved) {
+      select([Math.min(d.start.x, p.x), Math.min(d.start.y, p.y),
+              Math.max(d.start.x, p.x), Math.max(d.start.y, p.y)]);
+      return;
+    }
+    // A click lands on an element or nowhere: no box for empty space.
+    const i = rowAt(d.start);
+    if (i !== null) select(state.rows[i].bbox, state.rows[i].label);
+    else clearSelection();
+  });
+}
+
+// ---------- the action bar ----------
+
+function selName() {
+  return state.sel.label ? "“" + state.sel.label + "”" : bboxText(state.sel.bbox);
+}
+
+function press(tool) {
+  if (!state.sel) return;
+  act(tool, { bbox: state.sel.bbox }, tool.replace("_", " ") + " " + selName());
+}
+
+function swipe(direction, size) {
+  if (!state.sel) return;
+  const speed = $("swipe-speed").value;
+  act("swipe", { bbox: state.sel.bbox, direction, size, speed },
+      "swipe " + direction + " from " + selName() + " (" + size + ", " + speed + ")");
+}
+
+// The press buttons' keycaps are their hotkeys — spelled once, in the markup.
+const PRESS_KEYS = {};
+document.querySelectorAll("#actbar [data-press]").forEach(b => {
+  b.onclick = () => press(b.dataset.press);
+  PRESS_KEYS[b.querySelector("kbd").textContent.toLowerCase()] = b.dataset.press;
+});
+$("swipe-btn").onclick = () => armSwipe(!state.swipeArmed);
+$("cap-x").onclick = clearSelection;
+
+document.querySelectorAll("header button[data-tool]").forEach(btn => {
+  btn.onclick = () => act(btn.dataset.tool, {}, btn.textContent.trim());
 });
 
-function startMark(name) {
-  state.marking = name;
-  $("mode-badge").textContent = "MARK " + name.toUpperCase();
-  $("mode-badge").className = "badge marking";
-  logEntry("drag a rectangle over the " + name + " area on the camera pane (click = small box)");
-}
-
-function stopMark() {
-  state.marking = null;
-  $("mark-rect").style.display = "none";
-  updateModeBadge();
-}
-
-function finishMark(start, end) {
-  const name = state.marking;
-  stopMark();
-  let [l, t, r, b] = [
-    Math.min(start.x, end.x), Math.min(start.y, end.y),
-    Math.max(start.x, end.x), Math.max(start.y, end.y),
-  ];
-  if (r - l < 0.01 || b - t < 0.01) { [l, t, r, b] = tapBbox(start); }
-  const hint = name === "back" ? "e.g. back chevron (top-left)" : "e.g. scrim above the bottom sheet";
-  const label = prompt("Label this " + name + " landmark — on-screen text, or a plain description (" + hint + "):");
-  if (!label) { logEntry("mark " + name + " cancelled"); return; }
-  draftEdit({ op: "landmark_set", name, label, bbox: [l, t, r, b].map(r3) });
-}
-
-// ---------- draft curation ----------
-
-function applyFeedback(data) {
-  state.draft = data.draft; state.evidence = data.evidence;
-  state.validation = data.validation || {};
-  state.pack = data.pack || state.pack;
-  state.matrix = null;
-  renderAll();
-}
-
-async function draftEdit(body, quiet) {
-  const data = await apiOr("/api/draft/edit", body, body.op);
-  if (!data) return null;
-  if (!quiet) logEntry(body.op + " ok");
-  applyFeedback(data);
-  return data;
-}
-
-// The one error-display convention: banner + red log entry on refusal.
-async function apiOr(path, body, label) {
-  const data = await api(path, body);
-  if (data.status !== "ok") {
-    banner(data.message || "request failed");
-    logEntry(label + " — " + (data.message || "failed"), true);
-    return null;
-  }
-  banner("");
-  return data;
-}
-
-function renderAll() {
-  renderPages(); renderLandmarks(); renderMacros(); renderPlaybooks();
-  renderProve(); renderSelected(); updateModeBadge();
-}
-
-function updateModeBadge() {
-  if (state.marking) return; // marking owns the badge until it ends
-  const rec = recording();
-  const b = $("mode-badge");
-  b.textContent = rec ? "REC → " + rec.macro : "EXPLORE";
-  b.className = rec ? "badge marking" : "badge mode";
-}
-
-async function refreshDraft() {
-  if (!state.app) return;
-  const data = await api("/api/draft");
-  if (data.status !== "ok") { banner(data.message); return; }
-  applyFeedback(data);
-}
-
-async function addShot() {
-  if (state.busy || !state.page) return;
-  setBusy("peek → shot of " + state.page);
-  try {
-    const data = await apiOr("/api/draft/shot", { page: state.page }, "shot");
-    if (!data) return;
-    setConnected(true);
-    state.viewingShot = data.shot;
-    logEntry("shot " + data.shot + " → " + state.page);
-    applyFeedback(data);
-    renderView(data);
-  } finally {
-    setBusy(null);
-  }
-}
-
-async function viewShot(sid) {
-  const data = await api("/api/shot/" + sid + "/view");
-  if (data.status !== "ok") { banner(data.message); return; }
-  state.viewingShot = sid;
-  renderView(data);
-  logEntry("viewing stored shot " + sid + " (" + data.page + ")");
-}
-
-function badgeFor(text) {
-  const ev = (state.evidence[state.page] || {})[text];
-  if (!ev) return null;
-  const span = el("span");
-  const freq = el("span",
-    ev.shots && ev.seen / ev.shots >= state.limits.min_freq ? "b-ok" : "b-warn",
-    " " + ev.seen + "/" + ev.shots);
-  freq.title = "shots of this page containing the anchor (≥"
-    + Math.round(state.limits.min_freq * 100) + "% earns geometry)";
-  span.appendChild(freq);
-  if (ev.other_pages > 0) {
-    const shared = el("span", "b-warn", " ⚠" + ev.other_pages);
-    shared.title = "also appears in shots of " + ev.other_pages + " other page(s) — shared chrome discriminates poorly";
-    span.appendChild(shared);
-  }
-  return span;
-}
-
-function renderPages() {
-  if (!state.draft) return;
-  const card = $("pages-card");
-  card.innerHTML = "";
-  const names = Object.keys(state.draft.pages);
-  if (!names.length) card.appendChild(el("div", "kv", "no pages drafted yet"));
-  for (const name of names) {
-    const page = state.draft.pages[name];
-    const item = el("div", "page-item" + (state.page === name ? " sel" : ""));
-    const head = el("div", "head");
-    head.appendChild(el("b", null, name));
-    head.appendChild(el("span", "kv", page.shots.length + " shot(s)"));
-    const del = el("button", "tiny", "✕");
-    del.onclick = ev => { ev.stopPropagation();
-      if (confirm("Delete drafted page " + name + " and its shots?"))
-        draftEdit({ op: "page_delete", page: name }).then(() => { if (state.page === name) state.page = null; });
-    };
-    head.appendChild(del);
-    item.appendChild(head);
-    item.onclick = () => { state.page = state.page === name ? null : name; renderPages(); renderSelected(); };
-
-    if (state.page === name) {
-      const shots = el("div", "shots");
-      for (const sid of page.shots) {
-        const th = el("div", "thumb");
-        const img = document.createElement("img");
-        img.src = "/api/shot/" + sid;
-        img.className = state.viewingShot === sid ? "viewing" : "";
-        img.title = sid;
-        img.onclick = ev => { ev.stopPropagation(); viewShot(sid); };
-        const x = el("div", "x", "✕");
-        x.onclick = ev => { ev.stopPropagation(); draftEdit({ op: "shot_delete", shot: sid }); };
-        th.append(img, x);
-        shots.appendChild(th);
-      }
-      const plus = el("button", "tiny", "+ Shot (peek)");
-      plus.onclick = ev => { ev.stopPropagation(); addShot(); };
-      shots.appendChild(plus);
-      item.appendChild(shots);
-
-      const anchors = el("div");
-      anchors.appendChild(el("span", "kv", "anchors: "));
-      if (!page.anchors.length) anchors.appendChild(el("span", "kv", "none — click a row, then “+ Anchor”"));
-      page.anchors.forEach((a, i) => {
-        const text = typeof a === "string" ? a : a.text;
-        const chip = el("span", "chip");
-        chip.appendChild(el("span", null, typeof a === "string" ? text : text + " @" + a.region));
-        const b = badgeFor(Array.isArray(text) ? text[0] : text);
-        if (b) chip.appendChild(b);
-        const x = el("span", "x", "✕");
-        x.onclick = ev => { ev.stopPropagation();
-          draftEdit({ op: "page_update", page: name, anchors: page.anchors.filter((_, j) => j !== i) });
-        };
-        chip.appendChild(x);
-        anchors.appendChild(chip);
-      });
-      item.appendChild(anchors);
-
-      const forbid = el("div");
-      forbid.appendChild(el("span", "kv", "forbid: "));
-      if (!page.forbid.length) forbid.appendChild(el("span", "kv", "none"));
-      page.forbid.forEach((t, i) => {
-        const chip = el("span", "chip");
-        chip.appendChild(el("span", null, t));
-        const x = el("span", "x", "✕");
-        x.onclick = ev => { ev.stopPropagation();
-          draftEdit({ op: "page_update", page: name, forbid: page.forbid.filter((_, j) => j !== i) });
-        };
-        chip.appendChild(x);
-        forbid.appendChild(chip);
-      });
-      item.appendChild(forbid);
-
-      const scroll = el("label", "kv");
-      const cb = document.createElement("input");
-      cb.type = "checkbox";
-      cb.checked = page.scrollable;
-      cb.onchange = () => draftEdit({ op: "page_update", page: name, scrollable: cb.checked });
-      scroll.append(cb, " scrollable");
-      scroll.onclick = ev => ev.stopPropagation();
-      item.appendChild(scroll);
-    }
-    card.appendChild(item);
-  }
-  card.appendChild(addNameRow("page_add", "new page name", "+ Page", n => state.page = n));
-}
-
-function addNameRow(op, placeholder, label, select) {
-  const row = el("div");
-  row.style.marginTop = "6px";
-  const input = document.createElement("input");
-  input.type = "text"; input.placeholder = placeholder; input.size = 14;
-  const btn = el("button", "tiny", label);
-  btn.onclick = () => {
-    const n = input.value.trim();
-    if (n) draftEdit({ op, name: n }).then(d => { if (d) { select(n); renderAll(); } });
-  };
-  row.append(input, " ", btn);
-  return row;
-}
-
-function renderLandmarks() {
-  if (!state.draft) return;
-  const card = $("landmarks-card");
-  card.innerHTML = "";
-  for (const name of ["back", "dismiss"]) {
-    const line = el("div");
-    line.appendChild(el("b", null, name + ": "));
-    const c = state.draft.landmarks[name];
-    if (c) {
-      const chip = el("span", "chip");
-      chip.appendChild(el("span", null,
-        (Array.isArray(c.label) ? c.label[0] : c.label) + " [" + c.bbox.map(v => v.toFixed(2)).join(",") + "]"));
-      const x = el("span", "x", "✕");
-      x.onclick = () => draftEdit({ op: "landmark_clear", name });
-      chip.appendChild(x);
-      line.appendChild(chip);
-    } else {
-      const mark = el("button", "tiny", "Mark on camera…");
-      mark.onclick = () => startMark(name);
-      line.appendChild(mark);
-    }
-    card.appendChild(line);
-  }
-  card.appendChild(el("div", "kv",
-    "back = the app's own back affordance · dismiss = the scrim a modal closes from"));
-}
-
-// ---------- macro recording + step editor ----------
-
-function stepSummary(s) {
-  if (s.tool === "wait") {
-    const exp = s.expect ? " expect " + JSON.stringify(s.expect.text || s.expect) : "";
-    return "wait " + ((s.with || {}).seconds ?? "") + "s" + exp;
-  }
-  const w = s.with || {};
-  const label = Array.isArray(w.label) ? w.label[0] : w.label;
-  let out = s.tool;
-  if (label) out += " “" + label + "”";
-  else if (w.bbox) out += " @ [" + w.bbox.map(v => v.toFixed ? v.toFixed(2) : v).join(",") + "]";
-  if (w.direction) out += " " + w.direction + " (" + (w.size || "m") + ")";
-  if (w.text) out += " " + JSON.stringify(w.text);
-  return out;
-}
-
-function renderMacros() {
-  if (!state.draft) return;
-  const card = $("macros-card");
-  card.innerHTML = "";
-  const macros = state.draft.macros || {};
-  const rec = recording();
-  for (const [name, m] of Object.entries(macros)) {
-    const item = el("div", "page-item" + (state.macro === name ? " sel" : ""));
-    const head = el("div", "head");
-    head.appendChild(el("b", null, name));
-    head.appendChild(el("span", "kv", m.steps.length + "/" + state.limits.max_steps));
-    if (rec && rec.macro === name) head.appendChild(el("span", "b-bad", "● REC"));
-    const del = el("button", "tiny", "✕");
-    del.onclick = ev => { ev.stopPropagation();
-      if (confirm("Delete drafted macro " + name + "?"))
-        draftEdit({ op: "macro_delete", name }).then(() => { if (state.macro === name) state.macro = null; });
-    };
-    head.appendChild(del);
-    item.appendChild(head);
-    item.onclick = () => { state.macro = state.macro === name ? null : name; renderMacros(); renderSelected(); };
-
-    if (state.macro === name) {
-      m.steps.forEach((s, i) => {
-        const row = el("div", "chip");
-        row.style.display = "flex";
-        row.title = (s.comment || "") + (s.page ? " · page: " + s.page : "");
-        if (s.snap) {
-          const img = document.createElement("img");
-          img.src = "/api/shot/" + s.snap;
-          img.style.cssText = "width:18px;height:32px;object-fit:cover;cursor:pointer;border-radius:2px";
-          img.onclick = ev => { ev.stopPropagation(); viewShot(s.snap); };
-          row.appendChild(img);
-        }
-        row.appendChild(el("span", null, (i + 1) + " " + s.name + ": " + stepSummary(s)));
-        if (s.skip_when) row.appendChild(el("span", "b-warn", "skip?"));
-        const menu = el("span", "x", "⋯");
-        menu.onclick = ev => { ev.stopPropagation(); stepMenu(name, i, s); };
-        const x = el("span", "x", "✕");
-        x.onclick = ev => { ev.stopPropagation(); draftEdit({ op: "step_delete", macro: name, index: i }); };
-        row.append(menu, x);
-        item.appendChild(row);
-      });
-
-      const controls = el("div");
-      controls.style.marginTop = "4px";
-      if (rec && rec.macro === name) {
-        const stop = el("button", "tiny", "■ Stop recording");
-        stop.onclick = ev => { ev.stopPropagation(); draftEdit({ op: "record_stop" }); };
-        controls.appendChild(stop);
-      } else if (!rec) {
-        const start = el("button", "tiny", "● Record");
-        start.title = "every gesture you make appends a step (with its after-screen snapshot)";
-        start.onclick = ev => { ev.stopPropagation(); draftEdit({ op: "record_start", macro: name }); };
-        controls.appendChild(start);
-      }
-      const save = el("button", "tiny", "Save MACRO.yml");
-      save.onclick = ev => { ev.stopPropagation(); saveMacro(name); };
-      const reh = el("button", "tiny primary", "▶ Rehearse");
-      reh.onclick = ev => { ev.stopPropagation(); rehearseMacro(name, m); };
-      const target = document.createElement("select");
-      for (const t of ["pack", "global"]) target.appendChild(new Option(t, t, false, m.target === t));
-      target.onchange = () => draftEdit({ op: "macro_update", macro: name, target: target.value });
-      target.onclick = ev => ev.stopPropagation();
-      const inp = el("button", "tiny", "+ Input");
-      inp.title = "declare an input, then edit a step arg to {name} (the MACRO.yml placeholder spelling)";
-      inp.onclick = ev => { ev.stopPropagation(); addInput(name, m); };
-      controls.append(" ", save, " ", reh, " ", target, " ", inp);
-      item.appendChild(controls);
-      if (Object.keys(m.inputs || {}).length)
-        item.appendChild(el("div", "kv", "inputs: " + Object.keys(m.inputs).join(", ")));
-    }
-    card.appendChild(item);
-  }
-  card.appendChild(addNameRow("macro_add", "new macro name", "+ Macro", n => state.macro = n));
-}
-
-function stepMenu(macro, index, s) {
-  const choice = prompt(
-    "Step " + (index + 1) + " (" + s.name + ") — type one:\n" +
-    "rename · comment · args · dismissal · rerecord · rehearse-from", "");
-  if (!choice) return;
-  if (choice === "rename") {
-    const name = prompt("new step name (lowercase/digits/hyphens):", s.name);
-    if (name) draftEdit({ op: "step_update", macro, index, fields: { name } });
-  } else if (choice === "comment") {
-    const comment = prompt("step comment (emitted as a YAML comment):", s.comment || "");
-    if (comment !== null) draftEdit({ op: "step_update", macro, index, fields: { comment: comment || null } });
-  } else if (choice === "args") {
-    const raw = prompt("edit `with` as JSON ({name} in a string = declared-input placeholder):",
-      JSON.stringify(s.with || {}));
-    if (raw) {
-      try { draftEdit({ op: "step_update", macro, index, fields: { with: JSON.parse(raw) } }); }
-      catch (e) { banner("not JSON: " + e.message); }
-    }
-  } else if (choice === "dismissal") {
-    draftEdit({ op: "step_dismissal", macro, index });
-  } else if (choice === "rerecord") {
-    draftEdit({ op: "record_start", macro, replace: index });
-    logEntry("re-recording step " + (index + 1) + " — the next gesture replaces it in place");
-  } else if (choice === "rehearse-from") {
-    rehearseMacro(macro, state.draft.macros[macro], s.name);
-  } else {
-    banner("unknown step action “" + choice + "”");
-  }
-}
-
-function addInput(macro, m) {
-  const added = promptNewInput();
-  if (added) draftEdit({ op: "macro_update", macro, inputs: { ...m.inputs, [added[0]]: added[1] } });
-}
-
-async function saveMacro(name) {
-  const data = await apiOr("/api/macro/save", { macro: name }, "save");
-  if (data) logEntry("saved → " + data.path + "\n" + data.yaml);
-}
-
-function promptValues(inputs) {
-  const values = {};
-  for (const [iname, spec] of Object.entries(inputs || {})) {
-    const v = prompt("input “" + iname + "”" + (spec.example ? " (e.g. " + spec.example + ")" : "") + ":",
-      spec.default || "");
-    if (v === null) return null;
-    values[iname] = v;
-  }
-  return values;
-}
-
-function promptNewInput() {
-  const iname = prompt("input name (lowercase/digits/hyphens):");
-  if (!iname) return null;
-  const example = prompt("example value:") || undefined;
-  return [iname, { description: "studio-declared input", example }];
-}
-
-async function rehearseMacro(name, m, startAt) {
-  const values = promptValues(m.inputs);
-  if (values === null) return;
-  if (state.busy) return;
-  setBusy("rehearse " + name);
-  try {
-    const data = await apiOr("/api/macro/rehearse",
-      { macro: name, values, start_at: startAt || "" }, "rehearse");
-    if (!data) return;
-    setConnected(true);
-    logEntry((data.ok ? "✓ rehearsal green" : "✗ rehearsal failed at step " + data.aborted_step)
-      + " (" + data.run_id + ")\n" + data.text);
-    if (data.image) { state.viewingShot = null; renderView(data); }
-  } finally {
-    setBusy(null);
-  }
-}
-
-// ---------- route assembly (playbooks) ----------
-
-const ENTRY_TEMPLATES = {
-  page: name => ({ page: name }),
-  start: name => ({ start: name, macro: { steps: [] } }),
-  do: name => ({ do: name, macro: { steps: [] } }),
-  agent: name => ({
-    agent: name, prompt: "EDIT ME — the goal, the rules, and where to finish",
-    tools: ["tap"], returns: { summary: "EDIT ME — what to report back" },
-  }),
-  ask: name => ({ ask: name, approve: "EDIT", message: "EDIT ME — what you are asking approval for", yes: ["ok"], no: ["no"] }),
-  tell: name => ({ tell: name, message: "EDIT ME — write it in the user's language" }),
+$("clip").onsubmit = ev => {
+  ev.preventDefault();
+  const text = $("clip-text").value;
+  if (!text) return;
+  act("send_to_clipboard", { text }, "clipboard ← " + JSON.stringify(text));
 };
 
-function entrySummary(e) {
-  const kind = ["page", "start", "do", "agent", "ask", "tell"].find(k => k in e);
-  let out = kind + ": " + e[kind];
-  if (kind === "page" && e.anchors) out += " (declared here)";
-  if (kind === "page" && e.recover) out += " · recover";
-  if ((kind === "do" || kind === "start") && e.macro && e.macro.steps) out += " · inline ×" + e.macro.steps.length;
-  if (kind === "do" && e.irreversible) out += " · " + e.irreversible + "!";
-  if (kind === "agent") out += (e.tools && e.tools.length) ? " · tools " + e.tools.join("/") : " · text";
-  if (kind === "ask" && e.approve) out += " · approve " + e.approve;
-  return out;
-}
-
-function renderPlaybooks() {
-  if (!state.draft) return;
-  const card = $("playbooks-card");
-  card.innerHTML = "";
-  const books = state.draft.playbooks || {};
-  if (state.pack.error)
-    card.appendChild(el("div", "b-warn", "pack: " + state.pack.error));
-  for (const [name, p] of Object.entries(books)) {
-    const item = el("div", "page-item" + (state.playbook === name ? " sel" : ""));
-    const err = state.validation[name];
-    const head = el("div", "head");
-    head.appendChild(el("b", null, name));
-    head.appendChild(el("span", err === null ? "b-ok" : "b-warn", err === null ? "compiles" : "draft"));
-    const del = el("button", "tiny", "✕");
-    del.onclick = ev => { ev.stopPropagation();
-      if (confirm("Delete drafted playbook " + name + "?"))
-        draftEdit({ op: "playbook_delete", name }).then(() => { if (state.playbook === name) state.playbook = null; });
-    };
-    head.appendChild(del);
-    item.appendChild(head);
-    item.onclick = () => { state.playbook = state.playbook === name ? null : name; renderPlaybooks(); };
-
-    if (state.playbook === name) {
-      p.route.forEach((e, i) => {
-        const row = el("div", "chip");
-        row.style.display = "flex";
-        row.appendChild(el("span", null, (i + 1) + " " + entrySummary(e)));
-        const up = el("span", "x", "↑"), dn = el("span", "x", "↓"), ed = el("span", "x", "✎"), x = el("span", "x", "✕");
-        up.onclick = ev => { ev.stopPropagation(); draftEdit({ op: "route_move", playbook: name, index: i, delta: -1 }); };
-        dn.onclick = ev => { ev.stopPropagation(); draftEdit({ op: "route_move", playbook: name, index: i, delta: 1 }); };
-        ed.onclick = ev => { ev.stopPropagation();
-          const raw = prompt("edit route entry as JSON:", JSON.stringify(e));
-          if (raw) {
-            try { draftEdit({ op: "route_update", playbook: name, index: i, entry: JSON.parse(raw) }); }
-            catch (err2) { banner("not JSON: " + err2.message); }
-          }
-        };
-        x.onclick = ev => { ev.stopPropagation(); draftEdit({ op: "route_delete", playbook: name, index: i }); };
-        row.append(up, dn, ed, x);
-        item.appendChild(row);
-      });
-      if (err) item.appendChild(el("div", "b-warn", err));
-      else if (p.route.length) item.appendChild(el("div", "b-ok", "compiles clean"));
-
-      const addRow = el("div");
-      addRow.style.marginTop = "4px";
-      const kindSel = document.createElement("select");
-      for (const k of ["page", "start", "do", "agent", "ask", "tell"]) kindSel.appendChild(new Option(k, k));
-      const nameIn = document.createElement("input");
-      nameIn.type = "text"; nameIn.size = 10; nameIn.placeholder = "name";
-      nameIn.setAttribute("list", "known-names");
-      const dl = document.createElement("datalist");
-      dl.id = "known-names";
-      for (const pg of state.pack.pages) dl.appendChild(new Option(pg));
-      for (const mc of Object.keys(state.draft.macros || {})) dl.appendChild(new Option(mc));
-      const add = el("button", "tiny", "+ entry");
-      add.onclick = ev => {
-        ev.stopPropagation();
-        const n = nameIn.value.trim();
-        if (!n) return;
-        const kind = kindSel.value;
-        if (kind === "do" && (state.draft.macros || {})[n]) {
-          draftEdit({ op: "route_embed", playbook: name, macro: n });  // inline by default
-        } else {
-          draftEdit({ op: "route_insert", playbook: name, entry: ENTRY_TEMPLATES[kind](n) });
-        }
-        nameIn.value = "";
-      };
-      addRow.append(kindSel, " ", nameIn, dl, " ", add);
-      addRow.onclick = ev => ev.stopPropagation();
-      item.appendChild(addRow);
-
-      const controls = el("div");
-      controls.style.marginTop = "4px";
-      const desc = el("button", "tiny", "Describe");
-      desc.onclick = ev => { ev.stopPropagation();
-        const d = prompt("playbook description:", p.description || "");
-        if (d !== null) draftEdit({ op: "playbook_update", playbook: name, fields: { description: d } });
-      };
-      const inp = el("button", "tiny", "+ Input");
-      inp.onclick = ev => { ev.stopPropagation();
-        const added = promptNewInput();
-        if (added)
-          draftEdit({ op: "playbook_update", playbook: name,
-            fields: { inputs: { ...p.inputs, [added[0]]: added[1] } } });
-      };
-      const commit = el("button", "tiny primary", "Commit");
-      commit.onclick = ev => { ev.stopPropagation(); commitPlaybook(name); };
-      const reh = el("button", "tiny primary", "▶ Rehearse");
-      reh.title = "walks the COMMITTED playbook on the live phone";
-      reh.onclick = ev => { ev.stopPropagation(); rehearsePlaybook(name, p); };
-      controls.append(desc, " ", inp, " ", commit, " ", reh);
-      item.appendChild(controls);
-      if (Object.keys(p.inputs || {}).length)
-        item.appendChild(el("div", "kv", "inputs: " + Object.keys(p.inputs).join(", ")));
-    }
-    card.appendChild(item);
+const ARROWS = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
+window.addEventListener("keydown", ev => {
+  if (ev.target.tagName === "INPUT" || ev.target.tagName === "SELECT" || ev.metaKey || ev.ctrlKey) return;
+  if (ev.key === "Escape") {
+    if (drag) { drag = null; hideDragFeedback(); }
+    else if (state.swipeArmed) armSwipe(false);
+    else clearSelection();
+    return;
   }
-  card.appendChild(addNameRow("playbook_add", "new playbook name", "+ Playbook", n => state.playbook = n));
-}
-
-async function commitPlaybook(name) {
-  if (!confirm("Write playbook " + name + " into PLAYBOOK.yml (disabled)?")) return;
-  const data = await apiOr("/api/playbook/commit", { playbook: name }, "commit");
-  if (data) logEntry("committed playbook → " + data.pack_file + "\npack check: " + data.check);
-}
-
-async function rehearsePlaybook(name, p) {
-  const values = promptValues(p.inputs);
-  if (values === null) return;
   if (state.busy) return;
-  setBusy("walking " + name + " — watch the phone");
-  try {
-    const data = await apiOr("/api/playbook/rehearse", { playbook: name, values }, "rehearse");
-    if (!data) return;
-    setConnected(true);
-    logEntry("walk: " + data.outcome + "\n" + (data.lines || []).join("\n"));
-  } finally {
-    setBusy(null);
-  }
-}
+  const k = ev.key.toLowerCase();
+  if (k === "p") act("peek", {}, "peek");
+  else if (PRESS_KEYS[k]) press(PRESS_KEYS[k]);
+  else if (k === "s") armSwipe(!state.swipeArmed);
+  else if (ARROWS[ev.key] && state.sel) { ev.preventDefault(); swipe(ARROWS[ev.key], "m"); }
+});
 
-async function runMatrix() {
-  const data = await apiOr("/api/draft/matrix", undefined, "matrix");
-  if (!data) return;
-  state.matrix = data;
-  renderProve();
-}
-
-async function commitDraft() {
-  if (!confirm("Write pages + landmarks into PLAYBOOK.yml and merge learned geometry?")) return;
-  const data = await apiOr("/api/draft/commit", {}, "commit");
-  if (!data) return;
-  logEntry("committed → " + data.pack_file + "\npages: " + data.pages_written.join(", ")
-    + (data.landmarks_written.length ? "\nlandmarks: " + data.landmarks_written.join(", ") : "")
-    + "\npack check: " + data.check);
-  state.matrix = data.dry_run;
-  renderProve();
-}
-
-function renderProve() {
-  if (!state.draft) return;
-  const card = $("prove-card");
-  card.innerHTML = "";
-  const row = el("div");
-  const score = el("button", "tiny", "Score draft (dry run)");
-  score.onclick = runMatrix;
-  const commit = el("button", "tiny primary", "Commit to pack");
-  commit.onclick = commitDraft;
-  row.append(score, " ", commit);
-  card.appendChild(row);
-  const m = state.matrix;
-  if (!m) return;
-
-  for (const [name, info] of Object.entries(m.pages)) {
-    const line = el("div");
-    line.appendChild(el("b", null, name + " "));
-    line.appendChild(el("span", "kv", "thr " + info.threshold + " · " + info.anchors_learned + " anchors learned · "));
-    line.appendChild(el("span", info.separable ? "b-ok" : "b-bad",
-      info.separable ? "separable" : "CLASHES with " + info.impostor_shot + " (" + info.impostor_max + ")"));
-    card.appendChild(line);
-  }
-  const pages = Object.keys(m.pages);
-  if (pages.length && m.matrix.length) {
-    const table = el("table", "matrix");
-    const hr = el("tr");
-    hr.appendChild(el("th", null, "shot"));
-    pages.forEach(p => hr.appendChild(el("th", null, p)));
-    table.appendChild(hr);
-    for (const cell of m.matrix) {
-      const tr = el("tr");
-      tr.appendChild(el("th", null, cell.shot + " (" + cell.page + ")"));
-      for (const p of pages) {
-        const s = cell.scores[p], thr = m.pages[p].threshold;
-        const td = el("td", null, s.toFixed(2));
-        if (cell.page === p) td.className = "own";
-        else if (s >= thr) td.className = "clash";
-        else if (s >= thr * state.limits.lookalike) td.className = "near";
-        tr.appendChild(td);
-      }
-      table.appendChild(tr);
-    }
-    card.appendChild(table);
-  }
-  for (const [page, terms] of Object.entries(m.forbid_suggestions || {})) {
-    const line = el("div");
-    line.appendChild(el("span", "kv", "forbid for " + page + "? "));
-    for (const t of terms) {
-      const b = el("button", "tiny", "+ " + t);
-      b.onclick = () => draftEdit({
-        op: "page_update", page,
-        forbid: [...state.draft.pages[page].forbid, t],
-      });
-      line.append(b, " ");
-    }
-    card.appendChild(line);
-  }
-  for (const w of m.warnings || []) card.appendChild(el("div", "b-warn", w));
-}
-
-// ---------- session state ----------
-
-function setConnected(on) {
-  $("dot").className = on ? "on" : "";
-  $("conn-label").textContent = on ? "connected" : "disconnected";
-}
+// ---------- session ----------
 
 async function refreshState() {
   try {
     const s = await api("/api/state");
     setConnected(s.connected);
-    state.app = s.app;
-    if (s.limits) state.limits = s.limits;
-    $("app-badge").textContent = s.app || "no app";
-    $("curation").style.display = s.app ? "block" : "none";
-    $("conn-card").innerHTML = "";
-    $("conn-card").appendChild(el("div", "kv", s.mcp_url));
-    $("conn-card").appendChild(el("div", "kv",
-      s.connected ? s.tools.length + " tools published" : "first action connects"));
-    if (s.app && !state.draft) refreshDraft();
+    $("conn").title = s.mcp_url;
+    if (s.swipe) {
+      state.swipe = s.swipe;
+      const sel = $("swipe-speed"), keep = sel.value;
+      sel.innerHTML = "";
+      for (const sp of s.swipe.speeds) sel.appendChild(new Option(sp, sp, false, sp === (keep || "medium")));
+    }
+    // A session publishes its surface once connected; grey out the rest.
+    if (s.tools && s.tools.length)
+      document.querySelectorAll("header [data-tool]").forEach(b => {
+        const off = !s.tools.includes(b.dataset.tool);
+        b.dataset.unpublished = off ? "1" : "0";
+        b.disabled = off;
+        b.title = off ? "not published by this session" : b.title;
+      });
   } catch (e) {
     setConnected(false);
     banner("studio server unreachable: " + e.message);
   }
 }
 
+let resizeQueued = false;
 window.addEventListener("resize", () => {
-  if (state.imgW) { sizePanes(); renderRows(); }
+  if (resizeQueued) return;
+  resizeQueued = true;
+  requestAnimationFrame(() => { resizeQueued = false; layout(); });
 });
-window.addEventListener("keydown", ev => {
-  if (ev.key === "Escape" && state.marking) { stopMark(); logEntry("mark cancelled"); }
+refreshState().then(() => act("peek", {}, "peek")).then(() => {
+  if (!state.aspect) $("cam-empty").innerHTML = "No view yet — press <kbd>Peek</kbd>.";
 });
-document.querySelectorAll("nav button[data-tool]").forEach(btn => {
-  btn.onclick = () => act(btn.dataset.tool, {}, btn.textContent.trim());
-});
-refreshState();
 </script>
 </body>
 </html>

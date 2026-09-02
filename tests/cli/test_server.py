@@ -614,14 +614,14 @@ def test_server_runtime_stop_terminates_subprocess(mocker) -> None:
         save_screenshots=False,
     )
 
-    # Find the registered _stop_runtime closure and run it.
+    # The shared terminator is registered with the child as its argument.
     stop_calls = [
         c
         for c in register_spy.call_args_list
-        if callable(c.args[0]) and getattr(c.args[0], "__name__", "") == "_stop_runtime"
+        if c.args[0] is server_mod.terminate_child
     ]
     assert stop_calls
-    stop_calls[0].args[0]()
+    stop_calls[0].args[0](*stop_calls[0].args[1:])
 
     fake_proc.terminate.assert_called_once()
 
@@ -647,11 +647,11 @@ def test_server_runtime_stop_kills_after_timeout(mocker) -> None:
     )
 
     stop = next(
-        c.args[0]
+        c
         for c in register_spy.call_args_list
-        if callable(c.args[0]) and getattr(c.args[0], "__name__", "") == "_stop_runtime"
+        if c.args[0] is server_mod.terminate_child
     )
-    stop()
+    stop.args[0](*stop.args[1:])
 
     fake_proc.terminate.assert_called_once()
     fake_proc.kill.assert_called_once()

@@ -584,16 +584,18 @@ def _start_runtime_loop(
         return
 
     runtime_proc = _spawn_runtime(host, port, verbose, runtime_label)
+    atexit.register(terminate_child, runtime_proc)
 
-    def _stop_runtime() -> None:
-        if runtime_proc.poll() is None:
-            runtime_proc.terminate()
-            try:
-                runtime_proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                runtime_proc.kill()
 
-    atexit.register(_stop_runtime)
+def terminate_child(proc: subprocess.Popen, timeout: float = 5) -> None:
+    """Stop a child we spawned: terminate, wait, kill if it lingers. The
+    one reaping policy — the studio's server child uses it too."""
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
 
 
 def _spawn_runtime(host: str, port: int, verbose: bool, label: str) -> subprocess.Popen:

@@ -17,12 +17,15 @@ from physiclaw.common.gesture_vocab import (
     PEEK,
     PRESS_TOOLS,
     RUN_MACRO,
+    SCREENSHOT,
     SEND_TO_CLIPBOARD,
     SEQUENCE,
     STEP_ACTIONS,
     STEP_ARG,
     STEP_TOOL,
     SWIPE,
+    SWIPE_DISTANCES,
+    SWIPE_SPEEDS,
     UNLOCK_PHONE,
 )
 
@@ -71,6 +74,7 @@ def test_registered_tool_names_cover_the_vocabulary(mocker) -> None:
             SWIPE,
             SEQUENCE,
             PEEK,
+            SCREENSHOT,
             SEND_TO_CLIPBOARD,
             UNLOCK_PHONE,
         }
@@ -99,3 +103,15 @@ def test_parse_step_accepts_swipe() -> None:
     validator = GestureValidator.__new__(GestureValidator)
     with pytest.raises(ValueError):
         validator.parse_step(SWIPE, "not-a-dict")
+
+
+def test_swipe_ladder_matches_the_typed_gesture_vocabulary() -> None:
+    """The dependency-free ladder (served to the studio page) and the
+    Literal types the orchestrator validates against are one vocabulary."""
+    from typing import get_args
+
+    from physiclaw.core.orchestration import gestures
+
+    assert tuple(SWIPE_DISTANCES) == get_args(gestures.Size)
+    assert SWIPE_SPEEDS == get_args(gestures.Speed)
+    assert gestures.SWIPE_DISTANCES is SWIPE_DISTANCES

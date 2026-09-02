@@ -88,34 +88,56 @@ def scrub_block(b: dict, persist: PersistImage) -> dict:
     return b
 
 
-def iter_request_texts(path) -> Iterator[tuple[str, str]]:
-    """Every ``(message_role, text)`` in a wire.jsonl's request records —
-    the reader beside the writer above. Streams the file; skips
-    unparseable lines."""
+def iter_request_messages(path) -> Iterator[tuple[str, list[dict]]]:
+    """Every ``(message_role, leaf blocks)`` in a wire.jsonl's request
+    records — the reader beside the writer above. A string content is
+    one text block; a ``tool_result``'s nested content is flattened so
+    a consumer sees the image and listing blocks it carries in order.
+    Streams the file; skips unparseable lines."""
     with open(path, encoding="utf-8") as f:
         for line in f:
             try:
                 rec = json.loads(line)
             except ValueError:
                 continue
-            if rec.get("kind") != "request":
+            if not isinstance(rec, dict) or rec.get("kind") != "request":
                 continue
             for msg in rec.get("messages", ()):
-                role = msg.get("role", "")
-                for text in _iter_texts(msg.get("content")):
-                    yield role, text
+                yield msg.get("role", ""), list(_leaf_blocks(msg.get("content")))
 
 
-def _iter_texts(content: Any) -> Iterable[str]:
+def iter_request_texts(path) -> Iterator[tuple[str, str]]:
+    """Every ``(message_role, text)`` in a wire.jsonl's request records."""
+    for role, blocks in iter_request_messages(path):
+        for b in blocks:
+            if b.get("type") == "text":
+                yield role, b.get("text", "")
+
+
+def image_ref(block: dict) -> str | None:
+    """The persisted image path a scrubbed block carries (relative to
+    the session dir), for either wire shape — the reader half of
+    `scrub_block`. None for any other block, or an unscrubbed data URL."""
+    bt = block.get("type")
+    if bt == "image_url":
+        url = (block.get("image_url") or {}).get("url", "")
+        return url if url and not url.startswith("data:") else None
+    if bt == "image":
+        src = block.get("source") or {}
+        return src.get("ref") or None if src.get("type") == "ref" else None
+    return None
+
+
+def _leaf_blocks(content: Any) -> Iterable[dict]:
     if isinstance(content, str):
-        yield content
+        yield {"type": "text", "text": content}
         return
     if not isinstance(content, list):
         return
     for block in content:
         if not isinstance(block, dict):
             continue
-        if block.get("type") == "text":
-            yield block.get("text", "")
-        elif block.get("type") == "tool_result":
-            yield from _iter_texts(block.get("content"))
+        if block.get("type") == "tool_result":
+            yield from _leaf_blocks(block.get("content"))
+        else:
+            yield block

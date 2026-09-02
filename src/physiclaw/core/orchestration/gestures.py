@@ -18,6 +18,7 @@ could carry marker-like text.
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, Literal, get_args
 
+from physiclaw.common import gesture_vocab
 from physiclaw.core.vision.util import validate_bbox
 
 if TYPE_CHECKING:
@@ -32,13 +33,9 @@ Direction = Literal["up", "down", "left", "right"]
 Size = Literal["s", "m", "l", "xl", "xxl"]
 Speed = Literal["slow", "medium", "fast"]
 
-SWIPE_DISTANCES: dict[Size, float] = {
-    "s": 0.1,
-    "m": 0.3,
-    "l": 0.5,
-    "xl": 0.75,
-    "xxl": 0.90,
-}
+# The ladder itself lives in the dependency-free vocabulary; the Literal
+# above types it, and tests pin the two spellings to each other.
+SWIPE_DISTANCES: dict[str, float] = gesture_vocab.SWIPE_DISTANCES
 SWIPE_DIRS: tuple[Direction, ...] = get_args(Direction)
 SWIPE_SPEEDS: tuple[Speed, ...] = get_args(Speed)
 

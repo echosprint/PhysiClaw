@@ -6,9 +6,8 @@ exactly the conductor's contract — ask the Program for a turn, dispatch
 its one action, feed the result back — so a rehearsal exercises the
 real walk rather than a simulation of it.
 
-Two drivers share it: `physiclaw playbooks run` (typer around it) and
-the studio's rehearse button (its persistent MCP session, lines into
-the browser log). The split is deliberate: `arm` loads and validates
+`physiclaw playbooks run` is typer around it, and `playbooks replay`
+shares `arm` (dry). The split is deliberate: `arm` loads and validates
 everything BEFORE any connection exists (bad inputs must fail without
 touching the phone), `walk` runs the loop over an already-open client.
 `emit` receives each progress line (`arm`'s advisory lines go to its

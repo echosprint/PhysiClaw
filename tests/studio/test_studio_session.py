@@ -83,7 +83,7 @@ def _session(monkeypatch, **kwargs) -> StudioSession:
     monkeypatch.setattr(
         session_mod, "McpClient", lambda base: FakeClient(base, **kwargs)
     )
-    return StudioSession(mcp_url="http://127.0.0.1:8048/mcp")
+    return StudioSession(base_url="http://127.0.0.1:8048/mcp")
 
 
 @pytest.mark.asyncio
@@ -129,8 +129,9 @@ async def test_transport_error_drops_the_client_for_reconnect(monkeypatch) -> No
 
 
 def test_mcp_url_accepts_both_spellings() -> None:
-    with_suffix = StudioSession(mcp_url="http://127.0.0.1:8048/mcp")
-    without = StudioSession(mcp_url="http://127.0.0.1:8048")
+    with_suffix = StudioSession(base_url="http://127.0.0.1:8048/mcp")
+    without = StudioSession(base_url="http://127.0.0.1:8048")
 
     assert with_suffix.mcp_url == "http://127.0.0.1:8048/mcp"
     assert without.mcp_url == "http://127.0.0.1:8048/mcp"
+    assert with_suffix.base_url == without.base_url == "http://127.0.0.1:8048"

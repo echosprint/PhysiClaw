@@ -33,12 +33,27 @@ NAV_TOOLS = frozenset({GO_BACK, "home_screen", FORCE_QUIT})
 SWIPE = "swipe"
 SEQUENCE = "sequence"
 
-# Non-gesture tools the agent layer also names — the perception peek
-# (macro recovery views) and the clipboard bridge (macro steps). Owned
+# Non-gesture tools named beyond the server — the perception peek
+# (macro recovery views), the phone's own screenshot (the studio's
+# published surface), and the clipboard bridge (macro steps). Owned
 # here so macros' whitelist and the registration ⊇ vocabulary pin cover
 # them like any gesture name.
 PEEK = "peek"
+SCREENSHOT = "screenshot"
 SEND_TO_CLIPBOARD = "send_to_clipboard"
+
+# The swipe ladder: stroke length per `size` as a fraction of the screen,
+# and the speed names. Dependency-free here so the studio page can be
+# served the same ladder the orchestrator drives (`gestures.py` types
+# them and consumes them).
+SWIPE_DISTANCES: dict[str, float] = {
+    "s": 0.1,
+    "m": 0.3,
+    "l": 0.5,
+    "xl": 0.75,
+    "xxl": 0.90,
+}
+SWIPE_SPEEDS = ("slow", "medium", "fast")
 # Security-sensitive and deliberately NOT macro-able (see
 # `macros.model.ALLOWED_STEP_TOOLS`), but the agent layer names it in
 # two places — the engine's screen-tool classifier and the conductor's boot,

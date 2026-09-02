@@ -2,7 +2,7 @@
 
 `wire.jsonl` is the one artifact that retains full listings (trace events
 truncate them); the wire-shape walking itself lives beside the writer
-(`contract.wire.iter_request_texts`) — this module owns only "is this text
+(`contract.wire.iter_request_messages` and its text view) — this module owns only "is this text
 a screen" and the corpus file format. A corpus file is JSONL, one screen
 per line::
 
@@ -43,15 +43,18 @@ def session_listings(sid: str) -> list[str]:
         # doctrine, so system messages must not extract as screens.
         if role == "system" or text in seen:
             continue
-        if LISTING_HEADER in text and _has_rows(text):
+        if is_screen(text):
             seen[text] = None
     return list(seen)
 
 
-def _has_rows(text: str) -> bool:
-    """At least one line parses as a real element row — a header quoted in
+def is_screen(text: str) -> bool:
+    """Whether a wire text is a screen: the listing header plus at least
+    one line that parses as a real element row — a header quoted in
     prose (or a superseded labels-only stub) is not a screen."""
-    return any(parse_row(line) is not None for line in text.splitlines())
+    return LISTING_HEADER in text and any(
+        parse_row(line) is not None for line in text.splitlines()
+    )
 
 
 def partition(

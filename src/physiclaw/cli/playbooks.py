@@ -511,8 +511,8 @@ def _split_ref(ref: str) -> tuple[str, str]:
 
 
 # ---------- rehearsal (`playbooks run`) ----------
-# The core lives in `conductor.rehearsal` — the studio's rehearse button
-# drives the same loop; this layer adds the connection and typer skin.
+# The core lives in `conductor.rehearsal` (`replay` shares its `arm`);
+# this layer adds the connection and typer skin.
 
 
 async def _rehearse(app: str, name: str, values: dict[str, str]) -> str:
