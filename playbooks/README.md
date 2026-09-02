@@ -17,17 +17,25 @@ self-describing YAML document, the way a GitHub workflow is one file
 
 `PLAYBOOK.yml` sections, top to bottom:
 
-- `name` (must equal the folder) and `description` (what the pack
+- `app` (must equal the folder) and `description` (what the pack
   automates and when to adopt it — `install` prints it, so that one
   line is the whole index)
 - `placeholders:` — per-installation constants (the `inputs:` of
   `action.yml`): prompt prose + example per token
-- `pages:` — the eyes: page fingerprints, semantics only (geometry is
-  learned on-device via `conductor calibrate`). Nodes reference them
-  as `pages.<name>` (`enter:` = precondition, `verify:` = landing
-  check); `ios.<page>`/`channel.<page>` reach the reserved built-ins
-- `playbooks:` — the walks, keyed by name (referenced as `<app>/<name>`
-  — the `jobs:` of a workflow, each with `inputs`, `mandate`, `nodes`)
+- `landmarks:` — named fixed spots (`{label, bbox}`) the pack's
+  recover hands tap and its agent episodes are granted by name
+- `playbooks:` — the walks, keyed by name (referenced as
+  `<app>/<name>`). Each is a ROUTE: an optional pure-text `agent` and
+  the `start` cold-launch, then `page:` waypoints (checked every
+  time, each optionally declaring its own `recover:` hand)
+  alternating with moves — `do` (a recorded macro), `agent` (the
+  model drives inside your prompt's fence), `decide`, `ask`
+  (human gate; `resume:` re-enters the app), `tell`, `sync`. A move's
+  enter/verify checks derive from the adjacent waypoints.
+- `pages:` — optional appendix for fingerprints no move lands on.
+  Anchors are one clause (`"text"`, `{or: [...], region}`,
+  `{and: [...]}`) — semantics only; geometry is learned on-device via
+  `conductor calibrate`.
 
 Adaptation notes and the rehearsal checklist ride as comments in the
 same file.

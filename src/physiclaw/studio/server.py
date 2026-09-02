@@ -217,7 +217,7 @@ def _ok_draft(draft: dict) -> JSONResponse:
 
 # One draft mutation per op — each row is exactly one brains call, so
 # op ownership stays readable against the module split (draft_store =
-# pages/shots/controls, record = macros/steps, route = playbooks).
+# pages/shots/landmarks, record = macros/steps, route = playbooks).
 _DRAFT_OPS = {
     "page_add": lambda d, b: draft_store.add_page(d, b["name"]),
     "page_update": lambda d, b: draft_store.update_page(
@@ -229,10 +229,10 @@ _DRAFT_OPS = {
     ),
     "page_delete": lambda d, b: draft_store.delete_page(d, b["page"]),
     "shot_delete": lambda d, b: draft_store.delete_shot(d, b["shot"]),
-    "control_set": lambda d, b: draft_store.set_control(
+    "landmark_set": lambda d, b: draft_store.set_landmark(
         d, b["name"], b["label"], b["bbox"]
     ),
-    "control_clear": lambda d, b: draft_store.clear_control(d, b["name"]),
+    "landmark_clear": lambda d, b: draft_store.clear_landmark(d, b["name"]),
     "macro_add": lambda d, b: record.add_macro(d, b["name"]),
     "macro_delete": lambda d, b: record.delete_macro(d, b["name"]),
     "macro_update": lambda d, b: record.update_macro(

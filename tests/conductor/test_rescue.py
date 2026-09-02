@@ -250,27 +250,27 @@ def test_learn_dismiss_drops_oldest_past_the_cap() -> None:
     assert learned[-1] == labels[-1] and labels[0] not in learned
 
 
-# ---------- declared app chrome (`controls:`) ----------
+# ---------- declared app chrome (`landmarks:`) ----------
 
 
-def _controls(**kw):
-    from physiclaw.conductor.pages import Control
+def _landmarks(**kw):
+    from physiclaw.conductor.pages import Landmark
 
-    return {k: Control(label=(v[0],), bbox=v[1]) for k, v in kw.items()}
+    return {k: Landmark(label=(v[0],), bbox=v[1]) for k, v in kw.items()}
 
 
 def test_scrim_dismiss_fires_outside_the_band_when_nothing_safer_exists() -> None:
     # No vocab word, no glyph, no icon in the band — the declared scrim
     # area (outside the overlay) is tapped before the micro tier is paid.
     screen = make_screen(("mystery offer", 0.5, 0.6), ("act fast", 0.5, 0.7))
-    controls = _controls(dismiss=("scrim above the sheet", (0.35, 0.1, 0.65, 0.2)))
+    landmarks = _landmarks(dismiss=("scrim above the sheet", (0.35, 0.1, 0.65, 0.2)))
 
     step = rescue.plan(
         _v("occluded", page="demo.home", band=(0.5, 0.9)),
         screen,
         {},
         0,
-        controls=controls,
+        landmarks=landmarks,
     )
 
     assert isinstance(step, rescue.Dismiss)
@@ -282,14 +282,14 @@ def test_scrim_dismiss_stands_down_inside_the_band() -> None:
     # A full-height modal leaves no scrim: the declared spot falls inside
     # the overlay band, so tapping it would hit modal content — skipped.
     screen = make_screen(("mystery offer", 0.5, 0.6))
-    controls = _controls(dismiss=("scrim", (0.35, 0.1, 0.65, 0.2)))
+    landmarks = _landmarks(dismiss=("scrim", (0.35, 0.1, 0.65, 0.2)))
 
     step = rescue.plan(
         _v("occluded", page="demo.home", band=(0.05, 0.9)),
         screen,
         {},
         0,
-        controls=controls,
+        landmarks=landmarks,
     )
 
     assert not isinstance(step, rescue.Dismiss)
@@ -298,14 +298,14 @@ def test_scrim_dismiss_stands_down_inside_the_band() -> None:
 def test_vocab_dismissal_still_beats_the_scrim() -> None:
     # Explicit close affordances first — the field's hierarchy.
     screen = make_screen(("以后再说", 0.5, 0.6))
-    controls = _controls(dismiss=("scrim", (0.35, 0.1, 0.65, 0.2)))
+    landmarks = _landmarks(dismiss=("scrim", (0.35, 0.1, 0.65, 0.2)))
 
     step = rescue.plan(
         _v("occluded", page="demo.home", band=(0.5, 0.9)),
         screen,
         {},
         0,
-        controls=controls,
+        landmarks=landmarks,
     )
 
     assert isinstance(step, rescue.Dismiss)
@@ -314,25 +314,25 @@ def test_vocab_dismissal_still_beats_the_scrim() -> None:
 
 def test_back_rung_carries_the_declared_back_control() -> None:
     screen = make_screen(("Nothing known", 0.5, 0.5))
-    controls = _controls(back=("back chevron", (0.02, 0.05, 0.1, 0.1)))
+    landmarks = _landmarks(back=("back chevron", (0.02, 0.05, 0.1, 0.1)))
 
     step = rescue.plan(
-        _v("unknown"), screen, {rescue.RUNG_SETTLE: 1}, 1, controls=controls
+        _v("unknown"), screen, {rescue.RUNG_SETTLE: 1}, 1, landmarks=landmarks
     )
 
     assert isinstance(step, rescue.Back)
-    assert step.control is not None and step.control.bbox == (0.02, 0.05, 0.1, 0.1)
+    assert step.landmark is not None and step.landmark.bbox == (0.02, 0.05, 0.1, 0.1)
 
 
-def test_locate_control_follows_the_label_within_radius() -> None:
-    from physiclaw.conductor.pages import Control
+def test_locate_landmark_follows_the_label_within_radius() -> None:
+    from physiclaw.conductor.pages import Landmark
 
-    control = Control(label=("返回",), bbox=(0.02, 0.05, 0.1, 0.1))
+    landmark = Landmark(label=("返回",), bbox=(0.02, 0.05, 0.1, 0.1))
     screen = make_screen(("返回", 0.1, 0.12))  # drifted a little
 
-    bbox, note = rescue.locate_control(control, screen)
+    bbox, note = rescue.locate_landmark(landmark, screen)
 
-    assert note and bbox != control.bbox
-    control_far = Control(label=("返回",), bbox=(0.8, 0.8, 0.9, 0.9))
-    bbox2, note2 = rescue.locate_control(control_far, screen)
-    assert bbox2 == control_far.bbox and note2 == ""  # off-radius → declared
+    assert note and bbox != landmark.bbox
+    landmark_far = Landmark(label=("返回",), bbox=(0.8, 0.8, 0.9, 0.9))
+    bbox2, note2 = rescue.locate_landmark(landmark_far, screen)
+    assert bbox2 == landmark_far.bbox and note2 == ""  # off-radius → declared

@@ -22,7 +22,7 @@ Driving:
     brief.py       the handover report a driver's last turn carries
     suspension.py  suspended.json, the one cross-wake file
     micro.py       scoped cheap-tier decision calls
-    calls.py       the DECIDE call-type table
+    calls.py       the DECIDE call-type table and the episode verbs
 
 Seeing the screen:
     pages.py       declared and learned page fingerprints

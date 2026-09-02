@@ -1,9 +1,9 @@
 """The studio's per-app authoring draft — declarations-in-progress,
-captured shot listings, and control picks, under `paths.studio_dir()`.
+captured shot listings, and landmark picks, under `paths.studio_dir()`.
 
 Layout: `<studio>/<app>/draft.json` plus `shots/<id>.jpg`. Every
 mutation validates through the REAL pack doors (`parse_pages_data`,
-`parse_controls`) so a draft that saves is a draft that will commit —
+`parse_landmarks`) so a draft that saves is a draft that will commit —
 their verbatim errors are the rail's inline feedback. Unlike the
 learned store this is NOT fail-open: a draft is user work, and an
 unreadable file must be a loud error, never a silent fresh start.
@@ -17,7 +17,7 @@ from pathlib import Path
 from physiclaw.common import paths
 from physiclaw.common.logger import write_json_atomic
 from physiclaw.common.text import read_text
-from physiclaw.conductor.pages import parse_controls, parse_pages_data
+from physiclaw.conductor.pages import parse_landmarks, parse_pages_data
 
 _DRAFT_SCHEMA = 1
 
@@ -37,7 +37,7 @@ def _fresh(app: str) -> dict:
         "app": app,
         "pages": {},
         "shots": {},
-        "controls": {},
+        "landmarks": {},
         "next_shot": 1,
         # Later-added fields ride the same schema (the alpha rule:
         # additive fields, older drafts read them via setdefault/.get).
@@ -193,19 +193,21 @@ def shot_jpeg(app: str, shot_id: str) -> Path:
     return p
 
 
-def set_control(draft: dict, name: str, label, bbox: list) -> None:
-    before = dict(draft["controls"])
-    draft["controls"][name] = {"label": label, "bbox": bbox}
+def set_landmark(draft: dict, name: str, label, bbox: list) -> None:
+    """Draft one fixed spot, validated through the pack's own open
+    `landmarks:` door (any valid name; the commit writes that section)."""
+    before = dict(draft["landmarks"])
+    draft["landmarks"][name] = {"label": label, "bbox": bbox}
     try:
-        parse_controls(draft["controls"])
+        parse_landmarks(draft["landmarks"])
     except Exception:
-        draft["controls"] = before
+        draft["landmarks"] = before
         raise
 
 
-def clear_control(draft: dict, name: str) -> None:
-    if draft["controls"].pop(name, None) is None:
-        raise DraftError(f"no control {name!r} drafted")
+def clear_landmark(draft: dict, name: str) -> None:
+    if draft["landmarks"].pop(name, None) is None:
+        raise DraftError(f"no landmark {name!r} drafted")
 
 
 def discard(app: str) -> None:

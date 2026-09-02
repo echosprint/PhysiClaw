@@ -94,19 +94,20 @@ def test_add_shot_refuses_an_empty_listing() -> None:
         ds.add_shot(d, "home", "   ", JPEG_B64)
 
 
-def test_controls_validate_through_the_pack_door() -> None:
+def test_landmarks_validate_through_the_pack_door() -> None:
     d = ds.load_draft("shopdemo")
-    ds.set_control(d, "back", "back chevron", [0.02, 0.05, 0.1, 0.1])
+    ds.set_landmark(d, "back", "back chevron", [0.02, 0.05, 0.1, 0.1])
+    ds.set_landmark(d, "cart", "cart", [0.8, 0.0, 0.9, 0.1])  # open vocabulary
 
-    with pytest.raises(PagesError, match="closed"):
-        ds.set_control(d, "cart", "cart", [0.8, 0.0, 0.9, 0.1])
+    with pytest.raises(PagesError):
+        ds.set_landmark(d, "Bad Name", "x", [0.1, 0.1, 0.2, 0.2])
     with pytest.raises(PagesError, match="left < right"):
-        ds.set_control(d, "dismiss", "scrim", [0.9, 0.1, 0.2, 0.2])
+        ds.set_landmark(d, "dismiss", "scrim", [0.9, 0.1, 0.2, 0.2])
 
-    # Failures rolled back; the good control survived both.
-    assert set(d["controls"]) == {"back"}
-    ds.clear_control(d, "back")
-    assert d["controls"] == {}
+    # Failures rolled back; the good landmarks survived both.
+    assert set(d["landmarks"]) == {"back", "cart"}
+    ds.clear_landmark(d, "back")
+    assert set(d["landmarks"]) == {"cart"}
 
 
 def test_discard_removes_the_draft_directory() -> None:

@@ -1,7 +1,10 @@
 """Micro-calls — the conductor's scoped decision calls.
 
-Six call types ride one channel: the playbook-authorable `choose_item`
-and `decide` (vocabulary declared in `calls.py`), plus four
+Eight call types ride one channel: the playbook-authorable `choose_item`
+and `decide` (vocabulary declared in `calls.py`), the playbook `agent`
+step's two calls (`agent_fields` — prompt in, declared fields out; and
+`agent_act` — one episode turn whose answer is a screen row, a granted
+landmark, a scroll verb, done, or escalate), plus four
 conductor-internal calls playbooks can never name — `parse_task`
 (activation: does the user's thread assign a task a playbook covers?),
 `confirm_reply` (the ask's LLM tier when the word lists can't
@@ -64,8 +67,15 @@ from physiclaw.common.config import CONFIG
 from physiclaw.common.listing import Screen
 from physiclaw.common.text import json_span
 from physiclaw.conductor import cards
-from physiclaw.conductor.calls import CALLS
-from physiclaw.contract.dto import Message, SystemMessage, Usage, UserMessage
+from physiclaw.conductor.calls import ACT_VERBS, AGENT_DONE, CALLS, ESCALATE
+from physiclaw.contract.dto import (
+    AssistantMessage,
+    FinishReason,
+    Message,
+    SystemMessage,
+    Usage,
+    UserMessage,
+)
 from physiclaw.contract.plugin import ChatProvider
 from physiclaw.provider import Provider, ProviderTransientError
 
@@ -91,6 +101,21 @@ SCROLL_UP = "scroll_up"
 # when nothing is safely tappable.
 CLEAR_OVERLAY = "clear_overlay"
 NONE_SAFE = "none_safe"
+
+# The playbook `agent` step's two calls. `agent_fields` is the
+# pure-text form: the authored prompt in, the declared return fields
+# out. `agent_act` is one EPISODE turn: the model answers with a screen
+# row (copied exactly), a granted landmark name, a scroll verb, `done`
+# (plus the return fields), or `escalate` — never coordinates; the walk
+# grounds the name to a live bbox. Episode context rides
+# `DecisionRequest.history`, append-only, so every call's prefix is
+# byte-identical to the previous call's whole request (the provider
+# prefix cache pays for all but the newest block). The verbs and `done`
+# are `calls.py`'s episode vocabulary.
+AGENT_FIELDS = "agent_fields"
+AGENT_ACT = "agent_act"
+ACT_ARM = "act"  # the routing arm a grounded row/landmark answer maps to
+_CONTRACT_KEYS = frozenset({"reason", "answer", "confidence"})
 # The routing arm a clear_overlay pick maps to.
 DISMISS_ARM = "dismiss"
 CONFIRM_OUTS = ("confirm", "deny", "revise", "unclear")
@@ -130,6 +155,11 @@ class DecisionRequest:
     candidates: tuple[Candidate, ...]  # pick-style calls only
     listing: str  # label text of the screen (decide only)
     context: str  # assembled context slices, "" when none
+    # An agent episode's prior turns, append-only: ("user"|"assistant",
+    # text) pairs replayed VERBATIM before the newest user block, so
+    # each call's prefix is byte-identical to the previous call's whole
+    # request. Empty for every one-shot call.
+    history: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -203,11 +233,14 @@ def build_request(
     )
 
 
-def _keyed(raw, reserved: tuple[str, ...], cap: int | None) -> tuple[Candidate, ...]:
+def _keyed(
+    raw, reserved: tuple[str, ...], cap: int | None, *, shuffle: bool = True
+) -> tuple[Candidate, ...]:
     """The key hygiene every candidate set shares: content-keyed, first
     occurrence wins, escape-answer collisions dropped, optionally
-    capped, always shuffled (position bias must not masquerade as
-    preference). One home, so the two builders below cannot drift."""
+    capped, shuffled by default (position bias must not masquerade as
+    preference — episode rows opt out: screen order is spatial
+    information). One home, so the builders below cannot drift."""
     seen: set[str] = set()
     out: list[Candidate] = []
     for cand in raw:
@@ -218,7 +251,8 @@ def _keyed(raw, reserved: tuple[str, ...], cap: int | None) -> tuple[Candidate, 
     if cap is not None and len(out) > cap:
         log.info("micro: %d candidates capped to %d", len(out), cap)
         out = out[:cap]
-    random.shuffle(out)
+    if shuffle:
+        random.shuffle(out)
     return tuple(out)
 
 
@@ -250,6 +284,29 @@ def _button_candidates(rows) -> tuple[Candidate, ...]:
         (NONE_SAFE,),
         None,
     )
+
+
+def act_candidates(rows) -> tuple[Candidate, ...]:
+    """One candidate per labeled row for an agent-episode turn — the
+    shared `_keyed` hygiene (verb collisions dropped too: a row that
+    literally reads "done" must not shadow the verb), but NOT shuffled:
+    screen order is spatial information (top to bottom) an episode
+    navigates by; the shuffle's position-bias defense protects
+    single-shot preference picks, not step-by-step operation."""
+    return _keyed(
+        (Candidate(key=row.label.strip(), bbox=tuple(row.bbox)) for row in rows),
+        (AGENT_DONE, ESCALATE, *ACT_VERBS),
+        MAX_CANDIDATES,
+        shuffle=False,
+    )
+
+
+def act_block(header: str, candidates: tuple[Candidate, ...]) -> str:
+    """One episode turn's screen block — the rows the model may name,
+    top to bottom, data-fenced. The block is STORED in the episode
+    history verbatim, so past turns keep showing exactly what was seen."""
+    body = "\n".join(_candidate_line(c) for c in candidates) or "(no readable rows)"
+    return _data_block(f"{header} — rows top to bottom", body)
 
 
 def _candidate_line(c: Candidate) -> str:
@@ -381,10 +438,18 @@ class MicroCaller:
         a stronger tier may fix (`retryable`: a floor miss or a
         double-invalid — never a provider error) — structured, so the
         cascade's trigger can never depend on the detail's wording."""
-        messages: list[Message] = [
-            SystemMessage(content=_system(req, allowed)),
-            UserMessage(content=_user(req)),
-        ]
+        messages: list[Message] = [SystemMessage(content=_system(req, allowed))]
+        for role, text in req.history:
+            # An episode's prior turns, replayed verbatim (append-only —
+            # the byte-identical-prefix contract the provider cache pays).
+            messages.append(
+                AssistantMessage(
+                    content=text, tool_calls=[], finish_reason=FinishReason.STOP
+                )
+                if role == "assistant"
+                else UserMessage(content=text)
+            )
+        messages.append(UserMessage(content=_user(req)))
         prompt_tokens = completion_tokens = 0
         attempts = 0
         err = ""
@@ -418,9 +483,20 @@ class MicroCaller:
             prompt_tokens += asst.usage.prompt_tokens
             completion_tokens += asst.usage.completion_tokens
             if self._rlog is not None:
+                # An episode replays its whole history every call — log
+                # only the system prompt and the newest exchange: the
+                # replayed turns are byte-identical to this session's
+                # prior `micro` records for the same node, and dumping
+                # them again would make the wire log quadratic in
+                # episode length.
+                to_log = (
+                    messages
+                    if not req.history
+                    else [messages[0], *messages[1 + len(req.history) :]]
+                )
                 self._rlog.write_micro(
                     req.call,
-                    provider.serialize_history(messages),
+                    provider.serialize_history(to_log),
                     asst.raw,
                 )
             usage = Usage(
@@ -564,7 +640,7 @@ def _choose_outcome(
 ) -> MicroOutcome:
     decl = CALLS[req.call]
     if answer not in decl.escapes:
-        picked = next(c for c in req.candidates if c.key == answer)
+        picked = _picked(req, answer)
         assert decl.pick_arm is not None
         return MicroOutcome(
             out=decl.pick_arm, reason=reason, confidence=confidence, picked=picked
@@ -590,22 +666,25 @@ def _is_unfilled(value: object) -> bool:
     return isinstance(value, str) and value.strip().casefold() in _UNFILLED
 
 
+def _string_fields(mapping: dict) -> dict[str, str]:
+    """Payload values are strings by contract — a structured value (a
+    `type: list` input's item array) rides as ITS JSON (str() would
+    produce a Python repr no parser accepts), and unfilled spellings are
+    dropped (a present "null" would shadow a declared default). ONE
+    home: parse_task's inputs and the agent calls' return fields share
+    the rule."""
+    return {
+        str(k): (v if isinstance(v, str) else json.dumps(v, ensure_ascii=False))
+        for k, v in mapping.items()
+        if not _is_unfilled(v)
+    }
+
+
 def _parse_task_outcome(
     req: DecisionRequest, answer: str, reason: str, confidence: float, obj: dict
 ) -> MicroOutcome:
     raw = obj.get("inputs")
-    # Payload values are strings by contract; a structured value (a
-    # `type: list` input's item array) rides as ITS JSON — str() would
-    # produce a Python repr no ledger parser accepts.
-    inputs: dict[str, str] = {}
-    if isinstance(raw, dict):
-        inputs = {
-            str(k): (v if isinstance(v, str) else json.dumps(v, ensure_ascii=False))
-            for k, v in raw.items()
-            # Gates the value arm above: an unfilled `null` reaching it
-            # would serialize to the string "null" and read as real.
-            if not _is_unfilled(v)
-        }
+    inputs = _string_fields(raw) if isinstance(raw, dict) else {}
     return MicroOutcome(
         out=answer,
         reason=reason,
@@ -625,10 +704,65 @@ def _clear_overlay_outcome(
 ) -> MicroOutcome:
     if answer == NONE_SAFE:
         return MicroOutcome(out=NONE_SAFE, reason=reason, confidence=confidence)
-    picked = next(c for c in req.candidates if c.key == answer)
     return MicroOutcome(
-        out=DISMISS_ARM, reason=reason, confidence=confidence, picked=picked
+        out=DISMISS_ARM,
+        reason=reason,
+        confidence=confidence,
+        picked=_picked(req, answer),
     )
+
+
+def _payload_fields(obj: dict) -> dict[str, str]:
+    """The reply's extra fields — everything beyond the three-field
+    contract, in the shared `_string_fields` shape. The program
+    validates them against the node's DECLARED return fields; a missing
+    one escalates there (default), never guesses here."""
+    return _string_fields(
+        {k: v for k, v in obj.items() if str(k) not in _CONTRACT_KEYS}
+    )
+
+
+def canonical_reply(outcome: MicroOutcome) -> str:
+    """A validated outcome re-serialized in the contract's own spelling
+    — what an episode's replayed history carries as the assistant turn.
+    Rebuilt from the outcome (never the raw reply), so repair-retry
+    noise can't enter the byte-stable prefix; contract fields ride in
+    `_CONTRACT`'s order, payload fields after."""
+    obj: dict = {
+        "reason": outcome.reason,
+        "answer": outcome.picked.key if outcome.picked else outcome.out,
+        "confidence": round(outcome.confidence, 2),
+    }
+    if outcome.payload:
+        obj.update(outcome.payload)
+    return json.dumps(obj, ensure_ascii=False)
+
+
+def _agent_done_outcome(
+    req: DecisionRequest, answer: str, reason: str, confidence: float, obj: dict
+) -> MicroOutcome:
+    payload = _payload_fields(obj) if answer == AGENT_DONE else None
+    return MicroOutcome(
+        out=answer, reason=reason, confidence=confidence, payload=payload
+    )
+
+
+def _act_outcome(
+    req: DecisionRequest, answer: str, reason: str, confidence: float, obj: dict
+) -> MicroOutcome:
+    picked = _picked(req, answer)
+    if picked is not None:
+        return MicroOutcome(
+            out=ACT_ARM, reason=reason, confidence=confidence, picked=picked
+        )
+    return _agent_done_outcome(req, answer, reason, confidence, obj)
+
+
+def _picked(req: DecisionRequest, answer: str) -> Candidate | None:
+    """The presented candidate a validated answer names — None when the
+    answer is a verb/escape (the allowed-set check already guarantees
+    it is one or the other)."""
+    return next((c for c in req.candidates if c.key == answer), None)
 
 
 def _revise_outcome(
@@ -778,6 +912,59 @@ _SPECS: dict[str, _CallSpec] = {
         ],
         to_outcome=_clear_overlay_outcome,
     ),
+    AGENT_FIELDS: _CallSpec(
+        role=(
+            "You perform one scoped text task for a phone-automation "
+            "walk. Follow the task brief exactly; it is the whole "
+            "specification."
+        ),
+        material="none",
+        answer_space=_fixed((AGENT_DONE, ESCALATE)),
+        answer_spec=(
+            '"answer" is "done" when the brief can be fulfilled — ALSO add '
+            "one field per return field the brief lists, each a plain "
+            'string; or "escalate" when it cannot be fulfilled from what '
+            "the brief gives you."
+        ),
+        user_parts=lambda req: [
+            req.args.get("prompt", ""),
+            *(
+                [f"Return fields:\n{req.args['fields']}"]
+                if req.args.get("fields")
+                else []
+            ),
+        ],
+        to_outcome=_agent_done_outcome,
+    ),
+    AGENT_ACT: _CallSpec(
+        # The concrete rows live in each turn's user block, NEVER in this
+        # legend — the system prompt must stay byte-stable across an
+        # episode for the provider prefix cache to pay.
+        role=(
+            "You operate a phone app step by step toward the goal given "
+            "in the first message, choosing exactly ONE action per turn "
+            "from what the current screen offers. The screen arrives as "
+            "text rows read top to bottom; you never use coordinates."
+        ),
+        # "none": episode requests are assembled by the WALK
+        # (`program._episode_request`) — they carry replayed history and
+        # granted-landmark candidates `build_request` cannot produce, so
+        # there is deliberately no build_request arm to half-mirror them.
+        material="none",
+        answer_space=lambda req: tuple(c.key for c in req.candidates) + req.outcomes,
+        answer_spec=(
+            '"answer" is ONE of: a screen row from the NEWEST message, '
+            "copied EXACTLY as quoted (it will be tapped); a granted "
+            'landmark name; "scroll_down" or "scroll_up" when scrolling '
+            'is allowed; "done" ONLY when the goal is fully met — ALSO '
+            "add one field per return field the goal lists, each a plain "
+            'string; or "escalate" when you are stuck, the screen is '
+            "unexpected, or the goal demands something outside your "
+            "allowed actions."
+        ),
+        user_parts=lambda req: [req.args.get("block", "")],
+        to_outcome=_act_outcome,
+    ),
     REVISE_LIST: _CallSpec(
         role=(
             "You update a shopping list from the user's instant-message "
@@ -806,6 +993,10 @@ _SPECS: dict[str, _CallSpec] = {
 def _system(req: DecisionRequest, allowed: tuple[str, ...]) -> str:
     # One skeleton owns the prompt's load-bearing order (role sentence →
     # contract → answer legend); the row supplies only the two texts.
+    # `format` fills the optional {allowed} placeholder and unescapes a
+    # JSON legend's doubled braces; a legend with neither (agent_act —
+    # its rows change per turn, so the system prompt stays byte-stable
+    # for the prefix cache) passes through unchanged.
     spec = _SPECS[req.call]
     legend = spec.answer_spec.format(allowed=", ".join(allowed))
     return f"{spec.role} {_CONTRACT}\n{legend}"

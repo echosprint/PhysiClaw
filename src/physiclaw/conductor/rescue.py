@@ -18,13 +18,13 @@ explicit close affordances, then the scrim, then back, then reset):
       以后再说 / skip / not now …), the close glyph, or the band's
       top-right icon — deny-listed so nothing money-shaped is ever
       tappable, whatever the popup says. When none is in sight and the
-      pack declares a `dismiss` control (the scrim area modals close
+      pack declares a `dismiss` landmark (the scrim area modals close
       from), tap THAT — author-trusted prior knowledge, free, taken
       before the micro tier is paid; it only fires when the declared
       spot lies OUTSIDE the overlay band (a scrim tap, literally).
   anything else (wandered deeper: a live-stream room, a product page,
       an ad landing; or unknown) → back. The pack's declared `back`
-      control (the app's own affordance, located by its label live)
+      landmark (the app's own affordance, located by its label live)
       when one exists, else the generic ``go_back`` gesture — either
       only pops the navigation stack and cannot mutate app state.
 
@@ -37,7 +37,7 @@ this ladder cannot restore, the model inherits with the brief.
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Mapping
+from typing import TYPE_CHECKING, Mapping
 
 from physiclaw.common import paths
 from physiclaw.common.bbox import Bbox, center_of
@@ -50,9 +50,12 @@ from physiclaw.conductor.micro import (
     DecisionRequest,
     build_request,
 )
-from physiclaw.conductor.pages import CONTROL_BACK, CONTROL_DISMISS, Control
+from physiclaw.conductor.pages import LANDMARK_BACK, LANDMARK_DISMISS, Landmark
 from physiclaw.conductor.reply import normalize
 from physiclaw.macros.steps import HEAL_RADIUS
+
+if TYPE_CHECKING:  # the walk's model, typed here without a runtime import
+    from physiclaw.conductor.playbook import RecoverHand
 
 log = logging.getLogger(__name__)
 
@@ -73,6 +76,7 @@ RUNG_UNLOCK = "unlock"
 RUNG_BACK = "back"
 RUNG_MICRO = "micro"
 RUNG_RESET = "reset"
+RUNG_HAND = "hand"  # the declared path's one recovery rung
 
 # Resume modes — how the walk continues once the target page is
 # restored. Validated at State construction (the walklog OUTCOMES
@@ -182,11 +186,22 @@ class Unlock:
 
 @dataclass(frozen=True)
 class Back:
-    """Pop the navigation stack — via the pack's declared `back` control
+    """Pop the navigation stack — via the pack's declared `back` landmark
     (the app's own affordance) when one exists, else the generic
     ``go_back`` gesture. Same rung, same budget either way."""
 
-    control: Control | None = None
+    landmark: Landmark | None = None
+
+
+@dataclass(frozen=True)
+class Hand:
+    """The page's DECLARED `recover:` hand (declared mode only), run
+    once per engagement. The walk owns its interpretation (tool /
+    landmark tap / macro); this planner only decides WHEN it is spent.
+    After it runs and the target still does not read, the walk
+    re-locates on the route and walks again."""
+
+    hand: "RecoverHand"
 
 
 @dataclass(frozen=True)
@@ -204,7 +219,7 @@ class Exhausted:
     reason: str
 
 
-Step = Settle | Dismiss | AskDismiss | Unlock | Back | Reset | Exhausted
+Step = Settle | Dismiss | AskDismiss | Unlock | Back | Reset | Hand | Exhausted
 
 
 @dataclass
@@ -246,22 +261,41 @@ def plan(
     actions: int,
     learned: tuple[str, ...] = (),
     can_reset: bool = False,
-    controls: Mapping[str, Control] | None = None,
+    landmarks: Mapping[str, Landmark] | None = None,
+    declared_mode: bool = False,
+    declared: "RecoverHand | None" = None,
 ) -> Step:
     """The next rescue action for this reading of the screen. Read-only
     over the walk's counters (the `reconcile.plan` contract). `learned`
     is the app's mined dismissal labels — an extra vocabulary tier.
     `can_reset` says the walk still has its once-per-walk reset (a pack
-    `open` macro exists and the hammer is unswung). `controls` is the
+    `open` macro exists and the hammer is unswung). `landmarks` is the
     pack's declared app chrome — author-trusted prior knowledge the
-    ladder spends before the model is woken."""
-    controls = controls or {}
+    ladder spends before the model is woken.
+
+    `declared_mode` is the playbook-with-`recover:` regime: the ladder's
+    dismiss/back/reset rungs are OFF — after the shared unlock rung and
+    the free settle re-peek, the ONE recovery action is the page's own
+    declared hand (`declared`, run once per engagement), and a page
+    declaring none is exhausted immediately. What you declare is what
+    runs."""
+    landmarks = landmarks or {}
     if actions >= GLOBAL_BUDGET:
         return Exhausted(f"rescue budget ({GLOBAL_BUDGET} actions) spent")
     if reads_as_locked(screen):
         if tries.get(RUNG_UNLOCK, 0) >= UNLOCK_TRIES:
             return Exhausted(f"phone still locked after {UNLOCK_TRIES} unlock attempts")
         return Unlock()
+    if declared_mode:
+        if not tries.get(RUNG_SETTLE, 0):
+            # The same free re-peek the ladder grants before its first
+            # back: the wrong reading may just be a page mid-transition.
+            return Settle()
+        if declared is None:
+            return Exhausted("its page declares no recover")
+        if tries.get(RUNG_HAND, 0):
+            return Exhausted("the declared hand already ran")
+        return Hand(declared)
     if (
         verdict.kind == "occluded"
         and verdict.overlay_band is not None
@@ -270,7 +304,7 @@ def plan(
         step = find_dismiss(screen, verdict.overlay_band, learned)
         if step is not None:
             return step
-        scrim = _scrim_dismiss(controls.get(CONTROL_DISMISS), verdict.overlay_band)
+        scrim = _scrim_dismiss(landmarks.get(LANDMARK_DISMISS), verdict.overlay_band)
         if scrim is not None:
             # Free and deterministic beats one paid micro call — and the
             # scrim tap only fires OUTSIDE the band, so a modal that
@@ -299,39 +333,39 @@ def plan(
         # mid-transition — re-peek once, free, and judge the settled
         # screen instead of spending a real recovery action on it.
         return Settle()
-    return Back(control=controls.get(CONTROL_BACK))
+    return Back(landmark=landmarks.get(LANDMARK_BACK))
 
 
 def _scrim_dismiss(
-    control: Control | None, band: tuple[float, float]
+    landmark: Landmark | None, band: tuple[float, float]
 ) -> Dismiss | None:
-    """The declared `dismiss` control as a Dismiss step — only when its
+    """The declared `dismiss` landmark as a Dismiss step — only when its
     center lies OUTSIDE the overlay band (a scrim tap, literally; a
     full-height modal leaves no scrim to tap and the rung stands down)."""
-    if control is None:
+    if landmark is None:
         return None
     lo, hi = band
-    cy = (control.bbox[1] + control.bbox[3]) / 2
+    cy = (landmark.bbox[1] + landmark.bbox[3]) / 2
     if lo <= cy <= hi:
         return None
     return Dismiss(
-        bbox=control.bbox, note="tapping the declared dismiss area outside the modal"
+        bbox=landmark.bbox, note="tapping the declared dismiss area outside the modal"
     )
 
 
-def locate_control(control: Control, screen: Screen) -> "tuple[Bbox, str]":
-    """Where a declared control IS right now: the text row matching one
+def locate_landmark(landmark: Landmark, screen: Screen) -> "tuple[Bbox, str]":
+    """Where a declared landmark IS right now: the text row matching one
     of its label readings nearest the declared spot (`nearest_labeled_row`
     — the one search the macro heal rides too, within the one
     HEAL_RADIUS), else the declared bbox. Returns the bbox to tap and a
     short note for the journal."""
     if not screen.readable:
-        return control.bbox, ""
-    declared = center_of(control.bbox)
-    assert declared is not None  # Control bboxes are parse-validated
-    best = nearest_labeled_row(screen.rows, control.label, declared)
+        return landmark.bbox, ""
+    declared = center_of(landmark.bbox)
+    assert declared is not None  # Landmark bboxes are parse-validated
+    best = nearest_labeled_row(screen.rows, landmark.label, declared)
     if best is None or best[0] > HEAL_RADIUS:
-        return control.bbox, ""
+        return landmark.bbox, ""
     return best[1].bbox, f" (located {best[1].label.strip()!r} on screen)"
 
 

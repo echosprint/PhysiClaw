@@ -12,8 +12,10 @@ from conductor_fakes import (
     ELSEWHERE,
     LEDGERED,
     make_screen,
+    write_channel,
     write_pack,
 )
+from conductor_fakes import build_program as _program
 from conductor_fakes import (
     feed as _feed,
 )
@@ -65,15 +67,6 @@ BRANCH = (
 HOME = make_screen(("Files", 0.5, 0.1)).text
 RESULTS = make_screen(("综合", 0.5, 0.1)).text
 DONE = make_screen(("AllDone", 0.5, 0.1)).text
-
-
-def _program(app: str = "demo", name: str = "flow", **values) -> program.Program:
-    """Build the walk the way `playbooks run` does — the factory that
-    replaced arming as the way to get a Program without a wake."""
-    spec, pack = setup.load_spec(app, name, require_live=False)
-    return setup.build_program(
-        app, spec, pack, setup.resolve_inputs(spec, values), channel.load_channel()
-    )
 
 
 # ---------- the walk ----------
@@ -314,23 +307,6 @@ def test_failed_micro_call_hands_over() -> None:
 
 # ---------- the gate, suspending, activation ----------
 
-CHANNEL_PAGES = """\
-thread:
-  anchors: ["MyChat"]
-"""
-
-CHANNEL_SEND = """\
-name: send
-description: send to the user
-inputs:
-  message:
-    description: text
-steps:
-  - name: clip
-    tool: send_to_clipboard
-    with: {text: "{message}"}
-"""
-
 CHANNEL_OPEN = """\
 name: open
 description: open the thread
@@ -365,19 +341,6 @@ route:
 """
 
 
-def _write_channel() -> None:
-    from conductor_fakes import compose_pack_doc
-
-    root = paths.playbooks_dir() / "channel"
-    (root / "macros" / "send").mkdir(parents=True, exist_ok=True)
-    (root / "macros" / "open").mkdir(parents=True, exist_ok=True)
-    (root / "PLAYBOOK.yml").write_text(
-        compose_pack_doc("channel", CHANNEL_PAGES), encoding="utf-8"
-    )
-    (root / "macros" / "send" / "MACRO.yml").write_text(CHANNEL_SEND, encoding="utf-8")
-    (root / "macros" / "open" / "MACRO.yml").write_text(CHANNEL_OPEN, encoding="utf-8")
-
-
 def _sheet(total: str = "¥45") -> str:
     return make_screen(("综合", 0.5, 0.1), (f"合计 {total}", 0.5, 0.5)).text
 
@@ -385,7 +348,7 @@ def _sheet(total: str = "¥45") -> str:
 def _at_gate(total: str = "¥45", playbook: str = GATED):
     """Arm the gated playbook (with a channel pack) and walk to the sent
     ask; `total` is what the payment sheet shows."""
-    _write_channel()
+    write_channel(CHANNEL_OPEN)
     write_pack(playbooks={"pay": playbook})
     p = _program(name="pay", keyword="milk")
     assert p.channel is not None and p.channel.send == "channel/send"
@@ -448,7 +411,7 @@ def test_arm_warns_when_a_gate_ask_quotes_no_deny_word() -> None:
     # don't cover still arms and works — every reply just rides the
     # LLM tier. The author is told the cost, not refused.
     quiet = GATED.replace("回复 好的 确认支付，或 不用 取消", "veuillez répondre")
-    _write_channel()
+    write_channel(CHANNEL_OPEN)
     write_pack(playbooks={"pay": quiet})
 
     spec, _ = setup.load_spec("demo", "pay", require_live=False)
@@ -559,7 +522,7 @@ route:
 
 
 def test_confirm_sends_suspends_and_resumes_past_itself() -> None:
-    _write_channel()
+    write_channel(CHANNEL_OPEN)
     write_pack(playbooks={"notify": CONFIRMING})
     p = _program(name="notify", keyword="milk")
     h = _history()
@@ -595,7 +558,7 @@ def test_suspended_confirm_resume_reads_a_cancel() -> None:
     # The user replies "cancel" to the CONFIRM's message; the reply
     # itself wakes the device. The resumed walk must read it and stop —
     # not barrel on into the remaining legs.
-    _write_channel()
+    write_channel(CHANNEL_OPEN)
     write_pack(playbooks={"notify": CONFIRMING})
     p = _program(name="notify", keyword="milk")
     h = _history()
@@ -618,7 +581,7 @@ def test_suspended_confirm_resume_reads_a_cancel() -> None:
 def test_suspended_confirm_resume_off_thread_reopens_then_continues() -> None:
     # Banner wake: the screen is some other app. The check reopens the
     # thread once; with no cancel there, the walk resumes normally.
-    _write_channel()
+    write_channel(CHANNEL_OPEN)
     write_pack(playbooks={"notify": CONFIRMING})
     p = _program(name="notify", keyword="milk")
     h = _history()
@@ -646,7 +609,7 @@ def test_suspended_confirm_resume_off_thread_reopens_then_continues() -> None:
 
 
 def test_session_setup_builds_the_overture_and_hidden_registry() -> None:
-    _write_channel()
+    write_channel(CHANNEL_OPEN)
     write_pack(playbooks={"flow": FLOW})
 
     prog, overture, hidden = setup.session_setup()
@@ -668,7 +631,7 @@ def test_session_setup_builds_the_overture_and_hidden_registry() -> None:
 def test_session_setup_prefers_a_suspended_walk_over_the_overture() -> None:
     from physiclaw.common.logger import write_json_atomic
 
-    _write_channel()
+    write_channel(CHANNEL_OPEN)
     write_pack(playbooks={"flow": FLOW})
     write_json_atomic(
         suspension.suspended_path(),
@@ -691,7 +654,7 @@ def test_activation_builds_a_request_over_the_thread_screen() -> None:
     from physiclaw.common.listing import Screen
     from physiclaw.conductor.micro import PARSE_TASK, MicroOutcome
 
-    _write_channel()
+    write_channel(CHANNEL_OPEN)
     write_pack(playbooks={"flow": FLOW})
     _, overture, _ = setup.session_setup()
     assert overture is not None
@@ -719,7 +682,7 @@ def test_activation_menu_renders_the_input_example() -> None:
     # The authored `example:` is the extraction hint — it must reach the
     # parse_task menu, or a keyword input has only prose to shape its
     # value ("五常大米 5kg" beats any rule about quantity words).
-    _write_channel()
+    write_channel(CHANNEL_OPEN)
     spec = FLOW.replace(
         "    description: what to search\n",
         "    description: what to search\n    example: rice 5kg\n",
@@ -736,7 +699,7 @@ def test_activation_menu_renders_the_input_example() -> None:
 def test_activation_rejects_unresolvable_inputs_and_not_a_task() -> None:
     from physiclaw.conductor.micro import MicroOutcome
 
-    _write_channel()
+    write_channel(CHANNEL_OPEN)
     write_pack(playbooks={"flow": FLOW})
     _, overture, _ = setup.session_setup()
     assert overture is not None
@@ -914,7 +877,7 @@ def _cart_screen(*items: tuple[str, int]) -> str:
 
 
 def _arm_ledger(items: str = LEDGER_ITEMS):
-    _write_channel()
+    write_channel(CHANNEL_OPEN)
     write_pack(playbooks={"shop": LEDGERED})
     p = _program(name="shop", **{"items": items})
     assert p is not None and p.channel is not None
@@ -1387,7 +1350,7 @@ def _write_suspended(playbook: str, idx: int, **over) -> None:
 def test_payment_gate_total_is_quoted_only_off_a_verified_page() -> None:
     # A suspended resume straight onto the gate with an unknown screen must
     # hand over, not quote max(¥) off whatever the camera saw.
-    _write_channel()
+    write_channel(CHANNEL_OPEN)
     write_pack(playbooks={"shop": LEDGERED})
     spec, _ = setup.load_spec("demo", "shop")
     gate_idx = next(
@@ -1533,7 +1496,7 @@ def test_second_reshop_of_an_item_hands_over() -> None:
 
 def _suspend_a_confirm() -> None:
     """Drive the CONFIRMING playbook to its written suspension."""
-    _write_channel()
+    write_channel(CHANNEL_OPEN)
     write_pack(playbooks={"notify": CONFIRMING})
     p = _program(name="notify", keyword="milk")
     h = _history()
@@ -1558,7 +1521,7 @@ def test_rearming_the_same_playbook_drops_its_stale_suspension() -> None:
 def test_missing_suspend_result_drops_the_suspension_file() -> None:
     # The suspension file is written before end_session; if that result never
     # lands, the session may run on — a dead walk must not resurrect.
-    _write_channel()
+    write_channel(CHANNEL_OPEN)
     write_pack(playbooks={"notify": CONFIRMING})
     p = _program(name="notify", keyword="milk")
     h = _history()
@@ -1682,7 +1645,7 @@ def test_gate_over_cap_consent_binds_to_the_quoted_total() -> None:
 def test_gate_hands_over_when_no_total_is_readable(caplog) -> None:
     # The sheet page verified but shows no ¥ amount: the ask IS the
     # consent record, so with nothing to quote the gate refuses to ask.
-    _write_channel()
+    write_channel(CHANNEL_OPEN)
     write_pack(playbooks={"pay": GATED})
     p = _program(name="pay", keyword="milk")
     h = _history()
@@ -1702,7 +1665,7 @@ def test_gate_hands_over_when_the_cap_cannot_resolve(caplog) -> None:
     ref_cap = GATED.replace("budget: 100", 'budget: "{inputs.cap}"').replace(
         "inputs:\n", "inputs:\n  cap:\n    description: budget\n"
     )
-    _write_channel()
+    write_channel(CHANNEL_OPEN)
     write_pack(playbooks={"pay": ref_cap})
     p = _program(name="pay", keyword="milk", cap="oops")
     h = _history()
@@ -1719,7 +1682,7 @@ def test_payment_leg_without_consent_hands_over(caplog) -> None:
     # recorded (the gate never confirmed): money never fires. This is
     # `money.fire_block`'s first predicate — the last line of defense
     # if every earlier guard were somehow skipped.
-    _write_channel()
+    write_channel(CHANNEL_OPEN)
     write_pack(playbooks={"pay": GATED})
     spec, _ = setup.load_spec("demo", "pay")
     pay_idx = next(
@@ -2183,7 +2146,7 @@ def test_session_setup_assembles_the_activation_context() -> None:
     # store (runs.jsonl stays telemetry).
     from physiclaw.common import daylog
 
-    _write_channel()
+    write_channel(CHANNEL_OPEN)
     _write_memory("## shopping\nprefers oat milk\n\n## other\nsecret\n")
     daylog.append_log("[11:02] demo: bought milk ¥45 — reported to the user")
     spec = FLOW.replace(
@@ -2301,7 +2264,7 @@ def test_session_setup_hidden_registry_carries_inline_macros() -> None:
     # The registry is handed to the engine ONCE at wake — an activation
     # mid-session dispatches inline legs out of `hidden`, so they must
     # ride it beside the directory macros.
-    _write_channel()
+    write_channel(CHANNEL_OPEN)
     write_pack(playbooks={"flow": INLINE_FLOW})
 
     _, overture, hidden = setup.session_setup()
@@ -2310,10 +2273,10 @@ def test_session_setup_hidden_registry_carries_inline_macros() -> None:
     assert "demo/flow.open" in hidden
 
 
-# ---------- declared app chrome (`controls:`) ----------
+# ---------- declared app chrome (`landmarks:`) ----------
 
 
-CONTROLS = """\
+LANDMARKS = """\
 back:
   label: "back chevron"
   bbox: [0.02, 0.05, 0.10, 0.10]
@@ -2323,10 +2286,10 @@ dismiss:
 """
 
 
-def test_back_rung_taps_the_declared_back_control() -> None:
+def test_back_rung_taps_the_declared_back_landmark() -> None:
     # A pack declaring its own back affordance backs out by TAPPING it
     # (located by label when readable) instead of the generic gesture.
-    write_pack(pages=RESCUE_PAGES, playbooks={"flow": FLOW}, controls=CONTROLS)
+    write_pack(pages=RESCUE_PAGES, playbooks={"flow": FLOW}, landmarks=LANDMARKS)
     _learn_pages()
     p = _program(keyword="milk")
     h = _history()
@@ -2341,4 +2304,4 @@ def test_back_rung_taps_the_declared_back_control() -> None:
 
     assert back is not None and back.tool_names() == ["note", "tap"]
     assert back.tool_calls[1].arguments == {"bbox": [0.02, 0.05, 0.10, 0.10]}
-    assert "back control" in back.tool_calls[0].arguments["summary"]
+    assert "back landmark" in back.tool_calls[0].arguments["summary"]

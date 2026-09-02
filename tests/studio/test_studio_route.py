@@ -116,7 +116,7 @@ def test_validation_compiles_a_good_route_and_names_a_bad_one() -> None:
     v = route.validation(d)
 
     assert v["walk"] is None
-    assert "START at a page" in v["broken"]
+    assert "needs a page waypoint" in v["broken"]
 
 
 def test_validation_without_a_pack_says_commit_pages_first() -> None:

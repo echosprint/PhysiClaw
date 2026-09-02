@@ -93,6 +93,11 @@ def test_commit_writes_sections_learned_and_checks(tmp_path) -> None:
         "app: shopdemo\n"
         "description: test pack\n"
         "\n"
+        "landmarks:\n"
+        "  cart:\n"
+        '    label: "购物车"\n'
+        "    bbox: [0.2, 0.9, 0.3, 0.95]\n"
+        "\n"
         "pages:\n"
         "  stale:\n"
         '    anchors: ["旧"]\n'
@@ -101,14 +106,16 @@ def test_commit_writes_sections_learned_and_checks(tmp_path) -> None:
         "playbooks: {}\n",
     )
     d = _draft()
-    ds.set_control(d, "back", "back chevron", [0.02, 0.05, 0.1, 0.1])
+    ds.set_landmark(d, "back", "back chevron", [0.02, 0.05, 0.1, 0.1])
 
     result = curate.commit(d)
 
     text = read_text(pack_dir / PACK_FILENAME)
     assert "stale" not in text  # the pages section was replaced whole
     assert '- "首页"' in text and '- "综合"' in text
-    assert 'label: "back chevron"' in text
+    # Landmarks merge: the marked spot lands, the hand-authored one survives.
+    assert 'label: "back chevron"' in text and 'label: "购物车"' in text
+    assert result["landmarks_written"] == ["back"]
     assert "# the walks stay untouched\nplaybooks: {}" in text
     assert result["check"] == "ok"
     assert sorted(load_learned("shopdemo")) == ["home", "results"]

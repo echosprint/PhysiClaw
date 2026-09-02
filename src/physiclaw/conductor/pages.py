@@ -26,7 +26,7 @@ from physiclaw.common.bbox import Bbox, validate_bbox
 from physiclaw.common.logger import write_json_atomic
 from physiclaw.common.text import read_text
 from physiclaw.conductor import _spec
-from physiclaw.macros.model import MAX_LABEL_READINGS, checked_readings
+from physiclaw.macros.model import AND, MAX_LABEL_READINGS, OR, checked_readings
 
 log = logging.getLogger(__name__)
 
@@ -162,23 +162,22 @@ class PageDecl:
     scrollable: bool = False
 
 
-# The pack-level `controls:` vocabulary — app chrome the AUTHOR knows
-# sits at a fixed place (the field's recovery hierarchy: explicit close
-# affordances, then the scrim, then back, then reset). Closed on
-# purpose: every declared control has a code consumer in the rescue
-# ladder, so an unconsumed name is dead config the parser refuses.
-CONTROL_BACK = "back"  # the app's own back affordance (iOS: top-left chevron)
-CONTROL_DISMISS = "dismiss"  # empty scrim area a modal/sheet dismisses from
-CONTROL_KEYS = (CONTROL_BACK, CONTROL_DISMISS)
+# The pack-level fixed spots: `landmarks:`, an OPEN vocabulary of named
+# spots the author knows — recover hands tap them, agent episodes are
+# granted them by name, and the two names below are the ones the rescue
+# ladder itself consults when a pack declares them.
+LANDMARK_BACK = "back"  # the app's own back affordance (iOS: top-left chevron)
+LANDMARK_DISMISS = "dismiss"  # empty scrim area a modal/sheet dismisses from
+MAX_LANDMARKS = 12
 
 
 @dataclass(frozen=True)
-class Control:
-    """One declared app control — the gesture-target shape ({label,
-    bbox}) as PACK knowledge: prior the author holds about the app's
-    fixed chrome, consumed by the rescue ladder (never by money paths).
-    `label` is the readings tuple; on-screen text lets the tap be
-    located live, a description documents the coordinates."""
+class Landmark:
+    """One declared landmark — the gesture-target shape ({label, bbox})
+    as PACK knowledge: prior the author holds about the app's fixed
+    chrome, consumed by recover hands and agent-episode grants (never by
+    money paths). `label` is the readings tuple; on-screen text lets the
+    tap be located live, a description documents the coordinates."""
 
     label: tuple[str, ...]
     bbox: Bbox
@@ -298,25 +297,21 @@ def collect_page_decls(doc: dict) -> dict:
     return out
 
 
-def parse_controls(data: Any) -> dict[str, Control]:
-    """The pack's `controls:` section → validated Controls. Each entry is
-    the gesture-target shape (`{label, bbox}` — the macro grammar's
-    pairing rule, at pack level), under the closed CONTROL_KEYS
-    vocabulary."""
+def parse_landmarks(data: Any) -> dict[str, Landmark]:
+    """The `landmarks:` section → validated Landmarks. Each entry is the
+    gesture-target shape (`{label, bbox}` — the macro grammar's pairing
+    rule, at pack level) under any valid name; its consumers are the
+    pack's own recover hands and agent grants."""
     if data is None:
         return {}
     if not isinstance(data, dict):
-        raise PagesError("`controls` must be a mapping of control name → target")
-    unknown = sorted(set(data) - set(CONTROL_KEYS))
-    if unknown:
-        raise PagesError(
-            f"`controls`: unknown key(s): {', '.join(map(str, unknown))} — "
-            f"the vocabulary is closed ({', '.join(CONTROL_KEYS)}): every "
-            "declared control has a rescue-ladder consumer"
-        )
-    out: dict[str, Control] = {}
+        raise PagesError("`landmarks` must be a mapping of name → target")
+    if len(data) > MAX_LANDMARKS:
+        raise PagesError(f"`landmarks`: {len(data)} entries > max {MAX_LANDMARKS}")
+    out: dict[str, Landmark] = {}
     for name, spec in data.items():
-        where = f"control {name!r}"
+        where = f"landmark {name!r}"
+        _check_name(name, where)
         if not isinstance(spec, dict) or set(spec.keys()) != {"label", "bbox"}:
             raise PagesError(f"{where} must be a {{label, bbox}} mapping")
         label = checked_readings(spec, where, _require_str, PagesError)
@@ -324,8 +319,13 @@ def parse_controls(data: Any) -> dict[str, Control]:
             left, top, right, bottom = map(float, validate_bbox(spec["bbox"]))
         except ValueError as e:
             raise PagesError(f"{where}: {e}") from e
-        out[name] = Control(label=label, bbox=(left, top, right, bottom))
+        out[name] = Landmark(label=label, bbox=(left, top, right, bottom))
     return out
+
+
+def pack_landmarks(doc: dict) -> dict[str, Landmark]:
+    """The pack document's `landmarks:` section, parsed (empty when absent)."""
+    return parse_landmarks(doc.get("landmarks"))
 
 
 def parse_pages_data(data, app: str) -> dict[str, PageDecl]:
@@ -353,12 +353,7 @@ def _parse_page(name: str, spec: Any) -> PageDecl:
     if unknown:
         raise PagesError(f"{where}: unknown key(s): {', '.join(map(str, unknown))}")
 
-    raw_anchors = spec.get("anchors")
-    if not isinstance(raw_anchors, list) or not raw_anchors:
-        raise PagesError(f"{where}: `anchors` must be a non-empty list")
-    if len(raw_anchors) > MAX_ANCHORS:
-        raise PagesError(f"{where}: {len(raw_anchors)} anchors > max {MAX_ANCHORS}")
-    anchors = tuple(_parse_anchor(a, where) for a in raw_anchors)
+    anchors = _parse_anchor_clause(spec.get("anchors"), where)
 
     raw_forbid = spec.get("forbid", [])
     if not isinstance(raw_forbid, list):
@@ -374,17 +369,62 @@ def _parse_page(name: str, spec: Any) -> PageDecl:
     return PageDecl(name=name, anchors=anchors, forbid=forbid, scrollable=scrollable)
 
 
+def _parse_anchor_clause(raw: Any, where: str) -> tuple[AnchorDecl, ...]:
+    """`anchors:` — ONE clause, the macro guard grammar's shapes: a bare
+    string or one `{text|or, region}` dict is a single anchor; `{and:
+    [clause, ...]}` is the multi-anchor set (scored fractionally, not a
+    hard boolean — the threshold decides); `or:` inside a clause lists
+    alternate READINGS of one anchor (any hit scores it once). The
+    legacy spelling — a top-level list of anchor entries — still parses
+    as the implicit `and`."""
+    if isinstance(raw, list):
+        items = raw  # legacy: a list IS the and-set
+    elif isinstance(raw, dict) and AND in raw:
+        unknown = sorted(set(raw.keys()) - {AND})
+        if unknown:
+            raise PagesError(
+                f"{where}: `anchors.{AND}` takes no sibling key(s): "
+                f"{', '.join(map(str, unknown))}"
+            )
+        items = raw[AND]
+        if not isinstance(items, list):
+            raise PagesError(f"{where}: `anchors.{AND}` must be a list of anchors")
+    elif isinstance(raw, (str, dict)):
+        items = [raw]  # a single clause is the whole set
+    else:
+        raise PagesError(
+            f"{where}: `anchors` must be a clause (a string, a "
+            "{text|or, region} mapping, or {and: [...]}) or a list"
+        )
+    if not items:
+        raise PagesError(f"{where}: `anchors` must be non-empty")
+    if len(items) > MAX_ANCHORS:
+        raise PagesError(f"{where}: {len(items)} anchors > max {MAX_ANCHORS}")
+    return tuple(_parse_anchor(a, where) for a in items)
+
+
 def _parse_anchor(raw: Any, where: str) -> AnchorDecl:
     raw_text: Any  # validated (and narrowed to str) by _anchor_text below
     if isinstance(raw, str):
         raw_text, region = raw, None
     elif isinstance(raw, dict):
-        unknown = sorted(set(raw.keys()) - {"text", "region"})
+        if AND in raw:
+            raise PagesError(f"{where}: `{AND}` does not nest inside an anchor")
+        unknown = sorted(set(raw.keys()) - {"text", OR, "region"})
         if unknown:
             raise PagesError(
                 f"{where}: anchor has unknown key(s): {', '.join(map(str, unknown))}"
             )
-        raw_text = raw.get("text")
+        if "text" in raw and OR in raw:
+            raise PagesError(
+                f"{where}: an anchor takes `text` or `{OR}`, not both — "
+                f"`{OR}` IS the readings list"
+            )
+        # `or:` is the clause grammar's spelling of alternate readings —
+        # the same meaning the legacy list-under-`text:` carried.
+        raw_text = raw[OR] if OR in raw else raw.get("text")
+        if OR in raw and not isinstance(raw_text, list):
+            raise PagesError(f"{where}: anchor `{OR}` must be a list of readings")
         region = raw.get("region")
         if region is not None and region not in REGIONS:
             raise PagesError(

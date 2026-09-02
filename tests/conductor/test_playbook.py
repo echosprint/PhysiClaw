@@ -250,9 +250,11 @@ def test_rejections_name_the_rule(text: str, fragment: str) -> None:
 
 
 def test_route_must_start_at_a_page() -> None:
+    # A screen-touching move before the first page breaks the start
+    # contract — only pure-text agents and the `start` move may precede.
     text = _mutate("route:\n  - page: home\n", "route:\n")
 
-    with pytest.raises(PlaybookError, match="START at a page"):
+    with pytest.raises(PlaybookError, match="precede the first page"):
         pb.parse_playbook(text, "buy", _pack())
 
 

@@ -102,14 +102,14 @@ def compose_pack_doc(
     app: str,
     pages: str,
     playbooks: dict[str, str] | None = None,
-    controls: str | None = None,
+    landmarks: str | None = None,
 ) -> str:
     """One unified PLAYBOOK.yml from the fixtures' historical pieces —
     pages text + full playbook docs, indented under their map keys (the
     keys ARE the names; entries carry no inner `name:`)."""
     doc = f"app: {app}\ndescription: test pack\npages:\n{indent(pages, '  ')}\n"
-    if controls:
-        doc += f"controls:\n{indent(controls, '  ')}\n"
+    if landmarks:
+        doc += f"landmarks:\n{indent(landmarks, '  ')}\n"
     if playbooks:
         doc += "playbooks:\n"
         for name, text in playbooks.items():
@@ -123,7 +123,7 @@ def write_pack(
     macros: tuple[str, ...] = ("open-app", "add-cart"),
     playbooks: dict[str, str] | None = None,
     pages: str = PAGES,
-    controls: str | None = None,
+    landmarks: str | None = None,
 ):
     """Write a pack under the (fixture-scoped) playbooks dir; returns its
     root."""
@@ -132,13 +132,61 @@ def write_pack(
     root = paths.playbooks_dir() / app
     (root / "macros").mkdir(parents=True, exist_ok=True)
     (root / "PLAYBOOK.yml").write_text(
-        compose_pack_doc(app, pages, playbooks, controls), encoding="utf-8"
+        compose_pack_doc(app, pages, playbooks, landmarks), encoding="utf-8"
     )
     for m in macros:
         d = root / "macros" / m
         d.mkdir(parents=True, exist_ok=True)
         (d / "MACRO.yml").write_text(PACK_MACRO.format(name=m), encoding="utf-8")
     return root
+
+
+def build_program(app: str = "demo", name: str = "flow", **values):
+    """Build the walk the way `playbooks run` does — the factory that
+    replaced arming as the way to get a Program without a wake."""
+    from physiclaw.conductor import channel, setup
+
+    spec, pack = setup.load_spec(app, name, require_live=False)
+    return setup.build_program(
+        app, spec, pack, setup.resolve_inputs(spec, values), channel.load_channel()
+    )
+
+
+# The user-channel pack the gate tests send over: one thread page and
+# a send macro; `write_channel` lays it down (plus an `open` macro when
+# the test's walk needs the resume/overture hand).
+CHANNEL_PAGES = """\
+thread:
+  anchors: ["MyChat"]
+"""
+
+CHANNEL_SEND = """\
+name: send
+description: send to the user
+inputs:
+  message:
+    description: text
+steps:
+  - name: clip
+    tool: send_to_clipboard
+    with: {text: "{message}"}
+"""
+
+
+def write_channel(open_macro: str | None = None) -> None:
+    from physiclaw.common import paths
+
+    root = paths.playbooks_dir() / "channel"
+    (root / "macros" / "send").mkdir(parents=True, exist_ok=True)
+    (root / "PLAYBOOK.yml").write_text(
+        compose_pack_doc("channel", CHANNEL_PAGES), encoding="utf-8"
+    )
+    (root / "macros" / "send" / "MACRO.yml").write_text(CHANNEL_SEND, encoding="utf-8")
+    if open_macro is not None:
+        (root / "macros" / "open").mkdir(parents=True, exist_ok=True)
+        (root / "macros" / "open" / "MACRO.yml").write_text(
+            open_macro, encoding="utf-8"
+        )
 
 
 # The canonical ledger playbook — the full P8 stack (list input,

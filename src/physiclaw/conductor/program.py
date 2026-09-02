@@ -15,14 +15,23 @@ where its state stands — so the model never resumes blind.
 
 The walk executes every node type, strictly:
 
-  - Before a leg: its ``enter:`` page (when declared) must match the
-    current screen. After a leg: its ``verify:`` page must match the
-    screen the macro result carries. A mechanical deviation — a popup
-    band, a locked phone, a wandered-into page — goes to the rescue
-    ladder first (`rescue.py`: dismiss / unlock / back / reset, hard
-    budgets, cursor frozen); only what the ladder cannot restore — and
-    every blocked or errored call, and any reserved ``ios.*`` page ref —
+  - Before a leg: its ``enter:`` page (when declared — a ``start`` leg
+    has none and runs unconditionally) must match the current screen.
+    After a leg: its ``verify:`` page must match the screen the macro
+    result carries. A mechanical deviation — a popup band, a locked
+    phone, a wandered-into page — goes to recovery first: in DECLARED
+    mode (any ``recover:`` in the playbook) the page's own declared
+    hand after an implicit unlock/settle, else the legacy rescue ladder
+    (`rescue.py`); only what recovery cannot restore — and every
+    blocked or errored call, and any reserved ``ios.*`` page ref —
     hands over.
+  - An AGENT step is the model's, inside the author's fence: no tools =
+    one pure-text call filling its declared ``returns``; tools = an
+    EPISODE — each turn one constrained call (append-only context, so
+    every request's prefix is byte-identical to the previous one) whose
+    answer the walk grounds to a live bbox; ``done`` is audited against
+    the adjacent verify page, and a payment episode re-runs the money
+    predicates before EVERY tap.
   - A DECIDE becomes one micro-call over the decide-time screen. A pick
     is acted on by a conductor tap primitive at the chosen row; a
     ``scroll`` routed back to the same node swipes and re-asks, bounded
@@ -72,26 +81,48 @@ from physiclaw.conductor import (
     views,
     walklog,
 )
-from physiclaw.conductor.calls import CALLS, ESCALATE, LEDGER_FIELDS, NEXT_ITEM
+from physiclaw.conductor.calls import (
+    ACT_BACK,
+    ACT_SCROLL_DOWN,
+    ACT_SCROLL_UP,
+    AGENT_DONE,
+    AGENT_TOOL_VERBS,
+    CALLS,
+    ESCALATE,
+    LEDGER_FIELDS,
+    NEXT_ITEM,
+)
 from physiclaw.conductor.channel import Channel
-from physiclaw.conductor.match import Verdict, match_screen
+from physiclaw.conductor.match import (
+    Verdict,
+    match_screen,
+    reads_as_locked,
+)
 from physiclaw.conductor.micro import (
+    ACT_ARM,
+    AGENT_ACT,
+    AGENT_FIELDS,
     CONFIRM_REPLY,
     REVISE_LIST,
+    Candidate,
     DecisionRequest,
     MicroOutcome,
+    act_block,
+    act_candidates,
     build_request,
+    canonical_reply,
 )
 from physiclaw.conductor.pages import (
     OPEN_MACRO,
     THREAD_ID,
-    Control,
+    Landmark,
     PagePrint,
     page_id,
 )
 from physiclaw.conductor.playbook import (
     GATE_MAX_CHECKS,
     GATE_MAX_REVISIONS,
+    AgentNode,
     ConfirmNode,
     DecideNode,
     HumanGateNode,
@@ -108,7 +139,7 @@ from physiclaw.conductor.suspension import (
     suspended_path,
 )
 from physiclaw.conductor.turns import Turnsmith
-from physiclaw.contract.dto import AssistantMessage, Message
+from physiclaw.contract.dto import AssistantMessage, Message, ToolResultMessage
 from physiclaw.macros.model import NO_GESTURES_NOTE, Macro
 
 log = logging.getLogger(__name__)
@@ -187,6 +218,28 @@ class _Gate:
         )
 
 
+@dataclass
+class _Episode:
+    """One acting agent step mid-flight. `history` is the append-only
+    transcript of settled (user block, model reply) pairs — replayed
+    verbatim on every call so each request's prefix is byte-identical
+    to the previous one; `block` is the pending user block the next
+    call sends. `consented` is a payment episode's bound, stashed at
+    open so the per-tap predicates keep checking after the gate's
+    consent is consumed by the first fire."""
+
+    node: AgentNode
+    block: str = ""
+    history: list[tuple[str, str]] = field(default_factory=list)
+    candidates: tuple[Candidate, ...] = ()
+    calls: int = 0
+    scrolls: int = 0
+    consented: float | None = None
+    spent: bool = False  # the first tap fired — consent consumed
+    logged: bool = False  # the purchase daylog line was written
+    pending_desc: str = ""
+
+
 class Program:
     """One playbook mid-walk. Constructed per session (the conductor
     plugin's wake setup builds it), so the cursor state lives for
@@ -203,7 +256,7 @@ class Program:
         prints: list[PagePrint],
         channel: Channel | None = None,
         suspended: dict | None = None,
-        controls: "dict[str, Control] | None" = None,
+        landmarks: "dict[str, Landmark] | None" = None,
     ):
         self.app = app
         self.spec = spec
@@ -241,9 +294,15 @@ class Program:
         self._rescue: rescue.State | None = None
         self._rescues_total = 0
         self._dismiss_labels: "tuple[str, ...] | None" = None  # lazy, per walk
+        # Agent steps: the acting episode in flight (a pure-text call
+        # holds no state — its outcome resolves against the node at the
+        # cursor). Declared recovery holds NO state of its own either:
+        # `spec.recovers` non-empty flips `rescue.plan` into declared
+        # mode, riding the one rescue State/step/landed path.
+        self._episode: _Episode | None = None
         # The pack's declared app chrome (back / dismiss) — the rescue
         # ladder's author-trusted prior knowledge.
-        self._controls: dict[str, Control] = controls or {}
+        self._landmarks: dict[str, Landmark] = landmarks or {}
         # The reset rung's hands and its once-per-WALK latch: the start
         # page's own `open:` body first (it launches to exactly the page
         # the route starts at), else the pack's directory `open` macro
@@ -460,9 +519,13 @@ class Program:
                 clear_suspended()
                 return self._handover(f"{failed} — suspension dropped")
             if kind == "leg":
-                retry = self._retry_leg_after_abort(history)
-                if retry is not None:
-                    return retry
+                view = self._failed_leg_view(history)
+                if view is not None:
+                    retry = self._retry_leg_after_abort(*view)
+                    if retry is None:
+                        retry = self._retry_leg_locked(*view)
+                    if retry is not None:
+                        return retry
             return self._handover(failed)
         assert result is not None  # settle: exactly one of result/failed
         # One reading, one verdict: channel-facing actions (declared at
@@ -546,6 +609,14 @@ class Program:
         elif kind in ("rec-peek", "rec-tap"):
             # The tap's own result screen is the re-read — no extra peek.
             return self._reconcile_step()
+        elif kind == "leg-unlock":
+            # The locked-leg retry's unlock landed — re-run the node at
+            # the unchanged cursor; its own checks judge the fresh world.
+            return self._next()
+        elif kind in ("agent-tap", "agent-swipe"):
+            # An episode action landed: its own result view is the next
+            # turn's screen block.
+            return self._episode_landed()
         elif kind.startswith("rescue-"):
             # Every rescue kind is `rescue-<rung>` minted by _rescue_act
             # (plus the reset pair's follow-up "rescue-open") — one
@@ -605,6 +676,15 @@ class Program:
                 {},
             )
         node = nodes[self._idx]
+        if isinstance(node, AgentNode):
+            if not node.tools:
+                # A pure-text call: no screen, no page contract — prompt
+                # in, declared fields out.
+                return self._agent_fields_request(node)
+            gate = self._enter_gate(node)
+            if gate is not None:
+                return gate
+            return self._episode_start(node)
         if isinstance(node, DecideNode):
             if CALLS[node.call].deterministic:
                 # The program answers it itself — no prompt, no
@@ -632,14 +712,9 @@ class Program:
                 f"leg {node.id!r} references a reserved built-in page — "
                 "not supported in this phase"
             )
-        wrong = self._mismatch(verdict, page_id(self.app, node.enter))
-        if wrong is not None:
-            return self._rescue_or_handover(
-                node,
-                page_id(self.app, node.enter),
-                rescue.MODE_ENTER,
-                f"leg {node.id!r} expects page {node.enter!r} ({wrong})",
-            )
+        gate = self._enter_gate(node)
+        if gate is not None:
+            return gate
         if node.irreversible == "payment":
             # Money fires only off a VERIFIED own-pack page: the ask was
             # sent on the IM thread and quotes the consented total, so an
@@ -813,7 +888,11 @@ class Program:
             if outcome is not None and outcome.out == "confirm":
                 return self._gate_confirmed()
             return self._synth_wait()
+        if self._episode is not None:
+            return self._episode_resolve(outcome)
         node = self.spec.nodes[self._idx]
+        if isinstance(node, AgentNode) and not node.tools:
+            return self._agent_fields_done(node, outcome)
         assert isinstance(node, DecideNode)
         if outcome is None:
             return self._handover(
@@ -849,11 +928,8 @@ class Program:
             # The sanctioned self-loop (the parser lints self-routes to
             # exactly this arm): swipe up (page scrolls down), then
             # re-ask over whatever the fresh screen shows.
-            return self._synth(
-                "swipe",
-                "conductor: scrolling for more candidates",
-                gesture_vocab.SWIPE,
-                {"bbox": list(SCROLL_BBOX), "direction": "up"},
+            return self._synth_swipe(
+                "swipe", "conductor: scrolling for more candidates", "up"
             )
         self._idx = self._ids[target]
         return self._next()
@@ -903,6 +979,260 @@ class Program:
             return self._handover(f"{NEXT_ITEM} {node.id!r} routed to escalate")
         self._idx = self._ids[target]
         return self._next()
+
+    # ---- agent steps (pure-text calls and acting episodes) ----
+
+    def _agent_fields_request(
+        self, node: AgentNode
+    ) -> "DecisionRequest | AssistantMessage | None":
+        """A no-tools agent: one call — the authored prompt (refs filled
+        NOW, then frozen), the declared return fields as the contract."""
+        try:
+            prompt = str(
+                fill_refs(
+                    node.prompt, self._values(), where=f"agent {node.id!r} `prompt`"
+                )
+            )
+        except PlaybookError as e:
+            return self._handover(str(e))
+        return DecisionRequest(
+            call=AGENT_FIELDS,
+            node_id=node.id,
+            outcomes=(),
+            args={
+                "prompt": prompt,
+                "fields": "\n".join(f"- {n}: {d}" for n, d in node.returns),
+            },
+            candidates=(),
+            listing="",
+            context="",
+        )
+
+    def _agent_fields_done(
+        self, node: AgentNode, outcome: MicroOutcome | None
+    ) -> "AssistantMessage | DecisionRequest | None":
+        if outcome is None:
+            return self._handover(f"agent {node.id!r}: call failed or under-confident")
+        if outcome.out != AGENT_DONE:
+            return self._handover(f"agent {node.id!r} escalated: {outcome.reason}")
+        return self._agent_close(node, outcome)
+
+    def _agent_close(
+        self, node: AgentNode, outcome: MicroOutcome, *, calls: int = 0
+    ) -> "AssistantMessage | DecisionRequest | None":
+        """The one done tail both agent forms share: record the returns,
+        journal, advance the cursor."""
+        err = self._agent_returns(node, outcome)
+        if err is not None:
+            return self._handover(err)
+        after = f" after {calls} calls" if calls else ""
+        self._journal = f"agent {node.id}: done{after} — {outcome.reason}"
+        self._idx += 1
+        return self._next()
+
+    def _agent_returns(self, node: AgentNode, outcome: MicroOutcome) -> str | None:
+        """Record the declared return fields off a done outcome into the
+        walk's outputs (`{node.field}` refs read them). The reason a
+        missing field hands over instead of retrying: escalation is the
+        default, never a guess."""
+        payload = outcome.payload or {}
+        missing = [n for n in node.return_fields if not payload.get(n, "").strip()]
+        if missing:
+            return (
+                f"agent {node.id!r} answered done without return field(s) "
+                f"{', '.join(missing)}"
+            )
+        for n in node.return_fields:
+            self._outputs[f"{node.id}.{n}"] = payload[n].strip()
+        return None
+
+    def _episode_start(
+        self, node: AgentNode
+    ) -> "AssistantMessage | DecisionRequest | None":
+        """Open an acting episode on the current (enter-verified) screen.
+        The prompt's refs fill ONCE here; a payment episode additionally
+        gets {ask.total} — the consented amount its adjacent gate bound —
+        and stashes that bound for the per-tap predicates."""
+        vals = self._values()
+        consented: float | None = None
+        if node.irreversible == "payment":
+            if self._gate.consented is None:
+                return self._handover(
+                    f"agent {node.id!r}: payment episode without bound consent"
+                )
+            consented = self._gate.consented
+            vals = {**vals, "ask.total": f"{consented:g}"}
+        try:
+            prompt = str(
+                fill_refs(node.prompt, vals, where=f"agent {node.id!r} `prompt`")
+            )
+        except PlaybookError as e:
+            return self._handover(str(e))
+        self._episode = _Episode(node=node, consented=consented)
+        self._episode_screen_block(prompt)
+        return self._episode_request()
+
+    def _episode_screen_block(self, prefix: str) -> None:
+        """Rebuild the episode's answerable candidates off the CURRENT
+        screen and set the pending user block. When the episode may tap,
+        granted landmarks ride as candidates too (declared bbox,
+        label-healed now) unless a live row already reads their name —
+        the fresher bbox wins; with no tap tool there is nothing to
+        answer with, so no candidates (and no locate work) at all."""
+        ep = self._episode
+        assert ep is not None and self._screen is not None
+        rows = act_candidates(self._screen.rows)
+        can_tap = "tap" in ep.node.tools
+        give = ep.node.give if can_tap else ()
+        row_keys = {r.key for r in rows}
+        grants = tuple(
+            Candidate(
+                key=n,
+                bbox=rescue.locate_landmark(self._landmarks[n], self._screen)[0],
+            )
+            for n in give
+            if n in self._landmarks and n not in row_keys
+        )
+        ep.candidates = grants + rows if can_tap else ()
+        parts = [prefix] if prefix else []
+        parts.append(act_block("Current screen", rows))
+        if give:
+            parts.append("Granted landmarks (answer by name): " + ", ".join(give))
+        ep.block = "\n".join(parts)
+
+    def _episode_request(self) -> "AssistantMessage | DecisionRequest | None":
+        ep = self._episode
+        assert ep is not None
+        node = ep.node
+        ep.calls += 1
+        if ep.calls > node.max_calls:
+            self._episode = None
+            return self._handover(
+                f"agent {node.id!r} exceeded its call limit ({node.max_calls})"
+            )
+        verbs = [AGENT_DONE, ESCALATE]
+        for tool, tool_verbs in AGENT_TOOL_VERBS.items():
+            if tool in node.tools:
+                verbs.extend(tool_verbs)
+        return DecisionRequest(
+            call=AGENT_ACT,
+            node_id=node.id,
+            outcomes=tuple(verbs),
+            args={"block": ep.block},
+            candidates=ep.candidates,
+            listing="",
+            context="",
+            history=tuple(ep.history),
+        )
+
+    def _episode_resolve(
+        self, outcome: MicroOutcome | None
+    ) -> "AssistantMessage | DecisionRequest | None":
+        ep = self._episode
+        assert ep is not None
+        node = ep.node
+        if outcome is None:
+            self._episode = None
+            return self._handover(f"agent {node.id!r}: call failed or under-confident")
+        # Settle the turn into the append-only history: the block that
+        # asked, then the reply in the contract's canonical spelling
+        # (micro re-serializes it, so repair-retry noise never enters
+        # the replayed prefix).
+        ep.history.append(("user", ep.block))
+        ep.history.append(("assistant", canonical_reply(outcome)))
+        if outcome.out == ESCALATE:
+            self._episode = None
+            return self._handover(f"agent {node.id!r} escalated: {outcome.reason}")
+        if outcome.out == ACT_BACK:
+            # The OS back edge-swipe — the reliable pop on iOS (a corner
+            # chevron tap misses too often to trust the stylus with).
+            ep.pending_desc = "went back"
+            return self._synth(
+                "agent-swipe",
+                f"conductor: agent {node.id} — went back",
+                gesture_vocab.GO_BACK,
+                {},
+            )
+        if outcome.out in (ACT_SCROLL_DOWN, ACT_SCROLL_UP):
+            ep.scrolls += 1
+            if ep.scrolls > node.max_scrolls:
+                self._episode = None
+                return self._handover(
+                    f"agent {node.id!r} exceeded its scroll limit ({node.max_scrolls})"
+                )
+            # scroll_down = see content further down = the swipe goes up.
+            down = outcome.out == ACT_SCROLL_DOWN
+            ep.pending_desc = "scrolled down" if down else "scrolled up"
+            return self._synth_swipe(
+                "agent-swipe",
+                f"conductor: agent {node.id} — {ep.pending_desc}",
+                "up" if down else "down",
+            )
+        if outcome.out == AGENT_DONE:
+            # The exit contract is the matcher's, never the model's: done
+            # counts only on the adjacent verify page. A rejection costs
+            # one call and the episode continues.
+            wrong = (
+                self._mismatch(self._verdict, page_id(self.app, node.verify))
+                if self._verdict is not None
+                else "no screen observed"
+            )
+            if wrong is not None:
+                ep.block = (
+                    f"done rejected: the walk must be on {node.verify!r} — "
+                    f"{wrong}. Continue toward the goal, or answer escalate."
+                )
+                return self._episode_request()
+            self._episode = None
+            return self._agent_close(node, outcome, calls=ep.calls)
+        assert outcome.out == ACT_ARM and outcome.picked is not None
+        if node.irreversible == "payment":
+            # The purse stays with the walker: BOTH predicates re-run
+            # before every tap the model proposes — a tap while no
+            # visible amount equals the consented total, or with any
+            # amount above it, is refused.
+            assert self._screen is not None
+            blocked = money.fire_block(
+                consented=ep.consented, cap=self._gate.cap, screen=self._screen
+            )
+            if blocked is not None:
+                self._episode = None
+                return self._handover(f"payment agent {node.id!r}: {blocked}")
+            if not ep.spent:
+                # Consent is consumed by the FIRST fire — a later payment
+                # needs its own gate (the leg rule, episode-shaped). The
+                # amount survives into the history line via _paid.
+                ep.spent = True
+                self._paid = ep.consented
+                self._gate.consented = None
+                self._gate.quoted = None
+        ep.pending_desc = f"tapped {outcome.picked.key!r}"
+        return self._synth(
+            "agent-tap",
+            f"conductor: agent {node.id} — {ep.pending_desc}",
+            "tap",
+            {"bbox": list(outcome.picked.bbox)},
+        )
+
+    def _episode_landed(self) -> "AssistantMessage | DecisionRequest | None":
+        """An episode action's own result view becomes the next turn's
+        screen block — no extra peek."""
+        ep = self._episode
+        if ep is None:
+            return self._handover("agent action landed with no episode in flight")
+        node = ep.node
+        assert self._screen is not None
+        if node.irreversible == "payment" and ep.spent and not ep.logged:
+            # The doctrine's purchase line, written the moment the first
+            # consented tap's result lands — whatever happens next, money
+            # may have moved, and the daily log is the cross-wake record.
+            ep.logged = True
+            self._log_day(self._purchase_line())
+        if reads_as_locked(self._screen):
+            self._episode = None
+            return self._handover(f"agent {node.id!r}: phone locked mid-episode")
+        self._episode_screen_block(f"[you {ep.pending_desc}]")
+        return self._episode_request()
 
     def _start_reconcile(self, node: ReconcileNode) -> AssistantMessage:
         self._rec_actions = 0
@@ -1083,11 +1413,16 @@ class Program:
                     f"gate {node.id!r}: the total must be quoted off a "
                     f"verified {self.app} page — refusing to ask blind"
                 )
-            cap = money.mandate_cap(self.spec.mandate, self.values)
-            if cap is None:
-                return self._handover(
-                    f"gate {node.id!r}: mandate cap could not be resolved"
-                )
+            cap = None
+            if self.spec.mandate is not None:
+                # A `budget:` is optional now — without one the consented
+                # total IS the bound (`money.fire_block` treats cap None
+                # exactly so), and there is no over-budget branch.
+                cap = money.mandate_cap(self.spec.mandate, self.values)
+                if cap is None:
+                    return self._handover(
+                        f"gate {node.id!r}: mandate cap could not be resolved"
+                    )
             amts = money.amounts(self._screen) if self._screen else []
             if not amts:
                 return self._handover(
@@ -1095,13 +1430,15 @@ class Program:
                 )
             quoted = max(amts)
             self._gate.quoted, self._gate.cap = quoted, cap
-            values = {**values, "ask.total": f"{quoted:g}", "ask.cap": f"{cap:g}"}
-            if quoted > cap:
-                # Over-cap (ruled): the SAME plain-consent reply opens
-                # the gate, but the breach must be disclosed — the
-                # parser guarantees this template quotes total AND cap.
-                assert node.over_message is not None
-                template = node.over_message
+            values = {**values, "ask.total": f"{quoted:g}"}
+            if cap is not None:
+                values["ask.cap"] = f"{cap:g}"
+                if quoted > cap:
+                    # Over-cap (ruled): the SAME plain-consent reply opens
+                    # the gate, but the breach must be disclosed — the
+                    # parser guarantees this template quotes total AND cap.
+                    assert node.over_message is not None
+                    template = node.over_message
         try:
             text = str(fill_refs(template, values, where=f"gate {node.id!r} `message`"))
         except PlaybookError as e:
@@ -1237,6 +1574,17 @@ class Program:
             channel=True,
         )
 
+    def _synth_swipe(self, kind: str, note: str, direction: str) -> AssistantMessage:
+        """The one scroll gesture — a mid-screen swipe in `direction` —
+        both re-ask forms ride: the decide's scroll-for-more and an
+        episode's scroll verb."""
+        return self._synth(
+            kind,
+            note,
+            gesture_vocab.SWIPE,
+            {"bbox": list(SCROLL_BBOX), "direction": direction},
+        )
+
     def _synth_wait(self) -> AssistantMessage:
         return self._synth(
             "gate-wait",
@@ -1293,8 +1641,12 @@ class Program:
         if (
             self._gate.consented is not None
             or self._gate.awaiting
-            or (isinstance(node, LegNode) and node.irreversible)
+            or (isinstance(node, (LegNode, AgentNode)) and node.irreversible)
         ):
+            return self._handover(reason)
+        if self._declared and not expected_id.startswith(f"{self.app}."):
+            # Declared mode covers this pack's own pages only — a
+            # reserved/channel target has no hand to declare.
             return self._handover(reason)
         if self._rescue is None:
             self._rescue = rescue.State(target=expected_id, mode=mode, reason=reason)
@@ -1308,16 +1660,26 @@ class Program:
         st = self._rescue
         assert st is not None
         assert self._verdict is not None and self._screen is not None
-        if self._dismiss_labels is None:
+        declared_mode = self._declared
+        if self._dismiss_labels is None and not declared_mode:
+            # The dismiss vocabulary feeds the ladder's overlay rung,
+            # which declared mode never reaches — skip the disk read.
             self._dismiss_labels = rescue.load_dismiss(self.app)
         step = rescue.plan(
             self._verdict,
             self._screen,
             st.tries,
-            st.actions,
-            self._dismiss_labels,
+            # Declared mode budgets the WALK, not the engagement: a hand
+            # that ran and re-located clears its State, so the fresh
+            # engagement's own counter restarts at zero — the lifetime
+            # count is what stops a relaunch loop (a splash ad on every
+            # cold launch, say) from running forever.
+            self._rescues_total if declared_mode else st.actions,
+            self._dismiss_labels or (),
             can_reset=self._open_macro is not None and not self._reset_used,
-            controls=self._controls,
+            landmarks=self._landmarks,
+            declared_mode=declared_mode,
+            declared=self.spec.recovers.get(st.target.partition(".")[2]),
         )
         if isinstance(step, rescue.Settle):
             # Free — verification hygiene, not recovery: no action
@@ -1364,15 +1726,42 @@ class Program:
                 gesture_vocab.FORCE_QUIT,
                 {},
             )
+        if isinstance(step, rescue.Hand):
+            # The page's DECLARED hand (declared mode's one recovery
+            # action) — the planner decides WHEN, the walk interprets
+            # WHAT: a bare gesture, a landmark tap (label-healed), or
+            # an argument-less macro.
+            hand = step.hand
+            note = f"conductor: recovering toward {st.target} via its declared hand"
+            if hand.macro is not None:
+                return self._rescue_act(
+                    rescue.RUNG_HAND,
+                    note,
+                    gesture_vocab.RUN_MACRO,
+                    {"name": qualified_macro(self.app, hand.macro)},
+                )
+            if hand.tool == "tap":
+                landmark = self._landmarks.get(hand.landmark or "")
+                if landmark is None:
+                    self._rescue = None
+                    return self._handover(
+                        f"{st.reason} (recover landmark {hand.landmark!r} undeclared)"
+                    )
+                bbox, located = rescue.locate_landmark(landmark, self._screen)
+                return self._rescue_act(
+                    rescue.RUNG_HAND, note + located, "tap", {"bbox": list(bbox)}
+                )
+            assert hand.tool is not None
+            return self._rescue_act(rescue.RUNG_HAND, note, hand.tool, {})
         assert isinstance(step, rescue.Back)
-        if step.control is not None:
+        if step.landmark is not None:
             # The app's OWN back affordance, located by its label first
             # (the labeled-target heal, conductor-side) — more precise
             # than the generic gesture on apps whose chrome we know.
-            bbox, located = rescue.locate_control(step.control, self._screen)
+            bbox, located = rescue.locate_landmark(step.landmark, self._screen)
             return self._rescue_act(
                 rescue.RUNG_BACK,
-                f"conductor: backing out via the app's back control toward "
+                f"conductor: backing out via the app's back landmark toward "
                 f"{st.target}{located}",
                 "tap",
                 {"bbox": list(bbox)},
@@ -1397,27 +1786,37 @@ class Program:
         self._rescues_total += 1
         return self._synth(f"rescue-{rung}", note, tool, args)
 
-    def _retry_leg_after_abort(
+    def _failed_leg_view(
         self, history: list[Message]
-    ) -> "AssistantMessage | DecisionRequest | None":
-        """The I6 one-shot: a leg whose macro aborted BEFORE any gesture
-        ran (the runner's marker) moved nothing — when the abort's own
-        view reads as an overlay on a known page, rescue the page and
-        re-run the leg, once per leg per walk. Everything else keeps the
-        hard handover. None = not this case; the caller hands over.
-
-        The marker is read off the RAW result text, not the settle
-        failure string — that one is clipped (`turns.MAX_ERROR_CHARS`)
-        and the marker sits late in a header that grows with macro name
-        and view notes."""
+    ) -> "tuple[LegNode, ToolResultMessage, Screen] | None":
+        """A failed leg's own result view, harvested ONCE for the two
+        one-shot retries below: the leg at the cursor (not yet retried
+        this walk), its raw result, and the screen that result carries.
+        None = no retry can apply; the caller hands over."""
         node = self.spec.nodes[self._idx]
         if not isinstance(node, LegNode) or node.id in self._leg_retries:
             return None
         pending = self._turns.pending
         raw = views.result_for(history, pending.call_id) if pending else None
-        if raw is None or NO_GESTURES_NOTE not in views.text_of(raw):
+        if raw is None:
             return None
-        screen = views.screen_of(raw)
+        return node, raw, views.screen_of(raw)
+
+    def _retry_leg_after_abort(
+        self, node: LegNode, raw: ToolResultMessage, screen: Screen
+    ) -> "AssistantMessage | DecisionRequest | None":
+        """The I6 one-shot: a leg whose macro aborted BEFORE any gesture
+        ran (the runner's marker) moved nothing — when the abort's own
+        view reads as an overlay on a known page, rescue the page and
+        re-run the leg, once per leg per walk. Everything else keeps the
+        hard handover. None = not this case.
+
+        The marker is read off the RAW result text, not the settle
+        failure string — that one is clipped (`turns.MAX_ERROR_CHARS`)
+        and the marker sits late in a header that grows with macro name
+        and view notes."""
+        if NO_GESTURES_NOTE not in views.text_of(raw):
+            return None
         verdict = match_screen(screen, self._prints)
         if verdict.kind != "occluded" or verdict.page_id is None:
             return None
@@ -1430,6 +1829,29 @@ class Program:
             rescue.MODE_ENTER,
             f"leg {node.id!r} aborted before any gesture under an overlay "
             f"on {verdict.page_id}",
+        )
+
+    def _retry_leg_locked(
+        self, node: LegNode, raw: ToolResultMessage, screen: Screen
+    ) -> "AssistantMessage | DecisionRequest | None":
+        """The I6 retry's sibling: a leg whose macro FAILED while the
+        screen reads locked (hint text or the cover's hero clock) moved
+        nothing — a locked phone swallows gestures. Unlock and re-run
+        the leg, once per leg per walk. The field case: the phone
+        auto-locks during a long model call before the first gesture (a
+        route opening with a pure-text agent reasons for tens of
+        seconds). None = not this case. (The unlock's own result view
+        is the next reading, so nothing here is worth matching.)"""
+        if not reads_as_locked(screen):
+            return None
+        self._leg_retries.add(node.id)
+        self._turns.pending = None  # the failure is handled, not retried blind
+        self._journal = f"leg {node.id} ran against a locked phone"
+        return self._synth(
+            "leg-unlock",
+            f"conductor: phone locked during leg {node.id} — unlocking to retry",
+            gesture_vocab.UNLOCK_PHONE,
+            {},
         )
 
     def _resolve_rescue(
@@ -1482,6 +1904,16 @@ class Program:
             self._idx = self._locate(self._verdict)
             return self._next()
         if not self._verdict.matches(st.target):
+            if kind == f"rescue-{rescue.RUNG_HAND}":
+                # The declared hand ran and the page still does not read:
+                # re-locate on the route and walk from wherever reads —
+                # the start move re-runs when the locate lands at the
+                # top, which is a force_quit hand's whole point.
+                # Recurrence is bounded by the walk-wide budget.
+                self._journal = f"recover hand ran — walking again toward {st.target}"
+                self._rescue = None
+                self._idx = self._locate(self._verdict)
+                return self._next()
             st.pending_learn = None  # that pick did not restore — unlearned
             return self._rescue_step()
         if st.pending_learn:
@@ -1498,6 +1930,42 @@ class Program:
         return self._next()
 
     # ---- page identity ----
+
+    def _text_agent_settled(self, node) -> bool:
+        """A pure-text agent whose outputs are already recorded — the
+        locate scan skips it rather than re-spending its call."""
+        return (
+            isinstance(node, AgentNode)
+            and not node.tools
+            and all(f"{node.id}.{f}" in self._outputs for f in node.return_fields)
+        )
+
+    @property
+    def _declared(self) -> bool:
+        """The playbook-with-`recover:` regime — `rescue.plan`'s declared
+        mode, where a page's own hand replaces the hidden ladder."""
+        return bool(self.spec.recovers)
+
+    def _enter_gate(
+        self, node: "LegNode | AgentNode"
+    ) -> "AssistantMessage | DecisionRequest | None":
+        """The one enter-page guard legs and acting agents share: None
+        when the node has no enter (a `start` leg runs unconditionally)
+        or the page reads; else the recovery/handover step."""
+        if not node.enter:
+            return None
+        kind = "agent" if isinstance(node, AgentNode) else "leg"
+        assert self._verdict is not None
+        expected = page_id(self.app, node.enter)
+        wrong = self._mismatch(self._verdict, expected)
+        if wrong is None:
+            return None
+        return self._rescue_or_handover(
+            node,
+            expected,
+            rescue.MODE_ENTER,
+            f"{kind} {node.id!r} expects page {node.enter!r} ({wrong})",
+        )
 
     def _mismatch(self, verdict: Verdict, expected_id: str) -> str | None:
         """None when the verdict is a match on the full `expected_id`
@@ -1516,11 +1984,19 @@ class Program:
         happened, never that a decision, loop pass, reconcile, or ask
         ran — fast-forwarding past work off one page coincidence would
         quote a gate total for a list that was never shopped."""
+        nodes = self.spec.nodes
+        # A COMPLETED pure-text agent never re-runs: its outputs are
+        # recorded, and re-deriving them mid-walk (a recover hand's
+        # walk-from-the-top, a resume) could silently change them.
+        base = 0
+        while base < len(nodes) and self._text_agent_settled(nodes[base]):
+            base += 1
         if verdict.kind != "match":
             log.info("conductor: screen is %s — starting from the top", verdict.kind)
-            return 0
-        resume = 0
-        for i, node in enumerate(self.spec.nodes):
+            return base
+        resume = base
+        for i in range(base, len(nodes)):
+            node = nodes[i]
             if not isinstance(node, LegNode):
                 break
             if page_id(self.app, node.verify) == verdict.page_id:

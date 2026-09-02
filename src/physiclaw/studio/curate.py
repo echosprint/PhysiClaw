@@ -28,7 +28,7 @@ from physiclaw.conductor.pages import (
     PagesError,
     collect_page_decls,
     load_learned,
-    parse_controls,
+    pack_landmarks,
     parse_pages_data,
     save_learned,
 )
@@ -213,9 +213,11 @@ def _forbid_suggestions(
 
 
 def commit(draft: dict) -> dict:
-    """Write the draft into the real files: the `pages:` and `controls:`
+    """Write the draft into the real files: the `pages:` and `landmarks:`
     sections of PLAYBOOK.yml (pack scaffolded if absent) and the mined
-    geometry merged per-page into `learned/pages/<app>.json`. The new
+    geometry merged per-page into `learned/pages/<app>.json`. The pages
+    section is the studio's whole; landmarks MERGE — the draft refreshes
+    the spots it marked and the pack's hand-authored ones survive. The new
     file text is validated through the pack doors BEFORE anything is
     written — including against route-declared pages (a page is
     declared ONCE)."""
@@ -230,9 +232,10 @@ def commit(draft: dict) -> dict:
 
     pack_file = _pack_file(app)
     text = read_text(pack_file)
+    if draft["landmarks"]:
+        merged = _merged_landmarks(text, draft["landmarks"])
+        text = _splice_section(text, "landmarks", _emit_landmarks(merged))
     text = _splice_section(text, "pages", _emit_pages(pages_data))
-    if draft["controls"]:
-        text = _splice_section(text, "controls", _emit_controls(draft["controls"]))
     _validate_pack_text(text, app)
     write_text(pack_file, text)
 
@@ -240,7 +243,7 @@ def commit(draft: dict) -> dict:
     save_learned(app, merged)
 
     # The `playbooks check` core over the file just written — pages and
-    # controls were pre-validated, this also re-parses the untouched
+    # landmarks were pre-validated, this also re-parses the untouched
     # walks against the new page set.
     from physiclaw.conductor import playbook as pb
 
@@ -252,7 +255,7 @@ def commit(draft: dict) -> dict:
     return {
         "pack_file": str(pack_file),
         "pages_written": sorted(pages_data),
-        "controls_written": sorted(draft["controls"]),
+        "landmarks_written": sorted(draft["landmarks"]),
         "learned_pages": sorted(learned),
         "check": check,
         "dry_run": dry,
@@ -272,11 +275,31 @@ def _validate_pack_text(text: str, app: str) -> None:
     try:
         doc = _spec.load_yaml(text, PagesError)
         parse_pages_data(collect_page_decls(doc), app)
-        parse_controls(doc.get("controls"))
+        pack_landmarks(doc)
     except PagesError as e:
         raise DraftError(
             f"commit refused — the new {PACK_FILENAME} would not parse: {e}"
         ) from e
+
+
+def _merged_landmarks(text: str, drafted: dict) -> dict:
+    """The pack file's own landmarks under the draft's, in the draft's
+    {label, bbox} shape — so a commit never
+    drops a hand-authored spot the walks or recover hands name."""
+    try:
+        existing = pack_landmarks(_spec.load_yaml(text, PagesError))
+    except PagesError as e:
+        raise DraftError(
+            f"commit refused — the current {PACK_FILENAME} would not parse: {e}"
+        ) from e
+    kept = {
+        name: {
+            "label": c.label[0] if len(c.label) == 1 else list(c.label),
+            "bbox": list(c.bbox),
+        }
+        for name, c in existing.items()
+    }
+    return {**kept, **drafted}
 
 
 # ---------- YAML emission ----------
@@ -312,9 +335,9 @@ def _emit_pages(pages_data: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _emit_controls(controls: dict) -> str:
-    lines = ["controls:"]
-    for name, spec in controls.items():
+def _emit_landmarks(landmarks: dict) -> str:
+    lines = ["landmarks:"]
+    for name, spec in landmarks.items():
         lines.append(f"  {name}:")
         lines.append(f"    label: {quote_yaml(spec['label'])}")
         coords = ", ".join(f"{float(v):g}" for v in spec["bbox"])

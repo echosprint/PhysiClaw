@@ -13,45 +13,53 @@ placeholders:
     description: the IM contact name of YOUR user thread, exactly as the chat app shows it
     example: QiaoQian
 
-# App chrome the author KNOWS sits at a fixed place — prior knowledge
-# the rescue ladder spends before the model is woken. `back` replaces
-# the generic go_back gesture on the back rung (located by its label
-# live when readable); `dismiss` is the scrim area sheets and modals
-# close from, tapped only when it lies OUTSIDE the detected overlay.
-# Verify both positions at rehearsal like any recorded coordinate.
-controls:
+landmarks:
   back:
     label: "back chevron (top-left)"     # an icon — no on-screen text
     bbox: [0.015, 0.045, 0.095, 0.095]
   dismiss:
     label: "scrim above a bottom sheet"  # below the IM-banner zone (y < 0.15)
     bbox: [0.35, 0.16, 0.65, 0.24]
+  cart:
+    label: "购物车"                       # detail-page bottom bar, third icon —
+    bbox: [0.231, 0.898, 0.346, 0.954]   # measured live on the detail footer
+  confirm:
+    label: "确定"                         # a sheet's full-width bottom confirm —
+    bbox: [0.06, 0.910, 0.94, 0.955]     # UNRECORDED estimate, heals by text
 
 playbooks:
   buy:
-    description: 淘宝按关键词买一件东西
+    description: buy one item on Taobao by keyword
     enabled: false  # rehearse on YOUR device, then enable
     inputs:
-      keyword:
-        description: 纯商品搜索关键词（品名+规格；不含数量词，如“一袋/两盒”）
-        example: "五常大米 5kg"
-      criteria:
-        description: 挑选标准
-        default: "单件装且规格与搜索词一致（不要多件套装/组合装），标题带百亿补贴的，销量高、价格便宜的"
-      cap:
-        description: 预算上限（元）
-        default: "50"
-    budget: "{inputs.cap}"
+      user_said:
+        description: what the user said, verbatim — the original message the task came from
+        example: "帮我在淘宝买一袋五常大米，5kg装的"
 
     # The walk. `page:` is where the walk must BE (checked every time);
     # everything else is a move, landing on the page that follows it.
     route:
-      - page: home                    # ── START ─────────────────────────
-        anchors:                      # not on home at wake → init ladder:
-          - {text: "推荐", region: top}    # go_back ×2, then force_quit and
-          - {text: "关注", region: top}    # `open` below, until home reads
-        open:                         # cold-launch taobao to this page
+      # An agent step with no tools is a pure-text call: prompt in,
+      # declared fields out, no screen — it runs before the arm ever
+      # moves, so a message that yields no keyword escalates before the
+      # phone is touched. Outputs are referenced as {parse.keyword}.
+      - agent: parse
+        prompt: |
+          From the buyer's message, produce the Taobao search keyword.
+          The buyer said: "{inputs.user_said}"
+          Rules:
+          - a pure product keyword: name + spec (e.g. 五常大米 5kg)
+          - no quantity words (一袋/两盒), no verbs, no politeness
+          - keep the language the buyer used
+          If the message names no concrete product, answer escalate.
+        returns:
+          keyword: the search keyword, exactly as it should be typed
+
+      - start: app                    # ── START: cold-launch taobao ─────
+        macro:
           steps:
+            - name: force-quit        # ALWAYS cold: a resumed app would land
+              tool: force_quit        # mid-state and fail the settle expect
             - name: go-home
               tool: home_screen
             - name: dismiss-switcher  # home_screen FROM home can open the switcher
@@ -59,21 +67,28 @@ playbooks:
               with: {label: "blank area below the app cards", bbox: [0.42, 0.855, 0.58, 0.885]}
             - name: open-taobao
               tool: tap
-              with: {label: "淘宝", bbox: [0.720, 0.425, 0.909, 0.551]}
+              with: {label: "the taobao app icon", bbox: [0.720, 0.425, 0.909, 0.551]}
             - name: cold-launch
               tool: wait
               with: {seconds: 5}
-            - name: skip-splash       # a cold launch may open on a full-screen ad
-              tool: tap
-              with: {label: "跳过", bbox: [0.79, 0.030, 0.87, 0.065]}
+            - name: skip-splash       # a cold launch may open on a full-screen
+              tool: tap               # ad — without this guard every relaunch
+              with: {label: "跳过", bbox: [0.79, 0.030, 0.87, 0.065]}   # fails verify
               skip_when: {not: {text: "跳过", within: [0.70, 0.0, 1.0, 0.12]}}
-            - name: dismiss-banner    # an incoming-IM banner hijacks top taps
-              tool: swipe
-              with: {label: "the notification banner", bbox: [0.30, 0.03, 0.70, 0.08], direction: "up", size: "s"}
-              skip_when: {not: {text: "<<CONTACT>>", within: [0.0, 0.0, 1.0, 0.15]}}
+            - name: settle            # `expect` re-peeks AFTER the sleep — THIS
+              tool: wait              # fresh view is what the home verify reads
+              with: {seconds: 4}      # (a tap's own view is grabbed mid-launch;
+              expect: "推荐"           # a post-ad cold render needs the slack)
+
+      - page: home                    # the landing the start must reach
+        anchors: {or: ["推荐", "关注"], region: top}
+        recover:                      # not this page → run this hand, then
+          tool: force_quit            # walk again from the route top (start
+                                      # re-runs); declared, not a hidden
+                                      # ladder — what you write is what runs
 
       - do: search                    # type the keyword, run the search
-        with: {keyword: "{inputs.keyword}"}
+        with: {keyword: "{parse.keyword} 非直播"}  # suffix the search, not the field
         macro:
           inputs:
             keyword: {description: what to search for}
@@ -96,101 +111,105 @@ playbooks:
             - name: load
               tool: wait
               with: {seconds: 2}
-            - name: close-vip-overlay # post-search 88VIP/coupon promo covers results
+            - name: close-vip-overlay # post-search coupon promo covers results
               tool: tap
               with: {label: "close (X) on the coupon overlay", bbox: [0.858, 0.069, 0.901, 0.104]}
-              skip_when: {not: {or: ["确认领取", "消费券"]}}
+              skip_when: {not: {or: ["确认领取", "消费券", "马上去用"]}}
 
       - page: results
-        anchors: ["综合", "销量"]
+        anchors: {and: ["综合", "销量"]}
         scrollable: true
+        recover:                      # a promo page or mis-tap → pop it
+          tool: go_back               # the edge swipe — the chevron tap misses
 
-      - decide: choose                # pick the item per criteria
-        uses: choose_item
-        with: {criteria: "{inputs.criteria}"}
-        context: [inputs.keyword]
-        routes: {pick: detail, scroll: choose, none_fit: escalate, escalate: escalate}
+      # A custom sub-agent: YOUR prompt drives the LLM through the pick.
+      # `prompt` is filled from fields ONCE when the episode opens, then
+      # frozen; each call appends one [action]/[screen] pair and nothing
+      # is ever rewritten — every call's prefix is byte-identical to the
+      # previous call's whole request, so the provider cache pays for
+      # all but the newest block. Screens arrive as element listings
+      # (text rows with ids, no images); the model answers with a row
+      # id, a granted landmark, or a verb (scroll / done / escalate) —
+      # never coordinates. The walker grounds the name to a live bbox.
+      - agent: pick-into-cart
+        prompt: |
+          You are buying ONE item for the buyer on Taobao, from search
+          results to an audited cart. Work in stages:
+          1. PICK — browse the results. Prefer a single-pack item whose
+             spec matches the keyword exactly (no bundles), high sales,
+             low price; 百亿补贴 first. Open a listing to inspect its
+             detail page; use go_back to return and keep comparing.
+             Compare at least two listings. NEVER tap coupon or promo
+             buttons (领券, 领取, 马上去用) — they leave the results.
+          2. ADD — add the chosen item to the cart (加入购物车). If a
+             spec sheet opens, pick the spec matching the keyword, set
+             the quantity, and confirm (the granted `confirm` landmark).
+          3. CART — open the cart (answer the granted `cart` landmark
+             from a listing's detail page) and audit it: the item you just added is ticked
+             (round toggle at the row's left edge); untick every other
+             line — they may be the buyer's own saved items, never
+             remove or delete anything. The spec and quantity match the
+             ask (+/- steppers flank the quantity numeral). Read the
+             total (合计) for the ticked items.
+          The buyer said: "{inputs.user_said}"
+          Search keyword: {parse.keyword}
+          When the cart is exactly right, answer done and return the
+          fields, standing on the cart page. If nothing fits, the added
+          item is missing from the cart, or the cart cannot be fixed by
+          ticking and steppers, answer escalate.
+        tools: [tap, scroll, back]    # closed allowlist for this episode
+        give: [landmarks.cart, landmarks.confirm]        # known spots the model may name
+        returns:
+          summary: one line per ticked item - title, spec, qty, price
+          total: the 合计 amount for the ticked items, digits only
+          message: a short Chinese message asking the buyer to confirm
+            this purchase - name the item, spec, qty and total
+        limit: {calls: 24, scrolls: 10}
 
-      - page: detail
-        # 百亿补贴 items label the buy button 领券购买, plain items 立即购买
-        # — alt readings of one anchor. `forbid: 有货` kills the SKU-sheet
-        # lookalike, whose bottom bar can carry the same buttons.
-        anchors:
-          - {text: "加入购物车", region: bottom}
-          - {text: ["领券购买", "立即购买"], region: bottom}
-        forbid: ["有货"]
-
-      - do: buysheet                  # open the buy sheet
-        macro:
-          steps:
-            - name: buy-button        # one target, two spellings (百亿补贴 vs plain)
-              tool: tap
-              with: {label: ["领券购买", "立即购买"], bbox: [0.66, 0.905, 0.93, 0.945]}
-            - name: settle            # the sheet animates in and lazy-loads its
-              tool: wait              # rows; `expect` re-peeks AFTER the sleep, so
-              with: {seconds: 3}      # it waits out the render and fails loudly
-              expect: "实付"           # if no payment sheet opened
-
-      - page: paysheet
-        anchors: ["实付", "订单备注"]
+      - page: cart
+        anchors: {and: ["购物车", "结算"]}
+        scrollable: true
+        recover:
+          tool: go_back
 
       - ask: confirm-pay              # the human approves before money moves
         approve: payment
-        message: "「买{inputs.keyword}」已选好，实付合计 ¥{ask.total}。回复 好的 确认支付，或 不用 取消。"
-        over_budget_message: "「买{inputs.keyword}」实付合计 ¥{ask.total}，已超出预算 ¥{ask.cap}。回复 好的 确认支付，或 不用 取消。"
-        return:                       # the ask left the app — come back
-          steps:
-            - name: go-home
-              tool: home_screen
-            - name: dismiss-switcher
-              tool: tap
-              with: {label: "blank area below the app cards", bbox: [0.42, 0.855, 0.58, 0.885]}
-            - name: open-taobao
-              tool: tap
-              with: {label: "淘宝", bbox: [0.720, 0.425, 0.909, 0.551]}
-            - name: settle
-              tool: wait
-              with: {seconds: 2}
+        message: "{pick-into-cart.message}（实付以屏幕读数为准：¥{ask.total}）回复 好的 确认支付，或 不用 取消。"
+        resume:                       # the ask left the app — come back
+          macro:
+            steps:
+              - name: go-home
+                tool: home_screen
+              - name: dismiss-switcher
+                tool: tap
+                with: {label: "blank area below the app cards", bbox: [0.42, 0.855, 0.58, 0.885]}
+              - name: open-taobao
+                tool: tap
+                with: {label: "the taobao app icon", bbox: [0.720, 0.425, 0.909, 0.551]}
+              - name: settle
+                tool: wait
+                with: {seconds: 2}
 
-      - do: pay
+      # Payment as a fenced episode: the human already consented to
+      # ¥{ask.total}, so the model only NAVIGATES the checkout — the
+      # walker re-runs the money predicates before EVERY tap proposed
+      # here, and a tap while no visible amount equals the consented
+      # total (or with any amount above it) is refused → escalate.
+      - agent: pay
         irreversible: payment
-        macro:
-          steps:
-            - name: pay-button
-              tool: tap
-              with: {label: ["立即支付", "确认支付"], bbox: [0.39, 0.915, 0.69, 0.958]}
-            - name: settle
-              tool: wait
-              with: {seconds: 4}
+        prompt: |
+          The buyer has approved this purchase at ¥{ask.total}.
+          Complete the checkout from the cart:
+          - tap 结算; on the order page, confirm the total equals
+            ¥{ask.total}, then tap 提交订单
+          - on the payment sheet, keep the default payment method and
+            tap 立即支付 or 确认支付
+          Do not change the address, coupons, or anything else. If the
+          total differs from ¥{ask.total}, or a password or verification
+          is requested, answer escalate.
+        tools: [tap]
+        limit: {calls: 8}
 
       - page: paid
-        anchors: ["支付成功"]
+        anchors: "支付成功"
 
-# Pages OFF the route — hand-over contexts and lookalike fences the
-# matcher must know but no move lands on deliberately.
-pages:
-  skusheet:
-    # The spec-choosing overlay; the buy walk hands over here (choosing
-    # a spec beyond the pick is the model's job). NOT "有货": 2-char
-    # anchors ride the one-substitution window, and 有货 ≈ 退货(宝)
-    # would fake this page onto the payment sheet. `forbid: 订单备注`
-    # is the structural kill: only the payment sheet carries it.
-    anchors:
-      - "规格"
-      - {text: ["加入购物车", "确定", "立即购买"], region: bottom}
-    forbid: ["订单备注"]
-
-# Adapting to your device
-# - Gesture coordinates were recorded on the authoring device (iPhone,
-#   zh apps / en system). Same model usually replays as-is; rehearse
-#   and re-record the steps that miss.
-# - Page anchors were measured on 百亿补贴 listings (the buy button
-#   reads 领券购买 there, 立即购买 elsewhere — both declared). Verify:
-#   `physiclaw conductor match taobao --live` on each page, then
-#   `calibrate` to learn geometry.
-#
-# Rehearse, then enable
-#   physiclaw playbooks run taobao/buy --input "keyword=五常大米 5kg"
-# Walk it to the gate at least once (reply 不用 to back out without
-# paying) before flipping `enabled: true` here — the one switch gates
-# every embedded macro too.

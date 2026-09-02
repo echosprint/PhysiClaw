@@ -43,7 +43,14 @@ yaml_loader = YAML(typ="safe", pure=True)
 
 
 _PACK_TOP_KEYS = frozenset(
-    {"app", "description", "placeholders", "pages", "playbooks", "controls"}
+    {
+        "app",
+        "description",
+        "placeholders",
+        "pages",
+        "playbooks",
+        "landmarks",
+    }
 )
 
 

@@ -8,11 +8,11 @@ import pytest
 from physiclaw.common import paths
 from physiclaw.conductor import pages
 from physiclaw.conductor.pages import (
-    Control,
+    Landmark,
     LearnedAnchor,
     LearnedPage,
     PagesError,
-    parse_controls,
+    parse_landmarks,
     parse_pages,
 )
 
@@ -51,7 +51,7 @@ def test_parse_empty_file_is_no_pages() -> None:
     "text, fragment",
     [
         ("results: []", "must be a mapping"),
-        ("results:\n  anchors: []", "non-empty list"),
+        ("results:\n  anchors: []", "non-empty"),
         ("results:\n  anchors: ['a']\n  bogus: 1", "unknown key"),
         ("Results:\n  anchors: ['a']", "lowercase"),
         ("results:\n  anchors: [{text: 'a', region: middle}]", "region"),
@@ -227,32 +227,35 @@ def test_parse_pages_rejects_unpopulated_placeholder() -> None:
         parse_pages('thread:\n  anchors: ["<<CONTACT>>"]\n', "channel")
 
 
-# ---------- `controls:` (declared app chrome) ----------
+# ---------- `landmarks:` (declared fixed spots) ----------
 
 
-def test_parse_controls_happy_path() -> None:
-    out = parse_controls(
+def test_parse_landmarks_happy_path() -> None:
+    out = parse_landmarks(
         {
             "back": {"label": "back chevron", "bbox": [0.02, 0.05, 0.1, 0.1]},
             "dismiss": {"label": ["scrim", "empty area"], "bbox": [0.3, 0.1, 0.7, 0.2]},
+            "cart": {"label": "cart", "bbox": [0.8, 0.0, 0.9, 0.1]},  # open vocabulary
         }
     )
 
-    assert out["back"] == Control(label=("back chevron",), bbox=(0.02, 0.05, 0.1, 0.1))
+    assert out["back"] == Landmark(label=("back chevron",), bbox=(0.02, 0.05, 0.1, 0.1))
     assert out["dismiss"].label == ("scrim", "empty area")
+    assert set(out) == {"back", "dismiss", "cart"}
 
 
-def test_parse_controls_vocabulary_is_closed() -> None:
-    # Every declared control has a rescue-ladder consumer — an
-    # unconsumed name is dead config, refused.
-    with pytest.raises(PagesError, match="closed"):
-        parse_controls({"cart": {"label": "cart", "bbox": [0.8, 0.0, 0.9, 0.1]}})
+def test_parse_landmarks_names_and_count_are_bounded() -> None:
+    with pytest.raises(PagesError):
+        parse_landmarks({"Cart Tab": {"label": "cart", "bbox": [0.8, 0.0, 0.9, 0.1]}})
+    many = {f"spot{i}": {"label": "x", "bbox": [0.1, 0.1, 0.2, 0.2]} for i in range(13)}
+    with pytest.raises(PagesError, match="max"):
+        parse_landmarks(many)
 
 
-def test_parse_controls_rejects_bad_shapes() -> None:
+def test_parse_landmarks_rejects_bad_shapes() -> None:
     with pytest.raises(PagesError, match="label, bbox"):
-        parse_controls({"back": {"label": "x"}})
+        parse_landmarks({"back": {"label": "x"}})
     with pytest.raises(PagesError, match="left < right"):
-        parse_controls({"back": {"label": "x", "bbox": [0.9, 0.1, 0.2, 0.2]}})
+        parse_landmarks({"back": {"label": "x", "bbox": [0.9, 0.1, 0.2, 0.2]}})
     with pytest.raises(PagesError, match="duplicate"):
-        parse_controls({"back": {"label": ["x", "x"], "bbox": [0.1, 0.1, 0.2, 0.2]}})
+        parse_landmarks({"back": {"label": ["x", "x"], "bbox": [0.1, 0.1, 0.2, 0.2]}})

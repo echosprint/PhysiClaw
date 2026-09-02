@@ -199,8 +199,8 @@
     <div id="curation" style="display:none">
       <h2>Pages</h2>
       <div class="card" id="pages-card"></div>
-      <h2>Controls</h2>
-      <div class="card" id="controls-card"></div>
+      <h2>Landmarks</h2>
+      <div class="card" id="landmarks-card"></div>
       <h2>Macros</h2>
       <div class="card" id="macros-card"></div>
       <h2>Playbooks</h2>
@@ -488,9 +488,9 @@ function finishMark(start, end) {
   ];
   if (r - l < 0.01 || b - t < 0.01) { [l, t, r, b] = tapBbox(start); }
   const hint = name === "back" ? "e.g. back chevron (top-left)" : "e.g. scrim above the bottom sheet";
-  const label = prompt("Label this " + name + " control — on-screen text, or a plain description (" + hint + "):");
+  const label = prompt("Label this " + name + " landmark — on-screen text, or a plain description (" + hint + "):");
   if (!label) { logEntry("mark " + name + " cancelled"); return; }
-  draftEdit({ op: "control_set", name, label, bbox: [l, t, r, b].map(r3) });
+  draftEdit({ op: "landmark_set", name, label, bbox: [l, t, r, b].map(r3) });
 }
 
 // ---------- draft curation ----------
@@ -524,7 +524,7 @@ async function apiOr(path, body, label) {
 }
 
 function renderAll() {
-  renderPages(); renderControls(); renderMacros(); renderPlaybooks();
+  renderPages(); renderLandmarks(); renderMacros(); renderPlaybooks();
   renderProve(); renderSelected(); updateModeBadge();
 }
 
@@ -686,20 +686,20 @@ function addNameRow(op, placeholder, label, select) {
   return row;
 }
 
-function renderControls() {
+function renderLandmarks() {
   if (!state.draft) return;
-  const card = $("controls-card");
+  const card = $("landmarks-card");
   card.innerHTML = "";
   for (const name of ["back", "dismiss"]) {
     const line = el("div");
     line.appendChild(el("b", null, name + ": "));
-    const c = state.draft.controls[name];
+    const c = state.draft.landmarks[name];
     if (c) {
       const chip = el("span", "chip");
       chip.appendChild(el("span", null,
         (Array.isArray(c.label) ? c.label[0] : c.label) + " [" + c.bbox.map(v => v.toFixed(2)).join(",") + "]"));
       const x = el("span", "x", "✕");
-      x.onclick = () => draftEdit({ op: "control_clear", name });
+      x.onclick = () => draftEdit({ op: "landmark_clear", name });
       chip.appendChild(x);
       line.appendChild(chip);
     } else {
@@ -1046,11 +1046,11 @@ async function runMatrix() {
 }
 
 async function commitDraft() {
-  if (!confirm("Write pages + controls into PLAYBOOK.yml and merge learned geometry?")) return;
+  if (!confirm("Write pages + landmarks into PLAYBOOK.yml and merge learned geometry?")) return;
   const data = await apiOr("/api/draft/commit", {}, "commit");
   if (!data) return;
   logEntry("committed → " + data.pack_file + "\npages: " + data.pages_written.join(", ")
-    + (data.controls_written.length ? "\ncontrols: " + data.controls_written.join(", ") : "")
+    + (data.landmarks_written.length ? "\nlandmarks: " + data.landmarks_written.join(", ") : "")
     + "\npack check: " + data.check);
   state.matrix = data.dry_run;
   renderProve();
