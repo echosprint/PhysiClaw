@@ -62,11 +62,11 @@ from physiclaw.common.listing import Screen
 from physiclaw.common.text import json_span
 from physiclaw.conductor.calls import (
     ACT_SCROLL_UP,
-    ACT_VERBS,
     AGENT_DONE,
     AGENT_TOOL_LEGEND,
     AGENT_TOOL_VERBS,
     ESCALATE,
+    RESERVED_KEYS,
 )
 from physiclaw.contract.dto import (
     AssistantMessage,
@@ -110,14 +110,23 @@ ACT_ARM = "act"  # the routing arm a grounded row/landmark answer maps to
 _CONTRACT_KEYS = frozenset({"reason", "answer", "confidence"})
 
 
+# What a candidate IS — set once where it is built, read where the
+# model's pick is grounded.
+CAND_ROW = "row"
+CAND_LANDMARK = "landmark"
+CAND_MACRO = "macro"
+
+
 @dataclass(frozen=True)
 class Candidate:
-    """One answerable screen row (or granted landmark) of an agent
-    episode: the content key (the label, verbatim — the model answers
-    by copying it) and the bbox the walk taps when it is picked."""
+    """One answerable name of an agent episode: a screen row (the label,
+    verbatim — the model answers by copying it), a granted landmark, or
+    a granted macro. `bbox` is what the walk taps when a row or landmark
+    is picked; a macro grant carries none — the walk runs it by name."""
 
     key: str
-    bbox: Bbox
+    bbox: Bbox | None = None
+    kind: str = CAND_ROW
 
 
 @dataclass(frozen=True)
@@ -196,11 +205,6 @@ def build_request(
     )
 
 
-# What a screen row may never be named as: the answers with a fixed
-# meaning. A row that literally reads "done" must not shadow the verb.
-_RESERVED_KEYS = frozenset({AGENT_DONE, ESCALATE, *ACT_VERBS})
-
-
 def act_candidates(rows) -> tuple[Candidate, ...]:
     """One candidate per labeled row for an agent-episode turn:
     content-keyed, first occurrence wins, verb collisions dropped,
@@ -210,7 +214,7 @@ def act_candidates(rows) -> tuple[Candidate, ...]:
     out: list[Candidate] = []
     for row in rows:
         key = row.label.strip()
-        if not key or key in seen or key in _RESERVED_KEYS:
+        if not key or key in seen or key in RESERVED_KEYS:
             continue
         seen.add(key)
         out.append(Candidate(key=key, bbox=tuple(row.bbox)))
@@ -648,12 +652,12 @@ def return_fields(fields: str) -> str:
 
 
 def _act_legend(req: DecisionRequest, allowed: tuple[str, ...]) -> str:
-    """The episode's answer legend, built from exactly the tools and
-    landmarks the author granted (`args.tools` / `args.give`, fixed for
-    the episode, so the system prompt stays byte-stable and the
-    provider prefix cache pays) — each tool's line and verbs read off
-    `calls.py`. The rows themselves live in each turn's user block,
-    never here."""
+    """The episode's answer legend, built from exactly the tools,
+    landmarks, and macros the author granted (`args.tools` / `args.give`
+    / `args.macros`, fixed for the episode, so the system prompt stays
+    byte-stable and the provider prefix cache pays) — each tool's line
+    and verbs read off `calls.py`. The rows themselves live in each
+    turn's user block, never here."""
     tools = req.args.get("tools", "").split()
     options: list[str] = []
     for tool, verbs in AGENT_TOOL_VERBS.items():
@@ -664,6 +668,11 @@ def _act_legend(req: DecisionRequest, allowed: tuple[str, ...]) -> str:
         )
         if tool == "tap" and req.args.get("give"):
             options.append(f"a granted landmark name ({req.args['give']})")
+    if req.args.get("macros"):
+        options.append(
+            "a granted macro name, copied exactly — it runs that recorded "
+            f"gesture sequence ({req.args['macros']})"
+        )
     options.append(
         '"done" ONLY when the goal is fully met (then ALSO add one field per '
         "return field listed, each a plain string)"

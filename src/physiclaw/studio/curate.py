@@ -29,6 +29,7 @@ from physiclaw.conductor.pages import (
     collect_page_decls,
     load_learned,
     pack_landmarks,
+    parse_landmarks,
     parse_pages_data,
     save_learned,
 )
@@ -284,10 +285,12 @@ def _validate_pack_text(text: str, app: str) -> None:
 
 def _merged_landmarks(text: str, drafted: dict) -> dict:
     """The pack file's own landmarks under the draft's, in the draft's
-    {label, bbox} shape — so a commit never
-    drops a hand-authored spot the walks or recover hands name."""
+    {label, bbox, [page]} shape — so a commit never drops a
+    hand-authored spot the walks or recover hands name. Read section-
+    level (scopes unchecked): the commit REPLACES the pages section, so
+    a scope is judged against the new pages by `_validate_pack_text`."""
     try:
-        existing = pack_landmarks(_spec.load_yaml(text, PagesError))
+        existing = parse_landmarks(_spec.load_yaml(text, PagesError).get("landmarks"))
     except PagesError as e:
         raise DraftError(
             f"commit refused — the current {PACK_FILENAME} would not parse: {e}"
@@ -296,6 +299,7 @@ def _merged_landmarks(text: str, drafted: dict) -> dict:
         name: {
             "label": c.label[0] if len(c.label) == 1 else list(c.label),
             "bbox": list(c.bbox),
+            **({"page": c.page} if c.page else {}),
         }
         for name, c in existing.items()
     }
@@ -342,6 +346,8 @@ def _emit_landmarks(landmarks: dict) -> str:
         lines.append(f"    label: {quote_yaml(spec['label'])}")
         coords = ", ".join(f"{float(v):g}" for v in spec["bbox"])
         lines.append(f"    bbox: [{coords}]")
+        if spec.get("page"):
+            lines.append(f"    page: {spec['page']}")
     return "\n".join(lines) + "\n"
 
 

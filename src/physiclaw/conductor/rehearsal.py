@@ -23,10 +23,13 @@ import asyncio
 REHEARSE_MAX_TURNS = 60
 
 
-def arm(app: str, name: str, values: dict[str, str], emit_warn) -> tuple:
+def arm(
+    app: str, name: str, values: dict[str, str], emit_warn, *, dry: bool = False
+) -> tuple:
     """Load, validate, and build the walk — no connection, no gesture.
     Raises PlaybookError/MacroError on a bad spec or bad inputs.
-    Returns (program, registry) ready for `walk`."""
+    Returns (program, registry) ready for `walk`; `dry` builds the
+    walk the offline replay drives (it writes nothing)."""
     from physiclaw.conductor import channel as channel_mod
     from physiclaw.conductor import setup as conductor_setup
 
@@ -34,10 +37,10 @@ def arm(app: str, name: str, values: dict[str, str], emit_warn) -> tuple:
     values = conductor_setup.resolve_inputs(spec, values)
     if not spec.enabled:
         emit_warn(f"{app}/{name} is disabled — rehearsing it anyway")
-    for line in conductor_setup.readiness_warnings(spec):
+    for line in conductor_setup.readiness_warnings(spec, pack):
         emit_warn(line)
     channel = channel_mod.load_channel()
-    program = conductor_setup.build_program(spec, pack, values, channel)
+    program = conductor_setup.build_program(spec, pack, values, channel, dry=dry)
     # The dispatch registry a real wake would arm — one spelling, shared
     # with `session_setup` (a gate's ask dispatches `channel/send`,
     # which is not this pack's macro).

@@ -62,6 +62,7 @@
         "custom/memory",
         "custom/skills",
         "custom/macros",
+        "custom/playbooks",
         "custom/mcp"
       ]
     },

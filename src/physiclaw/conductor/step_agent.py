@@ -6,9 +6,12 @@ constrained call (append-only context, so every request's prefix is
 byte-identical to the previous one and the provider cache pays for all
 but the newest block) whose answer the walk grounds to a live bbox — a
 screen row, a granted landmark, a scroll or back verb, `done`, or
-`escalate`; never coordinates. `done` is audited against the adjacent
+`escalate` — or runs by name (a granted pack macro); never
+coordinates. A landmark scoped to a page is offered only while that
+page is the verified reading. `done` is audited against the adjacent
 verify page by the matcher, never trusted, and a payment episode
-re-runs the money predicates before EVERY tap the model proposes.
+re-runs the money predicates before EVERY tap or macro the model
+proposes.
 """
 
 from physiclaw.common import gesture_vocab
@@ -26,6 +29,8 @@ from physiclaw.conductor.micro import (
     ACT_ARM,
     AGENT_ACT,
     AGENT_FIELDS,
+    CAND_LANDMARK,
+    CAND_MACRO,
     Candidate,
     DecisionRequest,
     MicroOutcome,
@@ -36,18 +41,19 @@ from physiclaw.conductor.micro import (
     return_fields,
 )
 from physiclaw.conductor.pages import page_id
-from physiclaw.conductor.playbook import AgentNode, fill_refs
-from physiclaw.conductor.step import Step, Turn
+from physiclaw.conductor.playbook import AgentNode, fill_refs, qualified_macro
+from physiclaw.conductor.step import Step, Turn, Walk
 from physiclaw.conductor.turns import SCROLL_BBOX
 
 KIND_TAP = "agent-tap"
 KIND_SWIPE = "agent-swipe"
+KIND_MACRO = "agent-macro"
 
 
 class AgentStep(Step[AgentNode]):
-    kinds = frozenset({KIND_TAP, KIND_SWIPE})
+    kinds = frozenset({KIND_TAP, KIND_SWIPE, KIND_MACRO})
 
-    def __init__(self, walk, node: AgentNode) -> None:
+    def __init__(self, walk: Walk, node: AgentNode) -> None:
         super().__init__(walk, node)
         # Episode state. `history` is the append-only transcript of
         # settled (user block, model reply) pairs — replayed verbatim on
@@ -175,25 +181,47 @@ class AgentStep(Step[AgentNode]):
         screen and set the pending user block. When the episode may tap,
         granted landmarks ride as candidates too (their declared bbox —
         healed to the live label only if picked) unless a live row
-        already reads their name — the fresher row wins; with no tap
-        tool there is nothing to answer with, so no candidates at all."""
+        already reads their name — the fresher row wins — and a
+        page-scoped landmark rides only while its page is the verified
+        reading; with no tap tool there is nothing to tap, so no rows.
+        Granted macros are always answerable, by name."""
         walk, node = self.walk, self.node
         assert walk.screen is not None
-        rows = act_candidates(walk.screen.rows)
+        macros = tuple(Candidate(key=n, kind=CAND_MACRO) for n in node.macros)
+        rows = tuple(
+            c for c in act_candidates(walk.screen.rows) if c.key not in node.macros
+        )
         can_tap = "tap" in node.tools
-        give = node.give if can_tap else ()
+        give = tuple(n for n in node.give if self._granted(n)) if can_tap else ()
         row_keys = {r.key for r in rows}
         grants = tuple(
-            Candidate(key=n, bbox=walk.landmarks[n].bbox)
+            Candidate(key=n, bbox=walk.landmarks[n].bbox, kind=CAND_LANDMARK)
             for n in give
-            if n in walk.landmarks and n not in row_keys
+            if n not in row_keys
         )
-        self.candidates = grants + rows if can_tap else ()
+        self.candidates = macros + (grants + rows if can_tap else ())
         parts = [prefix] if prefix else []
         parts.append(act_block("Current screen", rows))
         if give:
             parts.append("Granted landmarks (answer by name): " + ", ".join(give))
+        if node.macros:
+            parts.append(
+                "Granted macros (answer by name to run one): " + ", ".join(node.macros)
+            )
         self.block = "\n".join(parts)
+
+    def _granted(self, name: str) -> bool:
+        """Whether a landmark is on offer NOW: declared, and either
+        unscoped or scoped to the page the current verdict reads."""
+        walk = self.walk
+        landmark = walk.landmarks.get(name)
+        if landmark is None:
+            return False
+        if landmark.page is None:
+            return True
+        return walk.verdict is not None and walk.verdict.matches(
+            page_id(walk.app, landmark.page)
+        )
 
     def _request(self) -> Turn:
         node = self.node
@@ -215,6 +243,7 @@ class AgentStep(Step[AgentNode]):
                 "block": self.block,
                 "tools": " ".join(node.tools),
                 "give": ", ".join(node.give),
+                "macros": ", ".join(node.macros),
             },
             candidates=self.candidates,
             history=tuple(self.history),
@@ -277,8 +306,8 @@ class AgentStep(Step[AgentNode]):
         assert walk.screen is not None
         if node.irreversible == "payment":
             # The purse stays with the walker: BOTH predicates re-run
-            # before every tap the model proposes — a tap while no
-            # visible amount equals the consented total, or with any
+            # before every tap or macro the model proposes — one while
+            # no visible amount equals the consented total, or with any
             # amount above it, is refused.
             blocked = money.fire_block(consented=self.consented, screen=walk.screen)
             if blocked is not None:
@@ -287,8 +316,19 @@ class AgentStep(Step[AgentNode]):
             # needs its own gate (the move rule, episode-shaped).
             walk.spend_consent()
         picked = outcome.picked
+        if picked.kind == CAND_MACRO:
+            # A granted pack macro: the recorded gesture sequence runs
+            # whole, argument-less; its result view is the next screen.
+            self.pending_desc = f"ran macro {picked.key!r}"
+            return walk.synth(
+                KIND_MACRO,
+                f"conductor: agent {node.id} — {self.pending_desc}",
+                gesture_vocab.RUN_MACRO,
+                {"name": qualified_macro(walk.app, picked.key)},
+            )
         bbox = picked.bbox
-        if picked.key in node.give and picked.key in walk.landmarks:
+        assert bbox is not None  # rows and landmarks carry one
+        if picked.kind == CAND_LANDMARK:
             # A granted landmark: label-healed to where its text sits
             # NOW (the one search the macro heal rides too).
             bbox = recover.locate_landmark(walk.landmarks[picked.key], walk.screen)[0]

@@ -34,13 +34,14 @@ on an irreversible move, a deviation is the model's.
 """
 
 import logging
-from dataclasses import dataclass, field
+from collections import Counter
 
 from physiclaw.common import daylog, gesture_vocab
 from physiclaw.common.listing import Screen
 from physiclaw.common.logger import write_json_atomic
 from physiclaw.conductor import brief, recover, views, walklog
 from physiclaw.conductor.channel import Channel
+from physiclaw.conductor.gate import Gate
 from physiclaw.conductor.match import Verdict, match_screen
 from physiclaw.conductor.micro import MicroOutcome
 from physiclaw.conductor.pages import (
@@ -51,9 +52,12 @@ from physiclaw.conductor.pages import (
     page_name,
 )
 from physiclaw.conductor.playbook import (
+    READING_ELSEWHERE,
+    READING_OCCLUDED,
     AgentNode,
     AskNode,
     DoNode,
+    Node,
     Playbook,
     PlaybookError,
     TellNode,
@@ -90,66 +94,6 @@ _STEP_FOR: dict[type, type[Step]] = {
 }
 
 
-@dataclass
-class Gate:
-    """The ask-and-hold state — one object, one suspension projection. The
-    walk owns the cursor; this owns everything between "ask sent" and
-    "consent bound": the ask text, the thread snapshot it is diffed
-    against, the money numbers, the silence counter, and the reply words
-    the last send declared. Consent lives here,
-    not on the ask step, because the payment move AFTER the ask spends
-    it — and a suspension in between must carry it."""
-
-    ask: str = ""
-    baseline: set[str] = field(default_factory=set)
-    quoted: float | None = None
-    consented: float | None = None
-    silence: int = 0
-    awaiting: bool = False  # ask sent, polling for the reply
-    # The reply words the last LANDED send declared (already in
-    # `reply.normalize` space) — what every read of the thread after it
-    # matches: this ask's check, a later send's landing, a tell's
-    # resume. `next_words` holds the words of a send still in flight.
-    yes: tuple[str, ...] = ()
-    no: tuple[str, ...] = ()
-    next_words: tuple[tuple[str, ...], tuple[str, ...]] = ((), ())
-    tried_open: bool = False
-
-    def spend(self) -> float | None:
-        """Consent is CONSUMED by firing: a later payment needs its own
-        gate's fresh confirm, never this one's leftovers. Returns the
-        amount that fired."""
-        amount, self.consented, self.quoted = self.consented, None, None
-        return amount
-
-    def to_suspended(self) -> dict:
-        """The persisted projection — the one field list, beside the
-        fields. Counters and the in-flight handshake deliberately reset
-        on resume; `consented` persists so a post-consent suspension can
-        never resume into a refused payment."""
-        return {
-            "ask_text": self.ask,
-            "baseline": sorted(self.baseline),
-            "quoted": self.quoted,
-            "consented": self.consented,
-            "awaiting": self.awaiting,
-            "yes": list(self.yes),
-            "no": list(self.no),
-        }
-
-    @classmethod
-    def from_suspended(cls, data: dict) -> "Gate":
-        return cls(
-            ask=str(data.get("ask_text") or ""),
-            baseline=set(data.get("baseline") or []),
-            quoted=data.get("quoted"),
-            consented=data.get("consented"),
-            awaiting=bool(data.get("awaiting")),
-            yes=tuple(str(w) for w in (data.get("yes") or [])),
-            no=tuple(str(w) for w in (data.get("no") or [])),
-        )
-
-
 class Program:
     """One playbook mid-walk. Constructed per session (the conductor
     plugin's wake setup builds it), so the cursor state lives for
@@ -166,8 +110,13 @@ class Program:
         channel: Channel | None = None,
         suspended: dict | None = None,
         landmarks: "dict[str, Landmark] | None" = None,
+        dry: bool = False,
     ) -> None:
         self.app = spec.app
+        # A dry walk (`replay.py`) leaves no trace: no runs.jsonl line,
+        # no daily-log entry, no suspension file. Everything else runs
+        # exactly as live.
+        self.dry = dry
         self.spec = spec
         self.values = values
         # The `inputs.<name>` half of the ref-resolution dict, built once:
@@ -202,10 +151,10 @@ class Program:
         # The step executor at the cursor (a resume pre-step rides the
         # same slot before the walk proper opens).
         self._step: Step | None = None
-        # Recovery (`recover.py`): the hand in flight and the
-        # walk-lifetime action count that budgets it.
+        # Recovery (`recover.py`): the hand in flight and the actions
+        # spent per target page (their sum is the walk-wide count).
         self._recovery: recover.State | None = None
-        self._recoveries = 0
+        self._page_recoveries: Counter[str] = Counter()
         self._resumed = False
         # The telemetry pair (`walklog`): decision outcomes brokered to
         # this walk, and the one-shot latch so exactly one runs.jsonl
@@ -219,6 +168,9 @@ class Program:
         # The NEXT advance is the permanent None the conductor drops the
         # program on.
         self._done = False
+        # The walk's recorded outcome (`walklog.OUTCOMES`), None while it
+        # runs — what a replay reports.
+        self.outcome: str | None = None
         # The journal line the next synthesized note carries
         # (record-don't-replay: the transcript carries what happened).
         self._journal: str | None = None
@@ -234,6 +186,16 @@ class Program:
                 self.idx + 1,
                 "awaiting reply" if self.gate.awaiting else "walk",
             )
+
+    @property
+    def node(self) -> "Node | None":
+        """The node at the cursor — None once the walk is past the last."""
+        nodes = self.spec.nodes
+        return nodes[self.idx] if self.idx < len(nodes) else None
+
+    @property
+    def _recoveries(self) -> int:
+        return sum(self._page_recoveries.values())
 
     # ---- suspension ----
 
@@ -268,7 +230,8 @@ class Program:
         the follow-up alarm (`contract.drive`) — the file, not the job,
         is what resumes the walk on ANY next wake."""
         self.gate.awaiting = awaiting
-        write_json_atomic(suspended_path(), self._suspended_dict(resume_idx))
+        if not self.dry:
+            write_json_atomic(suspended_path(), self._suspended_dict(resume_idx))
         recap = f"waiting for the user's reply on {self.app}/{self.spec.name}"
         self._record_run("suspended", recap)
         # The close-routine's log line, harness-written: the conductor
@@ -324,11 +287,7 @@ class Program:
             if self.gate.awaiting:
                 # Suspended-at-gate resume: the ask was sent before the
                 # suspension — the ask step picks up at its reply check.
-                node = (
-                    self.spec.nodes[self.idx]
-                    if self.idx < len(self.spec.nodes)
-                    else None
-                )
+                node = self.node
                 if not isinstance(node, AskNode):
                     return self.handover(
                         "suspended awaiting a reply, but no ask at the cursor"
@@ -351,7 +310,8 @@ class Program:
             # end_session was blocked, its result never arrived, or the
             # session simply ran on, a dead walk must not resurrect on
             # the next wake.
-            clear_suspended()
+            if not self.dry:
+                clear_suspended()
             return self.handover(
                 f"{failed or 'suspend end_session returned'} — suspension dropped"
             )
@@ -424,8 +384,8 @@ class Program:
         return self.next()
 
     def _node_id(self) -> str | None:
-        nodes = self.spec.nodes
-        return nodes[self.idx].id if self.idx < len(nodes) else None
+        node = self.node
+        return node.id if node is not None else None
 
     # ---- what the steps read and call ----
 
@@ -565,8 +525,19 @@ class Program:
             # channel target has no hand to declare.
             return self.handover(reason)
         st = recover.State(target=expected_id, mode=mode, reason=reason)
+        v = self.verdict
+        # The reading the page declared its hands for: the page itself
+        # under an overlay, or any other screen.
+        reading = (
+            READING_OCCLUDED
+            if v is not None and v.kind == "occluded" and v.page_id == expected_id
+            else READING_ELSEWHERE
+        )
         step = recover.plan(
-            self._recoveries, self.spec.recovers.get(page_name(expected_id))
+            self._recoveries,
+            self.spec.recovers.get(page_name(expected_id)),
+            self._page_recoveries[expected_id],
+            reading=reading,
         )
         if isinstance(step, recover.Exhausted):
             return self.handover(f"{reason} — {step.reason}")
@@ -574,7 +545,10 @@ class Program:
         # walk interprets WHAT: a bare gesture, a landmark tap
         # (label-healed), or an argument-less macro.
         hand = step.hand
-        note = f"conductor: recovering toward {expected_id} via its declared hand"
+        note = (
+            f"conductor: recovering toward {expected_id} via its declared hand "
+            f"({reading})"
+        )
         if hand.macro is not None:
             return self._recover_act(
                 st,
@@ -597,10 +571,11 @@ class Program:
     def _recover_act(
         self, st: recover.State, note: str, tool: str, args: dict
     ) -> AssistantMessage:
-        """The hand's turn: the engagement goes in flight, the walk-wide
-        budget counts it, and the landing dispatch reads `KIND_RECOVER`."""
+        """The hand's turn: the engagement goes in flight, the page's
+        limit and the walk-wide ceiling both count it, and the landing
+        dispatch reads `KIND_RECOVER`."""
         self._recovery = st
-        self._recoveries += 1
+        self._page_recoveries[st.target] += 1
         return self.synth(KIND_RECOVER, note, tool, args)
 
     def _recover_landed(self) -> Turn:
@@ -645,6 +620,8 @@ class Program:
         (`common.daylog`), stamped, fail-open — the walk's activity must
         land in the same record the model reads at wake, and a logging
         failure must never take the walk down."""
+        if self.dry:
+            return
         try:
             daylog.append_log(daylog.stamped(entry))
         except OSError:
@@ -657,6 +634,9 @@ class Program:
         if self._run_recorded:
             return
         self._run_recorded = True
+        self.outcome = outcome
+        if self.dry:
+            return
         walklog.record(
             app=self.app,
             playbook=self.spec.name,

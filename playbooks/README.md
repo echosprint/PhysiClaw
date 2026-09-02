@@ -22,20 +22,25 @@ self-describing YAML document, the way a GitHub workflow is one file
   line is the whole index)
 - `placeholders:` — per-installation constants (the `inputs:` of
   `action.yml`): prompt prose + example per token
-- `landmarks:` — named fixed spots (`{label, bbox}`) the pack's
-  recover hands tap and its agent episodes are granted by name
+- `landmarks:` — named fixed spots (`{label, bbox, [page]}`) the
+  pack's recover hands tap and its agent episodes are granted by name;
+  a `page:` scope offers the spot only while that page reads
 - `playbooks:` — the walks, keyed by name (referenced as
   `<app>/<name>`). Each is a ROUTE: an optional pure-text `agent` and
   the `start` cold-launch, then `page:` waypoints (checked every
-  time, each optionally declaring its own `recover:` hand)
+  time, each optionally declaring its own `recover:` — one hand, or
+  `occluded:`/`elsewhere:` hands per reading, with its own `limit:`)
   alternating with moves — `do` (a recorded macro), `agent` (the
-  model drives inside your prompt's fence, with the tools and
+  model drives inside your prompt's fence, with the tools, the
+  `give:` grants — landmarks to tap, pack macros to run — and the
   `context:` you list), `ask` (human gate; `yes:`/`no:` are the replies
-  it reads, `resume:` re-enters the app), `tell`. A move's enter/verify
-  checks derive from the adjacent waypoints; there is no branching and
-  no loop — judgment is an `agent` step, approval is an `ask`. What the
-  playbook declares is what runs: a page without `recover:` hands over,
-  and nothing retries or unlocks in the background.
+  it reads, `wait:` its patience, `total:` the label a payment total
+  sits beside, `resume:` re-enters the app), `tell`. A move's
+  enter/verify checks derive from the adjacent waypoints; there is no
+  branching and no loop — judgment is an `agent` step, approval is an
+  `ask`. What the playbook declares is what runs: a page without
+  `recover:` hands over, and nothing retries or unlocks in the
+  background.
 - `pages:` — optional appendix for fingerprints no move lands on.
   Anchors are one clause (`"text"`, `{or: [...], region}`,
   `{and: [...]}`) — semantics only; geometry is learned on-device via
@@ -80,6 +85,9 @@ gesture coordinates come from the authoring device; on the same phone
 model they usually replay as-is, otherwise re-record the steps that
 miss. Each manifest ends with its own checklist; the generic one:
 
-1. rehearse: `physiclaw playbooks run <app>/<playbook> --input k=v`
-2. capture page geometry: `physiclaw conductor calibrate <app>`
-3. set `enabled: true` in the pack files
+1. replay offline: `physiclaw playbooks replay <app>/<playbook> --session <id>`
+   walks recorded screens through the real route and shows where it
+   would hand over — no phone, nothing written
+2. rehearse: `physiclaw playbooks run <app>/<playbook> --input k=v`
+3. capture page geometry: `physiclaw conductor calibrate <app>`
+4. set `enabled: true` in the pack files

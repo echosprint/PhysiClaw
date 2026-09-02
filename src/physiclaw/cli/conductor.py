@@ -31,7 +31,7 @@ def _input_screens(session: str | None, listing: Path | None, live: bool) -> lis
     elif listing is not None:
         listings = [read_text(listing)]
     elif session is not None:
-        listings = corpus.session_listings(_resolve_sid(session))
+        listings = corpus.session_listings(resolve_sid(session))
     else:
         exit_error("need one of --session / --listing / --live", code=2)
     return [Screen.read(t) for t in listings]
@@ -50,7 +50,9 @@ async def _live_listing() -> str:
     return verdict.screen_text(blocks)
 
 
-def _resolve_sid(suffix: str) -> str:
+def resolve_sid(suffix: str) -> str:
+    """A session id from a unique suffix — the `logs <suffix>` convention,
+    shared with `playbooks replay`."""
     from physiclaw.agent.trace.store import find_session_dirs
     from physiclaw.common import paths
 
@@ -70,7 +72,7 @@ def extract(
     """Dump a session's listings to a corpus file with '?' labels to edit."""
     from physiclaw.conductor import corpus
 
-    listings = corpus.session_listings(_resolve_sid(session))
+    listings = corpus.session_listings(resolve_sid(session))
     corpus.write_corpus(
         out, [corpus.CorpusItem(label=corpus.UNLABELED, listing=t) for t in listings]
     )

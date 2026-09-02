@@ -244,6 +244,17 @@ def test_parse_landmarks_happy_path() -> None:
     assert set(out) == {"back", "dismiss", "cart"}
 
 
+def test_parse_landmarks_page_scope_is_checked_against_the_pack() -> None:
+    spec = {"cart": {"label": "cart", "bbox": [0.2, 0.9, 0.3, 0.95], "page": "detail"}}
+
+    assert parse_landmarks(spec)["cart"].page == "detail"  # unchecked door
+    assert parse_landmarks(spec, {"detail"})["cart"].page == "detail"
+    with pytest.raises(PagesError, match="not a declared page"):
+        parse_landmarks(spec, {"home"})
+    with pytest.raises(PagesError, match="must be a"):
+        parse_landmarks({"cart": {**spec["cart"], "extra": 1}})
+
+
 def test_parse_landmarks_names_and_count_are_bounded() -> None:
     with pytest.raises(PagesError):
         parse_landmarks({"Cart Tab": {"label": "cart", "bbox": [0.8, 0.0, 0.9, 0.1]}})

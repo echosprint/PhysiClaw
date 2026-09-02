@@ -259,9 +259,7 @@ def run(
     stops instead of leaving a file for the next wake."""
     from physiclaw.conductor.playbook import PlaybookError
 
-    app, _, name = ref.partition("/")
-    if not app or not name:
-        exit_error(f"expected <app>/<playbook> (got {ref!r})")
+    app, name = _split_ref(ref)
     try:
         outcome = asyncio.run(_rehearse(app, name, parse_inputs(inputs or [])))
     except PlaybookError as e:
@@ -276,6 +274,69 @@ def run(
         # `rehearsal.micro_caller` — an agent step fired with no model configured.
         exit_error(str(e))
     typer.echo(outcome)
+
+
+@playbooks_app.command()
+def replay(
+    ref: Annotated[str, typer.Argument(help="<app>/<playbook> to replay.")],
+    session: Annotated[
+        Optional[str],
+        typer.Option("--session", help="A recorded session id (suffix ok if unique)."),
+    ] = None,
+    listings: Annotated[
+        Optional[list[Path]],
+        typer.Option("--listing", help="A listing text file, one screen (repeatable)."),
+    ] = None,
+    inputs: Annotated[
+        list[str] | None,
+        typer.Option("--input", "-i", help="NAME=VALUE for a declared input."),
+    ] = None,
+    outputs: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help="NODE.FIELD=VALUE — what a pure-text agent step answers.",
+        ),
+    ] = None,
+) -> None:
+    """Replay the real walk over recorded screens — no phone, no model.
+    Each screen is the result of the walk's next action; the report
+    shows the node, the verdict it acted on, the tool, and where the
+    walk stopped. A session's screens come from its wire log; a
+    listing file is one screen. Writes nothing."""
+    from physiclaw.cli.conductor import resolve_sid
+    from physiclaw.common.text import read_text
+    from physiclaw.conductor import corpus
+    from physiclaw.conductor import replay as replay_mod
+    from physiclaw.conductor.playbook import PlaybookError
+
+    app, name = _split_ref(ref)
+    if (session is None) == (not listings):
+        exit_error("need exactly one of --session or --listing", code=2)
+    try:
+        if listings:
+            screens = [read_text(p) for p in listings]
+        else:
+            assert session is not None  # the exactly-one check above
+            screens = corpus.session_listings(resolve_sid(session))
+        program, _ = rehearsal.arm(
+            app,
+            name,
+            parse_inputs(inputs or []),
+            emit_warn=lambda s: typer.echo(warn(s)),
+            dry=True,
+        )
+    except (OSError, PlaybookError) as e:
+        exit_error(str(e))
+    result = replay_mod.replay(
+        program, screens, parse_inputs(outputs or [], flag="--output")
+    )
+    for i, t in enumerate(result.turns, 1):
+        typer.echo(
+            f"[{i:3d}] {t.node or '(end)':16s} {t.verdict:28s} {t.tool:12s} {t.note}"
+        )
+    typer.echo(f"{result.outcome}: {result.detail}")
 
 
 @playbooks_app.command()
@@ -398,8 +459,9 @@ def _check_app(app: str) -> bool:
     for entry in entries:
         if entry.spec is None:
             continue
-        # Advisories: a gate ask quoting no word-tier reply word.
-        for line in conductor_setup.readiness_warnings(entry.spec):
+        # Advisories: an ask quoting none of its reply words, a route
+        # page too thinly anchored to survive one OCR miss.
+        for line in conductor_setup.readiness_warnings(entry.spec, pack):
             typer.echo(warn(f"{app}/{entry.name}: {line}"))
     return bad
 
@@ -438,6 +500,14 @@ def _report_not_live(
                 f"{', '.join(not_live)} — rehearse, then enable."
             )
         )
+
+
+def _split_ref(ref: str) -> tuple[str, str]:
+    """`<app>/<playbook>` — the one spelling of a playbook ref on the CLI."""
+    app, _, name = ref.partition("/")
+    if not app or not name:
+        exit_error(f"expected <app>/<playbook> (got {ref!r})")
+    return app, name
 
 
 # ---------- rehearsal (`playbooks run`) ----------

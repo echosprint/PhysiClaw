@@ -10,7 +10,11 @@ import json
 
 import pytest
 from conductor_fakes import (
+    DONE,
     ELSEWHERE,
+    FLOW,
+    HOME,
+    RESULTS,
     make_screen,
     write_channel,
     write_pack,
@@ -29,32 +33,8 @@ from conductor_fakes import (
     thread_screen as _thread,
 )
 
-from physiclaw.conductor import channel, program, setup, step_ask, suspension
+from physiclaw.conductor import channel, program, route, setup, suspension
 from physiclaw.conductor.playbook import PlaybookError
-
-# The shared fixture pages are three DISTINCT pages: the start page
-# matches no move's landing, so every check reads unambiguously.
-FLOW = """\
-description: two moves
-inputs:
-  keyword:
-    description: what to search
-route:
-  - page: home
-  - do: open
-    macro: open-app
-    with: {message: "{inputs.keyword}"}
-  - page: results
-  - do: search
-    macro: add-cart
-    with: {message: "go"}
-  - page: done
-"""
-
-HOME = make_screen(("Files", 0.5, 0.1)).text
-RESULTS = make_screen(("综合", 0.5, 0.1)).text
-DONE = make_screen(("AllDone", 0.5, 0.1)).text
-
 
 # ---------- the walk ----------
 
@@ -255,6 +235,7 @@ route:
   - page: results
   - ask: gate
     approve: payment
+    total: "合计"
     message: "已选好{inputs.keyword}，合计 ¥{ask.total}。回复 好的 确认支付，或 不用 取消。"
     yes: ["好的"]
     no: ["不用"]
@@ -305,7 +286,7 @@ def _suspend_via_silence(p, h, send) -> str:
     thread = _thread((ask, 0.75, 0.3))
     _feed(h, send, thread)
     step = p.advance(h)
-    for _ in range(step_ask.SILENCE_ROUNDS):
+    for _ in range(route.DEFAULT_ASK_ROUNDS):
         assert step.tool_names() == ["note", "wait"]
         _feed(h, step, "waited")
         peek = p.advance(h)
@@ -330,11 +311,24 @@ def test_check_warns_when_a_gate_ask_quotes_no_deny_word() -> None:
     write_channel(CHANNEL_OPEN)
     write_pack(playbooks={"pay": quiet})
 
-    spec, _ = setup.load_spec("demo", "pay", require_live=False)
-    warnings = setup.readiness_warnings(spec)
+    spec, pack = setup.load_spec("demo", "pay", require_live=False)
+    warnings = [w for w in setup.readiness_warnings(spec, pack) if "yes/no" in w]
 
     (warning,) = warnings
     assert "hands the walk over" in warning
+
+
+def test_check_warns_about_thinly_anchored_route_pages() -> None:
+    # The fixture pages declare one anchor each and no geometry is
+    # learned: one OCR miss reads them unknown, so the checker says so
+    # for every page the route checks — advisory, never a refusal.
+    write_pack(playbooks={"flow": FLOW})
+    spec, pack = setup.load_spec("demo", "flow", require_live=False)
+
+    warnings = [w for w in setup.readiness_warnings(spec, pack) if "anchor" in w]
+
+    assert [w.split("'")[1] for w in warnings] == ["done", "home", "results"]
+    assert all("one OCR miss" in w for w in warnings)
 
 
 def test_gate_confirm_resumes_and_pays_under_the_predicates() -> None:
@@ -358,6 +352,25 @@ def test_gate_blocks_when_the_sheet_changed_after_consent() -> None:
 
     summary = _finish(p, h, p.advance(h))  # staleness predicate → hand over
     assert "sheet changed after consent" in summary
+
+
+def test_gate_patience_is_the_asks_own() -> None:
+    # `wait: {seconds, rounds}` — the poll cadence and the silent rounds
+    # before the session suspends are the ask's declaration, not code.
+    patient = GATED.replace(
+        '    yes: ["好的"]\n', '    yes: ["好的"]\n    wait: {seconds: 10, rounds: 1}\n'
+    )
+    p, h, send = _at_gate(playbook=patient)
+    ask = send.tool_calls[1].arguments["inputs"]["message"]
+    thread = _thread((ask, 0.75, 0.3))
+    _feed(h, send, thread)
+
+    wait = p.advance(h)
+    assert wait.tool_names() == ["note", "wait"]
+    assert wait.tool_calls[1].arguments == {"seconds": 10}
+    _feed(h, wait, "waited")
+    _feed(h, p.advance(h), thread)  # the one silent peek
+    assert p.advance(h).tool_names() == ["note", "end_session"]
 
 
 def test_gate_deny_hands_over_without_reasking() -> None:
@@ -716,7 +729,7 @@ def test_blocked_suspend_end_session_drops_the_suspension() -> None:
     thread = _thread((ask, 0.75, 0.3))
     _feed(h, send, thread)
     step = p.advance(h)
-    for _ in range(step_ask.SILENCE_ROUNDS):  # silent rounds → suspend turn
+    for _ in range(route.DEFAULT_ASK_ROUNDS):  # silent rounds → suspend turn
         _feed(h, step, "waited")
         peek = p.advance(h)
         _feed(h, peek, thread)
@@ -874,7 +887,7 @@ def test_gate_hands_over_when_no_total_is_readable() -> None:
     _feed(h, p.advance(h), RESULTS)  # the verified results page — no ¥ on it
 
     step = p.advance(h)  # handover, no ask sent
-    assert "no total readable" in _finish(p, h, step)
+    assert "no amount readable beside 合计" in _finish(p, h, step)
 
 
 def test_payment_move_without_consent_hands_over() -> None:
@@ -1023,6 +1036,99 @@ def test_hand_that_does_not_restore_relocates_from_the_top() -> None:
         again is not None and again.tool_calls[1].arguments["name"] == "demo/open-app"
     )
     assert "walking again" in again.tool_calls[0].arguments["summary"]
+
+
+OCCLUDABLE_PAGES = """\
+home:
+  anchors: ["Files"]
+results:
+  anchors: ["综合", "销量"]
+done:
+  anchors: ["AllDone"]
+"""
+
+KEYED = FLOW.replace(
+    "  - page: results\n",
+    "  - page: results\n    recover:\n"
+    "      occluded: {tool: tap, with: landmarks.back}\n"
+    "      elsewhere: {tool: go_back}\n",
+)
+
+
+def _learn_results() -> None:
+    """Calibrated geometry for `results` — an overlay verdict needs it."""
+    from physiclaw.conductor import pages
+
+    def anchor(text, cy):
+        return pages.LearnedAnchor(
+            text=text, cx=0.5, cy=cy, pos_tol=0.03, freq=1.0, weight=1.0
+        )
+
+    pages.save_learned(
+        "demo",
+        {
+            "results": pages.LearnedPage(
+                anchors={"综合": anchor("综合", 0.1), "销量": anchor("销量", 0.2)},
+                threshold=0.75,
+                observations=6,
+            )
+        },
+    )
+
+
+# `results` with its second anchor hidden under a coupon sheet: three
+# unexpected labels in the band where 销量 should be.
+COVERED_RESULTS = make_screen(
+    ("综合", 0.5, 0.1),
+    ("领券", 0.5, 0.18),
+    ("消费券", 0.5, 0.2),
+    ("马上去用", 0.5, 0.22),
+).text
+
+
+def test_keyed_recover_runs_the_hand_for_the_reading() -> None:
+    # The page itself under an overlay → its `occluded` hand (the scrim
+    # tap); any other screen → its `elsewhere` hand (go_back).
+    write_pack(playbooks={"flow": KEYED}, pages=OCCLUDABLE_PAGES, landmarks=LANDMARKS)
+    _learn_results()
+    p = _program(keyword="milk")
+    h = _history()
+    _feed(h, p.advance(h), HOME)
+    move1 = p.advance(h)
+    _feed(h, move1, COVERED_RESULTS)
+
+    dismiss = p.advance(h)
+    assert dismiss is not None and dismiss.tool_names() == ["note", "tap"]
+    assert "(occluded)" in dismiss.tool_calls[0].arguments["summary"]
+    assert dismiss.tool_calls[1].arguments == {"bbox": [0.02, 0.05, 0.10, 0.10]}
+
+    # The sheet is gone: both anchors read where they were learned.
+    _feed(h, dismiss, make_screen(("综合", 0.5, 0.1), ("销量", 0.5, 0.2)).text)
+    move2 = p.advance(h)
+    assert move2 is not None and move2.tool_names() == ["note", "run_macro"]
+    assert "recovered demo.results" in move2.tool_calls[0].arguments["summary"]
+
+    # A fresh walk landing on an unknown screen takes the other hand.
+    p2 = _program(keyword="milk")
+    h2 = _history()
+    _feed(h2, p2.advance(h2), HOME)
+    _feed(h2, p2.advance(h2), ELSEWHERE)
+    back = p2.advance(h2)
+    assert back is not None and back.tool_names() == ["note", "go_back"]
+    assert "(elsewhere)" in back.tool_calls[0].arguments["summary"]
+
+
+def test_keyed_recover_without_a_hand_for_the_reading_hands_over() -> None:
+    only_occluded = FLOW.replace(
+        "  - page: results\n",
+        "  - page: results\n    recover:\n"
+        "      occluded: {tool: tap, with: landmarks.back}\n",
+    )
+    p, h, move1 = _recovering_walk(only_occluded)
+    _feed(h, move1, ELSEWHERE)
+
+    summary = _finish(p, h, p.advance(h))
+    assert "declares no `elsewhere` recover hand" in summary
 
 
 def test_recovery_never_runs_with_consent_bound() -> None:

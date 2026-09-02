@@ -18,6 +18,7 @@ which is what lets capture bootstrap from declarations alone.
 
 import json
 import logging
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -117,6 +118,10 @@ REGIONS: dict[str, tuple[float, float, float, float]] = {
 # calibration ever derives a per-page value.
 DECL_ONLY_THRESHOLD = 0.75
 DEFAULT_MARGIN = 0.15
+# How many equal-weight anchors a declaration-only page needs to still
+# clear its threshold with ONE missing: (n-1)/n ≥ threshold. Derived,
+# never hand-set — the readiness advisory reads it.
+MIN_ROBUST_ANCHORS = math.ceil(1 / (1 - DECL_ONLY_THRESHOLD))
 
 
 class PagesError(ValueError):
@@ -184,10 +189,13 @@ class Landmark:
     as PACK knowledge: prior the author holds about the app's fixed
     chrome, consumed by recover hands and agent-episode grants (never by
     money paths). `label` is the readings tuple; on-screen text lets the
-    tap be located live, a description documents the coordinates."""
+    tap be located live, a description documents the coordinates.
+    `page` (optional) scopes it: an episode is granted the landmark
+    only while that page is the verified reading."""
 
     label: tuple[str, ...]
     bbox: Bbox
+    page: str | None = None
 
 
 @dataclass(frozen=True)
@@ -304,11 +312,16 @@ def collect_page_decls(doc: dict) -> dict:
     return out
 
 
-def parse_landmarks(data: Any) -> dict[str, Landmark]:
+_LANDMARK_KEYS = frozenset({"label", "bbox", "page"})
+
+
+def parse_landmarks(data: Any, pages: "set[str] | None" = None) -> dict[str, Landmark]:
     """The `landmarks:` section → validated Landmarks. Each entry is the
     gesture-target shape (`{label, bbox}` — the macro grammar's pairing
-    rule, at pack level) under any valid name; its consumers are the
-    pack's own recover hands and agent grants."""
+    rule, at pack level) plus an optional `page:` scope, under any valid
+    name; its consumers are the pack's own recover hands and agent
+    grants. `pages` (the pack's declared page names) validates the
+    scope when given."""
     if data is None:
         return {}
     if not isinstance(data, dict):
@@ -319,20 +332,36 @@ def parse_landmarks(data: Any) -> dict[str, Landmark]:
     for name, spec in data.items():
         where = f"landmark {name!r}"
         _check_name(name, where)
-        if not isinstance(spec, dict) or set(spec.keys()) != {"label", "bbox"}:
-            raise PagesError(f"{where} must be a {{label, bbox}} mapping")
+        if (
+            not isinstance(spec, dict)
+            or not {"label", "bbox"} <= set(spec.keys())
+            or not set(spec.keys()) <= _LANDMARK_KEYS
+        ):
+            raise PagesError(f"{where} must be a {{label, bbox, [page]}} mapping")
         label = checked_readings(spec, where, _require_str, PagesError)
         try:
             left, top, right, bottom = map(float, validate_bbox(spec["bbox"]))
         except ValueError as e:
             raise PagesError(f"{where}: {e}") from e
-        out[name] = Landmark(label=label, bbox=(left, top, right, bottom))
+        page = spec.get("page")
+        if page is not None:
+            _check_name(page, f"{where}: `page`")
+            if pages is not None and page not in pages:
+                known = ", ".join(sorted(pages)) or "(none)"
+                raise PagesError(
+                    f"{where}: `page` {page!r} is not a declared page of this "
+                    f"pack. Declared: {known}"
+                )
+        out[name] = Landmark(label=label, bbox=(left, top, right, bottom), page=page)
     return out
 
 
 def pack_landmarks(doc: dict) -> dict[str, Landmark]:
-    """The pack document's `landmarks:` section, parsed (empty when absent)."""
-    return parse_landmarks(doc.get("landmarks"))
+    """The pack document's `landmarks:` section, parsed (empty when
+    absent) — with every `page:` scope checked against the pages the
+    same document declares, so no door can accept a scope another
+    refuses."""
+    return parse_landmarks(doc.get("landmarks"), set(collect_page_decls(doc)))
 
 
 def parse_pages_data(data, app: str) -> dict[str, PageDecl]:

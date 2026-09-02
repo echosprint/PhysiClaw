@@ -14,8 +14,11 @@ vocabulary and the model classes below carry the same names)::
                 | "do" name [with] [macro] [irreversible]
                 | "agent" name prompt [tools] [give] [returns] [limit]
                   [context] [irreversible]   # the step handed to the model
-                | "ask" name approve message yes no [resume]
+                | "ask" name approve message yes no [total] [wait] [resume]
                 | "tell" name message [no]
+    recover   ::= hand [limit]                # one hand for any deviation
+                | {[occluded: hand] [elsewhere: hand] [limit]}
+    hand      ::= {tool [with]} | {macro}
     macro     ::= name                    # macros/<name>/ — a directory macro
                 | {[inputs] steps}        # inline — MACRO.yml grammar minus
                                           # name/description/enabled
@@ -24,7 +27,10 @@ The route's shape IS the contract: an optional prefix of pure-text
 `agent` steps and one `start` opens it, the first page is the start
 contract, every `do` and every acting `agent` is followed by the page
 it lands on (its landing check — the reflector, enforced by shape),
-and a page may declare its own `recover:` hand. Moves fall through in
+and a page may declare its own `recover:` hand — one hand for any
+deviation, or one per reading (`occluded:` a sheet over the page
+itself, `elsewhere:` any other screen), each page bounded by its own
+`limit:` under the walk-wide ceiling. Moves fall through in
 route order — there is no routing and no loop; whatever needs judgment
 is an `agent` step inside the author's fence, and whatever needs a
 human is an `ask`. Money runs in code: an `irreversible: payment` move
@@ -32,9 +38,11 @@ directly follows the `ask` that approves it (`route.py` lints it).
 
 What the playbook declares is what runs — no more, no less. A page
 without `recover:` hands over; an agent step runs the author's prompt
-with the tools, landmarks, and context the author listed and nothing
-else; an ask's reply is read against the `yes:`/`no:` words the ask
-declares, and anything they do not cover is the model's to read.
+with the tools, landmarks, macros, and context the author listed and
+nothing else; an ask's reply is read against the `yes:`/`no:` words
+the ask declares, and anything they do not cover is the model's to
+read; a payment ask names the label its `total:` sits beside, and
+`wait:` is its own patience.
 
 Wiring is by placeholder, and every ref is dotted: `{inputs.name}` reads
 a declared input, `{move.field}` reads an EARLIER agent step's declared
@@ -70,6 +78,21 @@ from physiclaw.macros.model import Macro, MacroError, MacroInput
 # by the pack's own MAX_PAGES. (Inputs are capped by the macro grammar's
 # MAX_INPUTS — the same `inputs:` section.)
 MAX_NODES = 20
+# Recovery bounds: the walk-wide ceiling on recovery actions (what stops
+# a splash ad on every cold launch from relaunching forever), and a
+# page's own default `limit:` under it.
+MAX_RECOVER_ACTIONS = 6
+DEFAULT_RECOVER_LIMIT = 2
+# The two readings a page's `recover:` may key its hands by: the page
+# itself under an overlay, or any other screen.
+READING_OCCLUDED = "occluded"
+READING_ELSEWHERE = "elsewhere"
+RECOVER_READINGS = (READING_OCCLUDED, READING_ELSEWHERE)
+# An ask's default patience (`wait:`): the in-session reply poll
+# cadence (the engine's `wait` tool caps a single sleep at 60s) and how
+# many silent rounds before the session suspends for the next wake.
+DEFAULT_ASK_WAIT_SECONDS = 45
+DEFAULT_ASK_ROUNDS = 3
 # `{root.name}` — the playbook's own ref grammar, always dotted
 # (`inputs.` / an earlier agent step's id). The root follows the
 # move-name grammar (hyphens included — `{pick-into-cart.message}`);
@@ -146,6 +169,7 @@ class AgentNode:
     max_scrolls: int
     irreversible: str | None = None
     context: tuple[str, ...] = ()  # `context:` — what to load (`context.py`)
+    macros: tuple[str, ...] = ()  # granted pack macros (`give: [macros.<name>]`)
 
     @property
     def return_fields(self) -> tuple[str, ...]:
@@ -166,6 +190,13 @@ class AskNode:
     yes: tuple[str, ...]
     no: tuple[str, ...]
     resume: str | None = None
+    # A payment ask's `total:` — the label readings the sheet total sits
+    # beside (`money.declared_total` reads the amount off that row).
+    total: tuple[str, ...] = ()
+    # The ask's own patience: the in-session poll cadence and how many
+    # silent rounds before the session suspends for the next wake.
+    wait_seconds: int = DEFAULT_ASK_WAIT_SECONDS
+    silence_rounds: int = DEFAULT_ASK_ROUNDS
 
 
 @dataclass(frozen=True)
@@ -180,12 +211,33 @@ class TellNode:
 
 @dataclass(frozen=True)
 class RecoverHand:
-    """A page's declared `recover:` — ONE gesture (`tool`, a `tap` taking
-    its `landmark`) or one argument-less `macro`."""
+    """One recovery hand — ONE gesture (`tool`, a `tap` taking its
+    `landmark`) or one argument-less `macro`."""
 
     tool: str | None = None
     landmark: str | None = None
     macro: str | None = None
+
+
+@dataclass(frozen=True)
+class Recovery:
+    """A page's declared `recover:` — which hand runs for which reading
+    of the deviation, and how many times this page may recover in one
+    walk. `occluded` fires when the page itself reads under an overlay
+    (a sheet, a popup); `elsewhere` for any other screen. The flat form
+    (`recover: {tool: ...}`) declares one hand for both."""
+
+    occluded: RecoverHand | None = None
+    elsewhere: RecoverHand | None = None
+    limit: int = DEFAULT_RECOVER_LIMIT
+
+    def hand_for(self, reading: str) -> RecoverHand | None:
+        """The hand declared for one of `RECOVER_READINGS`."""
+        return self.occluded if reading == READING_OCCLUDED else self.elsewhere
+
+    @property
+    def hands(self) -> tuple[RecoverHand, ...]:
+        return tuple(h for h in (self.occluded, self.elsewhere) if h is not None)
 
 
 Node = DoNode | AgentNode | AskNode | TellNode
@@ -212,9 +264,9 @@ class Playbook:
     # holds the same synthesized name, so dispatch is name-keyed either
     # way. `qualified_inline` is the registry door.
     inline_macros: dict[str, Macro] = field(default_factory=dict)
-    # Declared recovery, page name → hand: a mismatched page runs ITS
-    # hand, or hands over when it declares none.
-    recovers: dict[str, RecoverHand] = field(default_factory=dict)
+    # Declared recovery, page name → its hands: a mismatched page runs
+    # ITS hand for the reading, or hands over when it declares none.
+    recovers: dict[str, Recovery] = field(default_factory=dict)
 
     def first_unsettled(self, outputs: dict[str, str]) -> int:
         """Where a walk (re)starts: the route top, past any COMPLETED
@@ -556,15 +608,19 @@ def disabled_macros(spec: Playbook, pack: Pack) -> list[str]:
     """Referenced pack macros still disabled — the live-readiness rule:
     `playbooks check` warns about it and the overture will not offer such
     a playbook at all. Covers every dispatching role: do moves, an ask's
-    `resume:`, and a page's `recover:`. Safe unguarded access: parse
+    `resume:`, a page's `recover:` hands, and an agent's granted macros.
+    Safe unguarded access: parse
     validated every directory name against `pack.macros`."""
     named: set[str] = set()
-    named.update(h.macro for h in spec.recovers.values() if h.macro is not None)
+    for recovery in spec.recovers.values():
+        named.update(h.macro for h in recovery.hands if h.macro is not None)
     for n in spec.nodes:
         if isinstance(n, DoNode):
             named.add(n.macro)
         elif isinstance(n, AskNode) and n.resume is not None:
             named.add(n.resume)
+        elif isinstance(n, AgentNode):
+            named.update(n.macros)
     # One rule, no inline special case: each name resolves through the
     # merged view, and an inline macro is enabled by construction — its
     # gate is the playbook's own `enabled:` — so only directory names

@@ -25,6 +25,10 @@ AGENT_TOOL_VERBS: dict[str, tuple[str, ...]] = {
 }
 AGENT_TOOLS = tuple(AGENT_TOOL_VERBS)
 ACT_VERBS = tuple(v for verbs in AGENT_TOOL_VERBS.values() for v in verbs)
+# What a screen row or a granted macro may never be named as: the
+# answers with a fixed meaning. A row that literally reads "done" must
+# not shadow the verb; a macro named `escalate` is refused at parse.
+RESERVED_KEYS = frozenset({AGENT_DONE, ESCALATE, *ACT_VERBS})
 # How each granted tool reads in the episode's answer legend — `{verbs}`
 # is the tool's verbs, quoted. Kept beside the verbs so renaming one can
 # never make the legend lie.

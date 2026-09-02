@@ -113,8 +113,9 @@ def test_parse_the_agented_playbook() -> None:
     assert isinstance(pick, AgentNode)
     assert pick.enter == "results" and pick.verify == "done"
     assert pick.give == ("back",) and pick.max_calls == 5 and pick.max_scrolls == 1
-    assert spec.recovers["home"].tool == "force_quit"
-    assert spec.recovers["results"].landmark == "back"
+    assert spec.recovers["home"].elsewhere.tool == "force_quit"
+    assert spec.recovers["home"].occluded is spec.recovers["home"].elsewhere
+    assert spec.recovers["results"].elsewhere.landmark == "back"
 
 
 def _parse(text: str):
@@ -152,6 +153,38 @@ def test_route_shape_lints(mutate, fragment) -> None:
     text = AGENTED.replace(old, new)
     with pytest.raises(PlaybookError, match=fragment):
         _parse(text)
+
+
+def test_give_may_grant_a_pack_macro() -> None:
+    spec = _parse(
+        AGENTED.replace(
+            "give: [landmarks.back]", "give: [landmarks.back, macros.add-cart]"
+        )
+    )
+    pick = spec.nodes[3]
+    assert isinstance(pick, AgentNode)
+    assert pick.give == ("back",) and pick.macros == ("add-cart",)
+    assert pb.disabled_macros(spec, pb.load_pack("demo")) == []
+
+
+@pytest.mark.parametrize(
+    "grant, fragment",
+    [
+        ("macros.nope", "not found in this pack"),
+        ("macros.done", "fixed episode answer"),
+        ("gestures.back", "must look like"),
+    ],
+)
+def test_give_grants_are_checked(grant, fragment) -> None:
+    write_pack(
+        playbooks={
+            "walk": AGENTED.replace("give: [landmarks.back]", f"give: [{grant}]")
+        },
+        landmarks=BACK_LANDMARK,
+        macros=("open-app", "add-cart", "done"),
+    )
+    with pytest.raises(PlaybookError, match=fragment):
+        setup.load_spec("demo", "walk", require_live=False)
 
 
 def test_give_is_optional() -> None:
@@ -351,6 +384,54 @@ def test_episode_tap_grounds_and_history_is_append_only() -> None:
     assert "[you tapped 'Milk 5kg']" in req2.args["block"]
 
 
+def test_episode_runs_a_granted_macro_by_name() -> None:
+    from physiclaw.conductor.step_agent import KIND_MACRO
+
+    _write(AGENTED.replace("give: [landmarks.back]", "give: [macros.add-cart]"))
+    p = _program(name="walk", user_said="买牛奶")
+    h = _history()
+    _feed(h, p.advance(h), ELSEWHERE)
+    assert isinstance(p.advance(h), DecisionRequest)
+    _feed(h, p.resolve(_done_outcome(keyword="milk")), HOME)
+    _feed(h, p.advance(h), RESULTS)
+    req = p.advance(h)
+    assert isinstance(req, DecisionRequest)
+    assert "Granted macros" in req.args["block"] and req.args["macros"] == "add-cart"
+    macro = next(c for c in req.candidates if c.key == "add-cart")
+    assert macro.bbox is None
+
+    run = p.resolve(
+        MicroOutcome(out=ACT_ARM, reason="add", confidence=0.9, picked=macro)
+    )
+
+    assert run is not None and run.tool_names() == ["note", "run_macro"]
+    assert run.tool_calls[1].arguments == {"name": "demo/add-cart"}
+    assert "ran macro 'add-cart'" in run.tool_calls[0].arguments["summary"]
+    _feed(h, run, RESULTS)  # its result view is the next turn's screen
+    req2 = p.advance(h)
+    assert isinstance(req2, DecisionRequest)
+    assert req2.args["block"].startswith("[you ran macro 'add-cart']")
+    assert KIND_MACRO in p._step.kinds
+
+
+@pytest.mark.parametrize("page, offered", [("results", True), ("home", False)])
+def test_page_scoped_landmark_is_offered_only_on_its_page(page, offered) -> None:
+    scoped = BACK_LANDMARK.rstrip("\n") + f"\n  page: {page}\n"
+    write_pack(playbooks={"walk": AGENTED}, landmarks=scoped)
+    p = _program(name="walk", user_said="买牛奶")
+    h = _history()
+    _feed(h, p.advance(h), ELSEWHERE)
+    assert isinstance(p.advance(h), DecisionRequest)
+    _feed(h, p.resolve(_done_outcome(keyword="milk")), HOME)
+    _feed(h, p.advance(h), RESULTS)  # the episode opens on results
+
+    req = p.advance(h)
+
+    assert isinstance(req, DecisionRequest)
+    assert any(c.key == "back" for c in req.candidates) is offered
+    assert ("Granted landmarks" in req.args["block"]) is offered
+
+
 def test_episode_done_is_audited_against_the_verify_page() -> None:
     p, h, req = _at_episode()
 
@@ -437,9 +518,14 @@ def test_recover_relaunch_loop_is_bounded_by_the_walk_budget() -> None:
     # A hand that runs and restores its page clears its recovery State, so the
     # budget must count the WALK's spend, not the engagement's — else a
     # splash ad on every cold launch loops force_quit forever.
-    from physiclaw.conductor import recover
+    from physiclaw.conductor.playbook import MAX_RECOVER_ACTIONS
 
-    _write()
+    _write(
+        AGENTED.replace(
+            "    recover:\n      tool: force_quit\n",
+            "    recover: {tool: force_quit, limit: 6}\n",
+        )
+    )
     p = _program(name="walk", user_said="买牛奶")
     h = _history()
     _feed(h, p.advance(h), ELSEWHERE)
@@ -457,8 +543,33 @@ def test_recover_relaunch_loop_is_bounded_by_the_walk_budget() -> None:
         step = nxt
     else:
         pytest.fail("the relaunch loop never terminated")
-    assert 1 <= quits <= recover.GLOBAL_BUDGET
+    assert 1 <= quits <= MAX_RECOVER_ACTIONS
     assert "budget" in step.tool_calls[0].arguments["summary"]
+
+
+def test_page_recover_limit_stops_the_relaunch_before_the_walk_budget() -> None:
+    # The page's own `limit:` (default 2) is spent first; the handover
+    # names it, so the author sees which bound fired.
+    from physiclaw.conductor.playbook import MAX_RECOVER_ACTIONS
+
+    _write()
+    p = _program(name="walk", user_said="买牛奶")
+    h = _history()
+    _feed(h, p.advance(h), ELSEWHERE)
+    assert isinstance(p.advance(h), DecisionRequest)
+    step = p.resolve(_done_outcome(keyword="milk"))
+    quits = 0
+    for _ in range(20):
+        assert step is not None and step.synthesized
+        if step.tool_names() == ["note", "force_quit"]:
+            quits += 1
+        _feed(h, step, ELSEWHERE)
+        nxt = p.advance(h)
+        if nxt is None:
+            break
+        step = nxt
+    assert quits == 2 < MAX_RECOVER_ACTIONS
+    assert "recover limit (2) spent" in step.tool_calls[0].arguments["summary"]
 
 
 def test_recover_force_quit_then_walk_restarts_from_the_top() -> None:
@@ -494,6 +605,7 @@ route:
   - page: results
   - ask: gate
     approve: payment
+    total: "合计"
     message: "合计 ¥{ask.total}。回复 好的 确认支付，或 不用 取消。"
     yes: ["好的"]
     no: ["不用"]

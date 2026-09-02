@@ -14,12 +14,9 @@ placeholders:
     example: QiaoQian
 
 landmarks:
-  back:
-    label: "back chevron (top-left)"     # an icon — no on-screen text
-    bbox: [0.015, 0.045, 0.095, 0.095]
   dismiss:
     label: "scrim above a bottom sheet"  # below the IM-banner zone (y < 0.15)
-    bbox: [0.35, 0.16, 0.65, 0.24]
+    bbox: [0.35, 0.16, 0.65, 0.24]       # the `occluded:` recover hand taps it
   cart:
     label: "购物车"                       # detail-page bottom bar, third icon —
     bbox: [0.231, 0.898, 0.346, 0.954]   # measured live on the detail footer
@@ -119,8 +116,13 @@ playbooks:
       - page: results
         anchors: {and: ["综合", "销量"]}
         scrollable: true
-        recover:                      # a promo page or mis-tap → pop it
-          tool: go_back               # the edge swipe — the chevron tap misses
+        recover:                      # one hand per reading of the deviation:
+          occluded:                   # a coupon sheet over the results → tap
+            tool: tap                 # the scrim above it
+            with: landmarks.dismiss
+          elsewhere:                  # a promo page or mis-tap → pop it with
+            tool: go_back             # the edge swipe (the chevron tap misses)
+          limit: 2                    # this page's tries per walk
 
       # A custom sub-agent: YOUR prompt drives the LLM through the pick.
       # `prompt` is filled from fields ONCE when the episode opens, then
@@ -170,13 +172,17 @@ playbooks:
         anchors: {and: ["购物车", "结算"]}
         scrollable: true
         recover:
-          tool: go_back
+          occluded: {tool: tap, with: landmarks.dismiss}
+          elsewhere: {tool: go_back}
 
       - ask: confirm-pay              # the human approves before money moves
         approve: payment
+        total: "合计"                  # the label the sheet total sits beside —
+                                      # {ask.total} is the amount on THAT row
         message: "{pick-into-cart.message}（实付以屏幕读数为准：¥{ask.total}）回复 好的 确认支付，或 不用 取消。"
         yes: ["好的", "好", "可以", "确认"]   # whole-message replies that open the gate
         no: ["不用", "不要", "取消", "算了"]   # …and that close it; anything else hands over
+        wait: {seconds: 45, rounds: 3}  # poll cadence × silent rounds, then suspend
         resume:                       # the ask left the app — come back
           macro:
             steps:

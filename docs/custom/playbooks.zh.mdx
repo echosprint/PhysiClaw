@@ -1,0 +1,104 @@
+---
+title: 剧本
+description: 每个 App 一个 YAML 文件，确定性地走完一项任务。你声明每一步，指挥器只执行你声明的内容，模型只在你划定的范围内做决定。
+---
+
+剧本把一项 App 任务写成一条路线：走位必须停留的页面，与它做出的动作交替出现。大多数动作是录制好的宏，不花 token。必须做判断的地方，用 `agent` 步骤把你的提示词和少数几个工具交给模型。必须由人批准的地方，用 `ask` 给用户发消息并等待。剧本声明什么就运行什么。后台不会自行恢复、重试或解锁。
+
+## 创建剧本包
+
+生成模板，再编辑 `PLAYBOOK.yml`：
+
+```bash
+physiclaw playbooks init taobao
+```
+
+<FileTree>
+- ~/.physiclaw/playbooks/
+  - README.md
+  - taobao/
+    - PLAYBOOK.yml
+    - macros/
+      - example-move/
+        - MACRO.yml
+</FileTree>
+
+模板就是格式说明。每种条目都带注释，说明它做什么、需要什么。
+
+## 路线
+
+路线由六种条目组成：
+
+- `page` 是走位必须到达的页面，每次都检查。锚点只声明一次，写在路点旁或 `pages:` 里，其他地方只写名字。
+- `start` 是冷启动，至多一个，紧挨第一个页面之前。
+- `do` 运行一个录制好的宏。它后面的页面就是落地检查。
+- `agent` 把这一步交给模型。你的 `prompt:` 就是全部指令。没有 `tools:` 时是纯文本调用，填写 `returns:`。有工具时它在屏幕上行动，用行文本、授予的地标或授予的宏作答，直到它后面的页面出现。
+- `ask` 给用户发消息并等待。回复按你声明的 `yes:` 和 `no:` 词读取。其他回复交给模型处理。
+- `tell` 给用户发消息，然后暂停到下次唤醒。
+
+一条最小路线：
+
+```yaml
+route:
+  - start: app
+    macro: {steps: [{name: open, tool: tap, with: {label: "the app icon", bbox: [0.72, 0.42, 0.91, 0.55]}}]}
+  - page: home
+    anchors: {or: ["推荐", "关注"], region: top}
+    recover: {tool: force_quit}
+  - do: search
+    with: {keyword: "{inputs.keyword}"}
+  - page: results
+    anchors: {and: ["综合", "销量"]}
+    recover:
+      occluded: {tool: tap, with: landmarks.dismiss}
+      elsewhere: {tool: go_back}
+      limit: 2
+```
+
+## 恢复
+
+页面的 `recover:` 是唯一的恢复手段。一只手覆盖任何偏离。两只手对应匹配器的两种读法：`occluded` 是页面本身被弹层或弹窗盖住，`elsewhere` 是任何其他屏幕。`limit:` 限制该页面每次走位的尝试次数。手运行后，走位重新检查页面，仍不对就从路线顶部重来。没有 `recover:` 的页面当场交接。
+
+## 金额
+
+支付类 `ask` 用 `total:` 声明总额旁边的标签。该行上的金额填入 `{ask.total}`，消息必须引用它。`yes:` 回复把同意绑定到这个数字。支付动作必须紧跟在 `ask` 之后，且只在屏幕仍显示已同意的金额、且没有更高金额时才会执行。
+
+```yaml
+  - ask: confirm-pay
+    approve: payment
+    total: "合计"
+    message: "实付 ¥{ask.total}，回复 好的 支付，或 不用 取消。"
+    yes: ["好的"]
+    no: ["不用"]
+    wait: {seconds: 45, rounds: 3}
+  - agent: pay
+    irreversible: payment
+    prompt: "Tap 结算, then 立即支付. Escalate if the total differs from ¥{ask.total}."
+    tools: [tap]
+  - page: paid
+    anchors: "支付成功"
+```
+
+## 启用前先测试
+
+回放把录制的屏幕送入真实路线，不用手机就能看到走位会在哪里交接：
+
+```bash
+physiclaw playbooks replay taobao/buy --session <id> -i keyword=五常大米 -o parse.keyword=五常大米
+```
+
+然后在手机上排练、校准页面，再设置 `enabled: true`：
+
+```bash
+physiclaw playbooks check
+physiclaw playbooks run taobao/buy -i user_said="帮我买五常大米"
+physiclaw conductor calibrate taobao
+```
+
+## 最佳实践
+
+- 能录制的动作都录制。`agent` 步骤是例外，由前后页面、`limit:` 和你授予的工具围住。
+- 授予地标和宏，而不是描述它们。`give: [landmarks.cart, macros.add-to-cart]` 把五次自由点击变成一次作答。
+- 每个页面声明四个以上锚点。只有三个时，一次 OCR 漏读就会让页面低于阈值而读成未知。`playbooks check` 会提示。
+- 用 `page:` 把地标限定在它所在的页面，模型就不会被授予屏幕上不存在的位置。
+- 关注 `physiclaw playbooks stats`。反复交接的节点就是要修的地方，`propose` 会打印对应命令。

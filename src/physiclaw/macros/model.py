@@ -100,12 +100,13 @@ TARGET_BBOX = "bbox"
 MAX_LABEL_READINGS = 4
 
 
-def label_readings(args: dict) -> "tuple[str, ...]":
-    """A target's `label` as the tuple of its readings — the ONE reader
-    of the string-or-list shape. Parse validates through it and the
-    runner heals through it, so the two can never disagree on what
-    counts as a reading. () when the step carries no label."""
-    raw = args.get(TARGET_LABEL)
+def label_readings(args: dict, key: str = TARGET_LABEL) -> "tuple[str, ...]":
+    """A target's `label` (or another readings-shaped `key`) as the tuple
+    of its readings — the ONE reader of the string-or-list shape. Parse
+    validates through it and the runner heals through it, so the two
+    can never disagree on what counts as a reading. () when the step
+    carries no label."""
+    raw = args.get(key)
     if raw is None:
         return ()
     return tuple(raw) if isinstance(raw, list) else (raw,)
@@ -116,23 +117,24 @@ def checked_readings(
     where: str,
     require_str: "Callable[[object, str], str]",
     err: type[Exception],
+    key: str = TARGET_LABEL,
 ) -> "tuple[str, ...]":
     """`label_readings` plus the grammar over them — the ONE validator
     of a readings list (non-empty, ≤ MAX_LABEL_READINGS, each a string
     via the caller's own scalar terminal, no duplicates), raising the
-    caller's error class. Macro targets and pack controls must never
-    disagree on what a legal readings list is."""
-    readings = label_readings(args)
+    caller's error class. Macro targets, pack landmarks, and an ask's
+    `total:` must never disagree on what a legal readings list is."""
+    readings = label_readings(args, key)
     if not readings or len(readings) > MAX_LABEL_READINGS:
         raise err(
-            f"{where}: `label` takes one string or up to "
+            f"{where}: `{key}` takes one string or up to "
             f"{MAX_LABEL_READINGS} alternate readings of ONE target"
         )
     seen: list[str] = []
     for r in readings:
-        text = require_str(r, f"{where}: `label`")
+        text = require_str(r, f"{where}: `{key}`")
         if text in seen:
-            raise err(f"{where}: duplicate `label` reading {text!r}")
+            raise err(f"{where}: duplicate `{key}` reading {text!r}")
         seen.append(text)
     return tuple(seen)
 

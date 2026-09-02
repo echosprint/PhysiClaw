@@ -38,6 +38,7 @@ route:
     message: "Added to the cart, ordering soon"
   - ask: pay
     approve: payment
+    total: "Total"
     message: "Total ¥{ask.total}, reply ok to pay, or no to cancel"
     yes: ["ok"]
     no: ["no"]
@@ -461,9 +462,26 @@ def test_tell_may_declare_its_cancel_words() -> None:
         # {ask.total} exists only inside a payment ask.
         (
             "approve: payment\n"
+            '    total: "Total"\n'
             '    message: "Total ¥{ask.total}, reply ok to pay, or no to cancel"',
             'approve: handoff\n    message: "Total ¥{ask.total}, reply ok or no"',
             "references move 'ask'",
+        ),
+        # A payment ask declares where the total sits…
+        ('    total: "Total"\n', "", "declares `total:`"),
+        # …and only a payment ask does.
+        (
+            "approve: payment\n"
+            '    total: "Total"\n'
+            '    message: "Total ¥{ask.total}, reply ok to pay, or no to cancel"\n',
+            'approve: handoff\n    total: "Total"\n    message: "reply ok or no"\n',
+            "goes with `approve: payment`",
+        ),
+        # The ask's patience is bounded by the engine's single sleep.
+        (
+            '    total: "Total"\n',
+            '    total: "Total"\n    wait: {seconds: 600}\n',
+            "wait.seconds",
         ),
     ],
 )
@@ -750,5 +768,5 @@ def test_disabled_recover_macro_is_reported_not_run() -> None:
 
     spec = pb.parse_playbook(text, "buy", pack)
 
-    assert spec.recovers["home"].macro == "go-home"
+    assert spec.recovers["home"].elsewhere.macro == "go-home"
     assert pb.disabled_macros(spec, pack) == ["go-home"]

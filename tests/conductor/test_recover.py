@@ -8,13 +8,14 @@ from conductor_fakes import make_screen
 
 from physiclaw.conductor import recover
 from physiclaw.conductor.pages import Landmark
-from physiclaw.conductor.playbook import RecoverHand
+from physiclaw.conductor.playbook import MAX_RECOVER_ACTIONS, RecoverHand, Recovery
 
 HAND = RecoverHand(tool="go_back")
+RECOVERY = Recovery(occluded=HAND, elsewhere=HAND, limit=2)
 
 
 def test_the_declared_hand_is_the_plan() -> None:
-    step = recover.plan(0, HAND)
+    step = recover.plan(0, RECOVERY)
 
     assert isinstance(step, recover.Hand) and step.hand is HAND
 
@@ -27,9 +28,27 @@ def test_page_without_a_hand_is_exhausted_at_once() -> None:
 
 
 def test_global_budget_wins_over_the_hand() -> None:
-    step = recover.plan(recover.GLOBAL_BUDGET, HAND)
+    step = recover.plan(MAX_RECOVER_ACTIONS, RECOVERY)
 
     assert isinstance(step, recover.Exhausted) and "budget" in step.reason
+
+
+def test_page_limit_is_spent_before_the_walk_budget() -> None:
+    step = recover.plan(1, RECOVERY, page_actions=RECOVERY.limit)
+
+    assert isinstance(step, recover.Exhausted) and "recover limit (2)" in step.reason
+
+
+def test_keyed_hands_follow_the_reading() -> None:
+    # A page declaring only an `occluded` hand hands over on any other
+    # screen — and vice versa: what is declared is what runs.
+    dismiss = RecoverHand(tool="tap", landmark="dismiss")
+    only_occluded = Recovery(occluded=dismiss)
+
+    step = recover.plan(0, only_occluded, reading="occluded")
+    assert isinstance(step, recover.Hand) and step.hand is dismiss
+    step = recover.plan(0, only_occluded, reading="elsewhere")
+    assert isinstance(step, recover.Exhausted) and "`elsewhere`" in step.reason
 
 
 def test_state_rejects_an_unknown_mode() -> None:

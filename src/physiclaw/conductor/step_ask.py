@@ -2,14 +2,16 @@
 user, both over the channel pack (`channel.py`): the playbook's
 `message:` goes VERBATIM (only the author knows the user's language).
 
-`ask` sends and HOLDS: it polls the thread for a reply (bounded silent
-rounds, then the session suspends for the next wake), reads the reply
+`ask` sends and HOLDS: it polls the thread for a reply (the ask's own
+`wait:` cadence and silent rounds, then the session suspends for the
+next wake), reads the reply
 against the words the ask itself declares (`yes:` / `no:`, `reply.py`),
 and on consent binds the money numbers the following payment move
 spends. A deny ends the walk; a reply the declared words do not cover
 hands over — the model reads the thread, the conductor never guesses.
-A payment ask reads the sheet total off a VERIFIED own-pack page and
-quotes it in the message: the ask IS the consent record.
+A payment ask reads the sheet total off a VERIFIED own-pack page —
+the amount beside the label its `total:` names — and quotes it in the
+message: the ask IS the consent record.
 
 `tell` sends and suspends; ANY next wake resumes the walk past it, and
 when the tell declares `no:` words that resume first reads the thread
@@ -22,15 +24,10 @@ from physiclaw.common import gesture_vocab
 from physiclaw.conductor import money, reply
 from physiclaw.conductor.pages import THREAD_ID
 from physiclaw.conductor.playbook import AskNode, TellNode, fill_refs, qualified_macro
-from physiclaw.conductor.step import Step, Turn
+from physiclaw.conductor.step import Step, Turn, Walk
 from physiclaw.contract.dto import AssistantMessage
 
 log = logging.getLogger(__name__)
-
-# Ask-and-hold bounds: in-session reply polling cadence, and how many
-# silent rounds before the session suspends for the next wake.
-GATE_WAIT_SECONDS = 45
-SILENCE_ROUNDS = 3
 
 KIND_ASK_SENT = "ask-sent"
 KIND_ASK_WAIT = "ask-wait"
@@ -42,7 +39,7 @@ KIND_TELL_PEEK = "tell-peek"
 KIND_TELL_OPEN = "tell-open"
 
 
-def _thread_mismatch(walk) -> str | None:
+def _thread_mismatch(walk: Walk) -> str | None:
     if walk.channel is None:
         return "no channel pack"
     assert walk.verdict is not None
@@ -50,7 +47,7 @@ def _thread_mismatch(walk) -> str | None:
 
 
 def _send(
-    walk, kind: str, text: str, yes: tuple[str, ...], no: tuple[str, ...]
+    walk: Walk, kind: str, text: str, yes: tuple[str, ...], no: tuple[str, ...]
 ) -> Turn:
     """The one door to the user: the channel's send macro with the
     authored text — or the handover when there is no send to run.
@@ -73,7 +70,7 @@ def _send(
     )
 
 
-def _reopen(walk, kind: str) -> AssistantMessage | None:
+def _reopen(walk: Walk, kind: str) -> AssistantMessage | None:
     """The thread is not on screen: reopen it ONCE per ask via the
     channel's open macro — None when there is none, or it already ran."""
     if not (walk.channel and walk.channel.open) or walk.gate.tried_open:
@@ -88,7 +85,7 @@ def _reopen(walk, kind: str) -> AssistantMessage | None:
     )
 
 
-def _new_replies(walk, *, after_ask: bool = True) -> list[str]:
+def _new_replies(walk: Walk, *, after_ask: bool = True) -> list[str]:
     """The user's messages since the gate's baseline (`reply.py` owns
     the diff), off the current thread screen."""
     assert walk.screen is not None
@@ -102,7 +99,7 @@ def _new_replies(walk, *, after_ask: bool = True) -> list[str]:
     )
 
 
-def _verdict(walk, messages: list[str]) -> str | None:
+def _verdict(walk: Walk, messages: list[str]) -> str | None:
     """The gate's own words over `messages` — deny wins over anything
     else said, an uncovered message defers."""
     return reply.classify_all(
@@ -110,7 +107,7 @@ def _verdict(walk, messages: list[str]) -> str | None:
     )
 
 
-def _deny(walk) -> Turn:
+def _deny(walk: Walk) -> Turn:
     """The one deny disposition: no re-asks, and no second chance this
     session."""
     return walk.handover(
@@ -119,7 +116,7 @@ def _deny(walk) -> Turn:
     )
 
 
-def _sent_landed(walk) -> Turn:
+def _sent_landed(walk: Walk) -> Turn:
     """A send's landing, shared by ask and tell: it must be on the
     thread; anything the user sent while the walk was off in the app (an
     earlier ask's baseline) lands here as new, and a deny among it must
@@ -171,20 +168,25 @@ class AskStep(Step[AskNode]):
     def _start(self) -> Turn:
         """Send the ask. A payment ask reads the sheet total off a
         VERIFIED own-pack page (the sheet the lints put before the ask),
-        never whatever screen happened to come last, and quotes it —
-        the message IS the consent record."""
+        never whatever screen happened to come last — the amount beside
+        the label its `total:` declares — and quotes it: the message IS
+        the consent record."""
         node, walk = self.node, self.walk
         values = walk.ref_values()
         if node.approve == "payment":
             blocked = walk.money_page_block(f"ask {node.id!r}")
             if blocked is not None:
                 return walk.handover(f"{blocked} — refusing to ask blind")
-            amts = money.amounts(walk.screen) if walk.screen else []
-            if not amts:
-                return walk.handover(f"ask {node.id!r}: no total readable on the sheet")
+            assert walk.screen is not None  # a verified verdict was read off it
+            total = money.declared_total(walk.screen, node.total)
+            if total is None:
+                return walk.handover(
+                    f"ask {node.id!r}: no amount readable beside "
+                    f"{' / '.join(node.total)} on the sheet"
+                )
             # The number the user will see is the number they consent
             # to — and, at fire time, the bound.
-            walk.gate.quoted = max(amts)
+            walk.gate.quoted = total
             values = {**values, "ask.total": f"{walk.gate.quoted:g}"}
         text = str(fill_refs(node.message, values, where=f"ask {node.id!r} `message`"))
         return _send(walk, KIND_ASK_SENT, text, node.yes, node.no)
@@ -203,7 +205,7 @@ class AskStep(Step[AskNode]):
         new = _new_replies(walk)
         if not new:
             gate.silence += 1
-            if gate.silence >= SILENCE_ROUNDS:
+            if gate.silence >= node.silence_rounds:
                 return walk.suspend(resume_idx=walk.idx, awaiting=True)
             return self._wait()
         verdict = _verdict(walk, new)
@@ -240,7 +242,7 @@ class AskStep(Step[AskNode]):
             KIND_ASK_WAIT,
             "conductor: waiting for the user's reply",
             "wait",
-            {"seconds": GATE_WAIT_SECONDS},
+            {"seconds": self.node.wait_seconds},
         )
 
     def _peek(self) -> AssistantMessage:

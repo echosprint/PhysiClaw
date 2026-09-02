@@ -1,16 +1,20 @@
 """Declared recovery — a page's `recover:` hand, and nothing else.
 
-Pure policy over the walk's counter, the `plan` shape: given a check
+Pure policy over the walk's counters, the `plan` shape: given a check
 that needed page P and did not get it, name the ONE next action, or
 Exhausted and the walk hands over. What the playbook declares is what
-runs: a page with a `recover:` hand runs it (after it the walk re-checks
-on the hand's own result view and, still off, walks the route again
-from its first unsettled node — a `force_quit` hand re-runs `start`,
-its whole point); a page declaring none hands over on the spot.
-Nothing taps, unlocks, or waits in the background — a phone that may
-lock mid-walk gets an `unlock_phone` hand declared by its author.
+runs: a page with a `recover:` runs the hand declared for the reading
+— `occluded` when P itself sits under a sheet or popup, `elsewhere`
+for any other screen (the flat form declares one hand for both). After
+it the walk re-checks on the hand's own result view and, still off,
+walks the route again from its first unsettled node (a `force_quit`
+hand re-runs `start`, its whole point). A page declaring none, or no
+hand for this reading, hands over on the spot. Nothing taps, unlocks,
+or waits in the background — a phone that may lock mid-walk gets an
+`unlock_phone` hand declared by its author.
 
-Everything is bounded by one walk-wide budget that only ever goes up
+Two bounds, both visible in the playbook: the page's own `limit:` and
+the walk-wide ceiling (`MAX_RECOVER_ACTIONS`) that only ever goes up
 (the rebinding-attack lesson: recovery must not be farmable into a
 loop). Handover stays the floor.
 """
@@ -20,12 +24,13 @@ from dataclasses import dataclass
 from physiclaw.common.bbox import Bbox, center_of
 from physiclaw.common.listing import Screen, nearest_labeled_row
 from physiclaw.conductor.pages import Landmark
-from physiclaw.conductor.playbook import RecoverHand
+from physiclaw.conductor.playbook import (
+    MAX_RECOVER_ACTIONS,
+    READING_ELSEWHERE,
+    RecoverHand,
+    Recovery,
+)
 from physiclaw.macros.steps import HEAL_RADIUS
-
-# Fixed, not authorable: the walk-wide budget of recovery actions —
-# what stops a splash ad on every cold launch from relaunching forever.
-GLOBAL_BUDGET = 6
 
 # Resume modes — how the walk continues once the target page is
 # restored. Validated at State construction: a typo'd mode must fail
@@ -69,13 +74,26 @@ class State:
             raise ValueError(f"unknown recovery mode {self.mode!r}")
 
 
-def plan(actions: int, hand: RecoverHand | None) -> Step:
-    """The next recovery action: the declared hand, within the walk's
-    lifetime budget (`actions`, the recovery actions spent so far)."""
-    if actions >= GLOBAL_BUDGET:
-        return Exhausted(f"recovery budget ({GLOBAL_BUDGET} actions) spent")
-    if hand is None:
+def plan(
+    actions: int,
+    recovery: Recovery | None,
+    page_actions: int = 0,
+    *,
+    reading: str = READING_ELSEWHERE,
+) -> Step:
+    """The next recovery action: the hand the page declares for this
+    `reading` (one of `playbook.RECOVER_READINGS`), within the page's
+    own `limit` (`page_actions`, its actions so far) and the walk's
+    lifetime ceiling (`actions`)."""
+    if actions >= MAX_RECOVER_ACTIONS:
+        return Exhausted(f"recovery budget ({MAX_RECOVER_ACTIONS} actions) spent")
+    if recovery is None:
         return Exhausted("its page declares no recover")
+    if page_actions >= recovery.limit:
+        return Exhausted(f"its page's recover limit ({recovery.limit}) spent")
+    hand = recovery.hand_for(reading)
+    if hand is None:
+        return Exhausted(f"its page declares no `{reading}` recover hand")
     return Hand(hand)
 
 

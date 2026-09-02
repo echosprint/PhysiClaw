@@ -34,6 +34,28 @@ def make_screen(*rows: tuple) -> Screen:
 # `turns.py` centralized this on the src side, so the tests must not
 # re-spell "the result is keyed to tool_calls[1]" per file.
 ELSEWHERE = make_screen(("Nothing known", 0.5, 0.5)).text
+# The demo pack's three pages as screens, and the two-move walk over
+# them — the fixtures the walk-driving test files share.
+HOME = make_screen(("Files", 0.5, 0.1)).text
+RESULTS = make_screen(("综合", 0.5, 0.1)).text
+DONE = make_screen(("AllDone", 0.5, 0.1)).text
+
+FLOW = """\
+description: two moves
+inputs:
+  keyword:
+    description: what to search
+route:
+  - page: home
+  - do: open
+    macro: open-app
+    with: {message: "{inputs.keyword}"}
+  - page: results
+  - do: search
+    macro: add-cart
+    with: {message: "go"}
+  - page: done
+"""
 
 
 def thread_screen(*bubbles: tuple) -> str:
@@ -141,14 +163,17 @@ def write_pack(
     return root
 
 
-def build_program(app: str = "demo", name: str = "flow", **values):
+def build_program(
+    app: str = "demo", name: str = "flow", *, dry: bool = False, **values
+):
     """Build the walk the way `playbooks run` does — the factory that
-    replaced arming as the way to get a Program without a wake."""
+    replaced arming as the way to get a Program without a wake. `dry`
+    builds the replay's no-trace walk."""
     from physiclaw.conductor import channel, setup
 
     spec, pack = setup.load_spec(app, name, require_live=False)
     return setup.build_program(
-        spec, pack, setup.resolve_inputs(spec, values), channel.load_channel()
+        spec, pack, setup.resolve_inputs(spec, values), channel.load_channel(), dry=dry
     )
 
 

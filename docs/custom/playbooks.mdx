@@ -1,0 +1,104 @@
+---
+title: Playbooks
+description: Deterministic walks through an app, one YAML file per app. You declare every step; the conductor runs exactly that, and the model decides only where you fence it in.
+---
+
+A playbook is one app task written as a route: pages the walk must be on, alternating with moves it makes. Most moves are recorded macros, so the walk spends no tokens. Where a decision is unavoidable, an `agent` step hands the model your prompt with the few tools you grant. Where a human must approve, an `ask` messages your user and waits. What the playbook declares is what runs. Nothing recovers, retries, or unlocks in the background.
+
+## Create a pack
+
+Scaffold one, then edit `PLAYBOOK.yml`:
+
+```bash
+physiclaw playbooks init taobao
+```
+
+<FileTree>
+- ~/.physiclaw/playbooks/
+  - README.md
+  - taobao/
+    - PLAYBOOK.yml
+    - macros/
+      - example-move/
+        - MACRO.yml
+</FileTree>
+
+The scaffold is the format reference. It carries every entry kind with a comment on what it does and what it needs.
+
+## The route
+
+Six entry kinds make up a route:
+
+- `page` is where the walk must be, checked every time. Declare its anchors once, beside the waypoint or in `pages:`, and name it bare everywhere else.
+- `start` is the cold launch, at most one, right before the first page.
+- `do` runs a recorded macro. The page after it is its landing check.
+- `agent` hands the step to the model. Your `prompt:` is the whole brief. With no `tools:` it is a pure text call that fills `returns:`. With tools it acts on the screen, naming rows, granted landmarks, or granted macros, until the page after it reads.
+- `ask` messages your user and holds. The reply is read against the `yes:` and `no:` words you declare. Any other reply hands over to the model.
+- `tell` messages your user and pauses until the next wake.
+
+A minimal route:
+
+```yaml
+route:
+  - start: app
+    macro: {steps: [{name: open, tool: tap, with: {label: "the app icon", bbox: [0.72, 0.42, 0.91, 0.55]}}]}
+  - page: home
+    anchors: {or: ["推荐", "关注"], region: top}
+    recover: {tool: force_quit}
+  - do: search
+    with: {keyword: "{inputs.keyword}"}
+  - page: results
+    anchors: {and: ["综合", "销量"]}
+    recover:
+      occluded: {tool: tap, with: landmarks.dismiss}
+      elsewhere: {tool: go_back}
+      limit: 2
+```
+
+## Recovery
+
+A page's `recover:` is the only recovery. One hand covers any deviation. Two hands cover the two readings the matcher gives: `occluded` when the page itself sits under a sheet or popup, `elsewhere` for any other screen. `limit:` bounds the page's tries per walk. After a hand runs, the walk re-checks the page and, still off, starts the route over. A page without `recover:` hands over on the spot.
+
+## Money
+
+A payment ask names the label the sheet total sits beside with `total:`. The amount on that row fills `{ask.total}`, which the message must quote. A `yes:` reply binds consent to exactly that number. The payment move must directly follow the ask, and it fires only while the screen still shows the consented amount and nothing above it.
+
+```yaml
+  - ask: confirm-pay
+    approve: payment
+    total: "合计"
+    message: "实付 ¥{ask.total}，回复 好的 支付，或 不用 取消。"
+    yes: ["好的"]
+    no: ["不用"]
+    wait: {seconds: 45, rounds: 3}
+  - agent: pay
+    irreversible: payment
+    prompt: "Tap 结算, then 立即支付. Escalate if the total differs from ¥{ask.total}."
+    tools: [tap]
+  - page: paid
+    anchors: "支付成功"
+```
+
+## Test before enabling
+
+Replay walks recorded screens through the real route and shows where it would hand over, without the phone:
+
+```bash
+physiclaw playbooks replay taobao/buy --session <id> -i keyword=五常大米 -o parse.keyword=五常大米
+```
+
+Then rehearse on the phone, calibrate the pages, and set `enabled: true`:
+
+```bash
+physiclaw playbooks check
+physiclaw playbooks run taobao/buy -i user_said="帮我买五常大米"
+physiclaw conductor calibrate taobao
+```
+
+## Best practices
+
+- Record every move you can. An `agent` step is the exception, fenced by the pages around it, its `limit:`, and the tools you grant.
+- Grant landmarks and macros instead of describing them. `give: [landmarks.cart, macros.add-to-cart]` turns five freeform taps into one answer.
+- Declare four or more anchors per page. With three, one OCR miss drops the page below its threshold and it reads unknown. `playbooks check` warns about it.
+- Scope a landmark to its page with `page:` so the model is never offered a spot that is not on screen.
+- Watch `physiclaw playbooks stats`. A node that keeps handing over is authoring work, and `propose` prints the commands.

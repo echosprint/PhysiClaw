@@ -32,10 +32,10 @@ moved to the key.
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeVar
 
 from physiclaw.conductor import context, reply
-from physiclaw.conductor.calls import AGENT_TOOLS
+from physiclaw.conductor.calls import AGENT_TOOLS, RESERVED_KEYS
 from physiclaw.conductor.pages import (
     PAGE_DECL_FIELDS,
     RESERVED_APPS,
@@ -44,10 +44,17 @@ from physiclaw.conductor.pages import (
     route_decl,
 )
 from physiclaw.conductor.playbook import (
+    DEFAULT_ASK_ROUNDS,
+    DEFAULT_ASK_WAIT_SECONDS,
+    DEFAULT_RECOVER_LIMIT,
     INPUTS_ROOT,
     IRREVERSIBLE_CLASSES,
     MAX_NODES,
+    MAX_RECOVER_ACTIONS,
     PACK_MACROS_DIRNAME,
+    READING_ELSEWHERE,
+    READING_OCCLUDED,
+    RECOVER_READINGS,
     AgentNode,
     AskNode,
     DoNode,
@@ -55,6 +62,7 @@ from physiclaw.conductor.playbook import (
     Pack,
     PlaybookError,
     RecoverHand,
+    Recovery,
     TellNode,
     check_arg_refs,
     check_name,
@@ -64,7 +72,7 @@ from physiclaw.conductor.playbook import (
     refs_in,
     require_str,
 )
-from physiclaw.macros.model import Macro, MacroError
+from physiclaw.macros.model import Macro, MacroError, checked_readings
 from physiclaw.macros.parse import parse_inline_macro
 
 # Agent-step bounds. `tools` is the closed per-episode gesture allowlist
@@ -75,15 +83,32 @@ from physiclaw.macros.parse import parse_inline_macro
 MAX_AGENT_CALLS = 30
 DEFAULT_AGENT_CALLS = 12
 DEFAULT_AGENT_SCROLLS = 6
-MAX_PROMPT_LEN = 2000
+# The prompt is the author's whole brief; the cap only guards against a
+# pasted document (a real brief runs a few thousand characters).
+MAX_PROMPT_LEN = 8000
 MAX_RETURNS = 6
 _AGENT_LIMIT_KEYS = {"calls", "scrolls"}
+
+# An ask's `wait:` bounds (the defaults live on the model, `playbook.py`).
+MIN_ASK_WAIT_SECONDS = 5
+MAX_ASK_WAIT_SECONDS = 60
+MAX_ASK_ROUNDS = 10
+_ASK_WAIT_KEYS = {"seconds", "rounds"}
 
 # The declared-recovery hand: one gesture (`tool`, with `with:
 # landmarks.<name>` for a tap) or a macro. Closed tool vocabulary — a
 # recover hand resets state, it does not navigate (the route does that).
+# A page declares one hand for any deviation, or one per reading
+# (`occluded:` / `elsewhere:`), plus its own `limit:`.
 RECOVER_TOOLS = ("force_quit", "go_back", "home_screen", "unlock_phone", "tap")
-_RECOVER_KEYS = {"tool", "with", "macro"}
+_HAND_KEYS = {"tool", "with", "macro"}
+_RECOVER_KEYS = _HAND_KEYS | {"limit", *RECOVER_READINGS}
+
+# What an agent may be granted by name (`give:`): a landmark it may tap
+# blind, or a pack macro it may run.
+GRANT_LANDMARKS = "landmarks"
+GRANT_MACROS = "macros"
+_GRANT_ROOTS = (GRANT_LANDMARKS, GRANT_MACROS)
 
 # Route entry vocabularies. An entry's KIND is its leading key and the
 # value is the entry's name — the map-key-is-the-name doctrine, applied
@@ -105,12 +130,14 @@ _ENTRY_KEYS = {
         "context",
         "irreversible",
     },
-    "ask": {"ask", "approve", "message", "yes", "no", "resume"},
+    "ask": {"ask", "approve", "message", "yes", "no", "total", "wait", "resume"},
     "tell": {"tell", "message", "no"},
 }
 
 # The shape `_macro_resolver` returns.
 _MacroResolve = Callable[..., Macro]
+
+_T = TypeVar("_T")
 
 
 @dataclass(frozen=True)
@@ -121,7 +148,7 @@ class CompiledRoute:
 
     nodes: list[Node]
     start: str
-    recovers: dict[str, RecoverHand]
+    recovers: dict[str, Recovery]
     inline: dict[str, Macro]
 
 
@@ -192,7 +219,7 @@ def compile_route(
     resolve = _macro_resolver(playbook, pack, inline)
     moves: list[Node] = []
     seen: dict[str, int] = {}
-    recovers: dict[str, RecoverHand] = {}
+    recovers: dict[str, Recovery] = {}
     # Grows as the single pass advances, so `{move.field}` refs are
     # defined-before-use by construction (route order).
     payloads: dict[str, tuple[str, ...]] = {}
@@ -268,7 +295,15 @@ def compile_route(
             )
         elif kind == "agent":
             agent = _parse_agent(
-                where, name, entry, input_names, payloads, pack, current_page, nxt
+                where,
+                name,
+                entry,
+                input_names,
+                payloads,
+                pack,
+                current_page,
+                nxt,
+                resolve,
             )
             payloads[agent.id] = agent.return_fields
             moves.append(agent)
@@ -361,12 +396,12 @@ def _waypoint_id(pos: int, name: str, entry: dict, pack: Pack, declared: set) ->
 # ---------- shared field rules ----------
 
 
-def _unique_list(raw: Any, where: str, check: Callable[[Any], str]) -> list[str]:
+def _unique_list(raw: Any, where: str, check: Callable[[Any], _T]) -> list[_T]:
     """A list of distinct entries, each validated (and normalized) by
-    `check` — the one shape `tools` and `give` share."""
+    `check` — the one shape `tools`, `give`, and the reply words share."""
     if not isinstance(raw, list):
         raise PlaybookError(f"{where} must be a list")
-    out: list[str] = []
+    out: list[_T] = []
     for item in raw:
         value = check(item)
         if value in out:
@@ -441,7 +476,7 @@ def _landmark_name(value: Any, where: str, pack: Pack) -> str:
     half rides the shared name grammar (`check_name`), so a landmark
     reference can never drift from the section's own naming rule."""
     prefix, _, name = value.partition(".") if isinstance(value, str) else ("", "", "")
-    if prefix != "landmarks" or not name:
+    if prefix != GRANT_LANDMARKS or not name:
         raise PlaybookError(f"{where}: {value!r} must look like `landmarks.<name>`")
     check_name(name, where)
     if name not in pack.landmarks:
@@ -451,6 +486,26 @@ def _landmark_name(value: Any, where: str, pack: Pack) -> str:
             f"`landmarks`. Declared: {known}"
         )
     return name
+
+
+def _grant(
+    value: Any, where: str, nid: str, pack: Pack, resolve: "_MacroResolve"
+) -> tuple[str, str]:
+    """One `give:` entry → (root, name): a `landmarks.<name>` the episode
+    may tap blind, or a `macros.<name>` pack macro it may run — argument-
+    less, like every helper hand, and never spelled like a fixed answer
+    (`done`, `escalate`, a verb) that the episode legend already owns."""
+    prefix, _, name = value.partition(".") if isinstance(value, str) else ("", "", "")
+    if prefix not in _GRANT_ROOTS or not name:
+        roots = " or ".join(f"`{r}.<name>`" for r in _GRANT_ROOTS)
+        raise PlaybookError(f"{where}: {value!r} must look like {roots}")
+    if prefix == GRANT_LANDMARKS:
+        return prefix, _landmark_name(value, where, pack)
+    if name in RESERVED_KEYS:
+        raise PlaybookError(
+            f"{where}: macro name {name!r} is a fixed episode answer — rename the macro"
+        )
+    return prefix, _argless_macro(name, "give", where, nid, resolve)
 
 
 # ---------- macros ----------
@@ -582,6 +637,7 @@ def _parse_agent(
     pack: Pack,
     current_page: str | None,
     next_wp: str | None,
+    resolve: _MacroResolve,
 ) -> AgentNode:
     """An `agent` move. No `tools` = a pure-text call (needs `returns`,
     no pages); tools = an acting episode framed by the adjacent
@@ -611,11 +667,13 @@ def _parse_agent(
                     f"{where}: `{key}` is for acting episodes — a pure-text "
                     "call has no screen"
                 )
-    give = _unique_list(
+    grants = _unique_list(
         entry.get("give", []),
         f"{where}: `give`",
-        lambda g: _landmark_name(g, f"{where}: `give` entry", pack),
+        lambda g: _grant(g, f"{where}: `give` entry", nid, pack, resolve),
     )
+    give = tuple(n for root, n in grants if root == GRANT_LANDMARKS)
+    macros = tuple(n for root, n in grants if root == GRANT_MACROS)
 
     raw_returns = entry.get("returns")
     returns: list[tuple[str, str]] = []
@@ -699,7 +757,7 @@ def _parse_agent(
         id=nid,
         prompt=prompt,
         tools=tuple(tools),
-        give=tuple(give),
+        give=give,
         returns=tuple(returns),
         enter=enter,
         verify=verify,
@@ -707,6 +765,7 @@ def _parse_agent(
         max_scrolls=max_scrolls,
         irreversible=irreversible,
         context=tuple(_context_entries(entry, where)),
+        macros=macros,
     )
 
 
@@ -728,11 +787,22 @@ def _parse_ask(
         # and at fill.)
         g_payloads = {**payloads, "ask": ("total",)}
     message, msg_refs = _entry_message(where, entry, input_names, g_payloads)
-    if approve == "payment" and "ask.total" not in msg_refs:
-        raise PlaybookError(
-            f"{where}: a payment ask's `message` must quote the sheet "
-            "total — reference {ask.total} (the ask IS the consent record)"
-        )
+    total: tuple[str, ...] = ()
+    if approve == "payment":
+        if "ask.total" not in msg_refs:
+            raise PlaybookError(
+                f"{where}: a payment ask's `message` must quote the sheet "
+                "total — reference {ask.total} (the ask IS the consent record)"
+            )
+        if "total" not in entry:
+            raise PlaybookError(
+                f"{where}: a payment ask declares `total:` — the label the "
+                "sheet total sits beside (e.g. 合计), read off that row only"
+            )
+        total = checked_readings(entry, where, require_str, PlaybookError, key="total")
+    elif "total" in entry:
+        raise PlaybookError(f"{where}: `total` goes with `approve: payment`")
+    wait_seconds, rounds = _ask_wait(entry.get("wait"), where)
     resume = None
     if entry.get("resume") is not None:
         resume = _argless_macro(entry["resume"], "resume", where, nid, resolve)
@@ -743,16 +813,44 @@ def _parse_ask(
         yes=tuple(_reply_words(entry, "yes", where)),
         no=tuple(_reply_words(entry, "no", where)),
         resume=resume,
+        total=total,
+        wait_seconds=wait_seconds,
+        silence_rounds=rounds,
     )
+
+
+def _ask_wait(raw: Any, where: str) -> tuple[int, int]:
+    """`wait: {seconds, rounds}` — both optional, defaults visible in
+    the scaffold; bounded by the engine's single-sleep cap and a sane
+    number of silent rounds."""
+    raw = {} if raw is None else raw
+    if not isinstance(raw, dict):
+        raise PlaybookError(f"{where}: `wait` must be a mapping")
+    unknown = sorted(set(map(str, raw)) - _ASK_WAIT_KEYS)
+    if unknown:
+        raise PlaybookError(f"{where}: `wait`: unknown key(s): {', '.join(unknown)}")
+    seconds = _limit_int(
+        raw.get("seconds", DEFAULT_ASK_WAIT_SECONDS),
+        f"{where}: `wait.seconds`",
+        MIN_ASK_WAIT_SECONDS,
+        MAX_ASK_WAIT_SECONDS,
+    )
+    rounds = _limit_int(
+        raw.get("rounds", DEFAULT_ASK_ROUNDS),
+        f"{where}: `wait.rounds`",
+        1,
+        MAX_ASK_ROUNDS,
+    )
+    return seconds, rounds
 
 
 def _parse_recover(
     raw: Any, where: str, page: str, pack: Pack, resolve: _MacroResolve
-) -> RecoverHand:
-    """A page's `recover:` hand — one gesture or one argument-less
-    macro. A `tap` takes its target as `with: landmarks.<name>` (the
-    declared spot, label-healed at run time); the other tools take no
-    target."""
+) -> Recovery:
+    """A page's `recover:` — one hand for any deviation (`tool:`/`macro:`
+    at the top), or one per reading (`occluded:` the page itself under
+    a sheet or popup, `elsewhere:` any other screen), with the page's
+    own `limit:` under the walk-wide ceiling."""
     if not isinstance(raw, dict):
         raise PlaybookError(
             f"{where}: `recover` must be a mapping — `tool:` (one gesture) or `macro:`"
@@ -760,28 +858,64 @@ def _parse_recover(
     unknown = sorted(set(map(str, raw)) - _RECOVER_KEYS)
     if unknown:
         raise PlaybookError(f"{where}: `recover`: unknown key(s): {', '.join(unknown)}")
+    limit = _limit_int(
+        raw.get("limit", DEFAULT_RECOVER_LIMIT),
+        f"{where}: `recover.limit`",
+        1,
+        MAX_RECOVER_ACTIONS,
+    )
+    keyed = [k for k in RECOVER_READINGS if k in raw]
+    flat = [k for k in _HAND_KEYS if k in raw]
+    if keyed and flat:
+        raise PlaybookError(
+            f"{where}: `recover` declares one hand (`tool:`/`macro:`) OR one "
+            f"per reading ({', '.join(RECOVER_READINGS)}), not both"
+        )
+    if keyed:
+        hands = {
+            k: _parse_hand(raw[k], f"{where}: `recover.{k}`", page, pack, resolve)
+            for k in keyed
+        }
+        return Recovery(
+            occluded=hands.get(READING_OCCLUDED),
+            elsewhere=hands.get(READING_ELSEWHERE),
+            limit=limit,
+        )
+    hand = _parse_hand(
+        {k: raw[k] for k in flat}, f"{where}: `recover`", page, pack, resolve
+    )
+    return Recovery(occluded=hand, elsewhere=hand, limit=limit)
+
+
+def _parse_hand(
+    raw: Any, where: str, page: str, pack: Pack, resolve: _MacroResolve
+) -> RecoverHand:
+    """One recovery hand — one gesture or one argument-less macro. A
+    `tap` takes its target as `with: landmarks.<name>` (the declared
+    spot, label-healed at run time); the other tools take no target."""
+    if not isinstance(raw, dict):
+        raise PlaybookError(f"{where} must be a mapping — `tool:` or `macro:`")
+    unknown = sorted(set(map(str, raw)) - _HAND_KEYS)
+    if unknown:
+        raise PlaybookError(f"{where}: unknown key(s): {', '.join(unknown)}")
     tool, macro_raw = raw.get("tool"), raw.get("macro")
     if (tool is None) == (macro_raw is None):
-        raise PlaybookError(
-            f"{where}: `recover` takes exactly one of `tool` or `macro`"
-        )
+        raise PlaybookError(f"{where} takes exactly one of `tool` or `macro`")
     if macro_raw is not None:
         if "with" in raw:
-            raise PlaybookError(f"{where}: `recover.with` goes with `tool: tap`")
+            raise PlaybookError(f"{where}: `with` goes with `tool: tap`")
         return RecoverHand(
             macro=_argless_macro(macro_raw, "recover", where, page, resolve)
         )
     if tool not in RECOVER_TOOLS:
         raise PlaybookError(
-            f"{where}: `recover.tool` must be one of {', '.join(RECOVER_TOOLS)} "
-            f"(got {tool!r})"
+            f"{where}: `tool` must be one of {', '.join(RECOVER_TOOLS)} (got {tool!r})"
         )
     target = raw.get("with")
     if tool != "tap":
         if target is not None:
             raise PlaybookError(
-                f"{where}: `recover.with` goes with `tool: tap` — "
-                f"{tool} takes no target"
+                f"{where}: `with` goes with `tool: tap` — {tool} takes no target"
             )
         return RecoverHand(tool=tool)
     if target is None:
@@ -790,7 +924,7 @@ def _parse_recover(
             "declared spot it presses"
         )
     return RecoverHand(
-        tool=tool, landmark=_landmark_name(target, f"{where}: `recover.with`", pack)
+        tool=tool, landmark=_landmark_name(target, f"{where}: `with`", pack)
     )
 
 

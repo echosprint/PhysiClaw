@@ -47,11 +47,15 @@ from physiclaw.conductor.micro import (
 from physiclaw.conductor.overture import Overture
 from physiclaw.conductor.pages import (
     IOS_APP,
+    MIN_ROBUST_ANCHORS,
     RESERVED_APPS,
+    load_learned,
     prints_for_app,
 )
 from physiclaw.conductor.playbook import (
+    AgentNode,
     AskNode,
+    DoNode,
     Pack,
     Playbook,
     PlaybookError,
@@ -108,11 +112,13 @@ def build_program(
     channel: "Channel | None",
     *,
     suspended: dict | None = None,
+    dry: bool = False,
 ) -> "Program":
     """The one Program constructor call — the overture's activation, a
-    resumed suspension, and the CLI rehearsal all come through here, so a
-    program is whole at construction (channel and any suspended state
-    included) and never patched up afterwards."""
+    resumed suspension, the CLI rehearsal, and the offline replay all
+    come through here, so a program is whole at construction (channel
+    and any suspended state included) and never patched up afterwards.
+    `dry` (the replay) runs the walk without writing any record."""
     return Program(
         spec=spec,
         values=values,
@@ -121,6 +127,7 @@ def build_program(
         channel=channel,
         suspended=suspended,
         landmarks=pack.landmarks,
+        dry=dry,
     )
 
 
@@ -162,11 +169,39 @@ def resolve_inputs(spec: Playbook, provided: dict[str, str]) -> dict[str, str]:
         raise PlaybookError(str(e)) from e
 
 
-def readiness_warnings(spec: Playbook) -> list[str]:
+def readiness_warnings(spec: Playbook, pack: Pack) -> list[str]:
     """The actionable non-blockers `playbooks check` prints: things that
     let a walk start and then quietly under-perform. Advisory by design —
     each is legal, and the author is told the cost rather than refused."""
-    return _gate_word_warnings(spec)
+    return _gate_word_warnings(spec) + _anchor_warnings(spec, pack)
+
+
+def _anchor_warnings(spec: Playbook, pack: Pack) -> list[str]:
+    """A page the route checks that declares too few anchors to clear
+    its declaration-only threshold with one missing
+    (`pages.MIN_ROBUST_ANCHORS`) and has no learned geometry yet —
+    legal, but one OCR miss reads it unknown and the walk spends its
+    recover hand (or hands over) for nothing. Calibrated geometry lifts
+    the warning: its threshold is the page's own."""
+    learned = load_learned(spec.app)
+    checked = {
+        p
+        for n in spec.nodes
+        if isinstance(n, (DoNode, AgentNode))
+        for p in (n.enter, n.verify)
+        if p
+    }
+    out = []
+    for name in sorted(checked):
+        decl = pack.pages.get(name)
+        if decl is None or name in learned or len(decl.anchors) >= MIN_ROBUST_ANCHORS:
+            continue
+        out.append(
+            f"page {name!r} declares {len(decl.anchors)} anchor(s) and no "
+            f"geometry is learned — one OCR miss reads it unknown; declare "
+            f"{MIN_ROBUST_ANCHORS}+ anchors or calibrate the page"
+        )
+    return out
 
 
 def _gate_word_warnings(spec: Playbook) -> list[str]:

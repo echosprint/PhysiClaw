@@ -97,6 +97,7 @@ def test_commit_writes_sections_learned_and_checks(tmp_path) -> None:
         "  cart:\n"
         '    label: "购物车"\n'
         "    bbox: [0.2, 0.9, 0.3, 0.95]\n"
+        "    page: home\n"
         "\n"
         "pages:\n"
         "  stale:\n"
@@ -115,6 +116,7 @@ def test_commit_writes_sections_learned_and_checks(tmp_path) -> None:
     assert '- "首页"' in text and '- "综合"' in text
     # Landmarks merge: the marked spot lands, the hand-authored one survives.
     assert 'label: "back chevron"' in text and 'label: "购物车"' in text
+    assert "    page: home\n" in text  # the scope survives the merge
     assert result["landmarks_written"] == ["back"]
     assert "# the walks stay untouched\nplaybooks: {}" in text
     assert result["check"] == "ok"
