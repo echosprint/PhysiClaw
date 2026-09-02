@@ -378,8 +378,8 @@ class Verdict:
     dy: float
     detail: str
     # The padded (lo, hi) y-band the overlay hypothesis found — set only
-    # on "occluded", where it is what the rescue ladder's dismissal tier
-    # restricts its candidates to (`rescue.find_dismiss`).
+    # on "occluded" (the retry-after-abort rule reads the verdict kind;
+    # the band itself is diagnostic).
     overlay_band: tuple[float, float] | None = None
 
     def matches(self, expected_id: str) -> bool:
@@ -447,8 +447,7 @@ def _overlay_band(best: PageScore, screen: Screen) -> tuple[float, float] | None
     horizontal band (≤ OVERLAY_MAX_HEIGHT tall) that also holds unexpected
     labels — a dialog or keyboard over a known page. Needs learned
     geometry; declaration-only pages can't hypothesize overlays. Returns
-    the padded (lo, hi) band — the overlay's own extent, which the
-    rescue dismissal tier scopes to — or None."""
+    the padded (lo, hi) band — the overlay's own extent — or None."""
     learned = best.print_.learned
     if learned is None or not best.missing:
         return None

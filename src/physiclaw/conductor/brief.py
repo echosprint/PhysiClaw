@@ -16,8 +16,6 @@ imperative (the deny back-out, the unlock doctrine), the caller already
 wrote it into the reason, so this module never invents instructions.
 """
 
-from physiclaw.conductor import ledger
-
 
 def walk_brief(
     reason: str,
@@ -28,7 +26,6 @@ def walk_brief(
     idx: int,
     nodes: int,
     outputs: dict[str, str],
-    ledger_items: "list[ledger.LedgerItem] | None",
     consented: float | None,
 ) -> str:
     """A handed-over walk's report: why, where, and every piece of walk
@@ -45,8 +42,6 @@ def walk_brief(
     if outputs:
         decided = ", ".join(f"{k}={v!r}" for k, v in outputs.items())
         parts.append(f"Decisions so far: {decided}.")
-    if ledger_items:
-        parts.append(f"Buying list: {ledger.describe(ledger_items)}.")
     if consented is not None:
         # Consent is CONSUMED by firing (program.py), so a consented
         # value surviving to the brief proves the payment did NOT fire.
@@ -64,13 +59,10 @@ def completion_brief(
     app: str,
     playbook: str,
     nodes: int,
-    ledger_items: "list[ledger.LedgerItem] | None",
 ) -> str:
     """A completed walk's report: the task portion is done; what remains
     is the model's wrap-up (report to the user, close the session)."""
     parts = [f"conductor: walk {app}/{playbook} completed ({nodes}/{nodes} nodes)."]
-    if ledger_items:
-        parts.append(f"Buying list: {ledger.describe(ledger_items)}.")
     parts.append(
         "This turn's peek shows the final screen. Report the outcome to "
         "the user and wrap up."

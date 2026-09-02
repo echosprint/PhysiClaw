@@ -9,7 +9,7 @@ import logging
 from pathlib import Path
 
 from physiclaw.common.paths import PACK_FILENAME
-from physiclaw.conductor.calls import CALLS
+from physiclaw.conductor.calls import AGENT_TOOLS
 from physiclaw.conductor.pages import (
     CHANNEL_APP,
     IOS_APP,
@@ -19,21 +19,21 @@ from physiclaw.conductor.pages import (
     THREAD_PAGE,
 )
 from physiclaw.conductor.playbook import (
-    AGENT_TOOLS,
-    DEFAULT_AGENT_CALLS,
-    DEFAULT_AGENT_SCROLLS,
     GATE_MAX_CHECKS,
     IRREVERSIBLE_CLASSES,
-    MAX_AGENT_CALLS,
-    MAX_INPUTS,
     MAX_NODES,
     PACK_MACROS_DIRNAME,
-    RECOVER_TOOLS,
     PlaybookError,
     check_name,
 )
+from physiclaw.conductor.route import (
+    DEFAULT_AGENT_CALLS,
+    DEFAULT_AGENT_SCROLLS,
+    MAX_AGENT_CALLS,
+    RECOVER_TOOLS,
+)
 from physiclaw.macros import scaffold as macro_scaffold
-from physiclaw.macros.model import MACRO_FILENAME
+from physiclaw.macros.model import MACRO_FILENAME, MAX_INPUTS
 
 log = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ def read_template_manifest(src: Path) -> dict:
     return data
 
 
-EXAMPLE_MACRO = "example-leg"
+EXAMPLE_MACRO = "example-move"
 EXAMPLE_PLAYBOOK = "example"
 
 
@@ -78,7 +78,6 @@ def render_pack_stub(app: str) -> str:
         max_inputs=MAX_INPUTS,
         max_nodes=MAX_NODES,
         gate_checks=GATE_MAX_CHECKS,
-        calls=", ".join(sorted(CALLS)),
         classes="|".join(IRREVERSIBLE_CLASSES),
         agent_tools=", ".join(AGENT_TOOLS),
         max_agent_calls=MAX_AGENT_CALLS,
@@ -119,8 +118,8 @@ description: EDIT ME — what this pack automates, and when to adopt it
 # The walks. Key = playbook name (referenced as {app}/<name>). A route
 # may open with pure-text agent steps and one `start`, then alternates
 # WHERE (page — checked every time) with WHAT (a move); ≤ {max_nodes}
-# moves, forward-only except a decide's bounded re-ask self-loop and
-# next_item's backward `next` arm. Entry kinds:
+# moves, forward-only — whatever needs judgment is an `agent` step,
+# whatever needs a human is an `ask`. Entry kinds:
 #   page   — where the walk must BE. Declare it in place (anchors
 #            beside the waypoint — semantics only; geometry is captured
 #            on YOUR device via `physiclaw conductor calibrate`), or
@@ -128,9 +127,9 @@ description: EDIT ME — what this pack automates, and when to adopt it
 #            declares ITS recovery hand — one gesture
 #            ({recover_tools}; tap takes with: landmarks.<name>) or an
 #            argument-less `macro:`; after it runs the walk re-locates
-#            on the route. ANY recover in the playbook replaces the
-#            built-in rescue ladder: what you declare is what runs, and
-#            a page declaring none hands over.
+#            on the route. What you declare is what runs (after the
+#            built-in unlock and one settle re-peek): a page declaring
+#            none hands over.
 #   start  — the unconditional cold-launch (at most one, immediately
 #            before the first page — the landing it must reach);
 #            `macro:` is its hand. It re-runs whenever recovery walks
@@ -138,10 +137,9 @@ description: EDIT ME — what this pack automates, and when to adopt it
 #   do     — run a gesture macro. The name IS the macro (the directory
 #            macro of that name, or the `macro:` body beside it — the
 #            MACRO.yml grammar minus name/description/enabled); the
-#            page that FOLLOWS is its landing check. `undo:` names the
-#            reverser. A move doing real damage carries
-#            `irreversible: <{classes}>` — `payment` must directly
-#            follow an `ask` that approves it.
+#            page that FOLLOWS is its landing check. A move doing real
+#            damage carries `irreversible: <{classes}>` — `payment`
+#            must directly follow an `ask` that approves it.
 #   agent  — hand the step to the model with YOUR prompt (refs fill
 #            once when it opens). No `tools` = a pure-text call: prompt
 #            in, `returns:` fields out (read downstream as
@@ -153,11 +151,6 @@ description: EDIT ME — what this pack automates, and when to adopt it
 #            {{calls, scrolls}}` bounds it (≤ {max_agent_calls} calls),
 #            and `done` counts only on the page that follows, judged by
 #            the matcher.
-#   decide — the AI answers one bounded question ({calls});
-#            `routes:` maps EVERY answer to a move, a page ("this
-#            answer lands there"), or `escalate` (the model takes
-#            over). `context: [memory.<slug>]` shares ONLY that
-#            memory.md section (fail-closed); `max_asks` bounds re-asks.
 #   ask    — message the user and WAIT for approval; after
 #            {gate_checks} unconfirmed checks the session suspends.
 #            `approve: payment` fills {{ask.total}} — the `message:`
@@ -166,8 +159,6 @@ description: EDIT ME — what this pack automates, and when to adopt it
 #            consented total is the fire-time bound. `resume:`
 #            re-enters the app after the reply.
 #   tell   — message the user, then pause until any reply.
-#   sync   — converge the page it follows onto the `type: list` input
-#            (the shopping ledger), in code.
 playbooks:
   {playbook}:
     description: EDIT ME — one line saying what task this playbook does
@@ -261,14 +252,11 @@ The route's shape IS the contract the checker enforces: an optional
 prefix of pure-text `agent` steps and one `start` (the unconditional
 cold-launch) opens the route, the first page is the start contract,
 every `do` — and every acting `agent` episode — is followed by the
-page it lands on, a `decide` routes EVERY answer (to a move, a page,
-or `escalate`), `{{inputs.name}}` refs name declared inputs and
-`{{move.field}}` refs name EARLIER decide/agent outputs, routes are
-forward-only except a decide's bounded re-ask self-loop and
-next_item's ledger loop, and `irreversible: payment` moves (legs and
-agent episodes alike) directly follow an `ask` with
-`approve: payment` — a `budget:` is optional; without one the
-consented total is the fire-time bound.
+page it lands on, `{{inputs.name}}` refs name declared inputs and
+`{{move.field}}` refs name EARLIER agent outputs, moves run forward
+only, and `irreversible: payment` moves (do and agent alike) directly
+follow an `ask` with `approve: payment` — a `budget:` is optional;
+without one the consented total is the fire-time bound.
 
 An `agent` step is the model's, inside the author's fence: `prompt:`
 is the whole brief (refs fill once when the step opens), `tools:`
@@ -282,18 +270,16 @@ by the matcher.
 A pack may declare `landmarks:` — named fixed spots ({{label, bbox}},
 open vocabulary) that recover hands tap and agent episodes are
 granted. A page's `recover:` declares its recovery hand (one gesture
-or an argument-less macro); ANY recover in the playbook replaces the
-built-in rescue ladder — what you declare is what runs, and a page
-declaring none hands over.
+or an argument-less macro) — what you declare is what runs, after the
+built-in unlock and one settle re-peek; a page declaring none hands
+over.
 
 A page is declared ONCE — beside its waypoint, in the `pages:`
 appendix, or on another route — and referenced bare everywhere else.
 Macros embed as `macro: {{steps: [...]}}` (the MACRO.yml grammar minus
-name/description/enabled, enabled with the playbook); `undo:`, an
-ask's `resume:`, and a page's `recover:` take the same form and
-dispatch argument-less. A playbook-level `context:`
-(`[memory.<slug>, …]`) names memory sections the wake-time task
-reading receives, fail-closed.
+name/description/enabled, enabled with the playbook); an ask's
+`resume:` and a page's `recover:` take the same form and dispatch
+argument-less.
 
 Limits: ≤ {max_nodes} moves, ≤ {max_inputs} inputs per playbook.
 Macro format: see ~/.physiclaw/macros/README.md (identical grammar).
@@ -430,10 +416,6 @@ def init_pack(app: str) -> Path:
     macro_dir.mkdir(parents=True)
     write_text(root / PACK_FILENAME, render_pack_stub(app))
     write_text(macro_dir / MACRO_FILENAME, render_example_macro())
-    # No `open` directory macro is scaffolded anymore: the start page's
-    # `open:` body (commented in the stub) is the primary spelling of
-    # the cold-launch; a directory `open` remains legal for packs whose
-    # playbooks share one.
     ensure_format_readme()
     return root
 

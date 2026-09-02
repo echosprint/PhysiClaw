@@ -123,7 +123,7 @@ def parse_macro(text: str, dir_name: str) -> Macro:
     if not isinstance(enabled, bool):
         raise MacroError("`enabled` must be true or false")
 
-    inputs = _parse_inputs(data.get("inputs", {}))
+    inputs = parse_inputs(data.get("inputs", {}))
     steps = _parse_steps(data.get("steps"), {i.name for i in inputs})
     return Macro(
         name=name,
@@ -144,7 +144,7 @@ _INLINE_KEYS = frozenset(_TOP_KEYS) - _IDENTITY_KEYS
 
 
 def parse_inline_macro(data: Any, name: str) -> Macro:
-    """A macro embedded where a name was expected (a playbook LEG's
+    """A macro embedded where a name was expected (a playbook move's
     `macro:` mapping) → a validated `Macro` under the caller-synthesized
     `name`. Same `inputs`/`steps` grammar and budgets as a MACRO.yml —
     one step parser, so the two homes can never drift — and always
@@ -163,7 +163,7 @@ def parse_inline_macro(data: Any, name: str) -> Macro:
             "only `steps` and `inputs`; name, description and enabled "
             "belong to a directory macro"
         )
-    inputs = _parse_inputs(data.get("inputs", {}))
+    inputs = parse_inputs(data.get("inputs", {}))
     steps = _parse_steps(data.get("steps"), {i.name for i in inputs})
     return Macro(
         name=name,
@@ -177,7 +177,10 @@ def parse_inline_macro(data: Any, name: str) -> Macro:
 # ---------- inputs ----------
 
 
-def _parse_inputs(raw: Any) -> tuple[MacroInput, ...]:
+def parse_inputs(raw: Any) -> tuple[MacroInput, ...]:
+    """`inputs:` → declared inputs — the one authoring grammar a macro
+    and a playbook share (the conductor delegates here and translates
+    the error class at its seam)."""
     if not isinstance(raw, dict):
         raise MacroError("`inputs` must be a mapping of input names")
     if len(raw) > MAX_INPUTS:

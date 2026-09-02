@@ -68,10 +68,8 @@ RESERVED_APPS = frozenset({CHANNEL_APP, IOS_APP})
 # interpolate these, never hand-copy them.
 THREAD_PAGE = "thread"  # the channel pack's `pages:` must declare this
 SEND_MACRO = "send"  # nav to the user's thread + paste + send {message}
-# `open` serves twice, one spelling: the channel's (nav to the thread —
-# resume reads) and every TASK pack's (launch ITS app to a home state —
-# the rescue ladder's reset rung re-enters through it after force_quit;
-# a pack without one simply skips that rung).
+# `open` is the channel's hand: nav to the user's thread — the overture
+# boots through it and a resumed ask reads through it.
 OPEN_MACRO = "open"
 
 # The ios pack's one convention, here for the same reason: the boot
@@ -84,6 +82,17 @@ def page_id(app: str, page: str) -> str:
     """The `app.page` spelling — the ONE format matcher verdicts carry
     and every expectation is compared against."""
     return f"{app}.{page}"
+
+
+def page_name(pid: str) -> str:
+    """The page half of a full id — `page_id`'s inverse."""
+    return pid.partition(".")[2]
+
+
+def owned_by(pid: str, app: str) -> bool:
+    """Whether a full id names one of `app`'s own pages (the reserved
+    namespaces and the channel are somebody else's)."""
+    return pid.startswith(f"{app}.")
 
 
 # The full ids, precomputed: what the gate's peeks and the boot match
@@ -164,10 +173,8 @@ class PageDecl:
 
 # The pack-level fixed spots: `landmarks:`, an OPEN vocabulary of named
 # spots the author knows — recover hands tap them, agent episodes are
-# granted them by name, and the two names below are the ones the rescue
-# ladder itself consults when a pack declares them.
-LANDMARK_BACK = "back"  # the app's own back affordance (iOS: top-left chevron)
-LANDMARK_DISMISS = "dismiss"  # empty scrim area a modal/sheet dismisses from
+# granted them by name. No name is reserved: what a landmark is for is
+# said where it is used.
 MAX_LANDMARKS = 12
 
 

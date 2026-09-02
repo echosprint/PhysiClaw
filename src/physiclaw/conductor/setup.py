@@ -13,9 +13,7 @@ degrades to a normal session, never takes one down):
     and build — with the overture owning the navigation that reaches a
     thread screen to ask over.
 
-A playbook on disk IS the grant; there is nothing to pre-declare. (There
-used to be a third door, ``armed.json``, naming the playbook to run next
-— the overture retired it.)
+A playbook on disk IS the grant; there is nothing to pre-declare.
 
 ``session_setup`` is the plugin's single wake-time setup call
 (`plugin.py` runs it behind the seam): it
@@ -39,11 +37,9 @@ from physiclaw.common import daylog
 from physiclaw.common.config import CONFIG
 from physiclaw.common.listing import Screen
 from physiclaw.common.text import read_text
-from physiclaw.conductor import memory, reply, scaffold, suspension
+from physiclaw.conductor import reply, scaffold, suspension
 from physiclaw.conductor.channel import Channel, load_channel
-from physiclaw.conductor.ledger import check_ledger_value
 from physiclaw.conductor.micro import (
-    LIST_INPUT_MARK,
     NOT_A_TASK,
     PARSE_TASK,
     DecisionRequest,
@@ -57,12 +53,11 @@ from physiclaw.conductor.pages import (
     prints_for_app,
 )
 from physiclaw.conductor.playbook import (
-    DecideNode,
-    HumanGateNode,
+    AskNode,
     Pack,
     Playbook,
     PlaybookError,
-    disabled_leg_macros,
+    disabled_macros,
     list_apps,
     load_pack,
     qualified_inline,
@@ -94,7 +89,6 @@ def load_suspended(channel: "Channel | None" = None) -> "Program | None":
         name = str(data["playbook"])
         spec, pack = load_spec(app, name)
         program = build_program(
-            app,
             spec,
             pack,
             {str(k): str(v) for k, v in (data.get("values") or {}).items()},
@@ -110,7 +104,6 @@ def load_suspended(channel: "Channel | None" = None) -> "Program | None":
 
 
 def build_program(
-    app: str,
     spec: Playbook,
     pack: Pack,
     values: dict[str, str],
@@ -123,11 +116,10 @@ def build_program(
     program is whole at construction (channel and any suspended state
     included) and never patched up afterwards."""
     return Program(
-        app=app,
         spec=spec,
         values=values,
-        pack_macros=qualified_pack(app, pack) | qualified_inline(app, spec),
-        prints=prints_for_app(app, decls=pack.pages),
+        pack_macros=qualified_pack(spec.app, pack) | qualified_inline(spec.app, spec),
+        prints=prints_for_app(spec.app, decls=pack.pages),
         channel=channel,
         suspended=suspended,
         landmarks=pack.landmarks,
@@ -138,7 +130,7 @@ def load_spec(
     app: str, name: str, *, require_live: bool = True
 ) -> tuple[Playbook, Pack]:
     """The parsed playbook and its pack. `require_live` additionally holds
-    it to what a real wake needs — enabled, with every leg macro enabled —
+    it to what a real wake needs — enabled, with every referenced macro enabled —
     which a resuming suspension must satisfy but a rehearsal deliberately
     need not (`physiclaw macros run` rehearses disabled macros for the same
     reason: you rehearse BEFORE you enable)."""
@@ -153,7 +145,7 @@ def load_spec(
             raise PlaybookError(
                 f"{app}/{name} is disabled — set `enabled: true` once rehearsed"
             )
-        disabled = disabled_leg_macros(entry.spec, pack)
+        disabled = disabled_macros(entry.spec, pack)
         if disabled:
             raise PlaybookError(
                 f"{app}/{name} references disabled pack macro(s): "
@@ -176,37 +168,7 @@ def readiness_warnings(spec: Playbook) -> list[str]:
     """The actionable non-blockers `playbooks check` prints: things that
     let a walk start and then quietly under-perform. Advisory by design —
     each is legal, and the author is told the cost rather than refused."""
-    # (A third warning — an ask with no `return:` followed by a blind
-    # move — retired with the route grammar: a move's enter is DERIVED
-    # from its preceding waypoint, so no move can run blind anymore.)
-    return _memory_slice_warnings(spec) + _gate_word_warnings(spec)
-
-
-def _memory_slice_warnings(spec: Playbook) -> list[str]:
-    """A declared `memory.<slug>` slice with no matching `## <slug>`
-    section on THIS device runs empty (fail-closed — memory.py owns the
-    contract; this is its check-time projection)."""
-    slugs = sorted(
-        {
-            entry.partition(".")[2]
-            for node in spec.nodes
-            if isinstance(node, DecideNode)
-            for entry in node.context
-            if entry.startswith("memory.")
-        }
-    )
-    if not slugs:
-        return []
-    sections = memory.read_sections()
-    have = frozenset().union(*(tokens for tokens, _ in sections)) if sections else ()
-    missing = [slug for slug in slugs if slug.casefold() not in have]
-    if not missing:
-        return []
-    return [
-        f"memory slice(s) {', '.join(missing)}: no `## <slug>` section in "
-        "memory.md on this device — those decisions run without memory "
-        "context (fail-closed)"
-    ]
+    return _gate_word_warnings(spec)
 
 
 def _gate_word_warnings(spec: Playbook) -> list[str]:
@@ -216,7 +178,7 @@ def _gate_word_warnings(spec: Playbook) -> list[str]:
     legal; the author is told the cost, not refused."""
     out = []
     for node in spec.nodes:
-        if not isinstance(node, HumanGateNode):
+        if not isinstance(node, AskNode):
             continue
         for key, text in (
             ("message", node.message),
@@ -249,13 +211,12 @@ def walk_registry(program: "Program", channel: "Channel | None") -> dict[str, Ma
 
 
 def _menu_input(i) -> str:
-    """One declared input on the parse_task menu: name, list mark (keys
-    the prompt's JSON-array rule), description — and the authored
+    """One declared input on the parse_task menu: name, description —
+    and the authored
     `example:`, which is the extraction hint ("五常大米 5kg" shows the
     shape a value should take better than any rule prose)."""
-    mark = f" {LIST_INPUT_MARK}" if i.kind == "list" else ""
     example = f"; e.g. {i.example}" if i.example else ""
-    return f"{i.name}{mark} ({i.description}{example})"
+    return f"{i.name} ({i.description}{example})"
 
 
 @dataclass
@@ -269,8 +230,7 @@ class Activation:
 
     entries: dict[str, tuple[Playbook, Pack]]
     channel: Channel
-    # parse_task's context: the entries' declared `context:`
-    # memory slices plus the recent completed-walk history — assembled
+    # parse_task's context: the recent daily-log entries — assembled
     # once at wake by `session_setup` (`_activation_context`).
     context: str = ""
 
@@ -308,16 +268,14 @@ class Activation:
         default mode, fail-open)."""
         if outcome is None or outcome.out == NOT_A_TASK:
             return None
-        app = outcome.out.partition("/")[0]
         spec, pack = self.entries[outcome.out]
         try:
             values = resolve_inputs(spec, outcome.payload or {})
-            check_ledger_value(spec, values)
         except PlaybookError as e:
             log.warning("activation %s: inputs did not resolve (%s)", outcome.out, e)
             return None
         log.info("conductor: activated %s (%s)", outcome.out, outcome.reason)
-        return build_program(app, spec, pack, values, self.channel)
+        return build_program(spec, pack, values, self.channel)
 
 
 def session_setup() -> "tuple[Program | None, Overture | None, dict[str, Macro]]":
@@ -368,7 +326,7 @@ def session_setup() -> "tuple[Program | None, Overture | None, dict[str, Macro]]
             # (which carries disabled macros too; gating is the entries
             # filter below, not the dispatch table).
             hidden.update(qualified_inline(app, spec))
-            if not spec.enabled or disabled_leg_macros(spec, pack):
+            if not spec.enabled or disabled_macros(spec, pack):
                 continue
             entries[f"{app}/{entry.name}"] = (spec, pack)
     if not entries:
@@ -404,26 +362,12 @@ def session_setup() -> "tuple[Program | None, Overture | None, dict[str, Macro]]
 
 def _activation_context(entries: dict[str, tuple[Playbook, Pack]]) -> str:
     """parse_task's context, assembled once at wake, from the agent's
-    OWN memory convention (never a conductor-private store): the union
-    of the offered playbooks' `context:` memory slices
-    (fail-closed — no matching `## <slug>` section means no memory, the
-    decide contract) plus the recent daily-log entries — the same
-    window the engine preloads into the model's wake context
-    (`[memory] bootstrap_log_entries`), which is where completed
-    purchases and suspensions are recorded, so "never re-run a finished
-    task" reads off the same record the model would."""
+    OWN memory convention (never a conductor-private store): the recent
+    daily-log entries — the same window the engine preloads into the
+    model's wake context (`[memory] bootstrap_log_entries`), which is
+    where completed purchases and suspensions are recorded, so "never
+    re-run a finished task" reads off the same record the model would."""
     parts: list[str] = []
-    slugs = sorted(
-        {
-            entry.partition(".")[2]
-            for spec, _pack in entries.values()
-            for entry in spec.context
-        }
-    )
-    if slugs:
-        sliced = memory.match_sections(memory.read_sections(), slugs)
-        if sliced:
-            parts.append(f"memory (for {', '.join(slugs)}):\n{sliced}")
     recent = daylog.load_recent_entries(CONFIG.memory.bootstrap_log_entries)
     if recent:
         parts.append(

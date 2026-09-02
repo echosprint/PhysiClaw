@@ -3,9 +3,9 @@
 Offline-first: `extract` and `match --session` work from recorded
 sessions with no hardware; `match --live` and `propose --live` do one
 `peek` against a running `physiclaw mcp` server, same connection idiom
-as macro rehearsal. `micro` replays one decision call over recorded
-listings (needs provider credentials, not hardware) — the threshold-
-tuning surface. Nothing here touches the engine runtime.
+as macro rehearsal. `eval` replays labeled model calls (needs provider
+credentials, not hardware) — the threshold-tuning surface. Nothing here
+touches the engine runtime.
 """
 
 import asyncio
@@ -77,16 +77,15 @@ def extract(
     typer.echo(f"wrote {len(listings)} listings → {out} (edit the '?' labels)")
 
 
-# Bounded replay fan-out shared by `micro` and `eval`.
+# Bounded replay fan-out for `eval`.
 _MICRO_FANOUT = 4
 
 
 def _resolve_micro_ref(override: str | None = None) -> str:
     """The model the micro tier actually runs — the engine wiring's own
     resolution (`[conductor] micro_model`, else the session model),
-    optionally overridden. One spelling for `micro` and `eval`, so a
-    replay can never silently measure a different model than the
-    runtime wires."""
+    optionally overridden — so a replay can never silently measure a
+    different model than the runtime wires."""
     from physiclaw.common.config import CONFIG, model_ref
 
     if override:
@@ -98,8 +97,7 @@ def _resolve_micro_ref(override: str | None = None) -> str:
 
 
 async def _micro_batch(ref: str, requests: list) -> list:
-    """Run decision requests through one MicroCaller with the shared
-    fan-out — the one replay executor `micro` and `eval` both use."""
+    """Run requests through one MicroCaller with the shared fan-out."""
     from physiclaw.common.config import CONFIG, parse_model_ref
     from physiclaw.conductor.micro import MicroCaller
     from physiclaw.provider import make_provider
@@ -117,60 +115,6 @@ async def _micro_batch(ref: str, requests: list) -> list:
         return await asyncio.gather(*(one(r) for r in requests))
     finally:
         await provider.aclose()
-
-
-@conductor_app.command()
-def micro(
-    criteria: str = typer.Option("", "--criteria", help="choose_item criteria"),
-    question: str = typer.Option("", "--question", help="decide question"),
-    outcomes: str = typer.Option(
-        "",
-        "--outcomes",
-        help="decide answers, comma-separated (escalate auto-added)",
-    ),
-    session: str = typer.Option(None, "--session", help="replay a recorded session"),
-    listing: Path = typer.Option(None, "--listing", help="a listing text file"),
-    live: bool = typer.Option(False, "--live", help="one peek via `physiclaw mcp`"),
-) -> None:
-    """Run one decision micro-call over each input screen — the offline
-    replay surface for tuning `[conductor] micro_confidence`. Prints the
-    outcome, confidence, and token cost per screen."""
-    from physiclaw.conductor.calls import CALLS, ESCALATE
-    from physiclaw.conductor.micro import build_request
-
-    if bool(criteria) == bool(question):
-        exit_error("pass exactly one of --criteria (choose_item) / --question (decide)")
-    ref = _resolve_micro_ref()
-    if criteria:
-        call, call_outcomes = "choose_item", CALLS["choose_item"].outcomes
-        args = {"criteria": criteria}
-    else:
-        answers = [o.strip() for o in outcomes.split(",") if o.strip()]
-        if ESCALATE not in answers:
-            answers.append(ESCALATE)
-        if len(answers) < 2:
-            exit_error("--outcomes needs at least one answer besides escalate")
-        call, call_outcomes = "decide", tuple(answers)
-        args = {"question": question}
-    screens = _input_screens(session, listing, live)
-    requests = [
-        build_request(call, "cli", call_outcomes, args, screen) for screen in screens
-    ]
-
-    results = asyncio.run(_micro_batch(ref, requests))
-    for i, res in enumerate(results):
-        cost = (
-            f"{res.usage.prompt_tokens}+{res.usage.completion_tokens}tok "
-            f"{res.elapsed_ms}ms"
-        )
-        if res.outcome is None:
-            typer.echo(f"[{i:3d}] escalate  {res.detail}  ({cost})")
-            continue
-        picked = f" pick={res.outcome.picked.key!r}" if res.outcome.picked else ""
-        typer.echo(
-            f"[{i:3d}] {res.outcome.out:10s} conf={res.outcome.confidence:.2f}"
-            f"{picked}  {res.outcome.reason}  ({cost})"
-        )
 
 
 @conductor_app.command()

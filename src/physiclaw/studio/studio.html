@@ -886,24 +886,24 @@ async function rehearseMacro(name, m, startAt) {
 
 const ENTRY_TEMPLATES = {
   page: name => ({ page: name }),
+  start: name => ({ start: name, macro: { steps: [] } }),
   do: name => ({ do: name, macro: { steps: [] } }),
-  tell: name => ({ tell: name, message: "EDIT ME — write it in the user's language" }),
-  ask: name => ({ ask: name, message: "EDIT ME — what you are asking approval for" }),
-  decide: name => ({
-    decide: name, uses: "decide", with: { question: "EDIT ME?" },
-    answers: ["yes", "no"], routes: { yes: "EDIT", no: "EDIT", escalate: "escalate" },
+  agent: name => ({
+    agent: name, prompt: "EDIT ME — the goal, the rules, and where to finish",
+    tools: ["tap"], returns: { summary: "EDIT ME — what to report back" },
   }),
-  sync: name => ({ sync: name }),
+  ask: name => ({ ask: name, approve: "EDIT", message: "EDIT ME — what you are asking approval for" }),
+  tell: name => ({ tell: name, message: "EDIT ME — write it in the user's language" }),
 };
 
 function entrySummary(e) {
-  const kind = ["page", "do", "decide", "ask", "tell", "sync"].find(k => k in e);
+  const kind = ["page", "start", "do", "agent", "ask", "tell"].find(k => k in e);
   let out = kind + ": " + e[kind];
   if (kind === "page" && e.anchors) out += " (declared here)";
-  if (kind === "page" && e.open) out += " · open";
-  if (kind === "do" && e.macro) out += " · inline ×" + (e.macro.steps || []).length;
+  if (kind === "page" && e.recover) out += " · recover";
+  if ((kind === "do" || kind === "start") && e.macro && e.macro.steps) out += " · inline ×" + e.macro.steps.length;
   if (kind === "do" && e.irreversible) out += " · " + e.irreversible + "!";
-  if (kind === "decide") out += " → " + Object.keys(e.routes || {}).join("/");
+  if (kind === "agent") out += (e.tools && e.tools.length) ? " · tools " + e.tools.join("/") : " · text";
   if (kind === "ask" && e.approve) out += " · approve " + e.approve;
   return out;
 }
@@ -955,7 +955,7 @@ function renderPlaybooks() {
       const addRow = el("div");
       addRow.style.marginTop = "4px";
       const kindSel = document.createElement("select");
-      for (const k of ["page", "do", "tell", "ask", "decide", "sync"]) kindSel.appendChild(new Option(k, k));
+      for (const k of ["page", "start", "do", "agent", "ask", "tell"]) kindSel.appendChild(new Option(k, k));
       const nameIn = document.createElement("input");
       nameIn.type = "text"; nameIn.size = 10; nameIn.placeholder = "name";
       nameIn.setAttribute("list", "known-names");

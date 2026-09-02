@@ -171,30 +171,12 @@ def test_record_carries_history_fields() -> None:
         reason="",
         values={"keyword": "milk"},
         total=45.0,
-        picks={"eggs": "farm eggs"},
     )
 
     (row,) = walklog.load()
 
     assert row["values"] == {"keyword": "milk"}
     assert row["total"] == 45.0
-    assert row["picks"] == {"eggs": "farm eggs"}
-
-
-def test_last_picks_returns_the_most_recent_matching_walk() -> None:
-    _record(outcome="completed", node=None, picks={"eggs": "old eggs"})
-    _record(outcome="completed", node=None, picks={"eggs": "farm eggs"})
-    _record(outcome="completed", node=None, playbook="other", picks={"eggs": "x"})
-
-    picks = walklog.last_picks(walklog.load(), "demo", "flow")
-
-    assert picks == {"eggs": "farm eggs"}
-
-
-def test_last_picks_empty_when_no_completed_walk_matches() -> None:
-    _record()  # handover only
-
-    assert walklog.last_picks(walklog.load(), "demo", "flow") == {}
 
 
 def test_escalation_sites_rank_and_carry_the_evidence() -> None:

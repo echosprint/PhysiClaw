@@ -35,7 +35,7 @@ def _one_node_program():
     the locate peek; a history without that peek's result makes the next
     advance hand over — enough to pin the conductor's arbitration without
     a pack on disk."""
-    from physiclaw.conductor.playbook import ConfirmNode, Playbook
+    from physiclaw.conductor.playbook import Playbook, TellNode
     from physiclaw.conductor.program import Program
 
     spec = Playbook(
@@ -45,9 +45,9 @@ def _one_node_program():
         enabled=True,
         inputs=(),
         mandate=None,
-        nodes=(ConfirmNode(id="c", message="ok done"),),
+        nodes=(TellNode(id="c", message="ok done"),),
     )
-    return Program(app="demo", spec=spec, values={}, pack_macros={}, prints=[])
+    return Program(spec=spec, values={}, pack_macros={}, prints=[])
 
 
 @pytest.mark.asyncio
@@ -90,26 +90,25 @@ class FakeMicro:
         )
 
 
-def _decide_program(routes: dict[str, str]):
-    """A one-decision Program (plus a `done` sink when routed to) — the
-    shared scaffolding of the broker tests; only the routing differs."""
-    from physiclaw.conductor.calls import CALLS
-    from physiclaw.conductor.playbook import ConfirmNode, DecideNode, Playbook
+def _agent_program():
+    """A Program opening with one pure-text agent step — the shared
+    scaffolding of the broker tests."""
+    from physiclaw.conductor.playbook import AgentNode, Playbook
     from physiclaw.conductor.program import Program
 
     nodes: tuple = (
-        DecideNode(
-            id="choose",
-            call="choose_item",
-            args={"criteria": "cheapest"},
-            context=(),
-            outcomes=CALLS["choose_item"].outcomes,
-            routes=routes,
-            max_visits=3,
+        AgentNode(
+            id="parse",
+            prompt="the keyword, please",
+            tools=(),
+            give=(),
+            returns=(("keyword", "the search term"),),
+            enter="",
+            verify="",
+            max_calls=1,
+            max_scrolls=0,
         ),
     )
-    if "done" in routes.values():
-        nodes += (ConfirmNode(id="done", message="ok done"),)
     spec = Playbook(
         app="demo",
         name="x",
@@ -119,7 +118,7 @@ def _decide_program(routes: dict[str, str]):
         mandate=None,
         nodes=nodes,
     )
-    return Program(app="demo", spec=spec, values={}, pack_macros={}, prints=[])
+    return Program(spec=spec, values={}, pack_macros={}, prints=[])
 
 
 async def _walk_to_decision(conductor, history) -> None:
@@ -141,44 +140,31 @@ async def _walk_to_decision(conductor, history) -> None:
 
 @pytest.mark.asyncio
 async def test_advance_brokers_decision_requests_through_the_micro_caller() -> None:
-    from physiclaw.conductor.micro import MicroOutcome
+    from physiclaw.conductor.micro import AGENT_FIELDS, MicroOutcome
 
-    prog = _decide_program(
-        {
-            "pick": "done",
-            "scroll": "choose",
-            "none_fit": "escalate",
-            "escalate": "escalate",
-        }
-    )
+    prog = _agent_program()
     micro = FakeMicro(
         lambda req: MicroOutcome(
-            out="pick", reason="cheapest", confidence=0.9, picked=req.candidates[0]
+            out="done", reason="clear", confidence=0.9, payload={"keyword": "牛奶"}
         )
     )
     conductor = Conductor(program=prog, micro=micro)
     history: list = [SystemMessage(content="s"), UserMessage(content="u")]
     await _walk_to_decision(conductor, history)
 
-    # One advance: the decide brokers through the micro-caller, and the
-    # pick's tap primitive comes back as the turn.
-    tap = await conductor.advance(history)
+    # One advance: the agent step brokers through the micro-caller, its
+    # outputs land, and the walk's next turn comes back (here the
+    # completion brief — the one-step route is done).
+    turn = await conductor.advance(history)
 
-    assert tap.synthesized and tap.tool_names() == ["note", "tap"]
-    assert len(micro.requests) == 1
-    assert [c.key for c in micro.requests[0].candidates] == ["牛奶"]
+    assert turn.synthesized and turn.tool_names() == ["note", "peek"]
+    assert len(micro.requests) == 1 and micro.requests[0].call == AGENT_FIELDS
+    assert prog.outputs == {"parse.keyword": "牛奶"}
 
 
 @pytest.mark.asyncio
-async def test_unwired_micro_caller_means_decides_hand_over() -> None:
-    prog = _decide_program(
-        {
-            "pick": "escalate",
-            "scroll": "escalate",
-            "none_fit": "escalate",
-            "escalate": "escalate",
-        }
-    )
+async def test_unwired_micro_caller_means_agent_steps_hand_over() -> None:
+    prog = _agent_program()
     conductor = Conductor(program=prog)  # no micro wired
     history: list = [SystemMessage(content="s"), UserMessage(content="u")]
     await _walk_to_decision(conductor, history)

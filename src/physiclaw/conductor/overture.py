@@ -60,8 +60,8 @@ from physiclaw.conductor.channel import Channel
 from physiclaw.conductor.match import Verdict, match_screen, reads_as_cover
 from physiclaw.conductor.micro import SCROLL_UP, DecisionRequest, MicroOutcome
 from physiclaw.conductor.pages import LOCKED_ID, THREAD_ID, PagePrint
-from physiclaw.conductor.program import SCROLL_BBOX, Program
-from physiclaw.conductor.turns import Turnsmith
+from physiclaw.conductor.program import Program
+from physiclaw.conductor.turns import SCROLL_BBOX, Turnsmith
 from physiclaw.contract.dto import AssistantMessage, Message
 
 log = logging.getLogger(__name__)

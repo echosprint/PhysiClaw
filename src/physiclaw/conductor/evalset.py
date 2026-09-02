@@ -4,21 +4,21 @@ A case file is JSONL, one labeled decision per line — recorded screens
 (the `corpus` extraction path) paired with the answer a correct call
 gives::
 
-    {"call": "choose_item", "expect": "farm rice 5kg",
-     "args": {"criteria": "cheapest rice"}, "listing": "<listing text>"}
+    {"call": "parse_task", "expect": "taobao/buy",
+     "args": {"menu": "<menu text>"}, "listing": "<thread text>",
+     "outcomes": ["taobao/buy"]}
 
 ``expect`` is the raw ANSWER the model should produce, in the call's own
-answer space: a candidate key for a pick, an escape arm ("scroll",
-"none_fit"), a decide outcome, a playbook ref or "not_a_task" for
+answer space: a playbook ref, "not_a_task" or "scroll_up" for
 parse_task, a CONFIRM_OUTS member for confirm_reply. ``outcomes`` names
-the authored arms where the call takes them (decide, parse_task's
+the caller-supplied arms where the call takes them (parse_task's
 playbook refs); calls with fixed answer spaces leave it empty, exactly
 like the runtime. ``expect: "(escalate)"`` marks a case whose CORRECT
 behavior is no outcome at all (the caller should escalate).
 
 This module owns the file format, scoring, and aggregation — all pure,
 so the suite is testable without a provider. The CLI owns the provider
-round-trips (the `conductor micro` split).
+round-trips.
 """
 
 import json
@@ -29,10 +29,10 @@ from pathlib import Path
 from physiclaw.common.listing import Screen
 from physiclaw.common.text import read_text
 from physiclaw.conductor.micro import (
+    CALL_NAMES,
     DecisionRequest,
     MicroResult,
     build_request,
-    call_names,
 )
 
 # The expect spelling for "a correct call escalates" — parenthesized so
@@ -103,7 +103,7 @@ def read_cases(path: Path) -> list[EvalCase]:
     `corpus.read_corpus` contract). Empty file → error: an eval over
     nothing would report a perfect score."""
     out: list[EvalCase] = []
-    known = call_names()
+    known = CALL_NAMES
     for n, line in enumerate(read_text(path).splitlines(), 1):
         if not line.strip():
             continue

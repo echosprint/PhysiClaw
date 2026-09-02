@@ -6,9 +6,11 @@ in `Program`, so callers can't diverge; the `session` field tells them
 apart via the active-session marker, the `macros.runlog` convention)::
 
     {"ts", "session", "app", "playbook", "outcome", "node", "idx",
-     "nodes", "reason", "micros"}
+     "nodes", "reason", "micros", "rescues"}
 
-``outcome`` is one of completed | suspended | handover | crashed.
+``outcome`` is one of completed | suspended | handover | crashed |
+abandoned. ``rescues`` counts the walk's recovery actions (the JSON key
+keeps its original spelling).
 ``node``/``idx`` locate where the walk ended (``idx`` is the 0-based
 cursor; ``node`` is null once past the last node); ``reason`` is the
 handover reason or suspend recap, clipped; ``micros`` counts the
@@ -17,17 +19,15 @@ suspension whose end_session is then blocked stays recorded "suspended"
 — the one-line-per-walk shape beats a second row.
 
 Completed lines additionally carry the walk's `values` (the resolved
-inputs, clipped), `total` (the ¥ amount actually paid, when a payment
-fired) and `picks` (the ledger's query → chosen row label) — structured
-machine data `last_picks` reads for choose_item's "usual brand" context.
-TELEMETRY ONLY beyond that: the human-readable record of a walk's
+inputs, clipped) and `total` (the ¥ amount actually paid, when a
+payment fired). TELEMETRY ONLY: the human-readable record of a walk's
 purchases and suspensions goes to the agent's own daily log
 (`common.daylog`, written by the Program at those moments), which is
 what parse_task's activation context reads — the conductor follows the
 agent's memory convention, never a private prompt store.
 
-Read by `physiclaw playbooks stats` / `propose` and `last_picks` —
-never into the SYSTEM prompt. Never fatal in either direction: a write
+Read by `physiclaw playbooks stats` / `propose` — never into the
+SYSTEM prompt. Never fatal in either direction: a write
 failure logs and moves on, unparseable lines are skipped at read.
 Append-only with no cap (alpha convention — readers take the tail).
 """
@@ -78,7 +78,6 @@ def record(
     rescues: int = 0,
     values: dict | None = None,
     total: float | None = None,
-    picks: dict | None = None,
 ) -> None:
     """Append one walk's terminal line. Best-effort: a write failure logs
     and moves on — telemetry must never take down a session."""
@@ -98,7 +97,6 @@ def record(
         "rescues": rescues,
         "values": {str(k): _clip(str(v)) for k, v in (values or {}).items()},
         "total": total,
-        "picks": {str(k): _clip(str(v)) for k, v in (picks or {}).items()},
     }
     try:
         paths.playbooks_dir().mkdir(parents=True, exist_ok=True)
@@ -203,7 +201,7 @@ class EscalationSite:
 def escalation_sites(rows: list[dict], top: int = 3) -> list[EscalationSite]:
     """The hottest escalation sites across all playbooks, most-escalated
     first — every one is authoring work the author can now see (a page
-    that keeps missing, a popup the ladder can't clear, a macro whose
+    that keeps missing, a popup no hand clears, a macro whose
     rehearsal drifted)."""
     counts: Counter = Counter()
     latest: dict = {}
@@ -234,20 +232,6 @@ def escalation_sites(rows: list[dict], top: int = 3) -> list[EscalationSite]:
             )
         )
     return out
-
-
-def last_picks(rows: list[dict], app: str, playbook: str) -> dict[str, str]:
-    """The most recent completed walk's query → chosen-label map for one
-    playbook — choose_item's "the usual brand" context. {} when none."""
-    for r in reversed(rows):
-        if (
-            r.get("outcome") == "completed"
-            and r.get("app") == app
-            and r.get("playbook") == playbook
-            and r.get("picks")
-        ):
-            return {str(k): str(v) for k, v in r["picks"].items()}
-    return {}
 
 
 def _clip(text: str) -> str:

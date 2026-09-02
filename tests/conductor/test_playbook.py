@@ -1,11 +1,11 @@
-"""Tests for `physiclaw.conductor.playbook` — the route grammar, its
-lints, and pack loading. Every rejection must name the exact field and
-rule; the graph/money lints are the safety substance."""
+"""Tests for `physiclaw.conductor.playbook` and `route` — the route
+grammar, its lints, and pack loading. Every rejection must name the
+exact field and rule; the money lint is the safety substance."""
 
 from __future__ import annotations
 
 import pytest
-from conductor_fakes import LEDGERED, write_pack
+from conductor_fakes import write_pack
 
 from physiclaw.common import paths
 from physiclaw.conductor import playbook as pb
@@ -24,15 +24,17 @@ route:
     macro: open-app
     with: {message: "{inputs.keyword}"}
   - page: home
-  - decide: choose
-    uses: choose_item
-    with: {criteria: "cheapest {inputs.keyword}"}
-    context: [memory.shopping_prefs, inputs.keyword]
-    routes: {pick: to-cart, scroll: choose, none_fit: escalate, escalate: escalate}
+  - agent: choose
+    prompt: "Pick the cheapest {inputs.keyword} and land on the results"
+    tools: [tap, scroll]
+    returns:
+      pick: the chosen item's title
+    limit: {calls: 4, scrolls: 2}
+  - page: results
   - do: to-cart
     macro: add-cart
     with: {message: "{choose.pick}"}
-  - page: results
+  - page: done
   - tell: confirm
     message: "Added to the cart, ordering soon"
   - ask: pay
@@ -73,31 +75,6 @@ def _required_message_pack(app: str = "demo"):
 # ---------- happy path ----------
 
 
-def test_context_is_parsed_onto_the_playbook() -> None:
-    text = VALID.replace(
-        "description: test playbook\n",
-        "description: test playbook\ncontext: [memory.shopping_prefs]\n",
-    )
-
-    p = pb.parse_playbook(text, "buy", _pack())
-
-    assert p.context == ("memory.shopping_prefs",)
-
-
-@pytest.mark.parametrize(
-    "entry",
-    ["inputs.keyword", "shopping", "memory.", "memory.Bad-Slug"],
-)
-def test_context_rejects_non_memory_entries(entry: str) -> None:
-    text = VALID.replace(
-        "description: test playbook\n",
-        f'description: test playbook\ncontext: ["{entry}"]\n',
-    )
-
-    with pytest.raises(PlaybookError, match="memory"):
-        pb.parse_playbook(text, "buy", _pack())
-
-
 def test_parse_valid_playbook() -> None:
     p = pb.parse_playbook(VALID, "buy", _pack())
 
@@ -105,21 +82,22 @@ def test_parse_valid_playbook() -> None:
     assert p.mandate is not None and p.mandate.max_amount == 100.0
     assert p.start == "home"
     kinds = [type(n).__name__ for n in p.nodes]
-    assert kinds == ["LegNode", "DecideNode", "LegNode", "ConfirmNode", "HumanGateNode"]
+    assert kinds == ["DoNode", "AgentNode", "DoNode", "TellNode", "AskNode"]
     choose = p.nodes[1]
-    assert choose.outcomes == ("pick", "scroll", "none_fit", "escalate")
-    assert choose.routes["scroll"] == "choose"  # bounded self-loop
+    assert choose.tools == ("tap", "scroll") and choose.return_fields == ("pick",)
+    assert choose.max_calls == 4 and choose.max_scrolls == 2
     assert p.nodes[2].irreversible is None
-    assert p.nodes[4].gate == "payment"
+    assert p.nodes[4].approve == "payment"
 
 
 def test_derived_checks_come_from_the_waypoints() -> None:
-    # A do's enter is the nearest preceding page, its verify the page
+    # A move's enter is the nearest preceding page, its verify the page
     # that follows it — no enter/verify keys exist to author.
     p = pb.parse_playbook(VALID, "buy", _pack())
 
     assert p.nodes[0].enter == "home" and p.nodes[0].verify == "home"
-    assert p.nodes[2].enter == "home" and p.nodes[2].verify == "results"
+    assert p.nodes[1].enter == "home" and p.nodes[1].verify == "results"
+    assert p.nodes[2].enter == "results" and p.nodes[2].verify == "done"
 
 
 def test_scan_playbooks_reads_pack_files() -> None:
@@ -129,6 +107,32 @@ def test_scan_playbooks_reads_pack_files() -> None:
 
     assert entries["buy"].spec is not None
     assert entries["broken"].spec is None and entries["broken"].error
+
+
+def test_retired_keys_are_unknown() -> None:
+    # The grammar has no decide, sync, context, undo, open, or return:
+    # whatever needs judgment is an agent step, whatever needs a human
+    # is an ask, and a page's recover is the only recovery.
+    pack = _pack()
+    for text, fragment in (
+        (
+            VALID.replace("budget: 100\n", "budget: 100\ncontext: [memory.x]\n"),
+            "unknown key",
+        ),
+        (VALID + "  - sync: fix\n", "exactly one of"),
+        (
+            VALID.replace('    with: {message: "pay"}', "")  # no-op guard
+            + "  - decide: q\n    uses: decide\n",
+            "exactly one of",
+        ),
+        (
+            VALID.replace("  - page: done\n", "  - page: done\n    open: open-app\n"),
+            "unknown key",
+        ),
+        (VALID + "    return: open-app\n", "unknown key"),
+    ):
+        with pytest.raises(PlaybookError, match=fragment):
+            pb.parse_playbook(text, "buy", pack)
 
 
 # ---------- rejection lints ----------
@@ -157,13 +161,6 @@ def _mutate(old: str, new: str) -> str:
         (_mutate("- tell: confirm", "- tell: open"), "duplicate move name"),
         # unknown entry kind
         (_mutate("  - tell: confirm\n", "  - shout: confirm\n"), "exactly one of"),
-        # unroutable target
-        (
-            _mutate("routes: {pick: to-cart,", "routes: {pick: nowhere,"),
-            "neither a move nor a page",
-        ),
-        # non-total routes:
-        (_mutate("none_fit: escalate, ", ""), "route EVERY answer"),
         # unknown macro
         (_mutate("macro: add-cart", "macro: ghost"), "not found in this pack"),
         # unknown page
@@ -184,7 +181,7 @@ def _mutate(old: str, new: str) -> str:
                 'with: {message: "{inputs.keyword}"}',
                 'with: {message: "{choose.pick}"}',
             ),
-            "EARLIER decide",
+            "EARLIER agent",
         ),
         # dotted ref to unknown payload field
         (_mutate("{choose.pick}", "{choose.nope}"), "no output"),
@@ -196,13 +193,6 @@ def _mutate(old: str, new: str) -> str:
             ),
             "inputs of macro",
         ),
-        # choose_item may not author answers
-        (
-            _mutate(
-                "uses: choose_item", "uses: choose_item\n    answers: [a, escalate]"
-            ),
-            "declares its answers itself",
-        ),
         # unknown irreversible class
         (
             _mutate(
@@ -212,7 +202,7 @@ def _mutate(old: str, new: str) -> str:
             "`irreversible` must be one of",
         ),
         # stray brace
-        (_mutate('"cheapest {inputs.keyword}"', '"cheapest {Keyword}"'), "stray"),
+        (_mutate("cheapest {inputs.keyword}", "cheapest {Keyword}"), "stray"),
         # bare ref: `{inputs.name}` is the ONE written form
         (
             _mutate(
@@ -222,21 +212,8 @@ def _mutate(old: str, new: str) -> str:
         ),
         # a move named `inputs` would shadow the input ref root
         (_mutate("- do: open", "- do: inputs"), "ref root"),
-        # reserved routing target as a move name
-        (_mutate("- tell: confirm", "- tell: escalate"), "reserved routing target"),
-        # a move sharing a route page's name — one routing namespace
+        # a move sharing a route page's name — one namespace
         (_mutate("- tell: confirm", "- tell: results"), "also a page"),
-        # context inputs.* typo (with: refs are strict; context must be too)
-        (
-            _mutate(
-                "context: [memory.shopping_prefs, inputs.keyword]",
-                "context: [memory.shopping_prefs, inputs.keywrod]",
-            ),
-            "not declared",
-        ),
-        # a self-route on anything but the call's re-ask arm can never
-        # converge (same screen, same prompt) — parse-time rejection
-        (_mutate("none_fit: escalate", "none_fit: choose"), "re-ask arm"),
     ],
 )
 def test_rejections_name_the_rule(text: str, fragment: str) -> None:
@@ -266,74 +243,9 @@ def test_route_needs_at_least_one_move() -> None:
 
 
 def test_do_must_be_followed_by_its_landing_page() -> None:
-    text = _mutate("  - page: results\n", "")
+    text = _mutate("  - page: done\n", "")
 
     with pytest.raises(PlaybookError, match="followed by the page"):
-        pb.parse_playbook(text, "buy", _pack())
-
-
-def test_open_belongs_to_the_start_page_only() -> None:
-    text = _mutate(
-        "  - page: results\n",
-        "  - page: results\n    open:\n      steps:\n"
-        "        - {name: go, tool: home_screen}\n",
-    )
-
-    with pytest.raises(PlaybookError, match="START page only"):
-        pb.parse_playbook(text, "buy", _pack())
-
-
-def test_start_open_body_is_registered() -> None:
-    text = _mutate(
-        "route:\n  - page: home\n",
-        "route:\n  - page: home\n    open:\n      steps:\n"
-        "        - {name: go, tool: home_screen}\n",
-    )
-
-    p = pb.parse_playbook(text, "buy", _pack())
-
-    assert p.start == "home" and p.open_macro == "buy.home.open"
-    assert "buy.home.open" in p.inline_macros
-
-
-def test_start_open_with_required_input_rejected() -> None:
-    # The init ladder dispatches open with no arguments — the
-    # undo/return rule, applied to the cold-launch.
-    text = _mutate(
-        "route:\n  - page: home\n", "route:\n  - page: home\n    open: open-app\n"
-    )
-
-    with pytest.raises(PlaybookError, match=r"requires input\(s\) message"):
-        pb.parse_playbook(text, "buy", _required_message_pack())
-
-
-def test_route_target_may_name_a_unique_page() -> None:
-    # "this answer lands there": the page target resolves to the move
-    # after that waypoint. (to-cart keeps an in-edge via none_fit so the
-    # mutation doesn't orphan it.)
-    text = _mutate("routes: {pick: to-cart,", "routes: {pick: results,").replace(
-        "none_fit: escalate,", "none_fit: to-cart,"
-    )
-
-    p = pb.parse_playbook(text, "buy", _pack())
-
-    assert p.nodes[1].routes["pick"] == "confirm"
-
-
-def test_ambiguous_page_target_rejected() -> None:
-    # `home` appears twice on the route — the landing is ambiguous.
-    text = _mutate("routes: {pick: to-cart,", "routes: {pick: home,")
-
-    with pytest.raises(PlaybookError, match="more than once"):
-        pb.parse_playbook(text, "buy", _pack())
-
-
-def test_page_target_with_no_following_move_rejected() -> None:
-    # `results` is followed only by non-move... make it terminal:
-    text = _mutate("routes: {pick: to-cart,", "routes: {pick: last,")
-    text = text + '  - page: last\n    anchors: ["End"]\n'
-
-    with pytest.raises(PlaybookError, match="nothing follows"):
         pb.parse_playbook(text, "buy", _pack())
 
 
@@ -370,8 +282,7 @@ def test_page_declared_twice_rejected() -> None:
 
 
 def test_waypoints_are_bare_names() -> None:
-    # Own-pack pages are written bare — the route IS the pack's context;
-    # the old `pages.<name>` spelling is gone.
+    # Own-pack pages are written bare — the route IS the pack's context.
     with pytest.raises(PlaybookError, match="bare"):
         pb.parse_playbook(
             _mutate("  - page: results\n", "  - page: pages.results\n"),
@@ -380,24 +291,10 @@ def test_waypoints_are_bare_names() -> None:
         )
 
 
-# ---------- decide ----------
-
-
-def test_decide_call_requires_authored_answers_with_escalate() -> None:
-    pack = _pack()
-    text = _mutate("uses: choose_item", "uses: decide").replace(
-        'with: {criteria: "cheapest {inputs.keyword}"}', 'with: {question: "which?"}'
-    )
-
-    with pytest.raises(PlaybookError, match="escalate"):
-        # decide with no answers at all
-        pb.parse_playbook(text, "buy", pack)
-
-
 # ---------- money lints ----------
 
 
-def test_money_requires_gate_on_every_path() -> None:
+def test_money_requires_an_ask_directly_before() -> None:
     pack = _pack()
     # Make to-cart a payment move: the pay ask sits AFTER it → unguarded.
     text = _mutate(
@@ -409,22 +306,17 @@ def test_money_requires_gate_on_every_path() -> None:
         pb.parse_playbook(text, "buy", pack)
 
 
-def test_money_requires_budget() -> None:
+def test_over_budget_message_requires_a_budget() -> None:
     pack = _pack()
-    text = _mutate(
-        'with: {message: "{choose.pick}"}',
-        'with: {message: "{choose.pick}"}\n    irreversible: payment',
-    )
-    text = text.replace("budget: 100\n", "")
+    text = VALID.replace("budget: 100\n", "")
 
     with pytest.raises(PlaybookError, match="budget"):
         pb.parse_playbook(text, "buy", pack)
 
 
 def test_any_irreversible_class_requires_its_gate() -> None:
-    # send_message was previously declared but unenforced — a cancel
-    # replied to a tell is never read, so nothing consequential may
-    # hide behind one: every irreversible class runs as an ask's
+    # A cancel replied to a tell is never read, so nothing consequential
+    # may hide behind one: every irreversible class runs as an ask's
     # fall-through.
     pack = _pack()
     text = _mutate(
@@ -454,8 +346,8 @@ def test_send_move_behind_any_ask_parses() -> None:
 
 
 def test_payment_move_must_directly_follow_its_ask() -> None:
-    # Reachability is not enough: the conductor reads the sheet AT the
-    # ask and fires the move as its fall-through — a move in between
+    # Adjacency, not just reachability: the conductor reads the sheet AT
+    # the ask and fires the move as its fall-through — a move in between
     # desynchronizes consent from the sheet, so the parser rejects it.
     pack = _pack()
     text = (
@@ -482,20 +374,18 @@ def test_payment_move_behind_ask_parses() -> None:
     assert p.nodes[-1].irreversible == "payment"
     # The derived enter (the waypoint before the ask) is what guarantees
     # money fires on a verified app page, never blind off the IM thread.
-    assert p.nodes[-1].enter == "results"
+    assert p.nodes[-1].enter == "done"
 
 
-def test_non_payment_ask_does_not_satisfy_the_money_dfs() -> None:
-    # An address/handoff ask must NOT raise the approved flag: a decide
-    # arm skipping the PAYMENT ask has to be rejected even when another
-    # ask class sits upstream.
+def test_non_payment_ask_does_not_approve_payment() -> None:
+    # An address/handoff ask must NOT open a payment move: the class the
+    # ask approves is declared, and money keys off the declaration.
     pack = _pack()
     text = """\
 description: bypass probe
 inputs:
   keyword:
     description: what
-budget: 100
 route:
   - page: home
   - do: open
@@ -505,34 +395,34 @@ route:
   - ask: addr
     approve: address
     message: "address ok? reply ok or no"
-  - decide: route
-    uses: decide
-    with: {question: "ready?"}
-    answers: [go, hold, escalate]
-    routes: {go: pay, hold: paygate, escalate: escalate}
-  - ask: paygate
-    approve: payment
-    message: "Total ¥{ask.total}, reply ok or no"
-    over_budget_message: "Total ¥{ask.total} over ¥{ask.cap}, reply ok or no"
-    return: open-app
   - do: pay
     macro: add-cart
     with: {message: "pay"}
     irreversible: payment
   - page: home
 """
-    with pytest.raises(PlaybookError, match="entered ONLY"):
+    with pytest.raises(PlaybookError, match="approve: payment"):
         pb.parse_playbook(text, "buy", pack)
 
 
-def test_routed_in_edge_to_payment_move_rejected() -> None:
-    # Even after a real payment ask, a payment move reachable via a
-    # decide arm would fire under the FIRST ask's consent.
+def test_payment_agent_episode_takes_the_ask_total() -> None:
+    # An `irreversible: payment` agent directly after its ask may quote
+    # {ask.total} — the one gate slot a payment episode reads.
     pack = _pack()
-    text = (VALID + PAY_TAIL).replace("none_fit: escalate,", "none_fit: do-pay,")
+    text = (
+        VALID
+        + """  - agent: checkout
+    prompt: "Pay exactly ¥{ask.total}"
+    tools: [tap]
+    irreversible: payment
+    limit: {calls: 3}
+  - page: results
+"""
+    )
 
-    with pytest.raises(PlaybookError, match="entered ONLY"):
-        pb.parse_playbook(text, "buy", pack)
+    p = pb.parse_playbook(text, "buy", pack)
+
+    assert p.nodes[-1].irreversible == "payment" and p.nodes[-1].enter == "done"
 
 
 # ---------- ask templates ----------
@@ -573,89 +463,6 @@ def test_ask_template_lints(old, new, fragment) -> None:
 
     with pytest.raises(PlaybookError, match=fragment):
         pb.parse_playbook(_mutate(old, new), "buy", pack)
-
-
-# ---------- the ledger stack ----------
-
-
-def test_ledger_playbook_parses_with_the_sanctioned_backward_edge() -> None:
-    p = pb.parse_playbook(LEDGERED, "shop", _pack())
-
-    assert p.inputs[0].kind == "list"
-    loop = p.nodes[4]
-    assert loop.call == "next_item" and loop.routes == {"next": "search", "done": "fix"}
-    assert type(p.nodes[5]).__name__ == "ReconcileNode" and p.nodes[5].page == "results"
-    assert p.nodes[7].revise == "advance"
-
-
-@pytest.mark.parametrize(
-    "old, new, fragment",
-    [
-        ("type: list", "type: tuple", "`type` must be one of"),
-        # The loop closer must route its `next` arm backward.
-        (
-            "routes: {next: search, done: fix}",
-            "routes: {next: fix, done: sheet}",
-            "must route BACKWARD",
-        ),
-        # `revise` re-enters THE loop, nothing else.
-        ("revise: advance", "revise: choose", "must target the next_item"),
-        # The ledger JSON is not a template value.
-        (
-            'with: {message: "{item.query}"}',
-            'with: {message: "{inputs.items}"}',
-            "items",
-        ),
-        # next_item's pick wiring is required.
-        (
-            '    with: {picked: "{choose.pick}"}\n',
-            "",
-            "requires `with.picked`",
-        ),
-        # A dropped loop strands the list input.
-        (
-            "  - decide: advance\n"
-            "    uses: next_item\n"
-            '    with: {picked: "{choose.pick}"}\n'
-            "    routes: {next: search, done: fix}\n",
-            "",
-            "no next_item",
-        ),
-    ],
-)
-def test_ledger_lints(old, new, fragment) -> None:
-    pack = _pack()
-    assert LEDGERED.count(old) == 1, old
-
-    with pytest.raises(PlaybookError, match=fragment):
-        pb.parse_playbook(LEDGERED.replace(old, new), "shop", pack)
-
-
-def test_two_list_inputs_rejected() -> None:
-    pack = _pack()
-    text = LEDGERED.replace(
-        "budget:",
-        "  extra:\n    description: another list\n    type: list\nbudget:",
-    )
-
-    with pytest.raises(PlaybookError, match="at most one `type: list`"):
-        pb.parse_playbook(text, "shop", pack)
-
-
-def test_sync_without_the_loop_rejected() -> None:
-    pack = _pack()
-    text = VALID + "  - sync: fix\n"
-
-    with pytest.raises(PlaybookError, match="`sync` needs the next_item"):
-        pb.parse_playbook(text, "buy", pack)
-
-
-def test_revise_requires_return() -> None:
-    pack = _pack()
-    text = LEDGERED.replace("    return: open-app\n", "")
-
-    with pytest.raises(PlaybookError, match="`revise` needs `return:`"):
-        pb.parse_playbook(text, "shop", pack)
 
 
 def test_do_missing_required_macro_input_rejected() -> None:
@@ -738,28 +545,6 @@ def test_scaffolded_pack_parses_clean() -> None:
 
     assert entry.error is None, entry.error
     assert entry.spec is not None and entry.spec.enabled is False
-
-
-# ---------- graph lints ----------
-
-
-def test_cycle_beyond_self_loop_rejected() -> None:
-    pack = _pack()
-    # Route none_fit back to the EARLIER open move → a wide cycle.
-    text = _mutate("none_fit: escalate", "none_fit: open")
-
-    with pytest.raises(PlaybookError, match="cycle"):
-        pb.parse_playbook(text, "buy", pack)
-
-
-def test_unreachable_move_rejected() -> None:
-    pack = _pack()
-    # A decide routes explicitly (no fall-through), so routing `pick`
-    # past to-cart leaves to-cart with no incoming edge at all.
-    text = _mutate("routes: {pick: to-cart,", "routes: {pick: confirm,")
-
-    with pytest.raises(PlaybookError, match="unreachable"):
-        pb.parse_playbook(text, "buy", pack)
 
 
 # ---------- budget ----------
@@ -873,7 +658,7 @@ def test_do_macro_rejects_a_non_string_non_mapping() -> None:
         pb.parse_playbook(text, "buy", _pack())
 
 
-def test_disabled_leg_macros_skips_inline_bodies() -> None:
+def test_disabled_macros_skips_inline_bodies() -> None:
     # An inline macro is not in `pack.macros` — the readiness check must
     # neither KeyError on it nor report it (its gate is the playbook's).
     root = write_pack()
@@ -883,7 +668,7 @@ def test_disabled_leg_macros_skips_inline_bodies() -> None:
 
     spec = pb.parse_playbook(_inline(), "buy", pack)
 
-    assert pb.disabled_leg_macros(spec, pack) == ["add-cart"]
+    assert pb.disabled_macros(spec, pack) == ["add-cart"]
 
 
 def test_qualified_inline_mints_dispatch_keys() -> None:
@@ -909,44 +694,29 @@ def test_pack_doc_rejects_yaml_aliases() -> None:
         pb.load_pack("demo")
 
 
-def test_ask_return_may_embed_the_body() -> None:
+def test_ask_resume_may_embed_the_body() -> None:
     text = VALID + (
-        "    return:\n      steps:\n        - {name: back-to-app, tool: home_screen}\n"
+        "    resume:\n      steps:\n        - {name: back-to-app, tool: home_screen}\n"
     )
     pack = _pack()
 
     spec = pb.parse_playbook(text, "buy", pack)
 
-    gate = spec.nodes[4]
-    assert gate.return_macro == "buy.pay.return"  # <playbook>.<move>.<role>
-    assert [s.name for s in spec.inline_macros["buy.pay.return"].steps] == [
+    ask = spec.nodes[4]
+    assert ask.resume == "buy.pay.resume"  # <playbook>.<move>.<role>
+    assert [s.name for s in spec.inline_macros["buy.pay.resume"].steps] == [
         "back-to-app"
     ]
     # The readiness check must skip the role body, not KeyError on it.
-    assert pb.disabled_leg_macros(spec, pack) == []
-
-
-def test_do_undo_may_embed_the_body() -> None:
-    text = _mutate(
-        'with: {message: "{choose.pick}"}',
-        'with: {message: "{choose.pick}"}\n'
-        "    undo:\n"
-        "      steps:\n"
-        "        - {name: back, tool: home_screen}",
-    )
-
-    spec = pb.parse_playbook(text, "buy", _pack())
-
-    assert spec.nodes[2].compensate == "buy.to-cart.undo"
-    assert "buy.to-cart.undo" in spec.inline_macros
+    assert pb.disabled_macros(spec, pack) == []
 
 
 def test_inline_role_body_with_required_input_rejected() -> None:
-    # undo/return dispatch with no arguments — a required input could
+    # resume/recover dispatch with no arguments — a required input could
     # only abort at run time (right after a confirmed ask), so the lint
     # runs on the RESOLVED macro.
     text = VALID + (
-        "    return:\n"
+        "    resume:\n"
         "      inputs:\n"
         "        x: {description: d}\n"
         "      steps:\n"
@@ -960,7 +730,7 @@ def test_inline_role_body_with_required_input_rejected() -> None:
 def test_directory_role_macro_with_required_input_rejected() -> None:
     # The same lint, directory spelling: the rule is role-shaped, not
     # embedding-shaped — moving a body out to macros/ must not lose it.
-    text = VALID + "    return: open-app\n"
+    text = VALID + "    resume: open-app\n"
 
     with pytest.raises(PlaybookError, match=r"requires input\(s\) message"):
         pb.parse_playbook(text, "buy", _required_message_pack())
@@ -969,9 +739,7 @@ def test_directory_role_macro_with_required_input_rejected() -> None:
 def test_scrollable_only_waypoint_is_a_declaration_at_both_doors() -> None:
     # `pages.route_decl` is the ONE declaration predicate: a waypoint
     # carrying only `scrollable:` must read as a (re)declaration at the
-    # pack door AND the text door — the two once disagreed, so a
-    # scrollable-only re-declare slipped the playbook parse while the
-    # pack door raised "declared twice".
+    # pack door AND the text door.
     text = _mutate(
         "route:\n  - page: home\n",
         "route:\n  - page: home\n    scrollable: true\n",
@@ -995,10 +763,9 @@ def test_text_door_validates_inplace_declarations_too() -> None:
         pb.parse_playbook(text, "buy", _pack())
 
 
-def test_disabled_directory_open_is_reported_not_armed() -> None:
-    # `open:` may name a directory macro; a disabled one must surface in
-    # the readiness check (rehearse-then-enable) — and the walk must not
-    # arm it as the reset rung's hand.
+def test_disabled_recover_macro_is_reported_not_run() -> None:
+    # `recover:` may name a directory macro; a disabled one must surface
+    # in the readiness check (rehearse-then-enable).
     from conductor_fakes import PACK_MACRO
 
     root = write_pack()
@@ -1009,10 +776,11 @@ def test_disabled_directory_open_is_reported_not_armed() -> None:
     )
     pack = pb.load_pack("demo")
     text = _mutate(
-        "route:\n  - page: home\n", "route:\n  - page: home\n    open: go-home\n"
+        "route:\n  - page: home\n",
+        "route:\n  - page: home\n    recover: {macro: go-home}\n",
     )
 
     spec = pb.parse_playbook(text, "buy", pack)
 
-    assert spec.open_macro == "go-home"
-    assert pb.disabled_leg_macros(spec, pack) == ["go-home"]
+    assert spec.recovers["home"].macro == "go-home"
+    assert pb.disabled_macros(spec, pack) == ["go-home"]

@@ -13,7 +13,7 @@ The walk (`program.py`) supplies the numbers and acts on the answers:
     CURRENT screen after the human's consent: staleness (the sheet
     must still show the consented total) and the bound (nothing may
     exceed max(cap, consented)). None = pay; else the bare reason —
-    the walk prefixes the leg it was guarding, logs it, and hands over.
+    the walk prefixes the move it was guarding, logs it, and hands over.
 
 Consent itself — quoting, binding, consuming — stays with the gate in
 `program.py`: consent is a conversation, these are arithmetic.
@@ -52,7 +52,7 @@ def fire_block(
     screen: Screen,
 ) -> str | None:
     """The two fire-time predicates. None = pay; else the bare reason to
-    block — the walk prefixes the leg it was guarding."""
+    block — the walk prefixes the move it was guarding."""
     if consented is None:
         return "reached without a confirmed total"
     amts = amounts(screen)

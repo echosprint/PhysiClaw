@@ -54,7 +54,7 @@ class Channel:
 
 def load_channel() -> Channel | None:
     """The channel pack, fail-open: absent or broken → None (asks and
-    activation degrade; legs run unaffected)."""
+    activation degrade; moves run unaffected)."""
     try:
         pack = load_pack(CHANNEL_APP)
         prints = prints_for_app(CHANNEL_APP, decls=pack.pages)

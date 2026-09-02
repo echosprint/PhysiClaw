@@ -7,9 +7,9 @@ here instead — `setup.session_setup()` at wake, the micro-caller with
 its cheap-tier client, and the `Conductor` arbiter per turn.
 
 The micro-caller wiring: None only when nothing drives (no program and
-no overture — with the rescue ladder's clear_overlay call, any live
-walk can need one, and the owned client is built lazily on the FIRST
-call, so wiring costs nothing at wake); `[conductor] micro_model`
+no overture — an ask's reply judgment can fire on any live walk, and
+the owned client is built lazily on the FIRST call, so wiring costs
+nothing at wake); `[conductor] micro_model`
 selects the cheap decision tier, ours to close (`aclose`); fail-open to
 the session provider on any problem, at parse time or build time.
 """
@@ -73,13 +73,12 @@ class ConductorPlugin:
 
 
 def _wire_micro(program, overture, ctx: SetupContext) -> MicroCaller | None:
-    """The micro-caller for the conductor's decision calls — None only
-    when NOTHING drives (no program and no overture). A pure-LEG walk
-    used to skip it too, but the rescue ladder's clear_overlay call
-    means any live walk can need one — and the owned cheap-tier client
-    is built lazily on the FIRST call, so wiring the caller costs
-    nothing at wake. The session provider (off the setup context) is
-    the fail-open floor."""
+    """The micro-caller for the conductor's model calls — None only
+    when NOTHING drives (no program and no overture). Any live walk can
+    need one (an ask's reply judgment, an agent step) — and the owned
+    cheap-tier client is built lazily on the FIRST call, so wiring the
+    caller costs nothing at wake. The session provider (off the setup
+    context) is the fail-open floor."""
     if overture is None and program is None:
         return None
     factory = None

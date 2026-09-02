@@ -371,7 +371,7 @@ async def _aborted(
         # "Failed before acting" is not "burned": nothing moved, so the
         # steering flips — clearing the blocker makes a retry safe. The
         # marker is one spelling (`model.NO_GESTURES_NOTE`); the
-        # conductor's leg-retry reads it off this very text.
+        # conductor's move-retry reads it off this very text.
         steer = (
             f"{NO_GESTURES_NOTE} — the phone did not move; clear the "
             "blocker and a re-run is safe."

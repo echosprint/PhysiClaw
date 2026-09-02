@@ -127,7 +127,7 @@ class StudioSession:
         `rehearsal.walk`, the identical loop `playbooks run` drives,
         holding the one-rig lock for the whole walk. The caller arms
         first (`rehearsal.arm` — bad specs fail before we dial);
-        RuntimeError (no model configured for a decide) passes through
+        RuntimeError (no model configured for a model call) passes through
         as config, not transport."""
         from physiclaw.conductor import rehearsal
 

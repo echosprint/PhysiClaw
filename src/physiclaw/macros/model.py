@@ -154,7 +154,7 @@ WAIT_SECONDS_ARG = "seconds"
 # (a first-guard miss, a wait that timed out): the phone did not move, so
 # a retry replays nothing. One spelling, three consumers: the runner
 # composes it, the engine's burn rule reads the structural field beside
-# it (`MacroRunResult.gestures`), and the conductor's leg-retry reads
+# it (`MacroRunResult.gestures`), and the conductor's move-retry reads
 # THIS marker off the transcript text (its only channel).
 NO_GESTURES_NOTE = "stopped before any gesture ran"
 

@@ -2,10 +2,9 @@
 
 ``playbooks/suspended.json`` holds a walk that asked the user something
 and stepped out of the way rather than burning a session waiting: a
-CONFIRM was sent, or a HUMAN_GATE ran out of patience polling for a
-reply. It carries the walk's whole position — cursor, decision outputs,
-visit counts, ledger state, the gate's consent numbers — so the next
-wake picks up mid-purchase instead of starting over.
+tell was sent, or an ask ran out of patience polling for a reply. It carries the walk's whole position — cursor, agent outputs, the
+gate's consent numbers — so the next wake picks up mid-purchase
+instead of starting over.
 
 One-shot: consumed on load, whatever the outcome. A crash mid-resume
 loses the suspension and the wake runs plain, never a loop.

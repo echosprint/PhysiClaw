@@ -29,9 +29,10 @@ self-describing YAML document, the way a GitHub workflow is one file
   the `start` cold-launch, then `page:` waypoints (checked every
   time, each optionally declaring its own `recover:` hand)
   alternating with moves — `do` (a recorded macro), `agent` (the
-  model drives inside your prompt's fence), `decide`, `ask`
-  (human gate; `resume:` re-enters the app), `tell`, `sync`. A move's
-  enter/verify checks derive from the adjacent waypoints.
+  model drives inside your prompt's fence), `ask` (human gate;
+  `resume:` re-enters the app), `tell`. A move's enter/verify checks
+  derive from the adjacent waypoints; there is no branching and no
+  loop — judgment is an `agent` step, approval is an `ask`.
 - `pages:` — optional appendix for fingerprints no move lands on.
   Anchors are one clause (`"text"`, `{or: [...], region}`,
   `{and: [...]}`) — semantics only; geometry is learned on-device via

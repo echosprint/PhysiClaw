@@ -148,7 +148,7 @@ def build_program(app: str = "demo", name: str = "flow", **values):
 
     spec, pack = setup.load_spec(app, name, require_live=False)
     return setup.build_program(
-        app, spec, pack, setup.resolve_inputs(spec, values), channel.load_channel()
+        spec, pack, setup.resolve_inputs(spec, values), channel.load_channel()
     )
 
 
@@ -187,58 +187,3 @@ def write_channel(open_macro: str | None = None) -> None:
         (root / "macros" / "open" / "MACRO.yml").write_text(
             open_macro, encoding="utf-8"
         )
-
-
-# The canonical ledger playbook — the full P8 stack (list input,
-# next_item loop, sync, payment ask with revise) — shared by the
-# parser and walk test files so grammar changes are edited ONCE. Route
-# form: `goto` hops from the start page to `results` so the loop head
-# (`search`) ENTERS at the loop's own page — the backward `next:` arm
-# re-runs it from `results` on every later iteration, and a derived
-# enter of `home` would rescue instead of searching.
-LEDGERED = """\
-description: shop the list
-inputs:
-  items:
-    description: the buying list
-    type: list
-budget: 100
-route:
-  - page: home
-  - do: goto
-    macro: open-app
-    with: {message: "go"}
-  - page: results
-  - do: search
-    macro: open-app
-    with: {message: "{item.query}"}
-  - page: results
-  - decide: choose
-    uses: choose_item
-    with: {criteria: "cheapest {item.query}"}
-    routes: {pick: add, scroll: choose, none_fit: escalate, escalate: escalate}
-  - do: add
-    macro: add-cart
-    with: {message: "add"}
-  - page: results
-  - decide: advance
-    uses: next_item
-    with: {picked: "{choose.pick}"}
-    routes: {next: search, done: fix}
-  - sync: fix
-  - do: sheet
-    macro: open-app
-    with: {message: "sheet"}
-  - page: results
-  - ask: gate
-    approve: payment
-    message: "List ready, total ¥{ask.total}. Reply ok to pay, or no to cancel."
-    over_budget_message: "Total ¥{ask.total}, over the ¥{ask.cap} budget. Reply ok to pay, or no to cancel."
-    return: open-app
-    revise: advance
-  - do: pay
-    macro: add-cart
-    with: {message: "pay"}
-    irreversible: payment
-  - page: home
-"""

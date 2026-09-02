@@ -29,20 +29,15 @@ def arm(app: str, name: str, values: dict[str, str], emit_warn) -> tuple:
     Returns (program, registry) ready for `walk`."""
     from physiclaw.conductor import channel as channel_mod
     from physiclaw.conductor import setup as conductor_setup
-    from physiclaw.conductor.ledger import check_ledger_value
 
     spec, pack = conductor_setup.load_spec(app, name, require_live=False)
     values = conductor_setup.resolve_inputs(spec, values)
-    # A `type: list` value is a JSON ledger — hold it to the same contract
-    # the overture's activation does, so a typo'd list fails here rather
-    # than mid-walk at the shopping loop.
-    check_ledger_value(spec, values)
     if not spec.enabled:
         emit_warn(f"{app}/{name} is disabled — rehearsing it anyway")
     for line in conductor_setup.readiness_warnings(spec):
         emit_warn(line)
     channel = channel_mod.load_channel()
-    program = conductor_setup.build_program(app, spec, pack, values, channel)
+    program = conductor_setup.build_program(spec, pack, values, channel)
     # The dispatch registry a real wake would arm — one spelling, shared
     # with `session_setup` (a gate's ask dispatches `channel/send`,
     # which is not this pack's macro).
@@ -59,7 +54,7 @@ async def walk(
 ) -> str:
     """One armed walk over an already-open MCP client, one turn at a
     time, until it finishes, hands over, suspends, or hits the turn cap.
-    Raises RuntimeError when a decide fires with no model configured."""
+    Raises RuntimeError when a model call fires with no model configured."""
     from physiclaw.conductor.micro import DecisionRequest
     from physiclaw.contract.dto import SystemMessage, ToolResultMessage, UserMessage
 
@@ -76,10 +71,9 @@ async def walk(
         for _ in range(REHEARSE_MAX_TURNS):
             step = program.advance(history)
             while isinstance(step, DecisionRequest):
-                # Built on FIRST use (a rescue clear_overlay can fire
-                # even on a pure-LEG walk), and after the connection —
-                # so "start the server first" is what a user without
-                # one hears, and a walk that never decides never pays
+                # Built on FIRST use, and after the connection — so
+                # "start the server first" is what a user without one
+                # hears, and a walk that never calls a model never pays
                 # a model-config error either.
                 if micro is None:
                     micro = micro_caller()

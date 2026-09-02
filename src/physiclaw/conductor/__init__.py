@@ -13,32 +13,33 @@ The seam:
 
 Driving:
     overture.py    boot to the user's thread, read the intent there
-    program.py     one playbook mid-walk: the state machine alone
+    program.py     one playbook mid-walk: cursor, verdicts, recovery
+    step.py        the step executor contract the walk routes to
+    step_do.py     the `do`/`start` step: enter, macro, verify
+    step_agent.py  the `agent` step: the pure-text call, the episode
+    step_ask.py    the `ask` and `tell` steps: message, hold, consent
     money.py       the payment predicates, pure
-    reconcile.py   the cart step planner, pure
-    rescue.py      the recovery-ladder planner, pure
+    recover.py     declared recovery: unlock, settle, the page's hand
     setup.py       how a Program comes to exist (activation, resume)
     turns.py       minting a synthesized turn
     brief.py       the handover report a driver's last turn carries
     suspension.py  suspended.json, the one cross-wake file
-    micro.py       scoped cheap-tier decision calls
-    calls.py       the DECIDE call-type table and the episode verbs
+    micro.py       the scoped model calls (agent, activation, reply)
+    calls.py       the episode vocabulary the parser and walk share
 
 Seeing the screen:
     pages.py       declared and learned page fingerprints
     match.py       the open-set page matcher
-    cards.py       clustering result rows into item cards
     views.py       reading tool results out of the transcript
     capture.py     mining fingerprints from recorded observations
     corpus.py      recorded-session listings for offline matching
 
 Specs and the user:
-    playbook.py    PLAYBOOK.yml model, parser, lints
+    playbook.py    PLAYBOOK.yml model, the pack, the ref grammar
+    route.py       the route compiler and its lints
     _spec.py       shared YAML substrate
     channel.py     the user-channel pack (thread, send, open)
-    ledger.py      the buying list: cart readers, revision merge
     reply.py       deterministic confirm/deny reply reading
-    memory.py      fail-closed memory slices for decisions
     scaffold.py    pack templates and playbooks/README.md
 
 Telemetry and tuning:

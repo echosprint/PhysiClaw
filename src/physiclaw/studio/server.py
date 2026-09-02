@@ -6,7 +6,7 @@ Error convention, read by the browser's banner (`_refused` is its one
 home): 400 — request the studio refuses (unknown tool, unreadable
 body, any brains-layer refusal); 409 — a call is in flight (one rig);
 502 — the MCP server is unreachable; 500 — the tool ran and reported
-failure, or a decide has no model configured.
+failure, or a model call has no model configured.
 """
 
 import base64

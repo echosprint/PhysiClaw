@@ -50,6 +50,12 @@ from physiclaw.contract.dto import (
 # stale result whenever its own failed to land.
 CALL_PREFIX = "conductor"
 
+# Where a scroll swipe originates: a mid-content band, clear of top
+# chrome and the tab bar, so the drag scrolls the list rather than
+# dismissing or paging anything. Stylus up → page scrolls down. Shared
+# by the overture's history scroll and an episode's scroll verb.
+SCROLL_BBOX = (0.2, 0.35, 0.8, 0.65)
+
 # How much of a blocked call's text a hand-over reason quotes. Enough to
 # name the cause, short enough not to paste a screen into a log line.
 MAX_ERROR_CHARS = 200
@@ -60,9 +66,8 @@ class Pending:
     """The synthesized action whose result the next advance() must read.
 
     A driver's cursor never moves while an action is pending, so a
-    pending leg (or the decide a "swipe" re-asks) is always the node the
-    cursor sits on; a pending "tap" already had its cursor routed at
-    resolve time. `channel` marks actions that land on the user thread —
+    pending move is always the node the cursor sits on. `channel` marks
+    actions that land on the user thread —
     the synth site declares it, so the reader never re-derives it from
     kind names."""
 
@@ -90,10 +95,12 @@ class Turnsmith:
         """The other half of the contract: read the pending action's
         result out of the transcript and retire it.
 
-        Returns `(what was pending, its result, why there is none)` —
-        exactly one of the last two is set. The action is cleared only
-        when a result actually landed, so a driver that failed still
-        knows what it was waiting on. Callers keep their own policy
+        Returns `(what was pending, its result, why it failed)` — `failed`
+        is None when the result landed clean; on a blocked or errored
+        call the error result rides along too (a retry may read it), on
+        a missing one it is None. The action is cleared only when a
+        result actually landed, so a driver that failed still knows
+        what it was waiting on. Callers keep their own policy
         (the walk drops a suspension; the boot spends no retry budget);
         what lives here is where a result is found and how a missing or
         blocked one is phrased, so the two drivers cannot word — or
@@ -110,12 +117,17 @@ class Turnsmith:
         if result.is_error:
             return (
                 pending,
-                None,
+                result,
                 f"{pending.kind} was blocked or failed: "
                 f"{views.text_of(result)[:MAX_ERROR_CHARS]}",
             )
         self.pending = None
         return pending, result, None
+
+    def drop(self) -> None:
+        """Retire the pending action without a result — a failure the
+        driver handled itself (a retry), never to be settled blind."""
+        self.pending = None
 
     def synth(
         self, kind: str, summary: str, tool: str, args: dict, *, channel: bool = False

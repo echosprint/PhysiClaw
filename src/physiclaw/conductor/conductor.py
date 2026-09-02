@@ -4,8 +4,8 @@ The turn loop never calls the LLM provider while a driver is live; it
 asks ``Conductor.advance()``. The conductor's whole job is that
 decision: while a program or the overture is live, IT synthesizes the
 turn (``overture.py`` — boot to the user's thread and read the intent
-there; ``program.py`` — legs as ``run_macro``, verified against page
-fingerprints) and the conductor brokers their decision requests through
+there; ``program.py`` — moves as ``run_macro``, verified against page
+fingerprints) and the conductor brokers their model requests through
 the wired micro-caller (``micro.py``); when they complete or hand over
 — one final synthesized brief turn (``brief.py``), then None — "not
 mine" — the loop calls the provider with the context the runtime

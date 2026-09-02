@@ -10,7 +10,12 @@ import pytest
 from conductor_fakes import make_screen
 
 from physiclaw.conductor import evalset
-from physiclaw.conductor.micro import Candidate, MicroOutcome, MicroResult
+from physiclaw.conductor.micro import (
+    CONFIRM_REPLY,
+    PARSE_TASK,
+    MicroOutcome,
+    MicroResult,
+)
 from physiclaw.contract.dto import Usage
 
 
@@ -25,10 +30,11 @@ def _write_cases(tmp_path: Path, *cases: dict) -> Path:
 
 def _case(**overrides) -> evalset.EvalCase:
     base = dict(
-        call="choose_item",
-        expect="milk 1L",
-        args={"criteria": "cheapest milk"},
-        listing=make_screen(("milk 1L", 0.5, 0.3), ("yogurt", 0.5, 0.5)).text,
+        call=PARSE_TASK,
+        expect="taobao/buy",
+        args={"menu": "- taobao/buy: buy things"},
+        outcomes=("taobao/buy",),
+        listing=make_screen(("买牛奶", 0.25, 0.3)).text,
     )
     return evalset.EvalCase(**{**base, **overrides})
 
@@ -43,13 +49,8 @@ def _result(outcome: MicroOutcome | None, detail: str = "") -> MicroResult:
     )
 
 
-def _pick(key: str, confidence: float = 0.9) -> MicroOutcome:
-    return MicroOutcome(
-        out="pick",
-        reason="fits",
-        confidence=confidence,
-        picked=Candidate(key=key, bbox=(0.1, 0.1, 0.2, 0.2)),
-    )
+def _answer(out: str, confidence: float = 0.9) -> MicroOutcome:
+    return MicroOutcome(out=out, reason="fits", confidence=confidence)
 
 
 # ---------- read_cases ----------
@@ -59,10 +60,9 @@ def test_read_cases_parses_fields(tmp_path: Path) -> None:
     p = _write_cases(
         tmp_path,
         {
-            "call": "decide",
-            "expect": "yes",
-            "args": {"question": "logged in?"},
-            "outcomes": ["yes", "no", "escalate"],
+            "call": CONFIRM_REPLY,
+            "expect": "confirm",
+            "args": {"ask": "reply ok", "reply": "ok then"},
             "listing": "x",
             "note": "smoke",
         },
@@ -70,10 +70,10 @@ def test_read_cases_parses_fields(tmp_path: Path) -> None:
 
     (case,) = evalset.read_cases(p)
 
-    assert case.call == "decide"
-    assert case.expect == "yes"
-    assert case.args == {"question": "logged in?"}
-    assert case.outcomes == ("yes", "no", "escalate")
+    assert case.call == CONFIRM_REPLY
+    assert case.expect == "confirm"
+    assert case.args == {"ask": "reply ok", "reply": "ok then"}
+    assert case.outcomes == ()
     assert case.note == "smoke"
 
 
@@ -93,7 +93,7 @@ def test_read_cases_rejects_unknown_call(tmp_path: Path) -> None:
 
 
 def test_read_cases_rejects_missing_expect(tmp_path: Path) -> None:
-    p = _write_cases(tmp_path, {"call": "decide", "args": {"question": "q"}})
+    p = _write_cases(tmp_path, {"call": CONFIRM_REPLY, "args": {"ask": "q"}})
 
     with pytest.raises(ValueError, match="`expect` must be a non-empty string"):
         evalset.read_cases(p)
@@ -107,35 +107,35 @@ def test_read_cases_rejects_empty_file(tmp_path: Path) -> None:
         evalset.read_cases(p)
 
 
-def test_build_harvests_candidates_via_runtime_assembler() -> None:
+def test_build_reads_the_listing_via_runtime_assembler() -> None:
     case = _case()
 
     req = evalset.build(case, "eval-0")
 
-    assert {c.key for c in req.candidates} == {"milk 1L", "yogurt"}
+    assert "买牛奶" in req.listing and req.outcomes == ("taobao/buy",)
 
 
 # ---------- score ----------
 
 
-def test_score_pick_matching_candidate_key_is_correct() -> None:
-    scored = evalset.score(_case(), _result(_pick("milk 1L")))
+def test_score_matching_answer_is_correct() -> None:
+    scored = evalset.score(_case(), _result(_answer("taobao/buy")))
 
     assert scored.correct
-    assert scored.answer == "milk 1L"
+    assert scored.answer == "taobao/buy"
 
 
 def test_score_escape_arm_matches_out() -> None:
-    outcome = MicroOutcome(out="scroll", reason="maybe below", confidence=0.8)
+    outcome = _answer("not_a_task", 0.8)
 
-    scored = evalset.score(_case(expect="scroll"), _result(outcome))
+    scored = evalset.score(_case(expect="not_a_task"), _result(outcome))
 
     assert scored.correct
-    assert scored.answer == "scroll"
+    assert scored.answer == "not_a_task"
 
 
 def test_score_wrong_answer_is_answered_but_not_correct() -> None:
-    scored = evalset.score(_case(), _result(_pick("yogurt")))
+    scored = evalset.score(_case(), _result(_answer("not_a_task")))
 
     assert scored.answer is not None
     assert not scored.correct
@@ -162,24 +162,25 @@ def test_score_no_outcome_against_real_expectation_is_wrong() -> None:
 
 
 def test_summarize_groups_by_call_in_first_seen_order() -> None:
+    reply = _case(
+        call=CONFIRM_REPLY, expect="confirm", listing="", args={}, outcomes=()
+    )
     scored = [
-        evalset.score(_case(), _result(_pick("milk 1L"))),
-        evalset.score(
-            _case(call="decide", expect="yes", listing="", args={}), _result(None)
-        ),
-        evalset.score(_case(), _result(_pick("yogurt"))),
+        evalset.score(_case(), _result(_answer("taobao/buy"))),
+        evalset.score(reply, _result(None)),
+        evalset.score(_case(), _result(_answer("not_a_task"))),
     ]
 
     reports = evalset.summarize(scored)
 
-    assert [r.call for r in reports] == ["choose_item", "decide"]
+    assert [r.call for r in reports] == [PARSE_TASK, CONFIRM_REPLY]
     assert (reports[0].n, reports[0].correct, reports[0].wrong) == (2, 1, 1)
     assert (reports[1].n, reports[1].escalated) == (1, 1)
 
 
 def test_report_rates() -> None:
     scored = [
-        evalset.score(_case(), _result(_pick("milk 1L"))),
+        evalset.score(_case(), _result(_answer("taobao/buy"))),
         evalset.score(_case(), _result(None)),
     ]
 
@@ -191,8 +192,8 @@ def test_report_rates() -> None:
 
 def test_reliability_buckets_answered_cases_only() -> None:
     scored = [
-        evalset.score(_case(), _result(_pick("milk 1L", confidence=0.95))),
-        evalset.score(_case(), _result(_pick("yogurt", confidence=0.92))),
+        evalset.score(_case(), _result(_answer("taobao/buy", 0.95))),
+        evalset.score(_case(), _result(_answer("not_a_task", 0.92))),
         evalset.score(_case(), _result(None)),
     ]
 
@@ -203,7 +204,7 @@ def test_reliability_buckets_answered_cases_only() -> None:
 
 
 def test_reliability_confidence_one_lands_in_top_bin() -> None:
-    scored = [evalset.score(_case(), _result(_pick("milk 1L", confidence=1.0)))]
+    scored = [evalset.score(_case(), _result(_answer("taobao/buy", 1.0)))]
 
     table = evalset.reliability(scored)
 

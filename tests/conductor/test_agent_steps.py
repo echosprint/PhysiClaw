@@ -35,7 +35,7 @@ from physiclaw.conductor.micro import (
     DecisionRequest,
     MicroOutcome,
 )
-from physiclaw.conductor.playbook import AgentNode, LegNode, PlaybookError
+from physiclaw.conductor.playbook import AgentNode, DoNode, PlaybookError
 
 BACK_LANDMARK = """\
 back:
@@ -105,11 +105,11 @@ def test_parse_the_agented_playbook() -> None:
     spec, _ = setup.load_spec("demo", "walk", require_live=False)
 
     kinds = [type(n).__name__ for n in spec.nodes]
-    assert kinds == ["AgentNode", "LegNode", "LegNode", "AgentNode"]
+    assert kinds == ["AgentNode", "DoNode", "DoNode", "AgentNode"]
     parse, start, search, pick = spec.nodes
     assert isinstance(parse, AgentNode) and parse.tools == ()
     assert parse.return_fields == ("keyword",)
-    assert isinstance(start, LegNode) and start.enter == "" and start.verify == "home"
+    assert isinstance(start, DoNode) and start.enter == "" and start.verify == "home"
     assert isinstance(pick, AgentNode)
     assert pick.enter == "results" and pick.verify == "done"
     assert pick.give == ("back",) and pick.max_calls == 5 and pick.max_scrolls == 1
@@ -141,7 +141,7 @@ def _parse(text: str):
         (
             (
                 "  - agent: parse\n",
-                "  - sync: pre\n  - agent: parse\n",
+                "  - do: open-app\n  - agent: parse\n",
             ),
             "precede the first page",
         ),
@@ -416,10 +416,10 @@ def test_page_without_recover_hands_over_in_declared_mode() -> None:
 
 
 def test_recover_relaunch_loop_is_bounded_by_the_walk_budget() -> None:
-    # A hand that runs and re-locates clears its rescue State, so the
+    # A hand that runs and re-locates clears its recovery State, so the
     # budget must count the WALK's spend, not the engagement's — else a
     # splash ad on every cold launch loops force_quit forever.
-    from physiclaw.conductor import rescue
+    from physiclaw.conductor import recover
 
     _write()
     p = _program(name="walk", user_said="买牛奶")
@@ -439,7 +439,7 @@ def test_recover_relaunch_loop_is_bounded_by_the_walk_budget() -> None:
         step = nxt
     else:
         pytest.fail("the relaunch loop never terminated")
-    assert 1 <= quits <= rescue.GLOBAL_BUDGET
+    assert 1 <= quits <= recover.GLOBAL_BUDGET
     assert "budget" in step.tool_calls[0].arguments["summary"]
 
 

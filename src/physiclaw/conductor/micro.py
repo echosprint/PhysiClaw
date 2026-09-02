@@ -1,19 +1,15 @@
-"""Micro-calls — the conductor's scoped decision calls.
+"""Micro-calls — the conductor's scoped model calls.
 
-Eight call types ride one channel: the playbook-authorable `choose_item`
-and `decide` (vocabulary declared in `calls.py`), the playbook `agent`
-step's two calls (`agent_fields` — prompt in, declared fields out; and
-`agent_act` — one episode turn whose answer is a screen row, a granted
-landmark, a scroll verb, done, or escalate), plus four
-conductor-internal calls playbooks can never name — `parse_task`
-(activation: does the user's thread assign a task a playbook covers?),
-`confirm_reply` (the ask's LLM tier when the word lists can't
-classify a reply), `revise_list` (a "yes, but change it" reply → the
-updated buying list), and `clear_overlay` (the rescue ladder's "which
-band control dismisses this popup"). `next_item` is deterministic and
-never prompted — no row here. Per-call shape lives in ONE table
-(`_SPECS`) — role sentence, answer space, prompt body, outcome mapping —
-never as boolean proxies scattered through the module.
+Four call types ride one channel: the playbook `agent` step's two
+(`agent_fields` — prompt in, declared fields out; and `agent_act` —
+one episode turn whose answer is a screen row, a granted landmark, a
+scroll verb, done, or escalate), plus two conductor-internal calls
+playbooks never name — `parse_task` (activation: does the user's
+thread assign a task a playbook covers?) and `confirm_reply` (the
+ask's LLM tier when the word lists can't classify a reply). Per-call
+shape lives in ONE table (`_SPECS`) — role sentence, answer space,
+prompt body, outcome mapping — never as boolean proxies scattered
+through the module.
 
 One `MicroCaller` serves them all. Each call is a tiny
 fixed-shape prompt (playbooks parameterize, never define prompt shapes),
@@ -36,9 +32,8 @@ model: escalation is the default, never a guess.
 (Logprob gating can layer onto OpenAI-shape vendors later; Anthropic
 exposes none, so validation + confidence is the universal gate.)
 
-The call vocabulary is read off `calls.py`'s declarations (`CallDecl`
-pick/re-ask arms and escapes), never re-listed here — parser and runner
-cannot disagree about what a call offers.
+The episode vocabulary is read off `calls.py`, never re-listed here —
+parser and runner cannot disagree about what a call offers.
 
 Wired by `plugin.py` off the setup context (the session's provider and
 sinks arrive through the plugin seam), so every micro round-trip is
@@ -48,16 +43,14 @@ and raw reply for replay/debugging. `run()` also returns the stats with
 the answer (`MicroResult`), so tooling reads the result instead of
 impersonating a sink.
 
-Candidates are content-keyed (the card's own title label — never A/B/C)
-and shuffled, so position bias cannot masquerade as preference; result
-rows are clustered into item cards first (`cards.py`), so a price
-fragment is metadata on its card, never a candidate itself.
+Episode candidates are content-keyed (the row's own label — never
+A/B/C) and kept in screen order: position is spatial information a
+step-by-step operator navigates by.
 """
 
 import asyncio
 import json
 import logging
-import random
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -66,8 +59,7 @@ from physiclaw.common.bbox import Bbox
 from physiclaw.common.config import CONFIG
 from physiclaw.common.listing import Screen
 from physiclaw.common.text import json_span
-from physiclaw.conductor import cards
-from physiclaw.conductor.calls import ACT_VERBS, AGENT_DONE, CALLS, ESCALATE
+from physiclaw.conductor.calls import ACT_SCROLL_UP, ACT_VERBS, AGENT_DONE, ESCALATE
 from physiclaw.contract.dto import (
     AssistantMessage,
     FinishReason,
@@ -85,22 +77,15 @@ log = logging.getLogger(__name__)
 # than this add tokens without adding real choices.
 MAX_CANDIDATES = 40
 
-# Conductor-internal call names — deliberately NOT in `calls.py`'s
-# CALLS: a playbook's DECIDE may never name them (the parser validates
-# `call` against CALLS alone).
+# Conductor-internal call names — a playbook never names them.
 PARSE_TASK = "parse_task"
 CONFIRM_REPLY = "confirm_reply"
-REVISE_LIST = "revise_list"
 NOT_A_TASK = "not_a_task"
 # parse_task's second escape: the newest message is a nudge whose
 # request sits ABOVE the visible thread — the overture scrolls up
-# (bounded) and re-asks over the accumulated listing.
-SCROLL_UP = "scroll_up"
-# The rescue ladder's micro tier: which band row dismisses this overlay
-# (deny-list-filtered candidates, `rescue.overlay_request`); the escape
-# when nothing is safely tappable.
-CLEAR_OVERLAY = "clear_overlay"
-NONE_SAFE = "none_safe"
+# (bounded) and re-asks over the accumulated listing. The episode's
+# scroll verb, one spelling.
+SCROLL_UP = ACT_SCROLL_UP
 
 # The playbook `agent` step's two calls. `agent_fields` is the
 # pure-text form: the authored prompt in, the declared return fields
@@ -116,45 +101,32 @@ AGENT_FIELDS = "agent_fields"
 AGENT_ACT = "agent_act"
 ACT_ARM = "act"  # the routing arm a grounded row/landmark answer maps to
 _CONTRACT_KEYS = frozenset({"reason", "answer", "confidence"})
-# The routing arm a clear_overlay pick maps to.
-DISMISS_ARM = "dismiss"
 CONFIRM_OUTS = ("confirm", "deny", "revise", "unclear")
-REVISE_OUTS = ("updated", "unclear")
-
-# The two halves of the list-input handshake, ONE spelling each: the
-# marker `_menu` prints beside a `type: list` input and this module's
-# parse_task prompt interprets, and the ledger-item JSON template both
-# list prompts show (fields = calls.LEDGER_FIELDS). `{{`/`}}` because
-# answer_spec strings go through .format().
-LIST_INPUT_MARK = "(list)"
-_ITEM_JSON = '{{"query": "<item>", "qty": <count>}}'
 
 
 @dataclass(frozen=True)
 class Candidate:
-    """One choosable item CARD (`cards.py`): content key (the title
-    row's label, verbatim — it flows into `{node.field}` refs and cart
-    matching) + the title row's bbox the conductor taps if picked +
-    the card's other labels, prompt-only."""
+    """One answerable screen row (or granted landmark) of an agent
+    episode: the content key (the label, verbatim — the model answers
+    by copying it) and the bbox the walk taps when it is picked."""
 
     key: str
     bbox: Bbox
-    meta: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class DecisionRequest:
-    """Everything one micro-call needs — the three node scalars it reads
-    (never the whole node: tooling builds requests without minting fake
-    nodes) plus the material assembled from the decide-time screen."""
+    """Everything one micro-call needs — the node scalars it reads (never
+    the whole node: tooling builds requests without minting fake nodes)
+    plus the material assembled from the screen at call time."""
 
-    call: str  # key into CALLS
+    call: str  # key into _SPECS
     node_id: str  # for logs/trace
-    outcomes: tuple[str, ...]  # resolved arms (move-authored `answers` for decide)
-    args: dict[str, str]  # resolved `with:` (criteria / question)
-    candidates: tuple[Candidate, ...]  # pick-style calls only
-    listing: str  # label text of the screen (decide only)
-    context: str  # assembled context slices, "" when none
+    outcomes: tuple[str, ...]  # the caller's arms (an episode's verbs)
+    args: dict[str, str]  # the call's text material (prompt / ask / menu)
+    candidates: tuple[Candidate, ...] = ()  # an episode's answerable rows
+    listing: str = ""  # label text of the screen (listing-material calls)
+    context: str = ""  # assembled context, "" when none
     # An agent episode's prior turns, append-only: ("user"|"assistant",
     # text) pairs replayed VERBATIM before the newest user block, so
     # each call's prefix is byte-identical to the previous call's whole
@@ -164,15 +136,16 @@ class DecisionRequest:
 
 @dataclass(frozen=True)
 class MicroOutcome:
-    """A validated, confident answer. `out` is the routing arm the
-    playbook's `routes:` map is keyed by; `picked` carries the chosen
-    candidate for a pick arm."""
+    """A validated, confident answer. `out` is the answer's arm (a verb,
+    an escape, or `ACT_ARM` for a grounded row); `picked` carries the
+    chosen candidate for a grounded one."""
 
     out: str
     reason: str
     confidence: float
     picked: Candidate | None = None
-    # parse_task's extracted playbook inputs; None for every other call.
+    # parse_task's extracted playbook inputs / an agent call's return
+    # fields; None for every other call.
     payload: dict[str, str] | None = None
 
 
@@ -194,13 +167,6 @@ class MicroResult:
     agreement: bool | None = None
 
 
-def call_names() -> tuple[str, ...]:
-    """Every call type this channel serves — playbook-namable and
-    conductor-internal alike. The validation set for tooling that names
-    calls as data (the eval harness), so it can never drift from _SPECS."""
-    return tuple(_SPECS)
-
-
 def build_request(
     call: str,
     node_id: str,
@@ -209,114 +175,51 @@ def build_request(
     screen: Screen,
     context: str = "",
 ) -> DecisionRequest:
-    """The one assembler of a request's screen material — candidates for a
-    pick-style call, the label text otherwise — shared by the program's
-    walk, activation, and the replay CLI. What a call consumes is read
-    off its `_SPECS` row."""
-    spec = _SPECS[call]
-    if spec.material == "candidates":
-        candidates = _candidates(call, screen.rows)
-    elif spec.material == "buttons":
-        # Flat per-row candidates — a popup's buttons must stay
-        # individual choices, never card-clustered under a title.
-        candidates = _button_candidates(screen.rows)
-    else:
-        candidates = ()
+    """The one assembler of a one-shot request's screen material — the
+    label text when the call reads the screen (`_SPECS` says which) —
+    shared by activation, the ask's reply judgment, and the eval replay.
+    (Episode requests are assembled by the agent step: they carry
+    replayed history and granted candidates this cannot produce.)"""
     return DecisionRequest(
         call=call,
         node_id=node_id,
         outcomes=outcomes,
         args=args,
-        candidates=candidates,
-        listing=screen.content if spec.material == "listing" else "",
+        listing=screen.content if _SPECS[call].material == "listing" else "",
         context=context,
     )
 
 
-def _keyed(
-    raw, reserved: tuple[str, ...], cap: int | None, *, shuffle: bool = True
-) -> tuple[Candidate, ...]:
-    """The key hygiene every candidate set shares: content-keyed, first
-    occurrence wins, escape-answer collisions dropped, optionally
-    capped, shuffled by default (position bias must not masquerade as
-    preference — episode rows opt out: screen order is spatial
-    information). One home, so the builders below cannot drift."""
-    seen: set[str] = set()
-    out: list[Candidate] = []
-    for cand in raw:
-        if not cand.key or cand.key in seen or cand.key in reserved:
-            continue
-        seen.add(cand.key)
-        out.append(cand)
-    if cap is not None and len(out) > cap:
-        log.info("micro: %d candidates capped to %d", len(out), cap)
-        out = out[:cap]
-    if shuffle:
-        random.shuffle(out)
-    return tuple(out)
-
-
-def _candidates(call: str, rows) -> tuple[Candidate, ...]:
-    """Screen rows → clustered cards (`cards.group_cards`) → keyed
-    candidates. A card's title label is the key; its other rows ride as
-    prompt-only metadata, so price/sales fragments stop being
-    candidates themselves."""
-    return _keyed(
-        (
-            Candidate(
-                key=card.title.label.strip(),
-                bbox=card.title.bbox,
-                meta=card.meta,
-            )
-            for card in cards.group_cards(rows)
-        ),
-        CALLS[call].escapes,
-        MAX_CANDIDATES,
-    )
-
-
-def _button_candidates(rows) -> tuple[Candidate, ...]:
-    """One candidate per labeled row, verbatim — the clear_overlay
-    material (popup buttons must stay individual, never card-clustered).
-    Uncapped on purpose: an overlay band holds a handful of rows."""
-    return _keyed(
-        (Candidate(key=row.label.strip(), bbox=tuple(row.bbox)) for row in rows),
-        (NONE_SAFE,),
-        None,
-    )
+# What a screen row may never be named as: the answers with a fixed
+# meaning. A row that literally reads "done" must not shadow the verb.
+_RESERVED_KEYS = frozenset({AGENT_DONE, ESCALATE, *ACT_VERBS})
 
 
 def act_candidates(rows) -> tuple[Candidate, ...]:
-    """One candidate per labeled row for an agent-episode turn — the
-    shared `_keyed` hygiene (verb collisions dropped too: a row that
-    literally reads "done" must not shadow the verb), but NOT shuffled:
-    screen order is spatial information (top to bottom) an episode
-    navigates by; the shuffle's position-bias defense protects
-    single-shot preference picks, not step-by-step operation."""
-    return _keyed(
-        (Candidate(key=row.label.strip(), bbox=tuple(row.bbox)) for row in rows),
-        (AGENT_DONE, ESCALATE, *ACT_VERBS),
-        MAX_CANDIDATES,
-        shuffle=False,
-    )
+    """One candidate per labeled row for an agent-episode turn:
+    content-keyed, first occurrence wins, verb collisions dropped,
+    capped — and in screen order, never shuffled: position is spatial
+    information (top to bottom) a step-by-step operator navigates by."""
+    seen: set[str] = set()
+    out: list[Candidate] = []
+    for row in rows:
+        key = row.label.strip()
+        if not key or key in seen or key in _RESERVED_KEYS:
+            continue
+        seen.add(key)
+        out.append(Candidate(key=key, bbox=tuple(row.bbox)))
+    if len(out) > MAX_CANDIDATES:
+        log.info("micro: %d candidates capped to %d", len(out), MAX_CANDIDATES)
+        out = out[:MAX_CANDIDATES]
+    return tuple(out)
 
 
 def act_block(header: str, candidates: tuple[Candidate, ...]) -> str:
     """One episode turn's screen block — the rows the model may name,
     top to bottom, data-fenced. The block is STORED in the episode
     history verbatim, so past turns keep showing exactly what was seen."""
-    body = "\n".join(_candidate_line(c) for c in candidates) or "(no readable rows)"
+    body = "\n".join(f'- "{c.key}"' for c in candidates) or "(no readable rows)"
     return _data_block(f"{header} — rows top to bottom", body)
-
-
-def _candidate_line(c: Candidate) -> str:
-    """One prompt line per card: the quoted NAME (the answer), then the
-    card's other facts in parentheses (context, never part of the name —
-    the answer spec says so, and the allowed-set validation rejects a
-    full-line copy anyway)."""
-    if not c.meta:
-        return f'- "{c.key}"'
-    return f'- "{c.key}" ({", ".join(c.meta)})'
 
 
 class MicroCaller:
@@ -464,7 +367,7 @@ class MicroCaller:
                     # real bugs fail fast): a blip on the cheap tier is
                     # common and permanent escalation is too big a price
                     # for it (field-measured: a single ReadTimeout killed
-                    # a walk mid-decide).
+                    # a walk mid-step).
                     log.info(
                         "micro %s (%s): transient provider error — one retry",
                         req.call,
@@ -599,28 +502,19 @@ def _enum_outcome(
 @dataclass(frozen=True)
 class _CallSpec:
     """One call type's whole shape — the table dispatch. `material` names
-    what `build_request` harvests off the screen; `answer_spec` is a
+    what `build_request` reads off the screen; `answer_spec` is a
     template (an optional `{allowed}` placeholder); the callables own
     answer space, prompt body, and outcome mapping (defaulting to the
-    plain enum). Adding a call type is one row here (+ a CALLS decl if
-    playbooks may name it)."""
+    plain enum). Adding a call type is one row here."""
 
     role: str
-    material: str  # "candidates" | "listing" | "none"
+    material: str  # "listing" | "none"
     answer_space: "Callable[[DecisionRequest], tuple[str, ...]]"
     answer_spec: str
     user_parts: "Callable[[DecisionRequest], list[str]]"
     to_outcome: "Callable[[DecisionRequest, str, str, float, dict], MicroOutcome]" = (
         _enum_outcome
     )
-
-
-def _choose_space(req: DecisionRequest) -> tuple[str, ...]:
-    return tuple(c.key for c in req.candidates) + CALLS[req.call].escapes
-
-
-def _outcomes_space(req: DecisionRequest) -> tuple[str, ...]:
-    return req.outcomes
 
 
 def _parse_task_space(req: DecisionRequest) -> tuple[str, ...]:
@@ -633,19 +527,6 @@ def _fixed(outcomes: tuple[str, ...]) -> "Callable[[DecisionRequest], tuple[str,
     """An answer space fixed whole in the row — nobody's to vary, and
     callers pass empty outcomes."""
     return lambda req: outcomes
-
-
-def _choose_outcome(
-    req: DecisionRequest, answer: str, reason: str, confidence: float, obj: dict
-) -> MicroOutcome:
-    decl = CALLS[req.call]
-    if answer not in decl.escapes:
-        picked = _picked(req, answer)
-        assert decl.pick_arm is not None
-        return MicroOutcome(
-            out=decl.pick_arm, reason=reason, confidence=confidence, picked=picked
-        )
-    return MicroOutcome(out=answer, reason=reason, confidence=confidence)
 
 
 # What a model writes when it means "the message didn't say". Asked for
@@ -667,12 +548,11 @@ def _is_unfilled(value: object) -> bool:
 
 
 def _string_fields(mapping: dict) -> dict[str, str]:
-    """Payload values are strings by contract — a structured value (a
-    `type: list` input's item array) rides as ITS JSON (str() would
-    produce a Python repr no parser accepts), and unfilled spellings are
-    dropped (a present "null" would shadow a declared default). ONE
-    home: parse_task's inputs and the agent calls' return fields share
-    the rule."""
+    """Payload values are strings by contract — a structured value rides
+    as ITS JSON (str() would produce a Python repr no parser accepts),
+    and unfilled spellings are dropped (a present "null" would shadow a
+    declared default). ONE home: parse_task's inputs and the agent
+    calls' return fields share the rule."""
     return {
         str(k): (v if isinstance(v, str) else json.dumps(v, ensure_ascii=False))
         for k, v in mapping.items()
@@ -690,25 +570,6 @@ def _parse_task_outcome(
         reason=reason,
         confidence=confidence,
         payload=None if answer in (NOT_A_TASK, SCROLL_UP) else inputs,
-    )
-
-
-def _clear_overlay_space(req: DecisionRequest) -> tuple[str, ...]:
-    # Not `_choose_space`: clear_overlay is not in CALLS (playbooks may
-    # never name it), so its one escape is spelled here.
-    return tuple(c.key for c in req.candidates) + (NONE_SAFE,)
-
-
-def _clear_overlay_outcome(
-    req: DecisionRequest, answer: str, reason: str, confidence: float, obj: dict
-) -> MicroOutcome:
-    if answer == NONE_SAFE:
-        return MicroOutcome(out=NONE_SAFE, reason=reason, confidence=confidence)
-    return MicroOutcome(
-        out=DISMISS_ARM,
-        reason=reason,
-        confidence=confidence,
-        picked=_picked(req, answer),
     )
 
 
@@ -765,56 +626,7 @@ def _picked(req: DecisionRequest, answer: str) -> Candidate | None:
     return next((c for c in req.candidates if c.key == answer), None)
 
 
-def _revise_outcome(
-    req: DecisionRequest, answer: str, reason: str, confidence: float, obj: dict
-) -> MicroOutcome:
-    raw = obj.get("items")
-    payload = None
-    if answer == "updated" and isinstance(raw, list):
-        # Shape validation (parse_ledger) happens at the consumer — the
-        # program hands over on an unusable list, escalation as default.
-        payload = {"ledger": json.dumps(raw, ensure_ascii=False)}
-    return MicroOutcome(
-        out=answer, reason=reason, confidence=confidence, payload=payload
-    )
-
-
 _SPECS: dict[str, _CallSpec] = {
-    "choose_item": _CallSpec(
-        role=(
-            "You pick ONE item from a list read off a phone screen, "
-            "judged ONLY by the given criteria. Prefer an item whose "
-            "brand and spec match the criteria exactly; a listing that "
-            "is an ad or a live-stream room when the criteria do not "
-            "ask for one is not a fit."
-        ),
-        material="candidates",
-        answer_space=_choose_space,
-        answer_spec=(
-            '"answer" is one candidate NAME copied EXACTLY as quoted — '
-            "the name alone, never the parenthesized details after it; or "
-            '"scroll" if a better match may sit further down the list; or '
-            '"none_fit" if none matches the criteria.'
-        ),
-        user_parts=lambda req: [
-            f"Criteria: {req.args.get('criteria', '')}",
-            _data_block(
-                "Candidates — order carries no meaning",
-                "\n".join(_candidate_line(c) for c in req.candidates),
-            ),
-        ],
-        to_outcome=_choose_outcome,
-    ),
-    "decide": _CallSpec(
-        role="You answer ONE scoped question about a phone screen.",
-        material="listing",
-        answer_space=_outcomes_space,
-        answer_spec='"answer" must be exactly one of: {allowed}.',
-        user_parts=lambda req: [
-            f"Question: {req.args.get('question', '')}",
-            *([_data_block("Screen text", req.listing)] if req.listing else []),
-        ],
-    ),
     CONFIRM_REPLY: _CallSpec(
         role=(
             "You judge whether a user's new instant-message reply confirms "
@@ -880,37 +692,13 @@ _SPECS: dict[str, _CallSpec] = {
             "for — a search-keyword input takes the bare product/search "
             "term (follow its e.g. example when shown), never quantity or "
             "count words; those belong only in an input that asks for "
-            "them. "
-            f"An input marked {LIST_INPUT_MARK} takes a JSON array of "
-            f"{_ITEM_JSON} objects."
+            "them."
         ),
         user_parts=lambda req: [
             req.args.get("menu", ""),
             _data_block("The user's message thread", req.listing),
         ],
         to_outcome=_parse_task_outcome,
-    ),
-    CLEAR_OVERLAY: _CallSpec(
-        role=(
-            "You find the one control that DISMISSES a popup overlay on "
-            "a phone screen without accepting, subscribing to, or "
-            "purchasing anything."
-        ),
-        material="buttons",
-        answer_space=_clear_overlay_space,
-        answer_spec=(
-            '"answer" is the one candidate copied EXACTLY as listed that '
-            "closes the popup and nothing more (a close, skip, or later "
-            'control); or "none_safe" when no candidate is clearly a '
-            'pure dismissal (when unsure, "none_safe").'
-        ),
-        user_parts=lambda req: [
-            _data_block(
-                "Overlay controls — order carries no meaning",
-                "\n".join(_candidate_line(c) for c in req.candidates),
-            ),
-        ],
-        to_outcome=_clear_overlay_outcome,
     ),
     AGENT_FIELDS: _CallSpec(
         role=(
@@ -946,8 +734,8 @@ _SPECS: dict[str, _CallSpec] = {
             "from what the current screen offers. The screen arrives as "
             "text rows read top to bottom; you never use coordinates."
         ),
-        # "none": episode requests are assembled by the WALK
-        # (`program._episode_request`) — they carry replayed history and
+        # "none": episode requests are assembled by the agent step
+        # (`step_agent.AgentStep._request`) — they carry replayed history and
         # granted-landmark candidates `build_request` cannot produce, so
         # there is deliberately no build_request arm to half-mirror them.
         material="none",
@@ -965,29 +753,12 @@ _SPECS: dict[str, _CallSpec] = {
         user_parts=lambda req: [req.args.get("block", "")],
         to_outcome=_act_outcome,
     ),
-    REVISE_LIST: _CallSpec(
-        role=(
-            "You update a shopping list from the user's instant-message "
-            "reply revising a pending order."
-        ),
-        material="none",
-        answer_space=_fixed(REVISE_OUTS),
-        answer_spec=(
-            '"answer" is "updated" when the reply changes the list — ALSO '
-            'add a fourth field "items": the FULL updated list as a JSON '
-            f"array of {_ITEM_JSON}, echoing "
-            "unchanged items VERBATIM and using qty 0 for a removed item; "
-            '"unclear" when the reply does not describe a change to the '
-            "list."
-        ),
-        user_parts=lambda req: [
-            f"The assistant asked: {req.args.get('ask', '')}",
-            _data_block("The current list (JSON)", req.args.get("ledger", "")),
-            _data_block("The user's revision reply", req.args.get("reply", "")),
-        ],
-        to_outcome=_revise_outcome,
-    ),
 }
+
+# Every call type this channel serves — the validation set for tooling
+# that names calls as data (the eval harness), so it can never drift
+# from the table.
+CALL_NAMES = tuple(_SPECS)
 
 
 def _system(req: DecisionRequest, allowed: tuple[str, ...]) -> str:
@@ -1005,8 +776,8 @@ def _system(req: DecisionRequest, allowed: tuple[str, ...]) -> str:
 def _user(req: DecisionRequest) -> str:
     parts = list(_SPECS[req.call].user_parts(req))
     if req.context:
-        # Context slices (memory.md, the walk's inputs) are agent-curated but
-        # ultimately screen-derived too — same stamp.
+        # Context (the recent daily log) is agent-written but ultimately
+        # screen-derived too — same stamp.
         parts.append(_data_block("Context", req.context))
     return "\n".join(p for p in parts if p)
 

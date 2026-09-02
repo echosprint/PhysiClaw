@@ -252,8 +252,8 @@ def run(
     `physiclaw macros run`, and the way to test a walk without waiting for
     a wake or hoping the boot picks it.
 
-    Drives the real walk on the real phone: legs run their macros, DECIDE
-    moves spend real micro-calls, and an `ask` really messages you and
+    Drives the real walk on the real phone: moves run their macros, agent
+    steps spend real model calls, and an `ask` really messages you and
     waits for your reply. Works while the playbook is disabled — rehearse
     first, enable after. Nothing is persisted: a walk that suspends here
     stops instead of leaving a file for the next wake."""
@@ -273,7 +273,7 @@ def run(
         # itself. (Same branch as `macros run`.)
         exit_error(f"{e}. Start it first: physiclaw mcp")
     except RuntimeError as e:
-        # `rehearsal.micro_caller` — a decide fired with no model configured.
+        # `rehearsal.micro_caller` — an agent step fired with no model configured.
         exit_error(str(e))
     typer.echo(outcome)
 
@@ -398,10 +398,7 @@ def _check_app(app: str) -> bool:
     for entry in entries:
         if entry.spec is None:
             continue
-        # Advisories that used to be reachable only by arming, so almost
-        # nobody saw them: a memory slice with no section on THIS device,
-        # a gate ask quoting no word-tier reply word, a gate with no way
-        # back into the app.
+        # Advisories: a gate ask quoting no word-tier reply word.
         for line in conductor_setup.readiness_warnings(entry.spec):
             typer.echo(warn(f"{app}/{entry.name}: {line}"))
     return bad
@@ -417,7 +414,7 @@ def _report_not_live(
     which playbooks the boot will not offer, and why — disabled files,
     and referenced pack macros that are themselves disabled. Rehearse
     them (`playbooks run`), then enable."""
-    from physiclaw.conductor.playbook import disabled_leg_macros
+    from physiclaw.conductor.playbook import disabled_macros
 
     if disabled:
         typer.echo(
@@ -426,19 +423,19 @@ def _report_not_live(
                 f"{', '.join(disabled)}. Set `enabled: true` once rehearsed."
             )
         )
-    disabled_macros = sorted(
+    not_live = sorted(
         {
             m
             for e in entries
             if e.spec is not None
-            for m in disabled_leg_macros(e.spec, pack)
+            for m in disabled_macros(e.spec, pack)
         }
     )
-    if disabled_macros:
+    if not_live:
         typer.echo(
             warn(
                 f"{app}: referenced pack macro(s) still disabled: "
-                f"{', '.join(disabled_macros)} — rehearse, then enable."
+                f"{', '.join(not_live)} — rehearse, then enable."
             )
         )
 

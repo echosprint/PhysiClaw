@@ -6,7 +6,6 @@ from __future__ import annotations
 import pytest
 
 from physiclaw.conductor import brief
-from physiclaw.conductor.ledger import LedgerItem
 
 
 def _walk(**overrides) -> str:
@@ -17,16 +16,15 @@ def _walk(**overrides) -> str:
         idx=2,
         nodes=9,
         outputs={},
-        ledger_items=None,
         consented=None,
     )
-    return brief.walk_brief("leg did not land", **{**base, **overrides})
+    return brief.walk_brief("move did not land", **{**base, **overrides})
 
 
 def test_walk_brief_carries_reason_and_position() -> None:
     text = _walk()
 
-    assert "conductor handing over: leg did not land." in text
+    assert "conductor handing over: move did not land." in text
     assert "Walk demo/flow stopped at node search (3/9)." in text
     assert "Verify state before acting." in text
 
@@ -37,18 +35,10 @@ def test_walk_brief_past_the_last_node_names_the_end() -> None:
     assert "past the last node (9/9)" in text
 
 
-def test_walk_brief_includes_recorded_decisions() -> None:
-    text = _walk(outputs={"choose.pick": "milk 1L"})
+def test_walk_brief_includes_recorded_outputs() -> None:
+    text = _walk(outputs={"parse.keyword": "milk 1L"})
 
-    assert "Decisions so far: choose.pick='milk 1L'." in text
-
-
-def test_walk_brief_includes_ledger_state() -> None:
-    items = [LedgerItem(query="eggs", qty=2, status="picked", label="farm eggs")]
-
-    text = _walk(ledger_items=items)
-
-    assert "Buying list: eggs×2(picked)." in text
+    assert "Decisions so far: parse.keyword='milk 1L'." in text
 
 
 def test_walk_brief_consent_line_says_payment_did_not_fire() -> None:
@@ -58,10 +48,7 @@ def test_walk_brief_consent_line_says_payment_did_not_fire() -> None:
     assert "has NOT been made" in text
 
 
-@pytest.mark.parametrize(
-    "absent",
-    ["Decisions so far", "Buying list", "consented"],
-)
+@pytest.mark.parametrize("absent", ["Decisions so far", "consented"])
 def test_walk_brief_omits_empty_sections(absent: str) -> None:
     text = _walk()
 
@@ -69,18 +56,10 @@ def test_walk_brief_omits_empty_sections(absent: str) -> None:
 
 
 def test_completion_brief_reports_done_and_wrap_up() -> None:
-    text = brief.completion_brief("demo", "flow", 9, None)
+    text = brief.completion_brief("demo", "flow", 9)
 
     assert "walk demo/flow completed (9/9 nodes)." in text
     assert "Report the outcome to the user" in text
-
-
-def test_completion_brief_includes_ledger_state() -> None:
-    items = [LedgerItem(query="eggs", qty=2)]
-
-    text = brief.completion_brief("demo", "flow", 9, items)
-
-    assert "Buying list: eggs×2(pending)." in text
 
 
 def test_boot_brief_carries_reason_and_instruction() -> None:
