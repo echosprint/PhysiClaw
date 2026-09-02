@@ -7,7 +7,7 @@ here instead — `setup.session_setup()` at wake, the micro-caller with
 its cheap-tier client, and the `Conductor` arbiter per turn.
 
 The micro-caller wiring: None only when nothing drives (no program and
-no overture — an ask's reply judgment can fire on any live walk, and
+no overture — an agent step can fire on any live walk, and
 the owned client is built lazily on the FIRST call, so wiring costs
 nothing at wake); `[conductor] micro_model`
 selects the cheap decision tier, ours to close (`aclose`); fail-open to

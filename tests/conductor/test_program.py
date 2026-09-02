@@ -32,9 +32,8 @@ from conductor_fakes import (
 from physiclaw.conductor import channel, program, setup, step_ask, suspension
 from physiclaw.conductor.playbook import PlaybookError
 
-# The shared fixture pages are three DISTINCT pages so `_locate`
-# (resume past matching verifies) never fast-forwards a freshly booted
-# walk: the start page matches no move's landing.
+# The shared fixture pages are three DISTINCT pages: the start page
+# matches no move's landing, so every check reads unambiguously.
 FLOW = """\
 description: two moves
 inputs:
@@ -87,26 +86,27 @@ def test_walk_runs_both_moves_then_completes() -> None:
     assert "walk demo/flow completed" in summary
 
 
-def test_locate_resumes_past_completed_moves() -> None:
-    # A killed session's next wake: the screen already shows move 1's
-    # verify page, so the walk resumes at move 2 — no repeated gestures.
+def test_walk_starts_at_the_top_whatever_the_screen_reads() -> None:
+    # The screen already shows move 1's landing page — the walk still
+    # begins at move 1, which expects `home`: a page match proves
+    # nothing about the moves before it, and nothing fast-forwards
+    # undeclared. With no recover on home the walk hands over.
     write_pack(playbooks={"flow": FLOW})
     p = _program(keyword="milk")
     h = _history()
 
     peek = p.advance(h)
     assert peek is not None
-    _feed(h, peek, RESULTS)  # move 1's landing page — its outcome holds
-    nxt = p.advance(h)
+    _feed(h, peek, RESULTS)
 
-    assert nxt is not None
-    assert nxt.tool_calls[1].arguments["name"] == "demo/add-cart"
+    summary = _finish(p, h, p.advance(h))
+    assert "move 'open' expects page 'home'" in summary
 
 
-def test_verify_mismatch_settles_then_hands_over_without_a_recover() -> None:
-    # A wrong known page at verify gets one free settle re-peek (it may
-    # be mid-transition); a page declaring no recover then hands over —
-    # what you declare is what runs, nothing hidden taps around.
+def test_verify_mismatch_hands_over_without_a_recover() -> None:
+    # A wrong known page at verify: a page declaring no recover hands
+    # over on the spot — what you declare is what runs, nothing hidden
+    # re-peeks, waits, or taps around.
     write_pack(playbooks={"flow": FLOW})
     p = _program(keyword="milk")
     h = _history()
@@ -115,10 +115,6 @@ def test_verify_mismatch_settles_then_hands_over_without_a_recover() -> None:
     move1 = p.advance(h)
     assert move1 is not None
     _feed(h, move1, HOME)  # landed on the WRONG known page
-
-    settle = p.advance(h)
-    assert settle is not None and settle.tool_names() == ["note", "peek"]
-    _feed(h, settle, HOME)  # settled — genuinely the wrong page
 
     summary = _finish(p, h, p.advance(h))
     assert "did not land" in summary and "declares no recover" in summary
@@ -198,10 +194,9 @@ def test_failed_agent_call_hands_over() -> None:
     assert "call failed or under-confident" in summary
 
 
-def test_locate_never_skips_work_nodes() -> None:
+def test_a_late_page_match_never_skips_work_nodes() -> None:
     # A fresh wake whose screen matches a LATE move's verify page must
-    # not fast-forward past an agent step: a page match proves
-    # navigation, never that the judgment ran.
+    # not skip the agent step before it: the walk starts at the top.
     flow = """\
 description: agent in the middle
 inputs:
@@ -229,10 +224,6 @@ route:
     h = _history()
     _feed(h, p.advance(h), DONE)  # reads as the LAST move's landing
 
-    settle = p.advance(h)  # the agent's enter check fails: results expected
-    assert settle is not None and settle.tool_names() == ["note", "peek"]
-    _feed(h, settle, DONE)
-
     # The cursor stayed at the top: the leading `do` run ended at the
     # agent, so the walk starts over at `open` (whose enter fails here)
     # instead of jumping to `wrap` off the coincidental page match.
@@ -256,7 +247,6 @@ description: 买牛奶
 inputs:
   keyword:
     description: what
-budget: 100
 route:
   - page: home
   - do: open
@@ -266,7 +256,8 @@ route:
   - ask: gate
     approve: payment
     message: "已选好{inputs.keyword}，合计 ¥{ask.total}。回复 好的 确认支付，或 不用 取消。"
-    over_budget_message: "已选好{inputs.keyword}，合计 ¥{ask.total}，已超出预算 ¥{ask.cap}。回复 好的 确认支付，或 不用 取消。"
+    yes: ["好的"]
+    no: ["不用"]
     resume: open-app
   - do: pay
     macro: add-cart
@@ -325,25 +316,16 @@ def _suspend_via_silence(p, h, send) -> str:
     return ask
 
 
-def test_gate_ask_quotes_the_total_within_budget() -> None:
+def test_gate_ask_quotes_the_sheet_total() -> None:
     _, _, send = _at_gate()
 
     ask = send.tool_calls[1].arguments["inputs"]["message"]
     assert "¥45" in ask and "好的" in ask
-    assert "超出预算" not in ask
-
-
-def test_gate_over_cap_ask_discloses_the_breach() -> None:
-    _, _, send = _at_gate(total="¥200")
-
-    ask = send.tool_calls[1].arguments["inputs"]["message"]
-    assert "超出预算" in ask and "¥200" in ask and "¥100" in ask
-    assert "好的" in ask  # plain consent still opens it — ruled
 
 
 def test_check_warns_when_a_gate_ask_quotes_no_deny_word() -> None:
-    # Advisory, never blocking: an ask in a language the word lists
-    # don't cover still works — every reply just rides the LLM tier.
+    # Advisory, never blocking: an ask whose message quotes none of its
+    # own words still works — a reply in other words just hands over.
     quiet = GATED.replace("回复 好的 确认支付，或 不用 取消", "veuillez répondre")
     write_channel(CHANNEL_OPEN)
     write_pack(playbooks={"pay": quiet})
@@ -351,8 +333,8 @@ def test_check_warns_when_a_gate_ask_quotes_no_deny_word() -> None:
     spec, _ = setup.load_spec("demo", "pay", require_live=False)
     warnings = setup.readiness_warnings(spec)
 
-    assert len(warnings) == 2  # message and over_message alike
-    assert all("LLM check" in w for w in warnings)
+    (warning,) = warnings
+    assert "hands the walk over" in warning
 
 
 def test_gate_confirm_resumes_and_pays_under_the_predicates() -> None:
@@ -387,21 +369,16 @@ def test_gate_deny_hands_over_without_reasking() -> None:
     assert "user declined" in summary and "back out" in summary
 
 
-def test_gate_unclear_reply_goes_to_the_llm_tier() -> None:
-    from physiclaw.conductor.micro import (
-        CONFIRM_REPLY,
-        DecisionRequest,
-        MicroOutcome,
-    )
-
+def test_gate_reply_outside_the_declared_words_hands_over() -> None:
+    # "那就来一份吧" is a yes in spirit, but the ask declared 好的/不用: the
+    # conductor never guesses — the model reads the thread and decides.
     p, h, send = _at_gate()
 
-    req = _reply_arrives(p, h, send, "那就来一份吧")
-    assert isinstance(req, DecisionRequest) and req.call == CONFIRM_REPLY
-    assert "那就来一份吧" in req.args["reply"]
+    step = _reply_arrives(p, h, send, "那就来一份吧")
 
-    back = p.resolve(MicroOutcome(out="confirm", reason="yes", confidence=0.9))
-    assert back.tool_calls[1].arguments["name"] == "demo/open-app"
+    summary = _finish(p, h, step)
+    assert "matches none of its yes/no words" in summary
+    assert "那就来一份吧" in summary
 
 
 def test_gate_silence_suspends_and_resumes_on_next_wake() -> None:
@@ -448,6 +425,7 @@ route:
   - page: results
   - tell: tell
     message: "已下单{inputs.keyword}，稍后汇报进度"
+    no: ["cancel"]
   - do: wrap
     macro: add-cart
     with: {message: "done"}
@@ -655,21 +633,6 @@ def test_scaffolded_channel_pack_parses_and_loads_disabled() -> None:
     assert set(pack.macros) == {"send", "open"} and not pack.macro_errors
 
 
-def test_gate_revise_hands_over_with_the_request() -> None:
-    # "好的，但是买两盒" is a change request, not a confirmation — the LLM
-    # tier answers revise and the model takes over to adjust the order.
-    from physiclaw.conductor.micro import DecisionRequest, MicroOutcome
-
-    p, h, send = _at_gate()
-
-    req = _reply_arrives(p, h, send, "好的，但是买两盒")
-    assert isinstance(req, DecisionRequest)
-
-    handed = p.resolve(MicroOutcome(out="revise", reason="wants two", confidence=0.9))
-    summary = _finish(p, h, handed)  # hand over — the model adjusts the order
-    assert "asked for changes" in summary
-
-
 def test_gate_ask_is_the_filled_template_exactly() -> None:
     # The playbook owns every word; the conductor owns only the slots:
     # the ask is `message:` with {inputs.keyword} and {ask.total} filled —
@@ -733,38 +696,6 @@ def test_pay_consumes_the_consent() -> None:
 
     assert pay.tool_calls[1].arguments["name"] == "demo/add-cart"
     assert p.gate.consented is None  # spent at fire — no leftovers
-
-
-def test_budget_suspend_does_not_swallow_the_final_batch() -> None:
-    # The 4th unclear message suspends WITHOUT being baselined, so the
-    # resuming wake still sees it (judged once, eventually).
-    from physiclaw.conductor.micro import MicroOutcome
-
-    p, h, send = _at_gate()
-    ask = send.tool_calls[1].arguments["inputs"]["message"]
-    _feed(h, send, _thread((ask, 0.75, 0.3)))
-    step = p.advance(h)  # first wait
-    for i in range(3):  # three unclear rounds spend the checks budget
-        _feed(h, step, "waited")
-        peek = p.advance(h)
-        _feed(h, peek, _thread((ask, 0.75, 0.3), (f"hmm what about {i}", 0.25, 0.5)))
-        p.advance(h)
-        step = p.resolve(MicroOutcome(out="unclear", reason="?", confidence=0.9))
-    _feed(h, step, "waited")
-    peek = p.advance(h)
-    _feed(h, peek, _thread((ask, 0.75, 0.3), ("make it two boxes then", 0.25, 0.5)))
-    susp = p.advance(h)  # budget spent → suspend
-
-    assert susp.tool_calls[1].arguments["status"] == "WAIT"
-    assert "make it two boxes then" not in p.gate.baseline  # NOT swallowed
-
-    resumed = setup.load_suspended()
-    h2 = _history()
-    peek2 = resumed.advance(h2)
-    _feed(h2, peek2, _thread((ask, 0.75, 0.3), ("make it two boxes then", 0.25, 0.5)))
-    req = resumed.advance(h2)  # the message reaches the LLM tier now
-
-    assert "make it two boxes then" in req.args["reply"]
 
 
 def test_suspended_idx_outside_the_spec_drops_the_suspension() -> None:
@@ -845,7 +776,6 @@ def _write_suspended(playbook: str, idx: int, **over) -> None:
         "ask_text": "",
         "baseline": [],
         "quoted": None,
-        "cap": None,
         "consented": None,
         "awaiting": False,
     }
@@ -882,10 +812,14 @@ route:
   - ask: address
     approve: address
     message: "地址没变吧？回复 好的 或 不用"
+    yes: ["好的"]
+    no: ["不用", "cancel"]
     resume: open-app
   - ask: handoff
     approve: handoff
     message: "现在下单吗？回复 好的 或 不用"
+    yes: ["好的"]
+    no: ["不用", "cancel"]
 """
 
 
@@ -915,38 +849,14 @@ def test_second_ask_reads_a_deny_sent_meanwhile() -> None:
     assert "user declined" in summary
 
 
-def test_failed_reply_judgment_keeps_the_batch_visible() -> None:
-    # A provider failure on the LLM tier must NOT baseline the reply —
-    # the next round re-reads and re-judges it ("judged once,
-    # eventually"), instead of suspending on false silence forever.
-    from physiclaw.conductor.micro import CONFIRM_REPLY, DecisionRequest
-
-    p, h, send = _at_gate()
-    req = _reply_arrives(p, h, send, "ok, buy it now??")
-    assert isinstance(req, DecisionRequest)
-
-    wait = p.resolve(None)  # the micro-call failed
-    assert wait.tool_names() == ["note", "wait"]
-    assert "ok, buy it now??" not in p.gate.baseline
-
-    _feed(h, wait, "waited")
-    peek = p.advance(h)
-    ask = send.tool_calls[1].arguments["inputs"]["message"]
-    _feed(h, peek, _thread((ask, 0.75, 0.3), ("ok, buy it now??", 0.25, 0.5)))
-    again = p.advance(h)
-
-    assert isinstance(again, DecisionRequest) and again.call == CONFIRM_REPLY
+# ---------- payment gate: total edges ----------
 
 
-# ---------- payment gate: cap and total edges ----------
-
-
-def test_gate_over_cap_consent_binds_to_the_quoted_total() -> None:
-    # Quoted ¥145 against the mandate's ¥100: the SAME plain-consent
-    # reply opens an over-cap gate, and consent binds to the QUOTED
-    # total — never the cap.
+def test_consent_binds_to_the_quoted_total() -> None:
+    # Whatever the sheet says is what the user is asked about and what
+    # they consent to — there is no other bound.
     p, h, send = _at_gate("¥145")
-    assert "已超出预算" in send.tool_calls[1].arguments["inputs"]["message"]
+    assert "¥145" in send.tool_calls[1].arguments["inputs"]["message"]
 
     _reply_arrives(p, h, send, "好的")
 
@@ -967,24 +877,6 @@ def test_gate_hands_over_when_no_total_is_readable() -> None:
     assert "no total readable" in _finish(p, h, step)
 
 
-def test_gate_hands_over_when_the_cap_cannot_resolve() -> None:
-    # A `{inputs.cap}` mandate whose input turns out non-numeric: no cap
-    # means no over-budget rule, so the gate hands over rather than
-    # asking with an unenforceable mandate.
-    ref_cap = GATED.replace("budget: 100", 'budget: "{inputs.cap}"').replace(
-        "inputs:\n", "inputs:\n  cap:\n    description: budget\n"
-    )
-    write_channel(CHANNEL_OPEN)
-    write_pack(playbooks={"pay": ref_cap})
-    p = _program(name="pay", keyword="milk", cap="oops")
-    h = _history()
-    _feed(h, p.advance(h), HOME)
-    _feed(h, p.advance(h), _sheet())
-
-    step = p.advance(h)  # handover, no ask sent
-    assert "cap could not be resolved" in _finish(p, h, step)
-
-
 def test_payment_move_without_consent_hands_over() -> None:
     # A resume landing directly ON the payment move with no consent
     # recorded (the gate never confirmed): money never fires. This is
@@ -1001,7 +893,6 @@ def test_payment_move_without_consent_hands_over() -> None:
         pay_idx,
         values={"keyword": "milk"},
         quoted=45.0,
-        cap=100.0,
         # consented stays None — the gate never opened.
     )
     p = setup.load_suspended(channel.load_channel())
@@ -1015,32 +906,6 @@ def test_payment_move_without_consent_hands_over() -> None:
 
 # ---------- declared recovery ----------
 
-# Both walk pages carry learned geometry (the occluded verdict needs
-# it); `done` keeps the route's last landing distinct so `_locate`
-# never fast-forwards a booted walk.
-RESCUE_PAGES = """\
-home:
-  anchors: ["Files", "Recent"]
-results:
-  anchors: ["综合", "销量"]
-done:
-  anchors: ["AllDone"]
-"""
-
-# Screens with both anchors visible — match against learned geometry.
-HOME2 = make_screen(("Files", 0.5, 0.10), ("Recent", 0.5, 0.50)).text
-RESULTS2 = make_screen(("综合", 0.5, 0.10), ("销量", 0.5, 0.50)).text
-
-# A popup band over a page: the top anchor still visible, the lower one
-# hidden under four unexpected labels clustered at its learned position
-# — reads `occluded` with the band around cy 0.50.
-POPUP_OVER_HOME = make_screen(
-    ("Files", 0.5, 0.10),
-    ("new user gift pack", 0.4, 0.44),
-    ("mega deal inside", 0.6, 0.48),
-    ("one free with one", 0.5, 0.52),
-    ("以后再说", 0.5, 0.56),
-).text
 
 LOCKED_MID = make_screen(("Enter Passcode", 0.5, 0.5)).text
 
@@ -1048,56 +913,25 @@ LANDMARKS = """\
 back:
   label: "back chevron"
   bbox: [0.02, 0.05, 0.10, 0.10]
-dismiss:
-  label: "以后再说"
-  bbox: [0.45, 0.54, 0.55, 0.58]
 """
 
-# FLOW with declared hands: home dismisses a popup via its landmark,
-# results pops back with the OS gesture.
+# FLOW with declared hands: home force-quits, results pops back with
+# the OS gesture.
 RECOVERING = FLOW.replace(
     "  - page: home\n",
-    "  - page: home\n    recover: {tool: tap, with: landmarks.dismiss}\n",
+    "  - page: home\n    recover: {tool: force_quit}\n",
 ).replace(
     "  - page: results\n",
     "  - page: results\n    recover: {tool: go_back}\n",
 )
 
 
-def _learn_pages() -> None:
-    from physiclaw.conductor.pages import LearnedAnchor, LearnedPage, save_learned
-
-    save_learned(
-        "demo",
-        {
-            "home": LearnedPage(
-                anchors={
-                    "Files": LearnedAnchor("Files", 0.5, 0.10, 0.05, 1.0, 1.0),
-                    "Recent": LearnedAnchor("Recent", 0.5, 0.50, 0.05, 1.0, 1.0),
-                },
-                threshold=0.9,
-                observations=4,
-            ),
-            "results": LearnedPage(
-                anchors={
-                    "综合": LearnedAnchor("综合", 0.5, 0.10, 0.05, 1.0, 1.0),
-                    "销量": LearnedAnchor("销量", 0.5, 0.50, 0.05, 1.0, 1.0),
-                },
-                threshold=0.9,
-                observations=4,
-            ),
-        },
-    )
-
-
 def _recovering_walk(flow: str = RECOVERING):
-    """A walk over pages with learned geometry (the occluded verdict
-    needs it) and declared hands, driven past the opening peek to move 1."""
-    write_pack(pages=RESCUE_PAGES, playbooks={"flow": flow}, landmarks=LANDMARKS)
-    _learn_pages()
+    """A walk with declared hands, driven past the opening peek to move 1."""
+    write_pack(playbooks={"flow": flow}, landmarks=LANDMARKS)
     p = _program(keyword="milk")
     h = _history()
-    _feed(h, p.advance(h), HOME2)  # the start page
+    _feed(h, p.advance(h), HOME)  # the start page
     move1 = p.advance(h)
     assert move1 is not None and move1.tool_names() == ["note", "run_macro"]
     return p, h, move1
@@ -1105,81 +939,46 @@ def _recovering_walk(flow: str = RECOVERING):
 
 def test_wrong_page_on_resume_runs_the_hand_then_the_move() -> None:
     # A resumed walk stands on `home` while its move expects `results`:
-    # one settle re-peek, then the page's declared hand (go_back), the
-    # enter check re-runs on the restored page, and the move fires —
-    # the cursor never moved.
-    write_pack(pages=RESCUE_PAGES, playbooks={"flow": RECOVERING}, landmarks=LANDMARKS)
-    _learn_pages()
+    # the page's declared hand (go_back) runs, the enter check re-runs
+    # on the restored page, and the move fires — the cursor never moved.
+    write_pack(playbooks={"flow": RECOVERING}, landmarks=LANDMARKS)
     _write_suspended("flow", 1, values={"keyword": "milk"})
     p = setup.load_suspended(channel.load_channel())
     assert p is not None
     h = _history()
-    _feed(h, p.advance(h), HOME2)  # `search` enters at results — wrong page
-
-    settle = p.advance(h)
-    assert settle is not None and settle.tool_names() == ["note", "peek"]
-    _feed(h, settle, HOME2)  # settled — still the wrong page
+    _feed(h, p.advance(h), HOME)  # `search` enters at results — wrong page
     back = p.advance(h)
     assert back is not None and back.tool_names() == ["note", "go_back"]
     assert "declared hand" in back.tool_calls[0].arguments["summary"]
 
-    _feed(h, back, RESULTS2)
+    _feed(h, back, RESULTS)
     move2 = p.advance(h)
     assert move2 is not None
     assert move2.tool_calls[1].arguments["name"] == "demo/add-cart"
     assert "recovered demo.results" in move2.tool_calls[0].arguments["summary"]
 
 
-def test_locked_mid_walk_unlocks_then_continues() -> None:
-    # The unlock is built in — no hand needs declaring for a sleeping phone.
-    p, h, move1 = _recovering_walk(FLOW)
+def test_declared_unlock_hand_wakes_the_phone_then_continues() -> None:
+    # Nothing unlocks in the background: the page declares the
+    # `unlock_phone` hand, and only then does a locked phone get woken.
+    flow = FLOW.replace(
+        "  - page: results\n", "  - page: results\n    recover: {tool: unlock_phone}\n"
+    )
+    p, h, move1 = _recovering_walk(flow)
     _feed(h, move1, LOCKED_MID)
 
     unlock = p.advance(h)
     assert unlock is not None and unlock.tool_names() == ["note", "unlock_phone"]
 
-    _feed(h, unlock, RESULTS2)
+    _feed(h, unlock, RESULTS)
     move2 = p.advance(h)
     assert move2 is not None
     assert move2.tool_calls[1].arguments["name"] == "demo/add-cart"
 
 
-def test_zero_gesture_abort_under_an_overlay_recovers_and_retries_once() -> None:
-    # The move's macro guard-failed BEFORE any gesture (the runner's
-    # marker) with a popup over the page: the page's hand dismisses it
-    # and the SAME move re-runs. Nothing was burned engine-side either
-    # (the zero-gesture rule), so the retry actually dispatches.
-    from physiclaw.macros.model import NO_GESTURES_NOTE
-
-    p, h, move1 = _recovering_walk()
-    abort_text = (
-        "macro demo/open-app: ABORTED at step 1/1 (guard_failed) — no steps "
-        f"executed by this run. {NO_GESTURES_NOTE} — the phone did not move.\n"
-        + POPUP_OVER_HOME
-    )
-    _feed(h, move1, abort_text, error=True)
-
-    settle = p.advance(h)
-    assert settle is not None and settle.tool_names() == ["note", "peek"]
-    _feed(h, settle, POPUP_OVER_HOME)
-    dismiss = p.advance(h)
-    assert dismiss is not None and dismiss.tool_names() == ["note", "tap"]
-    assert "located '以后再说'" in dismiss.tool_calls[0].arguments["summary"]
-
-    _feed(h, dismiss, HOME2)  # popup gone — the page the guard needed
-    retry = p.advance(h)
-    assert retry is not None and retry.tool_names() == ["note", "run_macro"]
-    assert retry.tool_calls[1].arguments["name"] == "demo/open-app"  # SAME move
-
-    _feed(h, retry, RESULTS2)  # this time the move lands
-    move2 = p.advance(h)
-    assert move2 is not None
-    assert move2.tool_calls[1].arguments["name"] == "demo/add-cart"
-
-
-def test_acted_move_abort_still_hands_over() -> None:
-    # No marker = gestures ran = the one-strike world stands: hard
-    # handover, never a blind retry.
+def test_failed_move_hands_over() -> None:
+    # A macro that fails hands over — nothing re-runs in the background,
+    # whatever the failure text says.
     p, h, move1 = _recovering_walk()
     _feed(
         h,
@@ -1201,9 +1000,6 @@ def test_recover_tap_hand_falls_back_to_the_declared_bbox() -> None:
     )
     p, h, move1 = _recovering_walk(flow)
     _feed(h, move1, ELSEWHERE)  # unknown landing
-    settle = p.advance(h)
-    assert settle.tool_names() == ["note", "peek"]
-    _feed(h, settle, ELSEWHERE)
 
     back = p.advance(h)
 
@@ -1213,15 +1009,14 @@ def test_recover_tap_hand_falls_back_to_the_declared_bbox() -> None:
 
 
 def test_hand_that_does_not_restore_relocates_from_the_top() -> None:
-    # After the hand the page still does not read: the walk re-locates
-    # on the route and walks again — from the top when nothing reads.
+    # After the hand the page still does not read: the walk starts the
+    # route over from its first unsettled node.
     p, h, move1 = _recovering_walk()
     _feed(h, move1, ELSEWHERE)
-    _feed(h, p.advance(h), ELSEWHERE)  # settle
     back = p.advance(h)
     assert back.tool_names() == ["note", "go_back"]
 
-    _feed(h, back, HOME2)  # popped all the way to home
+    _feed(h, back, HOME)  # popped all the way to home
 
     again = p.advance(h)
     assert (
@@ -1270,18 +1065,16 @@ def test_handover_records_run_line_at_the_failing_node() -> None:
     from physiclaw.conductor import walklog
 
     p, h, move1 = _recovering_walk()
-    _feed(h, move1, HOME2)  # move 1 landed on the WRONG page
-    _feed(h, p.advance(h), HOME2)  # the settle re-peek — still wrong
-    _feed(h, p.advance(h), HOME2)  # the declared hand — still wrong → relocate
-    _feed(h, p.advance(h), HOME2)  # move 1 re-runs, lands wrong again
-    _feed(h, p.advance(h), HOME2)  # settle
-    _feed(h, p.advance(h), HOME2)  # hand again
+    _feed(h, move1, HOME)  # move 1 landed on the WRONG page
+    _feed(h, p.advance(h), HOME)  # the declared hand — still wrong → route top
+    _feed(h, p.advance(h), HOME)  # move 1 re-runs, lands wrong again
+    _feed(h, p.advance(h), HOME)  # hand again
 
     step = p.advance(h)
     for _ in range(40):  # relaunch attempts until the walk budget is spent
         if "conductor handing over" in step.tool_calls[0].arguments["summary"]:
             break
-        _feed(h, step, HOME2)
+        _feed(h, step, HOME)
         step = p.advance(h)
     _finish(p, h, step)
 

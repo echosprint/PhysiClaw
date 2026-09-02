@@ -44,7 +44,6 @@ def _one_node_program():
         description="d",
         enabled=True,
         inputs=(),
-        mandate=None,
         nodes=(TellNode(id="c", message="ok done"),),
     )
     return Program(spec=spec, values={}, pack_macros={}, prints=[])
@@ -115,7 +114,6 @@ def _agent_program():
         description="d",
         enabled=True,
         inputs=(),
-        mandate=None,
         nodes=nodes,
     )
     return Program(spec=spec, values={}, pack_macros={}, prints=[])
@@ -208,7 +206,6 @@ async def test_advance_activates_a_playbook_off_the_thread_screen() -> None:
         description="d",
         enabled=True,
         inputs=(),
-        mandate=None,
         nodes=(),
     )
     pack = Pack(app="demo", pages={}, macros={}, macro_errors={})

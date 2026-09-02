@@ -19,7 +19,6 @@ from physiclaw.conductor.pages import (
     THREAD_PAGE,
 )
 from physiclaw.conductor.playbook import (
-    GATE_MAX_CHECKS,
     IRREVERSIBLE_CLASSES,
     MAX_NODES,
     PACK_MACROS_DIRNAME,
@@ -77,7 +76,6 @@ def render_pack_stub(app: str) -> str:
         macro=EXAMPLE_MACRO,
         max_inputs=MAX_INPUTS,
         max_nodes=MAX_NODES,
-        gate_checks=GATE_MAX_CHECKS,
         classes="|".join(IRREVERSIBLE_CLASSES),
         agent_tools=", ".join(AGENT_TOOLS),
         max_agent_calls=MAX_AGENT_CALLS,
@@ -126,10 +124,11 @@ description: EDIT ME — what this pack automates, and when to adopt it
 #            reference a page declared elsewhere bare. `recover:`
 #            declares ITS recovery hand — one gesture
 #            ({recover_tools}; tap takes with: landmarks.<name>) or an
-#            argument-less `macro:`; after it runs the walk re-locates
-#            on the route. What you declare is what runs (after the
-#            built-in unlock and one settle re-peek): a page declaring
-#            none hands over.
+#            argument-less `macro:`; after it runs the walk starts the
+#            route over. What you declare is what runs — nothing else:
+#            no built-in unlock, wait, or retry; a page declaring none
+#            hands over. A phone that may lock mid-walk wants an
+#            `unlock_phone` hand.
 #   start  — the unconditional cold-launch (at most one, immediately
 #            before the first page — the landing it must reach);
 #            `macro:` is its hand. It re-runs whenever recovery walks
@@ -137,12 +136,16 @@ description: EDIT ME — what this pack automates, and when to adopt it
 #   do     — run a gesture macro. The name IS the macro (the directory
 #            macro of that name, or the `macro:` body beside it — the
 #            MACRO.yml grammar minus name/description/enabled); the
-#            page that FOLLOWS is its landing check. A move doing real
-#            damage carries `irreversible: <{classes}>` — `payment`
-#            must directly follow an `ask` that approves it.
+#            page that FOLLOWS is its landing check. A move that spends
+#            money carries `irreversible: {classes}` and must directly
+#            follow an `ask` with `approve: payment`.
 #   agent  — hand the step to the model with YOUR prompt (refs fill
-#            once when it opens). No `tools` = a pure-text call: prompt
-#            in, `returns:` fields out (read downstream as
+#            once when it opens): the prompt IS the brief — the
+#            conductor adds only the output contract and the answers
+#            your `tools:` grant. `context: [memory, memory.<slug>,
+#            daylog]` loads exactly those beside it; nothing else of
+#            the agent's memory travels. No `tools` = a pure-text
+#            call: prompt in, `returns:` fields out (read downstream as
 #            {{name.field}}), legal before the first page. With
 #            `tools: [{agent_tools}]` it is an EPISODE framed by the
 #            adjacent pages: each turn the model answers with a screen
@@ -151,14 +154,16 @@ description: EDIT ME — what this pack automates, and when to adopt it
 #            {{calls, scrolls}}` bounds it (≤ {max_agent_calls} calls),
 #            and `done` counts only on the page that follows, judged by
 #            the matcher.
-#   ask    — message the user and WAIT for approval; after
-#            {gate_checks} unconfirmed checks the session suspends.
-#            `approve: payment` fills {{ask.total}} — the `message:`
-#            must quote it. A `budget:` adds {{ask.cap}} and requires
-#            `over_budget_message:` quoting both; without one the
-#            consented total is the fire-time bound. `resume:`
-#            re-enters the app after the reply.
-#   tell   — message the user, then pause until any reply.
+#   ask    — message the user and WAIT for approval. The reply is read
+#            against YOUR `yes:` / `no:` words (whole-message match);
+#            any other reply hands over for the model to read; after a
+#            few silent rounds the session suspends until the next
+#            wake. `approve: payment` fills {{ask.total}} — the
+#            `message:` must quote it: the number the user said yes
+#            to is the fire-time bound. `resume:` re-enters the app
+#            after the reply.
+#   tell   — message the user, then pause until any wake; `no:`
+#            (optional) lists the replies that wake reads as a cancel.
 playbooks:
   {playbook}:
     description: EDIT ME — one line saying what task this playbook does
@@ -213,13 +218,15 @@ playbooks:
       #     EDIT ME — the goal, the rules, and where to finish.
       #   tools: [{agent_tools}]
       #   give: [landmarks.back]
+      #   context: [memory.shopping, daylog]
       #   returns:
       #     summary: EDIT ME — what to report back
       #   limit: {{calls: {agent_calls}, scrolls: {agent_scrolls}}}
       # - page: home
       - tell: done
         # The EXACT text sent to the user — write it in THEIR language.
-        message: "EDIT ME — done with {{inputs.message}}, reply to continue"
+        message: "EDIT ME — done with {{inputs.message}}, reply stop to cancel"
+        no: ["stop"]            # a resuming wake reads these as a cancel
 """
 
 
@@ -255,24 +262,27 @@ every `do` — and every acting `agent` episode — is followed by the
 page it lands on, `{{inputs.name}}` refs name declared inputs and
 `{{move.field}}` refs name EARLIER agent outputs, moves run forward
 only, and `irreversible: payment` moves (do and agent alike) directly
-follow an `ask` with `approve: payment` — a `budget:` is optional;
-without one the consented total is the fire-time bound.
+follow an `ask` with `approve: payment` — the total the user consented
+to is the fire-time bound.
 
-An `agent` step is the model's, inside the author's fence: `prompt:`
-is the whole brief (refs fill once when the step opens), `tools:`
-the closed gesture allowlist, `give:` the landmarks it may name
-blind, `returns:` the fields it must fill, `limit:` its call/scroll
+What the playbook declares is what runs — no more, no less. An
+`agent` step is the model's, inside the author's fence: `prompt:` is
+the whole brief (refs fill once when the step opens; the conductor
+adds only the output contract), `tools:` the closed gesture allowlist,
+`give:` the landmarks it may name blind, `context:` what to load
+beside the prompt (`memory`, `memory.<slug>`, `daylog` — nothing else
+travels), `returns:` the fields it must fill, `limit:` its call/scroll
 budget; each episode turn the model answers with a screen row, a
 granted landmark, a scroll verb, done, or escalate — never
 coordinates — and `done` counts only on the following page, judged
-by the matcher.
+by the matcher. An `ask` reads the reply against its own `yes:`/`no:`
+words; any other reply hands over.
 
 A pack may declare `landmarks:` — named fixed spots ({{label, bbox}},
 open vocabulary) that recover hands tap and agent episodes are
-granted. A page's `recover:` declares its recovery hand (one gesture
-or an argument-less macro) — what you declare is what runs, after the
-built-in unlock and one settle re-peek; a page declaring none hands
-over.
+granted. A page's `recover:` declares its recovery hand (one gesture,
+`unlock_phone` included, or an argument-less macro) — nothing recovers
+in the background; a page declaring none hands over.
 
 A page is declared ONCE — beside its waypoint, in the `pages:`
 appendix, or on another route — and referenced bare everywhere else.

@@ -33,11 +33,9 @@ import json
 import logging
 from dataclasses import dataclass
 
-from physiclaw.common import daylog
-from physiclaw.common.config import CONFIG
 from physiclaw.common.listing import Screen
 from physiclaw.common.text import read_text
-from physiclaw.conductor import reply, scaffold, suspension
+from physiclaw.conductor import context, reply, scaffold, suspension
 from physiclaw.conductor.channel import Channel, load_channel
 from physiclaw.conductor.micro import (
     NOT_A_TASK,
@@ -172,29 +170,21 @@ def readiness_warnings(spec: Playbook) -> list[str]:
 
 
 def _gate_word_warnings(spec: Playbook) -> list[str]:
-    """A gate ask that quotes no word the deterministic reply tier matches
-    still works — every reply just rides the LLM tier (bounded by
-    GATE_MAX_CHECKS). An ask in a language our word lists don't cover is
-    legal; the author is told the cost, not refused."""
+    """An ask whose message quotes none of its own `yes:`/`no:` words
+    still works — the user just has to guess what to reply, and any
+    other wording hands the walk over. Legal; the author is told the
+    cost, not refused."""
     out = []
     for node in spec.nodes:
         if not isinstance(node, AskNode):
             continue
-        for key, text in (
-            ("message", node.message),
-            ("over_message", node.over_message),
-        ):
-            if text is None:
-                continue
-            norm = reply.normalize(text)
-            if not any(w in norm for w in reply.CONFIRM_WORDS) or not any(
-                w in norm for w in reply.DENY_WORDS
-            ):
-                out.append(
-                    f"gate {node.id!r} `{key}` quotes no reply word the word "
-                    "tier matches (好的/ok…, 不用/no…) — every reply will "
-                    "spend an LLM check"
-                )
+        norm = reply.normalize(node.message)
+        if not any(w in norm for w in node.yes) or not any(w in norm for w in node.no):
+            out.append(
+                f"ask {node.id!r} `message` quotes none of its yes/no words "
+                f"({', '.join(node.yes)} / {', '.join(node.no)}) — a reply "
+                "in other words hands the walk over"
+            )
     return out
 
 
@@ -363,15 +353,7 @@ def session_setup() -> "tuple[Program | None, Overture | None, dict[str, Macro]]
 def _activation_context(entries: dict[str, tuple[Playbook, Pack]]) -> str:
     """parse_task's context, assembled once at wake, from the agent's
     OWN memory convention (never a conductor-private store): the recent
-    daily-log entries — the same window the engine preloads into the
-    model's wake context (`[memory] bootstrap_log_entries`), which is
-    where completed purchases and suspensions are recorded, so "never
-    re-run a finished task" reads off the same record the model would."""
-    parts: list[str] = []
-    recent = daylog.load_recent_entries(CONFIG.memory.bootstrap_log_entries)
-    if recent:
-        parts.append(
-            "Recent daily-log entries (the assistant's own activity "
-            f"record, newest first):\n{recent}"
-        )
-    return "\n".join(parts)
+    daily-log window — where completed purchases and suspensions are
+    recorded, so "never re-run a finished task" reads off the same
+    record the model would. The one loader agent steps declare through."""
+    return context.load((context.DAYLOG,))

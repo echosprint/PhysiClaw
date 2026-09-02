@@ -25,3 +25,11 @@ AGENT_TOOL_VERBS: dict[str, tuple[str, ...]] = {
 }
 AGENT_TOOLS = tuple(AGENT_TOOL_VERBS)
 ACT_VERBS = tuple(v for verbs in AGENT_TOOL_VERBS.values() for v in verbs)
+# How each granted tool reads in the episode's answer legend — `{verbs}`
+# is the tool's verbs, quoted. Kept beside the verbs so renaming one can
+# never make the legend lie.
+AGENT_TOOL_LEGEND: dict[str, str] = {
+    "tap": "a row of the NEWEST screen block, copied EXACTLY as quoted (it will be tapped)",
+    "scroll": "{verbs}",
+    "back": "{verbs}",
+}

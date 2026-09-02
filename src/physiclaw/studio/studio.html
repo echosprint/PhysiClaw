@@ -892,7 +892,7 @@ const ENTRY_TEMPLATES = {
     agent: name, prompt: "EDIT ME — the goal, the rules, and where to finish",
     tools: ["tap"], returns: { summary: "EDIT ME — what to report back" },
   }),
-  ask: name => ({ ask: name, approve: "EDIT", message: "EDIT ME — what you are asking approval for" }),
+  ask: name => ({ ask: name, approve: "EDIT", message: "EDIT ME — what you are asking approval for", yes: ["ok"], no: ["no"] }),
   tell: name => ({ tell: name, message: "EDIT ME — write it in the user's language" }),
 };
 
@@ -994,20 +994,12 @@ function renderPlaybooks() {
           draftEdit({ op: "playbook_update", playbook: name,
             fields: { inputs: { ...p.inputs, [added[0]]: added[1] } } });
       };
-      const bud = el("button", "tiny", "Budget");
-      bud.onclick = ev => { ev.stopPropagation();
-        const raw = prompt("budget as JSON ({\"max_amount\": 500} or {inputs.x} ref; empty clears):",
-          JSON.stringify(p.budget || {}));
-        if (raw === null) return;
-        try { draftEdit({ op: "playbook_update", playbook: name, fields: { budget: raw.trim() && raw.trim() !== "{}" ? JSON.parse(raw) : null } }); }
-        catch (e2) { banner("not JSON: " + e2.message); }
-      };
       const commit = el("button", "tiny primary", "Commit");
       commit.onclick = ev => { ev.stopPropagation(); commitPlaybook(name); };
       const reh = el("button", "tiny primary", "▶ Rehearse");
       reh.title = "walks the COMMITTED playbook on the live phone";
       reh.onclick = ev => { ev.stopPropagation(); rehearsePlaybook(name, p); };
-      controls.append(desc, " ", inp, " ", bud, " ", commit, " ", reh);
+      controls.append(desc, " ", inp, " ", commit, " ", reh);
       item.appendChild(controls);
       if (Object.keys(p.inputs || {}).length)
         item.appendChild(el("div", "kv", "inputs: " + Object.keys(p.inputs).join(", ")));

@@ -10,7 +10,8 @@ gives::
 
 ``expect`` is the raw ANSWER the model should produce, in the call's own
 answer space: a playbook ref, "not_a_task" or "scroll_up" for
-parse_task, a CONFIRM_OUTS member for confirm_reply. ``outcomes`` names
+parse_task; a declared field value or an episode verb for the agent
+calls. ``outcomes`` names
 the caller-supplied arms where the call takes them (parse_task's
 playbook refs); calls with fixed answer spaces leave it empty, exactly
 like the runtime. ``expect: "(escalate)"`` marks a case whose CORRECT

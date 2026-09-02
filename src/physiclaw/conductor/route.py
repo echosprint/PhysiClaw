@@ -34,6 +34,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from physiclaw.conductor import context, reply
 from physiclaw.conductor.calls import AGENT_TOOLS
 from physiclaw.conductor.pages import (
     PAGE_DECL_FIELDS,
@@ -59,7 +60,6 @@ from physiclaw.conductor.playbook import (
     check_name,
     check_refs,
     field_name,
-    opt_prose,
     prose,
     refs_in,
     require_str,
@@ -82,7 +82,7 @@ _AGENT_LIMIT_KEYS = {"calls", "scrolls"}
 # The declared-recovery hand: one gesture (`tool`, with `with:
 # landmarks.<name>` for a tap) or a macro. Closed tool vocabulary — a
 # recover hand resets state, it does not navigate (the route does that).
-RECOVER_TOOLS = ("force_quit", "go_back", "home_screen", "tap")
+RECOVER_TOOLS = ("force_quit", "go_back", "home_screen", "unlock_phone", "tap")
 _RECOVER_KEYS = {"tool", "with", "macro"}
 
 # Route entry vocabularies. An entry's KIND is its leading key and the
@@ -95,9 +95,18 @@ _ENTRY_KEYS = {
     "page": {"page", "recover", *PAGE_DECL_FIELDS},
     "start": {"start", "macro"},
     "do": {"do", "with", "macro", "irreversible"},
-    "agent": {"agent", "prompt", "tools", "give", "returns", "limit", "irreversible"},
-    "ask": {"ask", "approve", "message", "over_budget_message", "resume"},
-    "tell": {"tell", "message"},
+    "agent": {
+        "agent",
+        "prompt",
+        "tools",
+        "give",
+        "returns",
+        "limit",
+        "context",
+        "irreversible",
+    },
+    "ask": {"ask", "approve", "message", "yes", "no", "resume"},
+    "tell": {"tell", "message", "no"},
 }
 
 # The shape `_macro_resolver` returns.
@@ -122,7 +131,6 @@ def compile_route(
     playbook: str,
     input_names: set[str],
     pack: Pack,
-    has_mandate: bool,
 ) -> CompiledRoute:
     """`route:` → the compiled route (see `CompiledRoute`)."""
     if not isinstance(raw, list) or not raw:
@@ -273,12 +281,12 @@ def compile_route(
                     input_names,
                     payloads,
                     resolve,
-                    has_mandate=has_mandate,
                 )
             )
         else:  # tell
             message, _ = _entry_message(where, entry, input_names, payloads)
-            moves.append(TellNode(id=name, message=message))
+            no = _reply_words(entry, "no", where) if "no" in entry else []
+            moves.append(TellNode(id=name, message=message, no=tuple(no)))
     if len(moves) > MAX_NODES:
         raise PlaybookError(f"too many moves ({len(moves)} > {MAX_NODES})")
     _check_money(moves)
@@ -399,6 +407,32 @@ def _entry_message(
     refs = refs_in(text, f"{where}: `message`")
     check_refs(refs, input_names, payloads, f"{where}: `message`")
     return text, refs
+
+
+def _reply_words(entry: dict, key: str, where: str) -> list[str]:
+    """An ask's `yes:` / `no:` — the whole-message replies it reads, a
+    non-empty list of distinct strings, stored in `reply.normalize`
+    space so every reader compares without re-normalizing."""
+    out = _unique_list(
+        entry.get(key),
+        f"{where}: `{key}`",
+        lambda w: reply.normalize(require_str(w, f"{where}: `{key}` entry")),
+    )
+    if not out:
+        raise PlaybookError(f"{where}: `{key}` must list at least one reply word")
+    return out
+
+
+def _context_entries(entry: dict, where: str) -> list[str]:
+    """An agent's `context:` — the sources it loads beside its prompt."""
+
+    def _one(item: Any) -> str:
+        bad = context.check_entry(item)
+        if bad is not None:
+            raise PlaybookError(f"{where}: `context` entry {item!r} {bad}")
+        return item
+
+    return _unique_list(entry.get("context", []), f"{where}: `context`", _one)
 
 
 def _landmark_name(value: Any, where: str, pack: Pack) -> str:
@@ -672,6 +706,7 @@ def _parse_agent(
         max_calls=max_calls,
         max_scrolls=max_scrolls,
         irreversible=irreversible,
+        context=tuple(_context_entries(entry, where)),
     )
 
 
@@ -682,65 +717,32 @@ def _parse_ask(
     input_names: set[str],
     payloads: dict[str, tuple[str, ...]],
     resolve: _MacroResolve,
-    *,
-    has_mandate: bool,
 ) -> AskNode:
     approve = require_str(entry.get("approve"), f"{where}: `approve`")
     check_name(approve, f"{where}: `approve`")
     g_payloads = payloads
     if approve == "payment":
-        # The consent slots, runtime-filled from the payment sheet and
-        # available only here. {ask.cap} exists only when a `budget`
-        # does. (A move literally named `ask` would be shadowed in this
-        # message — the money slots win, both at parse and at fill.)
-        slots = ("total", "cap") if has_mandate else ("total",)
-        g_payloads = {**payloads, "ask": slots}
+        # The consent slot, runtime-filled from the payment sheet and
+        # available only here. (A move literally named `ask` would be
+        # shadowed in this message — the money slot wins, both at parse
+        # and at fill.)
+        g_payloads = {**payloads, "ask": ("total",)}
     message, msg_refs = _entry_message(where, entry, input_names, g_payloads)
-    over = opt_prose(
-        entry.get("over_budget_message"), f"{where}: `over_budget_message`"
-    )
-    if approve == "payment":
-        if "ask.total" not in msg_refs:
-            raise PlaybookError(
-                f"{where}: a payment ask's `message` must quote the sheet "
-                "total — reference {ask.total} (the ask IS the consent "
-                "record)"
-            )
-        # The over-budget branch exists exactly when a `budget` does: no
-        # budget → the consented total is the only bound (nothing to
-        # author); a budget → the breach message is mandatory.
-        if over is not None and not has_mandate:
-            raise PlaybookError(
-                f"{where}: `over_budget_message` needs a `budget` — "
-                "without a cap there is no over-budget branch"
-            )
-        if over is None and has_mandate:
-            raise PlaybookError(
-                f"{where}: a payment ask under a `budget` needs "
-                "`over_budget_message` — sent instead when the total "
-                "exceeds the cap; it must reference {ask.total} and {ask.cap}"
-            )
-        if over is not None:
-            over_refs = refs_in(over, f"{where}: `over_budget_message`")
-            check_refs(
-                over_refs, input_names, g_payloads, f"{where}: `over_budget_message`"
-            )
-            missing = sorted({"ask.total", "ask.cap"} - over_refs)
-            if missing:
-                raise PlaybookError(
-                    f"{where}: `over_budget_message` must reference "
-                    + " and ".join("{" + m + "}" for m in missing)
-                    + " — an over-budget ask must disclose the total AND the cap"
-                )
-    elif over is not None:
+    if approve == "payment" and "ask.total" not in msg_refs:
         raise PlaybookError(
-            f"{where}: `over_budget_message` is only for `approve: payment`"
+            f"{where}: a payment ask's `message` must quote the sheet "
+            "total — reference {ask.total} (the ask IS the consent record)"
         )
     resume = None
     if entry.get("resume") is not None:
         resume = _argless_macro(entry["resume"], "resume", where, nid, resolve)
     return AskNode(
-        id=nid, approve=approve, message=message, over_message=over, resume=resume
+        id=nid,
+        approve=approve,
+        message=message,
+        yes=tuple(_reply_words(entry, "yes", where)),
+        no=tuple(_reply_words(entry, "no", where)),
+        resume=resume,
     )
 
 
@@ -796,31 +798,23 @@ def _parse_recover(
 
 
 def _check_money(nodes: list[Node]) -> None:
-    """An irreversible-tagged move (a do OR an agent episode) runs only
-    as the fall-through of an `ask` that approves its class. Adjacency,
-    not just reachability — the route is linear, so adjacency IS the
-    only door: the conductor reads the payment sheet AT the ask (the
-    message quotes its total) and fires the move right after, so a move
-    in between would desynchronize the consent from the sheet. (The
+    """A payment move (a do OR an agent episode) runs only as the
+    fall-through of an `ask` with `approve: payment`. Adjacency, not
+    just reachability — the route is linear, so adjacency IS the only
+    door: the conductor reads the payment sheet AT the ask (the message
+    quotes its total) and fires the move right after, so a move in
+    between would desynchronize the consent from the sheet. (The
     route's derived `enter` — always the waypoint before the ask — is
     what guarantees money fires on a verified app page, never on the IM
     thread the ask left the phone on.)"""
     for i, n in enumerate(nodes):
-        irr = n.irreversible if isinstance(n, (DoNode, AgentNode)) else None
-        if not irr:
+        if not (isinstance(n, (DoNode, AgentNode)) and n.irreversible):
             continue
         prev = nodes[i - 1] if i > 0 else None
-        if irr == "payment":
-            if not (isinstance(prev, AskNode) and prev.approve == "payment"):
-                raise PlaybookError(
-                    f"move {n.id!r} (irreversible: payment) must DIRECTLY "
-                    "follow an `ask` with `approve: payment` — the ask "
-                    "reads the sheet its message quotes, and consent must "
-                    "not desynchronize from it"
-                )
-        elif not isinstance(prev, AskNode):
+        if not (isinstance(prev, AskNode) and prev.approve == "payment"):
             raise PlaybookError(
-                f"move {n.id!r} (irreversible: {irr}) must "
-                "DIRECTLY follow an `ask` — an irreversible act runs "
-                "human-approved or not at all"
+                f"move {n.id!r} (irreversible: payment) must DIRECTLY "
+                "follow an `ask` with `approve: payment` — the ask "
+                "reads the sheet its message quotes, and consent must "
+                "not desynchronize from it"
             )

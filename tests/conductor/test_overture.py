@@ -57,7 +57,6 @@ def _spec() -> Playbook:
         description="d",
         enabled=True,
         inputs=(),
-        mandate=None,
         nodes=(),
     )
 

@@ -6,18 +6,16 @@ of waypoints (`page:` — where the walk must BE, checked every time) and
 moves (what it DOES). The grammar, top-down (the YAML keys are the user
 vocabulary and the model classes below carry the same names)::
 
-    playbook  ::= description [enabled] [inputs] [budget] route
+    playbook  ::= description [enabled] [inputs] route
     inputs    ::= {id: {description, [default], [example]}}   # ≤ MAX_INPUTS
-    budget    ::= number | "{inputs.x}"                # scalar = max_amount
-                | {max_amount, [expires_minutes]}
     route     ::= [agent...] [start] page (move page | ask | tell)*
     entry     ::= "page" name [anchors] [forbid] [scrollable] [recover]
                 | "start" name macro          # the unconditional cold-launch
                 | "do" name [with] [macro] [irreversible]
                 | "agent" name prompt [tools] [give] [returns] [limit]
-                  [irreversible]             # the step handed to the model
-                | "ask" name approve message [over_budget_message] [resume]
-                | "tell" name message
+                  [context] [irreversible]   # the step handed to the model
+                | "ask" name approve message yes no [resume]
+                | "tell" name message [no]
     macro     ::= name                    # macros/<name>/ — a directory macro
                 | {[inputs] steps}        # inline — MACRO.yml grammar minus
                                           # name/description/enabled
@@ -32,9 +30,15 @@ is an `agent` step inside the author's fence, and whatever needs a
 human is an `ask`. Money runs in code: an `irreversible: payment` move
 directly follows the `ask` that approves it (`route.py` lints it).
 
+What the playbook declares is what runs — no more, no less. A page
+without `recover:` hands over; an agent step runs the author's prompt
+with the tools, landmarks, and context the author listed and nothing
+else; an ask's reply is read against the `yes:`/`no:` words the ask
+declares, and anything they do not cover is the model's to read.
+
 Wiring is by placeholder, and every ref is dotted: `{inputs.name}` reads
 a declared input, `{move.field}` reads an EARLIER agent step's declared
-return field, `{ask.total}`/`{ask.cap}` a payment ask's money slots. A
+return field, `{ask.total}` a payment ask's quoted total. A
 bare `{name}` is a load error. Dotted refs are playbook-level — resolved
 to plain strings before any macro sees them, so pack macros keep the
 stock single-name template grammar.
@@ -66,11 +70,6 @@ from physiclaw.macros.model import Macro, MacroError, MacroInput
 # by the pack's own MAX_PAGES. (Inputs are capped by the macro grammar's
 # MAX_INPUTS — the same `inputs:` section.)
 MAX_NODES = 20
-# How many reply-check rounds an `ask` gets before the session suspends
-# for the next wake-up. Fixed, not authorable: the patience budget is
-# the conductor's contract with the user, not a per-playbook knob.
-GATE_MAX_CHECKS = 3
-
 # `{root.name}` — the playbook's own ref grammar, always dotted
 # (`inputs.` / an earlier agent step's id). The root follows the
 # move-name grammar (hyphens included — `{pick-into-cart.message}`);
@@ -79,7 +78,9 @@ GATE_MAX_CHECKS = 3
 # `{{`/`}}` escapes, same fail-at-load-on-stray-brace rule.
 REF_RE = re.compile(r"\{\{|\}\}|\{([a-z0-9][a-z0-9_-]*\.[a-z][a-z0-9_]*)\}|[{}]")
 
-IRREVERSIBLE_CLASSES = ("payment", "send_message")
+# The one irreversible class: money. A payment move is entered only as
+# the fall-through of an `ask` with `approve: payment` (`route.py`).
+IRREVERSIBLE_CLASSES = ("payment",)
 
 # The ref grammar's one global root — `{inputs.name}` — rejected as a
 # move name so an agent's `{move.field}` outputs can never shadow it.
@@ -89,7 +90,7 @@ INPUTS_ROOT = "inputs"
 
 PACK_MACROS_DIRNAME = "macros"
 
-_PLAY_KEYS = {"description", "enabled", "inputs", "budget", "route"}
+_PLAY_KEYS = {"description", "enabled", "inputs", "route"}
 
 
 class PlaybookError(ValueError):
@@ -105,27 +106,9 @@ require_str, prose, opt_prose, check_name = _spec.bind(PlaybookError)
 # ---------- the model ----------
 
 
-@dataclass(frozen=True)
-class InputRef:
-    """A `{inputs.name}` reference resolved at parse time — the consumer
-    (the budget check) must never re-derive the brace grammar."""
-
-    name: str
-
-
 # A playbook's `inputs:` IS the macro grammar's — one shape, one parser
 # (`macros.parse.parse_inputs`), and the resolver reads either.
 PlaybookInput = MacroInput
-
-
-@dataclass(frozen=True)
-class Mandate:
-    """`budget:` — the user-authorized spend bound, enforced by the
-    conductor in code at checkout-class moves — never trusted to any
-    model call."""
-
-    max_amount: float | InputRef
-    expires_minutes: int | None
 
 
 @dataclass(frozen=True)
@@ -162,6 +145,7 @@ class AgentNode:
     max_calls: int
     max_scrolls: int
     irreversible: str | None = None
+    context: tuple[str, ...] = ()  # `context:` — what to load (`context.py`)
 
     @property
     def return_fields(self) -> tuple[str, ...]:
@@ -172,21 +156,26 @@ class AgentNode:
 class AskNode:
     """An `ask` move — message the user and hold for approval. `approve`
     names the class the reply consents to (`payment` binds the quoted
-    total); `resume` is the macro that re-enters the app afterwards."""
+    total); `yes`/`no` are the whole-message replies that open or close
+    the gate, in `reply.normalize` space (anything else is the model's);
+    `resume` is the macro that re-enters the app afterwards."""
 
     id: str
     approve: str
     message: str
-    over_message: str | None = None  # `over_budget_message:`
+    yes: tuple[str, ...]
+    no: tuple[str, ...]
     resume: str | None = None
 
 
 @dataclass(frozen=True)
 class TellNode:
-    """A `tell` move — message the user, then pause until any wake."""
+    """A `tell` move — message the user, then pause until any wake. `no`
+    (optional) names the replies the resuming wake reads as a cancel."""
 
     id: str
     message: str
+    no: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -213,7 +202,6 @@ class Playbook:
     description: str
     enabled: bool
     inputs: tuple[PlaybookInput, ...]
-    mandate: Mandate | None  # `budget:`
     nodes: tuple[Node, ...]  # the route's MOVES, compiled (waypoints derived away)
     # The route's first waypoint — where the walk must be at start (it
     # is also the first move's derived enter, which is what the runtime
@@ -225,9 +213,24 @@ class Playbook:
     # way. `qualified_inline` is the registry door.
     inline_macros: dict[str, Macro] = field(default_factory=dict)
     # Declared recovery, page name → hand: a mismatched page runs ITS
-    # hand (or hands over when it declares none) after the implicit
-    # unlock/settle.
+    # hand, or hands over when it declares none.
     recovers: dict[str, RecoverHand] = field(default_factory=dict)
+
+    def first_unsettled(self, outputs: dict[str, str]) -> int:
+        """Where a walk (re)starts: the route top, past any COMPLETED
+        pure-text agent — its outputs are recorded, and re-deriving them
+        (a recover hand's walk-from-the-top) could silently change them.
+        Never further: a page that happens to match a later move's
+        landing proves nothing about the moves before it."""
+        for i, node in enumerate(self.nodes):
+            settled = (
+                isinstance(node, AgentNode)
+                and not node.tools
+                and all(f"{node.id}.{f}" in outputs for f in node.return_fields)
+            )
+            if not settled:
+                return i
+        return len(self.nodes)
 
 
 @dataclass(frozen=True)
@@ -420,13 +423,8 @@ def _parse_playbook_data(data, name: str, pack: Pack) -> Playbook:
         raise PlaybookError("`enabled` must be true or false")
     inputs = _parse_inputs(data.get("inputs", {}))
     input_names = {i.name for i in inputs}
-    mandate = _parse_budget(data["budget"], input_names) if "budget" in data else None
     route = compile_route(
-        data.get("route"),
-        playbook=name,
-        input_names=input_names,
-        pack=pack,
-        has_mandate=mandate is not None,
+        data.get("route"), playbook=name, input_names=input_names, pack=pack
     )
     return Playbook(
         app=pack.app,
@@ -434,7 +432,6 @@ def _parse_playbook_data(data, name: str, pack: Pack) -> Playbook:
         description=description,
         enabled=enabled,
         inputs=inputs,
-        mandate=mandate,
         nodes=tuple(route.nodes),
         start=route.start,
         inline_macros=route.inline,
@@ -460,52 +457,6 @@ def _parse_inputs(raw: Any) -> tuple[PlaybookInput, ...]:
         return macro_parse.parse_inputs(raw)
     except MacroError as e:
         raise PlaybookError(str(e)) from e
-
-
-_BUDGET_KEYS = {"max_amount", "expires_minutes"}
-# A string that is EXACTLY one input ref (the mandate's string form).
-_SOLE_REF = re.compile(rf"^\{{{INPUTS_ROOT}\.([a-z][a-z0-9_]*)\}}$")
-
-
-def _parse_budget(raw: Any, input_names: set[str]) -> Mandate:
-    """`budget:` — a scalar (or one `{inputs.x}` ref) is the max amount;
-    the mapping form adds `expires_minutes`."""
-    where = "`budget`"
-    if not isinstance(raw, dict):
-        return Mandate(
-            max_amount=_budget_amount(raw, where, input_names), expires_minutes=None
-        )
-    unknown = sorted(set(map(str, raw)) - _BUDGET_KEYS)
-    if unknown:
-        raise PlaybookError(f"{where}: unknown key(s): {', '.join(unknown)}")
-    if "max_amount" not in raw:
-        raise PlaybookError(f"{where} needs `max_amount`")
-    max_amount = _budget_amount(raw["max_amount"], f"{where}.max_amount", input_names)
-    expires = raw.get("expires_minutes")
-    if expires is not None and (
-        isinstance(expires, bool) or not isinstance(expires, int) or expires <= 0
-    ):
-        raise PlaybookError(f"{where}.expires_minutes must be a positive whole number")
-    return Mandate(max_amount=max_amount, expires_minutes=expires)
-
-
-def _budget_amount(
-    amount: Any, where: str, input_names: set[str]
-) -> "float | InputRef":
-    if isinstance(amount, (int, float)) and not isinstance(amount, bool):
-        if amount <= 0:
-            raise PlaybookError(f"{where} must be positive (got {amount})")
-        return float(amount)
-    if isinstance(amount, str) and (m := _SOLE_REF.match(amount.strip())):
-        name = m.group(1)
-        if name not in input_names:
-            raise PlaybookError(
-                f"{where}: placeholder {{inputs.{name}}} not declared under `inputs`"
-            )
-        return InputRef(name=name)
-    raise PlaybookError(
-        f"{where} must be a number or exactly one `{{inputs.name}}` ref"
-    )
 
 
 # ---------- the ref grammar ----------

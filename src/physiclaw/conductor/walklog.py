@@ -51,7 +51,7 @@ RUNS_FILENAME = "runs.jsonl"
 # "abandoned" = the SESSION ended around a mid-flight walk (Ctrl-C,
 # wall-clock budget) — recorded from plugin teardown (`Program.abandon`,
 # `log_external_stop`'s twin), and deliberately NOT an escalation: the
-# next wake re-locates from the screen, no model session was spent.
+# next wake starts the route over, no model session was spent.
 OUTCOMES = ("completed", "suspended", "handover", "crashed", "abandoned")
 
 # The KPI's numerator, one home: suspensions are the walk working as

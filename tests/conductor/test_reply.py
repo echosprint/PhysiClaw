@@ -1,5 +1,6 @@
 """Tests for `physiclaw.conductor.reply` — the gate's deterministic
-tiers: whole-message word matching and new-incoming-bubble detection."""
+reading: whole-message matching against the ask's own words, and
+new-incoming-bubble detection."""
 
 from __future__ import annotations
 
@@ -7,6 +8,13 @@ import pytest
 from conductor_fakes import make_screen
 
 from physiclaw.conductor import reply
+
+YES = frozenset(map(reply.normalize, ["好的", "嗯", "ok", "go ahead", "confirm"]))
+NO = frozenset(map(reply.normalize, ["不用", "不要", "算了", "no thanks", "cancel"]))
+
+
+def _new(rows, baseline, own, **kw):
+    return reply.new_incoming(rows, baseline, own, words=YES | NO, **kw)
 
 
 @pytest.mark.parametrize(
@@ -20,21 +28,28 @@ from physiclaw.conductor import reply
         ("不用", "deny"),
         ("算了。", "deny"),
         ("No thanks", "deny"),
-        ("等等", None),  # a hold is neither — LLM tier
+        ("等等", None),  # a hold is neither — undeclared
         ("好的，但是买两盒", None),  # qualifier → whole-message rule defers
         ("what's the price?", None),
     ],
 )
 def test_classify_whole_message_only(text: str, expected: str | None) -> None:
-    assert reply.classify(text) == expected
+    assert reply.classify(text, YES, NO) == expected
 
 
 def test_classify_all_deny_wins_and_partial_defers() -> None:
-    assert reply.classify_all(["好的", "不要"]) == "deny"
-    assert reply.classify_all(["好的", "嗯"]) == "confirm"
-    # One unclassifiable message alongside a confirm defers to the LLM.
-    assert reply.classify_all(["好的", "顺便查下天气"]) is None
-    assert reply.classify_all([]) is None
+    assert reply.classify_all(["好的", "不要"], YES, NO) == "deny"
+    assert reply.classify_all(["好的", "嗯"], YES, NO) == "confirm"
+    # One unclassifiable message alongside a confirm defers — the model reads.
+    assert reply.classify_all(["好的", "顺便查下天气"], YES, NO) is None
+    assert reply.classify_all([], YES, NO) is None
+
+
+def test_only_the_declared_words_count() -> None:
+    # The conductor holds no word list of its own: an undeclared "yes"
+    # spelling is unclassified, a declared one classifies.
+    assert reply.classify("sure", YES, NO) is None
+    assert reply.classify("sure", frozenset({"sure"}), NO) == "confirm"
 
 
 def test_new_incoming_filters_side_baseline_and_own_ask() -> None:
@@ -46,7 +61,7 @@ def test_new_incoming_filters_side_baseline_and_own_ask() -> None:
         ("已发送", 0.75, 0.6),  # our own new bubble — right side, excluded
     )
 
-    new = reply.new_incoming(screen.rows, {"MyChat"}, ask)
+    new = _new(screen.rows, {"MyChat"}, ask)
 
     assert new == ["好的"]
 
@@ -62,7 +77,7 @@ def test_quoted_reply_words_are_never_swallowed_as_own_lines() -> None:
         ("confirm", 0.25, 0.5),
     )
 
-    assert reply.new_incoming(screen.rows, {"MyChat"}, ask) == ["confirm"]
+    assert _new(screen.rows, {"MyChat"}, ask) == ["confirm"]
 
 
 def test_bubbles_above_the_visible_ask_never_count() -> None:
@@ -78,13 +93,13 @@ def test_bubbles_above_the_visible_ask_never_count() -> None:
         ("ok", 0.25, 0.8),  # the real reply, below the ask
     )
 
-    new = reply.new_incoming(screen.rows, {"MyChat"}, ask)
+    new = _new(screen.rows, {"MyChat"}, ask)
 
     assert len(new) == 1  # only the reply below the ask
 
     # The re-ask deny sweep runs with the filter OFF — it must see what
     # arrived above a just-sent ask.
-    swept = reply.new_incoming(screen.rows, {"MyChat"}, ask, after_ask=False)
+    swept = _new(screen.rows, {"MyChat"}, ask, after_ask=False)
     assert len(swept) == 2
 
 
@@ -96,4 +111,4 @@ def test_centered_timestamp_rows_are_not_incoming() -> None:
         ("好的", 0.25, 0.4),
     )
 
-    assert reply.new_incoming(screen.rows, set(), "ask text") == ["好的"]
+    assert _new(screen.rows, set(), "ask text") == ["好的"]

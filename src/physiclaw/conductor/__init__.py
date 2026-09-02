@@ -19,13 +19,14 @@ Driving:
     step_agent.py  the `agent` step: the pure-text call, the episode
     step_ask.py    the `ask` and `tell` steps: message, hold, consent
     money.py       the payment predicates, pure
-    recover.py     declared recovery: unlock, settle, the page's hand
+    recover.py     declared recovery: the page's `recover:` hand, only
     setup.py       how a Program comes to exist (activation, resume)
     turns.py       minting a synthesized turn
     brief.py       the handover report a driver's last turn carries
     suspension.py  suspended.json, the one cross-wake file
-    micro.py       the scoped model calls (agent, activation, reply)
+    micro.py       the scoped model calls (agent, activation)
     calls.py       the episode vocabulary the parser and walk share
+    context.py     what an agent step's `context:` loads beside it
 
 Seeing the screen:
     pages.py       declared and learned page fingerprints

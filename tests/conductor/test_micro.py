@@ -18,7 +18,6 @@ from physiclaw.conductor.micro import (
     ACT_ARM,
     AGENT_ACT,
     AGENT_FIELDS,
-    CONFIRM_REPLY,
     Candidate,
     DecisionRequest,
     MicroCaller,
@@ -51,15 +50,14 @@ class ScriptedProvider:
         )
 
 
-def _reply_req(reply: str = "那就来一份吧"):
-    """A confirm_reply request — the fixed-space call the caller tests
-    ride (answers: confirm / deny / revise / unclear)."""
-    return build_request(
-        CONFIRM_REPLY,
-        "gate",
-        (),
-        {"ask": "回复 好的 确认支付", "reply": reply},
-        make_screen(("x", 0.3, 0.5)),
+def _fields_req(prompt: str = "the keyword, please"):
+    """A pure-text agent request — the fixed-space call (done /
+    escalate) the caller tests ride."""
+    return DecisionRequest(
+        call=AGENT_FIELDS,
+        node_id="parse",
+        outcomes=(),
+        args={"prompt": prompt, "fields": "- keyword: k"},
     )
 
 
@@ -74,7 +72,11 @@ def _act_req(*labels: str, history=(), verbs=(ACT_SCROLL_DOWN, ACT_SCROLL_UP)):
         call=AGENT_ACT,
         node_id="pick",
         outcomes=(AGENT_DONE, ESCALATE, *verbs),
-        args={"block": act_block("Current screen", cands)},
+        args={
+            "block": act_block("Current screen", cands),
+            "tools": "scroll",
+            "give": "",
+        },
         candidates=cands,
         listing="",
         context="",
@@ -149,14 +151,14 @@ async def test_repair_retry_recovers_one_invalid_reply() -> None:
     caller = _caller(
         [
             '{"answer": "ghost", "reason": "?", "confidence": 0.9}',  # not allowed
-            '{"answer": "confirm", "reason": "a yes", "confidence": 0.8}',
+            '{"answer": "done", "reason": "a yes", "confidence": 0.8}',
         ],
         tr=tap,
     )
 
-    result = await caller.run(_reply_req())
+    result = await caller.run(_fields_req())
 
-    assert result.outcome is not None and result.outcome.out == "confirm"
+    assert result.outcome is not None and result.outcome.out == "done"
     assert result.attempts == 2
     # Both round-trips' tokens are counted — spend honesty — and the
     # trace event mirrors the result's fields.
@@ -170,13 +172,13 @@ async def test_repair_retry_recovers_one_invalid_reply() -> None:
     "second",
     [
         "no json here",
-        '{"answer": "confirm"}',  # missing reason/confidence
-        '{"answer": "confirm", "reason": "", "confidence": 0.9}',
-        '{"answer": "confirm", "reason": "r", "confidence": 2}',
+        '{"answer": "done"}',  # missing reason/confidence
+        '{"answer": "done", "reason": "", "confidence": 0.9}',
+        '{"answer": "done", "reason": "r", "confidence": 2}',
     ],
 )
 async def test_two_invalid_replies_escalate(second: str) -> None:
-    result = await _caller(["not json", second]).run(_reply_req())
+    result = await _caller(["not json", second]).run(_fields_req())
 
     assert result.outcome is None
     assert "invalid after repair retry" in result.detail
@@ -184,7 +186,7 @@ async def test_two_invalid_replies_escalate(second: str) -> None:
 
 @pytest.mark.asyncio
 async def test_low_confidence_escalates_instead_of_guessing() -> None:
-    result = await _caller([_ok("confirm", 0.3)]).run(_reply_req())
+    result = await _caller([_ok("done", 0.3)]).run(_fields_req())
 
     assert result.outcome is None
     assert "below floor" in result.detail
@@ -193,7 +195,7 @@ async def test_low_confidence_escalates_instead_of_guessing() -> None:
 @pytest.mark.asyncio
 async def test_provider_error_escalates_and_traces() -> None:
     tap = _Tap()
-    result = await _caller([RuntimeError("boom")], tr=tap).run(_reply_req())
+    result = await _caller([RuntimeError("boom")], tr=tap).run(_fields_req())
 
     assert result.outcome is None and result.detail == "provider error"
     assert tap.events[-1]["out"] is None
@@ -299,11 +301,11 @@ def _cascaded(cheap_replies, session_replies, floor: float = 0.7) -> MicroCaller
 
 @pytest.mark.asyncio
 async def test_cascade_retries_a_floor_miss_on_the_session_model() -> None:
-    caller = _cascaded([_ok("confirm", 0.2)], [_ok("confirm", 0.9)])
+    caller = _cascaded([_ok("done", 0.2)], [_ok("done", 0.9)])
 
-    result = await caller.run(_reply_req())
+    result = await caller.run(_fields_req())
 
-    assert result.outcome is not None and result.outcome.out == "confirm"
+    assert result.outcome is not None and result.outcome.out == "done"
     assert result.tier == "session"
     assert result.agreement is True  # both tiers committed the same answer
     assert result.usage.prompt_tokens == 200  # both tiers' spend summed
@@ -311,30 +313,30 @@ async def test_cascade_retries_a_floor_miss_on_the_session_model() -> None:
 
 @pytest.mark.asyncio
 async def test_cascade_retries_a_double_invalid_on_the_session_model() -> None:
-    caller = _cascaded(["not json", "still not json"], [_ok("deny")])
+    caller = _cascaded(["not json", "still not json"], [_ok("escalate")])
 
-    result = await caller.run(_reply_req())
+    result = await caller.run(_fields_req())
 
-    assert result.outcome is not None and result.outcome.out == "deny"
+    assert result.outcome is not None and result.outcome.out == "escalate"
     assert result.tier == "session"
     assert result.agreement is None  # the cheap tier never committed an answer
 
 
 @pytest.mark.asyncio
 async def test_cascade_disagreement_is_recorded() -> None:
-    caller = _cascaded([_ok("confirm", 0.2)], [_ok("deny", 0.9)])
+    caller = _cascaded([_ok("done", 0.2)], [_ok("escalate", 0.9)])
 
-    result = await caller.run(_reply_req())
+    result = await caller.run(_fields_req())
 
-    assert result.outcome is not None and result.outcome.out == "deny"
+    assert result.outcome is not None and result.outcome.out == "escalate"
     assert result.agreement is False
 
 
 @pytest.mark.asyncio
 async def test_cascade_both_tiers_failing_escalates_with_both_details() -> None:
-    caller = _cascaded([_ok("confirm", 0.2)], [_ok("deny", 0.1)])
+    caller = _cascaded([_ok("done", 0.2)], [_ok("escalate", 0.1)])
 
-    result = await caller.run(_reply_req())
+    result = await caller.run(_fields_req())
 
     assert result.outcome is None
     assert "below floor" in result.detail and "session retry" in result.detail
@@ -344,9 +346,9 @@ async def test_cascade_both_tiers_failing_escalates_with_both_details() -> None:
 async def test_no_owned_tier_means_no_cascade() -> None:
     # The session model IS the micro tier (no cheap client built):
     # retrying the same model on a floor miss would just pay twice.
-    provider = ScriptedProvider([_ok("confirm", 0.2)])
+    provider = ScriptedProvider([_ok("done", 0.2)])
 
-    result = await MicroCaller(provider, confidence_floor=0.7).run(_reply_req())
+    result = await MicroCaller(provider, confidence_floor=0.7).run(_fields_req())
 
     assert result.outcome is None and result.tier == "micro"
     assert not provider._replies  # exactly one reply consumed
@@ -375,7 +377,7 @@ async def test_agent_fields_row_takes_the_prompt_and_returns_fields() -> None:
     assert result.outcome is not None and result.outcome.payload == {"keyword": "牛奶"}
     (messages,) = provider.calls
     assert "From the message" in messages[-1].content
-    assert "Return fields:" in messages[-1].content
+    assert "Return fields" in messages[-1].content
 
 
 @pytest.mark.asyncio
@@ -460,6 +462,23 @@ def test_parse_task_prompt_pins_value_hygiene() -> None:
     assert "ONLY what that input's description asks" in prompt
 
 
+def test_agent_prompts_carry_no_conductor_prose() -> None:
+    # The author's prompt IS the brief: the system prompt is the output
+    # contract plus the legend the granted tools shape — nothing else.
+    from physiclaw.conductor.micro import _CONTRACT, _SPECS, _system
+
+    fields = _fields_req("Derive the keyword.")
+    assert _system(fields, _SPECS[AGENT_FIELDS].answer_space(fields)).startswith(
+        _CONTRACT
+    )
+    act = _act_req("牛奶")
+    act_system = _system(act, _SPECS[AGENT_ACT].answer_space(act))
+    assert act_system.startswith(_CONTRACT)
+    assert "scroll_down" in act_system  # the granted scroll tool's verbs
+    assert "go_back" not in act_system  # back was not granted
+    assert "tapped" not in act_system  # nor tap
+
+
 def test_agent_act_system_prompt_is_byte_stable_across_turns() -> None:
     # The episode's system prompt must not vary with the screen: the
     # rows live in each turn's user block, so the provider prefix cache
@@ -517,28 +536,6 @@ async def test_parse_task_not_a_task_carries_no_payload() -> None:
 
     assert result.outcome is not None
     assert result.outcome.out == NOT_A_TASK and result.outcome.payload is None
-
-
-@pytest.mark.asyncio
-async def test_confirm_reply_row_judges_the_reply() -> None:
-    # Empty outcomes: the verdict space is fixed whole in the _SPECS row.
-    result = await _caller(
-        ['{"reason": "colloquial yes", "answer": "confirm", "confidence": 0.8}']
-    ).run(_reply_req())
-
-    assert result.outcome is not None and result.outcome.out == "confirm"
-
-
-@pytest.mark.asyncio
-async def test_confirm_reply_revise_is_a_legal_answer() -> None:
-    result = await _caller(
-        [
-            '{"reason": "approves a MODIFIED order", "answer": "revise", '
-            '"confidence": 0.9}'
-        ]
-    ).run(_reply_req("好的，但是买两盒"))
-
-    assert result.outcome is not None and result.outcome.out == "revise"
 
 
 @pytest.mark.asyncio
@@ -646,10 +643,10 @@ async def test_transient_provider_error_gets_one_retry(monkeypatch) -> None:
 
     monkeypatch.setattr("physiclaw.conductor.micro.asyncio.sleep", _nosleep)
     result = await _caller(
-        [ProviderTransientError("read timeout"), _ok("confirm", 0.8)]
-    ).run(_reply_req())
+        [ProviderTransientError("read timeout"), _ok("done", 0.8)]
+    ).run(_fields_req())
 
-    assert result.outcome is not None and result.outcome.out == "confirm"
+    assert result.outcome is not None and result.outcome.out == "done"
 
 
 @pytest.mark.asyncio
@@ -662,7 +659,7 @@ async def test_double_transient_error_still_escalates(monkeypatch) -> None:
     monkeypatch.setattr("physiclaw.conductor.micro.asyncio.sleep", _nosleep)
     result = await _caller(
         [ProviderTransientError("a"), ProviderTransientError("b")]
-    ).run(_reply_req())
+    ).run(_fields_req())
 
     assert result.outcome is None and result.detail == "provider error"
 
@@ -671,7 +668,7 @@ async def test_double_transient_error_still_escalates(monkeypatch) -> None:
 async def test_non_transient_error_fails_fast_without_retry() -> None:
     # Permanent failures (4xx, real bugs) never earn a second paid call
     # — the scripted list holds ONE item, so a retry would IndexError.
-    result = await _caller([RuntimeError("bad request")]).run(_reply_req())
+    result = await _caller([RuntimeError("bad request")]).run(_fields_req())
 
     assert result.outcome is None and result.detail == "provider error"
 
@@ -686,7 +683,7 @@ async def test_repair_attempt_failure_keeps_first_attempt_usage(monkeypatch) -> 
     monkeypatch.setattr("physiclaw.conductor.micro.asyncio.sleep", _nosleep)
     result = await _caller(
         ['{"answer": "ghost", "reason": "?", "confidence": 0.9}', RuntimeError("down")]
-    ).run(_reply_req())
+    ).run(_fields_req())
 
     assert result.outcome is None and result.detail == "provider error"
     assert result.usage.prompt_tokens == 100  # attempt 1 still counted

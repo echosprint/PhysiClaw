@@ -55,8 +55,6 @@ def add_playbook(draft: dict, name: str) -> None:
     books[name] = {
         "description": "",
         "inputs": {},
-        "budget": None,
-        "context": [],
         "route": [],
     }
 
@@ -67,10 +65,10 @@ def delete_playbook(draft: dict, name: str) -> None:
 
 
 def update_playbook(draft: dict, name: str, fields: dict) -> None:
-    """Merge top-level fields (description/inputs/budget/context) —
+    """Merge top-level fields (description/inputs) —
     unchecked; live validation is the feedback."""
     p = _playbook(draft, name)
-    unknown = sorted(set(fields) - {"description", "inputs", "budget", "context"})
+    unknown = sorted(set(fields) - {"description", "inputs"})
     if unknown:
         raise DraftError(f"playbook field(s) not editable: {', '.join(unknown)}")
     p.update(fields)
@@ -135,10 +133,6 @@ def playbook_data(p: dict) -> dict:
     out["enabled"] = False
     if p["inputs"]:
         out["inputs"] = p["inputs"]
-    if p["budget"]:
-        out["budget"] = p["budget"]
-    if p["context"]:
-        out["context"] = p["context"]
     out["route"] = p["route"]
     return out
 

@@ -21,8 +21,8 @@ should re-spell the call-id convention, the message shape, or how a
 result is found; a drift there is invisible until the loop rejects a
 turn or a lookup silently misses.
 
-Deliberately NOT here: what a kind MEANS, the decision journal, whether
-the walk has acted yet, and what to DO about a failure. Those are the
+Deliberately NOT here: what a kind MEANS, the decision journal, and
+what to DO about a failure. Those are the
 drivers' vocabulary and policy; this module knows only how to mint a
 turn, remember the one in flight, and find what it came back as.
 """
@@ -95,13 +95,11 @@ class Turnsmith:
         """The other half of the contract: read the pending action's
         result out of the transcript and retire it.
 
-        Returns `(what was pending, its result, why it failed)` — `failed`
-        is None when the result landed clean; on a blocked or errored
-        call the error result rides along too (a retry may read it), on
-        a missing one it is None. The action is cleared only when a
-        result actually landed, so a driver that failed still knows
-        what it was waiting on. Callers keep their own policy
-        (the walk drops a suspension; the boot spends no retry budget);
+        Returns `(what was pending, its result, why there is none)` —
+        exactly one of the last two is set. The action is cleared only
+        when a result actually landed, so a driver that failed still
+        knows what it was waiting on. Callers keep their own policy
+        (the walk drops a suspension; the boot quits);
         what lives here is where a result is found and how a missing or
         blocked one is phrased, so the two drivers cannot word — or
         truncate — the same failure differently."""
@@ -117,17 +115,12 @@ class Turnsmith:
         if result.is_error:
             return (
                 pending,
-                result,
+                None,
                 f"{pending.kind} was blocked or failed: "
                 f"{views.text_of(result)[:MAX_ERROR_CHARS]}",
             )
         self.pending = None
         return pending, result, None
-
-    def drop(self) -> None:
-        """Retire the pending action without a result — a failure the
-        driver handled itself (a retry), never to be settled blind."""
-        self.pending = None
 
     def synth(
         self, kind: str, summary: str, tool: str, args: dict, *, channel: bool = False

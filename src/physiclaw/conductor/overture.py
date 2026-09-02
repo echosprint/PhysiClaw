@@ -66,7 +66,7 @@ from physiclaw.contract.dto import AssistantMessage, Message
 
 log = logging.getLogger(__name__)
 
-# Bounds — fixed, not authorable, the same discipline as GATE_MAX_CHECKS.
+# Bounds — fixed, not authorable (the boot is infrastructure, not a playbook).
 # `unlock_phone` races the passcode keypad and its own doctrine says to
 # retry once or twice; the open macro is deterministic, so a second miss
 # means the world is not what the pack describes.

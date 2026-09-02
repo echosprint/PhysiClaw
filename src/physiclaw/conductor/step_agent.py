@@ -12,7 +12,7 @@ re-runs the money predicates before EVERY tap the model proposes.
 """
 
 from physiclaw.common import gesture_vocab
-from physiclaw.conductor import money, recover
+from physiclaw.conductor import context, money, recover
 from physiclaw.conductor.calls import (
     ACT_BACK,
     ACT_SCROLL_DOWN,
@@ -32,6 +32,8 @@ from physiclaw.conductor.micro import (
     act_block,
     act_candidates,
     canonical_reply,
+    data_block,
+    return_fields,
 )
 from physiclaw.conductor.pages import page_id
 from physiclaw.conductor.playbook import AgentNode, fill_refs
@@ -89,6 +91,14 @@ class AgentStep(Step[AgentNode]):
             fill_refs(self.node.prompt, vals, where=f"agent {self.node.id!r} `prompt`")
         )
 
+    def _fields(self) -> str:
+        return "\n".join(f"- {n}: {d}" for n, d in self.node.returns)
+
+    def _context(self) -> str:
+        """What the author declared beside the prompt (`context:`),
+        loaded now — nothing else of the agent's memory travels."""
+        return context.load(self.node.context)
+
     def _close(self, outcome: MicroOutcome, *, calls: int = 0) -> Turn:
         """The one done tail both forms share: record the returns,
         journal, advance the cursor."""
@@ -118,8 +128,9 @@ class AgentStep(Step[AgentNode]):
             outcomes=(),
             args={
                 "prompt": self._prompt(self.walk.ref_values()),
-                "fields": "\n".join(f"- {n}: {d}" for n, d in node.returns),
+                "fields": self._fields(),
             },
+            context=self._context(),
         )
 
     def _fields_done(self, outcome: MicroOutcome | None) -> Turn:
@@ -136,9 +147,11 @@ class AgentStep(Step[AgentNode]):
 
     def _episode_start(self) -> Turn:
         """Open an acting episode on the current (enter-verified) screen.
-        The prompt's refs fill ONCE here; a payment episode additionally
-        gets {ask.total} — the consented amount its adjacent gate bound —
-        and stashes that bound for the per-tap predicates."""
+        The prompt's refs fill ONCE here — the brief (prompt, return
+        fields, declared context) heads the first block and rides the
+        replayed history verbatim; a payment episode additionally gets
+        {ask.total} — the consented amount its adjacent gate bound — and
+        stashes that bound for the per-tap predicates."""
         node, walk = self.node, self.walk
         vals = walk.ref_values()
         if node.irreversible == "payment":
@@ -148,7 +161,13 @@ class AgentStep(Step[AgentNode]):
                 )
             self.consented = walk.gate.consented
             vals = {**vals, "ask.total": f"{self.consented:g}"}
-        self._screen_block(self._prompt(vals))
+        brief = [self._prompt(vals)]
+        if self.node.returns:
+            brief.append(return_fields(self._fields()))
+        loaded = self._context()
+        if loaded:
+            brief.append(data_block("Context", loaded))
+        self._screen_block("\n\n".join(brief))
         return self._request()
 
     def _screen_block(self, prefix: str) -> None:
@@ -191,7 +210,12 @@ class AgentStep(Step[AgentNode]):
             call=AGENT_ACT,
             node_id=node.id,
             outcomes=tuple(verbs),
-            args={"block": self.block},
+            # `tools`/`give` shape the legend — fixed for the episode.
+            args={
+                "block": self.block,
+                "tools": " ".join(node.tools),
+                "give": ", ".join(node.give),
+            },
             candidates=self.candidates,
             history=tuple(self.history),
         )
@@ -256,9 +280,7 @@ class AgentStep(Step[AgentNode]):
             # before every tap the model proposes — a tap while no
             # visible amount equals the consented total, or with any
             # amount above it, is refused.
-            blocked = money.fire_block(
-                consented=self.consented, cap=walk.gate.cap, screen=walk.screen
-            )
+            blocked = money.fire_block(consented=self.consented, screen=walk.screen)
             if blocked is not None:
                 return walk.handover(f"payment agent {node.id!r}: {blocked}")
             # Consent is consumed by the FIRST fire — a later payment

@@ -17,7 +17,6 @@ enabled: false
 inputs:
   keyword:
     description: what to search
-budget: 100
 route:
   - page: home
   - do: open
@@ -40,7 +39,8 @@ route:
   - ask: pay
     approve: payment
     message: "Total ¥{ask.total}, reply ok to pay, or no to cancel"
-    over_budget_message: "Total ¥{ask.total}, over budget ¥{ask.cap}, reply ok to pay, or no to cancel"
+    yes: ["ok"]
+    no: ["no"]
 """
 
 # A payment move appended as the ask's fall-through — several money
@@ -79,7 +79,6 @@ def test_parse_valid_playbook() -> None:
     p = pb.parse_playbook(VALID, "buy", _pack())
 
     assert p.name == "buy" and p.enabled is False
-    assert p.mandate is not None and p.mandate.max_amount == 100.0
     assert p.start == "home"
     kinds = [type(n).__name__ for n in p.nodes]
     assert kinds == ["DoNode", "AgentNode", "DoNode", "TellNode", "AskNode"]
@@ -116,7 +115,7 @@ def test_retired_keys_are_unknown() -> None:
     pack = _pack()
     for text, fragment in (
         (
-            VALID.replace("budget: 100\n", "budget: 100\ncontext: [memory.x]\n"),
+            VALID.replace("enabled: false\n", "enabled: false\ncontext: [memory.x]\n"),
             "unknown key",
         ),
         (VALID + "  - sync: fix\n", "exactly one of"),
@@ -306,43 +305,15 @@ def test_money_requires_an_ask_directly_before() -> None:
         pb.parse_playbook(text, "buy", pack)
 
 
-def test_over_budget_message_requires_a_budget() -> None:
-    pack = _pack()
-    text = VALID.replace("budget: 100\n", "")
-
-    with pytest.raises(PlaybookError, match="budget"):
-        pb.parse_playbook(text, "buy", pack)
-
-
-def test_any_irreversible_class_requires_its_gate() -> None:
-    # A cancel replied to a tell is never read, so nothing consequential
-    # may hide behind one: every irreversible class runs as an ask's
-    # fall-through.
+def test_payment_is_the_only_irreversible_class() -> None:
     pack = _pack()
     text = _mutate(
         'with: {message: "{choose.pick}"}',
         'with: {message: "{choose.pick}"}\n    irreversible: send_message',
     )
 
-    with pytest.raises(PlaybookError, match="DIRECTLY follow an `ask`"):
+    with pytest.raises(PlaybookError, match="`irreversible` must be one of payment"):
         pb.parse_playbook(text, "buy", pack)
-
-
-def test_send_move_behind_any_ask_parses() -> None:
-    pack = _pack()
-    text = (
-        VALID
-        + """  - do: notify
-    macro: add-cart
-    with: {message: "sent"}
-    irreversible: send_message
-  - page: results
-"""
-    )
-
-    p = pb.parse_playbook(text, "buy", pack)
-
-    assert p.nodes[-1].irreversible == "send_message"
 
 
 def test_payment_move_must_directly_follow_its_ask() -> None:
@@ -366,7 +337,7 @@ def test_payment_move_must_directly_follow_its_ask() -> None:
 
 def test_payment_move_behind_ask_parses() -> None:
     # The whole point of the ask: a confirmed reply falls through, so
-    # the conductor itself executes the payment move under the budget.
+    # the conductor itself executes the payment move under the consent.
     pack = _pack()
 
     p = pb.parse_playbook(VALID + PAY_TAIL, "buy", pack)
@@ -395,6 +366,8 @@ route:
   - ask: addr
     approve: address
     message: "address ok? reply ok or no"
+    yes: ["ok"]
+    no: ["no"]
   - do: pay
     macro: add-cart
     with: {message: "pay"}
@@ -431,6 +404,51 @@ def test_payment_agent_episode_takes_the_ask_total() -> None:
 @pytest.mark.parametrize(
     "old, new, fragment",
     [
+        # The reply words are the ask's own — required, non-empty.
+        ('    yes: ["ok"]\n', "", "`yes` must be a list"),
+        ('    yes: ["ok"]\n', "    yes: []\n", "at least one reply word"),
+        ('    no: ["no"]\n', "    no: [3]\n", "must be a string"),
+    ],
+)
+def test_ask_reply_words_are_declared(old, new, fragment) -> None:
+    with pytest.raises(PlaybookError, match=fragment):
+        pb.parse_playbook(_mutate(old, new), "buy", _pack())
+
+
+def test_agent_context_is_declared_and_checked() -> None:
+    text = _mutate(
+        "    limit: {calls: 4, scrolls: 2}\n",
+        "    limit: {calls: 4, scrolls: 2}\n    context: [memory.shopping, daylog]\n",
+    )
+
+    p = pb.parse_playbook(text, "buy", _pack())
+    assert p.nodes[1].context == ("memory.shopping", "daylog")
+
+    with pytest.raises(PlaybookError, match="`context` entry"):
+        pb.parse_playbook(
+            _mutate(
+                "    limit: {calls: 4, scrolls: 2}\n",
+                "    limit: {calls: 4, scrolls: 2}\n    context: [pitfalls]\n",
+            ),
+            "buy",
+            _pack(),
+        )
+
+
+def test_tell_may_declare_its_cancel_words() -> None:
+    text = _mutate(
+        '    message: "Added to the cart, ordering soon"\n',
+        '    message: "Added to the cart, ordering soon"\n    no: ["stop"]\n',
+    )
+
+    p = pb.parse_playbook(text, "buy", _pack())
+
+    assert p.nodes[3].no == ("stop",)
+
+
+@pytest.mark.parametrize(
+    "old, new, fragment",
+    [
         # Messages are REQUIRED — the conductor composes no user-facing
         # prose (only the author knows the user's language).
         ('    message: "Added to the cart, ordering soon"\n', "", "is required"),
@@ -440,21 +458,12 @@ def test_payment_agent_episode_takes_the_ask_total() -> None:
             '    message: "reply ok to pay, or no to cancel"\n',
             "must quote the sheet",
         ),
-        # …and carry the over-budget variant…
-        (
-            '    over_budget_message: "Total ¥{ask.total}, over budget ¥{ask.cap}, '
-            'reply ok to pay, or no to cancel"\n',
-            "",
-            "needs `over_budget_message`",
-        ),
-        # …which must disclose the breached budget too.
-        (", over budget ¥{ask.cap}", "", "total AND the cap"),
-        # over_budget_message is meaningless outside a payment ask.
+        # {ask.total} exists only inside a payment ask.
         (
             "approve: payment\n"
             '    message: "Total ¥{ask.total}, reply ok to pay, or no to cancel"',
-            'approve: handoff\n    message: "reply ok to continue, or no to cancel"',
-            "only for `approve: payment`",
+            'approve: handoff\n    message: "Total ¥{ask.total}, reply ok or no"',
+            "references move 'ask'",
         ),
     ],
 )
@@ -545,47 +554,6 @@ def test_scaffolded_pack_parses_clean() -> None:
 
     assert entry.error is None, entry.error
     assert entry.spec is not None and entry.spec.enabled is False
-
-
-# ---------- budget ----------
-
-
-def test_budget_accepts_input_ref() -> None:
-    pack = _pack()
-    text = VALID.replace("budget: 100", 'budget: "{inputs.keyword}"')
-
-    p = pb.parse_playbook(text, "buy", pack)
-
-    assert p.mandate is not None
-    assert p.mandate.max_amount == pb.InputRef(name="keyword")
-
-
-def test_budget_mapping_form_carries_expiry() -> None:
-    pack = _pack()
-    text = VALID.replace(
-        "budget: 100", "budget: {max_amount: 100, expires_minutes: 30}"
-    )
-
-    p = pb.parse_playbook(text, "buy", pack)
-
-    assert p.mandate is not None
-    assert p.mandate.max_amount == 100.0 and p.mandate.expires_minutes == 30
-
-
-@pytest.mark.parametrize(
-    "amount, fragment",
-    [
-        ("budget: -5", "positive"),
-        ("budget: true", "number or exactly one"),
-        ('budget: "up to {inputs.keyword} yuan"', "exactly one"),
-        ('budget: "{inputs.typo}"', "not declared"),
-    ],
-)
-def test_budget_rejections(amount: str, fragment: str) -> None:
-    pack = _pack()
-
-    with pytest.raises(PlaybookError, match=fragment):
-        pb.parse_playbook(VALID.replace("budget: 100", amount), "buy", pack)
 
 
 # ---------- inline macros (a move's embedded body) ----------

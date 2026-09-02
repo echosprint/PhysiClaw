@@ -1,16 +1,12 @@
-"""Gate reply reading — the deterministic tiers of the ask's reply check.
+"""Gate reply reading — the deterministic reading of the ask's reply.
 
 Ruled order: (0) there must be a NEW incoming message at all — no new
-bubble, no check, no budget spent; (1) exact word match on the WHOLE
-message, normalized — obvious confirmations and rejections never cost a
-model call; (2) only what neither tier can classify goes to the
-`confirm_reply` micro-call. Whole-message equality is the discipline:
-"ok, but make it two boxes" contains "ok" yet carries a qualifier that
-changes the order — anything longer than a listed token falls through
-to the LLM.
-
-Holds (等等 / wait / hold on) are deliberately in NEITHER list: a hold is
-not a yes and not a no, so it rides the re-ask cycle as "unclear".
+bubble, no check; (1) exact word match on the WHOLE message, normalized,
+against the words the ASK ITSELF declares (`yes:` / `no:`) — the
+conductor holds no word list of its own. Whole-message equality is the
+discipline: "ok, but make it two boxes" contains "ok" yet carries a
+qualifier that changes the order — anything the declared words do not
+cover is the model's to read off the thread (the walk hands over).
 
 New-message detection is positional + set-difference: incoming bubbles
 sit left of center in every listing-shaped IM layout (ours sit right),
@@ -27,8 +23,7 @@ from physiclaw.common.listing import Element
 
 # Incoming bubbles' centers sit left of this; our own sit right, and
 # centered system rows (timestamps, at ~0.5) fall OUTSIDE it — they
-# would otherwise burn an LLM check per fresh timestamp after a
-# suspension.
+# would otherwise read as a reply after a suspension.
 INCOMING_MAX_CX = 0.45
 
 # A row is treated as a wrapped LINE of our own ask only above this
@@ -36,106 +31,6 @@ INCOMING_MAX_CX = 0.45
 # quotes the confirm words ("回复 好的 确认…"), so a bare 好的 reply IS a
 # substring of it — the very reply the check exists to catch.
 _OWN_FRAGMENT_MIN = 5
-
-_CONFIRM_RAW = (
-    # zh
-    "好",
-    "好的",
-    "好啊",
-    "好呀",
-    "好嘞",
-    "行",
-    "行的",
-    "可以",
-    "可以的",
-    "没问题",
-    "确认",
-    "确定",
-    "同意",
-    "嗯",
-    "嗯嗯",
-    "对",
-    "对的",
-    "是",
-    "是的",
-    "买",
-    "买吧",
-    "买它",
-    "付",
-    "付吧",
-    "付款",
-    "支付",
-    "去支付",
-    "下单",
-    "下单吧",
-    "就这个",
-    "就它了",
-    "继续",
-    "冲",
-    "走起",
-    "ok的",
-    "好的ok",
-    # en
-    "ok",
-    "okay",
-    "k",
-    "kk",
-    "yes",
-    "yep",
-    "yeah",
-    "yup",
-    "sure",
-    "go",
-    "go on",
-    "go ahead",
-    "proceed",
-    "confirm",
-    "confirmed",
-    "do it",
-    "buy",
-    "buy it",
-    "pay",
-    "pay it",
-    "approve",
-    "approved",
-    "sounds good",
-    "yes please",
-)
-
-_DENY_RAW = (
-    # zh
-    "不",
-    "不要",
-    "不用",
-    "不行",
-    "不买",
-    "不付",
-    "别",
-    "别买",
-    "别付",
-    "算了",
-    "取消",
-    "停",
-    "停止",
-    "先不",
-    "先不买",
-    "先别",
-    # en
-    "no",
-    "nope",
-    "don't",
-    "dont",
-    "do not",
-    "stop",
-    "cancel",
-    "cancel it",
-    "abort",
-    "no thanks",
-    "not now",
-    "hold off",
-    "don't buy",
-    "don't pay",
-)
 
 
 def normalize(text: str) -> str:
@@ -152,27 +47,27 @@ def normalize(text: str) -> str:
     return t[start:end]
 
 
-CONFIRM_WORDS = frozenset(normalize(w) for w in _CONFIRM_RAW)
-DENY_WORDS = frozenset(normalize(w) for w in _DENY_RAW)
-
-
-def classify(text: str) -> str | None:
-    """Tier-1 verdict for ONE message: "confirm", "deny", or None (the
-    LLM tier's jurisdiction). Whole-message equality only."""
+def classify(text: str, yes: AbstractSet[str], no: AbstractSet[str]) -> str | None:
+    """The verdict for ONE message: "confirm", "deny", or None (the
+    declared words do not cover it). Whole-message equality only —
+    `yes`/`no` are the ask's words already in `normalize` space (the
+    parser normalizes them once)."""
     norm = normalize(text)
-    if norm in DENY_WORDS:
+    if norm in no:
         return "deny"
-    if norm in CONFIRM_WORDS:
+    if norm in yes:
         return "confirm"
     return None
 
 
-def classify_all(messages: list[str]) -> str | None:
-    """Tier-1 verdict over every new message of one check round. Deny
-    wins over confirm (a 不要 anywhere is a stop, whatever else was
-    said); any unclassifiable message alongside a confirm also defers to
-    the LLM — partial understanding must not open a money gate."""
-    verdicts = [classify(m) for m in messages]
+def classify_all(
+    messages: list[str], yes: AbstractSet[str], no: AbstractSet[str]
+) -> str | None:
+    """The verdict over every new message of one check round. Deny wins
+    over confirm (a 不要 anywhere is a stop, whatever else was said);
+    any unclassifiable message alongside a confirm also defers —
+    partial understanding must not open a money gate."""
+    verdicts = [classify(m, yes, no) for m in messages]
     if "deny" in verdicts:
         return "deny"
     if verdicts and all(v == "confirm" for v in verdicts):
@@ -186,11 +81,13 @@ def new_incoming(
     own_text: str,
     *,
     after_ask: bool = True,
+    words: AbstractSet[str] = frozenset(),
 ) -> list[str]:
     """The user's new bubbles since the baseline snapshot, in screen
     order. Incoming = left of center; new = label not in the baseline
     set; our own ask is excluded (whole, or as a wrapped line — but only
-    fragments long enough to BE lines, see _OWN_FRAGMENT_MIN).
+    fragments long enough to BE lines, see _OWN_FRAGMENT_MIN), except a
+    verbatim declared reply word (`words`), which is always a reply.
 
     `after_ask` (the default): when the ask bubble is visible, only rows
     BELOW it count. The baseline is a snapshot of one screen, and a
@@ -228,8 +125,9 @@ def new_incoming(
             # resurfacing, never this ask's reply.
             continue
         norm = normalize(label)
-        if norm in CONFIRM_WORDS or norm in DENY_WORDS:
-            # A verbatim reply word is ALWAYS a reply, even when the ask
+        if norm in words:
+            # A verbatim declared reply word is ALWAYS a reply, even when
+            # the ask
             # quotes it ("reply confirm to pay" + reply "confirm") — the
             # own-line exclusion must never swallow the very words the
             # check exists to catch.

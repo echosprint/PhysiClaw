@@ -149,10 +149,11 @@ def test_user_bubble_reads_as_incoming_and_agent_ask_is_excluded() -> None:
         ]
     )
 
-    new = reply.new_incoming(after_reply.rows, baseline, ask)
+    yes, no = frozenset({"ok", "好的"}), frozenset({"不用"})
+    new = reply.new_incoming(after_reply.rows, baseline, ask, words=yes | no)
 
     assert new == ["ok"]
-    assert reply.classify_all(new) == "confirm"
+    assert reply.classify_all(new, yes, no) == "confirm"
 
 
 def test_multiline_bubble_renders_as_wrapped_rows() -> None:

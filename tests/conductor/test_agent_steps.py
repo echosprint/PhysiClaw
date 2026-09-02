@@ -267,6 +267,31 @@ def test_text_agent_fills_outputs_then_start_runs_unconditionally() -> None:
     }
 
 
+def test_declared_context_rides_the_brief_and_nothing_else_does() -> None:
+    from physiclaw.common import daylog, paths
+    from physiclaw.common.text import write_text
+
+    f = paths.memory_file()
+    f.parent.mkdir(parents=True, exist_ok=True)
+    write_text(f, "## shopping\nprefers oat milk\n\n## other\nsecret\n")
+    daylog.append_log("[11:02] demo: bought milk ¥45")
+    _write(
+        AGENTED.replace(
+            "      keyword: the search keyword\n",
+            "      keyword: the search keyword\n    context: [memory.shopping]\n",
+        )
+    )
+    p = _program(name="walk", user_said="买牛奶")
+    h = _history()
+    _feed(h, p.advance(h), ELSEWHERE)
+
+    req = p.advance(h)
+
+    assert isinstance(req, DecisionRequest) and req.call == AGENT_FIELDS
+    assert "prefers oat milk" in req.context
+    assert "secret" not in req.context and "bought milk" not in req.context
+
+
 def test_text_agent_escalate_hands_over() -> None:
     p, h, _ = _boot()
     step = p.resolve(MicroOutcome(out="escalate", reason="no product", confidence=0.9))
@@ -379,11 +404,7 @@ def test_declared_recover_hand_runs_then_walk_resumes() -> None:
     search = p.advance(h)
     _feed(h, search, HOME)  # search did NOT land on results
 
-    settle = p.advance(h)  # the free re-peek
-    assert settle is not None and settle.tool_names() == ["note", "peek"]
-    _feed(h, settle, HOME)
-
-    hand = p.advance(h)  # results' declared hand: tap landmarks.back
+    hand = p.advance(h)  # results' declared hand: tap landmarks.back — no re-peek first
     assert hand is not None and hand.tool_names() == ["note", "tap"]
     _feed(h, hand, RESULTS)  # the hand restored the page
 
@@ -408,15 +429,12 @@ def test_page_without_recover_hands_over_in_declared_mode() -> None:
     search = p.advance(h)
     _feed(h, search, HOME)  # wrong page; results has no recover now
 
-    settle = p.advance(h)
-    assert settle is not None and settle.tool_names() == ["note", "peek"]
-    _feed(h, settle, HOME)
     summary = _finish(p, h, p.advance(h))
     assert "declares no recover" in summary
 
 
 def test_recover_relaunch_loop_is_bounded_by_the_walk_budget() -> None:
-    # A hand that runs and re-locates clears its recovery State, so the
+    # A hand that runs and restores its page clears its recovery State, so the
     # budget must count the WALK's spend, not the engagement's — else a
     # splash ad on every cold launch loops force_quit forever.
     from physiclaw.conductor import recover
@@ -452,13 +470,11 @@ def test_recover_force_quit_then_walk_restarts_from_the_top() -> None:
     start = p.resolve(_done_outcome(keyword="milk"))
     _feed(h, start, ELSEWHERE)  # the launch did NOT reach home
 
-    settle = p.advance(h)
-    _feed(h, settle, ELSEWHERE)
     hand = p.advance(h)  # home's declared hand: force_quit
     assert hand is not None and hand.tool_names() == ["note", "force_quit"]
     _feed(h, hand, ELSEWHERE)  # springboard — home still does not read
 
-    relaunch = p.advance(h)  # re-locate → route top → start runs again
+    relaunch = p.advance(h)  # still off → route top → start runs again
     assert relaunch is not None
     assert relaunch.tool_calls[1].arguments["name"] == "demo/walk.app"
 
@@ -479,6 +495,8 @@ route:
   - ask: gate
     approve: payment
     message: "合计 ¥{ask.total}。回复 好的 确认支付，或 不用 取消。"
+    yes: ["好的"]
+    no: ["不用"]
     resume:
       macro: open-app
   - agent: pay
@@ -506,7 +524,7 @@ def _at_pay_episode(resume_screen: str = SHEET):
     send = p.advance(h)
     assert send is not None and send.tool_calls[1].arguments["name"] == "channel/send"
     ask = send.tool_calls[1].arguments["inputs"]["message"]
-    assert "¥45" in ask  # budget-less: the total, no cap slot
+    assert "¥45" in ask  # the sheet total, quoted
     _feed(h, send, _thread((ask, 0.75, 0.3)))
     _feed(h, p.advance(h), "waited")
     peek = p.advance(h)
@@ -544,14 +562,3 @@ def test_payment_episode_blocks_a_tap_when_the_sheet_changed() -> None:
     )
     summary = _finish(p, h, step)
     assert "sheet changed after consent" in summary
-
-
-def test_budgetless_payment_ask_rejects_over_budget_message() -> None:
-    bad = AGENT_PAY.replace(
-        'message: "合计 ¥{ask.total}。回复 好的 确认支付，或 不用 取消。"\n',
-        'message: "合计 ¥{ask.total}。回复 好的 确认支付，或 不用 取消。"\n'
-        '    over_budget_message: "超 ¥{ask.total}"\n',
-    )
-    write_pack(playbooks={"pay": bad})
-    with pytest.raises(PlaybookError, match="needs a `budget`"):
-        setup.load_spec("demo", "pay", require_live=False)

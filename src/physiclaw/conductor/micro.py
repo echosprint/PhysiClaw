@@ -1,15 +1,16 @@
 """Micro-calls — the conductor's scoped model calls.
 
-Four call types ride one channel: the playbook `agent` step's two
+Three call types ride one channel: the playbook `agent` step's two
 (`agent_fields` — prompt in, declared fields out; and `agent_act` —
 one episode turn whose answer is a screen row, a granted landmark, a
-scroll verb, done, or escalate), plus two conductor-internal calls
+scroll verb, done, or escalate), plus one conductor-internal call
 playbooks never name — `parse_task` (activation: does the user's
-thread assign a task a playbook covers?) and `confirm_reply` (the
-ask's LLM tier when the word lists can't classify a reply). Per-call
-shape lives in ONE table (`_SPECS`) — role sentence, answer space,
-prompt body, outcome mapping — never as boolean proxies scattered
-through the module.
+thread assign a task a playbook covers?). Per-call shape lives in ONE
+table (`_SPECS`) — role sentence, answer space, prompt body, outcome
+mapping — never as boolean proxies scattered through the module. The
+agent rows carry NO role prose of the conductor's: the author's prompt
+is the whole brief, and the legend names exactly the answers the
+author's tools grant.
 
 One `MicroCaller` serves them all. Each call is a tiny
 fixed-shape prompt (playbooks parameterize, never define prompt shapes),
@@ -59,7 +60,14 @@ from physiclaw.common.bbox import Bbox
 from physiclaw.common.config import CONFIG
 from physiclaw.common.listing import Screen
 from physiclaw.common.text import json_span
-from physiclaw.conductor.calls import ACT_SCROLL_UP, ACT_VERBS, AGENT_DONE, ESCALATE
+from physiclaw.conductor.calls import (
+    ACT_SCROLL_UP,
+    ACT_VERBS,
+    AGENT_DONE,
+    AGENT_TOOL_LEGEND,
+    AGENT_TOOL_VERBS,
+    ESCALATE,
+)
 from physiclaw.contract.dto import (
     AssistantMessage,
     FinishReason,
@@ -79,7 +87,6 @@ MAX_CANDIDATES = 40
 
 # Conductor-internal call names — a playbook never names them.
 PARSE_TASK = "parse_task"
-CONFIRM_REPLY = "confirm_reply"
 NOT_A_TASK = "not_a_task"
 # parse_task's second escape: the newest message is a nudge whose
 # request sits ABOVE the visible thread — the overture scrolls up
@@ -101,7 +108,6 @@ AGENT_FIELDS = "agent_fields"
 AGENT_ACT = "agent_act"
 ACT_ARM = "act"  # the routing arm a grounded row/landmark answer maps to
 _CONTRACT_KEYS = frozenset({"reason", "answer", "confidence"})
-CONFIRM_OUTS = ("confirm", "deny", "revise", "unclear")
 
 
 @dataclass(frozen=True)
@@ -177,7 +183,7 @@ def build_request(
 ) -> DecisionRequest:
     """The one assembler of a one-shot request's screen material — the
     label text when the call reads the screen (`_SPECS` says which) —
-    shared by activation, the ask's reply judgment, and the eval replay.
+    shared by activation and the eval replay.
     (Episode requests are assembled by the agent step: they carry
     replayed history and granted candidates this cannot produce.)"""
     return DecisionRequest(
@@ -219,7 +225,7 @@ def act_block(header: str, candidates: tuple[Candidate, ...]) -> str:
     top to bottom, data-fenced. The block is STORED in the episode
     history verbatim, so past turns keep showing exactly what was seen."""
     body = "\n".join(f'- "{c.key}"' for c in candidates) or "(no readable rows)"
-    return _data_block(f"{header} — rows top to bottom", body)
+    return data_block(f"{header} — rows top to bottom", body)
 
 
 class MicroCaller:
@@ -483,7 +489,7 @@ _CONTRACT = (
 )
 
 
-def _data_block(header: str, body: str) -> str:
+def data_block(header: str, body: str) -> str:
     """Untrusted text enters the prompt ONLY through this stamp: OCR'd
     app content (and everything derived from it) can contain anything,
     including instruction-shaped strings — the label keeps the SYSTEM
@@ -510,7 +516,10 @@ class _CallSpec:
     role: str
     material: str  # "listing" | "none"
     answer_space: "Callable[[DecisionRequest], tuple[str, ...]]"
-    answer_spec: str
+    # The legend: a `_template(text)` (an optional {allowed} placeholder)
+    # or a builder — the episode's is built from the tools its request
+    # declares.
+    answer_spec: "Callable[[DecisionRequest, tuple[str, ...]], str]"
     user_parts: "Callable[[DecisionRequest], list[str]]"
     to_outcome: "Callable[[DecisionRequest, str, str, float, dict], MicroOutcome]" = (
         _enum_outcome
@@ -529,13 +538,19 @@ def _fixed(outcomes: tuple[str, ...]) -> "Callable[[DecisionRequest], tuple[str,
     return lambda req: outcomes
 
 
+def _template(text: str) -> "Callable[[DecisionRequest, tuple[str, ...]], str]":
+    """A static legend; `{allowed}` (when present) fills with the answer
+    space, and a JSON legend's doubled braces unescape."""
+    return lambda req, allowed: text.format(allowed=", ".join(allowed))
+
+
 # What a model writes when it means "the message didn't say". Asked for
 # an object over the DECLARED inputs, models emit a key for every one of
 # them and fill the unmentioned with a null spelling rather than omitting
 # it. Those must not reach `resolve_inputs`, which resolves on PRESENCE:
 # a present `"null"` shadows the declared default, so `criteria` becomes
-# the literal string "null" in the picking decision and a `{cap}` mandate
-# stops resolving to a number at all. Empty is included for the same
+# the literal string "null" in the picking decision. Empty is included
+# for the same
 # reason — an input filled with "" was not filled.
 _UNFILLED = frozenset({"", "null", "none", "nil", "n/a", "undefined"})
 
@@ -626,28 +641,41 @@ def _picked(req: DecisionRequest, answer: str) -> Candidate | None:
     return next((c for c in req.candidates if c.key == answer), None)
 
 
+def return_fields(fields: str) -> str:
+    """The declared `returns:` rendered for the model — one spelling for
+    the pure-text call and the episode's opening block."""
+    return f'Return fields (each a plain string beside "answer": "done"):\n{fields}'
+
+
+def _act_legend(req: DecisionRequest, allowed: tuple[str, ...]) -> str:
+    """The episode's answer legend, built from exactly the tools and
+    landmarks the author granted (`args.tools` / `args.give`, fixed for
+    the episode, so the system prompt stays byte-stable and the
+    provider prefix cache pays) — each tool's line and verbs read off
+    `calls.py`. The rows themselves live in each turn's user block,
+    never here."""
+    tools = req.args.get("tools", "").split()
+    options: list[str] = []
+    for tool, verbs in AGENT_TOOL_VERBS.items():
+        if tool not in tools:
+            continue
+        options.append(
+            AGENT_TOOL_LEGEND[tool].format(verbs=" or ".join(f'"{v}"' for v in verbs))
+        )
+        if tool == "tap" and req.args.get("give"):
+            options.append(f"a granted landmark name ({req.args['give']})")
+    options.append(
+        '"done" ONLY when the goal is fully met (then ALSO add one field per '
+        "return field listed, each a plain string)"
+    )
+    options.append(
+        '"escalate" when you are stuck, the screen is unexpected, or the goal '
+        "needs an action you were not given"
+    )
+    return '"answer" is exactly ONE of: ' + "; ".join(options) + "."
+
+
 _SPECS: dict[str, _CallSpec] = {
-    CONFIRM_REPLY: _CallSpec(
-        role=(
-            "You judge whether a user's new instant-message reply confirms "
-            "a pending action the assistant just asked them about."
-        ),
-        material="none",
-        answer_space=_fixed(CONFIRM_OUTS),
-        answer_spec=(
-            '"answer" is "confirm" ONLY if the reply approves the asked '
-            'action AS-IS; "deny" if it clearly rejects or cancels it; '
-            '"revise" if it asks for ANY change (quantity, remove/add an '
-            'item, a different choice — "ok, but make it two boxes" is '
-            "a revise, not a confirm) or asks a question that needs "
-            'answering first; "unclear" for hedges, holds ("wait a '
-            'moment"), or unrelated chatter.'
-        ),
-        user_parts=lambda req: [
-            f"The assistant asked: {req.args.get('ask', '')}",
-            _data_block("The user's new reply", req.args.get("reply", "")),
-        ],
-    ),
     PARSE_TASK: _CallSpec(
         role=(
             "You read an instant-message thread, oldest line first and "
@@ -656,7 +684,7 @@ _SPECS: dict[str, _CallSpec] = {
         ),
         material="listing",
         answer_space=_parse_task_space,
-        answer_spec=(
+        answer_spec=_template(
             '"answer" is one playbook EXACTLY as listed; or "not_a_task" '
             "for greetings, chat, questions, or anything no playbook "
             'covers (when unsure, "not_a_task"); or "scroll_up" when the '
@@ -696,64 +724,42 @@ _SPECS: dict[str, _CallSpec] = {
         ),
         user_parts=lambda req: [
             req.args.get("menu", ""),
-            _data_block("The user's message thread", req.listing),
+            data_block("The user's message thread", req.listing),
         ],
         to_outcome=_parse_task_outcome,
     ),
+    # The two agent rows: the author's prompt IS the brief (the first
+    # user block — replayed verbatim in an episode), the conductor adds
+    # only the output contract and the answers the author's tools grant.
     AGENT_FIELDS: _CallSpec(
-        role=(
-            "You perform one scoped text task for a phone-automation "
-            "walk. Follow the task brief exactly; it is the whole "
-            "specification."
-        ),
+        role="",
         material="none",
         answer_space=_fixed((AGENT_DONE, ESCALATE)),
-        answer_spec=(
-            '"answer" is "done" when the brief can be fulfilled — ALSO add '
-            "one field per return field the brief lists, each a plain "
-            'string; or "escalate" when it cannot be fulfilled from what '
-            "the brief gives you."
+        answer_spec=_template(
+            '"answer" is "done" (then ALSO add one field per return field '
+            'listed, each a plain string) or "escalate" when the brief '
+            "cannot be fulfilled from what it gives you."
         ),
         user_parts=lambda req: [
             req.args.get("prompt", ""),
-            *(
-                [f"Return fields:\n{req.args['fields']}"]
-                if req.args.get("fields")
-                else []
-            ),
+            *([return_fields(req.args["fields"])] if req.args.get("fields") else []),
         ],
         to_outcome=_agent_done_outcome,
     ),
     AGENT_ACT: _CallSpec(
-        # The concrete rows live in each turn's user block, NEVER in this
-        # legend — the system prompt must stay byte-stable across an
-        # episode for the provider prefix cache to pay.
-        role=(
-            "You operate a phone app step by step toward the goal given "
-            "in the first message, choosing exactly ONE action per turn "
-            "from what the current screen offers. The screen arrives as "
-            "text rows read top to bottom; you never use coordinates."
-        ),
+        role="",
         # "none": episode requests are assembled by the agent step
         # (`step_agent.AgentStep._request`) — they carry replayed history and
         # granted-landmark candidates `build_request` cannot produce, so
         # there is deliberately no build_request arm to half-mirror them.
         material="none",
         answer_space=lambda req: tuple(c.key for c in req.candidates) + req.outcomes,
-        answer_spec=(
-            '"answer" is ONE of: a screen row from the NEWEST message, '
-            "copied EXACTLY as quoted (it will be tapped); a granted "
-            'landmark name; "scroll_down" or "scroll_up" when scrolling '
-            'is allowed; "done" ONLY when the goal is fully met — ALSO '
-            "add one field per return field the goal lists, each a plain "
-            'string; or "escalate" when you are stuck, the screen is '
-            "unexpected, or the goal demands something outside your "
-            "allowed actions."
-        ),
+        answer_spec=_act_legend,
         user_parts=lambda req: [req.args.get("block", "")],
         to_outcome=_act_outcome,
     ),
 }
+
 
 # Every call type this channel serves — the validation set for tooling
 # that names calls as data (the eval harness), so it can never drift
@@ -769,8 +775,7 @@ def _system(req: DecisionRequest, allowed: tuple[str, ...]) -> str:
     # its rows change per turn, so the system prompt stays byte-stable
     # for the prefix cache) passes through unchanged.
     spec = _SPECS[req.call]
-    legend = spec.answer_spec.format(allowed=", ".join(allowed))
-    return f"{spec.role} {_CONTRACT}\n{legend}"
+    return f"{spec.role} {_CONTRACT}\n{spec.answer_spec(req, allowed)}".lstrip()
 
 
 def _user(req: DecisionRequest) -> str:
@@ -778,7 +783,7 @@ def _user(req: DecisionRequest) -> str:
     if req.context:
         # Context (the recent daily log) is agent-written but ultimately
         # screen-derived too — same stamp.
-        parts.append(_data_block("Context", req.context))
+        parts.append(data_block("Context", req.context))
     return "\n".join(p for p in parts if p)
 
 

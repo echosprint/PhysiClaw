@@ -24,14 +24,13 @@ runner the GitHub-Actions analogy asks for:
   - `step_ask.py`    `ask` (send, hold, judge the reply, bind consent)
                      and `tell` (send, suspend, read a cancel on resume)
 
-The opening peek doubles as resume: a killed session's next wake
-fast-forwards past every `do` whose verify page already matches the
-screen, so completed gestures are never replayed. A mechanical
-deviation at a check — a popup band, a locked phone, a wandered-into
-page — goes to recovery (`recover.py`: unlock, one settle re-peek, then
-the page's own declared hand); only what recovery cannot restore — and
-every blocked or errored call — hands over. Money never recovers: with
-consent bound or on an irreversible move, a deviation is the model's.
+What the playbook declares is what runs. The walk opens with one peek
+(it must see a screen before the first page check) and starts at the
+route's first unsettled node — never fast-forwarded off a page match.
+A deviation at a check goes to the page's own declared `recover:` hand
+(`recover.py`) or, with none declared, hands over; every blocked or
+errored call hands over. Money never recovers: with consent bound or
+on an irreversible move, a deviation is the model's.
 """
 
 import logging
@@ -79,6 +78,9 @@ log = logging.getLogger(__name__)
 # engine runtimes; a test pins the two equal.
 SUSPEND_STATUS = "WAIT"
 
+# The one recovery action's pending kind — the declared hand's landing.
+KIND_RECOVER = "recover-hand"
+
 # The executor for each route entry kind (`Node` is a closed union).
 _STEP_FOR: dict[type, type[Step]] = {
     DoNode: DoStep,
@@ -93,25 +95,24 @@ class Gate:
     """The ask-and-hold state — one object, one suspension projection. The
     walk owns the cursor; this owns everything between "ask sent" and
     "consent bound": the ask text, the thread snapshot it is diffed
-    against, the money numbers, the two bounded counters, and the
-    LLM-tier handshake (`llm_batch` non-empty = a confirm_reply request
-    is outstanding and owns the next resolve()). Consent lives here,
+    against, the money numbers, the silence counter, and the reply words
+    the last send declared. Consent lives here,
     not on the ask step, because the payment move AFTER the ask spends
     it — and a suspension in between must carry it."""
 
     ask: str = ""
     baseline: set[str] = field(default_factory=set)
     quoted: float | None = None
-    cap: float | None = None
     consented: float | None = None
     silence: int = 0
-    checks: int = 0
     awaiting: bool = False  # ask sent, polling for the reply
-    # The batch behind an outstanding LLM judgment, held UNBASELINED
-    # until the judgment actually arrives — a provider failure must
-    # leave the reply visible to the next round ("judged once,
-    # eventually"), never swallowed.
-    llm_batch: list[str] = field(default_factory=list)
+    # The reply words the last LANDED send declared (already in
+    # `reply.normalize` space) — what every read of the thread after it
+    # matches: this ask's check, a later send's landing, a tell's
+    # resume. `next_words` holds the words of a send still in flight.
+    yes: tuple[str, ...] = ()
+    no: tuple[str, ...] = ()
+    next_words: tuple[tuple[str, ...], tuple[str, ...]] = ((), ())
     tried_open: bool = False
 
     def spend(self) -> float | None:
@@ -130,9 +131,10 @@ class Gate:
             "ask_text": self.ask,
             "baseline": sorted(self.baseline),
             "quoted": self.quoted,
-            "cap": self.cap,
             "consented": self.consented,
             "awaiting": self.awaiting,
+            "yes": list(self.yes),
+            "no": list(self.no),
         }
 
     @classmethod
@@ -141,17 +143,18 @@ class Gate:
             ask=str(data.get("ask_text") or ""),
             baseline=set(data.get("baseline") or []),
             quoted=data.get("quoted"),
-            cap=data.get("cap"),
             consented=data.get("consented"),
             awaiting=bool(data.get("awaiting")),
+            yes=tuple(str(w) for w in (data.get("yes") or [])),
+            no=tuple(str(w) for w in (data.get("no") or [])),
         )
 
 
 class Program:
     """One playbook mid-walk. Constructed per session (the conductor
     plugin's wake setup builds it), so the cursor state lives for
-    exactly one attempt; persistence across wakes is the locate peek,
-    not saved state."""
+    exactly one attempt; persistence across wakes is the suspension file
+    (`suspend`), and only that."""
 
     def __init__(
         self,
@@ -163,7 +166,7 @@ class Program:
         channel: Channel | None = None,
         suspended: dict | None = None,
         landmarks: "dict[str, Landmark] | None" = None,
-    ):
+    ) -> None:
         self.app = spec.app
         self.spec = spec
         self.values = values
@@ -196,25 +199,14 @@ class Program:
         # completed history line), and whether its daily-log line landed.
         self.paid: float | None = None
         self._paid_logged = False
-        # Moves whose failed run already earned their single retry this
-        # walk (an abort under an overlay, a locked phone).
-        self.retried_moves: set[str] = set()
         # The step executor at the cursor (a resume pre-step rides the
         # same slot before the walk proper opens).
         self._step: Step | None = None
-        # Recovery (`recover.py`): the one engagement in flight and the
+        # Recovery (`recover.py`): the hand in flight and the
         # walk-lifetime action count that budgets it.
         self._recovery: recover.State | None = None
         self._recoveries = 0
         self._resumed = False
-        # A suspended tell's resume owes the user one thread read before
-        # the walk continues: the wake that resumes it may BE their
-        # cancel reply. Set only by _restore_suspended.
-        self._confirm_check = False
-        # True once any device-changing action was synthesized (peeks
-        # don't count). A walk that "completes" without ever acting hit
-        # a coincidental page match — that must not count as done.
-        self._acted = False
         # The telemetry pair (`walklog`): decision outcomes brokered to
         # this walk, and the one-shot latch so exactly one runs.jsonl
         # line lands per walk whatever terminal path fires.
@@ -266,17 +258,9 @@ class Program:
             # suspension (load_suspended is fail-open).
             raise PlaybookError(f"suspended idx {idx} is outside the playbook")
         self.idx = idx
-        self._acted = True  # the suspended session acted; completion is real
         self.outputs = {str(k): str(v) for k, v in (data.get("outputs") or {}).items()}
         self.gate = Gate.from_suspended(data)
         self._resumed = True
-        # A suspended tell (message away, not awaiting a reply) resumes
-        # mid-walk — read the thread for a cancel before continuing.
-        self._confirm_check = (
-            not self.gate.awaiting
-            and bool(self.gate.ask)
-            and self.idx < len(self.spec.nodes)
-        )
 
     def suspend(self, *, resume_idx: int, awaiting: bool) -> AssistantMessage:
         """Write the suspended state and close the session WAIT. No job is
@@ -351,16 +335,14 @@ class Program:
                     )
                 self._step = AskStep(self, node)
                 return self._step.open()
-            if self._confirm_check and self.channel is not None:
-                # Suspended-tell resume: this wake may BE the user's
-                # cancel reply — read the thread before the walk acts.
-                self._confirm_check = False
+            if self._resumed and self.gate.no and self.channel is not None:
+                # Suspended-tell resume (message away, not awaiting a
+                # reply, deny words declared): this wake may BE the
+                # user's cancel reply — read the thread before the walk
+                # acts. One-shot: the read clears the words.
                 self._step = TellResume(self, None)
                 return self._step.open()
-            # Observe before acting. The peek is also how a killed
-            # session resumes: _locate fast-forwards past moves whose
-            # verify page already matches, so completed gestures are
-            # never replayed.
+            # Observe before acting: the first page check needs a screen.
             return self.peek()
         pending, result, failed = self.turns.settle(history)
         kind = pending.kind
@@ -374,10 +356,8 @@ class Program:
                 f"{failed or 'suspend end_session returned'} — suspension dropped"
             )
         if failed is not None:
-            if self._step is not None and kind in self._step.kinds:
-                retry = self._step.failed(kind, failed, result)
-                if retry is not None:
-                    return retry
+            # Nothing retries in the background: what the playbook did
+            # not declare, the model decides.
             return self.handover(failed)
         assert result is not None  # settle: a result or a failure
         # One reading, one verdict: channel-facing actions (declared at
@@ -394,10 +374,10 @@ class Program:
                 # node's own checks judge whether the world still fits.
                 self._resumed = False
             else:
-                self.idx = self._locate(self.verdict)
+                self.idx = self.spec.first_unsettled(self.outputs)
             return self.next()
-        if kind.startswith("recover-"):
-            return self._recover_landed(kind)
+        if kind == KIND_RECOVER:
+            return self._recover_landed()
         if self._step is not None and kind in self._step.kinds:
             return self._step.landed(kind)
         # A typo'd kind at a synth site must fail loudly, never silently
@@ -419,14 +399,6 @@ class Program:
             return self.handover("no screen observed yet")
         nodes = self.spec.nodes
         if self.idx >= len(nodes):
-            if not self._acted:
-                # The opening locate fast-forwarded past EVERYTHING off
-                # one page match — a coincidence (common pages recur),
-                # not evidence the task ran. Hand over; the model verifies.
-                return self.handover(
-                    "screen already reads as the final page but this walk "
-                    "did nothing — verify the task state before trusting it"
-                )
             log.info(
                 "conductor: playbook %s/%s complete — handing over",
                 self.app,
@@ -454,49 +426,6 @@ class Program:
     def _node_id(self) -> str | None:
         nodes = self.spec.nodes
         return nodes[self.idx].id if self.idx < len(nodes) else None
-
-    def _locate(self, verdict: Verdict) -> int:
-        """Cursor for the current screen: just past the LAST move of the
-        playbook's LEADING `do` RUN whose verify page matches it (that
-        page proves the move's outcome holds), else the top. The scan
-        stops at the first non-do node: a page match proves navigation
-        happened, never that an agent step or an ask ran — fast-forwarding
-        past work off one page coincidence would quote a gate total for
-        a cart that was never filled."""
-        nodes = self.spec.nodes
-        # A COMPLETED pure-text agent never re-runs: its outputs are
-        # recorded, and re-deriving them mid-walk (a recover hand's
-        # walk-from-the-top, a resume) could silently change them.
-        base = 0
-        while base < len(nodes) and self._text_agent_settled(nodes[base]):
-            base += 1
-        if verdict.kind != "match":
-            log.info("conductor: screen is %s — starting from the top", verdict.kind)
-            return base
-        resume = base
-        for i in range(base, len(nodes)):
-            node = nodes[i]
-            if not isinstance(node, DoNode):
-                break
-            if page_id(self.app, node.verify) == verdict.page_id:
-                resume = i + 1
-        if resume:
-            log.info(
-                "conductor: screen already on %s — resuming at node %d/%d",
-                verdict.page_id,
-                resume + 1,
-                len(self.spec.nodes),
-            )
-        return resume
-
-    def _text_agent_settled(self, node) -> bool:
-        """A pure-text agent whose outputs are already recorded — the
-        locate scan skips it rather than re-spending its call."""
-        return (
-            isinstance(node, AgentNode)
-            and not node.tools
-            and all(f"{node.id}.{f}" in self.outputs for f in node.return_fields)
-        )
 
     # ---- what the steps read and call ----
 
@@ -575,7 +504,7 @@ class Program:
     def peek(self) -> AssistantMessage:
         return self.synth(
             "peek",
-            f"conductor: observing the screen to locate {self.app}/{self.spec.name}",
+            f"conductor: observing the screen before walking {self.app}/{self.spec.name}",
             gesture_vocab.PEEK,
             {},
         )
@@ -583,16 +512,11 @@ class Program:
     def synth(
         self, kind: str, summary: str, tool: str, args: dict, *, channel: bool = False
     ) -> AssistantMessage:
-        """The walk's synthesized turn: fold in anything journaled, note
-        whether this one touched the phone, then mint it (`turns.py`
-        owns the shape and the call-id convention). Any non-peek tool
-        marks the walk as having acted — a "completion" that never
-        acted must not count."""
+        """The walk's synthesized turn: fold in anything journaled, then
+        mint it (`turns.py` owns the shape and the call-id convention)."""
         if self._journal is not None:
             summary = f"{summary} | {self._journal}"
             self._journal = None
-        if tool != gesture_vocab.PEEK:
-            self._acted = True
         return self.turns.synth(kind, summary, tool, args, channel=channel)
 
     def handover(self, reason: str) -> AssistantMessage:
@@ -629,64 +553,31 @@ class Program:
     def recover_or_handover(
         self, node: "DoNode | AgentNode", expected_id: str, mode: str, reason: str
     ) -> Turn:
-        """Try recovery before the model: a mechanical deviation (popup,
-        lock, wandered deeper) is recoverable in code toward the page the
-        frozen cursor already requires — the cursor, outputs, and consent
-        are untouched throughout. Never with consent bound, mid-gate, or
-        for an irreversible move: money keeps the hard handover."""
+        """The page's declared hand before the model: a deviation is
+        recovered toward the page the frozen cursor already requires —
+        the cursor, outputs, and consent are untouched throughout. Never
+        with consent bound, mid-gate, or for an irreversible move: money
+        keeps the hard handover."""
         if self.gate.consented is not None or self.gate.awaiting or node.irreversible:
             return self.handover(reason)
         if not owned_by(expected_id, self.app):
             # Recovery covers this pack's own pages only — a reserved or
             # channel target has no hand to declare.
             return self.handover(reason)
-        if self._recovery is None:
-            self._recovery = recover.State(target=expected_id, mode=mode, reason=reason)
-        return self._recover_step()
-
-    def _recover_step(self) -> Turn:
-        """One action: ask the planner (`recover.plan`) for the next one
-        and synthesize it; Exhausted → handover carrying the ORIGINAL
-        check failure plus what was tried (the brief quotes it)."""
-        st = self._recovery
-        assert st is not None
-        assert self.verdict is not None and self.screen is not None
-        hand = self.spec.recovers.get(page_name(st.target))
-        step = recover.plan(self.verdict, self.screen, st.tries, self._recoveries, hand)
-        if isinstance(step, recover.Settle):
-            # Free — verification hygiene, not recovery: no action
-            # budget, just the one re-peek marker.
-            st.tries[recover.RUNG_SETTLE] = 1
-            return self.synth(
-                f"recover-{recover.RUNG_SETTLE}",
-                f"conductor: re-reading a possibly mid-transition screen "
-                f"before recovering toward {st.target}",
-                gesture_vocab.PEEK,
-                {},
-            )
+        st = recover.State(target=expected_id, mode=mode, reason=reason)
+        step = recover.plan(
+            self._recoveries, self.spec.recovers.get(page_name(expected_id))
+        )
         if isinstance(step, recover.Exhausted):
-            note = st.note()
-            self._recovery = None
-            return self.handover(
-                f"{st.reason} — {step.reason}"
-                + (f" (recovery tried: {note})" if note else "")
-            )
-        if isinstance(step, recover.Unlock):
-            return self._recover_act(
-                recover.RUNG_UNLOCK,
-                "conductor: phone locked mid-walk — unlocking",
-                gesture_vocab.UNLOCK_PHONE,
-                {},
-            )
-        assert isinstance(step, recover.Hand)
-        # The page's DECLARED hand — the planner decides WHEN, the walk
-        # interprets WHAT: a bare gesture, a landmark tap (label-healed),
-        # or an argument-less macro.
+            return self.handover(f"{reason} — {step.reason}")
+        # The page's DECLARED hand — the planner decides WHETHER, the
+        # walk interprets WHAT: a bare gesture, a landmark tap
+        # (label-healed), or an argument-less macro.
         hand = step.hand
-        note = f"conductor: recovering toward {st.target} via its declared hand"
+        note = f"conductor: recovering toward {expected_id} via its declared hand"
         if hand.macro is not None:
             return self._recover_act(
-                recover.RUNG_HAND,
+                st,
                 note,
                 gesture_vocab.RUN_MACRO,
                 {"name": qualified_macro(self.app, hand.macro)},
@@ -694,55 +585,43 @@ class Program:
         if hand.tool == "tap":
             landmark = self.landmarks.get(hand.landmark or "")
             if landmark is None:
-                self._recovery = None
                 return self.handover(
-                    f"{st.reason} (recover landmark {hand.landmark!r} undeclared)"
+                    f"{reason} (recover landmark {hand.landmark!r} undeclared)"
                 )
+            assert self.screen is not None
             bbox, located = recover.locate_landmark(landmark, self.screen)
-            return self._recover_act(
-                recover.RUNG_HAND, note + located, "tap", {"bbox": list(bbox)}
-            )
+            return self._recover_act(st, note + located, "tap", {"bbox": list(bbox)})
         assert hand.tool is not None
-        return self._recover_act(recover.RUNG_HAND, note, hand.tool, {})
+        return self._recover_act(st, note, hand.tool, {})
 
     def _recover_act(
-        self, rung: str, note: str, tool: str, args: dict
+        self, st: recover.State, note: str, tool: str, args: dict
     ) -> AssistantMessage:
-        """One recovery action's shared bookkeeping — the rung counter,
-        the walk-wide budget — then the synthesized turn under the
-        `recover-<rung>` kind the landing dispatch reads."""
-        st = self._recovery
-        assert st is not None
-        st.tries[rung] = st.tries.get(rung, 0) + 1
+        """The hand's turn: the engagement goes in flight, the walk-wide
+        budget counts it, and the landing dispatch reads `KIND_RECOVER`."""
+        self._recovery = st
         self._recoveries += 1
-        return self.synth(f"recover-{rung}", note, tool, args)
+        return self.synth(KIND_RECOVER, note, tool, args)
 
-    def _recover_landed(self, kind: str) -> Turn:
-        """The recovery action's result view, judged. Restored → resume
-        exactly where the walk stood: an interrupted enter re-checks and
-        runs its move; an interrupted verify is satisfied by the restored
-        page (the macro already ran — never re-run it). Still off after
-        the declared hand → re-locate on the route and walk again (the
-        start re-runs when the locate lands at the top, which is a
-        force_quit hand's whole point). Still off otherwise → the next
-        planned action."""
+    def _recover_landed(self) -> Turn:
+        """The hand's result view, judged. Restored → resume exactly
+        where the walk stood: an interrupted enter re-checks and runs its
+        move; an interrupted verify is satisfied by the restored page
+        (the macro already ran — never re-run it). Still off → walk the
+        route again from its first unsettled node (the start re-runs,
+        which is a force_quit hand's whole point)."""
         st = self._recovery
         assert st is not None and self.verdict is not None
+        self._recovery = None
+        self._step = None
         if self.verdict.matches(st.target):
-            note = st.note()
-            self.journal(f"recovered {st.target}" + (f" ({note})" if note else ""))
-            self._recovery = None
+            self.journal(f"recovered {st.target} via its declared hand")
             if st.mode == recover.MODE_VERIFY:
                 return self.advance_cursor()
-            self._step = None
             return self.next()
-        if kind == f"recover-{recover.RUNG_HAND}":
-            self.journal(f"recover hand ran — walking again toward {st.target}")
-            self._recovery = None
-            self._step = None
-            self.idx = self._locate(self.verdict)
-            return self.next()
-        return self._recover_step()
+        self.journal(f"recover hand ran — walking again toward {st.target}")
+        self.idx = self.spec.first_unsettled(self.outputs)
+        return self.next()
 
     # ---- the record ----
 
@@ -756,11 +635,10 @@ class Program:
             return
         node = self._node_id() or "(end)"
         self._record_run("abandoned", "session ended mid-walk")
-        if self._acted:
-            self.log_day(
-                f"conductor: {self.app}/{self.spec.name} cut short mid-walk "
-                f"at node {node} — the next wake re-locates from the screen"
-            )
+        self.log_day(
+            f"conductor: {self.app}/{self.spec.name} cut short mid-walk "
+            f"at node {node} — the next wake starts the route over"
+        )
 
     def log_day(self, entry: str) -> None:
         """One daily-log line in the agent's own convention

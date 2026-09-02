@@ -11,7 +11,7 @@ from conductor_fakes import make_screen
 
 from physiclaw.conductor import evalset
 from physiclaw.conductor.micro import (
-    CONFIRM_REPLY,
+    AGENT_FIELDS,
     PARSE_TASK,
     MicroOutcome,
     MicroResult,
@@ -60,9 +60,9 @@ def test_read_cases_parses_fields(tmp_path: Path) -> None:
     p = _write_cases(
         tmp_path,
         {
-            "call": CONFIRM_REPLY,
-            "expect": "confirm",
-            "args": {"ask": "reply ok", "reply": "ok then"},
+            "call": AGENT_FIELDS,
+            "expect": "done",
+            "args": {"prompt": "the keyword", "fields": "- keyword: k"},
             "listing": "x",
             "note": "smoke",
         },
@@ -70,9 +70,9 @@ def test_read_cases_parses_fields(tmp_path: Path) -> None:
 
     (case,) = evalset.read_cases(p)
 
-    assert case.call == CONFIRM_REPLY
-    assert case.expect == "confirm"
-    assert case.args == {"ask": "reply ok", "reply": "ok then"}
+    assert case.call == AGENT_FIELDS
+    assert case.expect == "done"
+    assert case.args == {"prompt": "the keyword", "fields": "- keyword: k"}
     assert case.outcomes == ()
     assert case.note == "smoke"
 
@@ -93,7 +93,7 @@ def test_read_cases_rejects_unknown_call(tmp_path: Path) -> None:
 
 
 def test_read_cases_rejects_missing_expect(tmp_path: Path) -> None:
-    p = _write_cases(tmp_path, {"call": CONFIRM_REPLY, "args": {"ask": "q"}})
+    p = _write_cases(tmp_path, {"call": AGENT_FIELDS, "args": {"prompt": "q"}})
 
     with pytest.raises(ValueError, match="`expect` must be a non-empty string"):
         evalset.read_cases(p)
@@ -162,9 +162,7 @@ def test_score_no_outcome_against_real_expectation_is_wrong() -> None:
 
 
 def test_summarize_groups_by_call_in_first_seen_order() -> None:
-    reply = _case(
-        call=CONFIRM_REPLY, expect="confirm", listing="", args={}, outcomes=()
-    )
+    reply = _case(call=AGENT_FIELDS, expect="confirm", listing="", args={}, outcomes=())
     scored = [
         evalset.score(_case(), _result(_answer("taobao/buy"))),
         evalset.score(reply, _result(None)),
@@ -173,7 +171,7 @@ def test_summarize_groups_by_call_in_first_seen_order() -> None:
 
     reports = evalset.summarize(scored)
 
-    assert [r.call for r in reports] == [PARSE_TASK, CONFIRM_REPLY]
+    assert [r.call for r in reports] == [PARSE_TASK, AGENT_FIELDS]
     assert (reports[0].n, reports[0].correct, reports[0].wrong) == (2, 1, 1)
     assert (reports[1].n, reports[1].escalated) == (1, 1)
 

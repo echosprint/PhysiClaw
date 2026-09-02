@@ -175,6 +175,8 @@ playbooks:
       - ask: confirm-pay              # the human approves before money moves
         approve: payment
         message: "{pick-into-cart.message}（实付以屏幕读数为准：¥{ask.total}）回复 好的 确认支付，或 不用 取消。"
+        yes: ["好的", "好", "可以", "确认"]   # whole-message replies that open the gate
+        no: ["不用", "不要", "取消", "算了"]   # …and that close it; anything else hands over
         resume:                       # the ask left the app — come back
           macro:
             steps:

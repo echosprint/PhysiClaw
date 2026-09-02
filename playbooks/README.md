@@ -1,7 +1,7 @@
 # Shared playbook packs
 
-Template packs for the conductor — the deterministic walks described in
-the docs' Custom section. Like `skills/`, these ship with the repo so a
+Template packs for the conductor — the deterministic walks it runs
+against a phone. Like `skills/`, these ship with the repo so a
 task one user has rehearsed can be adopted by another with minimal
 adaptation.
 
@@ -29,10 +29,13 @@ self-describing YAML document, the way a GitHub workflow is one file
   the `start` cold-launch, then `page:` waypoints (checked every
   time, each optionally declaring its own `recover:` hand)
   alternating with moves — `do` (a recorded macro), `agent` (the
-  model drives inside your prompt's fence), `ask` (human gate;
-  `resume:` re-enters the app), `tell`. A move's enter/verify checks
-  derive from the adjacent waypoints; there is no branching and no
-  loop — judgment is an `agent` step, approval is an `ask`.
+  model drives inside your prompt's fence, with the tools and
+  `context:` you list), `ask` (human gate; `yes:`/`no:` are the replies
+  it reads, `resume:` re-enters the app), `tell`. A move's enter/verify
+  checks derive from the adjacent waypoints; there is no branching and
+  no loop — judgment is an `agent` step, approval is an `ask`. What the
+  playbook declares is what runs: a page without `recover:` hands over,
+  and nothing retries or unlocks in the background.
 - `pages:` — optional appendix for fingerprints no move lands on.
   Anchors are one clause (`"text"`, `{or: [...], region}`,
   `{and: [...]}`) — semantics only; geometry is learned on-device via

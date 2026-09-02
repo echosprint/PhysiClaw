@@ -10,17 +10,16 @@ pending-action kinds the step declares:
                    `walk.screen` / `walk.verdict`
   - `resolve()`    the micro request it returned came back
 
-plus `failed(kind, error, raw)` when one of its actions was blocked or
-errored — None (the default) lets the walk hand over with the error; a
-step that can retry (a move under a popup, a locked phone) answers a
-turn instead. A step ends by `walk.advance_cursor()` or
-`walk.handover(...)`; the walk never inspects a step's private state.
+A blocked or errored action is not a question: the walk hands over
+with the error (nothing retries in the background). A step ends by
+`walk.advance_cursor()` or `walk.handover(...)`; the walk never
+inspects a step's private state.
 """
 
 from typing import TYPE_CHECKING, Generic, TypeVar
 
 from physiclaw.conductor.micro import DecisionRequest, MicroOutcome
-from physiclaw.contract.dto import AssistantMessage, ToolResultMessage
+from physiclaw.contract.dto import AssistantMessage
 
 if TYPE_CHECKING:
     from physiclaw.conductor.program import Program
@@ -39,19 +38,12 @@ class Step(Generic[N]):
         self.walk = walk
         self.node = node
 
-    @property
-    def name(self) -> str:
-        node_id = getattr(self.node, "id", None)
-        return node_id if node_id is not None else type(self).__name__
-
     def open(self) -> Turn:
         raise NotImplementedError
 
     def landed(self, kind: str) -> Turn:
         raise NotImplementedError
 
-    def failed(self, kind: str, error: str, raw: ToolResultMessage | None) -> Turn:
-        return None
-
     def resolve(self, outcome: MicroOutcome | None) -> Turn:
-        return self.walk.handover(f"{self.name!r} brokered no decision")
+        name = getattr(self.node, "id", type(self).__name__)
+        return self.walk.handover(f"{name!r} brokered no decision")
