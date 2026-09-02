@@ -27,6 +27,7 @@ def walk_brief(
     nodes: int,
     outputs: dict[str, str],
     consented: float | None,
+    paid: float | None = None,
 ) -> str:
     """A handed-over walk's report: why, where, and every piece of walk
     state the model would otherwise re-derive from raw turns."""
@@ -47,6 +48,11 @@ def walk_brief(
         # value surviving to the brief proves the payment did NOT fire.
         parts.append(
             f"The user consented to ¥{consented:g}; the payment has NOT been made."
+        )
+    if paid is not None:
+        parts.append(
+            f"A payment of ¥{paid:g} was FIRED before this stop and its result "
+            "is unverified — check the order before any further payment."
         )
     parts.append(
         "The synthesized turns above are the walk so far; this turn's "

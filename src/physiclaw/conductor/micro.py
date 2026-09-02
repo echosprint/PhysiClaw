@@ -65,6 +65,7 @@ from physiclaw.conductor.calls import (
     AGENT_DONE,
     AGENT_TOOL_LEGEND,
     AGENT_TOOL_VERBS,
+    CONTRACT_FIELDS,
     ESCALATE,
     RESERVED_KEYS,
 )
@@ -107,7 +108,6 @@ SCROLL_UP = ACT_SCROLL_UP
 AGENT_FIELDS = "agent_fields"
 AGENT_ACT = "agent_act"
 ACT_ARM = "act"  # the routing arm a grounded row/landmark answer maps to
-_CONTRACT_KEYS = frozenset({"reason", "answer", "confidence"})
 
 
 # What a candidate IS — set once where it is built, read where the
@@ -264,7 +264,7 @@ class MicroCaller:
                     "micro provider unusable — using the session model",
                     exc_info=True,
                 )
-        return self._owned or self._provider
+        return self._owned if self._owned is not None else self._provider
 
     async def aclose(self) -> None:
         """Close the lazily-built cheap-tier provider, if one was built."""
@@ -536,7 +536,7 @@ def _payload_fields(obj: dict) -> dict[str, str]:
     validates them against the node's DECLARED return fields; a missing
     one escalates there (default), never guesses here."""
     return _string_fields(
-        {k: v for k, v in obj.items() if str(k) not in _CONTRACT_KEYS}
+        {k: v for k, v in obj.items() if str(k) not in CONTRACT_FIELDS}
     )
 
 
@@ -605,7 +605,10 @@ def _act_legend(req: DecisionRequest, allowed: tuple[str, ...]) -> str:
             AGENT_TOOL_LEGEND[tool].format(verbs=" or ".join(f'"{v}"' for v in verbs))
         )
         if tool == "tap" and req.args.get("give"):
-            options.append(f"a granted landmark name ({req.args['give']})")
+            options.append(
+                "a granted landmark name, but ONLY one the NEWEST screen block "
+                f"lists under 'Granted landmarks' ({req.args['give']})"
+            )
     if req.args.get("macros"):
         options.append(
             "a granted macro name, copied exactly — it runs that recorded "

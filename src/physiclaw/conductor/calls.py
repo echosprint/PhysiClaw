@@ -29,6 +29,9 @@ ACT_VERBS = tuple(v for verbs in AGENT_TOOL_VERBS.values() for v in verbs)
 # answers with a fixed meaning. A row that literally reads "done" must
 # not shadow the verb; a macro named `escalate` is refused at parse.
 RESERVED_KEYS = frozenset({AGENT_DONE, ESCALATE, *ACT_VERBS})
+# The output contract's own fields — a declared return field may not
+# reuse one (the reply parser would strip it before the walk reads it).
+CONTRACT_FIELDS = frozenset({"reason", "answer", "confidence"})
 # How each granted tool reads in the episode's answer legend — `{verbs}`
 # is the tool's verbs, quoted. Kept beside the verbs so renaming one can
 # never make the legend lie.

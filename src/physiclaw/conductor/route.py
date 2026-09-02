@@ -35,7 +35,7 @@ from dataclasses import dataclass
 from typing import Any, TypeVar
 
 from physiclaw.conductor import context, reply
-from physiclaw.conductor.calls import AGENT_TOOLS, RESERVED_KEYS
+from physiclaw.conductor.calls import AGENT_TOOLS, CONTRACT_FIELDS, RESERVED_KEYS
 from physiclaw.conductor.pages import (
     PAGE_DECL_FIELDS,
     RESERVED_APPS,
@@ -316,6 +316,7 @@ def compile_route(
                     input_names,
                     payloads,
                     resolve,
+                    current_page,
                 )
             )
         else:  # tell
@@ -325,6 +326,7 @@ def compile_route(
     if len(moves) > MAX_NODES:
         raise PlaybookError(f"too many moves ({len(moves)} > {MAX_NODES})")
     _check_money(moves)
+    _check_resume(moves)
     return CompiledRoute(nodes=moves, start=start, recovers=recovers, inline=inline)
 
 
@@ -499,12 +501,13 @@ def _grant(
     if prefix not in _GRANT_ROOTS or not name:
         roots = " or ".join(f"`{r}.<name>`" for r in _GRANT_ROOTS)
         raise PlaybookError(f"{where}: {value!r} must look like {roots}")
-    if prefix == GRANT_LANDMARKS:
-        return prefix, _landmark_name(value, where, pack)
     if name in RESERVED_KEYS:
         raise PlaybookError(
-            f"{where}: macro name {name!r} is a fixed episode answer — rename the macro"
+            f"{where}: {name!r} is a fixed episode answer — a granted "
+            "landmark or macro cannot be spelled like one"
         )
+    if prefix == GRANT_LANDMARKS:
+        return prefix, _landmark_name(value, where, pack)
     return prefix, _argless_macro(name, "give", where, nid, resolve)
 
 
@@ -674,6 +677,17 @@ def _parse_agent(
     )
     give = tuple(n for root, n in grants if root == GRANT_LANDMARKS)
     macros = tuple(n for root, n in grants if root == GRANT_MACROS)
+    shared = sorted(set(give) & set(macros))
+    if shared:
+        raise PlaybookError(
+            f"{where}: `give` names {', '.join(shared)} as both a landmark and "
+            "a macro — the model answers by name, so the two must differ"
+        )
+    if give and "tap" not in tools:
+        raise PlaybookError(
+            f"{where}: `give` grants landmarks, but without `tap` the episode "
+            "cannot press one — grant `tap` or drop the landmarks"
+        )
 
     raw_returns = entry.get("returns")
     returns: list[tuple[str, str]] = []
@@ -688,6 +702,12 @@ def _parse_agent(
             )
         for fname, desc in raw_returns.items():
             field_name(fname, f"{where}: return field")
+            if fname in CONTRACT_FIELDS:
+                raise PlaybookError(
+                    f"{where}: return field {fname!r} is one of the reply "
+                    f"contract's own fields ({', '.join(sorted(CONTRACT_FIELDS))})"
+                    " — rename it"
+                )
             returns.append((fname, prose(desc, f"{where}: `returns.{fname}`")))
 
     if not tools and not returns:
@@ -740,6 +760,11 @@ def _parse_agent(
         )
     if "scroll" not in tools:
         max_scrolls = 0
+    elif max_scrolls == 0:
+        raise PlaybookError(
+            f"{where}: `scroll` is granted but `limit.scrolls` is 0 — the "
+            "first scroll would hand over; raise it or drop the tool"
+        )
 
     g_payloads = payloads
     if irreversible == "payment":
@@ -776,11 +801,17 @@ def _parse_ask(
     input_names: set[str],
     payloads: dict[str, tuple[str, ...]],
     resolve: _MacroResolve,
+    current_page: str | None,
 ) -> AskNode:
     approve = require_str(entry.get("approve"), f"{where}: `approve`")
     check_name(approve, f"{where}: `approve`")
     g_payloads = payloads
     if approve == "payment":
+        if current_page is None or "." in current_page:
+            raise PlaybookError(
+                f"{where}: a payment ask reads its total off the page before "
+                "it — put the sheet's page waypoint immediately before the ask"
+            )
         # The consent slot, runtime-filled from the payment sheet and
         # available only here. (A move literally named `ask` would be
         # shadowed in this message — the money slot wins, both at parse
@@ -813,6 +844,7 @@ def _parse_ask(
         yes=tuple(_reply_words(entry, "yes", where)),
         no=tuple(_reply_words(entry, "no", where)),
         resume=resume,
+        enter=current_page or "",
         total=total,
         wait_seconds=wait_seconds,
         silence_rounds=rounds,
@@ -928,7 +960,31 @@ def _parse_hand(
     )
 
 
-# ---------- the money lint ----------
+# ---------- the money and resume lints ----------
+
+
+def _screen_move(node: Node) -> bool:
+    """A move whose enter page must read before it runs — a `do` with an
+    enter, or an acting agent."""
+    return (isinstance(node, DoNode) and bool(node.enter)) or (
+        isinstance(node, AgentNode) and bool(node.tools)
+    )
+
+
+def _check_resume(nodes: list[Node]) -> None:
+    """An ask leaves the phone on the IM thread; a screen move right
+    after it needs the app back first. For a payment ask that is not
+    advisory: consent is bound, money never recovers, so a missing
+    `resume:` is a certain handover the moment the user says yes."""
+    for i, n in enumerate(nodes[:-1]):
+        nxt = nodes[i + 1]
+        if isinstance(n, AskNode) and n.approve == "payment" and n.resume is None:
+            if _screen_move(nxt):
+                raise PlaybookError(
+                    f"ask {n.id!r} (approve: payment) is followed by "
+                    f"{nxt.id!r}, which runs on the app — declare `resume:` "
+                    "on the ask to re-enter the app after the reply"
+                )
 
 
 def _check_money(nodes: list[Node]) -> None:

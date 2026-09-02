@@ -18,6 +18,9 @@ class Gate:
     baseline: set[str] = field(default_factory=set)
     quoted: float | None = None
     consented: float | None = None
+    # Every amount on the sheet when the ask quoted it — the fire-time
+    # bound's reference for "what the user saw".
+    seen: tuple[float, ...] = ()
     silence: int = 0
     awaiting: bool = False  # ask sent, polling for the reply
     # The reply words the last LANDED send declared (already in
@@ -34,6 +37,7 @@ class Gate:
         gate's fresh confirm, never this one's leftovers. Returns the
         amount that fired."""
         amount, self.consented, self.quoted = self.consented, None, None
+        self.seen = ()
         return amount
 
     def to_suspended(self) -> dict:
@@ -46,6 +50,7 @@ class Gate:
             "baseline": sorted(self.baseline),
             "quoted": self.quoted,
             "consented": self.consented,
+            "seen": list(self.seen),
             "awaiting": self.awaiting,
             "yes": list(self.yes),
             "no": list(self.no),
@@ -58,6 +63,7 @@ class Gate:
             baseline=set(data.get("baseline") or []),
             quoted=data.get("quoted"),
             consented=data.get("consented"),
+            seen=tuple(float(a) for a in (data.get("seen") or [])),
             awaiting=bool(data.get("awaiting")),
             yes=tuple(str(w) for w in (data.get("yes") or [])),
             no=tuple(str(w) for w in (data.get("no") or [])),

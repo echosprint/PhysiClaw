@@ -34,7 +34,9 @@ class DoStep(Step[DoNode]):
             if blocked is None:
                 assert walk.screen is not None  # a matched verdict was read off it
                 blocked = money.fire_block(
-                    consented=walk.gate.consented, screen=walk.screen
+                    consented=walk.gate.consented,
+                    seen=walk.gate.seen,
+                    screen=walk.screen,
                 )
             if blocked is not None:
                 return walk.handover(f"payment move {node.id!r}: {blocked}")

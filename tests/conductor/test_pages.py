@@ -270,3 +270,21 @@ def test_parse_landmarks_rejects_bad_shapes() -> None:
         parse_landmarks({"back": {"label": "x", "bbox": [0.9, 0.1, 0.2, 0.2]}})
     with pytest.raises(PagesError, match="duplicate"):
         parse_landmarks({"back": {"label": ["x", "x"], "bbox": [0.1, 0.1, 0.2, 0.2]}})
+
+
+def test_collect_page_decls_skips_a_dotted_route_page() -> None:
+    # `page: ios.locked` with anchors beside it is a playbook error (a
+    # reserved built-in cannot be declared) — reported by that route's
+    # own parse, never by taking the whole pack down.
+    doc = {
+        "playbooks": {
+            "walk": {
+                "route": [
+                    {"page": "home", "anchors": ["Files"]},
+                    {"page": "ios.locked", "anchors": ["x"]},
+                ]
+            }
+        }
+    }
+
+    assert list(pages.collect_page_decls(doc)) == ["home"]

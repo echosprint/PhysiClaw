@@ -45,6 +45,11 @@ route:
   - page: home
   - tell: note
     message: "starting {inputs.keyword}"
+  - page: home
+  - do: open
+    macro: open-app
+    with: {message: "{inputs.keyword}"}
+  - page: results
 """
 
 

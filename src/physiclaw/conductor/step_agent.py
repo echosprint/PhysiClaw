@@ -67,6 +67,7 @@ class AgentStep(Step[AgentNode]):
         self.calls = 0
         self.scrolls = 0
         self.consented: float | None = None
+        self.seen: tuple[float, ...] = ()
         self.pending_desc = ""
 
     def open(self) -> Turn:
@@ -166,6 +167,7 @@ class AgentStep(Step[AgentNode]):
                     f"agent {node.id!r}: payment episode without bound consent"
                 )
             self.consented = walk.gate.consented
+            self.seen = walk.gate.seen
             vals = {**vals, "ask.total": f"{self.consented:g}"}
         brief = [self._prompt(vals)]
         if self.node.returns:
@@ -309,7 +311,9 @@ class AgentStep(Step[AgentNode]):
             # before every tap or macro the model proposes — one while
             # no visible amount equals the consented total, or with any
             # amount above it, is refused.
-            blocked = money.fire_block(consented=self.consented, screen=walk.screen)
+            blocked = money.fire_block(
+                consented=self.consented, seen=self.seen, screen=walk.screen
+            )
             if blocked is not None:
                 return walk.handover(f"payment agent {node.id!r}: {blocked}")
             # Consent is consumed by the FIRST fire — a later payment

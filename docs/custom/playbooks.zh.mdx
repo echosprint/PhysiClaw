@@ -61,7 +61,7 @@ route:
 
 ## 金额
 
-支付类 `ask` 用 `total:` 声明总额旁边的标签。该行上的金额填入 `{ask.total}`，消息必须引用它。`yes:` 回复把同意绑定到这个数字。支付动作必须紧跟在 `ask` 之后，且只在屏幕仍显示已同意的金额、且没有更高金额时才会执行。
+支付类 `ask` 用 `total:` 声明总额旁边的标签。该行上的金额填入 `{ask.total}`，消息必须引用它。`yes:` 回复把同意绑定到这个数字。支付动作必须紧跟在 `ask` 之后，`ask` 必须声明 `resume:` 回到 App，且只在屏幕仍显示已同意的金额、且询问之后没有出现更高金额时才会执行。
 
 ```yaml
   - ask: confirm-pay
@@ -71,6 +71,7 @@ route:
     yes: ["好的"]
     no: ["不用"]
     wait: {seconds: 45, rounds: 3}
+    resume: {steps: [{name: reopen, tool: tap, with: {label: "the app icon", bbox: [0.72, 0.42, 0.91, 0.55]}}]}
   - agent: pay
     irreversible: payment
     prompt: "Tap 结算, then 立即支付. Escalate if the total differs from ¥{ask.total}."

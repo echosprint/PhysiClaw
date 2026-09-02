@@ -15,6 +15,8 @@ vocabulary and the model classes below carry the same names)::
                 | "agent" name prompt [tools] [give] [returns] [limit]
                   [context] [irreversible]   # the step handed to the model
                 | "ask" name approve message yes no [total] [wait] [resume]
+                                              # payment: resume required when
+                                              # a screen move follows
                 | "tell" name message [no]
     recover   ::= hand [limit]                # one hand for any deviation
                 | {[occluded: hand] [elsewhere: hand] [limit]}
@@ -190,6 +192,9 @@ class AskNode:
     yes: tuple[str, ...]
     no: tuple[str, ...]
     resume: str | None = None
+    # The waypoint before the ask — the page a payment ask reads its
+    # total off ("" when none precedes it; a payment ask requires one).
+    enter: str = ""
     # A payment ask's `total:` — the label readings the sheet total sits
     # beside (`money.declared_total` reads the amount off that row).
     total: tuple[str, ...] = ()

@@ -26,11 +26,13 @@ runner the GitHub-Actions analogy asks for:
 
 What the playbook declares is what runs. The walk opens with one peek
 (it must see a screen before the first page check) and starts at the
-route's first unsettled node — never fast-forwarded off a page match.
+route's first unsettled node — never fast-forwarded off a page match,
+and never below a resumed walk's stored cursor.
 A deviation at a check goes to the page's own declared `recover:` hand
 (`recover.py`) or, with none declared, hands over; every blocked or
-errored call hands over. Money never recovers: with consent bound or
-on an irreversible move, a deviation is the model's.
+errored call hands over. Money never recovers: with consent bound, on
+an irreversible move, or once a payment fired, a deviation is the
+model's.
 """
 
 import logging
@@ -42,7 +44,7 @@ from physiclaw.common.logger import write_json_atomic
 from physiclaw.conductor import brief, recover, views, walklog
 from physiclaw.conductor.channel import Channel
 from physiclaw.conductor.gate import Gate
-from physiclaw.conductor.match import Verdict, match_screen
+from physiclaw.conductor.match import Verdict, match_screen, reads_as_locked
 from physiclaw.conductor.micro import MicroOutcome
 from physiclaw.conductor.pages import (
     Landmark,
@@ -84,6 +86,9 @@ SUSPEND_STATUS = "WAIT"
 
 # The one recovery action's pending kind — the declared hand's landing.
 KIND_RECOVER = "recover-hand"
+# A resumed walk's one infrastructure action: the unlock before its
+# opening reading.
+KIND_UNLOCK = "resume-unlock"
 
 # The executor for each route entry kind (`Node` is a closed union).
 _STEP_FOR: dict[type, type[Step]] = {
@@ -155,6 +160,15 @@ class Program:
         # spent per target page (their sum is the walk-wide count).
         self._recovery: recover.State | None = None
         self._page_recoveries: Counter[str] = Counter()
+        # A resumed walk never restarts below its stored cursor: the
+        # nodes before it already ran on an earlier wake (a tell sent,
+        # an ask answered), and re-running them per wake would loop
+        # across wakes with a fresh recovery budget each time.
+        self._floor = 0
+        # The resume floor's one piece of infrastructure: a wake minutes
+        # later usually meets a locked phone, and no walk-level hand can
+        # run before the opening peek reads — one unlock, once.
+        self._unlocked = False
         self._resumed = False
         # The telemetry pair (`walklog`): decision outcomes brokered to
         # this walk, and the one-shot latch so exactly one runs.jsonl
@@ -220,6 +234,7 @@ class Program:
             # suspension (load_suspended is fail-open).
             raise PlaybookError(f"suspended idx {idx} is outside the playbook")
         self.idx = idx
+        self._floor = idx
         self.outputs = {str(k): str(v) for k, v in (data.get("outputs") or {}).items()}
         self.gate = Gate.from_suspended(data)
         self._resumed = True
@@ -284,25 +299,7 @@ class Program:
             # ordinary history. Quiet from here — the conductor drops us.
             return None
         if self.turns.pending is None:
-            if self.gate.awaiting:
-                # Suspended-at-gate resume: the ask was sent before the
-                # suspension — the ask step picks up at its reply check.
-                node = self.node
-                if not isinstance(node, AskNode):
-                    return self.handover(
-                        "suspended awaiting a reply, but no ask at the cursor"
-                    )
-                self._step = AskStep(self, node)
-                return self._step.open()
-            if self._resumed and self.gate.no and self.channel is not None:
-                # Suspended-tell resume (message away, not awaiting a
-                # reply, deny words declared): this wake may BE the
-                # user's cancel reply — read the thread before the walk
-                # acts. One-shot: the read clears the words.
-                self._step = TellResume(self, None)
-                return self._step.open()
-            # Observe before acting: the first page check needs a screen.
-            return self.peek()
+            return self._opening()
         pending, result, failed = self.turns.settle(history)
         kind = pending.kind
         if kind == "suspend":
@@ -317,7 +314,9 @@ class Program:
             )
         if failed is not None:
             # Nothing retries in the background: what the playbook did
-            # not declare, the model decides.
+            # not declare, the model decides. A fired payment is logged
+            # first — money may have moved even though the call failed.
+            self.log_purchase()
             return self.handover(failed)
         assert result is not None  # settle: a result or a failure
         # One reading, one verdict: channel-facing actions (declared at
@@ -328,6 +327,18 @@ class Program:
             self.screen,
             self.channel.prints if pending.channel and self.channel else self.prints,
         )
+        if self._resumed and not self._unlocked and reads_as_locked(self.screen):
+            # The resumed walk's first reading is the cover: wake the
+            # phone once, then open again exactly as before.
+            self._unlocked = True
+            return self.synth(
+                KIND_UNLOCK,
+                "conductor: phone is locked on resume — unlocking",
+                gesture_vocab.UNLOCK_PHONE,
+                {},
+            )
+        if kind == KIND_UNLOCK:
+            return self._opening()
         if kind == "peek":
             if self._resumed:
                 # A suspended walk trusts its stored cursor — the next
@@ -348,6 +359,30 @@ class Program:
         if self._step is None:
             return self.handover("a decision arrived with no step in flight")
         return self._step.resolve(outcome)
+
+    def _opening(self) -> Turn:
+        """The walk's first turn (fresh, or after a resume): the ask's
+        reply check when suspended at a gate, a cancel read after a
+        tell that declared deny words, else the plain opening peek."""
+        if self.gate.awaiting:
+            # Suspended-at-gate resume: the ask was sent before the
+            # suspension — the ask step picks up at its reply check.
+            node = self.node
+            if not isinstance(node, AskNode):
+                return self.handover(
+                    "suspended awaiting a reply, but no ask at the cursor"
+                )
+            self._step = AskStep(self, node)
+            return self._step.open()
+        if self._resumed and self.gate.no and self.channel is not None:
+            # Suspended-tell resume (message away, not awaiting a reply,
+            # deny words declared): this wake may BE the user's cancel
+            # reply — read the thread before the walk acts. One-shot:
+            # the read clears the words.
+            self._step = TellResume(self, None)
+            return self._step.open()
+        # Observe before acting: the first page check needs a screen.
+        return self.peek()
 
     # ---- the cursor ----
 
@@ -406,11 +441,12 @@ class Program:
         return f"screen reads as {verdict.kind}: {seen} — {verdict.detail}"
 
     def money_page_block(self, what: str) -> str | None:
-        """Money reads and fires only off a VERIFIED own-pack page: an ask
-        is sent on the IM thread and quotes the consented total, so an
-        unverified screen could satisfy the predicates with the
-        conductor's own ask bubble. None when the current verdict is
-        such a page; else the handover reason."""
+        """A payment move fires only off a VERIFIED own-pack page: the
+        ask left the phone on the IM thread, and an unverified screen
+        could satisfy the predicates with the conductor's own ask
+        bubble. None when the current verdict is such a page; else the
+        handover reason. (The ask itself reads its total off the exact
+        waypoint before it — `AskNode.enter`.)"""
         v = self.verdict
         if v is not None and v.kind == "match" and owned_by(v.page_id or "", self.app):
             return None
@@ -421,21 +457,27 @@ class Program:
 
     def spend_consent(self) -> None:
         """A payment move fires: consent is consumed, the amount survives
-        into the history line and the purchase log."""
-        self.paid = self.gate.spend()
-        self._paid_logged = False
+        into the history line and the purchase log. A later action of
+        the same payment episode finds the consent already spent and
+        leaves the record alone."""
+        amount = self.gate.spend()
+        if amount is not None:
+            self.paid = amount
+            self._paid_logged = False
 
     def log_purchase(self) -> None:
-        """The doctrine's purchase line, harness-written ONCE the moment
-        a payment move's result lands — whatever the next check says,
-        money may have moved, and the daily log is the cross-wake
-        record. Idempotent: a landing with nothing new to log is a no-op."""
+        """The doctrine's purchase line, harness-written ONCE as soon as
+        a fired payment's result lands, fails, or the session dies —
+        whatever the next check says, money may have moved, and the
+        daily log is the cross-wake record. Idempotent: nothing new to
+        log is a no-op."""
         if self.paid is None or self._paid_logged:
             return
         self._paid_logged = True
         self.log_day(
-            f"conductor: {self.app}: paid ¥{self.paid:g} "
-            f"(playbook {self.app}/{self.spec.name})"
+            f"conductor: {self.app}: payment ¥{self.paid:g} fired "
+            f"(playbook {self.app}/{self.spec.name}) — verify the order before "
+            "paying again"
         )
 
     def enter_gate(self, node: "DoNode | AgentNode") -> Turn:
@@ -503,6 +545,7 @@ class Program:
                 nodes=len(self.spec.nodes),
                 outputs=self.outputs,
                 consented=self.gate.consented,
+                paid=self.paid,
             ),
             gesture_vocab.PEEK,
             {},
@@ -516,9 +559,15 @@ class Program:
         """The page's declared hand before the model: a deviation is
         recovered toward the page the frozen cursor already requires —
         the cursor, outputs, and consent are untouched throughout. Never
-        with consent bound, mid-gate, or for an irreversible move: money
-        keeps the hard handover."""
-        if self.gate.consented is not None or self.gate.awaiting or node.irreversible:
+        with consent bound, mid-gate, for an irreversible move, or once
+        a payment fired: money keeps the hard handover (a restart from
+        the top would walk back into the ask and pay again)."""
+        if (
+            self.gate.consented is not None
+            or self.gate.awaiting
+            or node.irreversible
+            or self.paid is not None
+        ):
             return self.handover(reason)
         if not owned_by(expected_id, self.app):
             # Recovery covers this pack's own pages only — a reserved or
@@ -595,7 +644,7 @@ class Program:
                 return self.advance_cursor()
             return self.next()
         self.journal(f"recover hand ran — walking again toward {st.target}")
-        self.idx = self.spec.first_unsettled(self.outputs)
+        self.idx = max(self.spec.first_unsettled(self.outputs), self._floor)
         return self.next()
 
     # ---- the record ----
@@ -608,6 +657,7 @@ class Program:
         closed is a no-op, and so is one that never started."""
         if not self._started or self._run_recorded:
             return
+        self.log_purchase()  # a fired payment outlives the session
         node = self._node_id() or "(end)"
         self._record_run("abandoned", "session ended mid-walk")
         self.log_day(

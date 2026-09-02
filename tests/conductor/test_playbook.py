@@ -42,6 +42,7 @@ route:
     message: "Total ¥{ask.total}, reply ok to pay, or no to cancel"
     yes: ["ok"]
     no: ["no"]
+    resume: open-app
 """
 
 # A payment move appended as the ask's fall-through — several money
@@ -681,8 +682,9 @@ def test_pack_doc_rejects_yaml_aliases() -> None:
 
 
 def test_ask_resume_may_embed_the_body() -> None:
-    text = VALID + (
-        "    resume:\n      steps:\n        - {name: back-to-app, tool: home_screen}\n"
+    text = _mutate(
+        "    resume: open-app\n",
+        "    resume:\n      steps:\n        - {name: back-to-app, tool: home_screen}\n",
     )
     pack = _pack()
 
@@ -701,12 +703,13 @@ def test_inline_role_body_with_required_input_rejected() -> None:
     # resume/recover dispatch with no arguments — a required input could
     # only abort at run time (right after a confirmed ask), so the lint
     # runs on the RESOLVED macro.
-    text = VALID + (
+    text = _mutate(
+        "    resume: open-app\n",
         "    resume:\n"
         "      inputs:\n"
         "        x: {description: d}\n"
         "      steps:\n"
-        "        - {name: back, tool: home_screen}\n"
+        "        - {name: back, tool: home_screen}\n",
     )
 
     with pytest.raises(PlaybookError, match=r"requires input\(s\) x"):
@@ -716,10 +719,8 @@ def test_inline_role_body_with_required_input_rejected() -> None:
 def test_directory_role_macro_with_required_input_rejected() -> None:
     # The same lint, directory spelling: the rule is role-shaped, not
     # embedding-shaped — moving a body out to macros/ must not lose it.
-    text = VALID + "    resume: open-app\n"
-
     with pytest.raises(PlaybookError, match=r"requires input\(s\) message"):
-        pb.parse_playbook(text, "buy", _required_message_pack())
+        pb.parse_playbook(VALID, "buy", _required_message_pack())
 
 
 def test_scrollable_only_waypoint_is_a_declaration_at_both_doors() -> None:

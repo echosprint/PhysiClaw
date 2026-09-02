@@ -178,7 +178,8 @@ description: EDIT ME — what this pack automates, and when to adopt it
 #            the amount beside the label `total:` names (e.g. 合计) and
 #            fills {{ask.total}} — the `message:` must quote it: the
 #            number the user said yes to is the fire-time bound.
-#            `resume:` re-enters the app after the reply.
+#            `resume:` re-enters the app after the reply — required on
+#            a payment ask when a move on the app follows it.
 #   tell   — message the user, then pause until any wake; `no:`
 #            (optional) lists the replies that wake reads as a cancel.
 playbooks:
@@ -252,6 +253,7 @@ playbooks:
       #   yes: ["ok"]
       #   no: ["no"]
       #   wait: {{seconds: {ask_wait}, rounds: {ask_rounds}}}
+      #   resume: {macro}         # re-enter the app after the reply
       - tell: done
         # The EXACT text sent to the user — write it in THEIR language.
         message: "EDIT ME — done with {{inputs.message}}, reply stop to cancel"

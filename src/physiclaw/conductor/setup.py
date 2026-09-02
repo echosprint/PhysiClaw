@@ -59,6 +59,7 @@ from physiclaw.conductor.playbook import (
     Pack,
     Playbook,
     PlaybookError,
+    TellNode,
     disabled_macros,
     list_apps,
     load_pack,
@@ -173,7 +174,41 @@ def readiness_warnings(spec: Playbook, pack: Pack) -> list[str]:
     """The actionable non-blockers `playbooks check` prints: things that
     let a walk start and then quietly under-perform. Advisory by design —
     each is legal, and the author is told the cost rather than refused."""
-    return _gate_word_warnings(spec) + _anchor_warnings(spec, pack)
+    return (
+        _gate_word_warnings(spec)
+        + _resume_warnings(spec)
+        + _anchor_warnings(spec, pack)
+    )
+
+
+def _resume_warnings(spec: Playbook) -> list[str]:
+    """A non-payment ask without `resume:`, or a tell, followed by a move
+    that runs on the app: the phone is on the IM thread (or wherever
+    the next wake finds it), so that move's enter check runs against
+    the wrong screen and spends the page's recover hand, or hands over
+    with none. Legal; the author is told. (A payment ask in that shape
+    is refused at parse — consent never recovers.)"""
+    out = []
+    nodes = spec.nodes
+    for i, n in enumerate(nodes[:-1]):
+        nxt = nodes[i + 1]
+        if not (isinstance(nxt, DoNode) and nxt.enter) and not (
+            isinstance(nxt, AgentNode) and nxt.tools
+        ):
+            continue
+        if isinstance(n, AskNode) and n.resume is None:
+            out.append(
+                f"ask {n.id!r} has no `resume:` but {nxt.id!r} runs on the app "
+                "next — the enter check will read the IM thread; declare "
+                "`resume:` or expect the page's recover hand to spend"
+            )
+        elif isinstance(n, TellNode):
+            out.append(
+                f"tell {n.id!r} suspends the walk, and {nxt.id!r} runs on the "
+                "app on the next wake — its enter check reads whatever the "
+                "phone shows then; expect the page's recover hand to spend"
+            )
+    return out
 
 
 def _anchor_warnings(spec: Playbook, pack: Pack) -> list[str]:

@@ -298,9 +298,13 @@ def collect_page_decls(doc: dict) -> dict:
             if not isinstance(entry, dict) or "page" not in entry:
                 continue
             decl = route_decl(entry)
-            if decl is None:
-                continue  # bare waypoint — a reference, not a declaration
             name = str(entry["page"])
+            if decl is None or "." in name:
+                # A bare waypoint is a reference, not a declaration; a
+                # dotted one names a reserved built-in — its own route's
+                # parse refuses the declaration with the exact reason,
+                # never the whole pack.
+                continue
             site = f"playbook {pb_name!r}'s route"
             if name in out:
                 raise PagesError(

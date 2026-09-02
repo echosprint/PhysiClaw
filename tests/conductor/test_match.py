@@ -375,3 +375,39 @@ def test_reads_as_cover_width_floor_sits_between_the_two_clocks() -> None:
 
     assert m.reads_as_cover(clock(0.686))  # narrowest hero clock seen
     assert not m.reads_as_cover(clock(0.122))  # widest status bar seen
+
+
+def test_region_pinned_anchor_ignores_the_scroll_offset() -> None:
+    # Chrome does not scroll with the content: the tab-bar anchor is
+    # checked where it was learned, while the content anchors vote the
+    # offset and move with it.
+    pp = _print(
+        anchors=[
+            AnchorDecl("搜索", region="top"),
+            AnchorDecl("综合"),
+            AnchorDecl("销量"),
+        ],
+        learned_anchors=[
+            _learned("搜索", 0.5, 0.05),
+            _learned("综合", 0.5, 0.5),
+            _learned("销量", 0.5, 0.6),
+        ],
+        scrollable=True,
+        threshold=0.9,
+    )
+    screen = make_screen(("搜索", 0.5, 0.05), ("综合", 0.5, 0.47), ("销量", 0.5, 0.57))
+
+    v = m.match_screen(screen, [pp])
+
+    assert v.kind == "match" and abs(v.dy + 0.03) < 1e-9
+
+
+def test_forbid_reads_row_labels_not_the_result_prose() -> None:
+    # A macro result carries its step log beside the listing; a forbid
+    # term in that prose (a step named after it) must not veto the page.
+    pp = _print(anchors=[AnchorDecl("综合")], forbid=["popup"])
+    text = make_screen(("综合", 0.5, 0.1)).text + "\nmacro demo/x: tool popup ran"
+
+    v = m.match_screen(Screen.read(text), [pp])
+
+    assert v.kind == "match"

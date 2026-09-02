@@ -61,8 +61,9 @@ OVERLAY_MIN_LABELS = 3
 OVERLAY_PAD = 0.08
 
 # The one spelling of "a ¥/￥ amount": the matcher class-tokenizes with
-# it, the money predicates (program.py) extract its group.
-PRICE_RE = re.compile(r"[¥￥]\s*(\d+(?:\.\d+)?)")
+# it, the money predicates (`money.py`) read its group — thousands
+# separators included ("¥1,234.56"), which `money.amount` strips.
+PRICE_RE = re.compile(r"[¥￥]\s*((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)")
 
 # Volatile-content class tokens — "the clock is still a clock".
 # `TIME_TOKEN` is named because `reads_as_cover` tests a row against it:
@@ -286,9 +287,13 @@ def candidate_rows(
 def score_page(pp: PagePrint, screen: Screen) -> PageScore:
     """Score one candidate page against one screen reading."""
     if pp.decl.forbid:
-        content_norm = normalize(screen.content)
+        # Row labels only, one row at a time: a macro result's step log
+        # rides `screen.content` too, and a term must never straddle two
+        # labels once whitespace is collapsed.
+        labels_norm = [normalize(r.label) for r in screen.rows if r.label]
         for term in pp.decl.forbid:
-            if normalize(term) in content_norm:
+            t = normalize(term)
+            if any(t in label for label in labels_norm):
                 return PageScore(pp, 0.0, (), (), 0.0, forbidden=True)
 
     learned = pp.learned
@@ -308,13 +313,17 @@ def score_page(pp: PagePrint, screen: Screen) -> PageScore:
     total_weight = 0.0
     hit_weight = 0.0
     for a, la, rows in zip(anchors, las, rows_per):
+        # Chrome (a region-pinned anchor) does not scroll with the
+        # content: it is checked at its absolute position, exactly as
+        # `_vote_dy` leaves it out of the vote.
+        adj = 0.0 if a.region is not None else dy
         # Expected-visible: with a scroll offset, an anchor whose learned
         # position moved off-screen is neither expected nor missing.
-        if la is not None and pp.decl.scrollable and not (0.0 <= la.cy + dy <= 1.0):
+        if la is not None and pp.decl.scrollable and not (0.0 <= la.cy + adj <= 1.0):
             continue
         weight = la.weight if la else 1.0
         total_weight += weight
-        center = _verify_position(la, rows, dy)
+        center = _verify_position(la, rows, adj)
         if center is not None:
             hit_weight += weight
             hits.append(AnchorHit(anchor=a.text, center=center, weight=weight))

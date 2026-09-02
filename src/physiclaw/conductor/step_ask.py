@@ -9,9 +9,10 @@ against the words the ask itself declares (`yes:` / `no:`, `reply.py`),
 and on consent binds the money numbers the following payment move
 spends. A deny ends the walk; a reply the declared words do not cover
 hands over — the model reads the thread, the conductor never guesses.
-A payment ask reads the sheet total off a VERIFIED own-pack page —
-the amount beside the label its `total:` names — and quotes it in the
-message: the ask IS the consent record.
+A payment ask reads the sheet total off the waypoint before it, once
+that page reads — the amount beside the label its `total:` names —
+and quotes it in the message: the ask IS the consent record. Every
+amount on that sheet is remembered as what the user saw.
 
 `tell` sends and suspends; ANY next wake resumes the walk past it, and
 when the tell declares `no:` words that resume first reads the thread
@@ -22,7 +23,7 @@ import logging
 
 from physiclaw.common import gesture_vocab
 from physiclaw.conductor import money, reply
-from physiclaw.conductor.pages import THREAD_ID
+from physiclaw.conductor.pages import THREAD_ID, page_id
 from physiclaw.conductor.playbook import AskNode, TellNode, fill_refs, qualified_macro
 from physiclaw.conductor.step import Step, Turn, Walk
 from physiclaw.contract.dto import AssistantMessage
@@ -91,11 +92,7 @@ def _new_replies(walk: Walk, *, after_ask: bool = True) -> list[str]:
     assert walk.screen is not None
     gate = walk.gate
     return reply.new_incoming(
-        walk.screen.rows,
-        gate.baseline,
-        gate.ask,
-        after_ask=after_ask,
-        words=frozenset(gate.yes) | frozenset(gate.no),
+        walk.screen.rows, gate.baseline, gate.ask, after_ask=after_ask
     )
 
 
@@ -166,18 +163,24 @@ class AskStep(Step[AskNode]):
         return self._check()  # KIND_ASK_PEEK / KIND_ASK_OPEN
 
     def _start(self) -> Turn:
-        """Send the ask. A payment ask reads the sheet total off a
-        VERIFIED own-pack page (the sheet the lints put before the ask),
-        never whatever screen happened to come last — the amount beside
-        the label its `total:` declares — and quotes it: the message IS
-        the consent record."""
+        """Send the ask. A payment ask reads the sheet total off the
+        waypoint before it, once that page reads — never whatever screen
+        happened to come last — the amount beside the label its `total:`
+        declares — and quotes it: the message IS the consent record."""
         node, walk = self.node, self.walk
         values = walk.ref_values()
         if node.approve == "payment":
-            blocked = walk.money_page_block(f"ask {node.id!r}")
-            if blocked is not None:
-                return walk.handover(f"{blocked} — refusing to ask blind")
+            # The sheet is the waypoint before the ask — that page, not
+            # any own-pack page the phone happens to show.
+            assert walk.verdict is not None
+            wrong = walk.mismatch(walk.verdict, page_id(walk.app, node.enter))
+            if wrong is not None:
+                return walk.handover(
+                    f"ask {node.id!r} reads its total off {node.enter!r} "
+                    f"({wrong}) — refusing to ask blind"
+                )
             assert walk.screen is not None  # a verified verdict was read off it
+            walk.gate.seen = tuple(money.amounts(walk.screen))
             total = money.declared_total(walk.screen, node.total)
             if total is None:
                 return walk.handover(
@@ -274,6 +277,11 @@ class TellStep(Step[TellNode]):
         stop = _sent_landed(walk)
         if stop is not None:
             return stop
+        if walk.idx + 1 >= len(walk.spec.nodes):
+            # A trailing tell: the message is the walk's last word, so
+            # it completes now rather than suspending for a wake that
+            # would only mint the completion.
+            return walk.advance_cursor()
         # Message away → suspend; the walk continues past this node on
         # the resuming wake.
         return walk.suspend(resume_idx=walk.idx + 1, awaiting=False)

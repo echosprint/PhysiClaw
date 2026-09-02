@@ -14,7 +14,7 @@ NO = frozenset(map(reply.normalize, ["不用", "不要", "算了", "no thanks", 
 
 
 def _new(rows, baseline, own, **kw):
-    return reply.new_incoming(rows, baseline, own, words=YES | NO, **kw)
+    return reply.new_incoming(rows, baseline, own, **kw)
 
 
 @pytest.mark.parametrize(
@@ -112,3 +112,43 @@ def test_centered_timestamp_rows_are_not_incoming() -> None:
     )
 
     assert _new(screen.rows, set(), "ask text") == ["好的"]
+
+
+def test_reply_repeating_a_visible_word_below_the_ask_counts() -> None:
+    # The user's earlier "好的" (to a previous ask) is still on screen and
+    # in the baseline; their new "好的" below this ask is a reply all the
+    # same — position, not the label set, decides below a visible ask.
+    ask = "现在下单吗？回复 好的 或 不用"
+    screen = make_screen(
+        ("MyChat", 0.5, 0.05),
+        ("好的", 0.25, 0.2),  # the old reply, above
+        (ask, 0.75, 0.4),
+        ("好的", 0.25, 0.6),  # the new reply, below
+    )
+
+    assert _new(screen.rows, {"MyChat", "好的"}, ask) == ["好的"]
+
+
+def test_user_echo_of_the_ask_counts() -> None:
+    # "好的 确认支付" is a substring of the ask; it is still the user's
+    # bubble (left side, below the ask), never one of our own lines.
+    ask = "合计 ¥45。回复 好的 确认支付，或 不用 取消。"
+    screen = make_screen(
+        ("MyChat", 0.5, 0.05), (ask, 0.75, 0.3), ("好的 确认支付", 0.25, 0.5)
+    )
+
+    assert _new(screen.rows, {"MyChat"}, ask) == ["好的 确认支付"]
+
+
+def test_sweep_skips_the_just_sent_asks_own_band() -> None:
+    # A short wrapped tail of OUR new ask can OCR left of center; the
+    # deny sweep reads above the ask and must not read the ask itself.
+    ask = "现在下单吗？回复 好的 或 不用"
+    screen = make_screen(
+        ("MyChat", 0.5, 0.05),
+        ("cancel", 0.25, 0.2),  # sent while the walk was in the app
+        (ask[:8], 0.75, 0.5),
+        ("不用", 0.3, 0.52),  # the ask's own last line, left-aligned
+    )
+
+    assert _new(screen.rows, {"MyChat"}, ask, after_ask=False) == ["cancel"]

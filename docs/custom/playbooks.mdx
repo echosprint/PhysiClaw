@@ -61,7 +61,7 @@ A page's `recover:` is the only recovery. One hand covers any deviation. Two han
 
 ## Money
 
-A payment ask names the label the sheet total sits beside with `total:`. The amount on that row fills `{ask.total}`, which the message must quote. A `yes:` reply binds consent to exactly that number. The payment move must directly follow the ask, and it fires only while the screen still shows the consented amount and nothing above it.
+A payment ask names the label the sheet total sits beside with `total:`. The amount on that row fills `{ask.total}`, which the message must quote. A `yes:` reply binds consent to exactly that number. The payment move must directly follow the ask, the ask must declare `resume:` to bring the app back, and the move fires only while the screen still shows the consented amount and no higher amount has appeared since the ask.
 
 ```yaml
   - ask: confirm-pay
@@ -71,6 +71,7 @@ A payment ask names the label the sheet total sits beside with `total:`. The amo
     yes: ["好的"]
     no: ["不用"]
     wait: {seconds: 45, rounds: 3}
+    resume: {steps: [{name: reopen, tool: tap, with: {label: "the app icon", bbox: [0.72, 0.42, 0.91, 0.55]}}]}
   - agent: pay
     irreversible: payment
     prompt: "Tap 结算, then 立即支付. Escalate if the total differs from ¥{ask.total}."

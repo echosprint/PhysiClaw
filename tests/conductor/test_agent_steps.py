@@ -664,6 +664,83 @@ def test_payment_episode_taps_under_consent_then_completes() -> None:
     assert "completed" in summary
 
 
+def test_payment_episode_second_tap_keeps_the_paid_record() -> None:
+    # Consent is spent on the first tap; a later tap of the same episode
+    # finds nothing to spend and must not erase the amount that fired.
+    p, h, req = _at_pay_episode()
+    row = next(c for c in req.candidates if c.key == "支付")
+    tap = p.resolve(MicroOutcome(out=ACT_ARM, reason="pay", confidence=0.9, picked=row))
+    _feed(h, tap, SHEET)  # the sheet still shows ¥45 — a confirm step
+    req2 = p.advance(h)
+    row2 = next(c for c in req2.candidates if c.key == "支付")
+    tap2 = p.resolve(
+        MicroOutcome(out=ACT_ARM, reason="ok", confidence=0.9, picked=row2)
+    )
+    assert tap2 is not None and tap2.tool_names() == ["note", "tap"]
+    _feed(h, tap2, DONE)
+    assert isinstance(p.advance(h), DecisionRequest)
+    summary = _finish(p, h, p.resolve(_done_outcome()))
+
+    assert "completed" in summary and p.paid == 45.0
+
+
+@pytest.mark.parametrize(
+    "old, new, fragment",
+    [
+        # A granted name can never be spelled like a fixed answer.
+        ("give: [landmarks.back]", "give: [landmarks.done]", "fixed episode answer"),
+        # A return field cannot reuse the reply contract's own fields.
+        ("      keyword: the search keyword\n", "      answer: the pick\n", "contract"),
+        # scroll granted with no scroll budget would hand over at once.
+        ("limit: {calls: 5, scrolls: 1}", "limit: {calls: 5, scrolls: 0}", "scrolls"),
+        # Landmarks are pressed; without tap there is nothing to press with.
+        ("    tools: [tap, scroll]\n", "    tools: [scroll]\n", "without `tap`"),
+    ],
+)
+def test_episode_grammar_lints(old, new, fragment) -> None:
+    write_pack(
+        playbooks={"walk": AGENTED.replace(old, new)},
+        landmarks=BACK_LANDMARK
+        + 'done:\n  label: "done"\n  bbox: [0.5, 0.5, 0.6, 0.6]\n',
+    )
+    with pytest.raises(PlaybookError, match=fragment):
+        setup.load_spec("demo", "walk", require_live=False)
+
+
+def test_give_refuses_one_name_as_both_landmark_and_macro() -> None:
+    write_pack(
+        playbooks={
+            "walk": AGENTED.replace(
+                "give: [landmarks.back]", "give: [landmarks.back, macros.back]"
+            )
+        },
+        landmarks=BACK_LANDMARK,
+        macros=("open-app", "add-cart", "back"),
+    )
+    with pytest.raises(PlaybookError, match="both a landmark and a macro"):
+        setup.load_spec("demo", "walk", require_live=False)
+
+
+def test_payment_ask_before_a_screen_move_needs_resume() -> None:
+    text = AGENT_PAY.replace("    resume:\n      macro: open-app\n", "")
+    write_channel()
+    write_pack(playbooks={"pay": text})
+    with pytest.raises(PlaybookError, match="declare `resume:`"):
+        setup.load_spec("demo", "pay", require_live=False)
+
+
+def test_payment_ask_reads_the_page_before_it() -> None:
+    # A reserved built-in cannot be the sheet a payment ask reads.
+    text = AGENT_PAY.replace(
+        "  - page: results\n  - ask: gate\n",
+        "  - page: results\n  - page: ios.locked\n  - ask: gate\n",
+    )
+    write_channel()
+    write_pack(playbooks={"pay": text})
+    with pytest.raises(PlaybookError, match="reads its total off the page before"):
+        setup.load_spec("demo", "pay", require_live=False)
+
+
 def test_payment_episode_blocks_a_tap_when_the_sheet_changed() -> None:
     p, h, req = _at_pay_episode(resume_screen=SHEET_CHANGED)
     assert isinstance(req, DecisionRequest)

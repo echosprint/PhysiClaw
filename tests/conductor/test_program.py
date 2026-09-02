@@ -808,6 +808,7 @@ def _write_suspended(playbook: str, idx: int, **over) -> None:
         "baseline": [],
         "quoted": None,
         "consented": None,
+        "seen": [],
         "awaiting": False,
     }
     data.update(over)
@@ -878,6 +879,38 @@ def test_second_ask_reads_a_deny_sent_meanwhile() -> None:
 
     summary = _finish(p, h, p.advance(h))
     assert "user declined" in summary
+
+
+def test_second_ask_reads_a_yes_that_repeats_the_first() -> None:
+    # Both asks take "好的"; the first reply is still on screen (and in
+    # the second ask's baseline) when the user says "好的" again.
+    write_channel(CHANNEL_OPEN)
+    write_pack(playbooks={"two": TWO_ASKS})
+    p = _program(name="two", keyword="milk")
+    h = _history()
+    _feed(h, p.advance(h), HOME)
+    _feed(h, p.advance(h), RESULTS)
+    send = p.advance(h)
+    back = _reply_arrives(p, h, send, "好的")
+    _feed(h, back, RESULTS)
+    resend = p.advance(h)
+    ask1 = send.tool_calls[1].arguments["inputs"]["message"]
+    ask2 = resend.tool_calls[1].arguments["inputs"]["message"]
+    thread = [(ask1, 0.75, 0.2), ("好的", 0.25, 0.35), (ask2, 0.75, 0.5)]
+    _feed(h, resend, _thread(*thread))
+    _feed(h, p.advance(h), "waited")
+    _feed(h, p.advance(h), _thread(*thread, ("好的", 0.25, 0.7)))
+
+    summary = _finish(p, h, p.advance(h))
+    assert "completed" in summary
+
+
+def test_gate_seen_amounts_survive_the_suspension() -> None:
+    gate = program.Gate(quoted=45.0, consented=45.0, seen=(45.0, 79.0))
+
+    restored = program.Gate.from_suspended(gate.to_suspended())
+
+    assert restored.seen == (45.0, 79.0) and restored.consented == 45.0
 
 
 # ---------- payment gate: total edges ----------
@@ -1149,6 +1182,117 @@ def test_keyed_recover_without_a_hand_for_the_reading_hands_over() -> None:
     assert "declares no `elsewhere` recover hand" in summary
 
 
+def test_failed_payment_call_logs_the_purchase_and_briefs_it() -> None:
+    # Consent is spent when the pay macro is dispatched; an error result
+    # means money MAY have moved: the purchase line lands and the brief
+    # says the payment fired with an unverified result.
+    from physiclaw.common import daylog
+
+    p, h, send = _at_gate()
+    back = _reply_arrives(p, h, send, "好的")
+    _feed(h, back, _sheet())
+    pay = p.advance(h)
+    assert pay.tool_calls[1].arguments["name"] == "demo/add-cart"
+    _feed(h, pay, "macro demo/add-cart: ABORTED at step 1/1", error=True)
+
+    summary = _finish(p, h, p.advance(h))
+
+    assert "A payment of ¥45 was FIRED" in summary
+    assert "payment ¥45 fired" in daylog.load_recent_entries(5)
+
+
+def test_recovery_never_restarts_once_a_payment_fired() -> None:
+    # A restart from the top would walk back into the ask and pay again:
+    # after the payment move, a deviation is the model's even where the
+    # page declares a hand.
+    gated = GATED.replace(
+        "  - page: home\n  - do: open",
+        "  - page: home\n    recover: {tool: go_back}\n  - do: open",
+    )
+    p, h, send = _at_gate(playbook=gated)
+    back = _reply_arrives(p, h, send, "好的")
+    _feed(h, back, _sheet())
+    pay = p.advance(h)
+    _feed(h, pay, ELSEWHERE)  # the pay macro did not land on home
+
+    summary = _finish(p, h, p.advance(h))
+    assert "did not land on 'home'" in summary
+
+
+def test_resumed_walk_never_restarts_below_its_cursor() -> None:
+    # The nodes before the stored cursor ran on an earlier wake; a hand
+    # that does not restore walks again from the cursor, not the top —
+    # so the page's limit is what ends it, never a cross-wake loop.
+    write_pack(playbooks={"flow": RECOVERING}, landmarks=LANDMARKS)
+    _write_suspended("flow", 1, values={"keyword": "milk"})
+    p = setup.load_suspended(channel.load_channel())
+    assert p is not None
+    h = _history()
+    _feed(h, p.advance(h), HOME)  # `search` expects results
+    back = p.advance(h)
+    assert back.tool_names() == ["note", "go_back"]
+    _feed(h, back, HOME)  # not restored
+
+    again = p.advance(h)
+    assert again.tool_names() == ["note", "go_back"]  # NOT `open` re-run
+    _feed(h, again, HOME)
+
+    summary = _finish(p, h, p.advance(h))
+    assert "recover limit (2) spent" in summary
+
+
+def test_resumed_walk_unlocks_a_locked_phone_before_reading() -> None:
+    # A wake minutes later meets the cover: one unlock, then the opening
+    # exactly as before — no walk-level hand can run before it reads.
+    write_pack(playbooks={"flow": FLOW})
+    _write_suspended("flow", 1, values={"keyword": "milk"})
+    p = setup.load_suspended(channel.load_channel())
+    assert p is not None
+    h = _history()
+    _feed(h, p.advance(h), LOCKED_MID)
+
+    unlock = p.advance(h)
+    assert unlock.tool_names() == ["note", "unlock_phone"]
+    _feed(h, unlock, RESULTS)
+    peek = p.advance(h)
+    assert peek.tool_names() == ["note", "peek"]
+    _feed(h, peek, RESULTS)
+
+    move2 = p.advance(h)
+    assert move2.tool_calls[1].arguments["name"] == "demo/add-cart"
+
+
+def test_trailing_tell_completes_instead_of_suspending() -> None:
+    write_channel()
+    write_pack(playbooks={"flow": FLOW + '  - tell: finish\n    message: "all done"\n'})
+    p = _program(keyword="milk")
+    h = _history()
+    _feed(h, p.advance(h), HOME)
+    _feed(h, p.advance(h), RESULTS)
+    _feed(h, p.advance(h), DONE)
+    send = p.advance(h)
+    assert send.tool_calls[1].arguments["name"] == "channel/send"
+    _feed(h, send, _thread(("all done", 0.75, 0.3)))
+
+    summary = _finish(p, h, p.advance(h))
+    assert "completed" in summary
+    assert not suspension.suspended_path().exists()
+
+
+def test_check_warns_when_an_ask_without_resume_precedes_a_screen_move() -> None:
+    flow = TWO_ASKS.replace("    resume: open-app\n", "") + (
+        "  - page: results\n  - do: wrap\n    macro: add-cart\n"
+        '    with: {message: "x"}\n  - page: done\n'
+    )
+    write_channel(CHANNEL_OPEN)
+    write_pack(playbooks={"two": flow})
+    spec, pack = setup.load_spec("demo", "two", require_live=False)
+
+    warnings = [w for w in setup.readiness_warnings(spec, pack) if "resume" in w]
+
+    assert len(warnings) == 1 and "ask 'handoff'" in warnings[0]
+
+
 def test_recovery_never_runs_with_consent_bound() -> None:
     # Money keeps the hard handover: a deviation after the user consented
     # is the model's, never a hand's.
@@ -1243,7 +1387,7 @@ def test_payment_fire_writes_the_doctrine_purchase_log_line() -> None:
 
     entries = daylog.load_recent_entries(5)
 
-    assert "conductor: demo: paid ¥45 (playbook demo/pay)" in entries
+    assert "conductor: demo: payment ¥45 fired (playbook demo/pay)" in entries
 
 
 def test_suspend_writes_the_close_routine_log_line() -> None:
