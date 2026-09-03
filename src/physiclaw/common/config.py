@@ -149,6 +149,11 @@ class EngineConfig:
     # one turn, each spaced by `retry_backoff_seconds`.
     provider_retry_attempts: int = 3
     retry_backoff_seconds: float = 5.0
+    # HTTP read timeout for one provider call (seconds). Reasoning models
+    # spend 80–130s on a decision over a full screen listing (field-
+    # measured on kimi-k2.6), so a 120s ceiling turned a slow answer into
+    # a transient error, a retry, and a conductor handover.
+    provider_timeout_seconds: float = 300.0
     wait_default_minutes: int = 15
     react_cooldown_seconds: float = 6.0
     stale_tick_threshold: int = 8
@@ -268,7 +273,7 @@ class ConductorConfig:
     ``micro_confidence`` is the escalation floor — a validated answer
     reporting less hands the playbook over to the model instead of
     guessing. Tune by replaying recorded listings
-    (`physiclaw conductor micro`)."""
+    (`physiclaw playbooks replay`)."""
 
     micro_model: str = ""
     micro_confidence: float = 0.6

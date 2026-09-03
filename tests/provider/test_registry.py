@@ -174,6 +174,21 @@ def test_make_provider_passes_model_id_through(
     assert p.model == "claude-opus-4-7"
 
 
+def test_make_provider_applies_the_configured_read_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A reasoning model can spend minutes on one decision; the ceiling is
+    # the operator's knob, not a constant buried in the client.
+    from physiclaw.common.config import CONFIG
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr(CONFIG.engine, "provider_timeout_seconds", 42.0)
+
+    p = make_provider("openai", "gpt-5")
+
+    assert p._client.timeout.read == 42.0
+
+
 def test_make_provider_raises_value_error_for_unknown_id() -> None:
     with pytest.raises(
         ValueError,

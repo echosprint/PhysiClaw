@@ -77,6 +77,7 @@ def test_config_error_is_value_error_subclass() -> None:
         ("engine", "max_session_seconds", 3600),
         ("engine", "max_attempts", 3),
         ("engine", "retry_backoff_seconds", 5.0),
+        ("engine", "provider_timeout_seconds", 300.0),
         ("engine", "wait_default_minutes", 15),
         ("engine", "react_cooldown_seconds", 6.0),
         ("engine", "stale_tick_threshold", 8),

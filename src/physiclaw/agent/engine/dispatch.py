@@ -244,6 +244,8 @@ def _run_guards(
     at Policies construction) in declared order; the first Block wins and
     becomes an error ToolResult."""
     for guard in guards:
+        if guard.MODEL_TURNS_ONLY and session.synthesized_turn:
+            continue
         block = guard.check(session, call, turn=turn)
         if block is None:
             continue

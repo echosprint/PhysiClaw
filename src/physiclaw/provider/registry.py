@@ -66,7 +66,10 @@ def make_provider(provider_id: str, model_id: str) -> Provider:
 
     `model_id` is passed through verbatim — the provider's API rejects
     unknown ids on the first chat. Credentials come from the provider's
-    own `_api_key()` lookup in `__init__`."""
+    own `_api_key()` lookup in `__init__`; the HTTP read timeout is the
+    one configured knob (`[engine] provider_timeout_seconds`)."""
+    from physiclaw.common.config import CONFIG
+
     cls = _PROVIDER_CLASSES.get(provider_id)
     if cls is None:
         raise ValueError(
@@ -74,4 +77,4 @@ def make_provider(provider_id: str, model_id: str) -> Provider:
             f"(known in-process: {', '.join(_PROVIDER_CLASSES)}; "
             f"or use {CLAUDE_CODE_ID!r} for the subprocess engine)"
         )
-    return cls(model=model_id)
+    return cls(model=model_id, timeout=CONFIG.engine.provider_timeout_seconds)

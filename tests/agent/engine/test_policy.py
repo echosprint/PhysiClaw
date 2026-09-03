@@ -399,6 +399,31 @@ def test_burned_macro_blocks_a_rerun_after_an_abort() -> None:
     assert "already aborted this session" in block.content
 
 
+def test_burned_macro_lets_a_synthesized_turn_rerun_an_aborted_macro() -> None:
+    # A conductor recover hand (force_quit) re-runs the route's `start`
+    # macro by declared design; the walk bounds that, not this guard —
+    # the guard runner skips MODEL_TURNS_ONLY guards on a synthesized turn.
+    from types import SimpleNamespace
+
+    from physiclaw.agent.engine.dispatch import _run_guards
+
+    session = Session()
+    session.failed_macros.add("taobao/buy.app")
+    session.synthesized_turn = True
+    guard = policy_mod.BurnedMacro()
+    assert guard.MODEL_TURNS_ONLY is True
+
+    blocked = _run_guards(
+        SimpleNamespace(tr=None),
+        session,
+        _macro_call(name="taobao/buy.app"),
+        2,
+        (guard,),
+    )
+
+    assert blocked is None
+
+
 def test_burned_macro_blocks_start_at_retries_too() -> None:
     # A resumed run is still the same stale rehearsal.
     session = Session()
@@ -435,15 +460,20 @@ def test_burned_macro_is_registered_and_runs_before_the_stuck_block() -> None:
 
 def test_plan_gate_stands_down_on_a_synthesized_turn() -> None:
     # The conductor's turns carry no plan and never will — the armed
-    # playbook is their plan. Same call on a model turn stays gated.
+    # playbook is their plan: the guard runner skips the gate on a
+    # synthesized turn. Same call on a model turn stays gated.
+    from types import SimpleNamespace
+
+    from physiclaw.agent.engine.dispatch import _run_guards
+
     gate = policy_mod.PlanGate(layout_incomplete=False, required_after=0)
+    assert gate.MODEL_TURNS_ONLY is True
     session = Session()
     session.model_turns = 5  # well past the threshold, plan undrafted
 
     session.synthesized_turn = True
-    assert (
-        gate.check(session, ToolCall(id="c", name="tap", arguments={}), turn=5) is None
-    )
+    call = ToolCall(id="c", name="tap", arguments={})
+    assert _run_guards(SimpleNamespace(tr=None), session, call, 5, (gate,)) is None
 
     session.synthesized_turn = False
     assert (

@@ -656,9 +656,13 @@ _SPECS: dict[str, _CallSpec] = {
             "A request is FINISHED — never answer it with a playbook — "
             "once the assistant has reported it done or the user "
             "cancelled it; only a request with no such reply after it is "
-            "still outstanding. Re-running a finished task can spend "
-            "money twice, so on any doubt about which it is, answer "
-            '"not_a_task". '
+            "still outstanding. Judge that from THIS thread: the report or "
+            "cancellation must sit after the request here. The Context "
+            "block is background only — it records earlier, separate "
+            "tasks (even for the same product on another day) and never "
+            "finishes a request this thread shows unanswered. Re-running "
+            "a finished task can spend money twice, so on any doubt about "
+            'which it is, answer "not_a_task". '
             "When you answer with a "
             'playbook, ALSO add a fourth field "inputs": an object filling '
             "that playbook's declared inputs from the words of THAT "
