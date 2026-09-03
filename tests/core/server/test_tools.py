@@ -16,7 +16,9 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from mcp.server.fastmcp import Image
+from mcp.server.mcpserver import Image, MCPServer
+from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
+from mcp.types import ImageContent, TextContent
 
 from physiclaw.core.server import tools as tools_mod
 
@@ -392,12 +394,12 @@ async def test_gesture_without_view_falls_back_to_text(registered) -> None:
 
 @pytest.mark.asyncio
 async def test_tap_propagates_hardware_error(registered) -> None:
-    """Hardware exceptions surface unchanged so the engine sees the
-    real error, not a string-wrapped placeholder."""
+    """A declared rig failure crosses the boundary as `ToolError` with its
+    text intact: the SDK forwards that text, and the engine reads it."""
     mcp, pl = registered
     pl.tap.side_effect = RuntimeError("stylus offline")
 
-    with pytest.raises(RuntimeError, match=r"^stylus offline$"):
+    with pytest.raises(ToolError, match=r"^stylus offline$"):
         await mcp.tools["tap"]([0, 0, 1, 1])
 
 
@@ -406,7 +408,7 @@ async def test_peek_propagates_camera_error(registered) -> None:
     mcp, pl = registered
     pl.peek.side_effect = RuntimeError("camera busy")
 
-    with pytest.raises(RuntimeError, match=r"^camera busy$"):
+    with pytest.raises(ToolError, match=r"^camera busy$"):
         await mcp.tools["peek"]()
 
 
@@ -415,19 +417,18 @@ async def test_screenshot_propagates_timeout_error(registered) -> None:
     mcp, pl = registered
     pl.screenshot.side_effect = TimeoutError("upload timed out")
 
-    with pytest.raises(TimeoutError, match=r"^upload timed out$"):
+    with pytest.raises(ToolError, match=r"^upload timed out$"):
         await mcp.tools["screenshot"]()
 
 
 @pytest.mark.asyncio
 async def test_sequence_propagates_mid_flight_failure(registered) -> None:
     """`sequence` docstring promises stop-at-first-failure, no rollback.
-    The orchestrator surfaces the exception as-is; the tool wrapper
-    must not swallow it into a string."""
+    The orchestrator's exception text must reach the caller verbatim."""
     mcp, pl = registered
     pl.sequence.side_effect = ValueError("step 2: arm jammed")
 
-    with pytest.raises(ValueError, match=r"^step 2: arm jammed$"):
+    with pytest.raises(ToolError, match=r"^step 2: arm jammed$"):
         await mcp.tools["sequence"](
             {"tool_name": "tap", "arg": [0, 0, 1, 1]},
         )
@@ -438,53 +439,74 @@ async def test_send_to_clipboard_propagates_bridge_error(registered) -> None:
     mcp, pl = registered
     pl.send_to_clipboard.side_effect = ConnectionError("bridge gone")
 
-    with pytest.raises(ConnectionError, match=r"^bridge gone$"):
+    with pytest.raises(ToolError, match=r"^bridge gone$"):
         await mcp.tools["send_to_clipboard"]("x")
 
 
-# ---------- real FastMCP serialization (regression) ----------
+# ---------- real MCPServer serialization (regression) ----------
 #
 # The FakeMcp harness above calls tool functions directly, bypassing
-# FastMCP's result conversion — which is exactly where a `list | str`
+# MCPServer's result conversion — which is exactly where a `list | str`
 # return annotation once made the SDK build a structured-output model
 # and choke on `Image` ("Unable to serialize unknown type"). These tests
-# push gesture/view replies through a REAL FastMCP instance.
+# push gesture/view replies through a REAL MCPServer instance.
+
+
+@pytest.fixture
+def real():
+    """A real `MCPServer` with every tool registered over a mock rig."""
+    mcp = MCPServer("t")
+    pl = MagicMock()
+    tools_mod.register(mcp, pl)
+    return mcp, pl
 
 
 @pytest.mark.asyncio
-async def test_real_fastmcp_serializes_gesture_reply() -> None:
-    from mcp.server.fastmcp import FastMCP
-    from mcp.types import ImageContent, TextContent
-
-    mcp = FastMCP("t")
-    pl = MagicMock()
+async def test_real_mcpserver_serializes_gesture_reply(real) -> None:
+    mcp, pl = real
     pl.tap.return_value = _gr("Tapped at bbox [...] | screen: changed")
-    tools_mod.register(mcp, pl)
 
-    blocks = await mcp.call_tool("tap", {"bbox": [0.1, 0.1, 0.2, 0.2]})
+    blocks = (await mcp.call_tool("tap", {"bbox": [0.1, 0.1, 0.2, 0.2]})).content
 
     assert isinstance(blocks[0], TextContent)
     assert blocks[0].text.startswith("Tapped at bbox")
     assert isinstance(blocks[1], ImageContent)
     assert isinstance(blocks[2], TextContent)
-    assert blocks[2].text == "LISTING"
 
 
 @pytest.mark.asyncio
-async def test_real_fastmcp_serializes_text_fallback_and_view_tools() -> None:
-    from mcp.server.fastmcp import FastMCP
-    from mcp.types import ImageContent, TextContent
-
-    mcp = FastMCP("t")
-    pl = MagicMock()
+async def test_real_mcpserver_serializes_text_fallback_and_view_tools(real) -> None:
+    mcp, pl = real
     pl.go_back.return_value = _gr("Went back", with_view=False)
     pl.peek.return_value = (b"PEEK_JPG", "peek-listing")
-    tools_mod.register(mcp, pl)
 
-    fallback = await mcp.call_tool("go_back", {})
+    fallback = (await mcp.call_tool("go_back", {})).content
     assert isinstance(fallback[0], TextContent)
     assert tools_mod.NO_VIEW_FALLBACK in fallback[0].text
 
-    view = await mcp.call_tool("peek", {})
+    view = (await mcp.call_tool("peek", {})).content
     assert isinstance(view[0], ImageContent)
     assert isinstance(view[1], TextContent)
+
+
+@pytest.mark.asyncio
+async def test_real_mcpserver_forwards_tool_failure_text(real) -> None:
+    """A declared rig failure crosses the wire verbatim, not as the SDK's
+    masked "Error executing tool tap"."""
+    mcp, pl = real
+    pl.tap.side_effect = RuntimeError("stylus offline")
+
+    with pytest.raises(ToolError, match=r"stylus offline$") as exc:
+        await mcp.call_tool("tap", {"bbox": [0.1, 0.1, 0.2, 0.2]})
+    assert not isinstance(exc.value, UnexpectedToolError)
+
+
+@pytest.mark.asyncio
+async def test_real_mcpserver_keeps_a_crash_masked(real) -> None:
+    """A bug outside the declared failure types keeps the SDK's masking."""
+    mcp, pl = real
+    pl.tap.side_effect = AttributeError("'NoneType' object has no attribute 'x'")
+
+    with pytest.raises(UnexpectedToolError) as exc:
+        await mcp.call_tool("tap", {"bbox": [0.1, 0.1, 0.2, 0.2]})
+    assert "NoneType" not in str(exc.value)

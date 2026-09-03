@@ -429,7 +429,7 @@ def test_format_args_send_to_clipboard_handles_missing_text() -> None:
 
 
 def test_format_args_sequence_summarizes_tool_names() -> None:
-    # Real FastMCP shape: ONE kwarg holding the list of step dicts. The
+    # Real MCPServer shape: ONE kwarg holding the list of step dicts. The
     # old test passed steps as separate kwargs — an encoding the tool
     # never receives — which let every live batch log as "0 steps".
     out = _format_args(

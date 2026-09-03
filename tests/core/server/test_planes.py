@@ -129,3 +129,21 @@ def test_build_bridge_app_is_the_plain_phone_app() -> None:
     from starlette.applications import Starlette
 
     assert isinstance(build_bridge_app(PhoneApp()), Starlette)
+
+
+def test_build_control_app_hands_the_bind_host_to_the_sdk() -> None:
+    """`streamable_http_app(host=...)` decides the SDK's own Host
+    allowlist on `/mcp`: a loopback host installs a loopback-only list,
+    anything else installs none. Left at the SDK default (127.0.0.1), a
+    `--host 0.0.0.0` server would 421 every LAN client on `/mcp` while
+    the ControlGate in front of it stood down."""
+    from unittest.mock import MagicMock
+
+    from physiclaw.core.server.planes import build_control_app
+
+    mcp = MagicMock()
+    gate = build_control_app(mcp, host="0.0.0.0")
+
+    mcp.streamable_http_app.assert_called_once_with(host="0.0.0.0")
+    assert isinstance(gate, ControlGate)
+    assert gate.app is mcp.streamable_http_app.return_value

@@ -24,14 +24,18 @@ dependencies = [
     "pyserial>=3.5",
     "opencv-python>=4.8",
     "numpy>=1.26",
-    # <2: SDK 2.0 removed `mcp.server.fastmcp` (core/server/mcp.py's
-    # import). A fresh `uv tool install` resolves without uv.lock, so an
-    # unbounded spec breaks installs the moment a major ships — 2.0 did
-    # exactly that (0.3.20). Migration to SDK 2.x is its own project.
-    "mcp[cli]>=1.2,<2",
+    # SDK 2 (the 2026-07-28 protocol): `mcp.server.mcpserver`, httpx2 on
+    # the client side, ToolError as the one error text the server forwards
+    # (core/server/tools.py wraps every tool for that). The 1.x line is
+    # security-fixes only. Bounded above: 2.0 broke every 1.x import path,
+    # and a fresh `uv tool install` resolves without uv.lock.
+    "mcp>=2.1,<3",
     # Direct import; [socks] pulls socksio so socks5:// proxies work
     # (physiclaw.common.proxy rewrites Linux VPN clients' socks:// to socks5://).
     "httpx[socks]>=0.27",
+    # Direct import too (agent/engine/mcp_tool.py hands the MCP transport
+    # an httpx2 client); the SDK's own pin is what resolves the version.
+    "httpx2>=2.5",
     "croniter>=6.2.2",
     "rapidocr>=3.7.0",
     "onnxruntime>=1.24.0",

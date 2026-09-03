@@ -1,4 +1,4 @@
-"""FastMCP instance construction.
+"""MCPServer instance construction.
 
 Isolated from `physiclaw.core.server.__init__` so the agent-facing
 instructions prompt has a single, focused home. The instance is imported
@@ -20,8 +20,9 @@ Config is process-constant, so rendering once at import is stable.
 
 from pathlib import Path
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
+from physiclaw import __version__
 from physiclaw.common.doctrine import fill_tokens
 from physiclaw.common.text import read_text
 
@@ -31,11 +32,11 @@ _INSTRUCTIONS = fill_tokens(
 )
 
 
-def build_mcp() -> FastMCP:
-    """A fresh, unwired FastMCP instance — `app.build_server()` uses this
+def build_mcp() -> MCPServer:
+    """A fresh, unwired MCPServer instance — `app.build_server()` uses this
     so each assembly gets its own instance (tools/routes registered twice
     on one instance would collide)."""
-    return FastMCP("physiclaw", instructions=_INSTRUCTIONS)
+    return MCPServer("physiclaw", instructions=_INSTRUCTIONS, version=__version__)
 
 
 mcp = build_mcp()

@@ -1,6 +1,6 @@
 """Pydantic `Annotated` type aliases for MCP tool signatures.
 
-FastMCP propagates the `Field(...)` constraints (ge/le/min_length/etc.)
+MCPServer propagates the `Field(...)` constraints (ge/le/min_length/etc.)
 into each tool's JSONSchema, which the model sees via the `tools=[...]`
 API. The engine-side validator (src/physiclaw/agent/engine/validator.py)
 enforces the same schema before dispatch AND catches cross-element
@@ -15,7 +15,7 @@ from typing import Annotated
 
 from pydantic import Field
 
-# Each bbox coordinate in [0, 1]. FastMCP emits `minimum`/`maximum` for
+# Each bbox coordinate in [0, 1]. MCPServer emits `minimum`/`maximum` for
 # each item and `min_length`/`max_length` for the outer list. The
 # left<right / top<bottom invariant lives in the engine validator and
 # the orchestrator — see module docstring.

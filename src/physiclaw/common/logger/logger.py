@@ -179,6 +179,13 @@ class _OwnDebugFilter(logging.Filter):
         return record.levelno >= logging.INFO or record.name.startswith("physiclaw")
 
 
+# Each request through these stacks logs one INFO "HTTP Request:" line:
+# httpx/httpcore carry the providers and the localhost status probes,
+# httpx2/httpcore2 the MCP SDK's client. At 1 Hz (the ready watcher) that
+# floods a DEBUG daily file, so every process quiets them to WARNING.
+_NOISY_HTTP_LOGGERS = ("httpx", "httpcore", "httpx2", "httpcore2")
+
+
 def setup_logging(
     tag: str,
     level: int = logging.INFO,
@@ -216,6 +223,8 @@ def setup_logging(
         except OSError:
             pass  # unwritable dir → stderr-only; better than not starting
     logging.basicConfig(level=logging.DEBUG, handlers=handlers, force=True)
+    for name in _NOISY_HTTP_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
 
 
 class _SessionCaptureHandler(logging.StreamHandler):
@@ -493,7 +502,7 @@ def logged(fn: AsyncFn) -> AsyncFn:
     otherwise read as an identical `tool X(…) — 0.0s`). Cancellation
     (BaseException) propagates unlogged — it isn't a tool completion."""
 
-    # FastMCP dispatches tool calls with keyword args only (positional
+    # MCPServer dispatches tool calls with keyword args only (positional
     # args land in `args` but never in practice); the log reads kwargs.
     @wraps(fn)
     async def wrapper(*args, **kwargs):

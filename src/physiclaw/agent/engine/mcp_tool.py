@@ -13,7 +13,7 @@ from contextlib import AsyncExitStack
 from typing import Any
 from urllib.parse import urlparse
 
-import httpx
+import httpx2
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 from mcp.types import ImageContent, TextContent
@@ -116,10 +116,10 @@ class McpClient:
             log.debug("MCP teardown after failed connect", exc_info=True)
 
     async def _connect(self) -> "McpClient":
-        # Hand the transport our own httpx client so `trust_env` follows the
+        # Hand the transport our own httpx2 client so `trust_env` follows the
         # same per-platform proxy policy as every other localhost client (the
         # status poll, phone-watch hook, doctor). The MCP server is this
-        # runtime's parent on 127.0.0.1; with httpx's default trust_env=True a
+        # runtime's parent on 127.0.0.1; with httpx2's default trust_env=True a
         # configured system proxy (common on Windows) hijacks that localhost
         # request and the initialize() handshake hangs forever. We own the
         # client, so our stack closes it — entered first so it outlives the
@@ -127,13 +127,13 @@ class McpClient:
         # create_mcp_http_client defaults.
         await self._probe()  # legible error before the transport swallows it
         http_client = await self._stack.enter_async_context(
-            httpx.AsyncClient(
+            httpx2.AsyncClient(
                 follow_redirects=True,
-                timeout=httpx.Timeout(30.0, read=300.0),
+                timeout=httpx2.Timeout(30.0, read=300.0),
                 trust_env=platform.TRUST_PROXY_ENV,
             )
         )
-        read, write, _ = await self._stack.enter_async_context(
+        read, write = await self._stack.enter_async_context(
             streamable_http_client(self._url, http_client=http_client)
         )
         self._session = await self._stack.enter_async_context(
@@ -156,7 +156,7 @@ class McpClient:
             {
                 "name": t.name,
                 "description": t.description or "",
-                "input_schema": t.inputSchema,
+                "input_schema": t.input_schema,
             }
             for t in result.tools
         ]
@@ -180,7 +180,7 @@ class McpClient:
                 blocks.append(
                     {
                         "type": "image",
-                        "mime_type": c.mimeType,
+                        "mime_type": c.mime_type,
                         "data": c.data,
                     }
                 )
@@ -188,7 +188,7 @@ class McpClient:
                 # Unknown block type — stringify for debugging. MCP may grow
                 # resource/embedded types later; we don't fail on those.
                 blocks.append({"type": "text", "text": repr(c)})
-        if getattr(result, "isError", False):
+        if getattr(result, "is_error", False):
             joined = " | ".join(
                 b.get("text", "") for b in blocks if b["type"] == "text"
             )

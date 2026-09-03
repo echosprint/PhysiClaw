@@ -1,7 +1,7 @@
 """
 PhysiClaw MCP Server.
 
-The FastMCP instance lives in `physiclaw.core.server.mcp`; assembly (singletons,
+The MCPServer instance lives in `physiclaw.core.server.mcp`; assembly (singletons,
 tool/route registration) lives in `physiclaw.core.server.app`. This package
 re-exports the public surface — `mcp`, `physiclaw`, `shutdown` — so callers
 can keep doing `from physiclaw.core.server import mcp, shutdown`.

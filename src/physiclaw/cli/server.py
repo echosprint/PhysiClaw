@@ -152,12 +152,6 @@ def server(
     # session dir as mcp.log (the runtime publishes which session is active).
     attach_server_mcp_tee()
     logging.getLogger("mcp").setLevel(logging.WARNING)
-    # Silence per-request logs from httpx/httpcore (same as the runtime's
-    # launcher): the mcp-mode ready watcher probes /api/status at 1 Hz,
-    # and each probe would otherwise print an INFO "HTTP Request:" line —
-    # and flood the DEBUG-level daily file for as long as ready takes.
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("httpcore").setLevel(logging.WARNING)
     # Phones opening the bridge URL probe https:// first (Safari's HTTPS
     # upgrade, VPN apps); the TLS bytes hitting our plaintext port make
     # uvicorn warn "Invalid HTTP request received." once per attempt —

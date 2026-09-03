@@ -8,7 +8,7 @@ module is the single source. It also owns the non-gesture tool names the
 agent layer references (PEEK, SEND_TO_CLIPBOARD, UNLOCK_PHONE — macro whitelists,
 recovery views, and the conductor's boot), so those renames fail the same pin, and RUN_MACRO: the
 one LOCAL (non-MCP) tool the classifiers must name, deliberately outside
-that pin, with a test asserting the exclusion. FastMCP registration in
+that pin, with a test asserting the exclusion. MCPServer registration in
 `core/server/tools.py` deliberately does NOT consume it: names there
 are function identifiers, and `tests/common/test_gesture_vocab.py`
 pins registration ⊇ vocabulary instead, so a rename fails red in CI

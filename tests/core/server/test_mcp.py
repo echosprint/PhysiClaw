@@ -1,12 +1,12 @@
-"""Tests for `physiclaw.core.server.mcp` — FastMCP instance.
+"""Tests for `physiclaw.core.server.mcp` — MCPServer instance.
 
 The module reads `PHYSICLAW.md` from disk at import time and constructs
-a `FastMCP("physiclaw", instructions=...)`. The instructions string is
+a `MCPServer("physiclaw", instructions=...)`. The instructions string is
 sent to MCP clients at the initialization handshake — verifying it
 loads correctly and isn't empty matters for cross-tool reasoning.
 
 Note on imports: `physiclaw.core.server.mcp` (the module) gets shadowed
-by `physiclaw.core.server.mcp` (the FastMCP instance) once
+by `physiclaw.core.server.mcp` (the MCPServer instance) once
 `physiclaw.core.server.__init__` runs. We use `importlib.import_module`
 to get the module object reliably.
 """
@@ -16,13 +16,13 @@ from __future__ import annotations
 import importlib
 from pathlib import Path
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 mcp_mod = importlib.import_module("physiclaw.core.server.mcp")
 
 
-def test_mcp_is_fastmcp_instance() -> None:
-    assert isinstance(mcp_mod.mcp, FastMCP)
+def test_mcp_is_mcpserver_instance() -> None:
+    assert isinstance(mcp_mod.mcp, MCPServer)
 
 
 def test_mcp_instance_name() -> None:
@@ -80,3 +80,11 @@ def test_pkg_root_resolves_to_physiclaw_package() -> None:
     here silently load the wrong file at runtime."""
     assert mcp_mod._PKG_ROOT.name == "physiclaw"
     assert (mcp_mod._PKG_ROOT / "agent" / "context" / "PHYSICLAW.md").exists()
+
+
+def test_server_reports_the_package_version() -> None:
+    """Clients show `serverInfo.version`; without an explicit value the
+    SDK reports an empty string (1.x reported its own SDK version)."""
+    from physiclaw import __version__
+
+    assert mcp_mod.mcp.version == __version__

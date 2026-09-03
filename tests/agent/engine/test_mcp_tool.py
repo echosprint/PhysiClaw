@@ -94,7 +94,7 @@ def patched_transport(mocker, fake_session):
     @asynccontextmanager
     async def fake_http(url: str, *, http_client=None):
         captured["http_client"] = http_client
-        yield ("read", "write", "extra")
+        yield ("read", "write")
 
     mocker.patch.object(mcp_tool, "streamable_http_client", fake_http)
     # The connect pre-flight opens a real socket; a faked transport means
@@ -165,9 +165,9 @@ async def test_list_tools_returns_normalized_dicts(patched_transport) -> None:
     patched_transport.list_tools.return_value = SimpleNamespace(
         tools=[
             SimpleNamespace(
-                name="tap", description="Tap", inputSchema={"type": "object"}
+                name="tap", description="Tap", input_schema={"type": "object"}
             ),
-            SimpleNamespace(name="peek", description=None, inputSchema={}),
+            SimpleNamespace(name="peek", description=None, input_schema={}),
         ]
     )
 
@@ -198,7 +198,7 @@ async def test_call_tool_normalizes_text_blocks(patched_transport) -> None:
         content=[
             TextContent(type="text", text="hello"),
         ],
-        isError=False,
+        is_error=False,
     )
 
     async with mcp_tool.McpClient() as c:
@@ -211,9 +211,9 @@ async def test_call_tool_normalizes_text_blocks(patched_transport) -> None:
 async def test_call_tool_normalizes_image_blocks(patched_transport) -> None:
     patched_transport.call_tool.return_value = SimpleNamespace(
         content=[
-            ImageContent(type="image", mimeType="image/png", data="aGk="),
+            ImageContent(type="image", mime_type="image/png", data="aGk="),
         ],
-        isError=False,
+        is_error=False,
     )
 
     async with mcp_tool.McpClient() as c:
@@ -237,7 +237,7 @@ async def test_call_tool_image_shaped_duck_falls_to_repr(
 
     patched_transport.call_tool.return_value = SimpleNamespace(
         content=[_ImgBlob()],
-        isError=False,
+        is_error=False,
     )
 
     async with mcp_tool.McpClient() as c:
@@ -258,7 +258,7 @@ async def test_call_tool_unknown_block_type_stringified_as_text(
 
     patched_transport.call_tool.return_value = SimpleNamespace(
         content=[_Mystery()],
-        isError=False,
+        is_error=False,
     )
 
     async with mcp_tool.McpClient() as c:
@@ -271,7 +271,7 @@ async def test_call_tool_unknown_block_type_stringified_as_text(
 async def test_call_tool_passes_args_to_session(patched_transport) -> None:
     patched_transport.call_tool.return_value = SimpleNamespace(
         content=[],
-        isError=False,
+        is_error=False,
     )
 
     async with mcp_tool.McpClient() as c:
@@ -288,7 +288,7 @@ async def test_call_tool_uses_empty_dict_when_args_none(
 ) -> None:
     patched_transport.call_tool.return_value = SimpleNamespace(
         content=[],
-        isError=False,
+        is_error=False,
     )
 
     async with mcp_tool.McpClient() as c:
@@ -307,7 +307,7 @@ async def test_call_tool_raises_runtime_error_when_is_error_true(
             TextContent(type="text", text="bad arg"),
             TextContent(type="text", text="bbox missing"),
         ],
-        isError=True,
+        is_error=True,
     )
 
     async with mcp_tool.McpClient() as c:
@@ -364,7 +364,7 @@ async def test_list_tools_cached_caches_first_result(
 ) -> None:
     patched_transport.list_tools.return_value = SimpleNamespace(
         tools=[
-            SimpleNamespace(name="tap", description="Tap", inputSchema={}),
+            SimpleNamespace(name="tap", description="Tap", input_schema={}),
         ]
     )
 

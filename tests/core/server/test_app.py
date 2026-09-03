@@ -2,7 +2,7 @@
 
 Importing the module has side effects: it constructs the singleton
 PhysiClaw + bridge state, attaches the bridge, and wires every
-register_* function onto the FastMCP instance. These tests verify the
+register_* function onto the MCPServer instance. These tests verify the
 wiring without re-importing (which would fight pytest's import cache).
 """
 
@@ -65,7 +65,7 @@ def test_calibration_starts_empty_at_import() -> None:
 
 def test_build_server_returns_isolated_assembly() -> None:
     """Each build_server() call wires a fresh, isolated set of state
-    objects on a fresh FastMCP — nothing shared with the module default."""
+    objects on a fresh MCPServer — nothing shared with the module default."""
     from physiclaw.core import PhysiClaw
     from physiclaw.core.server import app
 
@@ -106,7 +106,7 @@ def test_shutdown_delegates_to_orchestrator(mocker) -> None:
 
 
 def test_mcp_has_tools_registered_after_import() -> None:
-    """All five register_* fns ran. We can't easily inspect FastMCP's
+    """All five register_* fns ran. We can't easily inspect MCPServer's
     internal route table here, but we can confirm at least one of the
     tool functions is callable on the mcp instance via the public
     interface (the routes were wired before any test ran)."""
@@ -114,7 +114,7 @@ def test_mcp_has_tools_registered_after_import() -> None:
     from physiclaw.core.server.mcp import mcp
 
     assert app.mcp is mcp
-    # FastMCP exposes registered tools via list_tools() / its internal
+    # MCPServer exposes registered tools via list_tools() / its internal
     # _tool_manager. Just check the instance is alive.
     assert mcp is not None
 

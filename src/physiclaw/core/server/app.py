@@ -32,7 +32,7 @@ from physiclaw.core.server.tools import register as _register_tools
 from physiclaw.core.server.watch import register as _register_watch
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server.mcpserver import MCPServer
 
 log = logging.getLogger(__name__)
 
@@ -45,18 +45,18 @@ class ServerBundle:
     bridge: BridgeState
     calib: CalibrationState
     phone: PageState
-    mcp: "FastMCP"
+    mcp: "MCPServer"
     phone_app: PhoneApp
 
 
-def build_server(mcp_instance: "FastMCP | None" = None) -> ServerBundle:
+def build_server(mcp_instance: "MCPServer | None" = None) -> ServerBundle:
     """Construct and wire a complete server assembly.
 
     Each call returns a fresh, isolated wiring (state objects + tool and
     route registrations), so tests can assemble a server without
     touching the module-level default. ``mcp_instance`` lets the default
     assembly reuse the ``core.server.mcp`` singleton; omitted, a fresh
-    FastMCP is built (registering twice on one instance would collide).
+    MCPServer is built (registering twice on one instance would collide).
 
     Calibration starts empty. The on-disk bundle at
     `~/.physiclaw/calibration/bundle.json` is loaded ONLY by
@@ -113,6 +113,6 @@ def shutdown() -> None:
 
 def build_apps(host: str = "127.0.0.1") -> tuple[ControlGate, Starlette]:
     """(control_asgi, bridge_asgi) — built on demand by `cli/server.py`.
-    `streamable_http_app()` is lazy-init inside FastMCP, so this is safe
+    `streamable_http_app()` is lazy-init inside MCPServer, so this is safe
     to call once serving is about to start. `host` is the control bind."""
     return build_control_app(mcp, host), build_bridge_app(_phone_app)

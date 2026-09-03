@@ -17,7 +17,7 @@ reports: phase gate — accepted only while a calibration step has a
 visual on screen; see ``bridge/handler.py``), and hostile-Wi-Fi safety
 is a transport problem (Tailscale/WireGuard), not a token problem.
 
-FastMCP's own ``transport_security`` covers only the ``/mcp`` route —
+MCPServer's own ``transport_security`` covers only the ``/mcp`` route —
 ``@mcp.custom_route`` routes are explicitly exempt from SDK auth. So
 instead of ``mcp.run()`` we take ``streamable_http_app()`` (a plain
 Starlette app) and wrap it in ``ControlGate``, which validates the Host
@@ -38,7 +38,7 @@ from physiclaw.common.config import WILDCARD_HOSTS
 from physiclaw.common.loopback import LOOPBACK_HOST_HEADERS
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server.mcpserver import MCPServer
 
 log = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ PHONE_PLANE_PATHS = frozenset(
 
 
 class PhoneApp:
-    """Route collector with FastMCP's ``custom_route`` decorator shape.
+    """Route collector with MCPServer's ``custom_route`` decorator shape.
 
     Lets ``register_phone`` in each feature module read identically to its
     control-plane sibling; ``build()`` turns the collected routes into the
@@ -129,10 +129,10 @@ class ControlGate:
         return await self.app(scope, receive, send)
 
 
-def build_control_app(mcp: "FastMCP", host: str = "127.0.0.1") -> ControlGate:
-    """The loopback ASGI app: FastMCP's Starlette app (``/mcp`` + every
+def build_control_app(mcp: "MCPServer", host: str = "127.0.0.1") -> ControlGate:
+    """The loopback ASGI app: MCPServer's Starlette app (``/mcp`` + every
     ``custom_route``) behind the ControlGate."""
-    return ControlGate(mcp.streamable_http_app(), host)
+    return ControlGate(mcp.streamable_http_app(host=host), host)
 
 
 def build_bridge_app(phone_app: PhoneApp) -> Starlette:

@@ -5,7 +5,7 @@ shim imports `launch` from here).
 
 Spawned as a subprocess by `physiclaw.main` so the hook loop runs
 out-of-process from the MCP server. This isolates long-running hook work
-(claude -p subprocess, or the in-process engine) from the FastMCP event
+(claude -p subprocess, or the in-process engine) from the MCPServer event
 loop.
 
 Two engines, one hook loop, one config knob:
@@ -151,9 +151,6 @@ def launch() -> None:
         logging.DEBUG if args.verbose else logging.INFO,
         file_dir=paths.runtime_log_dir(),
     )
-    # Silence noisy per-request logs from httpx/httpcore.
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
     if provider_id == CLAUDE_CODE_ID:
         from physiclaw.agent.claude import spawn_claude

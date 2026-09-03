@@ -11,7 +11,7 @@ its own; param semantics and return shape go in the body below.
 All tools are async — blocking hardware I/O runs in a thread pool via
 asyncio.to_thread() so the event loop stays free for HTTP routes.
 
-Source order here is wire order. FastMCP registers tools in decorator-
+Source order here is wire order. MCPServer registers tools in decorator-
 call order (module top-to-bottom), and the MCP `list_tools()` RPC
 replays them in that order. The engine concatenates MCP tools + local
 tools in `tool_schemas`, so the order in this file directly determines
@@ -23,14 +23,17 @@ Layering: each tool body is ONE core call + ONE reply step (a
 `_*_reply` adapter, or a trailing hint on text-only tools) — no other
 logic. The core stays transport-agnostic (it returns
 bytes/str/GestureResult, never MCP types); this module is the MCP
-boundary, so wire shapes, the `Image` type, and the hint text they
-carry live here and nowhere deeper.
+boundary, so wire shapes, the `Image` type, the hint text they carry,
+and the `ToolError` translation (`_boundary`) live here and nowhere
+deeper.
 """
 
 import asyncio
+import functools
 from typing import Literal
 
-from mcp.server.fastmcp import FastMCP, Image
+from mcp.server.mcpserver import Image, MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 
 from physiclaw.common.dumps import save_tool_call
 from physiclaw.common.logger import logged
@@ -99,13 +102,42 @@ def _gesture_reply(name: str, res: GestureResult, hint: str) -> str | list:
     return [text, *_view_reply(name, res.jpeg, res.listing)]
 
 
-def register(mcp: FastMCP, physiclaw: PhysiClaw) -> None:
-    """Register every MCP tool on the given FastMCP instance."""
+# The rig's declared failure vocabulary. `HardwareError` and
+# `ClipboardSyncError` are RuntimeErrors; `TimeoutError`, `ConnectionError`,
+# and pyserial's `SerialException` are OSErrors. Everything else that
+# escapes a tool body is a bug, not a failure the model can act on.
+_SURFACED = (RuntimeError, ValueError, OSError)
+
+
+def _boundary(fn):
+    """The tool boundary: log the call, then carry a failure's text out.
+
+    The SDK forwards only `ToolError` text; a bare "Error executing tool
+    <name>" is all a client sees of anything else. The agent, the
+    conductor, and every external client read that text ("Hardware not
+    set up", "stylus offline"), so the rig's declared failures re-raise
+    verbatim. Anything else is a bug and keeps the SDK's masking: the
+    traceback is logged once at ERROR, and the model gets no fragment
+    of it to act on."""
+    logged_fn = logged(fn)
+
+    @functools.wraps(fn)
+    async def wrapper(*args, **kwargs):
+        try:
+            return await logged_fn(*args, **kwargs)
+        except _SURFACED as e:
+            raise ToolError(str(e)) from e
+
+    return wrapper
+
+
+def register(mcp: MCPServer, physiclaw: PhysiClaw) -> None:
+    """Register every MCP tool on the given MCPServer instance."""
 
     # ─── See ─────────────────────────────────────────────────
 
     @mcp.tool(structured_output=False)
-    @logged
+    @_boundary
     async def peek() -> list:
         """Fresh look at the screen (~4s, camera, non-mutating) — orient when you have no current view.
 
@@ -122,7 +154,7 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw) -> None:
         return _view_reply("peek", jpeg, listing)
 
     @mcp.tool(structured_output=False)
-    @logged
+    @_boundary
     async def screenshot() -> list:
         """Phone's pixel-perfect capture (~12s, MUTATING) — escalate when peek misses the target.
 
@@ -145,7 +177,7 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw) -> None:
     # ─── Act ─────────────────────────────────────────────────
 
     @mcp.tool(structured_output=False)
-    @logged
+    @_boundary
     async def tap(bbox: Bbox) -> list | str:
         """Tap once at the bbox center — buttons, links, list items, dismissing dialogs.
 
@@ -164,7 +196,7 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw) -> None:
         return _gesture_reply("tap", res, HINT_VIEW_AFTER_TAP)
 
     @mcp.tool(structured_output=False)
-    @logged
+    @_boundary
     async def double_tap(bbox: Bbox) -> list | str:
         """Two quick taps (~150ms apart) at the bbox center — for zoom or word-select.
 
@@ -176,7 +208,7 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw) -> None:
         return _gesture_reply("double_tap", res, HINT_VIEW_AFTER_DOUBLE_TAP)
 
     @mcp.tool(structured_output=False)
-    @logged
+    @_boundary
     async def long_press(bbox: Bbox) -> list | str:
         """Press and hold ~1.2s at the bbox center — context menus, edit mode, paste popover.
 
@@ -192,7 +224,7 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw) -> None:
     # ─── Swipe ───────────────────────────────────────────────
 
     @mcp.tool(structured_output=False)
-    @logged
+    @_boundary
     async def swipe(
         bbox: Bbox,
         direction: Literal["up", "down", "left", "right"],
@@ -227,7 +259,7 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw) -> None:
     # ─── Navigate ────────────────────────────────────────────
 
     @mcp.tool(structured_output=False)
-    @logged
+    @_boundary
     async def home_screen() -> list | str:
         """Return to the iPhone home screen — exit any app to a known launch pad.
 
@@ -240,7 +272,7 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw) -> None:
         return _gesture_reply("home_screen", res, HINT_VIEW_AFTER_HOME)
 
     @mcp.tool(structured_output=False)
-    @logged
+    @_boundary
     async def go_back() -> list | str:
         """Pop back one screen via the iPhone left-edge swipe gesture.
 
@@ -259,7 +291,7 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw) -> None:
         return _gesture_reply("go_back", res, HINT_VIEW_AFTER_BACK)
 
     @mcp.tool(structured_output=False)
-    @logged
+    @_boundary
     async def force_quit() -> list | str:
         """Force-quit the current app via the iOS app-switcher gesture (~8s) — hard reset when you're stuck on the wrong app page and can't find the entry you need from here.
 
@@ -275,7 +307,7 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw) -> None:
         return _gesture_reply("force_quit", res, HINT_VIEW_AFTER_FORCE_QUIT)
 
     @mcp.tool(structured_output=False)
-    @logged
+    @_boundary
     async def unlock_phone() -> list | str:
         """Unlock the phone with passcode `111111` (~20-40s).
 
@@ -305,7 +337,7 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw) -> None:
     # ─── Text ────────────────────────────────────────────────
 
     @mcp.tool(structured_output=False)
-    @logged
+    @_boundary
     async def send_to_clipboard(text: ClipboardText) -> str:
         """Copy `text` to the phone's clipboard — paste is far faster than typing.
 
@@ -323,7 +355,7 @@ def register(mcp: FastMCP, physiclaw: PhysiClaw) -> None:
     # ─── Sequence ────────────────────────────────────────────
 
     @mcp.tool(structured_output=False)
-    @logged
+    @_boundary
     async def sequence(actions: SequenceActions) -> list | str:
         """Run 2-5 gestures in one call — REQUIRED when every target box is already grounded and no decision is needed between steps.
 

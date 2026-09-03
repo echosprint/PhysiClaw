@@ -19,7 +19,7 @@ from physiclaw.core.calibration.handler import (
 )
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server.mcpserver import MCPServer
 
     from physiclaw.core.orchestration import HardwareRig
 
@@ -27,7 +27,7 @@ log = logging.getLogger(__name__)
 
 
 def register(
-    mcp: "FastMCP",
+    mcp: "MCPServer",
     rig: "HardwareRig",
     bridge: BridgeState,
     calib: CalibrationState,

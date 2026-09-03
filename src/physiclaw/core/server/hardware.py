@@ -18,14 +18,14 @@ from physiclaw.core.server.hardware_setup import (
 )
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server.mcpserver import MCPServer
 
     from physiclaw.core.orchestration import HardwareRig
 
 log = logging.getLogger(__name__)
 
 
-def register(mcp: "FastMCP", rig: "HardwareRig", phone: PageState) -> None:
+def register(mcp: "MCPServer", rig: "HardwareRig", phone: PageState) -> None:
     """Register hardware setup routes."""
 
     @mcp.custom_route("/setup-hardware", methods=["GET"])

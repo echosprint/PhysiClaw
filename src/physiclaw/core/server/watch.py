@@ -17,15 +17,15 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server.mcpserver import MCPServer
 
     from physiclaw.core.orchestration import PhysiClaw
 
 log = logging.getLogger(__name__)
 
 
-def register(mcp: "FastMCP", physiclaw: "PhysiClaw") -> None:
-    """Wire the /api/phone/watch route onto the FastMCP server."""
+def register(mcp: "MCPServer", physiclaw: "PhysiClaw") -> None:
+    """Wire the /api/phone/watch route onto the MCPServer server."""
 
     @mcp.custom_route("/api/phone/watch", methods=["GET"])
     async def _watch(request: Request) -> JSONResponse:  # noqa: ARG001

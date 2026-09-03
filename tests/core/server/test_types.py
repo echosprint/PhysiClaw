@@ -1,8 +1,8 @@
 """Tests for `physiclaw.core.server.types` — Pydantic-Annotated tool types.
 
-`Bbox` and `ClipboardText` are `Annotated` aliases that FastMCP
+`Bbox` and `ClipboardText` are `Annotated` aliases that MCPServer
 propagates into JSONSchema. The constraints (ge/le/min_length/
-max_length) are validated at the tool boundary by FastMCP's Pydantic
+max_length) are validated at the tool boundary by MCPServer's Pydantic
 adapter. Per-element constraints (left < right, top < bottom) live in
 `agent/engine/validator.py` and `core/vision/util.validate_bbox` —
 those are tested separately.

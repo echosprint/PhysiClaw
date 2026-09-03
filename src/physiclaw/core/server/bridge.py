@@ -34,13 +34,13 @@ from physiclaw.core.bridge.handler import (
 from physiclaw.core.server.planes import PhoneApp
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server.mcpserver import MCPServer
 
 log = logging.getLogger(__name__)
 
 
 def register(
-    mcp: "FastMCP",
+    mcp: "MCPServer",
     bridge: BridgeState,
     phone: PageState,
 ) -> None:
@@ -68,7 +68,7 @@ def register_phone(
 ) -> None:
     """Register the phone-facing routes on the LAN bridge app.
 
-    ``app`` exposes the same ``custom_route`` decorator shape as FastMCP
+    ``app`` exposes the same ``custom_route`` decorator shape as MCPServer
     (see ``apps.PhoneApp``) so both planes register identically.
     """
 
