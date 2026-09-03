@@ -14,7 +14,7 @@ waypoint is the start contract either way. A `page:` may carry
 
 Control flow is route order, full stop: moves fall through (past the
 last entry = done), an `ask` falls through once the user approved, a
-`tell` suspends the session and the next wake continues past it. The
+`tell` falls through once its message landed. The
 one thing the compiler must PROVE is about money: an
 `irreversible: payment` move directly follows the `ask` that approves
 it, so consent never desynchronizes from the sheet it quotes.
@@ -134,7 +134,7 @@ _ENTRY_KEYS = {
         "irreversible",
     },
     "ask": {"ask", "approve", "message", "yes", "no", "total", "wait", "resume"},
-    "tell": {"tell", "message", "no"},
+    "tell": {"tell", "message"},
     "activate": {"activate", "limit"},
 }
 
@@ -272,8 +272,7 @@ def compile_route(
             moves.append(_parse_activate(ctx, where, name, entry, current_page))
         else:  # tell
             message, _ = _entry_message(ctx, where, entry, ctx.payloads)
-            no = _reply_words(entry, "no", where) if "no" in entry else []
-            moves.append(TellNode(id=name, message=message, no=tuple(no)))
+            moves.append(TellNode(id=name, message=message))
     if len(moves) > MAX_NODES:
         raise PlaybookError(f"too many moves ({len(moves)} > {MAX_NODES})")
     _check_money(moves)
@@ -898,9 +897,10 @@ def _is_boot(ctx: _Ctx) -> bool:
 
 def _check_boot(ctx: _Ctx, nodes: list[Node]) -> None:
     """The boot's shape: it ends in exactly one `activate` (the baton
-    IS its ending), and it never speaks to the user — an ask or tell
-    before the request is even read would suspend the wake for a reply
-    to nothing. Everything else on it is the ordinary route grammar."""
+    IS its ending), and it never speaks to the user — before the request
+    is even read, an ask would hold for a reply to nothing and a tell
+    would report on nothing. Everything else on it is the ordinary route
+    grammar."""
     if not _is_boot(ctx):
         return
     activates = [n.id for n in nodes if isinstance(n, ActivateNode)]

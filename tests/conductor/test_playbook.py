@@ -452,15 +452,16 @@ def test_agent_context_is_declared_and_checked() -> None:
         )
 
 
-def test_tell_may_declare_its_cancel_words() -> None:
+def test_tell_reads_no_reply() -> None:
+    # A tell is fire-and-forget: it declares no words to read a reply by
+    # (a reply is the next wake's boot to parse), so `no:` is a typo.
     text = _mutate(
         '    message: "Added to the cart, ordering soon"\n',
         '    message: "Added to the cart, ordering soon"\n    no: ["stop"]\n',
     )
 
-    p = pb.parse_playbook(text, "buy", _pack())
-
-    assert p.nodes[3].no == ("stop",)
+    with pytest.raises(PlaybookError, match="unknown key.*`tell`.*no"):
+        pb.parse_playbook(text, "buy", _pack())
 
 
 @pytest.mark.parametrize(

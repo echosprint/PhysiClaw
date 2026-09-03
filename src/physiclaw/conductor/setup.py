@@ -197,11 +197,11 @@ def readiness_warnings(spec: Playbook, pack: Pack) -> list[str]:
 
 def _resume_warnings(spec: Playbook) -> list[str]:
     """A non-payment ask without `resume:`, or a tell, followed by a move
-    that runs on the app: the phone is on the IM thread (or wherever
-    the next wake finds it), so that move's enter check runs against
-    the wrong screen and spends the page's recover hand, or hands over
-    with none. Legal; the author is told. (A payment ask in that shape
-    is refused at parse — consent never recovers.)"""
+    that runs on the app: the send left the phone on the IM thread, so
+    that move's enter check runs against the wrong screen and spends
+    the page's recover hand, or hands over with none. Legal; the author
+    is told. (A payment ask in that shape is refused at parse — consent
+    never recovers.)"""
     out = []
     nodes = spec.nodes
     for i, n in enumerate(nodes[:-1]):
@@ -218,9 +218,9 @@ def _resume_warnings(spec: Playbook) -> list[str]:
             )
         elif isinstance(n, TellNode):
             out.append(
-                f"tell {n.id!r} suspends the walk, and {nxt.id!r} runs on the "
-                "app on the next wake — its enter check reads whatever the "
-                "phone shows then; expect the page's recover hand to spend"
+                f"tell {n.id!r} leaves the phone on the IM thread, and {nxt.id!r} "
+                "runs on the app next — its enter check will read the thread; "
+                "expect the page's recover hand to spend"
             )
     return out
 

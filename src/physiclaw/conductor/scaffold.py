@@ -204,8 +204,9 @@ PLAYBOOK_TEMPLATE = """\
 #            number the user said yes to is the fire-time bound.
 #            `resume:` re-enters the app after the reply — required on
 #            a payment ask when a move on the app follows it.
-#   tell   — message the user, then pause until any wake; `no:`
-#            (optional) lists the replies that wake reads as a cancel.
+#   tell   — message the user; the walk moves on once it lands (a
+#            trailing tell is the walk's last word). A reply, if any,
+#            is the next wake's boot to read as a new request.
 name: {playbook}         # = this file's name; referenced as {app}/{playbook}
 description: EDIT ME — one line saying what task this playbook does
 # A valid playbook is enabled by default; this scaffold starts off.
@@ -279,8 +280,7 @@ route:
   #   resume: {macro}         # re-enter the app after the reply
   - tell: done
     # The EXACT text sent to the user — write it in THEIR language.
-    message: "EDIT ME — done with {{inputs.message}}, reply stop to cancel"
-    no: ["stop"]            # a resuming wake reads these as a cancel
+    message: "EDIT ME — done with {{inputs.message}}"
 """
 
 

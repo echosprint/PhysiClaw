@@ -1,10 +1,10 @@
 """The suspension file — the one thing a walk leaves behind.
 
 ``playbooks/suspended.json`` holds a walk that asked the user something
-and stepped out of the way rather than burning a session waiting: a
-tell was sent, or an ask ran out of patience polling for a reply. It carries the walk's whole position — cursor, agent outputs, the
-gate's consent numbers — so the next wake picks up mid-purchase
-instead of starting over.
+and stepped out of the way rather than burning a session waiting: an
+ask ran out of patience polling for a reply. It carries the walk's
+whole position — cursor, agent outputs, the gate's consent numbers —
+so the next wake picks up mid-purchase instead of starting over.
 
 One-shot: consumed on load, whatever the outcome. A crash mid-resume
 loses the suspension and the wake runs plain, never a loop.

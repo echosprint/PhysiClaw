@@ -1,8 +1,7 @@
 """Tests for `physiclaw.conductor.program` and its step executors — the
 walk: opening peek and locate, moves with their enter/verify checks,
 declared recovery, the ask (send, hold, judge, consent), the tell
-(send, suspend, read a cancel on resume), suspension, money, and the
-walk's telemetry."""
+(send, move on), suspension, money, and the walk's telemetry."""
 
 from __future__ import annotations
 
@@ -439,7 +438,6 @@ route:
   - page: results
   - tell: tell
     message: "已下单{inputs.keyword}，稍后汇报进度"
-    no: ["cancel"]
   - do: wrap
     macro: add-cart
     with: {message: "done"}
@@ -447,8 +445,12 @@ route:
 """
 
 
-def _suspend_a_tell():
-    """Walk TELLING to its suspension; returns (program, history, text)."""
+def test_tell_sends_then_the_walk_moves_on() -> None:
+    # Fire-and-forget: the send lands on the thread and the cursor moves
+    # to the next node in the same session — nothing suspends, nothing
+    # waits for a reply. (The next move's enter check then reads the
+    # thread the send left the phone on — the readiness advisory's
+    # case — and hands over with no recover declared.)
     write_channel(CHANNEL_OPEN)
     write_pack(playbooks={"notify": TELLING})
     p = _program(name="notify", keyword="milk")
@@ -458,63 +460,29 @@ def _suspend_a_tell():
     send = p.advance(h)
     assert send.tool_calls[1].arguments["name"] == "channel/send"
     text = send.tool_calls[1].arguments["inputs"]["message"]
-    _feed(h, send, _thread((text, 0.75, 0.3)))
-    susp = p.advance(h)
-    assert susp.tool_names() == ["note", "end_session"]
-    assert susp.tool_calls[1].arguments["status"] == "WAIT"
-    return p, h, text
-
-
-def test_tell_sends_suspends_and_resumes_past_itself() -> None:
-    _, _, text = _suspend_a_tell()
     # `message:` IS the sent text — refs filled, nothing code-appended.
     assert text == "已下单milk，稍后汇报进度"
+    _feed(h, send, _thread((text, 0.75, 0.3)))
 
-    # Resume: one thread read first (the wake may BE a cancel reply),
-    # then the walk continues PAST the tell node at its stored idx.
-    resumed = setup.load_suspended()
-    assert resumed is not None
-    h2 = _history()
-    check = resumed.advance(h2)
-    assert check.tool_names() == ["note", "peek"]
-    _feed(h2, check, _thread((text, 0.75, 0.3)))  # nothing new since the send
-    peek = resumed.advance(h2)
-    _feed(h2, peek, RESULTS)  # `wrap` enters where the walk left off
-    move = resumed.advance(h2)
-    assert move.tool_calls[1].arguments["name"] == "demo/add-cart"
+    summary = _finish(p, h, p.advance(h))
+
+    assert "move 'wrap' expects page 'results'" in summary
+    assert not suspension.suspended_path().exists()
+    assert p.idx == 2  # the cursor stood on `wrap`, past the tell
 
 
-def test_suspended_tell_resume_reads_a_cancel() -> None:
-    # The user replies "cancel" to the tell's message; the reply itself
-    # wakes the device. The resumed walk must read it and stop — not
-    # barrel on into the remaining moves.
-    _, _, text = _suspend_a_tell()
+def test_tell_landing_off_the_thread_hands_over() -> None:
+    write_channel(CHANNEL_OPEN)
+    write_pack(playbooks={"notify": TELLING})
+    p = _program(name="notify", keyword="milk")
+    h = _history()
+    _feed(h, p.advance(h), HOME)
+    _feed(h, p.advance(h), RESULTS)
+    send = p.advance(h)
+    _feed(h, send, HOME)  # the send macro did not reach the thread
 
-    resumed = setup.load_suspended()
-    assert resumed is not None
-    h2 = _history()
-    check = resumed.advance(h2)
-    _feed(h2, check, _thread((text, 0.75, 0.3), ("cancel", 0.25, 0.5)))
-    summary = _finish(resumed, h2, resumed.advance(h2))  # deny — the walk stops
-    assert "user declined" in summary
-
-
-def test_suspended_tell_resume_off_thread_reopens_then_continues() -> None:
-    # Banner wake: the screen is some other app. The check reopens the
-    # thread once; with no cancel there, the walk resumes normally.
-    _, _, text = _suspend_a_tell()
-
-    resumed = setup.load_suspended()
-    h2 = _history()
-    check = resumed.advance(h2)
-    _feed(h2, check, HOME)  # not the thread
-    reopen = resumed.advance(h2)
-    assert reopen.tool_calls[1].arguments["name"] == "channel/open"
-    _feed(h2, reopen, _thread((text, 0.75, 0.3)))
-    peek = resumed.advance(h2)
-    _feed(h2, peek, RESULTS)
-    move = resumed.advance(h2)
-    assert move.tool_calls[1].arguments["name"] == "demo/add-cart"
+    summary = _finish(p, h, p.advance(h))
+    assert "did not land on the thread" in summary
 
 
 # ---------- activation / session_setup ----------
@@ -704,12 +672,15 @@ def test_gate_ask_is_the_filled_template_exactly() -> None:
 
 
 def test_suspension_persists_consent_across_the_wake() -> None:
-    # A post-consent suspension must not resume into a refused payment:
-    # the consented total rides suspended.json (the Gate projection).
+    # The consented total rides the projection (the Gate half of
+    # `Program.state`), so a walk restored from it can never resume into
+    # a refused payment.
+    from physiclaw.common.logger import write_json_atomic
+
     p, h, send = _at_gate()
     _reply_arrives(p, h, send, "好的")
     assert p.gate.consented == 45.0
-    p.suspend(resume_idx=p.idx, awaiting=False)
+    write_json_atomic(suspension.suspended_path(), p.state())
 
     resumed = setup.load_suspended()
 
@@ -790,21 +761,28 @@ def test_blocked_suspend_end_session_drops_the_suspension() -> None:
     assert setup.load_suspended() is None  # stale suspension not resurrected
 
 
+def _suspended_ask():
+    """Walk GATED to its suspension turn (the ask ran out of patience);
+    returns (program, history, the end_session turn — not yet fed)."""
+    p, h, send = _at_gate()
+    ask = send.tool_calls[1].arguments["inputs"]["message"]
+    thread = _thread((ask, 0.75, 0.3))
+    _feed(h, send, thread)
+    step = p.advance(h)
+    for _ in range(limits.DEFAULT_ASK_ROUNDS):
+        _feed(h, step, "waited")
+        peek = p.advance(h)
+        _feed(h, peek, thread)
+        step = p.advance(h)
+    assert step.tool_names() == ["note", "end_session"]
+    return p, h, step
+
+
 def test_missing_suspend_result_drops_the_suspension_file() -> None:
     # The suspension file is written before end_session; if that result
     # never lands, the session may run on — a dead walk must not
     # resurrect.
-    write_channel(CHANNEL_OPEN)
-    write_pack(playbooks={"notify": TELLING})
-    p = _program(name="notify", keyword="milk")
-    h = _history()
-    _feed(h, p.advance(h), HOME)
-    _feed(h, p.advance(h), RESULTS)
-    send = p.advance(h)
-    text = send.tool_calls[1].arguments["inputs"]["message"]
-    _feed(h, send, _thread((text, 0.75, 0.3)))
-    susp = p.advance(h)
-    assert susp.tool_names() == ["note", "end_session"]
+    p, h, susp = _suspended_ask()
     assert suspension.suspended_path().exists()
     h.append(susp)  # the end_session result never arrives
 
@@ -814,7 +792,7 @@ def test_missing_suspend_result_drops_the_suspension_file() -> None:
 
 
 def test_clear_suspended_drops_a_suspension_file() -> None:
-    _suspend_a_tell()
+    _suspended_ask()
 
     assert suspension.clear_suspended() is True
     assert not suspension.suspended_path().exists()
@@ -822,7 +800,7 @@ def test_clear_suspended_drops_a_suspension_file() -> None:
 
 def _write_suspended(playbook: str, idx: int, **over) -> None:
     """suspended.json with the boilerplate defaulted — tests pass only
-    their deltas. The production shape is `Program._suspended_dict`; a
+    their deltas. The production shape is `Program.state`; a
     schema change is edited here once beside the tests that fake it."""
     from physiclaw.common.logger import write_json_atomic
 
@@ -1318,7 +1296,7 @@ def test_resumed_walk_unlocks_a_locked_phone_before_reading() -> None:
     assert move2.tool_calls[1].arguments["name"] == "demo/add-cart"
 
 
-def test_trailing_tell_completes_instead_of_suspending() -> None:
+def test_trailing_tell_completes_the_walk() -> None:
     write_channel()
     write_pack(playbooks={"flow": FLOW + '  - tell: finish\n    message: "all done"\n'})
     p = _program(keyword="milk")
@@ -1589,9 +1567,9 @@ def test_session_setup_hidden_registry_carries_inline_macros() -> None:
 def test_suspended_walk_with_a_broken_spec_is_dropped() -> None:
     # load_suspended is fail-open: a spec that no longer parses drops the
     # suspension instead of taking the wake down.
-    _suspend_a_tell()
-    write_pack(playbooks={"notify": "description: broken\nroute: []"})
+    _suspended_ask()
+    write_pack(playbooks={"pay": "description: broken\nroute: []"})
 
     assert setup.load_suspended() is None
     with pytest.raises(PlaybookError):
-        setup.load_spec("demo", "notify")
+        setup.load_spec("demo", "pay")

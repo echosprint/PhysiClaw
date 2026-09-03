@@ -18,7 +18,7 @@ The walk supplies the numbers and acts on the answers:
     prefixes the move it was guarding and hands over.
 
 Consent itself — quoting, binding, consuming — stays with the gate
-(`step_ask.py`, `gate.Gate`): consent is a conversation, these are
+(`step_ask.py`, `speak.py`, `gate.Gate`): consent is a conversation, these are
 arithmetic.
 """
 

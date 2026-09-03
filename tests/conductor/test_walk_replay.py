@@ -100,15 +100,19 @@ def test_replay_answers_a_text_agent_from_outputs_or_stops() -> None:
     assert answered.turns[1].tool == "run_macro"
 
 
-def test_replay_suspension_leaves_no_file() -> None:
+def test_replay_tell_sends_then_walks_on() -> None:
+    # A tell is fire-and-forget: the send lands, the next move's enter
+    # check reads the thread the send left the phone on (no recover
+    # declared → handover), and a dry walk writes nothing.
     write_channel()
     write_pack(playbooks={"flow": TELLING})
     thread = make_screen(("MyChat", 0.5, 0.05), ("starting milk", 0.75, 0.3)).text
 
-    result = replay.replay(_dry(keyword="milk"), [HOME, thread])
+    result = replay.replay(_dry(keyword="milk"), [HOME, thread, HOME])
 
-    assert result.outcome == "suspended"
-    assert result.turns[-1].tool == "end_session"
+    assert [t.tool for t in result.turns] == ["peek", "run_macro", "peek"]
+    assert result.turns[1].node == "note" and result.turns[2].node == "open"
+    assert result.outcome == "handover" and "expects page 'home'" in result.detail
     assert not suspension.suspended_path().exists()
 
 

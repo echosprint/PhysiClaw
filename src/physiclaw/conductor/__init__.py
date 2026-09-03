@@ -39,7 +39,9 @@ Driving:
     step.py        the step executor contract + the Walk surface
     step_do.py     the `do`/`start` step: enter, macro, verify
     step_agent.py  the `agent` step: the pure-text call, the episode
-    step_ask.py    the `ask` and `tell` steps: message, hold, consent
+    step_ask.py    the `ask` step: message, hold, judge, consent
+    step_tell.py   the `tell` step: message, then move on
+    speak.py       the walk's voice: send, land, read replies
     step_activate.py  the boot's `activate` step: parse_task, the baton
     gate.py        the ask-and-hold state, one suspension projection
     money.py       the declared total and the payment predicates, pure

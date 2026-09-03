@@ -26,7 +26,7 @@ vocabulary and the model classes below carry the same names)::
                 | "ask" name approve message yes no [total] [wait] [resume]
                                               # payment: resume required when
                                               # a screen move follows
-                | "tell" name message [no]
+                | "tell" name message
                 | "activate" name [limit]     # channel/boot only, and last:
                                               # read the thread, hand a
                                               # playbook the baton
@@ -215,12 +215,11 @@ class AskNode:
 
 @dataclass(frozen=True)
 class TellNode:
-    """A `tell` move — message the user, then pause until any wake. `no`
-    (optional) names the replies the resuming wake reads as a cancel."""
+    """A `tell` move — message the user; the walk moves on once the
+    send lands (a reply, if any, is the next wake's boot to read)."""
 
     id: str
     message: str
-    no: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

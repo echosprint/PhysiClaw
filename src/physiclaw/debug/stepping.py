@@ -405,12 +405,11 @@ async def step(
     state["outputs"] = {**state.get("outputs", {}), **(outputs or {})}
     if at is not None:
         # A jump abandons whatever the cursor was holding — an ask left
-        # awaiting its reply, a tell's pending cancel read — and forgets
-        # the jumped-to node's own recorded answer, so a re-run really
-        # re-runs it (the walk starts past any SETTLED pure-text node).
+        # awaiting its reply — and forgets the jumped-to node's own
+        # recorded answer, so a re-run really re-runs it (the walk
+        # starts past any SETTLED pure-text node).
         state["idx"] = node_index(spec, at)
         state["awaiting"] = False
-        state["told"] = False
         state["outputs"] = {
             k: v for k, v in state["outputs"].items() if not k.startswith(f"{at}.")
         }
@@ -455,11 +454,9 @@ async def step(
             return StepResult(
                 COMPLETED, f"{app}/{name}: playbook complete — position cleared", None
             )
-        # The projection is whole wherever the walk stopped: a
-        # suspension's (an ask awaiting its reply, a tell's pending
-        # cancel read) or the cursor's after a pause or a handover.
-        state = program.suspended if outcome == rehearsal.WALK_SUSPENDED else None
-        state = state or program.state()
+        # The projection is whole wherever the walk stopped — an ask
+        # awaiting its reply, the cursor after a pause or a handover.
+        state = program.state()
         save_state(state)
         here = position(spec, state)
         if outcome == rehearsal.WALK_SUSPENDED:

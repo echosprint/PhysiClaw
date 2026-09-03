@@ -232,7 +232,6 @@ def test_at_abandons_a_pending_ask(pack) -> None:
     assert result.exit_code == 0, result.output
     out = json.loads(result.stdout)  # stdout is the JSON alone under --json
     assert out["outcome"] == "paused" and out["position"]["awaiting"] is False
-    assert stepping.load_state("demo", "flow")["told"] is False
 
 
 # ---------- the boot ----------

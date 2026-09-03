@@ -21,8 +21,8 @@ runner the GitHub-Actions analogy asks for:
 
   - `step_do.py`       a `do`/`start` move: enter check, the macro, verify
   - `step_agent.py`    an `agent` step: the pure-text call, or the episode
-  - `step_ask.py`      `ask` (send, hold, judge the reply, bind consent)
-                       and `tell` (send, suspend, read a cancel on resume)
+  - `step_ask.py`      `ask`: send, hold, judge the reply, bind consent
+  - `step_tell.py`     `tell`: send, and move on once it landed
   - `step_activate.py` the boot's `activate`: parse_task over the thread,
                        and the baton — the program the conductor drives next
 
@@ -77,8 +77,9 @@ from physiclaw.conductor.playbook import (
 from physiclaw.conductor.step import Paused, Step, Turn
 from physiclaw.conductor.step_activate import ActivateStep
 from physiclaw.conductor.step_agent import AgentStep
-from physiclaw.conductor.step_ask import AskStep, TellResume, TellStep
+from physiclaw.conductor.step_ask import AskStep
 from physiclaw.conductor.step_do import DoStep
+from physiclaw.conductor.step_tell import TellStep
 from physiclaw.conductor.suspension import (
     SUSPENDED_SCHEMA,
     clear_suspended,
@@ -207,8 +208,8 @@ class Program:
         self._recovery: recover.State | None = None
         self._page_recoveries: Counter[str] = Counter()
         # A resumed walk never restarts below its stored cursor: the
-        # nodes before it already ran on an earlier wake (a tell sent,
-        # an ask answered), and re-running them per wake would loop
+        # nodes before it already ran on an earlier wake (an ask
+        # answered), and re-running them per wake would loop
         # across wakes with a fresh recovery budget each time.
         self._floor = 0
         # The resume floor's one piece of infrastructure: a wake minutes
@@ -228,10 +229,6 @@ class Program:
         # The journal line the next synthesized note carries
         # (record-don't-replay: the transcript carries what happened).
         self._journal: str | None = None
-        # The suspension projection the last `suspend` produced — what a
-        # dry driver (the stepping rehearsal) persists in place of the
-        # file a live walk writes.
-        self.suspended: dict | None = None
         # Stepping: a rehearsal that wants ONE node sets `step_one`; the
         # walk runs the first node it opens and answers `Paused` the
         # moment the cursor stands anywhere else — forward when the node
@@ -267,25 +264,21 @@ class Program:
 
     # ---- suspension ----
 
-    def _suspended_dict(self, resume_idx: int) -> dict:
-        """The suspension projection: walk state here, gate state via
-        `Gate.to_suspended` — each field list lives beside its fields."""
+    def state(self) -> dict:
+        """The walk's position as the suspension projection — what a
+        later wake, or a stepping rehearsal's next invocation, rebuilds
+        the walk from (`suspended=` at construction): walk state here,
+        gate state via `Gate.to_suspended` — each field list lives
+        beside its fields."""
         return {
             "schema": SUSPENDED_SCHEMA,
             "app": self.app,
             "playbook": self.spec.name,
-            "idx": resume_idx,
+            "idx": self.idx,
             "values": self.values,
             "outputs": self.outputs,
             **self.gate.to_suspended(),
         }
-
-    def state(self, resume_idx: int | None = None) -> dict:
-        """The walk's position as the suspension projection — what a
-        later wake, or a stepping rehearsal's next invocation, rebuilds
-        the walk from (`suspended=` at construction). `resume_idx`
-        defaults to the cursor."""
-        return self._suspended_dict(self.idx if resume_idx is None else resume_idx)
 
     def _restore_suspended(self, data: dict) -> None:
         idx = int(data["idx"])
@@ -300,15 +293,16 @@ class Program:
         self.gate = Gate.from_suspended(data)
         self._from_suspension = True
 
-    def suspend(self, *, resume_idx: int, awaiting: bool) -> AssistantMessage:
-        """Write the suspended state and close the session WAIT. No job is
-        synthesized: a WAIT without a session-created job auto-schedules
-        the follow-up alarm (`contract.drive`) — the file, not the job,
-        is what resumes the walk on ANY next wake."""
-        self.gate.awaiting = awaiting
-        self.suspended = self.state(resume_idx)
+    def suspend(self) -> AssistantMessage:
+        """Write the suspended state (`state()`, the cursor where it
+        stands) and close the session WAIT. No job is synthesized: a
+        WAIT without a session-created job auto-schedules the follow-up
+        alarm (`contract.drive`) — the file, not the job, is what
+        resumes the walk on ANY next wake. The one caller is an ask out
+        of patience, which already holds the gate open."""
+        assert self.gate.awaiting, "only an ask awaiting its reply suspends"
         if not self.dry:
-            write_json_atomic(suspended_path(), self.suspended)
+            write_json_atomic(suspended_path(), self.state())
         recap = f"waiting for the user's reply on {self.app}/{self.spec.name}"
         self._record_run(Outcome.SUSPENDED, recap)
         # The close-routine's log line, harness-written: the conductor
@@ -441,8 +435,8 @@ class Program:
 
     def _opening(self) -> Turn:
         """The walk's first turn (fresh, or after a resume): the ask's
-        reply check when suspended at a gate, a cancel read after a
-        tell that declared deny words, else the plain opening peek."""
+        reply check when suspended at a gate, else the plain opening
+        peek."""
         if self.gate.awaiting:
             # Suspended-at-gate resume: the ask was sent before the
             # suspension — the ask step picks up at its reply check.
@@ -452,13 +446,6 @@ class Program:
                     "suspended awaiting a reply, but no ask at the cursor"
                 )
             self._step = AskStep(self, node)
-            return self._step.open()
-        if self._from_suspension and self.gate.told and self.channel is not None:
-            # Suspended-tell resume (message away, not awaiting a reply,
-            # deny words declared): this wake may BE the user's cancel
-            # reply — read the thread before the walk acts. One-shot:
-            # the read clears the flag and the words.
-            self._step = TellResume(self, None)
             return self._step.open()
         # Observe before acting: the first page check needs a screen.
         return self.peek()

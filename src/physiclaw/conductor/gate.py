@@ -25,17 +25,12 @@ class Gate:
     awaiting: bool = False  # ask sent, polling for the reply
     # The reply words the last LANDED send declared (already in
     # `reply.normalize` space) — what every read of the thread after it
-    # matches: this ask's check, a later send's landing, a tell's
-    # resume. `next_words` holds the words of a send still in flight.
+    # matches: this ask's check, a later send's landing. `next_words`
+    # holds the words of a send still in flight.
     yes: tuple[str, ...] = ()
     no: tuple[str, ...] = ()
     next_words: tuple[tuple[str, ...], tuple[str, ...]] = ((), ())
     tried_open: bool = False
-    # A tell suspended the walk with deny words declared: the resuming
-    # wake reads the thread for a cancel first (`TellResume`). Set at
-    # the tell's suspension, cleared by that read — so a projection
-    # taken anywhere else (a stepping pause) never resumes as one.
-    told: bool = False
 
     def spend(self) -> float | None:
         """Consent is CONSUMED by firing: a later payment needs its own
@@ -59,7 +54,6 @@ class Gate:
             "awaiting": self.awaiting,
             "yes": list(self.yes),
             "no": list(self.no),
-            "told": self.told,
         }
 
     @classmethod
@@ -73,5 +67,4 @@ class Gate:
             awaiting=bool(data.get("awaiting")),
             yes=tuple(str(w) for w in (data.get("yes") or [])),
             no=tuple(str(w) for w in (data.get("no") or [])),
-            told=bool(data.get("told")),
         )
