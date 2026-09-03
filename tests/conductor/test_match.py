@@ -342,6 +342,24 @@ def test_reads_as_cover_on_every_captured_cover_state() -> None:
         assert m.reads_as_cover(Screen.read(text)), name
 
 
+def test_match_screen_reads_the_lock_screen_first_by_shape() -> None:
+    # No candidate describes the cover (a real one prints no anchorable
+    # text), yet every walk must tell it from "unknown": the matcher
+    # answers the OS page itself, so a page's `locked:` hand can fire.
+    from physiclaw.conductor.pages import LOCKED_ID
+
+    pp = PagePrint(
+        app="app", decl=PageDecl(name="home", anchors=(AnchorDecl(text="Files"),))
+    )
+    for text in (COVER_RESTING, COVER_WOKEN, COVER_WITH_NOTIFICATION):
+        v = m.match_screen(Screen.read(text), [pp])
+        assert v.matches(LOCKED_ID), text
+    keypad = make_screen(("Enter Passcode", 0.5, 0.5))
+    assert m.match_screen(keypad, [pp]).matches(LOCKED_ID)
+    assert not m.match_screen(Screen.read(UNLOCKED_APP), [pp]).matches(LOCKED_ID)
+    assert not m.match_screen(Screen.read(UNLOCKED_APP), []).matches(LOCKED_ID)
+
+
 def test_reads_as_cover_rejects_an_ordinary_app_screen() -> None:
     # The status-bar clock is a `<TIME>` row like the cover's; its WIDTH
     # (0.11 vs 0.75) is what separates them.

@@ -71,7 +71,7 @@ async def test_aclose_abandons_the_in_flight_walk(mocker) -> None:
 
 
 def test_wire_micro_none_when_nothing_can_need_one() -> None:
-    assert plugin_mod._wire_micro(None, None, _ctx()) is None
+    assert plugin_mod._wire_micro(None, _ctx()) is None
 
 
 def test_wire_micro_builds_the_configured_cheap_tier(mocker, monkeypatch) -> None:
@@ -80,7 +80,7 @@ def test_wire_micro_builds_the_configured_cheap_tier(mocker, monkeypatch) -> Non
     monkeypatch.setattr(CONFIG.conductor, "micro_model", "moonshot/kimi-test")
     build_spy = mocker.patch.object(plugin_mod, "make_provider")
 
-    caller = plugin_mod._wire_micro(None, mocker.MagicMock(), _ctx())
+    caller = plugin_mod._wire_micro(mocker.MagicMock(), _ctx())
 
     assert caller is not None
     # The cheap tier is a lazy factory — nothing is built (or paid for)
@@ -97,7 +97,7 @@ def test_wire_micro_bad_ref_falls_back_to_the_session_model(
     monkeypatch.setattr(CONFIG.conductor, "micro_model", "not-a-ref")
     provider = mocker.MagicMock()
 
-    caller = plugin_mod._wire_micro(None, mocker.MagicMock(), _ctx(provider))
+    caller = plugin_mod._wire_micro(mocker.MagicMock(), _ctx(provider))
 
     # Fail-open at parse time: the caller still exists, with no owned
     # factory — decisions run on the session model.

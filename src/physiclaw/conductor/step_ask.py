@@ -132,7 +132,7 @@ def _sent_landed(walk: Walk) -> Turn:
     # The send landed: its words and its thread snapshot take over together.
     gate.yes, gate.no = gate.next_words
     assert walk.screen is not None
-    gate.baseline = {r.label.strip() for r in walk.screen.rows if r.label.strip()}
+    gate.baseline = {label.strip() for label in walk.screen.labels}
     return None
 
 

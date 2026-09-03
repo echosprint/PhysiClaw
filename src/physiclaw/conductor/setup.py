@@ -6,22 +6,23 @@ degrades to a normal session, never takes one down):
   - ``load_suspended`` — a walk that asked the user something resumes at
     its stored node (one-shot; ANY wake resumes, the WAIT job is just the
     alarm clock).
-  - ``Overture`` — nothing suspended, but playbooks exist and the
-    channel has its `open` macro: the conductor boots to the user's
-    thread and fires ONE parse_task micro-call over the playbook menu
-    (``overture.py``); a positive answer builds the program on the spot. ``Activation`` is that last half — menu, call,
-    and build — with the overture owning the navigation that reaches a
-    thread screen to ask over.
+  - the boot — nothing suspended, but enabled playbooks exist and the
+    channel pack's boot playbook is live: the conductor walks
+    `channel/boot` (the thread page with its declared hands, then the
+    `activate` step — `step_activate.py`), which fires ONE parse_task
+    micro-call over the playbook menu and hands the program it built
+    on as its baton. ``Activation`` is that last half — menu, call, and
+    build — carried by the boot program for its activate step to run.
 
 A playbook on disk IS the grant; there is nothing to pre-declare.
 
 ``session_setup`` is the plugin's single wake-time setup call
-(`plugin.py` runs it behind the seam): it
-resolves those doors in priority order and assembles the hidden
-qualified-macro registry — every pack plus the channel on the overture
-path (the boot may activate any playbook, so all conductor hands must be
-dispatchable); a live program narrows it to its own pack + channel, and
-no channel means a channel-less registry.
+(`plugin.py` runs it behind the seam): it resolves those doors in
+priority order and assembles the hidden qualified-macro registry —
+every pack plus the channel on the boot path (the boot may activate
+any playbook, so all conductor hands must be dispatchable); a live
+program narrows it to its own pack + channel, and no channel means a
+channel-less registry.
 ``build_program`` is the one Program constructor call — a program is
 whole at construction, suspended state included — and the one place a
 playbook's spec, inputs and live-readiness are resolved. The CLI's
@@ -44,11 +45,11 @@ from physiclaw.conductor.micro import (
     MicroOutcome,
     build_request,
 )
-from physiclaw.conductor.overture import Overture
 from physiclaw.conductor.pages import (
     IOS_APP,
     MIN_ROBUST_ANCHORS,
     RESERVED_APPS,
+    PagePrint,
     load_learned,
     prints_for_app,
 )
@@ -68,6 +69,7 @@ from physiclaw.conductor.playbook import (
     qualified_pack,
     scan_playbooks,
 )
+from physiclaw.conductor.playbook import require_live as playbook_require_live
 from physiclaw.conductor.program import Program
 from physiclaw.macros import inputs as macro_inputs
 from physiclaw.macros.model import Macro, MacroError, MacroInput
@@ -115,22 +117,42 @@ def build_program(
     *,
     suspended: dict | None = None,
     dry: bool = False,
+    activation: "Activation | None" = None,
 ) -> "Program":
-    """The one Program constructor call — the overture's activation, a
+    """The one Program constructor call — the boot's activation, a
     resumed suspension, the CLI rehearsal, and the offline replay all
     come through here, so a program is whole at construction (channel
     and any suspended state included) and never patched up afterwards.
-    `dry` (the replay) runs the walk without writing any record."""
+    `dry` (the replay, the boot) runs the walk without writing any
+    record. The boot route's `activate` step needs the menu of enabled
+    playbooks: the wake passes the `activation` it discovered; a tool
+    stepping or rehearsing the boot gets it discovered here."""
+    if activation is None and spec.activates:
+        activation = activation_for(channel)
     return Program(
         spec=spec,
         values=values,
         pack_macros=qualified_pack(spec.app, pack) | qualified_inline(spec.app, spec),
-        prints=prints_for_app(spec.app, decls=pack.pages),
+        prints=prints_for_app(spec.app, decls=pack.pages) + os_prints(),
         channel=channel,
         suspended=suspended,
         landmarks=pack.landmarks,
         dry=dry,
+        activation=activation,
     )
+
+
+def os_prints() -> list[PagePrint]:
+    """The OS states every walk matches beside its own pages — the ios
+    pack's declared lock screen (the matcher reads the cover by shape
+    regardless; a declared hint is the sharper belt on a device that
+    prints one). Fail-open: missing or malformed just means the shape
+    read stands alone."""
+    try:
+        return prints_for_app(IOS_APP)
+    except Exception as e:
+        log.warning("ios pages unavailable (%s) — the lock screen reads by shape", e)
+        return []
 
 
 def load_spec(
@@ -148,16 +170,7 @@ def load_spec(
     if entry.spec is None:
         raise PlaybookError(f"{app}/{name} is invalid: {entry.error}")
     if require_live:
-        if not entry.spec.enabled:
-            raise PlaybookError(
-                f"{app}/{name} is disabled — set `enabled: true` once rehearsed"
-            )
-        disabled = disabled_macros(entry.spec, pack)
-        if disabled:
-            raise PlaybookError(
-                f"{app}/{name} references disabled pack macro(s): "
-                f"{', '.join(disabled)} — rehearse, then enable"
-            )
+        playbook_require_live(entry.spec, pack)
     return entry.spec, pack
 
 
@@ -307,29 +320,31 @@ def _menu_input(i: MacroInput) -> str:
 class Activation:
     """The parse_task half of the boot: turn a THREAD screen into one
     scoped ask, and its answer into a Program. Reaching a thread screen
-    is the overture's job (`overture.py`); this owns only the menu, the
-    call, and the build. `entries` is the single source — the answer
+    is the boot route's job (`channel/boot.yml`, walked like any
+    playbook); this owns only the menu, the call, and the build, and
+    rides the boot program for its `activate` step (`step_activate.py`). `entries` is the single source — the answer
     space is its keys, the menu a render of it, each value the parsed
     spec+pack so a positive answer activates without re-reading disk."""
 
     entries: dict[str, tuple[Playbook, Pack]]
-    channel: Channel
+    channel: "Channel | None"
     # parse_task's context: the recent daily-log entries — assembled
     # once at wake by `session_setup` (`_activation_context`).
     context: str = ""
 
-    def request(self, screen: Screen) -> DecisionRequest:
+    def request(self, screen: Screen, node_id: str) -> DecisionRequest:
         """The parse_task request for a thread screen. The CALLER
-        establishes that the screen IS the thread — the overture knows,
-        because it drove there — so this is purely "turn the menu and
-        this screen into a call".
-        `entries` is non-empty by construction — `session_setup` stands
+        establishes that the screen IS the thread — the boot's activate
+        step knows, its enter check just read it — so this is purely
+        "turn the menu and this screen into a call". `node_id` names
+        the step for the logs.
+        `entries` is non-empty by construction — `activation_for` stands
         down before building an Activation with nothing to offer."""
         # Playbook refs only — the `not_a_task` escape is the call's own
         # (its _SPECS row appends it; no caller can forget the exit).
         return build_request(
             PARSE_TASK,
-            "activation",
+            node_id,
             tuple(self.entries),
             {"menu": self._menu()},
             screen,
@@ -367,79 +382,101 @@ class Activation:
         return build_program(spec, pack, values, self.channel)
 
 
-def session_setup() -> "tuple[Program | None, Overture | None, dict[str, Macro]]":
+def session_setup() -> "tuple[Program | None, dict[str, Macro]]":
     """The plugin's one wake-time setup call, fail-open throughout:
-    (a resumed suspension, the overture, the hidden qualified macro
-    registry). The registry spans every pack plus the channel ON THE
-    OVERTURE PATH — the boot may activate any playbook, so all conductor
-    hands must be dispatchable; a live program narrows it to its own pack
-    + channel, and no channel means the channel-less registry only.
+    (the program to drive — a resumed suspension, else the boot — or
+    None; the hidden qualified macro registry). The registry spans
+    every pack plus the channel ON THE BOOT PATH — the boot may
+    activate any playbook, so all conductor hands must be
+    dispatchable; a live program narrows it to its own pack + channel,
+    and no channel means the channel-less registry only.
 
     A playbook on disk IS the grant: with any enabled playbook and a
-    channel that can open the thread, the overture drives. Nothing
-    suspended, nothing enabled, or no hand to open with means a plain
-    model session."""
+    live boot in the channel pack, the boot walks. Nothing suspended,
+    nothing enabled, or no boot means a plain model session."""
+    # The boot file is a template the user owns: materialized beside an
+    # existing channel pack on the first wake, then never touched.
+    scaffold.ensure_channel_boot()
     channel = load_channel()
     program = load_suspended(channel)
     if program is not None:
         # A live program names only its own pack + the channel — the
-        # full cross-pack discovery below is the overture's need, and
-        # the overture is off while a program drives (a suspended walk
+        # full cross-pack discovery below is the boot's need, and the
+        # boot is off while a program drives (a suspended walk
         # navigates to the thread on its own account).
-        return program, None, walk_registry(program, channel)
+        return program, walk_registry(program, channel)
     hidden: dict[str, Macro] = {}
     if channel is not None:
         hidden.update(channel.macros)
-    if channel is None or channel.open is None:
+    if channel is None or channel.boot is None:
         # No channel → nothing to boot to and nothing to ask over; no
-        # `open` macro → no hand to boot with. No consumer for the
-        # discovery either way, so skip the every-pack parse.
-        if channel is not None:
-            log.info("conductor: channel has no enabled `open` macro — no boot")
-        return None, None, hidden
+        # live boot (the channel logged why) → no walk to boot with.
+        # No consumer for the discovery either way, so skip the
+        # every-pack parse.
+        return None, hidden
+    entries, packs = discover()
+    hidden.update(packs)
+    if not entries:
+        return None, hidden
+    # The lock screen is matched by shape; `ensure_ios_pack` materializes
+    # the OS declarations on first look so a device that prints a hint
+    # gets the sharper belt without the user having run `playbooks init
+    # ios`. Fail-open inside.
+    scaffold.ensure_ios_pack()
+    boot = build_program(
+        channel.boot,
+        channel.pack,
+        {},
+        channel,
+        dry=True,  # the boot leaves no record: no runs row, no daily-log line
+        activation=_activation(entries, channel),
+    )
+    hidden.update(boot.pack_macros)  # a hand embedded in the boot route
+    return boot, hidden
+
+
+def discover() -> "tuple[dict[str, tuple[Playbook, Pack]], dict[str, Macro]]":
+    """Every pack on disk, once: the activation entries (ref → spec and
+    pack, enabled and live only — what the boot may offer) and the
+    whole dispatch table (disabled playbooks included — gating is the
+    entries filter, never the table). Fail-open per pack."""
     entries: dict[str, tuple[Playbook, Pack]] = {}
+    hidden: dict[str, Macro] = {}
     for app in list_apps():
         if app in RESERVED_APPS:
             # Infrastructure namespaces, not task packs: `channel` is the
             # conductor's own hands, and a user override of a built-in
-            # (`ios`) is page declarations only — neither holds playbooks.
+            # (`ios`) is page declarations only — neither holds app
+            # playbooks.
             continue
         try:
             pack = load_pack(app)
         except Exception as e:
             log.warning("pack %s unusable at wake (%s) — skipped", app, e)
             continue
-        # The whole dispatch table, disabled playbooks included — gating
-        # is the entries filter below, not the table.
         hidden.update(qualified_all(app, pack))
         for entry in scan_playbooks(app, pack):
             spec = entry.spec
             if spec is None or not spec.enabled or disabled_macros(spec, pack):
                 continue
             entries[f"{app}/{entry.name}"] = (spec, pack)
-    if not entries:
-        return None, None, hidden
-    # The overture matches against the thread and the OS states — the two
-    # things it must tell apart. `ensure_ios_pack` materializes the OS
-    # declarations on first look so the boot does not depend on the user
-    # having run `playbooks init ios`; both loads are fail-open, and
-    # missing prints just mean more screens read as unknown.
-    prints = list(channel.prints)
-    try:
-        scaffold.ensure_ios_pack()
-        prints += prints_for_app(IOS_APP)
-    except Exception as e:
-        log.warning("ios pages unavailable (%s) — a locked phone reads as unknown", e)
-    overture = Overture(
-        channel=channel,
-        activation=Activation(
-            entries=entries,
-            channel=channel,
-            context=_activation_context(entries),
-        ),
-        prints=prints,
+    return entries, hidden
+
+
+def activation_for(channel: "Channel | None") -> "Activation | None":
+    """The activation a boot walked OUTSIDE a wake (a stepping tool, a
+    rehearsal) runs with — the same discovery, or None when no enabled
+    playbook is on disk (the step then hands over, saying so)."""
+    entries, _ = discover()
+    return _activation(entries, channel) if entries else None
+
+
+def _activation(
+    entries: "dict[str, tuple[Playbook, Pack]]", channel: "Channel | None"
+) -> "Activation":
+    return Activation(
+        entries=entries, channel=channel, context=_activation_context(entries)
     )
-    return None, overture, hidden
 
 
 def _activation_context(entries: dict[str, tuple[Playbook, Pack]]) -> str:

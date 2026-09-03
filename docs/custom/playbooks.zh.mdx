@@ -28,7 +28,7 @@ physiclaw playbooks init taobao
 
 ## 路线
 
-路线由六种条目组成：
+剧本的路线由六种条目组成：
 
 - `page` 是走位必须到达的页面，每次都检查。锚点只声明一次，写在路点旁或 `pages:` 里，其他地方只写名字。
 - `start` 是冷启动，至多一个，紧挨第一个页面之前。
@@ -58,7 +58,23 @@ route:
 
 ## 恢复
 
-页面的 `recover:` 是唯一的恢复手段。在清单里声明的页面带着每条路线都继承的手法，路线也可以声明自己的手法来覆盖。一只手覆盖任何偏离。两只手对应匹配器的两种读法：`occluded` 是页面本身被弹层或弹窗盖住，`elsewhere` 是任何其他屏幕。`limit:` 限制该页面每次走位的尝试次数。手运行后，走位重新检查页面，仍不对就从路线顶部重来。没有 `recover:` 的页面当场交接。
+页面的 `recover:` 是唯一的恢复手段。在清单里声明的页面带着每条路线都继承的手法，路线也可以声明自己的手法来覆盖。一只手覆盖任何偏离。按读法分开的手对应匹配器的几种读法：`occluded` 是页面本身被弹层或弹窗盖住，`locked` 是手机显示锁屏，`elsewhere` 是任何其他屏幕。`limit:` 限制该页面每次走位的尝试次数。手运行后，走位重新检查页面，仍不对就从路线顶部重来。没有 `recover:` 的页面当场交接。
+
+## 开场
+
+每次唤醒都先走通道包自己的剧本 `channel/boot.yml`，走法和其他剧本一样。它的路线是会话页面和到达它的手法，然后是 `activate`，只有这个文件能带的一步：对照已启用的剧本读取会话，把匹配的剧本交给走位。手法和限制像任何路线一样改，用 `physiclaw playbooks step channel/boot --reply "帮我买五常大米"` 单步调试。
+
+```yaml
+route:
+  - page: thread
+    recover:
+      locked: {tool: unlock_phone}
+      occluded: {macro: open}
+      elsewhere: {macro: open}
+      limit: 4
+  - activate: parse
+    limit: {scrolls: 2}
+```
 
 ## 金额
 

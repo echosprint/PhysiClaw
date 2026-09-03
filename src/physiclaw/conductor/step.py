@@ -34,8 +34,10 @@ if TYPE_CHECKING:
     from physiclaw.conductor.gate import Gate
     from physiclaw.conductor.match import Verdict
     from physiclaw.conductor.pages import Landmark
-    from physiclaw.conductor.playbook import AgentNode, DoNode, Playbook
+    from physiclaw.conductor.playbook import Checked, Playbook
+    from physiclaw.conductor.program import Program
     from physiclaw.conductor.recover import Mode
+    from physiclaw.conductor.setup import Activation
 
 
 @dataclass(frozen=True)
@@ -43,7 +45,7 @@ class Paused:
     """The stepping pause: the walk's cursor left the node this run was
     for, and the walk answers nothing more THIS run. A later run
     rebuilds it from its projection. Distinct from None on purpose —
-    None is the driver spent for good (handed over, completed,
+    None is the walk spent for good (handed over, completed,
     crashed): the conductor drops it and the model speaks."""
 
 
@@ -66,6 +68,11 @@ class Walk(Protocol):
     outputs: dict[str, str]
     landmarks: "dict[str, Landmark]"
     channel: "Channel | None"
+    # The boot's two extras: the activation (menu, parse_task, build)
+    # its `activate` step runs, and the program that step hands on —
+    # None on every other walk.
+    activation: "Activation | None"
+    baton: "Program | None"
 
     def ref_values(self) -> dict[str, str]: ...
 
@@ -77,7 +84,7 @@ class Walk(Protocol):
 
     def log_purchase(self) -> None: ...
 
-    def enter_gate(self, node: "DoNode | AgentNode") -> Turn: ...
+    def enter_gate(self, node: "Checked") -> Turn: ...
 
     def journal(self, text: str) -> None: ...
 
@@ -89,12 +96,14 @@ class Walk(Protocol):
 
     def handover(self, reason: str) -> AssistantMessage: ...
 
+    def conclude(self, reason: str) -> None: ...
+
     def advance_cursor(self) -> Turn: ...
 
     def suspend(self, *, resume_idx: int, awaiting: bool) -> AssistantMessage: ...
 
     def recover_or_handover(
-        self, node: "DoNode | AgentNode", expected_id: str, mode: "Mode", reason: str
+        self, node: "Checked", expected_id: str, mode: "Mode", reason: str
     ) -> Turn: ...
 
 

@@ -11,7 +11,7 @@ from conductor_fakes import make_screen
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from physiclaw.conductor import match, money, overture, reply
+from physiclaw.conductor import match, money, reply, step_activate
 
 # ---------- reply: normalization and whole-message reading ----------
 
@@ -151,7 +151,7 @@ def test_volatile_numbers_normalize_to_class_tokens(
     assert match.TIME_TOKEN in match.normalize(f"{hour}:{minute:02d}")
 
 
-# ---------- overture: seaming two thread readings ----------
+# ---------- the boot's activate step: seaming two thread readings ----------
 
 _labels = st.lists(
     st.text(min_size=1, max_size=4, alphabet="abcxyz"), min_size=0, max_size=8
@@ -163,7 +163,7 @@ _labels = st.lists(
 def test_merge_keeps_every_newer_label_and_never_loses_the_tail(
     newer: list[str], previous: list[str]
 ) -> None:
-    merged = overture._merge_labels(newer, previous)
+    merged = step_activate.merge_labels(newer, previous)
     assert merged[: len(newer)] == newer  # the newer reading leads, in order
     assert len(merged) <= len(newer) + len(previous)
     # Whatever seam was chosen, the previous reading's tail is preserved.
@@ -172,4 +172,4 @@ def test_merge_keeps_every_newer_label_and_never_loses_the_tail(
 
 @given(_labels)
 def test_merging_a_reading_with_itself_is_the_reading(labels: list[str]) -> None:
-    assert overture._merge_labels(labels, labels) == labels
+    assert step_activate.merge_labels(labels, labels) == labels

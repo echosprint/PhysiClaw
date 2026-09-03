@@ -76,7 +76,7 @@ def test_channel_flag_is_declared_at_the_synth_site() -> None:
 
 
 def test_driver_scopes_keep_ids_unique_across_smiths() -> None:
-    # The overture and the program each run a private Turnsmith; the
+    # The boot and the program it activates each run a private Turnsmith; the
     # scope is what keeps their id sequences disjoint — without it a
     # driver whose result never landed could adopt the OTHER driver's
     # stale one (result_for is exact-match, newest-first).

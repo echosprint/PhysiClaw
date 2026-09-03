@@ -33,6 +33,7 @@ from conductor_fakes import (
     thread_screen as _thread,
 )
 
+from physiclaw.common import paths as paths_mod
 from physiclaw.conductor import channel, limits, program, setup, suspension
 from physiclaw.conductor.playbook import PlaybookError
 
@@ -519,15 +520,25 @@ def test_suspended_tell_resume_off_thread_reopens_then_continues() -> None:
 # ---------- activation / session_setup ----------
 
 
-def test_session_setup_builds_the_overture_and_hidden_registry() -> None:
+def test_session_setup_builds_the_boot_and_hidden_registry() -> None:
+    # The boot is the channel pack's own playbook, materialized beside
+    # a channel that has none: a dry Program over its route, carrying
+    # the activation (the menu of enabled playbooks) for its `activate`
+    # step, and the whole dispatch table beside it.
+    from physiclaw.common import paths
+    from physiclaw.conductor.playbook import ActivateNode
+
     write_channel(CHANNEL_OPEN)
     write_pack(playbooks={"flow": FLOW})
 
-    prog, overture, hidden = setup.session_setup()
+    prog, hidden = setup.session_setup()
 
-    assert prog is None
-    assert overture is not None
-    activation = overture._activation
+    assert prog is not None
+    assert prog.app == "channel" and prog.spec.name == "boot" and prog.dry
+    assert (paths.playbooks_dir() / "channel" / "boot.yml").exists()
+    assert isinstance(prog.spec.nodes[-1], ActivateNode)
+    activation = prog.activation
+    assert activation is not None
     assert tuple(activation.entries) == ("demo/flow",)
     menu = activation._menu()
     assert "demo/flow" in menu and "keyword" in menu
@@ -539,9 +550,10 @@ def test_session_setup_builds_the_overture_and_hidden_registry() -> None:
     }
 
 
-def test_session_setup_builds_no_overture_without_an_open_macro() -> None:
-    # A channel that cannot open the thread has no hand to boot with:
-    # a plain model session, and no pack discovery paid for nothing.
+def test_session_setup_builds_no_boot_without_an_open_macro() -> None:
+    # The boot names `open` as its hand; a channel that cannot open the
+    # thread has no live boot: a plain model session, and no pack
+    # discovery paid for nothing.
     write_channel()  # send only
     write_pack(
         playbooks={
@@ -551,13 +563,28 @@ def test_session_setup_builds_no_overture_without_an_open_macro() -> None:
         }
     )
 
-    prog, overture, hidden = setup.session_setup()
+    prog, hidden = setup.session_setup()
 
-    assert prog is None and overture is None
+    assert prog is None
     assert set(hidden) == {"channel/send"}
 
 
-def test_session_setup_prefers_a_suspended_walk_over_the_overture() -> None:
+def test_session_setup_builds_no_boot_without_an_enabled_playbook() -> None:
+    # Nothing to offer, nothing to boot for — no wake pays the boot's
+    # turns to read a thread no playbook could answer.
+    write_channel(CHANNEL_OPEN)
+    write_pack(playbooks={"flow": FLOW.replace("enabled: true", "enabled: false")})
+    (paths_mod.playbooks_dir() / "demo" / "flow.yml").write_text(
+        "name: flow\nenabled: false\n" + FLOW, encoding="utf-8"
+    )
+
+    prog, hidden = setup.session_setup()
+
+    assert prog is None
+    assert "channel/open" in hidden and "demo/open-app" in hidden
+
+
+def test_session_setup_prefers_a_suspended_walk_over_the_boot() -> None:
     from physiclaw.common.logger import write_json_atomic
 
     write_channel(CHANNEL_OPEN)
@@ -573,10 +600,10 @@ def test_session_setup_prefers_a_suspended_walk_over_the_overture() -> None:
         },
     )
 
-    prog, overture, hidden = setup.session_setup()
+    prog, hidden = setup.session_setup()
 
     assert prog is not None and prog.channel is not None
-    assert overture is None
+    assert prog.spec.name == "flow"  # the suspension, not the boot
 
 
 def test_activation_builds_a_request_over_the_thread_screen() -> None:
@@ -585,14 +612,14 @@ def test_activation_builds_a_request_over_the_thread_screen() -> None:
 
     write_channel(CHANNEL_OPEN)
     write_pack(playbooks={"flow": FLOW})
-    _, overture, _ = setup.session_setup()
-    assert overture is not None
-    activation = overture._activation
+    boot, _ = setup.session_setup()
+    assert boot is not None and boot.activation is not None
+    activation = boot.activation
 
-    # The caller establishes the screen IS the thread (the overture drove
-    # there) — this turns it into the call.
-    req = activation.request(Screen.read(_thread(("买牛奶", 0.25, 0.4))))
-    assert req is not None and req.call == PARSE_TASK
+    # The caller establishes the screen IS the thread (the boot's enter
+    # check read it) — this turns it into the call.
+    req = activation.request(Screen.read(_thread(("买牛奶", 0.25, 0.4))), "parse")
+    assert req is not None and req.call == PARSE_TASK and req.node_id == "parse"
     assert "买牛奶" in req.listing and "demo/flow" in req.args["menu"]
 
     prog = activation.build(
@@ -617,10 +644,10 @@ def test_activation_menu_renders_the_input_example() -> None:
         "    description: what to search\n    example: rice 5kg\n",
     )
     write_pack(playbooks={"flow": spec})
-    _, overture, _ = setup.session_setup()
-    assert overture is not None
+    boot, _ = setup.session_setup()
+    assert boot is not None and boot.activation is not None
 
-    menu = overture._activation._menu()
+    menu = boot.activation._menu()
 
     assert "keyword (what to search; e.g. rice 5kg)" in menu
 
@@ -630,9 +657,9 @@ def test_activation_rejects_unresolvable_inputs_and_not_a_task() -> None:
 
     write_channel(CHANNEL_OPEN)
     write_pack(playbooks={"flow": FLOW})
-    _, overture, _ = setup.session_setup()
-    assert overture is not None
-    activation = overture._activation
+    boot, _ = setup.session_setup()
+    assert boot is not None and boot.activation is not None
+    activation = boot.activation
 
     assert activation.build(None) is None
     assert (
@@ -655,9 +682,11 @@ def test_scaffolded_channel_pack_parses_and_loads_disabled() -> None:
 
     ch = channel.load_channel()
     # Pages parse and the thread page exists; the macros are scaffolded
-    # DISABLED (rehearse, then enable), so the sends stay unavailable.
+    # DISABLED (rehearse, then enable), so the sends stay unavailable —
+    # and the boot, which names `open`, is not live until it is.
     assert ch is not None
     assert ch.send is None and ch.open is None
+    assert ch.boot is None and ch.pack is not None
     from physiclaw.conductor.playbook import load_pack
 
     pack = load_pack("channel")
@@ -1169,6 +1198,33 @@ def test_keyed_recover_runs_the_hand_for_the_reading() -> None:
     assert "(elsewhere)" in back.tool_calls[0].arguments["summary"]
 
 
+def test_a_locked_phone_takes_the_locked_hand_and_no_other() -> None:
+    # The matcher reads the lock screen by shape, so a page's hands key
+    # it as `locked`: with none declared for it, the walk hands over
+    # saying so (a go_back hand would land nowhere), and the reading
+    # names the OS page rather than "no known page".
+    keyed = FLOW.replace(
+        "  - page: results\n",
+        "  - page: results\n    recover:\n      elsewhere: {tool: go_back}\n",
+    )
+    p, h, move1 = _recovering_walk(keyed)
+    _feed(h, move1, LOCKED_MID)
+
+    summary = _finish(p, h, p.advance(h))
+    assert "declares no `locked` recover hand" in summary
+    assert "ios.locked" in summary
+
+    with_lock = keyed.replace(
+        "      elsewhere: {tool: go_back}\n",
+        "      elsewhere: {tool: go_back}\n      locked: {tool: unlock_phone}\n",
+    )
+    p2, h2, m1 = _recovering_walk(with_lock)
+    _feed(h2, m1, LOCKED_MID)
+    unlock = p2.advance(h2)
+    assert unlock is not None and unlock.tool_names() == ["note", "unlock_phone"]
+    assert "(locked)" in unlock.tool_calls[0].arguments["summary"]
+
+
 def test_keyed_recover_without_a_hand_for_the_reading_hands_over() -> None:
     only_occluded = FLOW.replace(
         "  - page: results\n",
@@ -1415,10 +1471,10 @@ def test_session_setup_assembles_the_activation_context() -> None:
     daylog.append_log("[11:02] demo: bought milk ¥45 — reported to the user")
     write_pack(playbooks={"flow": FLOW})
 
-    _, overture, _ = setup.session_setup()
+    boot, _ = setup.session_setup()
 
-    assert overture is not None
-    ctx = overture._activation.context
+    assert boot is not None and boot.activation is not None
+    ctx = boot.activation.context
     assert "Recent daily-log entries" in ctx
     assert "bought milk ¥45" in ctx
 
@@ -1524,9 +1580,9 @@ def test_session_setup_hidden_registry_carries_inline_macros() -> None:
     write_channel(CHANNEL_OPEN)
     write_pack(playbooks={"flow": INLINE_FLOW})
 
-    _, overture, hidden = setup.session_setup()
+    boot, hidden = setup.session_setup()
 
-    assert overture is not None
+    assert boot is not None
     assert "demo/flow.open" in hidden
 
 

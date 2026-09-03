@@ -24,7 +24,6 @@ from physiclaw.conductor.calls import (
     AGENT_TOOL_VERBS,
     ESCALATE,
 )
-from physiclaw.conductor.match import reads_as_locked
 from physiclaw.conductor.micro import (
     ACT_ARM,
     AGENT_ACT,
@@ -40,10 +39,10 @@ from physiclaw.conductor.micro import (
     data_block,
     return_fields,
 )
-from physiclaw.conductor.pages import page_id
+from physiclaw.conductor.pages import LOCKED_ID, page_id
 from physiclaw.conductor.playbook import AgentNode, fill_refs, qualified_macro
 from physiclaw.conductor.step import Step, Turn, Walk
-from physiclaw.conductor.turns import SCROLL_BBOX
+from physiclaw.conductor.turns import scroll_args
 
 KIND_TAP = "agent-tap"
 KIND_SWIPE = "agent-swipe"
@@ -286,7 +285,7 @@ class AgentStep(Step[AgentNode]):
                 KIND_SWIPE,
                 f"conductor: agent {node.id} — {self.pending_desc}",
                 gesture_vocab.SWIPE,
-                {"bbox": list(SCROLL_BBOX), "direction": "up" if down else "down"},
+                scroll_args(down=down),
             )
         if outcome.out == AGENT_DONE:
             # The exit contract is the matcher's, never the model's: done
@@ -352,7 +351,7 @@ class AgentStep(Step[AgentNode]):
         # Whatever happens next, money may have moved: the purchase line
         # lands the moment the first consented tap's result does.
         walk.log_purchase()
-        if reads_as_locked(walk.screen):
+        if walk.verdict is not None and walk.verdict.matches(LOCKED_ID):
             return walk.handover(f"agent {node.id!r}: phone locked mid-episode")
         self._screen_block(f"[you {self.pending_desc}]")
         return self._request()

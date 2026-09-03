@@ -6,10 +6,10 @@ the conductor's name. Everything the engine used to wire by hand lands
 here instead — `setup.session_setup()` at wake, the micro-caller with
 its cheap-tier client, and the `Conductor` arbiter per turn.
 
-The micro-caller wiring: None only when nothing drives (no program and
-no overture — an agent step can fire on any live walk, and
-the owned client is built lazily on the FIRST call, so wiring costs
-nothing at wake); `[conductor] micro_model`
+The micro-caller wiring: None only when nothing drives (no program —
+the boot, a resumed walk; an agent step can fire on any live walk,
+and the owned client is built lazily on the FIRST call, so wiring
+costs nothing at wake); `[conductor] micro_model`
 selects the cheap decision tier, ours to close (`aclose`); fail-open to
 the session provider on any problem, at parse time or build time.
 """
@@ -21,7 +21,6 @@ from physiclaw.common.config import CONFIG, parse_model_ref
 from physiclaw.conductor import setup as conductor_setup
 from physiclaw.conductor.conductor import Conductor
 from physiclaw.conductor.micro import MicroCaller
-from physiclaw.conductor.overture import Overture
 from physiclaw.conductor.program import Program
 from physiclaw.contract.dto import AssistantMessage, Message
 from physiclaw.contract.plugin import SessionSetup, SetupContext
@@ -52,11 +51,9 @@ class ConductorPlugin:
 
     async def session_setup(self, ctx: SetupContext) -> SessionSetup | None:
         try:
-            program, overture, hidden = conductor_setup.session_setup()
-            self._micro = _wire_micro(program, overture, ctx)
-            self._conductor = Conductor(
-                program=program, micro=self._micro, overture=overture
-            )
+            program, hidden = conductor_setup.session_setup()
+            self._micro = _wire_micro(program, ctx)
+            self._conductor = Conductor(program=program, micro=self._micro)
             return SessionSetup(gated_macros=hidden)
         except Exception:
             log.exception("conductor setup crashed — plain model session")
@@ -95,16 +92,14 @@ class ConductorPlugin:
                 log.warning("conductor micro client close failed", exc_info=True)
 
 
-def _wire_micro(
-    program: "Program | None", overture: "Overture | None", ctx: SetupContext
-) -> MicroCaller | None:
+def _wire_micro(program: "Program | None", ctx: SetupContext) -> MicroCaller | None:
     """The micro-caller for the conductor's model calls — None only
-    when NOTHING drives (no program and no overture). Any live walk can
-    need one (an ask's reply judgment, an agent step) — and the owned
-    cheap-tier client is built lazily on the FIRST call, so wiring the
-    caller costs nothing at wake. The session provider (off the setup
-    context) is the fail-open floor."""
-    if overture is None and program is None:
+    when NOTHING drives (no program). Any live walk can need one (the
+    boot's parse_task, an ask's reply judgment, an agent step) — and
+    the owned cheap-tier client is built lazily on the FIRST call, so
+    wiring the caller costs nothing at wake. The session provider (off
+    the setup context) is the fail-open floor."""
+    if program is None:
         return None
     factory = None
     ref = CONFIG.conductor.micro_model

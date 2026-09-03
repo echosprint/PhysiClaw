@@ -1,13 +1,13 @@
 """The handover brief — the conductor's distilled report to the model.
 
-A driver that stops mints ONE last synthesized ``[note, peek]`` turn
+A walk that stops mints ONE last synthesized ``[note, peek]`` turn
 whose note carries these renderings, then answers None forever. The
 note summary is exactly what compaction preserves, so the brief
 outlives the turns it summarizes and the model never resumes blind;
 the peek hands it the fresh view it would have had to take anyway (and
 on a dead phone its error result is itself the evidence).
 
-Pure text: the drivers pass state in, nothing here reads the world.
+Pure text: the walk passes state in, nothing here reads the world.
 The reason string arrives verbatim; when a path owes the model an
 imperative (the deny back-out, the unlock doctrine), the caller already
 wrote it into the reason, so this module never invents instructions.
@@ -71,13 +71,3 @@ def completion_brief(
         "the user and wrap up."
     )
     return " ".join(parts)
-
-
-def boot_brief(reason: str) -> str:
-    """A quit boot's report: the overture holds no walk state, so the
-    brief is the reason plus where the session stands."""
-    return (
-        f"conductor handing over: {reason}. The boot could not reach the "
-        "user's thread; this turn's peek shows where the phone is now. "
-        "Take the session from there."
-    )

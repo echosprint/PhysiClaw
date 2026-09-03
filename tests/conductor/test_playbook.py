@@ -841,3 +841,139 @@ def test_disabled_recover_macro_is_reported_not_run() -> None:
 
     assert spec.recovers["home"].elsewhere.macro == "go-home"
     assert pb.disabled_macros(spec, pack) == ["go-home"]
+
+
+# ---------- the boot: `activate`, and the locked reading ----------
+
+CHANNEL_OPEN = """\
+name: open
+description: open the thread
+steps:
+  - name: go
+    tool: tap
+    with: {label: t, bbox: [0.1, 0.1, 0.2, 0.2]}
+"""
+
+BOOT = """\
+name: boot
+description: reach the thread and read it
+route:
+  - page: thread
+    recover:
+      locked: {tool: unlock_phone}
+      elsewhere: {macro: open}
+      limit: 4
+  - activate: parse
+"""
+
+
+def _channel_pack():
+    from conductor_fakes import write_channel
+
+    write_channel(CHANNEL_OPEN)
+    return pb.load_pack("channel")
+
+
+def test_the_boot_parses_with_its_activate_step_last() -> None:
+    from physiclaw.conductor.playbook import ActivateNode
+
+    spec = pb.parse_playbook(BOOT, "boot", _channel_pack())
+
+    node = spec.nodes[-1]
+    assert isinstance(node, ActivateNode)
+    assert node.enter == "thread" and node.max_scrolls == 2
+    assert spec.recovers["thread"].locked is not None
+    assert spec.recovers["thread"].limit == 4
+
+    bounded = pb.parse_playbook(
+        BOOT.replace(
+            "  - activate: parse\n", "  - activate: parse\n    limit: {scrolls: 0}\n"
+        ),
+        "boot",
+        _channel_pack(),
+    )
+    assert bounded.nodes[-1].max_scrolls == 0
+
+
+def test_activate_belongs_to_the_channel_boot_only() -> None:
+    # An app playbook cannot read the thread for a task — that is the
+    # boot's; and even in the channel pack, only the file named boot.
+    text = VALID.split("  - tell: confirm")[0] + "  - activate: parse\n"
+    with pytest.raises(PlaybookError, match="channel boot's own step"):
+        pb.parse_playbook(text, "buy", _pack())
+    with pytest.raises(PlaybookError, match="channel boot's own step"):
+        pb.parse_playbook(
+            BOOT.replace("name: boot", "name: other"), "other", _channel_pack()
+        )
+
+
+@pytest.mark.parametrize(
+    "edit, message",
+    [
+        # activate must read the thread: the page before it is the thread
+        (
+            lambda t: t.replace(
+                "  - activate: parse\n",
+                "  - do: nudge\n    macro: open\n  - page: other\n"
+                '    anchors: ["Somewhere else"]\n'
+                "  - activate: parse\n",
+            ),
+            "immediately before it",
+        ),
+        # activate ends the boot
+        (
+            lambda t: t + "  - do: after\n    macro: open\n  - page: thread\n",
+            "must end with an `activate`",
+        ),
+        # …and only one does
+        (
+            lambda t: t.replace(
+                "  - activate: parse\n",
+                "  - activate: first\n  - page: thread\n  - activate: parse\n",
+            ),
+            "one `activate` only",
+        ),
+        # a boot must have one
+        (
+            lambda t: t.replace(
+                "  - activate: parse\n",
+                "  - do: nudge\n    macro: open\n  - page: thread\n",
+            ),
+            "must end with an `activate`",
+        ),
+        # the boot never speaks to the user
+        (
+            lambda t: t.replace(
+                "  - activate: parse\n",
+                "  - tell: hi\n    message: hello\n  - activate: parse\n",
+            ),
+            "messages the user",
+        ),
+        # limit takes scrolls only
+        (
+            lambda t: t.replace(
+                "  - activate: parse\n", "  - activate: parse\n    limit: {calls: 2}\n"
+            ),
+            "takes only `scrolls`",
+        ),
+    ],
+)
+def test_boot_shape_lints(edit, message) -> None:
+    with pytest.raises(PlaybookError, match=message):
+        pb.parse_playbook(edit(BOOT), "boot", _channel_pack())
+
+
+def test_flat_recover_covers_the_locked_reading_too() -> None:
+    # `recover: {tool: x}` is one hand for ANY deviation — the lock
+    # screen included, exactly as the docstring promises; the keyed form
+    # is where an author tells the readings apart.
+    text = VALID.replace(
+        "  - page: home\n  - do: open",
+        "  - page: home\n    recover: {tool: force_quit}\n  - do: open",
+        1,
+    )
+    spec = pb.parse_playbook(text, "buy", _pack())
+
+    r = spec.recovers["home"]
+    assert r.locked is r.elsewhere is r.occluded
+    assert r.hand_for("locked") is r.locked

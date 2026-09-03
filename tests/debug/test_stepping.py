@@ -233,3 +233,66 @@ def test_at_abandons_a_pending_ask(pack) -> None:
     out = json.loads(result.stdout)  # stdout is the JSON alone under --json
     assert out["outcome"] == "paused" and out["position"]["awaiting"] is False
     assert stepping.load_state("demo", "flow")["told"] is False
+
+
+# ---------- the boot ----------
+
+
+def test_catalog_lists_the_channel_boot_with_its_activate_step(pack) -> None:
+    from conductor_fakes import write_channel
+
+    write_channel(
+        "name: open\ndescription: d\nsteps:\n  - name: go\n    tool: home_screen\n"
+    )
+    from physiclaw.conductor import scaffold
+
+    scaffold.ensure_channel_boot()
+
+    (channel,) = [p for p in stepping.catalog() if p["app"] == "channel"]
+    (boot,) = channel["playbooks"]
+    assert boot["name"] == "boot"
+    assert [(n["id"], n["kind"], n["enter"]) for n in boot["nodes"]] == [
+        ("parse", "activate", "thread")
+    ]
+
+
+def test_stepping_the_boot_reads_the_staged_reply_as_the_request(pack, mocker) -> None:
+    # The boot has no inputs and reads the thread first: `--reply` is the
+    # user's message there, seeded before the opening read — and the
+    # activate step's parse_task runs over the virtual thread.
+    from conductor_fakes import write_channel
+
+    from physiclaw.conductor import scaffold
+    from physiclaw.conductor.micro import MicroOutcome, MicroResult
+    from physiclaw.contract.dto import Usage
+    from physiclaw.debug import thread as vthread
+
+    write_channel(
+        "name: open\ndescription: d\nsteps:\n  - name: go\n    tool: home_screen\n"
+    )
+    scaffold.ensure_channel_boot()
+    seen: list = []
+
+    class _Micro:
+        async def run(self, req):
+            seen.append(req)
+            outcome = MicroOutcome(out="not_a_task", reason="chat", confidence=0.9)
+            return MicroResult(outcome, "chat", 1, Usage(), 1)
+
+        async def aclose(self):
+            return None
+
+    mocker.patch(
+        "physiclaw.conductor.rehearsal.micro_caller", lambda rlog=None: _Micro()
+    )
+
+    result = runner.invoke(
+        app, ["playbooks", "step", "channel/boot", "--reply", "买牛奶", "--json"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert vthread.load().bubbles[0].text == "买牛奶" and vthread.load().staged == []
+    assert (
+        len(seen) == 1 and seen[0].call == "parse_task" and "买牛奶" in seen[0].listing
+    )
+    assert json.loads(result.stdout)["outcome"] == "completed"

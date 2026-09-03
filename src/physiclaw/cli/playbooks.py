@@ -15,7 +15,7 @@ the CLI only prints).
 
 Nothing here writes cross-wake state. A rehearsal drives the phone now
 and stops; the conductor's own doors at wake are the suspension file and
-the overture."""
+the channel pack's boot."""
 
 import asyncio
 from pathlib import Path
@@ -71,7 +71,12 @@ def init(
     example walk) and an example pack macro — parse-clean, disabled."""
     from physiclaw.common.paths import PACK_FILENAME
     from physiclaw.conductor import scaffold
-    from physiclaw.conductor.pages import CHANNEL_APP, IOS_APP, THREAD_PAGE
+    from physiclaw.conductor.pages import (
+        BOOT_PLAYBOOK,
+        CHANNEL_APP,
+        IOS_APP,
+        THREAD_PAGE,
+    )
     from physiclaw.conductor.specfile import SpecError
 
     try:
@@ -86,7 +91,8 @@ def init(
         )
         typer.echo("  2. record the send/open gesture paths in macros/*/MACRO.yml")
         typer.echo("  3. rehearse both, then enable (physiclaw macros run is")
-        typer.echo("     per-user-macro; drive a pack's via physiclaw playbooks run)")
+        typer.echo("     per-user-macro; drive a pack's via physiclaw playbooks run);")
+        typer.echo(f"     the boot ({BOOT_PLAYBOOK}.yml) goes live with `open`")
         typer.echo(
             f"  4. capture geometry: physiclaw playbooks pages calibrate {CHANNEL_APP}"
         )

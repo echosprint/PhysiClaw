@@ -2,10 +2,10 @@
 
 The conductor promises that everything it does is bounded: a route has
 at most so many moves, an episode so many calls, a page so many
-recoveries, a boot so many unlocks. Those numbers used to sit beside
-the code that enforced each one; here they sit together so a reader
-can see, in one screen, what stops a walk from running forever. The
-modules that enforce them import from here.
+recoveries, the boot so many history scrolls. Those numbers used to
+sit beside the code that enforced each one; here they sit together so
+a reader can see, in one screen, what stops a walk from running
+forever. The modules that enforce them import from here.
 """
 
 # ---- the route (playbook.py / route.py) ----
@@ -55,20 +55,14 @@ MAX_LANDMARKS = 12
 # than this add tokens without adding real choices.
 MAX_CANDIDATES = 40
 
-# ---- the boot (overture.py) — fixed, not authorable ----
+# ---- the boot (channel/boot.yml, step_activate.py) ----
 
-# `unlock_phone` races the passcode keypad and its own doctrine says to
-# retry once or twice; the open macro is deterministic, so a second miss
-# means the world is not what the pack describes. Together these ARE
-# the boot's turn budget: one opening peek, then only unlocks, opens,
-# and history scrolls — never more than 1 + 2 + 2 + 2 turns plus the
-# one quit brief.
-UNLOCK_TRIES = 2
-OPEN_TRIES = 2
-# How many times parse_task's `scroll_up` escape may scroll the thread
-# for older messages before the cautious read (no full request in view
-# → no activation) stands.
-HISTORY_SCROLLS = 2
+# How many times the boot's `activate` step may take parse_task's
+# `scroll_up` escape — scrolling the thread for an older request —
+# before the cautious read (no full request in view → no activation)
+# stands. The boot's OTHER bounds (unlocks, opens) are its own route's
+# `recover.limit:`, under the walk-wide ceiling above.
+DEFAULT_BOOT_SCROLLS = 2
 
 # ---- the drivers (rehearsal.py / replay.py) ----
 

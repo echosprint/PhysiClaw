@@ -3,9 +3,9 @@
 The conductor never actuates and never holds an MCP client; everything
 it knows about the world arrives as ordinary ``ToolResultMessage``s in
 the session history. These three readers are the whole vocabulary: the
-result of one specific synthesized call (every driver's view, via
+result of one specific synthesized call (the walk's view, via
 `Turnsmith.settle`), and a result's text/screen extraction. One home,
-because Program and Overture must read history identically.
+so every reader of the transcript reads it identically.
 """
 
 from physiclaw.common.listing import Screen

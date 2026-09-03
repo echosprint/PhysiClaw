@@ -185,7 +185,7 @@ def build_program(
 
 # The user-channel pack the gate tests send over: one thread page and
 # a send macro; `write_channel` lays it down (plus an `open` macro when
-# the test's walk needs the resume/overture hand).
+# the test's walk needs the resume/boot hand).
 CHANNEL_PAGES = """\
 thread:
   anchors: ["MyChat"]

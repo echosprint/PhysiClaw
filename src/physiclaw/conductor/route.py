@@ -41,6 +41,7 @@ from physiclaw.conductor.limits import (
     DEFAULT_AGENT_SCROLLS,
     DEFAULT_ASK_ROUNDS,
     DEFAULT_ASK_WAIT_SECONDS,
+    DEFAULT_BOOT_SCROLLS,
     DEFAULT_RECOVER_LIMIT,
     MAX_AGENT_CALLS,
     MAX_ASK_ROUNDS,
@@ -52,8 +53,11 @@ from physiclaw.conductor.limits import (
     MIN_ASK_WAIT_SECONDS,
 )
 from physiclaw.conductor.pages import (
+    BOOT_PLAYBOOK,
+    CHANNEL_APP,
     PAGE_DECL_FIELDS,
     RESERVED_APPS,
+    THREAD_PAGE,
     PagesError,
     parse_pages_data,
     route_decl,
@@ -63,8 +67,10 @@ from physiclaw.conductor.playbook import (
     IRREVERSIBLE_CLASSES,
     PACK_MACROS_DIRNAME,
     READING_ELSEWHERE,
+    READING_LOCKED,
     READING_OCCLUDED,
     RECOVER_READINGS,
+    ActivateNode,
     AgentNode,
     AskNode,
     DoNode,
@@ -96,7 +102,7 @@ _ASK_WAIT_KEYS = {"seconds", "rounds"}
 # landmarks.<name>` for a tap) or a macro. Closed tool vocabulary — a
 # recover hand resets state, it does not navigate (the route does that).
 # A page declares one hand for any deviation, or one per reading
-# (`occluded:` / `elsewhere:`), plus its own `limit:`.
+# (`occluded:` / `elsewhere:` / `locked:`), plus its own `limit:`.
 RECOVER_TOOLS = ("force_quit", "go_back", "home_screen", "unlock_phone", "tap")
 _HAND_KEYS = {"tool", "with", "macro"}
 _RECOVER_KEYS = _HAND_KEYS | {"limit", *RECOVER_READINGS}
@@ -112,7 +118,7 @@ _GRANT_ROOTS = (GRANT_LANDMARKS, GRANT_MACROS)
 # to the route. Page-declaration fields come from `pages.py`'s ONE
 # spelling (PAGE_DECL_FIELDS) — their content is validated there; they
 # appear here only so the unknown-key check names them as legal.
-ENTRY_KINDS = ("page", "start", "do", "agent", "ask", "tell")
+ENTRY_KINDS = ("page", "start", "do", "agent", "ask", "tell", "activate")
 _ENTRY_KEYS = {
     "page": {"page", "recover", *PAGE_DECL_FIELDS},
     "start": {"start", "macro"},
@@ -129,6 +135,7 @@ _ENTRY_KEYS = {
     },
     "ask": {"ask", "approve", "message", "yes", "no", "total", "wait", "resume"},
     "tell": {"tell", "message", "no"},
+    "activate": {"activate", "limit"},
 }
 
 # The shape `_macro_resolver` returns.
@@ -261,6 +268,8 @@ def compile_route(
             moves.append(agent)
         elif kind == "ask":
             moves.append(_parse_ask(ctx, where, name, entry, current_page))
+        elif kind == "activate":
+            moves.append(_parse_activate(ctx, where, name, entry, current_page))
         else:  # tell
             message, _ = _entry_message(ctx, where, entry, ctx.payloads)
             no = _reply_words(entry, "no", where) if "no" in entry else []
@@ -269,6 +278,7 @@ def compile_route(
         raise PlaybookError(f"too many moves ({len(moves)} > {MAX_NODES})")
     _check_money(moves)
     _check_resume(moves)
+    _check_boot(ctx, moves)
     # The manifest's hands beneath this route's own: a route that
     # declares a page's hand replaces the inherited one whole.
     return CompiledRoute(
@@ -849,6 +859,70 @@ def _parse_ask(
     )
 
 
+def _parse_activate(
+    ctx: _Ctx, where: str, nid: str, entry: dict, current_page: str | None
+) -> ActivateNode:
+    """The `activate` step — the channel boot's own. It reads the user's
+    thread, so the thread page must sit immediately before it (its
+    place at the route's end is `_check_boot`'s rule). `limit:
+    {scrolls}` bounds parse_task's scroll-for-history escape."""
+    if not _is_boot(ctx):
+        raise PlaybookError(
+            f"{where}: `activate` is the channel boot's own step — it belongs "
+            f"in {CHANNEL_APP}/{BOOT_PLAYBOOK}.yml only"
+        )
+    if current_page != THREAD_PAGE:
+        raise PlaybookError(
+            f"{where}: `activate` reads the user's thread — put the "
+            f"`{THREAD_PAGE}` page waypoint immediately before it"
+        )
+    raw_limit = entry.get("limit")
+    max_scrolls = DEFAULT_BOOT_SCROLLS
+    if raw_limit is not None:
+        if not isinstance(raw_limit, dict) or set(map(str, raw_limit)) - {"scrolls"}:
+            raise PlaybookError(f"{where}: `limit` takes only `scrolls`")
+        max_scrolls = _limit_int(
+            raw_limit.get("scrolls", DEFAULT_BOOT_SCROLLS),
+            f"{where}: `limit.scrolls`",
+            0,
+            MAX_AGENT_CALLS,
+        )
+    return ActivateNode(id=nid, enter=current_page, max_scrolls=max_scrolls)
+
+
+def _is_boot(ctx: _Ctx) -> bool:
+    """Whether this route is the channel pack's boot playbook — the one
+    file the `activate` step is admitted in."""
+    return ctx.pack.app == CHANNEL_APP and ctx.playbook == BOOT_PLAYBOOK
+
+
+def _check_boot(ctx: _Ctx, nodes: list[Node]) -> None:
+    """The boot's shape: it ends in exactly one `activate` (the baton
+    IS its ending), and it never speaks to the user — an ask or tell
+    before the request is even read would suspend the wake for a reply
+    to nothing. Everything else on it is the ordinary route grammar."""
+    if not _is_boot(ctx):
+        return
+    activates = [n.id for n in nodes if isinstance(n, ActivateNode)]
+    if not nodes or not isinstance(nodes[-1], ActivateNode):
+        raise PlaybookError(
+            f"{CHANNEL_APP}/{BOOT_PLAYBOOK} must end with an `activate` step — "
+            "reading the thread is what the boot is for, and its answer is the "
+            "next walk"
+        )
+    if len(activates) > 1:
+        raise PlaybookError(
+            f"{CHANNEL_APP}/{BOOT_PLAYBOOK}: one `activate` only — "
+            f"{', '.join(activates)} would each end the boot"
+        )
+    for n in nodes:
+        if isinstance(n, (AskNode, TellNode)):
+            raise PlaybookError(
+                f"{CHANNEL_APP}/{BOOT_PLAYBOOK}: {n.id!r} messages the user — the "
+                "boot only reads the thread; asks and tells belong to playbooks"
+            )
+
+
 def _ask_wait(raw: Any, where: str) -> tuple[int, int]:
     """`wait: {seconds, rounds}` — both optional, defaults visible in
     the scaffold; bounded by the engine's single-sleep cap and a sane
@@ -906,8 +980,9 @@ def _refuse_bodies(raw: Any, where: str) -> None:
 def _parse_recover(ctx: _Ctx, raw: Any, where: str, page: str) -> Recovery:
     """A page's `recover:` — one hand for any deviation (`tool:`/`macro:`
     at the top), or one per reading (`occluded:` the page itself under
-    a sheet or popup, `elsewhere:` any other screen), with the page's
-    own `limit:` under the walk-wide ceiling."""
+    a sheet or popup, `locked:` the phone's lock screen, `elsewhere:`
+    any other screen), with the page's own `limit:` under the walk-wide
+    ceiling."""
     if not isinstance(raw, dict):
         raise PlaybookError(
             f"{where}: `recover` must be a mapping — `tool:` (one gesture) or `macro:`"
@@ -935,10 +1010,11 @@ def _parse_recover(ctx: _Ctx, raw: Any, where: str, page: str) -> Recovery:
         return Recovery(
             occluded=hands.get(READING_OCCLUDED),
             elsewhere=hands.get(READING_ELSEWHERE),
+            locked=hands.get(READING_LOCKED),
             limit=limit,
         )
     hand = _parse_hand(ctx, {k: raw[k] for k in flat}, f"{where}: `recover`", page)
-    return Recovery(occluded=hand, elsewhere=hand, limit=limit)
+    return Recovery(occluded=hand, elsewhere=hand, locked=hand, limit=limit)
 
 
 def _parse_hand(ctx: _Ctx, raw: Any, where: str, page: str) -> RecoverHand:

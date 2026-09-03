@@ -42,7 +42,8 @@ shows — name the app the way users say it, 淘宝 not taobao, so two
 packs offering the same task read apart), `enabled`, `inputs`, and
 `route` — a ROUTE of `page:` waypoints (checked every time, each
 optionally declaring its own `recover:` — one hand, or
-`occluded:`/`elsewhere:` hands per reading, with its own `limit:`)
+`occluded:`/`elsewhere:`/`locked:` hands per reading, with its own
+`limit:`)
 alternating with moves — `start` (the cold launch, usually a pack
 macro every route shares), `do` (a recorded macro), `agent` (the
 model drives inside your prompt's fence, with the tools, the `give:`
@@ -57,6 +58,13 @@ nothing retries or unlocks in the background.
 
 Adaptation notes and the rehearsal checklist ride as comments in the
 files.
+
+`channel/` is the conductor's own pack: the thread page, the
+send/open macros an `ask` runs, and `boot.yml` — the walk every wake
+plays before any playbook (reach the thread, read the request, hand
+the matching playbook the baton). Its `activate` step is the one
+entry only that file may carry; the hands and limits around it are
+yours to edit, step, and replay like any route.
 
 ## Install
 

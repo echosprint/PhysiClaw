@@ -19,10 +19,12 @@ moments (handover, completion, suspension). What each STEP does is its
 executor's (`step.py` is the contract) — one per route entry kind, the
 runner the GitHub-Actions analogy asks for:
 
-  - `step_do.py`     a `do`/`start` move: enter check, the macro, verify
-  - `step_agent.py`  an `agent` step: the pure-text call, or the episode
-  - `step_ask.py`    `ask` (send, hold, judge the reply, bind consent)
-                     and `tell` (send, suspend, read a cancel on resume)
+  - `step_do.py`       a `do`/`start` move: enter check, the macro, verify
+  - `step_agent.py`    an `agent` step: the pure-text call, or the episode
+  - `step_ask.py`      `ask` (send, hold, judge the reply, bind consent)
+                       and `tell` (send, suspend, read a cancel on resume)
+  - `step_activate.py` the boot's `activate`: parse_task over the thread,
+                       and the baton — the program the conductor drives next
 
 What the playbook declares is what runs. The walk opens with one peek
 (it must see a screen before the first page check) and starts at the
@@ -39,6 +41,7 @@ import logging
 from collections import Counter
 from collections.abc import Callable
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from physiclaw.common import daylog, gesture_vocab
 from physiclaw.common.listing import Screen
@@ -46,9 +49,10 @@ from physiclaw.common.logger import write_json_atomic
 from physiclaw.conductor import brief, recover, views, walklog
 from physiclaw.conductor.channel import Channel
 from physiclaw.conductor.gate import Gate
-from physiclaw.conductor.match import Reading, Verdict, match_screen, reads_as_locked
+from physiclaw.conductor.match import Reading, Verdict, match_screen
 from physiclaw.conductor.micro import MicroOutcome
 from physiclaw.conductor.pages import (
+    LOCKED_ID,
     Landmark,
     PagePrint,
     owned_by,
@@ -57,9 +61,12 @@ from physiclaw.conductor.pages import (
 )
 from physiclaw.conductor.playbook import (
     READING_ELSEWHERE,
+    READING_LOCKED,
     READING_OCCLUDED,
+    ActivateNode,
     AgentNode,
     AskNode,
+    Checked,
     DoNode,
     Node,
     Playbook,
@@ -68,6 +75,7 @@ from physiclaw.conductor.playbook import (
     qualified_macro,
 )
 from physiclaw.conductor.step import Paused, Step, Turn
+from physiclaw.conductor.step_activate import ActivateStep
 from physiclaw.conductor.step_agent import AgentStep
 from physiclaw.conductor.step_ask import AskStep, TellResume, TellStep
 from physiclaw.conductor.step_do import DoStep
@@ -80,6 +88,9 @@ from physiclaw.conductor.turns import Turnsmith
 from physiclaw.conductor.walklog import Outcome
 from physiclaw.contract.dto import AssistantMessage, Message
 from physiclaw.macros.model import Macro
+
+if TYPE_CHECKING:
+    from physiclaw.conductor.setup import Activation
 
 log = logging.getLogger(__name__)
 
@@ -112,6 +123,15 @@ _STEP_FOR: dict[type, type[Step]] = {
     AgentNode: AgentStep,
     AskNode: AskStep,
     TellNode: TellStep,
+    ActivateNode: ActivateStep,
+}
+
+
+# How a checked node names itself in a handover reason.
+_CHECKED_KIND: dict[type, str] = {
+    DoNode: "move",
+    AgentNode: "agent",
+    ActivateNode: "activate",
 }
 
 
@@ -132,6 +152,7 @@ class Program:
         suspended: dict | None = None,
         landmarks: "dict[str, Landmark] | None" = None,
         dry: bool = False,
+        activation: "Activation | None" = None,
     ) -> None:
         self.app = spec.app
         # A dry walk (`replay.py`) leaves no trace: no runs.jsonl line,
@@ -154,9 +175,18 @@ class Program:
         # The pack's declared fixed spots — recover hands tap them, agent
         # episodes are granted them by name.
         self.landmarks: dict[str, Landmark] = landmarks or {}
+        # The boot's activation (menu, parse_task, build) — what its
+        # `activate` step runs; None on every other walk — and the
+        # baton that step hands on: the program the conductor drives
+        # once this walk goes quiet.
+        self.activation = activation
+        self.baton: "Program | None" = None
         self.idx = 0
-        # Turn minting + the one action in flight (`turns.py`).
-        self.turns = Turnsmith("walk")
+        # Turn minting + the one action in flight (`turns.py`). The scope
+        # is the playbook ref: two walks in one session (the boot, then
+        # the program it activates) mint under different names, so a
+        # call id can never find the other walk's stale result.
+        self.turns = Turnsmith(f"{spec.app}-{spec.name}")
         self.gate = Gate()
         # Recorded agent outputs (`{node.field}` refs read them).
         self.outputs: dict[str, str] = {}
@@ -374,7 +404,7 @@ class Program:
             self.phase is Phase.OPENING
             and self._from_suspension
             and not self._unlocked
-            and reads_as_locked(self.screen)
+            and self.verdict.matches(LOCKED_ID)
         ):
             # The resumed walk's first reading is the cover: wake the
             # phone once, then open again exactly as before.
@@ -545,10 +575,11 @@ class Program:
             "paying again"
         )
 
-    def enter_gate(self, node: "DoNode | AgentNode") -> Turn:
-        """The one enter-page guard moves and acting agents share: None
-        when the node has no enter (a `start` runs unconditionally) or
-        the page reads; else the recovery/handover step."""
+    def enter_gate(self, node: Checked) -> Turn:
+        """The one enter-page guard moves, acting agents, and the boot's
+        activate share: None when the node has no enter (a `start` runs
+        unconditionally) or the page reads; else the recovery/handover
+        step."""
         if not node.enter:
             return None
         assert self.verdict is not None
@@ -556,7 +587,7 @@ class Program:
         wrong = self.mismatch(self.verdict, expected)
         if wrong is None:
             return None
-        kind = "agent" if isinstance(node, AgentNode) else "move"
+        kind = _CHECKED_KIND[type(node)]
         return self.recover_or_handover(
             node,
             expected,
@@ -585,6 +616,15 @@ class Program:
             summary = f"{summary} | {self._journal}"
             self._journal = None
         return self.turns.synth(kind, summary, tool, args, channel=channel)
+
+    def conclude(self, reason: str) -> None:
+        """The walk's quiet completion — recorded, DONE, and no brief
+        turn: the boot's ending is the next walk's beginning (its
+        `activate` step set the baton) or the model's own thread (it
+        set none), and either way there is nothing to report to a
+        model that is not about to speak from a brief."""
+        log.info("conductor: %s/%s concluded — %s", self.app, self.spec.name, reason)
+        self._end(Outcome.COMPLETED, reason)
 
     def handover(self, reason: str) -> AssistantMessage:
         """The walk's exit: log and record, then mint the ONE final
@@ -618,11 +658,7 @@ class Program:
     # ---- recovery ----
 
     def recover_or_handover(
-        self,
-        node: "DoNode | AgentNode",
-        expected_id: str,
-        mode: recover.Mode,
-        reason: str,
+        self, node: Checked, expected_id: str, mode: recover.Mode, reason: str
     ) -> Turn:
         """The page's declared hand before the model: a deviation is
         recovered toward the page the frozen cursor already requires —
@@ -643,13 +679,14 @@ class Program:
             return self.handover(reason)
         st = recover.State(target=expected_id, mode=mode, reason=reason)
         v = self.verdict
-        # The reading the page declared its hands for: the page itself
-        # under an overlay, or any other screen.
-        reading = (
-            READING_OCCLUDED
-            if v is not None and v.occludes(expected_id)
-            else READING_ELSEWHERE
-        )
+        # The reading the page declared its hands for: the lock screen
+        # (taps do not land there — the matcher reads it by shape), the
+        # page itself under an overlay, or any other screen.
+        reading = READING_ELSEWHERE
+        if v is not None and v.matches(LOCKED_ID):
+            reading = READING_LOCKED
+        elif v is not None and v.occludes(expected_id):
+            reading = READING_OCCLUDED
         step = recover.plan(
             self._recoveries,
             self.spec.recovers.get(page_name(expected_id)),

@@ -19,8 +19,7 @@ operator problem, not a retry case) — so ``drive()`` never catches.
 
 One divergence is deliberate, not drift: the in-process engine runs
 turn plugins (`[agent] plugins` — the conductor's armed playbooks, and
-the overture's boot to the user's thread at wake); the claude path runs
-none. A plugin's payoff is eliminating metered provider calls, and that
+its boot to the user's thread at wake); the claude path runs none. A plugin's payoff is eliminating metered provider calls, and that
 path is subscription-metered — so it keeps the doctrine-in-prose
 version, executed by the model.
 

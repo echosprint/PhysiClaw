@@ -50,6 +50,19 @@ def test_keyed_hands_follow_the_reading() -> None:
     assert isinstance(step, recover.Hand) and step.hand is dismiss
     step = recover.plan(0, only_occluded, reading="elsewhere")
     assert isinstance(step, recover.Exhausted) and "`elsewhere`" in step.reason
+    step = recover.plan(0, only_occluded, reading="locked")
+    assert isinstance(step, recover.Exhausted) and "`locked`" in step.reason
+
+
+def test_the_locked_reading_takes_its_own_hand() -> None:
+    # A sleeping phone gets no taps: the hand declared for `locked` is
+    # the one that runs there, whatever the elsewhere hand is.
+    wake = RecoverHand(tool="unlock_phone")
+    keyed = Recovery(elsewhere=HAND, locked=wake)
+
+    step = recover.plan(0, keyed, reading="locked")
+    assert isinstance(step, recover.Hand) and step.hand is wake
+    assert keyed.hands == (HAND, wake)
 
 
 def test_state_rejects_an_unknown_mode() -> None:

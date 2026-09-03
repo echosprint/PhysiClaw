@@ -40,6 +40,7 @@ from physiclaw.common.text import read_text
 from physiclaw.conductor import rehearsal
 from physiclaw.conductor.hooks import Emit, McpCaller, Observe, OnExchange
 from physiclaw.conductor.playbook import (
+    ActivateNode,
     AgentNode,
     AskNode,
     DoNode,
@@ -73,6 +74,7 @@ KIND_DO = "do"
 KIND_AGENT = "agent"
 KIND_ASK = "ask"
 KIND_TELL = "tell"
+KIND_ACTIVATE = "activate"
 
 
 def state_path() -> Path:
@@ -121,6 +123,8 @@ def node_info(app: str, node: Node) -> NodeInfo:
     if isinstance(node, AskNode):
         resume = qualified_macro(app, node.resume) if node.resume else None
         return NodeInfo(node.id, KIND_ASK, node.enter, macro=resume)
+    if isinstance(node, ActivateNode):
+        return NodeInfo(node.id, KIND_ACTIVATE, node.enter)
     assert isinstance(node, TellNode)
     return NodeInfo(node.id, KIND_TELL)
 
@@ -349,7 +353,8 @@ async def step(
     reset to start over); `at` puts the cursor on a node first; `outputs`
     seed a pure-text agent's answer, and the cursor fast-forwards past
     the settled prefix so no call fires for it (an explicit `at` wins);
-    `reply` stages the user's next reply; `start_at`/`stop_after` narrow
+    `reply` stages the user's next reply (for the boot, the request the
+    thread shows); `start_at`/`stop_after` narrow
     the first macro of this invocation to a step range. `mcp` is an
     open client with `call_tool`; `emit` receives every progress line,
     `emit_warn` the readiness advisories, `observe(call, blocks)` every
@@ -364,6 +369,9 @@ async def step(
     emit_warn = emit_warn or emit
     spec, pack = conductor_setup.load_spec(app, name, require_live=False)
     channel = channel_mod.load_channel()
+    # The boot's menu of enabled playbooks: every pack on disk, read
+    # once per invocation rather than per node built.
+    activation = conductor_setup.activation_for(channel) if spec.activates else None
     state = load_state(app, name)
     if state is None:
         # A new walk's position at the route top — `Program.state`, the
@@ -374,12 +382,17 @@ async def step(
             conductor_setup.resolve_inputs(spec, values or {}),
             channel,
             dry=True,
+            activation=activation,
         ).state()
         for line in conductor_setup.readiness_warnings(spec, pack):
             emit_warn(line)
         # The virtual thread opens with the user's words — the input that
         # reads like a message — so an ask's reply reading has a thread.
+        # The boot has no inputs and reads the thread first: `--reply`
+        # IS the user's message there, staged for its opening read.
         said = state["values"].get("user_said", "")
+        if not said and reply is not None and spec.activates:
+            said, reply = reply, None
         vthread.seed(said or f"(stepping {app}/{name})", [])
         emit(
             "user channel is virtual while stepping: an ask reads the reply you "
@@ -411,7 +424,13 @@ async def step(
     first = True
     while True:
         program = conductor_setup.build_program(
-            spec, pack, state["values"], channel, suspended=state, dry=True
+            spec,
+            pack,
+            state["values"],
+            channel,
+            suspended=state,
+            dry=True,
+            activation=activation,
         )
         program.step_one = True
         registry = conductor_setup.walk_registry(program, channel)

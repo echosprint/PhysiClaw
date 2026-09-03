@@ -4,14 +4,16 @@ Pure policy over the walk's counters, the `plan` shape: given a check
 that needed page P and did not get it, name the ONE next action, or
 Exhausted and the walk hands over. What the playbook declares is what
 runs: a page with a `recover:` runs the hand declared for the reading
-— `occluded` when P itself sits under a sheet or popup, `elsewhere`
-for any other screen (the flat form declares one hand for both). After
-it the walk re-checks on the hand's own result view and, still off,
-walks the route again from its first unsettled node (a `force_quit`
-hand re-runs `start`, its whole point). A page declaring none, or no
-hand for this reading, hands over on the spot. Nothing taps, unlocks,
-or waits in the background — a phone that may lock mid-walk gets an
-`unlock_phone` hand declared by its author.
+— `occluded` when P itself sits under a sheet or popup, `locked` when
+the phone shows its lock screen (the matcher reads it by shape), and
+`elsewhere` for any other screen (the flat form declares one hand for
+all three). After it the walk re-checks on the hand's own result view
+and, still off, walks the route again from its first unsettled node (a
+`force_quit` hand re-runs `start`, its whole point). A page declaring
+none, or no hand for this reading, hands over on the spot. Nothing
+taps, unlocks, or waits in the background — a phone that may lock
+mid-walk gets a `locked: {tool: unlock_phone}` hand declared by its
+author.
 
 Two bounds, both visible in the playbook: the page's own `limit:` and
 the walk-wide ceiling (`MAX_RECOVER_ACTIONS`) that only ever goes up

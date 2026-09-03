@@ -307,6 +307,11 @@ class Screen:
         return cls(text=text, content="\n".join(content), rows=tuple(rows))
 
     @property
+    def labels(self) -> list[str]:
+        """The non-blank row labels, top to bottom."""
+        return [r.label for r in self.rows if r.label.strip()]
+
+    @property
     def readable(self) -> bool:
         """False for a failed camera read. Every consumer must decide what
         an unreadable screen means BEFORE evaluating, because `not` is

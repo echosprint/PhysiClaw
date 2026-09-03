@@ -66,6 +66,8 @@ def test_installed_pack_parses_whole_and_ships_disabled(app: str) -> None:
     from typer.testing import CliRunner
 
     from physiclaw.cli import app as cli_app
+    from physiclaw.conductor.channel import load_channel
+    from physiclaw.conductor.pages import BOOT_PLAYBOOK, CHANNEL_APP
     from physiclaw.conductor.playbook import load_pack, scan_playbooks
 
     tokens = {t for f in _pack_files(app) for t in find_placeholders(read_text(f))}
@@ -81,6 +83,12 @@ def test_installed_pack_parses_whole_and_ships_disabled(app: str) -> None:
     entries = scan_playbooks(app, pack)
     invalid = [e.name for e in entries if e.spec is None]
     assert not invalid, f"invalid playbook(s): {invalid}"
-    assert all(not e.spec.enabled for e in entries if e.spec), (
-        "template playbook enabled"
-    )
+    # The channel's boot ships enabled on purpose: its gate is the
+    # `open` hand it names, which ships disabled — so it is valid, not
+    # live, exactly like every other template playbook.
+    assert all(
+        not e.spec.enabled for e in entries if e.spec and e.name != BOOT_PLAYBOOK
+    ), "template playbook enabled"
+    if app == CHANNEL_APP:
+        ch = load_channel()
+        assert ch is not None and ch.boot is None, "template boot is live"

@@ -21,6 +21,7 @@ from physiclaw.conductor.limits import (
     MAX_RECOVER_ACTIONS,
 )
 from physiclaw.conductor.pages import (
+    BOOT_PLAYBOOK,
     CHANNEL_APP,
     IOS_APP,
     LOCKED_PAGE,
@@ -343,9 +344,16 @@ A pack may declare `landmarks:` — named fixed spots ({{label, bbox,
 are granted; a `page:` scope offers the spot only on that page. A
 page's `recover:` declares its recovery hand (one gesture,
 `unlock_phone` included, or an argument-less macro), or one hand per
-reading (`occluded:` for a sheet over the page itself, `elsewhere:`
-for any other screen), with its own `limit:` — nothing recovers in
-the background; a page declaring none hands over.
+reading (`occluded:` for a sheet over the page itself, `locked:` for
+the phone's lock screen, `elsewhere:` for any other screen), with its
+own `limit:` — nothing recovers in the background; a page declaring
+none hands over.
+
+The channel pack (`playbooks/channel/`) is the conductor's own: the
+thread page, the send/open macros an `ask` runs, and `boot.yml` — the
+walk every wake plays before any playbook (reach the thread, read the
+request, hand the matching playbook the baton), a route like any
+other whose `activate` step is the one entry only that file may carry.
 
 Replay a walk offline against a recorded session's screens —
 `physiclaw playbooks replay <app>/<name> --session <id>` — to see
@@ -371,8 +379,8 @@ CHANNEL_PACK_STUB = f"""\
 app: {CHANNEL_APP}
 description: >-
   The user-channel pack — the conductor's route to YOUR user's IM
-  thread. Holds the thread page + the send/open macros its asks run;
-  no playbooks live here, and packs never name it.
+  thread: the thread page, the send/open macros its asks run, and the
+  boot ({BOOT_PLAYBOOK}.yml) every wake walks first.
 
 # The ONE page the conductor must recognize: your own chat thread in
 # your IM app. Anchor on the chat header (your name / the contact
@@ -435,10 +443,34 @@ steps:
 """
 
 
+# The boot: what every wake does before any playbook, declared. A route
+# like any other — the thread page with its hands, then the one step
+# only this file may carry.
+CHANNEL_BOOT_STUB = f"""\
+# {CHANNEL_APP}/{BOOT_PLAYBOOK} — the walk every wake plays before any playbook:
+# reach YOUR user's thread, read the request there, hand the matching
+# playbook the baton. A route like any other: edit the hands and the
+# limits, step it (physiclaw playbooks step {CHANNEL_APP}/{BOOT_PLAYBOOK}),
+# replay it over a recorded wake. Live once `{OPEN_MACRO}` is enabled.
+name: {BOOT_PLAYBOOK}
+description: reach the user's thread and read the request there
+enabled: true
+route:
+  - page: {THREAD_PAGE}                  # where the walk must BE (the manifest declares it)
+    recover:                       # …and what to do when it is not
+      locked: {{tool: unlock_phone}}   # a sleeping phone gets no taps: wake it first
+      occluded: {{macro: {OPEN_MACRO}}}         # the thread under a sheet or keyboard
+      elsewhere: {{macro: {OPEN_MACRO}}}        # any other screen: the rehearsed hand
+      limit: 4                       # unlocks + opens together (an unlock races the keypad)
+  - activate: parse                # the boot's own step: parse_task over the thread,
+    limit: {{scrolls: 2}}            # scrolling up for a request above the fold
+"""
+
+
 def _init_channel_pack(root: Path) -> Path:
-    """`playbooks/channel/` — the infrastructure pack: the thread page +
-    the send/open macros the conductor's asks run. No playbooks live
-    here; packs never name it."""
+    """`playbooks/channel/` — the infrastructure pack: the thread page,
+    the send/open macros the conductor's asks run, and the boot
+    playbook. App packs never name it."""
     from physiclaw.common.text import write_text
 
     for name, stub in (
@@ -449,8 +481,25 @@ def _init_channel_pack(root: Path) -> Path:
         d.mkdir(parents=True)
         write_text(d / MACRO_FILENAME, stub)
     write_text(root / PACK_FILENAME, CHANNEL_PACK_STUB)
+    write_text(root / f"{BOOT_PLAYBOOK}.yml", CHANNEL_BOOT_STUB)
     ensure_format_readme()
     return root
+
+
+def ensure_channel_boot() -> None:
+    """Materialize `channel/boot.yml` beside an existing channel pack
+    that has none — the `ensure_ios_pack` pattern, called at wake: the
+    boot is a template the user owns and edits (its hands, its
+    limits), so it lives on disk, but a channel pack recorded before
+    the boot was a file must not lose its wake. Written once, then
+    never touched; no channel pack means nothing to write. Fail-open."""
+    from physiclaw.common import paths
+
+    root = paths.pack_root(CHANNEL_APP)
+    if (root / PACK_FILENAME).exists():
+        _ensure_file(
+            root / f"{BOOT_PLAYBOOK}.yml", CHANNEL_BOOT_STUB, "no boot at wake"
+        )
 
 
 def render_example_macro() -> str:
@@ -520,11 +569,12 @@ pages:
   # every state a real iPhone's cover can be put in — resting Always-On
   # Display, woken and fully lit, and after a swipe — iOS printed no
   # hint text at all, so the anchor below has nothing to match and the
-  # page scores 0. The conductor therefore recognizes the cover by its
-  # SHAPE instead (a clock and nothing else — `match.reads_as_cover`),
-  # which needs no declaration and no calibration. Keep this page: on a
-  # device or version that DOES print a hint it is the sharper signal,
-  # and it costs nothing when it never matches.
+  # page scores 0. The matcher therefore recognizes the cover by its
+  # SHAPE first (a clock and nothing else — `match.reads_as_locked`),
+  # which needs no declaration and no calibration, and every page's
+  # `locked:` recover hand fires on it. Keep this page: on a device or
+  # version that DOES print a hint it is the sharper signal, and it
+  # costs nothing when it never matches.
   {LOCKED_PAGE}:
     anchors:
       # ONE anchor, several acceptable readings — never separate
@@ -556,16 +606,24 @@ def ensure_ios_pack() -> None:
     Fail-open: a read-only home degrades to "no ios pages", which the
     conductor already handles (every OS state reads as unknown)."""
     from physiclaw.common import paths
-    from physiclaw.common.text import write_text
 
     root = paths.playbooks_dir() / IOS_APP
     # Keyed on the FILE, not the dir: an old-layout ios pack (pages.yml)
     # self-migrates by gaining the unified spec, while an existing
     # PLAYBOOK.yml — including a deliberately emptied one — is theirs.
-    if (root / PACK_FILENAME).exists():
+    _ensure_file(root / PACK_FILENAME, IOS_PACK_STUB, "OS pages unavailable")
+
+
+def _ensure_file(path: Path, stub: str, cost: str) -> None:
+    """Write `stub` at `path` unless a file is there — a user-owned
+    template materialized once, then never touched. Fail-open: an
+    unwritable home logs `cost` and the conductor runs without it."""
+    from physiclaw.common.text import write_text
+
+    if path.exists():
         return
     try:
-        root.mkdir(parents=True, exist_ok=True)
-        write_text(root / PACK_FILENAME, IOS_PACK_STUB)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_text(path, stub)
     except OSError:
-        log.warning("could not scaffold %s — OS pages unavailable", root, exc_info=True)
+        log.warning("could not write %s — %s", path, cost, exc_info=True)

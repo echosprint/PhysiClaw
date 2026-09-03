@@ -89,9 +89,9 @@ log = logging.getLogger(__name__)
 PARSE_TASK = "parse_task"
 NOT_A_TASK = "not_a_task"
 # parse_task's second escape: the newest message is a nudge whose
-# request sits ABOVE the visible thread — the overture scrolls up
-# (bounded) and re-asks over the accumulated listing. The episode's
-# scroll verb, one spelling.
+# request sits ABOVE the visible thread — the boot's activate step
+# scrolls up (bounded) and re-asks over the accumulated listing. The
+# episode's scroll verb, one spelling.
 SCROLL_UP = ACT_SCROLL_UP
 
 # The playbook `agent` step's two calls. `agent_fields` is the

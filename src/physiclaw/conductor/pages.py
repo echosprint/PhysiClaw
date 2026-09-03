@@ -72,9 +72,13 @@ RESERVED_APPS = frozenset({CHANNEL_APP, IOS_APP})
 # interpolate these, never hand-copy them.
 THREAD_PAGE = "thread"  # the channel pack's `pages:` must declare this
 SEND_MACRO = "send"  # nav to the user's thread + paste + send {message}
-# `open` is the channel's hand: nav to the user's thread — the overture
-# boots through it and a resumed ask reads through it.
+# `open` is the channel's hand: nav to the user's thread — the boot's
+# route recovers through it and a resumed ask reads through it.
 OPEN_MACRO = "open"
+# The channel pack's one playbook: the boot — the walk every wake plays
+# before any app playbook (reach the thread, read the request there).
+# `route.py` admits its `activate` step in this one file only.
+BOOT_PLAYBOOK = "boot"
 
 # The ios pack's one convention, here for the same reason: the boot
 # matches this page and `scaffold.IOS_PAGES_STUB` declares it, so the two
@@ -99,8 +103,8 @@ def owned_by(pid: str, app: str) -> bool:
     return pid.startswith(f"{app}.")
 
 
-# The full ids, precomputed: what the gate's peeks and the boot match
-# against.
+# The full ids, precomputed: what the gate's peeks and the boot's route
+# check against.
 THREAD_ID = page_id(CHANNEL_APP, THREAD_PAGE)
 LOCKED_ID = page_id(IOS_APP, LOCKED_PAGE)
 

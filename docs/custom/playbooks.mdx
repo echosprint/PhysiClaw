@@ -28,7 +28,7 @@ A pack is a folder. `PLAYBOOK.yml` is the manifest: what the app is and what its
 
 ## The route
 
-Six entry kinds make up a route:
+Six entry kinds make up a playbook's route:
 
 - `page` is where the walk must be, checked every time. Declare its anchors once, beside the waypoint or in `pages:`, and name it bare everywhere else.
 - `start` is the cold launch, at most one, right before the first page.
@@ -58,7 +58,23 @@ route:
 
 ## Recovery
 
-A page's `recover:` is the only recovery. A page declared in the manifest carries the hand every route inherits, and a route may declare its own to override it. One hand covers any deviation. Two hands cover the two readings the matcher gives: `occluded` when the page itself sits under a sheet or popup, `elsewhere` for any other screen. `limit:` bounds the page's tries per walk. After a hand runs, the walk re-checks the page and, still off, starts the route over. A page without `recover:` hands over on the spot.
+A page's `recover:` is the only recovery. A page declared in the manifest carries the hand every route inherits, and a route may declare its own to override it. One hand covers any deviation. Keyed hands cover the readings the matcher gives: `occluded` when the page itself sits under a sheet or popup, `locked` when the phone shows its lock screen, `elsewhere` for any other screen. `limit:` bounds the page's tries per walk. After a hand runs, the walk re-checks the page and, still off, starts the route over. A page without `recover:` hands over on the spot.
+
+## The boot
+
+Every wake starts with the channel pack's own playbook, `channel/boot.yml`, walked like any other. Its route is the thread page with the hands that reach it, then `activate`, the one step only that file may carry: it reads the thread against the enabled playbooks and hands the matching one the walk. Edit the hands and the limits like any route, and step it with `physiclaw playbooks step channel/boot --reply "帮我买五常大米"`.
+
+```yaml
+route:
+  - page: thread
+    recover:
+      locked: {tool: unlock_phone}
+      occluded: {macro: open}
+      elsewhere: {macro: open}
+      limit: 4
+  - activate: parse
+    limit: {scrolls: 2}
+```
 
 ## Money
 

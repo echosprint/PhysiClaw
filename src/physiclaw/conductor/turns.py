@@ -15,16 +15,15 @@ thread rather than the pack's own pages (the synth site declares that —
 a reader must never re-derive it from kind names).
 
 `Turnsmith` owns the whole round trip — mint (`synth`) and settle
-(`settle`) — because both conductor drivers need it: the playbook walk
-(`program.py`) and the boot to the thread (`overture.py`). Neither one
-should re-spell the call-id convention, the message shape, or how a
-result is found; a drift there is invisible until the loop rejects a
-turn or a lookup silently misses.
+(`settle`) — so the walk (`program.py`) never re-spells the call-id
+convention, the message shape, or how a result is found; a drift
+there is invisible until the loop rejects a turn or a lookup silently
+misses.
 
 Deliberately NOT here: what a kind MEANS, the decision journal, and
-what to DO about a failure. Those are the
-drivers' vocabulary and policy; this module knows only how to mint a
-turn, remember the one in flight, and find what it came back as.
+what to DO about a failure. Those are the walk's vocabulary and
+policy; this module knows only how to mint a turn, remember the one
+in flight, and find what it came back as.
 """
 
 from dataclasses import dataclass
@@ -42,19 +41,26 @@ from physiclaw.contract.dto import (
 # what lets a reader of a recorded session (wire.jsonl, traces) tell
 # conductor-made tool calls apart — in-process code never parses ids;
 # provenance there is the session's structural `synthesized` bit.
-# The full id is `conductor-<scope>-<seq>-<role>`: each driver mints
-# under its own scope, so ids stay unique across the session even
-# though the overture and the program each run a private Turnsmith —
-# without the scope, both sequences start at 1 and `views.result_for`
-# (exact-match, newest-first) could hand a driver the OTHER driver's
-# stale result whenever its own failed to land.
+# The full id is `conductor-<scope>-<seq>-<role>`: each walk mints
+# under its own scope (its playbook ref), so ids stay unique across the
+# session even though the boot and the program it activates each run a
+# private Turnsmith — without the scope, both sequences start at 1 and
+# `views.result_for` (exact-match, newest-first) could hand a walk the
+# OTHER walk's stale result whenever its own failed to land.
 CALL_PREFIX = "conductor"
 
 # Where a scroll swipe originates: a mid-content band, clear of top
 # chrome and the tab bar, so the drag scrolls the list rather than
 # dismissing or paging anything. Stylus up → page scrolls down. Shared
-# by the overture's history scroll and an episode's scroll verb.
+# by the boot's history scroll and an episode's scroll verb.
 SCROLL_BBOX = (0.2, 0.35, 0.8, 0.65)
+
+
+def scroll_args(*, down: bool) -> dict:
+    """The `swipe` arguments that scroll the content one notch: `down`
+    = see what lies further down (the stylus drags up)."""
+    return {"bbox": list(SCROLL_BBOX), "direction": "up" if down else "down"}
+
 
 # How much of a blocked call's text a hand-over reason quotes. Enough to
 # name the cause, short enough not to paste a screen into a log line.
@@ -65,7 +71,7 @@ MAX_ERROR_CHARS = 200
 class Pending:
     """The synthesized action whose result the next advance() must read.
 
-    A driver's cursor never moves while an action is pending, so a
+    The walk's cursor never moves while an action is pending, so a
     pending move is always the node the cursor sits on. `channel` marks
     actions that land on the user thread —
     the synth site declares it, so the reader never re-derives it from
@@ -79,10 +85,9 @@ class Pending:
 class Turnsmith:
     """Mints synthesized turns and remembers the one action in flight.
 
-    `scope` names the driver this smith belongs to ("boot" for the
-    overture, "walk" for the program) and rides every call id — required
-    rather than defaulted so a future third driver cannot silently
-    collide with an existing sequence."""
+    `scope` names the walk this smith belongs to (its playbook ref) and
+    rides every call id — required rather than defaulted so two walks
+    in one session cannot silently collide on one sequence."""
 
     def __init__(self, scope: str) -> None:
         self.scope = scope
@@ -97,12 +102,12 @@ class Turnsmith:
 
         Returns `(what was pending, its result, why there is none)` —
         exactly one of the last two is set. The action is cleared only
-        when a result actually landed, so a driver that failed still
-        knows what it was waiting on. Callers keep their own policy
-        (the walk drops a suspension; the boot quits);
-        what lives here is where a result is found and how a missing or
-        blocked one is phrased, so the two drivers cannot word — or
-        truncate — the same failure differently."""
+        when a result actually landed, so a walk that failed still
+        knows what it was waiting on. The caller keeps its own policy
+        (the walk drops a suspension, hands over); what lives here is
+        where a result is found and how a missing or blocked one is
+        phrased, so no caller words — or truncates — the same failure
+        differently."""
         pending = self.pending
         assert pending is not None, "settle() with no action in flight"
         result = views.result_for(history, pending.call_id)
@@ -127,7 +132,7 @@ class Turnsmith:
     ) -> AssistantMessage:
         """One ``[note, one-other]`` turn, with its action registered as
         the pending one. The note carries `summary` verbatim — callers
-        compose their own prose, so this stays free of any driver's
+        compose their own prose, so this stays free of the walk's
         vocabulary."""
         self._seq += 1
         cid = f"{CALL_PREFIX}-{self.scope}-{self._seq}"

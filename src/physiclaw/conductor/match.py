@@ -32,6 +32,7 @@ from physiclaw.common.listing import Element, Screen, label_hit
 from physiclaw.common.text import fold
 from physiclaw.conductor.pages import (
     DEFAULT_MARGIN,
+    LOCKED_ID,
     REGIONS,
     AnchorDecl,
     LearnedAnchor,
@@ -204,10 +205,11 @@ def reads_as_cover(screen: Screen) -> bool:
     warning), which is why that cannot be the signal.
 
     Deliberately not fail-closed. A full-screen clock or timer app would
-    read as cover here, and the caller then spends an `unlock_phone` that
-    does nothing on an unlocked phone — seconds, no state change.
-    Cheaper than the alternative it exists to prevent: driving a recovery
-    macro's taps into a screen that is not awake to receive them.
+    read as cover here, and the page's `locked:` hand then spends an
+    `unlock_phone` that does nothing on an unlocked phone — seconds, no
+    state change. Cheaper than the alternative it exists to prevent:
+    driving a recovery macro's taps into a screen that is not awake to
+    receive them.
     """
     for row in screen.rows:
         if row.kind != "text" or normalize(row.label) != TIME_TOKEN:
@@ -414,8 +416,18 @@ class Verdict:
 def match_screen(screen: Screen, candidates: list[PagePrint]) -> Verdict:
     """The three-way open-set decision over one app-scoped candidate set.
 
+    The lock screen is read FIRST and by shape (`reads_as_locked`),
+    whatever the candidates: it is the one OS state every walk must
+    tell apart from "a screen I don't recognize", because the two
+    demand opposite hands — and a real cover prints no text an anchor
+    could find, so no `PagePrint` can describe it. The declared
+    `ios.locked` page, when it is a candidate, is the sharper belt for
+    a device that does print a hint.
+
     Every candidate is scored — the margin rule needs the runner-up, so
     there is no early exit that preserves its semantics."""
+    if reads_as_locked(screen):
+        return Verdict(Reading.MATCH, LOCKED_ID, 1.0, 0.0, 0.0, "the lock screen")
     if not screen.readable or not candidates:
         return Verdict(
             Reading.UNKNOWN, None, 0.0, 0.0, 0.0, "unreadable or no candidates"

@@ -1,0 +1,17 @@
+# channel/boot — the walk every wake plays before any playbook:
+# reach YOUR user's thread, read the request there, hand the matching
+# playbook the baton. A route like any other: edit the hands and the
+# limits, step it (physiclaw playbooks step channel/boot),
+# replay it over a recorded wake. Live once `open` is enabled.
+name: boot
+description: reach the user's thread and read the request there
+enabled: true
+route:
+  - page: thread                  # where the walk must BE (the manifest declares it)
+    recover:                       # …and what to do when it is not
+      locked: {tool: unlock_phone}   # a sleeping phone gets no taps: wake it first
+      occluded: {macro: open}         # the thread under a sheet or keyboard
+      elsewhere: {macro: open}        # any other screen: the rehearsed hand
+      limit: 4                       # unlocks + opens together (an unlock races the keypad)
+  - activate: parse                # the boot's own step: parse_task over the thread,
+    limit: {scrolls: 2}            # scrolling up for a request above the fold

@@ -139,9 +139,11 @@ async def walk(
     shown = None  # the last verdict printed — one line per reading
     try:
         # A rehearsal drives the phone NOW — wake it first if it locked
-        # between runs (the runtime's overture does this at every real
-        # wake; a rehearsal owes the walk the same floor).
-        if unlock:
+        # between runs (the runtime's boot does this at every real wake
+        # through its `locked:` hand; a rehearsal owes the walk the
+        # same floor) — unless the route's own start page declares that
+        # hand, in which case the walk wakes the phone itself.
+        if unlock and not _declares_locked_hand(program):
             await unlock_if_covered(mcp, emit)
         for _ in range(REHEARSE_MAX_TURNS):
             step = program.advance(history)
@@ -168,6 +170,16 @@ async def walk(
             if isinstance(step, Paused):
                 return WALK_PAUSED
             if step is None:
+                if program.baton is not None:
+                    # The boot decided: the rehearsal ends where the
+                    # wake would go on — say which walk, and how to
+                    # rehearse it on its own.
+                    baton = program.baton
+                    emit(
+                        f"  boot hands over to {baton.app}/{baton.spec.name} "
+                        f"{baton.values} — rehearse it: physiclaw playbooks run "
+                        f"{baton.app}/{baton.spec.name}"
+                    )
                 return WALK_ENDED
             note, act = step.tool_calls
             emit(f"  {note.arguments['summary']}")
@@ -208,6 +220,11 @@ async def walk(
         program.abandon()
         if micro is not None:
             await micro.aclose()
+
+
+def _declares_locked_hand(program: "Program") -> bool:
+    recovery = program.spec.recovers.get(program.spec.start)
+    return recovery is not None and recovery.locked is not None
 
 
 async def unlock_if_covered(mcp: McpCaller, emit: Emit) -> None:

@@ -177,70 +177,98 @@ async def test_unwired_micro_caller_means_agent_steps_hand_over() -> None:
 
 @pytest.mark.asyncio
 async def test_advance_activates_a_playbook_off_the_thread_screen() -> None:
-    """The boot peeks, finds the thread, fires parse_task, and the armed
-    program's first turn comes back — all through the one arbiter."""
-    from conductor_fakes import make_screen
+    """The boot walks, finds the thread, fires parse_task, and the armed
+    program's first turn comes back — the baton, through the one
+    arbiter, with no second driver."""
+    from conductor_fakes import FLOW, thread_screen, write_channel, write_pack
 
-    from physiclaw.conductor.channel import Channel
+    from physiclaw.conductor import setup
     from physiclaw.conductor.micro import PARSE_TASK, MicroOutcome
-    from physiclaw.conductor.overture import Overture
-    from physiclaw.conductor.pages import AnchorDecl, PageDecl, PagePrint
-    from physiclaw.conductor.playbook import Pack, Playbook
-    from physiclaw.conductor.setup import Activation
     from physiclaw.contract.dto import ToolResultMessage
-    from physiclaw.macros.model import Macro
 
-    channel = Channel(
-        prints=[
-            PagePrint(
-                app="channel",
-                decl=PageDecl(name="thread", anchors=(AnchorDecl(text="MyChat"),)),
-            )
-        ],
-        macros={
-            "channel/open": Macro(
-                name="open", description="d", enabled=True, inputs=(), steps=()
-            )
-        },
-    )
-    spec = Playbook(
-        app="demo",
-        name="flow",
-        description="d",
-        enabled=True,
-        inputs=(),
-        nodes=(),
-    )
-    pack = Pack(app="demo", pages={}, macros={}, macro_errors={})
-    activation = Activation(entries={"demo/flow": (spec, pack)}, channel=channel)
-    overture = Overture(
-        channel=channel, activation=activation, prints=list(channel.prints)
-    )
+    write_channel(CHANNEL_OPEN)
+    write_pack(playbooks={"flow": FLOW})
+    boot, _ = setup.session_setup()
+    assert boot is not None
     micro = FakeMicro(
         lambda req: MicroOutcome(
-            out="demo/flow", reason="task", confidence=0.9, payload={}
+            out="demo/flow", reason="task", confidence=0.9, payload={"keyword": "milk"}
         )
     )
-    conductor = Conductor(micro=micro, overture=overture)
+    conductor = Conductor(program=boot, micro=micro)
     history: list = [SystemMessage(content="s"), UserMessage(content="u")]
 
-    boot = await conductor.advance(history)  # the boot's opening peek
-    assert boot.synthesized and boot.tool_names() == ["note", "peek"]
-    history.append(boot)
+    peek = await conductor.advance(history)  # the boot's opening peek
+    assert peek.synthesized and peek.tool_names() == ["note", "peek"]
+    history.append(peek)
     history.append(
         ToolResultMessage(
-            tool_call_id=boot.tool_calls[1].id,
-            content=make_screen(("MyChat", 0.5, 0.05), ("买牛奶", 0.25, 0.4)).text,
+            tool_call_id=peek.tool_calls[1].id,
+            content=thread_screen(("买牛奶", 0.25, 0.4)),
         )
     )
 
     turn = await conductor.advance(history)
 
-    # parse_task fired on the thread screen, armed the program, and the
-    # program's first synthesized turn (its opening peek) came back — all
-    # in one advance, zero provider calls.
+    # parse_task fired on the thread screen, the boot concluded with the
+    # baton, and the activated program's first synthesized turn (its
+    # opening peek) came back — all in one advance, zero provider calls.
     assert len(micro.requests) == 1 and micro.requests[0].call == PARSE_TASK
     assert turn.synthesized and turn.tool_names() == ["note", "peek"]
+    # Two walks, two call-id scopes: the program's ids can never find
+    # the boot's stale results.
+    assert peek.tool_calls[1].id.startswith("conductor-channel-boot-")
+    assert turn.tool_calls[1].id.startswith("conductor-demo-flow-")
+    assert conductor._program is boot.baton and boot.baton.values == {"keyword": "milk"}
+
+
+@pytest.mark.asyncio
+async def test_abandon_covers_an_untaken_baton() -> None:
+    # Built at the boot's resolve, the session died before the next
+    # advance: the activated walk still records its abandoned row —
+    # and the boot, dry, records nothing.
+    from conductor_fakes import (
+        FLOW,
+        feed,
+        history,
+        thread_screen,
+        write_channel,
+        write_pack,
+    )
+
+    from physiclaw.conductor import setup, walklog
+    from physiclaw.conductor.micro import MicroOutcome
+
+    write_channel(CHANNEL_OPEN)
+    write_pack(playbooks={"flow": FLOW})
+    boot, _ = setup.session_setup()
+    assert boot is not None
+    h = history()
+    feed(h, boot.advance(h), thread_screen(("买牛奶", 0.25, 0.4)))
+    boot.advance(h)
+    boot.resolve(
+        MicroOutcome(
+            out="demo/flow", reason="t", confidence=0.9, payload={"keyword": "m"}
+        )
+    )
+    baton = boot.baton
+    assert baton is not None
+    baton.advance(h)  # the activated walk started: its peek is out
+
+    Conductor(program=boot).abandon()
+
+    rows = walklog.load()
+    assert [(r["playbook"], r["outcome"]) for r in rows] == [("flow", "abandoned")]
+
+
+CHANNEL_OPEN = """\
+name: open
+description: open the thread
+steps:
+  - name: go
+    tool: tap
+    with: {label: t, bbox: [0.1, 0.1, 0.2, 0.2]}
+"""
 
 
 # ---------- a driver bug: caught once, recorded, quiet ----------

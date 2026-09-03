@@ -27,8 +27,11 @@ vocabulary and the model classes below carry the same names)::
                                               # payment: resume required when
                                               # a screen move follows
                 | "tell" name message [no]
+                | "activate" name [limit]     # channel/boot only, and last:
+                                              # read the thread, hand a
+                                              # playbook the baton
     recover   ::= hand [limit]                # one hand for any deviation
-                | {[occluded: hand] [elsewhere: hand] [limit]}
+                | {[occluded: hand] [elsewhere: hand] [locked: hand] [limit]}
                 # a manifest page's recover: is inherited by every
                 # route; a route's own replaces it whole for that walk
     hand      ::= {tool [with]} | {macro}
@@ -42,8 +45,9 @@ contract, every `do` and every acting `agent` is followed by the page
 it lands on (its landing check — the reflector, enforced by shape),
 and a page may declare its own `recover:` hand — one hand for any
 deviation, or one per reading (`occluded:` a sheet over the page
-itself, `elsewhere:` any other screen), each page bounded by its own
-`limit:` under the walk-wide ceiling. Moves fall through in
+itself, `locked:` the phone's lock screen, `elsewhere:` any other
+screen), each page bounded by its own `limit:` under the walk-wide
+ceiling. Moves fall through in
 route order — there is no routing and no loop; whatever needs judgment
 is an `agent` step inside the author's fence, and whatever needs a
 human is an `ask`. Money runs in code: an `irreversible: payment` move
@@ -70,7 +74,7 @@ lints live in `route.py`.
 
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
 
 from physiclaw.common import paths
 from physiclaw.common.paths import PACK_FILENAME
@@ -93,11 +97,13 @@ from physiclaw.macros import parse as macro_parse
 from physiclaw.macros import store as macro_store
 from physiclaw.macros.model import Macro, MacroError, MacroInput
 
-# The two readings a page's `recover:` may key its hands by: the page
-# itself under an overlay, or any other screen.
+# The three readings a page's `recover:` may key its hands by: the page
+# itself under an overlay, the phone's lock screen (where taps do not
+# land — only `unlock_phone` helps), or any other screen.
 READING_OCCLUDED = "occluded"
 READING_ELSEWHERE = "elsewhere"
-RECOVER_READINGS = (READING_OCCLUDED, READING_ELSEWHERE)
+READING_LOCKED = "locked"
+RECOVER_READINGS = (READING_OCCLUDED, READING_ELSEWHERE, READING_LOCKED)
 # `{root.name}` — the playbook's own ref grammar, always dotted
 # (`inputs.` / an earlier agent step's id). The root follows the
 # move-name grammar (hyphens included — `{pick-into-cart.message}`);
@@ -218,6 +224,37 @@ class TellNode:
 
 
 @dataclass(frozen=True)
+class ActivateNode:
+    """The `activate` step — the channel boot's own, and its last: on
+    the thread (its `enter`, the page before it), ONE parse_task call
+    over the enabled playbooks; a positive answer becomes the walk's
+    baton (the program the conductor drives next), anything else ends
+    the boot quietly with the model standing on the thread. `max_scrolls`
+    bounds parse_task's scroll-for-history escape."""
+
+    id: str
+    enter: str
+    max_scrolls: int
+    irreversible: str | None = None  # `Checked`'s obligation; never set here
+
+
+class Checked(Protocol):
+    """A node the walk checks a page for before it runs — a `do`, an
+    acting `agent`, the boot's `activate`. What `enter_gate` and
+    `recover_or_handover` read: where it must be, and whether money
+    forbids recovering it."""
+
+    @property
+    def id(self) -> str: ...
+
+    @property
+    def enter(self) -> str: ...
+
+    @property
+    def irreversible(self) -> str | None: ...
+
+
+@dataclass(frozen=True)
 class RecoverHand:
     """One recovery hand — ONE gesture (`tool`, a `tap` taking its
     `landmark`) or one argument-less `macro`."""
@@ -232,23 +269,31 @@ class Recovery:
     """A page's declared `recover:` — which hand runs for which reading
     of the deviation, and how many times this page may recover in one
     walk. `occluded` fires when the page itself reads under an overlay
-    (a sheet, a popup); `elsewhere` for any other screen. The flat form
-    (`recover: {tool: ...}`) declares one hand for both."""
+    (a sheet, a popup); `locked` when the phone shows its lock screen;
+    `elsewhere` for any other screen. The flat form
+    (`recover: {tool: ...}`) declares one hand for all three."""
 
     occluded: RecoverHand | None = None
     elsewhere: RecoverHand | None = None
+    locked: RecoverHand | None = None
     limit: int = DEFAULT_RECOVER_LIMIT
 
     def hand_for(self, reading: str) -> RecoverHand | None:
         """The hand declared for one of `RECOVER_READINGS`."""
-        return self.occluded if reading == READING_OCCLUDED else self.elsewhere
+        if reading == READING_OCCLUDED:
+            return self.occluded
+        if reading == READING_LOCKED:
+            return self.locked
+        return self.elsewhere
 
     @property
     def hands(self) -> tuple[RecoverHand, ...]:
-        return tuple(h for h in (self.occluded, self.elsewhere) if h is not None)
+        return tuple(
+            h for h in (self.occluded, self.elsewhere, self.locked) if h is not None
+        )
 
 
-Node = DoNode | AgentNode | AskNode | TellNode
+Node = DoNode | AgentNode | AskNode | TellNode | ActivateNode
 
 
 @dataclass(frozen=True)
@@ -275,6 +320,13 @@ class Playbook:
     # Declared recovery, page name → its hands: a mismatched page runs
     # ITS hand for the reading, or hands over when it declares none.
     recovers: dict[str, Recovery] = field(default_factory=dict)
+
+    @property
+    def activates(self) -> bool:
+        """Whether this is the boot — a route ending in `activate`, the
+        one walk that hands a baton on (the compiler admits the step in
+        the channel pack's boot file only)."""
+        return any(isinstance(n, ActivateNode) for n in self.nodes)
 
     def first_unsettled(self, outputs: dict[str, str]) -> int:
         """Where a walk (re)starts: the route top, past any COMPLETED
@@ -687,9 +739,26 @@ def fill_refs(value: Any, values: dict[str, str], where: str) -> Any:
     return REF_RE.sub(repl, value)
 
 
+def require_live(spec: Playbook, pack: Pack) -> None:
+    """The live rule, spelled once: what a real wake needs of a playbook
+    — enabled, with every referenced pack macro enabled. A resuming
+    suspension and the boot must satisfy it; a rehearsal deliberately
+    need not (you rehearse BEFORE you enable). Raises PlaybookError
+    naming the gap."""
+    ref = f"{spec.app}/{spec.name}"
+    if not spec.enabled:
+        raise PlaybookError(f"{ref} is disabled — set `enabled: true` once rehearsed")
+    disabled = disabled_macros(spec, pack)
+    if disabled:
+        raise PlaybookError(
+            f"{ref} references disabled pack macro(s): {', '.join(disabled)} — "
+            "rehearse, then enable"
+        )
+
+
 def disabled_macros(spec: Playbook, pack: Pack) -> list[str]:
     """Referenced pack macros still disabled — the live-readiness rule:
-    `playbooks check` warns about it and the overture will not offer such
+    `playbooks check` warns about it and the boot will not offer such
     a playbook at all. Covers every dispatching role: do moves, an ask's
     `resume:`, a page's `recover:` hands, and an agent's granted macros.
     Safe unguarded access: parse

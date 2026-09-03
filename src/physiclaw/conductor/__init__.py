@@ -35,20 +35,20 @@ The seam:
     conductor.py   the per-turn arbiter; None means "the LLM speaks"
 
 Driving:
-    overture.py    boot to the user's thread, read the intent there
     program.py     one playbook mid-walk: cursor, verdicts, recovery
     step.py        the step executor contract + the Walk surface
     step_do.py     the `do`/`start` step: enter, macro, verify
     step_agent.py  the `agent` step: the pure-text call, the episode
     step_ask.py    the `ask` and `tell` steps: message, hold, consent
+    step_activate.py  the boot's `activate` step: parse_task, the baton
     gate.py        the ask-and-hold state, one suspension projection
     money.py       the declared total and the payment predicates, pure
     recover.py     declared recovery: the page's hands and their bounds
-    setup.py       how a Program comes to exist (activation, resume)
+    setup.py       how a Program comes to exist (the boot, resume)
     rehearsal.py   the engine's loop without the session: run, step, replay
     replay.py      the real walk over recorded screens, writing nothing
     turns.py       minting a synthesized turn
-    brief.py       the handover report a driver's last turn carries
+    brief.py       the handover report the walk's last turn carries
     suspension.py  suspended.json, the one cross-wake file
     micro.py       the scoped model calls (agent, activation)
     calls.py       the episode vocabulary the parser and walk share
@@ -67,7 +67,7 @@ Specs and the user:
     playbook.py    PLAYBOOK.yml model, the pack, the ref grammar
     route.py       the route compiler and its lints
     specfile.py    shared YAML substrate
-    channel.py     the user-channel pack (thread, send, open)
+    channel.py     the user-channel pack (thread, send, open, boot)
     reply.py       deterministic confirm/deny reply reading
     scaffold.py    pack templates and playbooks/README.md
 

@@ -60,10 +60,3 @@ def test_completion_brief_reports_done_and_wrap_up() -> None:
 
     assert "walk demo/flow completed (9/9 nodes)." in text
     assert "Report the outcome to the user" in text
-
-
-def test_boot_brief_carries_reason_and_instruction() -> None:
-    text = brief.boot_brief("phone still locked after 2 unlock attempts")
-
-    assert "conductor handing over: phone still locked" in text
-    assert "Take the session from there." in text

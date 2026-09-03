@@ -1,6 +1,6 @@
 # The pack MANIFEST — the thread page and the placeholders; the hands
-# (open/send) are recorded beside it in macros/<name>/MACRO.yml. No
-# playbooks live here.
+# (open/send) are recorded beside it in macros/<name>/MACRO.yml, and
+# boot.yml beside it is the walk every wake plays first.
 app: channel
 description: >-
   The user-channel pack for WeChat — reach YOUR user's thread by in-app

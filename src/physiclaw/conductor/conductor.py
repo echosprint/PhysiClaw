@@ -1,31 +1,32 @@
 """Conductor — orchestration only: decide who produces each turn.
 
-The turn loop never calls the LLM provider while a driver is live; it
+The turn loop never calls the LLM provider while a walk is live; it
 asks ``Conductor.advance()``. The conductor's whole job is that
-decision: while a program or the overture is live, IT synthesizes the
-turn (``overture.py`` — boot to the user's thread and read the intent
-there; ``program.py`` — moves as ``run_macro``, verified against page
-fingerprints) and the conductor brokers their model requests through
-the wired micro-caller (``micro.py``); when they complete or hand over
-— one final synthesized brief turn (``brief.py``), then None — "not
-mine" — the loop calls the provider with the context the runtime
-curated. It holds no session
-state and does no session management — context assembly, compaction
-policy, and wire logging stay with the engine (the micro-caller carries
-its own sinks for the same reason).
+decision: while a program is live, IT synthesizes the turn
+(``program.py`` — moves as ``run_macro``, verified against page
+fingerprints; the boot to the user's thread is the channel pack's own
+playbook, walked the same way) and the conductor brokers the walk's
+model requests through the wired micro-caller (``micro.py``); when a
+walk goes quiet it takes the baton the walk may hand on (the boot's
+`activate` step built the program the thread asked for) and drives
+that; with none — completed, handed over after one final synthesized
+brief turn (``brief.py``), or the boot found no task — it answers
+None, "not mine", and the loop calls the provider with the context the
+runtime curated. It holds no session state and does no session
+management — context assembly, compaction policy, and wire logging
+stay with the engine (the micro-caller carries its own sinks for the
+same reason).
 
-Going quiet is permanent for the session: a driver that handed over is
-dropped, not retried — the transcript of its synthesized turns and their
-results IS the handoff the model resumes from. With no driver left,
-every ``advance()`` is None — behavior identical to a session that never
-had a conductor.
+Going quiet is permanent for the session: a walk that handed over is
+dropped, not retried — the transcript of its synthesized turns and
+their results IS the handoff the model resumes from. With no walk
+left, every ``advance()`` is None — behavior identical to a session
+that never had a conductor.
 """
 
 import logging
-from typing import Protocol
 
-from physiclaw.conductor.micro import DecisionRequest, MicroCaller, MicroOutcome
-from physiclaw.conductor.overture import Overture
+from physiclaw.conductor.micro import DecisionRequest, MicroCaller
 from physiclaw.conductor.program import Program
 from physiclaw.conductor.step import Paused
 from physiclaw.contract.dto import AssistantMessage, Message
@@ -33,112 +34,78 @@ from physiclaw.contract.dto import AssistantMessage, Message
 log = logging.getLogger(__name__)
 
 
-class Driver(Protocol):
-    """What the conductor can hand a turn to — the contract `Overture`
-    and `Program` both satisfy structurally.
-
-    Each call answers one of three ways: a synthesized turn to dispatch,
-    a `DecisionRequest` for the conductor to broker back through
-    `resolve`, or None — "no turn from me". A driver may raise on a
-    program bug; `_drive` is the one place that turns that into `crash`
-    (recorded, quiet from here), because a session must survive the
-    conductor while every tool and test sees the traceback."""
-
-    def advance(
-        self, history: list[Message]
-    ) -> "AssistantMessage | DecisionRequest | Paused | None": ...
-
-    def resolve(
-        self, outcome: MicroOutcome | None
-    ) -> "AssistantMessage | DecisionRequest | Paused | None": ...
-
-    def crash(self) -> None: ...
-
-
 class Conductor:
-    """Turn arbiter: the overture boots and the program walks, each
-    producing turns while it can; None means the LLM produces this one."""
+    """Turn arbiter: the live program produces turns while it can, then
+    its baton does; None means the LLM produces this one."""
 
     def __init__(
         self,
         program: Program | None = None,
         micro: MicroCaller | None = None,
-        overture: Overture | None = None,
     ):
         self._program = program
         self._micro = micro
-        self._overture = overture
 
     def abandon(self) -> None:
         """Session teardown (the plugin's aclose): a walk still in
         flight records its abandoned row and breadcrumb —
         `Program.abandon` is latched, so a walk that closed properly is
-        a no-op. The overture's un-taken baton counts too (built at
+        a no-op. An un-taken baton counts too (built at the boot's
         resolve, session died before the next advance). Fail-open:
         teardown must never raise."""
-        for program in (
-            self._program,
-            self._overture.program if self._overture is not None else None,
-        ):
-            if program is None:
-                continue
+        walk = self._program
+        while walk is not None:
             try:
-                program.abandon()
+                walk.abandon()
             except Exception:
                 log.exception("conductor: abandon record failed — ignored")
+            walk = walk.baton
 
     async def advance(self, history: list[Message]) -> AssistantMessage | None:
-        """Produce the next assistant turn, or None ("the LLM speaks").
-        The overture first — it boots to the user's thread and reads the
-        intent there, and may hand a program back; then the program,
-        brokering any decision requests it raises; no playbook (or one
-        that handed over) → None."""
-        if self._program is None and self._overture is not None:
-            turn = await self._drive(self._overture, history)
-            if turn is not None:
-                return turn
-            # Spent: take the baton if there is one, then release the
-            # parsed pack entries.
-            self._program = self._overture.program
-            self._overture = None
-        if self._program is not None:
+        """Produce the next assistant turn, or None ("the LLM speaks"):
+        the live program's turn, brokering any decision requests it
+        raises; when it goes quiet, its baton's — the boot hands the
+        activated program on this way; no walk, or one that handed over
+        → None."""
+        while self._program is not None:
             turn = await self._drive(self._program, history)
             if turn is not None:
                 return turn
-            # Quiet is permanent — transcript is the handoff (the program
-            # already retired itself at the moment it went quiet).
-            self._program = None
+            # Quiet is permanent — the transcript is the handoff (the
+            # walk already retired itself at the moment it went quiet).
+            # The baton, if it set one, is the next walk; else nobody.
+            self._program = self._program.baton
         return None
 
     async def _drive(
-        self, driver: Driver, history: list[Message]
+        self, program: Program, history: list[Message]
     ) -> AssistantMessage | None:
-        """Run one driver for one turn, brokering every decision request
+        """Run one walk for one turn, brokering every decision request
         it raises. None = it produced no turn (it went quiet) and the
         caller decides what that means.
 
-        Both drivers speak this contract — synthesize, or ask, or go
-        quiet — so the brokering rule lives here once. In particular the
-        rule that an unwired micro-caller resolves as NO outcome: the
-        program then hands over like any failed decision, and the
-        overture finishes empty like `not_a_task`. Neither driver raises
-        (both catch internally and degrade to quiet), so there is no
-        fail-open wrapper here to disagree with theirs."""
+        The brokering rule lives here once — in particular the rule
+        that an unwired micro-caller resolves as NO outcome: the walk
+        then hands over like any failed decision (the boot finishes
+        empty like `not_a_task`). A program bug is caught here, once:
+        the walk is crashed (recorded, quiet from here) and the model
+        takes the session, because a session must survive the conductor
+        while every tool and test sees the traceback."""
         try:
-            step = driver.advance(history)
+            step = program.advance(history)
             while isinstance(step, DecisionRequest):
                 outcome = None
                 if self._micro is not None:
                     outcome = (await self._micro.run(step)).outcome
-                step = driver.resolve(outcome)
+                step = program.resolve(outcome)
             if isinstance(step, Paused):
                 # Only a stepping tool sets a walk to pause; under the
                 # engine it is a program bug like any other.
                 raise RuntimeError("a walk paused under the engine")
         except Exception:
-            log.exception("conductor: driver crashed — handing over to the model")
+            log.exception("conductor: walk crashed — handing over to the model")
             try:
-                driver.crash()
+                program.crash()
             except Exception:
                 log.exception("conductor: crash record failed — ignored")
             return None
