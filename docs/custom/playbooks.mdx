@@ -72,29 +72,38 @@ A payment ask names the label the sheet total sits beside with `total:`. The amo
     no: ["不用"]
     wait: {seconds: 45, rounds: 3}
     resume: {steps: [{name: reopen, tool: tap, with: {label: "the app icon", bbox: [0.72, 0.42, 0.91, 0.55]}}]}
-  - agent: pay
+  - do: pay
     irreversible: payment
-    prompt: "Tap 结算, then 立即支付. Escalate if the total differs from ¥{ask.total}."
-    tools: [tap]
+    macro:
+      steps:
+        - {name: pay-button, tool: tap, with: {label: ["免密支付", "立即支付", "提交订单"], bbox: [0.37, 0.92, 0.63, 0.95]}}
+        - {name: settle, tool: wait, with: {seconds: 4}}
   - page: paid
-    anchors: "支付成功"
+    anchors: {or: ["支付成功", "付款成功"]}
 ```
 
 ## Test before enabling
 
-Replay walks recorded screens through the real route and shows where it would hand over, without the phone:
-
-```bash
-physiclaw playbooks replay taobao/buy --session <id> -i keyword=五常大米 -o parse.keyword=五常大米
-```
-
-Then rehearse on the phone, calibrate the pages, and set `enabled: true`:
+Climb the ladder from cheapest to most real. Validate, replay recorded screens through the real route without the phone, step the route one node at a time on the phone, rehearse it end to end, then calibrate the pages and set `enabled: true`. Every rehearsal command needs `physiclaw mcp` running and never starts it.
 
 ```bash
 physiclaw playbooks check
+physiclaw playbooks replay taobao/buy --session <id> -i user_said="帮我买五常大米" -o parse.keyword=五常大米
+physiclaw playbooks step taobao/buy -i user_said="帮我买五常大米"
 physiclaw playbooks run taobao/buy -i user_said="帮我买五常大米"
-physiclaw conductor calibrate taobao
+physiclaw playbooks pages calibrate taobao
 ```
+
+Step is the debugger. Each invocation re-reads the pack, runs the node at the stored cursor, and pauses when the cursor moves, printing every verdict, model answer, and macro step. `--at` re-runs a node you just edited, `--start-at`/`--stop-after` narrow its macro to one gesture, `--output` seeds a pure-text agent's answer, `--reply` stages the reply an ask reads, `--raw` prints every model round-trip of an agent node as sent and received, and `--json` prints the outcome and position for an agent's loop. The user channel is virtual while stepping, so an ask reads the staged reply, while `run` waits for the real contact to answer. Both drive the real phone, so stepping through a payment node pays.
+
+```bash
+physiclaw playbooks step taobao/buy                              # the next node
+physiclaw playbooks step taobao/buy --at search --stop-after paste
+physiclaw playbooks step taobao/buy --reply 好的 --to end
+physiclaw playbooks step taobao/buy --status --json
+```
+
+`physiclaw studio` puts the same stepping behind a browser panel beside the camera and the virtual screen, on the same position file, so a person at the desk and an agent at the terminal can take turns on one walk.
 
 ## Best practices
 

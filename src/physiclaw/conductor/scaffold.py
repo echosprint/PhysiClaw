@@ -130,7 +130,7 @@ description: EDIT ME — what this pack automates, and when to adopt it
 # whatever needs a human is an `ask`. Entry kinds:
 #   page   — where the walk must BE. Declare it in place (anchors
 #            beside the waypoint — semantics only; geometry is captured
-#            on YOUR device via `physiclaw conductor calibrate`), or
+#            on YOUR device via `physiclaw playbooks pages calibrate`), or
 #            reference a page declared elsewhere bare. `recover:`
 #            declares ITS recovery hand — one gesture
 #            ({recover_tools}; tap takes with: landmarks.<name>) or an
@@ -503,7 +503,7 @@ pages:
       # so a second spelling of the same label would halve it.
       #
       # Verify this reading against YOUR phone before trusting it —
-      # lock it and run `physiclaw conductor propose --live` to see
+      # lock it and run `physiclaw playbooks pages propose --live` to see
       # what it actually prints, then put that beside this one:
       #
       #     - text: ["Swipe up for Face ID or Enter Passcode", "<yours>"]

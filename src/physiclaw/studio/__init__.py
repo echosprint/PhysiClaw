@@ -1,7 +1,9 @@
-"""PhysiClaw Studio — drive the phone by hand from the browser.
+"""PhysiClaw Studio — the browser skin for a person: drive the phone by
+hand, step a playbook node by node, run a macro gesture by gesture.
 
-An independent process that drives the phone ONLY through the standard
-MCP surface of a running `physiclaw mcp -H` server: every gesture the
-page fires is one published tool call with verbatim arguments, so what
-a person does here is exactly what an agent could do.
+A frontend only, in its own process, over a running `physiclaw mcp`
+it never starts. Manual gestures are published MCP tool calls with
+verbatim arguments; stepping goes through the same drivers the CLI
+wraps (`debug/stepping.py`), on the same position file, so what a
+person does here is exactly what an agent does at the terminal.
 """

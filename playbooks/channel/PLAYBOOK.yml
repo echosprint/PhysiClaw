@@ -23,5 +23,5 @@ pages:
 #   type unless the thread title matches — never message the wrong chat.
 # - Recorded on an English-system WeChat (guards accept Contacts and
 #   联系人). Rehearse once; re-record the search/paste taps if yours
-#   differs, then `physiclaw conductor calibrate channel` and enable
+#   differs, then `physiclaw playbooks pages calibrate channel` and enable
 #   both macros.

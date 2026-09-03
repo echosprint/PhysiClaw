@@ -328,6 +328,16 @@ def qualified_macro(app: str, name: str) -> str:
     return f"{app}/{name}"
 
 
+def split_ref(ref: str) -> tuple[str, str]:
+    """`<app>/<playbook>` → (app, playbook) — the one parse of the ref
+    every skin takes (the CLI exits on the error, the studio answers
+    400). Raises PlaybookError."""
+    app, sep, name = ref.partition("/")
+    if not sep or not app or not name or "/" in name:
+        raise PlaybookError(f"{ref!r} is not <app>/<playbook>")
+    return app, name
+
+
 def macro_app(name: str) -> str:
     """The app half of a qualified dispatch key — `qualified_macro`'s
     inverse, kept beside it so the "/" convention has one spelling.
@@ -346,6 +356,17 @@ def qualified_inline(app: str, spec: Playbook) -> dict[str, Macro]:
     `qualified_pack`'s sibling for the hands that live in the playbook
     itself. Every registry a walk can dispatch through takes both."""
     return {qualified_macro(app, n): m for n, m in spec.inline_macros.items()}
+
+
+def qualified_all(app: str, pack: Pack) -> dict[str, Macro]:
+    """Everything a walk of this pack can dispatch: the directory macros
+    plus every playbook's inline bodies — disabled playbooks included
+    (gating is the caller's filter, never the dispatch table)."""
+    macros = qualified_pack(app, pack)
+    for entry in scan_playbooks(app, pack):
+        if entry.spec is not None:
+            macros.update(qualified_inline(app, entry.spec))
+    return macros
 
 
 # ---------- pack loading ----------

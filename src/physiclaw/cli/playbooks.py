@@ -1,11 +1,17 @@
-"""`physiclaw playbooks` — scaffold, list, validate, and rehearse app packs.
+"""`physiclaw playbooks` — the agent's door to app packs: scaffold,
+validate, rehearse, and step them; `pages` for their fingerprints.
 
-Mirrors the macros CLI's shapes throughout: `init` prints the next
-steps, `check` is the all-or-nothing gate with valid-is-not-live
-warnings, and `run` rehearses one playbook against the live server the
-way `macros run` rehearses one macro — the test you do BEFORE enabling.
-The scaffolding itself lives in `conductor/scaffold.py` (the
-`store.init_macro` split: the CLI only prints).
+The CLI is a skin. Every command is typer around one driver — the
+rehearsal core (`conductor/rehearsal.py`), the stepping driver
+(`debug/stepping.py`), the replay (`conductor/replay.py`), the page
+tools (`cli/pages.py` over `conductor/capture.py`) — and the studio
+puts a browser UI over the same drivers for a person. Mirrors the
+macros CLI's shapes throughout: `init` prints the next steps, `check`
+is the all-or-nothing gate with valid-is-not-live warnings, and `run`
+rehearses one playbook against the live server the way `macros run`
+rehearses one macro — the test you do BEFORE enabling. The scaffolding
+itself lives in `conductor/scaffold.py` (the `store.init_macro` split:
+the CLI only prints).
 
 Nothing here writes cross-wake state. A rehearsal drives the phone now
 and stops; the conductor's own doors at wake are the suspension file and
@@ -25,12 +31,34 @@ from physiclaw.cli._format import (
     step_fail,
     warn,
 )
+from physiclaw.cli.pages import pages_app
+from physiclaw.common.ready import START_HINT
 from physiclaw.conductor import rehearsal
 
 if TYPE_CHECKING:
     from physiclaw.conductor.playbook import Pack, PlaybookEntry
 
 playbooks_app = typer.Typer(no_args_is_help=True)
+
+# The two knobs `run` and `step` share, spelled once.
+VerboseOpt = Annotated[
+    bool, typer.Option("--verbose", "-v", help="Print every result's listing rows.")
+]
+RawOpt = Annotated[
+    bool,
+    typer.Option(
+        "--raw",
+        help="Print every model round-trip: the messages as sent to the "
+        "provider and the reply as received (an agent step's context, "
+        "prompt, screen block, and answer).",
+    ),
+]
+playbooks_app.add_typer(
+    pages_app,
+    name="pages",
+    help="A pack's page fingerprints: propose anchors, match screens, "
+    "extract a corpus, calibrate geometry.",
+)
 
 
 @playbooks_app.command()
@@ -58,22 +86,22 @@ def init(
         typer.echo("  3. rehearse both, then enable (physiclaw macros run is")
         typer.echo("     per-user-macro; drive a pack's via physiclaw playbooks run)")
         typer.echo(
-            f"  4. capture geometry: physiclaw conductor calibrate {CHANNEL_APP}"
+            f"  4. capture geometry: physiclaw playbooks pages calibrate {CHANNEL_APP}"
         )
     elif app == IOS_APP:
         typer.echo("  1. check the lock-screen reading matches your phone's language")
-        typer.echo("     (lock it, then: physiclaw conductor propose --live)")
+        typer.echo("     (lock it, then: physiclaw playbooks pages propose --live)")
         typer.echo(
-            f"  2. capture geometry: physiclaw conductor calibrate {IOS_APP} --guided"
+            f"  2. capture geometry: physiclaw playbooks pages calibrate {IOS_APP} --guided"
         )
     else:
         typer.echo(
-            f"  1. declare `pages:` in {PACK_FILENAME} (physiclaw conductor propose --live)"
+            f"  1. declare `pages:` in {PACK_FILENAME} (physiclaw playbooks pages propose --live)"
         )
         typer.echo(
             "  2. write pack macros + the playbook, then: physiclaw playbooks check"
         )
-        typer.echo("  3. capture geometry: physiclaw conductor calibrate " + app)
+        typer.echo("  3. capture geometry: physiclaw playbooks pages calibrate " + app)
 
 
 @playbooks_app.command()
@@ -170,7 +198,7 @@ def install(
     _check_app(app)
     typer.echo(
         "next: rehearse (`physiclaw playbooks run`), capture pages "
-        f"(`physiclaw conductor calibrate {app}`), then set `enabled: true`."
+        f"(`physiclaw playbooks pages calibrate {app}`), then set `enabled: true`."
     )
 
 
@@ -247,6 +275,8 @@ def run(
             help="NAME=VALUE for a declared playbook input (repeatable).",
         ),
     ] = None,
+    verbose: VerboseOpt = False,
+    raw: RawOpt = False,
 ) -> None:
     """Rehearse one playbook against the running server — the mirror of
     `physiclaw macros run`, and the way to test a walk without waiting for
@@ -261,19 +291,157 @@ def run(
 
     app, name = _split_ref(ref)
     try:
-        outcome = asyncio.run(_rehearse(app, name, parse_inputs(inputs or [])))
+        outcome = asyncio.run(
+            _rehearse(app, name, parse_inputs(inputs or []), verbose=verbose, raw=raw)
+        )
     except PlaybookError as e:
         exit_error(str(e))
     except ConnectionError as e:
-        # `mcp`, not `server`: both serve the same endpoint, but `server`
-        # also spawns the agent runtime, which would wake on its own hooks
-        # and drive the phone mid-rehearsal. A rehearsal wants the rig to
-        # itself. (Same branch as `macros run`.)
-        exit_error(f"{e}. Start it first: physiclaw mcp")
+        # Same branch as `macros run` (`START_HINT` says why `mcp`).
+        exit_error(f"{e}. {START_HINT}")
     except RuntimeError as e:
         # `rehearsal.micro_caller` — an agent step fired with no model configured.
         exit_error(str(e))
     typer.echo(outcome)
+
+
+@playbooks_app.command()
+def step(
+    ref: Annotated[str, typer.Argument(help="<app>/<playbook> to step through.")],
+    inputs: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--input",
+            "-i",
+            help="NAME=VALUE for a declared playbook input (a fresh walk only).",
+        ),
+    ] = None,
+    at: Annotated[
+        Optional[str],
+        typer.Option(
+            "--at",
+            help="Put the cursor on this node (its name) first — jump there, "
+            "or re-run the node after editing it.",
+        ),
+    ] = None,
+    to: Annotated[
+        Optional[str],
+        typer.Option(
+            "--to",
+            help="Keep stepping until the cursor has passed this node "
+            "(`end`: run the route out).",
+        ),
+    ] = None,
+    outputs: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help="NODE.FIELD=VALUE — seed a pure-text agent's answer; the walk "
+            "starts past it without a call.",
+        ),
+    ] = None,
+    reply: Annotated[
+        Optional[str],
+        typer.Option(
+            "--reply",
+            help="Stage the user's reply for the next ask (the user channel "
+            "is virtual while stepping).",
+        ),
+    ] = None,
+    start_at: Annotated[
+        str,
+        typer.Option("--start-at", help="Begin this node's macro at the step NAME."),
+    ] = "",
+    stop_after: Annotated[
+        str,
+        typer.Option(
+            "--stop-after", help="Stop this node's macro after the step NAME."
+        ),
+    ] = "",
+    verbose: VerboseOpt = False,
+    raw: RawOpt = False,
+    as_json: Annotated[
+        bool,
+        typer.Option(
+            "--json",
+            help="Print the outcome and position as JSON (for an agent's loop).",
+        ),
+    ] = False,
+    reset: Annotated[
+        bool, typer.Option("--reset", help="Forget the stored position and stop.")
+    ] = False,
+    status: Annotated[
+        bool, typer.Option("--status", help="Show the stored position and stop.")
+    ] = False,
+) -> None:
+    """Step one playbook through the live phone, one node per invocation
+    — the playbook debugger (the studio's playbook panel drives the
+    same core with a mouse).
+
+    Each invocation re-reads PLAYBOOK.yml (an edit applies at once),
+    rebuilds the walk at its stored position (cursor, agent outputs, the
+    gate's consent), runs the node there — its enter check, its macro or
+    episode or ask, its verify check, its declared recovery — and pauses
+    the moment the cursor moves, printing each turn's verdict, model
+    answer, and macro step log. `--at` re-runs a node you just edited;
+    `--start-at`/`--stop-after` narrow its macro to one gesture. The user
+    channel is virtual (`--reply` stages the answer; the send still runs
+    on the phone), no model ever takes over, and nothing is persisted
+    beyond the position file (`debug/walk.json`). `--json` prints the
+    outcome (paused / suspended / stopped / completed) and the position
+    for a loop to read."""
+    import json
+
+    from physiclaw.conductor.playbook import PlaybookError
+    from physiclaw.debug import stepping
+
+    app, name = _split_ref(ref)
+    if reset:
+        typer.echo(stepping.reset(app, name))
+        return
+    if status:
+        try:
+            pos = stepping.status(app, name)
+        except PlaybookError as e:
+            exit_error(str(e))
+        if as_json:
+            typer.echo(json.dumps(pos.to_dict() if pos else None, ensure_ascii=False))
+        else:
+            typer.echo(
+                pos.describe()
+                if pos
+                else f"{app}/{name}: no stored position — the next step starts the route"
+            )
+        return
+    try:
+        result = asyncio.run(
+            _step(
+                app,
+                name,
+                parse_inputs(inputs or []),
+                at=at,
+                to=to,
+                outputs=parse_inputs(outputs or [], "--output"),
+                reply=reply,
+                start_at=start_at,
+                stop_after=stop_after,
+                verbose=verbose,
+                raw=raw,
+                # Under --json stdout is the JSON alone; the progress
+                # lines go to stderr, where a loop can still read them.
+                emit=lambda line: typer.echo(line, err=as_json),
+            )
+        )
+    except PlaybookError as e:
+        exit_error(str(e))
+    except ConnectionError as e:
+        exit_error(f"{e}. {START_HINT}")
+    except RuntimeError as e:
+        exit_error(str(e))
+    typer.echo(
+        json.dumps(result.to_dict(), ensure_ascii=False) if as_json else result.message
+    )
 
 
 @playbooks_app.command()
@@ -305,7 +473,7 @@ def replay(
     shows the node, the verdict it acted on, the tool, and where the
     walk stopped. A session's screens come from its wire log; a
     listing file is one screen. Writes nothing."""
-    from physiclaw.cli.conductor import resolve_sid
+    from physiclaw.cli._sessions import resolve_sid
     from physiclaw.common.text import read_text
     from physiclaw.conductor import corpus
     from physiclaw.conductor import replay as replay_mod
@@ -405,10 +573,12 @@ def propose(
         if s.sessions:
             typer.echo(f"  sessions to mine: {', '.join(s.sessions)}")
         typer.echo("  work it:")
-        typer.echo(f"    physiclaw conductor match {s.app} --session {sid}")
-        typer.echo(f"    physiclaw conductor extract {sid} --out {s.app}-corpus.jsonl")
+        typer.echo(f"    physiclaw playbooks pages match {s.app} --session {sid}")
         typer.echo(
-            f"    physiclaw conductor calibrate {s.app} {s.app}-corpus.jsonl"
+            f"    physiclaw playbooks pages extract {sid} --out {s.app}-corpus.jsonl"
+        )
+        typer.echo(
+            f"    physiclaw playbooks pages calibrate {s.app} {s.app}-corpus.jsonl"
             "  (after labeling)"
         )
 
@@ -503,11 +673,13 @@ def _report_not_live(
 
 
 def _split_ref(ref: str) -> tuple[str, str]:
-    """`<app>/<playbook>` — the one spelling of a playbook ref on the CLI."""
-    app, _, name = ref.partition("/")
-    if not app or not name:
-        exit_error(f"expected <app>/<playbook> (got {ref!r})")
-    return app, name
+    """`<app>/<playbook>` — the pack's own parse, exiting on a bad one."""
+    from physiclaw.conductor.playbook import PlaybookError, split_ref
+
+    try:
+        return split_ref(ref)
+    except PlaybookError as e:
+        exit_error(str(e))
 
 
 # ---------- rehearsal (`playbooks run`) ----------
@@ -515,7 +687,36 @@ def _split_ref(ref: str) -> tuple[str, str]:
 # this layer adds the connection and typer skin.
 
 
-async def _rehearse(app: str, name: str, values: dict[str, str]) -> str:
+# ---------- stepping (`playbooks step`) ----------
+# One call into the driver (`debug/stepping.py`); the CLI adds the MCP
+# connection and typer.
+
+
+async def _step(app: str, name: str, values: dict[str, str], *, emit, **opts):
+    # Local import: the mcp SDK only loads when actually stepping.
+    from physiclaw.agent.engine.mcp_tool import McpClient
+    from physiclaw.debug import stepping
+
+    async with McpClient() as mcp:
+        return await stepping.step(
+            app,
+            name,
+            mcp,
+            values=values,
+            emit=emit,
+            emit_warn=lambda line: emit(warn(line)),
+            **opts,
+        )
+
+
+async def _rehearse(
+    app: str,
+    name: str,
+    values: dict[str, str],
+    *,
+    verbose: bool = False,
+    raw: bool = False,
+) -> str:
     """Arm first (bad inputs fail before any connection), then drive the
     walk over one client, printing each synthesized turn as it goes."""
     # Local import: the mcp SDK only loads when actually rehearsing.
@@ -525,4 +726,6 @@ async def _rehearse(app: str, name: str, values: dict[str, str]) -> str:
         app, name, values, emit_warn=lambda s: typer.echo(warn(s))
     )
     async with McpClient() as mcp:
-        return await rehearsal.walk(program, registry, mcp, emit=typer.echo)
+        return await rehearsal.walk(
+            program, registry, mcp, emit=typer.echo, verbose=verbose, raw=raw
+        )

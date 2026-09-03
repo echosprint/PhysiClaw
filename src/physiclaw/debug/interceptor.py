@@ -29,17 +29,23 @@ real. Provenance is structural — dispatch passes the session's
 on — never inferred from call-id strings.
 
 State is per-session and deliberately minimal: a fresh interceptor
-starts off-thread, so a resumed suspension's first gate-peek reads the
-real phone, mismatches, and re-enters via the open macro — no
-cross-wake state to corrupt. The thread file is re-read on every
-render; only the channel fingerprint is cached (it cannot change
-mid-session).
+starts off-thread until a conductor peek reads as the thread, so a
+resumed suspension's first gate-peek reads the real phone and, unless
+the IM app is already showing the thread, mismatches and re-enters via
+the open macro — no cross-wake state to corrupt. A REAL listing that
+already reads as the channel thread (the previous session's wrap-up
+left the IM app open on it) is virtualized on that peek, or the boot
+would parse the real thread — where the last word is the assistant's
+own completion report — instead of the scripted one. The thread file is re-read on every render; only the
+channel fingerprint is cached (it cannot change mid-session).
 """
 
 import logging
 from functools import cached_property
 
 from physiclaw.common import gesture_vocab, verdict
+from physiclaw.common.listing import Screen
+from physiclaw.conductor.match import match_screen
 from physiclaw.conductor.pages import CHANNEL_APP, SEND_MACRO, PagePrint
 from physiclaw.conductor.playbook import macro_app, qualified_macro
 from physiclaw.contract.dto import ToolCall
@@ -82,7 +88,7 @@ class FakeChannel:
         plugin-minted-turn bit. Never raises: a harness bug must fail
         open into the real observation, not kill the session."""
         try:
-            return self._intercept(call, synthesized)
+            return self._intercept(call, synthesized, blocks)
         except Exception:
             log.exception("debug fake-channel crashed — keeping the real result")
             return None
@@ -90,7 +96,9 @@ class FakeChannel:
     def _render(self, bubbles: list[vthread.Bubble]) -> str:
         return vthread.render_listing(bubbles, self._pp)
 
-    def _intercept(self, call: ToolCall, synthesized: bool) -> list[dict] | None:
+    def _intercept(
+        self, call: ToolCall, synthesized: bool, blocks: list[dict]
+    ) -> list[dict] | None:
         args = call.arguments or {}
         macro = str(args.get("name") or "")
         if (
@@ -110,9 +118,23 @@ class FakeChannel:
             return vthread.gesture_blocks(
                 verdict.attach(action, True), self._render(bubbles)
             )
-        if synthesized and call.name == gesture_vocab.PEEK and self._on_thread:
-            log.info("debug fake-channel: virtualized peek of the thread")
-            return vthread.view_blocks(self._render(vthread.peek_bubbles()))
+        if synthesized and call.name == gesture_vocab.PEEK:
+            if not self._on_thread and self._reads_as_thread(blocks):
+                self._on_thread = True
+                log.info(
+                    "debug fake-channel: the real thread is on screen — virtualized"
+                )
+            if self._on_thread:
+                log.info("debug fake-channel: virtualized peek of the thread")
+                return vthread.view_blocks(self._render(vthread.peek_bubbles()))
         if call.name not in _KEEP_STATE:
             self._on_thread = False
         return None
+
+    def _reads_as_thread(self, blocks: list[dict]) -> bool:
+        """Whether a REAL peek shows the channel thread — judged by the
+        same matcher and fingerprint the conductor would use on it."""
+        if self._pp is None:
+            return False
+        screen = Screen.read(verdict.screen_text(blocks))
+        return match_screen(screen, [self._pp]).matches(self._pp.page_id)

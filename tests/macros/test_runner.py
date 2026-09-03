@@ -1151,6 +1151,56 @@ async def test_start_at_unknown_name_raises_before_any_gesture() -> None:
     assert mcp.calls == []  # nothing actuated
 
 
+# ---------- stop_after: rehearse one gesture, leave the rest unrun ----------
+
+
+@pytest.mark.asyncio
+async def test_stop_after_runs_through_the_named_step_and_no_further() -> None:
+    mcp = FakeCaller([_gesture("home"), _gesture("tapped")])
+
+    result = await run(_spec(RESUMABLE), {}, mcp, stop_after="open-app")
+
+    assert result.ok
+    assert [name for name, _ in mcp.calls] == ["home_screen", "tap"]
+    text = result.blocks[0]["text"]
+    assert "↷ 3–3. not run (stop_after 'open-app')" in text
+    assert "steps 1–2 completed" in text and "not run, stop_after" in text
+
+
+@pytest.mark.asyncio
+async def test_stop_after_combines_with_start_at_for_one_step() -> None:
+    mcp = FakeCaller([_gesture("tapped")])
+
+    result = await run(
+        _spec(RESUMABLE), {}, mcp, start_at="open-app", stop_after="open-app"
+    )
+
+    assert result.ok
+    assert [name for name, _ in mcp.calls] == ["tap"]
+
+
+@pytest.mark.asyncio
+async def test_stop_after_unknown_name_raises_before_any_gesture() -> None:
+    mcp = FakeCaller([])
+
+    with pytest.raises(MacroError, match="matches no step"):
+        await run(_spec(RESUMABLE), {}, mcp, stop_after="nope")
+
+    assert mcp.calls == []
+
+
+@pytest.mark.asyncio
+async def test_stop_after_before_start_at_is_refused() -> None:
+    mcp = FakeCaller([])
+
+    with pytest.raises(MacroError, match="precedes the start"):
+        await run(
+            _spec(RESUMABLE), {}, mcp, start_at="focus-input-box", stop_after="go-home"
+        )
+
+    assert mcp.calls == []
+
+
 def test_duplicate_step_names_are_rejected_at_parse_time() -> None:
     # `start_at` addresses steps by name, so duplicates would make it
     # ambiguous. Caught by `macros check` at authoring time rather than

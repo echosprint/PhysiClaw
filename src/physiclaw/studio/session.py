@@ -22,7 +22,9 @@ log = logging.getLogger(__name__)
 
 
 class Session(Protocol):
-    """What the studio server drives: one rig, one act door."""
+    """What the studio server drives: one rig, one act door — and one
+    `drive` door that lends the rig to a driver (the stepping core) for
+    the length of one job, under the same one-rig lock."""
 
     @property
     def mcp_url(self) -> str: ...
@@ -33,6 +35,8 @@ class Session(Protocol):
     def state(self) -> dict: ...
 
     async def act(self, tool: str, args: dict) -> dict: ...
+
+    async def drive(self, job): ...
 
     async def close(self) -> None: ...
 
@@ -117,6 +121,20 @@ class StudioSession:
                 await self.close()
                 raise ConnectionError(f"MCP call {tool!r} failed: {e}") from e
         return view_reply(blocks)
+
+    async def drive(self, job):
+        """Lend the connected client to `job(client)` — a driver that
+        makes many calls (a stepped playbook node) — holding the one-rig
+        lock throughout, so a manual gesture answers busy meanwhile.
+        Raises what the job raises; a transport failure drops the
+        client for reconnect exactly like `act`."""
+        async with self._lock:
+            client = await self._connected()
+            try:
+                return await job(client)
+            except ConnectionError:
+                await self.close()
+                raise
 
     async def _connected(self) -> McpClient:
         if self._client is None:

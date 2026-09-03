@@ -123,6 +123,12 @@ physiclaw macros check
 physiclaw macros run notify-user-whatsapp -i message=hi
 ```
 
+Rehearse one gesture at a time with `--start-at` and `--stop-after` naming the same step, look at the phone, fix the step, and run it again. A pack's macro is addressed as `<app>/<name>`, an inline body as `<app>/<playbook>.<move>`. The studio's Macro tab does the same with a cursor over the steps.
+
+```bash
+physiclaw macros run taobao/buy.search --start-at paste --stop-after paste
+```
+
 ## Best practices
 
 **Keep macros short and single-purpose.** Anything that needs a decision mid-way, like confirmations, payments, or choosing among results, belongs to the agent, not a macro.

@@ -37,5 +37,5 @@ def test_propose_renders_the_site_and_the_mining_commands() -> None:
     assert result.exit_code == 0
     assert "taobao/buy escalates at choose ×1" in result.output
     assert "decide exceeded max_visits" in result.output
-    assert "physiclaw conductor match taobao" in result.output
-    assert "physiclaw conductor calibrate taobao" in result.output
+    assert "physiclaw playbooks pages match taobao" in result.output
+    assert "physiclaw playbooks pages calibrate taobao" in result.output

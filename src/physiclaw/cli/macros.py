@@ -28,6 +28,7 @@ from physiclaw.cli._format import (
 )
 from physiclaw.common import paths, verdict
 from physiclaw.common.config import CONFIG
+from physiclaw.common.ready import START_HINT
 from physiclaw.common.text import read_text
 from physiclaw.macros import runlog as macro_runlog
 from physiclaw.macros import runner as macro_runner
@@ -145,7 +146,13 @@ def _report_unreachable(entries: list[macro_store.ScanEntry]) -> None:
 
 @macros_app.command()
 def run(
-    name: Annotated[str, typer.Argument(help="Macro name (its directory name).")],
+    name: Annotated[
+        str,
+        typer.Argument(
+            help="A user macro's directory name, or a pack macro as "
+            "<app>/<name> (an inline body is <app>/<playbook>.<move>)."
+        ),
+    ],
     inputs: Annotated[
         list[str],
         typer.Option(
@@ -162,13 +169,27 @@ def run(
             "the earlier steps are NOT executed.",
         ),
     ] = "",
+    stop_after: Annotated[
+        str,
+        typer.Option(
+            "--stop-after",
+            help="Stop after this step NAME; the later steps are NOT executed "
+            "— rehearse one gesture at a time.",
+        ),
+    ] = "",
 ) -> None:
     """Rehearse a macro against the running server (works while disabled —
-    rehearse first, then set `enabled: true`)."""
-    spec = _resolve_spec(macro_store.scan(), name)
+    rehearse first, then set `enabled: true`). `--start-at X --stop-after X`
+    runs one gesture — the studio's Macro tab steps the same way."""
+    from physiclaw.debug import stepping
+
+    try:
+        spec = stepping.find_macro(name)
+    except MacroError as e:
+        exit_error(str(e))
     values = parse_inputs(inputs)
     try:
-        result = asyncio.run(_run_live(spec, values, start_at))
+        result = asyncio.run(_run_live(spec, values, start_at, stop_after))
     except MacroError as e:
         # Already recorded as bad_input by run_and_record.
         exit_error(str(e))
@@ -182,8 +203,8 @@ def run(
         # `mcp`, not `server`: both serve the same MCP endpoint, but `server`
         # also spawns the agent runtime, which would wake on its own hooks
         # and drive the phone between the steps being rehearsed. A rehearsal
-        # wants the rig to itself.
-        exit_error(f"{e}. Start it first: physiclaw mcp")
+        # wants the rig to itself (`START_HINT` says so once for all).
+        exit_error(f"{e}. {START_HINT}")
 
     # The composed header + step log is always block 0 (runner contract).
     typer.echo(verdict.action_text(result.blocks))
@@ -373,21 +394,17 @@ def stats_cmd() -> None:
 
 
 async def _run_live(
-    spec: Macro, values: dict[str, str], start_at: str = ""
+    spec: Macro, values: dict[str, str], start_at: str = "", stop_after: str = ""
 ) -> macro_runner.MacroRunResult:
     # Local import: the mcp SDK only loads when actually rehearsing.
     from physiclaw.agent.engine.mcp_tool import McpClient
 
     async with McpClient() as mcp:
         return await macro_runner.run_and_record(
-            spec, values, mcp, caller="cli", start_at=start_at
+            spec,
+            values,
+            mcp,
+            caller="cli",
+            start_at=start_at,
+            stop_after=stop_after,
         )
-
-
-def _resolve_spec(entries: list[macro_store.ScanEntry], name: str) -> Macro:
-    for e in entries:
-        if e.dir_name == name:
-            if e.spec is None:
-                exit_error(f"{name}: {e.error}")
-            return e.spec
-    exit_error(f"no macro named {name!r}")

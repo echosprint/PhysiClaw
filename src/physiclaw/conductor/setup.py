@@ -63,6 +63,7 @@ from physiclaw.conductor.playbook import (
     disabled_macros,
     list_apps,
     load_pack,
+    qualified_all,
     qualified_inline,
     qualified_pack,
     scan_playbooks,
@@ -380,17 +381,12 @@ def session_setup() -> "tuple[Program | None, Overture | None, dict[str, Macro]]
         except Exception as e:
             log.warning("pack %s unusable at wake (%s) — skipped", app, e)
             continue
-        hidden.update(qualified_pack(app, pack))
+        # The whole dispatch table, disabled playbooks included — gating
+        # is the entries filter below, not the table.
+        hidden.update(qualified_all(app, pack))
         for entry in scan_playbooks(app, pack):
             spec = entry.spec
-            if spec is None:
-                continue
-            # Inline macros ride the registry alongside directory macros
-            # — disabled playbooks included, mirroring `qualified_pack`
-            # (which carries disabled macros too; gating is the entries
-            # filter below, not the dispatch table).
-            hidden.update(qualified_inline(app, spec))
-            if not spec.enabled or disabled_macros(spec, pack):
+            if spec is None or not spec.enabled or disabled_macros(spec, pack):
                 continue
             entries[f"{app}/{entry.name}"] = (spec, pack)
     if not entries:

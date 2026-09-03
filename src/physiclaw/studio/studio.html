@@ -93,7 +93,7 @@
 
   /* ── Panes ── */
   main {
-    flex: 1; display: grid; grid-template-columns: 1fr 1fr 300px; gap: 14px;
+    flex: 1; display: grid; grid-template-columns: 270px 1fr 1fr 300px; gap: 14px;
     padding: 14px; min-height: 0; position: relative;
   }
   .pane {
@@ -175,6 +175,47 @@
   .entry time { display: block; color: var(--faint); font-size: 11px; font-variant-numeric: tabular-nums; }
   .entry.err { color: var(--red); }
   .entry.dim { color: var(--muted); }
+  /* A model round-trip: the decision on the summary line, the request
+     and the reply verbatim underneath, folded until asked for. */
+  .entry details { margin-top: 3px; }
+  .entry summary { cursor: pointer; color: var(--blue); }
+  .entry .xchg { margin: 6px 0 0; padding: 8px; background: var(--card2); border-radius: 8px; font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; max-height: 60vh; overflow: auto; }
+  .entry .xchg b { color: var(--accent); }
+
+  /* ── Playbook panel: the stepping driver with a mouse ── */
+  /* Both driver panels (playbook nodes, macro gestures) share one shape. */
+  .driver {
+    flex: 1; overflow-y: auto; padding: 2px 16px 12px; min-height: 0;
+    display: none; flex-direction: column; gap: 8px; font-size: 12px;
+  }
+  .driver.on { display: flex; }
+  .driver select { width: 100%; }
+  .driver .muted { color: var(--muted); }
+  .driver .row { display: flex; gap: 6px; }
+  .driver .row input { flex: 1; min-width: 0; font-size: 12px; padding: 5px 8px; }
+  .driver label { display: block; color: var(--muted); margin-top: 2px; }
+  .driver label input { width: 100%; margin-top: 2px; }
+  .driver ol { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+  .node {
+    display: flex; align-items: baseline; gap: 8px; padding: 5px 8px; cursor: pointer;
+    border-left: 3px solid transparent; border-bottom: 1px solid var(--line);
+  }
+  .node:last-child { border-bottom: 0; }
+  .node:hover { background: var(--card2); }
+  .node .k { font-size: 10px; color: var(--faint); width: 36px; flex: none; text-transform: uppercase; }
+  .node .n { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .node .p { color: var(--faint); font-size: 11px; white-space: nowrap; }
+  .node.cur { background: var(--card2); border-left-color: var(--accent); font-weight: 600; }
+  .node.at { outline: 1.5px dashed var(--accent-lt); outline-offset: -2px; }
+  .node.money .k { color: var(--amber); font-weight: 600; }
+  .driver .pos { color: var(--muted); line-height: 1.6; }
+  .driver .pos b { color: var(--txt); font-weight: 600; }
+  .node .g { flex: none; color: var(--faint); cursor: pointer; padding: 0 2px; }
+  .node .g:hover { color: var(--accent); }
+  .tabs { display: flex; gap: 4px; margin-left: auto; }
+  .tabs button { padding: 2px 9px; font-size: 11px; border-radius: 7px; }
+  .tabs button.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  #steps .node.done .n { color: var(--faint); }
 
   #busy {
     display: none; position: absolute; inset: 14px; border-radius: 16px;
@@ -222,6 +263,44 @@
 <div id="banner" title="click to dismiss"></div>
 
 <main>
+  <section class="pane">
+    <h2><span id="pane-title">Playbook</span> <span class="hint" id="pane-hint">one node at a time</span>
+      <span class="tabs"><button id="tab-pb" class="on">Playbook</button><button id="tab-mc">Macro</button></span></h2>
+    <div id="pb" class="driver on">
+      <select id="pb-select"><option value="">no packs found</option></select>
+      <div id="pb-desc" class="muted"></div>
+      <div id="pb-inputs"></div>
+      <ol id="route"></ol>
+      <div id="pb-pos" class="pos"></div>
+      <div class="row">
+        <input type="text" id="pb-reply" placeholder="reply to stage for the next ask" title="the user channel is virtual while stepping: an ask reads this reply">
+      </div>
+      <div class="row">
+        <input type="text" id="pb-start" placeholder="start at step" title="begin this node's macro at the step NAME">
+        <input type="text" id="pb-stop" placeholder="stop after step" title="stop this node's macro after the step NAME">
+      </div>
+      <div class="row">
+        <input type="text" id="pb-output" placeholder="node.field=value" title="seed a pure-text agent's answer; the walk starts past it">
+      </div>
+      <div class="row">
+        <button class="primary" id="pb-step" title="run the node at the cursor, then pause">Step</button>
+        <button id="pb-end" title="keep stepping to the route's end">To end</button>
+        <button id="pb-reset" title="forget the stored position">Reset</button>
+      </div>
+    </div>
+    <div id="mc" class="driver">
+      <select id="mc-select"><option value="">no macros found</option></select>
+      <div id="mc-desc" class="muted"></div>
+      <div id="mc-inputs"></div>
+      <ol id="steps"></ol>
+      <div id="mc-pos" class="pos"></div>
+      <div class="row">
+        <button class="primary" id="mc-step" title="run the gesture at the cursor, no page checks">Run step</button>
+        <button id="mc-end" title="run from the cursor to the macro's end">To end</button>
+        <button id="mc-rewind" title="put the cursor back on the first step">Rewind</button>
+      </div>
+    </div>
+  </section>
   <section class="pane">
     <h2>Camera <span class="hint">click an element, or hold and drag a box</span></h2>
     <div class="stage">
@@ -293,12 +372,12 @@ function banner(msg) {
 }
 $("banner").onclick = () => banner("");
 
-function logEntry(text, cls) {
+function logEntry(content, cls) {  // content: text, or a node
   const div = document.createElement("div");
   div.className = "entry" + (cls ? " " + cls : "");
   const t = document.createElement("time");
   t.textContent = new Date().toTimeString().slice(0, 8);
-  div.append(t, text);
+  div.append(t, content);
   $("log").prepend(div);
   while ($("log").children.length > 80) $("log").lastChild.remove();
 }
@@ -308,7 +387,7 @@ function setBusy(what) {
   $("busy").style.display = what ? "flex" : "none";
   $("busy-what").textContent = what || "";
   $("dot").classList.toggle("busy", state.busy);
-  document.querySelectorAll("button").forEach(b => b.disabled = state.busy || b.dataset.unpublished === "1");
+  document.querySelectorAll("button:not(.tabs button)").forEach(b => b.disabled = state.busy || b.dataset.unpublished === "1");
   renderActbar();
 }
 
@@ -675,6 +754,289 @@ window.addEventListener("keydown", ev => {
   else if (ARROWS[ev.key] && state.sel) { ev.preventDefault(); swipe(ARROWS[ev.key], "m"); }
 });
 
+// ---------- the playbook panel: the stepping driver with a mouse ----------
+// Same core and position file as `physiclaw playbooks step`: the page
+// posts one step, then polls its lines and the phone views it produced.
+
+const pb = { packs: [], ref: "", at: null };
+// The one job the server runs at a time, as the page watches it: what
+// it has already printed, the newest view it holds, and the poll.
+const job = { lines: 0, exchanges: 0, seq: 0, polling: null, ticking: false };
+
+// The two driver panels share their widgets: a select of named items,
+// a block of declared inputs, and the reader of what was typed.
+function fillSelect(sel, items, keep, empty) {
+  sel.innerHTML = "";
+  for (const it of items) {
+    const label = it.name + (it.error ? " (invalid)" : it.enabled ? "" : " (disabled)");
+    const o = new Option(label, it.name, false, it.name === keep);
+    if (it.error) o.disabled = true;
+    sel.appendChild(o);
+  }
+  if (!sel.options.length) sel.appendChild(new Option(empty, ""));
+  return sel.value;
+}
+function renderInputs(container, inputs) {
+  container.innerHTML = "";
+  for (const inp of inputs || []) {
+    const lab = document.createElement("label");
+    lab.textContent = inp.name + " — " + inp.description;
+    const box = document.createElement("input");
+    box.type = "text"; box.dataset.input = inp.name;
+    box.placeholder = inp.example || inp.default || "";
+    if (inp.default !== null && inp.default !== undefined) box.value = inp.default;
+    lab.appendChild(box); container.appendChild(lab);
+  }
+}
+function readInputs(container) {
+  const out = {};
+  container.querySelectorAll("input[data-input]").forEach(b => { if (b.value) out[b.dataset.input] = b.value; });
+  return out;
+}
+
+function pbEntry() {
+  for (const pack of pb.packs)
+    for (const p of pack.playbooks) if (pack.app + "/" + p.name === pb.ref) return p;
+  return null;
+}
+
+async function loadPlaybooks() {
+  const data = await api("/api/playbooks");
+  if (data.status !== "ok") { banner(data.message || "cannot list playbooks"); return; }
+  pb.packs = data.packs || [];
+  const items = [];
+  for (const pack of pb.packs)
+    for (const p of pack.playbooks) items.push({ ...p, name: pack.app + "/" + p.name });
+  pb.ref = fillSelect($("pb-select"), items, pb.ref, "no packs found");
+  renderPlaybook();
+}
+
+function renderPlaybook() {
+  const p = pbEntry();
+  const desc = $("pb-desc"), route = $("route"), pos = $("pb-pos");
+  route.innerHTML = ""; pos.innerHTML = "";
+  desc.textContent = p ? (p.description || "") : "scaffold a pack: physiclaw playbooks init <app>";
+  renderInputs($("pb-inputs"), p && !p.position ? p.inputs : []);
+  if (!p) return;
+  const cur = p.position ? p.position.idx : 0;
+  (p.nodes || []).forEach((n, i) => {
+    const li = document.createElement("li");
+    li.className = "node" + (i === cur ? " cur" : "") + (pb.at === n.id ? " at" : "") + (n.irreversible ? " money" : "");
+    li.title = "click: put the cursor here for the next step";
+    const k = document.createElement("span"); k.className = "k"; k.textContent = n.kind;
+    const name = document.createElement("span"); name.className = "n"; name.textContent = n.id;
+    const pg = document.createElement("span"); pg.className = "p";
+    pg.textContent = n.verify ? "→ " + n.verify : (n.enter ? "@ " + n.enter : "");
+    li.append(k, name, pg);
+    if (n.macro) {
+      // The hand this node runs, gesture by gesture on the Macro tab.
+      const g = document.createElement("span"); g.className = "g"; g.textContent = "⚙";
+      g.title = "step the macro " + n.macro + " one gesture at a time";
+      g.onclick = ev => { ev.stopPropagation(); showMacro(n.macro); };
+      li.appendChild(g);
+    }
+    li.onclick = () => { pb.at = pb.at === n.id ? null : n.id; renderPlaybook(); };
+    route.appendChild(li);
+  });
+  const g = p.position;
+  pos.innerHTML = g
+    ? "at <b>" + g.node + "</b>" + (pb.at ? " · next step at <b>" + pb.at + "</b>" : "")
+      + (g.awaiting ? " · <b>awaiting a reply</b>" : "")
+      + (g.quoted !== null ? " · quoted ¥" + g.quoted : "") + (g.consented !== null ? " · consented ¥" + g.consented : "")
+      + (g.staged.length ? " · staged: " + g.staged.join(" / ") : "")
+    : "fresh walk — the first step opens the route" + (pb.at ? " at <b>" + pb.at + "</b>" : "");
+}
+
+function pbNextNode(p) {
+  const nodes = p.nodes || [];
+  if (pb.at) return nodes.find(n => n.id === pb.at) || null;
+  return nodes[p.position ? p.position.idx : 0] || null;
+}
+
+async function stepPlaybook(toEnd) {
+  const p = pbEntry();
+  if (!p || state.busy) return;
+  const next = pbNextNode(p);
+  const from = pb.at ? (p.nodes || []).findIndex(n => n.id === pb.at) : (p.position ? p.position.idx : 0);
+  const ahead = (p.nodes || []).slice(Math.max(0, from));
+  if ((toEnd && ahead.some(n => n.irreversible)) || (next && next.irreversible)) {
+    if (!confirm("This runs an irreversible " + ((next && next.irreversible) || "payment") + " node on the real phone. Continue?")) return;
+  }
+  const body = { ref: pb.ref, inputs: p.position ? {} : readInputs($("pb-inputs")), outputs: {} };
+  if (pb.at) body.at = pb.at;
+  if (toEnd) body.to = "end";
+  for (const [key, id] of [["reply", "pb-reply"], ["start_at", "pb-start"], ["stop_after", "pb-stop"]])
+    if ($(id).value) body[key] = $(id).value;
+  const out = $("pb-output").value, eq = out.indexOf("=");
+  if (out && eq > 0) body.outputs[out.slice(0, eq).trim()] = out.slice(eq + 1);
+  else if (out) { banner("output is node.field=value"); return; }
+  banner("");
+  const data = await api("/api/step", body);
+  if (data.status !== "ok") { banner(data.message || "step refused"); return; }
+  for (const id of ["pb-reply", "pb-start", "pb-stop", "pb-output"]) $(id).value = "";
+  pb.at = null;
+  watchJob("stepping " + pb.ref + (next ? " · " + next.id : ""), () => loadPlaybooks());
+}
+
+// A model round-trip, folded: the decision reads on the summary line;
+// the record's own rendering (`rehearsal.exchange_lines`, the same
+// text `--raw` prints) unfolds underneath — what the provider saw and
+// what it said, parsed once, in one place.
+function logExchange(x) {
+  const det = document.createElement("details");
+  const sum = document.createElement("summary");
+  sum.textContent = ((x.lines || [])[0] || ("model " + x.call)) + " · request and reply";
+  const pre = document.createElement("div");
+  pre.className = "xchg";
+  pre.textContent = (x.lines || []).slice(1).join("\n");
+  det.append(sum, pre);
+  logEntry(det);
+}
+
+// One job at a time on the server (a stepped node or a macro range);
+// the page polls it, prints its lines, renders its views, then hands
+// the result to the tab that started it.
+function watchJob(what, onDone) {
+  if (job.polling) return;
+  setBusy(what);
+  job.lines = 0; job.exchanges = 0;
+  const tick = async () => {
+    if (job.ticking) return;  // a slow poll must not overlap the next one
+    job.ticking = true;
+    try {
+      const s = await api("/api/step?since=" + job.seq + "&lines=" + job.lines + "&exchanges=" + job.exchanges);
+      if (s.status !== "ok") { banner(s.message || "job lost"); stopWatch(); return; }
+      for (const line of s.lines || []) logEntry(line, line.startsWith("  ") ? "dim" : "");
+      job.lines += (s.lines || []).length;
+      for (const x of s.exchanges || []) logExchange(x);
+      job.exchanges += (s.exchanges || []).length;
+      if (s.view) { job.seq = s.seq; renderView(s.view); state.sel = null; renderOverlays(); }
+      if (s.running) return;
+      stopWatch();
+      const r = s.result;
+      if (s.error) { banner(s.error); logEntry(s.error, "err"); }
+      else if (r) logEntry(r.message, (r.outcome === "stopped" || r.ok === false) ? "err" : "");
+      onDone(s.error ? null : r, s.kind);
+    } finally {
+      job.ticking = false;
+    }
+  };
+  job.polling = setInterval(tick, 600);
+  tick();
+}
+
+function stopWatch() {
+  clearInterval(job.polling);
+  job.polling = null;
+  setBusy(null);
+}
+
+$("pb-select").onchange = () => { pb.ref = $("pb-select").value; pb.at = null; renderPlaybook(); };
+$("pb-step").onclick = () => stepPlaybook(false);
+$("pb-end").onclick = () => stepPlaybook(true);
+$("pb-reset").onclick = async () => {
+  if (!pb.ref || state.busy) return;
+  const data = await api("/api/step/reset", { ref: pb.ref });
+  if (data.status !== "ok") { banner(data.message || "reset refused"); return; }
+  logEntry(data.message, "dim");
+  pb.at = null;
+  loadPlaybooks();
+};
+
+// A job already running when the page opens (a reload mid-step) is
+// picked up rather than lost.
+async function resumeWatch() {
+  const s = await api("/api/step");
+  if (s.status === "ok" && s.running) {
+    watchJob((s.kind === "macro" ? "running " : "stepping ") + (s.ref || ""), (r, kind) => {
+      if (kind === "macro") loadMacros(); else loadPlaybooks();
+    });
+  }
+}
+
+// ---------- the macro tab: one gesture at a time, no page checks ----------
+// The `macros run --start-at X --stop-after X` core: the cursor is the
+// next gesture; a run that works advances it, one that fails keeps it,
+// so the author can tap by hand, edit the step, and run it again.
+
+const mc = { macros: [], name: "", cursor: 0 };
+
+function mcEntry() { return mc.macros.find(m => m.name === mc.name) || null; }
+
+async function loadMacros() {
+  const data = await api("/api/macros");
+  if (data.status !== "ok") { banner(data.message || "cannot list macros"); return; }
+  mc.macros = data.macros || [];
+  const picked = fillSelect($("mc-select"), mc.macros, mc.name, "no macros found");
+  if (picked !== mc.name) { mc.name = picked; mc.cursor = 0; }
+  renderMacro();
+}
+
+function renderMacro() {
+  const m = mcEntry();
+  const desc = $("mc-desc"), steps = $("steps"), pos = $("mc-pos");
+  steps.innerHTML = ""; pos.innerHTML = "";
+  desc.textContent = m ? (m.source === "user" ? "" : "pack " + m.source + " · ") + (m.description || "") : "";
+  renderInputs($("mc-inputs"), m ? m.inputs : []);
+  if (!m) return;
+  const total = (m.steps || []).length;
+  mc.cursor = Math.min(mc.cursor, Math.max(0, total - 1));
+  (m.steps || []).forEach((st, i) => {
+    const li = document.createElement("li");
+    li.className = "node" + (i === mc.cursor ? " cur" : i < mc.cursor ? " done" : "");
+    li.title = "click: put the cursor here";
+    const k = document.createElement("span"); k.className = "k"; k.textContent = st.tool;
+    const name = document.createElement("span"); name.className = "n"; name.textContent = st.name;
+    const d = document.createElement("span"); d.className = "p"; d.textContent = st.detail || "";
+    li.append(k, name, d);
+    li.onclick = () => { mc.cursor = i; renderMacro(); };
+    steps.appendChild(li);
+  });
+  pos.innerHTML = total
+    ? "next gesture <b>" + m.steps[mc.cursor].name + "</b> (" + (mc.cursor + 1) + "/" + total + ")"
+    : "no steps";
+}
+
+function showMacro(name) {
+  mc.name = name; mc.cursor = 0;
+  showTab("mc");
+  if (mcEntry()) { $("mc-select").value = name; renderMacro(); }
+  else loadMacros();  // not listed yet (a pack edited since): re-read, keeping the name
+}
+
+async function runMacro(toEnd) {
+  const m = mcEntry();
+  if (!m || state.busy || !(m.steps || []).length) return;
+  const step = m.steps[mc.cursor];
+  const body = { name: m.name, inputs: readInputs($("mc-inputs")), start_at: step.name, stop_after: toEnd ? "" : step.name };
+  banner("");
+  const data = await api("/api/macro", body);
+  if (data.status !== "ok") { banner(data.message || "macro refused"); return; }
+  const from = mc.cursor;
+  watchJob("running " + m.name + " · " + step.name + (toEnd ? " → end" : ""), r => {
+    // The cursor moves only past gestures that ran clean.
+    if (r && r.ok) mc.cursor = toEnd ? 0 : Math.min(from + 1, m.steps.length - 1);
+    renderMacro();
+  });
+}
+
+function showTab(which) {
+  const pbOn = which === "pb";
+  $("pb").classList.toggle("on", pbOn);
+  $("mc").classList.toggle("on", !pbOn);
+  $("tab-pb").classList.toggle("on", pbOn);
+  $("tab-mc").classList.toggle("on", !pbOn);
+  $("pane-title").textContent = pbOn ? "Playbook" : "Macro";
+  $("pane-hint").textContent = pbOn ? "one node at a time" : "one gesture at a time";
+}
+
+$("tab-pb").onclick = () => showTab("pb");
+$("tab-mc").onclick = () => showTab("mc");
+$("mc-select").onchange = () => { mc.name = $("mc-select").value; mc.cursor = 0; renderMacro(); };
+$("mc-step").onclick = () => runMacro(false);
+$("mc-end").onclick = () => runMacro(true);
+$("mc-rewind").onclick = () => { mc.cursor = 0; renderMacro(); };
+
 // ---------- session ----------
 
 async function refreshState() {
@@ -708,6 +1070,9 @@ window.addEventListener("resize", () => {
   resizeQueued = true;
   requestAnimationFrame(() => { resizeQueued = false; layout(); });
 });
+loadPlaybooks();
+loadMacros();
+resumeWatch();
 refreshState().then(() => act("peek", {}, "peek")).then(() => {
   if (!state.aspect) $("cam-empty").innerHTML = "No view yet — press <kbd>Peek</kbd>.";
 });

@@ -1,6 +1,8 @@
 """The e2e debug harness — a virtual user channel, off in production.
 
-Three fakes and nothing else: the debug wake (`agent/hooks/debug.py`),
+Three fakes, plus the debugger built on them (`stepping.py`: one
+playbook node or one macro gesture per call, behind `playbooks step`,
+`macros run`, and the studio's tabs). The fakes: the debug wake (`agent/hooks/debug.py`),
 the user's chat bubble, and their confirm/deny replies. Everything
 else runs real — the engine loop, the conductor's walk, the page
 matcher, the reply tiers, the micro-calls, and the phone itself: a

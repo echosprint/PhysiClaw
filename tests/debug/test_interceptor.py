@@ -94,6 +94,33 @@ def test_peek_before_any_channel_action_keeps_the_real_result() -> None:
     assert build().intercept(_call("peek"), True, REAL_BLOCKS) is None
 
 
+def test_peek_that_shows_the_real_thread_is_virtualized() -> None:
+    # The previous session's wrap-up leaves the IM app on the thread, so
+    # the boot's opening peek reads as `channel.thread` for real — and
+    # would parse the assistant's own completion report instead of the
+    # scripted task. That reading is virtualized like a post-open peek.
+    write_channel_pages()
+    vthread.seed("buy soy sauce", [])
+    on_thread = [
+        {"type": "image", "data": "", "mimeType": "image/jpeg"},
+        {
+            "type": "text",
+            "text": 'id [kind] "label" [left,top,right,bottom] conf\n'
+            '0 [text] "MyChat" [0.4,0.05,0.6,0.09] 0.99\n'
+            '1 [text] "rice purchase done" [0.5,0.3,0.9,0.34] 0.99',
+        },
+    ]
+    fc = build()
+
+    blocks = fc.intercept(_call("peek"), True, on_thread)
+
+    assert blocks is not None
+    labels = [r.label for r in _listing_of(blocks).rows]
+    assert "buy soy sauce" in labels and "rice purchase done" not in labels
+    # And the state is now on-thread: the next peek stays virtual.
+    assert fc.intercept(_call("peek"), True, REAL_BLOCKS) is not None
+
+
 def test_an_app_macro_passes_through_and_leaves_the_thread() -> None:
     write_channel_pages()
     fc = build()

@@ -31,6 +31,11 @@ class Gate:
     no: tuple[str, ...] = ()
     next_words: tuple[tuple[str, ...], tuple[str, ...]] = ((), ())
     tried_open: bool = False
+    # A tell suspended the walk with deny words declared: the resuming
+    # wake reads the thread for a cancel first (`TellResume`). Set at
+    # the tell's suspension, cleared by that read — so a projection
+    # taken anywhere else (a stepping pause) never resumes as one.
+    told: bool = False
 
     def spend(self) -> float | None:
         """Consent is CONSUMED by firing: a later payment needs its own
@@ -54,6 +59,7 @@ class Gate:
             "awaiting": self.awaiting,
             "yes": list(self.yes),
             "no": list(self.no),
+            "told": self.told,
         }
 
     @classmethod
@@ -67,4 +73,5 @@ class Gate:
             awaiting=bool(data.get("awaiting")),
             yes=tuple(str(w) for w in (data.get("yes") or [])),
             no=tuple(str(w) for w in (data.get("no") or [])),
+            told=bool(data.get("told")),
         )

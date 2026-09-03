@@ -182,10 +182,14 @@ _EDGE_ALLOWLISTS = {
     # The engine reaches it only via debug mode's dotted-path
     # load (`agent.engine.plugins.load_debug_intercept`) — never an
     # import, same blindness as the conductor plugin.
+    # The stepping driver (`debug/stepping.py`) also steps macros one
+    # gesture at a time through the macro runner — the `macros run`
+    # core, wrapped once more for the studio's Macro tab.
     "debug": (
         "physiclaw.common",
         "physiclaw.contract",
         "physiclaw.conductor",
+        "physiclaw.macros",
     ),
 }
 

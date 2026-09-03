@@ -89,5 +89,5 @@ miss. Each manifest ends with its own checklist; the generic one:
    walks recorded screens through the real route and shows where it
    would hand over — no phone, nothing written
 2. rehearse: `physiclaw playbooks run <app>/<playbook> --input k=v`
-3. capture page geometry: `physiclaw conductor calibrate <app>`
+3. capture page geometry: `physiclaw playbooks pages calibrate <app>`
 4. set `enabled: true` in the pack files

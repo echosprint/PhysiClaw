@@ -124,6 +124,12 @@ physiclaw macros check
 physiclaw macros run notify-user-wechat -i message=hi
 ```
 
+用 `--start-at` 和 `--stop-after` 指向同一个步骤，就能一次只排练一个手势：看手机，改步骤，再运行。包里的宏写作 `<app>/<name>`，内联宏写作 `<app>/<playbook>.<move>`。工作室的 Macro 标签页用步骤上的游标做同样的事。
+
+```bash
+physiclaw macros run taobao/buy.search --start-at paste --stop-after paste
+```
+
 ## 最佳实践
 
 **宏要短小、职责单一。** 需要中途做判断的场景，比如二次确认、付款、从多个结果里挑一个，这些交给智能体，别写进宏。

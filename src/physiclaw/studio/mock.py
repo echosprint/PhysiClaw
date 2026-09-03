@@ -1,5 +1,5 @@
 """A recorded session standing in for the phone — `physiclaw studio
---mock <session>`.
+--session <id>`.
 
 The page is checked against real frames without a rig or an MCP server:
 every screen view a session logged (the annotated JPEG beside its full
@@ -71,9 +71,10 @@ def session_frames(session_dir: Path) -> list[Frame]:
 
 
 class MockSession:
-    """`Session` over recorded frames. Never dials anything."""
-
-    busy = False
+    """`Session` over recorded frames. Never dials anything. `call_tool`
+    is the MCP-shaped door (blocks out), so a driver lent the session
+    via `drive` — a stepped playbook node — walks the frames the way a
+    session's actions once did."""
 
     def __init__(self, frames: list[Frame], label: str):
         if not frames:
@@ -81,6 +82,9 @@ class MockSession:
         self.frames = frames
         self.label = label
         self.idx = 0
+        # Lent to a driver: manual gestures answer busy meanwhile, the
+        # one-rig rule the real session keeps with its lock.
+        self.busy = False
 
     @property
     def mcp_url(self) -> str:
@@ -90,20 +94,29 @@ class MockSession:
         return {"connected": True, "mcp_url": self.mcp_url, "tools": sorted(MOCK_TOOLS)}
 
     async def act(self, tool: str, args: dict) -> dict:
+        return view_reply(await self.call_tool(tool, args))
+
+    async def drive(self, job):
+        self.busy = True
+        try:
+            return await job(self)
+        finally:
+            self.busy = False
+
+    async def call_tool(self, tool: str, args: dict | None = None) -> list[dict]:
+        args = args or {}
         if tool not in MOCK_TOOLS:
             raise unpublished(tool)
         if tool == gesture_vocab.SEND_TO_CLIPBOARD:
-            return view_reply(
-                [{"type": "text", "text": f"(mock) copied {args.get('text', '')!r}"}]
-            )
+            return [{"type": "text", "text": f"(mock) copied {args.get('text', '')!r}"}]
         if tool == gesture_vocab.PEEK:
-            return view_reply(self._view())
+            return self._view()
         self.idx = (self.idx + 1) % len(self.frames)
         text = (
             f"(mock) {tool} {json.dumps(args, ensure_ascii=False)} | "
             f"frame {self.idx + 1}/{len(self.frames)}"
         )
-        return view_reply([{"type": "text", "text": text}, *self._view()])
+        return [{"type": "text", "text": text}, *self._view()]
 
     def _view(self) -> list[dict]:
         frame = self.frames[self.idx]

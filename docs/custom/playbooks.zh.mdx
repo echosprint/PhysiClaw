@@ -72,29 +72,38 @@ route:
     no: ["不用"]
     wait: {seconds: 45, rounds: 3}
     resume: {steps: [{name: reopen, tool: tap, with: {label: "the app icon", bbox: [0.72, 0.42, 0.91, 0.55]}}]}
-  - agent: pay
+  - do: pay
     irreversible: payment
-    prompt: "Tap 结算, then 立即支付. Escalate if the total differs from ¥{ask.total}."
-    tools: [tap]
+    macro:
+      steps:
+        - {name: pay-button, tool: tap, with: {label: ["免密支付", "立即支付", "提交订单"], bbox: [0.37, 0.92, 0.63, 0.95]}}
+        - {name: settle, tool: wait, with: {seconds: 4}}
   - page: paid
-    anchors: "支付成功"
+    anchors: {or: ["支付成功", "付款成功"]}
 ```
 
 ## 启用前先测试
 
-回放把录制的屏幕送入真实路线，不用手机就能看到走位会在哪里交接：
-
-```bash
-physiclaw playbooks replay taobao/buy --session <id> -i keyword=五常大米 -o parse.keyword=五常大米
-```
-
-然后在手机上排练、校准页面，再设置 `enabled: true`：
+按从便宜到真实的阶梯来。先校验，再把录制的屏幕送入真实路线离线回放，然后在手机上逐节点单步，再端到端排练，最后校准页面并设置 `enabled: true`。所有排练命令都需要 `physiclaw mcp` 已在运行，且不会自行启动它。
 
 ```bash
 physiclaw playbooks check
+physiclaw playbooks replay taobao/buy --session <id> -i user_said="帮我买五常大米" -o parse.keyword=五常大米
+physiclaw playbooks step taobao/buy -i user_said="帮我买五常大米"
 physiclaw playbooks run taobao/buy -i user_said="帮我买五常大米"
-physiclaw conductor calibrate taobao
+physiclaw playbooks pages calibrate taobao
 ```
+
+单步就是调试器。每次调用都重新读取包文件，在存储的游标处运行该节点，游标一动就暂停，并打印每个判定、模型回答和宏步骤。`--at` 重跑刚改过的节点，`--start-at`/`--stop-after` 把它的宏收窄到一个手势，`--output` 预置纯文本 agent 的答案，`--reply` 预置 ask 读取的回复，`--raw` 原样打印 agent 节点每次模型往返的发送内容和返回内容，`--json` 输出结果和位置供 agent 循环读取。单步时用户通道是虚拟的，ask 读取预置的回复；`run` 则等待真实联系人回复。两者都驱动真实手机，单步走到支付节点就会真的付款。
+
+```bash
+physiclaw playbooks step taobao/buy                              # 下一个节点
+physiclaw playbooks step taobao/buy --at search --stop-after paste
+physiclaw playbooks step taobao/buy --reply 好的 --to end
+physiclaw playbooks step taobao/buy --status --json
+```
+
+`physiclaw studio` 把同一套单步放进浏览器面板，与相机和虚拟屏并排，共用同一个位置文件，所以桌前的人和终端里的 agent 可以轮流推进同一次走位。
 
 ## 最佳实践
 

@@ -283,7 +283,9 @@ class TellStep(Step[TellNode]):
             # would only mint the completion.
             return walk.advance_cursor()
         # Message away → suspend; the walk continues past this node on
-        # the resuming wake.
+        # the resuming wake — reading the thread for a cancel first when
+        # the tell declared deny words.
+        walk.gate.told = bool(walk.gate.no)
         return walk.suspend(resume_idx=walk.idx + 1, awaiting=False)
 
 
@@ -317,7 +319,8 @@ class TellResume(Step[None]):
                 return reopen
             log.info("conductor: tell reply check skipped — %s", wrong)
         # No cancel (or no thread): the read is spent — the tell's words
-        # are cleared so it never repeats — and the walk proper starts
-        # with its plain peek (the stored cursor is trusted).
+        # and flag are cleared so it never repeats — and the walk proper
+        # starts with its plain peek (the stored cursor is trusted).
         walk.gate.no = ()
+        walk.gate.told = False
         return walk.peek()

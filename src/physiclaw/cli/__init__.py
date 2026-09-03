@@ -7,7 +7,6 @@ import typer
 from physiclaw import __version__ as _pkg_version
 from physiclaw.cli.auto import auto
 from physiclaw.cli.clear import clear
-from physiclaw.cli.conductor import conductor_app
 from physiclaw.cli.config import config_app
 from physiclaw.cli.debug import debug
 from physiclaw.cli.doctor import doctor
@@ -79,14 +78,9 @@ app.add_typer(
     help="List, check, rehearse, and track gesture macros.",
 )
 app.add_typer(
-    conductor_app,
-    name="conductor",
-    help="Page-identity tooling: match screens, capture fingerprints.",
-)
-app.add_typer(
     playbooks_app,
     name="playbooks",
-    help="Scaffold, list, and validate conductor app packs.",
+    help="Author, validate, rehearse, and step app packs — routes, pages, macros.",
 )
 app.add_typer(
     prompt_app,

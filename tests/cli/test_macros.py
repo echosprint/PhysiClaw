@@ -495,7 +495,48 @@ def test_run_start_at_is_forwarded_to_the_runner(mocker) -> None:
     _write("demo")
     seen: dict = {}
 
-    async def fake(spec, values, mcp, caller="engine", start_at=""):
+    async def fake(spec, values, mcp, caller="engine", start_at="", stop_after=""):
+        seen["start_at"] = start_at
+        seen["stop_after"] = stop_after
+        return macro_runner.MacroRunResult(blocks=[], ok=True)
+
+    _patch_mcp(mocker, FakeMcp)
+    mocker.patch.object(macro_runner, "run_and_record", side_effect=fake)
+
+    result = runner.invoke(
+        app,
+        [
+            "macros",
+            "run",
+            "demo",
+            "-i",
+            "msg=hi",
+            "--start-at",
+            "paste",
+            "--stop-after",
+            "paste",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert seen["start_at"] == "paste"
+    assert seen["stop_after"] == "paste"
+
+
+def test_run_resolves_a_pack_macro_by_qualified_name(mocker) -> None:
+    # `macros run demo/open-app` — the same name a walk dispatches, so a
+    # pack's hand is rehearsed gesture by gesture without a playbook.
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "conductor"))
+    from conductor_fakes import write_pack
+
+    write_pack(macros=("open-app",))
+    seen: dict = {}
+
+    async def fake(spec, values, mcp, caller="engine", start_at="", stop_after=""):
+        seen["name"] = spec.name
         seen["start_at"] = start_at
         return macro_runner.MacroRunResult(blocks=[], ok=True)
 
@@ -503,8 +544,14 @@ def test_run_start_at_is_forwarded_to_the_runner(mocker) -> None:
     mocker.patch.object(macro_runner, "run_and_record", side_effect=fake)
 
     result = runner.invoke(
-        app, ["macros", "run", "demo", "-i", "msg=hi", "--start-at", "paste"]
+        app, ["macros", "run", "demo/open-app", "-i", "message=hi", "--start-at", "go"]
     )
 
-    assert result.exit_code == 0
-    assert seen["start_at"] == "paste"
+    assert result.exit_code == 0, result.output
+    assert seen == {"name": "open-app", "start_at": "go"}
+
+
+def test_run_names_the_missing_pack_macro() -> None:
+    result = runner.invoke(app, ["macros", "run", "ghost/x"])
+
+    assert result.exit_code == 1 and "pack 'ghost'" in result.output

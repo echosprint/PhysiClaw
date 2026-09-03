@@ -188,6 +188,22 @@ class Program:
         # The journal line the next synthesized note carries
         # (record-don't-replay: the transcript carries what happened).
         self._journal: str | None = None
+        # The suspension projection the last `suspend` produced — what a
+        # dry driver (the stepping rehearsal) persists in place of the
+        # file a live walk writes.
+        self.suspended: dict | None = None
+        # Stepping: a rehearsal that wants ONE node sets `step_one`; the
+        # walk runs the first node it opens and pauses (`paused`) the
+        # moment the cursor stands anywhere else — forward when the node
+        # settles, backward when a recover hand restarted the route.
+        # `next()` then answers None WITHOUT opening a step, so nothing
+        # of the next node (a payment's consent, an ask's numbers) is
+        # spent. The driver reads `paused` to tell a pause from a
+        # handover. (The opening peek may move the cursor past a
+        # settled prefix first; the node opened after it is the one.)
+        self.step_one = False
+        self._stepped: int | None = None
+        self.paused = False
         if suspended is not None:
             # A resumed walk is ALSO whole at construction: the suspended
             # projection overlays the fresh state right here, so no
@@ -226,6 +242,13 @@ class Program:
             **self.gate.to_suspended(),
         }
 
+    def state(self, resume_idx: int | None = None) -> dict:
+        """The walk's position as the suspension projection — what a
+        later wake, or a stepping rehearsal's next invocation, rebuilds
+        the walk from (`suspended=` at construction). `resume_idx`
+        defaults to the cursor."""
+        return self._suspended_dict(self.idx if resume_idx is None else resume_idx)
+
     def _restore_suspended(self, data: dict) -> None:
         idx = int(data["idx"])
         if not (0 <= idx <= len(self.spec.nodes)):
@@ -245,8 +268,9 @@ class Program:
         the follow-up alarm (`contract.drive`) — the file, not the job,
         is what resumes the walk on ANY next wake."""
         self.gate.awaiting = awaiting
+        self.suspended = self.state(resume_idx)
         if not self.dry:
-            write_json_atomic(suspended_path(), self._suspended_dict(resume_idx))
+            write_json_atomic(suspended_path(), self.suspended)
         recap = f"waiting for the user's reply on {self.app}/{self.spec.name}"
         self._record_run("suspended", recap)
         # The close-routine's log line, harness-written: the conductor
@@ -340,12 +364,13 @@ class Program:
         if kind == KIND_UNLOCK:
             return self._opening()
         if kind == "peek":
-            if self._resumed:
-                # A suspended walk trusts its stored cursor — the next
-                # node's own checks judge whether the world still fits.
-                self._resumed = False
-            else:
-                self.idx = self.spec.first_unsettled(self.outputs)
+            # The one cursor-floor rule (`_recover_landed` applies it
+            # too): past the settled pure-text prefix, never below a
+            # resumed walk's stored cursor — which a suspended walk
+            # trusts (the next node's own checks judge whether the world
+            # still fits) and a fresh walk has at zero.
+            self._resumed = False
+            self.idx = max(self.spec.first_unsettled(self.outputs), self._floor)
             return self.next()
         if kind == KIND_RECOVER:
             return self._recover_landed()
@@ -374,11 +399,11 @@ class Program:
                 )
             self._step = AskStep(self, node)
             return self._step.open()
-        if self._resumed and self.gate.no and self.channel is not None:
+        if self._resumed and self.gate.told and self.channel is not None:
             # Suspended-tell resume (message away, not awaiting a reply,
             # deny words declared): this wake may BE the user's cancel
             # reply — read the thread before the walk acts. One-shot:
-            # the read clears the words.
+            # the read clears the flag and the words.
             self._step = TellResume(self, None)
             return self._step.open()
         # Observe before acting: the first page check needs a screen.
@@ -407,6 +432,19 @@ class Program:
                 gesture_vocab.PEEK,
                 {},
             )
+        if self.step_one:
+            if self._stepped is None:
+                self._stepped = self.idx
+            elif self.idx != self._stepped:
+                # The cursor left the one node this run was for. Pause
+                # here, before the next step opens and spends anything.
+                log.info(
+                    "conductor: stepping pause — cursor moved from node %d to %d",
+                    self._stepped + 1,
+                    self.idx + 1,
+                )
+                self.paused = True
+                return None
         node = nodes[self.idx]
         self._step = _STEP_FOR[type(node)](self, node)
         return self._step.open()
@@ -655,7 +693,9 @@ class Program:
         plus a daily-log breadcrumb when the walk actually moved the
         phone. Latched like every terminal moment — a walk that already
         closed is a no-op, and so is one that never started."""
-        if not self._started or self._run_recorded:
+        if not self._started or self._run_recorded or self.paused:
+            # A stepping pause is not an abandonment: the walk continues
+            # from its persisted position on the next invocation.
             return
         self.log_purchase()  # a fired payment outlives the session
         node = self._node_id() or "(end)"

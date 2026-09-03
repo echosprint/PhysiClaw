@@ -1,9 +1,14 @@
-"""`physiclaw conductor` — page-identity + decision tooling.
+"""`physiclaw playbooks pages` — a pack's page fingerprints.
 
-Offline-first: `extract` and `match --session` work from recorded
-sessions with no hardware; `match --live` and `propose --live` do one
-`peek` against a running `physiclaw mcp` server, same connection idiom
-as macro rehearsal. Nothing here touches the engine runtime.
+The `pages:` a pack declares are semantics; the geometry that makes
+them robust is learned on-device. These commands do that work:
+`propose` suggests anchors off screens, `match` prints the matcher's
+verdict per screen, `extract` dumps a session's listings to a corpus
+to label, `calibrate` learns geometry from a labeled corpus or live.
+Offline-first: `extract` and `--session` inputs need no hardware;
+`--live` does one `peek` against a running `physiclaw mcp`, the same
+connection idiom as macro rehearsal. Nothing here touches the engine
+runtime.
 """
 
 import asyncio
@@ -12,9 +17,11 @@ from pathlib import Path
 import typer
 
 from physiclaw.cli._format import exit_error
+from physiclaw.cli._sessions import resolve_sid
+from physiclaw.common.ready import START_HINT
 from physiclaw.common.text import read_text
 
-conductor_app = typer.Typer(no_args_is_help=True)
+pages_app = typer.Typer(no_args_is_help=True)
 
 
 def _input_screens(session: str | None, listing: Path | None, live: bool) -> list:
@@ -44,25 +51,11 @@ async def _live_listing() -> str:
             blocks = await mcp.call_tool("peek", {})
     except ConnectionError as e:
         # Same arm as macro rehearsal: --live needs `physiclaw mcp` running.
-        exit_error(f"{e}\nstart the server first: physiclaw mcp")
+        exit_error(f"{e}. {START_HINT}")
     return verdict.screen_text(blocks)
 
 
-def resolve_sid(suffix: str) -> str:
-    """A session id from a unique suffix — the `logs <suffix>` convention,
-    shared with `playbooks replay`."""
-    from physiclaw.agent.trace.store import find_session_dirs
-    from physiclaw.common import paths
-
-    matches = find_session_dirs(paths.engine_sessions_dir(), suffix)
-    if len(matches) == 1:
-        return matches[0].name
-    if not matches:
-        exit_error(f"no session matches {suffix!r}")
-    exit_error(f"ambiguous session {suffix!r}: {', '.join(m.name for m in matches)}")
-
-
-@conductor_app.command()
+@pages_app.command()
 def extract(
     session: str = typer.Argument(help="session id (suffix ok if unique)"),
     out: Path = typer.Option(..., "--out", help="corpus JSONL to write"),
@@ -77,7 +70,7 @@ def extract(
     typer.echo(f"wrote {len(listings)} listings → {out} (edit the '?' labels)")
 
 
-@conductor_app.command()
+@pages_app.command()
 def match(
     app: str = typer.Argument(help="app pack whose pages to match against"),
     session: str = typer.Option(None, "--session", help="replay a recorded session"),
@@ -108,7 +101,7 @@ def match(
 GUIDED_SHOTS = 4
 
 
-@conductor_app.command()
+@pages_app.command()
 def calibrate(
     app: str = typer.Argument(help="app pack to calibrate"),
     corpus_file: Path = typer.Argument(None, help="labeled corpus JSONL"),
@@ -199,7 +192,7 @@ def _report_line(r) -> str:
     )
 
 
-@conductor_app.command()
+@pages_app.command()
 def propose(
     session: str = typer.Option(None, "--session", help="replay a recorded session"),
     listing: Path = typer.Option(None, "--listing", help="a listing text file"),

@@ -103,7 +103,7 @@ def iter_request_messages(path) -> Iterator[tuple[str, list[dict]]]:
             if not isinstance(rec, dict) or rec.get("kind") != "request":
                 continue
             for msg in rec.get("messages", ()):
-                yield msg.get("role", ""), list(_leaf_blocks(msg.get("content")))
+                yield msg.get("role", ""), list(leaf_blocks(msg.get("content")))
 
 
 def iter_request_texts(path) -> Iterator[tuple[str, str]]:
@@ -128,7 +128,10 @@ def image_ref(block: dict) -> str | None:
     return None
 
 
-def _leaf_blocks(content: Any) -> Iterable[dict]:
+def leaf_blocks(content: Any) -> Iterable[dict]:
+    """A message's content as a flat run of typed blocks, whichever wire
+    shape: a bare string is one text block, a `tool_result` opens into
+    its own blocks. The one flattening every reader of the wire uses."""
     if isinstance(content, str):
         yield {"type": "text", "text": content}
         return
@@ -138,6 +141,6 @@ def _leaf_blocks(content: Any) -> Iterable[dict]:
         if not isinstance(block, dict):
             continue
         if block.get("type") == "tool_result":
-            yield from _leaf_blocks(block.get("content"))
+            yield from leaf_blocks(block.get("content"))
         else:
             yield block

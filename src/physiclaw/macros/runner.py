@@ -93,6 +93,7 @@ async def run_and_record(
     caller: str = "engine",
     start_at: str = "",
     record_as: str = "",
+    stop_after: str = "",
 ) -> MacroRunResult:
     """The one entry point callers use: replay + fold the outcome into
     stats and the per-step run log. The engine handler and the CLI
@@ -128,7 +129,9 @@ async def run_and_record(
         )
 
     try:
-        result = await run(spec, provided, mcp, rlog=rlog, start_at=start_at)
+        result = await run(
+            spec, provided, mcp, rlog=rlog, start_at=start_at, stop_after=stop_after
+        )
     except MacroError as e:
         record(ok=False, step=0, reason=REASON_BAD_INPUT, detail=str(e))
         raise
@@ -147,6 +150,7 @@ async def run(
     mcp: McpCaller,
     rlog: "runlog.RunLogger | None" = None,
     start_at: str = "",
+    stop_after: str = "",
 ) -> MacroRunResult:
     """Replay the steps in order. Raises MacroError (from input resolution
     or an unresolvable `start_at`) before any gesture fires; after the first
@@ -158,18 +162,20 @@ async def run(
     `start_at` names the step to begin at, for when the caller already did
     the leading steps by hand. The skipped prefix is NOT executed and is
     reported as such — see `_resolve_start` for why it is named, not
-    numbered."""
+    numbered. `stop_after` names the last step to run — a rehearsal
+    inspecting one gesture stops there and the rest is reported as not
+    run, the same way."""
     values = resolve_inputs(spec, provided)
     start = _resolve_start(spec, start_at)
+    stop = _resolve_stop(spec, stop_after, start)
     ctx = RunContext(mcp=mcp, deadline=time.monotonic() + MAX_RUN_SECONDS)
     if rlog:
         rlog.start(values, start_at=start_at)
     ident = f" [{rlog.run_id}]" if rlog else ""
-    total = len(spec.steps)
     log_lines = _skipped_prefix(spec, start, start_at, rlog)
 
     gestures = 0
-    for i, raw_step in enumerate(spec.steps[start - 1 :], start=start):
+    for i, raw_step in enumerate(spec.steps[start - 1 : stop], start=start):
         # Checks are templated exactly like `with:` tables: a macro that
         # pastes to `{contact}` wants to VERIFY it landed in `{contact}`'s
         # chat. See `model.TextClause.substituted`.
@@ -203,7 +209,8 @@ async def run(
         if outcome.verdict is not None:
             ctx.last_verdict = outcome.verdict
 
-    return await _completed(ctx, spec, ident, log_lines, start, total, gestures)
+    log_lines += _unrun_suffix(spec, stop, stop_after, rlog)
+    return await _completed(ctx, spec, ident, log_lines, start, stop, gestures)
 
 
 # Step outcomes that mean the tool actually fired (or attempted to):
@@ -296,6 +303,48 @@ def _skipped_prefix(
     return lines
 
 
+def _unrun_suffix(
+    spec: Macro, stop: int, stop_after: str, rlog: "runlog.RunLogger | None"
+) -> list[str]:
+    """The log lines for a `stop_after` suffix this run did not execute —
+    `_skipped_prefix`'s twin, one event per unrun step."""
+    total = len(spec.steps)
+    if stop >= total:
+        return []
+    lines = [f"↷ {stop + 1}–{total}. not run (stop_after {stop_after!r})"]
+    if rlog:
+        for j, unrun in enumerate(spec.steps[stop:], start=stop + 1):
+            rlog.step(
+                j,
+                unrun.tool,
+                unrun.name,
+                "skipped",
+                detail=f"stop_after {stop_after!r} — not run",
+            )
+    return lines
+
+
+def _resolve_stop(spec: Macro, stop_after: str, start: int) -> int:
+    """1-based index of the last step to run, or the step count when
+    `stop_after` is empty. Named like `start_at`, for the same reason;
+    must not precede the start. Raises MacroError before any gesture."""
+    want = stop_after.strip()
+    if not want:
+        return len(spec.steps)
+    names = [s.name for s in spec.steps]
+    if want not in names:
+        raise MacroError(
+            f"stop_after {want!r} matches no step of macro {spec.name!r}. "
+            f"Steps: {', '.join(map(repr, names))}"
+        )
+    stop = names.index(want) + 1
+    if stop < start:
+        raise MacroError(
+            f"stop_after {want!r} (step {stop}) precedes the start step {start}"
+        )
+    return stop
+
+
 def _resolve_start(spec: Macro, start_at: str) -> int:
     """1-based index of the step to begin at, or 1 when `start_at` is empty.
 
@@ -329,11 +378,13 @@ async def _completed(
     """The success result — `_aborted`'s twin, so the two ways a run ends
     compose their reply the same way (header, step log, current view)."""
     view, view_note = await _current_view(ctx)
-    ran = (
-        f"all {total} steps completed"
-        if start == 1
-        else f"steps {start}–{total} completed (1–{start - 1} skipped by start_at)"
-    )
+    count = len(spec.steps)
+    if start == 1 and total == count:
+        ran = f"all {total} steps completed"
+    else:
+        skipped = f" (1–{start - 1} skipped by start_at)" if start > 1 else ""
+        unrun = f" ({total + 1}–{count} not run, stop_after)" if total < count else ""
+        ran = f"steps {start}–{total} completed{skipped}{unrun}"
     header = f"macro {spec.name}{ident}: {ran} — {view_note}."
     return MacroRunResult(
         blocks=_compose(header, log_lines, view, ctx.last_verdict),

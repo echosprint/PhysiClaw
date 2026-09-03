@@ -25,6 +25,13 @@ if TYPE_CHECKING:
 
 STATUS_PATH = "/api/status"
 
+# What every out-of-process driver says when nothing answers: the
+# rehearsal commands, the studio, the pages tools. `mcp`, not `server`:
+# both serve the same endpoint, but `server` also spawns the agent
+# runtime, which would wake on its own hooks and drive the phone under
+# whoever is rehearsing.
+START_HINT = "Start it first: physiclaw mcp"
+
 
 def ready_from_status(payload: dict) -> bool:
     """Read the ``ready`` flag out of an ``/api/status`` JSON body."""
