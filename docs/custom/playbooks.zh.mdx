@@ -7,7 +7,7 @@ description: 每个 App 一个 YAML 文件，确定性地走完一项任务。�
 
 ## 创建剧本包
 
-生成模板，再编辑 `PLAYBOOK.yml`：
+先脚手架，再编辑文件：
 
 ```bash
 physiclaw playbooks init taobao
@@ -18,12 +18,13 @@ physiclaw playbooks init taobao
   - README.md
   - taobao/
     - PLAYBOOK.yml
+    - example.yml
     - macros/
       - example-move/
         - MACRO.yml
 </FileTree>
 
-模板就是格式说明。每种条目都带注释，说明它做什么、需要什么。
+一个包就是一个文件夹。`PLAYBOOK.yml` 是清单：这个 App 是什么、它的剧本共用什么，即占位符、地标和多条路线都会落到的页面。它从不包含路线，每个段落都可选，空文件也是合法的包。每个剧本各自一个文件放在旁边，像 skill 一样以 `name` 和 `description` 开头；名字必须与文件名一致，所以 `buy.yml` 就是 `taobao/buy`。路线共用的手法放在 `macros/` 下作为包宏。脚手架生成的示例剧本就是格式参考，每种条目都带注释说明用途和要求。
 
 ## 路线
 
@@ -57,7 +58,7 @@ route:
 
 ## 恢复
 
-页面的 `recover:` 是唯一的恢复手段。一只手覆盖任何偏离。两只手对应匹配器的两种读法：`occluded` 是页面本身被弹层或弹窗盖住，`elsewhere` 是任何其他屏幕。`limit:` 限制该页面每次走位的尝试次数。手运行后，走位重新检查页面，仍不对就从路线顶部重来。没有 `recover:` 的页面当场交接。
+页面的 `recover:` 是唯一的恢复手段。在清单里声明的页面带着每条路线都继承的手法，路线也可以声明自己的手法来覆盖。一只手覆盖任何偏离。两只手对应匹配器的两种读法：`occluded` 是页面本身被弹层或弹窗盖住，`elsewhere` 是任何其他屏幕。`limit:` 限制该页面每次走位的尝试次数。手运行后，走位重新检查页面，仍不对就从路线顶部重来。没有 `recover:` 的页面当场交接。
 
 ## 金额
 

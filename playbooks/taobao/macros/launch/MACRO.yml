@@ -1,0 +1,42 @@
+name: launch
+description: cold-launch Taobao from wherever the phone is — every route's start
+# Disabled until rehearsed on YOUR device: physiclaw macros run taobao/launch
+enabled: false
+steps:
+  # ALWAYS cold: a resumed app lands mid-state (a stale search,
+  # a detail page) and fails the settle expect. force_quit kills
+  # the FOREGROUND app, and the boot leaves the IM app there —
+  # so bring taobao to the front first, then kill it.
+  - name: go-home
+    tool: home_screen
+  - name: dismiss-switcher  # home_screen FROM home can open the switcher
+    tool: tap
+    with: {label: "blank area below the app cards", bbox: [0.42, 0.855, 0.58, 0.885]}
+  - name: raise-taobao      # foreground it in whatever state it kept
+    tool: tap
+    with: {label: "the taobao app icon", bbox: [0.720, 0.425, 0.909, 0.551]}
+  - name: settle-raise
+    tool: wait
+    with: {seconds: 2}
+  - name: force-quit        # now the card the switcher flings is taobao's
+    tool: force_quit
+  - name: go-home-again
+    tool: home_screen
+  - name: dismiss-switcher-again
+    tool: tap
+    with: {label: "blank area below the app cards", bbox: [0.42, 0.855, 0.58, 0.885]}
+  - name: open-taobao       # the cold launch
+    tool: tap
+    with: {label: "the taobao app icon", bbox: [0.720, 0.425, 0.909, 0.551]}
+  - name: cold-launch
+    tool: wait
+    with: {seconds: 5}
+  - name: skip-splash       # a cold launch may open on a full-screen
+    tool: tap               # ad — without this guard every relaunch
+    with: {label: "跳过", bbox: [0.79, 0.030, 0.87, 0.065]}   # fails verify
+    skip_when: {not: {text: "跳过", within: [0.70, 0.0, 1.0, 0.12]}}
+  - name: settle            # `expect` re-peeks AFTER the sleep — THIS
+    tool: wait              # fresh view is what the home verify reads
+    with: {seconds: 4}      # (a tap's own view is grabbed mid-launch;
+    expect: "推荐"           # a post-ad cold render needs the slack)
+

@@ -186,7 +186,7 @@ def compile_route(
     ctx = _Ctx(playbook, pack, input_names, _macro_resolver(playbook, pack, inline))
     moves: list[Node] = []
     seen: dict[str, int] = {}
-    recovers: dict[str, Recovery] = {}
+    recovers: dict[str, Recovery] = {}  # this route's own hands, by page
     current_page: str | None = None
     for i, (kind, name, entry) in enumerate(entries):
         pos = i + 1
@@ -269,7 +269,14 @@ def compile_route(
         raise PlaybookError(f"too many moves ({len(moves)} > {MAX_NODES})")
     _check_money(moves)
     _check_resume(moves)
-    return CompiledRoute(nodes=moves, start=start, recovers=recovers, inline=inline)
+    # The manifest's hands beneath this route's own: a route that
+    # declares a page's hand replaces the inherited one whole.
+    return CompiledRoute(
+        nodes=moves,
+        start=start,
+        recovers={**_inherited_hands(ctx), **recovers},
+        inline=inline,
+    )
 
 
 def _shape(
@@ -865,6 +872,35 @@ def _ask_wait(raw: Any, where: str) -> tuple[int, int]:
         MAX_ASK_ROUNDS,
     )
     return seconds, rounds
+
+
+def _inherited_hands(ctx: _Ctx) -> dict[str, Recovery]:
+    """The manifest's `pages: <name>: recover:` hands, resolved here with
+    the route's own context — the one hand grammar, the one resolver.
+    A manifest carries settings, never bodies: an inline `macro:
+    {steps: ...}` is refused, so the hand every route shares is a
+    recorded pack macro by name. Raises PlaybookError naming the page."""
+    out: dict[str, Recovery] = {}
+    for name, spec in ctx.pack.page_recovers.items():
+        # Every page here is declared: the pack door parses the same
+        # entry's anchors first and refuses one without.
+        where = f"manifest page {name!r}"
+        _refuse_bodies(spec, where)
+        out[name] = _parse_recover(ctx, spec, where, name)
+    return out
+
+
+def _refuse_bodies(raw: Any, where: str) -> None:
+    """A manifest hand names a pack macro; it never embeds one."""
+    if not isinstance(raw, dict):
+        return
+    if isinstance(raw.get("macro"), dict):
+        raise PlaybookError(
+            f"{where}: the manifest names a pack macro for a recover hand — "
+            "record the body under macros/<name>/ and name it here"
+        )
+    for reading in RECOVER_READINGS:
+        _refuse_bodies(raw.get(reading), where)
 
 
 def _parse_recover(ctx: _Ctx, raw: Any, where: str, page: str) -> Recovery:

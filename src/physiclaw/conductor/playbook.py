@@ -1,5 +1,14 @@
-"""PLAYBOOK.yml → a validated `Playbook` — the model, the pack, and the
-ref grammar's two halves (validate at parse, `fill_refs` at run).
+"""A pack → validated `Playbook`s — the model, the pack, and the ref
+grammar's two halves (validate at parse, `fill_refs` at run).
+
+A pack is a folder: `PLAYBOOK.yml`, the MANIFEST (what the app is and
+what its routes share — meta, placeholders, landmarks, pages; every
+section optional, the file may be empty), one `<name>.yml` per
+playbook beside it (the file body is the playbook: name, description,
+enabled, inputs, route; the stem is the name, referenced as
+`<app>/<name>`, and `name:` must agree with it), and
+`macros/<name>/MACRO.yml` for the recorded hands
+routes share. The manifest never carries a route.
 
 A playbook is one app task written as a ROUTE: a top-down alternation
 of waypoints (`page:` — where the walk must BE, checked every time) and
@@ -20,6 +29,8 @@ vocabulary and the model classes below carry the same names)::
                 | "tell" name message [no]
     recover   ::= hand [limit]                # one hand for any deviation
                 | {[occluded: hand] [elsewhere: hand] [limit]}
+                # a manifest page's recover: is inherited by every
+                # route; a route's own replaces it whole for that walk
     hand      ::= {tool [with]} | {macro}
     macro     ::= name                    # macros/<name>/ — a directory macro
                 | {[inputs] steps}        # inline — MACRO.yml grammar minus
@@ -74,6 +85,7 @@ from physiclaw.conductor.pages import (
     PageDecl,
     PagesError,
     collect_page_decls,
+    collect_page_recovers,
     pack_landmarks,
     parse_pages_data,
 )
@@ -106,7 +118,7 @@ INPUTS_ROOT = "inputs"
 
 PACK_MACROS_DIRNAME = "macros"
 
-_PLAY_KEYS = {"description", "enabled", "inputs", "route"}
+_PLAY_KEYS = {"name", "description", "enabled", "inputs", "route"}
 
 
 class PlaybookError(specfile.SpecError):
@@ -303,9 +315,16 @@ class Pack:
     pages: dict[str, PageDecl]
     macros: dict[str, Macro]
     macro_errors: dict[str, str]
-    # The raw `playbooks:` map of the pack file — parsed per entry by
-    # `scan_playbooks`, so one broken walk excludes itself, never the pack.
+    # The raw playbook files (`<name>.yml` beside the manifest) — parsed
+    # per entry by `scan_playbooks`, so one broken walk excludes itself,
+    # never the pack; the files that would not load ride as errors.
     playbook_docs: dict = field(default_factory=dict)
+    playbook_errors: dict[str, str] = field(default_factory=dict)
+    # The manifest's `pages: <name>: recover:` hands, RAW by page name —
+    # the route compiler resolves them (its grammar, its resolver) and
+    # every route inherits them for a shared page unless it declares
+    # its own.
+    page_recovers: dict[str, Any] = field(default_factory=dict)
     # The pack's declared fixed spots (`landmarks:`) — recover hands and
     # agent grants name them. See `pages.Landmark`.
     landmarks: dict[str, Landmark] = field(default_factory=dict)
@@ -364,35 +383,36 @@ def qualified_all(app: str, pack: Pack) -> dict[str, Macro]:
 
 
 def load_pack(app: str) -> Pack:
-    """The app pack, whole, from its one spec file: validated meta, page
-    declarations, landmarks, the raw `playbooks:` docs (parsed per-entry
-    by `scan_playbooks`), and the recorded macros. A broken pack macro
-    is carried as its error string so the playbook referencing it fails
-    with the cause."""
+    """The app pack, whole: the manifest (`PLAYBOOK.yml` — what the app
+    is and what its routes share: meta, placeholders, landmarks,
+    pages), the playbook files beside it (raw, parsed per entry by
+    `scan_playbooks`), and the recorded macros. A broken pack macro is
+    carried as its error string so the playbook referencing it fails
+    with the cause; a broken playbook file rides the same way."""
     doc = specfile.load_pack_doc(app, PlaybookError)
     if doc is None:
         raise PlaybookError(f"no pack {app!r} on disk (missing {PACK_FILENAME})")
     _check_pack_meta(doc, app)
+    root = paths.pack_root(app)
+    docs, pb_errors = specfile.load_playbook_docs(app, PlaybookError, root)
     try:
-        # Appendix + route-declared waypoints, one namespace — the
-        # matcher and every playbook validate against the same set.
-        pages = parse_pages_data(collect_page_decls(doc), app)
+        # Appendix + route-declared waypoints across every playbook
+        # file, one namespace — the matcher and every playbook validate
+        # against the same set.
+        pages = parse_pages_data(collect_page_decls(doc, docs), app)
     except PagesError as e:
         raise PlaybookError(f"{app}/{PACK_FILENAME} pages: {e}") from e
     try:
         landmarks = pack_landmarks(doc)
     except PagesError as e:
         raise PlaybookError(f"{app}/{PACK_FILENAME} landmarks: {e}") from e
-    raw_playbooks = doc.get("playbooks") or {}
-    if not isinstance(raw_playbooks, dict):
-        raise PlaybookError("`playbooks` must be a mapping of name → playbook")
     macros: dict[str, Macro] = {}
     errors: dict[str, str] = {}
-    root = paths.pack_root(app) / PACK_MACROS_DIRNAME
-    if root.is_dir():
+    macros_root = root / PACK_MACROS_DIRNAME
+    if macros_root.is_dir():
         # One scanner for both macro roots: traversal guard, dot-dir
         # convention, and the broad-except lesson live in `store.scan`.
-        for entry in macro_store.scan(root):
+        for entry in macro_store.scan(macros_root):
             if entry.spec is not None:
                 macros[entry.dir_name] = entry.spec
             else:
@@ -402,25 +422,33 @@ def load_pack(app: str) -> Pack:
         pages=pages,
         macros=macros,
         macro_errors=errors,
-        playbook_docs=dict(raw_playbooks),
+        playbook_docs=docs,
+        playbook_errors=pb_errors,
         landmarks=landmarks,
+        page_recovers=collect_page_recovers(doc),
     )
 
 
 def _check_pack_meta(doc: dict, app: str) -> None:
-    """The manifest half of the pack file: `app` (which app this pack
-    automates) equals the directory, `description` is real prose,
+    """The manifest's meta, every field optional: `app` (which app this
+    pack automates) must equal the directory when present — the folder
+    IS the app, the field catches a pack copied under the wrong name;
+    `description` is real prose when present (`install` prints it);
     `placeholders` (install-time constants, validated here so `check`
     catches a malformed map before install prompts read it) is
     name → {description, [example]}."""
-    declared = require_str(doc.get("app"), "`app`")
-    if declared != app:
-        raise PlaybookError(f"app {declared!r} must equal the pack directory {app!r}")
+    if "app" in doc:
+        declared = require_str(doc.get("app"), "`app`")
+        if declared != app:
+            raise PlaybookError(
+                f"app {declared!r} must equal the pack directory {app!r}"
+            )
     if app == "pages":
         raise PlaybookError(
             "a pack cannot be named 'pages' — it is the page-reference root"
         )
-    prose(doc.get("description"), "`description`")
+    if "description" in doc:
+        prose(doc.get("description"), "`description`")
     ph = doc.get("placeholders")
     if ph is None:
         return
@@ -434,14 +462,18 @@ def _check_pack_meta(doc: dict, app: str) -> None:
 
 
 def scan_playbooks(app: str, pack: Pack | None = None) -> list[PlaybookEntry]:
-    """Every entry of the pack's `playbooks:` map, parsed against the
-    pack. Callers that already hold the Pack thread it through so the
-    spec file and macros are not re-read."""
+    """Every playbook file of the pack, parsed against it — plus the
+    files that would not load, as invalid entries. Callers that already
+    hold the Pack thread it through so the spec file and macros are
+    not re-read."""
     if pack is None:
         if not (paths.pack_root(app) / PACK_FILENAME).exists():
             return []
         pack = load_pack(app)
-    out: list[PlaybookEntry] = []
+    out: list[PlaybookEntry] = [
+        PlaybookEntry(app=app, name=n, error=e)
+        for n, e in sorted(pack.playbook_errors.items())
+    ]
     for name, data in pack.playbook_docs.items():
         name = str(name)
         try:
@@ -451,6 +483,27 @@ def scan_playbooks(app: str, pack: Pack | None = None) -> list[PlaybookEntry]:
             out.append(
                 PlaybookEntry(app=app, name=name, error=str(e) or type(e).__name__)
             )
+    return out
+
+
+def stray_dirs() -> list[str]:
+    """Folders under a playbooks root holding YAML beside no manifest —
+    an author who wrote a route and forgot the marker. Skips the `_`
+    and `.` prefixes every lister does, and a name a home pack already
+    claims (the home layer shadows the tree's)."""
+    packs = set(list_apps())
+    out: list[str] = []
+    for root in paths.playbooks_dirs():
+        if not root.is_dir():
+            continue
+        for d in sorted(root.iterdir()):
+            if (
+                d.is_dir()
+                and not d.name.startswith(("_", "."))
+                and d.name not in packs
+                and any(d.glob("*.yml"))
+            ):
+                out.append(f"{root.name}/{d.name}")
     return out
 
 
@@ -465,16 +518,16 @@ def list_apps() -> list[str]:
 
 def parse_playbook(text: str, name: str, pack: Pack) -> Playbook:
     """One playbook given as YAML text — the text-shaped door tests and
-    tooling use; the live path is `scan_playbooks` over the pack file's
-    `playbooks:` map. Raises PlaybookError naming the offending field;
+    tooling use; the live path is `scan_playbooks` over the pack's
+    playbook files. Raises PlaybookError naming the offending field;
     never a partial spec."""
     data = specfile.load_yaml(text, PlaybookError)
     return _parse_playbook_data(data, name, pack)
 
 
 def _parse_playbook_data(data: Any, name: str, pack: Pack) -> Playbook:
-    """One entry of the `playbooks:` map → a validated Playbook. The map
-    key IS the name — there is no inner `name:` key to drift from it."""
+    """One playbook file's document → a validated Playbook. The file
+    stem IS the name; the `name:` inside must agree with it."""
     # The compiler imports this module's model; the one import in the
     # other direction is deferred to the call so the two files stay a
     # pair without a cycle at load.
@@ -485,7 +538,20 @@ def _parse_playbook_data(data: Any, name: str, pack: Pack) -> Playbook:
     unknown = sorted(set(map(str, data.keys())) - _PLAY_KEYS)
     if unknown:
         raise PlaybookError(f"unknown key(s): {', '.join(unknown)}")
-    check_name(name, "playbook key")
+    # A playbook names itself, like a macro and a skill do — and the
+    # name must be the file's, so a copied file cannot lie about what
+    # it is (the same rule `app` keeps with the pack folder).
+    if "name" not in data:
+        raise PlaybookError(
+            f"every .yml beside the manifest is a playbook, and this one has "
+            f"no `name:` — a playbook starts `name: {name}`"
+        )
+    check_name(name, "playbook name")
+    declared = require_str(data.get("name"), "`name`")
+    if declared != name:
+        raise PlaybookError(
+            f"name {declared!r} must equal the file name {name!r} ({name}.yml)"
+        )
     description = prose(data.get("description"), "`description`")
     enabled = data.get("enabled", True)
     if not isinstance(enabled, bool):

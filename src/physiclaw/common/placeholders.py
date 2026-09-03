@@ -80,15 +80,20 @@ def write_placeholder_values(values: dict[str, str]) -> None:
     )
 
 
-def resolve_placeholders(text: str, error_cls: type[Exception]) -> str:
+def resolve_placeholders(
+    text: str, error_cls: type[Exception], values: dict[str, str] | None = None
+) -> str:
     """`text` with its `<<TOKEN>>`s filled from the local values file —
     the one wrapper every pack-file parser (macros, pages, playbooks)
     calls. A surviving token (or a broken values file) raises
     `error_cls`, so the message cannot drift between grammars."""
-    try:
-        values = placeholder_values()
-    except ValueError as e:
-        raise error_cls(str(e)) from e
+    if values is None:
+        # A caller loading many files reads the values file once and
+        # threads them; a single load reads it here.
+        try:
+            values = placeholder_values()
+        except ValueError as e:
+            raise error_cls(str(e)) from e
     if values:
         text = fill_placeholders(text, values)
     tokens = find_placeholders(text)

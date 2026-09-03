@@ -1,5 +1,6 @@
-# The pack spec — one file, the whole pack. The hands (open/send) are
-# recorded beside it in macros/<name>/MACRO.yml.
+# The pack MANIFEST — the thread page and the placeholders; the hands
+# (open/send) are recorded beside it in macros/<name>/MACRO.yml. No
+# playbooks live here.
 app: channel
 description: >-
   The user-channel pack for WeChat — reach YOUR user's thread by in-app

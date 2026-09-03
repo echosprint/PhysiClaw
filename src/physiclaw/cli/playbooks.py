@@ -32,12 +32,13 @@ from physiclaw.cli._format import (
     warn,
 )
 from physiclaw.cli.pages import pages_app
+from physiclaw.common.paths import PACK_FILENAME
 from physiclaw.common.ready import START_HINT
 from physiclaw.conductor import rehearsal
 from physiclaw.conductor.playbook import PlaybookError
 
 if TYPE_CHECKING:
-    from physiclaw.conductor.playbook import Pack, PlaybookEntry
+    from physiclaw.conductor.playbook import Pack, Playbook, PlaybookEntry
 
 playbooks_app = typer.Typer(no_args_is_help=True)
 
@@ -100,7 +101,9 @@ def init(
             f"  1. declare `pages:` in {PACK_FILENAME} (physiclaw playbooks pages propose --live)"
         )
         typer.echo(
-            "  2. write pack macros + the playbook, then: physiclaw playbooks check"
+            f"  2. write the route in {scaffold.EXAMPLE_PLAYBOOK}.yml (one playbook "
+            "per file beside the manifest) and its macros, then: physiclaw "
+            "playbooks check"
         )
         typer.echo("  3. capture geometry: physiclaw playbooks pages calibrate " + app)
 
@@ -236,6 +239,18 @@ def _gather_values(
     return values
 
 
+def _warn_strays() -> None:
+    from physiclaw.conductor import playbook as pb
+
+    for stray in pb.stray_dirs():
+        typer.echo(
+            warn(
+                f"{stray} holds playbook files but no {PACK_FILENAME} — not a pack "
+                "until the manifest exists (it may be empty)"
+            )
+        )
+
+
 @playbooks_app.command("list")
 def list_cmd() -> None:
     """List every pack and its playbooks: enabled, disabled, or invalid."""
@@ -243,6 +258,7 @@ def list_cmd() -> None:
     from physiclaw.conductor import scaffold
 
     scaffold.ensure_format_readme()
+    _warn_strays()
     apps = pb.list_apps()
     if not apps:
         typer.echo(
@@ -589,18 +605,29 @@ def check() -> None:
     is invalid."""
     from physiclaw.conductor import playbook as pb
     from physiclaw.conductor import scaffold
+    from physiclaw.conductor import setup as conductor_setup
 
     scaffold.ensure_format_readme()
+    _warn_strays()
     apps = pb.list_apps()
     if not apps:
         typer.echo("No app packs found.")
         return
-    if any([_check_app(app) for app in apps]):
+    specs: dict[str, "Playbook"] = {}
+    bad = False
+    for app in apps:
+        app_bad, app_specs = _check_app(app)
+        bad = bad or app_bad
+        specs.update(app_specs)
+    for line in conductor_setup.menu_warnings(specs):
+        typer.echo(warn(line))
+    if bad:
         raise typer.Exit(1)
 
 
-def _check_app(app: str) -> bool:
-    """Report one pack; True when anything in it is invalid."""
+def _check_app(app: str) -> "tuple[bool, dict[str, Playbook]]":
+    """Report one pack: (anything invalid, the valid playbooks by ref —
+    what the cross-pack advisory reads, so nothing loads twice)."""
     from physiclaw.conductor import playbook as pb
     from physiclaw.conductor import setup as conductor_setup
 
@@ -608,7 +635,7 @@ def _check_app(app: str) -> bool:
         pack = pb.load_pack(app)
     except pb.PlaybookError as e:
         typer.echo(step_fail(str(e)))
-        return True
+        return True, {}
     bad = False
     for macro_name, err in sorted(pack.macro_errors.items()):
         typer.echo(step_fail(f"{app}/macros/{macro_name}: {err}"))
@@ -633,7 +660,7 @@ def _check_app(app: str) -> bool:
         # page too thinly anchored to survive one OCR miss.
         for line in conductor_setup.readiness_warnings(entry.spec, pack):
             typer.echo(warn(f"{app}/{entry.name}: {line}"))
-    return bad
+    return bad, {f"{app}/{e.name}": e.spec for e in entries if e.spec is not None}
 
 
 def _report_not_live(
@@ -655,11 +682,13 @@ def _report_not_live(
                 f"{', '.join(disabled)}. Set `enabled: true` once rehearsed."
             )
         )
+    # Only enabled playbooks: a disabled playbook's macros are not "not
+    # live" beyond the playbook itself, already reported above.
     not_live = sorted(
         {
             m
             for e in entries
-            if e.spec is not None
+            if e.spec is not None and e.spec.enabled
             for m in disabled_macros(e.spec, pack)
         }
     )

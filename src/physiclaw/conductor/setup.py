@@ -259,6 +259,29 @@ def _gate_word_warnings(spec: Playbook) -> list[str]:
     return out
 
 
+def menu_warnings(entries: dict[str, Playbook]) -> list[str]:
+    """Across packs: two enabled playbooks whose descriptions read the
+    same would sit on the activation menu as two identical lines under
+    different refs — the model could only tell them apart by the ref,
+    which users never type. Advisory: name the app in the description
+    the way users say it. `entries` is ref → spec, the menu's own shape."""
+    seen: dict[str, str] = {}
+    out: list[str] = []
+    for ref, spec in entries.items():
+        if not spec.enabled:
+            continue
+        key = " ".join(spec.description.split()).casefold()
+        if key in seen:
+            out.append(
+                f"{ref} and {seen[key]} carry the same description — the "
+                "activation menu cannot tell them apart; say which app each "
+                "is for, the way users name it"
+            )
+        else:
+            seen[key] = ref
+    return out
+
+
 def walk_registry(program: "Program", channel: "Channel | None") -> dict[str, Macro]:
     """The qualified dispatch registry one live walk needs — its own
     pack's macros plus the channel's. The ONE spelling of that rule:
@@ -314,6 +337,11 @@ class Activation:
         )
 
     def _menu(self) -> str:
+        """One line per playbook: the ref (the answer key), what it does,
+        its inputs. The description is what the model chooses by, so a
+        playbook's description names its app the way users say it
+        (淘宝, 京东) — `playbooks check` warns when two enabled
+        playbooks across packs read the same."""
         lines = ["Available playbooks:"]
         for ref, (spec, _pack) in self.entries.items():
             inputs = ", ".join(_menu_input(i) for i in spec.inputs)

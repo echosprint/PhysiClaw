@@ -11,13 +11,14 @@ distinct catch surfaces without re-spelling the validation:
     _require_str, _prose, _opt_prose, _check_name = specfile.bind(PagesError)
 """
 
+from pathlib import Path
 from typing import Any, Callable
 
 from ruamel.yaml import YAML
 
 from physiclaw.common import paths
 from physiclaw.common.paths import PACK_FILENAME
-from physiclaw.common.placeholders import resolve_placeholders
+from physiclaw.common.placeholders import placeholder_values, resolve_placeholders
 from physiclaw.common.text import read_text
 from physiclaw.macros.model import (
     INPUT_NAME_RE as INPUT_NAME_RE,
@@ -49,19 +50,19 @@ class SpecError(ValueError):
 yaml_loader = YAML(typ="safe", pure=True)
 
 
-_PACK_TOP_KEYS = frozenset(
-    {
-        "app",
-        "description",
-        "placeholders",
-        "pages",
-        "playbooks",
-        "landmarks",
-    }
-)
+# The manifest's sections — what the app IS and what its routes share.
+# Never a route: each playbook is its own `<name>.yml` beside the
+# manifest (`load_playbook_docs`), so `playbooks:` is refused with the
+# reason.
+_PACK_TOP_KEYS = frozenset({"app", "description", "placeholders", "pages", "landmarks"})
 
 
-def load_yaml(text: str, error_cls: type[Exception], where: str = "") -> Any:
+def load_yaml(
+    text: str,
+    error_cls: type[Exception],
+    where: str = "",
+    values: dict[str, str] | None = None,
+) -> Any:
     """The one load ritual every spec door shares: fill `<<TOKEN>>`s
     from the local values file (rejecting survivors), YAML 1.2 load,
     reject anchors/aliases document-wide, wrap errors in the door's own
@@ -70,7 +71,7 @@ def load_yaml(text: str, error_cls: type[Exception], where: str = "") -> Any:
     alias-bomb ride — behind these doors, and running it HERE keeps the
     grammar door-independent (a text that parses at the test/tooling
     door must not fail only at the live pack file)."""
-    text = resolve_placeholders(text, error_cls)
+    text = resolve_placeholders(text, error_cls, values)
     prefix = f"{where}: " if where else ""
     try:
         data = yaml_loader.load(text)
@@ -84,17 +85,27 @@ def load_yaml(text: str, error_cls: type[Exception], where: str = "") -> Any:
 
 
 def load_pack_doc(app: str, error_cls: type[Exception]) -> dict | None:
-    """`playbooks/<app>/PLAYBOOK.yml`, loaded and top-checked: a mapping
-    with only the known top-level sections, no unpopulated template
-    placeholders. None when the file doesn't exist (not a pack).
-    Section contents are validated by their owners (`pages.py`,
-    `playbook.py`) — this is just the shared front door."""
+    """`playbooks/<app>/PLAYBOOK.yml`, the manifest, loaded and
+    top-checked: a mapping with only the known sections, no unpopulated
+    template placeholders — or empty, which is a valid manifest (the
+    file is the pack marker; every section is optional). None when the
+    file doesn't exist (not a pack). Section contents are validated by
+    their owners (`pages.py`, `playbook.py`) — this is just the shared
+    front door."""
     path = paths.pack_root(app) / PACK_FILENAME
     if not path.exists():
         return None
     data = load_yaml(read_text(path), error_cls, where=f"{app}/{PACK_FILENAME}")
+    if data is None:
+        return {}
     if not isinstance(data, dict):
         raise error_cls(f"{app}/{PACK_FILENAME} must be a YAML mapping")
+    if "playbooks" in data:
+        raise error_cls(
+            f"{app}/{PACK_FILENAME}: `playbooks` does not live in the manifest "
+            "— write each playbook as its own <name>.yml beside it (the "
+            "file body is the playbook: name, description, enabled, inputs, route)"
+        )
     unknown = sorted(set(map(str, data.keys())) - _PACK_TOP_KEYS)
     if unknown:
         raise error_cls(
@@ -102,6 +113,51 @@ def load_pack_doc(app: str, error_cls: type[Exception]) -> dict | None:
             f"(sections: {', '.join(sorted(_PACK_TOP_KEYS))})"
         )
     return data
+
+
+def load_playbook_docs(
+    app: str, error_cls: type[ValueError], root: Path | None = None
+) -> tuple[dict[str, Any], dict[str, str]]:
+    """Every playbook file of a pack — `playbooks/<app>/<name>.yml`,
+    any YAML beside the manifest — as raw documents keyed by the file
+    stem (the playbook's name, referenced as `<app>/<name>`), plus the
+    files that would not load, by name with the reason. A bad file
+    excludes itself, never the pack: `scan_playbooks` reports it as an
+    invalid entry. The stem follows the move-name grammar, so a file
+    the grammar refuses is an error entry too; a `_` or `.` prefix is
+    the one skip convention every artifact lister shares (a draft the
+    author parks beside the pack). `root` is the pack's directory when
+    the caller already resolved it."""
+    root = paths.pack_root(app) if root is None else root
+    name_check = bind(error_cls)[3]
+    try:
+        values = placeholder_values()
+    except ValueError as e:
+        raise error_cls(str(e)) from e
+    docs: dict[str, Any] = {}
+    errors: dict[str, str] = {}
+    for path in sorted(root.glob("*.yml")):
+        if (
+            path.name == PACK_FILENAME
+            or path.name.startswith(("_", "."))
+            or not path.is_file()
+        ):
+            continue
+        name = path.stem
+        where = f"{app}/{path.name}"
+        try:
+            name_check(name, f"{where}: playbook file name")
+            data = load_yaml(read_text(path), error_cls, where=where, values=values)
+            if not isinstance(data, dict):
+                raise error_cls(
+                    f"{where} must be a YAML mapping (name, description, enabled, "
+                    "inputs, route)"
+                )
+        except Exception as e:  # broad: exclude the file, never the pack
+            errors[name] = str(e) or type(e).__name__
+            continue
+        docs[name] = data
+    return docs, errors
 
 
 def bind(

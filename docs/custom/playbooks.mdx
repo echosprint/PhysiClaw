@@ -7,7 +7,7 @@ A playbook is one app task written as a route: pages the walk must be on, altern
 
 ## Create a pack
 
-Scaffold one, then edit `PLAYBOOK.yml`:
+Scaffold one, then edit the files:
 
 ```bash
 physiclaw playbooks init taobao
@@ -18,12 +18,13 @@ physiclaw playbooks init taobao
   - README.md
   - taobao/
     - PLAYBOOK.yml
+    - example.yml
     - macros/
       - example-move/
         - MACRO.yml
 </FileTree>
 
-The scaffold is the format reference. It carries every entry kind with a comment on what it does and what it needs.
+A pack is a folder. `PLAYBOOK.yml` is the manifest: what the app is and what its playbooks share, placeholders, landmarks, and the pages more than one route lands on. It never carries a route, every section is optional, and an empty file is a valid pack. Each playbook is its own file beside it, headed like a skill with `name` and `description`; the name must equal the file's, so `buy.yml` is `taobao/buy`. Hands that routes share are pack macros under `macros/`. The scaffold's example playbook is the format reference. It carries every entry kind with a comment on what it does and what it needs.
 
 ## The route
 
@@ -57,7 +58,7 @@ route:
 
 ## Recovery
 
-A page's `recover:` is the only recovery. One hand covers any deviation. Two hands cover the two readings the matcher gives: `occluded` when the page itself sits under a sheet or popup, `elsewhere` for any other screen. `limit:` bounds the page's tries per walk. After a hand runs, the walk re-checks the page and, still off, starts the route over. A page without `recover:` hands over on the spot.
+A page's `recover:` is the only recovery. A page declared in the manifest carries the hand every route inherits, and a route may declare its own to override it. One hand covers any deviation. Two hands cover the two readings the matcher gives: `occluded` when the page itself sits under a sheet or popup, `elsewhere` for any other screen. `limit:` bounds the page's tries per walk. After a hand runs, the walk re-checks the page and, still off, starts the route over. A page without `recover:` hands over on the spot.
 
 ## Money
 

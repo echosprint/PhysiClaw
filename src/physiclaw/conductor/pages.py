@@ -258,6 +258,24 @@ def parse_pages(text: str, app: str) -> dict[str, PageDecl]:
 # waypoint key set from it — a new page field lands here and reaches
 # every door.
 PAGE_DECL_FIELDS = ("anchors", "forbid", "scrollable")
+# A manifest page's one non-declaration key: the recover hand every
+# route of the pack inherits for it (a route may declare its own).
+PAGE_RECOVER_FIELD = "recover"
+
+
+def collect_page_recovers(doc: dict) -> dict[str, Any]:
+    """The RAW `recover:` hands the manifest's `pages:` declare, by page
+    name — resolved by the route compiler (`route._inherited_hands`)
+    against the pack's macros and landmarks, so the grammar has one
+    home. Shape errors surface at that parse; this only collects."""
+    appendix = doc.get("pages")
+    if not isinstance(appendix, dict):
+        return {}
+    return {
+        str(name): spec[PAGE_RECOVER_FIELD]
+        for name, spec in appendix.items()
+        if isinstance(spec, dict) and PAGE_RECOVER_FIELD in spec
+    }
 
 
 def route_decl(entry: dict) -> "dict | None":
@@ -270,16 +288,18 @@ def route_decl(entry: dict) -> "dict | None":
     return decl or None
 
 
-def collect_page_decls(doc: dict) -> dict:
+def collect_page_decls(doc: dict, playbook_docs: dict | None = None) -> dict:
     """The pack's RAW page declarations, wherever they were written: the
-    `pages:` appendix plus every playbook-route waypoint carrying
-    declaration fields beside its `page:` key. Data-level on purpose —
-    this runs at the pack door (`scan_app_decls`, `load_pack`) before
-    any playbook parses, so the matcher sees route-declared pages
-    through every door and playbook.py never re-owns the page grammar.
-    A page is DECLARED exactly once per pack; a second site raises with
-    both named. Malformed playbook shapes are skipped here — each
-    playbook excludes itself at its own parse, never the pack."""
+    manifest's `pages:` appendix plus every route waypoint carrying
+    declaration fields beside its `page:` key, across every playbook
+    file. Data-level on purpose — this runs at the pack door
+    (`scan_app_decls`, `load_pack`) before any playbook parses, so the
+    matcher sees route-declared pages through every door and
+    playbook.py never re-owns the page grammar. A page is DECLARED
+    exactly once per pack; a second site raises with both named — the
+    same page declared in two files is a pack error, never a silent
+    merge. Malformed playbook shapes are skipped here — each playbook
+    excludes itself at its own parse, never the pack."""
     out: dict[str, Any] = {}
     sites: dict[str, str] = {}
     appendix = doc.get("pages")
@@ -287,12 +307,15 @@ def collect_page_decls(doc: dict) -> dict:
         if not isinstance(appendix, dict):
             raise PagesError("`pages` must be a YAML mapping of page name → spec")
         for name, spec in appendix.items():
-            out[str(name)] = spec
-            sites[str(name)] = "the `pages:` section"
-    raw_playbooks = doc.get("playbooks")
-    if not isinstance(raw_playbooks, dict):
-        return out
-    for pb_name, pb in raw_playbooks.items():
+            # The declaration half only: a manifest page may also carry
+            # `recover:`, the pack-level hand (`collect_page_recovers`).
+            out[str(name)] = (
+                {k: v for k, v in spec.items() if k != PAGE_RECOVER_FIELD}
+                if isinstance(spec, dict)
+                else spec
+            )
+            sites[str(name)] = "the manifest's `pages:` section"
+    for pb_name, pb in (playbook_docs or {}).items():
         route = pb.get("route") if isinstance(pb, dict) else None
         if not isinstance(route, list):
             continue
@@ -307,7 +330,7 @@ def collect_page_decls(doc: dict) -> dict:
                 # parse refuses the declaration with the exact reason,
                 # never the whole pack.
                 continue
-            site = f"playbook {pb_name!r}'s route"
+            site = f"{pb_name}.yml's route"
             if name in out:
                 raise PagesError(
                     f"page {name!r} declared twice — in {sites[name]} and on "
@@ -529,7 +552,8 @@ def scan_app_decls(app: str) -> dict[str, PageDecl]:
     doc = specfile.load_pack_doc(app, PagesError)
     if doc is None:
         return {}
-    return parse_pages_data(collect_page_decls(doc), app)
+    docs, _errors = specfile.load_playbook_docs(app, PagesError)
+    return parse_pages_data(collect_page_decls(doc, docs), app)
 
 
 # ---------- learned store ----------

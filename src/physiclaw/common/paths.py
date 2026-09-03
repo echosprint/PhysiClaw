@@ -233,8 +233,9 @@ def macros_dir() -> Path:
 
 def playbooks_dir() -> Path:
     """Self-contained conductor app packs — one ``<app>/`` dir per app
-    holding its ``PLAYBOOK.yml`` (meta + page declarations + the walks,
-    human-authored) and the pack's private ``macros/``.
+    holding its ``PLAYBOOK.yml`` manifest (meta, placeholders, landmarks,
+    shared pages), one ``<name>.yml`` per playbook, and the pack's
+    private ``macros/``.
     Geometry never lives here; it is captured on-device into
     ``learned_pages_dir()`` — device variance (iPhone models, iOS and app
     versions) makes shipped or authored geometry infeasible."""

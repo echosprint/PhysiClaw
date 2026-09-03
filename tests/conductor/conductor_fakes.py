@@ -123,19 +123,14 @@ steps:
 def compose_pack_doc(
     app: str,
     pages: str,
-    playbooks: dict[str, str] | None = None,
     landmarks: str | None = None,
 ) -> str:
-    """One unified PLAYBOOK.yml from the fixtures' historical pieces —
-    pages text + full playbook docs, indented under their map keys (the
-    keys ARE the names; entries carry no inner `name:`)."""
+    """The manifest (`PLAYBOOK.yml`) from the fixtures' pieces: meta, a
+    `pages:` appendix, optional landmarks. Playbooks are files beside
+    it (`write_pack` writes them), never manifest content."""
     doc = f"app: {app}\ndescription: test pack\npages:\n{indent(pages, '  ')}\n"
     if landmarks:
         doc += f"landmarks:\n{indent(landmarks, '  ')}\n"
-    if playbooks:
-        doc += "playbooks:\n"
-        for name, text in playbooks.items():
-            doc += f"  {name}:\n{indent(text, '    ')}\n"
     return doc
 
 
@@ -147,15 +142,22 @@ def write_pack(
     pages: str = PAGES,
     landmarks: str | None = None,
 ):
-    """Write a pack under the (fixture-scoped) playbooks dir; returns its
+    """Write a pack under the (fixture-scoped) playbooks dir — the
+    manifest, one `<name>.yml` per playbook, the macros; returns its
     root."""
     from physiclaw.common import paths
 
     root = paths.playbooks_dir() / app
     (root / "macros").mkdir(parents=True, exist_ok=True)
     (root / "PLAYBOOK.yml").write_text(
-        compose_pack_doc(app, pages, playbooks, landmarks), encoding="utf-8"
+        compose_pack_doc(app, pages, landmarks), encoding="utf-8"
     )
+    for name, text in (playbooks or {}).items():
+        # A playbook names itself; fixtures written before that rule
+        # get the header the file stem implies.
+        if not text.startswith("name:"):
+            text = f"name: {name}\n{text}"
+        (root / f"{name}.yml").write_text(text, encoding="utf-8")
     for m in macros:
         d = root / "macros" / m
         d.mkdir(parents=True, exist_ok=True)

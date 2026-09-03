@@ -32,9 +32,10 @@ MACRO = (
     '    with: {text: "<<CONTACT>>"}\n'
 )
 MANIFEST = (
-    "name: channel\ndescription: reach the user thread\n"
+    "app: channel\ndescription: reach the user thread\n"
     "placeholders:\n  CONTACT:\n    description: the contact\n"
     "    example: SomeOne\n"
+    "pages:\n" + "\n".join("  " + line for line in PAGES.splitlines()) + "\n"
 )
 
 
@@ -42,7 +43,6 @@ MANIFEST = (
 def template(tmp_path: Path) -> Path:
     src = tmp_path / "template" / "channel"
     (src / "macros" / "open").mkdir(parents=True)
-    (src / "pages.yml").write_text(PAGES, encoding="utf-8")
     (src / "macros" / "open" / "MACRO.yml").write_text(MACRO, encoding="utf-8")
     (src / "PLAYBOOK.yml").write_text(MANIFEST, encoding="utf-8")
     return src
@@ -55,7 +55,7 @@ def test_install_copies_verbatim_and_records_the_value(template: Path) -> None:
     assert "reach the user thread" in result.output  # tier-1 description echoed
     dest = paths.playbooks_dir() / "channel"
     # Tokens stay in the installed files — diffable against the template.
-    assert "<<CONTACT>>" in (dest / "pages.yml").read_text("utf-8")
+    assert "<<CONTACT>>" in (dest / "PLAYBOOK.yml").read_text("utf-8")
     macro = (dest / "macros/open/MACRO.yml").read_text("utf-8")
     assert "<<CONTACT>>" in macro and "Alice" not in macro
     assert "enabled: false" in macro  # disabled state preserved

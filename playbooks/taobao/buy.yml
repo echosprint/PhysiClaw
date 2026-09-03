@@ -1,0 +1,191 @@
+# taobao/buy — one playbook, one file. The manifest (PLAYBOOK.yml)
+# beside this file holds what every taobao playbook shares:
+# placeholders, landmarks, pages. This file is the walk: description,
+# enabled, inputs, and the ROUTE (page → do → page → decide … ask …
+# page). Hands used by one move embed in it; hands routes share are
+# pack macros (macros/<name>/MACRO.yml).
+name: buy                       # = this file's name; referenced as taobao/buy
+description: buy one item on Taobao by keyword
+enabled: false  # rehearse on YOUR device, then enable
+inputs:
+  user_said:
+    description: what the user said, verbatim — the original message the task came from
+    example: "帮我在淘宝买一袋五常大米，5kg装的"
+
+# The walk. `page:` is where the walk must BE (checked every time);
+# everything else is a move, landing on the page that follows it. The
+# pages are declared once in the manifest beside this file — anchors
+# and recover hands every taobao route shares — and referenced bare.
+route:
+  # An agent step with no tools is a pure-text call: prompt in,
+  # declared fields out, no screen — it runs before the arm ever
+  # moves, so a message that yields no keyword escalates before the
+  # phone is touched. Outputs are referenced as {parse.keyword}.
+  - agent: parse
+    prompt: |
+      From the buyer's message, produce the Taobao search keyword.
+      The buyer said: "{inputs.user_said}"
+      Rules:
+      - a pure product keyword: name + spec (e.g. 五常大米 5kg)
+      - no quantity words (一袋/两盒), no verbs, no politeness
+      - keep the language the buyer used
+      If the message names no concrete product, answer escalate.
+    returns:
+      keyword: the search keyword, exactly as it should be typed
+
+  - start: app                    # ── START: cold-launch taobao ─────
+    macro: launch                 # the pack macro every route shares
+                                  # (macros/launch/MACRO.yml)
+
+  - page: home                    # the landing the start must reach
+
+  - do: search                    # type the keyword, run the search
+    with: {keyword: "{parse.keyword} 非直播"}  # suffix the search, not the field
+    macro:
+      inputs:
+        keyword: {description: what to search for}
+      steps:
+        - name: tap-search-bar    # only ever tapped ON the home feed —
+          tool: tap               # the start contract guarantees it
+          with: {label: "home-feed search bar", bbox: [0.30, 0.092, 0.70, 0.128]}
+        - name: clip
+          tool: send_to_clipboard
+          with: {text: "{keyword}"}
+        - name: hold-field
+          tool: long_press
+          with: {label: "search input field", bbox: [0.08, 0.115, 0.55, 0.148]}
+        - name: paste             # en system — the iOS menu bubble reads Paste
+          tool: tap
+          with: {label: "Paste", bbox: [0.066, 0.070, 0.163, 0.098]}
+        - name: go-search
+          tool: tap
+          with: {label: "搜索", bbox: [0.811, 0.865, 0.923, 0.895]}
+        - name: load
+          tool: wait
+          with: {seconds: 2}
+        - name: close-vip-overlay # post-search coupon promo covers results
+          tool: tap
+          with: {label: "close (X) on the coupon overlay", bbox: [0.858, 0.069, 0.901, 0.104]}
+          skip_when: {not: {or: ["确认领取", "消费券", "马上去用"]}}
+
+  - page: results
+
+  # A custom sub-agent: YOUR prompt drives the LLM through the pick.
+  # `prompt` is filled from fields ONCE when the episode opens, then
+  # frozen; each call appends one [action]/[screen] pair and nothing
+  # is ever rewritten — every call's prefix is byte-identical to the
+  # previous call's whole request, so the provider cache pays for
+  # all but the newest block. Screens arrive as element listings
+  # (text rows with ids, no images); the model answers with a row
+  # id, a granted landmark, or a verb (scroll / done / escalate) —
+  # never coordinates. The walker grounds the name to a live bbox.
+  #
+  # The pick ends on the BUY SHEET (立即购买 / 领券购买 from the detail
+  # page): one item, the spec options, the address, 实付 and the pay
+  # button — the payment ask reads its total there, and the pay move
+  # is one recorded tap. The cart is never touched: it belongs to
+  # the buyer and can hold dozens of their own lines.
+  - agent: pick
+    prompt: |
+      You are buying ONE item for the buyer on Taobao: from the
+      search results to the buy sheet, stopping BEFORE payment.
+      1. PICK — compare the listings from the results rows you can
+         read (title, spec, price, sales): prefer a single-pack item
+         whose spec matches the keyword exactly (no bundles, no ×2),
+         high sales, low price; 百亿补贴 first. Decide from the rows
+         (scroll once if the first screen shows fewer than two
+         fitting items), then tap the chosen listing's title ONCE to
+         open its detail page. Do not open listings to browse.
+      2. BUY SHEET — on the detail page tap the footer's right
+         button: 领券购买 or 立即购买 (whichever row shows). One of two
+         sheets opens:
+         (a) a SPEC sheet — option rows under 商品规格 / 颜色分类 /
+             规格, NO 实付 row, and a bottom button reading 领券购买,
+             立即购买 or 确定. Tap the option row matching the keyword
+             (the single pack: 500ml ×1瓶, 5kg ×1袋 — never a ×2, 套餐
+             or 搭配 row), then answer that bottom button row; the
+             order sheet (b) opens.
+         (b) the ORDER sheet — the address, a 实付￥… row, option
+             rows, and a pay button (免密支付, 提交订单 or 立即支付).
+             While 实付 reads a RANGE (…起) tap the matching option
+             row; once it shows ONE exact price the spec is chosen —
+             do not tap an option row then. Keep quantity 1.
+         Never scroll a sheet looking for 实付: no 实付 row listed
+         means sheet (a) — pick the spec and tap its bottom button.
+         A tap on an option row sometimes does not take: if the
+         price header still reads …起 after your tap, tap the SAME
+         option row once more — expected, answer it with confidence.
+      3. DONE — with the buy sheet showing one exact 实付 price for
+         the right spec, answer done and return the fields, standing
+         on the sheet. The walker pays; you NEVER tap the pay button
+         (免密支付 / 提交订单 / 立即支付), never 先用后付, never a
+         顺手买 add-on, never coupons.
+      Popups: a promo card (天降红包, 红包, 优惠券, 领券) may cover the
+      page right after it opens — you know one is there ONLY when the
+      rows show such text. Then answer the granted `close` landmark
+      ONCE to dismiss it — never go_back on a popup, and NEVER tap
+      its buttons (马上去用, 领券, 领取, 立即领取). Granted landmarks
+      are always listed; their presence says nothing about the
+      screen. Use go_back only to leave a detail page you rejected.
+      The buyer said: "{inputs.user_said}"
+      Search keyword: {parse.keyword}
+      If nothing fits, or the sheet cannot show the right spec at one
+      exact price, answer escalate.
+    tools: [tap, scroll, back]    # closed allowlist for this episode
+    give: [landmarks.close]       # known spots the model may name
+    returns:
+      summary: one line - title, spec, qty, the 实付 price
+      message: a short Chinese message to the buyer asking them to
+        confirm this purchase - name the item, spec, qty and price;
+        say nothing about tools, walkers, or how the payment is made
+    limit: {calls: 12, scrolls: 4}
+
+  - page: buysheet
+
+  - ask: confirm-pay              # the human approves before money moves
+    approve: payment
+    total: ["实付", "免密支付", "优惠后"]  # the label the total sits beside —
+                                  # {ask.total} is the amount on THAT row
+    message: "{pick.message}（实付以屏幕读数为准：¥{ask.total}）回复 好的 确认支付，或 不用 取消。"
+    yes: ["好的", "好", "可以", "确认"]   # whole-message replies that open the gate
+    no: ["不用", "不要", "取消", "算了"]   # …and that close it; anything else hands over
+    wait: {seconds: 45, rounds: 3}  # poll cadence × silent rounds, then suspend
+    resume:                       # the ask left the app — come back
+      macro:
+        steps:
+          - name: go-home
+            tool: home_screen
+          - name: dismiss-switcher
+            tool: tap
+            with: {label: "blank area below the app cards", bbox: [0.42, 0.855, 0.58, 0.885]}
+          - name: open-taobao     # resumes, not cold: the sheet is still up
+            tool: tap
+            with: {label: "the taobao app icon", bbox: [0.720, 0.425, 0.909, 0.551]}
+          - name: settle
+            tool: wait
+            with: {seconds: 2}
+
+  # Payment is one recorded tap: the human consented to ¥{ask.total},
+  # the walker re-reads the sheet (the consented amount still shows,
+  # nothing higher appeared) and fires. A two-step cashier (提交订单
+  # then a payment sheet) gets its second tap only when its button is
+  # on screen.
+  - do: pay
+    irreversible: payment
+    macro:
+      steps:
+        - name: pay-button        # one target, three spellings; heals by text
+          tool: tap
+          with: {label: ["免密支付", "立即支付", "提交订单"], bbox: [0.368, 0.923, 0.629, 0.948]}
+        - name: cashier-settle
+          tool: wait
+          with: {seconds: 4}
+        - name: cashier-confirm   # only a two-step cashier shows this
+          tool: tap
+          with: {label: ["立即支付", "确认支付"], bbox: [0.30, 0.90, 0.70, 0.96]}
+          skip_when: {not: {or: ["立即支付", "确认支付"]}}
+        - name: settle
+          tool: wait
+          with: {seconds: 4}
+
+  - page: paid

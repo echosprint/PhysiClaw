@@ -289,4 +289,4 @@ def test_collect_page_decls_skips_a_dotted_route_page() -> None:
         }
     }
 
-    assert list(pages.collect_page_decls(doc)) == ["home"]
+    assert list(pages.collect_page_decls(doc, doc.get("playbooks"))) == ["home"]

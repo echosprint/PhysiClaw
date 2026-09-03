@@ -5,49 +5,58 @@ against a phone. Like `skills/`, these ship with the repo so a
 task one user has rehearsed can be adopted by another with minimal
 adaptation.
 
-## Pack layout — the `action.yml` shape
+## Pack layout — a manifest and one file per playbook
 
-A pack is a folder with ONE spec file — the whole pack in a single
-self-describing YAML document, the way a GitHub workflow is one file
-(and a composite action is one `action.yml`):
+A pack is a folder. The manifest names the app and holds what every
+playbook of that app shares; each playbook is its own file beside it,
+the way a Helm chart is one `Chart.yaml` beside one template per
+resource, and a Maestro workspace one `config.yaml` beside one flow
+per journey:
 
     <app>/
-    ├── PLAYBOOK.yml         # the whole pack: meta + pages + playbooks
-    └── macros/<n>/MACRO.yml # the pack's hands (recorded gestures)
+    ├── PLAYBOOK.yml         # the MANIFEST: meta + placeholders + landmarks + shared pages
+    ├── <name>.yml           # one playbook per file: name (= the stem), description, enabled, inputs, route
+    └── macros/<n>/MACRO.yml # the pack's hands (recorded gestures) routes share
 
-`PLAYBOOK.yml` sections, top to bottom:
+`PLAYBOOK.yml` never carries a route. Every section is optional, so an
+empty file is a valid pack (the file is the pack marker):
 
-- `app` (must equal the folder) and `description` (what the pack
-  automates and when to adopt it — `install` prints it, so that one
-  line is the whole index)
+- `app` (must equal the folder when present) and `description` (what
+  the pack automates and when to adopt it — `install` prints it)
 - `placeholders:` — per-installation constants (the `inputs:` of
   `action.yml`): prompt prose + example per token
 - `landmarks:` — named fixed spots (`{label, bbox, [page]}`) the
   pack's recover hands tap and its agent episodes are granted by name;
   a `page:` scope offers the spot only while that page reads
-- `playbooks:` — the walks, keyed by name (referenced as
-  `<app>/<name>`). Each is a ROUTE: an optional pure-text `agent` and
-  the `start` cold-launch, then `page:` waypoints (checked every
-  time, each optionally declaring its own `recover:` — one hand, or
-  `occluded:`/`elsewhere:` hands per reading, with its own `limit:`)
-  alternating with moves — `do` (a recorded macro), `agent` (the
-  model drives inside your prompt's fence, with the tools, the
-  `give:` grants — landmarks to tap, pack macros to run — and the
-  `context:` you list), `ask` (human gate; `yes:`/`no:` are the replies
-  it reads, `wait:` its patience, `total:` the label a payment total
-  sits beside, `resume:` re-enters the app), `tell`. A move's
-  enter/verify checks derive from the adjacent waypoints; there is no
-  branching and no loop — judgment is an `agent` step, approval is an
-  `ask`. What the playbook declares is what runs: a page without
-  `recover:` hands over, and nothing retries or unlocks in the
-  background.
-- `pages:` — optional appendix for fingerprints no move lands on.
-  Anchors are one clause (`"text"`, `{or: [...], region}`,
-  `{and: [...]}`) — semantics only; geometry is learned on-device via
-  `conductor calibrate`.
+- `pages:` — fingerprints more than one route lands on (a page only
+  one route uses may be declared beside its waypoint instead). Anchors
+  are one clause (`"text"`, `{or: [...], region}`, `{and: [...]}`) —
+  semantics only; geometry is learned on-device via
+  `physiclaw playbooks pages calibrate`. A page here may carry its
+  `recover:` hand too — a gesture, a landmark tap, or a pack macro by
+  name — which every route inherits unless it declares its own.
+
+`<name>.yml` is the playbook, headed like a macro or a skill: `name`
+(must equal the file's), `description` (the line the activation menu
+shows — name the app the way users say it, 淘宝 not taobao, so two
+packs offering the same task read apart), `enabled`, `inputs`, and
+`route` — a ROUTE of `page:` waypoints (checked every time, each
+optionally declaring its own `recover:` — one hand, or
+`occluded:`/`elsewhere:` hands per reading, with its own `limit:`)
+alternating with moves — `start` (the cold launch, usually a pack
+macro every route shares), `do` (a recorded macro), `agent` (the
+model drives inside your prompt's fence, with the tools, the `give:`
+grants — landmarks to tap, pack macros to run — and the `context:`
+you list), `ask` (human gate; `yes:`/`no:` are the replies it reads,
+`wait:` its patience, `total:` the label a payment total sits beside,
+`resume:` re-enters the app), `tell`. A move's enter/verify checks
+derive from the adjacent waypoints; there is no branching and no loop
+— judgment is an `agent` step, approval is an `ask`. What the playbook
+declares is what runs: a page without `recover:` hands over, and
+nothing retries or unlocks in the background.
 
 Adaptation notes and the rehearsal checklist ride as comments in the
-same file.
+files.
 
 ## Install
 

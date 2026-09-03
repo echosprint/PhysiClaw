@@ -12,6 +12,7 @@ from physiclaw.conductor import playbook as pb
 from physiclaw.conductor.playbook import PlaybookError
 
 VALID = """\
+name: buy
 description: test playbook
 enabled: false
 inputs:
@@ -53,6 +54,19 @@ PAY_TAIL = """\
     with: {message: "pay"}
     irreversible: payment
   - page: results
+"""
+
+
+# A self-contained playbook file: its one page declared in place, its
+# one hand embedded — nothing from the manifest or the macros dir.
+FLOW_MIN = """\
+description: minimal
+route:
+  - page: home
+    anchors: ["Files"]
+  - do: open
+    macro: {steps: [{name: go, tool: home_screen}]}
+  - page: home
 """
 
 
@@ -152,7 +166,7 @@ def _mutate(old: str, new: str) -> str:
         # inner `name:` is gone — the map key IS the name
         (
             _mutate(
-                "description: test playbook", "name: buy\ndescription: test playbook"
+                "description: test playbook", "stem: buy\ndescription: test playbook"
             ),
             "unknown key",
         ),
@@ -237,7 +251,7 @@ def test_route_must_start_at_a_page() -> None:
 
 
 def test_route_needs_at_least_one_move() -> None:
-    text = "description: only a place\nroute:\n  - page: home\n"
+    text = "name: buy\ndescription: only a place\nroute:\n  - page: home\n"
 
     with pytest.raises(PlaybookError, match="needs at least one move"):
         pb.parse_playbook(text, "buy", _pack())
@@ -355,6 +369,7 @@ def test_non_payment_ask_does_not_approve_payment() -> None:
     # ask approves is declared, and money keys off the declaration.
     pack = _pack()
     text = """\
+name: buy
 description: bypass probe
 inputs:
   keyword:
@@ -563,7 +578,11 @@ def test_scaffolded_pack_parses_clean() -> None:
 
     root = paths.playbooks_dir() / "newapp"
     (root / pb.PACK_MACROS_DIRNAME / scaffold.EXAMPLE_MACRO).mkdir(parents=True)
-    write_text(root / "PLAYBOOK.yml", scaffold.render_pack_stub("newapp"))
+    write_text(root / "PLAYBOOK.yml", scaffold.render_manifest_stub("newapp"))
+    write_text(
+        root / f"{scaffold.EXAMPLE_PLAYBOOK}.yml",
+        scaffold.render_playbook_stub("newapp"),
+    )
     write_text(
         root / pb.PACK_MACROS_DIRNAME / scaffold.EXAMPLE_MACRO / "MACRO.yml",
         scaffold.render_example_macro(),
@@ -571,8 +590,59 @@ def test_scaffolded_pack_parses_clean() -> None:
 
     (entry,) = pb.scan_playbooks("newapp")
 
+    assert entry.name == scaffold.EXAMPLE_PLAYBOOK
     assert entry.error is None, entry.error
     assert entry.spec is not None and entry.spec.enabled is False
+
+
+# ---------- the manifest is a manifest: shared knowledge, never a route ----------
+
+
+def test_an_empty_manifest_is_a_pack() -> None:
+    root = paths.playbooks_dir() / "bare"
+    root.mkdir(parents=True)
+    (root / "PLAYBOOK.yml").write_text("", encoding="utf-8")
+    (root / "flow.yml").write_text("name: flow\n" + FLOW_MIN, encoding="utf-8")
+
+    pack = pb.load_pack("bare")
+
+    assert pack.app == "bare" and set(pack.pages) == {"home"} and pack.landmarks == {}
+    (entry,) = pb.scan_playbooks("bare", pack)
+    assert entry.name == "flow" and entry.error is None
+
+
+def test_manifest_refuses_a_playbooks_section() -> None:
+    root = write_pack()
+    (root / "PLAYBOOK.yml").write_text(
+        "app: demo\nplaybooks:\n  x: {description: d, route: []}\n", encoding="utf-8"
+    )
+
+    with pytest.raises(PlaybookError, match="own <name>.yml"):
+        pb.load_pack("demo")
+
+
+def test_a_playbook_file_that_will_not_load_is_an_invalid_entry() -> None:
+    root = write_pack(
+        pages='results:\n  anchors: ["综合"]\n', playbooks={"flow": FLOW_MIN}
+    )
+    (root / "broken.yml").write_text("route: [\n", encoding="utf-8")
+    (root / "Bad Name.yml").write_text("description: d\n", encoding="utf-8")
+
+    entries = {e.name: e for e in pb.scan_playbooks("demo")}
+
+    assert entries["flow"].spec is not None
+    assert "invalid YAML" in (entries["broken"].error or "")
+    assert entries["Bad Name"].spec is None and entries["Bad Name"].error
+
+
+def test_a_page_declared_in_two_files_is_a_pack_error() -> None:
+    write_pack(
+        pages='results:\n  anchors: ["综合"]\n',
+        playbooks={"a": FLOW_MIN, "b": FLOW_MIN},
+    )
+
+    with pytest.raises(PlaybookError, match="declared twice"):
+        pb.load_pack("demo")
 
 
 # ---------- inline macros (a move's embedded body) ----------

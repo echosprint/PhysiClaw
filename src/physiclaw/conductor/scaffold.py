@@ -75,8 +75,13 @@ EXAMPLE_MACRO = "example-move"
 EXAMPLE_PLAYBOOK = "example"
 
 
-def render_pack_stub(app: str) -> str:
-    return PACK_TEMPLATE.format(
+def render_manifest_stub(app: str) -> str:
+    return MANIFEST_TEMPLATE.format(app=app)
+
+
+def render_playbook_stub(app: str) -> str:
+    """The scaffold's example playbook file (`<EXAMPLE_PLAYBOOK>.yml`)."""
+    return PLAYBOOK_TEMPLATE.format(
         app=app,
         playbook=EXAMPLE_PLAYBOOK,
         macro=EXAMPLE_MACRO,
@@ -95,13 +100,12 @@ def render_pack_stub(app: str) -> str:
     )
 
 
-PACK_TEMPLATE = """\
-# The pack spec — ONE file, read top-down: meta, then each walk as a
-# ROUTE with two kinds of steps — moves the walker makes itself
-# (start/do) and briefs it hands the model (agent) — alternating with
-# `page:` waypoints, then `pages:` for anything off the route.
-# Directory macros (macros/<name>/MACRO.yml) hold hands shared across
-# playbooks; single-use hands embed in their moves.
+MANIFEST_TEMPLATE = """\
+# The pack MANIFEST — what the app is and what its playbooks share.
+# Never a route: each playbook is its own <name>.yml beside this file
+# (the stem is the name, referenced as {app}/<name>), and the recorded
+# hands routes share live in macros/<name>/MACRO.yml. Every section
+# here is optional; an empty manifest is a valid pack.
 app: {app}           # which app this pack automates = the directory name
 description: EDIT ME — what this pack automates, and when to adopt it
 
@@ -125,9 +129,26 @@ description: EDIT ME — what this pack automates, and when to adopt it
 #     bbox: [0.015, 0.045, 0.095, 0.095]
 #     page: detail
 
-# The walks. Key = playbook name (referenced as {app}/<name>). A route
-# may open with pure-text agent steps and one `start`, then alternates
-# WHERE (page — checked every time) with WHAT (a move); ≤ {max_nodes}
+# Pages more than one playbook lands on are declared here once and
+# referenced bare from every route; a page only one route uses may be
+# declared beside its waypoint instead. Anchors are semantics; geometry
+# is captured on YOUR device via `physiclaw playbooks pages calibrate`.
+# A `recover:` here is the hand every route inherits for the page (a
+# gesture, a tap on a landmark, or a pack macro BY NAME — the manifest
+# carries no bodies); a route may declare its own to override it.
+# pages:
+#   home:
+#     anchors: {{or: ["Search", "搜索"], region: top}}
+#     recover: {{tool: force_quit}}
+"""
+
+
+PLAYBOOK_TEMPLATE = """\
+# One playbook — this file's stem is its name (referenced as
+# {app}/{playbook}); the manifest beside it holds what every playbook
+# shares. A route may open with pure-text agent steps and one `start`,
+# then alternates WHERE (page — checked every time) with WHAT (a
+# move); ≤ {max_nodes}
 # moves, forward-only — whatever needs judgment is an `agent` step,
 # whatever needs a human is an `ask`. Entry kinds:
 #   page   — where the walk must BE. Declare it in place (anchors
@@ -184,82 +205,81 @@ description: EDIT ME — what this pack automates, and when to adopt it
 #            a payment ask when a move on the app follows it.
 #   tell   — message the user, then pause until any wake; `no:`
 #            (optional) lists the replies that wake reads as a cancel.
-playbooks:
-  {playbook}:
-    description: EDIT ME — one line saying what task this playbook does
-    # A valid playbook is enabled by default; this scaffold starts off.
-    enabled: false
-    # Values filled at activation; reference them as {{inputs.name}} in
-    # `with:` values and agent prompts. ≤ {max_inputs}; `default`
-    # present = optional.
-    inputs:
-      message:
-        description: EDIT ME — what this value means
-        example: "hello"
-    route:
-      # An agent step with no tools may open the route — derive values
-      # from the user's words before the phone is touched:
-      # - agent: parse
-      #   prompt: |
-      #     EDIT ME — say exactly what to derive and the rules.
-      #     The user said: "{{inputs.message}}"
-      #   returns:
-      #     keyword: EDIT ME — what this field holds
-      - start: app              # ── the cold-launch; `home` below is the
-        macro:                  #    landing it must reach
-          steps:
-            - name: go-home
-              tool: home_screen
-            - name: open-app
-              tool: tap
-              with: {{label: "the app icon", bbox: [0.1, 0.1, 0.3, 0.2]}}
-            - name: settle
-              tool: wait
-              with: {{seconds: 3}}
-      - page: home
-        # `anchors:` is ONE clause: a bare string, {{text|or, region}},
-        # or {{and: [...]}} for several anchors at once. `or:` lists
-        # alternate READINGS of one anchor (any hit scores it once) —
-        # never write alternates as separate anchors: each declared
-        # anchor is a share of the page's score.
-        anchors: "EDIT ME"      # a label text that identifies this page
-        # anchors: {{or: ["Search", "搜索"], region: top}}
-        # anchors: {{and: ["EDIT ME", {{text: "tab", region: bottom}}]}}
-        # forbid: ["popup text"]  # veto terms — kills look-alike takeovers
-        # scrollable: true        # content may scroll under fixed chrome
-        recover:                # not this page → force_quit, then the
-          tool: force_quit      # walk (and `start`) re-runs from the top
-        # recover:              # or one hand per reading:
-        #   occluded: {{tool: tap, with: landmarks.dismiss}}
-        #   elsewhere: {{tool: go_back}}
-        #   limit: 2
-      - do: {macro}             # the recorded gesture (macros/{macro}/)
-        with: {{message: "{{inputs.message}}"}}
-      - page: home              # the landing check — hand over if not reached
-      # An acting agent episode — the judgment stretch, delegated whole:
-      # - agent: choose
-      #   prompt: |
-      #     EDIT ME — the goal, the rules, and where to finish.
-      #   tools: [{agent_tools}]
-      #   give: [landmarks.back, macros.{macro}]
-      #   context: [memory.shopping, daylog]
-      #   returns:
-      #     summary: EDIT ME — what to report back
-      #   limit: {{calls: {agent_calls}, scrolls: {agent_scrolls}}}
-      # - page: home
-      # A human gate before money moves — the payment move follows it:
-      # - ask: confirm-pay
-      #   approve: payment
-      #   total: "合计"           # the label the sheet total sits beside
-      #   message: "EDIT ME — total ¥{{ask.total}}, reply ok to pay or no to cancel"
-      #   yes: ["ok"]
-      #   no: ["no"]
-      #   wait: {{seconds: {ask_wait}, rounds: {ask_rounds}}}
-      #   resume: {macro}         # re-enter the app after the reply
-      - tell: done
-        # The EXACT text sent to the user — write it in THEIR language.
-        message: "EDIT ME — done with {{inputs.message}}, reply stop to cancel"
-        no: ["stop"]            # a resuming wake reads these as a cancel
+name: {playbook}         # = this file's name; referenced as {app}/{playbook}
+description: EDIT ME — one line saying what task this playbook does
+# A valid playbook is enabled by default; this scaffold starts off.
+enabled: false
+# Values filled at activation; reference them as {{inputs.name}} in
+# `with:` values and agent prompts. ≤ {max_inputs}; `default`
+# present = optional.
+inputs:
+  message:
+    description: EDIT ME — what this value means
+    example: "hello"
+route:
+  # An agent step with no tools may open the route — derive values
+  # from the user's words before the phone is touched:
+  # - agent: parse
+  #   prompt: |
+  #     EDIT ME — say exactly what to derive and the rules.
+  #     The user said: "{{inputs.message}}"
+  #   returns:
+  #     keyword: EDIT ME — what this field holds
+  - start: app              # ── the cold-launch; `home` below is the
+    macro:                  #    landing it must reach
+      steps:
+        - name: go-home
+          tool: home_screen
+        - name: open-app
+          tool: tap
+          with: {{label: "the app icon", bbox: [0.1, 0.1, 0.3, 0.2]}}
+        - name: settle
+          tool: wait
+          with: {{seconds: 3}}
+  - page: home
+    # `anchors:` is ONE clause: a bare string, {{text|or, region}},
+    # or {{and: [...]}} for several anchors at once. `or:` lists
+    # alternate READINGS of one anchor (any hit scores it once) —
+    # never write alternates as separate anchors: each declared
+    # anchor is a share of the page's score.
+    anchors: "EDIT ME"      # a label text that identifies this page
+    # anchors: {{or: ["Search", "搜索"], region: top}}
+    # anchors: {{and: ["EDIT ME", {{text: "tab", region: bottom}}]}}
+    # forbid: ["popup text"]  # veto terms — kills look-alike takeovers
+    # scrollable: true        # content may scroll under fixed chrome
+    recover:                # not this page → force_quit, then the
+      tool: force_quit      # walk (and `start`) re-runs from the top
+    # recover:              # or one hand per reading:
+    #   occluded: {{tool: tap, with: landmarks.dismiss}}
+    #   elsewhere: {{tool: go_back}}
+    #   limit: 2
+  - do: {macro}             # the recorded gesture (macros/{macro}/)
+    with: {{message: "{{inputs.message}}"}}
+  - page: home              # the landing check — hand over if not reached
+  # An acting agent episode — the judgment stretch, delegated whole:
+  # - agent: choose
+  #   prompt: |
+  #     EDIT ME — the goal, the rules, and where to finish.
+  #   tools: [{agent_tools}]
+  #   give: [landmarks.back, macros.{macro}]
+  #   context: [memory.shopping, daylog]
+  #   returns:
+  #     summary: EDIT ME — what to report back
+  #   limit: {{calls: {agent_calls}, scrolls: {agent_scrolls}}}
+  # - page: home
+  # A human gate before money moves — the payment move follows it:
+  # - ask: confirm-pay
+  #   approve: payment
+  #   total: "合计"           # the label the sheet total sits beside
+  #   message: "EDIT ME — total ¥{{ask.total}}, reply ok to pay or no to cancel"
+  #   yes: ["ok"]
+  #   no: ["no"]
+  #   wait: {{seconds: {ask_wait}, rounds: {ask_rounds}}}
+  #   resume: {macro}         # re-enter the app after the reply
+  - tell: done
+    # The EXACT text sent to the user — write it in THEIR language.
+    message: "EDIT ME — done with {{inputs.message}}, reply stop to cancel"
+    no: ["stop"]            # a resuming wake reads these as a cancel
 """
 
 
@@ -269,13 +289,17 @@ README_CONTENT = """\
 One directory per app, self-contained — everything its playbooks use:
 
     playbooks/<app>/
-      PLAYBOOK.yml         the whole pack in one file: meta (app,
-                           description, placeholders), `playbooks:`
-                           (each walk a ROUTE: page → move → page →
-                           move, top-down), and an optional `pages:`
-                           appendix for pages off any route. Anchors
-                           are semantics; geometry is captured
-                           on-device into learned/pages/.
+      PLAYBOOK.yml         the MANIFEST: what the app is and what its
+                           playbooks share — app, description,
+                           placeholders, landmarks, and a `pages:`
+                           appendix for pages more than one route
+                           lands on. Every section optional; an empty
+                           file is a valid pack. Never a route.
+      <name>.yml           one playbook per file; the stem is the name
+                           (referenced as <app>/<name>, and `name:`
+                           inside must agree) and the body is the
+                           playbook: name, description, enabled,
+                           inputs, route (page → move → page → move).
       macros/<n>/MACRO.yml pack-private macros shared across playbooks
                            (same format as ~/.physiclaw/macros/, never
                            shown to the model's macro list); single-use
@@ -327,8 +351,10 @@ Replay a walk offline against a recorded session's screens —
 `physiclaw playbooks replay <app>/<name> --session <id>` — to see
 where it would hand over before touching the phone.
 
-A page is declared ONCE — beside its waypoint, in the `pages:`
-appendix, or on another route — and referenced bare everywhere else.
+A page is declared ONCE per pack — beside its waypoint in one file,
+or in the manifest's `pages:` appendix when routes share it — and
+referenced bare everywhere else; the same page declared in two files
+is a pack error, never a merge.
 Macros embed as `macro: {{steps: [...]}}` (the MACRO.yml grammar minus
 name/description/enabled, enabled with the playbook); an ask's
 `resume:` and a page's `recover:` take the same form and dispatch
@@ -444,8 +470,8 @@ def ensure_format_readme() -> None:
 
 
 def init_pack(app: str) -> Path:
-    """Scaffold ``playbooks/<app>/`` — pages stub, disabled example
-    playbook, example pack macro — and return the pack root. Raises
+    """Scaffold ``playbooks/<app>/`` — the manifest, a disabled example
+    playbook file, an example pack macro — and return the pack root. Raises
     PlaybookError on a bad name or an existing directory; `ios` is the
     exception, being idempotent (see below)."""
     from physiclaw.common import paths
@@ -467,7 +493,8 @@ def init_pack(app: str) -> Path:
         return _init_channel_pack(root)
     macro_dir = root / PACK_MACROS_DIRNAME / EXAMPLE_MACRO
     macro_dir.mkdir(parents=True)
-    write_text(root / PACK_FILENAME, render_pack_stub(app))
+    write_text(root / PACK_FILENAME, render_manifest_stub(app))
+    write_text(root / f"{EXAMPLE_PLAYBOOK}.yml", render_playbook_stub(app))
     write_text(macro_dir / MACRO_FILENAME, render_example_macro())
     ensure_format_readme()
     return root
