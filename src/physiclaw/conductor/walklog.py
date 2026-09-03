@@ -36,6 +36,7 @@ import json
 import logging
 from collections import Counter
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 
 from physiclaw.common import paths
@@ -46,17 +47,27 @@ log = logging.getLogger(__name__)
 
 RUNS_FILENAME = "runs.jsonl"
 
+
 # The valid outcome spellings — `record` refuses anything else loudly (a
 # typo'd outcome at a call site must fail tests, never skew the KPI).
 # "abandoned" = the SESSION ended around a mid-flight walk (Ctrl-C,
 # wall-clock budget) — recorded from plugin teardown (`Program.abandon`,
 # `log_external_stop`'s twin), and deliberately NOT an escalation: the
 # next wake starts the route over, no model session was spent.
-OUTCOMES = ("completed", "suspended", "handover", "crashed", "abandoned")
+class Outcome(StrEnum):
+    """How a walk ended — the one vocabulary the walk records, the KPI
+    counts, and a replay or a stepping driver reports."""
+
+    COMPLETED = "completed"
+    SUSPENDED = "suspended"
+    HANDOVER = "handover"
+    CRASHED = "crashed"
+    ABANDONED = "abandoned"
+
 
 # The KPI's numerator, one home: suspensions are the walk working as
 # designed and abandonments spent no model session — neither escalates.
-ESCALATION_OUTCOMES = ("handover", "crashed")
+ESCALATION_OUTCOMES = frozenset({Outcome.HANDOVER, Outcome.CRASHED})
 
 _TRUNCATE_REASON = 200
 
@@ -69,7 +80,7 @@ def record(
     *,
     app: str,
     playbook: str,
-    outcome: str,
+    outcome: Outcome,
     idx: int,
     nodes: int,
     node: str | None,
@@ -80,9 +91,13 @@ def record(
     total: float | None = None,
 ) -> None:
     """Append one walk's terminal line. Best-effort: a write failure logs
-    and moves on — telemetry must never take down a session."""
-    if outcome not in OUTCOMES:
-        raise ValueError(f"unknown walk outcome {outcome!r}")
+    and moves on — telemetry must never take down a session. `outcome`
+    is coerced through `Outcome`, so a typo'd spelling at a call site
+    raises rather than skewing the KPI."""
+    try:
+        outcome = Outcome(outcome)
+    except ValueError:
+        raise ValueError(f"unknown walk outcome {outcome!r}") from None
     line = {
         "ts": iso_now(),
         "session": paths.live_session_id(),
@@ -101,7 +116,7 @@ def record(
     try:
         paths.playbooks_dir().mkdir(parents=True, exist_ok=True)
         append_text(runs_file(), json.dumps(line, ensure_ascii=False) + "\n")
-    except OSError:
+    except Exception:
         log.warning("walk run log write failed", exc_info=True)
 
 

@@ -518,7 +518,7 @@ def test_recover_relaunch_loop_is_bounded_by_the_walk_budget() -> None:
     # A hand that runs and restores its page clears its recovery State, so the
     # budget must count the WALK's spend, not the engagement's — else a
     # splash ad on every cold launch loops force_quit forever.
-    from physiclaw.conductor.playbook import MAX_RECOVER_ACTIONS
+    from physiclaw.conductor.limits import MAX_RECOVER_ACTIONS
 
     _write(
         AGENTED.replace(
@@ -550,7 +550,7 @@ def test_recover_relaunch_loop_is_bounded_by_the_walk_budget() -> None:
 def test_page_recover_limit_stops_the_relaunch_before_the_walk_budget() -> None:
     # The page's own `limit:` (default 2) is spent first; the handover
     # names it, so the author sees which bound fired.
-    from physiclaw.conductor.playbook import MAX_RECOVER_ACTIONS
+    from physiclaw.conductor.limits import MAX_RECOVER_ACTIONS
 
     _write()
     p = _program(name="walk", user_said="买牛奶")

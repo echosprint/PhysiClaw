@@ -22,6 +22,7 @@ executor knows exactly what it may read and call without opening
 `program.py`.
 """
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Generic, Protocol, TypeVar
 
 from physiclaw.conductor.micro import DecisionRequest, MicroOutcome
@@ -34,10 +35,21 @@ if TYPE_CHECKING:
     from physiclaw.conductor.match import Verdict
     from physiclaw.conductor.pages import Landmark
     from physiclaw.conductor.playbook import AgentNode, DoNode, Playbook
+    from physiclaw.conductor.recover import Mode
+
+
+@dataclass(frozen=True)
+class Paused:
+    """The stepping pause: the walk's cursor left the node this run was
+    for, and the walk answers nothing more THIS run. A later run
+    rebuilds it from its projection. Distinct from None on purpose —
+    None is the driver spent for good (handed over, completed,
+    crashed): the conductor drops it and the model speaks."""
+
 
 # What every walk call answers: a synthesized turn, a micro request for
-# the conductor to broker, or None — hand over.
-Turn = AssistantMessage | DecisionRequest | None
+# the conductor to broker, a stepping pause, or None — spent.
+Turn = AssistantMessage | DecisionRequest | Paused | None
 
 
 class Walk(Protocol):
@@ -82,7 +94,7 @@ class Walk(Protocol):
     def suspend(self, *, resume_idx: int, awaiting: bool) -> AssistantMessage: ...
 
     def recover_or_handover(
-        self, node: "DoNode | AgentNode", expected_id: str, mode: str, reason: str
+        self, node: "DoNode | AgentNode", expected_id: str, mode: "Mode", reason: str
     ) -> Turn: ...
 
 

@@ -13,6 +13,7 @@ file handle in a helper would be more indirection than it's worth.
 """
 
 import json
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -54,3 +55,15 @@ def clip(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 1] + "…"
+
+
+def fold(text: str) -> str:
+    """The one case-and-width folding: NFKC, casefold, whitespace
+    removed, NFKC again — Unicode's NFKC_Casefold shape. The last pass
+    is load-bearing: NFKC turns a spacing mark (¯ ¨) into a space plus
+    a combining mark, and once the space is gone that mark composes
+    with its new neighbour, so a single pass is not idempotent (a
+    property test found "Õ¯"). Every reader that compares text by
+    meaning folds through here."""
+    folded = "".join(unicodedata.normalize("NFKC", text).casefold().split())
+    return unicodedata.normalize("NFKC", folded)

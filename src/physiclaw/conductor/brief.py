@@ -1,14 +1,11 @@
 """The handover brief — the conductor's distilled report to the model.
 
 A driver that stops mints ONE last synthesized ``[note, peek]`` turn
-whose note carries these renderings, then answers None forever. Before
-this, the handover reason lived only in the process log: the model took
-over blind and re-derived the walk from raw synthesized turns, and
-imperatives like the deny path's back-out instruction never reached it
-at all. The note summary is exactly what compaction preserves, so the
-brief outlives the turns it summarizes; the peek hands the model the
-fresh view it would have had to take anyway (and on a dead phone its
-error result is itself the evidence).
+whose note carries these renderings, then answers None forever. The
+note summary is exactly what compaction preserves, so the brief
+outlives the turns it summarizes and the model never resumes blind;
+the peek hands it the fresh view it would have had to take anyway (and
+on a dead phone its error result is itself the evidence).
 
 Pure text: the drivers pass state in, nothing here reads the world.
 The reason string arrives verbatim; when a path owes the model an

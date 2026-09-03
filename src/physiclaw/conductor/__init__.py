@@ -45,6 +45,7 @@ Driving:
     money.py       the declared total and the payment predicates, pure
     recover.py     declared recovery: the page's hands and their bounds
     setup.py       how a Program comes to exist (activation, resume)
+    rehearsal.py   the engine's loop without the session: run, step, replay
     replay.py      the real walk over recorded screens, writing nothing
     turns.py       minting a synthesized turn
     brief.py       the handover report a driver's last turn carries
@@ -52,6 +53,8 @@ Driving:
     micro.py       the scoped model calls (agent, activation)
     calls.py       the episode vocabulary the parser and walk share
     context.py     what an agent step's `context:` loads beside it
+    hooks.py       the typed callable seams a driver takes
+    limits.py      every bound a walk runs under, in one place
 
 Seeing the screen:
     pages.py       declared and learned page fingerprints
@@ -63,7 +66,7 @@ Seeing the screen:
 Specs and the user:
     playbook.py    PLAYBOOK.yml model, the pack, the ref grammar
     route.py       the route compiler and its lints
-    _spec.py       shared YAML substrate
+    specfile.py    shared YAML substrate
     channel.py     the user-channel pack (thread, send, open)
     reply.py       deterministic confirm/deny reply reading
     scaffold.py    pack templates and playbooks/README.md

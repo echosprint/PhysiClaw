@@ -71,7 +71,7 @@ class DoStep(Step[DoNode]):
             return walk.recover_or_handover(
                 node,
                 expected,
-                recover.MODE_VERIFY,
+                recover.Mode.VERIFY,
                 f"move {node.id!r} did not land on {node.verify!r} ({wrong})",
             )
         return walk.advance_cursor()

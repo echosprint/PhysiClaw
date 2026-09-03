@@ -10,6 +10,16 @@ from pathlib import Path
 
 from physiclaw.common.paths import PACK_FILENAME
 from physiclaw.conductor.calls import AGENT_TOOLS
+from physiclaw.conductor.limits import (
+    DEFAULT_AGENT_CALLS,
+    DEFAULT_AGENT_SCROLLS,
+    DEFAULT_ASK_ROUNDS,
+    DEFAULT_ASK_WAIT_SECONDS,
+    DEFAULT_RECOVER_LIMIT,
+    MAX_AGENT_CALLS,
+    MAX_NODES,
+    MAX_RECOVER_ACTIONS,
+)
 from physiclaw.conductor.pages import (
     CHANNEL_APP,
     IOS_APP,
@@ -19,20 +29,12 @@ from physiclaw.conductor.pages import (
     THREAD_PAGE,
 )
 from physiclaw.conductor.playbook import (
-    DEFAULT_RECOVER_LIMIT,
     IRREVERSIBLE_CLASSES,
-    MAX_NODES,
-    MAX_RECOVER_ACTIONS,
     PACK_MACROS_DIRNAME,
     PlaybookError,
     check_name,
 )
 from physiclaw.conductor.route import (
-    DEFAULT_AGENT_CALLS,
-    DEFAULT_AGENT_SCROLLS,
-    DEFAULT_ASK_ROUNDS,
-    DEFAULT_ASK_WAIT_SECONDS,
-    MAX_AGENT_CALLS,
     RECOVER_TOOLS,
 )
 from physiclaw.macros import scaffold as macro_scaffold
@@ -48,13 +50,13 @@ def read_template_manifest(src: Path) -> dict:
     loud PlaybookError on bad YAML or a malformed `placeholders:`
     section, so install fails BEFORE it mutates anything."""
     from physiclaw.common.text import read_text
-    from physiclaw.conductor import _spec
+    from physiclaw.conductor import specfile
 
     path = src / PACK_FILENAME
     if not path.exists():
         return {}
     try:
-        data = _spec.yaml_loader.load(read_text(path))
+        data = specfile.yaml_loader.load(read_text(path))
     except Exception as e:  # loader errors are not confined to YAMLError
         raise PlaybookError(f"{path}: invalid YAML: {e or type(e).__name__}") from e
     if not isinstance(data, dict):

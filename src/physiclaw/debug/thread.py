@@ -28,6 +28,7 @@ a view reply is `[image, listing]` — block 0 must NOT be text, or
 import json
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from physiclaw.common import paths
 from physiclaw.common.listing import Element, format_elements
@@ -87,7 +88,7 @@ class Thread:
     staged: list[str] = field(default_factory=list)
 
 
-def thread_path():
+def thread_path() -> Path:
     return paths.debug_dir() / "thread.json"
 
 

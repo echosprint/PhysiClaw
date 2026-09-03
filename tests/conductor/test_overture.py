@@ -13,6 +13,7 @@ from conductor_fakes import history as _history
 
 from physiclaw.common import gesture_vocab
 from physiclaw.common.listing import LISTING_HEADER
+from physiclaw.conductor import limits
 from physiclaw.conductor import overture as ov
 from physiclaw.conductor.channel import Channel
 from physiclaw.conductor.micro import DecisionRequest, MicroOutcome
@@ -249,7 +250,7 @@ def test_open_attempts_are_bounded() -> None:
     h = _history()
     _feed(h, o.advance(h), ELSEWHERE)
 
-    for _ in range(ov.OPEN_TRIES):
+    for _ in range(limits.OPEN_TRIES):
         step = o.advance(h)
         assert step is not None
         _feed(h, step, ELSEWHERE)  # never lands on the thread
@@ -264,7 +265,7 @@ def test_unlock_attempts_are_bounded() -> None:
     h = _history()
     _feed(h, o.advance(h), LOCKED)
 
-    for _ in range(ov.UNLOCK_TRIES):
+    for _ in range(limits.UNLOCK_TRIES):
         step = o.advance(h)
         assert step is not None
         _feed(h, step, LOCKED)  # unlock keeps losing the keypad race

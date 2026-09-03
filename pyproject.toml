@@ -100,6 +100,14 @@ enable_error_code = ["ignore-without-code"]
 module = ["rapidocr.*", "onnxruntime.*"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+# The first packages ratcheted to strict defs: every function is fully
+# annotated, so a driver's hooks (`conductor.hooks`) and the walk's
+# states are checked, not trusted.
+module = ["physiclaw.conductor.*", "physiclaw.debug.*"]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
 [tool.pytest.ini_options]
 # "." makes the repo-root `hardware` package importable for tests/hardware
 # (it ships in GitHub releases, not the wheel, so it can't live in src/).

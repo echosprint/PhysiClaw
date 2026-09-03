@@ -175,9 +175,11 @@ def test_scan_app_decls_validates_name_before_touching_paths() -> None:
 def test_parse_wraps_any_loader_error_as_pages_error(mocker) -> None:
     # The YAML loader does not confine itself to YAMLError (deep nesting
     # surfaces as RecursionError) — the contract is PagesError-only.
-    from physiclaw.conductor import _spec
+    from physiclaw.conductor import specfile
 
-    mocker.patch.object(_spec.yaml_loader, "load", side_effect=RecursionError("deep"))
+    mocker.patch.object(
+        specfile.yaml_loader, "load", side_effect=RecursionError("deep")
+    )
 
     with pytest.raises(pages.PagesError, match="invalid YAML"):
         pages.parse_pages("x: {anchors: ['a']}", "app")

@@ -63,7 +63,12 @@ from typing import Any
 
 from physiclaw.common import paths
 from physiclaw.common.paths import PACK_FILENAME
-from physiclaw.conductor import _spec
+from physiclaw.conductor import specfile
+from physiclaw.conductor.limits import (
+    DEFAULT_ASK_ROUNDS,
+    DEFAULT_ASK_WAIT_SECONDS,
+    DEFAULT_RECOVER_LIMIT,
+)
 from physiclaw.conductor.pages import (
     Landmark,
     PageDecl,
@@ -76,25 +81,11 @@ from physiclaw.macros import parse as macro_parse
 from physiclaw.macros import store as macro_store
 from physiclaw.macros.model import Macro, MacroError, MacroInput
 
-# The cap counts MOVES (compiled nodes) — waypoints ride free, bounded
-# by the pack's own MAX_PAGES. (Inputs are capped by the macro grammar's
-# MAX_INPUTS — the same `inputs:` section.)
-MAX_NODES = 20
-# Recovery bounds: the walk-wide ceiling on recovery actions (what stops
-# a splash ad on every cold launch from relaunching forever), and a
-# page's own default `limit:` under it.
-MAX_RECOVER_ACTIONS = 6
-DEFAULT_RECOVER_LIMIT = 2
 # The two readings a page's `recover:` may key its hands by: the page
 # itself under an overlay, or any other screen.
 READING_OCCLUDED = "occluded"
 READING_ELSEWHERE = "elsewhere"
 RECOVER_READINGS = (READING_OCCLUDED, READING_ELSEWHERE)
-# An ask's default patience (`wait:`): the in-session reply poll
-# cadence (the engine's `wait` tool caps a single sleep at 60s) and how
-# many silent rounds before the session suspends for the next wake.
-DEFAULT_ASK_WAIT_SECONDS = 45
-DEFAULT_ASK_ROUNDS = 3
 # `{root.name}` — the playbook's own ref grammar, always dotted
 # (`inputs.` / an earlier agent step's id). The root follows the
 # move-name grammar (hyphens included — `{pick-into-cart.message}`);
@@ -118,14 +109,14 @@ PACK_MACROS_DIRNAME = "macros"
 _PLAY_KEYS = {"description", "enabled", "inputs", "route"}
 
 
-class PlaybookError(ValueError):
+class PlaybookError(specfile.SpecError):
     """A playbook (or its pack wiring) is invalid. Message is user-facing:
     `physiclaw playbooks check` prints it verbatim. All-or-nothing."""
 
 
 # The scalar terminals, bound once for the whole playbook grammar —
 # `route.py` (the compiler) reads them from here.
-require_str, prose, opt_prose, check_name = _spec.bind(PlaybookError)
+require_str, prose, opt_prose, check_name = specfile.bind(PlaybookError)
 
 
 # ---------- the model ----------
@@ -378,7 +369,7 @@ def load_pack(app: str) -> Pack:
     by `scan_playbooks`), and the recorded macros. A broken pack macro
     is carried as its error string so the playbook referencing it fails
     with the cause."""
-    doc = _spec.load_pack_doc(app, PlaybookError)
+    doc = specfile.load_pack_doc(app, PlaybookError)
     if doc is None:
         raise PlaybookError(f"no pack {app!r} on disk (missing {PACK_FILENAME})")
     _check_pack_meta(doc, app)
@@ -477,11 +468,11 @@ def parse_playbook(text: str, name: str, pack: Pack) -> Playbook:
     tooling use; the live path is `scan_playbooks` over the pack file's
     `playbooks:` map. Raises PlaybookError naming the offending field;
     never a partial spec."""
-    data = _spec.load_yaml(text, PlaybookError)
+    data = specfile.load_yaml(text, PlaybookError)
     return _parse_playbook_data(data, name, pack)
 
 
-def _parse_playbook_data(data, name: str, pack: Pack) -> Playbook:
+def _parse_playbook_data(data: Any, name: str, pack: Pack) -> Playbook:
     """One entry of the `playbooks:` map → a validated Playbook. The map
     key IS the name — there is no inner `name:` key to drift from it."""
     # The compiler imports this module's model; the one import in the
@@ -520,7 +511,7 @@ def _parse_playbook_data(data, name: str, pack: Pack) -> Playbook:
 def field_name(name: Any, what: str) -> str:
     """The one naming rule for the values `{x.y}` refs read — an agent's
     return fields, spelled like the inputs they sit beside."""
-    if not isinstance(name, str) or not _spec.INPUT_NAME_RE.match(name):
+    if not isinstance(name, str) or not specfile.INPUT_NAME_RE.match(name):
         raise PlaybookError(
             f"{what} {name!r} must be lowercase, start with a "
             "letter, and contain only letters/digits/underscores"

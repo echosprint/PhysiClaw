@@ -19,9 +19,11 @@ tell — the ask scrolled off, or a sweep above it — does the baseline
 
 import unicodedata
 from collections.abc import Set as AbstractSet
+from enum import StrEnum
 
 from physiclaw.common.bbox import center_of
 from physiclaw.common.listing import Element
+from physiclaw.common.text import fold
 
 # Incoming bubbles' centers sit left of this; our own sit right, and
 # centered system rows (timestamps, at ~0.5) fall OUTSIDE it — they
@@ -37,45 +39,58 @@ _OWN_FRAGMENT_MIN = 5
 _WRAP_GAP = 0.04
 
 
+# Stripped from both ends: punctuation, symbols, and a dangling
+# combining mark (what a stray ¨ leaves behind once its space is gone).
+EDGE_CATEGORIES = ("P", "S", "M")
+
+
 def normalize(text: str) -> str:
     """The comparison space for whole-message matching: NFKC (folds
     full-width forms), casefold, ALL whitespace removed, punctuation and
     symbols stripped from both ends (。！!?～ and friends — a trailing
-    exclamation mark must not defeat 好的)."""
-    t = "".join(unicodedata.normalize("NFKC", text).casefold().split())
+    exclamation mark must not defeat 好的). Idempotent: a word stored
+    normalized at parse reads back equal to itself."""
+    t = fold(text)
     start, end = 0, len(t)
-    while start < end and unicodedata.category(t[start])[0] in ("P", "S"):
+    while start < end and unicodedata.category(t[start])[0] in EDGE_CATEGORIES:
         start += 1
-    while end > start and unicodedata.category(t[end - 1])[0] in ("P", "S"):
+    while end > start and unicodedata.category(t[end - 1])[0] in EDGE_CATEGORIES:
         end -= 1
     return t[start:end]
 
 
-def classify(text: str, yes: AbstractSet[str], no: AbstractSet[str]) -> str | None:
-    """The verdict for ONE message: "confirm", "deny", or None (the
+class Answer(StrEnum):
+    """What a reply reads as against the ask's own words."""
+
+    CONFIRM = "confirm"
+    DENY = "deny"
+
+
+def classify(text: str, yes: AbstractSet[str], no: AbstractSet[str]) -> Answer | None:
+    """The verdict for ONE message: confirm, deny, or None (the
     declared words do not cover it). Whole-message equality only —
     `yes`/`no` are the ask's words already in `normalize` space (the
     parser normalizes them once)."""
     norm = normalize(text)
     if norm in no:
-        return "deny"
+        return Answer.DENY
     if norm in yes:
-        return "confirm"
+        return Answer.CONFIRM
     return None
 
 
 def classify_all(
     messages: list[str], yes: AbstractSet[str], no: AbstractSet[str]
-) -> str | None:
+) -> Answer | None:
     """The verdict over every new message of one check round. Deny wins
     over confirm (a 不要 anywhere is a stop, whatever else was said);
     any unclassifiable message alongside a confirm also defers —
     partial understanding must not open a money gate."""
     verdicts = [classify(m, yes, no) for m in messages]
-    if "deny" in verdicts:
-        return "deny"
-    if verdicts and all(v == "confirm" for v in verdicts):
-        return "confirm"
+    if Answer.DENY in verdicts:
+        return Answer.DENY
+    if verdicts and all(v is Answer.CONFIRM for v in verdicts):
+        return Answer.CONFIRM
     return None
 
 

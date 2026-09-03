@@ -53,12 +53,13 @@ import asyncio
 import json
 import logging
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Callable
 
 from physiclaw.common.bbox import Bbox
 from physiclaw.common.config import CONFIG
-from physiclaw.common.listing import Screen
+from physiclaw.common.listing import Element, Screen
 from physiclaw.common.text import json_span
 from physiclaw.conductor.calls import (
     ACT_SCROLL_UP,
@@ -69,6 +70,7 @@ from physiclaw.conductor.calls import (
     ESCALATE,
     RESERVED_KEYS,
 )
+from physiclaw.conductor.limits import MAX_CANDIDATES
 from physiclaw.contract.dto import (
     AssistantMessage,
     FinishReason,
@@ -77,14 +79,11 @@ from physiclaw.contract.dto import (
     Usage,
     UserMessage,
 )
-from physiclaw.contract.plugin import ChatProvider
+from physiclaw.contract.plugin import ChatProvider, EventSink, WireSink
 from physiclaw.provider import Provider, ProviderTransientError
 
 log = logging.getLogger(__name__)
 
-# Prompt-size guard: a listing rarely exceeds ~40 rows; more candidates
-# than this add tokens without adding real choices.
-MAX_CANDIDATES = 40
 
 # Conductor-internal call names — a playbook never names them.
 PARSE_TASK = "parse_task"
@@ -198,7 +197,7 @@ def build_request(
     )
 
 
-def act_candidates(rows) -> tuple[Candidate, ...]:
+def act_candidates(rows: Iterable[Element]) -> tuple[Candidate, ...]:
     """One candidate per labeled row for an agent-episode turn:
     content-keyed, first occurrence wins, verb collisions dropped,
     capped — and in screen order, never shuffled: position is spatial
@@ -210,7 +209,7 @@ def act_candidates(rows) -> tuple[Candidate, ...]:
         if not key or key in seen or key in RESERVED_KEYS:
             continue
         seen.add(key)
-        out.append(Candidate(key=key, bbox=tuple(row.bbox)))
+        out.append(Candidate(key=key, bbox=row.bbox))
     if len(out) > MAX_CANDIDATES:
         log.info("micro: %d candidates capped to %d", len(out), MAX_CANDIDATES)
         out = out[:MAX_CANDIDATES]
@@ -237,8 +236,8 @@ class MicroCaller:
         provider: ChatProvider,
         *,
         confidence_floor: float,
-        tr=None,
-        rlog=None,
+        tr: "EventSink | None" = None,
+        rlog: "WireSink | None" = None,
         owned_factory: "Callable[[], Provider] | None" = None,
     ):
         self._provider = provider
@@ -298,40 +297,14 @@ class MicroCaller:
         over rather than asking a second model the same question."""
         allowed = _SPECS[req.call].answer_space(req)
         provider = self._live_provider()
-        messages: list[Message] = [SystemMessage(content=_system(req, allowed))]
-        for role, text in req.history:
-            # An episode's prior turns, replayed verbatim (append-only —
-            # the byte-identical-prefix contract the provider cache pays).
-            messages.append(
-                AssistantMessage(
-                    content=text, tool_calls=[], finish_reason=FinishReason.STOP
-                )
-                if role == "assistant"
-                else UserMessage(content=text)
-            )
-        messages.append(UserMessage(content=_user(req)))
+        messages = _messages(req, allowed)
         prompt_tokens = completion_tokens = 0
         attempts = 0
         err = ""
         usage = Usage()
         for attempts in (1, 2):  # one bounded repair retry
             try:
-                try:
-                    asst = await provider.chat(messages, [])
-                except ProviderTransientError:
-                    # One TRANSIENT retry per attempt (the providers' own
-                    # taxonomy: timeout / 429 / 5xx — permanent 4xx and
-                    # real bugs fail fast): a blip on the cheap tier is
-                    # common and permanent escalation is too big a price
-                    # for it (field-measured: a single ReadTimeout killed
-                    # a walk mid-step).
-                    log.info(
-                        "micro %s (%s): transient provider error — one retry",
-                        req.call,
-                        req.node_id,
-                    )
-                    await asyncio.sleep(CONFIG.engine.retry_backoff_seconds)
-                    asst = await provider.chat(messages, [])
+                asst = await _chat(provider, messages, req)
             except Exception as e:
                 # Escalate HERE, not via run()'s catch-all: a failure on
                 # the repair attempt must not erase the first attempt's
@@ -342,23 +315,7 @@ class MicroCaller:
                 return None, "provider error", attempts, usage
             prompt_tokens += asst.usage.prompt_tokens
             completion_tokens += asst.usage.completion_tokens
-            if self._rlog is not None:
-                # An episode replays its whole history every call — log
-                # only the system prompt and the newest exchange: the
-                # replayed turns are byte-identical to this session's
-                # prior `micro` records for the same node, and dumping
-                # them again would make the wire log quadratic in
-                # episode length.
-                to_log = (
-                    messages
-                    if not req.history
-                    else [messages[0], *messages[1 + len(req.history) :]]
-                )
-                self._rlog.write_micro(
-                    req.call,
-                    provider.serialize_history(to_log),
-                    asst.raw,
-                )
+            self._log_wire(req, provider, messages, asst)
             usage = Usage(
                 prompt_tokens=prompt_tokens, completion_tokens=completion_tokens
             )
@@ -395,6 +352,27 @@ class MicroCaller:
             return outcome, reason, attempts, usage
         return None, f"invalid after repair retry: {err}", attempts, usage
 
+    def _log_wire(
+        self,
+        req: DecisionRequest,
+        provider: ChatProvider,
+        messages: list[Message],
+        asst: AssistantMessage,
+    ) -> None:
+        """One round-trip to the wire sink. An episode replays its whole
+        history every call — log only the system prompt and the newest
+        exchange: the replayed turns are byte-identical to this
+        session's prior records for the same node, and dumping them
+        again would make the wire log quadratic in episode length."""
+        if self._rlog is None:
+            return
+        to_log = (
+            messages
+            if not req.history
+            else [messages[0], *messages[1 + len(req.history) :]]
+        )
+        self._rlog.write_micro(req.call, provider.serialize_history(to_log), asst.raw)
+
     def _trace(self, req: DecisionRequest, result: MicroResult) -> None:
         if self._tr is None:
             return
@@ -412,6 +390,42 @@ class MicroCaller:
                 "completion_tokens": result.usage.completion_tokens,
             }
         )
+
+
+def _messages(req: DecisionRequest, allowed: tuple[str, ...]) -> list[Message]:
+    """The request as messages: the system contract, an episode's prior
+    turns replayed verbatim (append-only — the byte-identical-prefix
+    contract the provider cache pays), then the newest user block."""
+    messages: list[Message] = [SystemMessage(content=_system(req, allowed))]
+    for role, text in req.history:
+        messages.append(
+            AssistantMessage(
+                content=text, tool_calls=[], finish_reason=FinishReason.STOP
+            )
+            if role == "assistant"
+            else UserMessage(content=text)
+        )
+    messages.append(UserMessage(content=_user(req)))
+    return messages
+
+
+async def _chat(
+    provider: ChatProvider, messages: list[Message], req: DecisionRequest
+) -> AssistantMessage:
+    """One provider call with ONE transient retry (the providers' own
+    taxonomy: timeout / 429 / 5xx — permanent 4xx and real bugs fail
+    fast): a blip on the cheap tier is common and permanent escalation
+    is too big a price for it. Raises whatever the second try raises."""
+    try:
+        return await provider.chat(messages, [])
+    except ProviderTransientError:
+        log.info(
+            "micro %s (%s): transient provider error — one retry",
+            req.call,
+            req.node_id,
+        )
+        await asyncio.sleep(CONFIG.engine.retry_backoff_seconds)
+        return await provider.chat(messages, [])
 
 
 # ---------- the call table (prompts / answer spaces / outcomes) ----------

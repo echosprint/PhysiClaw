@@ -37,6 +37,8 @@ model's.
 
 import logging
 from collections import Counter
+from collections.abc import Callable
+from enum import StrEnum
 
 from physiclaw.common import daylog, gesture_vocab
 from physiclaw.common.listing import Screen
@@ -44,7 +46,7 @@ from physiclaw.common.logger import write_json_atomic
 from physiclaw.conductor import brief, recover, views, walklog
 from physiclaw.conductor.channel import Channel
 from physiclaw.conductor.gate import Gate
-from physiclaw.conductor.match import Verdict, match_screen, reads_as_locked
+from physiclaw.conductor.match import Reading, Verdict, match_screen, reads_as_locked
 from physiclaw.conductor.micro import MicroOutcome
 from physiclaw.conductor.pages import (
     Landmark,
@@ -65,7 +67,7 @@ from physiclaw.conductor.playbook import (
     TellNode,
     qualified_macro,
 )
-from physiclaw.conductor.step import Step, Turn
+from physiclaw.conductor.step import Paused, Step, Turn
 from physiclaw.conductor.step_agent import AgentStep
 from physiclaw.conductor.step_ask import AskStep, TellResume, TellStep
 from physiclaw.conductor.step_do import DoStep
@@ -75,6 +77,7 @@ from physiclaw.conductor.suspension import (
     suspended_path,
 )
 from physiclaw.conductor.turns import Turnsmith
+from physiclaw.conductor.walklog import Outcome
 from physiclaw.contract.dto import AssistantMessage, Message
 from physiclaw.macros.model import Macro
 
@@ -89,6 +92,19 @@ KIND_RECOVER = "recover-hand"
 # A resumed walk's one infrastructure action: the unlock before its
 # opening reading.
 KIND_UNLOCK = "resume-unlock"
+
+
+class Phase(StrEnum):
+    """Where a walk stands in its life. One value replaces the latches
+    it grew up with (started / done / paused): every transition is a
+    named event, and the terminal rules read off one field."""
+
+    FRESH = "fresh"  # constructed, never advanced
+    OPENING = "opening"  # the first reading: unlock, gate resume, the opening peek
+    LIVE = "live"  # a step at the cursor: stepping, recovering, gated
+    PAUSED = "paused"  # a stepping run ended with the cursor moved on
+    DONE = "done"  # the last word is minted: brief, or crash — quiet from here
+
 
 # The executor for each route entry kind (`Node` is a closed union).
 _STEP_FOR: dict[type, type[Step]] = {
@@ -169,22 +185,16 @@ class Program:
         # later usually meets a locked phone, and no walk-level hand can
         # run before the opening peek reads — one unlock, once.
         self._unlocked = False
-        self._resumed = False
-        # The telemetry pair (`walklog`): decision outcomes brokered to
-        # this walk, and the one-shot latch so exactly one runs.jsonl
-        # line lands per walk whatever terminal path fires.
+        # Built from a suspension (the OPENING phase then trusts the
+        # stored cursor and may read the thread first).
+        self._from_suspension = False
+        # Telemetry (`walklog`): decision outcomes brokered to this walk.
         self._micros = 0
-        self._run_recorded = False
-        # True once advance() was ever called — `abandon` records only
-        # walks that actually started.
-        self._started = False
-        # Terminal: the brief turn (handover or completion) was minted.
-        # The NEXT advance is the permanent None the conductor drops the
-        # program on.
-        self._done = False
-        # The walk's recorded outcome (`walklog.OUTCOMES`), None while it
-        # runs — what a replay reports.
-        self.outcome: str | None = None
+        # The walk's recorded outcome, None while it runs — set by the
+        # FIRST terminal moment and never again (one runs.jsonl line per
+        # walk, whatever terminal path fires later).
+        self.outcome: Outcome | None = None
+        self.phase = Phase.FRESH
         # The journal line the next synthesized note carries
         # (record-don't-replay: the transcript carries what happened).
         self._journal: str | None = None
@@ -193,17 +203,15 @@ class Program:
         # file a live walk writes.
         self.suspended: dict | None = None
         # Stepping: a rehearsal that wants ONE node sets `step_one`; the
-        # walk runs the first node it opens and pauses (`paused`) the
+        # walk runs the first node it opens and answers `Paused` the
         # moment the cursor stands anywhere else — forward when the node
-        # settles, backward when a recover hand restarted the route.
-        # `next()` then answers None WITHOUT opening a step, so nothing
-        # of the next node (a payment's consent, an ask's numbers) is
-        # spent. The driver reads `paused` to tell a pause from a
-        # handover. (The opening peek may move the cursor past a
-        # settled prefix first; the node opened after it is the one.)
+        # settles, backward when a recover hand restarted the route —
+        # WITHOUT opening the next step, so nothing of it (a payment's
+        # consent, an ask's numbers) is spent. (The opening peek may
+        # move the cursor past a settled prefix first; the node opened
+        # after it is the one.)
         self.step_one = False
         self._stepped: int | None = None
-        self.paused = False
         if suspended is not None:
             # A resumed walk is ALSO whole at construction: the suspended
             # projection overlays the fresh state right here, so no
@@ -260,7 +268,7 @@ class Program:
         self._floor = idx
         self.outputs = {str(k): str(v) for k, v in (data.get("outputs") or {}).items()}
         self.gate = Gate.from_suspended(data)
-        self._resumed = True
+        self._from_suspension = True
 
     def suspend(self, *, resume_idx: int, awaiting: bool) -> AssistantMessage:
         """Write the suspended state and close the session WAIT. No job is
@@ -272,7 +280,7 @@ class Program:
         if not self.dry:
             write_json_atomic(suspended_path(), self.suspended)
         recap = f"waiting for the user's reply on {self.app}/{self.spec.name}"
-        self._record_run("suspended", recap)
+        self._record_run(Outcome.SUSPENDED, recap)
         # The close-routine's log line, harness-written: the conductor
         # synthesizes end_session directly, so the model never runs this
         # wake — with no per-step logs either, the suspension would be
@@ -292,36 +300,47 @@ class Program:
 
     def advance(self, history: list[Message]) -> Turn:
         """The next synthesized turn; a DecisionRequest for the conductor
-        to broker (feed the outcome back via ``resolve``); or None — hand
-        over to the model. Never raises: a spec-level failure (a ref with
-        no value) hands over with its reason, and a program bug degrades
-        to a handover too, not a crashed session (the model finishes the
-        task either way)."""
-        self._started = True
+        to broker (feed the outcome back via ``resolve``); `Paused` when
+        a stepping run is over; or None — spent, hand over to the model.
+        A spec-level failure (a ref with no value) hands over with its
+        reason. A program bug RAISES: the one caller that must keep a
+        session alive (`Conductor._drive`) catches it and calls `crash`;
+        every tool and test sees the traceback."""
+        if self.phase is Phase.FRESH:
+            self.phase = Phase.OPENING
         return self._guarded(lambda: self._advance(history))
 
     def resolve(self, outcome: MicroOutcome | None) -> Turn:
         """Continue the walk with a micro-call's outcome (None = the call
         failed or was under-confident — hand over). Same return contract
-        and same never-raises guarantee as ``advance``."""
+        and same guarantees as ``advance``."""
         self._micros += 1
         return self._guarded(lambda: self._resolve(outcome))
 
-    def _guarded(self, run) -> Turn:
+    def _guarded(self, run: "Callable[[], Turn]") -> Turn:
         try:
             return run()
         except PlaybookError as e:
             return self.handover(str(e))
+
+    def crash(self) -> None:
+        """The walk died of a program bug (the conductor caught it):
+        quiet from here whatever else fails, and recorded as crashed
+        when the record can be written. The transcript so far is the
+        model's hand-off."""
+        self.phase = Phase.DONE
+        try:
+            self._record_run(Outcome.CRASHED, "program crashed")
         except Exception:
-            log.exception("conductor: program crashed — handing over to the model")
-            self._record_run("crashed", "program crashed")
-            return None
+            log.exception("conductor: crash record failed — ignored")
 
     def _advance(self, history: list[Message]) -> Turn:
-        if self._done:
+        if self.phase is Phase.DONE:
             # The brief turn was the walk's last word; its peek result is
             # ordinary history. Quiet from here — the conductor drops us.
             return None
+        if self.phase is Phase.PAUSED:
+            return Paused()
         if self.turns.pending is None:
             return self._opening()
         pending, result, failed = self.turns.settle(history)
@@ -351,7 +370,12 @@ class Program:
             self.screen,
             self.channel.prints if pending.channel and self.channel else self.prints,
         )
-        if self._resumed and not self._unlocked and reads_as_locked(self.screen):
+        if (
+            self.phase is Phase.OPENING
+            and self._from_suspension
+            and not self._unlocked
+            and reads_as_locked(self.screen)
+        ):
             # The resumed walk's first reading is the cover: wake the
             # phone once, then open again exactly as before.
             self._unlocked = True
@@ -369,7 +393,7 @@ class Program:
             # resumed walk's stored cursor — which a suspended walk
             # trusts (the next node's own checks judge whether the world
             # still fits) and a fresh walk has at zero.
-            self._resumed = False
+            self.phase = Phase.LIVE
             self.idx = max(self.spec.first_unsettled(self.outputs), self._floor)
             return self.next()
         if kind == KIND_RECOVER:
@@ -399,7 +423,7 @@ class Program:
                 )
             self._step = AskStep(self, node)
             return self._step.open()
-        if self._resumed and self.gate.told and self.channel is not None:
+        if self._from_suspension and self.gate.told and self.channel is not None:
             # Suspended-tell resume (message away, not awaiting a reply,
             # deny words declared): this wake may BE the user's cancel
             # reply — read the thread before the walk acts. One-shot:
@@ -424,8 +448,7 @@ class Program:
                 self.app,
                 self.spec.name,
             )
-            self._record_run("completed")
-            self._done = True
+            self._end(Outcome.COMPLETED)
             return self.synth(
                 "brief",
                 brief.completion_brief(self.app, self.spec.name, len(nodes)),
@@ -443,8 +466,8 @@ class Program:
                     self._stepped + 1,
                     self.idx + 1,
                 )
-                self.paused = True
-                return None
+                self.phase = Phase.PAUSED
+                return Paused()
         node = nodes[self.idx]
         self._step = _STEP_FOR[type(node)](self, node)
         return self._step.open()
@@ -486,7 +509,11 @@ class Program:
         handover reason. (The ask itself reads its total off the exact
         waypoint before it — `AskNode.enter`.)"""
         v = self.verdict
-        if v is not None and v.kind == "match" and owned_by(v.page_id or "", self.app):
+        if (
+            v is not None
+            and v.kind is Reading.MATCH
+            and owned_by(v.page_id or "", self.app)
+        ):
             return None
         return (
             f"{what}: current screen is not a verified {self.app} page — "
@@ -533,7 +560,7 @@ class Program:
         return self.recover_or_handover(
             node,
             expected,
-            recover.MODE_ENTER,
+            recover.Mode.ENTER,
             f"{kind} {node.id!r} expects page {node.enter!r} ({wrong})",
         )
 
@@ -570,8 +597,7 @@ class Program:
             self.spec.name,
             reason,
         )
-        self._record_run("handover", reason)
-        self._done = True
+        self._end(Outcome.HANDOVER, reason)
         return self.synth(
             "brief",
             brief.walk_brief(
@@ -592,7 +618,11 @@ class Program:
     # ---- recovery ----
 
     def recover_or_handover(
-        self, node: "DoNode | AgentNode", expected_id: str, mode: str, reason: str
+        self,
+        node: "DoNode | AgentNode",
+        expected_id: str,
+        mode: recover.Mode,
+        reason: str,
     ) -> Turn:
         """The page's declared hand before the model: a deviation is
         recovered toward the page the frozen cursor already requires —
@@ -617,7 +647,7 @@ class Program:
         # under an overlay, or any other screen.
         reading = (
             READING_OCCLUDED
-            if v is not None and v.kind == "occluded" and v.page_id == expected_id
+            if v is not None and v.occludes(expected_id)
             else READING_ELSEWHERE
         )
         step = recover.plan(
@@ -678,7 +708,7 @@ class Program:
         self._step = None
         if self.verdict.matches(st.target):
             self.journal(f"recovered {st.target} via its declared hand")
-            if st.mode == recover.MODE_VERIFY:
+            if st.mode is recover.Mode.VERIFY:
                 return self.advance_cursor()
             return self.next()
         self.journal(f"recover hand ran — walking again toward {st.target}")
@@ -693,13 +723,13 @@ class Program:
         plus a daily-log breadcrumb when the walk actually moved the
         phone. Latched like every terminal moment — a walk that already
         closed is a no-op, and so is one that never started."""
-        if not self._started or self._run_recorded or self.paused:
-            # A stepping pause is not an abandonment: the walk continues
-            # from its persisted position on the next invocation.
+        if self.phase in (Phase.FRESH, Phase.PAUSED) or self.outcome is not None:
+            # Never started, already closed, or a stepping pause (the
+            # walk continues from its persisted position next run).
             return
         self.log_purchase()  # a fired payment outlives the session
         node = self._node_id() or "(end)"
-        self._record_run("abandoned", "session ended mid-walk")
+        self._record_run(Outcome.ABANDONED, "session ended mid-walk")
         self.log_day(
             f"conductor: {self.app}/{self.spec.name} cut short mid-walk "
             f"at node {node} — the next wake starts the route over"
@@ -714,16 +744,21 @@ class Program:
             return
         try:
             daylog.append_log(daylog.stamped(entry))
-        except OSError:
+        except Exception:
             log.warning("conductor daily-log write failed", exc_info=True)
 
-    def _record_run(self, outcome: str, reason: str = "") -> None:
+    def _end(self, outcome: Outcome, reason: str = "") -> None:
+        """A terminal moment that also closes the walk: recorded, and
+        DONE — the next advance is the permanent None."""
+        self._record_run(outcome, reason)
+        self.phase = Phase.DONE
+
+    def _record_run(self, outcome: Outcome, reason: str = "") -> None:
         """The walk's one runs.jsonl line (`walklog`) — first terminal
         moment wins, so a suspension whose end_session is later blocked
         stays recorded as suspended."""
-        if self._run_recorded:
+        if self.outcome is not None:
             return
-        self._run_recorded = True
         self.outcome = outcome
         if self.dry:
             return

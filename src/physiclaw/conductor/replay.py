@@ -18,14 +18,12 @@ no daily-log entry, no suspension file.
 from dataclasses import dataclass
 
 from physiclaw.conductor.calls import AGENT_DONE
+from physiclaw.conductor.limits import MAX_REPLAY_TURNS
 from physiclaw.conductor.micro import AGENT_FIELDS, DecisionRequest, MicroOutcome
 from physiclaw.conductor.playbook import AgentNode
 from physiclaw.conductor.program import Program
+from physiclaw.conductor.step import Paused
 from physiclaw.contract.dto import SystemMessage, ToolResultMessage, UserMessage
-
-# A replay's hard stop, whatever the screens say: a walk that keeps
-# recovering must not spin past what a person would read.
-MAX_REPLAY_TURNS = 200
 
 
 @dataclass(frozen=True)
@@ -71,7 +69,7 @@ def replay(
                     f"({step.call}) — supply its outputs, or stop here",
                 )
             step = program.resolve(answer)
-        if step is None:
+        if step is None or isinstance(step, Paused):
             return Replay(tuple(turns), program.outcome or "stopped", "went quiet")
         note, act = step.tool_calls
         summary = str(note.arguments.get("summary", ""))

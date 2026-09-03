@@ -23,12 +23,13 @@ mathematically pass.
 """
 
 import re
-import unicodedata
 from dataclasses import dataclass
+from enum import StrEnum
 from functools import lru_cache
 
 from physiclaw.common.bbox import center_of, inside, near
 from physiclaw.common.listing import Element, Screen, label_hit
+from physiclaw.common.text import fold
 from physiclaw.conductor.pages import (
     DEFAULT_MARGIN,
     REGIONS,
@@ -83,8 +84,7 @@ def normalize(text: str) -> str:
     and screen labels — normalize once, compare in one space. Memoized:
     per screen the same ~40 labels are compared against every anchor of
     every candidate page, and anchor texts recur across screens forever."""
-    t = unicodedata.normalize("NFKC", text).casefold()
-    t = "".join(t.split())
+    t = fold(text)
     for pat, token in _NORM_SUBS:
         t = pat.sub(token, t)
     return t
@@ -378,9 +378,19 @@ def _vote_dy(
 # ---------- open-set decision ----------
 
 
+class Reading(StrEnum):
+    """The three ways a screen reads. A `StrEnum`, so a verdict still
+    compares equal to its spelling in logs and tests, while every
+    branch on it can be checked exhaustively."""
+
+    MATCH = "match"  # a confident read of one page
+    OCCLUDED = "occluded"  # that page, under an overlay band
+    UNKNOWN = "unknown"  # the model's jurisdiction
+
+
 @dataclass(frozen=True)
 class Verdict:
-    kind: str  # "match" | "occluded" | "unknown"
+    kind: Reading
     page_id: str | None
     score: float
     runner_up: float
@@ -392,7 +402,13 @@ class Verdict:
         The ONE spelling of that question — pack pages, the channel
         thread, and OS states are all judged by it, so no caller
         re-derives "match AND the right page"."""
-        return self.kind == "match" and self.page_id == expected_id
+        return self.kind is Reading.MATCH and self.page_id == expected_id
+
+    def occludes(self, expected_id: str) -> bool:
+        """Is this exactly `expected_id` under an overlay — the page
+        itself, with a sheet or popup over it (the reading a page's
+        `occluded:` hand is declared for)?"""
+        return self.kind is Reading.OCCLUDED and self.page_id == expected_id
 
 
 def match_screen(screen: Screen, candidates: list[PagePrint]) -> Verdict:
@@ -401,7 +417,9 @@ def match_screen(screen: Screen, candidates: list[PagePrint]) -> Verdict:
     Every candidate is scored — the margin rule needs the runner-up, so
     there is no early exit that preserves its semantics."""
     if not screen.readable or not candidates:
-        return Verdict("unknown", None, 0.0, 0.0, 0.0, "unreadable or no candidates")
+        return Verdict(
+            Reading.UNKNOWN, None, 0.0, 0.0, 0.0, "unreadable or no candidates"
+        )
 
     scores = sorted(
         (score_page(pp, screen) for pp in candidates),
@@ -412,11 +430,11 @@ def match_screen(screen: Screen, candidates: list[PagePrint]) -> Verdict:
     runner = scores[1].score if len(scores) > 1 else 0.0
 
     if best.forbidden or best.score <= 0.0:
-        return Verdict("unknown", None, 0.0, runner, 0.0, "no candidate scored")
+        return Verdict(Reading.UNKNOWN, None, 0.0, runner, 0.0, "no candidate scored")
 
     if best.score >= best.print_.threshold and (best.score - runner) >= DEFAULT_MARGIN:
         return Verdict(
-            "match",
+            Reading.MATCH,
             best.page_id,
             best.score,
             runner,
@@ -426,7 +444,7 @@ def match_screen(screen: Screen, candidates: list[PagePrint]) -> Verdict:
 
     if best.score >= OCCLUDED_FLOOR and _under_overlay(best, screen):
         return Verdict(
-            "occluded",
+            Reading.OCCLUDED,
             best.page_id,
             best.score,
             runner,
@@ -435,7 +453,7 @@ def match_screen(screen: Screen, candidates: list[PagePrint]) -> Verdict:
         )
 
     return Verdict(
-        "unknown",
+        Reading.UNKNOWN,
         None,
         best.score,
         runner,

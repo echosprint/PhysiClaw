@@ -210,7 +210,7 @@ async def test_walk_pauses_when_the_stepping_cursor_moves(mocker) -> None:
     out = await rehearsal.walk(program, registry, mcp, emit=lambda s: None)
 
     assert out == rehearsal.WALK_PAUSED
-    assert program.paused is True and program.outcome is None
+    assert program.phase == "paused" and program.outcome is None
     assert program.state()["idx"] == 1
     assert [n for n, _ in mcp.calls] == ["peek", "peek"]  # unlock probe + opening
 

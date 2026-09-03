@@ -22,7 +22,7 @@ from collections.abc import Callable
 from physiclaw.common import daylog, paths
 from physiclaw.common.config import CONFIG
 from physiclaw.common.text import read_text
-from physiclaw.conductor._spec import INPUT_NAME_RE
+from physiclaw.conductor.specfile import INPUT_NAME_RE
 
 MEMORY = "memory"
 DAYLOG = "daylog"

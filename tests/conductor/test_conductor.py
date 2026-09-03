@@ -241,3 +241,34 @@ async def test_advance_activates_a_playbook_off_the_thread_screen() -> None:
     # in one advance, zero provider calls.
     assert len(micro.requests) == 1 and micro.requests[0].call == PARSE_TASK
     assert turn.synthesized and turn.tool_names() == ["note", "peek"]
+
+
+# ---------- a driver bug: caught once, recorded, quiet ----------
+
+
+@pytest.mark.asyncio
+async def test_a_program_bug_becomes_a_crash_record_and_silence(mocker) -> None:
+    from physiclaw.conductor.program import Phase
+    from physiclaw.conductor.walklog import Outcome
+
+    program = _one_node_program()
+    mocker.patch.object(program, "_advance", side_effect=RuntimeError("bug"))
+    conductor = Conductor(program=program)
+    history = [SystemMessage(content="sys"), UserMessage(content="hi")]
+
+    assert await conductor.advance(history) is None
+    assert program.phase is Phase.DONE and program.outcome is Outcome.CRASHED
+    assert await conductor.advance(history) is None  # dropped; the model speaks
+
+
+@pytest.mark.asyncio
+async def test_a_failing_crash_record_still_goes_quiet(mocker) -> None:
+    from physiclaw.conductor.program import Phase
+
+    program = _one_node_program()
+    mocker.patch.object(program, "_advance", side_effect=RuntimeError("bug"))
+    mocker.patch.object(program, "_record_run", side_effect=OSError("disk"))
+    conductor = Conductor(program=program)
+
+    assert await conductor.advance([SystemMessage(content="sys")]) is None
+    assert program.phase is Phase.DONE

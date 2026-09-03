@@ -10,6 +10,8 @@ loop suite, whose `_mk_run` builds exactly that.
 
 from __future__ import annotations
 
+import pytest
+
 from physiclaw.agent.engine import plugins as plugins_mod
 from physiclaw.common.config import CONFIG
 from physiclaw.contract.plugin import TurnPlugin
@@ -68,3 +70,29 @@ def test_bad_paths_do_not_sink_good_ones(monkeypatch) -> None:
         f"no.such.module:build, {plugins_mod.DEFAULT_PLUGINS}",
     )
     assert len(plugins_mod.load_plugins()) == 1
+
+
+# ---------- the seam's own belt: a plugin bug never kills the session ----------
+
+
+@pytest.mark.asyncio
+async def test_advance_with_retry_passes_a_crashing_plugin_to_the_provider() -> None:
+    from physiclaw.agent.engine.loop import _advance_with_retry
+    from physiclaw.contract.dto import AssistantMessage, FinishReason
+
+    class Crashing:
+        async def advance(self, messages):
+            raise RuntimeError("plugin bug")
+
+    spoken = AssistantMessage(
+        content="model", tool_calls=[], finish_reason=FinishReason.STOP
+    )
+
+    async def chat(messages, tools):
+        return spoken
+
+    turn = await _advance_with_retry(
+        (Crashing(),), chat, [], [], attempts=1, backoff=0.0
+    )
+
+    assert turn is spoken

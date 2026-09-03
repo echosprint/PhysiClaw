@@ -17,7 +17,7 @@ touching the phone), `walk` runs the loop over an already-open client.
 the same loop one node at a time: it builds the
 program from a persisted position (`Program.state`, the suspension
 projection), sets `Program.step_one`, and `walk` returns the moment the
-cursor moves (`Program.paused`). Its `transform` hook is the debug
+cursor moves (`Paused`). Its `transform` hook is the debug
 fake-channel — a result transformer over the dispatch seam, so an ask
 reads a staged reply instead of waiting on a human — and `macro_opts`
 narrows the FIRST macro run of the invocation to a step range
@@ -27,20 +27,26 @@ to re-run one gesture after editing it.
 
 import asyncio
 import json
+from typing import TYPE_CHECKING
 
 from physiclaw.common import gesture_vocab
 from physiclaw.common.listing import is_header
+from physiclaw.conductor.hooks import Emit, McpCaller, Observe, OnExchange, Transform
+from physiclaw.conductor.limits import REHEARSE_MAX_TURNS
 from physiclaw.contract.wire import leaf_blocks
 
-# A rehearsal is a person watching, so the bound is "long enough for a
-# real walk" rather than the engine's session budget. A gate polling for
-# a reply is the long pole.
-REHEARSE_MAX_TURNS = 60
+if TYPE_CHECKING:
+    from physiclaw.conductor.match import Verdict
+    from physiclaw.conductor.micro import DecisionRequest, MicroCaller, MicroResult
+    from physiclaw.conductor.program import Program
+    from physiclaw.contract.dto import ToolCall
+    from physiclaw.contract.plugin import WireSink
+    from physiclaw.macros.model import Macro
 
 
 def arm(
-    app: str, name: str, values: dict[str, str], emit_warn, *, dry: bool = False
-) -> tuple:
+    app: str, name: str, values: dict[str, str], emit_warn: Emit, *, dry: bool = False
+) -> "tuple[Program, dict[str, Macro]]":
     """Load, validate, and build the walk — no connection, no gesture.
     Raises PlaybookError/MacroError on a bad spec or bad inputs.
     Returns (program, registry) ready for `walk`; `dry` builds the
@@ -90,18 +96,18 @@ WALK_PAUSED = "walk paused — the node settled"
 
 
 async def walk(
-    program,
-    registry: dict,
-    mcp,
-    emit,
+    program: "Program",
+    registry: "dict[str, Macro]",
+    mcp: McpCaller,
+    emit: Emit,
     caller: str = "cli",
     *,
-    transform=None,
+    transform: Transform | None = None,
     macro_opts: dict | None = None,
     verbose: bool = False,
-    observe=None,
+    observe: Observe | None = None,
     raw: bool = False,
-    on_exchange=None,
+    on_exchange: OnExchange | None = None,
     unlock: bool = True,
 ) -> str:
     """One armed walk over an already-open MCP client, one turn at a
@@ -120,6 +126,7 @@ async def walk(
     preamble; a caller re-entering per node pays it once. Raises
     RuntimeError when a model call fires with no model configured."""
     from physiclaw.conductor.micro import DecisionRequest
+    from physiclaw.conductor.step import Paused
     from physiclaw.contract.dto import SystemMessage, ToolResultMessage, UserMessage
 
     history: list = [
@@ -158,8 +165,10 @@ async def walk(
                     if on_exchange is not None:
                         on_exchange(record)
                 step = program.resolve(result.outcome)
+            if isinstance(step, Paused):
+                return WALK_PAUSED
             if step is None:
-                return WALK_PAUSED if program.paused else WALK_ENDED
+                return WALK_ENDED
             note, act = step.tool_calls
             emit(f"  {note.arguments['summary']}")
             if act.name == "end_session":
@@ -201,7 +210,7 @@ async def walk(
             await micro.aclose()
 
 
-async def unlock_if_covered(mcp, emit) -> None:
+async def unlock_if_covered(mcp: McpCaller, emit: Emit) -> None:
     """One peek; a lock-screen reading (the cover's hero clock, or the
     unlock hint text) gets one `unlock_phone`. Fail-open — a camera blip
     just lets the walk meet the world as it is."""
@@ -220,7 +229,7 @@ async def unlock_if_covered(mcp, emit) -> None:
         emit(f"unlock preamble skipped ({e})")
 
 
-def exchanges(drained: list[dict], req, decision: str) -> list[dict]:
+def exchanges(drained: list[dict], req: "DecisionRequest", decision: str) -> list[dict]:
     """The drained round-trips of one decision as debugger records:
     which call and node, the attempt (a repair retry is a second
     round-trip), how many replayed episode turns the request omits
@@ -288,13 +297,13 @@ def reply_text(raw: dict) -> str:
     return json.dumps(raw, ensure_ascii=False)
 
 
-def _describe_verdict(v) -> str:
+def _describe_verdict(v: "Verdict") -> str:
     """What the matcher made of the screen the next turn acts on."""
     page = v.page_id or "no known page"
     return f"screen reads {v.kind}: {page} — {v.detail} (score {v.score:.2f})"
 
 
-def _describe(result) -> str:
+def _describe(result: "MicroResult") -> str:
     o = result.outcome
     if o is None:
         return f"no outcome — {result.detail} ({result.elapsed_ms} ms)"
@@ -324,13 +333,13 @@ def result_lines(text: str, verbose: bool) -> list[str]:
 
 
 async def dispatch(
-    mcp,
-    call,
-    registry: dict,
+    mcp: McpCaller,
+    call: "ToolCall",
+    registry: "dict[str, Macro]",
     caller: str = "cli",
     *,
-    transform=None,
-    observe=None,
+    transform: Transform | None = None,
+    observe: Observe | None = None,
     start_at: str = "",
     stop_after: str = "",
 ) -> tuple[str, bool]:
@@ -385,7 +394,7 @@ async def dispatch(
         return f"{call.name} failed: {e}", True
 
 
-def micro_caller(rlog=None):
+def micro_caller(rlog: "WireSink | None" = None) -> "MicroCaller":
     """The decision channel a rehearsal needs — same resolution as the
     engine's (`[conductor] micro_model`, else the session model), so a
     rehearsal spends the model a real wake would. `rlog` is the wire

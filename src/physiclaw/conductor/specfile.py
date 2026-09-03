@@ -8,7 +8,7 @@ re-exports them for the conductor and binds the scalar validators to
 each spec's own error class, so `pages.py` and `playbook.py` keep their
 distinct catch surfaces without re-spelling the validation:
 
-    _require_str, _prose, _opt_prose, _check_name = bind(PagesError)
+    _require_str, _prose, _opt_prose, _check_name = specfile.bind(PagesError)
 """
 
 from typing import Any, Callable
@@ -34,6 +34,13 @@ from physiclaw.macros.model import (
 from physiclaw.macros.model import MacroError
 from physiclaw.macros.model import check_name as _model_check_name
 from physiclaw.macros.parse import reject_aliases
+
+
+class SpecError(ValueError):
+    """A pack's spec file is invalid — the one base every spec error
+    (`PlaybookError`, `PagesError`) derives from, so a skin catches one
+    class. Messages are user-facing and name their place in the file."""
+
 
 # YAML 1.2 safe loader, pure-python, load-only — the same construction as
 # `macros/parse.py`. `load_yaml` below is the resolved-spec door; the

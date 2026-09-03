@@ -96,7 +96,7 @@ def _new_replies(walk: Walk, *, after_ask: bool = True) -> list[str]:
     )
 
 
-def _verdict(walk: Walk, messages: list[str]) -> str | None:
+def _verdict(walk: Walk, messages: list[str]) -> reply.Answer | None:
     """The gate's own words over `messages` — deny wins over anything
     else said, an uncovered message defers."""
     return reply.classify_all(
@@ -124,7 +124,10 @@ def _sent_landed(walk: Walk) -> Turn:
     if wrong is not None:
         return walk.handover(f"channel send did not land on the thread ({wrong})")
     gate = walk.gate
-    if gate.baseline and _verdict(walk, _new_replies(walk, after_ask=False)) == "deny":
+    if (
+        gate.baseline
+        and _verdict(walk, _new_replies(walk, after_ask=False)) is reply.Answer.DENY
+    ):
         return _deny(walk)
     # The send landed: its words and its thread snapshot take over together.
     gate.yes, gate.no = gate.next_words
@@ -212,9 +215,9 @@ class AskStep(Step[AskNode]):
                 return walk.suspend(resume_idx=walk.idx, awaiting=True)
             return self._wait()
         verdict = _verdict(walk, new)
-        if verdict == "deny":
+        if verdict is reply.Answer.DENY:
             return _deny(walk)
-        if verdict == "confirm":
+        if verdict is reply.Answer.CONFIRM:
             return self._confirmed()
         # The declared words do not cover it ("ok, but make it two
         # boxes", a question, a hold): the model reads the thread from
@@ -311,7 +314,7 @@ class TellResume(Step[None]):
         walk = self.walk
         wrong = _thread_mismatch(walk)
         if wrong is None:
-            if _verdict(walk, _new_replies(walk)) == "deny":
+            if _verdict(walk, _new_replies(walk)) is reply.Answer.DENY:
                 return _deny(walk)
         else:
             reopen = _reopen(walk, KIND_TELL_OPEN)

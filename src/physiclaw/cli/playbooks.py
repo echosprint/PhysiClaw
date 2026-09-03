@@ -34,6 +34,7 @@ from physiclaw.cli._format import (
 from physiclaw.cli.pages import pages_app
 from physiclaw.common.ready import START_HINT
 from physiclaw.conductor import rehearsal
+from physiclaw.conductor.playbook import PlaybookError
 
 if TYPE_CHECKING:
     from physiclaw.conductor.playbook import Pack, PlaybookEntry
@@ -70,11 +71,11 @@ def init(
     from physiclaw.common.paths import PACK_FILENAME
     from physiclaw.conductor import scaffold
     from physiclaw.conductor.pages import CHANNEL_APP, IOS_APP, THREAD_PAGE
-    from physiclaw.conductor.playbook import PlaybookError
+    from physiclaw.conductor.specfile import SpecError
 
     try:
         root = scaffold.init_pack(app)
-    except PlaybookError as e:
+    except SpecError as e:
         exit_error(str(e))
     typer.echo(ok(str(root)))
     typer.echo("Next:")
@@ -141,7 +142,7 @@ def install(
     )
     from physiclaw.common.text import read_text, write_text
     from physiclaw.conductor import scaffold
-    from physiclaw.conductor.playbook import PlaybookError
+    from physiclaw.conductor.specfile import SpecError
 
     if not src.is_dir():
         exit_error(f"{src} is not a directory")
@@ -157,7 +158,7 @@ def install(
     # prompts below. It installs WITH the pack, tokens intact.
     try:
         meta = scaffold.read_template_manifest(src)
-    except PlaybookError as e:
+    except SpecError as e:
         exit_error(str(e))
     if meta.get("description"):
         typer.echo(meta["description"])
@@ -287,14 +288,14 @@ def run(
     waits for your reply. Works while the playbook is disabled — rehearse
     first, enable after. Nothing is persisted: a walk that suspends here
     stops instead of leaving a file for the next wake."""
-    from physiclaw.conductor.playbook import PlaybookError
+    from physiclaw.conductor.specfile import SpecError
 
     app, name = _split_ref(ref)
     try:
         outcome = asyncio.run(
             _rehearse(app, name, parse_inputs(inputs or []), verbose=verbose, raw=raw)
         )
-    except PlaybookError as e:
+    except SpecError as e:
         exit_error(str(e))
     except ConnectionError as e:
         # Same branch as `macros run` (`START_HINT` says why `mcp`).
@@ -393,7 +394,7 @@ def step(
     for a loop to read."""
     import json
 
-    from physiclaw.conductor.playbook import PlaybookError
+    from physiclaw.conductor.specfile import SpecError
     from physiclaw.debug import stepping
 
     app, name = _split_ref(ref)
@@ -403,7 +404,7 @@ def step(
     if status:
         try:
             pos = stepping.status(app, name)
-        except PlaybookError as e:
+        except SpecError as e:
             exit_error(str(e))
         if as_json:
             typer.echo(json.dumps(pos.to_dict() if pos else None, ensure_ascii=False))
@@ -433,7 +434,7 @@ def step(
                 emit=lambda line: typer.echo(line, err=as_json),
             )
         )
-    except PlaybookError as e:
+    except SpecError as e:
         exit_error(str(e))
     except ConnectionError as e:
         exit_error(f"{e}. {START_HINT}")
@@ -477,7 +478,6 @@ def replay(
     from physiclaw.common.text import read_text
     from physiclaw.conductor import corpus
     from physiclaw.conductor import replay as replay_mod
-    from physiclaw.conductor.playbook import PlaybookError
 
     app, name = _split_ref(ref)
     if (session is None) == (not listings):
@@ -674,11 +674,12 @@ def _report_not_live(
 
 def _split_ref(ref: str) -> tuple[str, str]:
     """`<app>/<playbook>` — the pack's own parse, exiting on a bad one."""
-    from physiclaw.conductor.playbook import PlaybookError, split_ref
+    from physiclaw.conductor.playbook import split_ref
+    from physiclaw.conductor.specfile import SpecError
 
     try:
         return split_ref(ref)
-    except PlaybookError as e:
+    except SpecError as e:
         exit_error(str(e))
 
 
@@ -727,5 +728,10 @@ async def _rehearse(
     )
     async with McpClient() as mcp:
         return await rehearsal.walk(
-            program, registry, mcp, emit=typer.echo, verbose=verbose, raw=raw
+            program,
+            registry,
+            mcp,
+            emit=typer.echo,
+            verbose=verbose,
+            raw=raw,
         )

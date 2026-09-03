@@ -26,19 +26,22 @@ from physiclaw.common import paths
 from physiclaw.common.bbox import Bbox, validate_bbox
 from physiclaw.common.logger import write_json_atomic
 from physiclaw.common.text import read_text
-from physiclaw.conductor import _spec
+from physiclaw.conductor import specfile
+from physiclaw.conductor.limits import (
+    MAX_ANCHOR_LEN,
+    MAX_ANCHORS,
+    MAX_FORBID,
+    MAX_LANDMARKS,
+    MAX_PAGES,
+)
 from physiclaw.macros.model import AND, MAX_LABEL_READINGS, OR, checked_readings
 
 log = logging.getLogger(__name__)
 
-MAX_PAGES = 30
-MAX_ANCHORS = 12
-MAX_FORBID = 8
-MAX_ANCHOR_LEN = 80
 # Acceptable readings of ONE anchor, canonical included (see `AnchorDecl`).
 # A handful covers the real cases — a bilingual label plus a known OCR
 # confusion; more than that is usually two anchors wearing one coat.
-# The VALUE is the macro layer's one alts-per-target cap (`_spec`
+# The VALUE is the macro layer's one alts-per-target cap (`specfile`
 # doctrine): anchors and gesture labels follow the same convention, so
 # the two caps can never drift.
 MAX_ANCHOR_READINGS = MAX_LABEL_READINGS
@@ -124,15 +127,15 @@ DEFAULT_MARGIN = 0.15
 MIN_ROBUST_ANCHORS = math.ceil(1 / (1 - DECL_ONLY_THRESHOLD))
 
 
-class PagesError(ValueError):
+class PagesError(specfile.SpecError):
     """A `pages:` section is invalid. Message is user-facing: the
     conductor CLI prints it verbatim. All-or-nothing — a pack failing
     any check is excluded whole, never partially loaded."""
 
 
-# Shared spec substrate (`_spec`): the macro naming/prose rules bound
+# Shared spec substrate (`specfile`): the macro naming/prose rules bound
 # to this spec's error class.
-_require_str, _prose, _opt_prose, _check_name = _spec.bind(PagesError)
+_require_str, _prose, _opt_prose, _check_name = specfile.bind(PagesError)
 
 
 @dataclass(frozen=True)
@@ -179,8 +182,7 @@ class PageDecl:
 # The pack-level fixed spots: `landmarks:`, an OPEN vocabulary of named
 # spots the author knows — recover hands tap them, agent episodes are
 # granted them by name. No name is reserved: what a landmark is for is
-# said where it is used.
-MAX_LANDMARKS = 12
+# said where it is used. (`MAX_LANDMARKS` caps them, in `limits.py`.)
 
 
 @dataclass(frozen=True)
@@ -246,7 +248,7 @@ def parse_pages(text: str, app: str) -> dict[str, PageDecl]:
     text-shaped door tests and tooling use; `scan_app_decls` reads the
     live section out of the pack file. Raises PagesError naming the
     offending field; never returns a partially-valid set."""
-    data = _spec.load_yaml(text, PagesError)
+    data = specfile.load_yaml(text, PagesError)
     return parse_pages_data(data, app)
 
 
@@ -368,7 +370,7 @@ def pack_landmarks(doc: dict) -> dict[str, Landmark]:
     return parse_landmarks(doc.get("landmarks"), set(collect_page_decls(doc)))
 
 
-def parse_pages_data(data, app: str) -> dict[str, PageDecl]:
+def parse_pages_data(data: Any, app: str) -> dict[str, PageDecl]:
     """The `pages:` section of a pack file → validated declarations."""
     _check_name(app, "app name")
     if data is None:
@@ -524,7 +526,7 @@ def scan_app_decls(app: str) -> dict[str, PageDecl]:
     declarations live on disk, under the user's hand, never in the
     wheel."""
     _check_name(app, "app name")
-    doc = _spec.load_pack_doc(app, PagesError)
+    doc = specfile.load_pack_doc(app, PagesError)
     if doc is None:
         return {}
     return parse_pages_data(collect_page_decls(doc), app)

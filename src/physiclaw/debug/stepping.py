@@ -38,6 +38,7 @@ from physiclaw.common import paths
 from physiclaw.common.logger import write_json_atomic
 from physiclaw.common.text import read_text
 from physiclaw.conductor import rehearsal
+from physiclaw.conductor.hooks import Emit, McpCaller, Observe, OnExchange
 from physiclaw.conductor.playbook import (
     AgentNode,
     AskNode,
@@ -49,10 +50,12 @@ from physiclaw.conductor.playbook import (
     qualified_all,
     qualified_macro,
 )
+from physiclaw.conductor.specfile import SpecError
 from physiclaw.conductor.suspension import SUSPENDED_SCHEMA
 from physiclaw.contract.dto import ToolCall
 from physiclaw.debug import thread as vthread
-from physiclaw.macros.model import Macro, MacroError
+from physiclaw.macros.model import Macro, MacroError, MacroInput
+from physiclaw.macros.steps import Step as MacroStep
 
 log = logging.getLogger(__name__)
 
@@ -292,7 +295,7 @@ def catalog() -> list[dict]:
     return packs
 
 
-def _input_item(i) -> dict:
+def _input_item(i: MacroInput) -> dict:
     return {
         "name": i.name,
         "description": i.description,
@@ -324,7 +327,7 @@ class StepResult:
 async def step(
     app: str,
     name: str,
-    mcp,
+    mcp: McpCaller,
     *,
     values: dict[str, str] | None = None,
     at: str | None = None,
@@ -333,12 +336,12 @@ async def step(
     reply: str | None = None,
     start_at: str = "",
     stop_after: str = "",
-    emit,
-    emit_warn=None,
+    emit: Emit,
+    emit_warn: Emit | None = None,
     verbose: bool = False,
-    observe=None,
+    observe: Observe | None = None,
     raw: bool = False,
-    on_exchange=None,
+    on_exchange: OnExchange | None = None,
 ) -> StepResult:
     """Rebuild the walk at its stored position, run one node (or up to
     `to`, `end` for the route's end), persist where it stands, and say
@@ -447,7 +450,7 @@ async def step(
                 "step again",
                 here,
             )
-        if not program.paused:
+        if outcome != rehearsal.WALK_PAUSED:
             return StepResult(
                 STOPPED,
                 f"{outcome}; position kept at {here.node} — fix, then step again",
@@ -477,7 +480,7 @@ def _macro_item(name: str, source: str, spec: Macro | None, error: str | None) -
     return item
 
 
-def _step_detail(st) -> str:
+def _step_detail(st: MacroStep) -> str:
     """The one thing to show beside a step: its target label, its text,
     or its wait."""
     args = getattr(st, "args", None) or {}
@@ -499,7 +502,7 @@ def _pack_macros(app: str) -> tuple[dict[str, Macro], dict[str, str]]:
 
     try:
         pack = load_pack(app)
-    except (PlaybookError, OSError) as e:
+    except (SpecError, OSError) as e:
         raise MacroError(f"pack {app!r}: {e}") from e
     errors = {qualified_macro(app, n): e for n, e in pack.macro_errors.items()}
     return qualified_all(app, pack), errors
@@ -558,12 +561,12 @@ def find_macro(name: str) -> Macro:
 async def run_macro(
     spec: Macro,
     values: dict[str, str],
-    mcp,
+    mcp: McpCaller,
     *,
     start_at: str = "",
     stop_after: str = "",
-    emit,
-    observe=None,
+    emit: Emit,
+    observe: Observe | None = None,
     caller: str = "cli",
 ) -> dict:
     """Run a macro's step range through the macro runner — no page

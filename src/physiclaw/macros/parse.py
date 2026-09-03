@@ -770,7 +770,7 @@ def reject_aliases(
     Public because the guard is document-shaped, not macro-shaped: the
     conductor's spec doors run it over PLAYBOOK.yml too (inline macros
     put clause parsing — the materializer the bomb rides — behind every
-    spec door; `_spec.load_yaml` calls it after every load, and
+    spec door; `specfile.load_yaml` calls it after every load, and
     `parse_inline_macro` guards its own data-shaped door)."""
     if not isinstance(value, (dict, list)):
         return

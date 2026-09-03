@@ -33,7 +33,7 @@ from conductor_fakes import (
     thread_screen as _thread,
 )
 
-from physiclaw.conductor import channel, program, route, setup, suspension
+from physiclaw.conductor import channel, limits, program, setup, suspension
 from physiclaw.conductor.playbook import PlaybookError
 
 # ---------- the walk ----------
@@ -286,7 +286,7 @@ def _suspend_via_silence(p, h, send) -> str:
     thread = _thread((ask, 0.75, 0.3))
     _feed(h, send, thread)
     step = p.advance(h)
-    for _ in range(route.DEFAULT_ASK_ROUNDS):
+    for _ in range(limits.DEFAULT_ASK_ROUNDS):
         assert step.tool_names() == ["note", "wait"]
         _feed(h, step, "waited")
         peek = p.advance(h)
@@ -747,7 +747,7 @@ def test_blocked_suspend_end_session_drops_the_suspension() -> None:
     thread = _thread((ask, 0.75, 0.3))
     _feed(h, send, thread)
     step = p.advance(h)
-    for _ in range(route.DEFAULT_ASK_ROUNDS):  # silent rounds → suspend turn
+    for _ in range(limits.DEFAULT_ASK_ROUNDS):  # silent rounds → suspend turn
         _feed(h, step, "waited")
         peek = p.advance(h)
         _feed(h, peek, thread)

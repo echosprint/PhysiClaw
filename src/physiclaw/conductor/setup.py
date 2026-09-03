@@ -70,7 +70,7 @@ from physiclaw.conductor.playbook import (
 )
 from physiclaw.conductor.program import Program
 from physiclaw.macros import inputs as macro_inputs
-from physiclaw.macros.model import Macro, MacroError
+from physiclaw.macros.model import Macro, MacroError, MacroInput
 
 log = logging.getLogger(__name__)
 
@@ -271,7 +271,7 @@ def walk_registry(program: "Program", channel: "Channel | None") -> dict[str, Ma
     return registry
 
 
-def _menu_input(i) -> str:
+def _menu_input(i: MacroInput) -> str:
     """One declared input on the parse_task menu: name, description —
     and the authored
     `example:`, which is the extraction hint ("五常大米 5kg" shows the

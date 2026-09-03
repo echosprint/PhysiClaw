@@ -26,7 +26,7 @@ PLACEHOLDER_RE = re.compile(r"<<([A-Z][A-Z0-9_]*)>>")
 PLACEHOLDER_VALUES_FILENAME = "placeholders.yml"
 
 # YAML 1.2 safe handler for the values file — this module's one
-# instance (the `_spec.yaml_loader` pattern, one layer down).
+# instance (the `specfile.yaml_loader` pattern, one layer down).
 _yaml = YAML(typ="safe", pure=True)
 
 

@@ -9,10 +9,8 @@ instead of starting over.
 One-shot: consumed on load, whatever the outcome. A crash mid-resume
 loses the suspension and the wake runs plain, never a loop.
 
-This is the ONLY cross-wake state the conductor writes. (There used to
-be a second, ``armed.json`` — a standing order naming the playbook to
-run next. The overture retired it: a playbook on disk is the grant, so
-there is nothing left to pre-declare.)
+This is the ONLY cross-wake state the conductor writes: a playbook on
+disk is the grant, so nothing else needs pre-declaring.
 """
 
 import json

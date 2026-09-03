@@ -31,11 +31,26 @@ moved to the key.
 """
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
 from physiclaw.conductor import context, reply
 from physiclaw.conductor.calls import AGENT_TOOLS, CONTRACT_FIELDS, RESERVED_KEYS
+from physiclaw.conductor.limits import (
+    DEFAULT_AGENT_CALLS,
+    DEFAULT_AGENT_SCROLLS,
+    DEFAULT_ASK_ROUNDS,
+    DEFAULT_ASK_WAIT_SECONDS,
+    DEFAULT_RECOVER_LIMIT,
+    MAX_AGENT_CALLS,
+    MAX_ASK_ROUNDS,
+    MAX_ASK_WAIT_SECONDS,
+    MAX_NODES,
+    MAX_PROMPT_LEN,
+    MAX_RECOVER_ACTIONS,
+    MAX_RETURNS,
+    MIN_ASK_WAIT_SECONDS,
+)
 from physiclaw.conductor.pages import (
     PAGE_DECL_FIELDS,
     RESERVED_APPS,
@@ -44,13 +59,8 @@ from physiclaw.conductor.pages import (
     route_decl,
 )
 from physiclaw.conductor.playbook import (
-    DEFAULT_ASK_ROUNDS,
-    DEFAULT_ASK_WAIT_SECONDS,
-    DEFAULT_RECOVER_LIMIT,
     INPUTS_ROOT,
     IRREVERSIBLE_CLASSES,
-    MAX_NODES,
-    MAX_RECOVER_ACTIONS,
     PACK_MACROS_DIRNAME,
     READING_ELSEWHERE,
     READING_OCCLUDED,
@@ -75,24 +85,11 @@ from physiclaw.conductor.playbook import (
 from physiclaw.macros.model import Macro, MacroError, checked_readings
 from physiclaw.macros.parse import parse_inline_macro
 
-# Agent-step bounds. `tools` is the closed per-episode gesture allowlist
+# Agent-step grammar. `tools` is the closed per-episode gesture allowlist
 # (`calls.AGENT_TOOLS`, the keys of the tool → verbs map the runner
-# reads); `limit.calls` bounds the LLM calls an episode may spend (each
-# action is one call), `limit.scrolls` the scrolling subset — the
-# classic degenerate loop gets its own tighter cap.
-MAX_AGENT_CALLS = 30
-DEFAULT_AGENT_CALLS = 12
-DEFAULT_AGENT_SCROLLS = 6
-# The prompt is the author's whole brief; the cap only guards against a
-# pasted document (a real brief runs a few thousand characters).
-MAX_PROMPT_LEN = 8000
-MAX_RETURNS = 6
+# reads); the bounds on calls, scrolls, prompt, and returns are
+# `limits.py`'s.
 _AGENT_LIMIT_KEYS = {"calls", "scrolls"}
-
-# An ask's `wait:` bounds (the defaults live on the model, `playbook.py`).
-MIN_ASK_WAIT_SECONDS = 5
-MAX_ASK_WAIT_SECONDS = 60
-MAX_ASK_ROUNDS = 10
 _ASK_WAIT_KEYS = {"seconds", "rounds"}
 
 # The declared-recovery hand: one gesture (`tool`, with `with:
@@ -140,6 +137,27 @@ _MacroResolve = Callable[..., Macro]
 _T = TypeVar("_T")
 
 
+@dataclass
+class _Ctx:
+    """What every entry parser reads — one object instead of the same
+    five arguments threaded through each signature. `payloads` grows as
+    the compile pass advances (an agent's return fields, in route
+    order), so a `{move.field}` ref is defined-before-use by
+    construction."""
+
+    playbook: str
+    pack: Pack
+    input_names: set[str]
+    resolve: "_MacroResolve"
+    payloads: dict[str, tuple[str, ...]] = field(default_factory=dict)
+
+    def payloads_with_total(self) -> dict[str, tuple[str, ...]]:
+        """The refs a payment step may quote: every recorded return
+        field plus the ONE gate slot, `{ask.total}` — the consented
+        amount its ask binds (`_check_money` keeps the two adjacent)."""
+        return {**self.payloads, "ask": ("total",)}
+
+
 @dataclass(frozen=True)
 class CompiledRoute:
     """What `compile_route` hands back: the moves, the start page, each
@@ -159,7 +177,111 @@ def compile_route(
     input_names: set[str],
     pack: Pack,
 ) -> CompiledRoute:
-    """`route:` → the compiled route (see `CompiledRoute`)."""
+    """`route:` → the compiled route (see `CompiledRoute`): the shape
+    prepass first (every rule about WHERE an entry may sit), then one
+    forward pass compiling the moves against the waypoints around them,
+    then the lints that need the whole route."""
+    entries, wp_ids, start, page_names = _shape(raw, pack)
+    inline: dict[str, Macro] = {}
+    ctx = _Ctx(playbook, pack, input_names, _macro_resolver(playbook, pack, inline))
+    moves: list[Node] = []
+    seen: dict[str, int] = {}
+    recovers: dict[str, Recovery] = {}
+    current_page: str | None = None
+    for i, (kind, name, entry) in enumerate(entries):
+        pos = i + 1
+        if kind == "page":
+            current_page = wp_ids[i]
+            if "recover" in entry:
+                rpage = wp_ids[i]
+                assert rpage is not None
+                if "." in rpage:
+                    raise PlaybookError(
+                        f"route entry {pos}: {rpage!r} is a reserved built-in "
+                        "— packs declare recovery for their own pages only"
+                    )
+                hand = _parse_recover(
+                    ctx, entry["recover"], f"route entry {pos}", rpage
+                )
+                if rpage in recovers and recovers[rpage] != hand:
+                    raise PlaybookError(
+                        f"route entry {pos}: page {rpage!r} declares `recover` "
+                        "twice with different hands — declare it once"
+                    )
+                recovers[rpage] = hand
+            continue
+        where = f"route entry {pos}"
+        check_name(name, f"{where}: `{kind}`")
+        if name == INPUTS_ROOT:
+            raise PlaybookError(
+                f"{where}: name {name!r} is a reserved ref root — "
+                "{inputs.*} always reads the declared inputs"
+            )
+        if name in page_names:
+            raise PlaybookError(
+                f"{where}: {name!r} is also a page on this route — moves "
+                "and pages share one namespace, so the names must not collide"
+            )
+        if name in seen:
+            raise PlaybookError(
+                f"{where}: duplicate move name {name!r} (entry {seen[name]} "
+                "already uses it) — refs address moves by name, so they "
+                "must be unique"
+            )
+        seen[name] = pos
+        where = f"move {name!r}"
+        args = entry.get("with", {})
+        if not isinstance(args, dict):
+            raise PlaybookError(f"{where}: `with` must be a mapping of arguments")
+        check_arg_refs(args, input_names, ctx.payloads, where)
+        nxt = wp_ids[i + 1] if i + 1 < len(entries) else None
+        if kind == "do":
+            if nxt is None:
+                raise PlaybookError(
+                    f"{where}: a `do` must be followed by the page it lands "
+                    "on — the landing check is what proves the move ran"
+                )
+            assert current_page is not None  # checked by the prefix rule
+            moves.append(_parse_do(ctx, where, name, entry, args, current_page, nxt))
+        elif kind == "start":
+            assert nxt is not None  # `start` sits immediately before a page
+            spec = ctx.resolve(entry.get("macro"), where, name)
+            moves.append(
+                DoNode(
+                    id=name,
+                    macro=spec.name,
+                    args={},
+                    enter="",  # unconditional: the start runs from anywhere
+                    verify=nxt,
+                )
+            )
+        elif kind == "agent":
+            agent = _parse_agent(ctx, where, name, entry, current_page, nxt)
+            ctx.payloads[agent.id] = agent.return_fields
+            moves.append(agent)
+        elif kind == "ask":
+            moves.append(_parse_ask(ctx, where, name, entry, current_page))
+        else:  # tell
+            message, _ = _entry_message(ctx, where, entry, ctx.payloads)
+            no = _reply_words(entry, "no", where) if "no" in entry else []
+            moves.append(TellNode(id=name, message=message, no=tuple(no)))
+    if len(moves) > MAX_NODES:
+        raise PlaybookError(f"too many moves ({len(moves)} > {MAX_NODES})")
+    _check_money(moves)
+    _check_resume(moves)
+    return CompiledRoute(nodes=moves, start=start, recovers=recovers, inline=inline)
+
+
+def _shape(
+    raw: Any, pack: Pack
+) -> tuple[list[tuple[str, str, dict]], list[str | None], str, set[str]]:
+    """The route's shape, proved before any move is compiled: a
+    non-empty list whose first page is the start contract, at most one
+    `start` sitting right before it, only pure-text agents above it,
+    and every waypoint's id resolved (`_waypoint_id`, one grammar at
+    every door) so a move can read the page after it in one look.
+    Returns (classified entries, the waypoint id per entry or None,
+    the start page id, the set of page ids on the route)."""
     if not isinstance(raw, list) or not raw:
         raise PlaybookError("`route` must be a non-empty list")
     entries = [_classify_entry(i, e) for i, e in enumerate(raw, start=1)]
@@ -214,120 +336,7 @@ def compile_route(
         page_names.add(pid)
     start = wp_ids[first_page]
     assert start is not None  # first_page indexes a page entry
-
-    inline: dict[str, Macro] = {}
-    resolve = _macro_resolver(playbook, pack, inline)
-    moves: list[Node] = []
-    seen: dict[str, int] = {}
-    recovers: dict[str, Recovery] = {}
-    # Grows as the single pass advances, so `{move.field}` refs are
-    # defined-before-use by construction (route order).
-    payloads: dict[str, tuple[str, ...]] = {}
-    current_page: str | None = None
-    for i, (kind, name, entry) in enumerate(entries):
-        pos = i + 1
-        if kind == "page":
-            current_page = wp_ids[i]
-            if "recover" in entry:
-                rpage = wp_ids[i]
-                assert rpage is not None
-                if "." in rpage:
-                    raise PlaybookError(
-                        f"route entry {pos}: {rpage!r} is a reserved built-in "
-                        "— packs declare recovery for their own pages only"
-                    )
-                hand = _parse_recover(
-                    entry["recover"], f"route entry {pos}", rpage, pack, resolve
-                )
-                if rpage in recovers and recovers[rpage] != hand:
-                    raise PlaybookError(
-                        f"route entry {pos}: page {rpage!r} declares `recover` "
-                        "twice with different hands — declare it once"
-                    )
-                recovers[rpage] = hand
-            continue
-        where = f"route entry {pos}"
-        check_name(name, f"{where}: `{kind}`")
-        if name == INPUTS_ROOT:
-            raise PlaybookError(
-                f"{where}: name {name!r} is a reserved ref root — "
-                "{inputs.*} always reads the declared inputs"
-            )
-        if name in page_names:
-            raise PlaybookError(
-                f"{where}: {name!r} is also a page on this route — moves "
-                "and pages share one namespace, so the names must not collide"
-            )
-        if name in seen:
-            raise PlaybookError(
-                f"{where}: duplicate move name {name!r} (entry {seen[name]} "
-                "already uses it) — refs address moves by name, so they "
-                "must be unique"
-            )
-        seen[name] = pos
-        where = f"move {name!r}"
-        args = entry.get("with", {})
-        if not isinstance(args, dict):
-            raise PlaybookError(f"{where}: `with` must be a mapping of arguments")
-        check_arg_refs(args, input_names, payloads, where)
-        nxt = wp_ids[i + 1] if i + 1 < len(entries) else None
-        if kind == "do":
-            if nxt is None:
-                raise PlaybookError(
-                    f"{where}: a `do` must be followed by the page it lands "
-                    "on — the landing check is what proves the move ran"
-                )
-            assert current_page is not None  # checked by the prefix rule
-            moves.append(
-                _parse_do(where, name, entry, args, current_page, nxt, resolve)
-            )
-        elif kind == "start":
-            assert nxt is not None  # `start` sits immediately before a page
-            spec = resolve(entry.get("macro"), where, name)
-            moves.append(
-                DoNode(
-                    id=name,
-                    macro=spec.name,
-                    args={},
-                    enter="",  # unconditional: the start runs from anywhere
-                    verify=nxt,
-                )
-            )
-        elif kind == "agent":
-            agent = _parse_agent(
-                where,
-                name,
-                entry,
-                input_names,
-                payloads,
-                pack,
-                current_page,
-                nxt,
-                resolve,
-            )
-            payloads[agent.id] = agent.return_fields
-            moves.append(agent)
-        elif kind == "ask":
-            moves.append(
-                _parse_ask(
-                    where,
-                    name,
-                    entry,
-                    input_names,
-                    payloads,
-                    resolve,
-                    current_page,
-                )
-            )
-        else:  # tell
-            message, _ = _entry_message(where, entry, input_names, payloads)
-            no = _reply_words(entry, "no", where) if "no" in entry else []
-            moves.append(TellNode(id=name, message=message, no=tuple(no)))
-    if len(moves) > MAX_NODES:
-        raise PlaybookError(f"too many moves ({len(moves)} > {MAX_NODES})")
-    _check_money(moves)
-    _check_resume(moves)
-    return CompiledRoute(nodes=moves, start=start, recovers=recovers, inline=inline)
+    return entries, wp_ids, start, page_names
 
 
 def _classify_entry(i: int, entry: Any) -> tuple[str, str, dict]:
@@ -431,10 +440,7 @@ def _limit_int(value: Any, where: str, lo: int, hi: int) -> int:
 
 
 def _entry_message(
-    where: str,
-    entry: dict,
-    input_names: set[str],
-    payloads: dict[str, tuple[str, ...]],
+    ctx: _Ctx, where: str, entry: dict, payloads: dict[str, tuple[str, ...]]
 ) -> tuple[str, set[str]]:
     """A REQUIRED authored `message:` — the exact text sent to the user;
     only the author knows the user's language, so the conductor composes
@@ -442,7 +448,7 @@ def _entry_message(
     as `with:` values; returned with them so the ask lints can inspect."""
     text = prose(entry.get("message"), f"{where}: `message`")
     refs = refs_in(text, f"{where}: `message`")
-    check_refs(refs, input_names, payloads, f"{where}: `message`")
+    check_refs(refs, ctx.input_names, payloads, f"{where}: `message`")
     return text, refs
 
 
@@ -472,7 +478,7 @@ def _context_entries(entry: dict, where: str) -> list[str]:
     return _unique_list(entry.get("context", []), f"{where}: `context`", _one)
 
 
-def _landmark_name(value: Any, where: str, pack: Pack) -> str:
+def _landmark_name(ctx: _Ctx, value: Any, where: str) -> str:
     """A `landmarks.<name>` reference resolved to its bare name — ONE
     spelling for `give:` entries and a recover tap's `with:`. The name
     half rides the shared name grammar (`check_name`), so a landmark
@@ -481,8 +487,8 @@ def _landmark_name(value: Any, where: str, pack: Pack) -> str:
     if prefix != GRANT_LANDMARKS or not name:
         raise PlaybookError(f"{where}: {value!r} must look like `landmarks.<name>`")
     check_name(name, where)
-    if name not in pack.landmarks:
-        known = ", ".join(sorted(pack.landmarks)) or "(none)"
+    if name not in ctx.pack.landmarks:
+        known = ", ".join(sorted(ctx.pack.landmarks)) or "(none)"
         raise PlaybookError(
             f"{where}: names landmark {name!r} — not declared under "
             f"`landmarks`. Declared: {known}"
@@ -490,9 +496,7 @@ def _landmark_name(value: Any, where: str, pack: Pack) -> str:
     return name
 
 
-def _grant(
-    value: Any, where: str, nid: str, pack: Pack, resolve: "_MacroResolve"
-) -> tuple[str, str]:
+def _grant(ctx: _Ctx, value: Any, where: str, nid: str) -> tuple[str, str]:
     """One `give:` entry → (root, name): a `landmarks.<name>` the episode
     may tap blind, or a `macros.<name>` pack macro it may run — argument-
     less, like every helper hand, and never spelled like a fixed answer
@@ -507,8 +511,8 @@ def _grant(
             "landmark or macro cannot be spelled like one"
         )
     if prefix == GRANT_LANDMARKS:
-        return prefix, _landmark_name(value, where, pack)
-    return prefix, _argless_macro(name, "give", where, nid, resolve)
+        return prefix, _landmark_name(ctx, value, where)
+    return prefix, _argless_macro(name, "give", where, nid, ctx.resolve)
 
 
 # ---------- macros ----------
@@ -586,13 +590,13 @@ def _argless_macro(
 
 
 def _parse_do(
+    ctx: _Ctx,
     where: str,
     nid: str,
     entry: dict,
     args: dict,
     enter: str,
     verify: str,
-    resolve: _MacroResolve,
 ) -> DoNode:
     """A `do` move. Its name IS its macro — the directory macro of that
     name, or the `macro:` beside it (an inline body, or another name
@@ -603,7 +607,7 @@ def _parse_do(
             f"{where}: a `do` runs on this pack's own pages — a reserved "
             "built-in cannot frame it"
         )
-    spec = resolve(entry.get("macro", nid), where, nid)
+    spec = ctx.resolve(entry.get("macro", nid), where, nid)
     macro = spec.name
     declared = {inp.name: inp for inp in spec.inputs}
     unknown_args = sorted(set(args.keys()) - set(declared))
@@ -632,15 +636,12 @@ def _parse_do(
 
 
 def _parse_agent(
+    ctx: _Ctx,
     where: str,
     nid: str,
     entry: dict,
-    input_names: set[str],
-    payloads: dict[str, tuple[str, ...]],
-    pack: Pack,
     current_page: str | None,
     next_wp: str | None,
-    resolve: _MacroResolve,
 ) -> AgentNode:
     """An `agent` move. No `tools` = a pure-text call (needs `returns`,
     no pages); tools = an acting episode framed by the adjacent
@@ -673,7 +674,7 @@ def _parse_agent(
     grants = _unique_list(
         entry.get("give", []),
         f"{where}: `give`",
-        lambda g: _grant(g, f"{where}: `give` entry", nid, pack, resolve),
+        lambda g: _grant(ctx, g, f"{where}: `give` entry", nid),
     )
     give = tuple(n for root, n in grants if root == GRANT_LANDMARKS)
     macros = tuple(n for root, n in grants if root == GRANT_MACROS)
@@ -766,14 +767,12 @@ def _parse_agent(
             "first scroll would hand over; raise it or drop the tool"
         )
 
-    g_payloads = payloads
-    if irreversible == "payment":
-        # The consented total — the ONE gate slot a payment episode may
-        # quote (its ask directly precedes it, `_check_money`).
-        g_payloads = {**payloads, "ask": ("total",)}
+    g_payloads = (
+        ctx.payloads_with_total() if irreversible == "payment" else ctx.payloads
+    )
     check_refs(
         refs_in(prompt, f"{where}: `prompt`"),
-        input_names,
+        ctx.input_names,
         g_payloads,
         f"{where}: `prompt`",
     )
@@ -795,29 +794,21 @@ def _parse_agent(
 
 
 def _parse_ask(
-    where: str,
-    nid: str,
-    entry: dict,
-    input_names: set[str],
-    payloads: dict[str, tuple[str, ...]],
-    resolve: _MacroResolve,
-    current_page: str | None,
+    ctx: _Ctx, where: str, nid: str, entry: dict, current_page: str | None
 ) -> AskNode:
     approve = require_str(entry.get("approve"), f"{where}: `approve`")
     check_name(approve, f"{where}: `approve`")
-    g_payloads = payloads
     if approve == "payment":
         if current_page is None or "." in current_page:
             raise PlaybookError(
                 f"{where}: a payment ask reads its total off the page before "
                 "it — put the sheet's page waypoint immediately before the ask"
             )
-        # The consent slot, runtime-filled from the payment sheet and
-        # available only here. (A move literally named `ask` would be
-        # shadowed in this message — the money slot wins, both at parse
-        # and at fill.)
-        g_payloads = {**payloads, "ask": ("total",)}
-    message, msg_refs = _entry_message(where, entry, input_names, g_payloads)
+    # A payment ask may quote the consent slot (a move literally named
+    # `ask` is shadowed in this message — the money slot wins, both at
+    # parse and at fill).
+    g_payloads = ctx.payloads_with_total() if approve == "payment" else ctx.payloads
+    message, msg_refs = _entry_message(ctx, where, entry, g_payloads)
     total: tuple[str, ...] = ()
     if approve == "payment":
         if "ask.total" not in msg_refs:
@@ -836,7 +827,7 @@ def _parse_ask(
     wait_seconds, rounds = _ask_wait(entry.get("wait"), where)
     resume = None
     if entry.get("resume") is not None:
-        resume = _argless_macro(entry["resume"], "resume", where, nid, resolve)
+        resume = _argless_macro(entry["resume"], "resume", where, nid, ctx.resolve)
     return AskNode(
         id=nid,
         approve=approve,
@@ -876,9 +867,7 @@ def _ask_wait(raw: Any, where: str) -> tuple[int, int]:
     return seconds, rounds
 
 
-def _parse_recover(
-    raw: Any, where: str, page: str, pack: Pack, resolve: _MacroResolve
-) -> Recovery:
+def _parse_recover(ctx: _Ctx, raw: Any, where: str, page: str) -> Recovery:
     """A page's `recover:` — one hand for any deviation (`tool:`/`macro:`
     at the top), or one per reading (`occluded:` the page itself under
     a sheet or popup, `elsewhere:` any other screen), with the page's
@@ -905,23 +894,18 @@ def _parse_recover(
         )
     if keyed:
         hands = {
-            k: _parse_hand(raw[k], f"{where}: `recover.{k}`", page, pack, resolve)
-            for k in keyed
+            k: _parse_hand(ctx, raw[k], f"{where}: `recover.{k}`", page) for k in keyed
         }
         return Recovery(
             occluded=hands.get(READING_OCCLUDED),
             elsewhere=hands.get(READING_ELSEWHERE),
             limit=limit,
         )
-    hand = _parse_hand(
-        {k: raw[k] for k in flat}, f"{where}: `recover`", page, pack, resolve
-    )
+    hand = _parse_hand(ctx, {k: raw[k] for k in flat}, f"{where}: `recover`", page)
     return Recovery(occluded=hand, elsewhere=hand, limit=limit)
 
 
-def _parse_hand(
-    raw: Any, where: str, page: str, pack: Pack, resolve: _MacroResolve
-) -> RecoverHand:
+def _parse_hand(ctx: _Ctx, raw: Any, where: str, page: str) -> RecoverHand:
     """One recovery hand — one gesture or one argument-less macro. A
     `tap` takes its target as `with: landmarks.<name>` (the declared
     spot, label-healed at run time); the other tools take no target."""
@@ -937,7 +921,7 @@ def _parse_hand(
         if "with" in raw:
             raise PlaybookError(f"{where}: `with` goes with `tool: tap`")
         return RecoverHand(
-            macro=_argless_macro(macro_raw, "recover", where, page, resolve)
+            macro=_argless_macro(macro_raw, "recover", where, page, ctx.resolve)
         )
     if tool not in RECOVER_TOOLS:
         raise PlaybookError(
@@ -956,7 +940,7 @@ def _parse_hand(
             "declared spot it presses"
         )
     return RecoverHand(
-        tool=tool, landmark=_landmark_name(target, f"{where}: `with`", pack)
+        tool=tool, landmark=_landmark_name(ctx, target, f"{where}: `with`")
     )
 
 

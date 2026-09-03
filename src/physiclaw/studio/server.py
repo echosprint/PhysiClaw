@@ -32,7 +32,8 @@ from starlette.routing import Route
 from physiclaw.common import gesture_vocab
 from physiclaw.common.ready import START_HINT
 from physiclaw.common.text import read_text
-from physiclaw.conductor.playbook import PlaybookError, split_ref
+from physiclaw.conductor.playbook import split_ref
+from physiclaw.conductor.specfile import SpecError
 from physiclaw.debug import stepping
 from physiclaw.macros.model import MacroError
 from physiclaw.studio.session import Session, view_reply
@@ -62,7 +63,7 @@ def _error(code: int, message: str) -> JSONResponse:
 def _refused(e: Exception) -> JSONResponse:
     """The ONE exception → HTTP mapping; anything unrecognized
     re-raises (a bug, not a refusal)."""
-    if isinstance(e, ValueError):  # PlaybookError is one
+    if isinstance(e, ValueError):  # SpecError and MacroError are ValueErrors
         return _error(400, str(e))
     if isinstance(e, ConnectionError):
         return _error(502, f"{e}. {START_HINT}")
@@ -158,7 +159,7 @@ class Job:
             self.result = await session.drive(lent)
         except ConnectionError as e:
             self.error = f"{e}. {START_HINT}"
-        except (PlaybookError, MacroError, RuntimeError, ValueError) as e:
+        except (SpecError, MacroError, RuntimeError, ValueError) as e:
             self.error = str(e)
         except Exception as e:  # the page must learn of a bug, not hang
             log.exception("studio job crashed")

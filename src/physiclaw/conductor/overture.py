@@ -50,34 +50,24 @@ no overture without one (a channel is declared, like everything else).
 
 import logging
 from dataclasses import replace
+from typing import TYPE_CHECKING
 
 from physiclaw.common import gesture_vocab
 from physiclaw.common.listing import Screen
 from physiclaw.conductor import brief, views
 from physiclaw.conductor.channel import Channel
+from physiclaw.conductor.limits import HISTORY_SCROLLS, OPEN_TRIES, UNLOCK_TRIES
 from physiclaw.conductor.match import Verdict, match_screen, reads_as_cover
 from physiclaw.conductor.micro import SCROLL_UP, DecisionRequest, MicroOutcome
 from physiclaw.conductor.pages import LOCKED_ID, THREAD_ID, PagePrint
 from physiclaw.conductor.program import Program
 from physiclaw.conductor.turns import SCROLL_BBOX, Turnsmith
-from physiclaw.contract.dto import AssistantMessage, Message
+from physiclaw.contract.dto import AssistantMessage, Message, ToolResultMessage
+
+if TYPE_CHECKING:
+    from physiclaw.conductor.setup import Activation
 
 log = logging.getLogger(__name__)
-
-# Bounds — fixed, not authorable (the boot is infrastructure, not a playbook).
-# `unlock_phone` races the passcode keypad and its own doctrine says to
-# retry once or twice; the open macro is deterministic, so a second miss
-# means the world is not what the pack describes.
-# Together these ARE the turn budget: the boot mints one opening peek and
-# then only unlocks, opens, and scrolls for history, so it can never
-# exceed 1 + 2 + 2 + 2 turns (plus the one [note, peek] quit brief when
-# it gives up).
-UNLOCK_TRIES = 2
-OPEN_TRIES = 2
-# How many times parse_task's `scroll_up` escape may scroll the thread
-# for older messages before the cautious read (no full request in view →
-# no activation) stands.
-HISTORY_SCROLLS = 2
 
 
 class Overture:
@@ -88,9 +78,9 @@ class Overture:
         self,
         *,
         channel: Channel,
-        activation,
+        activation: "Activation",
         prints: list[PagePrint],
-    ):
+    ) -> None:
         # Fixed at construction: `Channel` is frozen, so the hand to
         # navigate with cannot change mid-session — and it must exist.
         if channel.open is None:
@@ -126,6 +116,10 @@ class Overture:
             log.exception("conductor: overture crashed — handing over to the model")
             self.done = True
             return None
+
+    def crash(self) -> None:
+        """Spent by a bug the conductor caught: quiet from here."""
+        self.done = True
 
     def resolve(
         self, outcome: MicroOutcome | None
@@ -189,7 +183,9 @@ class Overture:
         assert result is not None  # settle: exactly one of result/failed
         return self._on_screen(result)
 
-    def _on_screen(self, result) -> "AssistantMessage | DecisionRequest | None":
+    def _on_screen(
+        self, result: ToolResultMessage
+    ) -> "AssistantMessage | DecisionRequest | None":
         """A landed view → where it sends us."""
         screen = views.screen_of(result)
         self._screen = screen
@@ -205,14 +201,11 @@ class Overture:
         reason to quit.
 
         "Locked" is read two ways, and the SHAPE is the one that fires in
-        practice. A declared `ios.locked` page is honoured first, but on
-        a real iPhone it never matches: the cover prints no hint text for
-        an anchor to find (`match.reads_as_cover`). Without the shape
-        read, a sleeping phone scored `unknown` and fell to the recovery
-        arm, which spent both `OPEN_TRIES` driving a macro's taps into a
-        screen that was not awake to receive them — twice measured at
-        ~45s per attempt, then a hand-over, on a wake whose only real
-        obstacle was the lock."""
+        practice: a declared `ios.locked` page is honoured first, but a
+        real cover prints no hint text for an anchor to find, so
+        `match.reads_as_cover` reads its clock. Without it a sleeping
+        phone reads unknown and the open macro taps a screen that is not
+        awake to receive them."""
         if verdict.matches(THREAD_ID):
             return self._read_intent()
         if verdict.matches(LOCKED_ID) or reads_as_cover(screen):

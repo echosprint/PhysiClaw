@@ -21,6 +21,8 @@ from physiclaw.common.config import CONFIG, parse_model_ref
 from physiclaw.conductor import setup as conductor_setup
 from physiclaw.conductor.conductor import Conductor
 from physiclaw.conductor.micro import MicroCaller
+from physiclaw.conductor.overture import Overture
+from physiclaw.conductor.program import Program
 from physiclaw.contract.dto import AssistantMessage, Message
 from physiclaw.contract.plugin import SessionSetup, SetupContext
 from physiclaw.provider import make_provider
@@ -34,45 +36,68 @@ def build() -> "ConductorPlugin":
 
 
 class ConductorPlugin:
-    """One session's conductor behind the plugin seam. Fail-open like
-    everything conductor-side: a crash in setup degrades to a plain
-    model session; `advance` never raises (the Conductor and both
-    drivers catch internally)."""
+    """One session's conductor behind the plugin seam.
+
+    The promise to the runtime: NOTHING here raises. The engine keeps
+    its own belt at the seam (setup, advance, and close are each
+    wrapped there), and this class keeps the conductor's: every door
+    catches, logs, and degrades — setup to a plain model session,
+    advance to "the LLM speaks" with the conductor dropped for the
+    rest of the session, close to a logged failure. Two belts on
+    purpose: the guarantee must not depend on which side is edited."""
 
     def __init__(self) -> None:
         self._conductor: Conductor | None = None
         self._micro: MicroCaller | None = None
 
     async def session_setup(self, ctx: SetupContext) -> SessionSetup | None:
-        # No fail-open wrapper here: `setup.session_setup` is fail-open
-        # internally, and the engine wraps every plugin's setup call at
-        # the seam — a third belt would only disagree with theirs (the
-        # same rule `Conductor._drive` documents for its drivers).
-        program, overture, hidden = conductor_setup.session_setup()
-        self._micro = _wire_micro(program, overture, ctx)
-        self._conductor = Conductor(
-            program=program, micro=self._micro, overture=overture
-        )
-        return SessionSetup(gated_macros=hidden)
+        try:
+            program, overture, hidden = conductor_setup.session_setup()
+            self._micro = _wire_micro(program, overture, ctx)
+            self._conductor = Conductor(
+                program=program, micro=self._micro, overture=overture
+            )
+            return SessionSetup(gated_macros=hidden)
+        except Exception:
+            log.exception("conductor setup crashed — plain model session")
+            self._conductor = None
+            return SessionSetup(gated_macros={})
 
     async def advance(self, history: list[Message]) -> AssistantMessage | None:
         if self._conductor is None:
             return None
-        return await self._conductor.advance(history)
+        try:
+            return await self._conductor.advance(history)
+        except Exception:
+            # The conductor is dropped for the rest of the session: its
+            # state is unknown, and the transcript so far is the model's
+            # hand-off. Every later advance is a pass.
+            log.exception("conductor advance crashed — the model takes the session")
+            self._conductor = None
+            return None
 
     async def aclose(self) -> None:
         # Teardown runs on EVERY session end (the engine's finally): a
         # walk cut short mid-flight (Ctrl-C, wall-clock budget) records
         # its abandoned row + breadcrumb here — the conductor's
         # counterpart of `loop.log_external_stop`, which only covers
-        # model sessions (it keys on a drafted plan).
+        # model sessions (it keys on a drafted plan). Each close is its
+        # own belt, so one failing never skips the other.
         if self._conductor is not None:
-            self._conductor.abandon()
+            try:
+                self._conductor.abandon()
+            except Exception:
+                log.exception("conductor abandon record failed — ignored")
         if self._micro is not None:
-            await self._micro.aclose()
+            try:
+                await self._micro.aclose()
+            except Exception:
+                log.warning("conductor micro client close failed", exc_info=True)
 
 
-def _wire_micro(program, overture, ctx: SetupContext) -> MicroCaller | None:
+def _wire_micro(
+    program: "Program | None", overture: "Overture | None", ctx: SetupContext
+) -> MicroCaller | None:
     """The micro-caller for the conductor's model calls — None only
     when NOTHING drives (no program and no overture). Any live walk can
     need one (an ask's reply judgment, an agent step) — and the owned

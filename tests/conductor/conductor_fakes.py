@@ -173,7 +173,11 @@ def build_program(
 
     spec, pack = setup.load_spec(app, name, require_live=False)
     return setup.build_program(
-        spec, pack, setup.resolve_inputs(spec, values), channel.load_channel(), dry=dry
+        spec,
+        pack,
+        setup.resolve_inputs(spec, values),
+        channel.load_channel(),
+        dry=dry,
     )
 
 

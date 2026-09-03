@@ -7,8 +7,9 @@ import pytest
 from conductor_fakes import make_screen
 
 from physiclaw.conductor import recover
+from physiclaw.conductor.limits import MAX_RECOVER_ACTIONS
 from physiclaw.conductor.pages import Landmark
-from physiclaw.conductor.playbook import MAX_RECOVER_ACTIONS, RecoverHand, Recovery
+from physiclaw.conductor.playbook import RecoverHand, Recovery
 
 HAND = RecoverHand(tool="go_back")
 RECOVERY = Recovery(occluded=HAND, elsewhere=HAND, limit=2)

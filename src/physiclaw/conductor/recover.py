@@ -20,24 +20,25 @@ loop). Handover stays the floor.
 """
 
 from dataclasses import dataclass
+from enum import StrEnum
 
 from physiclaw.common.bbox import Bbox, center_of
 from physiclaw.common.listing import Screen, nearest_labeled_row
+from physiclaw.conductor.limits import MAX_RECOVER_ACTIONS
 from physiclaw.conductor.pages import Landmark
 from physiclaw.conductor.playbook import (
-    MAX_RECOVER_ACTIONS,
     READING_ELSEWHERE,
     RecoverHand,
     Recovery,
 )
 from physiclaw.macros.steps import HEAL_RADIUS
 
-# Resume modes — how the walk continues once the target page is
-# restored. Validated at State construction: a typo'd mode must fail
-# loudly, never silently resume as "enter".
-MODE_ENTER = "enter"  # re-check the enter, then run the move
-MODE_VERIFY = "verify"  # the move already ran — verify is satisfied
-MODES = (MODE_ENTER, MODE_VERIFY)
+
+class Mode(StrEnum):
+    """How the walk continues once the target page is restored."""
+
+    ENTER = "enter"  # re-check the enter, then run the move
+    VERIFY = "verify"  # the move already ran — verify is satisfied
 
 
 @dataclass(frozen=True)
@@ -66,11 +67,12 @@ class State:
     hand's miss). Owned by the walk; cleared on the hand's landing."""
 
     target: str  # full `app.page` id the interrupted check needs
-    mode: str  # one of MODES — the resume rule
+    mode: Mode  # the resume rule
     reason: str = ""
 
     def __post_init__(self) -> None:
-        if self.mode not in MODES:
+        # A typo'd mode must fail loudly, never silently resume as enter.
+        if not isinstance(self.mode, Mode):
             raise ValueError(f"unknown recovery mode {self.mode!r}")
 
 

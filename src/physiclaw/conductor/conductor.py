@@ -27,6 +27,7 @@ from typing import Protocol
 from physiclaw.conductor.micro import DecisionRequest, MicroCaller, MicroOutcome
 from physiclaw.conductor.overture import Overture
 from physiclaw.conductor.program import Program
+from physiclaw.conductor.step import Paused
 from physiclaw.contract.dto import AssistantMessage, Message
 
 log = logging.getLogger(__name__)
@@ -38,17 +39,20 @@ class Driver(Protocol):
 
     Each call answers one of three ways: a synthesized turn to dispatch,
     a `DecisionRequest` for the conductor to broker back through
-    `resolve`, or None — "no turn from me". Implementations NEVER raise:
-    they catch internally and degrade to None, which is why `_drive` has
-    no fail-open wrapper of its own."""
+    `resolve`, or None — "no turn from me". A driver may raise on a
+    program bug; `_drive` is the one place that turns that into `crash`
+    (recorded, quiet from here), because a session must survive the
+    conductor while every tool and test sees the traceback."""
 
     def advance(
         self, history: list[Message]
-    ) -> "AssistantMessage | DecisionRequest | None": ...
+    ) -> "AssistantMessage | DecisionRequest | Paused | None": ...
 
     def resolve(
         self, outcome: MicroOutcome | None
-    ) -> "AssistantMessage | DecisionRequest | None": ...
+    ) -> "AssistantMessage | DecisionRequest | Paused | None": ...
+
+    def crash(self) -> None: ...
 
 
 class Conductor:
@@ -120,10 +124,22 @@ class Conductor:
         overture finishes empty like `not_a_task`. Neither driver raises
         (both catch internally and degrade to quiet), so there is no
         fail-open wrapper here to disagree with theirs."""
-        step = driver.advance(history)
-        while isinstance(step, DecisionRequest):
-            outcome = None
-            if self._micro is not None:
-                outcome = (await self._micro.run(step)).outcome
-            step = driver.resolve(outcome)
+        try:
+            step = driver.advance(history)
+            while isinstance(step, DecisionRequest):
+                outcome = None
+                if self._micro is not None:
+                    outcome = (await self._micro.run(step)).outcome
+                step = driver.resolve(outcome)
+            if isinstance(step, Paused):
+                # Only a stepping tool sets a walk to pause; under the
+                # engine it is a program bug like any other.
+                raise RuntimeError("a walk paused under the engine")
+        except Exception:
+            log.exception("conductor: driver crashed — handing over to the model")
+            try:
+                driver.crash()
+            except Exception:
+                log.exception("conductor: crash record failed — ignored")
+            return None
         return step

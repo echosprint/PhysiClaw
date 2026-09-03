@@ -17,6 +17,7 @@ from physiclaw.common.bbox import center_of
 from physiclaw.common.listing import Screen
 from physiclaw.conductor.match import candidate_rows, normalize, score_page
 from physiclaw.conductor.pages import (
+    AnchorDecl,
     LearnedAnchor,
     LearnedPage,
     PageDecl,
@@ -188,7 +189,7 @@ def propose_anchors(screen: Screen, *, limit: int = 14) -> list[str]:
 
 
 def _readings(
-    anchor, observations: list[Screen]
+    anchor: AnchorDecl, observations: list[Screen]
 ) -> tuple[list[float], list[float], list[str], list[float]]:
     """Per observation containing the anchor (best row by confidence):
     parallel center-x, center-y, raw-label, and confidence lists."""

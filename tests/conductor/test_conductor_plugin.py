@@ -105,3 +105,44 @@ def test_wire_micro_bad_ref_falls_back_to_the_session_model(
     assert caller is not None
     assert caller._owned_factory is None
     assert caller._provider is provider
+
+
+# ---------- the promise to the runtime: nothing here raises ----------
+
+
+@pytest.mark.asyncio
+async def test_setup_crash_degrades_to_a_plain_model_session(mocker) -> None:
+    mocker.patch.object(
+        plugin_mod.conductor_setup, "session_setup", side_effect=RuntimeError("boom")
+    )
+    plug = plugin_mod.build()
+
+    contribution = await plug.session_setup(_ctx())
+
+    assert contribution == SessionSetup(gated_macros={})
+    assert await plug.advance([]) is None
+
+
+@pytest.mark.asyncio
+async def test_advance_crash_drops_the_conductor_for_the_session(mocker) -> None:
+    plug = plugin_mod.build()
+    plug._conductor = mocker.Mock()
+    plug._conductor.advance = mocker.AsyncMock(side_effect=RuntimeError("boom"))
+
+    assert await plug.advance([]) is None
+    assert plug._conductor is None  # every later advance is a pass
+    assert await plug.advance([]) is None
+
+
+@pytest.mark.asyncio
+async def test_aclose_survives_both_closers_failing(mocker) -> None:
+    plug = plugin_mod.build()
+    plug._conductor = mocker.Mock()
+    plug._conductor.abandon.side_effect = RuntimeError("record failed")
+    plug._micro = mocker.Mock()
+    plug._micro.aclose = mocker.AsyncMock(side_effect=OSError("transport"))
+
+    await plug.aclose()  # no raise
+
+    plug._conductor.abandon.assert_called_once()
+    plug._micro.aclose.assert_awaited_once()
