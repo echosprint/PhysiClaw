@@ -6,6 +6,7 @@ from __future__ import annotations
 import pytest
 
 from physiclaw.common import paths
+from physiclaw.common.bbox import BANDS
 from physiclaw.conductor.spec import conventions, pages
 from physiclaw.conductor.spec.pages import (
     Landmark,
@@ -20,7 +21,7 @@ VALID = """\
 results:
   anchors:
     - "综合"
-    - {text: "搜索", region: top}
+    - {text: "搜索", within: top}
   forbid: ["直播中"]
   scrollable: true
 item-detail:
@@ -36,8 +37,8 @@ def test_parse_valid_pages() -> None:
 
     assert set(out) == {"results", "item-detail"}
     r = out["results"]
-    assert r.anchors[0].text == "综合" and r.anchors[0].region is None
-    assert r.anchors[1].region == "top"
+    assert r.anchors[0].text == "综合" and r.anchors[0].within is None
+    assert r.anchors[1].within == BANDS["top"]
     assert r.forbid == ("直播中",)
     assert r.scrollable is True
     assert out["item-detail"].scrollable is False
@@ -54,9 +55,12 @@ def test_parse_empty_file_is_no_pages() -> None:
         ("results:\n  anchors: []", "non-empty"),
         ("results:\n  anchors: ['a']\n  bogus: 1", "unknown key"),
         ("Results:\n  anchors: ['a']", "lowercase"),
-        ("results:\n  anchors: [{text: 'a', region: middle}]", "region"),
-        ("results:\n  anchors: ['x']", "needs a `region`"),
-        ("results:\n  anchors: [123]", "string or"),
+        ("results:\n  anchors: [{text: 'a', within: middle}]", "one of"),
+        ("results:\n  anchors: ['x']", "needs a `within`"),
+        ("results:\n  anchors: 'a'", "is a list"),
+        ("results:\n  anchors: {text: 'a', within: top}", "must be a list"),
+        ("results:\n  anchors: [{or: ['a', 'b']}]", "unknown key"),
+        ("results:\n  anchors: [123]", "a text, a list"),
         ("results:\n  anchors: ['ok']\n  forbid: 'nope'", "list of strings"),
         ("results:\n  anchors: ['ok']\n  scrollable: 1", "true or false"),
     ],
@@ -67,7 +71,7 @@ def test_parse_rejects_with_named_error(text: str, fragment: str) -> None:
 
 
 def test_single_char_anchor_allowed_with_region() -> None:
-    out = parse_pages("results:\n  anchors: [{text: 'x', region: top}]", "app")
+    out = parse_pages("results:\n  anchors: [{text: 'x', within: top}]", "app")
 
     assert out["results"].anchors[0].text == "x"
 
@@ -86,7 +90,7 @@ def test_bare_string_anchor_has_no_alternates() -> None:
 
 def test_anchor_alternates_parse_as_one_anchor() -> None:
     out = parse_pages(
-        'lock:\n  anchors: [{text: ["Swipe up", "轻扫以打开"], region: top}]', "ios2"
+        'lock:\n  anchors: [{text: ["Swipe up", "轻扫以打开"], within: top}]', "ios2"
     )
     (a,) = out["lock"].anchors
 
@@ -95,7 +99,7 @@ def test_anchor_alternates_parse_as_one_anchor() -> None:
     assert a.text == "Swipe up"
     assert a.alts == ("轻扫以打开",)
     assert a.readings == ("Swipe up", "轻扫以打开")
-    assert a.region == "top"
+    assert a.within == BANDS["top"]
 
 
 @pytest.mark.parametrize(
@@ -109,7 +113,7 @@ def test_anchor_alternates_parse_as_one_anchor() -> None:
         ("p:\n  anchors: [{text: ['dup', 'dup']}]", "repeats the reading"),
         # The single-char rule is per reading — one loose alternate opens
         # the same door as one loose anchor.
-        ("p:\n  anchors: [{text: ['Search', 'x']}]", "needs a `region`"),
+        ("p:\n  anchors: [{text: ['Search', 'x']}]", "needs a `within`"),
         ("p:\n  anchors: [{text: ['ok', 123]}]", "must be a string"),
     ],
 )
@@ -235,9 +239,9 @@ def test_parse_pages_rejects_unpopulated_placeholder() -> None:
 def test_parse_landmarks_happy_path() -> None:
     out = parse_landmarks(
         {
-            "back": {"label": "back chevron", "bbox": [0.02, 0.05, 0.1, 0.1]},
-            "dismiss": {"label": ["scrim", "empty area"], "bbox": [0.3, 0.1, 0.7, 0.2]},
-            "cart": {"label": "cart", "bbox": [0.8, 0.0, 0.9, 0.1]},  # open vocabulary
+            "back": {"label": "back chevron", "at": [0.02, 0.05, 0.1, 0.1]},
+            "dismiss": {"label": ["scrim", "empty area"], "at": [0.3, 0.1, 0.7, 0.2]},
+            "cart": {"label": "cart", "at": [0.8, 0.0, 0.9, 0.1]},  # open vocabulary
         }
     )
 
@@ -247,7 +251,7 @@ def test_parse_landmarks_happy_path() -> None:
 
 
 def test_parse_landmarks_page_scope_is_checked_against_the_pack() -> None:
-    spec = {"cart": {"label": "cart", "bbox": [0.2, 0.9, 0.3, 0.95], "page": "detail"}}
+    spec = {"cart": {"label": "cart", "at": [0.2, 0.9, 0.3, 0.95], "page": "detail"}}
 
     assert parse_landmarks(spec)["cart"].page == "detail"  # unchecked door
     assert parse_landmarks(spec, {"detail"})["cart"].page == "detail"
@@ -259,19 +263,19 @@ def test_parse_landmarks_page_scope_is_checked_against_the_pack() -> None:
 
 def test_parse_landmarks_names_and_count_are_bounded() -> None:
     with pytest.raises(PagesError):
-        parse_landmarks({"Cart Tab": {"label": "cart", "bbox": [0.8, 0.0, 0.9, 0.1]}})
-    many = {f"spot{i}": {"label": "x", "bbox": [0.1, 0.1, 0.2, 0.2]} for i in range(13)}
+        parse_landmarks({"Cart Tab": {"label": "cart", "at": [0.8, 0.0, 0.9, 0.1]}})
+    many = {f"spot{i}": {"label": "x", "at": [0.1, 0.1, 0.2, 0.2]} for i in range(13)}
     with pytest.raises(PagesError, match="max"):
         parse_landmarks(many)
 
 
 def test_parse_landmarks_rejects_bad_shapes() -> None:
-    with pytest.raises(PagesError, match="label, bbox"):
+    with pytest.raises(PagesError, match="label, at"):
         parse_landmarks({"back": {"label": "x"}})
     with pytest.raises(PagesError, match="left < right"):
-        parse_landmarks({"back": {"label": "x", "bbox": [0.9, 0.1, 0.2, 0.2]}})
+        parse_landmarks({"back": {"label": "x", "at": [0.9, 0.1, 0.2, 0.2]}})
     with pytest.raises(PagesError, match="duplicate"):
-        parse_landmarks({"back": {"label": ["x", "x"], "bbox": [0.1, 0.1, 0.2, 0.2]}})
+        parse_landmarks({"back": {"label": ["x", "x"], "at": [0.1, 0.1, 0.2, 0.2]}})
 
 
 def test_collect_page_decls_skips_a_dotted_route_page() -> None:

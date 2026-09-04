@@ -273,6 +273,6 @@ def _assert_settle_guard_matches_the_skip(spec: Macro, rel: Path) -> None:
 
     assert thread.skip_when is not None
     assert thread.skip_when.text in accepted, (
-        f"{rel}: {settle.name} accepts {sorted(accepted)}, which excludes the "
-        f"{thread.skip_when.text!r} state {thread.name} skips on"
+        f"{rel}: step {settle.name} accepts {sorted(accepted)}, which excludes "
+        f"the {thread.skip_when.text!r} state step {thread.name} skips on"
     )

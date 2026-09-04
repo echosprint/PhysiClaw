@@ -34,9 +34,9 @@ from physiclaw.conductor.spec.channel import Channel
 from physiclaw.conductor.spec.conventions import LOCKED_ID, owned_by, page_id, page_name
 from physiclaw.conductor.spec.match import Reading, Verdict, match_screen
 from physiclaw.conductor.spec.model import (
+    READING_COVERED,
     READING_ELSEWHERE,
     READING_LOCKED,
-    READING_OCCLUDED,
     ActivateNode,
     AgentNode,
     AskNode,
@@ -108,7 +108,7 @@ _STEP_FOR: dict[type, type[Step]] = {
 _CHECKED_KIND: dict[type, str] = {
     DoNode: "move",
     AgentNode: "agent",
-    ActivateNode: "activate",
+    ActivateNode: "select",
 }
 
 
@@ -153,7 +153,7 @@ class Program:
         # episodes are granted them by name.
         self.landmarks: dict[str, Landmark] = landmarks or {}
         # The boot's activation (menu, parse_task, build) — what its
-        # `activate` step runs; None on every other walk — and the
+        # `select` step runs; None on every other walk — and the
         # baton that step hands on: the program the conductor drives
         # once this walk goes quiet.
         self.activation = activation
@@ -594,7 +594,7 @@ class Program:
     def conclude(self, reason: str) -> None:
         """The walk's quiet completion — recorded, DONE, and no brief
         turn: the boot's ending is the next walk's beginning (its
-        `activate` step set the baton) or the model's own thread (it
+        `select` step set the baton) or the model's own thread (it
         set none), and either way there is nothing to report to a
         model that is not about to speak from a brief."""
         log.info("conductor: %s/%s concluded — %s", self.app, self.spec.name, reason)
@@ -660,7 +660,7 @@ class Program:
         if v is not None and v.matches(LOCKED_ID):
             reading = READING_LOCKED
         elif v is not None and v.occludes(expected_id):
-            reading = READING_OCCLUDED
+            reading = READING_COVERED
         step = recover.plan(
             self._recoveries,
             self.spec.recovers.get(page_name(expected_id)),

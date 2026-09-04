@@ -9,7 +9,7 @@ to a normal session, never takes one down):
   - the boot — nothing suspended, but enabled playbooks exist and the
     channel pack's boot playbook is live: the conductor walks
     `channel/boot` (the thread page with its declared hands, then the
-    `activate` step), which fires ONE parse_task micro-call over the
+    `select` step), which fires ONE parse_task micro-call over the
     playbook menu (`activation.py`) and hands the program it built on
     as its baton.
 

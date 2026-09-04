@@ -36,75 +36,49 @@ inputs:
     description: The message text to send
     example: "Order placed, $4.77"
 
-# Run top to bottom, one action per step.
+# Run top to bottom, one action per step: a verb and its object,
+# then anything the step needs beside it.
 steps:
-  - name: start-home
-    tool: home_screen
+  - home_screen
 
-  - name: open-whatsapp
-    tool: tap
-    with:
-      # Every bbox carries a `label` saying what it is — on-screen
-      # text when the target has any (the tap then follows that text
-      # if it moves), a plain description otherwise.
-      label: "the WhatsApp icon"
-      # [left, top, right, bottom] as 0–1 screen fractions.
-      bbox: [0.31, 0.893, 0.491, 0.974]
+  # A press names what it taps; `at` is the box, [left, top, right,
+  # bottom] as 0–1 screen fractions. On-screen text as the object lets
+  # the tap follow that text if it moves; icons get a plain description.
+  - tap: "the WhatsApp icon"
+    at: [0.31, 0.893, 0.491, 0.974]
 
-  - name: await-whatsapp
-    tool: wait
-    with:
-      seconds: 2
-    # WhatsApp reopens where it was left, so accept either title.
-    expect:
-      {or: ["Chats", "your-user-name"], within: [0.02, 0.05, 0.95, 0.18]}
+  # Sleep, then confirm what arrived. WhatsApp reopens where it was
+  # left, so accept either title.
+  - wait: 2
+    expect: {text: ["Chats", "your-user-name"], within: top}
     hint: "WhatsApp did not open — log in, then send manually"
 
-  - name: open-chat
-    tool: tap
-    with:
-      label: "your-user-name"
-      bbox: [0.03, 0.32, 0.60, 0.42]
-    # Skip if we are already in the chat.
-    skip_when:
-      {text: "your-user-name", within: [0.20, 0.05, 0.60, 0.11]}
-    # Make sure we tap the right list item.
-    guard:
-      require: {text: "your-user-name", within: [0.03, 0.30, 0.95, 0.44]}
+  # `skip_when` skips the step when the chat is already open; `require`
+  # checks the right row sits where the tap lands.
+  - tap: "your-user-name"
+    at: [0.03, 0.32, 0.60, 0.42]
+    skip_when: {text: "your-user-name", within: [0.20, 0.05, 0.60, 0.11]}
+    require: {text: "your-user-name", within: [0.03, 0.30, 0.95, 0.44]}
 
-  - name: stage-text
-    tool: send_to_clipboard
-    with:
-      text: "{message}"
+  - send_to_clipboard: "{message}"
 
-  - name: focus-input
-    tool: tap
-    with:
-      label: "the message input box"
-      bbox: [0.2, 0.928, 0.6, 0.962]
-    # Skip if the keyboard is up. Its space bar has no label, so use "123".
-    skip_when:
-      {text: "123", within: [0.05, 0.86, 0.30, 0.93]}
+  # Skip if the keyboard is up. Its space bar has no label, so use "123".
+  - tap: "the message input box"
+    at: [0.2, 0.928, 0.6, 0.962]
+    skip_when: {text: "123", within: [0.05, 0.86, 0.30, 0.93]}
 
-  - name: paste-menu
-    tool: long_press
-    with:
-      label: "the message input box (keyboard up)"
-      # The input box sits higher once the keyboard is up.
-      bbox: [0.2, 0.59, 0.6, 0.62]
+  # The input box sits higher once the keyboard is up.
+  - long_press: "the message input box (keyboard up)"
+    at: [0.2, 0.59, 0.6, 0.62]
 
-  - name: paste
-    tool: tap
-    with:
-      label: "Paste"
-      bbox: [0.10, 0.545, 0.21, 0.566]
-    guard:
-      require: {text: "Paste", within: [0.03, 0.52, 0.40, 0.59]}
+  - tap: "Paste"
+    at: [0.10, 0.545, 0.21, 0.566]
+    require: {text: "Paste", within: [0.03, 0.52, 0.40, 0.59]}
 
 # No send step: the agent checks the text and decides whether to send.
 ```
 
-Available tools: `tap`, `double_tap`, `long_press`, `swipe`, `home_screen`, `go_back`, `force_quit`, `send_to_clipboard`, `peek`, and `wait`.
+Verbs: `tap`, `double_tap`, `long_press` (a label, with `at`), `swipe` (`up`/`down`/`left`/`right`, with `at` and optional `size`/`speed`), `send_to_clipboard` (text), `wait` (seconds), and the bare words `home_screen`, `go_back`, `force_quit`, `peek`. Beside a verb: `at`, `when` or `skip_when` (run the step only while, or skip it while, a check holds), `require` and `forbid` (checked before the step), `expect` and `hint` (on a `wait`). A check is a text, a list of alternates, `{text, within}` with a band (`top`, `bottom`, `left`, `right`) or a box, or `{and|or|not}`.
 
 The full reference lives at `~/.physiclaw/macros/README.md`.
 
@@ -123,10 +97,10 @@ physiclaw macros check
 physiclaw macros run notify-user-whatsapp -i message=hi
 ```
 
-Rehearse one gesture at a time with `--start-at` and `--stop-after` naming the same step, look at the phone, fix the step, and run it again. A pack's macro is addressed as `<app>/<name>`, an inline body as `<app>/<playbook>.<move>`. The studio's Macro tab does the same with a cursor over the steps.
+Every step gets a handle from its position and verb line (`idx8-tap-paste`), shown in the step log. Rehearse one gesture at a time with `--start-at` and `--stop-after` on the same handle, look at the phone, fix the step, and run it again. A pack's macro is addressed as `<app>/<name>`, an inline body as `<app>/<playbook>.<move>`. The studio's Macro tab does the same with a cursor over the steps.
 
 ```bash
-physiclaw macros run taobao/buy.search --start-at paste --stop-after paste
+physiclaw macros run taobao/buy.search --start-at idx4-tap-paste --stop-after idx4-tap-paste
 ```
 
 ## Best practices
@@ -137,6 +111,6 @@ physiclaw macros run taobao/buy.search --start-at paste --stop-after paste
 
 **Rehearse before enabling.** Hard-coded bboxes are trustworthy only because you tested them on this rig, this phone, this layout.
 
-**Give text targets their real on-screen text as `label`.** That is what lets a press follow a button that moved; icons and blank areas get a plain description instead.
+**Give text targets their real on-screen text as the object.** That is what lets a press follow a button that moved; icons and blank areas get a plain description instead.
 
 **Watch the stats.** `physiclaw macros stats` shows per-macro counters. A rising `consecutive_aborts` streak means the app layout changed under the macro; re-rehearse and update the bboxes.

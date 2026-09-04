@@ -21,6 +21,17 @@ converts to ValidationError; `core.vision.util` re-exports as-is).
 # (`common.listing.Element`) and macro region clauses share it.
 Bbox = tuple[float, float, float, float]
 
+# The named bands a check's `within:` may spell instead of a box — the
+# one vocabulary the macro grammar (`within: top`) and the pack grammar
+# (an anchor pinned to a band) share. Here because macros never import
+# the conductor, and the two must not drift.
+BANDS: dict[str, Bbox] = {
+    "top": (0.0, 0.0, 1.0, 0.25),
+    "bottom": (0.0, 0.75, 1.0, 1.0),
+    "left": (0.0, 0.0, 0.3, 1.0),
+    "right": (0.7, 0.0, 1.0, 1.0),
+}
+
 
 def validate_bbox(bbox: list[float]) -> list[float]:
     """Raise ValueError if bbox is malformed; return `bbox` unchanged.
@@ -43,6 +54,29 @@ def validate_bbox(bbox: list[float]) -> list[float]:
             f"bbox: left < right, top < bottom; got [{left}, {top}, {right}, {bottom}]"
         )
     return bbox
+
+
+def parse_box(value) -> Bbox:
+    """A declared `[left, top, right, bottom]` → the canonical tuple.
+    `validate_bbox` plus the one check a YAML author can trip that a
+    tool call cannot: a bool is not a coordinate. Raises ValueError."""
+    if isinstance(value, (list, tuple)) and any(isinstance(v, bool) for v in value):
+        raise ValueError(f"bbox: each coord must be a number; got {value!r}")
+    left, top, right, bottom = (float(v) for v in validate_bbox(value))
+    return (left, top, right, bottom)
+
+
+def parse_within(value) -> Bbox:
+    """A check's `within:` — a band name (`BANDS`) or a box. The ONE
+    reader of "where to look", shared by the macro grammar's checks and
+    the pack grammar's anchors. Raises ValueError."""
+    if isinstance(value, str):
+        if value not in BANDS:
+            raise ValueError(
+                f"must be one of {', '.join(BANDS)} or a [left, top, right, bottom] box"
+            )
+        return BANDS[value]
+    return parse_box(value)
 
 
 def center_of(bbox) -> tuple[float, float] | None:

@@ -54,7 +54,7 @@ Turn = AssistantMessage | DecisionRequest | Paused | None
 
 
 class Activator(Protocol):
-    """What the boot's `activate` step needs of the activation the wake
+    """What the boot's `select` step needs of the activation the wake
     wires in (`drive/activation.Activation` is the one implementation):
     the parse_task request over a thread screen, and the program its
     outcome builds — or None when nothing activates."""
@@ -79,7 +79,7 @@ class Walk(Protocol):
     landmarks: "dict[str, Landmark]"
     channel: "Channel | None"
     # The boot's two extras: the activation (menu, parse_task, build)
-    # its `activate` step runs, and the program that step hands on —
+    # its `select` step runs, and the program that step hands on —
     # None on every other walk.
     activation: "Activator | None"
     baton: "Program | None"

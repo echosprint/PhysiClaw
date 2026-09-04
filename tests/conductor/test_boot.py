@@ -29,7 +29,7 @@ from physiclaw.conductor.walk.walklog import Outcome
 
 THREAD = thread_screen(("买牛奶", 0.25, 0.4))
 # y=0.93: where an iPhone actually prints the hint — the bottom band, not
-# the top. A fixture inside `region: top` agreed with a wrong declaration
+# the top. A fixture inside `within: top` agreed with a wrong declaration
 # and hid it from every test until a live boot met a real lock screen.
 LOCKED = make_screen(("Swipe up for Face ID or Enter Passcode", 0.5, 0.93)).text
 # Verbatim from a failed wake's own trace: a real cover prints no hint,
@@ -44,9 +44,8 @@ CHANNEL_OPEN = """\
 name: open
 description: open the thread
 steps:
-  - name: go
-    tool: tap
-    with: {label: t, bbox: [0.1, 0.1, 0.2, 0.2]}
+  - tap: t
+    at: [0.1, 0.1, 0.2, 0.2]
 """
 
 
@@ -225,7 +224,7 @@ def test_recover_attempts_are_bounded_by_the_declared_limit() -> None:
         _feed(h, step, ELSEWHERE)  # never lands on the thread
 
     summary = _finish(o, h, o.advance(h))
-    assert "recover limit (4) spent" in summary
+    assert "recover tries (4) spent" in summary
     assert o.outcome is Outcome.HANDOVER
 
 
@@ -294,8 +293,8 @@ def test_the_boot_route_is_authorable() -> None:
         "description: mine\n"
         "route:\n"
         "  - page: thread\n"
-        "    recover: {elsewhere: {macro: open}, limit: 1}\n"
-        "  - activate: read\n"
+        "    recover: {elsewhere: {macro: open}}\n    tries: 1\n"
+        "  - select: read\n"
         "    limit: {scrolls: 0}\n"
     )
     h = _history()
@@ -313,7 +312,7 @@ def test_a_disabled_boot_means_a_plain_session() -> None:
     write_pack(playbooks={"flow": FLOW})
     (paths.playbooks_dir() / "channel" / "boot.yml").write_text(
         "name: boot\ndescription: off\nenabled: false\nroute:\n"
-        "  - page: thread\n  - activate: parse\n",
+        "  - page: thread\n  - select: parse\n",
         encoding="utf-8",
     )
 

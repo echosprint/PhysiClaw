@@ -1,9 +1,7 @@
-# taobao/buy — one playbook, one file. The manifest (PLAYBOOK.yml)
-# beside this file holds what every taobao playbook shares:
-# placeholders, landmarks, pages. This file is the walk: description,
-# enabled, inputs, and the ROUTE (page → do → page → decide … ask …
-# page). Hands used by one move embed in it; hands routes share are
-# pack macros (macros/<name>/MACRO.yml).
+# taobao/buy — one playbook, one file: the walk from a keyword to a paid
+# order. The manifest beside it (PLAYBOOK.yml) holds what every taobao
+# playbook shares; hands only this route uses embed in it, shared ones
+# are pack macros (macros/<name>/MACRO.yml).
 name: buy                       # = this file's name; referenced as taobao/buy
 description: buy one item on Taobao by keyword
 enabled: false  # rehearse on YOUR device, then enable
@@ -12,10 +10,9 @@ inputs:
     description: what the user said, verbatim — the original message the task came from
     example: "帮我在淘宝买一袋五常大米，5kg装的"
 
-# The walk. `page:` is where the walk must BE (checked every time);
-# everything else is a move, landing on the page that follows it. The
-# pages are declared once in the manifest beside this file — anchors
-# and recover hands every taobao route shares — and referenced bare.
+# `page:` is where the walk must BE (checked every time); everything
+# else is a move landing on the page that follows it. Pages are declared
+# once in the manifest and referenced bare here.
 route:
   # An agent step with no tools is a pure-text call: prompt in,
   # declared fields out, no screen — it runs before the arm ever
@@ -45,28 +42,19 @@ route:
       inputs:
         keyword: {description: what to search for}
       steps:
-        - name: tap-search-bar    # only ever tapped ON the home feed —
-          tool: tap               # the start contract guarantees it
-          with: {label: "home-feed search bar", bbox: [0.30, 0.092, 0.70, 0.128]}
-        - name: clip
-          tool: send_to_clipboard
-          with: {text: "{keyword}"}
-        - name: hold-field
-          tool: long_press
-          with: {label: "search input field", bbox: [0.08, 0.115, 0.55, 0.148]}
-        - name: paste             # en system — the iOS menu bubble reads Paste
-          tool: tap
-          with: {label: "Paste", bbox: [0.066, 0.070, 0.163, 0.098]}
-        - name: go-search
-          tool: tap
-          with: {label: "搜索", bbox: [0.811, 0.865, 0.923, 0.895]}
-        - name: load
-          tool: wait
-          with: {seconds: 2}
-        - name: close-vip-overlay # post-search coupon promo covers results
-          tool: tap
-          with: {label: "close (X) on the coupon overlay", bbox: [0.858, 0.069, 0.901, 0.104]}
-          skip_when: {not: {or: ["确认领取", "消费券", "马上去用"]}}
+        - tap: "home-feed search bar"       # only ever tapped ON the home feed —
+          at: [0.30, 0.092, 0.70, 0.128]    # the start contract guarantees it
+        - send_to_clipboard: "{keyword}"
+        - long_press: "search input field"
+          at: [0.08, 0.115, 0.55, 0.148]
+        - tap: "Paste"                      # en system — the iOS menu bubble reads Paste
+          at: [0.066, 0.070, 0.163, 0.098]
+        - tap: "搜索"
+          at: [0.811, 0.865, 0.923, 0.895]
+        - wait: 2
+        - tap: "close (X) on the coupon overlay"   # post-search coupon promo covers results
+          at: [0.858, 0.069, 0.901, 0.104]
+          when: ["确认领取", "消费券", "马上去用"]
 
   - page: results
 
@@ -144,26 +132,22 @@ route:
 
   - ask: confirm-pay              # the human approves before money moves
     approve: payment
-    total: ["实付", "免密支付", "优惠后"]  # the label the total sits beside —
-                                  # {ask.total} is the amount on THAT row
+    total_label: ["实付", "免密支付", "优惠后"]  # the label the total sits
+                                  # beside — {ask.total} is that row's amount
     message: "{pick.message}（实付以屏幕读数为准：¥{ask.total}）回复 好的 确认支付，或 不用 取消。"
     yes: ["好的", "好", "可以", "确认"]   # whole-message replies that open the gate
     no: ["不用", "不要", "取消", "算了"]   # …and that close it; anything else hands over
-    wait: {seconds: 45, rounds: 3}  # poll cadence × silent rounds, then suspend
+    wait: 45                      # seconds between reply polls…
+    rounds: 3                     # …and silent polls before the session suspends
     resume:                       # the ask left the app — come back
       macro:
         steps:
-          - name: go-home
-            tool: home_screen
-          - name: dismiss-switcher
-            tool: tap
-            with: {label: "blank area below the app cards", bbox: [0.42, 0.855, 0.58, 0.885]}
-          - name: open-taobao     # resumes, not cold: the sheet is still up
-            tool: tap
-            with: {label: "the taobao app icon", bbox: [0.720, 0.425, 0.909, 0.551]}
-          - name: settle
-            tool: wait
-            with: {seconds: 2}
+          - home_screen
+          - tap: "blank area below the app cards"
+            at: [0.42, 0.855, 0.58, 0.885]
+          - tap: "the taobao app icon"    # resumes, not cold: the sheet is still up
+            at: [0.720, 0.425, 0.909, 0.551]
+          - wait: 2
 
   # Payment is one recorded tap: the human consented to ¥{ask.total},
   # the walker re-reads the sheet (the consented amount still shows,
@@ -174,19 +158,13 @@ route:
     irreversible: payment
     macro:
       steps:
-        - name: pay-button        # one target, three spellings; heals by text
-          tool: tap
-          with: {label: ["免密支付", "立即支付", "提交订单"], bbox: [0.368, 0.923, 0.629, 0.948]}
-        - name: cashier-settle
-          tool: wait
-          with: {seconds: 4}
-        - name: cashier-confirm   # only a two-step cashier shows this
-          tool: tap
-          with: {label: ["立即支付", "确认支付"], bbox: [0.30, 0.90, 0.70, 0.96]}
-          skip_when: {not: {or: ["立即支付", "确认支付"]}}
-        - name: settle
-          tool: wait
-          with: {seconds: 4}
+        - tap: ["免密支付", "立即支付", "提交订单"]   # one target, three spellings; heals by text
+          at: [0.368, 0.923, 0.629, 0.948]
+        - wait: 4
+        - tap: ["立即支付", "确认支付"]              # only a two-step cashier shows this
+          at: [0.30, 0.90, 0.70, 0.96]
+          when: ["立即支付", "确认支付"]
+        - wait: 4
 
   - page: paid
 

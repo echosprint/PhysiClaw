@@ -4,7 +4,7 @@ program a positive answer builds.
 `discover` reads every pack on disk once at wake: the entries the boot
 may offer (enabled and live) and the whole dispatch table. `Activation`
 turns a THREAD screen into the scoped parse_task request and its
-outcome into a `Program` — the baton the boot's `activate` step
+outcome into a `Program` — the baton the boot's `select` step
 (`step_activate.py`) hands the conductor. Reaching the thread is the
 boot route's job; this owns only the menu, the call, and the build.
 """
@@ -53,7 +53,7 @@ class Activation:
     scoped ask, and its answer into a Program. Reaching a thread screen
     is the boot route's job (`channel/boot.yml`, walked like any
     playbook); this owns only the menu, the call, and the build, and
-    rides the boot program for its `activate` step (`step_activate.py`).
+    rides the boot program for its `select` step (`step_activate.py`).
     `entries` is the single source — the answer space is its keys, the
     menu a render of it, each value the parsed spec+pack so a positive
     answer activates without re-reading disk."""

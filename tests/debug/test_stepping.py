@@ -166,7 +166,7 @@ def test_macro_catalog_lists_user_and_pack_macros_with_steps(pack) -> None:
     assert items["mine"]["source"] == "user" and items["mine"]["enabled"] is False
     assert items["demo/open-app"]["source"] == "demo"
     assert [(s["name"], s["tool"]) for s in items["demo/open-app"]["steps"]] == [
-        ("go", "tap")
+        ("idx1-tap-t", "tap")
     ]
     assert items["demo/open-app"]["steps"][0]["detail"] == "t"
     assert [i["name"] for i in items["demo/open-app"]["inputs"]] == ["message"]
@@ -243,9 +243,7 @@ def test_at_abandons_a_pending_ask(pack) -> None:
 def test_catalog_lists_the_channel_boot_with_its_activate_step(pack) -> None:
     from conductor_fakes import write_channel
 
-    write_channel(
-        "name: open\ndescription: d\nsteps:\n  - name: go\n    tool: home_screen\n"
-    )
+    write_channel("name: open\ndescription: d\nsteps:\n  - home_screen\n")
     from physiclaw.conductor.spec import scaffold
 
     scaffold.ensure_channel_boot(paths.playbooks_dir() / "channel")
@@ -254,7 +252,7 @@ def test_catalog_lists_the_channel_boot_with_its_activate_step(pack) -> None:
     (boot,) = channel["playbooks"]
     assert boot["name"] == "boot"
     assert [(n["id"], n["kind"], n["enter"]) for n in boot["nodes"]] == [
-        ("parse", "activate", "thread")
+        ("parse", "select", "thread")
     ]
 
 
@@ -269,9 +267,7 @@ def test_stepping_the_boot_reads_the_staged_reply_as_the_request(pack, mocker) -
     from physiclaw.contract.dto import Usage
     from physiclaw.debug import thread as vthread
 
-    write_channel(
-        "name: open\ndescription: d\nsteps:\n  - name: go\n    tool: home_screen\n"
-    )
+    write_channel("name: open\ndescription: d\nsteps:\n  - home_screen\n")
     scaffold.ensure_channel_boot(paths.playbooks_dir() / "channel")
     seen: list = []
 

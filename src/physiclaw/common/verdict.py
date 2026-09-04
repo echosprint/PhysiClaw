@@ -74,7 +74,7 @@ def all_text(blocks: list[dict]) -> str:
 
 def screen_text(blocks: list[dict]) -> str:
     """The screen half of a raw MCP tool result — the OCR listing, joined.
-    What guards and macro `skip_when` clauses match against: they WANT
+    What guards and macro `when`/`skip_when` clauses match against: they WANT
     whatever the phone displays. Never pass this to `parse`.
 
     `action_text`'s complement, and both halves are security boundaries

@@ -1,6 +1,6 @@
 """Tests for the agent-step grammar and its walk — `agent` moves (pure
 text and acting episodes), the `start` move, per-page `recover:` hands,
-`landmarks`, and the anchors clause forms."""
+`landmarks`, and the anchor forms."""
 
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ from physiclaw.conductor.walk.micro import (
 BACK_LANDMARK = """\
 back:
   label: "back"
-  bbox: [0.0, 0.0, 0.1, 0.1]
+  at: [0.0, 0.0, 0.1, 0.1]
 """
 
 # The new-grammar walk: a pure-text agent derives a value before the
@@ -62,18 +62,14 @@ route:
   - start: app
     macro:
       steps:
-        - name: launch
-          tool: home_screen
+        - home_screen
   - page: home
-    recover:
-      tool: force_quit
+    recover: force_quit
   - do: search
     macro: open-app
     with: {message: "{parse.keyword}"}
   - page: results
-    recover:
-      tool: tap
-      with: landmarks.back
+    recover: {tap: landmarks.back}
   - agent: pick
     prompt: |
       Add the right item to the cart, then finish on the done page.
@@ -115,7 +111,7 @@ def test_parse_the_agented_playbook() -> None:
     assert pick.enter == "results" and pick.verify == "done"
     assert pick.give == ("back",) and pick.max_calls == 5 and pick.max_scrolls == 1
     assert spec.recovers["home"].elsewhere.tool == "force_quit"
-    assert spec.recovers["home"].occluded is spec.recovers["home"].elsewhere
+    assert spec.recovers["home"].covered is spec.recovers["home"].elsewhere
     assert spec.recovers["results"].elsewhere.landmark == "back"
 
 
@@ -199,16 +195,14 @@ def test_agent_give_must_name_a_declared_landmark() -> None:
 
 
 def test_recover_tap_requires_a_landmark_target() -> None:
-    text = AGENTED.replace(
-        "      tool: tap\n      with: landmarks.back\n", "      tool: tap\n"
-    )
+    text = AGENTED.replace("    recover: {tap: landmarks.back}\n", "    recover: tap\n")
     with pytest.raises(PlaybookError, match="landmarks.<name>"):
         _parse(text)
 
 
 def test_recover_rejects_an_unknown_tool() -> None:
-    text = AGENTED.replace("      tool: force_quit\n", "      tool: dance\n")
-    with pytest.raises(PlaybookError, match="recover.*tool"):
+    text = AGENTED.replace("    recover: force_quit\n", "    recover: dance\n")
+    with pytest.raises(PlaybookError, match="not a hand"):
         _parse(text)
 
 
@@ -222,8 +216,8 @@ def test_landmarks_section_is_the_open_spelling() -> None:
     root = write_pack(playbooks={"walk": AGENTED})
     doc = (root / "PLAYBOOK.yml").read_text(encoding="utf-8")
     (root / "PLAYBOOK.yml").write_text(
-        doc + 'landmarks:\n  back:\n    label: "back"\n    bbox: [0.0, 0.0, 0.1, 0.1]\n'
-        '  cart-tab:\n    label: "cart"\n    bbox: [0.6, 0.9, 0.8, 1.0]\n',
+        doc + 'landmarks:\n  back:\n    label: "back"\n    at: [0.0, 0.0, 0.1, 0.1]\n'
+        '  cart-tab:\n    label: "cart"\n    at: [0.6, 0.9, 0.8, 1.0]\n',
         encoding="utf-8",
     )
     pack = pb.load_pack("demo")
@@ -243,15 +237,15 @@ def test_controls_is_not_a_pack_section() -> None:
         pb.load_pack("demo")
 
 
-def test_anchor_clause_forms_parse() -> None:
+def test_anchor_forms_parse() -> None:
     decls = pages.parse_pages(
         """\
 home:
-  anchors: {or: ["推荐", "关注"], region: top}
+  anchors: [{text: ["推荐", "关注"], within: top}]
 results:
-  anchors: {and: ["综合", {or: ["销量", "销售"], region: top}]}
+  anchors: ["综合", {text: ["销量", "销售"], within: top}]
 paid:
-  anchors: "支付成功"
+  anchors: [["支付成功", "购买成功"]]
 """,
         "demo",
     )
@@ -259,12 +253,15 @@ paid:
     assert len(home) == 1 and home[0].readings == ("推荐", "关注")
     results = decls["results"].anchors
     assert len(results) == 2 and results[1].readings == ("销量", "销售")
-    assert decls["paid"].anchors[0].text == "支付成功"
+    assert decls["paid"].anchors[0].readings == ("支付成功", "购买成功")
 
 
-def test_anchor_clause_rejects_nested_and() -> None:
-    with pytest.raises(pages.PagesError, match="does not nest"):
-        pages.parse_pages('p:\n  anchors: {and: [{and: ["a"]}]}', "demo")
+def test_anchor_is_a_list_of_text_within_items() -> None:
+    # One shape: a list of anchors, alternates inside as `text: [..]`.
+    with pytest.raises(pages.PagesError, match="unknown key.*and"):
+        pages.parse_pages('p:\n  anchors: [{and: ["a"]}]', "demo")
+    with pytest.raises(pages.PagesError, match="must be a list"):
+        pages.parse_pages('p:\n  anchors: {or: ["a", "b"], within: top}', "demo")
 
 
 # ---------- the walk: pure-text agent + start ----------
@@ -498,7 +495,7 @@ def test_page_without_recover_hands_over_in_declared_mode() -> None:
     # `done` declares no recover; failing to reach it (episode fence
     # aside) → the walk hands over instead of climbing a hidden ladder.
     no_recover = AGENTED.replace(
-        "  - page: results\n    recover:\n      tool: tap\n      with: landmarks.back\n",
+        "  - page: results\n    recover: {tap: landmarks.back}\n",
         "  - page: results\n",
     )
     _write(no_recover)
@@ -523,8 +520,8 @@ def test_recover_relaunch_loop_is_bounded_by_the_walk_budget() -> None:
 
     _write(
         AGENTED.replace(
-            "    recover:\n      tool: force_quit\n",
-            "    recover: {tool: force_quit, limit: 6}\n",
+            "    recover: force_quit\n",
+            "    recover: force_quit\n    tries: 6\n",
         )
     )
     p = _program(name="walk", user_said="买牛奶")
@@ -570,7 +567,7 @@ def test_page_recover_limit_stops_the_relaunch_before_the_walk_budget() -> None:
             break
         step = nxt
     assert quits == 2 < MAX_RECOVER_ACTIONS
-    assert "recover limit (2) spent" in step.tool_calls[0].arguments["summary"]
+    assert "recover tries (2) spent" in step.tool_calls[0].arguments["summary"]
 
 
 def test_recover_force_quit_then_walk_restarts_from_the_top() -> None:
@@ -606,7 +603,7 @@ route:
   - page: results
   - ask: gate
     approve: payment
-    total: "合计"
+    total_label: "合计"
     message: "合计 ¥{ask.total}。回复 好的 确认支付，或 不用 取消。"
     yes: ["好的"]
     no: ["不用"]
@@ -702,7 +699,7 @@ def test_episode_grammar_lints(old, new, fragment) -> None:
     write_pack(
         playbooks={"walk": AGENTED.replace(old, new)},
         landmarks=BACK_LANDMARK
-        + 'done:\n  label: "done"\n  bbox: [0.5, 0.5, 0.6, 0.6]\n',
+        + 'done:\n  label: "done"\n  at: [0.5, 0.5, 0.6, 0.6]\n',
     )
     with pytest.raises(PlaybookError, match=fragment):
         build.load_spec("demo", "walk", require_live=False)

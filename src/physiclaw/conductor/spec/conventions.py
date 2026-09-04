@@ -39,7 +39,7 @@ SEND_MACRO = "send"  # nav to the user's thread + paste + send {message}
 OPEN_MACRO = "open"
 # The channel pack's one playbook: the boot — the walk every wake plays
 # before any app playbook (reach the thread, read the request there).
-# `route.py` admits its `activate` step in this one file only.
+# `route.py` admits its `select` step in this one file only.
 BOOT_PLAYBOOK = "boot"
 
 # The ios pack's one convention, here for the same reason: the boot

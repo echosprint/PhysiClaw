@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from conductor_fakes import make_screen
 
+from physiclaw.common.bbox import BANDS
 from physiclaw.common.listing import LISTING_HEADER, Screen
 from physiclaw.conductor.spec import match as m
 from physiclaw.conductor.spec.pages import (
@@ -143,7 +144,7 @@ def test_score_forbid_vetoes() -> None:
 
 
 def test_score_region_hint_rejects_out_of_band_row() -> None:
-    pp = _print(anchors=[AnchorDecl("搜索", region="top")])
+    pp = _print(anchors=[AnchorDecl("搜索", within=BANDS["top"])])
     screen = make_screen(("搜索", 0.5, 0.9))  # bottom of screen
 
     s = m.score_page(pp, screen)
@@ -401,7 +402,7 @@ def test_region_pinned_anchor_ignores_the_scroll_offset() -> None:
     # offset and move with it.
     pp = _print(
         anchors=[
-            AnchorDecl("搜索", region="top"),
+            AnchorDecl("搜索", within=BANDS["top"]),
             AnchorDecl("综合"),
             AnchorDecl("销量"),
         ],

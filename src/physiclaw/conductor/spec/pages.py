@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from physiclaw.common import paths
-from physiclaw.common.bbox import Bbox, validate_bbox
+from physiclaw.common.bbox import Bbox, parse_box, parse_within
 from physiclaw.common.logger import write_json_atomic
 from physiclaw.common.text import read_text
 from physiclaw.conductor.spec import specfile
@@ -35,7 +35,7 @@ from physiclaw.conductor.spec.limits import (
     MAX_LANDMARKS,
     MAX_PAGES,
 )
-from physiclaw.macros.model import AND, MAX_LABEL_READINGS, OR, checked_readings
+from physiclaw.macros.model import MAX_LABEL_READINGS, checked_readings
 
 log = logging.getLogger(__name__)
 
@@ -46,16 +46,6 @@ log = logging.getLogger(__name__)
 # doctrine): anchors and gesture labels follow the same convention, so
 # the two caps can never drift.
 MAX_ANCHOR_READINGS = MAX_LABEL_READINGS
-
-# Coarse region hints — bands, not bboxes: exact geometry is learned, the
-# hint only disambiguates before capture and pins chrome that must not
-# drift (a tab bar found mid-screen is not the tab bar).
-REGIONS: dict[str, tuple[float, float, float, float]] = {
-    "top": (0.0, 0.0, 1.0, 0.25),
-    "bottom": (0.0, 0.75, 1.0, 1.0),
-    "left": (0.0, 0.0, 0.3, 1.0),
-    "right": (0.7, 0.0, 1.0, 1.0),
-}
 
 # Matching defaults. Learned pages carry their own calibrated threshold;
 # declaration-only pages need most anchors present because text is all
@@ -83,7 +73,7 @@ _require_str, _prose, _opt_prose, _check_name = specfile.bind(PagesError)
 @dataclass(frozen=True)
 class AnchorDecl:
     """One declared identity anchor: the label text that should be on the
-    page, optionally pinned to a coarse region band.
+    page, optionally pinned to where it must sit (`within`).
 
     `alts` are further acceptable READINGS of that SAME anchor — any one
     satisfies it, and it still counts ONCE toward the page score. They are
@@ -105,7 +95,9 @@ class AnchorDecl:
 
     text: str
     alts: tuple[str, ...] = ()
-    region: str | None = None  # key into REGIONS
+    # Where the anchor must sit (a band resolved to its box at parse), or
+    # None = anywhere. A pinned anchor is chrome — it does not scroll.
+    within: "Bbox | None" = None
 
     @property
     def readings(self) -> tuple[str, ...]:
@@ -202,22 +194,34 @@ def parse_pages(text: str, app: str) -> dict[str, PageDecl]:
 PAGE_DECL_FIELDS = ("anchors", "forbid", "scrollable")
 # A manifest page's one non-declaration key: the recover hand every
 # route of the pack inherits for it (a route may declare its own).
-PAGE_RECOVER_FIELD = "recover"
+PAGE_RECOVERY_FIELDS = ("recover", "tries")
 
 
-def collect_page_recovers(doc: dict) -> dict[str, Any]:
-    """The RAW `recover:` hands the manifest's `pages:` declare, by page
-    name — resolved by the route compiler (`route._inherited_hands`)
-    against the pack's macros and landmarks, so the grammar has one
-    home. Shape errors surface at that parse; this only collects."""
+def recovery_fields(spec: dict) -> dict:
+    """The recovery half of a page mapping — its PAGE_RECOVERY_FIELDS
+    subset ({} when it declares none). `route_decl`'s mirror: the pack
+    door (`collect_page_recovers`) and the route compiler read the
+    same slice, so what "declares recovery" means has one home."""
+    return {k: spec[k] for k in PAGE_RECOVERY_FIELDS if k in spec}
+
+
+def collect_page_recovers(doc: dict) -> dict[str, dict]:
+    """The RAW recovery the manifest's `pages:` declare, by page name —
+    `{recover: hand(s), tries: n}`, whichever keys the page carries —
+    resolved by the route compiler (`route._inherited_hands`) against
+    the pack's macros and landmarks, so the grammar has one home. Shape
+    errors surface at that parse; this only collects."""
     appendix = doc.get("pages")
     if not isinstance(appendix, dict):
         return {}
-    return {
-        str(name): spec[PAGE_RECOVER_FIELD]
-        for name, spec in appendix.items()
-        if isinstance(spec, dict) and PAGE_RECOVER_FIELD in spec
-    }
+    out: dict[str, dict] = {}
+    for name, spec in appendix.items():
+        if not isinstance(spec, dict):
+            continue
+        picked = recovery_fields(spec)
+        if picked:
+            out[str(name)] = picked
+    return out
 
 
 def route_decl(entry: dict) -> "dict | None":
@@ -252,7 +256,7 @@ def collect_page_decls(doc: dict, playbook_docs: dict | None = None) -> dict:
             # The declaration half only: a manifest page may also carry
             # `recover:`, the pack-level hand (`collect_page_recovers`).
             out[str(name)] = (
-                {k: v for k, v in spec.items() if k != PAGE_RECOVER_FIELD}
+                {k: v for k, v in spec.items() if k not in PAGE_RECOVERY_FIELDS}
                 if isinstance(spec, dict)
                 else spec
             )
@@ -283,13 +287,13 @@ def collect_page_decls(doc: dict, playbook_docs: dict | None = None) -> dict:
     return out
 
 
-_LANDMARK_KEYS = frozenset({"label", "bbox", "page"})
+_LANDMARK_KEYS = frozenset({"label", "at", "page"})
 
 
 def parse_landmarks(data: Any, pages: "set[str] | None" = None) -> dict[str, Landmark]:
     """The `landmarks:` section → validated Landmarks. Each entry is the
-    gesture-target shape (`{label, bbox}` — the macro grammar's pairing
-    rule, at pack level) plus an optional `page:` scope, under any valid
+    gesture-target shape (`{label, at}` — a macro step's pairing rule,
+    at pack level) plus an optional `page:` scope, under any valid
     name; its consumers are the pack's own recover hands and agent
     grants. `pages` (the pack's declared page names) validates the
     scope when given."""
@@ -305,14 +309,14 @@ def parse_landmarks(data: Any, pages: "set[str] | None" = None) -> dict[str, Lan
         _check_name(name, where)
         if (
             not isinstance(spec, dict)
-            or not {"label", "bbox"} <= set(spec.keys())
+            or not {"label", "at"} <= set(spec.keys())
             or not set(spec.keys()) <= _LANDMARK_KEYS
         ):
-            raise PagesError(f"{where} must be a {{label, bbox, [page]}} mapping")
+            raise PagesError(f"{where} must be a {{label, at, [page]}} mapping")
         label = checked_readings(spec, where, _require_str, PagesError)
         try:
-            left, top, right, bottom = map(float, validate_bbox(spec["bbox"]))
-        except ValueError as e:
+            left, top, right, bottom = parse_box(spec["at"])
+        except (ValueError, TypeError) as e:
             raise PagesError(f"{where}: {e}") from e
         page = spec.get("page")
         if page is not None:
@@ -360,7 +364,7 @@ def _parse_page(name: str, spec: Any) -> PageDecl:
     if unknown:
         raise PagesError(f"{where}: unknown key(s): {', '.join(map(str, unknown))}")
 
-    anchors = _parse_anchor_clause(spec.get("anchors"), where)
+    anchors = _parse_anchors(spec.get("anchors"), where)
 
     raw_forbid = spec.get("forbid", [])
     if not isinstance(raw_forbid, list):
@@ -376,71 +380,44 @@ def _parse_page(name: str, spec: Any) -> PageDecl:
     return PageDecl(name=name, anchors=anchors, forbid=forbid, scrollable=scrollable)
 
 
-def _parse_anchor_clause(raw: Any, where: str) -> tuple[AnchorDecl, ...]:
-    """`anchors:` — ONE clause, the macro guard grammar's shapes: a bare
-    string or one `{text|or, region}` dict is a single anchor; `{and:
-    [clause, ...]}` is the multi-anchor set (scored fractionally, not a
-    hard boolean — the threshold decides); `or:` inside a clause lists
-    alternate READINGS of one anchor (any hit scores it once). The
-    legacy spelling — a top-level list of anchor entries — still parses
-    as the implicit `and`."""
-    if isinstance(raw, list):
-        items = raw  # legacy: a list IS the and-set
-    elif isinstance(raw, dict) and AND in raw:
-        unknown = sorted(set(raw.keys()) - {AND})
-        if unknown:
-            raise PagesError(
-                f"{where}: `anchors.{AND}` takes no sibling key(s): "
-                f"{', '.join(map(str, unknown))}"
-            )
-        items = raw[AND]
-        if not isinstance(items, list):
-            raise PagesError(f"{where}: `anchors.{AND}` must be a list of anchors")
-    elif isinstance(raw, (str, dict)):
-        items = [raw]  # a single clause is the whole set
-    else:
-        raise PagesError(
-            f"{where}: `anchors` must be a clause (a string, a "
-            "{text|or, region} mapping, or {and: [...]}) or a list"
-        )
-    if not items:
+def _parse_anchors(raw: Any, where: str) -> tuple[AnchorDecl, ...]:
+    """`anchors:` — a LIST of anchors, all of which the page should show
+    (scored fractionally, not a hard boolean — the threshold decides).
+    Each anchor is a text, a list of alternate readings of ONE text, or
+    `{text, within}` with `within` a band (`top`, `bottom`, `left`,
+    `right`) or a box — the check shape a macro step's `require:` uses.
+    Alternates go INSIDE an anchor, never as separate anchors: each
+    declared anchor is a share of the page's score."""
+    if isinstance(raw, str):
+        raise PagesError(f"{where}: `anchors` is a list — write `anchors: [{raw!r}]`")
+    if not isinstance(raw, list):
+        raise PagesError(f"{where}: `anchors` must be a list of anchors")
+    if not raw:
         raise PagesError(f"{where}: `anchors` must be non-empty")
-    if len(items) > MAX_ANCHORS:
-        raise PagesError(f"{where}: {len(items)} anchors > max {MAX_ANCHORS}")
-    return tuple(_parse_anchor(a, where) for a in items)
+    if len(raw) > MAX_ANCHORS:
+        raise PagesError(f"{where}: {len(raw)} anchors > max {MAX_ANCHORS}")
+    return tuple(_parse_anchor(a, where) for a in raw)
 
 
 def _parse_anchor(raw: Any, where: str) -> AnchorDecl:
     raw_text: Any  # validated (and narrowed to str) by _anchor_text below
-    if isinstance(raw, str):
-        raw_text, region = raw, None
+    within: Bbox | None = None
+    if isinstance(raw, (str, list)):
+        raw_text = raw
     elif isinstance(raw, dict):
-        if AND in raw:
-            raise PagesError(f"{where}: `{AND}` does not nest inside an anchor")
-        unknown = sorted(set(raw.keys()) - {"text", OR, "region"})
+        unknown = sorted(set(raw.keys()) - {"text", "within"})
         if unknown:
             raise PagesError(
                 f"{where}: anchor has unknown key(s): {', '.join(map(str, unknown))}"
             )
-        if "text" in raw and OR in raw:
-            raise PagesError(
-                f"{where}: an anchor takes `text` or `{OR}`, not both — "
-                f"`{OR}` IS the readings list"
-            )
-        # `or:` is the clause grammar's spelling of alternate readings —
-        # the same meaning the legacy list-under-`text:` carried.
-        raw_text = raw[OR] if OR in raw else raw.get("text")
-        if OR in raw and not isinstance(raw_text, list):
-            raise PagesError(f"{where}: anchor `{OR}` must be a list of readings")
-        region = raw.get("region")
-        if region is not None and region not in REGIONS:
-            raise PagesError(
-                f"{where}: anchor region {region!r} must be one of "
-                f"{', '.join(sorted(REGIONS))}"
-            )
+        if "text" not in raw:
+            raise PagesError(f"{where}: an anchor mapping needs `text`")
+        raw_text = raw["text"]
+        within = _parse_within(raw.get("within"), f"{where}: anchor `within`")
     else:
         raise PagesError(
-            f"{where}: each anchor must be a string or {{text, region}} mapping"
+            f"{where}: each anchor must be a text, a list of readings, or a "
+            "{text, within} mapping"
         )
     # `text:` takes one reading, or a list of alternate readings of the SAME
     # anchor — any one satisfies it, and it counts once (see `AnchorDecl`).
@@ -458,15 +435,26 @@ def _parse_anchor(raw: Any, where: str) -> AnchorDecl:
         # any label — the macro grammar's rule, for the same reason. Checked
         # per reading: one loose alternate opens the same door as one loose
         # anchor.
-        if len(text) == 1 and region is None:
+        if len(text) == 1 and within is None:
             raise PagesError(
-                f"{where}: single-character anchor {text!r} needs a `region`"
+                f"{where}: single-character anchor {text!r} needs a `within`"
             )
         if text in texts:
             raise PagesError(f"{where}: anchor repeats the reading {text!r}")
         texts.append(text)
     # First reading is canonical — the learned-geometry key (see AnchorDecl).
-    return AnchorDecl(text=texts[0], alts=tuple(texts[1:]), region=region)
+    return AnchorDecl(text=texts[0], alts=tuple(texts[1:]), within=within)
+
+
+def _parse_within(raw: Any, where: str) -> "Bbox | None":
+    """A check's `within:` — a band name or a box, read by the one shared
+    parser (`common.bbox.parse_within`); None when absent."""
+    if raw is None:
+        return None
+    try:
+        return parse_within(raw)
+    except (ValueError, TypeError) as e:
+        raise PagesError(f"{where}: {e}") from e
 
 
 def _anchor_text(value: Any, where: str) -> str:

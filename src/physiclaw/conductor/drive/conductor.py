@@ -4,7 +4,7 @@ While a walk is live the turn loop never calls the provider; it asks
 ``Conductor.advance()``, which drives the walk (`program.py`), brokers
 its model requests through the micro-caller (`micro.py`), and — when
 the walk goes quiet — takes the baton it may hand on (the boot's
-`activate` step built the program the thread asked for) and drives
+`select` step built the program the thread asked for) and drives
 that. With no walk left it answers None, "not mine", and the loop
 calls the provider with the context the runtime curated.
 

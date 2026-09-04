@@ -9,7 +9,7 @@ per gesture — an Excel macro, not a workflow: no general conditionals, no loop
 macro-calling-macro (a `wait` step may settle, and `skip_when` may skip a
 step whose postcondition already holds — neither is a branch in the flow). Anything needing judgment stays with the agent; a macro
 only replays a rehearsed, fixed path and aborts the moment the screen stops
-matching it (per-step ``guard`` blocks).
+matching it (per-step ``require`` / ``forbid`` checks).
 
 Module split — depends on ``common`` only (no ``engine`` imports; the engine
 imports us). Listed leaf-first, the DSL pipeline top to bottom:

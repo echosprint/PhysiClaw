@@ -33,7 +33,6 @@ from physiclaw.common.text import fold
 from physiclaw.conductor.spec.conventions import LOCKED_ID, PRICE_RE
 from physiclaw.conductor.spec.pages import (
     DEFAULT_MARGIN,
-    REGIONS,
     AnchorDecl,
     LearnedAnchor,
     PagePrint,
@@ -257,7 +256,7 @@ def candidate_rows(
     anchor_norms = [normalize(t) for t in anchor.readings]
     sole = anchor_norms[0] if len(anchor_norms) == 1 else None
     # Hoisted out of the row loop: the band is per anchor, not per row.
-    band = list(REGIONS[anchor.region]) if anchor.region is not None else None
+    band = list(anchor.within) if anchor.within is not None else None
     out = []
     for row in rows:
         if not row.label:
@@ -313,7 +312,7 @@ def score_page(pp: PagePrint, screen: Screen) -> PageScore:
         # Chrome (a region-pinned anchor) does not scroll with the
         # content: it is checked at its absolute position, exactly as
         # `_vote_dy` leaves it out of the vote.
-        adj = 0.0 if a.region is not None else dy
+        adj = 0.0 if a.within is not None else dy
         # Expected-visible: with a scroll offset, an anchor whose learned
         # position moved off-screen is neither expected nor missing.
         if la is not None and pp.decl.scrollable and not (0.0 <= la.cy + adj <= 1.0):
@@ -358,7 +357,7 @@ def _vote_dy(
     check and are excluded here."""
     votes: dict[int, list[float]] = {}
     for a, la, rows in zip(anchors, las, rows_per):
-        if la is None or a.region is not None:
+        if la is None or a.within is not None:
             continue
         for row in rows:
             c = center_of(row.bbox)
@@ -404,7 +403,7 @@ class Verdict:
     def occludes(self, expected_id: str) -> bool:
         """Is this exactly `expected_id` under an overlay — the page
         itself, with a sheet or popup over it (the reading a page's
-        `occluded:` hand is declared for)?"""
+        `covered:` hand is declared for)?"""
         return self.kind is Reading.OCCLUDED and self.page_id == expected_id
 
 

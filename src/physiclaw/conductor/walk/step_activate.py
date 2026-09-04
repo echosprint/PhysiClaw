@@ -1,4 +1,5 @@
-"""The `activate` step — the channel boot's own, and its last.
+"""The `select` step — the channel boot's own, and its last: read the
+thread, select the playbook it asks for.
 
 At wake the conductor walks the channel pack's boot playbook
 (`channel/boot.yml`): the thread page with the hands it declares for

@@ -219,9 +219,8 @@ CHANNEL_OPEN = """\
 name: open
 description: open the thread
 steps:
-  - name: go
-    tool: tap
-    with: {label: t, bbox: [0.1, 0.1, 0.2, 0.2]}
+  - tap: t
+    at: [0.1, 0.1, 0.2, 0.2]
 """
 
 GATED = """\
@@ -237,7 +236,7 @@ route:
   - page: results
   - ask: gate
     approve: payment
-    total: "合计"
+    total_label: "合计"
     message: "已选好{inputs.keyword}，合计 ¥{ask.total}。回复 好的 确认支付，或 不用 取消。"
     yes: ["好的"]
     no: ["不用"]
@@ -357,10 +356,10 @@ def test_gate_blocks_when_the_sheet_changed_after_consent() -> None:
 
 
 def test_gate_patience_is_the_asks_own() -> None:
-    # `wait: {seconds, rounds}` — the poll cadence and the silent rounds
+    # `wait:` and `rounds:` — the poll cadence and the silent rounds
     # before the session suspends are the ask's declaration, not code.
     patient = GATED.replace(
-        '    yes: ["好的"]\n', '    yes: ["好的"]\n    wait: {seconds: 10, rounds: 1}\n'
+        '    yes: ["好的"]\n', '    yes: ["好的"]\n    wait: 10\n    rounds: 1\n'
     )
     p, h, send = _at_gate(playbook=patient)
     ask = send.tool_calls[1].arguments["inputs"]["message"]
@@ -985,17 +984,17 @@ LOCKED_MID = make_screen(("Enter Passcode", 0.5, 0.5)).text
 LANDMARKS = """\
 back:
   label: "back chevron"
-  bbox: [0.02, 0.05, 0.10, 0.10]
+  at: [0.02, 0.05, 0.10, 0.10]
 """
 
 # FLOW with declared hands: home force-quits, results pops back with
 # the OS gesture.
 RECOVERING = FLOW.replace(
     "  - page: home\n",
-    "  - page: home\n    recover: {tool: force_quit}\n",
+    "  - page: home\n    recover: force_quit\n",
 ).replace(
     "  - page: results\n",
-    "  - page: results\n    recover: {tool: go_back}\n",
+    "  - page: results\n    recover: go_back\n",
 )
 
 
@@ -1071,7 +1070,7 @@ def test_declared_unlock_hand_wakes_the_phone_then_continues() -> None:
     # Nothing unlocks in the background: the page declares the
     # `unlock_phone` hand, and only then does a locked phone get woken.
     flow = FLOW.replace(
-        "  - page: results\n", "  - page: results\n    recover: {tool: unlock_phone}\n"
+        "  - page: results\n", "  - page: results\n    recover: unlock_phone\n"
     )
     p, h, move1 = _recovering_walk(flow)
     _feed(h, move1, LOCKED_MID)
@@ -1105,7 +1104,7 @@ def test_recover_tap_hand_falls_back_to_the_declared_bbox() -> None:
     # A tap hand whose label is not on screen presses the declared spot.
     flow = FLOW.replace(
         "  - page: results\n",
-        "  - page: results\n    recover: {tool: tap, with: landmarks.back}\n",
+        "  - page: results\n    recover: {tap: landmarks.back}\n",
     )
     p, h, move1 = _recovering_walk(flow)
     _feed(h, move1, ELSEWHERE)  # unknown landing
@@ -1146,8 +1145,8 @@ done:
 KEYED = FLOW.replace(
     "  - page: results\n",
     "  - page: results\n    recover:\n"
-    "      occluded: {tool: tap, with: landmarks.back}\n"
-    "      elsewhere: {tool: go_back}\n",
+    "      covered: {tap: landmarks.back}\n"
+    "      elsewhere: go_back\n",
 )
 
 
@@ -1183,7 +1182,7 @@ COVERED_RESULTS = make_screen(
 
 
 def test_keyed_recover_runs_the_hand_for_the_reading() -> None:
-    # The page itself under an overlay → its `occluded` hand (the scrim
+    # The page itself under an overlay → its `covered` hand (the scrim
     # tap); any other screen → its `elsewhere` hand (go_back).
     write_pack(playbooks={"flow": KEYED}, pages=OCCLUDABLE_PAGES, landmarks=LANDMARKS)
     _learn_results()
@@ -1195,7 +1194,7 @@ def test_keyed_recover_runs_the_hand_for_the_reading() -> None:
 
     dismiss = p.advance(h)
     assert dismiss is not None and dismiss.tool_names() == ["note", "tap"]
-    assert "(occluded)" in dismiss.tool_calls[0].arguments["summary"]
+    assert "(covered)" in dismiss.tool_calls[0].arguments["summary"]
     assert dismiss.tool_calls[1].arguments == {"bbox": [0.02, 0.05, 0.10, 0.10]}
 
     # The sheet is gone: both anchors read where they were learned.
@@ -1221,7 +1220,7 @@ def test_a_locked_phone_takes_the_locked_hand_and_no_other() -> None:
     # names the OS page rather than "no known page".
     keyed = FLOW.replace(
         "  - page: results\n",
-        "  - page: results\n    recover:\n      elsewhere: {tool: go_back}\n",
+        "  - page: results\n    recover:\n      elsewhere: go_back\n",
     )
     p, h, move1 = _recovering_walk(keyed)
     _feed(h, move1, LOCKED_MID)
@@ -1231,8 +1230,8 @@ def test_a_locked_phone_takes_the_locked_hand_and_no_other() -> None:
     assert "ios.locked" in summary
 
     with_lock = keyed.replace(
-        "      elsewhere: {tool: go_back}\n",
-        "      elsewhere: {tool: go_back}\n      locked: {tool: unlock_phone}\n",
+        "      elsewhere: go_back\n",
+        "      elsewhere: go_back\n      locked: unlock_phone\n",
     )
     p2, h2, m1 = _recovering_walk(with_lock)
     _feed(h2, m1, LOCKED_MID)
@@ -1244,8 +1243,7 @@ def test_a_locked_phone_takes_the_locked_hand_and_no_other() -> None:
 def test_keyed_recover_without_a_hand_for_the_reading_hands_over() -> None:
     only_occluded = FLOW.replace(
         "  - page: results\n",
-        "  - page: results\n    recover:\n"
-        "      occluded: {tool: tap, with: landmarks.back}\n",
+        "  - page: results\n    recover:\n      covered: {tap: landmarks.back}\n",
     )
     p, h, move1 = _recovering_walk(only_occluded)
     _feed(h, move1, ELSEWHERE)
@@ -1279,7 +1277,7 @@ def test_recovery_never_restarts_once_a_payment_fired() -> None:
     # page declares a hand.
     gated = GATED.replace(
         "  - page: home\n  - do: open",
-        "  - page: home\n    recover: {tool: go_back}\n  - do: open",
+        "  - page: home\n    recover: go_back\n  - do: open",
     )
     p, h, send = _at_gate(playbook=gated)
     back = _reply_arrives(p, h, send, "好的")
@@ -1310,7 +1308,7 @@ def test_resumed_walk_never_restarts_below_its_cursor() -> None:
     _feed(h, again, HOME)
 
     summary = _finish(p, h, p.advance(h))
-    assert "recover limit (2) spent" in summary
+    assert "recover tries (2) spent" in summary
 
 
 def test_resumed_walk_unlocks_a_locked_phone_before_reading() -> None:
@@ -1369,7 +1367,7 @@ def test_recovery_never_runs_with_consent_bound() -> None:
     # Money keeps the hard handover: a deviation after the user consented
     # is the model's, never a hand's.
     gated = GATED.replace(
-        "  - page: results\n", "  - page: results\n    recover: {tool: go_back}\n"
+        "  - page: results\n", "  - page: results\n    recover: go_back\n"
     )
     p, h, send = _at_gate(playbook=gated)
     back = _reply_arrives(p, h, send, "好的")
@@ -1566,7 +1564,7 @@ INLINE_FLOW = FLOW.replace(
     "      inputs:\n"
     "        message: {description: the text}\n"
     "      steps:\n"
-    "        - {name: go, tool: home_screen}\n",
+    "        - home_screen\n",
 )
 
 

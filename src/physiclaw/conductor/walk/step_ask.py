@@ -9,7 +9,7 @@ numbers the following payment move spends. A deny ends the walk; a
 reply the declared words do not cover hands over — the model reads the
 thread, the conductor never guesses. A payment ask reads the sheet
 total off the waypoint before it, once that page reads — the amount
-beside the label its `total:` names — and quotes it in the message:
+beside the label its `total_label:` names — and quotes it in the message:
 the ask IS the consent record. Every amount on that sheet is
 remembered as what the user saw.
 """
@@ -63,7 +63,7 @@ class AskStep(Step[AskNode]):
     def _start(self) -> Turn:
         """Send the ask. A payment ask reads the sheet total off the
         waypoint before it, once that page reads — never whatever screen
-        happened to come last — the amount beside the label its `total:`
+        happened to come last — the amount beside the label its `total_label:`
         declares — and quotes it: the message IS the consent record."""
         node, walk = self.node, self.walk
         values = walk.ref_values()
@@ -79,11 +79,11 @@ class AskStep(Step[AskNode]):
                 )
             assert walk.screen is not None  # a verified verdict was read off it
             walk.gate.seen = tuple(money.amounts(walk.screen))
-            total = money.declared_total(walk.screen, node.total)
+            total = money.declared_total(walk.screen, node.total_label)
             if total is None:
                 return walk.handover(
                     f"ask {node.id!r}: no amount readable beside "
-                    f"{' / '.join(node.total)} on the sheet"
+                    f"{' / '.join(node.total_label)} on the sheet"
                 )
             # The number the user will see is the number they consent
             # to — and, at fire time, the bound.

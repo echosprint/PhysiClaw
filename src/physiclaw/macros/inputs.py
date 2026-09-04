@@ -6,7 +6,7 @@ load time that every placeholder names a declared input, so by the time
 error rather than user input. Inputs are the ONLY dynamic thing in a
 macro — flat strings, no expressions — so this module is a dict merge
 over `template`'s tokenizer, nothing more. Clause text templates itself
-(`model.Clause.substituted`); this half handles `with:` tables.
+(`model.Clause.substituted`); this half handles step arguments.
 """
 
 from typing import Any, Protocol, Sequence
@@ -58,8 +58,8 @@ def resolve_inputs(spec: _HasInputs, provided: dict[str, Any]) -> dict[str, str]
 
 
 def substitute(args: dict[str, Any], values: dict[str, str]) -> dict[str, Any]:
-    """Fill `{name}` placeholders in the string leaves of a step's `with:`
-    table. Every placeholder was validated against the declared inputs at
+    """Fill `{name}` placeholders in the string leaves of a step's
+    arguments. Every placeholder was validated against the declared inputs at
     parse time, so a missing key here is a programming error, not user
     input."""
     return {k: _fill(v, values) for k, v in args.items()}

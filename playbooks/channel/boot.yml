@@ -9,9 +9,10 @@ enabled: true
 route:
   - page: thread                  # where the walk must BE (the manifest declares it)
     recover:                       # …and what to do when it is not
-      locked: {tool: unlock_phone}   # a sleeping phone gets no taps: wake it first
-      occluded: {macro: open}         # the thread under a sheet or keyboard
+      locked: unlock_phone           # a sleeping phone gets no taps: wake it first
+      covered: {macro: open}          # the thread under a sheet or keyboard
       elsewhere: {macro: open}        # any other screen: the rehearsed hand
-      limit: 4                       # unlocks + opens together (an unlock races the keypad)
-  - activate: parse                # the boot's own step: parse_task over the thread,
-    limit: {scrolls: 2}            # scrolling up for a request above the fold
+    tries: 4                         # unlocks + opens together (an unlock races the keypad)
+  - select: parse                  # the boot's own step: read the thread and select
+    limit: {scrolls: 2}            # the playbook it asks for (scrolls up for an
+                                   # older request)

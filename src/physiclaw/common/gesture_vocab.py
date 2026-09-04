@@ -31,6 +31,7 @@ FORCE_QUIT = "force_quit"
 NAV_TOOLS = frozenset({GO_BACK, "home_screen", FORCE_QUIT})
 
 SWIPE = "swipe"
+SWIPE_DIRECTIONS = ("up", "down", "left", "right")
 SEQUENCE = "sequence"
 
 # Non-gesture tools named beyond the server — the perception peek

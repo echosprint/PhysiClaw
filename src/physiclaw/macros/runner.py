@@ -18,7 +18,7 @@ gate, act) with no per-tool branching left in it.
 
 Nothing branches: a decided-failed check or a tool error stops the run
 and reports where, and recovery is the agent's job with the returned
-screen to work from. `start_at` begins at a named step, reporting the
+screen to work from. `start_at` begins at a step (by handle), reporting the
 skipped prefix as NOT executed. Server-side safety (bbox validation,
 AssistiveTouch guards, the hardware lock, auto-park) applies per step
 unchanged; this module cannot bypass it.
@@ -159,15 +159,21 @@ async def run(
     by `run_and_record`) receives one event per step; None keeps the replay
     silent for unit tests.
 
-    `start_at` names the step to begin at, for when the caller already did
-    the leading steps by hand. The skipped prefix is NOT executed and is
-    reported as such — see `_resolve_start` for why it is named, not
-    numbered. `stop_after` names the last step to run — a rehearsal
-    inspecting one gesture stops there and the rest is reported as not
-    run, the same way."""
+    `start_at` is the handle of the step to begin at (see `_step_index`),
+    for when the caller already did the leading steps by hand. The skipped prefix is NOT executed and is
+    reported as such. `stop_after` names the last step to run — a
+    rehearsal inspecting one gesture stops there and the rest is
+    reported as not run, the same way."""
     values = resolve_inputs(spec, provided)
-    start = _resolve_start(spec, start_at)
-    stop = _resolve_stop(spec, stop_after, start)
+    start_at, stop_after = start_at.strip(), stop_after.strip()
+    start = _step_index(spec, start_at, "start_at") if start_at else 1
+    stop = (
+        _step_index(spec, stop_after, "stop_after") if stop_after else len(spec.steps)
+    )
+    if stop < start:
+        raise MacroError(
+            f"stop_after {stop_after!r} (step {stop}) precedes the start step {start}"
+        )
     ctx = RunContext(mcp=mcp, deadline=time.monotonic() + MAX_RUN_SECONDS)
     if rlog:
         rlog.start(values, start_at=start_at)
@@ -176,7 +182,7 @@ async def run(
 
     gestures = 0
     for i, raw_step in enumerate(spec.steps[start - 1 : stop], start=start):
-        # Checks are templated exactly like `with:` tables: a macro that
+        # Checks are templated exactly like step arguments: a macro that
         # pastes to `{contact}` wants to VERIFY it landed in `{contact}`'s
         # chat. See `model.TextClause.substituted`.
         step = raw_step.substituted(values)
@@ -324,46 +330,19 @@ def _unrun_suffix(
     return lines
 
 
-def _resolve_stop(spec: Macro, stop_after: str, start: int) -> int:
-    """1-based index of the last step to run, or the step count when
-    `stop_after` is empty. Named like `start_at`, for the same reason;
-    must not precede the start. Raises MacroError before any gesture."""
-    want = stop_after.strip()
-    if not want:
-        return len(spec.steps)
+def _step_index(spec: Macro, want: str, field: str) -> int:
+    """A step handle (`idx3-tap-paste`, as the agent's `steps:` list and
+    the run log show it) → its 1-based index. The handle carries the
+    position AND the verb line, so one written down before the macro
+    was edited fails loudly here rather than landing on a different
+    gesture."""
     names = [s.name for s in spec.steps]
-    if want not in names:
-        raise MacroError(
-            f"stop_after {want!r} matches no step of macro {spec.name!r}. "
-            f"Steps: {', '.join(map(repr, names))}"
-        )
-    stop = names.index(want) + 1
-    if stop < start:
-        raise MacroError(
-            f"stop_after {want!r} (step {stop}) precedes the start step {start}"
-        )
-    return stop
-
-
-def _resolve_start(spec: Macro, start_at: str) -> int:
-    """1-based index of the step to begin at, or 1 when `start_at` is empty.
-
-    Named, not numbered: an index is an implementation detail that shifts
-    silently when the macro is edited, so `start_at=4` would quietly come to
-    mean a different gesture. A name survives reordering, reads back in the
-    step log and abort report, and fails loudly when it stops existing.
-    `parse` guarantees every step is named and names are unique, so a plain
-    lookup is enough. Raises MacroError — before any gesture fires."""
-    want = start_at.strip()
-    if not want:
-        return 1
-    names = [s.name for s in spec.steps]
-    if want not in names:
-        raise MacroError(
-            f"start_at {want!r} matches no step of macro {spec.name!r}. "
-            f"Steps: {', '.join(map(repr, names))}"
-        )
-    return names.index(want) + 1
+    if want in names:
+        return names.index(want) + 1
+    raise MacroError(
+        f"{field} {want!r} names no step of macro {spec.name!r}. Steps: "
+        f"{', '.join(names)}"
+    )
 
 
 async def _completed(

@@ -39,7 +39,7 @@ route:
     message: "Added to the cart, ordering soon"
   - ask: pay
     approve: payment
-    total: "Total"
+    total_label: "Total"
     message: "Total ¥{ask.total}, reply ok to pay, or no to cancel"
     yes: ["ok"]
     no: ["no"]
@@ -65,7 +65,7 @@ route:
   - page: home
     anchors: ["Files"]
   - do: open
-    macro: {steps: [{name: go, tool: home_screen}]}
+    macro: {steps: [home_screen]}
   - page: home
 """
 
@@ -479,26 +479,26 @@ def test_tell_reads_no_reply() -> None:
         # {ask.total} exists only inside a payment ask.
         (
             "approve: payment\n"
-            '    total: "Total"\n'
+            '    total_label: "Total"\n'
             '    message: "Total ¥{ask.total}, reply ok to pay, or no to cancel"',
             'approve: handoff\n    message: "Total ¥{ask.total}, reply ok or no"',
             "references move 'ask'",
         ),
         # A payment ask declares where the total sits…
-        ('    total: "Total"\n', "", "declares `total:`"),
+        ('    total_label: "Total"\n', "", "declares `total_label:`"),
         # …and only a payment ask does.
         (
             "approve: payment\n"
-            '    total: "Total"\n'
+            '    total_label: "Total"\n'
             '    message: "Total ¥{ask.total}, reply ok to pay, or no to cancel"\n',
-            'approve: handoff\n    total: "Total"\n    message: "reply ok or no"\n',
+            'approve: handoff\n    total_label: "Total"\n    message: "reply ok or no"\n',
             "goes with `approve: payment`",
         ),
         # The ask's patience is bounded by the engine's single sleep.
         (
-            '    total: "Total"\n',
-            '    total: "Total"\n    wait: {seconds: 600}\n',
-            "wait.seconds",
+            '    total_label: "Total"\n',
+            '    total_label: "Total"\n    wait: 600\n',
+            "`wait` must be",
         ),
     ],
 )
@@ -656,7 +656,7 @@ INLINE_OPEN = """\
       inputs:
         message: {description: the text}
       steps:
-        - {name: go, tool: home_screen}
+        - home_screen
 """
 
 
@@ -672,17 +672,16 @@ def test_do_macro_may_embed_the_body() -> None:
     assert node.macro == "buy.open"  # synthesized: <playbook>.<move>
     m = p.inline_macros["buy.open"]
     assert m.enabled is True  # the playbook's own `enabled:` is the gate
-    assert [s.name for s in m.steps] == ["go"]
+    assert [s.tool for s in m.steps] == ["home_screen"]
 
 
-def test_do_name_is_the_macro_by_default() -> None:
-    # `do: open-app` with no `macro:` key runs the directory macro of
-    # that name — no redundant id + macro pair.
+def test_do_names_its_macro() -> None:
+    # `do: open-app` alone no longer runs a same-named directory macro: a
+    # reader must not need the rule to know where the hand lives.
     text = _mutate("  - do: open\n    macro: open-app\n", "  - do: open-app\n")
 
-    p = pb.parse_playbook(text, "buy", _pack())
-
-    assert p.nodes[0].id == "open-app" and p.nodes[0].macro == "open-app"
+    with pytest.raises(PlaybookError, match="names its `macro:`"):
+        pb.parse_playbook(text, "buy", _pack())
 
 
 def test_inline_do_with_keys_validate_against_the_body() -> None:
@@ -703,9 +702,9 @@ def test_inline_do_missing_required_input_is_rejected() -> None:
 
 
 def test_inline_body_errors_are_framed_with_the_move() -> None:
-    text = _inline().replace("tool: home_screen", "tool: rm_rf")
+    text = _inline().replace("- home_screen", "- rm_rf")
 
-    with pytest.raises(PlaybookError, match="move 'open': inline `macro`.*`tool`"):
+    with pytest.raises(PlaybookError, match="move 'open': inline `macro`.*step verb"):
         pb.parse_playbook(text, "buy", _pack())
 
 
@@ -755,7 +754,7 @@ def test_pack_doc_rejects_yaml_aliases() -> None:
 def test_ask_resume_may_embed_the_body() -> None:
     text = _mutate(
         "    resume: open-app\n",
-        "    resume:\n      steps:\n        - {name: back-to-app, tool: home_screen}\n",
+        "    resume:\n      steps:\n        - home_screen\n",
     )
     pack = _pack()
 
@@ -763,8 +762,8 @@ def test_ask_resume_may_embed_the_body() -> None:
 
     ask = spec.nodes[4]
     assert ask.resume == "buy.pay.resume"  # <playbook>.<move>.<role>
-    assert [s.name for s in spec.inline_macros["buy.pay.resume"].steps] == [
-        "back-to-app"
+    assert [s.tool for s in spec.inline_macros["buy.pay.resume"].steps] == [
+        "home_screen"
     ]
     # The readiness check must skip the role body, not KeyError on it.
     assert pb.disabled_macros(spec, pack) == []
@@ -780,7 +779,7 @@ def test_inline_role_body_with_required_input_rejected() -> None:
         "      inputs:\n"
         "        x: {description: d}\n"
         "      steps:\n"
-        "        - {name: back, tool: home_screen}\n",
+        "        - home_screen\n",
     )
 
     with pytest.raises(PlaybookError, match=r"requires input\(s\) x"):
@@ -850,9 +849,8 @@ CHANNEL_OPEN = """\
 name: open
 description: open the thread
 steps:
-  - name: go
-    tool: tap
-    with: {label: t, bbox: [0.1, 0.1, 0.2, 0.2]}
+  - tap: t
+    at: [0.1, 0.1, 0.2, 0.2]
 """
 
 BOOT = """\
@@ -861,10 +859,10 @@ description: reach the thread and read it
 route:
   - page: thread
     recover:
-      locked: {tool: unlock_phone}
+      locked: unlock_phone
       elsewhere: {macro: open}
-      limit: 4
-  - activate: parse
+    tries: 4
+  - select: parse
 """
 
 
@@ -884,11 +882,11 @@ def test_the_boot_parses_with_its_activate_step_last() -> None:
     assert isinstance(node, ActivateNode)
     assert node.enter == "thread" and node.max_scrolls == 2
     assert spec.recovers["thread"].locked is not None
-    assert spec.recovers["thread"].limit == 4
+    assert spec.recovers["thread"].tries == 4
 
     bounded = pb.parse_playbook(
         BOOT.replace(
-            "  - activate: parse\n", "  - activate: parse\n    limit: {scrolls: 0}\n"
+            "  - select: parse\n", "  - select: parse\n    limit: {scrolls: 0}\n"
         ),
         "boot",
         _channel_pack(),
@@ -899,7 +897,7 @@ def test_the_boot_parses_with_its_activate_step_last() -> None:
 def test_activate_belongs_to_the_channel_boot_only() -> None:
     # An app playbook cannot read the thread for a task — that is the
     # boot's; and even in the channel pack, only the file named boot.
-    text = VALID.split("  - tell: confirm")[0] + "  - activate: parse\n"
+    text = VALID.split("  - tell: confirm")[0] + "  - select: parse\n"
     with pytest.raises(PlaybookError, match="channel boot's own step"):
         pb.parse_playbook(text, "buy", _pack())
     with pytest.raises(PlaybookError, match="channel boot's own step"):
@@ -914,46 +912,46 @@ def test_activate_belongs_to_the_channel_boot_only() -> None:
         # activate must read the thread: the page before it is the thread
         (
             lambda t: t.replace(
-                "  - activate: parse\n",
+                "  - select: parse\n",
                 "  - do: nudge\n    macro: open\n  - page: other\n"
                 '    anchors: ["Somewhere else"]\n'
-                "  - activate: parse\n",
+                "  - select: parse\n",
             ),
             "immediately before it",
         ),
         # activate ends the boot
         (
             lambda t: t + "  - do: after\n    macro: open\n  - page: thread\n",
-            "must end with an `activate`",
+            "must end with a `select`",
         ),
         # …and only one does
         (
             lambda t: t.replace(
-                "  - activate: parse\n",
-                "  - activate: first\n  - page: thread\n  - activate: parse\n",
+                "  - select: parse\n",
+                "  - select: first\n  - page: thread\n  - select: parse\n",
             ),
-            "one `activate` only",
+            "one `select` only",
         ),
         # a boot must have one
         (
             lambda t: t.replace(
-                "  - activate: parse\n",
+                "  - select: parse\n",
                 "  - do: nudge\n    macro: open\n  - page: thread\n",
             ),
-            "must end with an `activate`",
+            "must end with a `select`",
         ),
         # the boot never speaks to the user
         (
             lambda t: t.replace(
-                "  - activate: parse\n",
-                "  - tell: hi\n    message: hello\n  - activate: parse\n",
+                "  - select: parse\n",
+                "  - tell: hi\n    message: hello\n  - select: parse\n",
             ),
             "messages the user",
         ),
         # limit takes scrolls only
         (
             lambda t: t.replace(
-                "  - activate: parse\n", "  - activate: parse\n    limit: {calls: 2}\n"
+                "  - select: parse\n", "  - select: parse\n    limit: {calls: 2}\n"
             ),
             "takes only `scrolls`",
         ),
@@ -965,16 +963,16 @@ def test_boot_shape_lints(edit, message) -> None:
 
 
 def test_flat_recover_covers_the_locked_reading_too() -> None:
-    # `recover: {tool: x}` is one hand for ANY deviation — the lock
+    # `recover: x` is one hand for ANY deviation — the lock
     # screen included, exactly as the docstring promises; the keyed form
     # is where an author tells the readings apart.
     text = VALID.replace(
         "  - page: home\n  - do: open",
-        "  - page: home\n    recover: {tool: force_quit}\n  - do: open",
+        "  - page: home\n    recover: force_quit\n  - do: open",
         1,
     )
     spec = pb.parse_playbook(text, "buy", _pack())
 
     r = spec.recovers["home"]
-    assert r.locked is r.elsewhere is r.occluded
+    assert r.locked is r.elsewhere is r.covered
     assert r.hand_for("locked") is r.locked

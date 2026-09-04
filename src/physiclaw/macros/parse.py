@@ -1,8 +1,8 @@
 """MACRO.yml → a validated `Macro`.
 
-The file shape follows GitHub Actions conventions (``name`` /
-``description`` / ``inputs.<id>.{description, default}`` at the top,
-``steps`` with per-step ``name`` and ``with:``), parsed with a YAML 1.2
+The file shape follows GitHub Actions conventions at the top (``name`` /
+``description`` / ``inputs.<id>.{description, default}``); each step is
+one ``verb: object`` line plus its qualifiers. Parsed with a YAML 1.2
 loader so ``yes/no/on/off`` stay strings. What 1.2 still coerces
 (unquoted ``true``/``false``, bare numbers like ``007``) is caught by
 the strict type check here: every string-position value that arrives as
@@ -15,48 +15,62 @@ recursive-descent style, sharing the scalar terminals at the bottom:
     macro     ::= name description [enabled] [inputs] steps
     inputs    ::= {id: {description, [default], [example]}}     # ≤ MAX_INPUTS
     steps     ::= [step, ...]                                   # 1–MAX_STEPS
-    step      ::= name tool [with] [guard] [skip_when]          # gesture
-                | name "wait" with:{seconds} [guard] [skip_when]
-                  [expect [hint]]                               # settle
-    guard     ::= {[require: check] [forbid: check] [hint]}     # ≥1 check
-    check     ::= clause          # also the shape of expect / skip_when
+    step      ::= verb                                          # argless, bare word
+                | {verb: object, [at], [when | skip_when],
+                   [require], [forbid], [expect [hint]]}
+    verb      ::= tap | double_tap | long_press    object = label, at REQUIRED
+                | swipe                            object = up|down|left|right, at REQUIRED,
+                                                  [size] [speed] off the ladder
+                | send_to_clipboard                object = text
+                | wait                             object = seconds  (expect lives here)
+                | home_screen | go_back | force_quit | peek       no object
+    label     ::= "text" | ["text", ...]          # ≤ MAX_LABEL_READINGS readings of ONE target
+    at        ::= [left, top, right, bottom]      # unit floats, l<r, t<b
+    check     ::= clause          # require / forbid / expect / when / skip_when
     clause    ::= "text"                          # whole-screen substring
-                | {text, within: bbox}            # element-granular
-                | {and|or: [clause × 2+]} | {not: clause}   # may carry within
+                | ["text", ...]                   # any of them
+                | {text: "t" | [alts], within: band | bbox}   # element-granular
+                | {and|or: [clause × 2+]} | {not: clause}     # may carry within
                   # combinators nest ≤ MAX_CLAUSE_DEPTH levels
-    bbox      ::= [left, top, right, bottom]      # unit floats, l<r, t<b
-                  # a `with.bbox` REQUIRES `with.label` beside it — what
-                  # the coordinates are (on-screen text heals the press
-                  # to where that text sits today; a description merely
-                  # documents). One string or ≤ MAX_LABEL_READINGS alts.
+    band      ::= top | bottom | left | right     # common.bbox.BANDS
+
+The `at:` box never travels alone: the verb's object says what the
+coordinates ARE (on-screen text heals the press to where that text sits
+today; a description merely documents).
 
 Validation is all-or-nothing (a file failing ANY check is excluded
 whole, never partially loaded), so the runner never meets an unknown
 tool, a bad guard shape, or a dangling placeholder mid-replay. The
 format is deliberately logic-free — fixed linear steps, string-only
-inputs, ``{name}`` substitution, and per-step guards that pass or
-abort — plus one sanctioned conditional, ``skip_when``, an idempotence
-postcondition rather than general branching. A macro's robustness comes
-from staying a dumb replay of a rehearsed path.
+inputs, ``{name}`` substitution, and per-step checks that pass or
+abort — plus one sanctioned conditional, ``when`` / ``skip_when``, an
+idempotence postcondition rather than general branching. A macro's
+robustness comes from staying a dumb replay of a rehearsed path.
 
-Two rules exist for reasons outside this module. Step names are
-identifiers (required, lowercase/digits/hyphens, unique) because
-``start_at`` addresses steps by name. The prose fields — ``description``
-and each input's ``description`` / ``example`` — are single-line and
-length-capped because `store.render_section` renders them verbatim into
-the CACHED system prefix; YAML anchors/aliases are rejected outright so
-no consumer has to be alias-safe.
+A step carries no name: its handle (`idx3-tap-paste`) is derived here
+from its position and its verb line (`model.step_handle`), so every
+step is addressable and nothing in the file exists for the address.
+One rule exists for reasons outside this module. The
+prose fields — ``description`` and each input's ``description`` /
+``example`` — are single-line and length-capped because
+`store.render_section` renders them verbatim into the CACHED system
+prefix; YAML anchors/aliases are rejected outright so no consumer has
+to be alias-safe.
 """
 
 import io
+from collections.abc import Callable
 from typing import Any
 
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
+from physiclaw.common import bbox, gesture_vocab
 from physiclaw.common.placeholders import resolve_placeholders
 from physiclaw.macros.model import (
     ALLOWED_STEP_TOOLS,
+    ARGLESS_TOOLS,
+    BOXED_TOOLS,
     COMBINATORS,
     INPUT_NAME_RE,
     MAX_CLAUSE_DEPTH,
@@ -65,8 +79,8 @@ from physiclaw.macros.model import (
     MAX_RUN_SECONDS,
     MAX_STEPS,
     MAX_WAIT_SECONDS,
+    OBJECT_ARG,
     TARGET_BBOX,
-    TARGET_LABEL,
     WAIT,
     WAIT_SECONDS_ARG,
     Bbox,
@@ -75,9 +89,12 @@ from physiclaw.macros.model import (
     MacroError,
     MacroGuard,
     MacroInput,
+    NotClause,
+    OrClause,
     TextClause,
     check_name,
     checked_readings,
+    step_handle,
 )
 from physiclaw.macros.steps import GestureStep, Step, WaitStep
 from physiclaw.macros.template import TemplateError, placeholders
@@ -85,8 +102,76 @@ from physiclaw.macros.template import TemplateError, placeholders
 # The key vocabulary of each mapping production, in grammar order.
 _TOP_KEYS = {"name", "description", "enabled", "inputs", "steps"}
 _INPUT_KEYS = {"description", "default", "example"}
-_STEP_KEYS = {"tool", "with", "name", "guard", "skip_when", "expect", "hint"}
-_GUARD_KEYS = {"require", "forbid", "hint"}
+# A step is one verb key plus these qualifiers.
+_QUALIFIER_KEYS = {
+    "at",
+    "when",
+    "skip_when",
+    "require",
+    "forbid",
+    "expect",
+    "hint",
+}
+# A swipe's stroke: `size` off the ladder, `speed` off the names — the
+# server's own optional arguments, spelled beside the direction.
+_SWIPE_LADDER: dict[str, tuple[str, ...]] = {
+    "size": tuple(gesture_vocab.SWIPE_DISTANCES),
+    "speed": gesture_vocab.SWIPE_SPEEDS,
+}
+_STEP_KEYS = ALLOWED_STEP_TOOLS | _QUALIFIER_KEYS
+_SWIPE_STEP_KEYS = _STEP_KEYS | _SWIPE_LADDER.keys()
+
+
+def _press_object(tool: str, obj: Any, where: str, step: dict) -> dict:
+    args = {OBJECT_ARG[tool]: obj}
+    checked_readings(args, where, _require_str, MacroError)
+    return args
+
+
+def _swipe_object(tool: str, obj: Any, where: str, step: dict) -> dict:
+    if obj not in gesture_vocab.SWIPE_DIRECTIONS:
+        raise MacroError(
+            f"{where}: `swipe` takes a direction "
+            f"({' / '.join(gesture_vocab.SWIPE_DIRECTIONS)}), got {obj!r}"
+        )
+    args = {OBJECT_ARG[tool]: obj}
+    for name, ladder in _SWIPE_LADDER.items():
+        if name in step:
+            if step[name] not in ladder:
+                raise MacroError(
+                    f"{where}: `{name}` must be one of {', '.join(ladder)} "
+                    f"(got {step[name]!r})"
+                )
+            args[name] = step[name]
+    return args
+
+
+def _clipboard_object(tool: str, obj: Any, where: str, step: dict) -> dict:
+    return {OBJECT_ARG[tool]: _require_str(obj, f"{where}: `{tool}`")}
+
+
+def _wait_object(tool: str, obj: Any, where: str, step: dict) -> dict:
+    return {OBJECT_ARG[tool]: _wait_seconds(obj, where, "expect" in step)}
+
+
+# One record per object-taking verb: how its object (and, for a swipe,
+# the stroke keys beside it) becomes wire arguments, and how the object
+# is spelled — for the error that asks for one. Keyed exactly like
+# `OBJECT_ARG`, which names the wire key; the pin below keeps the two
+# tables the same set of verbs.
+_OBJECTS: dict[str, tuple[Callable[[str, Any, str, dict], dict], str]] = {
+    **{
+        t: (_press_object, f'`- {t}: "Paste"` with `at: [...]`')
+        for t in gesture_vocab.PRESS_TOOLS
+    },
+    gesture_vocab.SWIPE: (_swipe_object, "`- swipe: up` with `at: [...]`"),
+    gesture_vocab.SEND_TO_CLIPBOARD: (
+        _clipboard_object,
+        '`- send_to_clipboard: "{message}"`',
+    ),
+    WAIT: (_wait_object, "`- wait: 2`"),
+}
+assert _OBJECTS.keys() == OBJECT_ARG.keys()
 
 # YAML 1.2 safe loader, pure-python. One instance, load-only.
 _yaml = YAML(typ="safe", pure=True)
@@ -216,105 +301,71 @@ def parse_inputs(raw: Any) -> tuple[MacroInput, ...]:
 def _parse_steps(raw: Any, input_names: set[str]) -> list[Step]:
     """The step list: shape and size here, each step in `_parse_step`,
     then the one check that only the WHOLE list can answer (the wait
-    budget). `seen_names` is the symbol table `start_at` resolution
-    relies on — duplicates are caught at the step that reuses a name, so
-    the error can cite both occupants."""
+    budget)."""
     if not isinstance(raw, list) or not raw:
         raise MacroError("`steps` must be a non-empty list")
     if len(raw) > MAX_STEPS:
         raise MacroError(f"too many steps ({len(raw)} > {MAX_STEPS})")
-    seen_names: dict[str, int] = {}
-    out = [
-        _parse_step(i, step, input_names, seen_names)
-        for i, step in enumerate(raw, start=1)
-    ]
+    out = [_parse_step(i, step, input_names) for i, step in enumerate(raw, start=1)]
     _check_wait_budget(out)
     return out
 
 
-def _parse_step(
-    i: int, step: Any, input_names: set[str], seen_names: dict[str, int]
-) -> Step:
-    """One step: keys, tool, args, name, its checks — in the order that
-    yields the most specific error first (an unknown key beats a bad
-    tool beats a malformed check)."""
+def _parse_step(i: int, step: Any, input_names: set[str]) -> Step:
+    """One step: the verb and its object, `at`, its checks — in
+    the order that yields the most specific error first (an unknown key
+    beats a bad verb beats a malformed check).
+
+    Two spellings: a bare word for an argless verb (`- home_screen`), or
+    a mapping whose ONE verb key carries the object (`- tap: "Paste"`)
+    beside the qualifiers."""
+    where = f"step {i}"
+    if isinstance(step, str):
+        return _argless(i, step)
     if not isinstance(step, dict):
-        raise MacroError(f"step {i} must be a mapping")
-    unknown = sorted(set(step.keys()) - _STEP_KEYS)
+        raise MacroError(
+            f"{where} must be a verb (`- home_screen`) or a mapping (`- tap: ...`)"
+        )
+    keys = set(map(str, step.keys()))
+    verbs = sorted(keys & ALLOWED_STEP_TOOLS)
+    allowed = _SWIPE_STEP_KEYS if gesture_vocab.SWIPE in verbs else _STEP_KEYS
+    unknown = sorted(keys - allowed)
     if unknown:
-        raise MacroError(f"step {i}: unknown key(s): {', '.join(map(str, unknown))}")
-    tool = step.get("tool")
-    if not isinstance(tool, str) or tool not in ALLOWED_STEP_TOOLS:
         raise MacroError(
-            f"step {i}: `tool` must be one of "
-            f"{', '.join(sorted(ALLOWED_STEP_TOOLS))} (got {tool!r})"
+            f"{where}: unknown key(s): {', '.join(unknown)} — a step is one of "
+            f"{', '.join(sorted(ALLOWED_STEP_TOOLS))} plus "
+            f"{', '.join(sorted(_QUALIFIER_KEYS))}"
         )
-    args = step.get("with", {})
-    if not isinstance(args, dict):
-        raise MacroError(f"step {i}: `with` must be a mapping of arguments")
-    _check_placeholders(args, input_names, i)
-    _check_target(args, i)
-    if tool == WAIT:
-        _check_wait_args(args, i, "expect" in step)
-    # Required, identifier-shaped, and unique. A step name is what
-    # `start_at` addresses and what the step log, abort report and run
-    # log show, so an unnamed step is unreachable and unreadable. Same
-    # lowercase/hyphen rule as macro names: it is an identifier, not
-    # prose — no spaces to quote at a shell prompt. Duplicates are
-    # caught here rather than mid-replay.
-    name = _require_str(step.get("name"), f"step {i}: `name`")
-    check_name(
-        name,
-        f"step {i}: `name`",
-        " — it is the identifier `start_at` uses (e.g. `focus-input-box`)",
-    )
-    if name in seen_names:
+    if len(verbs) != 1:
         raise MacroError(
-            f"step {i}: duplicate step name {name!r} (step "
-            f"{seen_names[name]} already uses it) — `start_at` addresses "
-            "steps by name, so they must be unique"
+            f"{where}: exactly one verb per step (one of "
+            f"{', '.join(sorted(ALLOWED_STEP_TOOLS))}); got "
+            f"{', '.join(verbs) or 'none'}"
         )
-    seen_names[name] = i
-    if "expect" in step and tool != WAIT:
-        # Deliberately wait-only. A gesture's own view is captured ~2s
-        # after the touch and is the SAME frame the next step's guard
-        # reads for free — so `expect` there asserts nothing new, just
-        # a second name for one check on one frame. Forcing a `wait`
-        # step also forces real settle time, which ~2s often isn't.
+    tool = verbs[0]
+    args = _step_args(tool, step, where, input_names)
+    name = step_handle(i, tool, args)
+    skip_when = _parse_skip_when(step, where, input_names)
+    hint = _opt_str(step.get("hint"), f"{where}: `hint`") or ""
+    guard = _parse_guard(step, where, input_names, hint)
+    expect = _parse_expect(step, tool, where, input_names)
+    # One `hint` per step: it steers the recovery when THIS step's checks
+    # fail, so it rides the guard and the expect alike — and needs one.
+    if hint and guard is None and expect is None:
         raise MacroError(
-            f"step {i}: `expect` belongs to a `wait` step, not to "
-            f"{tool!r} — to check what this step produced, add a step "
-            "after it: `- {name: confirm, tool: wait, with: {seconds: 1}, "
-            'expect: "..."}`'
+            f"{where}: `hint` steers the recovery when a check fails, so it "
+            "needs a `require`, `forbid` or `expect` to belong to"
         )
-    if "expect" in step and "skip_when" in step:
+    if expect is not None and skip_when is not None:
         # A skipped step never reaches its `expect`, so the weaker check
         # would silently disable the stronger one — and they are judged
         # on different frames besides (skip on the previous step's,
         # expect on a fresh post-sleep peek).
         raise MacroError(
-            f"step {i}: `skip_when` and `expect` on one step contradict "
+            f"{where}: `when`/`skip_when` and `expect` on one step contradict "
             "each other — a skipped step never runs its `expect`. Split "
             "them into two steps."
         )
-    expect = (
-        _parse_check(step.get("expect"), f"step {i}: `expect`", input_names)
-        if "expect" in step
-        else None
-    )
-    hint = _opt_str(step.get("hint"), f"step {i}: `hint`") or ""
-    if hint and expect is None:
-        raise MacroError(
-            f"step {i}: `hint` steers the recovery when `expect` fails, "
-            "so it needs an `expect` to belong to (a guard carries its "
-            "own `hint` inside `guard`)"
-        )
-    guard = _parse_guard(step["guard"], i, input_names) if "guard" in step else None
-    skip_when = (
-        _parse_check(step.get("skip_when"), f"step {i}: `skip_when`", input_names)
-        if "skip_when" in step
-        else None
-    )
     # The one place the DSL's two step kinds are chosen. Everything
     # downstream is polymorphic, so this `if` has no siblings.
     if tool == WAIT:
@@ -327,74 +378,146 @@ def _parse_step(
             hint=hint,
         )
     return GestureStep(
-        name=name, guard=guard, skip_when=skip_when, mcp_tool=tool, args=dict(args)
+        name=name, guard=guard, skip_when=skip_when, mcp_tool=tool, args=args
     )
 
 
-def _check_target(args: dict, step_no: int) -> None:
-    """The gesture-target pairing rule: a `bbox` never travels alone —
-    the `label` beside it says what the coordinates ARE (and lets the
-    runner heal a press to where that text sits today), and a `label`
-    without a `bbox` has nothing to describe. Enforced on the `with:`
-    shape, not per tool: every bbox-taking gesture reads the same way."""
-    where = f"step {step_no}"
-    has_bbox, has_label = TARGET_BBOX in args, TARGET_LABEL in args
-    if has_bbox and not has_label:
+def _argless(i: int, verb: str) -> Step:
+    """The bare-word step: a verb that takes no object and no qualifier."""
+    where = f"step {i}"
+    if verb not in ALLOWED_STEP_TOOLS:
         raise MacroError(
-            f"{where}: `bbox` needs a `label` beside it — the label says "
-            "what the coordinates are (the element's own on-screen text, "
-            "or a plain description for icons and blank areas)"
+            f"{where}: {verb!r} is not a step verb — one of "
+            f"{', '.join(sorted(ALLOWED_STEP_TOOLS))}"
         )
-    if has_label and not has_bbox:
-        raise MacroError(
-            f"{where}: `label` describes a `bbox` — it has nothing to label without one"
-        )
-    if not has_label:
-        return
-    raw_bbox = args[TARGET_BBOX]
-    if not (isinstance(raw_bbox, list) and any(isinstance(v, str) for v in raw_bbox)):
-        # The runner now READS this value (healing measures drift from
-        # its center), so a literal target must not reach it malformed —
-        # the same argument `_check_wait_args` makes for `wait`. A bbox
-        # carrying `{placeholder}` strings stays server-checked (the
-        # placeholder pass above already vetted the names).
-        _bbox(raw_bbox, f"{where}: `bbox`")
-    checked_readings(args, where, _require_str, MacroError)
+    if verb not in ARGLESS_TOOLS:
+        raise MacroError(f"{where}: `{verb}` takes an object — write {_example(verb)}")
+    return GestureStep(name=step_handle(i, verb, {}), mcp_tool=verb)
 
 
-def _check_wait_args(args: dict, step_no: int, has_expect: bool) -> None:
+def _step_args(tool: str, step: dict, where: str, input_names: set[str]) -> dict:
+    """The verb's object and `at:` → the wire arguments, validated per
+    verb: a press wants a label (one string or readings of ONE target)
+    with `at`; a swipe a direction with `at`; the clipboard its text;
+    `wait` its seconds; an argless verb nothing at all."""
+    obj = step[tool]
+    at = step.get("at")
+    if "at" in step and tool not in BOXED_TOOLS:
+        raise MacroError(
+            f"{where}: `at` belongs to a press or swipe — {tool!r} takes no box"
+        )
+    if tool in BOXED_TOOLS and at is None:
+        raise MacroError(
+            f"{where}: `{tool}` needs `at: [left, top, right, bottom]` — the box "
+            "the gesture lands on (the object says what sits there)"
+        )
+    if tool in ARGLESS_TOOLS:
+        if obj is not None:
+            raise MacroError(
+                f"{where}: `{tool}` takes no object — write `- {tool}` (or "
+                f"`{tool}:` with nothing after it when it carries qualifiers)"
+            )
+        return {}
+    if obj is None:
+        raise MacroError(f"{where}: `{tool}` needs its object — e.g. {_example(tool)}")
+    # Placeholders in the object are vetted here, once — and the
+    # unquoted-`{placeholder}` trap (a mapping) gets its own hint before
+    # the string check could call it "not a string".
+    _check_placeholders(obj, input_names, where)
+    parse_object, _ = _OBJECTS[tool]
+    args = parse_object(tool, obj, where, step)
+    if at is not None:
+        if not (isinstance(at, list) and any(isinstance(v, str) for v in at)):
+            # The runner READS this value (healing measures drift from
+            # its center), so a literal box must not reach it malformed.
+            # A box carrying `{placeholder}` strings stays server-checked
+            # (the placeholder pass below vets the names).
+            _box(at, f"{where}: `at`")
+        _check_placeholders(at, input_names, where)
+        args[TARGET_BBOX] = at
+    return args
+
+
+def _example(tool: str) -> str:
+    return _OBJECTS[tool][1]
+
+
+def _parse_skip_when(step: dict, where: str, input_names: set[str]) -> Clause | None:
+    """`when` / `skip_when` → the one skip clause. `skip_when: X` skips the
+    step while X shows; `when: X` runs it only while X shows, i.e. skips
+    unless X — stored as `{not: X}` so the runner has one rule."""
+    if "when" in step and "skip_when" in step:
+        raise MacroError(
+            f"{where}: `when` and `skip_when` on one step contradict each other — "
+            "keep the one that reads naturally"
+        )
+    if "skip_when" in step:
+        return _parse_check(step["skip_when"], f"{where}: `skip_when`", input_names)
+    if "when" in step:
+        return NotClause(
+            child=_parse_check(step["when"], f"{where}: `when`", input_names)
+        )
+    return None
+
+
+def _parse_guard(
+    step: dict, where: str, input_names: set[str], hint: str
+) -> MacroGuard | None:
+    """`require` / `forbid` beside the verb → the pre-step gate, the step's
+    `hint` riding it."""
+    require = (
+        _parse_check(step["require"], f"{where}: `require`", input_names)
+        if "require" in step
+        else None
+    )
+    forbid = (
+        _parse_check(step["forbid"], f"{where}: `forbid`", input_names)
+        if "forbid" in step
+        else None
+    )
+    if require is None and forbid is None:
+        return None
+    return MacroGuard(require=require, forbid=forbid, hint=hint)
+
+
+def _parse_expect(
+    step: dict, tool: str, where: str, input_names: set[str]
+) -> Clause | None:
+    """`expect`, a wait step's post-sleep check."""
+    if "expect" not in step:
+        return None
+    if tool != WAIT:
+        # Deliberately wait-only. A gesture's own view is captured ~2s
+        # after the touch and is the SAME frame the next step's checks
+        # read for free — so `expect` there asserts nothing new, just
+        # a second name for one check on one frame. Forcing a `wait`
+        # step also forces real settle time, which ~2s often isn't.
+        raise MacroError(
+            f"{where}: `expect` belongs to a `wait` step, not to {tool!r} — to "
+            "check what this step produced, add a step after it: "
+            '`- wait: 1` with `expect: "..."`'
+        )
+    return _parse_check(step["expect"], f"{where}: `expect`", input_names)
+
+
+def _wait_seconds(raw: Any, where: str, has_expect: bool) -> int:
     """`wait` is the one step the MCP server never sees, so nothing
-    downstream will reject a malformed one — validate it here or it fails on
-    the rig mid-run."""
-    where = f"step {step_no}: `wait`"
-    unknown = sorted(set(args.keys()) - {WAIT_SECONDS_ARG})
-    if unknown:
+    downstream will reject a malformed one — validate it here or it fails
+    on the rig mid-run."""
+    if isinstance(raw, bool) or not isinstance(raw, int):
         raise MacroError(
-            f"{where}: unknown argument(s): {', '.join(map(str, unknown))} "
-            f"(want only `{WAIT_SECONDS_ARG}`)"
+            f"{where}: `wait` takes a whole number of seconds (got {raw!r})"
         )
-    if WAIT_SECONDS_ARG not in args:
-        raise MacroError(
-            f"{where} needs `{WAIT_SECONDS_ARG}` — e.g. "
-            f"`with: {{{WAIT_SECONDS_ARG}: 3}}`"
-        )
-    seconds = args[WAIT_SECONDS_ARG]
-    if isinstance(seconds, bool) or not isinstance(seconds, int):
-        raise MacroError(
-            f"{where}.{WAIT_SECONDS_ARG} must be a whole number of seconds "
-            f"(got {seconds!r})"
-        )
-    if not 0 <= seconds <= MAX_WAIT_SECONDS:
-        raise MacroError(
-            f"{where}.{WAIT_SECONDS_ARG} must be 0–{MAX_WAIT_SECONDS} (got {seconds})"
-        )
-    if seconds == 0 and not has_expect:
+    if not 0 <= raw <= MAX_WAIT_SECONDS:
+        raise MacroError(f"{where}: `wait` must be 0–{MAX_WAIT_SECONDS} (got {raw})")
+    if raw == 0 and not has_expect:
         # 0 earns its place only as "check now": a `wait` with neither sleep
         # nor assertion is a step that does nothing at all.
         raise MacroError(
-            f"{where}.{WAIT_SECONDS_ARG}: 0 is only meaningful with an "
-            "`expect` — a wait that neither sleeps nor checks does nothing"
+            f"{where}: `wait: 0` is only meaningful with an `expect` — a wait "
+            "that neither sleeps nor checks does nothing"
         )
+    return raw
 
 
 def _check_wait_budget(steps: list[Step]) -> None:
@@ -411,58 +534,16 @@ def _check_wait_budget(steps: list[Step]) -> None:
         )
 
 
-# ---------- guards ----------
-
-
-def _parse_guard(raw: Any, step_no: int, input_names: set[str]) -> MacroGuard | None:
-    if raw is None:
-        raise MacroError(
-            f"step {step_no}: `guard` is empty — write `require` and/or "
-            '`forbid`, e.g. `guard: {require: "WeChat"}`. Delete the key '
-            "entirely if this step needs no gate."
-        )
-    where = f"step {step_no}: `guard`"
-    if not isinstance(raw, dict):
-        raise MacroError(f"{where} must be a mapping")
-    if "wait_seconds" in raw:
-        # Named explicitly rather than falling into "unknown key": this key
-        # was real, and the replacement is a different shape, so say so.
-        raise MacroError(
-            f"{where}.wait_seconds was removed — a guard now only checks. "
-            "To settle before the check, put a step before it: "
-            "`- {name: settle, tool: wait, with: {seconds: 3}}`"
-        )
-    unknown = sorted(set(raw.keys()) - _GUARD_KEYS)
-    if unknown:
-        raise MacroError(f"{where}: unknown key(s): {', '.join(unknown)}")
-    require = (
-        _parse_check(raw["require"], f"{where}.require", input_names)
-        if "require" in raw
-        else None
-    )
-    forbid = (
-        _parse_check(raw["forbid"], f"{where}.forbid", input_names)
-        if "forbid" in raw
-        else None
-    )
-    if require is None and forbid is None:
-        raise MacroError(f"{where} needs `require` and/or `forbid`")
-    hint = _opt_str(raw.get("hint"), f"{where}.hint") or ""
-    return MacroGuard(require=require, forbid=forbid, hint=hint)
-
-
 # ---------- checks and the clause grammar ----------
 
 
 def _parse_check(raw: Any, where: str, input_names: set[str]) -> Clause:
-    """THE check shape — `require`, `forbid`, `expect`, `skip_when` all take
-    exactly one clause, so there is nothing positional to remember. Parses
+    """THE check shape — `require`, `forbid`, `expect`, `when`, `skip_when`
+    all take exactly one clause, so there is nothing positional to remember. Parses
     the clause expression, then runs the leaf-level validation passes.
 
-    They were lists once (implicitly AND-ed) and `forbid` was a flat list of
-    bare strings. That made bracket shape carry meaning: a list meant AND at
-    the top level and was an error one level down. Spelling conjunction
-    `{and: [...]}` costs six characters and removes the rule."""
+    A list is any-of (the alternate-readings shape the whole format uses);
+    conjunction is spelled `{and: [...]}`."""
     if raw is None:
         # The key was written and left empty. Silently reading that as
         # "no check" would drop a guard the author believed they had.
@@ -479,15 +560,20 @@ def _parse_check(raw: Any, where: str, input_names: set[str]) -> Clause:
 def _clause_expr(
     v: Any, where: str, scope: Bbox | None = None, depth: int = 0
 ) -> Clause:
-    """The recursive clause production, in one of four forms:
+    """The recursive clause production, in one of five forms:
 
         "WeChat"                                whole-screen substring
-        {text: "微信", within: [l,t,r,b]}        element-granular, region-scoped
+        ["WeChat", "Weixin"]                    any of them
+        {text: "微信", within: top}              element-granular, scoped to a
+                                                band or a [l,t,r,b] box; text
+                                                may list alternates
         {or: [c, c, ...]}  {and: [c, c, ...]}   combinators, spelled out
         {not: c}                                negation
 
     The combinators nest, so `{or: [{not: x}, {and: [y, z]}]}` is legal and
-    means what it reads as.
+    means what it reads as. A bare list is `or` — the same "alternate
+    readings" shape a press label and a page anchor take, so one list
+    means one thing everywhere in the format.
 
     Any of them may also carry `within`, which SCOPES the whole subtree —
     `{or: ["space", "空格"], within: [...]}` beats repeating the same bbox
@@ -500,10 +586,15 @@ def _clause_expr(
     `MAX_CLAUSE_DEPTH` — see there for why. Leaves are free: the cap is on
     nesting, not on how many alternatives an `or` lists."""
     if isinstance(v, list):
-        raise MacroError(
-            f"{where}: a bare list is not a clause — write the operator: "
-            "{or: [...]} for any-of, {and: [...]} for all-of"
-        )
+        # A list is `or` without the word — and counts as a level like
+        # one, so dropping the operator name cannot dodge the cap.
+        depth += 1
+        if depth > MAX_CLAUSE_DEPTH:
+            raise MacroError(
+                f"{where}: clauses may nest at most {MAX_CLAUSE_DEPTH} levels — "
+                "flatten the list"
+            )
+        return _any_of([_clause_expr(k, where, scope, depth) for k in v], where)
     if not isinstance(v, dict):
         # A string leaf, or the YAML coercion trap (`require: [true]`,
         # `require: [007]`) — the strict string check accepts the first and
@@ -533,7 +624,7 @@ def _clause_expr(
                 "genuinely needs more belongs in two steps."
             )
         build, arity = COMBINATORS[op]
-        inner = _bbox(v["within"], f"{where}.within") if "within" in v else scope
+        inner = _within(v["within"], f"{where}.within") if "within" in v else scope
         if arity == 1:
             return build((_clause_expr(v[op], f"{where}.{op}", inner, depth),))
         kids = v[op]
@@ -562,29 +653,33 @@ def _region_clause(raw: dict, where: str, scope: Bbox | None = None) -> Clause:
             f"{where} mapping item needs `within` — either on the item or on "
             f"an enclosing {_operator_list()}"
         )
-    if isinstance(raw["text"], list):
-        raise MacroError(
-            f"{where}.text must be a single string — for alternatives use "
-            '{or: ["a", "b"], within: [...]}'
-        )
-    within = _bbox(raw["within"], f"{where}.within") if "within" in raw else scope
-    return TextClause(text=_require_str(raw["text"], f"{where}.text"), within=within)
+    within = _within(raw["within"], f"{where}.within") if "within" in raw else scope
+    readings = checked_readings(raw, where, _require_str, MacroError, key="text")
+    return _any_of([TextClause(text=t, within=within) for t in readings], where)
 
 
-def _bbox(value: Any, where: str) -> Bbox:
-    ok = (
-        isinstance(value, list)
-        and len(value) == 4
-        and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in value)
-    )
-    if not ok:
-        raise MacroError(f"{where} must be [left, top, right, bottom] numbers (0–1)")
-    left, top, right, bottom = (float(v) for v in value)
-    if not (0 <= left < right <= 1 and 0 <= top < bottom <= 1):
-        raise MacroError(
-            f"{where} must satisfy 0 ≤ left < right ≤ 1 and 0 ≤ top < bottom ≤ 1"
-        )
-    return (left, top, right, bottom)
+def _any_of(kids: list[Clause], where: str) -> Clause:
+    """A list of alternates → the one clause that means any of them: the
+    child itself when there is one, else `or`."""
+    if not kids:
+        raise MacroError(f"{where}: an empty list matches nothing — list a reading")
+    return kids[0] if len(kids) == 1 else OrClause(children=tuple(kids))
+
+
+def _within(value: Any, where: str) -> Bbox:
+    """A check's `within:` — a band name or a box, read by the one
+    shared parser (`common.bbox.parse_within`)."""
+    try:
+        return bbox.parse_within(value)
+    except (ValueError, TypeError) as e:
+        raise MacroError(f"{where}: {e}") from e
+
+
+def _box(value: Any, where: str) -> Bbox:
+    try:
+        return bbox.parse_box(value)
+    except (ValueError, TypeError) as e:
+        raise MacroError(f"{where}: {e}") from e
 
 
 def _operator_list() -> str:
@@ -619,8 +714,8 @@ def _check_single_chars(clause: Clause, where: str) -> None:
 def _check_clause_placeholders(
     clause: Clause, input_names: set[str], where: str
 ) -> None:
-    """Every `{name}` in a check must name a declared input, exactly as in a
-    `with:` table. Undeclared names used to be accepted and then matched
+    """Every `{name}` in a check must name a declared input, exactly as in
+    a step's arguments. Undeclared names used to be accepted and then matched
     literally at replay — silently inverting `forbid`/`skip_when`, which a
     never-present string satisfies. `placeholders` also raises on a stray
     brace, so a typo'd template fails at load rather than on the rig."""
@@ -635,11 +730,11 @@ def _check_clause_placeholders(
             )
 
 
-# ---------- placeholder validation for `with:` tables ----------
+# ---------- placeholder validation for step arguments ----------
 
 
-def _check_placeholders(value: Any, input_names: set[str], step_no: int) -> None:
-    """Validate every `{name}` in a step's `with:` table, walking each
+def _check_placeholders(value: Any, input_names: set[str], where: str) -> None:
+    """Validate every `{name}` in a step's arguments, walking each
     container at most once.
 
     A repeat is REJECTED, not skipped: sharing identity means an alias (two
@@ -650,15 +745,15 @@ def _check_placeholders(value: Any, input_names: set[str], step_no: int) -> None
     blow up identically, on the phone, mid-run. `_reject_aliases` already
     refused anchors document-wide, so this walk only checks names."""
     if isinstance(value, str):
-        undeclared = sorted(_names_in(value, f"step {step_no}") - input_names)
+        undeclared = sorted(_names_in(value, where) - input_names)
         if undeclared:
             raise MacroError(
-                f"step {step_no}: placeholder(s) {', '.join(undeclared)} "
+                f"{where}: placeholder(s) {', '.join(undeclared)} "
                 "not declared under `inputs`"
             )
     elif isinstance(value, list):
         for v in value:
-            _check_placeholders(v, input_names, step_no)
+            _check_placeholders(v, input_names, where)
     elif isinstance(value, dict):
         # An unquoted `text: {message}` is YAML flow-mapping syntax, not a
         # placeholder — the classic mistake. Detect the exact shape and
@@ -667,11 +762,11 @@ def _check_placeholders(value: Any, input_names: set[str], step_no: int) -> None
             (k, v), *_ = value.items()
             if v is None and isinstance(k, str) and INPUT_NAME_RE.match(k):
                 raise MacroError(
-                    f"step {step_no}: {{{k}}} was parsed as a YAML mapping — "
+                    f"{where}: {{{k}}} was parsed as a YAML mapping — "
                     f'quote placeholder strings: "{{{k}}}"'
                 )
         for v in value.values():
-            _check_placeholders(v, input_names, step_no)
+            _check_placeholders(v, input_names, where)
 
 
 def _names_in(text: str, where: str) -> set[str]:

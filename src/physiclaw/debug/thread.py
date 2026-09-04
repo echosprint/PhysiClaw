@@ -35,7 +35,7 @@ from physiclaw.common.listing import Element, format_elements
 from physiclaw.common.logger import write_json_atomic
 from physiclaw.common.text import read_text
 from physiclaw.conductor.spec.conventions import CHANNEL_APP, THREAD_PAGE
-from physiclaw.conductor.spec.pages import REGIONS, PagePrint, prints_for_app
+from physiclaw.conductor.spec.pages import PagePrint, prints_for_app
 
 log = logging.getLogger(__name__)
 
@@ -208,8 +208,8 @@ def _anchor_elements(pp: PagePrint | None) -> list[Element]:
         la = pp.learned.anchors.get(a.text) if pp.learned else None
         if la is not None:
             cx, cy = la.cx, la.cy
-        elif a.region is not None:
-            band = REGIONS[a.region]
+        elif a.within is not None:
+            band = a.within
             cx, cy = (band[0] + band[2]) / 2, (band[1] + band[3]) / 2
         else:
             cx, cy = 0.5, 0.03 + i * 0.045

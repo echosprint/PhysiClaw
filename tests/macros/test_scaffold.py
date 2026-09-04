@@ -16,11 +16,14 @@ from physiclaw.macros.parse import parse_macro
 from physiclaw.macros.scaffold import README_CONTENT, render_init
 from physiclaw.macros.steps import Step
 
+# The scaffold's steps by position: dock icon → settle → thread →
+# clipboard → focus → long-press → paste. Unnamed on purpose (the
+# scaffold teaches that `name:` is optional), so tests address them here.
+HOME, OPEN, SETTLE, THREAD, CLIP, FOCUS, HOLD, PASTE = range(8)
 
-def _step(spec: Macro, name: str) -> Step:
-    """Address a scaffold step by name — the assertions below are about
-    each step's shape, and should not break when one is inserted."""
-    return next(s for s in spec.steps if s.name == name)
+
+def _steps(spec: Macro) -> tuple[Step, ...]:
+    return spec.steps
 
 
 # ---------- render_init ----------
@@ -44,16 +47,18 @@ def test_render_init_declares_the_example_input() -> None:
     assert spec.inputs[0].required is True
 
 
-def test_render_init_documents_all_guard_shapes() -> None:
-    # The check forms (any-of list, region-scoped mapping, forbid, the
-    # wait+expect settle, hint) must all appear — teaching by example.
+def test_render_init_documents_all_check_shapes() -> None:
+    # The check forms (alternate readings, a band, a region-scoped
+    # mapping, forbid, skip_when, the wait+expect settle, hint) must all
+    # appear — teaching by example.
     text = render_init("my-macro")
 
-    assert 'or: ["WeChat", "Weixin"' in text  # any-of alternatives
+    assert 'text: ["WeChat", "Weixin"' in text  # alternate readings
+    assert "within: top" in text  # a band name
     assert 'text: "Paste", within: [0.03, 0.5, 0.35, 0.62]' in text  # region-scoped
     assert "forbid:" in text
-    assert "tool: wait" in text
-    assert "seconds:" in text
+    assert "skip_when:" in text
+    assert "- wait: 2" in text
     assert "expect:" in text
     assert "hint:" in text
 
@@ -75,8 +80,8 @@ def test_render_init_is_the_real_wechat_flow_stopping_before_send() -> None:
         "long_press",
         "tap",
     ]
-    assert spec.steps[-1].name == "paste"
-    assert not any("send" in s.name.lower() for s in spec.steps)
+    assert spec.steps[PASTE].object == "'Paste'"
+    assert not any("send" in s.object.lower() for s in spec.steps)
     assert "NO send step" in render_init("my-macro")
 
 
@@ -87,7 +92,7 @@ def test_render_init_focus_step_skips_when_keyboard_already_up() -> None:
     # safe because single-char texts match whole element labels only.
     spec = parse_macro(render_init("my-macro"), "my-macro")
 
-    focus = _step(spec, "focus-input-box")
+    focus = _steps(spec)[FOCUS]
 
     assert focus.skip_when is not None
     clause = focus.skip_when
@@ -104,7 +109,7 @@ def test_render_init_thread_step_skips_when_already_in_the_chat() -> None:
     # skip when the title bar already shows the user (placeholder to edit).
     spec = parse_macro(render_init("my-macro"), "my-macro")
 
-    thread = _step(spec, "open-chat")
+    thread = _steps(spec)[THREAD]
 
     assert thread.skip_when is not None
     assert thread.skip_when.text == "your-user-name"
@@ -118,7 +123,7 @@ def test_render_init_waits_for_the_launch_on_a_settle_step() -> None:
     # the `wait` that also buys the cold start.
     spec = parse_macro(render_init("my-macro"), "my-macro")
 
-    opener, settle = _step(spec, "open-wechat"), _step(spec, "await-wechat")
+    opener, settle = _steps(spec)[OPEN], _steps(spec)[SETTLE]
 
     assert opener.guard is None
     assert settle.tool == "wait"
@@ -133,11 +138,11 @@ def test_render_init_waits_for_the_launch_on_a_settle_step() -> None:
 def test_render_init_settle_guard_accepts_both_landing_states() -> None:
     # WeChat reopens where it was left, so the title bar reads the app name
     # OR the chat's. A settle `expect` listing only the app name aborts
-    # exactly the case the NEXT step's skip_when exists to absorb — the two
+    # exactly the case the NEXT step's `skip_when` exists to absorb — the two
     # must agree, so pin them to each other rather than to literals.
     spec = parse_macro(render_init("my-macro"), "my-macro")
 
-    settle, thread = _step(spec, "await-wechat"), _step(spec, "open-chat")
+    settle, thread = _steps(spec)[SETTLE], _steps(spec)[THREAD]
     assert settle.expect is not None
 
     accepted = {c.text for c in settle.expect.children}
@@ -153,8 +158,8 @@ def test_render_init_guards_the_fixed_row_tap_and_the_paste() -> None:
     # tapping it, the paste bubble must be up before tapping Paste.
     spec = parse_macro(render_init("my-macro"), "my-macro")
 
-    row_guard = _step(spec, "open-chat").guard
-    paste_guard = _step(spec, "paste").guard
+    row_guard = _steps(spec)[THREAD].guard
+    paste_guard = _steps(spec)[PASTE].guard
 
     assert row_guard is not None
     assert row_guard.require.within is not None
@@ -175,8 +180,8 @@ def test_render_init_derives_the_tool_list() -> None:
 def test_readme_derives_tools_and_caps() -> None:
     assert ", ".join(sorted(ALLOWED_STEP_TOOLS)) in README_CONTENT
     assert f"max {MAX_INPUTS}" in README_CONTENT
-    assert f"Max {MAX_STEPS} steps" in README_CONTENT
-    assert f"1–{MAX_WAIT_SECONDS}" in README_CONTENT
+    assert f"max {MAX_STEPS}" in README_CONTENT
+    assert f"0–{MAX_WAIT_SECONDS}" in README_CONTENT
 
 
 def test_readme_documents_the_yaml_quoting_gotcha() -> None:

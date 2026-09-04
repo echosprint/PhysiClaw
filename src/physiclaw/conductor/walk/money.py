@@ -4,7 +4,7 @@ Two pure functions, deliberately free of walk state so the money
 rules can be read (and audited) without the state machine around them.
 The walk supplies the numbers and acts on the answers:
 
-  - `declared_total` — the amount beside the label the ask's `total:`
+  - `declared_total` — the amount beside the label the ask's `total_label:`
     names: the number the user is quoted and consents to.
   - `amounts` — every amount the screen shows; the ask records this
     set as what the user SAW, the fire-time check reads the sheet the

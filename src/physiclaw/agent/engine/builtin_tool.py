@@ -726,9 +726,9 @@ _RUN_MACRO_SCHEMA = {
         "start_at": {
             "type": "string",
             "description": (
-                "Optional. Begin at this step NAME (as listed under the "
-                "macro's `steps:` in `## Available Macros`) instead of the "
-                "first, for when you already did the leading steps by hand. "
+                "Optional. Begin at this step (a handle from the macro's "
+                "`steps:` list in `## Available Macros`) instead of the first, "
+                "for when you already did the leading steps by hand. "
                 "The skipped steps are NOT executed. Omit to run the whole "
                 "macro."
             ),

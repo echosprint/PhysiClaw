@@ -27,17 +27,17 @@ placeholders:
 landmarks:
   dismiss:
     label: "scrim"
-    bbox: [0.35, 0.16, 0.65, 0.24]
+    at: [0.35, 0.16, 0.65, 0.24]
 pages:
   home:
     anchors: ["Files"]
-    recover: {tool: force_quit}
+    recover: force_quit
   results:
     anchors: ["综合"]
     recover:
-      occluded: {tool: tap, with: landmarks.dismiss}
+      covered: {tap: landmarks.dismiss}
       elsewhere: {macro: launch}
-      limit: 2
+    tries: 2
 """
 
 BUY = """\
@@ -51,6 +51,7 @@ route:
     macro: launch
   - page: home
   - do: search
+    macro: search
     with: {message: "{inputs.keyword}"}
   - page: results
   - agent: pick
@@ -73,7 +74,7 @@ route:
     macro: search
     with: {message: "orders"}
   - page: results
-    recover: {tool: go_back}
+    recover: go_back
   - tell: done
     message: "<<CONTACT>>, your order is on its way"
 """
@@ -119,11 +120,11 @@ def test_manifest_hands_are_inherited_and_a_route_may_override(shop) -> None:
 
     # buy declares nothing: it walks with the manifest's hands as is.
     assert buy.recovers["home"].elsewhere == RecoverHand(tool="force_quit")
-    assert buy.recovers["results"].occluded == RecoverHand(
+    assert buy.recovers["results"].covered == RecoverHand(
         tool="tap", landmark="dismiss"
     )
     assert buy.recovers["results"].elsewhere == RecoverHand(macro="launch")
-    assert buy.recovers["results"].limit == 2
+    assert buy.recovers["results"].tries == 2
     # track overrides results for its own walk and still inherits home.
     assert track.recovers["results"].elsewhere == RecoverHand(tool="go_back")
     assert track.recovers["home"] == buy.recovers["home"]
@@ -174,7 +175,7 @@ def test_manifest_hand_must_name_a_recorded_macro_never_a_body(shop) -> None:
     (shop / "PLAYBOOK.yml").write_text(
         MANIFEST.replace(
             "elsewhere: {macro: launch}",
-            "elsewhere: {macro: {steps: [{name: x, tool: home_screen}]}}",
+            "elsewhere: {macro: {steps: [home_screen]}}\n",
         ),
         encoding="utf-8",
     )
@@ -188,7 +189,7 @@ def test_manifest_hand_on_an_undeclared_page_is_refused(shop) -> None:
     # A page entry with a hand and no anchors is not a declaration: the
     # pack refuses it as a page, before any route could inherit it.
     (shop / "PLAYBOOK.yml").write_text(
-        MANIFEST + "  ghost:\n    recover: {tool: go_back}\n", encoding="utf-8"
+        MANIFEST + "  ghost:\n    recover: go_back\n", encoding="utf-8"
     )
 
     with pytest.raises(PlaybookError, match="ghost"):

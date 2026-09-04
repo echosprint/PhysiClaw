@@ -17,11 +17,16 @@ from physiclaw.macros.steps import GestureStep
 # ---------- display ----------
 
 
-def test_step_display_shows_tool_and_name() -> None:
-    # Every step is named (parse enforces it), so display has no bare form.
-    step = GestureStep(mcp_tool="send_to_clipboard", args={}, name="stage-text")
+def test_step_display_shows_verb_and_object() -> None:
+    # The step log reads like the file: the verb and what it acts on.
+    step = GestureStep(mcp_tool="send_to_clipboard", args={"text": "hi"}, name="3")
+    press = GestureStep(
+        mcp_tool="tap", args={"label": ["A", "B"], "bbox": []}, name="1"
+    )
 
-    assert step.display() == 'send_to_clipboard "stage-text"'
+    assert step.display() == "send_to_clipboard 'hi'"
+    assert press.display() == "tap 'A' / 'B'"
+    assert GestureStep(mcp_tool="home_screen", name="2").display() == "home_screen"
 
 
 def test_require_clause_display_plain_and_group() -> None:

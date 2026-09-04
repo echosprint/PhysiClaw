@@ -275,16 +275,22 @@ def list_cmd() -> None:
         return
     for app in apps:
         typer.echo(f"{app}/")
-        for e in pb.scan_playbooks(app):
+        try:
+            entries = pb.scan_playbooks(app)
+        except pb.PlaybookError as e:
+            typer.echo(f"  {step_fail(str(e))}")
+            continue
+        for entry in entries:
             tag = state_tag(
-                valid=e.spec is not None, enabled=bool(e.spec and e.spec.enabled)
+                valid=entry.spec is not None,
+                enabled=bool(entry.spec and entry.spec.enabled),
             )
             detail = (
-                (e.error or "")
-                if e.spec is None
-                else f"{e.spec.description} ({len(e.spec.nodes)} nodes)"
+                (entry.error or "")
+                if entry.spec is None
+                else f"{entry.spec.description} ({len(entry.spec.nodes)} nodes)"
             )
-            typer.echo(f"  {tag} {e.name}  {detail}")
+            typer.echo(f"  {tag} {entry.name}  {detail}")
 
 
 @playbooks_app.command()
@@ -374,12 +380,16 @@ def step(
     ] = None,
     start_at: Annotated[
         str,
-        typer.Option("--start-at", help="Begin this node's macro at the step NAME."),
+        typer.Option(
+            "--start-at",
+            help="Begin this node's macro at this step (its handle).",
+        ),
     ] = "",
     stop_after: Annotated[
         str,
         typer.Option(
-            "--stop-after", help="Stop this node's macro after the step NAME."
+            "--stop-after",
+            help="Stop this node's macro after this step (same handle).",
         ),
     ] = "",
     verbose: VerboseOpt = False,

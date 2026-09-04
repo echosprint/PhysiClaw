@@ -266,9 +266,8 @@ CHANNEL_OPEN = """\
 name: open
 description: open the thread
 steps:
-  - name: go
-    tool: tap
-    with: {label: t, bbox: [0.1, 0.1, 0.2, 0.2]}
+  - tap: t
+    at: [0.1, 0.1, 0.2, 0.2]
 """
 
 

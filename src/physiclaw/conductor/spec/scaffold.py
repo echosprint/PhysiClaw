@@ -8,6 +8,7 @@ interpolate from `playbook`/`calls` constants, never hand-copied."""
 import logging
 from pathlib import Path
 
+from physiclaw.common.bbox import BANDS
 from physiclaw.common.paths import PACK_FILENAME
 from physiclaw.conductor.spec import specfile
 from physiclaw.conductor.spec.calls import AGENT_TOOLS
@@ -28,7 +29,6 @@ from physiclaw.conductor.spec.limits import (
     DEFAULT_RECOVER_LIMIT,
     MAX_AGENT_CALLS,
     MAX_NODES,
-    MAX_RECOVER_ACTIONS,
 )
 from physiclaw.conductor.spec.model import (
     IRREVERSIBLE_CLASSES,
@@ -37,7 +37,7 @@ from physiclaw.conductor.spec.model import (
     check_name,
 )
 from physiclaw.conductor.spec.route import (
-    RECOVER_TOOLS,
+    BARE_HANDS,
 )
 from physiclaw.macros import scaffold as macro_scaffold
 from physiclaw.macros.model import MACRO_FILENAME, MAX_INPUTS
@@ -93,9 +93,9 @@ def render_playbook_stub(app: str) -> str:
         max_agent_calls=MAX_AGENT_CALLS,
         agent_calls=DEFAULT_AGENT_CALLS,
         agent_scrolls=DEFAULT_AGENT_SCROLLS,
-        recover_tools=" / ".join(RECOVER_TOOLS),
+        recover_tools=" / ".join(BARE_HANDS),
         recover_limit=DEFAULT_RECOVER_LIMIT,
-        recover_max=MAX_RECOVER_ACTIONS,
+        bands=" / ".join(BANDS),
         ask_wait=DEFAULT_ASK_WAIT_SECONDS,
         ask_rounds=DEFAULT_ASK_ROUNDS,
     )
@@ -121,13 +121,13 @@ description: EDIT ME — what this pack automates, and when to adopt it
 
 # Named fixed spots the author KNOWS — recover hands tap them, and
 # agent episodes are granted them by name (`give: [landmarks.back]`).
-# Open vocabulary; each is {{label, bbox, [page]}}, label-healed live
+# Open vocabulary; each is {{label, at, [page]}}, label-healed live
 # when the label is readable on screen; `page:` scopes it — an episode
 # is offered it only while that page is the verified reading.
 # landmarks:
 #   back:
 #     label: "back chevron (top-left)"
-#     bbox: [0.015, 0.045, 0.095, 0.095]
+#     at: [0.015, 0.045, 0.095, 0.095]
 #     page: detail
 
 # Pages more than one playbook lands on are declared here once and
@@ -139,74 +139,40 @@ description: EDIT ME — what this pack automates, and when to adopt it
 # carries no bodies); a route may declare its own to override it.
 # pages:
 #   home:
-#     anchors: {{or: ["Search", "搜索"], region: top}}
-#     recover: {{tool: force_quit}}
+#     anchors:
+#       - {{text: ["Search", "搜索"], within: top}}
+#     recover: force_quit
 """
 
 
 PLAYBOOK_TEMPLATE = """\
-# One playbook — this file's stem is its name (referenced as
-# {app}/{playbook}); the manifest beside it holds what every playbook
-# shares. A route may open with pure-text agent steps and one `start`,
-# then alternates WHERE (page — checked every time) with WHAT (a
-# move); ≤ {max_nodes}
-# moves, forward-only — whatever needs judgment is an `agent` step,
-# whatever needs a human is an `ask`. Entry kinds:
-#   page   — where the walk must BE. Declare it in place (anchors
-#            beside the waypoint — semantics only; geometry is captured
-#            on YOUR device via `physiclaw playbooks pages calibrate`), or
-#            reference a page declared elsewhere bare. `recover:`
-#            declares ITS recovery hand — one gesture
-#            ({recover_tools}; tap takes with: landmarks.<name>) or an
-#            argument-less `macro:`; or one hand per reading:
-#            `occluded:` (this page under a sheet or popup) and
-#            `elsewhere:` (any other screen). `limit:` (default
-#            {recover_limit}, ≤ {recover_max} per walk) bounds this
-#            page's tries; after a hand runs the walk re-checks, then
-#            starts the route over. What you declare is what runs —
-#            nothing else: no built-in unlock, wait, or retry; a page
-#            declaring none hands over. A phone that may lock mid-walk
-#            wants an `unlock_phone` hand.
-#   start  — the unconditional cold-launch (at most one, immediately
-#            before the first page — the landing it must reach);
-#            `macro:` is its hand. It re-runs whenever recovery walks
-#            from the route top.
-#   do     — run a gesture macro. The name IS the macro (the directory
-#            macro of that name, or the `macro:` body beside it — the
-#            MACRO.yml grammar minus name/description/enabled); the
-#            page that FOLLOWS is its landing check. A move that spends
-#            money carries `irreversible: {classes}` and must directly
-#            follow an `ask` with `approve: payment`.
-#   agent  — hand the step to the model with YOUR prompt (refs fill
-#            once when it opens): the prompt IS the brief — the
-#            conductor adds only the output contract and the answers
-#            your `tools:` grant. `context: [memory, memory.<slug>,
-#            daylog]` loads exactly those beside it; nothing else of
-#            the agent's memory travels. No `tools` = a pure-text
-#            call: prompt in, `returns:` fields out (read downstream as
-#            {{name.field}}), legal before the first page. With
-#            `tools: [{agent_tools}]` it is an EPISODE framed by the
-#            adjacent pages: each turn the model answers with a screen
-#            row, a landmark or pack macro granted via `give:`
-#            (`landmarks.<name>` to tap blind, `macros.<name>` to run a
-#            recorded sequence whole), a scroll verb, done, or escalate
-#            — never coordinates; `limit: {{calls, scrolls}}` bounds it
-#            (≤ {max_agent_calls} calls), and `done` counts only on the
-#            page that follows, judged by the matcher.
-#   ask    — message the user and WAIT for approval. The reply is read
-#            against YOUR `yes:` / `no:` words (whole-message match);
-#            any other reply hands over for the model to read. `wait:
-#            {{seconds, rounds}}` is its patience (default
-#            {ask_wait}s × {ask_rounds} silent rounds, then the session
-#            suspends until the next wake). `approve: payment` reads
-#            the amount beside the label `total:` names (e.g. 合计) and
-#            fills {{ask.total}} — the `message:` must quote it: the
-#            number the user said yes to is the fire-time bound.
-#            `resume:` re-enters the app after the reply — required on
-#            a payment ask when a move on the app follows it.
-#   tell   — message the user; the walk moves on once it lands (a
-#            trailing tell is the walk's last word). A reply, if any,
-#            is the next wake's boot to read as a new request.
+# One playbook — this file's stem is its name ({app}/{playbook}); the
+# manifest beside it holds what every playbook shares. A route alternates
+# WHERE (a page, checked every time) with WHAT (a move), forward-only,
+# ≤ {max_nodes} moves. What you declare is what runs: nothing retries,
+# unlocks, or waits unless a line here says so. The entries:
+#   page   — where the walk must BE; `recover:` is the hand that runs when
+#            it is not ({recover_tools}, `{{tap: landmarks.<name>}}`,
+#            `{{macro: <name>}}`, or one per reading: covered / elsewhere /
+#            locked), `tries:` beside it (default {recover_limit}).
+#   start  — the cold launch, once, right before the first page.
+#   do     — a recorded macro (`macro:` a pack macro or an inline body,
+#            `with:` its inputs); the page after it is the landing check.
+#            Money: `irreversible: {classes}` right after an `approve:
+#            payment` ask.
+#   agent  — the model drives inside YOUR prompt with the `tools:` and
+#            `give:` grants you list; `returns:` fields read downstream as
+#            {{name.field}}. No tools = a pure-text call, legal before the
+#            first page. `limit: {{calls, scrolls}}` bounds an episode
+#            (≤ {max_agent_calls} calls).
+#   ask    — message the user and wait for `yes:` / `no:` (whole-message);
+#            `wait:` × `rounds:` is its patience (default {ask_wait}s ×
+#            {ask_rounds}); `approve: payment` reads the amount beside
+#            `total_label:` into {{ask.total}}; `resume:` re-enters the app.
+#   tell   — message the user and move on (a trailing tell ends the walk).
+# Values: the manifest's placeholders fill at install, {{inputs.x}} /
+# {{node.field}} / {{ask.total}} when the walk reaches the move, {{x}}
+# inside a macro from its `with:`. Reference: ~/.physiclaw/playbooks/README.md.
 name: {playbook}         # = this file's name; referenced as {app}/{playbook}
 description: EDIT ME — one line saying what task this playbook does
 # A valid playbook is enabled by default; this scaffold starts off.
@@ -230,32 +196,29 @@ route:
   - start: app              # ── the cold-launch; `home` below is the
     macro:                  #    landing it must reach
       steps:
-        - name: go-home
-          tool: home_screen
-        - name: open-app
-          tool: tap
-          with: {{label: "the app icon", bbox: [0.1, 0.1, 0.3, 0.2]}}
-        - name: settle
-          tool: wait
-          with: {{seconds: 3}}
+        - home_screen
+        - tap: "the app icon"
+          at: [0.1, 0.1, 0.3, 0.2]
+        - wait: 3
   - page: home
-    # `anchors:` is ONE clause: a bare string, {{text|or, region}},
-    # or {{and: [...]}} for several anchors at once. `or:` lists
-    # alternate READINGS of one anchor (any hit scores it once) —
-    # never write alternates as separate anchors: each declared
-    # anchor is a share of the page's score.
-    anchors: "EDIT ME"      # a label text that identifies this page
-    # anchors: {{or: ["Search", "搜索"], region: top}}
-    # anchors: {{and: ["EDIT ME", {{text: "tab", region: bottom}}]}}
+    # `anchors:` is a list; all should show. Alternate readings of ONE
+    # anchor go inside it as a list — never as separate anchors, since
+    # each declared anchor is a share of the page's score. `within:`
+    # pins an anchor to a band ({bands}) or a box.
+    anchors:
+      - "EDIT ME"           # a label text that identifies this page
+      # - {{text: ["Search", "搜索"], within: top}}
     # forbid: ["popup text"]  # veto terms — kills look-alike takeovers
     # scrollable: true        # content may scroll under fixed chrome
-    recover:                # not this page → force_quit, then the
-      tool: force_quit      # walk (and `start`) re-runs from the top
+    recover: force_quit     # not this page → force_quit, then the walk
+                            # (and `start`) re-runs from the top
     # recover:              # or one hand per reading:
-    #   occluded: {{tool: tap, with: landmarks.dismiss}}
-    #   elsewhere: {{tool: go_back}}
-    #   limit: 2
-  - do: {macro}             # the recorded gesture (macros/{macro}/)
+    #   covered: {{tap: landmarks.dismiss}}
+    #   elsewhere: go_back
+    #   locked: unlock_phone
+    # tries: 2              # this page's tries per walk (default {recover_limit})
+  - do: {macro}             # the recorded gesture
+    macro: {macro}          # the pack macro (macros/{macro}/)
     with: {{message: "{{inputs.message}}"}}
   - page: home              # the landing check — hand over if not reached
   # An acting agent episode — the judgment stretch, delegated whole:
@@ -272,11 +235,12 @@ route:
   # A human gate before money moves — the payment move follows it:
   # - ask: confirm-pay
   #   approve: payment
-  #   total: "合计"           # the label the sheet total sits beside
+  #   total_label: "合计"     # the label the sheet total sits beside
   #   message: "EDIT ME — total ¥{{ask.total}}, reply ok to pay or no to cancel"
   #   yes: ["ok"]
   #   no: ["no"]
-  #   wait: {{seconds: {ask_wait}, rounds: {ask_rounds}}}
+  #   wait: {ask_wait}              # seconds between reply polls
+  #   rounds: {ask_rounds}          # silent polls before the session suspends
   #   resume: {macro}         # re-enter the app after the reply
   - tell: done
     # The EXACT text sent to the user — write it in THEIR language.
@@ -336,24 +300,27 @@ row, a granted landmark or macro, a scroll verb, done, or escalate —
 never coordinates — and `done` counts only on the following page,
 judged by the matcher. An `ask` reads the reply against its own
 `yes:`/`no:` words (any other reply hands over), waits by its own
-`wait: {{seconds, rounds}}`, and a payment ask reads the amount beside
-the label its `total:` names.
+`wait:` seconds for `rounds:` silent polls, and a payment ask reads
+the amount beside the label its `total_label:` names.
 
-A pack may declare `landmarks:` — named fixed spots ({{label, bbox,
+A pack may declare `landmarks:` — named fixed spots ({{label, at,
 [page]}}, open vocabulary) that recover hands tap and agent episodes
 are granted; a `page:` scope offers the spot only on that page. A
-page's `recover:` declares its recovery hand (one gesture,
-`unlock_phone` included, or an argument-less macro), or one hand per
-reading (`occluded:` for a sheet over the page itself, `locked:` for
-the phone's lock screen, `elsewhere:` for any other screen), with its
-own `limit:` — nothing recovers in the background; a page declaring
-none hands over.
+page's `recover:` declares its recovery hand — a bare gesture
+(`go_back`, `force_quit`, `home_screen`, `unlock_phone`), `{{tap:
+landmarks.<name>}}`, or `{{macro: <name>}}` — or one hand per reading
+(`covered:` for a sheet over the page itself, `locked:` for the
+phone's lock screen, `elsewhere:` for any other screen), with `tries:`
+beside it as its own bound — nothing recovers in the background; a page
+declaring none hands over. A page's `anchors:` is a list of texts the page shows;
+alternate readings of one text go inside it (`text: [..]`), and
+`within:` pins it to a band or a box.
 
 The channel pack (`playbooks/channel/`) is the conductor's own: the
 thread page, the send/open macros an `ask` runs, and `boot.yml` — the
 walk every wake plays before any playbook (reach the thread, read the
 request, hand the matching playbook the baton), a route like any
-other whose `activate` step is the one entry only that file may carry.
+other whose `select` step is the one entry only that file may carry.
 
 Replay a walk offline against a recorded session's screens —
 `physiclaw playbooks replay <app>/<name> --session <id>` — to see
@@ -402,29 +369,20 @@ inputs:
   message:
     description: the text to send to the user
 steps:
-  - name: go-home
-    tool: home_screen
-  - name: open-im
-    tool: tap
-    with: {{label: "the IM app's dock icon", bbox: [0.1, 0.9, 0.2, 0.98]}}    # EDIT ME
-  - name: open-thread
-    tool: tap
-    with: {{label: "your user's chat-row name", bbox: [0.1, 0.15, 0.9, 0.22]}}   # EDIT ME
-  - name: raise-keyboard
-    tool: tap
-    with: {{label: "the input box (hidden)", bbox: [0.1, 0.9, 0.7, 0.96]}}   # EDIT ME
-  - name: clip
-    tool: send_to_clipboard
-    with: {{text: "{{message}}"}}
-  - name: hold-input
-    tool: long_press
-    with: {{label: "the input box (visible)", bbox: [0.1, 0.5, 0.7, 0.56]}}  # EDIT ME
-  - name: paste
-    tool: tap
-    with: {{label: "Paste", bbox: [0.1, 0.44, 0.3, 0.5]}}    # EDIT ME: the Paste button
-  - name: send
-    tool: tap
-    with: {{label: "Send", bbox: [0.8, 0.5, 0.98, 0.56]}}    # EDIT ME: the Send key
+  - home_screen
+  - tap: "the IM app's dock icon"
+    at: [0.1, 0.9, 0.2, 0.98]        # EDIT ME
+  - tap: "your user's chat-row name"
+    at: [0.1, 0.15, 0.9, 0.22]       # EDIT ME
+  - tap: "the input box (hidden)"
+    at: [0.1, 0.9, 0.7, 0.96]        # EDIT ME
+  - send_to_clipboard: "{{message}}"
+  - long_press: "the input box (visible)"
+    at: [0.1, 0.5, 0.7, 0.56]        # EDIT ME
+  - tap: "Paste"
+    at: [0.1, 0.44, 0.3, 0.5]        # EDIT ME: the Paste button
+  - tap: "Send"
+    at: [0.8, 0.5, 0.98, 0.56]       # EDIT ME: the Send key
 """
 
 CHANNEL_OPEN_STUB = f"""\
@@ -432,14 +390,11 @@ name: {OPEN_MACRO}
 description: open the user's IM thread (read only, no send)
 enabled: false
 steps:
-  - name: go-home
-    tool: home_screen
-  - name: open-im
-    tool: tap
-    with: {{label: "the IM app's dock icon", bbox: [0.1, 0.9, 0.2, 0.98]}}    # EDIT ME
-  - name: open-thread
-    tool: tap
-    with: {{label: "your user's chat-row name", bbox: [0.1, 0.15, 0.9, 0.22]}}   # EDIT ME
+  - home_screen
+  - tap: "the IM app's dock icon"
+    at: [0.1, 0.9, 0.2, 0.98]        # EDIT ME
+  - tap: "your user's chat-row name"
+    at: [0.1, 0.15, 0.9, 0.22]       # EDIT ME
 """
 
 
@@ -458,12 +413,13 @@ enabled: true
 route:
   - page: {THREAD_PAGE}                  # where the walk must BE (the manifest declares it)
     recover:                       # …and what to do when it is not
-      locked: {{tool: unlock_phone}}   # a sleeping phone gets no taps: wake it first
-      occluded: {{macro: {OPEN_MACRO}}}         # the thread under a sheet or keyboard
+      locked: unlock_phone           # a sleeping phone gets no taps: wake it first
+      covered: {{macro: {OPEN_MACRO}}}          # the thread under a sheet or keyboard
       elsewhere: {{macro: {OPEN_MACRO}}}        # any other screen: the rehearsed hand
-      limit: 4                       # unlocks + opens together (an unlock races the keypad)
-  - activate: parse                # the boot's own step: parse_task over the thread,
-    limit: {{scrolls: 2}}            # scrolling up for a request above the fold
+    tries: 4                         # unlocks + opens together (an unlock races the keypad)
+  - select: parse                  # the boot's own step: read the thread and select
+    limit: {{scrolls: 2}}            # the playbook it asks for (scrolls up for an
+                                   # older request)
 """
 
 
@@ -581,7 +537,7 @@ pages:
       #
       #     - text: ["Swipe up for Face ID or Enter Passcode", "<yours>"]
       - text: ["Swipe up for Face ID or Enter Passcode"]
-        region: bottom
+        within: bottom
 """
 
 

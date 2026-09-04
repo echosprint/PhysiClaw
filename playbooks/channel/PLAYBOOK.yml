@@ -15,7 +15,7 @@ placeholders:
 pages:
   thread:
     anchors:
-      - {text: "<<CONTACT>>", region: top}
+      - {text: "<<CONTACT>>", within: top}
     forbid: ["Weixin"]   # the chat LIST header — kills the list lookalike
 
 # Adapting to your device

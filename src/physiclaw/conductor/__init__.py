@@ -34,7 +34,7 @@ One wake, end to end:
 
     plugin.session_setup  → setup: a suspension resumes, else the boot
     the boot              → Program over channel/boot.yml: peek, the thread
-                            page's declared hands, then `activate` —
+                            page's declared hands, then `select` —
                             parse_task over the enabled playbooks
     the baton             → activation builds the matching playbook's
                             Program; the conductor drives it next
@@ -74,7 +74,7 @@ walk/ — one playbook executing (imports spec, never drive):
     step_agent.py       `agent`: the pure-text call, or the episode
     step_ask.py         `ask`: send, hold, judge the reply, bind consent
     step_tell.py        `tell`: send, then move on
-    step_activate.py    the boot's `activate`: parse_task, the baton
+    step_activate.py    the boot's `select`: parse_task, the baton
     speak.py            the walk's voice: send, land, read replies
     gate.py             the ask-and-hold state, one suspension projection
     money.py            the declared total and the payment predicates

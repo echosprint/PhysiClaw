@@ -123,7 +123,7 @@ def checked_readings(
     of a readings list (non-empty, ≤ MAX_LABEL_READINGS, each a string
     via the caller's own scalar terminal, no duplicates), raising the
     caller's error class. Macro targets, pack landmarks, and an ask's
-    `total:` must never disagree on what a legal readings list is."""
+    `total_label:` must never disagree on what a legal readings list is."""
     readings = label_readings(args, key)
     if not readings or len(readings) > MAX_LABEL_READINGS:
         raise err(
@@ -183,6 +183,57 @@ ALLOWED_STEP_TOOLS = frozenset(
 # test_parse.py` pins against the live registration.
 LOCAL_STEP_TOOLS = frozenset({WAIT})
 
+# The step grammar is `verb: object` — the ONE table of what each verb's
+# object IS on the wire: a press names its target's label (the box rides
+# beside it as `at:`), a swipe its direction (with `at:` the box to
+# stroke across), `wait` its seconds, `send_to_clipboard` its text. A
+# verb absent here takes no object and is a bare word in the step list
+# (the whole-screen navigations and the perception peek).
+OBJECT_ARG: dict[str, str] = {
+    **dict.fromkeys(gesture_vocab.PRESS_TOOLS, TARGET_LABEL),
+    gesture_vocab.SWIPE: "direction",
+    gesture_vocab.SEND_TO_CLIPBOARD: "text",
+    WAIT: WAIT_SECONDS_ARG,
+}
+ARGLESS_TOOLS = ALLOWED_STEP_TOOLS - OBJECT_ARG.keys()
+BOXED_TOOLS = frozenset(gesture_vocab.PRESS_TOOLS | {gesture_vocab.SWIPE})
+
+# A step's handle is derived at parse, never written: `idx<N>-<verb>` plus
+# the object's slug (`idx8-tap-paste`, `idx3-wait-2`, `idx1-home_screen`).
+# Unique by construction (the position), readable by construction (the
+# verb line), and the one string the step log, the run log, the agent's
+# `steps:` list and `start_at` share. The object part is capped so a
+# descriptive label ("close (X) on the coupon overlay") does not make an
+# unwieldy handle; the cut falls on a word boundary.
+HANDLE_OBJECT_CHARS = 24
+
+
+def step_handle(index: int, tool: str, args: dict) -> str:
+    """The handle of step `index` (1-based) — see `HANDLE_OBJECT_CHARS`."""
+    key = OBJECT_ARG.get(tool)
+    readings = label_readings(args, key) if key else ()
+    head = f"idx{index}-{tool}"
+    slug = _slug(str(readings[0])) if readings else ""
+    return f"{head}-{slug}" if slug else head
+
+
+def _slug(text: str) -> str:
+    """Lowercase words joined by `-`, whole words up to the cap; a lone
+    word longer than the cap is cut hard. Letters of any script count
+    (a Chinese label keeps its characters); braces, quotes and spaces
+    are separators, so `{message}` reads `message`."""
+    words = "".join(ch.lower() if ch.isalnum() else " " for ch in text).split()
+    out = ""
+    for word in words:
+        cand = word if not out else f"{out}-{word}"
+        if len(cand) > HANDLE_OBJECT_CHARS:
+            break
+        out = cand
+    if not out and words:
+        out = words[0][:HANDLE_OBJECT_CHARS]
+    return out
+
+
 # Macro names follow the skill-folder convention (lowercase/digits/hyphens,
 # no leading/trailing/consecutive hyphens); input names double as `{name}`
 # placeholders, so they follow identifier rules instead.
@@ -224,7 +275,7 @@ AND, OR, NOT = "and", "or", "not"
 
 class Clause(ABC):
     """A boolean expression over the screen — the one shape `require`,
-    `forbid`, `expect` and `skip_when` all take.
+    `forbid`, `expect`, `when` and `skip_when` all take.
 
     The three combinators are spelled out rather than implied by nesting
     depth. An earlier grammar made a bare list mean "any of these", so
@@ -337,7 +388,7 @@ class OrClause(_Combinator):
 class NotClause(Clause):
     """The one operator an EMPTY haystack satisfies — which is why every
     consumer decides what an unreadable screen means before evaluating:
-    guards and `expect` fail closed, `skip_when` declines to skip."""
+    guards and `expect` fail closed, `when`/`skip_when` decline to skip."""
 
     child: Clause
 
@@ -433,9 +484,8 @@ class Macro:
 
 def check_name(name: str, where: str = "name", extra: str = "") -> None:
     """Enforce the identifier rule (the skill-folder convention). Shared by
-    `parse.parse_macro`, step names, and `macros init`, so a name that
-    scaffolds also parses and the three can never drift. Raises
-    MacroError."""
+    `parse.parse_macro` and `macros init`, so a name that scaffolds also
+    parses and the two can never drift. Raises MacroError."""
     if len(name) > MAX_NAME_LEN or not NAME_RE.match(name):
         raise MacroError(
             f"{where} {name!r} must be lowercase letters/digits/hyphens, "

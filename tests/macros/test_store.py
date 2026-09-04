@@ -39,12 +39,8 @@ inputs:
     default: hi
 
 steps:
-  - name: home-screen-1
-    tool: home_screen
-  - name: send-to-clipboard-1
-    tool: send_to_clipboard
-    with:
-      text: "{{message}}"
+  - home_screen
+  - send_to_clipboard: "{{message}}"
 """
 
 
@@ -246,8 +242,8 @@ def test_render_section_lists_name_description_and_step_count() -> None:
 
     assert section.startswith("## Available Macros")
     assert "- **demo** — Demo macro" in section
-    # The step list IS the count, and every entry is a valid `start_at`.
-    assert "  - steps: home-screen-1, send-to-clipboard-1" in section
+    # The handle list IS the count, and every entry is a valid `start_at`.
+    assert "  - steps: idx1-home_screen, idx2-send_to_clipboard-message" in section
 
 
 def test_render_section_lists_inputs_with_required_and_default() -> None:

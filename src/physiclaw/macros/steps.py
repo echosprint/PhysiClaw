@@ -35,6 +35,7 @@ from physiclaw.common.listing import nearest_labeled_row
 from physiclaw.macros.inputs import substitute
 from physiclaw.macros.model import (
     BLANK_SCREEN,
+    OBJECT_ARG,
     REASON_EXPECT_FAILED,
     REASON_GUARD_FAILED,
     REASON_TOOL_ERROR,
@@ -179,19 +180,23 @@ class StepOutcome:
 
 @dataclass(frozen=True)
 class Step(ABC):
-    """A named step with its optional checks.
+    """One step with its optional checks.
 
     `guard` runs BEFORE the step (a precondition), `skip_when` runs before
     that (idempotence — if the postcondition already holds, the step is
     not needed). Both are one clause; see `model.Clause`."""
 
-    name: str  # required and unique per macro — what `start_at` addresses
+    # The handle `model.step_handle` derives at parse (`idx3-tap-paste`):
+    # what `start_at` / `stop_after` address and the run log records.
+    name: str
     guard: MacroGuard | None = None
     # Idempotence, the Ansible creates/unless model, NOT general branching:
-    # when already true the step is skipped, because executing it would be
-    # redundant or harmful (e.g. tapping the keyboard-hidden input-box
-    # position while the keyboard is up hits the keys). Author contract:
-    # skip state == post-execution state, so later bboxes stay synchronized.
+    # when the clause already holds the step is skipped, because executing
+    # it would be redundant or harmful (e.g. tapping the keyboard-hidden
+    # input-box position while the keyboard is up hits the keys). The
+    # author writes `skip_when: X` (skip when X shows) or `when: X` (run only
+    # while X shows — parsed to `skip_when: {not: X}`). Author contract: skip
+    # state == post-execution state, so later bboxes stay synchronized.
     skip_when: Clause | None = None
 
     @property
@@ -212,7 +217,16 @@ class Step(ABC):
         `{contact}`'s chat."""
 
     def display(self) -> str:
-        return f'{self.tool} "{self.name}"'
+        """How the step reads in the step log: the verb and its object
+        (`tap "Paste"`, `swipe up`, `wait 2s`, `home_screen`)."""
+        obj = self.object
+        return f"{self.tool} {obj}" if obj else self.tool
+
+    @property
+    def object(self) -> str:
+        """The verb's object as the author wrote it, "" for an argless
+        verb — the one thing worth showing beside a step."""
+        return ""
 
     @property
     def log_args(self) -> dict[str, Any]:
@@ -233,11 +247,21 @@ class GestureStep(Step):
     view (image + listing) becomes the screen the next check reads."""
 
     mcp_tool: str = ""
-    args: dict[str, Any] = field(default_factory=dict)  # the `with:` table
+    # The wire arguments: the object under its server name (`label` for
+    # a press, `direction` for a swipe, `text` for the clipboard) and
+    # `bbox` for the step's `at:`.
+    args: dict[str, Any] = field(default_factory=dict)
 
     @property
     def tool(self) -> str:
         return self.mcp_tool
+
+    @property
+    def object(self) -> str:
+        key = OBJECT_ARG.get(self.mcp_tool)
+        return (
+            " / ".join(repr(r) for r in label_readings(self.args, key)) if key else ""
+        )
 
     @property
     def log_args(self) -> dict[str, Any]:
@@ -350,6 +374,10 @@ class WaitStep(Step):
     @property
     def tool(self) -> str:
         return WAIT
+
+    @property
+    def object(self) -> str:
+        return f"{self.seconds}s"
 
     @property
     def declared_seconds(self) -> int:

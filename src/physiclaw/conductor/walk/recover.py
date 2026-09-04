@@ -2,7 +2,7 @@
 
 Pure policy over the walk's counters: given a check that needed page P
 and did not get it, `plan` names the ONE next action — the hand the
-page declared for the reading (`occluded`: P under a sheet or popup;
+page declared for the reading (`covered`: P under a sheet or popup;
 `locked`: the lock screen, read by shape; `elsewhere`: any other
 screen; the flat form declares one hand for all three) — or Exhausted,
 and the walk hands over. After a hand the walk re-checks on its own
@@ -10,7 +10,7 @@ result view and, still off, walks the route again from its first
 unsettled node (a `force_quit` hand re-runs `start`). Nothing taps,
 unlocks, or waits in the background.
 
-Two bounds, both visible in the playbook: the page's own `limit:` and
+Two bounds, both visible in the playbook: the page's own `tries:` and
 the walk-wide ceiling `MAX_RECOVER_ACTIONS`.
 """
 
@@ -76,14 +76,14 @@ def plan(
 ) -> Step:
     """The next recovery action: the hand the page declares for this
     `reading` (one of `playbook.RECOVER_READINGS`), within the page's
-    own `limit` (`page_actions`, its actions so far) and the walk's
+    own `tries` (`page_actions`, its actions so far) and the walk's
     lifetime ceiling (`actions`)."""
     if actions >= MAX_RECOVER_ACTIONS:
         return Exhausted(f"recovery budget ({MAX_RECOVER_ACTIONS} actions) spent")
     if recovery is None:
         return Exhausted("its page declares no recover")
-    if page_actions >= recovery.limit:
-        return Exhausted(f"its page's recover limit ({recovery.limit}) spent")
+    if page_actions >= recovery.tries:
+        return Exhausted(f"its page's recover tries ({recovery.tries}) spent")
     hand = recovery.hand_for(reading)
     if hand is None:
         return Exhausted(f"its page declares no `{reading}` recover hand")

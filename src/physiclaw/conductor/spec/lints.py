@@ -76,7 +76,7 @@ def check_money(nodes: list[Node]) -> None:
 
 
 def check_boot(nodes: list[Node]) -> None:
-    """The boot's shape: it ends in exactly one `activate` (the baton
+    """The boot's shape: it ends in exactly one `select` (the baton
     IS its ending), and it never speaks to the user — before the request
     is even read, an ask would hold for a reply to nothing and a tell
     would report on nothing. Everything else on it is the ordinary route
@@ -84,13 +84,13 @@ def check_boot(nodes: list[Node]) -> None:
     activates = [n.id for n in nodes if isinstance(n, ActivateNode)]
     if not nodes or not isinstance(nodes[-1], ActivateNode):
         raise PlaybookError(
-            f"{CHANNEL_APP}/{BOOT_PLAYBOOK} must end with an `activate` step — "
+            f"{CHANNEL_APP}/{BOOT_PLAYBOOK} must end with a `select` step — "
             "reading the thread is what the boot is for, and its answer is the "
             "next walk"
         )
     if len(activates) > 1:
         raise PlaybookError(
-            f"{CHANNEL_APP}/{BOOT_PLAYBOOK}: one `activate` only — "
+            f"{CHANNEL_APP}/{BOOT_PLAYBOOK}: one `select` only — "
             f"{', '.join(activates)} would each end the boot"
         )
     for n in nodes:

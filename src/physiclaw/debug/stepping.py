@@ -76,7 +76,7 @@ KIND_DO = "do"
 KIND_AGENT = "agent"
 KIND_ASK = "ask"
 KIND_TELL = "tell"
-KIND_ACTIVATE = "activate"
+KIND_SELECT = "select"
 
 
 def state_path() -> Path:
@@ -126,7 +126,7 @@ def node_info(app: str, node: Node) -> NodeInfo:
         resume = qualified_macro(app, node.resume) if node.resume else None
         return NodeInfo(node.id, KIND_ASK, node.enter, macro=resume)
     if isinstance(node, ActivateNode):
-        return NodeInfo(node.id, KIND_ACTIVATE, node.enter)
+        return NodeInfo(node.id, KIND_SELECT, node.enter)
     assert isinstance(node, TellNode)
     return NodeInfo(node.id, KIND_TELL)
 
@@ -594,7 +594,7 @@ async def run_macro(
     checks, the runner's own guards only — emitting its header and step
     log, and showing `observe` the result view. Returns {ok, message,
     run_id}. Raises MacroError before any gesture on bad inputs or an
-    unknown step name (recorded as bad_input by the runner)."""
+    unknown step handle (recorded as bad_input by the runner)."""
     from physiclaw.common import gesture_vocab, verdict
     from physiclaw.macros import runner as macro_runner
 

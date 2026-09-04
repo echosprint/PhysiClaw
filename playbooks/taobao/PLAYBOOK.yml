@@ -17,16 +17,16 @@ placeholders:
 landmarks:
   dismiss:
     label: "scrim above a bottom sheet"  # below the IM-banner zone (y < 0.15)
-    bbox: [0.35, 0.16, 0.65, 0.24]       # the `occluded:` recover hand taps it
+    at: [0.35, 0.16, 0.65, 0.24]         # the `covered:` recover hand taps it
   cart:
     label: "购物车"                       # detail-page bottom bar, third icon —
-    bbox: [0.231, 0.898, 0.346, 0.954]   # measured live on the detail footer
+    at: [0.231, 0.898, 0.346, 0.954]     # measured live on the detail footer
   confirm:
     label: ["确定", "加入购物车"]           # a sheet's full-width bottom button —
-    bbox: [0.06, 0.910, 0.94, 0.955]     # UNRECORDED estimate, heals by text
+    at: [0.06, 0.910, 0.94, 0.955]       # UNRECORDED estimate, heals by text
   close:
     label: "the ✕ below a promo popup card"  # 天降红包 / coupon popups: an icon,
-    bbox: [0.44, 0.665, 0.56, 0.735]         # no text row — the bbox is the tap
+    at: [0.44, 0.665, 0.56, 0.735]           # no text row — the box is the tap
 
 # The pages every route lands on, declared once: anchors (semantics —
 # geometry is captured on YOUR device via `physiclaw playbooks pages
@@ -35,36 +35,35 @@ landmarks:
 # to override these for that walk.
 pages:
   home:
-    anchors: {or: ["推荐", "关注"], region: top}
-    recover:                      # not this page → run this hand, then
-      tool: force_quit            # walk again from the route top (start
-                                  # re-runs); declared, not a hidden
-                                  # ladder — what you write is what runs
+    anchors:
+      - {text: ["推荐", "关注"], within: top}   # one anchor, two readings
+    recover: force_quit           # not this page → force_quit, then walk
+                                  # again from the route top (start re-runs);
+                                  # what you write is what runs
   results:                        # the filter row pins them: two-char
     anchors:                      # anchors ride the one-substitution
-      - {text: "综合", region: top}   # tier, so unpinned they read feed
-      - {text: "销量", region: top}   # text (组合, 数量) as results
+      - {text: "综合", within: top}   # tier, so unpinned they read feed
+      - {text: "销量", within: top}   # text (组合, 数量) as results
     scrollable: true
     recover:                      # one hand per reading of the deviation:
-      occluded:                   # a coupon sheet over the results → tap
-        tool: tap                 # the scrim above it
-        with: landmarks.dismiss
-      elsewhere:                  # a promo page or mis-tap → pop it with
-        tool: go_back             # the edge swipe (the chevron tap misses)
-      limit: 2                    # this page's tries per walk
+      covered: {tap: landmarks.dismiss}   # a coupon sheet over the results
+      elsewhere: go_back                  # a promo page or mis-tap: the edge
+                                          # swipe (the chevron tap misses)
+    tries: 2                      # this page's tries per walk
   # Two shapes of one page: the merged sheet (实付￥…, spec options)
   # and the order page a spec sheet leads to (优惠后￥…, 价格明细).
   # Four anchors, three suffice — a page-specific row may be absent.
   buysheet:
     anchors:
-      - {text: ["免密支付", "提交订单", "立即支付"], region: bottom}
+      - {text: ["免密支付", "提交订单", "立即支付"], within: bottom}
       - {text: ["实付", "优惠后", "价格明细"]}
-      - {text: "备注"}
-      - {text: "顺手买"}
+      - "备注"
+      - "顺手买"
     forbid: ["支付成功"]
     recover:
-      occluded: {tool: tap, with: landmarks.close}
-      elsewhere: {tool: go_back}
-      limit: 2
+      covered: {tap: landmarks.close}
+      elsewhere: go_back
+    tries: 2
   paid:
-    anchors: {or: ["支付成功", "付款成功", "购买成功"]}
+    anchors:
+      - ["支付成功", "付款成功", "购买成功"]

@@ -11,14 +11,12 @@ from physiclaw.agent.engine.assemble import build_prompt_bundle, format_triggers
 from physiclaw.agent.runtime.hook import Trigger
 from physiclaw.common import paths
 
-MACRO = """
-name: notify-user
+MACRO = """name: notify-user
 description: Ping the user
 enabled: true
 
 steps:
-  - name: home-screen-1
-    tool: home_screen
+  - home_screen
 """
 
 

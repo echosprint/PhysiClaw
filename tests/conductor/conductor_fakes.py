@@ -114,9 +114,8 @@ inputs:
     description: text to use
     default: hi
 steps:
-  - name: go
-    tool: tap
-    with: {{label: t, bbox: [0.1, 0.1, 0.2, 0.2]}}
+  - tap: t
+    at: [0.1, 0.1, 0.2, 0.2]
 """
 
 
@@ -199,9 +198,7 @@ inputs:
   message:
     description: text
 steps:
-  - name: clip
-    tool: send_to_clipboard
-    with: {text: "{message}"}
+  - send_to_clipboard: "{message}"
 """
 
 

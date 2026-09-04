@@ -20,23 +20,25 @@ vocabulary and the model classes below carry the same names)::
     playbook  ::= description [enabled] [inputs] route
     inputs    ::= {id: {description, [default], [example]}}   # ≤ MAX_INPUTS
     route     ::= [agent...] [start] page (move page | ask | tell)*
-    entry     ::= "page" name [anchors] [forbid] [scrollable] [recover]
+    entry     ::= "page" name [anchors] [forbid] [scrollable] [recover] [tries]
                 | "start" name macro          # the unconditional cold-launch
-                | "do" name [with] [macro] [irreversible]
+                | "do" name macro [with] [irreversible]
                 | "agent" name prompt [tools] [give] [returns] [limit]
                   [context] [irreversible]   # the step handed to the model
-                | "ask" name approve message yes no [total] [wait] [resume]
-                                              # payment: resume required when
+                | "ask" name approve message yes no [total_label] [wait]
+                  [rounds] [resume]           # payment: resume required when
                                               # a screen move follows
                 | "tell" name message
-                | "activate" name [limit]     # channel/boot only, and last:
+                | "select" name [limit]       # channel/boot only, and last:
                                               # read the thread, hand a
                                               # playbook the baton
-    recover   ::= hand [limit]                # one hand for any deviation
-                | {[occluded: hand] [elsewhere: hand] [locked: hand] [limit]}
-                # a manifest page's recover: is inherited by every
-                # route; a route's own replaces it whole for that walk
-    hand      ::= {tool [with]} | {macro}
+    recover   ::= hand                        # one hand for any deviation
+                | {[covered: hand] [elsewhere: hand] [locked: hand]}
+                # `tries:` beside it bounds the page; a manifest page's
+                # recover: is inherited by every route, a route's own
+                # replaces it whole for that walk
+    hand      ::= go_back | force_quit | home_screen | unlock_phone
+                | {tap: landmarks.<name>} | {macro: name | body}
     macro     ::= name                    # macros/<name>/ — a directory macro
                 | {[inputs] steps}        # inline — MACRO.yml grammar minus
                                           # name/description/enabled
@@ -46,9 +48,9 @@ The route's shape IS the contract: an optional prefix of pure-text
 contract, every `do` and every acting `agent` is followed by the page
 it lands on (its landing check — the reflector, enforced by shape),
 and a page may declare its own `recover:` hand — one hand for any
-deviation, or one per reading (`occluded:` a sheet over the page
+deviation, or one per reading (`covered:` a sheet over the page
 itself, `locked:` the phone's lock screen, `elsewhere:` any other
-screen), each page bounded by its own `limit:` under the walk-wide
+screen), each page bounded by its own `tries:` under the walk-wide
 ceiling. Moves fall through in
 route order — there is no routing and no loop; whatever needs judgment
 is an `agent` step inside the author's fence, and whatever needs a
@@ -60,8 +62,8 @@ without `recover:` hands over; an agent step runs the author's prompt
 with the tools, landmarks, macros, and context the author listed and
 nothing else; an ask's reply is read against the `yes:`/`no:` words
 the ask declares, and anything they do not cover is the model's to
-read; a payment ask names the label its `total:` sits beside, and
-`wait:` is its own patience.
+read; a payment ask names the label its `total_label:` sits beside, and
+`wait:` and `rounds:` are its own patience.
 
 Wiring is by placeholder, and every ref is dotted: `{inputs.name}` reads
 a declared input, `{move.field}` reads an EARLIER agent step's declared
@@ -89,10 +91,10 @@ from physiclaw.macros.model import Macro, MacroInput
 # The three readings a page's `recover:` may key its hands by: the page
 # itself under an overlay, the phone's lock screen (where taps do not
 # land — only `unlock_phone` helps), or any other screen.
-READING_OCCLUDED = "occluded"
+READING_COVERED = "covered"
 READING_ELSEWHERE = "elsewhere"
 READING_LOCKED = "locked"
-RECOVER_READINGS = (READING_OCCLUDED, READING_ELSEWHERE, READING_LOCKED)
+RECOVER_READINGS = (READING_COVERED, READING_ELSEWHERE, READING_LOCKED)
 # The one irreversible class: money. A payment move is entered only as
 # the fall-through of an `ask` with `approve: payment` (`lints.py`).
 IRREVERSIBLE_CLASSES = ("payment",)
@@ -183,9 +185,9 @@ class AskNode:
     # The waypoint before the ask — the page a payment ask reads its
     # total off ("" when none precedes it; a payment ask requires one).
     enter: str = ""
-    # A payment ask's `total:` — the label readings the sheet total sits
-    # beside (`money.declared_total` reads the amount off that row).
-    total: tuple[str, ...] = ()
+    # A payment ask's `total_label:` — the label readings the sheet total
+    # sits beside (`money.declared_total` reads the amount off that row).
+    total_label: tuple[str, ...] = ()
     # The ask's own patience: the in-session poll cadence and how many
     # silent rounds before the session suspends for the next wake.
     wait_seconds: int = DEFAULT_ASK_WAIT_SECONDS
@@ -203,7 +205,7 @@ class TellNode:
 
 @dataclass(frozen=True)
 class ActivateNode:
-    """The `activate` step — the channel boot's own, and its last: on
+    """The `select` step — the channel boot's own, and its last: on
     the thread (its `enter`, the page before it), ONE parse_task call
     over the enabled playbooks; a positive answer becomes the walk's
     baton (the program the conductor drives next), anything else ends
@@ -218,7 +220,7 @@ class ActivateNode:
 
 class Checked(Protocol):
     """A node the walk checks a page for before it runs — a `do`, an
-    acting `agent`, the boot's `activate`. What `enter_gate` and
+    acting `agent`, the boot's `select`. What `enter_gate` and
     `recover_or_handover` read: where it must be, and whether money
     forbids recovering it."""
 
@@ -234,8 +236,8 @@ class Checked(Protocol):
 
 @dataclass(frozen=True)
 class RecoverHand:
-    """One recovery hand — ONE gesture (`tool`, a `tap` taking its
-    `landmark`) or one argument-less `macro`."""
+    """One recovery hand — a bare gesture (`tool`), a tap of a declared
+    `landmark`, or one argument-less `macro`."""
 
     tool: str | None = None
     landmark: str | None = None
@@ -245,21 +247,21 @@ class RecoverHand:
 @dataclass(frozen=True)
 class Recovery:
     """A page's declared `recover:` — which hand runs for which reading
-    of the deviation, and how many times this page may recover in one
-    walk. `occluded` fires when the page itself reads under an overlay
-    (a sheet, a popup); `locked` when the phone shows its lock screen;
-    `elsewhere` for any other screen. The flat form
-    (`recover: {tool: ...}`) declares one hand for all three."""
+    of the deviation, and how many `tries` this page gets in one walk.
+    `covered` fires when the page itself reads under a sheet or popup;
+    `locked` when the phone shows its lock screen; `elsewhere` for any
+    other screen. The flat form (`recover: go_back`) declares one hand
+    for all three."""
 
-    occluded: RecoverHand | None = None
+    covered: RecoverHand | None = None
     elsewhere: RecoverHand | None = None
     locked: RecoverHand | None = None
-    limit: int = DEFAULT_RECOVER_LIMIT
+    tries: int = DEFAULT_RECOVER_LIMIT
 
     def hand_for(self, reading: str) -> RecoverHand | None:
         """The hand declared for one of `RECOVER_READINGS`."""
-        if reading == READING_OCCLUDED:
-            return self.occluded
+        if reading == READING_COVERED:
+            return self.covered
         if reading == READING_LOCKED:
             return self.locked
         return self.elsewhere
@@ -267,7 +269,7 @@ class Recovery:
     @property
     def hands(self) -> tuple[RecoverHand, ...]:
         return tuple(
-            h for h in (self.occluded, self.elsewhere, self.locked) if h is not None
+            h for h in (self.covered, self.elsewhere, self.locked) if h is not None
         )
 
 
@@ -301,7 +303,7 @@ class Playbook:
 
     @property
     def activates(self) -> bool:
-        """Whether this is the boot — a route ending in `activate`, the
+        """Whether this is the boot — a route ending in `select`, the
         one walk that hands a baton on (the compiler admits the step in
         the channel pack's boot file only)."""
         return any(isinstance(n, ActivateNode) for n in self.nodes)

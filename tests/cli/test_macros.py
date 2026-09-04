@@ -29,32 +29,23 @@ inputs:
     description: text
 
 steps:
-  - name: send-to-clipboard-1
-    tool: send_to_clipboard
-    with:
-      text: "{{msg}}"
+  - send_to_clipboard: "{{msg}}"
 """
 
 
-TAP_MACRO = """
-name: tap-demo
+TAP_MACRO = """name: tap-demo
 description: One tap, for reading a bbox back out of the run log
 
 steps:
-  - name: tap-1
-    tool: tap
-    with:
-      label: t
-      bbox: [0.12, 0.04, 0.34, 0.10]
+  - tap: t
+    at: [0.12, 0.04, 0.34, 0.10]
 """
 
-NAV_MACRO = """
-name: nav-demo
+NAV_MACRO = """name: nav-demo
 description: One argument-free navigation step
 
 steps:
-  - name: home-1
-    tool: home_screen
+  - home_screen
 """
 
 
@@ -162,7 +153,7 @@ def test_check_all_valid_exits_zero() -> None:
 def test_check_invalid_macro_exits_one_with_reason() -> None:
     _write(
         "bad",
-        text="name: other\ndescription: d\nsteps:\n  - name: peek-1\n    tool: peek\n",
+        text="name: other\ndescription: d\nsteps:\n  - peek:\n",
     )
 
     result = runner.invoke(app, ["macros", "check"])
@@ -220,9 +211,7 @@ def test_check_reports_the_fleet_gate_instead_of_the_per_file_advice(mocker) -> 
 def test_check_still_exits_one_when_a_disabled_macro_sits_beside_a_broken_one() -> None:
     # The reminder must not swallow the failure it prints after.
     _write("staged", enabled=False)
-    _write(
-        "bad", text="name: nope\ndescription: d\nsteps:\n  - {name: p, tool: peek}\n"
-    )
+    _write("bad", text="name: nope\ndescription: d\nsteps:\n  - peek:\n")
 
     result = runner.invoke(app, ["macros", "check"])
 

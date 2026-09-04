@@ -1,8 +1,8 @@
 """`{name}` placeholder syntax — the DSL's one dynamic construct.
 
 The true leaf of the package: pure string computation, no imports beyond
-the error type, so both `model` (clause text) and `inputs` (`with:`
-tables) can template without either depending on the other.
+the error type, so both `model` (clause text) and `inputs` (step
+arguments) can template without either depending on the other.
 
 Inputs are the ONLY dynamic thing in a macro — flat strings, no
 expressions — so this is a tokenizer and a dict lookup, nothing more.

@@ -25,12 +25,13 @@ empty file is a valid pack (the file is the pack marker):
   the pack automates and when to adopt it — `install` prints it)
 - `placeholders:` — per-installation constants (the `inputs:` of
   `action.yml`): prompt prose + example per token
-- `landmarks:` — named fixed spots (`{label, bbox, [page]}`) the
+- `landmarks:` — named fixed spots (`{label, at, [page]}`) the
   pack's recover hands tap and its agent episodes are granted by name;
   a `page:` scope offers the spot only while that page reads
 - `pages:` — fingerprints more than one route lands on (a page only
   one route uses may be declared beside its waypoint instead). Anchors
-  are one clause (`"text"`, `{or: [...], region}`, `{and: [...]}`) —
+  are a list of texts the page shows — alternate readings of one text
+  go inside it (`text: [..]`), `within:` pins it to a band or a box —
   semantics only; geometry is learned on-device via
   `physiclaw playbooks pages calibrate`. A page here may carry its
   `recover:` hand too — a gesture, a landmark tap, or a pack macro by
@@ -41,20 +42,40 @@ empty file is a valid pack (the file is the pack marker):
 shows — name the app the way users say it, 淘宝 not taobao, so two
 packs offering the same task read apart), `enabled`, `inputs`, and
 `route` — a ROUTE of `page:` waypoints (checked every time, each
-optionally declaring its own `recover:` — one hand, or
-`occluded:`/`elsewhere:`/`locked:` hands per reading, with its own
-`limit:`)
+optionally declaring its own `recover:` — one hand (`go_back`,
+`{tap: landmarks.<name>}`, `{macro: <name>}`), or
+`covered:`/`elsewhere:`/`locked:` hands per reading, with `tries:`
+beside it)
 alternating with moves — `start` (the cold launch, usually a pack
 macro every route shares), `do` (a recorded macro), `agent` (the
 model drives inside your prompt's fence, with the tools, the `give:`
 grants — landmarks to tap, pack macros to run — and the `context:`
 you list), `ask` (human gate; `yes:`/`no:` are the replies it reads,
-`wait:` its patience, `total:` the label a payment total sits beside,
+`wait:` and `rounds:` its patience, `total_label:` the label a payment total sits beside,
 `resume:` re-enters the app), `tell`. A move's enter/verify checks
 derive from the adjacent waypoints; there is no branching and no loop
 — judgment is an `agent` step, approval is an `ask`. What the playbook
 declares is what runs: a page without `recover:` hands over, and
 nothing retries or unlocks in the background.
+
+## Values, and the one check shape
+
+Three spellings, filled at three times:
+
+| Spelling                                        | Filled                                        | Lives in                                             |
+|-------------------------------------------------|-----------------------------------------------|------------------------------------------------------|
+| `<<TOKEN>>`                                     | at install, from `placeholders.yml`           | any string in the pack, macros included              |
+| `{inputs.x}`, `{node.field}`, `{ask.total}`     | when the walk reaches the move                | a move's `with:`, an `ask`/`tell` `message:`, a prompt |
+| `{x}`                                           | when the macro runs, from the move's `with:`  | a macro's steps and checks                           |
+
+A check reads the same everywhere it appears — a macro step's `require`
+/ `forbid` / `expect` / `when` / `skip_when`, a page's anchors:
+
+    "text"                              the text shows
+    ["text", "alt"]                     any of them (alternate readings)
+    {text: "t" | [alts], within: top}   in a band (top / bottom / left /
+                                        right) or a [l, t, r, b] box
+    {and: [..]}  {or: [..]}  {not: ..}  combinators (macro checks only)
 
 Adaptation notes and the rehearsal checklist ride as comments in the
 files.
@@ -62,7 +83,7 @@ files.
 `channel/` is the conductor's own pack: the thread page, the
 send/open macros an `ask` runs, and `boot.yml` — the walk every wake
 plays before any playbook (reach the thread, read the request, hand
-the matching playbook the baton). Its `activate` step is the one
+the matching playbook the baton). Its `select` step is the one
 entry only that file may carry; the hands and limits around it are
 yours to edit, step, and replay like any route.
 
@@ -93,7 +114,7 @@ literal string.
 Placeholders are deliberately not playbook inputs: inputs are per-run
 values the activation extracts from the user's message, while a
 placeholder is a constant of your installation that also lives where
-inputs cannot reach (page anchors, macro guards).
+inputs cannot reach (page anchors, macro checks).
 
 ## After installing
 

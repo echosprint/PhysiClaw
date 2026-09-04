@@ -21,7 +21,7 @@ from physiclaw.macros.model import (
     Screen,
 )
 from physiclaw.macros.parse import parse_macro
-from physiclaw.macros.runner import run, run_and_record
+from physiclaw.macros.runner import _step_index, run, run_and_record
 
 IMAGE = {"type": "image", "mime_type": "image/jpeg", "data": "aGk="}
 
@@ -55,84 +55,57 @@ def _spec(text: str, name: str = "demo"):
     return parse_macro(text, name)
 
 
-TWO_STEPS = """
-name: demo
+TWO_STEPS = """name: demo
 description: d
 inputs:
   msg:
     description: text
 steps:
-  - name: home-screen-3
-    tool: home_screen
-  - name: stage
-    tool: send_to_clipboard
-    with:
-      text: "{msg}"
+  - home_screen
+  - send_to_clipboard: "{msg}"
 """
 
 
 def _guarded(guard_body: str):
     """The guard tests' shared scaffold: home_screen, then a guarded tap."""
-    indented = "".join(f"      {line}\n" for line in guard_body.splitlines())
+    indented = "".join(f"    {line}\n" for line in guard_body.splitlines())
     return _spec(
         "name: demo\ndescription: d\nsteps:\n"
-        "  - name: home-screen-1\n    tool: home_screen\n"
-        "  - name: open-app\n"
-        "    tool: tap\n"
-        "    with:\n"
-        "      label: t\n"
-        "      bbox: [0.1, 0.2, 0.3, 0.4]\n"
-        f"    guard:\n{indented}"
+        "  - home_screen\n"
+        "  - tap: t\n"
+        "    at: [0.1, 0.2, 0.3, 0.4]\n"
+        f"{indented}"
     )
 
 
 GUARDED = 'require: "WeChat"\nhint: "open it manually"'
 GUARD_FORBID = 'forbid: "Upgrade now"'
 
-GUARD_FIRST = """
-name: demo
+GUARD_FIRST = """name: demo
 description: d
 steps:
-  - name: entry
-    tool: tap
-    with:
-      label: t
-      bbox: [0.1, 0.2, 0.3, 0.4]
-    guard:
-      require: "Home"
+  - tap: t
+    at: [0.1, 0.2, 0.3, 0.4]
+    require: "Home"
 """
 
-WAIT_STEPS = """
-name: demo
+WAIT_STEPS = """name: demo
 description: d
 steps:
-  - name: go-home
-    tool: home_screen
-  - name: settle
-    tool: wait
-    with:
-      seconds: 3
+  - home_screen
+  - wait: 3
 """
 
 # The canonical replacement for the old `wait_seconds` guard: settle, then
 # check. The wait invalidates the held listing, so the guard re-reads.
-WAIT_THEN_GUARD = """
-name: demo
+WAIT_THEN_GUARD = """name: demo
 description: d
 steps:
-  - name: go-home
-    tool: home_screen
-  - name: settle
-    tool: wait
-    with:
-      seconds: 2
-  - name: open-app
-    tool: tap
-    with:
-      label: t
-      bbox: [0.1, 0.2, 0.3, 0.4]
-    guard:
-      require: "WeChat"
+  - home_screen
+  - wait: 2
+  - tap: t
+    at: [0.1, 0.2, 0.3, 0.4]
+    require: "WeChat"
 """
 
 
@@ -160,7 +133,7 @@ async def test_run_success_result_reports_all_steps() -> None:
     log = result.blocks[0]["text"]
     assert "all 2 steps completed" in log
     assert "✓ 1. home_screen" in log
-    assert '✓ 2. send_to_clipboard "stage"' in log
+    assert "✓ 2. send_to_clipboard 'hello'" in log
 
 
 async def test_run_keeps_only_last_step_view() -> None:
@@ -240,7 +213,7 @@ async def test_run_guard_failure_result_carries_previous_view() -> None:
 
     log = result.blocks[0]["text"]
     assert "ABORTED at step 2/2" in log
-    assert '✗ 2. tap "open-app"' in log
+    assert "✗ 2. tap 't'" in log
     assert any("Settings only" in b.get("text", "") for b in result.blocks[1:])
 
 
@@ -410,7 +383,7 @@ async def test_wait_step_sleeps_and_calls_no_tool(mocker) -> None:
     assert result.ok is True
     sleep.assert_awaited_once_with(3)
     assert [name for name, _ in mcp.calls] == ["home_screen", "peek"]
-    assert 'wait "settle"' in result.blocks[0]["text"]
+    assert "wait 3s" in result.blocks[0]["text"]
     assert "waited 3s" in result.blocks[0]["text"]
 
 
@@ -445,10 +418,7 @@ async def test_a_wait_whose_expect_peeked_needs_no_recovery_read(mocker) -> None
     row = format_row(0, "text", "WeChat", [0.3, 0.03, 0.6, 0.09], 0.95)
     mcp = FakeCaller([_gesture("went home"), _gesture("peeked", listing=row)])
     spec = _spec(
-        "name: demo\ndescription: d\nsteps:\n"
-        "  - name: go-home\n    tool: home_screen\n"
-        "  - name: settle\n    tool: wait\n    with: {seconds: 1}\n"
-        '    expect: {text: "WeChat", within: [0.15, 0.0, 0.85, 0.15]}\n'
+        'name: demo\ndescription: d\nsteps:\n  - home_screen\n  - wait: 1\n    expect: {text: "WeChat", within: [0.15, 0.0, 0.85, 0.15]}\n'
     )
 
     result = await run(spec, {}, mcp)
@@ -519,25 +489,17 @@ async def test_run_guard_peek_failure_is_retried_once_then_aborts() -> None:
 
 # ---------- skip_when (idempotence) ----------
 
-SKIP_STEPS = """
-name: demo
+SKIP_STEPS = """name: demo
 description: d
 inputs:
   msg:
     description: text
 steps:
-  - name: home-screen-4
-    tool: home_screen
-  - name: focus-input-box
-    tool: tap
-    with:
-      label: t
-      bbox: [0.1, 0.915, 0.69, 0.955]
+  - home_screen
+  - tap: t
+    at: [0.1, 0.915, 0.69, 0.955]
     skip_when: {or: ["空格", "space"]}
-  - name: stage
-    tool: send_to_clipboard
-    with:
-      text: "{msg}"
+  - send_to_clipboard: "{msg}"
 """
 
 
@@ -549,10 +511,7 @@ async def test_run_skips_step_whose_postcondition_holds() -> None:
 
     assert result.ok is True
     assert [name for name, _ in mcp.calls] == ["home_screen", "send_to_clipboard"]
-    assert (
-        '↷ 2. tap "focus-input-box" — skipped (already satisfied)'
-        in (result.blocks[0]["text"])
-    )
+    assert "↷ 2. tap 't' — skipped (already satisfied)" in (result.blocks[0]["text"])
 
 
 async def test_run_executes_step_when_postcondition_not_met() -> None:
@@ -576,11 +535,7 @@ async def test_run_executes_step_when_postcondition_not_met() -> None:
 
 async def test_run_skip_when_on_first_step_peeks_once() -> None:
     spec = _spec(
-        "name: demo\ndescription: d\nsteps:\n"
-        "  - name: entry\n    tool: tap\n    with:\n"
-        "      label: t\n"
-        "      bbox: [0.1, 0.2, 0.3, 0.4]\n"
-        '    skip_when: "already there"\n'
+        'name: demo\ndescription: d\nsteps:\n  - tap: t\n    at: [0.1, 0.2, 0.3, 0.4]\n    skip_when: "already there"\n'
     )
     already = _gesture("current", changed=None, listing="already there")
     mcp = FakeCaller([already])
@@ -594,13 +549,7 @@ async def test_run_skip_when_on_first_step_peeks_once() -> None:
 async def test_run_skipped_step_bypasses_its_guard() -> None:
     # A skipped step's guard must not abort the run — the step isn't needed.
     spec = _spec(
-        "name: demo\ndescription: d\nsteps:\n"
-        "  - name: home-screen-2\n    tool: home_screen\n"
-        "  - name: focus\n    tool: tap\n    with:\n"
-        "      label: t\n"
-        "      bbox: [0.1, 0.9, 0.7, 0.96]\n"
-        '    skip_when: "空格"\n'
-        '    guard:\n      require: "never-on-screen"\n'
+        'name: demo\ndescription: d\nsteps:\n  - home_screen\n  - tap: t\n    at: [0.1, 0.9, 0.7, 0.96]\n    skip_when: "空格"\n    require: "never-on-screen"\n'
     )
     mcp = FakeCaller([_gesture("went home", listing="空格")])
 
@@ -852,7 +801,7 @@ async def test_run_and_record_keeps_stats_of_disabled_macros() -> None:
         d = paths.macros_dir() / name
         d.mkdir(parents=True)
         (d / "MACRO.yml").write_text(
-            f"name: {name}\ndescription: d\nsteps:\n  - name: peek-1\n    tool: peek\n",
+            f"name: {name}\ndescription: d\nsteps:\n  - peek\n",
             encoding="utf-8",
         )
     macro_stats.record("resting", ok=True, known_names={"demo", "resting"})
@@ -890,20 +839,16 @@ _KEYS = "\n".join(
     ]
 )
 
-CLIPBOARD_THEN_GUARD = """
-name: demo
+CLIPBOARD_THEN_GUARD = """name: demo
 description: d
 steps:
-  - name: tap-1
-    tool: tap
-    with: {label: t, bbox: [0.1, 0.1, 0.2, 0.2]}
-  - name: send-to-clipboard-1
-    tool: send_to_clipboard
-    with: {text: hi}
-  - name: tap-2
-    tool: tap
-    with: {label: t, bbox: [0.3, 0.3, 0.4, 0.4]}
-    guard: {require: "Paste", forbid: "boom"}
+  - tap: t
+    at: [0.1, 0.1, 0.2, 0.2]
+  - send_to_clipboard: hi
+  - tap: t
+    at: [0.3, 0.3, 0.4, 0.4]
+    require: "Paste"
+    forbid: "boom"
 """
 
 
@@ -928,18 +873,15 @@ async def test_clipboard_step_does_not_blind_the_next_guard() -> None:
     assert [name for name, _ in mcp.calls].count("peek") == 0
 
 
-SKIP_THEN_GUARD = """
-name: demo
+SKIP_THEN_GUARD = """name: demo
 description: d
 steps:
-  - name: tap-3
-    tool: tap
-    with: {label: t, bbox: [0.1, 0.9, 0.6, 0.95]}
+  - tap: t
+    at: [0.1, 0.9, 0.6, 0.95]
     skip_when: {text: "A", within: [0.0, 0.5, 1.0, 1.0]}
-  - name: tap-4
-    tool: tap
-    with: {label: t, bbox: [0.3, 0.3, 0.4, 0.4]}
-    guard: {require: "Paste"}
+  - tap: t
+    at: [0.3, 0.3, 0.4, 0.4]
+    require: "Paste"
 """
 
 
@@ -956,14 +898,12 @@ async def test_step_one_skip_peek_is_adopted_not_discarded() -> None:
     assert [name for name, _ in mcp.calls] == ["peek", "tap"]  # exactly one peek
 
 
-GUARDED_FIRST_STEP = """
-name: demo
+GUARDED_FIRST_STEP = """name: demo
 description: d
 steps:
-  - name: tap-5
-    tool: tap
-    with: {label: t, bbox: [0.1, 0.1, 0.2, 0.2]}
-    guard: {require: "Settings"}
+  - tap: t
+    at: [0.1, 0.1, 0.2, 0.2]
+    require: "Settings"
 """
 
 
@@ -1011,14 +951,12 @@ async def test_unreadable_screen_is_not_reported_as_a_missing_element(
 # CLOSED. Both cases below are false-PASSes: the guard says yes and the
 # gesture fires on a screen that never matched.
 
-FORBID_ONLY = """
-name: demo
+FORBID_ONLY = """name: demo
 description: d
 steps:
-  - name: tap-6
-    tool: tap
-    with: {label: t, bbox: [0.1, 0.1, 0.2, 0.2]}
-    guard: {forbid: "Upgrade now"}
+  - tap: t
+    at: [0.1, 0.1, 0.2, 0.2]
+    forbid: "Upgrade now"
 """
 
 
@@ -1038,17 +976,14 @@ async def test_forbid_only_guard_fails_closed_on_an_unreadable_screen(
     assert ("tap", {"bbox": [0.1, 0.1, 0.2, 0.2]}) not in mcp.calls
 
 
-ECHO_GUARD = """
-name: demo
+ECHO_GUARD = """name: demo
 description: d
 steps:
-  - name: tap-7
-    tool: tap
-    with: {label: t, bbox: [0.1, 0.1, 0.2, 0.2]}
-  - name: tap-8
-    tool: tap
-    with: {label: t, bbox: [0.3, 0.3, 0.4, 0.4]}
-    guard: {require: "Payment confirmed"}
+  - tap: t
+    at: [0.1, 0.1, 0.2, 0.2]
+  - tap: t
+    at: [0.3, 0.3, 0.4, 0.4]
+    require: "Payment confirmed"
 """
 
 
@@ -1085,19 +1020,15 @@ def test_screen_text_keeps_a_view_replys_listing() -> None:
 
 # ---------- start_at: resume a macro the caller partly did by hand ----------
 
-RESUMABLE = """
-name: demo
+RESUMABLE = """name: demo
 description: d
 steps:
-  - name: go-home
-    tool: home_screen
-  - name: open-app
-    tool: tap
-    with: {label: t, bbox: [0.1, 0.1, 0.2, 0.2]}
-  - name: focus-input-box
-    tool: tap
-    with: {label: t, bbox: [0.1, 0.9, 0.7, 0.95]}
-    guard: {require: "Chat"}
+  - home_screen
+  - tap: t
+    at: [0.1, 0.1, 0.2, 0.2]
+  - tap: t
+    at: [0.1, 0.9, 0.7, 0.95]
+    require: "Chat"
 """
 
 _CHAT = format_row(0, "text", "Chat", [0.3, 0.02, 0.5, 0.07], 0.9)
@@ -1107,7 +1038,7 @@ _CHAT = format_row(0, "text", "Chat", [0.3, 0.02, 0.5, 0.07], 0.9)
 async def test_start_at_skips_the_prefix_without_executing_it() -> None:
     mcp = FakeCaller([_gesture("peeked", listing=_CHAT), _gesture("tapped")])
 
-    result = await run(_spec(RESUMABLE), {}, mcp, start_at="focus-input-box")
+    result = await run(_spec(RESUMABLE), {}, mcp, start_at="idx3-tap-t")
 
     assert result.ok
     # home_screen and the app tap must NOT have fired — the caller did those.
@@ -1122,7 +1053,7 @@ async def test_start_at_verifies_the_entry_step_guard() -> None:
     # the screen does not match and nothing may fire.
     mcp = FakeCaller([_gesture("peeked", listing="somewhere else")])
 
-    result = await run(_spec(RESUMABLE), {}, mcp, start_at="focus-input-box")
+    result = await run(_spec(RESUMABLE), {}, mcp, start_at="idx3-tap-t")
 
     assert not result.ok
     assert result.reason == REASON_GUARD_FAILED
@@ -1136,7 +1067,7 @@ async def test_start_at_abort_counts_from_the_entry_step_not_from_one() -> None:
     # is not in — MACRO.md tells it to trust this line.
     mcp = FakeCaller([_gesture("peeked", listing="somewhere else")])
 
-    result = await run(_spec(RESUMABLE), {}, mcp, start_at="focus-input-box")
+    result = await run(_spec(RESUMABLE), {}, mcp, start_at="idx3-tap-t")
 
     assert "no steps executed by this run" in result.blocks[0]["text"]
 
@@ -1145,7 +1076,7 @@ async def test_start_at_abort_counts_from_the_entry_step_not_from_one() -> None:
 async def test_start_at_unknown_name_raises_before_any_gesture() -> None:
     mcp = FakeCaller([])
 
-    with pytest.raises(MacroError, match="matches no step"):
+    with pytest.raises(MacroError, match="names no step"):
         await run(_spec(RESUMABLE), {}, mcp, start_at="nope")
 
     assert mcp.calls == []  # nothing actuated
@@ -1158,12 +1089,12 @@ async def test_start_at_unknown_name_raises_before_any_gesture() -> None:
 async def test_stop_after_runs_through_the_named_step_and_no_further() -> None:
     mcp = FakeCaller([_gesture("home"), _gesture("tapped")])
 
-    result = await run(_spec(RESUMABLE), {}, mcp, stop_after="open-app")
+    result = await run(_spec(RESUMABLE), {}, mcp, stop_after="idx2-tap-t")
 
     assert result.ok
     assert [name for name, _ in mcp.calls] == ["home_screen", "tap"]
     text = result.blocks[0]["text"]
-    assert "↷ 3–3. not run (stop_after 'open-app')" in text
+    assert "↷ 3–3. not run (stop_after 'idx2-tap-t')" in text
     assert "steps 1–2 completed" in text and "not run, stop_after" in text
 
 
@@ -1172,7 +1103,7 @@ async def test_stop_after_combines_with_start_at_for_one_step() -> None:
     mcp = FakeCaller([_gesture("tapped")])
 
     result = await run(
-        _spec(RESUMABLE), {}, mcp, start_at="open-app", stop_after="open-app"
+        _spec(RESUMABLE), {}, mcp, start_at="idx2-tap-t", stop_after="idx2-tap-t"
     )
 
     assert result.ok
@@ -1183,7 +1114,7 @@ async def test_stop_after_combines_with_start_at_for_one_step() -> None:
 async def test_stop_after_unknown_name_raises_before_any_gesture() -> None:
     mcp = FakeCaller([])
 
-    with pytest.raises(MacroError, match="matches no step"):
+    with pytest.raises(MacroError, match="names no step"):
         await run(_spec(RESUMABLE), {}, mcp, stop_after="nope")
 
     assert mcp.calls == []
@@ -1195,20 +1126,24 @@ async def test_stop_after_before_start_at_is_refused() -> None:
 
     with pytest.raises(MacroError, match="precedes the start"):
         await run(
-            _spec(RESUMABLE), {}, mcp, start_at="focus-input-box", stop_after="go-home"
+            _spec(RESUMABLE),
+            {},
+            mcp,
+            start_at="idx3-tap-t",
+            stop_after="idx1-home_screen",
         )
 
     assert mcp.calls == []
 
 
-def test_duplicate_step_names_are_rejected_at_parse_time() -> None:
-    # `start_at` addresses steps by name, so duplicates would make it
-    # ambiguous. Caught by `macros check` at authoring time rather than
-    # mid-replay with the phone half-way through the flow.
-    dupe = RESUMABLE.replace("  - name: go-home\n", "  - name: open-app\n")
-
-    with pytest.raises(MacroError, match="duplicate step name"):
-        _spec(dupe)
+def test_an_unknown_handle_lists_the_steps() -> None:
+    # The handle carries position AND verb line, so one written down
+    # before the macro was edited fails here with the current list.
+    with pytest.raises(
+        MacroError,
+        match=r"start_at 'idx3-tap-paste'.*Steps: idx1-home_screen, idx2-tap-t, idx3-tap-t",
+    ):
+        _step_index(_spec(RESUMABLE), "idx3-tap-paste", "start_at")
 
 
 @pytest.mark.asyncio
@@ -1217,7 +1152,7 @@ async def test_start_at_unguarded_entry_step_says_it_was_unverified() -> None:
     # the log imply the entry state was verified.
     mcp = FakeCaller([_gesture("tapped", listing=_CHAT), _gesture("focused")])
 
-    result = await run(_spec(RESUMABLE), {}, mcp, start_at="open-app")
+    result = await run(_spec(RESUMABLE), {}, mcp, start_at="idx2-tap-t")
 
     assert result.ok
     assert "NOT verified" in result.blocks[0]["text"]
@@ -1244,9 +1179,8 @@ async def test_no_start_at_runs_the_whole_macro() -> None:
 # session deadline is only checked between turns — so a slow app could block
 # the engine task for half a session.
 
-BUDGET_STEPS = "name: demo\ndescription: d\nsteps:\n" + "".join(
-    f"  - name: s{i}\n    tool: tap\n    with: {{label: t, bbox: [0.1, 0.1, 0.2, 0.2]}}\n"
-    for i in range(1, 11)
+BUDGET_STEPS = "name: demo\ndescription: d\nsteps:\n" + (
+    "  - tap: t\n    at: [0.1, 0.1, 0.2, 0.2]\n" * 10
 )
 
 
@@ -1301,19 +1235,12 @@ async def test_a_wait_step_counts_against_the_run_budget(mocker) -> None:
 
 # ---------- expect (postcondition) ----------
 
-WAIT_EXPECT = """
-name: demo
+WAIT_EXPECT = """name: demo
 description: d
 steps:
-  - name: tap-dock
-    tool: tap
-    with:
-      label: t
-      bbox: [0.1, 0.2, 0.3, 0.4]
-  - name: await-app
-    tool: wait
-    with:
-      seconds: 1
+  - tap: t
+    at: [0.1, 0.2, 0.3, 0.4]
+  - wait: 1
     expect: {text: "WeChat", within: [0.15, 0.0, 0.85, 0.15]}
     hint: "WeChat did not open"
 """
@@ -1396,11 +1323,7 @@ async def test_expect_adopts_the_screen_it_read_for_the_next_step(mocker) -> Non
     # rather than buy a second camera cycle.
     mocker.patch("physiclaw.macros.steps.asyncio.sleep")
     spec = _spec(
-        "name: demo\ndescription: d\nsteps:\n"
-        "  - name: settle\n    tool: wait\n    with: {seconds: 1}\n"
-        '    expect: {text: "WeChat", within: [0.15, 0.0, 0.85, 0.15]}\n'
-        "  - name: tap-row\n    tool: tap\n    with: {label: t, bbox: [0.1, 0.2, 0.3, 0.4]}\n"
-        '    guard:\n      require: {text: "WeChat", within: [0.15, 0.0, 0.85, 0.15]}\n'
+        'name: demo\ndescription: d\nsteps:\n  - wait: 1\n    expect: {text: "WeChat", within: [0.15, 0.0, 0.85, 0.15]}\n  - tap: t\n    at: [0.1, 0.2, 0.3, 0.4]\n    require: {text: "WeChat", within: [0.15, 0.0, 0.85, 0.15]}\n'
     )
     mcp = FakeCaller([_gesture("peeked", listing=_OPEN), _gesture("tapped")])
 
@@ -1421,10 +1344,7 @@ _SCREEN = "\n".join(
 
 
 def _one(body: str):
-    spec = _spec(
-        "name: demo\ndescription: d\nsteps:\n  - name: s1\n    tool: peek\n"
-        "    guard:\n      require:\n" + body
-    )
+    spec = _spec("name: demo\ndescription: d\nsteps:\n  - peek:\n    require:\n" + body)
     return spec.steps[0].guard.require
 
 
@@ -1451,9 +1371,7 @@ async def test_skip_when_will_not_skip_on_an_unreadable_screen() -> None:
     # would otherwise read as "it's gone, skip the step" and silently drop
     # a gesture. No screen text means no skip.
     spec = _spec(
-        "name: demo\ndescription: d\nsteps:\n"
-        "  - name: dismiss\n    tool: tap\n    with: {label: t, bbox: [0.1, 0.1, 0.2, 0.2]}\n"
-        '    skip_when: {not: "popup"}\n'
+        'name: demo\ndescription: d\nsteps:\n  - tap: t\n    at: [0.1, 0.1, 0.2, 0.2]\n    when: "popup"\n'
     )
     mcp = FakeCaller([RuntimeError("camera busy"), _gesture("tapped")])
 
@@ -1467,15 +1385,12 @@ async def test_skip_when_will_not_skip_on_an_unreadable_screen() -> None:
 # ---------- the label target: annotation + healing ----------
 
 
-HEAL_SPEC = """
-name: demo
+HEAL_SPEC = """name: demo
 description: d
 steps:
-  - name: entry
-    tool: home_screen
-  - name: press
-    tool: tap
-    with: {label: "Buy", bbox: [0.40, 0.40, 0.50, 0.44]}
+  - home_screen
+  - tap: "Buy"
+    at: [0.40, 0.40, 0.50, 0.44]
 """
 
 
@@ -1521,13 +1436,12 @@ async def test_label_not_found_uses_the_recorded_bbox_silently() -> None:
 
 
 async def test_swipe_label_is_stripped_but_never_heals() -> None:
-    # A swipe's bbox is a region, not an element: the label documents it
-    # and is lowered off the wire, but the coordinates never move.
+    # A swipe's box is a region, not an element: its object is the
+    # direction, so there is no label to heal by and the coordinates never
+    # move.
     spec = _spec(
-        "name: demo\ndescription: d\nsteps:\n"
-        "  - name: entry\n    tool: home_screen\n"
-        "  - name: fling\n    tool: swipe\n"
-        '    with: {label: "Buy", bbox: [0.40, 0.40, 0.50, 0.44], direction: "up", size: "s"}\n'
+        "name: demo\ndescription: d\nsteps:\n  - home_screen\n  - swipe: up\n"
+        "    at: [0.40, 0.40, 0.50, 0.44]\n    size: s\n"
     )
     listing = format_row(0, "text", "Buy now", [0.42, 0.50, 0.52, 0.54], 0.9)
     mcp = FakeCaller([_gesture("home", listing=listing), _gesture("swiped")])
@@ -1560,6 +1474,6 @@ async def test_healed_press_records_the_fired_coordinates(tmp_path) -> None:
         .read_text(encoding="utf-8")
         .splitlines()
     ]
-    (press,) = [e for e in events if e.get("name") == "press"]
+    (press,) = [e for e in events if e.get("name") == "idx2-tap-buy"]
     assert press["args"]["bbox"] == [0.42, 0.5, 0.52, 0.54]
     assert press["args"]["label"] == "Buy"

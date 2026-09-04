@@ -165,16 +165,16 @@ def run(
         str,
         typer.Option(
             "--start-at",
-            help="Begin at this step NAME, as the agent's `start_at` does; "
-            "the earlier steps are NOT executed.",
+            help="Begin at this step, by the handle the step log shows, as "
+            "the agent's `start_at` does; the earlier steps are NOT executed.",
         ),
     ] = "",
     stop_after: Annotated[
         str,
         typer.Option(
             "--stop-after",
-            help="Stop after this step NAME; the later steps are NOT executed "
-            "— rehearse one gesture at a time.",
+            help="Stop after this step (same handle); the later steps are NOT "
+            "executed — rehearse one gesture at a time.",
         ),
     ] = "",
 ) -> None:
@@ -299,7 +299,7 @@ def _clip(text: str, limit: int) -> str:
 
 def _fmt_args(args: dict) -> str:
     """A step's recorded arguments, rendered to paste straight back into
-    the `with:` table that produced them — `bbox: [0.12, 0.04, 0.34, 0.1]`,
+    the step arguments that produced them — `bbox: [0.12, 0.04, 0.34, 0.1]`,
     not a Python dict repr. JSON per VALUE (not over the whole mapping)
     keeps YAML flow syntax for lists and quotes strings, so whitespace in a
     clipboard value is visible instead of silently trailing. Values are

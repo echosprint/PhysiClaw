@@ -176,7 +176,7 @@ def render_section(macros: dict[str, Macro]) -> str:
                 # "…the chat Example: …" reads as one run-on sentence.
                 line += f" (example: `{inp.example}`)"
             lines.append(line)
-        # Every step is named and unique (parse enforces it), so this line
-        # is both the step count and the set of valid `start_at` values.
+        # Every step's handle: the count, what each step does, and the
+        # exact `start_at` values — one list, three answers.
         lines.append(f"  - steps: {', '.join(s.name for s in spec.steps)}")
     return "\n".join(lines)

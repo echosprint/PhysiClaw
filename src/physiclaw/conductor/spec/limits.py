@@ -17,7 +17,7 @@ MAX_NODES = 20
 
 # Recovery: the walk-wide ceiling on recovery actions (what stops a
 # splash ad on every cold launch from relaunching forever), and a
-# page's own default `limit:` under it.
+# page's own default `tries:` under it.
 MAX_RECOVER_ACTIONS = 6
 DEFAULT_RECOVER_LIMIT = 2
 
@@ -57,11 +57,11 @@ MAX_CANDIDATES = 40
 
 # ---- the boot (channel/boot.yml, step_activate.py) ----
 
-# How many times the boot's `activate` step may take parse_task's
+# How many times the boot's `select` step may take parse_task's
 # `scroll_up` escape — scrolling the thread for an older request —
 # before the cautious read (no full request in view → no activation)
 # stands. The boot's OTHER bounds (unlocks, opens) are its own route's
-# `recover.limit:`, under the walk-wide ceiling above.
+# `tries:`, under the walk-wide ceiling above.
 DEFAULT_BOOT_SCROLLS = 2
 
 # ---- the drivers (rehearsal.py / replay.py) ----

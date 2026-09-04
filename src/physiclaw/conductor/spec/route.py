@@ -21,6 +21,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
+from physiclaw.common import gesture_vocab
 from physiclaw.conductor.spec import context, lints, reply
 from physiclaw.conductor.spec.calls import AGENT_TOOLS, CONTRACT_FIELDS, RESERVED_KEYS
 from physiclaw.conductor.spec.conventions import (
@@ -49,9 +50,9 @@ from physiclaw.conductor.spec.model import (
     INPUTS_ROOT,
     IRREVERSIBLE_CLASSES,
     PACK_MACROS_DIRNAME,
+    READING_COVERED,
     READING_ELSEWHERE,
     READING_LOCKED,
-    READING_OCCLUDED,
     RECOVER_READINGS,
     ActivateNode,
     AgentNode,
@@ -69,8 +70,10 @@ from physiclaw.conductor.spec.model import (
 )
 from physiclaw.conductor.spec.pages import (
     PAGE_DECL_FIELDS,
+    PAGE_RECOVERY_FIELDS,
     PagesError,
     parse_pages_data,
+    recovery_fields,
     route_decl,
 )
 from physiclaw.conductor.spec.refs import (
@@ -87,16 +90,16 @@ from physiclaw.macros.parse import parse_inline_macro
 # reads); the bounds on calls, scrolls, prompt, and returns are
 # `limits.py`'s.
 _AGENT_LIMIT_KEYS = {"calls", "scrolls"}
-_ASK_WAIT_KEYS = {"seconds", "rounds"}
 
-# The declared-recovery hand: one gesture (`tool`, with `with:
-# landmarks.<name>` for a tap) or a macro. Closed tool vocabulary — a
-# recover hand resets state, it does not navigate (the route does that).
-# A page declares one hand for any deviation, or one per reading
-# (`occluded:` / `elsewhere:` / `locked:`), plus its own `limit:`.
-RECOVER_TOOLS = ("force_quit", "go_back", "home_screen", "unlock_phone", "tap")
-_HAND_KEYS = {"tool", "with", "macro"}
-_RECOVER_KEYS = _HAND_KEYS | {"limit", *RECOVER_READINGS}
+# The declared-recovery hand, in a macro step's own shape: a bare
+# gesture, `{tap: landmarks.<name>}`, or `{macro: <name>}`. Closed
+# vocabulary — a recover hand resets state, it does not navigate (the
+# route does that). A page declares one hand for any deviation, or one
+# per reading (`covered:` / `elsewhere:` / `locked:`), plus its own
+# `tries:`.
+BARE_HANDS = tuple(sorted(gesture_vocab.NAV_TOOLS | {gesture_vocab.UNLOCK_PHONE}))
+_HAND_KEYS = {"tap", "macro"}
+_RECOVER_KEYS = _HAND_KEYS | set(RECOVER_READINGS)
 
 # What an agent may be granted by name (`give:`): a landmark it may tap
 # blind, or a pack macro it may run.
@@ -109,9 +112,9 @@ _GRANT_ROOTS = (GRANT_LANDMARKS, GRANT_MACROS)
 # to the route. Page-declaration fields come from `pages.py`'s ONE
 # spelling (PAGE_DECL_FIELDS) — their content is validated there; they
 # appear here only so the unknown-key check names them as legal.
-ENTRY_KINDS = ("page", "start", "do", "agent", "ask", "tell", "activate")
+ENTRY_KINDS = ("page", "start", "do", "agent", "ask", "tell", "select")
 _ENTRY_KEYS = {
-    "page": {"page", "recover", *PAGE_DECL_FIELDS},
+    "page": {"page", *PAGE_RECOVERY_FIELDS, *PAGE_DECL_FIELDS},
     "start": {"start", "macro"},
     "do": {"do", "with", "macro", "irreversible"},
     "agent": {
@@ -124,9 +127,19 @@ _ENTRY_KEYS = {
         "context",
         "irreversible",
     },
-    "ask": {"ask", "approve", "message", "yes", "no", "total", "wait", "resume"},
+    "ask": {
+        "ask",
+        "approve",
+        "message",
+        "yes",
+        "no",
+        "total_label",
+        "wait",
+        "rounds",
+        "resume",
+    },
     "tell": {"tell", "message"},
-    "activate": {"activate", "limit"},
+    "select": {"select", "limit"},
 }
 
 # The shape `_macro_resolver` returns.
@@ -190,7 +203,8 @@ def compile_route(
         pos = i + 1
         if kind == "page":
             current_page = wp_ids[i]
-            if "recover" in entry:
+            fields = recovery_fields(entry)
+            if fields:
                 rpage = wp_ids[i]
                 assert rpage is not None
                 if "." in rpage:
@@ -198,9 +212,7 @@ def compile_route(
                         f"route entry {pos}: {rpage!r} is a reserved built-in "
                         "— packs declare recovery for their own pages only"
                     )
-                hand = _parse_recover(
-                    ctx, entry["recover"], f"route entry {pos}", rpage
-                )
+                hand = _parse_recover(ctx, fields, f"route entry {pos}", rpage)
                 if rpage in recovers and recovers[rpage] != hand:
                     raise PlaybookError(
                         f"route entry {pos}: page {rpage!r} declares `recover` "
@@ -259,8 +271,8 @@ def compile_route(
             moves.append(agent)
         elif kind == "ask":
             moves.append(_parse_ask(ctx, where, name, entry, current_page))
-        elif kind == "activate":
-            moves.append(_parse_activate(ctx, where, name, entry, current_page))
+        elif kind == "select":
+            moves.append(_parse_select(ctx, where, name, entry, current_page))
         else:  # tell
             message, _ = _entry_message(ctx, where, entry, ctx.payloads)
             moves.append(TellNode(id=name, message=message))
@@ -488,7 +500,7 @@ def _context_entries(entry: dict, where: str) -> list[str]:
 
 def _landmark_name(ctx: _Ctx, value: Any, where: str) -> str:
     """A `landmarks.<name>` reference resolved to its bare name — ONE
-    spelling for `give:` entries and a recover tap's `with:`. The name
+    spelling for `give:` entries and a recover hand's `tap:`. The name
     half rides the shared name grammar (`check_name`), so a landmark
     reference can never drift from the section's own naming rule."""
     prefix, _, name = value.partition(".") if isinstance(value, str) else ("", "", "")
@@ -606,16 +618,20 @@ def _parse_do(
     enter: str,
     verify: str,
 ) -> DoNode:
-    """A `do` move. Its name IS its macro — the directory macro of that
-    name, or the `macro:` beside it (an inline body, or another name
-    when one directory macro serves two moves). `enter`/`verify` arrive
-    derived from the route's waypoints."""
+    """A `do` move: the `macro:` it runs (a pack macro by name, or an
+    inline body), with `with:` as that macro's inputs. `enter`/`verify`
+    arrive derived from the route's waypoints."""
     if "." in enter or "." in verify:
         raise PlaybookError(
             f"{where}: a `do` runs on this pack's own pages — a reserved "
             "built-in cannot frame it"
         )
-    spec = ctx.resolve(entry.get("macro", nid), where, nid)
+    if "macro" not in entry:
+        raise PlaybookError(
+            f"{where}: a `do` names its `macro:` — a pack macro by name, or an "
+            "inline body with `steps:`"
+        )
+    spec = ctx.resolve(entry["macro"], where, nid)
     macro = spec.name
     declared = {inp.name: inp for inp in spec.inputs}
     unknown_args = sorted(set(args.keys()) - set(declared))
@@ -824,15 +840,17 @@ def _parse_ask(
                 f"{where}: a payment ask's `message` must quote the sheet "
                 "total — reference {ask.total} (the ask IS the consent record)"
             )
-        if "total" not in entry:
+        if "total_label" not in entry:
             raise PlaybookError(
-                f"{where}: a payment ask declares `total:` — the label the "
-                "sheet total sits beside (e.g. 合计), read off that row only"
+                f"{where}: a payment ask declares `total_label:` — the label "
+                "the sheet total sits beside (e.g. 合计), read off that row only"
             )
-        total = checked_readings(entry, where, require_str, PlaybookError, key="total")
-    elif "total" in entry:
-        raise PlaybookError(f"{where}: `total` goes with `approve: payment`")
-    wait_seconds, rounds = _ask_wait(entry.get("wait"), where)
+        total = checked_readings(
+            entry, where, require_str, PlaybookError, key="total_label"
+        )
+    elif "total_label" in entry:
+        raise PlaybookError(f"{where}: `total_label` goes with `approve: payment`")
+    wait_seconds, rounds = _ask_wait(entry, where)
     resume = None
     if entry.get("resume") is not None:
         resume = _argless_macro(entry["resume"], "resume", where, nid, ctx.resolve)
@@ -844,27 +862,28 @@ def _parse_ask(
         no=tuple(_reply_words(entry, "no", where)),
         resume=resume,
         enter=current_page or "",
-        total=total,
+        total_label=total,
         wait_seconds=wait_seconds,
         silence_rounds=rounds,
     )
 
 
-def _parse_activate(
+def _parse_select(
     ctx: _Ctx, where: str, nid: str, entry: dict, current_page: str | None
 ) -> ActivateNode:
-    """The `activate` step — the channel boot's own. It reads the user's
-    thread, so the thread page must sit immediately before it (its
-    place at the route's end is `lints.check_boot`'s rule). `limit:
-    {scrolls}` bounds parse_task's scroll-for-history escape."""
+    """The `select` step — the channel boot's own: read the thread and
+    select the playbook it asks for. It reads the user's thread, so the
+    thread page must sit immediately before it (its place at the route's
+    end is `lints.check_boot`'s rule). `limit: {scrolls}` bounds
+    parse_task's scroll-for-history escape."""
     if not _is_boot(ctx):
         raise PlaybookError(
-            f"{where}: `activate` is the channel boot's own step — it belongs "
+            f"{where}: `select` is the channel boot's own step — it belongs "
             f"in {CHANNEL_APP}/{BOOT_PLAYBOOK}.yml only"
         )
     if current_page != THREAD_PAGE:
         raise PlaybookError(
-            f"{where}: `activate` reads the user's thread — put the "
+            f"{where}: `select` reads the user's thread — put the "
             f"`{THREAD_PAGE}` page waypoint immediately before it"
         )
     raw_limit = entry.get("limit")
@@ -883,31 +902,23 @@ def _parse_activate(
 
 def _is_boot(ctx: _Ctx) -> bool:
     """Whether this route is the channel pack's boot playbook — the one
-    file the `activate` step is admitted in."""
+    file the `select` step is admitted in."""
     return ctx.pack.app == CHANNEL_APP and ctx.playbook == BOOT_PLAYBOOK
 
 
-def _ask_wait(raw: Any, where: str) -> tuple[int, int]:
-    """`wait: {seconds, rounds}` — both optional, defaults visible in
-    the scaffold; bounded by the engine's single-sleep cap and a sane
-    number of silent rounds."""
-    raw = {} if raw is None else raw
-    if not isinstance(raw, dict):
-        raise PlaybookError(f"{where}: `wait` must be a mapping")
-    unknown = sorted(set(map(str, raw)) - _ASK_WAIT_KEYS)
-    if unknown:
-        raise PlaybookError(f"{where}: `wait`: unknown key(s): {', '.join(unknown)}")
+def _ask_wait(entry: dict, where: str) -> tuple[int, int]:
+    """An ask's patience — `wait:` seconds between reply polls and
+    `rounds:` silent polls before the session suspends; both optional,
+    defaults visible in the scaffold; bounded by the engine's single-sleep
+    cap and a sane number of rounds."""
     seconds = _limit_int(
-        raw.get("seconds", DEFAULT_ASK_WAIT_SECONDS),
-        f"{where}: `wait.seconds`",
+        entry.get("wait", DEFAULT_ASK_WAIT_SECONDS),
+        f"{where}: `wait`",
         MIN_ASK_WAIT_SECONDS,
         MAX_ASK_WAIT_SECONDS,
     )
     rounds = _limit_int(
-        raw.get("rounds", DEFAULT_ASK_ROUNDS),
-        f"{where}: `wait.rounds`",
-        1,
-        MAX_ASK_ROUNDS,
+        entry.get("rounds", DEFAULT_ASK_ROUNDS), f"{where}: `rounds`", 1, MAX_ASK_ROUNDS
     )
     return seconds, rounds
 
@@ -923,7 +934,7 @@ def _inherited_hands(ctx: _Ctx) -> dict[str, Recovery]:
         # Every page here is declared: the pack door parses the same
         # entry's anchors first and refuses one without.
         where = f"manifest page {name!r}"
-        _refuse_bodies(spec, where)
+        _refuse_bodies(spec.get("recover"), where)
         out[name] = _parse_recover(ctx, spec, where, name)
     return out
 
@@ -941,80 +952,83 @@ def _refuse_bodies(raw: Any, where: str) -> None:
         _refuse_bodies(raw.get(reading), where)
 
 
-def _parse_recover(ctx: _Ctx, raw: Any, where: str, page: str) -> Recovery:
-    """A page's `recover:` — one hand for any deviation (`tool:`/`macro:`
-    at the top), or one per reading (`occluded:` the page itself under
-    a sheet or popup, `locked:` the phone's lock screen, `elsewhere:`
-    any other screen), with the page's own `limit:` under the walk-wide
-    ceiling."""
-    if not isinstance(raw, dict):
+def _parse_recover(ctx: _Ctx, fields: dict, where: str, page: str) -> Recovery:
+    """A page's `recover:` and `tries:` (the `PAGE_RECOVERY_FIELDS` slice
+    of its mapping). `recover:` is one hand for any deviation (a bare
+    gesture, `{tap: landmarks.<name>}`, or `{macro: <name>}`), or one per
+    reading (`covered:` the page itself under a sheet or popup, `locked:`
+    the phone's lock screen, `elsewhere:` any other screen); `tries:`
+    beside it is the page's own bound under the walk-wide ceiling, and
+    means nothing without a hand to count."""
+    if "recover" not in fields:
         raise PlaybookError(
-            f"{where}: `recover` must be a mapping — `tool:` (one gesture) or `macro:`"
+            f"{where}: `tries` bounds a `recover:` — declare the hand it counts"
         )
-    unknown = sorted(set(map(str, raw)) - _RECOVER_KEYS)
-    if unknown:
-        raise PlaybookError(f"{where}: `recover`: unknown key(s): {', '.join(unknown)}")
-    limit = _limit_int(
-        raw.get("limit", DEFAULT_RECOVER_LIMIT),
-        f"{where}: `recover.limit`",
+    raw = fields["recover"]
+    tries = _limit_int(
+        fields.get("tries", DEFAULT_RECOVER_LIMIT),
+        f"{where}: `tries`",
         1,
         MAX_RECOVER_ACTIONS,
     )
-    keyed = [k for k in RECOVER_READINGS if k in raw]
-    flat = [k for k in _HAND_KEYS if k in raw]
-    if keyed and flat:
-        raise PlaybookError(
-            f"{where}: `recover` declares one hand (`tool:`/`macro:`) OR one "
-            f"per reading ({', '.join(RECOVER_READINGS)}), not both"
-        )
-    if keyed:
-        hands = {
-            k: _parse_hand(ctx, raw[k], f"{where}: `recover.{k}`", page) for k in keyed
-        }
-        return Recovery(
-            occluded=hands.get(READING_OCCLUDED),
-            elsewhere=hands.get(READING_ELSEWHERE),
-            locked=hands.get(READING_LOCKED),
-            limit=limit,
-        )
-    hand = _parse_hand(ctx, {k: raw[k] for k in flat}, f"{where}: `recover`", page)
-    return Recovery(occluded=hand, elsewhere=hand, locked=hand, limit=limit)
+    if isinstance(raw, dict):
+        unknown = sorted(set(map(str, raw)) - _RECOVER_KEYS)
+        if unknown:
+            hint = (
+                " — `tries` sits beside `recover`, not inside"
+                if "tries" in unknown
+                else ""
+            )
+            raise PlaybookError(
+                f"{where}: `recover`: unknown key(s): {', '.join(unknown)}{hint}"
+            )
+        keyed = [k for k in RECOVER_READINGS if k in raw]
+        if keyed:
+            if set(raw) - set(keyed):
+                raise PlaybookError(
+                    f"{where}: `recover` declares one hand OR one per reading "
+                    f"({', '.join(RECOVER_READINGS)}), not both"
+                )
+            hands = {
+                k: _parse_hand(ctx, raw[k], f"{where}: `recover.{k}`", page)
+                for k in keyed
+            }
+            return Recovery(
+                covered=hands.get(READING_COVERED),
+                elsewhere=hands.get(READING_ELSEWHERE),
+                locked=hands.get(READING_LOCKED),
+                tries=tries,
+            )
+    # A bare gesture, `{tap: ...}` / `{macro: ...}`, or a non-hand — the
+    # one hand parser judges the shape and names the alternatives.
+    hand = _parse_hand(ctx, raw, f"{where}: `recover`", page)
+    return Recovery(covered=hand, elsewhere=hand, locked=hand, tries=tries)
 
 
 def _parse_hand(ctx: _Ctx, raw: Any, where: str, page: str) -> RecoverHand:
-    """One recovery hand — one gesture or one argument-less macro. A
-    `tap` takes its target as `with: landmarks.<name>` (the declared
-    spot, label-healed at run time); the other tools take no target."""
-    if not isinstance(raw, dict):
-        raise PlaybookError(f"{where} must be a mapping — `tool:` or `macro:`")
-    unknown = sorted(set(map(str, raw)) - _HAND_KEYS)
-    if unknown:
-        raise PlaybookError(f"{where}: unknown key(s): {', '.join(unknown)}")
-    tool, macro_raw = raw.get("tool"), raw.get("macro")
-    if (tool is None) == (macro_raw is None):
-        raise PlaybookError(f"{where} takes exactly one of `tool` or `macro`")
-    if macro_raw is not None:
-        if "with" in raw:
-            raise PlaybookError(f"{where}: `with` goes with `tool: tap`")
-        return RecoverHand(
-            macro=_argless_macro(macro_raw, "recover", where, page, ctx.resolve)
-        )
-    if tool not in RECOVER_TOOLS:
-        raise PlaybookError(
-            f"{where}: `tool` must be one of {', '.join(RECOVER_TOOLS)} (got {tool!r})"
-        )
-    target = raw.get("with")
-    if tool != "tap":
-        if target is not None:
+    """One recovery hand, in a step's shape: a bare gesture that takes no
+    object (`go_back`), `{tap: landmarks.<name>}` (the declared spot,
+    label-healed at run time), or `{macro: <name>}` (argument-less)."""
+    if isinstance(raw, str):
+        if raw == "tap":
             raise PlaybookError(
-                f"{where}: `with` goes with `tool: tap` — {tool} takes no target"
+                f"{where}: a tap names its spot — `{{tap: landmarks.<name>}}`"
             )
-        return RecoverHand(tool=tool)
-    if target is None:
+        if raw not in BARE_HANDS:
+            raise PlaybookError(
+                f"{where}: {raw!r} is not a hand — one of {', '.join(BARE_HANDS)}, "
+                "{tap: landmarks.<name>}, or {macro: <name>}"
+            )
+        return RecoverHand(tool=raw)
+    if not isinstance(raw, dict) or len(raw) != 1 or not set(raw) <= _HAND_KEYS:
         raise PlaybookError(
-            f"{where}: a recover tap needs `with: landmarks.<name>` — the "
-            "declared spot it presses"
+            f"{where} is one hand — a bare gesture ({', '.join(BARE_HANDS)}), "
+            "{tap: landmarks.<name>}, or {macro: <name>}"
+        )
+    if "macro" in raw:
+        return RecoverHand(
+            macro=_argless_macro(raw["macro"], "recover", where, page, ctx.resolve)
         )
     return RecoverHand(
-        tool=tool, landmark=_landmark_name(ctx, target, f"{where}: `with`")
+        tool="tap", landmark=_landmark_name(ctx, raw["tap"], f"{where}: `tap`")
     )
