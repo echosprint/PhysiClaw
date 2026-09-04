@@ -151,6 +151,7 @@ class Program:
         prints: list[PagePrint],
         channel: Channel | None = None,
         suspended: dict | None = None,
+        position: dict | None = None,
         landmarks: "dict[str, Landmark] | None" = None,
         dry: bool = False,
         activation: "Activation | None" = None,
@@ -207,18 +208,11 @@ class Program:
         # spent per target page (their sum is the walk-wide count).
         self._recovery: recover.State | None = None
         self._page_recoveries: Counter[str] = Counter()
-        # A resumed walk never restarts below its stored cursor: the
-        # nodes before it already ran on an earlier wake (an ask
-        # answered), and re-running them per wake would loop
-        # across wakes with a fresh recovery budget each time.
-        self._floor = 0
-        # The resume floor's one piece of infrastructure: a wake minutes
-        # later usually meets a locked phone, and no walk-level hand can
-        # run before the opening peek reads — one unlock, once.
-        self._unlocked = False
-        # Built from a suspension (the OPENING phase then trusts the
-        # stored cursor and may read the thread first).
+        # A restored walk's stored cursor and whether it is a wake's
+        # suspension — `_restore` says what each buys.
+        self._resume_at = 0
         self._from_suspension = False
+        self._unlocked = False  # the resume unlock, once
         # Telemetry (`walklog`): decision outcomes brokered to this walk.
         self._micros = 0
         # The walk's recorded outcome, None while it runs — set by the
@@ -239,11 +233,15 @@ class Program:
         # after it is the one.)
         self.step_one = False
         self._stepped: int | None = None
-        if suspended is not None:
-            # A resumed walk is ALSO whole at construction: the suspended
+        if suspended is not None and position is not None:
+            raise ValueError("a walk resumes a suspension OR a position, not both")
+        restored = suspended if suspended is not None else position
+        if restored is not None:
+            # A restored walk is ALSO whole at construction: the
             # projection overlays the fresh state right here, so no
             # caller ever patches a program up afterwards.
-            self._restore_suspended(suspended)
+            self._restore(restored, resumed=suspended is not None)
+        if suspended is not None:
             log.info(
                 "conductor: resuming suspended %s/%s at node %d (%s)",
                 self.app,
@@ -267,7 +265,8 @@ class Program:
     def state(self) -> dict:
         """The walk's position as the suspension projection — what a
         later wake, or a stepping rehearsal's next invocation, rebuilds
-        the walk from (`suspended=` at construction): walk state here,
+        the walk from (`suspended=` or `position=` at
+        construction): walk state here,
         gate state via `Gate.to_suspended` — each field list lives
         beside its fields."""
         return {
@@ -280,7 +279,19 @@ class Program:
             **self.gate.to_suspended(),
         }
 
-    def _restore_suspended(self, data: dict) -> None:
+    def _restore(self, data: dict, *, resumed: bool) -> None:
+        """Overlay one projection (`state()`'s shape). The stored cursor
+        is where the walk opens either way (the next node's own checks
+        judge whether the world still fits). `resumed` marks a WAKE's
+        suspension, which buys two more things: the cursor is also the
+        floor no recovery restarts below (the nodes before it ran on an
+        earlier wake — an ask answered — and re-running them per wake
+        would loop across wakes with a fresh recovery budget each time),
+        and the opening read may unlock a locked phone once. A stepping
+        position keeps the fresh walk's rules: a recover hand that does
+        not restore the page walks again from the top — exactly what
+        the author steps to see — and the tool's own preamble wakes the
+        phone."""
         idx = int(data["idx"])
         if not (0 <= idx <= len(self.spec.nodes)):
             # The spec changed under the suspension (edited shorter) — a
@@ -288,10 +299,15 @@ class Program:
             # suspension (load_suspended is fail-open).
             raise PlaybookError(f"suspended idx {idx} is outside the playbook")
         self.idx = idx
-        self._floor = idx
+        self._resume_at = idx
+        self._from_suspension = resumed
         self.outputs = {str(k): str(v) for k, v in (data.get("outputs") or {}).items()}
         self.gate = Gate.from_suspended(data)
-        self._from_suspension = True
+
+    @property
+    def _floor(self) -> int:
+        """The cursor no recovery restarts below (`_restore`)."""
+        return self._resume_at if self._from_suspension else 0
 
     def suspend(self) -> AssistantMessage:
         """Write the suspended state (`state()`, the cursor where it
@@ -412,13 +428,10 @@ class Program:
         if kind == KIND_UNLOCK:
             return self._opening()
         if kind == "peek":
-            # The one cursor-floor rule (`_recover_landed` applies it
-            # too): past the settled pure-text prefix, never below a
-            # resumed walk's stored cursor — which a suspended walk
-            # trusts (the next node's own checks judge whether the world
-            # still fits) and a fresh walk has at zero.
+            # Past the settled pure-text prefix, never below a restored
+            # walk's stored cursor (`_restore`).
             self.phase = Phase.LIVE
-            self.idx = max(self.spec.first_unsettled(self.outputs), self._floor)
+            self.idx = max(self.spec.first_unsettled(self.outputs), self._resume_at)
             return self.next()
         if kind == KIND_RECOVER:
             return self._recover_landed()

@@ -17,6 +17,7 @@ from conductor_fakes import make_screen, write_pack  # noqa: E402
 from typer.testing import CliRunner  # noqa: E402
 
 from physiclaw.cli import app  # noqa: E402
+from physiclaw.common import paths  # noqa: E402
 from physiclaw.debug import stepping  # noqa: E402
 
 runner = CliRunner()
@@ -232,6 +233,8 @@ def test_at_abandons_a_pending_ask(pack) -> None:
     assert result.exit_code == 0, result.output
     out = json.loads(result.stdout)  # stdout is the JSON alone under --json
     assert out["outcome"] == "paused" and out["position"]["awaiting"] is False
+    left = stepping.load_state("demo", "flow")
+    assert left["yes"] == [] and left["no"] == [] and left["ask_text"] == ""
 
 
 # ---------- the boot ----------
@@ -245,7 +248,7 @@ def test_catalog_lists_the_channel_boot_with_its_activate_step(pack) -> None:
     )
     from physiclaw.conductor import scaffold
 
-    scaffold.ensure_channel_boot()
+    scaffold.ensure_channel_boot(paths.playbooks_dir() / "channel")
 
     (channel,) = [p for p in stepping.catalog() if p["app"] == "channel"]
     (boot,) = channel["playbooks"]
@@ -269,7 +272,7 @@ def test_stepping_the_boot_reads_the_staged_reply_as_the_request(pack, mocker) -
     write_channel(
         "name: open\ndescription: d\nsteps:\n  - name: go\n    tool: home_screen\n"
     )
-    scaffold.ensure_channel_boot()
+    scaffold.ensure_channel_boot(paths.playbooks_dir() / "channel")
     seen: list = []
 
     class _Micro:

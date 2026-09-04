@@ -64,8 +64,11 @@ OVERLAY_PAD = 0.08
 
 # The one spelling of "a ¥/￥ amount": the matcher class-tokenizes with
 # it, the money predicates (`money.py`) read its group — thousands
-# separators included ("¥1,234.56"), which `money.amount` strips.
-PRICE_RE = re.compile(r"[¥￥]\s*((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)")
+# separators included ("¥1,234.56"), which `money.amount` strips. At
+# most two decimals: a price has no third, and OCR glues the next
+# word's leading digit onto one ("实付￥24.751优惠前" quoted ¥24.751 to
+# the user and bound consent to it).
+PRICE_RE = re.compile(r"[¥￥]\s*((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?)")
 
 # Volatile-content class tokens — "the clock is still a clock".
 # `TIME_TOKEN` is named because `reads_as_cover` tests a row against it:

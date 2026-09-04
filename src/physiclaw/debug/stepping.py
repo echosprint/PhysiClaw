@@ -16,7 +16,9 @@ again. Pack macros (directory and inline) are addressable by their
 qualified `app/name`, the same name a walk dispatches.
 
 A step rebuilds the walk from a persisted position (`Program.state`,
-the suspension projection), runs the node at the cursor on the live
+the suspension projection, overlaid as a checkpoint: a recover hand's
+restart walks below the cursor exactly as a wake's fresh walk would),
+runs the node at the cursor on the live
 phone through the rehearsal loop (`conductor.rehearsal.walk` with
 `Program.step_one` set), and persists where the cursor stands when the
 loop pauses. The user channel is virtual: an ask's send still runs on
@@ -38,6 +40,7 @@ from physiclaw.common import paths
 from physiclaw.common.logger import write_json_atomic
 from physiclaw.common.text import read_text
 from physiclaw.conductor import rehearsal
+from physiclaw.conductor.gate import Gate
 from physiclaw.conductor.hooks import Emit, McpCaller, Observe, OnExchange
 from physiclaw.conductor.playbook import (
     ActivateNode,
@@ -405,11 +408,12 @@ async def step(
     state["outputs"] = {**state.get("outputs", {}), **(outputs or {})}
     if at is not None:
         # A jump abandons whatever the cursor was holding — an ask left
-        # awaiting its reply — and forgets the jumped-to node's own
-        # recorded answer, so a re-run really re-runs it (the walk
-        # starts past any SETTLED pure-text node).
+        # awaiting its reply (`Gate.abandon_ask` says what goes and what
+        # stays) — and forgets the jumped-to node's own recorded answer,
+        # so a re-run really re-runs it (the walk starts past any
+        # SETTLED pure-text node).
         state["idx"] = node_index(spec, at)
-        state["awaiting"] = False
+        state.update(Gate.from_suspended(state).abandon_ask().to_suspended())
         state["outputs"] = {
             k: v for k, v in state["outputs"].items() if not k.startswith(f"{at}.")
         }
@@ -427,7 +431,7 @@ async def step(
             pack,
             state["values"],
             channel,
-            suspended=state,
+            position=state,
             dry=True,
             activation=activation,
         )

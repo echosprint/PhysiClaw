@@ -22,15 +22,9 @@ Consent itself — quoting, binding, consuming — stays with the gate
 arithmetic.
 """
 
-import math
-
-from physiclaw.common.bbox import center_of
+from physiclaw.common.bbox import Bbox, center_of
 from physiclaw.common.listing import Screen, label_hit
 from physiclaw.conductor.match import PRICE_RE
-
-# How far from the total's label row its amount may sit when OCR splits
-# them into two rows (a footer's "合计" and its "¥59.9" side by side).
-TOTAL_RADIUS = 0.15
 
 
 def amount(text: str) -> float:
@@ -61,15 +55,14 @@ def _is_label_row(label: str, readings: tuple[str, ...]) -> tuple[bool, bool]:
 
 def declared_total(screen: Screen, readings: tuple[str, ...]) -> float | None:
     """The amount beside the declared total label: on the label's own
-    row when that row carries one, else the nearest price-bearing row
-    within `TOTAL_RADIUS`. A row that is the label and nothing else
-    beats a row that merely contains it (the payable 合计 over a 商品合计
-    subtotal), and among equals the LOWEST on screen wins — the payable
-    total is the footer. None when no such row reads."""
+    row, else the nearest amount on a row sharing its line (OCR splits
+    "合计" from its "¥59.9") — never a row above or below, whatever the
+    distance. A row that is the label and nothing else beats one that
+    merely contains it (the payable 合计 over a 商品合计 subtotal); among
+    equals the lowest on screen wins (the footer); a label row with no
+    amount on its line yields to the next. None when none reads."""
     priced = [
-        (pc, amount(m[0]))
-        for r in screen.rows
-        if (m := PRICE_RE.findall(r.label)) and (pc := center_of(r.bbox)) is not None
+        (r.bbox, amount(m[0])) for r in screen.rows if (m := PRICE_RE.findall(r.label))
     ]
     ranked = []
     for row in screen.rows:
@@ -80,15 +73,32 @@ def declared_total(screen: Screen, readings: tuple[str, ...]) -> float | None:
             continue
         c = center_of(row.bbox)
         assert c is not None  # Element bboxes are valid by construction
-        ranked.append((not exact, -c[1], row, c))
-    for _, _, row, c in sorted(ranked, key=lambda t: (t[0], t[1])):
+        ranked.append((not exact, -c[1], row))
+    for _, _, row in sorted(ranked, key=lambda t: (t[0], t[1])):
         own = PRICE_RE.findall(row.label)
         if own:
             return amount(own[0])
-        nearest = min(((math.dist(c, pc), amt) for pc, amt in priced), default=None)
-        if nearest is not None and nearest[0] <= TOTAL_RADIUS:
-            return nearest[1]
+        beside = min(
+            (
+                (_gap(row.bbox, bbox), amt)
+                for bbox, amt in priced
+                if _same_line(row.bbox, bbox)
+            ),
+            default=None,
+        )
+        if beside is not None:
+            return beside[1]
     return None
+
+
+def _same_line(a: Bbox, b: Bbox) -> bool:
+    """Two boxes overlap vertically — the one geometry of "beside"."""
+    return a[1] < b[3] and b[1] < a[3]
+
+
+def _gap(a: Bbox, b: Bbox) -> float:
+    """Horizontal distance between two boxes (0 when they overlap)."""
+    return max(b[0] - a[2], a[0] - b[2], 0.0)
 
 
 def fire_block(

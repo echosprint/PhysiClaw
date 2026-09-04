@@ -85,6 +85,7 @@ from physiclaw.conductor.limits import (
     DEFAULT_RECOVER_LIMIT,
 )
 from physiclaw.conductor.pages import (
+    CHANNEL_APP,
     Landmark,
     PageDecl,
     PagesError,
@@ -445,6 +446,15 @@ def load_pack(app: str) -> Pack:
         raise PlaybookError(f"no pack {app!r} on disk (missing {PACK_FILENAME})")
     _check_pack_meta(doc, app)
     root = paths.pack_root(app)
+    if app == CHANNEL_APP:
+        # The boot file is a template the user owns, materialized beside
+        # an existing channel pack on first look (the ios pack's
+        # pattern): a channel recorded before the boot was a file keeps
+        # its wake, and every door — wake, step, run, check — sees the
+        # same pack. (Lazy: scaffold imports this module.)
+        from physiclaw.conductor import scaffold
+
+        scaffold.ensure_channel_boot(root)
     docs, pb_errors = specfile.load_playbook_docs(app, PlaybookError, root)
     try:
         # Appendix + route-declared waypoints across every playbook

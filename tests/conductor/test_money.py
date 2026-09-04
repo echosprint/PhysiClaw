@@ -14,7 +14,7 @@ def test_declared_total_reads_the_label_row_itself() -> None:
     assert money.declared_total(screen, ("合计",)) == 59.9
 
 
-def test_declared_total_joins_a_split_row_within_radius() -> None:
+def test_declared_total_joins_a_split_row_on_the_same_line() -> None:
     # OCR split the footer: "合计" and its amount sit side by side.
     screen = make_screen(("合计", 0.2, 0.9), ("¥59.9", 0.3, 0.9), ("¥79", 0.5, 0.2))
 
@@ -25,6 +25,47 @@ def test_declared_total_ignores_a_far_amount() -> None:
     screen = make_screen(("合计", 0.2, 0.9), ("¥79", 0.8, 0.2))
 
     assert money.declared_total(screen, ("合计",)) is None
+
+
+def test_declared_total_never_reads_a_row_above_the_bare_label() -> None:
+    # The rig's Taobao order sheet, 2026-09-03: the pay button reads the
+    # exact label 免密支付 with no price on its line, and a 顺手买 add-on
+    # (¥15.80) sits a hand above it — closer than the 实付 row at the
+    # top. The quoted total is the 实付 row's, never the add-on's.
+    sheet = make_screen(
+        ("实付￥24.75 优惠前￥45", 0.55, 0.245),
+        ("五常大米5kg真空锁鲜 每千克￥4.95", 0.42, 0.42),
+        ("顺手买·天猫维达集团旗舰店", 0.27, 0.655),
+        ("￥15.80￥49.90", 0.44, 0.77),
+        ("免密支付", 0.50, 0.935),
+    )
+
+    assert money.declared_total(sheet, ("实付", "免密支付", "优惠后")) == 24.75
+
+
+def test_amounts_read_at_most_two_decimals() -> None:
+    # The rig's sheet, 2026-09-03: OCR ran "实付￥24.75" into the next
+    # word ("1优惠前…"), and the ask quoted ¥24.751. A price has two
+    # decimals; the glued digit is not part of it.
+    screen = make_screen(
+        ("实付￥24.751优惠前￥45", 0.5, 0.25), ("共减￥12.501开88VIP", 0.5, 0.3)
+    )
+
+    assert money.amounts(screen) == [24.75, 45.0, 12.5]
+    assert money.declared_total(screen, ("实付",)) == 24.75
+
+
+def test_declared_total_takes_the_nearest_amount_on_the_line() -> None:
+    # OCR split the label from its amount, and the struck-through
+    # original price shares the line further right: the amount beside
+    # the label is the nearest one, not the first in listing order.
+    sheet = make_screen(
+        ("优惠前￥62.5", 0.62, 0.27),
+        ("实付", 0.20, 0.27),
+        ("￥50", 0.33, 0.27),
+    )
+
+    assert money.declared_total(sheet, ("实付",)) == 50
 
 
 def test_declared_total_needs_the_label() -> None:

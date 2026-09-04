@@ -1029,6 +1029,42 @@ def test_wrong_page_on_resume_runs_the_hand_then_the_move() -> None:
     assert "recovered demo.results" in move2.tool_calls[0].arguments["summary"]
 
 
+def test_a_stepping_position_restarts_below_its_cursor_a_suspension_never() -> None:
+    # The rig, 2026-09-03: `step --at search` with the phone off the app
+    # ran the home page's force_quit hand twice and hit its limit —
+    # the position had been overlaid as a suspension, whose stored
+    # cursor is a floor no recovery restarts below. A checkpoint keeps
+    # the fresh walk's rule: the hand ran, walk again from the top.
+    write_pack(playbooks={"flow": RECOVERING}, landmarks=LANDMARKS)
+    spec, pack = setup.load_spec("demo", "flow", require_live=False)
+    at_search = {**_program(keyword="milk").state(), "idx": 1}
+
+    stepped = setup.build_program(
+        spec, pack, {"keyword": "milk"}, None, position=at_search, dry=True
+    )
+    h = _history()
+    _feed(h, stepped.advance(h), ELSEWHERE)
+    back = stepped.advance(h)
+    assert back is not None and back.tool_names() == ["note", "go_back"]
+    _feed(h, back, ELSEWHERE)  # the hand did not restore results
+    relaunch = stepped.advance(h)
+    assert relaunch is not None  # …so the walk restarted at move 1
+    assert (
+        stepped.idx == 0
+        and "walking again" in relaunch.tool_calls[0].arguments["summary"]
+    )
+
+    resumed = setup.build_program(
+        spec, pack, {"keyword": "milk"}, None, suspended=at_search, dry=True
+    )
+    h2 = _history()
+    _feed(h2, resumed.advance(h2), ELSEWHERE)
+    _feed(h2, resumed.advance(h2), ELSEWHERE)
+    again = resumed.advance(h2)
+    assert again is not None and again.tool_names() == ["note", "go_back"]
+    assert resumed.idx == 1  # the floor: never below the stored cursor
+
+
 def test_declared_unlock_hand_wakes_the_phone_then_continues() -> None:
     # Nothing unlocks in the background: the page declares the
     # `unlock_phone` hand, and only then does a locked phone get woken.

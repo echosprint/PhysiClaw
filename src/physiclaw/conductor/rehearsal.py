@@ -366,9 +366,12 @@ async def dispatch(
     runs a macro through the macro runner, which drives the same MCP
     connection step by step), everything else is a plain MCP call.
     `registry` holds qualified `app/name` macros — the pack's plus the
-    channel's, like the engine's hidden registry. The reply text is what
-    the Program reads a screen out of, so both arms must hand back the
-    same listing shape. `transform(call, blocks)` may replace a
+    channel's, like the engine's hidden registry. The reply text is
+    EVERY text block of the result (`verdict.all_text`), exactly what
+    the engine's tool result carries — a gesture's action line, a
+    macro's header and step log — ahead of the listing the Program
+    reads its screen out of, so an aborted macro's cause reaches the
+    handover reason and the eye. `transform(call, blocks)` may replace a
     successful result's blocks (None keeps them) — the engine's
     debug-intercept seam, reproduced; `observe(call, blocks)` is told
     the real blocks first, rewritten or not; `start_at`/`stop_after`
@@ -406,7 +409,7 @@ async def dispatch(
             faked = transform(call, blocks)
             if faked is not None:
                 blocks = faked
-        return verdict.screen_text(blocks), is_error
+        return verdict.all_text(blocks), is_error
     except Exception as e:  # a rehearsal reports, it does not crash
         return f"{call.name} failed: {e}", True
 

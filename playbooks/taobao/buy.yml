@@ -189,3 +189,8 @@ route:
           with: {seconds: 4}
 
   - page: paid
+
+  # The report: one message to the buyer, and the walk is done. A
+  # reply, if any, is the next wake's boot to read as a new request.
+  - tell: report
+    message: "已下单并完成支付：{pick.summary}。"

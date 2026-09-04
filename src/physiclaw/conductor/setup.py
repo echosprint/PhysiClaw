@@ -116,6 +116,7 @@ def build_program(
     channel: "Channel | None",
     *,
     suspended: dict | None = None,
+    position: dict | None = None,
     dry: bool = False,
     activation: "Activation | None" = None,
 ) -> "Program":
@@ -124,7 +125,9 @@ def build_program(
     come through here, so a program is whole at construction (channel
     and any suspended state included) and never patched up afterwards.
     `dry` (the replay, the boot) runs the walk without writing any
-    record. The boot route's `activate` step needs the menu of enabled
+    record; `position` is a stepping tool's checkpoint — the projection
+    overlaid without a wake-suspension's cursor floor (`Program`). The
+    boot route's `activate` step needs the menu of enabled
     playbooks: the wake passes the `activation` it discovered; a tool
     stepping or rehearsing the boot gets it discovered here."""
     if activation is None and spec.activates:
@@ -136,6 +139,7 @@ def build_program(
         prints=prints_for_app(spec.app, decls=pack.pages) + os_prints(),
         channel=channel,
         suspended=suspended,
+        position=position,
         landmarks=pack.landmarks,
         dry=dry,
         activation=activation,
@@ -394,9 +398,6 @@ def session_setup() -> "tuple[Program | None, dict[str, Macro]]":
     A playbook on disk IS the grant: with any enabled playbook and a
     live boot in the channel pack, the boot walks. Nothing suspended,
     nothing enabled, or no boot means a plain model session."""
-    # The boot file is a template the user owns: materialized beside an
-    # existing channel pack on the first wake, then never touched.
-    scaffold.ensure_channel_boot()
     channel = load_channel()
     program = load_suspended(channel)
     if program is not None:

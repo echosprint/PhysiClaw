@@ -117,6 +117,35 @@ async def test_dispatch_routes_run_macro_to_the_macro_runner(mocker) -> None:
     assert runner.await_count == 1
 
 
+async def test_dispatch_keeps_an_aborted_macros_header(mocker) -> None:
+    # The runner's header + step log is block 0 — the engine's tool
+    # result carries it, so the rehearsal must too: an abort's cause
+    # (which step, which guard) is what the handover reason reports.
+    mcp = _FakeMcp()
+    header = "macro demo/open-app: ABORTED at step 2/3 (guard_failed) — steps 1–1 already executed"
+    mocker.patch(
+        "physiclaw.macros.runner.run_and_record",
+        new=mocker.AsyncMock(
+            return_value=mocker.Mock(
+                ok=False,
+                blocks=[
+                    {"type": "text", "text": header},
+                    {"type": "image", "data": "x"},
+                    {"type": "text", "text": RESULTS},
+                ],
+            )
+        ),
+    )
+    call = ToolCall(
+        id="c", name=gesture_vocab.RUN_MACRO, arguments={"name": "demo/open-app"}
+    )
+
+    text, is_error = await rehearsal.dispatch(mcp, call, _registry())
+
+    assert is_error is True
+    assert text.startswith(header) and "综合" in text
+
+
 async def test_dispatch_reports_an_unknown_pack_macro() -> None:
     mcp = _FakeMcp()
     call = ToolCall(

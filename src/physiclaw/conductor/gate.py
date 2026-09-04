@@ -32,6 +32,19 @@ class Gate:
     next_words: tuple[tuple[str, ...], tuple[str, ...]] = ((), ())
     tried_open: bool = False
 
+    def abandon_ask(self) -> "Gate":
+        """Leave the ask the cursor was holding (a stepping jump): the
+        ask text, its reply words, the thread snapshot they were read
+        against, and the hold — a later send's landing must not read a
+        reply staged for THAT ask as its own. Consent is kept: a jump
+        onto the payment move after a confirmed ask is how it is
+        stepped. Returns self."""
+        self.ask = ""
+        self.baseline = set()
+        self.awaiting = False
+        self.yes = self.no = ()
+        return self
+
     def spend(self) -> float | None:
         """Consent is CONSUMED by firing: a later payment needs its own
         gate's fresh confirm, never this one's leftovers. Returns the

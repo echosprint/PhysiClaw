@@ -63,6 +63,15 @@ def action_text(blocks: list[dict]) -> str:
     return blocks[0].get("text") or ""
 
 
+def all_text(blocks: list[dict]) -> str:
+    """Every text block of a raw MCP tool result, joined — action text
+    and screen alike, the whole a tool result carries into the
+    transcript (`conductor.views.text_of` reads the same off the DTO).
+    The one spelling of the text-block walk `screen_text` and
+    `action_text` split."""
+    return "\n".join(b.get("text") or "" for b in blocks if b.get("type") == "text")
+
+
 def screen_text(blocks: list[dict]) -> str:
     """The screen half of a raw MCP tool result — the OCR listing, joined.
     What guards and macro `skip_when` clauses match against: they WANT
@@ -80,10 +89,9 @@ def screen_text(blocks: list[dict]) -> str:
     all — so block 0 is action text iff it is a text block. Must run on
     the RAW blocks — provider-side fusing merges text blocks and erases
     the boundary."""
-    texts = [b.get("text") or "" for b in blocks if b.get("type") == "text"]
     if blocks and blocks[0].get("type") == "text":
-        texts = texts[1:]  # drop the action text — it is not screen content
-    return "\n".join(texts)
+        blocks = blocks[1:]  # drop the action text — it is not screen content
+    return all_text(blocks)
 
 
 def has_image(blocks: list[dict]) -> bool:

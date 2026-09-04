@@ -486,20 +486,14 @@ def _init_channel_pack(root: Path) -> Path:
     return root
 
 
-def ensure_channel_boot() -> None:
-    """Materialize `channel/boot.yml` beside an existing channel pack
-    that has none — the `ensure_ios_pack` pattern, called at wake: the
-    boot is a template the user owns and edits (its hands, its
-    limits), so it lives on disk, but a channel pack recorded before
-    the boot was a file must not lose its wake. Written once, then
-    never touched; no channel pack means nothing to write. Fail-open."""
-    from physiclaw.common import paths
-
-    root = paths.pack_root(CHANNEL_APP)
-    if (root / PACK_FILENAME).exists():
-        _ensure_file(
-            root / f"{BOOT_PLAYBOOK}.yml", CHANNEL_BOOT_STUB, "no boot at wake"
-        )
+def ensure_channel_boot(root: Path) -> None:
+    """Materialize `boot.yml` in the channel pack at `root` when it has
+    none — the `ensure_ios_pack` pattern, called as the pack loads: the
+    boot is a template the user owns and edits (its hands, its limits),
+    so it lives on disk, but a channel pack recorded before the boot
+    was a file must not lose its wake. Written once, then never
+    touched. Fail-open."""
+    _ensure_file(root / f"{BOOT_PLAYBOOK}.yml", CHANNEL_BOOT_STUB, "no boot at wake")
 
 
 def render_example_macro() -> str:
