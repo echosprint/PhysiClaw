@@ -34,11 +34,11 @@ from physiclaw.cli._format import (
 from physiclaw.cli.pages import pages_app
 from physiclaw.common.paths import PACK_FILENAME
 from physiclaw.common.ready import START_HINT
-from physiclaw.conductor import rehearsal
-from physiclaw.conductor.playbook import PlaybookError
+from physiclaw.conductor.drive import rehearsal
+from physiclaw.conductor.spec.model import PlaybookError
 
 if TYPE_CHECKING:
-    from physiclaw.conductor.playbook import Pack, Playbook, PlaybookEntry
+    from physiclaw.conductor.spec.model import Pack, Playbook, PlaybookEntry
 
 playbooks_app = typer.Typer(no_args_is_help=True)
 
@@ -70,14 +70,14 @@ def init(
     """Scaffold a new app pack: one PLAYBOOK.yml (meta + pages + an
     example walk) and an example pack macro — parse-clean, disabled."""
     from physiclaw.common.paths import PACK_FILENAME
-    from physiclaw.conductor import scaffold
-    from physiclaw.conductor.pages import (
+    from physiclaw.conductor.spec import scaffold
+    from physiclaw.conductor.spec.conventions import (
         BOOT_PLAYBOOK,
         CHANNEL_APP,
         IOS_APP,
         THREAD_PAGE,
     )
-    from physiclaw.conductor.specfile import SpecError
+    from physiclaw.conductor.spec.specfile import SpecError
 
     try:
         root = scaffold.init_pack(app)
@@ -150,8 +150,8 @@ def install(
         write_placeholder_values,
     )
     from physiclaw.common.text import read_text, write_text
-    from physiclaw.conductor import scaffold
-    from physiclaw.conductor.specfile import SpecError
+    from physiclaw.conductor.spec import scaffold
+    from physiclaw.conductor.spec.specfile import SpecError
 
     if not src.is_dir():
         exit_error(f"{src} is not a directory")
@@ -246,7 +246,7 @@ def _gather_values(
 
 
 def _warn_strays() -> None:
-    from physiclaw.conductor import playbook as pb
+    from physiclaw.conductor.spec import pack as pb
 
     for stray in pb.stray_dirs():
         typer.echo(
@@ -260,8 +260,8 @@ def _warn_strays() -> None:
 @playbooks_app.command("list")
 def list_cmd() -> None:
     """List every pack and its playbooks: enabled, disabled, or invalid."""
-    from physiclaw.conductor import playbook as pb
-    from physiclaw.conductor import scaffold
+    from physiclaw.conductor.spec import pack as pb
+    from physiclaw.conductor.spec import scaffold
 
     scaffold.ensure_format_readme()
     _warn_strays()
@@ -310,7 +310,7 @@ def run(
     waits for your reply. Works while the playbook is disabled — rehearse
     first, enable after. Nothing is persisted: a walk that suspends here
     stops instead of leaving a file for the next wake."""
-    from physiclaw.conductor.specfile import SpecError
+    from physiclaw.conductor.spec.specfile import SpecError
 
     app, name = _split_ref(ref)
     try:
@@ -416,7 +416,7 @@ def step(
     for a loop to read."""
     import json
 
-    from physiclaw.conductor.specfile import SpecError
+    from physiclaw.conductor.spec.specfile import SpecError
     from physiclaw.debug import stepping
 
     app, name = _split_ref(ref)
@@ -498,8 +498,8 @@ def replay(
     listing file is one screen. Writes nothing."""
     from physiclaw.cli._sessions import resolve_sid
     from physiclaw.common.text import read_text
-    from physiclaw.conductor import corpus
-    from physiclaw.conductor import replay as replay_mod
+    from physiclaw.conductor.drive import corpus
+    from physiclaw.conductor.drive import replay as replay_mod
 
     app, name = _split_ref(ref)
     if (session is None) == (not listings):
@@ -539,7 +539,7 @@ def stats(
     """Per-playbook walk outcomes from playbooks/runs.jsonl — the
     escalation-rate KPI. A playbook that keeps handing over at one node
     is a rehearsal bug this table points at."""
-    from physiclaw.conductor import walklog
+    from physiclaw.conductor.walk import walklog
 
     rows = walklog.load()
     if not rows:
@@ -582,7 +582,7 @@ def propose(
     that make a pack patch out of the recorded evidence. Nothing
     self-applies — every escalation the author fixes here prevents the
     next one."""
-    from physiclaw.conductor import walklog
+    from physiclaw.conductor.walk import walklog
 
     sites = walklog.escalation_sites(walklog.load(), top=top)
     if not sites:
@@ -609,9 +609,8 @@ def propose(
 def check() -> None:
     """Validate every pack: pages, pack macros, playbooks. Exit 1 if any
     is invalid."""
-    from physiclaw.conductor import playbook as pb
-    from physiclaw.conductor import scaffold
-    from physiclaw.conductor import setup as conductor_setup
+    from physiclaw.conductor.spec import lints, scaffold
+    from physiclaw.conductor.spec import pack as pb
 
     scaffold.ensure_format_readme()
     _warn_strays()
@@ -625,7 +624,7 @@ def check() -> None:
         app_bad, app_specs = _check_app(app)
         bad = bad or app_bad
         specs.update(app_specs)
-    for line in conductor_setup.menu_warnings(specs):
+    for line in lints.menu_warnings(specs):
         typer.echo(warn(line))
     if bad:
         raise typer.Exit(1)
@@ -634,8 +633,8 @@ def check() -> None:
 def _check_app(app: str) -> "tuple[bool, dict[str, Playbook]]":
     """Report one pack: (anything invalid, the valid playbooks by ref —
     what the cross-pack advisory reads, so nothing loads twice)."""
-    from physiclaw.conductor import playbook as pb
-    from physiclaw.conductor import setup as conductor_setup
+    from physiclaw.conductor.spec import lints
+    from physiclaw.conductor.spec import pack as pb
 
     try:
         pack = pb.load_pack(app)
@@ -664,7 +663,7 @@ def _check_app(app: str) -> "tuple[bool, dict[str, Playbook]]":
             continue
         # Advisories: an ask quoting none of its reply words, a route
         # page too thinly anchored to survive one OCR miss.
-        for line in conductor_setup.readiness_warnings(entry.spec, pack):
+        for line in lints.readiness_warnings(entry.spec, pack):
             typer.echo(warn(f"{app}/{entry.name}: {line}"))
     return bad, {f"{app}/{e.name}": e.spec for e in entries if e.spec is not None}
 
@@ -679,7 +678,7 @@ def _report_not_live(
     which playbooks the boot will not offer, and why — disabled files,
     and referenced pack macros that are themselves disabled. Rehearse
     them (`playbooks run`), then enable."""
-    from physiclaw.conductor.playbook import disabled_macros
+    from physiclaw.conductor.spec.pack import disabled_macros
 
     if disabled:
         typer.echo(
@@ -709,8 +708,8 @@ def _report_not_live(
 
 def _split_ref(ref: str) -> tuple[str, str]:
     """`<app>/<playbook>` — the pack's own parse, exiting on a bad one."""
-    from physiclaw.conductor.playbook import split_ref
-    from physiclaw.conductor.specfile import SpecError
+    from physiclaw.conductor.spec.pack import split_ref
+    from physiclaw.conductor.spec.specfile import SpecError
 
     try:
         return split_ref(ref)

@@ -34,13 +34,8 @@ from physiclaw.common import paths
 from physiclaw.common.listing import Element, format_elements
 from physiclaw.common.logger import write_json_atomic
 from physiclaw.common.text import read_text
-from physiclaw.conductor.pages import (
-    CHANNEL_APP,
-    REGIONS,
-    THREAD_PAGE,
-    PagePrint,
-    prints_for_app,
-)
+from physiclaw.conductor.spec.conventions import CHANNEL_APP, THREAD_PAGE
+from physiclaw.conductor.spec.pages import REGIONS, PagePrint, prints_for_app
 
 log = logging.getLogger(__name__)
 

@@ -1,4 +1,4 @@
-"""Tests for `physiclaw.conductor.context` — what an agent step loads
+"""Tests for `physiclaw.conductor.spec.context` — what an agent step loads
 beside its prompt, exactly as declared and nothing more."""
 
 from __future__ import annotations
@@ -7,7 +7,7 @@ import pytest
 
 from physiclaw.common import daylog, paths
 from physiclaw.common.text import write_text
-from physiclaw.conductor import context
+from physiclaw.conductor.spec import context
 
 MEMORY = "## shopping_prefs 购物偏好\n- 只买伊利\n\n## shopping_blacklist\n- 三无\n"
 

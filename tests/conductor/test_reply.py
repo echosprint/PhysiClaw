@@ -1,4 +1,4 @@
-"""Tests for `physiclaw.conductor.reply` — the gate's deterministic
+"""Tests for `physiclaw.conductor.spec.reply` — the gate's deterministic
 reading: whole-message matching against the ask's own words, and
 new-incoming-bubble detection."""
 
@@ -7,7 +7,7 @@ from __future__ import annotations
 import pytest
 from conductor_fakes import make_screen
 
-from physiclaw.conductor import reply
+from physiclaw.conductor.spec import reply
 
 YES = frozenset(map(reply.normalize, ["好的", "嗯", "ok", "go ahead", "confirm"]))
 NO = frozenset(map(reply.normalize, ["不用", "不要", "算了", "no thanks", "cancel"]))

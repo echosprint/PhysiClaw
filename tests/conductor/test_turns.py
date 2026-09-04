@@ -1,10 +1,10 @@
-"""Tests for `physiclaw.conductor.turns` — the synthesized-turn
+"""Tests for `physiclaw.conductor.walk.turns` — the synthesized-turn
 shape and the call-id convention two drivers depend on."""
 
 from __future__ import annotations
 
-from physiclaw.conductor import views
-from physiclaw.conductor.turns import Turnsmith
+from physiclaw.conductor.walk import views
+from physiclaw.conductor.walk.turns import Turnsmith
 from physiclaw.contract.dto import FinishReason, TextBlock, ToolResultMessage
 
 

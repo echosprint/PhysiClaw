@@ -1,4 +1,4 @@
-"""Tests for `physiclaw.conductor.match` — normalization, fuzzy
+"""Tests for `physiclaw.conductor.spec.match` — normalization, fuzzy
 tiers, scoring, and the open-set decision."""
 
 from __future__ import annotations
@@ -6,8 +6,8 @@ from __future__ import annotations
 from conductor_fakes import make_screen
 
 from physiclaw.common.listing import LISTING_HEADER, Screen
-from physiclaw.conductor import match as m
-from physiclaw.conductor.pages import (
+from physiclaw.conductor.spec import match as m
+from physiclaw.conductor.spec.pages import (
     AnchorDecl,
     LearnedAnchor,
     LearnedPage,
@@ -346,7 +346,7 @@ def test_match_screen_reads_the_lock_screen_first_by_shape() -> None:
     # No candidate describes the cover (a real one prints no anchorable
     # text), yet every walk must tell it from "unknown": the matcher
     # answers the OS page itself, so a page's `locked:` hand can fire.
-    from physiclaw.conductor.pages import LOCKED_ID
+    from physiclaw.conductor.spec.conventions import LOCKED_ID
 
     pp = PagePrint(
         app="app", decl=PageDecl(name="home", anchors=(AnchorDecl(text="Files"),))

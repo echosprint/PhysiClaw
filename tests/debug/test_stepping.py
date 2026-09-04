@@ -82,7 +82,7 @@ def pack(mocker):
         calls.append(1)
         raise RuntimeError("no model configured")
 
-    mocker.patch("physiclaw.conductor.rehearsal.micro_caller", no_model)
+    mocker.patch("physiclaw.conductor.drive.rehearsal.micro_caller", no_model)
     return calls
 
 
@@ -246,7 +246,7 @@ def test_catalog_lists_the_channel_boot_with_its_activate_step(pack) -> None:
     write_channel(
         "name: open\ndescription: d\nsteps:\n  - name: go\n    tool: home_screen\n"
     )
-    from physiclaw.conductor import scaffold
+    from physiclaw.conductor.spec import scaffold
 
     scaffold.ensure_channel_boot(paths.playbooks_dir() / "channel")
 
@@ -264,8 +264,8 @@ def test_stepping_the_boot_reads_the_staged_reply_as_the_request(pack, mocker) -
     # activate step's parse_task runs over the virtual thread.
     from conductor_fakes import write_channel
 
-    from physiclaw.conductor import scaffold
-    from physiclaw.conductor.micro import MicroOutcome, MicroResult
+    from physiclaw.conductor.spec import scaffold
+    from physiclaw.conductor.walk.micro import MicroOutcome, MicroResult
     from physiclaw.contract.dto import Usage
     from physiclaw.debug import thread as vthread
 
@@ -285,7 +285,7 @@ def test_stepping_the_boot_reads_the_staged_reply_as_the_request(pack, mocker) -
             return None
 
     mocker.patch(
-        "physiclaw.conductor.rehearsal.micro_caller", lambda rlog=None: _Micro()
+        "physiclaw.conductor.drive.rehearsal.micro_caller", lambda rlog=None: _Micro()
     )
 
     result = runner.invoke(

@@ -18,7 +18,8 @@ from conductor_fakes import PACK_MACRO, make_screen, write_pack
 
 from physiclaw.cli import playbooks as cli
 from physiclaw.common import gesture_vocab
-from physiclaw.conductor import rehearsal, suspension
+from physiclaw.conductor.drive import rehearsal
+from physiclaw.conductor.walk import suspension
 from physiclaw.contract.dto import ToolCall
 
 HOME = make_screen(("Files", 0.5, 0.1)).text
@@ -69,7 +70,7 @@ def _registry():
     """The qualified dispatch registry a rehearsal builds — the pack's
     macros under `app/name` keys, exactly like the engine's hidden set."""
     write_pack(playbooks={"flow": FLOW}, macros=("open-app", "add-cart"))
-    from physiclaw.conductor.playbook import load_pack, qualified_pack
+    from physiclaw.conductor.spec.pack import load_pack, qualified_pack
 
     return qualified_pack("demo", load_pack("demo"))
 
@@ -232,7 +233,7 @@ async def test_walk_pauses_when_the_stepping_cursor_moves(mocker) -> None:
     )
     program = build_program(dry=True, keyword="milk")
     program.step_one = True
-    from physiclaw.conductor.playbook import load_pack, qualified_pack
+    from physiclaw.conductor.spec.pack import load_pack, qualified_pack
 
     registry = qualified_pack("demo", load_pack("demo"))
 
@@ -274,7 +275,7 @@ async def test_rehearse_drives_the_walk_and_persists_nothing(mocker) -> None:
 
 
 async def test_rehearse_rejects_bad_inputs_before_touching_the_phone() -> None:
-    from physiclaw.conductor.playbook import PlaybookError
+    from physiclaw.conductor.spec.model import PlaybookError
 
     write_pack(playbooks={"flow": FLOW}, macros=("open-app", "add-cart"))
 
@@ -285,7 +286,7 @@ async def test_rehearse_rejects_bad_inputs_before_touching_the_phone() -> None:
 async def test_rehearse_runs_a_disabled_playbook() -> None:
     # `macros run` rehearses disabled macros for the same reason: you
     # rehearse BEFORE you enable. A disabled playbook must not be refused.
-    from physiclaw.conductor import setup as conductor_setup
+    from physiclaw.conductor.drive import build
 
     write_pack(
         playbooks={
@@ -296,7 +297,7 @@ async def test_rehearse_runs_a_disabled_playbook() -> None:
         macros=("open-app", "add-cart"),
     )
 
-    spec, _ = conductor_setup.load_spec("demo", "flow", require_live=False)
+    spec, _ = build.load_spec("demo", "flow", require_live=False)
 
     assert spec.enabled is False  # and load_spec did not raise
 
@@ -335,8 +336,8 @@ OPENAI_REPLY = {
 def _fake_micro(monkeypatch):
     """`micro_caller` → a caller that logs one round-trip to the sink the
     walk wired, then answers `done` with the return field."""
-    from physiclaw.conductor.calls import AGENT_DONE
-    from physiclaw.conductor.micro import MicroOutcome, MicroResult
+    from physiclaw.conductor.spec.calls import AGENT_DONE
+    from physiclaw.conductor.walk.micro import MicroOutcome, MicroResult
     from physiclaw.contract.dto import Usage
 
     class Caller:
@@ -388,7 +389,7 @@ async def test_walk_captures_each_model_round_trip(monkeypatch, mocker) -> None:
         ),
     )
     _fake_micro(monkeypatch)
-    from physiclaw.conductor.playbook import load_pack, qualified_pack
+    from physiclaw.conductor.spec.pack import load_pack, qualified_pack
 
     program = build_program(dry=True, keyword="milk")
     registry = qualified_pack("demo", load_pack("demo"))
@@ -435,7 +436,7 @@ async def test_walk_without_raw_still_hands_exchanges_to_the_hook(
         ),
     )
     _fake_micro(monkeypatch)
-    from physiclaw.conductor.playbook import load_pack, qualified_pack
+    from physiclaw.conductor.spec.pack import load_pack, qualified_pack
 
     lines: list[str] = []
     seen: list[dict] = []

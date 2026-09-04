@@ -1,5 +1,5 @@
-"""Tests for `physiclaw.conductor.playbook` and `route` — the route
-grammar, its lints, and pack loading. Every rejection must name the
+"""Tests for the playbook grammar — `model`, `pack`, and `route`: the
+route grammar, its lints, and pack loading. Every rejection must name the
 exact field and rule; the money lint is the safety substance."""
 
 from __future__ import annotations
@@ -8,8 +8,8 @@ import pytest
 from conductor_fakes import write_pack
 
 from physiclaw.common import paths
-from physiclaw.conductor import playbook as pb
-from physiclaw.conductor.playbook import PlaybookError
+from physiclaw.conductor.spec import pack as pb
+from physiclaw.conductor.spec.model import PlaybookError
 
 VALID = """\
 name: buy
@@ -267,7 +267,7 @@ def test_do_must_be_followed_by_its_landing_page() -> None:
 def test_route_declared_page_reaches_the_pack() -> None:
     # A waypoint carrying anchors DECLARES the page — the matcher sees
     # it through every door (load_pack merges route declarations).
-    from physiclaw.conductor import pages
+    from physiclaw.conductor.spec import pages
 
     text = _mutate(
         "  - page: results\n",
@@ -564,18 +564,18 @@ def test_scan_of_a_walkless_pack_is_empty() -> None:
 
 def test_scaffolded_ios_pack_parses_clean() -> None:
     # The OS-state pack: declarations only — no playbooks, no macros.
-    from physiclaw.conductor import pages, scaffold
+    from physiclaw.conductor.spec import conventions, scaffold
 
-    root = scaffold.init_pack(pages.IOS_APP)
+    root = scaffold.init_pack(conventions.IOS_APP)
 
-    assert set(pb.load_pack(pages.IOS_APP).pages) == {"locked"}
-    assert pb.scan_playbooks(pages.IOS_APP) == []
+    assert set(pb.load_pack(conventions.IOS_APP).pages) == {"locked"}
+    assert pb.scan_playbooks(conventions.IOS_APP) == []
     assert not (root / pb.PACK_MACROS_DIRNAME).exists()
 
 
 def test_scaffolded_pack_parses_clean() -> None:
     from physiclaw.common.text import write_text
-    from physiclaw.conductor import scaffold
+    from physiclaw.conductor.spec import scaffold
 
     root = paths.playbooks_dir() / "newapp"
     (root / pb.PACK_MACROS_DIRNAME / scaffold.EXAMPLE_MACRO).mkdir(parents=True)
@@ -876,7 +876,7 @@ def _channel_pack():
 
 
 def test_the_boot_parses_with_its_activate_step_last() -> None:
-    from physiclaw.conductor.playbook import ActivateNode
+    from physiclaw.conductor.spec.model import ActivateNode
 
     spec = pb.parse_playbook(BOOT, "boot", _channel_pack())
 

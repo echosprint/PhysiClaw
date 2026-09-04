@@ -1,4 +1,4 @@
-"""Tests for `physiclaw.conductor.suspension` — the one cross-wake file.
+"""Tests for `physiclaw.conductor.walk.suspension` — the one cross-wake file.
 
 Unit pins for the module's own surface: the cheap `suspended_ref` peek
 (the CLI/jobs-facing read that skips walk-state validation) and the
@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 
-from physiclaw.conductor import suspension
+from physiclaw.conductor.walk import suspension
 
 
 def _write(text: str) -> None:

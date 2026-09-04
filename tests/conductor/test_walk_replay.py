@@ -1,4 +1,4 @@
-"""Tests for `physiclaw.conductor.replay` (behind `playbooks replay`) —
+"""Tests for `physiclaw.conductor.drive.replay` (behind `playbooks replay`) —
 the real walk over recorded screens, writing nothing."""
 
 from __future__ import annotations
@@ -17,7 +17,8 @@ from conductor_fakes import (
 from typer.testing import CliRunner
 
 from physiclaw.cli.playbooks import playbooks_app
-from physiclaw.conductor import replay, suspension, walklog
+from physiclaw.conductor.drive import replay
+from physiclaw.conductor.walk import suspension, walklog
 
 AGENT_FLOW = """\
 description: parse then walk

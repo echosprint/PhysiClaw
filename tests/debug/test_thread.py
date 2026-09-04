@@ -13,9 +13,10 @@ from conftest import write_channel_pages
 
 from physiclaw.common import paths
 from physiclaw.common.listing import Screen
-from physiclaw.conductor import reply
-from physiclaw.conductor.match import match_screen
-from physiclaw.conductor.pages import THREAD_ID, prints_for_app
+from physiclaw.conductor.spec import reply
+from physiclaw.conductor.spec.conventions import THREAD_ID
+from physiclaw.conductor.spec.match import match_screen
+from physiclaw.conductor.spec.pages import prints_for_app
 from physiclaw.debug import thread as vthread
 
 

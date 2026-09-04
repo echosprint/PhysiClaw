@@ -11,7 +11,8 @@ from conductor_fakes import make_screen
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from physiclaw.conductor import match, money, reply, step_activate
+from physiclaw.conductor.spec import conventions, match, reply
+from physiclaw.conductor.walk import money, step_activate
 
 # ---------- reply: normalization and whole-message reading ----------
 
@@ -115,7 +116,9 @@ def test_amounts_never_raises_and_reads_only_currency_marked_numbers(
     # row keeps of the label is what the reader must agree with.
     screen = make_screen((label, 0.5, 0.15))
     out = money.amounts(screen)
-    assert len(out) == sum(len(match.PRICE_RE.findall(r.label)) for r in screen.rows)
+    assert len(out) == sum(
+        len(conventions.PRICE_RE.findall(r.label)) for r in screen.rows
+    )
 
 
 # ---------- match: normalization and the label tiers ----------

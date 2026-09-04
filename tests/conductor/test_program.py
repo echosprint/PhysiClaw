@@ -1,4 +1,4 @@
-"""Tests for `physiclaw.conductor.program` and its step executors — the
+"""Tests for `physiclaw.conductor.walk.program` and its step executors — the
 walk: opening peek and locate, moves with their enter/verify checks,
 declared recovery, the ask (send, hold, judge, consent), the tell
 (send, move on), suspension, money, and the walk's telemetry."""
@@ -33,8 +33,10 @@ from conductor_fakes import (
 )
 
 from physiclaw.common import paths as paths_mod
-from physiclaw.conductor import channel, limits, program, setup, suspension
-from physiclaw.conductor.playbook import PlaybookError
+from physiclaw.conductor.drive import build, setup
+from physiclaw.conductor.spec import channel, limits, lints
+from physiclaw.conductor.spec.model import PlaybookError
+from physiclaw.conductor.walk import program, suspension
 
 # ---------- the walk ----------
 
@@ -111,7 +113,7 @@ def test_move_verifying_a_builtin_page_is_refused_at_parse() -> None:
     )
 
     with pytest.raises(PlaybookError, match="reserved built-in"):
-        setup.load_spec("demo", "flow", require_live=False)
+        build.load_spec("demo", "flow", require_live=False)
 
 
 def test_error_result_hands_over() -> None:
@@ -161,7 +163,7 @@ route:
 
 
 def test_failed_agent_call_hands_over() -> None:
-    from physiclaw.conductor.micro import DecisionRequest
+    from physiclaw.conductor.walk.micro import DecisionRequest
 
     write_pack(playbooks={"flow": AGENT_FLOW})
     p = _program(keyword="milk")
@@ -311,8 +313,8 @@ def test_check_warns_when_a_gate_ask_quotes_no_deny_word() -> None:
     write_channel(CHANNEL_OPEN)
     write_pack(playbooks={"pay": quiet})
 
-    spec, pack = setup.load_spec("demo", "pay", require_live=False)
-    warnings = [w for w in setup.readiness_warnings(spec, pack) if "yes/no" in w]
+    spec, pack = build.load_spec("demo", "pay", require_live=False)
+    warnings = [w for w in lints.readiness_warnings(spec, pack) if "yes/no" in w]
 
     (warning,) = warnings
     assert "hands the walk over" in warning
@@ -323,9 +325,9 @@ def test_check_warns_about_thinly_anchored_route_pages() -> None:
     # learned: one OCR miss reads them unknown, so the checker says so
     # for every page the route checks — advisory, never a refusal.
     write_pack(playbooks={"flow": FLOW})
-    spec, pack = setup.load_spec("demo", "flow", require_live=False)
+    spec, pack = build.load_spec("demo", "flow", require_live=False)
 
-    warnings = [w for w in setup.readiness_warnings(spec, pack) if "anchor" in w]
+    warnings = [w for w in lints.readiness_warnings(spec, pack) if "anchor" in w]
 
     assert [w.split("'")[1] for w in warnings] == ["done", "home", "results"]
     assert all("one OCR miss" in w for w in warnings)
@@ -494,7 +496,7 @@ def test_session_setup_builds_the_boot_and_hidden_registry() -> None:
     # the activation (the menu of enabled playbooks) for its `activate`
     # step, and the whole dispatch table beside it.
     from physiclaw.common import paths
-    from physiclaw.conductor.playbook import ActivateNode
+    from physiclaw.conductor.spec.model import ActivateNode
 
     write_channel(CHANNEL_OPEN)
     write_pack(playbooks={"flow": FLOW})
@@ -576,7 +578,7 @@ def test_session_setup_prefers_a_suspended_walk_over_the_boot() -> None:
 
 def test_activation_builds_a_request_over_the_thread_screen() -> None:
     from physiclaw.common.listing import Screen
-    from physiclaw.conductor.micro import PARSE_TASK, MicroOutcome
+    from physiclaw.conductor.walk.micro import PARSE_TASK, MicroOutcome
 
     write_channel(CHANNEL_OPEN)
     write_pack(playbooks={"flow": FLOW})
@@ -621,7 +623,7 @@ def test_activation_menu_renders_the_input_example() -> None:
 
 
 def test_activation_rejects_unresolvable_inputs_and_not_a_task() -> None:
-    from physiclaw.conductor.micro import MicroOutcome
+    from physiclaw.conductor.walk.micro import MicroOutcome
 
     write_channel(CHANNEL_OPEN)
     write_pack(playbooks={"flow": FLOW})
@@ -644,7 +646,7 @@ def test_activation_rejects_unresolvable_inputs_and_not_a_task() -> None:
 
 
 def test_scaffolded_channel_pack_parses_and_loads_disabled() -> None:
-    from physiclaw.conductor import scaffold
+    from physiclaw.conductor.spec import scaffold
 
     scaffold.init_pack("channel")
 
@@ -655,7 +657,7 @@ def test_scaffolded_channel_pack_parses_and_loads_disabled() -> None:
     assert ch is not None
     assert ch.send is None and ch.open is None
     assert ch.boot is None and ch.pack is not None
-    from physiclaw.conductor.playbook import load_pack
+    from physiclaw.conductor.spec.pack import load_pack
 
     pack = load_pack("channel")
     assert set(pack.macros) == {"send", "open"} and not pack.macro_errors
@@ -955,7 +957,7 @@ def test_payment_move_without_consent_hands_over() -> None:
     # if every earlier guard were somehow skipped.
     write_channel(CHANNEL_OPEN)
     write_pack(playbooks={"pay": GATED})
-    spec, _ = setup.load_spec("demo", "pay")
+    spec, _ = build.load_spec("demo", "pay")
     pay_idx = next(
         i for i, n in enumerate(spec.nodes) if getattr(n, "irreversible", None)
     )
@@ -1036,10 +1038,10 @@ def test_a_stepping_position_restarts_below_its_cursor_a_suspension_never() -> N
     # cursor is a floor no recovery restarts below. A checkpoint keeps
     # the fresh walk's rule: the hand ran, walk again from the top.
     write_pack(playbooks={"flow": RECOVERING}, landmarks=LANDMARKS)
-    spec, pack = setup.load_spec("demo", "flow", require_live=False)
+    spec, pack = build.load_spec("demo", "flow", require_live=False)
     at_search = {**_program(keyword="milk").state(), "idx": 1}
 
-    stepped = setup.build_program(
+    stepped = build.build_program(
         spec, pack, {"keyword": "milk"}, None, position=at_search, dry=True
     )
     h = _history()
@@ -1054,7 +1056,7 @@ def test_a_stepping_position_restarts_below_its_cursor_a_suspension_never() -> N
         and "walking again" in relaunch.tool_calls[0].arguments["summary"]
     )
 
-    resumed = setup.build_program(
+    resumed = build.build_program(
         spec, pack, {"keyword": "milk"}, None, suspended=at_search, dry=True
     )
     h2 = _history()
@@ -1151,7 +1153,7 @@ KEYED = FLOW.replace(
 
 def _learn_results() -> None:
     """Calibrated geometry for `results` — an overlay verdict needs it."""
-    from physiclaw.conductor import pages
+    from physiclaw.conductor.spec import pages
 
     def anchor(text, cy):
         return pages.LearnedAnchor(
@@ -1356,9 +1358,9 @@ def test_check_warns_when_an_ask_without_resume_precedes_a_screen_move() -> None
     )
     write_channel(CHANNEL_OPEN)
     write_pack(playbooks={"two": flow})
-    spec, pack = setup.load_spec("demo", "two", require_live=False)
+    spec, pack = build.load_spec("demo", "two", require_live=False)
 
-    warnings = [w for w in setup.readiness_warnings(spec, pack) if "resume" in w]
+    warnings = [w for w in lints.readiness_warnings(spec, pack) if "resume" in w]
 
     assert len(warnings) == 1 and "ask 'handoff'" in warnings[0]
 
@@ -1381,7 +1383,7 @@ def test_recovery_never_runs_with_consent_bound() -> None:
 
 
 def test_completed_walk_records_one_completed_run_line() -> None:
-    from physiclaw.conductor import walklog
+    from physiclaw.conductor.walk import walklog
 
     write_pack(playbooks={"flow": FLOW})
     p = _program(keyword="milk")
@@ -1400,7 +1402,7 @@ def test_completed_walk_records_one_completed_run_line() -> None:
 
 
 def test_handover_records_run_line_at_the_failing_node() -> None:
-    from physiclaw.conductor import walklog
+    from physiclaw.conductor.walk import walklog
 
     p, h, move1 = _recovering_walk()
     _feed(h, move1, HOME)  # move 1 landed on the WRONG page
@@ -1426,7 +1428,7 @@ def test_completed_payment_walk_records_history_fields() -> None:
     # The completed line carries the structured fields: inputs and the
     # fired total (consent is consumed at fire — this is where it
     # survives).
-    from physiclaw.conductor import walklog
+    from physiclaw.conductor.walk import walklog
 
     p, h, send = _at_gate()
     back = _reply_arrives(p, h, send, "好的")
@@ -1498,7 +1500,7 @@ def test_abandon_records_a_mid_flight_walk_and_breadcrumbs_it() -> None:
     # short — one telemetry row plus the daily-log breadcrumb, since
     # this walk had acted.
     from physiclaw.common import daylog
-    from physiclaw.conductor import walklog
+    from physiclaw.conductor.walk import walklog
 
     write_pack(playbooks={"flow": FLOW})
     p = _program(keyword="milk")
@@ -1515,7 +1517,7 @@ def test_abandon_records_a_mid_flight_walk_and_breadcrumbs_it() -> None:
 
 
 def test_abandon_is_a_no_op_for_unstarted_and_closed_walks() -> None:
-    from physiclaw.conductor import walklog
+    from physiclaw.conductor.walk import walklog
 
     write_pack(playbooks={"flow": FLOW})
     fresh = _program(keyword="milk")
@@ -1536,8 +1538,8 @@ def test_abandon_is_a_no_op_for_unstarted_and_closed_walks() -> None:
 
 
 def test_failed_agent_call_records_handover_with_micro_count() -> None:
-    from physiclaw.conductor import walklog
-    from physiclaw.conductor.micro import DecisionRequest
+    from physiclaw.conductor.walk import walklog
+    from physiclaw.conductor.walk.micro import DecisionRequest
 
     write_pack(playbooks={"flow": AGENT_FLOW})
     p = _program(keyword="milk")
@@ -1608,4 +1610,4 @@ def test_suspended_walk_with_a_broken_spec_is_dropped() -> None:
 
     assert setup.load_suspended() is None
     with pytest.raises(PlaybookError):
-        setup.load_spec("demo", "pay")
+        build.load_spec("demo", "pay")

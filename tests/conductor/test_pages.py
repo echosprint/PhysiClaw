@@ -1,4 +1,4 @@
-"""Tests for `physiclaw.conductor.pages` — declaration parsing and
+"""Tests for `physiclaw.conductor.spec.pages` — declaration parsing and
 the learned store."""
 
 from __future__ import annotations
@@ -6,8 +6,8 @@ from __future__ import annotations
 import pytest
 
 from physiclaw.common import paths
-from physiclaw.conductor import pages
-from physiclaw.conductor.pages import (
+from physiclaw.conductor.spec import conventions, pages
+from physiclaw.conductor.spec.pages import (
     Landmark,
     LearnedAnchor,
     LearnedPage,
@@ -125,23 +125,23 @@ def test_ios_pack_is_scaffolded_then_read_from_disk() -> None:
     # `ios` used to be reserved-and-unloadable. It is now an ordinary
     # pack directory the user owns — scaffolded by the CLI, read from
     # disk like every other, never shipped in the wheel.
-    from physiclaw.conductor import scaffold
+    from physiclaw.conductor.spec import scaffold
 
-    assert pages.scan_app_decls(pages.IOS_APP) == {}  # nothing until scaffolded
+    assert pages.scan_app_decls(conventions.IOS_APP) == {}  # nothing until scaffolded
 
-    scaffold.init_pack(pages.IOS_APP)
-    decls = pages.scan_app_decls(pages.IOS_APP)
+    scaffold.init_pack(conventions.IOS_APP)
+    decls = pages.scan_app_decls(conventions.IOS_APP)
 
     assert "locked" in decls
     assert decls["locked"].anchors  # semantics only — geometry is captured
 
 
 def test_scaffolded_ios_pages_are_matchable_prints_without_geometry() -> None:
-    from physiclaw.conductor import scaffold
+    from physiclaw.conductor.spec import scaffold
 
-    scaffold.init_pack(pages.IOS_APP)
+    scaffold.init_pack(conventions.IOS_APP)
 
-    prints = pages.prints_for_app(pages.IOS_APP)
+    prints = pages.prints_for_app(conventions.IOS_APP)
 
     assert [p.page_id for p in prints] == ["ios.locked"]
     # No learned file until `calibrate` runs — declaration-only threshold.
@@ -175,7 +175,7 @@ def test_scan_app_decls_validates_name_before_touching_paths() -> None:
 def test_parse_wraps_any_loader_error_as_pages_error(mocker) -> None:
     # The YAML loader does not confine itself to YAMLError (deep nesting
     # surfaces as RecursionError) — the contract is PagesError-only.
-    from physiclaw.conductor import specfile
+    from physiclaw.conductor.spec import specfile
 
     mocker.patch.object(
         specfile.yaml_loader, "load", side_effect=RecursionError("deep")

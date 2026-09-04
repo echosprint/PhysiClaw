@@ -7,7 +7,7 @@ import typer
 from typer.testing import CliRunner
 
 from physiclaw.cli.playbooks import playbooks_app
-from physiclaw.conductor import walklog
+from physiclaw.conductor.walk import walklog
 
 app = typer.Typer()
 app.add_typer(playbooks_app, name="playbooks")

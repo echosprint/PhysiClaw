@@ -32,8 +32,8 @@ from starlette.routing import Route
 from physiclaw.common import gesture_vocab
 from physiclaw.common.ready import START_HINT
 from physiclaw.common.text import read_text
-from physiclaw.conductor.playbook import split_ref
-from physiclaw.conductor.specfile import SpecError
+from physiclaw.conductor.spec.pack import split_ref
+from physiclaw.conductor.spec.specfile import SpecError
 from physiclaw.debug import stepping
 from physiclaw.macros.model import MacroError
 from physiclaw.studio.session import Session, view_reply

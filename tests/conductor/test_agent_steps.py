@@ -25,17 +25,18 @@ from conductor_fakes import (
     thread_screen as _thread,
 )
 
-from physiclaw.conductor import pages, setup
-from physiclaw.conductor import playbook as pb
-from physiclaw.conductor.calls import ACT_SCROLL_DOWN, AGENT_DONE
-from physiclaw.conductor.micro import (
+from physiclaw.conductor.drive import build
+from physiclaw.conductor.spec import pack as pb
+from physiclaw.conductor.spec import pages
+from physiclaw.conductor.spec.calls import ACT_SCROLL_DOWN, AGENT_DONE
+from physiclaw.conductor.spec.model import AgentNode, DoNode, PlaybookError
+from physiclaw.conductor.walk.micro import (
     ACT_ARM,
     AGENT_ACT,
     AGENT_FIELDS,
     DecisionRequest,
     MicroOutcome,
 )
-from physiclaw.conductor.playbook import AgentNode, DoNode, PlaybookError
 
 BACK_LANDMARK = """\
 back:
@@ -102,7 +103,7 @@ def _done_outcome(**payload) -> MicroOutcome:
 
 def test_parse_the_agented_playbook() -> None:
     _write()
-    spec, _ = setup.load_spec("demo", "walk", require_live=False)
+    spec, _ = build.load_spec("demo", "walk", require_live=False)
 
     kinds = [type(n).__name__ for n in spec.nodes]
     assert kinds == ["AgentNode", "DoNode", "DoNode", "AgentNode"]
@@ -120,7 +121,7 @@ def test_parse_the_agented_playbook() -> None:
 
 def _parse(text: str):
     _write(text)
-    return setup.load_spec("demo", "walk", require_live=False)[0]
+    return build.load_spec("demo", "walk", require_live=False)[0]
 
 
 @pytest.mark.parametrize(
@@ -184,7 +185,7 @@ def test_give_grants_are_checked(grant, fragment) -> None:
         macros=("open-app", "add-cart", "done"),
     )
     with pytest.raises(PlaybookError, match=fragment):
-        setup.load_spec("demo", "walk", require_live=False)
+        build.load_spec("demo", "walk", require_live=False)
 
 
 def test_give_is_optional() -> None:
@@ -385,7 +386,7 @@ def test_episode_tap_grounds_and_history_is_append_only() -> None:
 
 
 def test_episode_runs_a_granted_macro_by_name() -> None:
-    from physiclaw.conductor.step_agent import KIND_MACRO
+    from physiclaw.conductor.walk.step_agent import KIND_MACRO
 
     _write(AGENTED.replace("give: [landmarks.back]", "give: [macros.add-cart]"))
     p = _program(name="walk", user_said="买牛奶")
@@ -518,7 +519,7 @@ def test_recover_relaunch_loop_is_bounded_by_the_walk_budget() -> None:
     # A hand that runs and restores its page clears its recovery State, so the
     # budget must count the WALK's spend, not the engagement's — else a
     # splash ad on every cold launch loops force_quit forever.
-    from physiclaw.conductor.limits import MAX_RECOVER_ACTIONS
+    from physiclaw.conductor.spec.limits import MAX_RECOVER_ACTIONS
 
     _write(
         AGENTED.replace(
@@ -550,7 +551,7 @@ def test_recover_relaunch_loop_is_bounded_by_the_walk_budget() -> None:
 def test_page_recover_limit_stops_the_relaunch_before_the_walk_budget() -> None:
     # The page's own `limit:` (default 2) is spent first; the handover
     # names it, so the author sees which bound fired.
-    from physiclaw.conductor.limits import MAX_RECOVER_ACTIONS
+    from physiclaw.conductor.spec.limits import MAX_RECOVER_ACTIONS
 
     _write()
     p = _program(name="walk", user_said="买牛奶")
@@ -704,7 +705,7 @@ def test_episode_grammar_lints(old, new, fragment) -> None:
         + 'done:\n  label: "done"\n  bbox: [0.5, 0.5, 0.6, 0.6]\n',
     )
     with pytest.raises(PlaybookError, match=fragment):
-        setup.load_spec("demo", "walk", require_live=False)
+        build.load_spec("demo", "walk", require_live=False)
 
 
 def test_give_refuses_one_name_as_both_landmark_and_macro() -> None:
@@ -718,7 +719,7 @@ def test_give_refuses_one_name_as_both_landmark_and_macro() -> None:
         macros=("open-app", "add-cart", "back"),
     )
     with pytest.raises(PlaybookError, match="both a landmark and a macro"):
-        setup.load_spec("demo", "walk", require_live=False)
+        build.load_spec("demo", "walk", require_live=False)
 
 
 def test_payment_ask_before_a_screen_move_needs_resume() -> None:
@@ -726,7 +727,7 @@ def test_payment_ask_before_a_screen_move_needs_resume() -> None:
     write_channel()
     write_pack(playbooks={"pay": text})
     with pytest.raises(PlaybookError, match="declare `resume:`"):
-        setup.load_spec("demo", "pay", require_live=False)
+        build.load_spec("demo", "pay", require_live=False)
 
 
 def test_payment_ask_reads_the_page_before_it() -> None:
@@ -738,7 +739,7 @@ def test_payment_ask_reads_the_page_before_it() -> None:
     write_channel()
     write_pack(playbooks={"pay": text})
     with pytest.raises(PlaybookError, match="reads its total off the page before"):
-        setup.load_spec("demo", "pay", require_live=False)
+        build.load_spec("demo", "pay", require_live=False)
 
 
 def test_payment_episode_blocks_a_tap_when_the_sheet_changed() -> None:

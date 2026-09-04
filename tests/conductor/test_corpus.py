@@ -1,4 +1,4 @@
-"""Tests for `physiclaw.conductor.corpus` — wire.jsonl listing
+"""Tests for `physiclaw.conductor.drive.corpus` — wire.jsonl listing
 extraction and the labeled-corpus round trip."""
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ import pytest
 
 from physiclaw.common import paths
 from physiclaw.common.listing import LISTING_HEADER
-from physiclaw.conductor import corpus
+from physiclaw.conductor.drive import corpus
 
 LISTING_A = f'{LISTING_HEADER}\n0 [text] "综合" [0.100,0.100,0.200,0.120] 0.90'
 LISTING_B = f'{LISTING_HEADER}\n0 [text] "结算" [0.500,0.900,0.600,0.940] 0.90'

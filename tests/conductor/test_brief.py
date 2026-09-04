@@ -1,11 +1,11 @@
-"""Tests for `physiclaw.conductor.brief` — the handover/completion/boot
+"""Tests for `physiclaw.conductor.walk.brief` — the handover/completion/boot
 report renderings the drivers' final [note, peek] turns carry."""
 
 from __future__ import annotations
 
 import pytest
 
-from physiclaw.conductor import brief
+from physiclaw.conductor.walk import brief
 
 
 def _walk(**overrides) -> str:

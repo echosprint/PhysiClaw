@@ -66,9 +66,9 @@ def test_installed_pack_parses_whole_and_ships_disabled(app: str) -> None:
     from typer.testing import CliRunner
 
     from physiclaw.cli import app as cli_app
-    from physiclaw.conductor.channel import load_channel
-    from physiclaw.conductor.pages import BOOT_PLAYBOOK, CHANNEL_APP
-    from physiclaw.conductor.playbook import load_pack, scan_playbooks
+    from physiclaw.conductor.spec.channel import load_channel
+    from physiclaw.conductor.spec.conventions import BOOT_PLAYBOOK, CHANNEL_APP
+    from physiclaw.conductor.spec.pack import load_pack, scan_playbooks
 
     tokens = {t for f in _pack_files(app) for t in find_placeholders(read_text(f))}
     sets = [x for tok in tokens for x in ("--set", f"{tok}=TestUser")]

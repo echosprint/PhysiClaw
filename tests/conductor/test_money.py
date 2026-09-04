@@ -1,11 +1,11 @@
-"""Tests for `physiclaw.conductor.money` — the declared total and the
+"""Tests for `physiclaw.conductor.walk.money` — the declared total and the
 fire-time predicates, pure arithmetic over a screen."""
 
 from __future__ import annotations
 
 from conductor_fakes import make_screen
 
-from physiclaw.conductor import money
+from physiclaw.conductor.walk import money
 
 
 def test_declared_total_reads_the_label_row_itself() -> None:

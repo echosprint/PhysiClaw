@@ -102,7 +102,7 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 # The first packages ratcheted to strict defs: every function is fully
-# annotated, so a driver's hooks (`conductor.hooks`) and the walk's
+# annotated, so a driver's hooks (`conductor.drive.hooks`) and the walk's
 # states are checked, not trusted.
 module = ["physiclaw.conductor.*", "physiclaw.debug.*"]
 disallow_untyped_defs = true

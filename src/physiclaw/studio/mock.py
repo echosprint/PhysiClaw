@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from physiclaw.common import gesture_vocab
-from physiclaw.conductor.corpus import is_screen
+from physiclaw.conductor.drive.corpus import is_screen
 from physiclaw.contract.wire import image_ref, iter_request_messages
 from physiclaw.studio.session import unpublished, view_reply
 

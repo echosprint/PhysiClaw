@@ -10,10 +10,12 @@ from conductor_fakes import PACK_MACRO
 
 from physiclaw.common import paths
 from physiclaw.common.placeholders import write_placeholder_values
-from physiclaw.conductor import playbook as pb
-from physiclaw.conductor import setup as conductor_setup
-from physiclaw.conductor.pages import prints_for_app
-from physiclaw.conductor.playbook import PlaybookError, RecoverHand, qualified_all
+from physiclaw.conductor.drive import activation, build
+from physiclaw.conductor.drive import setup as conductor_setup
+from physiclaw.conductor.spec import pack as pb
+from physiclaw.conductor.spec.model import PlaybookError, RecoverHand
+from physiclaw.conductor.spec.pack import qualified_all
+from physiclaw.conductor.spec.pages import prints_for_app
 
 MANIFEST = """\
 app: shop
@@ -151,13 +153,11 @@ def test_the_matcher_sees_the_shared_pages_and_a_walk_builds(shop) -> None:
         "results",
     }
     for name in ("buy", "track"):
-        spec, _ = conductor_setup.load_spec("shop", name, require_live=False)
-        program = conductor_setup.build_program(
+        spec, _ = build.load_spec("shop", name, require_live=False)
+        program = build.build_program(
             spec,
             pack,
-            conductor_setup.resolve_inputs(
-                spec, {"keyword": "x"} if name == "buy" else {}
-            ),
+            build.resolve_inputs(spec, {"keyword": "x"} if name == "buy" else {}),
             None,
             dry=True,
         )
@@ -223,7 +223,7 @@ def test_activation_menu_is_one_line_per_playbook_and_check_flags_twins(shop) ->
             if e.name == "buy":
                 entries[f"{app}/buy"] = (e.spec, pack)
 
-    menu = conductor_setup.Activation(entries=entries, channel=None)._menu()
+    menu = activation.Activation(entries=entries, channel=None)._menu()
     result = CliRunner().invoke(cli_app, ["playbooks", "check"])
 
     assert menu.splitlines() == [

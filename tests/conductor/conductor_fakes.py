@@ -171,13 +171,14 @@ def build_program(
     """Build the walk the way `playbooks run` does — the factory that
     replaced arming as the way to get a Program without a wake. `dry`
     builds the replay's no-trace walk."""
-    from physiclaw.conductor import channel, setup
+    from physiclaw.conductor.drive import build
+    from physiclaw.conductor.spec import channel
 
-    spec, pack = setup.load_spec(app, name, require_live=False)
-    return setup.build_program(
+    spec, pack = build.load_spec(app, name, require_live=False)
+    return build.build_program(
         spec,
         pack,
-        setup.resolve_inputs(spec, values),
+        build.resolve_inputs(spec, values),
         channel.load_channel(),
         dry=dry,
     )

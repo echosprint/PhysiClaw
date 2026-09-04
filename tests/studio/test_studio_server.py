@@ -273,7 +273,7 @@ async def test_step_snapshot_sends_the_view_only_past_since(monkeypatch) -> None
 
 @pytest.mark.asyncio
 async def test_step_errors_land_in_the_snapshot_not_the_response(monkeypatch) -> None:
-    from physiclaw.conductor.playbook import PlaybookError
+    from physiclaw.conductor.spec.model import PlaybookError
 
     monkeypatch.setattr(
         server.stepping, "step", _fake_step({}, error=PlaybookError("no node 'nope'"))

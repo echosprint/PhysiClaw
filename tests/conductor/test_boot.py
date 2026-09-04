@@ -21,10 +21,11 @@ from conductor_fakes import history as _history
 
 from physiclaw.common import gesture_vocab, paths
 from physiclaw.common.listing import LISTING_HEADER
-from physiclaw.conductor import setup, walklog
-from physiclaw.conductor.micro import SCROLL_UP, DecisionRequest, MicroOutcome
-from physiclaw.conductor.program import Program
-from physiclaw.conductor.walklog import Outcome
+from physiclaw.conductor.drive import setup
+from physiclaw.conductor.walk import walklog
+from physiclaw.conductor.walk.micro import SCROLL_UP, DecisionRequest, MicroOutcome
+from physiclaw.conductor.walk.program import Program
+from physiclaw.conductor.walk.walklog import Outcome
 
 THREAD = thread_screen(("买牛奶", 0.25, 0.4))
 # y=0.93: where an iPhone actually prints the hint — the bottom band, not

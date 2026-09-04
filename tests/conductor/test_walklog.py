@@ -1,4 +1,4 @@
-"""Tests for `physiclaw.conductor.walklog` — the per-walk runs.jsonl
+"""Tests for `physiclaw.conductor.walk.walklog` — the per-walk runs.jsonl
 writer and the aggregation `physiclaw playbooks stats` renders."""
 
 from __future__ import annotations
@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from physiclaw.conductor import walklog
+from physiclaw.conductor.walk import walklog
 
 
 def _record(**overrides) -> None:

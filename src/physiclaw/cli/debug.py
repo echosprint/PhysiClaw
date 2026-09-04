@@ -86,7 +86,7 @@ def debug(
             _arm_wake(f"debug: user sent a message: {task!r}")
         _run_server_if_none(macro_failure)
     else:
-        from physiclaw.conductor.suspension import suspended_ref
+        from physiclaw.conductor.walk.suspension import suspended_ref
 
         vthread.stage(replies)
         typer.echo(f"staged {len(replies)} reply(ies) onto the running script")
@@ -130,7 +130,7 @@ def _arm_wake(description: str) -> None:
 
 
 def _status() -> None:
-    from physiclaw.conductor.suspension import suspended_ref
+    from physiclaw.conductor.walk.suspension import suspended_ref
     from physiclaw.debug import thread as vthread
 
     thread = vthread.load()

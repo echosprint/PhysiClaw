@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from physiclaw.conductor.conductor import Conductor
+from physiclaw.conductor.drive.conductor import Conductor
 from physiclaw.contract.dto import (
     SystemMessage,
     UserMessage,
@@ -35,8 +35,8 @@ def _one_node_program():
     the locate peek; a history without that peek's result makes the next
     advance hand over — enough to pin the conductor's arbitration without
     a pack on disk."""
-    from physiclaw.conductor.playbook import Playbook, TellNode
-    from physiclaw.conductor.program import Program
+    from physiclaw.conductor.spec.model import Playbook, TellNode
+    from physiclaw.conductor.walk.program import Program
 
     spec = Playbook(
         app="demo",
@@ -75,7 +75,7 @@ class FakeMicro:
         self.requests = []
 
     async def run(self, req):
-        from physiclaw.conductor.micro import MicroResult
+        from physiclaw.conductor.walk.micro import MicroResult
         from physiclaw.contract.dto import Usage
 
         self.requests.append(req)
@@ -92,8 +92,8 @@ class FakeMicro:
 def _agent_program():
     """A Program opening with one pure-text agent step — the shared
     scaffolding of the broker tests."""
-    from physiclaw.conductor.playbook import AgentNode, Playbook
-    from physiclaw.conductor.program import Program
+    from physiclaw.conductor.spec.model import AgentNode, Playbook
+    from physiclaw.conductor.walk.program import Program
 
     nodes: tuple = (
         AgentNode(
@@ -138,7 +138,7 @@ async def _walk_to_decision(conductor, history) -> None:
 
 @pytest.mark.asyncio
 async def test_advance_brokers_decision_requests_through_the_micro_caller() -> None:
-    from physiclaw.conductor.micro import AGENT_FIELDS, MicroOutcome
+    from physiclaw.conductor.walk.micro import AGENT_FIELDS, MicroOutcome
 
     prog = _agent_program()
     micro = FakeMicro(
@@ -182,8 +182,8 @@ async def test_advance_activates_a_playbook_off_the_thread_screen() -> None:
     arbiter, with no second driver."""
     from conductor_fakes import FLOW, thread_screen, write_channel, write_pack
 
-    from physiclaw.conductor import setup
-    from physiclaw.conductor.micro import PARSE_TASK, MicroOutcome
+    from physiclaw.conductor.drive import setup
+    from physiclaw.conductor.walk.micro import PARSE_TASK, MicroOutcome
     from physiclaw.contract.dto import ToolResultMessage
 
     write_channel(CHANNEL_OPEN)
@@ -236,8 +236,9 @@ async def test_abandon_covers_an_untaken_baton() -> None:
         write_pack,
     )
 
-    from physiclaw.conductor import setup, walklog
-    from physiclaw.conductor.micro import MicroOutcome
+    from physiclaw.conductor.drive import setup
+    from physiclaw.conductor.walk import walklog
+    from physiclaw.conductor.walk.micro import MicroOutcome
 
     write_channel(CHANNEL_OPEN)
     write_pack(playbooks={"flow": FLOW})
@@ -276,8 +277,8 @@ steps:
 
 @pytest.mark.asyncio
 async def test_a_program_bug_becomes_a_crash_record_and_silence(mocker) -> None:
-    from physiclaw.conductor.program import Phase
-    from physiclaw.conductor.walklog import Outcome
+    from physiclaw.conductor.walk.program import Phase
+    from physiclaw.conductor.walk.walklog import Outcome
 
     program = _one_node_program()
     mocker.patch.object(program, "_advance", side_effect=RuntimeError("bug"))
@@ -291,7 +292,7 @@ async def test_a_program_bug_becomes_a_crash_record_and_silence(mocker) -> None:
 
 @pytest.mark.asyncio
 async def test_a_failing_crash_record_still_goes_quiet(mocker) -> None:
-    from physiclaw.conductor.program import Phase
+    from physiclaw.conductor.walk.program import Phase
 
     program = _one_node_program()
     mocker.patch.object(program, "_advance", side_effect=RuntimeError("bug"))

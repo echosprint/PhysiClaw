@@ -112,7 +112,7 @@ def test_reply_alone_stages_without_arming_a_wake() -> None:
 
 def test_reply_wakes_a_suspended_walk() -> None:
     from physiclaw.common.logger import write_json_atomic
-    from physiclaw.conductor.suspension import SUSPENDED_SCHEMA, suspended_path
+    from physiclaw.conductor.walk.suspension import SUSPENDED_SCHEMA, suspended_path
 
     suspended_path().parent.mkdir(parents=True, exist_ok=True)
     write_json_atomic(

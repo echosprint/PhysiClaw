@@ -1,4 +1,4 @@
-"""Tests for `physiclaw.conductor.recover` — declared recovery's policy:
+"""Tests for `physiclaw.conductor.walk.recover` — declared recovery's policy:
 the page's declared hand, and the budget that bounds it."""
 
 from __future__ import annotations
@@ -6,10 +6,10 @@ from __future__ import annotations
 import pytest
 from conductor_fakes import make_screen
 
-from physiclaw.conductor import recover
-from physiclaw.conductor.limits import MAX_RECOVER_ACTIONS
-from physiclaw.conductor.pages import Landmark
-from physiclaw.conductor.playbook import RecoverHand, Recovery
+from physiclaw.conductor.spec.limits import MAX_RECOVER_ACTIONS
+from physiclaw.conductor.spec.model import RecoverHand, Recovery
+from physiclaw.conductor.spec.pages import Landmark
+from physiclaw.conductor.walk import recover
 
 HAND = RecoverHand(tool="go_back")
 RECOVERY = Recovery(occluded=HAND, elsewhere=HAND, limit=2)

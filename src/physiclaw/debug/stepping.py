@@ -39,10 +39,9 @@ from pathlib import Path
 from physiclaw.common import paths
 from physiclaw.common.logger import write_json_atomic
 from physiclaw.common.text import read_text
-from physiclaw.conductor import rehearsal
-from physiclaw.conductor.gate import Gate
-from physiclaw.conductor.hooks import Emit, McpCaller, Observe, OnExchange
-from physiclaw.conductor.playbook import (
+from physiclaw.conductor.drive import rehearsal
+from physiclaw.conductor.drive.hooks import Emit, McpCaller, Observe, OnExchange
+from physiclaw.conductor.spec.model import (
     ActivateNode,
     AgentNode,
     AskNode,
@@ -51,11 +50,11 @@ from physiclaw.conductor.playbook import (
     Playbook,
     PlaybookError,
     TellNode,
-    qualified_all,
-    qualified_macro,
 )
-from physiclaw.conductor.specfile import SpecError
-from physiclaw.conductor.suspension import SUSPENDED_SCHEMA
+from physiclaw.conductor.spec.pack import qualified_all, qualified_macro
+from physiclaw.conductor.spec.specfile import SpecError
+from physiclaw.conductor.walk.gate import Gate
+from physiclaw.conductor.walk.suspension import SUSPENDED_SCHEMA
 from physiclaw.contract.dto import ToolCall
 from physiclaw.debug import thread as vthread
 from physiclaw.macros.model import Macro, MacroError, MacroInput
@@ -255,12 +254,12 @@ def position(spec: Playbook, state: dict, staged: list[str] | None = None) -> Po
 
 def status(app: str, name: str) -> Position | None:
     """The stored position, or None when the next step starts the route."""
-    from physiclaw.conductor import setup as conductor_setup
+    from physiclaw.conductor.drive import build
 
     state = load_state(app, name)
     if state is None:
         return None
-    spec, _pack = conductor_setup.load_spec(app, name, require_live=False)
+    spec, _pack = build.load_spec(app, name, require_live=False)
     return position(spec, state)
 
 
@@ -269,7 +268,7 @@ def catalog() -> list[dict]:
     its route, and its stored position — the studio panel's whole
     model, JSON-shaped. A pack that fails to load reports its error
     instead of hiding."""
-    from physiclaw.conductor.playbook import list_apps, load_pack, scan_playbooks
+    from physiclaw.conductor.spec.pack import list_apps, load_pack, scan_playbooks
 
     stored = read_state()
     staged = list(vthread.load().staged)
@@ -365,29 +364,31 @@ async def step(
     every model round-trip as sent and received, and `on_exchange`
     receives each one as a record (`rehearsal.exchanges`).
     Raises PlaybookError on a bad ref, node, or input."""
-    from physiclaw.conductor import channel as channel_mod
-    from physiclaw.conductor import setup as conductor_setup
+    from physiclaw.conductor.drive import activation, build
+    from physiclaw.conductor.drive import setup as conductor_setup
+    from physiclaw.conductor.spec import channel as channel_mod
+    from physiclaw.conductor.spec import lints
     from physiclaw.debug.interceptor import FakeChannel
 
     emit_warn = emit_warn or emit
-    spec, pack = conductor_setup.load_spec(app, name, require_live=False)
+    spec, pack = build.load_spec(app, name, require_live=False)
     channel = channel_mod.load_channel()
     # The boot's menu of enabled playbooks: every pack on disk, read
     # once per invocation rather than per node built.
-    activation = conductor_setup.activation_for(channel) if spec.activates else None
+    menu = activation.activation_for(channel) if spec.activates else None
     state = load_state(app, name)
     if state is None:
         # A new walk's position at the route top — `Program.state`, the
         # one projection, off a program that never advanced.
-        state = conductor_setup.build_program(
+        state = build.build_program(
             spec,
             pack,
-            conductor_setup.resolve_inputs(spec, values or {}),
+            build.resolve_inputs(spec, values or {}),
             channel,
             dry=True,
-            activation=activation,
+            activation=menu,
         ).state()
-        for line in conductor_setup.readiness_warnings(spec, pack):
+        for line in lints.readiness_warnings(spec, pack):
             emit_warn(line)
         # The virtual thread opens with the user's words — the input that
         # reads like a message — so an ask's reply reading has a thread.
@@ -426,14 +427,14 @@ async def step(
     opts = {k: v for k, v in (("start_at", start_at), ("stop_after", stop_after)) if v}
     first = True
     while True:
-        program = conductor_setup.build_program(
+        program = build.build_program(
             spec,
             pack,
             state["values"],
             channel,
             position=state,
             dry=True,
-            activation=activation,
+            activation=menu,
         )
         program.step_one = True
         registry = conductor_setup.walk_registry(program, channel)
@@ -518,7 +519,7 @@ def _pack_macros(app: str) -> tuple[dict[str, Macro], dict[str, str]]:
     and every playbook's inline bodies, what a walk of that pack can
     dispatch — and the directory macros that failed to parse, by the
     same names. Raises MacroError when the pack itself does not load."""
-    from physiclaw.conductor.playbook import load_pack
+    from physiclaw.conductor.spec.pack import load_pack
 
     try:
         pack = load_pack(app)
@@ -532,7 +533,7 @@ def macro_catalog() -> list[dict]:
     """Every macro a rehearsal can run by name: the user's own, then each
     pack's under `app/name` — with inputs and steps, the Macro tab's
     whole model. A pack or macro that fails to load reports its error."""
-    from physiclaw.conductor.playbook import list_apps
+    from physiclaw.conductor.spec.pack import list_apps
     from physiclaw.macros import store as macro_store
 
     out = [_macro_item(e.dir_name, "user", e.spec, e.error) for e in macro_store.scan()]
@@ -555,7 +556,7 @@ def find_macro(name: str) -> Macro:
     """The macro a name addresses: a user macro's directory name, or a
     pack macro's qualified `app/name` (an inline body is
     `app/<playbook>.<move>`). Raises MacroError, naming the reason."""
-    from physiclaw.conductor.playbook import macro_app
+    from physiclaw.conductor.spec.pack import macro_app
     from physiclaw.macros import store as macro_store
 
     app = macro_app(name)

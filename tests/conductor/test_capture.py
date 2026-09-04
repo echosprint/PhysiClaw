@@ -1,13 +1,13 @@
-"""Tests for `physiclaw.conductor.capture` — geometry mining,
+"""Tests for `physiclaw.conductor.drive.capture` — geometry mining,
 app-level calibration, and anchor proposal."""
 
 from __future__ import annotations
 
 from conductor_fakes import make_screen
 
-from physiclaw.conductor import capture
-from physiclaw.conductor.match import normalize
-from physiclaw.conductor.pages import AnchorDecl, PageDecl
+from physiclaw.conductor.drive import capture
+from physiclaw.conductor.spec.match import normalize
+from physiclaw.conductor.spec.pages import AnchorDecl, PageDecl
 
 DECL = PageDecl(
     name="results",

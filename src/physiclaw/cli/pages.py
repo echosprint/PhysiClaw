@@ -29,7 +29,7 @@ def _input_screens(session: str | None, listing: Path | None, live: bool) -> lis
     resolved via the shared `logs <suffix>` convention), a listing file,
     or one live peek."""
     from physiclaw.common.listing import Screen
-    from physiclaw.conductor import corpus
+    from physiclaw.conductor.drive import corpus
 
     if live:
         listings = [asyncio.run(_live_listing())]
@@ -61,7 +61,7 @@ def extract(
     out: Path = typer.Option(..., "--out", help="corpus JSONL to write"),
 ) -> None:
     """Dump a session's listings to a corpus file with '?' labels to edit."""
-    from physiclaw.conductor import corpus
+    from physiclaw.conductor.drive import corpus
 
     listings = corpus.session_listings(resolve_sid(session))
     corpus.write_corpus(
@@ -79,8 +79,8 @@ def match(
 ) -> None:
     """Print the matcher's verdict for each input screen."""
     from physiclaw.common.paths import PACK_FILENAME
-    from physiclaw.conductor import pages
-    from physiclaw.conductor.match import match_screen
+    from physiclaw.conductor.spec import pages
+    from physiclaw.conductor.spec.match import match_screen
 
     prints = pages.prints_for_app(app)
     if not prints:
@@ -123,7 +123,8 @@ def calibrate(
 
     Either way, writes `learned/pages/<app>.json` and prints the per-page
     report."""
-    from physiclaw.conductor import capture, corpus, pages
+    from physiclaw.conductor.drive import capture, corpus
+    from physiclaw.conductor.spec import pages
 
     decls = pages.scan_app_decls(app)
     if not decls:
@@ -200,7 +201,7 @@ def propose(
 ) -> None:
     """Suggest anchor declarations from screens — prune by eye into
     the pack's `pages:` section."""
-    from physiclaw.conductor.capture import propose_anchors
+    from physiclaw.conductor.drive.capture import propose_anchors
 
     for i, screen in enumerate(_input_screens(session, listing, live)):
         candidates = propose_anchors(screen)
