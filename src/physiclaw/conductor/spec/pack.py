@@ -304,15 +304,23 @@ def require_live(spec: Playbook, pack: Pack) -> None:
     suspension and the boot must satisfy it; a rehearsal deliberately
     need not (you rehearse BEFORE you enable). Raises PlaybookError
     naming the gap."""
-    ref = f"{spec.app}/{spec.name}"
+    gap = live_gap(spec, pack)
+    if gap is not None:
+        raise PlaybookError(f"{spec.app}/{spec.name}: {gap} — rehearse, then enable")
+
+
+def live_gap(spec: Playbook, pack: Pack) -> str | None:
+    """The one thing that keeps a valid playbook from a wake, in a word
+    or two — None when it is live. `require_live` raises off it; the
+    wake roster prints it; both read one rule."""
     if not spec.enabled:
-        raise PlaybookError(f"{ref} is disabled — set `enabled: true` once rehearsed")
+        return "disabled"
     disabled = disabled_macros(spec, pack)
     if disabled:
-        raise PlaybookError(
-            f"{ref} references disabled pack macro(s): {', '.join(disabled)} — "
-            "rehearse, then enable"
+        return (
+            f"disabled macro{'s' if len(disabled) > 1 else ''}: {', '.join(disabled)}"
         )
+    return None
 
 
 def disabled_macros(spec: Playbook, pack: Pack) -> list[str]:

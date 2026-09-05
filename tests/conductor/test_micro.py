@@ -6,7 +6,7 @@ result/trace records."""
 from __future__ import annotations
 
 import pytest
-from conductor_fakes import make_screen
+from conductor_fakes import Sink, make_screen
 
 from physiclaw.conductor.spec.calls import (
     ACT_SCROLL_DOWN,
@@ -84,14 +84,6 @@ def _act_req(*labels: str, history=(), verbs=(ACT_SCROLL_DOWN, ACT_SCROLL_UP)):
     )
 
 
-class _Tap:
-    def __init__(self):
-        self.events: list[dict] = []
-
-    def write(self, event):
-        self.events.append(event)
-
-
 def _caller(replies, *, floor=0.6, tr=None):
     return MicroCaller(ScriptedProvider(replies), confidence_floor=floor, tr=tr)
 
@@ -147,7 +139,7 @@ async def test_done_carries_the_return_fields_as_payload() -> None:
 
 @pytest.mark.asyncio
 async def test_repair_retry_recovers_one_invalid_reply() -> None:
-    tap = _Tap()
+    tap = Sink()
     caller = _caller(
         [
             '{"answer": "ghost", "reason": "?", "confidence": 0.9}',  # not allowed
@@ -194,7 +186,7 @@ async def test_low_confidence_escalates_instead_of_guessing() -> None:
 
 @pytest.mark.asyncio
 async def test_provider_error_escalates_and_traces() -> None:
-    tap = _Tap()
+    tap = Sink()
     result = await _caller([RuntimeError("boom")], tr=tap).run(_fields_req())
 
     assert result.outcome is None and result.detail == "provider error"

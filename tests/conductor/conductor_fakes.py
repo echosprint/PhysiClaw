@@ -191,6 +191,14 @@ thread:
   anchors: ["MyChat"]
 """
 
+CHANNEL_OPEN = """\
+name: open
+description: open the thread
+steps:
+  - tap: t
+    at: [0.1, 0.1, 0.2, 0.2]
+"""
+
 CHANNEL_SEND = """\
 name: send
 description: send to the user
@@ -216,3 +224,14 @@ def write_channel(open_macro: str | None = None) -> None:
         (root / "macros" / "open" / "MACRO.yml").write_text(
             open_macro, encoding="utf-8"
         )
+
+
+class Sink:
+    """An `EventSink` that keeps what it is given — the session event
+    stream a test reads back (the trace, a micro-caller, a record)."""
+
+    def __init__(self) -> None:
+        self.events: list[dict] = []
+
+    def write(self, event: dict) -> None:
+        self.events.append(event)

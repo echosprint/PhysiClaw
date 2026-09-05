@@ -322,8 +322,7 @@ def reply_text(raw: dict) -> str:
 
 def _describe_verdict(v: "Verdict") -> str:
     """What the matcher made of the screen the next turn acts on."""
-    page = v.page_id or "no known page"
-    return f"screen reads {v.kind}: {page} — {v.detail} (score {v.score:.2f})"
+    return f"screen reads {v.describe()}"
 
 
 def _describe(result: "MicroResult") -> str:

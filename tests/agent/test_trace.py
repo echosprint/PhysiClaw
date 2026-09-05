@@ -240,6 +240,58 @@ def test_brief_content_multiple_blocks_joined_by_plus() -> None:
         ({"event": "done", "sentinel": "DONE", "recap": "ok"}, "OUTCOME: DONE — ok"),
         ({"event": "crashed"}, "CRASHED"),
         (
+            {
+                "event": "micro_call",
+                "call": "parse_task",
+                "node": "parse",
+                "out": "demo/flow",
+                "confidence": 0.9,
+                "detail": "task",
+                "attempts": 1,
+                "elapsed_ms": 1200,
+            },
+            "micro parse_task (parse) → demo/flow (0.90) — task [1 attempt(s), 1200ms]",
+        ),
+        (
+            {
+                "event": "micro_call",
+                "call": "parse_task",
+                "node": "parse",
+                "out": None,
+                "confidence": None,
+                "detail": "provider error",
+                "attempts": 2,
+                "elapsed_ms": 40,
+            },
+            "micro parse_task (parse) → escalate — provider error [2 attempt(s), 40ms]",
+        ),
+        (
+            {
+                "event": "walk",
+                "app": "demo",
+                "playbook": "flow",
+                "outcome": "handover",
+                "node": "search",
+                "idx": 2,
+                "nodes": 5,
+                "reason": "move did not land",
+            },
+            "WALK demo/flow handover at node search (2/5) — move did not land",
+        ),
+        (
+            {
+                "event": "walk",
+                "app": "demo",
+                "playbook": "flow",
+                "outcome": "completed",
+                "node": None,
+                "idx": 5,
+                "nodes": 5,
+                "reason": "",
+            },
+            "WALK demo/flow completed at node (end) (5/5)",
+        ),
+        (
             {"event": "provider_failed", "turn": 2, "error": "rate limited"},
             "provider failed: rate limited",
         ),
@@ -1200,3 +1252,76 @@ def test_summary_counts_micro_calls_and_folds_their_tokens(
     assert s["usage"]["by_model"]["moonshot/kimi-k2.6"]["calls"] == 1
     # A micro call is not a turn-loop provider call.
     assert s["provider_calls"] == 0
+
+
+def test_micro_decisions_are_mirrored_into_the_process_log(
+    _trace_dirs: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    # The conductor logs no line of its own for a decision: the trace
+    # renders the `micro_call` event once and mirrors that one line, so
+    # runtime.log and `physiclaw logs` can never disagree about it.
+    caplog.set_level("INFO", logger="physiclaw.agent.trace")
+    t = Trace("s1")
+    t.write(
+        {
+            "event": "micro_call",
+            "call": "parse_task",
+            "node": "parse",
+            "out": "demo/flow",
+            "confidence": 0.9,
+            "detail": "task",
+            "attempts": 1,
+            "elapsed_ms": 12,
+        }
+    )
+    t.close()
+
+    assert (
+        "micro parse_task (parse) → demo/flow (0.90) — task [1 attempt(s), 12ms]"
+        in caplog.text
+    )
+
+
+def test_summary_lists_every_walk_in_order(_trace_dirs: Path) -> None:
+    t = Trace("s1")
+    t.write({"event": "wake", "session": "s1", "model_ref": "x/y", "triggers": []})
+    t.write(
+        {
+            "event": "walk",
+            "app": "channel",
+            "playbook": "boot",
+            "outcome": "completed",
+            "node": "parse",
+            "idx": 1,
+            "nodes": 2,
+            "reason": "hands over to demo/flow",
+        }
+    )
+    t.write(
+        {
+            "event": "walk",
+            "app": "demo",
+            "playbook": "flow",
+            "outcome": "handover",
+            "node": "search",
+            "idx": 2,
+            "nodes": 5,
+            "reason": "move did not land",
+        }
+    )
+    t.close()
+
+    s = json.loads((_trace_dirs / "sessions" / "s1" / "summary.json").read_text())
+    assert [(w["playbook"], w["outcome"]) for w in s["walks"]] == [
+        ("boot", "completed"),
+        ("flow", "handover"),
+    ]
+    assert "event" not in s["walks"][0] and "t" not in s["walks"][0]
+
+
+def test_summary_omits_walks_when_no_playbook_ran(_trace_dirs: Path) -> None:
+    t = Trace("s1")
+    t.close()
+
+    s = json.loads((_trace_dirs / "sessions" / "s1" / "summary.json").read_text())
+    assert "walks" not in s

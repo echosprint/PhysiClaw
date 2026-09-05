@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import pytest
 from conductor_fakes import (
+    CHANNEL_OPEN,
     ELSEWHERE,
     FLOW,
+    Sink,
     make_screen,
     thread_screen,
     write_channel,
@@ -39,14 +41,6 @@ COVER = (
     '0 [text] "Thu Aug 27" [0.335,0.065,0.597,0.099] 0.94\n'
     '1 [text] "21:34" [0.101,0.084,0.842,0.239] 0.97'
 )
-
-CHANNEL_OPEN = """\
-name: open
-description: open the thread
-steps:
-  - tap: t
-    at: [0.1, 0.1, 0.2, 0.2]
-"""
 
 
 def _boot(boot_yml: str | None = None) -> Program:
@@ -319,3 +313,49 @@ def test_a_disabled_boot_means_a_plain_session() -> None:
     program, hidden = setup.session_setup()
 
     assert program is None and "channel/open" in hidden
+
+
+# ---------- what the log says ----------
+
+
+def test_every_reading_logs_its_verdict(caplog: pytest.LogCaptureFixture) -> None:
+    # The number-one debugging question of a walk is "what did it think
+    # the screen was?" — answered in the runtime log after every
+    # reading, with the page and both scores, not only on a mismatch.
+    caplog.set_level("INFO", logger="physiclaw.conductor")
+    o = _boot()
+    h = _history()
+    _feed(h, o.advance(h), THREAD)
+
+    o.advance(h)
+
+    (line,) = [
+        r.getMessage()
+        for r in caplog.records
+        if " read after peek — " in r.getMessage()
+    ]
+    assert line.startswith(
+        "conductor: channel/boot read after peek — match channel.thread (score "
+    )
+
+
+def test_the_boot_hands_on_as_a_walk_event_in_the_session() -> None:
+    # Dry as it is, the boot's conclusion lands in events.jsonl, so the
+    # summary's `walks` list opens with which playbook it picked.
+    write_channel(CHANNEL_OPEN)
+    write_pack(playbooks={"flow": FLOW})
+    sink = Sink()
+    program, _ = setup.session_setup(events=sink)
+    assert program is not None
+    h = _history()
+    _feed(h, program.advance(h), THREAD)
+    program.advance(h)
+
+    program.resolve(_matched(keyword="milk"))
+
+    assert [
+        (e["event"], e["app"], e["playbook"], e["outcome"], e["reason"])
+        for e in sink.events
+    ] == [("walk", "channel", "boot", "completed", "hands over to demo/flow")]
+    # …and the baton records into the same session.
+    assert program.baton is not None and program.baton.record.events is sink

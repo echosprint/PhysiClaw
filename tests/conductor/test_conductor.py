@@ -10,6 +10,7 @@ seam (`contract.plugin`) relies on exactly that.
 from __future__ import annotations
 
 import pytest
+from conductor_fakes import CHANNEL_OPEN
 
 from physiclaw.conductor.drive.conductor import Conductor
 from physiclaw.contract.dto import (
@@ -258,15 +259,6 @@ async def test_abandon_covers_an_untaken_baton() -> None:
 
     rows = walklog.load()
     assert [(r["playbook"], r["outcome"]) for r in rows] == [("flow", "abandoned")]
-
-
-CHANNEL_OPEN = """\
-name: open
-description: open the thread
-steps:
-  - tap: t
-    at: [0.1, 0.1, 0.2, 0.2]
-"""
 
 
 # ---------- a driver bug: caught once, recorded, quiet ----------

@@ -371,3 +371,36 @@ async def test_run_budget_exhausted_stuck_not_retried(mocker) -> None:
     await engine_mod.run([Trigger(description="t")], model_ref="x/y")
 
     assert spy.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_done_is_recorded_before_the_curation_pass(mocker) -> None:
+    # A Ctrl-C during the optional post-session curation call must not
+    # cost the summary its outcome: the `done` event is written first.
+    deps = _patch_session_deps(mocker)
+    asst = _asst(
+        tool_calls=[
+            _tc("note", {"summary": "x"}),
+            _tc("end_session", {"status": DONE, "recap": "fin"}),
+        ]
+    )
+    mocker.patch.object(engine_mod, "make_provider", return_value=FakeProvider([asst]))
+    mocker.patch.object(engine_mod.CONFIG.pitfalls, "curate_enabled", True)
+    curate = mocker.patch.object(
+        engine_mod.curate, "curate", side_effect=asyncio.CancelledError()
+    )
+    session = Session()
+    session.added_pitfalls = True
+
+    with pytest.raises(asyncio.CancelledError):
+        await engine_mod._run_session(
+            [Trigger(description="t")], model_ref="fake/fake-model", session=session
+        )
+
+    curate.assert_awaited_once()
+    done = [
+        c.args[0]
+        for c in deps["tr"].write.call_args_list
+        if c.args[0].get("event") == "done"
+    ]
+    assert done == [{"event": "done", "sentinel": DONE, "recap": "fin"}]

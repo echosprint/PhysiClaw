@@ -5,7 +5,7 @@ exact field and rule; the money lint is the safety substance."""
 from __future__ import annotations
 
 import pytest
-from conductor_fakes import write_pack
+from conductor_fakes import CHANNEL_OPEN, write_pack
 
 from physiclaw.common import paths
 from physiclaw.conductor.spec import pack as pb
@@ -844,14 +844,6 @@ def test_disabled_recover_macro_is_reported_not_run() -> None:
 
 
 # ---------- the boot: `activate`, and the locked reading ----------
-
-CHANNEL_OPEN = """\
-name: open
-description: open the thread
-steps:
-  - tap: t
-    at: [0.1, 0.1, 0.2, 0.2]
-"""
 
 BOOT = """\
 name: boot

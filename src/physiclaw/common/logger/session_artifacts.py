@@ -260,6 +260,7 @@ def build_summary(
     tool_calls: Mapping[str, int],
     tool_time_ms: int | None = None,
     verdicts: Mapping[str, int] | None = None,
+    walks: list[dict[str, Any]] | None = None,
     errors: Mapping[str, int],
     stuck_events: int,
     images: int,
@@ -330,6 +331,10 @@ def build_summary(
         "cost_usd": round(cost_usd, 4) if cost_usd is not None else None,
         "tool_calls": dict(tool_calls),
         "verdicts": dict(verdicts) if verdicts is not None else None,
+        # The conductor's walks, in order — app, playbook, outcome, the
+        # node it ended at, and the reason (engine-only; absent when no
+        # walk ran, so "was a playbook used?" is one key away).
+        "walks": list(walks) if walks is not None else None,
         "errors": {key: int(errors.get(key, 0)) for key in _ERROR_KEYS},
         "stuck_events": stuck_events,
         "images": images,
@@ -339,6 +344,7 @@ def build_summary(
         "cost_usd",
         "tool_time_ms",
         "verdicts",
+        "walks",
         "conductor_turns",
         "micro_calls",
     ):

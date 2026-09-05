@@ -123,7 +123,12 @@ in the `env` event / `summary.json.env.utc_offset`.
   failed, input, input_new, cache_read, cache_write, output,
   reasoning}}} — every bucket
   a bill needs; multiply each by the model's rate, tool_calls {name: count},
-  verdicts {changed/unchanged/no_verdict}, errors {blocked_plan,
+  verdicts {changed/unchanged/no_verdict}, walks [{app, playbook,
+  outcome completed|suspended|handover|crashed|abandoned, node, idx,
+  nodes, reason, micros, rescues, total} — every conductor walk in
+  order, the boot's hand-on first; absent when no playbook ran, and
+  the runtime log's `conductor: plain model session — <reason>` line
+  says why], errors {blocked_plan,
   blocked_layout, blocked_stuck, invalid_args, unknown_tool,
   tool_errors, correctives, provider_failures}, stuck_events, images,
   env {physiclaw/python versions, os, platform, host, utc_offset,
@@ -135,8 +140,10 @@ in the `env` event / `summary.json.env.utc_offset`.
   ...event fields}`. First line is always `env`. Key event types:
   `wake` (triggers), `response` (finish_reason, tool_calls requested,
   elapsed_ms; `synthesized: true` = a conductor playbook turn, no
-  request sent), `micro_call` (one conductor decision call: out,
-  confidence, attempts, elapsed_ms),
+  request sent), `micro_call` (one conductor decision call: call, node,
+  out or null when it escalated, confidence, detail, attempts,
+  elapsed_ms), `walk` (a conductor walk's terminal moment — the
+  fields `summary.walks` lists),
   `usage` (ONE per model call, answered or failed, written by the
   provider itself so no caller can skip it — call: turn|micro|curate,
   model (requested, provider/model), response_model and response_id

@@ -393,6 +393,16 @@ class Verdict:
     dy: float
     detail: str
 
+    def describe(self) -> str:
+        """One log line's worth: the reading, the page, both scores, and
+        the matcher's own detail — what a walk logs after every screen
+        so "why did it think it was elsewhere?" is answered on the spot."""
+        page = self.page_id or "no known page"
+        return (
+            f"{self.kind} {page} (score {self.score:.2f}, "
+            f"runner-up {self.runner_up:.2f}) — {self.detail}"
+        )
+
     def matches(self, expected_id: str) -> bool:
         """Is this a confident read of exactly `expected_id` (`app.page`)?
         The ONE spelling of that question — pack pages, the channel

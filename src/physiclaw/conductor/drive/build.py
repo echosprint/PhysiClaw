@@ -17,6 +17,7 @@ from physiclaw.conductor.spec.model import Pack, Playbook, PlaybookError
 from physiclaw.conductor.spec.pages import PagePrint, prints_for_app
 from physiclaw.conductor.walk.program import Program
 from physiclaw.conductor.walk.step import Activator
+from physiclaw.contract.plugin import EventSink
 from physiclaw.macros import inputs as macro_inputs
 from physiclaw.macros.model import MacroError
 
@@ -33,6 +34,7 @@ def build_program(
     position: dict | None = None,
     dry: bool = False,
     activation: Activator | None = None,
+    events: "EventSink | None" = None,
 ) -> "Program":
     """The one Program constructor call — the boot's activation, a
     resumed suspension, the CLI rehearsal, and the offline replay all
@@ -43,7 +45,8 @@ def build_program(
     overlaid without a wake-suspension's cursor floor (`Program`);
     `activation` is the boot's menu of enabled playbooks
     (`activation.activation_for`), which every door passes when the
-    route activates."""
+    route activates; `events` is the session's event stream, so the
+    walk's terminal moment lands in events.jsonl (None outside a wake)."""
     return Program(
         spec=spec,
         values=values,
@@ -56,6 +59,7 @@ def build_program(
         landmarks=pack_.landmarks,
         dry=dry,
         activation=activation,
+        events=events,
     )
 
 

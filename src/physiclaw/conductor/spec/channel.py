@@ -71,6 +71,10 @@ def load_channel() -> Channel | None:
         log.warning("channel pack unusable (%s) — asks will hand over", e)
         return None
     if not any(p.decl.name == THREAD_PAGE for p in prints):
+        log.warning(
+            "channel pack declares no %r page — unusable, asks will hand over",
+            THREAD_PAGE,
+        )
         return None
     return Channel(
         prints=prints,

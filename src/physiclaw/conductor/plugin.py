@@ -51,7 +51,7 @@ class ConductorPlugin:
 
     async def session_setup(self, ctx: SetupContext) -> SessionSetup | None:
         try:
-            program, hidden = conductor_setup.session_setup()
+            program, hidden = conductor_setup.session_setup(events=ctx.events)
             self._micro = _wire_micro(program, ctx)
             self._conductor = Conductor(program=program, micro=self._micro)
             return SessionSetup(gated_macros=hidden)

@@ -240,7 +240,7 @@ def _prepare_request(
     run.tr.write(
         {"event": "request", "turn": turn, "message_count": len(request_messages)}
     )
-    log.info("turn %d: %d messages → conductor", turn + 1, len(request_messages))
+    log.info("turn %d: %d messages", turn + 1, len(request_messages))
     return request_messages, compaction_imminent
 
 

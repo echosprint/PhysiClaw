@@ -228,6 +228,9 @@ class _Summary:
         self.provider_time_ms = 0
         self.tool_time_ms = 0
         self.verdicts: Counter[str] = Counter()
+        # Every walk's terminal moment, in order (the boot's hand-on, then
+        # the playbook's end) — the session's playbook story in the summary.
+        self.walks: list[dict[str, Any]] = []
         # Per model, every bucket plus call counts — a session that mixes
         # a cheap decision tier with the main model bills each at its own
         # rate, so the summary keeps them apart; the session totals are
@@ -263,6 +266,10 @@ class _Summary:
             # from turn-loop calls; its tokens arrive as a `usage` event
             # like every other model call's.
             self.micro_calls += 1
+        elif name == "walk":
+            self.walks.append(
+                {k: v for k, v in event.items() if k not in ("event", "t")}
+            )
         elif name == "usage":
             # ONE event type carries every model call's tokens (turn,
             # micro, curate), so the session's spend is one fold.
@@ -332,6 +339,7 @@ class _Summary:
             tool_calls=self.tool_calls,
             tool_time_ms=self.tool_time_ms,
             verdicts=self.verdicts,
+            walks=self.walks or None,
             errors=self.errors,
             stuck_events=self.stuck_events,
             images=images,

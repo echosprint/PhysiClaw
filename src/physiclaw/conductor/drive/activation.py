@@ -2,7 +2,9 @@
 program a positive answer builds.
 
 `discover` reads every pack on disk once at wake: the entries the boot
-may offer (enabled and live) and the whole dispatch table. `Activation`
+may offer (enabled and live), the whole dispatch table, and the roster
+— every playbook with its state — the wake log prints so a plain model
+session never leaves "why no playbook?" to guesswork. `Activation`
 turns a THREAD screen into the scoped parse_task request and its
 outcome into a `Program` — the baton the boot's `select` step
 (`step_activate.py`) hands the conductor. Reaching the thread is the
@@ -17,12 +19,13 @@ from physiclaw.conductor.drive.build import build_program, resolve_inputs
 from physiclaw.conductor.spec import context
 from physiclaw.conductor.spec.channel import Channel
 from physiclaw.conductor.spec.conventions import RESERVED_APPS
-from physiclaw.conductor.spec.model import Pack, Playbook, PlaybookError
+from physiclaw.conductor.spec.model import Pack, Playbook, PlaybookEntry, PlaybookError
 from physiclaw.conductor.spec.pack import (
-    disabled_macros,
     list_apps,
+    live_gap,
     load_pack,
-    qualified_all,
+    qualified_inline,
+    qualified_pack,
     scan_playbooks,
 )
 from physiclaw.conductor.walk.micro import (
@@ -33,6 +36,7 @@ from physiclaw.conductor.walk.micro import (
     build_request,
 )
 from physiclaw.conductor.walk.program import Program
+from physiclaw.contract.plugin import EventSink
 from physiclaw.macros.model import Macro, MacroInput
 
 log = logging.getLogger(__name__)
@@ -63,6 +67,8 @@ class Activation:
     # parse_task's context: the recent daily-log entries, assembled by
     # `activation_from`.
     context: str = ""
+    # The session's event stream the activated program records into.
+    events: EventSink | None = None
 
     def request(self, screen: Screen, node_id: str) -> DecisionRequest:
         """The parse_task request for a thread screen. The CALLER
@@ -111,16 +117,39 @@ class Activation:
             log.warning("activation %s: inputs did not resolve (%s)", outcome.out, e)
             return None
         log.info("conductor: activated %s (%s)", outcome.out, outcome.reason)
-        return build_program(spec, pack, values, self.channel)
+        return build_program(spec, pack, values, self.channel, events=self.events)
 
 
-def discover() -> "tuple[dict[str, tuple[Playbook, Pack]], dict[str, Macro]]":
-    """Every pack on disk, once: the activation entries (ref → spec and
-    pack, enabled and live only — what the boot may offer) and the
-    whole dispatch table (disabled playbooks included — gating is the
-    entries filter, never the table). Fail-open per pack."""
+@dataclass(frozen=True)
+class Discovery:
+    """Every pack on disk, read once at wake.
+
+    `entries`: ref → (spec, pack) for the live playbooks only — what the
+    boot may offer. `macros`: the whole dispatch table, disabled
+    playbooks included (gating is the entries filter, never the table).
+    `roster`: one line per playbook (and per unusable pack) with its
+    state — `app/name (live)`, `(disabled)`, `(disabled macro: x)`,
+    `(invalid: …)` — the wake log's answer to "why no playbook?"."""
+
+    entries: dict[str, tuple[Playbook, Pack]]
+    macros: dict[str, Macro]
+    roster: list[str]
+
+
+def playbook_gap(entry: PlaybookEntry, pack: Pack) -> str | None:
+    """Why the boot cannot offer this playbook — None when it can: the
+    file did not parse, or `pack.live_gap` names the readiness gap."""
+    if entry.spec is None:
+        return f"invalid: {entry.error or 'unreadable'}"
+    return live_gap(entry.spec, pack)
+
+
+def discover() -> Discovery:
+    """Every pack on disk, once — see `Discovery`. Fail-open per pack: a
+    pack that will not load is a roster line, never a failed wake."""
     entries: dict[str, tuple[Playbook, Pack]] = {}
-    hidden: dict[str, Macro] = {}
+    macros: dict[str, Macro] = {}
+    roster: list[str] = []
     for app in list_apps():
         if app in RESERVED_APPS:
             # Infrastructure namespaces, not task packs: `channel` is the
@@ -132,29 +161,42 @@ def discover() -> "tuple[dict[str, tuple[Playbook, Pack]], dict[str, Macro]]":
             pack = load_pack(app)
         except Exception as e:
             log.warning("pack %s unusable at wake (%s) — skipped", app, e)
+            roster.append(f"{app} (pack unusable: {e})")
             continue
-        hidden.update(qualified_all(app, pack))
+        # One scan per pack: the dispatch table (every playbook's inline
+        # bodies, disabled ones included) and the roster off the same
+        # entries.
+        macros.update(qualified_pack(app, pack))
         for entry in scan_playbooks(app, pack):
-            spec = entry.spec
-            if spec is None or not spec.enabled or disabled_macros(spec, pack):
+            ref = f"{app}/{entry.name}"
+            gap = playbook_gap(entry, pack)
+            roster.append(f"{ref} ({gap or 'live'})")
+            if entry.spec is None:
                 continue
-            entries[f"{app}/{entry.name}"] = (spec, pack)
-    return entries, hidden
+            macros.update(qualified_inline(app, entry.spec))
+            if gap is None:
+                entries[ref] = (entry.spec, pack)
+    return Discovery(entries=entries, macros=macros, roster=roster)
 
 
 def activation_for(channel: Channel | None) -> Activation | None:
     """The activation a boot walked OUTSIDE a wake (a stepping tool, a
     rehearsal) runs with — the same discovery, or None when no enabled
     playbook is on disk (the step then hands over, saying so)."""
-    entries, _ = discover()
-    return activation_from(entries, channel) if entries else None
+    found = discover()
+    return activation_from(found.entries, channel) if found.entries else None
 
 
 def activation_from(
-    entries: "dict[str, tuple[Playbook, Pack]]", channel: Channel | None
+    entries: "dict[str, tuple[Playbook, Pack]]",
+    channel: Channel | None,
+    events: EventSink | None = None,
 ) -> Activation:
     return Activation(
-        entries=entries, channel=channel, context=_activation_context(entries)
+        entries=entries,
+        channel=channel,
+        context=_activation_context(entries),
+        events=events,
     )
 
 

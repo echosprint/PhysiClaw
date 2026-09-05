@@ -13,7 +13,9 @@ to a normal session, never takes one down):
     playbook menu (`activation.py`) and hands the program it built on
     as its baton.
 
-A playbook on disk IS the grant; there is nothing to pre-declare.
+A playbook on disk IS the grant; there is nothing to pre-declare. And
+every wake logs the verdict: the roster of playbooks on disk with
+their states, then the boot's offer or the one reason it stays quiet.
 
 ``session_setup`` is the plugin's single wake-time setup call
 (`plugin.py` runs it behind the seam): it resolves those doors in
@@ -36,12 +38,15 @@ from physiclaw.conductor.spec.channel import Channel, load_channel
 from physiclaw.conductor.spec.model import PlaybookError
 from physiclaw.conductor.walk import suspension
 from physiclaw.conductor.walk.program import Program
+from physiclaw.contract.plugin import EventSink
 from physiclaw.macros.model import Macro
 
 log = logging.getLogger(__name__)
 
 
-def load_suspended(channel: Channel | None = None) -> Program | None:
+def load_suspended(
+    channel: Channel | None = None, events: EventSink | None = None
+) -> Program | None:
     """A suspended walk restored at its node, or None. One-shot: the file is
     consumed on load (a crash mid-resume loses the suspension, and the next
     wake runs as a plain session — fail-open, never a loop). The WAIT
@@ -64,6 +69,7 @@ def load_suspended(channel: Channel | None = None) -> Program | None:
             {str(k): str(v) for k, v in (data.get("values") or {}).items()},
             channel if channel is not None else load_channel(),
             suspended=data,
+            events=events,
         )
     except Exception as e:
         log.warning("suspended playbook could not load (%s) — dropped: %s", p, e)
@@ -85,7 +91,9 @@ def walk_registry(program: Program, channel: Channel | None) -> dict[str, Macro]
     return registry
 
 
-def session_setup() -> tuple[Program | None, dict[str, Macro]]:
+def session_setup(
+    events: EventSink | None = None,
+) -> tuple[Program | None, dict[str, Macro]]:
     """The plugin's one wake-time setup call, fail-open throughout:
     (the program to drive — a resumed suspension, else the boot — or
     None; the hidden qualified macro registry). The registry spans
@@ -96,28 +104,46 @@ def session_setup() -> tuple[Program | None, dict[str, Macro]]:
 
     A playbook on disk IS the grant: with any enabled playbook and a
     live boot in the channel pack, the boot walks. Nothing suspended,
-    nothing enabled, or no boot means a plain model session."""
+    nothing enabled, or no boot means a plain model session.
+
+    The wake log says which, every time: one roster line (every
+    playbook on disk with its state) and one decision line — the boot
+    drives and what it offers, or the plain session and the one reason.
+    A playbook not running is the first thing to know about a wake."""
     channel = load_channel()
-    program = load_suspended(channel)
+    program = load_suspended(channel, events)
     if program is not None:
         # A live program names only its own pack + the channel — the
         # full cross-pack discovery below is the boot's need, and the
         # boot is off while a program drives (a suspended walk
-        # navigates to the thread on its own account).
+        # navigates to the thread on its own account; it logged the
+        # resume itself).
         return program, walk_registry(program, channel)
+    found = discover()
+    log.info("conductor: playbooks on disk — %s", ", ".join(found.roster) or "none")
     hidden: dict[str, Macro] = {}
     if channel is not None:
         hidden.update(channel.macros)
-    if channel is None or channel.boot is None:
-        # No channel → nothing to boot to and nothing to ask over; no
-        # live boot (the channel logged why) → no walk to boot with.
-        # No consumer for the discovery either way, so skip the
-        # every-pack parse.
+        if channel.boot is not None:
+            # The boot may activate any playbook, so every pack's hands
+            # are the conductor's to dispatch (and hidden from the model).
+            hidden.update(found.macros)
+
+    def quiet(reason: str) -> tuple[None, dict[str, Macro]]:
+        # The first gap in the chain the boot needs — a usable channel
+        # pack, a live boot in it, a task pack on disk, a live playbook
+        # in one — each naming the door that closes it.
+        log.info("conductor: plain model session — %s", reason)
         return None, hidden
-    entries, packs = discover()
-    hidden.update(packs)
-    if not entries:
-        return None, hidden
+
+    if channel is None:
+        return quiet("no usable channel pack (`physiclaw playbooks init channel`)")
+    if channel.boot is None:
+        return quiet("the channel has no live boot (see above)")
+    if not found.roster:
+        return quiet("no task pack on disk (`physiclaw playbooks init <app>`)")
+    if not found.entries:
+        return quiet("no live playbook — none of the roster above is enabled and valid")
     # The lock screen is matched by shape; `ensure_ios_pack` materializes
     # the OS declarations on first look so a device that prints a hint
     # gets the sharper belt without the user having run `playbooks init
@@ -129,7 +155,9 @@ def session_setup() -> tuple[Program | None, dict[str, Macro]]:
         {},
         channel,
         dry=True,  # the boot leaves no record: no runs row, no daily-log line
-        activation=activation_from(entries, channel),
+        activation=activation_from(found.entries, channel, events),
+        events=events,
     )
     hidden.update(boot.pack_macros)  # a hand embedded in the boot route
+    log.info("conductor: boot drives — offering %s", ", ".join(found.entries))
     return boot, hidden

@@ -9,6 +9,7 @@ import json
 
 import pytest
 from conductor_fakes import (
+    CHANNEL_OPEN,
     DONE,
     ELSEWHERE,
     FLOW,
@@ -214,14 +215,6 @@ route:
 
 
 # ---------- the gate, suspending, activation ----------
-
-CHANNEL_OPEN = """\
-name: open
-description: open the thread
-steps:
-  - tap: t
-    at: [0.1, 0.1, 0.2, 0.2]
-"""
 
 GATED = """\
 description: 买牛奶

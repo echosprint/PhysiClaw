@@ -129,3 +129,13 @@ miss. Each manifest ends with its own checklist; the generic one:
 2. rehearse: `physiclaw playbooks run <app>/<playbook> --input k=v`
 3. capture page geometry: `physiclaw playbooks pages calibrate <app>`
 4. set `enabled: true` in the pack files
+
+Every wake logs the roster (`conductor: playbooks on disk — taobao/buy
+(disabled), …`) and the decision (`boot drives — offering …` or `plain
+model session — <reason>`), so a wake the model drove alone says why.
+While a walk runs, every reading logs its verdict (`read after peek —
+match taobao.results (score 0.92, runner-up 0.31)`), every decision
+call logs one line (`micro parse_task (parse) → taobao/buy (0.90) …`),
+and the walk's end logs its reason (`handing taobao/buy over to the
+model — …`); `summary.json` lists the same ends under `walks`, and
+`physiclaw playbooks stats` aggregates them from `runs.jsonl`.

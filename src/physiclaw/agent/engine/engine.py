@@ -249,12 +249,9 @@ async def _run_session(
             session.sentinel_status,
             session.sentinel_recap,
         )
-        # Post-session pitfalls curation: a separate LLM pass (still-open
-        # provider) that consolidates the list + enforces the cap when the agent
-        # added traps this session. Fail-open — never affects the outcome.
-        if CONFIG.pitfalls.curate_enabled and session.added_pitfalls:
-            await curate.curate(provider, tr=tr)
-
+        # The outcome is settled: record it BEFORE the optional curation
+        # pass, so a Ctrl-C during that extra model call still leaves the
+        # summary with the sentinel and recap the session actually reached.
         tr.write(
             {
                 "event": "done",
@@ -262,6 +259,11 @@ async def _run_session(
                 "recap": session.sentinel_recap,
             }
         )
+        # Post-session pitfalls curation: a separate LLM pass (still-open
+        # provider) that consolidates the list + enforces the cap when the agent
+        # added traps this session. Fail-open — never affects the outcome.
+        if CONFIG.pitfalls.curate_enabled and session.added_pitfalls:
+            await curate.curate(provider, tr=tr)
     except asyncio.CancelledError:
         loop.log_external_stop(session, tr)
         raise

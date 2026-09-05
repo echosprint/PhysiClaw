@@ -335,9 +335,11 @@ class MicroCaller:
         self._rlog.write_micro(req.call, provider.serialize_history(to_log), asst.raw)
 
     def _trace(self, req: DecisionRequest, result: MicroResult) -> None:
-        """The decision event. Its tokens are the provider's `usage`
-        event (written by the provider itself, under the model that
-        answered — the cheap tier when one is wired)."""
+        """The decision event — one per decision, whatever happened; the
+        trace renders it once and mirrors that line into the process
+        log. Its tokens are the provider's `usage` event (written by the
+        provider itself, under the model that answered — the cheap tier
+        when one is wired)."""
         if self._tr is None:
             return
         self._tr.write(

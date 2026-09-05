@@ -97,10 +97,10 @@ def fmt_tokens(n: int) -> str:
 
 
 # Event kinds whose rendered line ALSO goes to the process log
-# (runtime.log), beside the daily log: a model call's account is the one
-# place its numbers are printed, so the engine's own turn line never
-# repeats them.
-MIRRORED_EVENTS = frozenset({"usage"})
+# (runtime.log), beside the daily log: a model call's account and a
+# conductor decision are each printed in ONE place, so neither the
+# engine's turn line nor the micro-caller repeats them.
+MIRRORED_EVENTS = frozenset({"usage", "micro_call"})
 
 
 def usage_text(event: dict[str, Any]) -> str:
@@ -204,6 +204,23 @@ def summarize_event(event: dict[str, Any]) -> str | None:  # noqa: C901 — flat
             f"{pfx}!! PREFIX DRIFT "
             f"expected={event.get('expected', '')[:12]}… "
             f"actual={event.get('actual', '')[:12]}…"
+        )
+    if name == "micro_call":
+        c = event.get("confidence")
+        out = event.get("out") or "escalate"
+        conf = f" ({c:.2f})" if c is not None else ""
+        return (
+            f"{pfx}micro {event.get('call', '?')} ({event.get('node', '?')}) → "
+            f"{out}{conf} — {brief(event.get('detail') or '', 120)} "
+            f"[{event.get('attempts', '?')} attempt(s), {event.get('elapsed_ms', '?')}ms]"
+        )
+    if name == "walk":
+        reason = event.get("reason")
+        tail = f" — {brief(reason, 200)}" if reason else ""
+        return (
+            f"WALK {event.get('app', '?')}/{event.get('playbook', '?')} "
+            f"{event.get('outcome', '?')} at node {event.get('node') or '(end)'} "
+            f"({event.get('idx', '?')}/{event.get('nodes', '?')}){tail}"
         )
     if name in _SILENT_EVENTS:
         return None

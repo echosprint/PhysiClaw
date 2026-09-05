@@ -67,6 +67,7 @@ from physiclaw.conductor.walk.suspension import (
 from physiclaw.conductor.walk.turns import Turnsmith
 from physiclaw.conductor.walk.walklog import Outcome
 from physiclaw.contract.dto import AssistantMessage, Message
+from physiclaw.contract.plugin import EventSink
 from physiclaw.macros.model import Macro
 
 log = logging.getLogger(__name__)
@@ -131,6 +132,7 @@ class Program:
         landmarks: "dict[str, Landmark] | None" = None,
         dry: bool = False,
         activation: "Activator | None" = None,
+        events: "EventSink | None" = None,
     ) -> None:
         self.app = spec.app
         # A dry walk (`replay.py`) leaves no trace: no runs.jsonl line,
@@ -190,9 +192,10 @@ class Program:
         self._unlocked = False  # the resume unlock, once
         # Telemetry (`walklog`): decision outcomes brokered to this walk.
         self._micros = 0
-        # The record (`record.py`): the runs.jsonl line and the daily-log
-        # entries a terminal moment writes, and the outcome latch.
-        self.record = Record(self.app, spec.name, dry)
+        # The record (`record.py`): the runs.jsonl line, the session's
+        # `walk` event, the daily-log entries a terminal moment writes,
+        # and the outcome latch.
+        self.record = Record(self.app, spec.name, dry, events)
         self.phase = Phase.FRESH
         # The journal line the next synthesized note carries
         # (record-don't-replay: the transcript carries what happened).
@@ -384,6 +387,13 @@ class Program:
             self.screen,
             self.channel.prints if pending.channel and self.channel else self.prints,
         )
+        log.info(
+            "conductor: %s/%s read after %s — %s",
+            self.app,
+            self.spec.name,
+            kind,
+            self.verdict.describe(),
+        )
         if (
             self.phase is Phase.OPENING
             and self._from_suspension
@@ -502,8 +512,7 @@ class Program:
         thread judged by one spelling."""
         if verdict.matches(expected_id):
             return None
-        seen = verdict.page_id or "no known page"
-        return f"screen reads as {verdict.kind}: {seen} — {verdict.detail}"
+        return f"screen reads as {verdict.describe()}"
 
     def money_page_block(self, what: str) -> str | None:
         """A payment move fires only off a VERIFIED own-pack page: the
