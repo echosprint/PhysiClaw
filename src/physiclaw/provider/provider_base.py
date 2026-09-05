@@ -22,18 +22,24 @@ Principle 3: preserve the real `finish_reason` — never derive it.
 
 import logging
 import os
+import time
 from typing import Protocol
 
 import httpx
 
 from physiclaw.contract.dto import (
+    USAGE_CALL_TURN,
     AssistantMessage,
     CollapsePolicy,
     ImageBlock,
     Message,
     SystemMessage,
     ToolResultMessage,
+    Usage,
+    UsageCall,
+    usage_event,
 )
+from physiclaw.contract.plugin import EventSink
 
 log = logging.getLogger(__name__)
 
@@ -69,6 +75,8 @@ class Provider(Protocol):
         self,
         history: list[Message],
         tools: list[dict],
+        *,
+        purpose: UsageCall = USAGE_CALL_TURN,
     ) -> AssistantMessage: ...
 
     def serialize_history(self, history: list[Message]) -> list[dict]:
@@ -228,6 +236,7 @@ class BaseProvider:
         model: str | None = None,
         timeout: float = 120.0,
         base_url: str | None = None,
+        usage_sink: EventSink | None = None,
     ):
         if not (self.PROVIDER_ID and self.BASE_URL):
             raise RuntimeError(
@@ -241,6 +250,16 @@ class BaseProvider:
         # will surface a clear API error if invoked without a model).
         self.model = model or os.environ.get(self._model_env_var()) or ""
         self._client = self._build_client(key, timeout=timeout, base_url=base_url)
+        # Every call's account (a `usage` event per call) goes here — the
+        # session trace, handed in at construction so no owner can forget
+        # to attach it. None (a one-off CLI probe, a rehearsal) reports
+        # nothing.
+        self.usage_sink = usage_sink
+
+    @property
+    def ref(self) -> str:
+        """`provider/model` — how a usage event names what answered."""
+        return f"{self.PROVIDER_ID}/{self.model}"
 
     # ---------- HTTP client ----------
 
@@ -384,9 +403,58 @@ class BaseProvider:
             f"{type(self).__name__} must implement _encode_message"
         )
 
-    # ---------- request flow: provided by wire-shape subclasses ----------
+    # ---------- request flow ----------
 
     async def chat(
+        self,
+        history: list[Message],
+        tools: list[dict],
+        *,
+        purpose: UsageCall = USAGE_CALL_TURN,
+    ) -> AssistantMessage:
+        """One model call, whatever asks for it. THE door every call
+        passes through — so the account of it (the `usage` event: model,
+        purpose, elapsed time, every token bucket, the reply's id, or the
+        error class when the call failed) is written here and cannot be
+        skipped by a caller. `purpose` names who asked (the turn loop, a
+        conductor decision, curation); the wire-shape subclass does the
+        request in `_chat`."""
+        t0 = time.perf_counter()
+        try:
+            asst = await self._chat(history, tools)
+        except Exception as e:
+            self._account(purpose, t0, error=type(e).__name__)
+            raise
+        self._account(purpose, t0, asst)
+        return asst
+
+    def _account(
+        self,
+        purpose: UsageCall,
+        t0: float,
+        asst: AssistantMessage | None = None,
+        *,
+        error: str | None = None,
+    ) -> None:
+        """Write the call's `usage` event to the sink (none → a one-off
+        probe, nothing to record). Written for EVERY call, answered
+        (`asst`) or failed (`error`), tokens reported or not: zeros read
+        as "not reported", never as "no call"."""
+        if self.usage_sink is None:
+            return
+        self.usage_sink.write(
+            usage_event(
+                asst.usage if asst is not None else Usage(),
+                call=purpose,
+                model=self.ref,
+                elapsed_ms=int((time.perf_counter() - t0) * 1000),
+                response_id=asst.response_id if asst is not None else "",
+                response_model=asst.response_model if asst is not None else "",
+                error=error,
+            )
+        )
+
+    async def _chat(
         self,
         history: list[Message],
         tools: list[dict],

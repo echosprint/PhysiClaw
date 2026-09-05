@@ -313,18 +313,13 @@ async def _call_provider(
         # metrics would report zeros that read as data.
         log.info("turn %d: conductor synthesized calls=%s", turn + 1, asst.tool_names())
         return asst
-    cache_summary = _log_usage(turn, asst, run.tr)
-    # Provider round-trip time first, then token/cache — all provider-call
-    # metrics grouped in the trailing segment.
-    metrics = f"{elapsed_ms / 1000:.1f}s"
-    if cache_summary:
-        metrics += f", {cache_summary}"
+    # Tokens: the provider's `usage` event, rendered once by the trace.
     log.info(
-        "turn %d: finish=%s calls=%s — %s",
+        "turn %d: finish=%s calls=%s — %.1fs",
         turn + 1,
         asst.finish_reason,
         asst.tool_names() or None,
-        metrics,
+        elapsed_ms / 1000,
     )
     return asst
 
@@ -560,35 +555,6 @@ async def _advance_with_retry(
     # Typed, so _call_provider can tell this expected exhaustion (one
     # clean log line) from an engine bug (full traceback).
     raise ProviderError(f"gave up after {attempts} attempts: {last_err}")
-
-
-def _log_usage(turn: int, asst: AssistantMessage, tr: Trace) -> str:
-    """Read normalized `AssistantMessage.usage`, emit a trace event,
-    return a short `token: X.Xk, cache: YY%` summary for the per-turn
-    log line. Empty string when the provider didn't report usage (zero
-    prompt_tokens) — readers treat that as 'no data'.
-
-    Each provider populates `Usage` from its native usage block at parse
-    time, so this code is provider-agnostic."""
-    u = asst.usage
-    total = u.prompt_tokens
-    new = max(0, total - u.cached_tokens - u.cache_creation_tokens)
-    tr.write(
-        {
-            "event": "cache",
-            "turn": turn,
-            "hit": u.cached_tokens,
-            "create": u.cache_creation_tokens,
-            "new": new,
-            "total": total,
-            # Output tokens — the session summary sums these into
-            # usage.output_tokens.
-            "out": u.completion_tokens,
-        }
-    )
-    if not total:
-        return ""
-    return f"token: {total / 1000:.1f}k, cache: {100 * u.cached_tokens / total:.0f}%"
 
 
 def _corrective_for_bad_shape(called: list[str]) -> str:

@@ -106,7 +106,7 @@ def _wire_micro(program: "Program | None", ctx: SetupContext) -> MicroCaller | N
     if ref:
         try:
             pid, mid = parse_model_ref(ref)
-            factory = partial(make_provider, pid, mid)
+            factory = partial(make_provider, pid, mid, usage_sink=ctx.events)
         except Exception as e:
             log.warning(
                 "conductor micro_model %r unusable (%s) — using the session model",

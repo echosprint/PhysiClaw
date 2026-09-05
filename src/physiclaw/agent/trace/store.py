@@ -118,8 +118,11 @@ in the `env` event / `summary.json.env.utc_offset`.
   synthesized from an armed playbook — no provider request sent),
   micro_calls (the conductor's scoped decision calls; their tokens
   fold into usage), provider_time_ms, tool_time_ms, usage
-  {input_tokens, output_tokens, cache_read_tokens,
-  cache_creation_tokens, cache_hit_pct}, tool_calls {name: count},
+  {input_tokens, new_tokens, output_tokens, cache_read_tokens,
+  cache_creation_tokens, cache_hit_pct, by_model {model: {calls,
+  failed, input, input_new, cache_read, cache_write, output,
+  reasoning}}} — every bucket
+  a bill needs; multiply each by the model's rate, tool_calls {name: count},
   verdicts {changed/unchanged/no_verdict}, errors {blocked_plan,
   blocked_layout, blocked_stuck, invalid_args, unknown_tool,
   tool_errors, correctives, provider_failures}, stuck_events, images,
@@ -133,8 +136,17 @@ in the `env` event / `summary.json.env.utc_offset`.
   `wake` (triggers), `response` (finish_reason, tool_calls requested,
   elapsed_ms; `synthesized: true` = a conductor playbook turn, no
   request sent), `micro_call` (one conductor decision call: out,
-  confidence, attempts, token counts),
-  `cache` (token usage: total/hit/create/out),
+  confidence, attempts, elapsed_ms),
+  `usage` (ONE per model call, answered or failed, written by the
+  provider itself so no caller can skip it — call: turn|micro|curate,
+  model (requested, provider/model), response_model and response_id
+  (as the reply named them — reconcile against the provider's bill),
+  elapsed_ms, input, input_new, cache_read, cache_write, output,
+  reasoning (the part of output spent thinking), error (exception
+  class of a failed call, else null); all-zero counts = the provider
+  reported no usage; the field names follow the OpenTelemetry GenAI
+  conventions' token buckets;
+  `physiclaw logs <sid> --usage` tabulates them),
   `tool_result` (name, arguments, elapsed_ms, text or result_summary;
   gesture results also carry `changed`: true/false/null, the camera
   verdict as data),
@@ -190,7 +202,14 @@ in the `env` event / `summary.json.env.utc_offset`.
   the retention window, `log/stats.jsonl` (one summary line per
   session at close, both engines) survives the session-dir purge.
 - Turn timeline: events with the same `turn` value tell one
-  turn's story: response → cache → tool_result(s).
+  turn's story: usage → response → tool_result(s) (the provider writes
+  `usage` as the call returns, before the engine records `response`; a
+  `usage` with a `turn` but `call: micro`/`curate` is a side call made
+  while that turn was in progress — curation at close carries the last
+  turn's number).
+- Cost: `physiclaw logs <sid> --usage [--json]` lists every model
+  call's token buckets and per-model totals; cost is each bucket times
+  the model's rate, summed — no price table is kept here.
 
 Privacy: wire.jsonl carries full prompts (including the user profile /
 memory) and images/ are phone screenshots. Treat a session dir as

@@ -3,12 +3,13 @@
 import json
 import logging
 import time
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
 from physiclaw.agent.trace import store
 from physiclaw.agent.trace.format import (
+    MIRRORED_EVENTS,
     _end_footer,
     brief_content,
     summarize_event,
@@ -24,6 +25,7 @@ from physiclaw.common.logger import (
     iso_now,
     write_json_atomic,
 )
+from physiclaw.contract.dto import USAGE_BUCKETS
 
 log = logging.getLogger(__name__)
 
@@ -58,6 +60,16 @@ class Trace:
         # self-describing.
         self.write({"event": "env", **env_snapshot()})
 
+    @property
+    def turn(self) -> int | None:
+        """The turn in progress — the highest turn any event named so
+        far (the `request` event opens a turn before its model call), or
+        None before the first. `write` stamps every `usage` event with
+        it, whoever made the call (the loop, a conductor decision,
+        curation)."""
+        t = self._summary.max_turn
+        return t if t >= 0 else None
+
     def _open_notes(self, path: Path):
         """Open the per-turn note-history file and write its header.
         Fail-open (returns None) — a note-log failure must never sink a
@@ -72,6 +84,10 @@ class Trace:
             return None
 
     def write(self, event: dict[str, Any]) -> None:
+        if event.get("event") == "usage":
+            # The trace owns turns: a model call's account is stamped
+            # with the turn in progress here, whoever made the call.
+            event["turn"] = self.turn
         self._write_event(event)
         self._summary.observe(event)
         self._append_note(event)
@@ -79,6 +95,9 @@ class Trace:
         if msg is None:
             return
         self._daily.line(msg)
+        if event.get("event") in MIRRORED_EVENTS:
+            # One rendering, in the process log too (runtime.log).
+            log.info("%s", msg)
 
     def _append_note(self, event: dict[str, Any]) -> None:
         """Append a `note` tool_result's summary to notes.md — the
@@ -174,11 +193,23 @@ _BLOCKED_KEYS = {
 }
 
 
+def fold_usage(by_model: dict[str, Counter[str]], event: dict[str, Any]) -> None:
+    """Fold one `usage` event into per-model counters: `calls`, `failed`,
+    and every bucket in `USAGE_BUCKETS`. THE fold — the session summary
+    and `physiclaw logs --usage` both total through it."""
+    per = by_model[str(event.get("model") or "?")]
+    per["calls"] += 1
+    if event.get("error"):
+        per["failed"] += 1
+    for key in USAGE_BUCKETS:
+        per[key] += int(event.get(key) or 0)
+
+
 class _Summary:
     """Accumulates session metrics from the events flowing through
     `Trace.write` — zero extra plumbing in the engine; everything in
-    summary.json is derivable from the stream (loop.py enriches two
-    events for it: `response.elapsed_ms` and `cache.out`)."""
+    summary.json is derivable from the stream (loop.py enriches
+    `response.elapsed_ms`; the provider writes `usage`)."""
 
     def __init__(self, sid: str):
         self.sid = sid
@@ -197,10 +228,11 @@ class _Summary:
         self.provider_time_ms = 0
         self.tool_time_ms = 0
         self.verdicts: Counter[str] = Counter()
-        self.input_tokens = 0
-        self.output_tokens = 0
-        self.cache_read = 0
-        self.cache_creation = 0
+        # Per model, every bucket plus call counts — a session that mixes
+        # a cheap decision tier with the main model bills each at its own
+        # rate, so the summary keeps them apart; the session totals are
+        # the sums over models.
+        self.by_model: defaultdict[str, Counter[str]] = defaultdict(Counter)
         self.tool_calls: Counter[str] = Counter()
         self.errors: Counter[str] = Counter()
         self.stuck_events = 0
@@ -227,17 +259,14 @@ class _Summary:
                 self.provider_calls += 1
                 self.provider_time_ms += int(event.get("elapsed_ms") or 0)
         elif name == "micro_call":
-            # A real provider round-trip on the conductor's side channel:
-            # counted apart from turn-loop calls, tokens folded into the
-            # session's spend (that's the whole point of measuring).
+            # A decision on the conductor's side channel: counted apart
+            # from turn-loop calls; its tokens arrive as a `usage` event
+            # like every other model call's.
             self.micro_calls += 1
-            self.input_tokens += int(event.get("prompt_tokens") or 0)
-            self.output_tokens += int(event.get("completion_tokens") or 0)
-        elif name == "cache":
-            self.input_tokens += int(event.get("total") or 0)
-            self.output_tokens += int(event.get("out") or 0)
-            self.cache_read += int(event.get("hit") or 0)
-            self.cache_creation += int(event.get("create") or 0)
+        elif name == "usage":
+            # ONE event type carries every model call's tokens (turn,
+            # micro, curate), so the session's spend is one fold.
+            fold_usage(self.by_model, event)
         elif name == "tool_result":
             self.tool_calls[event.get("name") or "?"] += 1
             self.tool_time_ms += int(event.get("elapsed_ms") or 0)
@@ -275,6 +304,9 @@ class _Summary:
         if name in _STUCK_EVENTS:
             self.stuck_events += 1
 
+    def _total(self, bucket: str) -> int:
+        return sum(c[bucket] for c in self.by_model.values())
+
     def finalize(self, *, images: int) -> dict[str, Any]:
         return build_summary(
             sid=self.sid,
@@ -291,10 +323,12 @@ class _Summary:
             conductor_turns=self.conductor_turns,
             micro_calls=self.micro_calls,
             provider_time_ms=self.provider_time_ms,
-            input_tokens=self.input_tokens,
-            output_tokens=self.output_tokens,
-            cache_read_tokens=self.cache_read,
-            cache_creation_tokens=self.cache_creation,
+            input_tokens=self._total("input"),
+            new_tokens=self._total("input_new"),
+            output_tokens=self._total("output"),
+            cache_read_tokens=self._total("cache_read"),
+            cache_creation_tokens=self._total("cache_write"),
+            by_model=self.by_model,
             tool_calls=self.tool_calls,
             tool_time_ms=self.tool_time_ms,
             verdicts=self.verdicts,

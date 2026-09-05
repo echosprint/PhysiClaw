@@ -112,7 +112,7 @@ class OpenAICompatibleProvider(BaseProvider):
 
     CACHE_MARKERS: CacheMarkers = OpenAICacheMarkers()
 
-    async def chat(
+    async def _chat(
         self,
         history: list[Message],
         tools: list[dict],
@@ -237,6 +237,8 @@ class OpenAICompatibleProvider(BaseProvider):
             tool_calls=tool_calls,
             finish_reason=_normalize_finish(finish_raw),
             usage=self._parse_usage(raw),
+            response_id=str(raw.get("id") or ""),
+            response_model=str(raw.get("model") or ""),
             raw=raw,
         )
 
@@ -264,6 +266,10 @@ class OpenAICompatibleProvider(BaseProvider):
             cached_tokens=cached,
             cache_creation_tokens=int(
                 details.get("cache_creation_input_tokens", 0) or 0
+            ),
+            reasoning_tokens=int(
+                (u.get("completion_tokens_details") or {}).get("reasoning_tokens", 0)
+                or 0
             ),
         )
 

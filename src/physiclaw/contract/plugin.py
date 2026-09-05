@@ -32,7 +32,12 @@ two sink protocols becoming events returned in the advance response.
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
-from physiclaw.contract.dto import AssistantMessage, Message
+from physiclaw.contract.dto import (
+    USAGE_CALL_TURN,
+    AssistantMessage,
+    Message,
+    UsageCall,
+)
 from physiclaw.macros.model import Macro
 
 
@@ -47,7 +52,11 @@ class ChatProvider(Protocol):
     contract, never the reverse)."""
 
     async def chat(
-        self, history: list[Message], tools: list[dict]
+        self,
+        history: list[Message],
+        tools: list[dict],
+        *,
+        purpose: UsageCall = USAGE_CALL_TURN,
     ) -> AssistantMessage: ...
 
     def serialize_history(self, messages: list[Message]) -> list[dict]: ...

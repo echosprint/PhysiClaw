@@ -29,6 +29,7 @@ from physiclaw.contract.dto import (
     SystemMessage,
     TextBlock,
     ToolResultMessage,
+    Usage,
     UserMessage,
 )
 from physiclaw.provider.provider_base import (
@@ -673,3 +674,110 @@ async def test_aclose_closes_underlying_client(stub: _TestProvider, mocker) -> N
     await stub.aclose()
 
     aclose_mock.assert_awaited_once()
+
+
+# ---------- the usage door ----------
+
+
+class _Sink:
+    def __init__(self) -> None:
+        self.events: list[dict] = []
+
+    def write(self, event: dict) -> None:
+        self.events.append(event)
+
+
+class _UsageProvider(_TestProvider):
+    """A wire-shape stand-in: `_chat` answers with a fixed usage block."""
+
+    def __init__(self, usage: Usage) -> None:
+        super().__init__(model="m1")
+        self._usage = usage
+
+    async def _chat(self, history, tools):
+        if isinstance(self._usage, Exception):
+            raise self._usage
+        return AssistantMessage(
+            content="ok",
+            tool_calls=[],
+            finish_reason=FinishReason.STOP,
+            usage=self._usage,
+            response_id="resp_1",
+            response_model="m1-20260101",
+        )
+
+
+async def test_chat_writes_one_usage_event_per_call_with_model_time_and_buckets(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("STUB_API_KEY", "k")
+    provider = _UsageProvider(
+        Usage(
+            prompt_tokens=1000,
+            completion_tokens=50,
+            cached_tokens=800,
+            cache_creation_tokens=100,
+        )
+    )
+    sink = _Sink()
+    provider.usage_sink = sink
+
+    await provider.chat([], [], purpose="micro")
+    await provider.chat([], [])
+
+    assert [e["event"] for e in sink.events] == ["usage", "usage"]
+    first, second = sink.events
+    assert first["call"] == "micro" and second["call"] == "turn"
+    assert first["model"] == "stub/m1" and first["turn"] is None  # the trace stamps it
+    assert first["response_model"] == "m1-20260101" and first["response_id"] == "resp_1"
+    assert isinstance(first["elapsed_ms"], int) and first["error"] is None
+    assert (
+        first["input"],
+        first["input_new"],
+        first["cache_read"],
+        first["cache_write"],
+        first["output"],
+    ) == (
+        1000,
+        100,
+        800,
+        100,
+        50,
+    )
+
+
+async def test_chat_without_a_sink_writes_nothing(monkeypatch) -> None:
+    monkeypatch.setenv("STUB_API_KEY", "k")
+    silent = _UsageProvider(Usage(prompt_tokens=10))
+
+    await silent.chat([], [])  # no sink attached: a one-off probe — nothing to write to
+
+
+async def test_unreported_usage_still_records_the_call(monkeypatch) -> None:
+    # A provider that returns no usage block leaves zeros — "not
+    # reported" — but the call, its model and its time stay on record.
+    monkeypatch.setenv("STUB_API_KEY", "k")
+    unreported = _UsageProvider(Usage())
+    sink = _Sink()
+    unreported.usage_sink = sink
+
+    await unreported.chat([], [])
+
+    (event,) = sink.events
+    assert event["model"] == "stub/m1" and event["input"] == 0 and event["output"] == 0
+
+
+async def test_a_failed_call_is_recorded_with_its_error_class(monkeypatch) -> None:
+    # Every call is on record, answered or not: the failure's model, time
+    # and error class, with zero tokens — then the exception continues.
+    monkeypatch.setenv("STUB_API_KEY", "k")
+    provider = _UsageProvider(TimeoutError("slow"))
+    sink = _Sink()
+    provider.usage_sink = sink
+
+    with pytest.raises(TimeoutError):
+        await provider.chat([], [])
+
+    (event,) = sink.events
+    assert event["error"] == "TimeoutError" and event["model"] == "stub/m1"
+    assert event["input"] == 0 and event["output"] == 0

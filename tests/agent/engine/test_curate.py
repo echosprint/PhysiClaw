@@ -19,7 +19,7 @@ class _FakeProvider:
         self._replies = list(replies)
         self.calls: list[list] = []
 
-    async def chat(self, history, tools):
+    async def chat(self, history, tools, **kw):
         self.calls.append(history)
         return AssistantMessage(
             content=self._replies.pop(0), tool_calls=[], finish_reason=FinishReason.STOP
@@ -27,7 +27,7 @@ class _FakeProvider:
 
 
 class _BoomProvider:
-    async def chat(self, history, tools):
+    async def chat(self, history, tools, **kw):
         raise RuntimeError("provider down")
 
 

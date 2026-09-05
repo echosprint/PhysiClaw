@@ -37,7 +37,7 @@ class ScriptedProvider:
         self._replies = list(replies)
         self.calls: list[list] = []
 
-    async def chat(self, history, tools):
+    async def chat(self, history, tools, **kw):
         self.calls.append(list(history))
         nxt = self._replies.pop(0)
         if isinstance(nxt, Exception):
@@ -110,7 +110,7 @@ async def test_a_row_answer_grounds_to_the_act_arm() -> None:
 
     assert result.outcome is not None
     assert result.outcome.out == ACT_ARM and result.outcome.picked.key == "牛奶"
-    assert result.usage.prompt_tokens == 100 and result.attempts == 1
+    assert result.attempts == 1
 
 
 @pytest.mark.asyncio
@@ -160,11 +160,11 @@ async def test_repair_retry_recovers_one_invalid_reply() -> None:
 
     assert result.outcome is not None and result.outcome.out == "done"
     assert result.attempts == 2
-    # Both round-trips' tokens are counted — spend honesty — and the
-    # trace event mirrors the result's fields.
-    assert result.usage.prompt_tokens == 200
+    # The decision event carries no token counts: the provider writes
+    # the `usage` event itself, under the model that answered.
+    assert tap.events[-1]["event"] == "micro_call"
     assert tap.events[-1]["attempts"] == 2
-    assert tap.events[-1]["prompt_tokens"] == 200
+    assert "prompt_tokens" not in tap.events[-1]
 
 
 @pytest.mark.asyncio
@@ -308,7 +308,6 @@ async def test_a_floor_miss_on_the_cheap_tier_escalates_without_a_second_model()
 
     assert result.outcome is None and "below floor" in result.detail
     assert session.calls == []  # untouched
-    assert result.usage.prompt_tokens == 100  # one tier's spend
 
 
 # ---------- the call rows ----------
@@ -643,5 +642,4 @@ async def test_repair_attempt_failure_keeps_first_attempt_usage(monkeypatch) -> 
     ).run(_fields_req())
 
     assert result.outcome is None and result.detail == "provider error"
-    assert result.usage.prompt_tokens == 100  # attempt 1 still counted
     assert result.attempts == 2

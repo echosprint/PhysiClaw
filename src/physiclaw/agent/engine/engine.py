@@ -138,7 +138,7 @@ async def _run_session(
         # context can offer it (a plugin's decision calls fall back to
         # the session model). Construction is cheap; nothing is sent
         # until the first chat call.
-        provider = make_provider(provider_id, model_id)
+        provider = make_provider(provider_id, model_id, usage_sink=tr)
         # Turn-plugin wake-time setup, fail-open throughout: each
         # config-listed plugin loads blindly and contributes its gated
         # macros (dispatchable only on plugin-minted turns). Nothing

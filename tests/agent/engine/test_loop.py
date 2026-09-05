@@ -1,7 +1,7 @@
 """Tests for `physiclaw.agent.engine.loop` — the turn driver (`drive`),
 shape enforcement, the policy turn gates as exercised through the loop
 (their judgment is engine-visible behavior), and the pure helpers
-(`_advance_with_retry`, `_log_usage`, `_corrective_for_bad_shape`,
+(`_advance_with_retry`, `_usage_line`, `_corrective_for_bad_shape`,
 `log_external_stop`). Tool-call execution lives in `test_dispatch.py`;
 session lifecycle in `test_engine.py`."""
 
@@ -30,7 +30,6 @@ from physiclaw.agent.engine.loop import (
     _advance_with_retry,
     _call_provider,
     _corrective_for_bad_shape,
-    _log_usage,
     drive,
     log_external_stop,
 )
@@ -930,97 +929,13 @@ async def test_plugin_pass_and_crash_both_fall_through_to_the_provider(
     assert crashing.advance.await_count == 1
 
 
-# ---------- _log_usage ----------
+# ---------- _usage_line ----------
 
 
 @pytest.fixture
 def trace_stub(mocker):
     t = mocker.MagicMock(spec=Trace)
     return t
-
-
-def test_log_usage_returns_empty_string_when_no_usage_data(trace_stub) -> None:
-    asst = AssistantMessage(
-        content="x",
-        tool_calls=[],
-        finish_reason=FinishReason.STOP,
-        usage=Usage(),
-    )
-
-    out = _log_usage(turn=1, asst=asst, tr=trace_stub)
-
-    assert out == ""
-    trace_stub.write.assert_called_once()
-
-
-def test_log_usage_emits_cache_event_with_derived_new_count(trace_stub) -> None:
-    asst = AssistantMessage(
-        content="x",
-        tool_calls=[],
-        finish_reason=FinishReason.STOP,
-        usage=Usage(prompt_tokens=200, cached_tokens=120, cache_creation_tokens=30),
-    )
-
-    _log_usage(turn=5, asst=asst, tr=trace_stub)
-
-    trace_stub.write.assert_called_once()
-    payload = trace_stub.write.call_args.args[0]
-    assert payload["event"] == "cache"
-    assert payload["turn"] == 5
-    assert payload["hit"] == 120
-    assert payload["create"] == 30
-    # new = total - cached - created = 200 - 120 - 30 = 50
-    assert payload["new"] == 50
-    assert payload["total"] == 200
-
-
-def test_log_usage_returns_token_summary_with_cache_pct(trace_stub) -> None:
-    asst = AssistantMessage(
-        content="",
-        tool_calls=[],
-        finish_reason=FinishReason.STOP,
-        usage=Usage(prompt_tokens=10000, cached_tokens=5000, cache_creation_tokens=0),
-    )
-
-    out = _log_usage(turn=1, asst=asst, tr=trace_stub)
-
-    assert out == "token: 10.0k, cache: 50%"
-
-
-def test_log_usage_clamps_new_at_zero_when_cached_exceeds_total(trace_stub) -> None:
-    # Defensive: if a provider reports cached > total (shouldn't happen
-    # but...), `new` floors at 0.
-    asst = AssistantMessage(
-        content="",
-        tool_calls=[],
-        finish_reason=FinishReason.STOP,
-        usage=Usage(prompt_tokens=100, cached_tokens=200, cache_creation_tokens=0),
-    )
-
-    _log_usage(turn=1, asst=asst, tr=trace_stub)
-
-    payload = trace_stub.write.call_args.args[0]
-    assert payload["new"] == 0
-
-
-def test_log_usage_emits_output_tokens_for_the_session_summary(trace_stub) -> None:
-    # The session summary sums `cache.out` into usage.output_tokens.
-    asst = AssistantMessage(
-        content="",
-        tool_calls=[],
-        finish_reason=FinishReason.STOP,
-        usage=Usage(
-            prompt_tokens=100,
-            cached_tokens=0,
-            cache_creation_tokens=0,
-            completion_tokens=77,
-        ),
-    )
-
-    _log_usage(turn=1, asst=asst, tr=trace_stub)
-
-    payload = trace_stub.write.call_args.args[0]
-    assert payload["out"] == 77
 
 
 @pytest.mark.asyncio
@@ -1189,10 +1104,10 @@ async def test_synthesized_response_is_marked_in_wire_and_trace(
         if c.args and c.args[0].get("event") == "response"
     ]
     assert [e.get("synthesized") for e in response_events] == [True, None]
-    # No cache event for the synthesized turn — zeros would read as data.
-    cache_events = [
+    # The loop writes no usage event of its own (the provider does, per
+    # call) — and a synthesized turn made no call.
+    assert not [
         c.args[0]
         for c in tr.write.call_args_list
-        if c.args and c.args[0].get("event") == "cache"
+        if c.args and c.args[0].get("event") == "usage"
     ]
-    assert len(cache_events) == 1

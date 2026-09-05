@@ -22,7 +22,7 @@ import logging
 from physiclaw.agent.engine import pitfalls
 from physiclaw.common.config import CONFIG
 from physiclaw.common.text import json_span
-from physiclaw.contract.dto import SystemMessage, UserMessage
+from physiclaw.contract.dto import USAGE_CALL_CURATE, SystemMessage, UserMessage
 
 log = logging.getLogger(__name__)
 
@@ -73,6 +73,7 @@ async def curate(provider, *, tr=None) -> bool:
                 UserMessage(content="\n".join(f"- {x}" for x in current)),
             ],
             [],
+            purpose=USAGE_CALL_CURATE,
         )
         items = _parse(asst.content or "")
         if not items:

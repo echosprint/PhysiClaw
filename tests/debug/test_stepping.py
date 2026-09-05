@@ -264,7 +264,6 @@ def test_stepping_the_boot_reads_the_staged_reply_as_the_request(pack, mocker) -
 
     from physiclaw.conductor.spec import scaffold
     from physiclaw.conductor.walk.micro import MicroOutcome, MicroResult
-    from physiclaw.contract.dto import Usage
     from physiclaw.debug import thread as vthread
 
     write_channel("name: open\ndescription: d\nsteps:\n  - home_screen\n")
@@ -275,7 +274,7 @@ def test_stepping_the_boot_reads_the_staged_reply_as_the_request(pack, mocker) -
         async def run(self, req):
             seen.append(req)
             outcome = MicroOutcome(out="not_a_task", reason="chat", confidence=0.9)
-            return MicroResult(outcome, "chat", 1, Usage(), 1)
+            return MicroResult(outcome, "chat", 1, 1)
 
         async def aclose(self):
             return None

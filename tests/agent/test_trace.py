@@ -197,14 +197,18 @@ def test_brief_content_multiple_blocks_joined_by_plus() -> None:
         ),
         (
             {
-                "event": "cache",
+                "event": "usage",
                 "turn": 2,
-                "hit": 100,
-                "create": 5,
-                "new": 50,
-                "total": 155,
+                "call": "turn",
+                "model": "qwen/qwen3.6-plus",
+                "elapsed_ms": 2500,
+                "input": 155,
+                "input_new": 50,
+                "cache_read": 100,
+                "cache_write": 5,
+                "output": 9,
             },
-            "cache hit=100 create=5 new=50 / total=155",
+            "turn 2: usage[turn qwen/qwen3.6-plus] 2.5s in=155 (read 100, write 5, new 50) out=9",
         ),
         (
             {
@@ -770,13 +774,15 @@ def _feed_session(t: Trace) -> None:
     )
     t.write(
         {
-            "event": "cache",
+            "event": "usage",
             "turn": 0,
-            "hit": 800,
-            "create": 100,
-            "new": 100,
-            "total": 1000,
-            "out": 50,
+            "call": "turn",
+            "model": "qwen/qwen3.6-plus",
+            "input": 1000,
+            "input_new": 100,
+            "cache_read": 800,
+            "cache_write": 100,
+            "output": 50,
         }
     )
     t.write(
@@ -838,7 +844,19 @@ def test_summary_json_derived_from_event_stream(_trace_dirs: Path) -> None:
     assert s["usage"]["output_tokens"] == 50
     assert s["usage"]["cache_read_tokens"] == 800
     assert s["usage"]["cache_creation_tokens"] == 100
+    assert s["usage"]["new_tokens"] == 100
     assert s["usage"]["cache_hit_pct"] == 80.0
+    assert s["usage"]["by_model"] == {
+        "qwen/qwen3.6-plus": {
+            "calls": 1,
+            "input": 1000,
+            "input_new": 100,
+            "cache_read": 800,
+            "cache_write": 100,
+            "output": 50,
+            "reasoning": 0,
+        }
+    }
     assert s["tool_calls"] == {"note": 1, "tap": 1}
     assert s["tool_time_ms"] == 5 + 2000  # both tool_result events
     assert s["verdicts"] == {"changed": 1}  # note carried no verdict
@@ -1154,9 +1172,22 @@ def test_summary_counts_micro_calls_and_folds_their_tokens(
             "event": "micro_call",
             "call": "choose_item",
             "out": "pick",
-            "prompt_tokens": 1500,
-            "completion_tokens": 30,
             "elapsed_ms": 400,
+        }
+    )
+    # The decision's tokens ride the one `usage` event type, under the
+    # model that answered (here a cheap tier, not the session model).
+    t.write(
+        {
+            "event": "usage",
+            "turn": None,
+            "call": "micro",
+            "model": "moonshot/kimi-k2.6",
+            "input": 1500,
+            "input_new": 700,
+            "cache_read": 800,
+            "cache_write": 0,
+            "output": 30,
         }
     )
     t.close()
@@ -1165,5 +1196,7 @@ def test_summary_counts_micro_calls_and_folds_their_tokens(
     assert s["micro_calls"] == 1
     assert s["usage"]["input_tokens"] == 1500
     assert s["usage"]["output_tokens"] == 30
+    assert s["usage"]["cache_read_tokens"] == 800
+    assert s["usage"]["by_model"]["moonshot/kimi-k2.6"]["calls"] == 1
     # A micro call is not a turn-loop provider call.
     assert s["provider_calls"] == 0

@@ -42,6 +42,15 @@ def logs(
             help="Save the session as a single zip (for backups or bug reports).",
         ),
     ] = False,
+    usage: Annotated[
+        bool,
+        typer.Option(
+            "--usage",
+            help="Every model call (turn, kind, model, time, input split, "
+            "output) — multiply the buckets by your rates for the bill; "
+            "--json for rows.",
+        ),
+    ] = False,
     dest: Annotated[
         Path | None,
         typer.Argument(
@@ -54,10 +63,14 @@ def logs(
 
     sessions_dir = paths.engine_sessions_dir()
     if sid is None:
-        if save:
-            typer.echo(warn("--save needs a session: physiclaw logs <sid> --save"))
+        if save or usage:
+            typer.echo(
+                warn("that flag needs a session: physiclaw logs <sid> --save|--usage")
+            )
             raise typer.Exit(1)
         _list_sessions(sessions_dir, n=n, as_json=as_json)
+    elif usage:
+        _show_usage(_resolve(sessions_dir, sid), as_json=as_json)
     elif save:
         _save_session(_resolve(sessions_dir, sid), dest)
     elif dest is not None:
@@ -245,25 +258,93 @@ def _show_session(d: Path, *, n: int, as_json: bool) -> None:
     typer.echo(info(f"save a copy: physiclaw logs {d.name[-6:]} --save"))
 
 
+def _events(events_path: Path) -> list[dict[str, Any]] | None:
+    """The session's events.jsonl as dicts, skipping torn lines; None
+    when the file is unreadable."""
+    try:
+        lines = events_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    out: list[dict[str, Any]] = []
+    for line in lines:
+        try:
+            out.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return out
+
+
 def _echo_narrative(events_path: Path, n: int) -> None:
     """Re-render the last `n` events with the daily log's formatter — the
     per-session equivalent of the day file's narrative, without the other
     sessions interleaved."""
     from physiclaw.agent.trace import summarize_event
 
-    try:
-        lines = events_path.read_text(encoding="utf-8").splitlines()
-    except OSError:
+    events = _events(events_path)
+    if events is None:
         typer.echo(warn("no events.jsonl"))
         return
     typer.echo("")
-    typer.echo(section(f"Last {min(n, len(lines))} of {len(lines)} events"))
-    for line in lines[-n:]:
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
+    typer.echo(section(f"Last {min(n, len(events))} of {len(events)} events"))
+    for event in events[-n:]:
         stamp = str(event.pop("t", ""))[11:19]  # popped: the line carries it,
         msg = summarize_event(event)  # and fallback repr would echo it
         if msg is not None:
             typer.echo(f"  [{stamp}] {msg}")
+
+
+# ---------- usage mode ----------
+
+
+def _usage_rows(events_path: Path) -> list[dict[str, Any]]:
+    """The session's `usage` events, one per model call, in order."""
+    return [
+        {k: v for k, v in event.items() if k not in ("event", "t")}
+        for event in _events(events_path) or []
+        if event.get("event") == "usage"
+    ]
+
+
+def _show_usage(d: Path, *, as_json: bool) -> None:
+    """Every model call's token buckets, then totals per model — the
+    elements of the bill, with no price attached: each bucket times the
+    model's rate, summed, is the cost."""
+    rows = _usage_rows(d / "events.jsonl")
+    if as_json:
+        typer.echo(json.dumps(rows, ensure_ascii=False, indent=2))
+        return
+    if not rows:
+        typer.echo(warn("no usage events — the provider reported no token counts"))
+        return
+    from collections import Counter, defaultdict
+
+    from physiclaw.agent.trace import fmt_tokens
+    from physiclaw.agent.trace.trace import fold_usage
+    from physiclaw.contract.dto import USAGE_BUCKETS
+
+    typer.echo(section(f"Model calls — {d.name}"))
+    typer.echo(
+        f"{'turn':>4} {'call':<7} {'model':<28}{'time':>7}"
+        + "".join(f"{c:>12}" for c in USAGE_BUCKETS)
+    )
+    totals: defaultdict[str, Counter[str]] = defaultdict(Counter)
+    for r in rows:
+        turn = r.get("turn")
+        typer.echo(
+            f"{'-' if turn is None else turn:>4} {str(r.get('call') or '?'):<7} "
+            f"{str(r.get('model') or '?'):<28}"
+            f"{int(r.get('elapsed_ms') or 0) / 1000:>6.1f}s"
+            + "".join(f"{fmt_tokens(int(r.get(c) or 0)):>12}" for c in USAGE_BUCKETS)
+            + (f"  error={r['error']}" if r.get("error") else "")
+        )
+        fold_usage(totals, r)
+    typer.echo("")
+    typer.echo(section("Totals per model (exact counts)"))
+    for model, per in totals.items():
+        typer.echo(f"  {model}  ({per['calls']} calls, {per['failed']} failed)")
+        for c in USAGE_BUCKETS:
+            typer.echo(f"    {c:<12}{per[c]:>14,}")
+    typer.echo("")
+    typer.echo(
+        info("cost = Σ bucket × your model's rate per token; --json for the rows")
+    )

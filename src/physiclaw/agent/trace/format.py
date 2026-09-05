@@ -96,6 +96,36 @@ def fmt_tokens(n: int) -> str:
     return str(n)
 
 
+# Event kinds whose rendered line ALSO goes to the process log
+# (runtime.log), beside the daily log: a model call's account is the one
+# place its numbers are printed, so the engine's own turn line never
+# repeats them.
+MIRRORED_EVENTS = frozenset({"usage"})
+
+
+def usage_text(event: dict[str, Any]) -> str:
+    """THE rendering of one model call's account — the daily log, the
+    process log and `physiclaw logs` all read it from here, so the
+    numbers can never disagree. Every bucket by name; reasoning and
+    error only when there is something to say."""
+
+    def n(key: str) -> int:
+        return int(event.get(key) or 0)
+
+    tag = f"{event.get('call') or '?'} {event.get('model') or '?'}"
+    text = (
+        f"usage[{tag}] {n('elapsed_ms') / 1000:.1f}s "
+        f"in={fmt_tokens(n('input'))} (read {fmt_tokens(n('cache_read'))}, "
+        f"write {fmt_tokens(n('cache_write'))}, new {fmt_tokens(n('input_new'))}) "
+        f"out={fmt_tokens(n('output'))}"
+    )
+    if n("reasoning"):
+        text += f" (reasoning {fmt_tokens(n('reasoning'))})"
+    if event.get("error"):
+        text += f" error={event['error']}"
+    return text
+
+
 def _end_footer(summary: dict[str, Any]) -> str:
     """The daily-log session footer — headline metrics on one greppable line."""
     u = summary["usage"]
@@ -137,11 +167,8 @@ def summarize_event(event: dict[str, Any]) -> str | None:  # noqa: C901 — flat
     if name == "response":
         calls = [c.get("name") for c in event.get("tool_calls") or []]
         return f"{pfx}response finish={event.get('finish_reason', '?')} calls={calls}"
-    if name == "cache":
-        return (
-            f"{pfx}cache hit={event.get('hit', 0)} create={event.get('create', 0)} "
-            f"new={event.get('new', 0)} / total={event.get('total', 0)}"
-        )
+    if name == "usage":
+        return pfx + usage_text(event)
     if name == "tool_result":
         tool_name = event.get("name", "?")
         args = format_call_args(tool_name, event.get("arguments") or {})

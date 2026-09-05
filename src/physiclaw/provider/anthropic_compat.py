@@ -195,7 +195,7 @@ class AnthropicCompatibleProvider(BaseProvider):
 
     # ---------- request flow ----------
 
-    async def chat(
+    async def _chat(
         self,
         history: list[Message],
         tools: list[dict],
@@ -357,6 +357,8 @@ def _from_anthropic_response(resp) -> AssistantMessage:
         tool_calls=tool_calls,
         finish_reason=finish,
         usage=_parse_anthropic_usage(resp),
+        response_id=str(getattr(resp, "id", "") or ""),
+        response_model=str(getattr(resp, "model", "") or ""),
         raw=raw_dict,
     )
 

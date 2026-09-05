@@ -6,6 +6,7 @@ this module just wires them into a dict and exposes the lookups
 `is_known`).
 """
 
+from physiclaw.contract.plugin import EventSink
 from physiclaw.provider.provider_base import BaseProvider, Provider
 from physiclaw.provider.vendors.anthropic import AnthropicProvider
 from physiclaw.provider.vendors.deepseek import DeepSeekProvider
@@ -61,13 +62,18 @@ def provider_key_status(provider_id: str) -> tuple[str | None, str | None]:
     return ("********" if val else None), source
 
 
-def make_provider(provider_id: str, model_id: str) -> Provider:
+def make_provider(
+    provider_id: str, model_id: str, *, usage_sink: "EventSink | None" = None
+) -> Provider:
     """`(provider_id, model_id)` → `Provider` instance.
 
     `model_id` is passed through verbatim — the provider's API rejects
     unknown ids on the first chat. Credentials come from the provider's
     own `_api_key()` lookup in `__init__`; the HTTP read timeout is the
-    one configured knob (`[engine] provider_timeout_seconds`)."""
+    one configured knob (`[engine] provider_timeout_seconds`).
+    `usage_sink` is where every call's `usage` event goes (the session
+    trace) — a construction-time collaborator, so a provider built for a
+    session cannot be left unaccounted."""
     from physiclaw.common.config import CONFIG
 
     cls = _PROVIDER_CLASSES.get(provider_id)
@@ -77,4 +83,8 @@ def make_provider(provider_id: str, model_id: str) -> Provider:
             f"(known in-process: {', '.join(_PROVIDER_CLASSES)}; "
             f"or use {CLAUDE_CODE_ID!r} for the subprocess engine)"
         )
-    return cls(model=model_id, timeout=CONFIG.engine.provider_timeout_seconds)
+    return cls(
+        model=model_id,
+        timeout=CONFIG.engine.provider_timeout_seconds,
+        usage_sink=usage_sink,
+    )

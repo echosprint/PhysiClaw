@@ -32,7 +32,7 @@ replay / debugging.
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Union
+from typing import Any, Final, Literal, Union
 
 
 class FinishReason(StrEnum):
@@ -111,6 +111,81 @@ class Usage:
     completion_tokens: int = 0
     cached_tokens: int = 0  # cache hit (read)
     cache_creation_tokens: int = 0  # cache write (first-time)
+    # Output tokens spent on reasoning (OpenAI-shape
+    # `completion_tokens_details.reasoning_tokens`) — INCLUDED in
+    # completion_tokens, broken out because they are invisible in the reply.
+    reasoning_tokens: int = 0
+
+    @property
+    def new_tokens(self) -> int:
+        """Prompt tokens neither read from nor written to the cache — the
+        full-price part of the input. Floored at 0 against a provider
+        that reports more cached than total."""
+        return max(
+            0, self.prompt_tokens - self.cached_tokens - self.cache_creation_tokens
+        )
+
+    def buckets(self) -> dict[str, int]:
+        """The token buckets a bill is computed from, under the names the
+        `usage` event carries (`USAGE_BUCKETS`): `input` is the whole
+        prompt, `input_new` + `cache_read` + `cache_write` its split,
+        `output` the completion with `reasoning` the part spent thinking."""
+        return {
+            "input": self.prompt_tokens,
+            "input_new": self.new_tokens,
+            "cache_read": self.cached_tokens,
+            "cache_write": self.cache_creation_tokens,
+            "output": self.completion_tokens,
+            "reasoning": self.reasoning_tokens,
+        }
+
+
+# The bucket names, in `Usage.buckets` order — the ONE list every reader
+# (the session summary, the log renderer, `physiclaw logs --usage`)
+# iterates, so a bucket added here reaches them all.
+USAGE_BUCKETS: tuple[str, ...] = tuple(Usage().buckets())
+
+# The kinds of model call a session spends tokens on: the turn loop's own
+# request, the conductor's scoped decision call, the memory curation at
+# close. One `usage` event per call, whatever the kind, so a reader
+# sums one event type to get the session's bill.
+UsageCall = Literal["turn", "micro", "curate"]
+USAGE_CALL_TURN: Final[UsageCall] = "turn"
+USAGE_CALL_MICRO: Final[UsageCall] = "micro"
+USAGE_CALL_CURATE: Final[UsageCall] = "curate"
+
+
+def usage_event(
+    usage: Usage,
+    *,
+    call: UsageCall,
+    model: str,
+    elapsed_ms: int,
+    response_id: str = "",
+    response_model: str = "",
+    error: str | None = None,
+) -> dict:
+    """The one `usage` event shape (events.jsonl): every model call's
+    account, in the fields the OpenTelemetry GenAI conventions name —
+    who asked (`call`), the model requested (`model`, `provider/model`)
+    and the one the reply named (`response_model`), the reply's id for
+    reconciling against the provider's own bill, the round-trip time,
+    and the token buckets (`Usage.buckets`). `error` is the exception
+    class of a failed call (tokens zero), None otherwise. `turn` is
+    stamped by the trace, which owns turns; the provider leaves it None.
+    Rates are the reader's: multiply each bucket by the model's price
+    and add."""
+    return {
+        "event": "usage",
+        "turn": None,
+        "call": call,
+        "model": model,
+        "response_model": response_model,
+        "response_id": response_id,
+        "elapsed_ms": elapsed_ms,
+        **usage.buckets(),
+        "error": error,
+    }
 
 
 # ---------- messages (engine history entries) ----------
@@ -160,6 +235,11 @@ class AssistantMessage:
     tool_calls: list[ToolCall]
     finish_reason: FinishReason
     usage: Usage = field(default_factory=Usage)
+    # The reply's own identity as the provider named it: its id (what the
+    # provider's bill lists) and the model that actually answered (a dated
+    # snapshot, say). Normalized by each wire-shape parser like `usage`.
+    response_id: str = ""
+    response_model: str = ""
     raw: dict[str, Any] = field(default_factory=dict)
     vendor_extra: dict[str, Any] = field(default_factory=dict)
     synthesized: bool = False

@@ -302,3 +302,64 @@ def test_logs_list_orders_by_mtime_across_sid_formats(sessions: Path) -> None:
     sids = [s["sid"] for s in _collect(sessions, 10)]
 
     assert sids == ["20260717-100000-bbbbbb", "20260717_090000_aaaaaa"]
+
+
+def _usage_event(turn, call, model, inp, new, read, write, out) -> str:
+    return json.dumps(
+        {
+            "t": "2026-07-10T09:00:00.000",
+            "event": "usage",
+            "turn": turn,
+            "call": call,
+            "model": model,
+            "elapsed_ms": 1500,
+            "input": inp,
+            "input_new": new,
+            "cache_read": read,
+            "cache_write": write,
+            "output": out,
+        }
+    )
+
+
+def test_logs_usage_tabulates_every_model_call_and_totals_per_model(
+    sessions: Path,
+) -> None:
+    sd = _write_session(sessions, "20260710_090000")
+    (sd / "events.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps({"t": "x", "event": "env"}),
+                _usage_event(
+                    0, "turn", "moonshot/kimi-k3", 19000, 2000, 16600, 400, 300
+                ),
+                _usage_event(0, "micro", "moonshot/kimi-k2.6", 1500, 700, 800, 0, 30),
+                _usage_event(1, "turn", "moonshot/kimi-k3", 21000, 1000, 20000, 0, 250),
+            ]
+        )
+        + "\n"
+    )
+
+    result = runner.invoke(app, ["logs", "20260710_090000", "--usage"])
+
+    assert result.exit_code == 0, result.output
+    assert "moonshot/kimi-k2.6" in result.output and "micro" in result.output
+    assert "1.5s" in result.output
+    # Per-model totals are exact counts, not rounded — the bill's inputs.
+    assert "input_new" in result.output and "3,000" in result.output
+    assert "36,600" in result.output  # kimi-k3 cache_read across both turns
+
+    rows = json.loads(
+        runner.invoke(app, ["logs", "20260710_090000", "--usage", "--json"]).output
+    )
+    assert [r["turn"] for r in rows] == [0, 0, 1]
+    assert rows[1]["model"] == "moonshot/kimi-k2.6" and rows[1]["output"] == 30
+    assert "event" not in rows[0]
+
+
+def test_logs_usage_without_events_says_so(sessions: Path) -> None:
+    _write_session(sessions, "20260710_090000")
+
+    result = runner.invoke(app, ["logs", "20260710_090000", "--usage"])
+
+    assert result.exit_code == 0 and "no usage events" in result.output

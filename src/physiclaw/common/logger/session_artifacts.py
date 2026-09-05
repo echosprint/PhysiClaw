@@ -254,6 +254,8 @@ def build_summary(
     output_tokens: int,
     cache_read_tokens: int,
     cache_creation_tokens: int,
+    new_tokens: int | None = None,
+    by_model: Mapping[str, Mapping[str, int]] | None = None,
     cost_usd: float | None = None,
     tool_calls: Mapping[str, int],
     tool_time_ms: int | None = None,
@@ -300,6 +302,14 @@ def build_summary(
         "tool_time_ms": tool_time_ms,
         "usage": {
             "input_tokens": input_tokens,
+            # The full-price part of the input: what was neither read
+            # from nor written to the cache — summed per call when the
+            # caller has the calls (the engine), else derived from totals.
+            "new_tokens": (
+                new_tokens
+                if new_tokens is not None
+                else max(0, input_tokens - cache_read_tokens - cache_creation_tokens)
+            ),
             "output_tokens": output_tokens,
             "cache_read_tokens": cache_read_tokens,
             "cache_creation_tokens": cache_creation_tokens,
@@ -307,6 +317,14 @@ def build_summary(
                 round(100 * cache_read_tokens / input_tokens, 1)
                 if input_tokens
                 else 0.0
+            ),
+            # Per model (engine-only): calls and the same buckets, so a
+            # session mixing a decision tier with the main model can be
+            # billed model by model — multiply each bucket by its rate.
+            **(
+                {"by_model": {m: dict(c) for m, c in by_model.items()}}
+                if by_model is not None
+                else {}
             ),
         },
         "cost_usd": round(cost_usd, 4) if cost_usd is not None else None,

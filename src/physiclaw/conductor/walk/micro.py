@@ -42,11 +42,11 @@ from physiclaw.conductor.spec.calls import (
 from physiclaw.conductor.spec.limits import MAX_CANDIDATES
 from physiclaw.conductor.walk import prompts
 from physiclaw.contract.dto import (
+    USAGE_CALL_MICRO,
     AssistantMessage,
     FinishReason,
     Message,
     SystemMessage,
-    Usage,
     UserMessage,
 )
 from physiclaw.contract.plugin import ChatProvider, EventSink, WireSink
@@ -141,7 +141,6 @@ class MicroResult:
     outcome: MicroOutcome | None
     detail: str  # the outcome's reason, or why there is none
     attempts: int
-    usage: Usage
     elapsed_ms: int
 
 
@@ -245,15 +244,14 @@ class MicroCaller:
         escalate. Never raises."""
         t0 = time.perf_counter()
         try:
-            outcome, detail, attempts, usage = await self._ask(req)
+            outcome, detail, attempts = await self._ask(req)
         except Exception as e:
             log.warning("micro %s (%s): provider failed — %s", req.call, req.node_id, e)
-            outcome, detail, attempts, usage = None, "provider error", 0, Usage()
+            outcome, detail, attempts = None, "provider error", 0
         result = MicroResult(
             outcome=outcome,
             detail=detail,
             attempts=attempts,
-            usage=usage,
             elapsed_ms=int((time.perf_counter() - t0) * 1000),
         )
         self._trace(req, result)
@@ -261,34 +259,27 @@ class MicroCaller:
 
     async def _ask(
         self, req: DecisionRequest
-    ) -> "tuple[MicroOutcome | None, str, int, Usage]":
+    ) -> "tuple[MicroOutcome | None, str, int]":
         """One decision on the live provider: fresh messages, one repair
         retry, floor judgment. No outcome means escalate — the walk hands
         over rather than asking a second model the same question."""
         allowed = _SPECS[req.call].answer_space(req)
         provider = self._live_provider()
         messages = _messages(req, allowed)
-        prompt_tokens = completion_tokens = 0
         attempts = 0
         err = ""
-        usage = Usage()
         for attempts in (1, 2):  # one bounded repair retry
             try:
                 asst = await _chat(provider, messages, req)
             except Exception as e:
-                # Escalate HERE, not via run()'s catch-all: a failure on
-                # the repair attempt must not erase the first attempt's
-                # real token spend from the trace and session usage.
+                # Escalate HERE, not via run()'s catch-all, so the
+                # attempt count the trace records stays exact. (Tokens are
+                # the provider's `usage` events, one per attempt.)
                 log.warning(
                     "micro %s (%s): provider failed — %s", req.call, req.node_id, e
                 )
-                return None, "provider error", attempts, usage
-            prompt_tokens += asst.usage.prompt_tokens
-            completion_tokens += asst.usage.completion_tokens
+                return None, "provider error", attempts
             self._log_wire(req, provider, messages, asst)
-            usage = Usage(
-                prompt_tokens=prompt_tokens, completion_tokens=completion_tokens
-            )
             parsed, err = _parse(asst.content or "", allowed)
             if parsed is None:
                 log.info(
@@ -317,10 +308,10 @@ class MicroCaller:
                     confidence,
                     self._floor,
                 )
-                return None, f"confidence {confidence:.2f} below floor", attempts, usage
+                return None, f"confidence {confidence:.2f} below floor", attempts
             outcome = _SPECS[req.call].to_outcome(req, answer, reason, confidence, obj)
-            return outcome, reason, attempts, usage
-        return None, f"invalid after repair retry: {err}", attempts, usage
+            return outcome, reason, attempts
+        return None, f"invalid after repair retry: {err}", attempts
 
     def _log_wire(
         self,
@@ -344,6 +335,9 @@ class MicroCaller:
         self._rlog.write_micro(req.call, provider.serialize_history(to_log), asst.raw)
 
     def _trace(self, req: DecisionRequest, result: MicroResult) -> None:
+        """The decision event. Its tokens are the provider's `usage`
+        event (written by the provider itself, under the model that
+        answered — the cheap tier when one is wired)."""
         if self._tr is None:
             return
         self._tr.write(
@@ -356,8 +350,6 @@ class MicroCaller:
                 "detail": result.detail,
                 "attempts": result.attempts,
                 "elapsed_ms": result.elapsed_ms,
-                "prompt_tokens": result.usage.prompt_tokens,
-                "completion_tokens": result.usage.completion_tokens,
             }
         )
 
@@ -387,7 +379,7 @@ async def _chat(
     fast): a blip on the cheap tier is common and permanent escalation
     is too big a price for it. Raises whatever the second try raises."""
     try:
-        return await provider.chat(messages, [])
+        return await provider.chat(messages, [], purpose=USAGE_CALL_MICRO)
     except ProviderTransientError:
         log.info(
             "micro %s (%s): transient provider error — one retry",
@@ -395,7 +387,7 @@ async def _chat(
             req.node_id,
         )
         await asyncio.sleep(CONFIG.engine.retry_backoff_seconds)
-        return await provider.chat(messages, [])
+        return await provider.chat(messages, [], purpose=USAGE_CALL_MICRO)
 
 
 # ---------- the call table (prompts / answer spaces / outcomes) ----------

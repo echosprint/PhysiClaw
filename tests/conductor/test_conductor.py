@@ -76,7 +76,6 @@ class FakeMicro:
 
     async def run(self, req):
         from physiclaw.conductor.walk.micro import MicroResult
-        from physiclaw.contract.dto import Usage
 
         self.requests.append(req)
         outcome = self._factory(req)
@@ -84,7 +83,6 @@ class FakeMicro:
             outcome=outcome,
             detail=outcome.reason if outcome else "scripted escalate",
             attempts=1,
-            usage=Usage(),
             elapsed_ms=1,
         )
 

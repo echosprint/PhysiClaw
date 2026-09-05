@@ -111,7 +111,17 @@ def _engine_summary() -> dict:
         {"event": "wake", "model_ref": "qwen/qwen3.6-plus", "triggers": []},
         {"event": "prefix_pinned", "hash": "abc"},
         {"event": "response", "turn": 0, "elapsed_ms": 100},
-        {"event": "cache", "turn": 0, "total": 1000, "hit": 800, "create": 0, "out": 5},
+        {
+            "event": "usage",
+            "turn": 0,
+            "call": "turn",
+            "model": "qwen/qwen3.6-plus",
+            "input": 1000,
+            "input_new": 200,
+            "cache_read": 800,
+            "cache_write": 0,
+            "output": 5,
+        },
         {"event": "tool_result", "turn": 0, "name": "peek"},
         {"event": "done", "sentinel": "DONE", "recap": "ok"},
     ):
@@ -172,6 +182,8 @@ def test_both_engines_emit_the_same_summary_key_tree() -> None:
     assert engine.pop("conductor_turns", "absent") is None  # present, scalar
     assert engine.pop("micro_calls", "absent") is None  # present, scalar
     assert isinstance(engine.pop("verdicts"), dict)
+    # Per-model usage is engine-only (the claude CLI reports one model).
+    assert isinstance(engine["usage"].pop("by_model"), dict)
     # `env` is engine-populated data (the engine relays its env event
     # verbatim), not part of the constructed schema — opaque here.
     assert isinstance(engine.pop("env"), dict) and isinstance(claude.pop("env"), dict)

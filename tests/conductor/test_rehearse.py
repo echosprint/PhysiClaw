@@ -338,7 +338,6 @@ def _fake_micro(monkeypatch):
     walk wired, then answers `done` with the return field."""
     from physiclaw.conductor.spec.calls import AGENT_DONE
     from physiclaw.conductor.walk.micro import MicroOutcome, MicroResult
-    from physiclaw.contract.dto import Usage
 
     class Caller:
         def __init__(self, rlog):
@@ -362,7 +361,6 @@ def _fake_micro(monkeypatch):
                 ),
                 detail="r",
                 attempts=1,
-                usage=Usage(),
                 elapsed_ms=3,
             )
 
