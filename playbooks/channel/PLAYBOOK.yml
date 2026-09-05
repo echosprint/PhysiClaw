@@ -15,7 +15,11 @@ placeholders:
 pages:
   thread:
     anchors:
-      - {text: "<<CONTACT>>", within: top}
+      # The thread TITLE: the contact name centered in the top bar. The
+      # box, not the whole top band — an iOS notification banner prints
+      # the same name left-aligned at the same height, and a wake often
+      # opens on exactly that (home or lock screen, WeChat badge).
+      - {text: "<<CONTACT>>", within: [0.30, 0.03, 0.70, 0.12]}
     forbid: ["Weixin"]   # the chat LIST header — kills the list lookalike
 
 # Adapting to your device
