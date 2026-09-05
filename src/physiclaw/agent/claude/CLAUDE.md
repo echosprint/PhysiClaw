@@ -226,8 +226,8 @@ Lifecycle:
 [pend] ──(cron fires)──▶ [fired] ──(finish)──▶ [done|fail|cancel]
 ```
 
-- **one-time** (default) — terminal; auto-purged 7 days after
-  closing.
+- **one-time** (default) — terminal; auto-purged after the
+  retention window.
 - **periodic** — `finish done|fail` resets to `pend` for the next
   cycle; only `cancel` is permanent.
 

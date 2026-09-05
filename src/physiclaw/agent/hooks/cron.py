@@ -5,7 +5,7 @@ fire one Trigger → update the status/timing fields in place. The agent
 marks completion through `engine.jobs.finish_job` — via the engine's
 finish_job tool or the claude path's jobs skill; the CLI below wraps
 the same function for manual maintenance. Terminal jobs
-(cancel/done/fail) auto-purge after 7 days.
+(cancel/done/fail) auto-purge after `[retention] trace_days`.
 
 The durable data model (Job dataclass, parser, field updates) lives in
 `physiclaw.agent.engine.job_store`. This file only owns:
@@ -76,7 +76,7 @@ async def cron() -> Trigger | None:
 
     now = dt.datetime.now()
 
-    # Housekeeping: remove terminal jobs (cancel/done/fail) older than 7 days.
+    # Housekeeping: remove terminal jobs (cancel/done/fail) past the retention window.
     # Pass the already-loaded jobs so purge_stale doesn't re-parse jobs.md.
     try:
         purge_stale(now=now, jobs=jobs)

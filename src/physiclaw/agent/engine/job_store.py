@@ -7,7 +7,7 @@ outcomes). This module holds:
 - the `Job` dataclass + field constants
 - `load_jobs` / `update_fields` — read and mutate jobs.md in place
 - `validate_schedule` / `matches_now` / `next_fire` / `find_due` — cron helpers
-- `purge_stale` — housekeeping for terminal jobs older than 7 days
+- `purge_stale` — housekeeping for terminal jobs older than `[retention] trace_days`
 
 See `.claude/skills/cron/SKILL.md` for the full format spec and workflows.
 
@@ -487,8 +487,9 @@ def purge_stale(
     now: dt.datetime | None = None,
     jobs: list[Job] | None = None,
 ) -> list[str]:
-    """Remove jobs in terminal status (cancel/done/fail) inactive for 7+
-    days (or with no parseable timestamp). Returns purged job ids.
+    """Remove jobs in terminal status (cancel/done/fail) inactive for
+    `[retention] trace_days` or longer (or with no parseable timestamp).
+    Returns purged job ids.
 
     Pass `jobs` to reuse an already-loaded list (the cron hook does this to
     avoid re-parsing jobs.md every tick).

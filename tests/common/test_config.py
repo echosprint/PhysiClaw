@@ -108,7 +108,7 @@ def test_config_error_is_value_error_subclass() -> None:
         ("claude", "max_attempts", 3),
         ("claude", "retry_backoff_seconds", 5.0),
         # RetentionConfig
-        ("retention", "trace_days", 7),
+        ("retention", "trace_days", 30),
         # SkillsConfig
         ("skills", "default_source", ""),
         (

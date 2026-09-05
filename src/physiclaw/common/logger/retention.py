@@ -1,9 +1,9 @@
 """Retention for session logs — shared by engine / runtime / claude dirs.
 
-`purge_daily_logs` covers the `<prefix>-YYYY-MM-DD.log` dailies, which
-are tiny next to session artifacts and so keep a longer window
+`purge_daily_logs` covers the `<prefix>-YYYY-MM-DD.log` dailies
 (CONFIG.retention.log_days); `purge_old_sessions` covers the per-session
-artifact dirs (CONFIG.retention.trace_days). Both run at session
+artifact dirs (CONFIG.retention.trace_days). Two knobs because the two
+sizes differ by orders of magnitude, though both default to a month. Both run at session
 bootstrap, from each engine's writer.
 """
 

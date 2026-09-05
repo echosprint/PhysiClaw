@@ -55,8 +55,8 @@ def new_sid() -> str:
 
 
 # Purge session dirs (and legacy raw files) older than this on session
-# bootstrap. One week is generous for post-mortem debugging while
-# keeping disk usage bounded for long-running operators.
+# bootstrap: the `[retention]` window, a month by default — long enough
+# to post-mortem a run noticed late, bounded for long-running operators.
 _RETENTION_DAYS = CONFIG.retention.trace_days
 _LOG_RETENTION_DAYS = CONFIG.retention.log_days
 
