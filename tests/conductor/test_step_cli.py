@@ -81,7 +81,7 @@ def test_step_runs_one_node_and_stores_the_position(stepped_pack) -> None:
 
     assert result.exit_code == 0, result.output
     assert "node open (1/2)" in result.output
-    assert "screen reads match demo.home (score 1.00" in result.output
+    assert "screen reads match demo.home (1 anchor)" in result.output
     assert "paused — next node is search (2/2)" in result.output
     state = json.loads(read_text(stepping.state_path()))
     assert state["idx"] == 1 and state["values"] == {"keyword": "milk"}

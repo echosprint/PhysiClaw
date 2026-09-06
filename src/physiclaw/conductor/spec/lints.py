@@ -10,9 +10,12 @@ that let a walk start and then quietly under-perform — legal, and the
 author is told the cost rather than refused.
 """
 
+from physiclaw.common.bbox import center_of
+from physiclaw.common.listing import Element, Screen, format_elements
 from physiclaw.common.paths import PACK_PROMPTS_DIRNAME, PROMPT_SUFFIX
 from physiclaw.conductor.spec import reply
 from physiclaw.conductor.spec.conventions import BOOT_PLAYBOOK, CHANNEL_APP
+from physiclaw.conductor.spec.match import SHORT_ANCHOR_MIN, normalize, score_page
 from physiclaw.conductor.spec.model import (
     ActivateNode,
     AgentNode,
@@ -25,7 +28,7 @@ from physiclaw.conductor.spec.model import (
     PlaybookError,
     TellNode,
 )
-from physiclaw.conductor.spec.pages import MIN_ROBUST_ANCHORS, load_learned
+from physiclaw.conductor.spec.pages import PageDecl, PagePrint
 
 # ---------- the route's whole-shape checks ----------
 
@@ -108,12 +111,15 @@ def check_boot(nodes: list[Node]) -> None:
 
 def pack_warnings(pack: Pack, entries: "list[PlaybookEntry]") -> list[str]:
     """The pack-level advisories `playbooks check` prints, pack-relative:
-    prompt files no route names — a rename that left the old file
-    behind, or prose written before its step. The file costs nothing at
-    run time, but its author believes the model reads it."""
+    two pages one screen could read as both (one page's anchor texts a
+    subset of another's — every screen that reads the larger also reads
+    the smaller, and the matcher answers `ambiguous`), and prompt files
+    no route names — a rename that left the old file behind, or prose
+    written before its step."""
+    out = _ambiguous_pages(pack)
     used_by = {e.name: e.spec.prompts_used for e in entries if e.spec is not None}
     shared_used: set[str] = set().union(*used_by.values())
-    out = [
+    out += [
         f"{PACK_PROMPTS_DIRNAME}/{n}{PROMPT_SUFFIX} is read by no playbook"
         for n in sorted(set(pack.prompts.ok) - shared_used)
     ]
@@ -124,6 +130,46 @@ def pack_warnings(pack: Pack, entries: "list[PlaybookEntry]") -> list[str]:
                 f"no step of {pb_name}"
             )
     return out
+
+
+def _ambiguous_pages(pack: Pack) -> list[str]:
+    """Pages one screen would read as both: a screen showing exactly what
+    one page declares also reads another whole. Judged by the matcher
+    itself (`score_page` over a synthetic screen of the larger page's
+    anchors, each at its band), so `within`, alternates, the fuzzy tiers,
+    and `forbid` all decide — never a second spelling of the rule."""
+    out = []
+    pages = sorted(pack.pages.items())
+    for large, l_decl in pages:
+        screen = _declared_screen(l_decl)
+        for small, s_decl in pages:
+            if small == large:
+                continue
+            if score_page(PagePrint(app=pack.app, decl=s_decl), screen).passes:
+                out.append(
+                    f"pages {small!r} and {large!r}: a screen showing {large!r} "
+                    f"whole also reads {small!r} — add an anchor or a `forbid` "
+                    f"to {small!r}"
+                )
+    return out
+
+
+def _declared_screen(decl: PageDecl) -> Screen:
+    """The screen a page's declaration describes: one row per anchor,
+    its canonical text, centred in its band (or mid-screen unpinned)."""
+    els = []
+    for i, a in enumerate(decl.anchors):
+        cx, cy = (center_of(a.within) if a.within is not None else None) or (0.5, 0.5)
+        els.append(
+            Element(
+                id=i,
+                kind="text",
+                label=a.text,
+                bbox=(cx - 0.05, cy - 0.01, cx + 0.05, cy + 0.01),
+                conf=0.9,
+            )
+        )
+    return Screen.read(format_elements(els))
 
 
 def readiness_warnings(spec: Playbook, pack: Pack) -> list[str]:
@@ -166,13 +212,13 @@ def _resume_warnings(spec: Playbook) -> list[str]:
 
 
 def _anchor_warnings(spec: Playbook, pack: Pack) -> list[str]:
-    """A page the route checks that declares too few anchors to clear
-    its declaration-only threshold with one missing
-    (`pages.MIN_ROBUST_ANCHORS`) and has no learned geometry yet —
-    legal, but one OCR miss reads it unknown and the walk spends its
-    recover hand (or hands over) for nothing. Calibrated geometry lifts
-    the warning: its threshold is the page's own."""
-    learned = load_learned(spec.app)
+    """A page the route checks that identifies itself by a weak anchor: a
+    reading under `match.SHORT_ANCHOR_MIN`, pinned to no band. The
+    matcher reads such an anchor exactly (no one-substitution window at
+    that length), so one OCR slip reads the page unknown and the walk
+    spends its recover hand for nothing — and unpinned, it also matches
+    the same characters anywhere on any screen. Pin it (`within:`), or
+    choose a longer text."""
     checked = {
         p
         for n in spec.nodes
@@ -183,13 +229,21 @@ def _anchor_warnings(spec: Playbook, pack: Pack) -> list[str]:
     out = []
     for name in sorted(checked):
         decl = pack.pages.get(name)
-        if decl is None or name in learned or len(decl.anchors) >= MIN_ROBUST_ANCHORS:
+        if decl is None:
             continue
-        out.append(
-            f"page {name!r} declares {len(decl.anchors)} anchor(s) and no "
-            f"geometry is learned — one OCR miss reads it unknown; declare "
-            f"{MIN_ROBUST_ANCHORS}+ anchors or calibrate the page"
-        )
+        weak = [
+            a.text
+            for a in decl.anchors
+            if a.within is None
+            and any(len(normalize(r)) < SHORT_ANCHOR_MIN for r in a.readings)
+        ]
+        if weak:
+            out.append(
+                f"page {name!r} anchor(s) {', '.join(weak)} are under "
+                f"{SHORT_ANCHOR_MIN} characters and pinned to no band — read "
+                "exactly, matched anywhere; pin them with `within:` or choose "
+                "a longer text"
+            )
     return out
 
 

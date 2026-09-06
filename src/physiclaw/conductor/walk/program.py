@@ -512,6 +512,11 @@ class Program:
         thread judged by one spelling."""
         if verdict.matches(expected_id):
             return None
+        gap = verdict.gaps.get(expected_id)
+        if gap is not None:
+            # The one clause that matters: what the EXPECTED page lacked,
+            # not every candidate's gap.
+            return f"screen reads as unknown — {page_name(expected_id)} {gap}"
         return f"screen reads as {verdict.describe()}"
 
     def money_page_block(self, what: str) -> str | None:

@@ -91,7 +91,7 @@ def match(
         v = match_screen(screen, prints)
         typer.echo(
             f"[{i:3d}] {v.kind:8s} {v.page_id or '-':24s} "
-            f"score={v.score:.2f} runner={v.runner_up:.2f} dy={v.dy:+.2f}  {v.detail}"
+            f"dy={v.dy:+.2f}  {v.describe()}"
         )
 
 
@@ -112,7 +112,7 @@ def calibrate(
         GUIDED_SHOTS, "--shots", help="live peeks per page (--guided)"
     ),
 ) -> None:
-    """Capture geometry + thresholds for an app.
+    """Capture geometry + OCR variants for an app.
 
     From a labeled corpus: lines labeled `<app>.<page>` are that page's
     genuine observations; any other non-'?' label is a hard negative.
@@ -184,12 +184,11 @@ def _guided_capture(app: str, page_names: list[str], shots: int) -> dict[str, li
 
 
 def _report_line(r) -> str:
-    imax = "-" if r.impostor_max is None else f"{r.impostor_max:.2f}"
+    impostors = "-" if r.impostor_pass is None else str(r.impostor_pass)
     flag = "" if r.separable else "  ⚠ INSEPARABLE"
     return (
         f"{r.page}: obs={r.observations} anchors={r.anchors_learned} "
-        f"thr={r.threshold:.2f} genuine_min={r.genuine_min:.2f} "
-        f"impostor_max={imax}{flag}"
+        f"genuine_pass={r.genuine_pass:.0%} impostors_read={impostors}{flag}"
     )
 
 

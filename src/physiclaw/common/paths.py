@@ -18,7 +18,7 @@ Layout::
     ├── official/{source.json, skills/, .sync-state.json}  (synced official pack)
     ├── cache/update.json                (update-notice stage marker; Phase B→A)
     ├── learned/pitfalls/{pitfalls.md, history.jsonl}  (agent-flagged traps; add_pitfall)
-    ├── learned/pages/<app>.json         (captured page geometry: anchors, thresholds, variants)
+    ├── learned/pages/<app>.json         (captured page geometry: anchor positions, OCR variants)
     ├── screen-layout/{layout.json, layout.md}  (learned on first run by the `screen-layout` skill)
     ├── snapshots/, screenshots/, tool_calls/, raw_camera/  (debug dumps; `physiclaw clear`)
     ├── debug/{thread.json, wake.json}   (e2e harness: virtual thread + one-shot wake)
@@ -283,7 +283,7 @@ def debug_dir() -> Path:
 def learned_pages_dir() -> Path:
     """Machine-captured page geometry per app — ``<app>.json`` holding the
     learned half of each page fingerprint (anchor positions/tolerances,
-    OCR variants, calibrated thresholds), merged with the authored
+    OCR variants), merged with the authored
     declarations at load. Deleting a file resets that app's capture
     without touching any authoring."""
     return HOME / "learned" / "pages"

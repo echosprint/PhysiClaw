@@ -312,17 +312,18 @@ def test_check_warns_when_a_gate_ask_quotes_no_deny_word() -> None:
     assert "hands the walk over" in warning
 
 
-def test_check_warns_about_thinly_anchored_route_pages() -> None:
-    # The fixture pages declare one anchor each and no geometry is
-    # learned: one OCR miss reads them unknown, so the checker says so
-    # for every page the route checks — advisory, never a refusal.
+def test_check_warns_about_weak_unpinned_anchors() -> None:
+    # The fixture's `results` page identifies itself by 综合 alone, two
+    # characters pinned to no band: read exactly and matched anywhere,
+    # so the checker says so — advisory, never a refusal. The longer
+    # anchors (Files, AllDone) draw no warning.
     write_pack(playbooks={"flow": FLOW})
     spec, pack = build.load_spec("demo", "flow", require_live=False)
 
     warnings = [w for w in lints.readiness_warnings(spec, pack) if "anchor" in w]
 
-    assert [w.split("'")[1] for w in warnings] == ["done", "home", "results"]
-    assert all("one OCR miss" in w for w in warnings)
+    assert [w.split("'")[1] for w in warnings] == ["results"]
+    assert "综合" in warnings[0] and "within" in warnings[0]
 
 
 def test_gate_confirm_resumes_and_pays_under_the_predicates() -> None:
@@ -1145,19 +1146,18 @@ KEYED = FLOW.replace(
 
 def _learn_results() -> None:
     """Calibrated geometry for `results` — an overlay verdict needs it."""
+    from conductor_fakes import make_learned
+
     from physiclaw.conductor.spec import pages
 
     def anchor(text, cy):
-        return pages.LearnedAnchor(
-            text=text, cx=0.5, cy=cy, pos_tol=0.03, freq=1.0, weight=1.0
-        )
+        return make_learned(text, 0.5, cy, pos_tol=0.03)
 
     pages.save_learned(
         "demo",
         {
             "results": pages.LearnedPage(
                 anchors={"综合": anchor("综合", 0.1), "销量": anchor("销量", 0.2)},
-                threshold=0.75,
                 observations=6,
             )
         },

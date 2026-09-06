@@ -6,19 +6,20 @@ A page fingerprint is split by audience:
     name, which label texts identify it, forbid terms, coarse region hints.
     Semantics only — portable across devices and app versions.
   - LEARNED (``learned/pages/<app>.json``, machine-written by capture):
-    anchor positions and tolerances, OCR variants, calibrated per-page
-    threshold. Geometry is ALWAYS captured on-device, never authored or
-    shipped — iPhone models, iOS and app versions make shipped geometry
-    infeasible (the same reason first-run layout learning exists).
+    anchor positions and tolerances, OCR variants. Geometry is ALWAYS
+    captured on-device, never authored or shipped — iPhone models, iOS
+    and app versions make shipped geometry infeasible (the same reason
+    first-run layout learning exists).
 
 ``PagePrint`` merges the two at load; a declared page with no learned
-geometry yet still matches, text-only, at a stricter default threshold —
-which is what lets capture bootstrap from declarations alone.
+geometry yet still matches, text-only — every anchor must show, no
+forbid term may — which is what lets capture bootstrap from
+declarations alone. Geometry adds position checks, the scroll vote,
+the overlay reading, and mined OCR variants; it never adds a score.
 """
 
 import json
 import logging
-import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -47,17 +48,6 @@ log = logging.getLogger(__name__)
 # the two caps can never drift.
 MAX_ANCHOR_READINGS = MAX_LABEL_READINGS
 
-# Matching defaults. Learned pages carry their own calibrated threshold;
-# declaration-only pages need most anchors present because text is all
-# there is to go on. The best-vs-runner-up margin is one constant until
-# calibration ever derives a per-page value.
-DECL_ONLY_THRESHOLD = 0.75
-DEFAULT_MARGIN = 0.15
-# How many equal-weight anchors a declaration-only page needs to still
-# clear its threshold with ONE missing: (n-1)/n ≥ threshold. Derived,
-# never hand-set — the readiness advisory reads it.
-MIN_ROBUST_ANCHORS = math.ceil(1 / (1 - DECL_ONLY_THRESHOLD))
-
 
 class PagesError(specfile.SpecError):
     """A `pages:` section is invalid. Message is user-facing: the
@@ -84,10 +74,10 @@ class AnchorDecl:
     it. The two converge — an alternate that does show up on this device
     gets mined into `variants` as well.
 
-    Alternates must never be written as separate anchors: scoring is a
-    weighted fraction over ALL declared anchors, so two spellings of one
-    label would halve the page's score on every device — below the
-    declaration-only threshold, on a page that is in fact right there.
+    Alternates must never be written as separate anchors: every declared
+    anchor must show, so two spellings of one label would demand both
+    on every device — and read the page unknown while it is in fact
+    right there.
 
     `text` stays the canonical reading: learned geometry keys off it, and
     it is the name hits/missing report.
@@ -143,14 +133,12 @@ class LearnedAnchor:
     cy: float
     pos_tol: float
     freq: float  # fraction of capture observations that contained it
-    weight: float  # freq × mean OCR conf ÷ within-app document frequency
     variants: tuple[str, ...] = ()  # OCR misreads observed for this label
 
 
 @dataclass(frozen=True)
 class LearnedPage:
     anchors: dict[str, LearnedAnchor]  # keyed by declared anchor text
-    threshold: float
     observations: int
 
 
@@ -166,12 +154,6 @@ class PagePrint:
     @property
     def page_id(self) -> str:
         return page_id(self.app, self.decl.name)
-
-    @property
-    def threshold(self) -> float:
-        if self.learned is not None:
-            return self.learned.threshold
-        return DECL_ONLY_THRESHOLD
 
 
 # ---------- `pages:` parsing ----------
@@ -382,12 +364,12 @@ def _parse_page(name: str, spec: Any) -> PageDecl:
 
 def _parse_anchors(raw: Any, where: str) -> tuple[AnchorDecl, ...]:
     """`anchors:` — a LIST of anchors, all of which the page should show
-    (scored fractionally, not a hard boolean — the threshold decides).
+    (every anchor must show; a forbid term must not).
     Each anchor is a text, a list of alternate readings of ONE text, or
     `{text, within}` with `within` a band (`top`, `bottom`, `left`,
     `right`) or a box — the check shape a macro step's `require:` uses.
-    Alternates go INSIDE an anchor, never as separate anchors: each
-    declared anchor is a share of the page's score."""
+    Alternates go INSIDE an anchor, never as separate anchors: every
+    declared anchor must show."""
     if isinstance(raw, str):
         raise PagesError(f"{where}: `anchors` is a list — write `anchors: [{raw!r}]`")
     if not isinstance(raw, list):
@@ -512,15 +494,14 @@ def load_learned(app: str) -> dict[str, LearnedPage]:
                     cy=float(a["cy"]),
                     pos_tol=float(a["pos_tol"]),
                     freq=float(a["freq"]),
-                    weight=float(a["weight"]),
                     variants=tuple(a.get("variants", ())),
                 )
                 for a in lp["anchors"]
             }
+            # A file written before scores were retired carries
+            # `threshold` and per-anchor `weight`; both are ignored.
             out[name] = LearnedPage(
-                anchors=anchors,
-                threshold=float(lp["threshold"]),
-                observations=int(lp["observations"]),
+                anchors=anchors, observations=int(lp["observations"])
             )
         return out
     except Exception:
@@ -535,7 +516,6 @@ def save_learned(app: str, pages: dict[str, LearnedPage]) -> None:
         "app": app,
         "pages": {
             name: {
-                "threshold": lp.threshold,
                 "observations": lp.observations,
                 "anchors": [
                     {
@@ -544,7 +524,6 @@ def save_learned(app: str, pages: dict[str, LearnedPage]) -> None:
                         "cy": a.cy,
                         "pos_tol": a.pos_tol,
                         "freq": a.freq,
-                        "weight": a.weight,
                         "variants": list(a.variants),
                     }
                     for a in lp.anchors.values()

@@ -41,24 +41,22 @@ pages:
                                   # again from the route top (start re-runs);
                                   # what you write is what runs
   results:                        # the filter row pins them: two-char
-    anchors:                      # anchors ride the one-substitution
-      - {text: "综合", within: top}   # tier, so unpinned they read feed
-      - {text: "销量", within: top}   # text (组合, 数量) as results
+    anchors:                      # anchors are read exactly, so the band
+      - {text: "综合", within: top}   # keeps feed text (组合, 热销) from
+      - {text: "销量", within: top}   # standing in for them
     scrollable: true
     recover:                      # one hand per reading of the deviation:
       covered: {tap: landmarks.dismiss}   # a coupon sheet over the results
       elsewhere: go_back                  # a promo page or mis-tap: the edge
                                           # swipe (the chevron tap misses)
     tries: 2                      # this page's tries per walk
-  # Two shapes of one page: the merged sheet (实付￥…, spec options)
-  # and the order page a spec sheet leads to (优惠后￥…, 价格明细).
-  # Four anchors, three suffice — a page-specific row may be absent.
+  # The sheet's identity is two rows every variant prints: the pay
+  # button and the total. Rows that vary between sheets (备注 vs 开具发票,
+  # 顺手买 vs 超值换购) are not anchors — every anchor must show.
   buysheet:
     anchors:
       - {text: ["免密支付", "提交订单", "立即支付"], within: bottom}
-      - {text: ["实付", "优惠后", "价格明细"]}
-      - "备注"
-      - "顺手买"
+      - {text: ["实付", "优惠后", "价格明细"], within: [0.0, 0.15, 1.0, 0.85]}  # the total row: below the header banner, above the pay bar
     forbid: ["支付成功"]
     recover:
       covered: {tap: landmarks.close}

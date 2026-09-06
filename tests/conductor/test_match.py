@@ -3,55 +3,20 @@ tiers, scoring, and the open-set decision."""
 
 from __future__ import annotations
 
-from conductor_fakes import make_screen
+from conductor_fakes import make_learned, make_print, make_screen
 
 from physiclaw.common.bbox import BANDS
 from physiclaw.common.listing import LISTING_HEADER, Screen
 from physiclaw.conductor.spec import match as m
 from physiclaw.conductor.spec.pages import (
     AnchorDecl,
-    LearnedAnchor,
-    LearnedPage,
     PageDecl,
     PagePrint,
+    parse_pages,
 )
 
-
-def _learned(text: str, cx: float, cy: float, *, weight=1.0, variants=()):
-    return LearnedAnchor(
-        text=text,
-        cx=cx,
-        cy=cy,
-        pos_tol=0.02,
-        freq=1.0,
-        weight=weight,
-        variants=variants,
-    )
-
-
-def _print(
-    *,
-    anchors,
-    learned_anchors=None,
-    forbid=(),
-    scrollable=False,
-    threshold=0.6,
-    name="page",
-) -> PagePrint:
-    decl = PageDecl(
-        name=name,
-        anchors=tuple(anchors),
-        forbid=tuple(forbid),
-        scrollable=scrollable,
-    )
-    learned = None
-    if learned_anchors is not None:
-        learned = LearnedPage(
-            anchors={a.text: a for a in learned_anchors},
-            threshold=threshold,
-            observations=6,
-        )
-    return PagePrint(app="app", decl=decl, learned=learned)
+_learned = make_learned
+_print = make_print
 
 
 # ---------- normalization + fuzzy tiers ----------
@@ -69,9 +34,23 @@ def test_bigram_dice_tolerates_one_substitution_in_long_strings() -> None:
 
 
 def test_short_cjk_anchor_matches_single_char_confusion() -> None:
-    assert m.label_matches("综合", "综台", ()) is True
-    assert m.label_matches("综合", "点击综台按钮", ()) is True
-    assert m.label_matches("综合", "完全无关", ()) is False
+    # Three and four characters: one substitution against any window.
+    assert m.label_matches("购物车", "购物年", ()) is True
+    assert m.label_matches("购物车", "打开购物年页", ()) is True
+    assert m.label_matches("购物车", "完全无关", ()) is False
+
+
+def test_two_char_anchor_is_read_exactly() -> None:
+    # One substitution in two characters is half the anchor: on a real
+    # order sheet the window tier read a 热销 banner as 销量. Two-char
+    # anchors match exactly or as a substring, never by confusion.
+    assert m.label_matches("综合", "综合", ()) is True
+    assert m.label_matches("综合", "综合排序", ()) is True
+    assert m.label_matches("综合", "综台", ()) is False
+    assert m.label_matches("销量", "白热销商品 本商品超25000回头客", ()) is False
+    # A mined variant still lands — calibration is the way to admit a
+    # device's own confusion.
+    assert m.label_matches("综合", "综台", ("综台",)) is True
 
 
 def test_edit_ratio_bounds() -> None:
@@ -101,7 +80,7 @@ def test_score_full_match_with_geometry() -> None:
 
     s = m.score_page(pp, screen)
 
-    assert s.score == 1.0
+    assert s.passes
     assert not s.missing
 
 
@@ -114,7 +93,7 @@ def test_score_rejects_geometry_drift_beyond_tolerance() -> None:
 
     s = m.score_page(pp, screen)
 
-    assert s.score == 0.0
+    assert not s.passes
     assert s.missing == ("综合",)
 
 
@@ -129,7 +108,7 @@ def test_score_scrollable_page_votes_shared_dy() -> None:
 
     s = m.score_page(pp, screen)
 
-    assert s.score == 1.0
+    assert s.passes
     assert abs(s.dy + 0.2) < 0.03
 
 
@@ -139,8 +118,7 @@ def test_score_forbid_vetoes() -> None:
 
     s = m.score_page(pp, screen)
 
-    assert s.forbidden is True
-    assert s.score == 0.0
+    assert not s.passes and s.forbid_term == "直播中"
 
 
 def test_score_region_hint_rejects_out_of_band_row() -> None:
@@ -149,7 +127,7 @@ def test_score_region_hint_rejects_out_of_band_row() -> None:
 
     s = m.score_page(pp, screen)
 
-    assert s.score == 0.0
+    assert s.missing == ("搜索",)
 
 
 # ---------- anchor alternates ----------
@@ -159,28 +137,28 @@ def test_alternate_readings_match_either_way() -> None:
     pp = _print(anchors=[AnchorDecl("Search", alts=("搜索",))])
 
     for label in ("Search", "搜索"):
-        assert m.score_page(pp, make_screen((label, 0.5, 0.1))).score == 1.0
+        assert m.score_page(pp, make_screen((label, 0.5, 0.1))).passes
 
 
-def test_alternates_count_as_one_anchor_where_two_anchors_would_halve() -> None:
+def test_alternates_count_as_one_anchor_where_two_anchors_would_demand_both() -> None:
     """The regression alternates exist to prevent: a mixed-locale device
     shows ONE of the two spellings, so declaring them as separate anchors
-    scores 0.5 — under the declaration-only threshold, on the right page."""
+    demands both — and the right page reads unknown."""
     screen = make_screen(("Search", 0.5, 0.1), ("other", 0.5, 0.5))
 
     together = _print(anchors=[AnchorDecl("Search", alts=("搜索",))])
     apart = _print(anchors=[AnchorDecl("Search"), AnchorDecl("搜索")])
 
-    assert m.score_page(together, screen).score == 1.0
-    assert m.score_page(apart, screen).score == 0.5
+    assert m.score_page(together, screen).passes
+    assert not m.score_page(apart, screen).passes
 
 
 def test_alternate_reading_still_gets_the_fuzzy_tiers() -> None:
-    # 综台 is the classic one-character OCR confusion for 综合; an alternate
-    # must be held to the same tiers as a lone anchor, not exact-matched.
-    pp = _print(anchors=[AnchorDecl("Sort", alts=("综合",))])
+    # 购物年 is a one-character OCR confusion for 购物车; an alternate must
+    # be held to the same tiers as a lone anchor, not exact-matched.
+    pp = _print(anchors=[AnchorDecl("Cart", alts=("购物车",))])
 
-    assert m.score_page(pp, make_screen(("综台", 0.5, 0.1))).score == 1.0
+    assert m.score_page(pp, make_screen(("购物年", 0.5, 0.1))).passes
 
 
 def test_alternates_report_the_canonical_reading() -> None:
@@ -191,14 +169,14 @@ def test_alternates_report_the_canonical_reading() -> None:
     hit = m.score_page(pp, make_screen(("搜索", 0.5, 0.1)))
     miss = m.score_page(pp, make_screen(("nothing", 0.5, 0.1)))
 
-    assert [h.anchor for h in hit.hits] == ["Search"]
+    assert list(hit.hits) == ["Search"]
     assert miss.missing == ("Search",)
 
 
 # ---------- open-set decision ----------
 
 
-def test_match_screen_accepts_above_threshold_with_margin() -> None:
+def test_match_screen_reads_the_one_page_that_reads_whole() -> None:
     good = _print(
         name="results",
         anchors=[AnchorDecl("综合"), AnchorDecl("销量")],
@@ -211,33 +189,45 @@ def test_match_screen_accepts_above_threshold_with_margin() -> None:
 
     assert v.kind == "match"
     assert v.page_id == "app.results"
+    assert v.describe() == "match app.results (2 anchors)"
 
 
-def test_match_screen_unknown_when_below_threshold() -> None:
+def test_match_screen_unknown_when_any_anchor_is_missing_and_names_it() -> None:
+    # No score decides: one missing anchor is not this page, and the
+    # verdict says which one, for every candidate.
     pp = _print(
+        name="results",
         anchors=[AnchorDecl("综合"), AnchorDecl("销量"), AnchorDecl("筛选")],
-        learned_anchors=[
-            _learned("综合", 0.2, 0.1),
-            _learned("销量", 0.4, 0.1),
-            _learned("筛选", 0.6, 0.1),
-        ],
-        threshold=0.8,
     )
-    screen = make_screen(("综合", 0.2, 0.1))  # 1 of 3
+    cart = _print(name="cart", anchors=[AnchorDecl("结算")])
+    screen = make_screen(("综合", 0.2, 0.1), ("销量", 0.4, 0.1))  # 2 of 3
 
-    v = m.match_screen(screen, [pp])
+    v = m.match_screen(screen, [pp, cart])
 
     assert v.kind == "unknown"
+    assert v.describe() == "unknown — results missing 筛选; cart missing 结算"
+    # …and structured, so the walk can name the ONE page it expected.
+    assert v.gaps == {"app.results": "missing 筛选", "app.cart": "missing 结算"}
 
 
-def test_match_screen_unknown_without_margin_over_runner_up() -> None:
-    a = _print(name="a", anchors=[AnchorDecl("共享"), AnchorDecl("独有甲")])
+def test_match_screen_two_pages_reading_whole_is_ambiguous() -> None:
+    a = _print(name="a", anchors=[AnchorDecl("共享")])
     b = _print(name="b", anchors=[AnchorDecl("共享"), AnchorDecl("独有乙")])
-    screen = make_screen(("共享", 0.5, 0.1))  # only the shared anchor
+    screen = make_screen(("共享", 0.5, 0.1), ("独有乙", 0.5, 0.3))
 
     v = m.match_screen(screen, [a, b])
 
     assert v.kind == "unknown"
+    assert "ambiguous: a, b" in v.detail
+
+
+def test_forbid_names_itself_on_the_unknown_line() -> None:
+    sheet = _print(name="buysheet", anchors=[AnchorDecl("实付")], forbid=("支付成功",))
+    screen = make_screen(("实付", 0.5, 0.5), ("支付成功", 0.5, 0.2))
+
+    v = m.match_screen(screen, [sheet])
+
+    assert v.kind == "unknown" and v.detail == "buysheet forbids 支付成功"
 
 
 def test_match_screen_unreadable_is_unknown() -> None:
@@ -257,7 +247,6 @@ def test_match_screen_occluded_when_missing_anchors_share_a_band() -> None:
             _learned("发送", 0.9, 0.85),  # bottom band — under the keyboard
             _learned("语音", 0.1, 0.90),
         ],
-        threshold=0.9,
     )
     # Top anchor visible; bottom band shows keyboard keys instead.
     screen = make_screen(
@@ -284,7 +273,6 @@ def test_overlay_band_is_padded_around_the_missing_anchors() -> None:
             _learned("发送", 0.9, 0.85),
             _learned("语音", 0.1, 0.90),
         ],
-        threshold=0.9,
     )
     screen = make_screen(
         ("妈妈", 0.5, 0.05),
@@ -412,7 +400,6 @@ def test_region_pinned_anchor_ignores_the_scroll_offset() -> None:
             _learned("销量", 0.5, 0.6),
         ],
         scrollable=True,
-        threshold=0.9,
     )
     screen = make_screen(("搜索", 0.5, 0.05), ("综合", 0.5, 0.47), ("销量", 0.5, 0.57))
 
@@ -430,3 +417,66 @@ def test_forbid_reads_row_labels_not_the_result_prose() -> None:
     v = m.match_screen(Screen.read(text), [pp])
 
     assert v.kind == "match"
+
+
+# ---------- the order sheet that failed on 2026-09-06 ----------
+
+# A 天猫超市 order sheet: the pay button and the total show, the remark
+# row reads 开具发票 and the add-on row 超值换购 — and a 热销 banner sits in
+# the top band. Under the old score two decorative anchors outvoted two
+# identity anchors (0.50 < 0.75) and the banner let `results` tie it.
+TMALL_SHEET = make_screen(
+    ("白热销商品 本商品超25000回头客", 0.5, 0.05),
+    ("乔迁三里河二区B区9号楼1005", 0.5, 0.12),
+    ("实付￥339", 0.3, 0.30),
+    ("购买规格", 0.2, 0.40),
+    ("开具发票", 0.2, 0.55),
+    ("超值换购0/10", 0.2, 0.62),
+    ("免密支付￥339", 0.5, 0.95),
+)
+
+# The pack's own declarations, as the YAML a user writes (kept in step
+# with playbooks/taobao/APP.yml by hand — a copy-paste stays a copy-paste).
+TAOBAO_PAGES = [
+    PagePrint(app="app", decl=d)
+    for d in parse_pages(
+        """
+results:
+  anchors:
+    - {text: "综合", within: top}
+    - {text: "销量", within: top}
+buysheet:
+  anchors:
+    - {text: ["免密支付", "提交订单", "立即支付"], within: bottom}
+    - {text: ["实付", "优惠后", "价格明细"], within: [0.0, 0.15, 1.0, 0.85]}
+  forbid: ["支付成功"]
+paid:
+  anchors:
+    - ["支付成功", "付款成功", "购买成功"]
+""",
+        "app",
+    ).values()
+]
+
+
+def test_the_tmall_order_sheet_reads_as_the_buysheet() -> None:
+    v = m.match_screen(TMALL_SHEET, TAOBAO_PAGES)
+
+    assert v.matches("app.buysheet")
+    assert v.describe() == "match app.buysheet (2 anchors)"
+
+
+def test_the_sheets_banner_does_not_stand_in_for_a_results_anchor() -> None:
+    results = TAOBAO_PAGES[0]
+
+    read = m.score_page(results, TMALL_SHEET)
+
+    assert read.missing == ("综合", "销量")
+
+
+def test_the_loose_tier_admits_a_two_char_confusion_only_when_asked() -> None:
+    # Capture's mining tier: the window opens at two characters; a single
+    # character stays exact even loose.
+    assert m.label_matches("综合", "综台", (), loose=True) is True
+    assert m.label_matches("综合", "综台", ()) is False
+    assert m.label_matches("合", "台", (), loose=True) is False

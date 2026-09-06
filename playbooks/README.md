@@ -39,9 +39,12 @@ empty file is a valid pack (the file is the pack marker):
   a `page:` scope offers the spot only while that page reads
 - `pages:` — fingerprints more than one route lands on (a page only
   one route uses may be declared beside its waypoint instead). Anchors
-  are a list of texts the page shows — alternate readings of one text
-  go inside it (`text: [..]`), `within:` pins it to a band or a box —
-  semantics only; geometry is learned on-device via
+  are the texts that identify the page and EVERY one must show, so
+  declare few, unmistakable texts — alternate readings of one text go
+  inside it (`text: [..]`), `within:` pins it to a band or a box, a
+  `forbid:` term showing reads the page out; no score, a screen reading
+  exactly one page whole is that page — semantics only; geometry is
+  learned on-device via
   `physiclaw playbooks pages calibrate`. A page here may carry its
   `recover:` hand too — a gesture, a landmark tap, or a pack macro by
   name — which every route inherits unless it declares its own.
@@ -144,7 +147,8 @@ Every wake logs the roster (`conductor: playbooks on disk — taobao/buy
 (disabled), …`) and the decision (`boot drives — offering …` or `plain
 model session — <reason>`), so a wake the model drove alone says why.
 While a walk runs, every reading logs its verdict (`read after peek —
-match taobao.results (score 0.92, runner-up 0.31)`), every decision
+match taobao.results (2/2 anchors)` or `unknown — buysheet missing 备注;
+results missing 综合`), every decision
 call logs one line (`micro parse_task (parse) → taobao/buy (0.90) …`),
 and the walk's end logs its reason (`handing taobao/buy over to the
 model — …`); `summary.json` lists the same ends under `walks`, and

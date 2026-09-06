@@ -270,3 +270,35 @@ class Sink:
 
     def write(self, event: dict) -> None:
         self.events.append(event)
+
+
+def make_learned(text: str, cx: float, cy: float, *, pos_tol=0.02, variants=()):
+    """One captured anchor — the shape `pages.LearnedAnchor` has today."""
+    from physiclaw.conductor.spec.pages import LearnedAnchor
+
+    return LearnedAnchor(
+        text=text, cx=cx, cy=cy, pos_tol=pos_tol, freq=1.0, variants=tuple(variants)
+    )
+
+
+def make_print(
+    *,
+    anchors,
+    learned_anchors=None,
+    forbid=(),
+    scrollable=False,
+    name="page",
+    app="app",
+):
+    """A matchable page: declaration plus optional captured geometry."""
+    from physiclaw.conductor.spec.pages import LearnedPage, PageDecl, PagePrint
+
+    decl = PageDecl(
+        name=name, anchors=tuple(anchors), forbid=tuple(forbid), scrollable=scrollable
+    )
+    learned = None
+    if learned_anchors is not None:
+        learned = LearnedPage(
+            anchors={a.text: a for a in learned_anchors}, observations=6
+        )
+    return PagePrint(app=app, decl=decl, learned=learned)

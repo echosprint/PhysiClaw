@@ -209,10 +209,11 @@ route:
           at: [0.1, 0.1, 0.3, 0.2]
         - wait: 3
   - page: home
-    # `anchors:` is a list; all should show. Alternate readings of ONE
-    # anchor go inside it as a list — never as separate anchors, since
-    # each declared anchor is a share of the page's score. `within:`
-    # pins an anchor to a band ({bands}) or a box.
+    # `anchors:` is a list; EVERY one must show for the page to read, so
+    # declare few, unmistakable texts. Alternate readings of ONE anchor
+    # go inside it as a list — never as separate anchors, since each
+    # declared anchor is required. `within:` pins an anchor to a band
+    # ({bands}) or a box; a `forbid:` term showing reads the page out.
     anchors:
       - "EDIT ME"           # a label text that identifies this page
       # - {{text: ["Search", "搜索"], within: top}}
@@ -327,9 +328,13 @@ landmarks.<name>}}`, or `{{macro: <name>}}` — or one hand per reading
 (`covered:` for a sheet over the page itself, `locked:` for the
 phone's lock screen, `elsewhere:` for any other screen), with `tries:`
 beside it as its own bound — nothing recovers in the background; a page
-declaring none hands over. A page's `anchors:` is a list of texts the page shows;
-alternate readings of one text go inside it (`text: [..]`), and
-`within:` pins it to a band or a box.
+declaring none hands over. A page's `anchors:` is the list of texts
+that identify it, and EVERY one must show — declare few, unmistakable
+texts; alternate readings of one text go inside it (`text: [..]`),
+`within:` pins it to a band or a box, and a `forbid:` term showing
+reads the page out. No score: a screen reading exactly one page whole
+is that page, none is unknown (the log names each page's missing
+anchor), two is ambiguous.
 
 The channel pack (`playbooks/channel/`) is the conductor's own: the
 thread page, the send/open macros an `ask` runs, and `boot/` — the
@@ -592,7 +597,7 @@ pages:
   # every state a real iPhone's cover can be put in — resting Always-On
   # Display, woken and fully lit, and after a swipe — iOS printed no
   # hint text at all, so the anchor below has nothing to match and the
-  # page scores 0. The matcher therefore recognizes the cover by its
+  # page never reads. The matcher therefore recognizes the cover by its
   # SHAPE first (a clock and nothing else — `match.reads_as_locked`),
   # which needs no declaration and no calibration, and every page's
   # `locked:` recover hand fires on it. Keep this page: on a device or
@@ -601,8 +606,8 @@ pages:
   {LOCKED_PAGE}:
     anchors:
       # ONE anchor, several acceptable readings — never separate
-      # anchors: each declared anchor is a share of the page's score,
-      # so a second spelling of the same label would halve it.
+      # anchors: every declared anchor must show, so a second spelling
+      # of the same label would demand both at once.
       #
       # Verify this reading against YOUR phone before trusting it —
       # lock it and run `physiclaw playbooks pages propose --live` to see

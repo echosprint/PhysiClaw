@@ -6,7 +6,6 @@ from __future__ import annotations
 from conductor_fakes import make_screen
 
 from physiclaw.conductor.drive import capture
-from physiclaw.conductor.spec.match import normalize
 from physiclaw.conductor.spec.pages import AnchorDecl, PageDecl
 
 DECL = PageDecl(
@@ -42,18 +41,10 @@ def test_mine_anchors_positions_variants_and_rare_drop() -> None:
     assert any("罕见" in w for w in warnings)
 
 
-def test_mine_anchors_weight_divides_by_document_frequency() -> None:
-    df = {normalize("综合"): 3, normalize("销量"): 1}
-
-    anchors, _ = capture.mine_anchors(DECL, _observations(), app_df=df)
-
-    assert anchors["综合"].weight < anchors["销量"].weight
-
-
 # ---------- capture_app ----------
 
 
-def test_capture_app_calibrates_threshold_and_reports_separation() -> None:
+def test_capture_app_reports_how_the_whole_rule_fares() -> None:
     obs = _observations()
     negatives = [make_screen(("结算", 0.5, 0.9))]
 
@@ -62,13 +53,27 @@ def test_capture_app_calibrates_threshold_and_reports_separation() -> None:
     )
 
     lp = learned["results"]
-    assert capture.THRESHOLD_LO <= lp.threshold <= capture.THRESHOLD_HI
     assert lp.observations == 5
     (report,) = reports
     assert report.page == "taobao.results"
-    assert report.genuine_min >= lp.threshold  # safety factor below min
-    assert report.separable
+    # 罕见 stayed declaration-only (1/5), so the whole rule — every
+    # declared anchor — reads only the observation that printed it.
+    assert report.genuine_pass == 0.2
+    assert report.impostor_pass == 0 and report.separable
     assert any("罕见" in w for w in warnings)
+
+
+def test_capture_report_flags_a_page_negatives_also_read() -> None:
+    decl = PageDecl(name="results", anchors=(AnchorDecl("综合"),))
+    obs = [make_screen(("综合", 0.2, 0.1)) for _ in range(3)]
+    negatives = [make_screen(("综合", 0.2, 0.1), ("结算", 0.5, 0.9))]
+
+    _, reports, _ = capture.capture_app(
+        "taobao", {"results": decl}, {"results": obs}, negatives
+    )
+
+    assert reports[0].genuine_pass == 1.0
+    assert reports[0].impostor_pass == 1 and not reports[0].separable
 
 
 def test_capture_app_skips_pages_without_observations() -> None:
@@ -85,20 +90,8 @@ def test_capture_report_impostor_none_without_negatives() -> None:
         "taobao", {"results": DECL}, {"results": _observations()}, []
     )
 
-    assert reports[0].impostor_max is None
+    assert reports[0].impostor_pass is None
     assert reports[0].separable
-
-
-def test_app_document_frequency_counts_pages_per_anchor() -> None:
-    decls = {
-        "a": PageDecl(name="a", anchors=(AnchorDecl("共享"), AnchorDecl("甲"))),
-        "b": PageDecl(name="b", anchors=(AnchorDecl("共享"),)),
-    }
-
-    df = capture.app_document_frequency(decls)
-
-    assert df[normalize("共享")] == 2
-    assert df[normalize("甲")] == 1
 
 
 # ---------- propose_anchors ----------
@@ -114,3 +107,18 @@ def test_propose_anchors_keeps_chrome_shaped_labels() -> None:
     )
 
     assert capture.propose_anchors(screen) == ["综合"]
+
+
+def test_mining_reads_a_two_char_confusion_only_at_the_vouched_spot() -> None:
+    # 综台 at the spot 综合 was read exactly is mined as a variant; the same
+    # confusion elsewhere on the screen is not the anchor.
+    decl = PageDecl(name="results", anchors=(AnchorDecl("综合"),))
+    obs = [make_screen(("综合", 0.2, 0.1)) for _ in range(3)]
+    obs.append(make_screen(("综台", 0.2, 0.1)))
+    obs.append(make_screen(("综台", 0.8, 0.9)))  # far away: not vouched for
+
+    anchors, _ = capture.mine_anchors(decl, obs)
+
+    a = anchors["综合"]
+    assert a.variants == ("综台",)
+    assert a.freq == 0.8  # 4 of 5 observations read it

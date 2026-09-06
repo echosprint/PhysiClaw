@@ -362,3 +362,50 @@ def test_an_input_with_a_default_is_optional_and_the_menu_says_so() -> None:
         "keyword": "water",
         "qty": "1",
     }
+
+
+# ---------- the ambiguity advisory ----------
+
+
+def _pages_pack(pages_yaml: str):
+    _write_pack(
+        "shop", MANIFEST.replace("pages:\n", "pages:\n" + pages_yaml, 1), buy=BUY
+    )
+    return pb.load_pack("shop")
+
+
+def test_check_warns_when_one_page_reads_whole_on_anothers_screen() -> None:
+    from physiclaw.conductor.spec import lints
+
+    pack = _pages_pack(
+        '  sheet:\n    anchors: ["实付", "免密支付"]\n  total:\n    anchors: ["实付"]\n'
+    )
+
+    lines = [w for w in lints.pack_warnings(pack, []) if "also reads" in w]
+
+    assert lines == [
+        "pages 'total' and 'sheet': a screen showing 'sheet' whole also reads "
+        "'total' — add an anchor or a `forbid` to 'total'"
+    ]
+
+
+def test_ambiguity_is_judged_by_the_matcher_not_by_text_sets() -> None:
+    from physiclaw.conductor.spec import lints
+
+    # A band tells the pages apart (the same text pinned to the bottom is
+    # not the mid-screen row), and a forbid term does too.
+    pack = _pages_pack(
+        '  sheet:\n    anchors: ["实付", "免密支付"]\n'
+        '  bar:\n    anchors: [{text: "实付", within: bottom}]\n'
+        '  receipt:\n    anchors: ["实付"]\n    forbid: ["免密支付"]\n'
+    )
+
+    lines = [w for w in lints.pack_warnings(pack, []) if "also reads" in w]
+
+    # sheet vs bar: the band separates them; sheet vs receipt: the forbid
+    # does. bar vs receipt is a real overlap — bar's screen shows 实付 and
+    # no 免密支付, which is exactly receipt — and the matcher says so.
+    assert lines == [
+        "pages 'receipt' and 'bar': a screen showing 'bar' whole also reads "
+        "'receipt' — add an anchor or a `forbid` to 'receipt'"
+    ]

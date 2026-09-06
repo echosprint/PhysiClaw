@@ -7,12 +7,17 @@ label sets overlap at Jaccard ≈0.97 with bbox jitter p99 0.007, while
 different pages sit at p90 0.13 — listing space separates by an order
 of magnitude).
 
-The decision is open-set and fail-closed on action: a page is reported
-only above its own threshold AND with a margin over the runner-up;
-anything else is `unknown` (the LLM's jurisdiction) or `occluded` (a
-known page under an overlay band — keyboard, dialog, popup — which is an
-event on the page, not a new page). The matcher's most important output
-is a reliable `unknown`.
+The decision is open-set, boolean, and fail-closed on action: a page
+is this page when EVERY declared anchor shows and no forbid term does,
+exactly the `require`/`forbid` rule a macro step's checks use; a screen
+that satisfies exactly one page is a match, none is `unknown` (the
+LLM's jurisdiction, with each page's missing anchor named), two or
+more is an ambiguous `unknown`. A calibrated page whose missing anchors
+sit under one overlay band reads `occluded` — a keyboard, dialog, or
+popup over a known page is an event on the page, not a new page. No
+score decides anything: the author chooses few, unmistakable anchors
+and gives each its alternate readings. The matcher's most important
+output is a reliable `unknown`.
 
 Text comparison builds on the shared base rule (`common.listing.
 label_hit`: single-char = whole-label equality, else substring) with
@@ -23,7 +28,7 @@ mathematically pass.
 """
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from functools import lru_cache
 
@@ -31,30 +36,31 @@ from physiclaw.common.bbox import center_of, inside, near
 from physiclaw.common.listing import Element, Screen, label_hit
 from physiclaw.common.text import fold
 from physiclaw.conductor.spec.conventions import LOCKED_ID, PRICE_RE
-from physiclaw.conductor.spec.pages import (
-    DEFAULT_MARGIN,
-    AnchorDecl,
-    LearnedAnchor,
-    PagePrint,
-)
+from physiclaw.conductor.spec.pages import AnchorDecl, LearnedAnchor, PagePrint
 
 # Fuzzy-tier floors (industrial practice: fuzzy text is reliable only
 # paired with anchors/structure — UiPath's 0.5–0.6 band). Short anchors
-# (≤ SHORT_ANCHOR_LEN chars — the dominant CJK chrome class: 综合, 搜索,
-# 结算) instead allow ONE substituted character against any same-length
+# (SHORT_ANCHOR_MIN..SHORT_ANCHOR_MAX chars — CJK chrome like 搜索框, 购物车)
+# instead allow ONE substituted character against any same-length
 # window of the label: bigram/ratio tiers mathematically cannot admit a
-# single-char confusion in a 2-char string, and single-char visual
-# confusion is the dominant CJK OCR error.
+# single-char confusion in a short string, and single-char visual
+# confusion is the dominant CJK OCR error. Below SHORT_ANCHOR_MIN the
+# tier is off: one substitution in two characters is half the anchor,
+# and on a real order sheet it read a 热销 banner as 销量 — a two-char
+# anchor must be read exactly (or pinned to a band and calibrated so
+# its OCR variants are mined: capture's `loose` reading lowers the
+# floor to LOOSE_ANCHOR_MIN at a spot the exact readings vouch for).
 BIGRAM_DICE_MIN = 0.5
 EDIT_RATIO_MAX = 0.3
-SHORT_ANCHOR_LEN = 4
+SHORT_ANCHOR_MIN = 3
+SHORT_ANCHOR_MAX = 4
+LOOSE_ANCHOR_MIN = 2
 
 # Δy scroll voting: bin height in 0–1 screen coords.
 DY_BIN = 0.02
 
-# Overlay hypothesis: mid-band score floor, the band's max height, and how
-# many unexpected labels the band must hold to read as an overlay.
-OCCLUDED_FLOOR = 0.3
+# Overlay hypothesis: the band's max height, and how many unexpected
+# labels the band must hold to read as an overlay.
 OVERLAY_MAX_HEIGHT = 0.6
 OVERLAY_MIN_LABELS = 3
 # The overlay extends beyond the missing anchors it hides — pad the band
@@ -119,16 +125,25 @@ def edit_ratio(a: str, b: str) -> float:
     return levenshtein(a, b) / max(len(a), len(b))
 
 
-def label_matches(anchor_norm: str, label_norm: str, variants: tuple[str, ...]) -> bool:
-    """The tiered text match. `anchor_norm`/`variants` are pre-normalized."""
+def label_matches(
+    anchor_norm: str,
+    label_norm: str,
+    variants: tuple[str, ...],
+    *,
+    loose: bool = False,
+) -> bool:
+    """The tiered text match. `anchor_norm`/`variants` are pre-normalized.
+    `loose` is capture's mining tier: the one-substitution window opens
+    from LOOSE_ANCHOR_MIN, so a two-character confusion at a vouched-for
+    spot can be learned; a single character stays exact everywhere."""
     if label_norm in variants:
         return True
     if label_hit(anchor_norm, label_norm):
         return True
-    if len(anchor_norm) == 1:
-        return False  # single char: the whole-label base rule is final
-    if len(anchor_norm) <= SHORT_ANCHOR_LEN:
-        return _window_match(anchor_norm, label_norm)
+    if len(anchor_norm) < (LOOSE_ANCHOR_MIN if loose else SHORT_ANCHOR_MIN):
+        return False  # too short for a substitution: the base rule is final
+    if len(anchor_norm) <= SHORT_ANCHOR_MAX:
+        return window_match(anchor_norm, label_norm)
     # Length prefilters: both fuzzy tiers are mathematically unable to
     # pass when the lengths are far apart — skip the O(n²)/set work.
     la, lb = len(anchor_norm), len(label_norm)
@@ -143,8 +158,9 @@ def label_matches(anchor_norm: str, label_norm: str, variants: tuple[str, ...]) 
     return False
 
 
-def _window_match(anchor_norm: str, label_norm: str) -> bool:
-    """Short-anchor tier: some same-length window of the label is within
+def window_match(anchor_norm: str, label_norm: str) -> bool:
+    """Short-anchor tier (and capture's confusion mining for anchors too
+    short to get it at run time): some same-length window of the label is within
     one SUBSTITUTION of the anchor — catches 综合→综台 both standalone and
     buried inside a longer row. Equal-length edit distance ≤1 is exactly
     Hamming ≤1 (an insert/delete changes length), so no DP is needed; the
@@ -226,28 +242,42 @@ def reads_as_locked(screen: Screen) -> bool:
 
 
 @dataclass(frozen=True)
-class AnchorHit:
-    anchor: str
-    center: tuple[float, float]
-    weight: float
-
-
-@dataclass(frozen=True)
 class PageScore:
+    """One page read against one screen: which anchors showed, which
+    expected-visible ones did not, and the forbid term that showed."""
+
     print_: PagePrint
-    score: float
-    hits: tuple[AnchorHit, ...]
+    hits: tuple[str, ...]  # anchor texts found (canonical spelling)
     missing: tuple[str, ...]  # expected-visible anchors not found on screen
     dy: float  # chosen scroll offset (0.0 for non-scrollable / unlearned)
-    forbidden: bool
+    forbid_term: str | None = None
 
     @property
     def page_id(self) -> str:
         return self.print_.page_id
 
+    @property
+    def passes(self) -> bool:
+        """The page's whole rule: every anchor shows, no forbid term does."""
+        return self.forbid_term is None and bool(self.hits) and not self.missing
+
+    def gap(self) -> str:
+        """What kept this page out — the clause after its name on the
+        unknown line, and the handover reason for the page a route
+        expected."""
+        if self.forbid_term is not None:
+            return f"forbids {self.forbid_term}"
+        if self.missing:
+            return f"missing {', '.join(self.missing)}"
+        return "shows no anchor"
+
 
 def candidate_rows(
-    anchor: AnchorDecl, rows: tuple[Element, ...], variants: tuple[str, ...]
+    anchor: AnchorDecl,
+    rows: tuple[Element, ...],
+    variants: tuple[str, ...],
+    *,
+    loose: bool = False,
 ) -> list[Element]:
     """Rows satisfying one anchor. ANY of its declared readings matches
     (`AnchorDecl.readings` — the canonical text plus authored alts),
@@ -272,16 +302,18 @@ def candidate_rows(
         if sole is not None:
             # The overwhelmingly common shape (one declared reading) —
             # kept off the generator to stay a plain call per row.
-            if not label_matches(sole, label_norm, variants):
+            if not label_matches(sole, label_norm, variants, loose=loose):
                 continue
-        elif not any(label_matches(a, label_norm, variants) for a in anchor_norms):
+        elif not any(
+            label_matches(a, label_norm, variants, loose=loose) for a in anchor_norms
+        ):
             continue
         out.append(row)
     return out
 
 
 def score_page(pp: PagePrint, screen: Screen) -> PageScore:
-    """Score one candidate page against one screen reading."""
+    """Read one candidate page against one screen."""
     if pp.decl.forbid:
         # Row labels only, one row at a time: a macro result's step log
         # rides `screen.content` too, and a term must never straddle two
@@ -290,7 +322,7 @@ def score_page(pp: PagePrint, screen: Screen) -> PageScore:
         for term in pp.decl.forbid:
             t = normalize(term)
             if any(t in label for label in labels_norm):
-                return PageScore(pp, 0.0, (), (), 0.0, forbidden=True)
+                return PageScore(pp, (), (), 0.0, forbid_term=term)
 
     learned = pp.learned
     anchors = pp.decl.anchors
@@ -304,10 +336,8 @@ def score_page(pp: PagePrint, screen: Screen) -> PageScore:
     if learned is not None and pp.decl.scrollable:
         dy = _vote_dy(anchors, las, rows_per)
 
-    hits: list[AnchorHit] = []
+    hits: list[str] = []
     missing: list[str] = []
-    total_weight = 0.0
-    hit_weight = 0.0
     for a, la, rows in zip(anchors, las, rows_per):
         # Chrome (a region-pinned anchor) does not scroll with the
         # content: it is checked at its absolute position, exactly as
@@ -317,33 +347,24 @@ def score_page(pp: PagePrint, screen: Screen) -> PageScore:
         # position moved off-screen is neither expected nor missing.
         if la is not None and pp.decl.scrollable and not (0.0 <= la.cy + adj <= 1.0):
             continue
-        weight = la.weight if la else 1.0
-        total_weight += weight
-        center = _verify_position(la, rows, adj)
-        if center is not None:
-            hit_weight += weight
-            hits.append(AnchorHit(anchor=a.text, center=center, weight=weight))
+        if _verified(la, rows, adj):
+            hits.append(a.text)
         else:
             missing.append(a.text)
-    score = hit_weight / total_weight if total_weight else 0.0
-    return PageScore(pp, score, tuple(hits), tuple(missing), dy, forbidden=False)
+    return PageScore(pp, tuple(hits), tuple(missing), dy)
 
 
-def _verify_position(
-    la: LearnedAnchor | None,
-    rows: list[Element],
-    dy: float,
-) -> tuple[float, float] | None:
-    """The first matched row consistent with the learned geometry (or any
-    row when unlearned — text is all we have). Returns its center.
-    `pos_tol` is already floored by capture, so it is used as-is."""
+def _verified(la: LearnedAnchor | None, rows: list[Element], dy: float) -> bool:
+    """Some matched row is consistent with the learned geometry (or any
+    row when unlearned — text is all we have). `pos_tol` is already
+    floored by capture, so it is used as-is."""
     for row in rows:
         c = center_of(row.bbox)
         if c is None:
             continue
         if la is None or near(c, (la.cx, la.cy + dy), tolerance=la.pos_tol):
-            return c
-    return None
+            return True
+    return False
 
 
 def _vote_dy(
@@ -388,20 +409,20 @@ class Reading(StrEnum):
 class Verdict:
     kind: Reading
     page_id: str | None
-    score: float
-    runner_up: float
     dy: float
     detail: str
+    # On an unknown read: every candidate's gap, by page id — the walk
+    # names the one page it expected; `describe` joins them all.
+    gaps: dict[str, str] = field(default_factory=dict)
 
     def describe(self) -> str:
-        """One log line's worth: the reading, the page, both scores, and
-        the matcher's own detail — what a walk logs after every screen
-        so "why did it think it was elsewhere?" is answered on the spot."""
-        page = self.page_id or "no known page"
-        return (
-            f"{self.kind} {page} (score {self.score:.2f}, "
-            f"runner-up {self.runner_up:.2f}) — {self.detail}"
-        )
+        """One log line's worth: the reading, the page, and the matcher's
+        own detail — the anchor count on a match, the gap of every page
+        on an unknown — what a walk logs after every screen so "why did
+        it think it was elsewhere?" is answered on the spot."""
+        if self.kind is Reading.UNKNOWN:
+            return f"unknown — {self.detail}"
+        return f"{self.kind} {self.page_id} ({self.detail})"
 
     def matches(self, expected_id: str) -> bool:
         """Is this a confident read of exactly `expected_id` (`app.page`)?
@@ -418,7 +439,7 @@ class Verdict:
 
 
 def match_screen(screen: Screen, candidates: list[PagePrint]) -> Verdict:
-    """The three-way open-set decision over one app-scoped candidate set.
+    """The open-set decision over one app-scoped candidate set.
 
     The lock screen is read FIRST and by shape (`reads_as_locked`),
     whatever the candidates: it is the one OS state every walk must
@@ -428,74 +449,62 @@ def match_screen(screen: Screen, candidates: list[PagePrint]) -> Verdict:
     `ios.locked` page, when it is a candidate, is the sharper belt for
     a device that does print a hint.
 
-    Every candidate is scored — the margin rule needs the runner-up, so
-    there is no early exit that preserves its semantics."""
+    Then every candidate is read whole (`PageScore.passes`): exactly
+    one passing page is the match; two or more is ambiguous; none is
+    unknown unless exactly one calibrated page has its missing anchors
+    under an overlay band, which reads occluded."""
     if reads_as_locked(screen):
-        return Verdict(Reading.MATCH, LOCKED_ID, 1.0, 0.0, 0.0, "the lock screen")
+        return Verdict(Reading.MATCH, LOCKED_ID, 0.0, "the lock screen")
     if not screen.readable or not candidates:
+        return Verdict(Reading.UNKNOWN, None, 0.0, "unreadable or no candidates")
+
+    reads = [score_page(pp, screen) for pp in candidates]
+    passing = [r for r in reads if r.passes]
+    if len(passing) == 1:
+        (best,) = passing
+        n = len(best.hits)
         return Verdict(
-            Reading.UNKNOWN, None, 0.0, 0.0, 0.0, "unreadable or no candidates"
+            Reading.MATCH, best.page_id, best.dy, f"{n} anchor{'s' if n != 1 else ''}"
         )
-
-    scores = sorted(
-        (score_page(pp, screen) for pp in candidates),
-        key=lambda s: s.score,
-        reverse=True,
-    )
-    best = scores[0]
-    runner = scores[1].score if len(scores) > 1 else 0.0
-
-    if best.forbidden or best.score <= 0.0:
-        return Verdict(Reading.UNKNOWN, None, 0.0, runner, 0.0, "no candidate scored")
-
-    if best.score >= best.print_.threshold and (best.score - runner) >= DEFAULT_MARGIN:
-        return Verdict(
-            Reading.MATCH,
-            best.page_id,
-            best.score,
-            runner,
-            best.dy,
-            f"{len(best.hits)}/{len(best.hits) + len(best.missing)} anchors",
-        )
-
-    if best.score >= OCCLUDED_FLOOR and _under_overlay(best, screen):
+    if passing:
+        names = ", ".join(r.print_.decl.name for r in passing)
+        return Verdict(Reading.UNKNOWN, None, 0.0, f"ambiguous: {names} all read whole")
+    covered = [r for r in reads if r.hits and _under_overlay(r, screen)]
+    if len(covered) == 1:
+        (best,) = covered
         return Verdict(
             Reading.OCCLUDED,
             best.page_id,
-            best.score,
-            runner,
             best.dy,
             f"missing anchors cluster in one band: {', '.join(best.missing)}",
         )
-
     return Verdict(
         Reading.UNKNOWN,
         None,
-        best.score,
-        runner,
-        best.dy,
-        f"best {best.page_id} below threshold {best.print_.threshold:.2f} or margin",
+        0.0,
+        "; ".join(f"{r.print_.decl.name} {r.gap()}" for r in reads),
+        gaps={r.page_id: r.gap() for r in reads},
     )
 
 
-def _under_overlay(best: PageScore, screen: Screen) -> bool:
+def _under_overlay(read: PageScore, screen: Screen) -> bool:
     """Overlay test (keyboard/dialog/scroll are events on a page, not new
     pages): the page's MISSING learned anchors all fall inside one
     horizontal band (≤ OVERLAY_MAX_HEIGHT tall) that, padded by
     OVERLAY_PAD, also holds unexpected labels — a dialog or keyboard
     over a known page. Needs learned geometry; declaration-only pages
     can't hypothesize overlays."""
-    learned = best.print_.learned
-    if learned is None or not best.missing:
+    learned = read.print_.learned
+    if learned is None or not read.missing:
         return False
-    ys = [learned.anchors[t].cy + best.dy for t in best.missing if t in learned.anchors]
+    ys = [learned.anchors[t].cy + read.dy for t in read.missing if t in learned.anchors]
     if not ys:
         return False
     lo, hi = min(ys), max(ys)
     if (hi - lo) > OVERLAY_MAX_HEIGHT:
         return False
     lo, hi = lo - OVERLAY_PAD, hi + OVERLAY_PAD
-    hit_norms = {normalize(h.anchor) for h in best.hits}
+    hit_norms = {normalize(t) for t in read.hits}
     unexpected = 0
     for row in screen.rows:
         if not row.label:

@@ -4,13 +4,13 @@ the learned store."""
 from __future__ import annotations
 
 import pytest
+from conductor_fakes import make_learned
 
 from physiclaw.common import paths
 from physiclaw.common.bbox import BANDS
 from physiclaw.conductor.spec import conventions, pages
 from physiclaw.conductor.spec.pages import (
     Landmark,
-    LearnedAnchor,
     LearnedPage,
     PagesError,
     parse_landmarks,
@@ -148,9 +148,8 @@ def test_scaffolded_ios_pages_are_matchable_prints_without_geometry() -> None:
     prints = pages.prints_for_app(conventions.IOS_APP)
 
     assert [p.page_id for p in prints] == ["ios.locked"]
-    # No learned file until `calibrate` runs — declaration-only threshold.
+    # No learned file until `calibrate` runs — text-only matching.
     assert prints[0].learned is None
-    assert prints[0].threshold == pages.DECL_ONLY_THRESHOLD
 
 
 # ---------- discovery + learned store ----------
@@ -192,18 +191,7 @@ def test_parse_wraps_any_loader_error_as_pages_error(mocker) -> None:
 def test_learned_round_trip_and_merge() -> None:
     _write_pack("taobao", VALID)
     learned = LearnedPage(
-        anchors={
-            "综合": LearnedAnchor(
-                text="综合",
-                cx=0.2,
-                cy=0.11,
-                pos_tol=0.02,
-                freq=1.0,
-                weight=0.9,
-                variants=("综台",),
-            )
-        },
-        threshold=0.55,
+        anchors={"综合": make_learned("综合", 0.2, 0.11, variants=("综台",))},
         observations=7,
     )
     pages.save_learned("taobao", {"results": learned})
@@ -212,11 +200,9 @@ def test_learned_round_trip_and_merge() -> None:
 
     r = prints["results"]
     assert r.learned is not None and r.learned.observations == 7
-    assert r.threshold == 0.55
     assert r.learned.anchors["综合"].variants == ("综台",)
     d = prints["item-detail"]
     assert d.learned is None
-    assert d.threshold == pages.DECL_ONLY_THRESHOLD
 
 
 def test_load_learned_missing_or_garbage_is_empty() -> None:

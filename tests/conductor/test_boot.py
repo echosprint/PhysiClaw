@@ -334,8 +334,9 @@ def test_every_reading_logs_its_verdict(caplog: pytest.LogCaptureFixture) -> Non
         for r in caplog.records
         if " read after peek — " in r.getMessage()
     ]
-    assert line.startswith(
-        "conductor: channel/boot read after peek — match channel.thread (score "
+    assert (
+        line
+        == "conductor: channel/boot read after peek — match channel.thread (1 anchor)"
     )
 
 
