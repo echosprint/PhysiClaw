@@ -124,7 +124,7 @@ def compose_pack_doc(
     pages: str,
     landmarks: str | None = None,
 ) -> str:
-    """The manifest (`PLAYBOOK.yml`) from the fixtures' pieces: meta, a
+    """The manifest (`APP.yml`) from the fixtures' pieces: meta, a
     `pages:` appendix, optional landmarks. Playbooks are files beside
     it (`write_pack` writes them), never manifest content."""
     doc = f"app: {app}\ndescription: test pack\npages:\n{indent(pages, '  ')}\n"
@@ -142,26 +142,63 @@ def write_pack(
     landmarks: str | None = None,
 ):
     """Write a pack under the (fixture-scoped) playbooks dir — the
-    manifest, one `<name>.yml` per playbook, the macros; returns its
-    root."""
+    manifest, one `<name>/PLAYBOOK.yml` folder per playbook, the pack
+    macros; returns its root."""
     from physiclaw.common import paths
 
     root = paths.playbooks_dir() / app
     (root / "macros").mkdir(parents=True, exist_ok=True)
-    (root / "PLAYBOOK.yml").write_text(
+    (root / "APP.yml").write_text(
         compose_pack_doc(app, pages, landmarks), encoding="utf-8"
     )
     for name, text in (playbooks or {}).items():
-        # A playbook names itself; fixtures written before that rule
-        # get the header the file stem implies.
-        if not text.startswith("name:"):
-            text = f"name: {name}\n{text}"
-        (root / f"{name}.yml").write_text(text, encoding="utf-8")
+        write_playbook(root, name, text)
     for m in macros:
-        d = root / "macros" / m
-        d.mkdir(parents=True, exist_ok=True)
-        (d / "MACRO.yml").write_text(PACK_MACRO.format(name=m), encoding="utf-8")
+        (root / "macros" / f"{m}.yml").write_text(
+            PACK_MACRO.format(name=m), encoding="utf-8"
+        )
     return root
+
+
+def write_playbook(root, name: str, text: str):
+    """One playbook folder under a pack root — `<name>/PLAYBOOK.yml`.
+    A playbook names itself; fixtures written before that rule get the
+    header the folder implies. Returns the folder."""
+    from physiclaw.common.text import write_text
+
+    if not text.startswith("name:"):
+        text = f"name: {name}\n{text}"
+    folder = root / name
+    folder.mkdir(parents=True, exist_ok=True)
+    write_text(folder / "PLAYBOOK.yml", text)
+    return folder
+
+
+def write_leaf(root, playbook: str | None, kind: str, name: str, text: str):
+    """One leaf file under a pack root — `<root>/[<playbook>/]<kind>/<name>` —
+    the layout's two leaf folders (`macros`, `prompts`) at either level.
+    `name` carries its suffix. Returns the path."""
+    from physiclaw.common.text import write_text
+
+    folder = (root / playbook if playbook else root) / kind
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / name
+    write_text(path, text)
+    return path
+
+
+def write_prompt(root, playbook: str | None, name: str, text: str):
+    return write_leaf(root, playbook, "prompts", f"{name}.md", text)
+
+
+def write_local_macro(root, playbook: str, name: str, text: str | None = None):
+    return write_leaf(
+        root,
+        playbook,
+        "macros",
+        f"{name}.yml",
+        PACK_MACRO.format(name=name) if text is None else text,
+    )
 
 
 def build_program(
@@ -214,16 +251,14 @@ def write_channel(open_macro: str | None = None) -> None:
     from physiclaw.common import paths
 
     root = paths.playbooks_dir() / "channel"
-    (root / "macros" / "send").mkdir(parents=True, exist_ok=True)
-    (root / "PLAYBOOK.yml").write_text(
+    (root / "macros").mkdir(parents=True, exist_ok=True)
+    (root / "boot").mkdir(exist_ok=True)  # a test may write its own boot
+    (root / "APP.yml").write_text(
         compose_pack_doc("channel", CHANNEL_PAGES), encoding="utf-8"
     )
-    (root / "macros" / "send" / "MACRO.yml").write_text(CHANNEL_SEND, encoding="utf-8")
+    (root / "macros" / "send.yml").write_text(CHANNEL_SEND, encoding="utf-8")
     if open_macro is not None:
-        (root / "macros" / "open").mkdir(parents=True, exist_ok=True)
-        (root / "macros" / "open" / "MACRO.yml").write_text(
-            open_macro, encoding="utf-8"
-        )
+        (root / "macros" / "open.yml").write_text(open_macro, encoding="utf-8")
 
 
 class Sink:

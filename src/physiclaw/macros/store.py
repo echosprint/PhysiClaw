@@ -1,13 +1,12 @@
 """Macro discovery and the `## Available Macros` prompt section.
 
-One directory per macro under ``~/.physiclaw/macros/`` holding a
-``MACRO.yml`` (the skill-folder shape, filename capitalized like
-``SKILL.md``: directory name IS the identity; the file's ``name`` field
-must match). Only ``*/MACRO.yml`` is scanned,
-so the machine-written ``stats.json`` at the root can never be read as a
-macro, and a macro dir may carry the user's rehearsal notes untouched.
+One file per macro under ``~/.physiclaw/macros/``: ``<name>.yml``, the
+stem IS the identity and the file's ``name`` field must match (a macro
+owns no other files, so it is a leaf, not a folder). Only ``*.yml`` is
+scanned, so the machine-written ``stats.json`` and the format
+``README.md`` at the root can never be read as a macro.
 
-Discovery is realpath-scoped like `engine.skill`: a symlinked dir that
+Discovery is realpath-scoped like `engine.skill`: a symlinked file that
 escapes the root is rejected. A file failing validation is excluded whole
 with its reason kept on the ScanEntry — `physiclaw macros check` prints
 it; the engine only ever sees valid AND enabled specs.
@@ -23,7 +22,7 @@ from physiclaw.common.logger import ensure_readme
 from physiclaw.common.text import read_text, write_text
 from physiclaw.macros import scaffold
 from physiclaw.macros.model import (
-    MACRO_FILENAME,
+    MACRO_SUFFIX,
     Macro,
     MacroError,
     check_name,
@@ -33,19 +32,26 @@ from physiclaw.macros.parse import parse_macro
 log = logging.getLogger(__name__)
 
 
-def init_macro(name: str) -> Path:
-    """Scaffold ``macros/<name>/MACRO.yml`` from the commented template
-    and return its path. The scaffold parses clean (disabled) so `check`
-    passes before any editing. Raises MacroError on a bad name or an
-    existing directory."""
+def macro_path(root: Path, name: str) -> Path:
+    """Where macro ``name`` lives under ``root`` — the one spelling of
+    the leaf-file rule."""
+    return root / f"{name}{MACRO_SUFFIX}"
+
+
+def init_macro(name: str, root: Path | None = None) -> Path:
+    """Scaffold ``macros/<name>.yml`` from the commented template and
+    return its path — under the home macros dir, or under ``root`` (a
+    pack's or a playbook's ``macros/``). The scaffold parses clean
+    (disabled) so `check` passes before any editing. Raises MacroError
+    on a bad name or an existing file."""
     check_name(name)
-    d = paths.macros_dir() / name
-    if d.exists():
-        raise MacroError(f"macro directory already exists: {d}")
-    d.mkdir(parents=True)
-    md = d / MACRO_FILENAME
+    md = macro_path(paths.macros_dir() if root is None else root, name)
+    if md.exists():
+        raise MacroError(f"macro file already exists: {md}")
+    md.parent.mkdir(parents=True, exist_ok=True)
     write_text(md, scaffold.render_init(name))
-    ensure_format_readme()
+    if root is None:
+        ensure_format_readme()
     return md
 
 
@@ -59,60 +65,60 @@ def ensure_format_readme() -> None:
 
 @dataclass(frozen=True)
 class ScanEntry:
-    """One macro directory as found on disk — either a parsed spec or the
-    reason it was excluded. `dir_name` is always set (it's the identity)."""
+    """One macro file as found on disk — either a parsed spec or the
+    reason it was excluded. `name` (the file stem) is always set."""
 
-    dir_name: str
+    name: str
     spec: Macro | None = None
     error: str | None = None
 
 
-def list_dir_names() -> set[str]:
-    """The macro directories on disk (a MACRO.yml present) across the
-    search path — identity only, no read, no parse. The stats prune set:
-    `run_and_record` needs just the names, so it must not pay `scan()`'s
-    full-parse of every file."""
-    return paths.marked_subdirs(paths.macros_dirs(), MACRO_FILENAME)
+def macro_files(root: Path) -> list[Path]:
+    """The macro files under ``root``, sorted — `paths.leaf_files` with
+    the macro suffix."""
+    return paths.leaf_files(root, MACRO_SUFFIX)
+
+
+def list_names() -> set[str]:
+    """The macro names on disk across the search path — identity only,
+    no read, no parse. The stats prune set: `run_and_record` needs just
+    the names, so it must not pay `scan()`'s full parse of every file."""
+    return {p.stem for root in paths.macros_dirs() for p in macro_files(root)}
 
 
 def scan(root: Path | None = None) -> list[ScanEntry]:
-    """Every macro directory, sorted by name — valid or not. With no
-    ``root``, unions the search path (first dir wins per name — the
+    """Every macro file, sorted by name — valid or not. With no ``root``,
+    unions the search path (first dir wins per name — the
     `paths.playbooks_dirs` layering rule). The CLI's view; the engine
     uses `discover_enabled`. Conductor packs point this at their private
-    ``playbooks/<app>/macros/`` root — one scanner, one traversal guard,
-    one broad-except lesson."""
+    ``macros/`` roots — one scanner, one traversal guard, one
+    broad-except lesson."""
     if root is None:
         seen: set[str] = set()
         merged: list[ScanEntry] = []
         for r in paths.macros_dirs():
             for e in scan(r):
-                if e.dir_name not in seen:
-                    seen.add(e.dir_name)
+                if e.name not in seen:
+                    seen.add(e.name)
                     merged.append(e)
-        return sorted(merged, key=lambda e: e.dir_name)
-    if not root.exists():
+        return sorted(merged, key=lambda e: e.name)
+    files = macro_files(root)
+    if not files:
         return []
     root_real = root.resolve()
     out: list[ScanEntry] = []
-    for d in sorted(root.iterdir()):
-        if not d.is_dir() or d.name.startswith(("_", ".")):
-            continue
-        real = d.resolve()
+    for md in files:
+        real = md.resolve()
         if not real.is_relative_to(root_real):
             log.warning(
                 "macro %s resolves outside %s; skipping (path traversal guard)",
-                d.name,
+                md.stem,
                 root,
             )
-            out.append(ScanEntry(d.name, error="resolves outside the macros dir"))
-            continue
-        md = real / MACRO_FILENAME
-        if not md.exists():
-            out.append(ScanEntry(d.name, error=f"no {MACRO_FILENAME}"))
+            out.append(ScanEntry(md.stem, error="resolves outside the macros dir"))
             continue
         try:
-            out.append(ScanEntry(d.name, spec=parse_macro(read_text(md), d.name)))
+            out.append(ScanEntry(md.stem, spec=parse_macro(read_text(real), md.stem)))
         except Exception as e:
             # Deliberately broad: a malformed file must be excluded WHOLE, per
             # this module's contract, and the YAML loader does not confine
@@ -120,7 +126,7 @@ def scan(root: Path | None = None) -> list[ScanEntry]:
             # which used to escape all the way to `build_prompt_bundle` and
             # STUCK every wake. `BaseException` still propagates, so
             # KeyboardInterrupt and CancelledError are untouched.
-            out.append(ScanEntry(d.name, error=str(e) or type(e).__name__))
+            out.append(ScanEntry(md.stem, error=str(e) or type(e).__name__))
     return out
 
 
@@ -138,7 +144,7 @@ def discover_enabled() -> dict[str, Macro]:
     out: dict[str, Macro] = {}
     for entry in scan():
         if entry.error is not None:
-            log.warning("macro %s excluded: %s", entry.dir_name, entry.error)
+            log.warning("macro %s excluded: %s", entry.name, entry.error)
         elif entry.spec is not None and entry.spec.enabled:
             out[entry.spec.name] = entry.spec
     return out

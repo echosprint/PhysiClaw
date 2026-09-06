@@ -7,7 +7,7 @@ description: 由你编写并排练过的手势序列，智能体一次调用即�
 
 ## 创建宏
 
-生成模板，再编辑 `MACRO.yml`：
+生成模板，再编辑生成的宏文件：
 
 ```bash
 physiclaw macros init notify-user-wechat
@@ -16,11 +16,10 @@ physiclaw macros init notify-user-wechat
 <FileTree>
 - ~/.physiclaw/macros/
   - README.md
-  - notify-user-wechat/
-    - MACRO.yml
+  - notify-user-wechat.yml
 </FileTree>
 
-### MACRO.yml
+### notify-user-wechat.yml
 
 ```yaml
 name: notify-user-wechat
@@ -87,7 +86,7 @@ steps:
 physiclaw mcp
 ```
 
-检查所有 `MACRO.yml`，在真实场景验证宏能否正确执行：
+检查所有宏文件，在真实场景验证宏能否正确执行：
 
 ```bash
 physiclaw macros check

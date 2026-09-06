@@ -1,4 +1,4 @@
-"""MACRO.yml → a validated `Macro`.
+"""A macro file (`macros/<name>.yml`) → a validated `Macro`.
 
 The file shape follows GitHub Actions conventions at the top (``name`` /
 ``description`` / ``inputs.<id>.{description, default}``); each step is
@@ -177,16 +177,18 @@ assert _OBJECTS.keys() == OBJECT_ARG.keys()
 _yaml = YAML(typ="safe", pure=True)
 
 
-def parse_macro(text: str, dir_name: str) -> Macro:
-    """Parse + validate one MACRO.yml. Raises MacroError with a message
-    that names the offending field — never a partially-valid spec."""
+def parse_macro(text: str, stem: str) -> Macro:
+    """Parse + validate one macro file; `stem` is its file name without
+    the suffix, which `name:` must equal. Raises MacroError with a
+    message that names the offending field — never a partially-valid
+    spec."""
     text = resolve_placeholders(text, MacroError)
     try:
         data = _yaml.load(io.StringIO(text))
     except YAMLError as e:
         raise MacroError(f"invalid YAML: {e}") from e
     if not isinstance(data, dict):
-        raise MacroError("MACRO.yml must be a YAML mapping (key: value pairs)")
+        raise MacroError("a macro file must be a YAML mapping (key: value pairs)")
 
     reject_aliases(data)
 
@@ -195,8 +197,8 @@ def parse_macro(text: str, dir_name: str) -> Macro:
         raise MacroError(f"unknown key(s): {', '.join(map(str, unknown))}")
 
     name = _require_str(data.get("name"), "`name`")
-    if name != dir_name:
-        raise MacroError(f"name {name!r} must equal the directory name {dir_name!r}")
+    if name != stem:
+        raise MacroError(f"name {name!r} must equal the file name {stem!r}")
     check_name(name)
 
     description = _prose(data.get("description"), "`description`")
@@ -222,7 +224,7 @@ def parse_macro(text: str, dir_name: str) -> Macro:
 # What an embedded body must NOT carry: `name` (the caller synthesizes
 # it), `description` (the node it sits on is the context), `enabled` (an
 # inline macro goes live with its playbook, never on its own). The inline
-# vocabulary is derived by subtraction so a key added to the MACRO.yml
+# vocabulary is derived by subtraction so a key added to the macro-file
 # grammar reaches the inline form without a second edit.
 _IDENTITY_KEYS = frozenset({"name", "description", "enabled"})
 _INLINE_KEYS = frozenset(_TOP_KEYS) - _IDENTITY_KEYS
@@ -231,7 +233,7 @@ _INLINE_KEYS = frozenset(_TOP_KEYS) - _IDENTITY_KEYS
 def parse_inline_macro(data: Any, name: str) -> Macro:
     """A macro embedded where a name was expected (a playbook move's
     `macro:` mapping) → a validated `Macro` under the caller-synthesized
-    `name`. Same `inputs`/`steps` grammar and budgets as a MACRO.yml —
+    `name`. Same `inputs`/`steps` grammar and budgets as a macro file —
     one step parser, so the two homes can never drift — and always
     enabled (the embedding playbook's own `enabled:` is its gate).
     Raises MacroError; the caller frames it with the node's address."""

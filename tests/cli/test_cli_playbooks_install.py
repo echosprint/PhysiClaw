@@ -38,9 +38,10 @@ MANIFEST = (
 @pytest.fixture()
 def template(tmp_path: Path) -> Path:
     src = tmp_path / "template" / "channel"
-    (src / "macros" / "open").mkdir(parents=True)
-    (src / "macros" / "open" / "MACRO.yml").write_text(MACRO, encoding="utf-8")
-    (src / "PLAYBOOK.yml").write_text(MANIFEST, encoding="utf-8")
+    (src / "macros").mkdir(parents=True)
+    (src / "macros" / "open.yml").write_text(MACRO, encoding="utf-8")
+    (src / "README.md").write_text("# channel\nnotes for people\n", encoding="utf-8")
+    (src / "APP.yml").write_text(MANIFEST, encoding="utf-8")
     return src
 
 
@@ -51,8 +52,11 @@ def test_install_copies_verbatim_and_records_the_value(template: Path) -> None:
     assert "reach the user thread" in result.output  # tier-1 description echoed
     dest = paths.playbooks_dir() / "channel"
     # Tokens stay in the installed files — diffable against the template.
-    assert "<<CONTACT>>" in (dest / "PLAYBOOK.yml").read_text("utf-8")
-    macro = (dest / "macros/open/MACRO.yml").read_text("utf-8")
+    assert "<<CONTACT>>" in (dest / "APP.yml").read_text("utf-8")
+    assert (
+        (dest / "README.md").read_text("utf-8").startswith("# channel")
+    )  # notes travel
+    macro = (dest / "macros/open.yml").read_text("utf-8")
     assert "<<CONTACT>>" in macro and "Alice" not in macro
     assert "enabled: false" in macro  # disabled state preserved
     # The value went to the ONE local values file instead.

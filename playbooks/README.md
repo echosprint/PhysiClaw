@@ -5,7 +5,7 @@ against a phone. Like `skills/`, these ship with the repo so a
 task one user has rehearsed can be adopted by another with minimal
 adaptation.
 
-## Pack layout — a manifest and one file per playbook
+## Pack layout — a manifest, one folder per playbook
 
 A pack is a folder. The manifest names the app and holds what every
 playbook of that app shares; each playbook is its own file beside it,
@@ -14,11 +14,20 @@ resource, and a Maestro workspace one `config.yaml` beside one flow
 per journey:
 
     <app>/
-    ├── PLAYBOOK.yml         # the MANIFEST: meta + placeholders + landmarks + shared pages
-    ├── <name>.yml           # one playbook per file: name (= the stem), description, enabled, inputs, route
-    └── macros/<n>/MACRO.yml # the pack's hands (recorded gestures) routes share
+    ├── APP.yml              # the MANIFEST: meta + placeholders + landmarks + shared pages
+    ├── README.md            # for people: what the pack does, the device, the traps (never loaded)
+    ├── macros/<n>.yml       # the pack's hands (recorded gestures) every route shares
+    └── <name>/              # one playbook per folder; the folder is the name
+        ├── PLAYBOOK.yml     # the route: name (= the folder), description, enabled, inputs, route
+        ├── macros/<n>.yml   # this route's own recorded hands (dispatch <app>/<name>.<n>)
+        ├── prompts/<n>.md   # this route's prose for the model (`prompt: prompts.<n>`)
+        └── README.md        # the route's notes for people (never loaded)
 
-`PLAYBOOK.yml` never carries a route. Every section is optional, so an
+A folder with `APP.yml` is a pack; a folder inside it with `PLAYBOOK.yml`
+is a playbook; `macros/` and `prompts/` hold leaf files and are never
+mistaken for one. A name resolves against the pack's `macros/` plus the
+route's own, and may not appear in both, so there is no lookup order.
+`APP.yml` never carries a route. Every section is optional, so an
 empty file is a valid pack (the file is the pack marker):
 
 - `app` (must equal the folder when present) and `description` (what
@@ -37,10 +46,11 @@ empty file is a valid pack (the file is the pack marker):
   `recover:` hand too — a gesture, a landmark tap, or a pack macro by
   name — which every route inherits unless it declares its own.
 
-`<name>.yml` is the playbook, headed like a macro or a skill: `name`
-(must equal the file's), `description` (the line the activation menu
+`<name>/PLAYBOOK.yml` is the playbook, headed like a macro or a skill: `name`
+(must equal the folder's), `description` (the line the activation menu
 shows — name the app the way users say it, 淘宝 not taobao, so two
-packs offering the same task read apart), `enabled`, `inputs`, and
+packs offering the same task read apart), `enabled`, `inputs` (a
+`default:` makes one optional; the boot's menu says so), and
 `route` — a ROUTE of `page:` waypoints (checked every time, each
 optionally declaring its own `recover:` — one hand (`go_back`,
 `{tap: landmarks.<name>}`, `{macro: <name>}`), or
@@ -81,7 +91,7 @@ Adaptation notes and the rehearsal checklist ride as comments in the
 files.
 
 `channel/` is the conductor's own pack: the thread page, the
-send/open macros an `ask` runs, and `boot.yml` — the walk every wake
+send/open macros an `ask` runs, and `boot/` — the walk every wake
 plays before any playbook (reach the thread, read the request, hand
 the matching playbook the baton). Its `select` step is the one
 entry only that file may carry; the hands and limits around it are
@@ -96,7 +106,7 @@ yours to edit, step, and replay like any route.
 tokens stay in the files, diffable against this template forever — and
 records their values in `~/.physiclaw/playbooks/placeholders.yml`,
 prompting (with the manifest's prose) for any token that has no value
-yet. `PLAYBOOK.yml` installs with the pack, so the docs travel with it.
+yet. `APP.yml` and every README install with the pack, so the docs travel with it.
 
 When physiclaw runs from a source checkout, these template packs load
 directly (repo edits are live, no install step); a same-named pack

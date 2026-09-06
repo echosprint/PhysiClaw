@@ -1,8 +1,8 @@
 # The pack MANIFEST — what the app is and what its playbooks share:
 # placeholders, landmarks, and any pages more than one route lands on.
-# Never a route: each playbook is its own <name>.yml beside this file
-# (buy.yml → taobao/buy), and the hands routes share are pack macros
-# (macros/launch is the cold launch every route starts with).
+# Never a route: each playbook is its own folder beside this file
+# (buy/PLAYBOOK.yml → taobao/buy), and the hands routes share are pack
+# macros (macros/launch.yml is the cold launch every route starts with).
 app: taobao
 description: >-
   Buy one item on 淘宝 (Taobao) by keyword, deterministically — search →

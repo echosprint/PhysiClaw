@@ -536,7 +536,7 @@ def macro_catalog() -> list[dict]:
     from physiclaw.conductor.spec.pack import list_apps
     from physiclaw.macros import store as macro_store
 
-    out = [_macro_item(e.dir_name, "user", e.spec, e.error) for e in macro_store.scan()]
+    out = [_macro_item(e.name, "user", e.spec, e.error) for e in macro_store.scan()]
     for app in list_apps():
         try:
             macros, errors = _pack_macros(app)
@@ -572,7 +572,7 @@ def find_macro(name: str) -> Macro:
             )
         return spec
     for e in macro_store.scan():
-        if e.dir_name == name:
+        if e.name == name:
             if e.spec is None:
                 raise MacroError(f"{name}: {e.error}")
             return e.spec

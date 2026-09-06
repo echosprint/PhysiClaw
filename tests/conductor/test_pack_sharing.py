@@ -6,7 +6,7 @@ before the second task arrives, proved on a fixture pack."""
 from __future__ import annotations
 
 import pytest
-from conductor_fakes import PACK_MACRO
+from conductor_fakes import PACK_MACRO, write_local_macro, write_playbook
 
 from physiclaw.common import paths
 from physiclaw.common.placeholders import write_placeholder_values
@@ -84,13 +84,14 @@ def _write_pack(app: str, manifest: str, **playbooks: str):
     """A pack the fixtures share: two recorded hands, the manifest, and
     the playbook files given by name."""
     root = paths.playbooks_dir() / app
+    (root / "macros").mkdir(parents=True)
     for name in ("launch", "search"):
-        d = root / "macros" / name
-        d.mkdir(parents=True)
-        (d / "MACRO.yml").write_text(PACK_MACRO.format(name=name), encoding="utf-8")
-    (root / "PLAYBOOK.yml").write_text(manifest, encoding="utf-8")
+        (root / "macros" / f"{name}.yml").write_text(
+            PACK_MACRO.format(name=name), encoding="utf-8"
+        )
+    (root / "APP.yml").write_text(manifest, encoding="utf-8")
     for name, text in playbooks.items():
-        (root / f"{name}.yml").write_text(text, encoding="utf-8")
+        write_playbook(root, name, text)
     return root
 
 
@@ -172,7 +173,7 @@ def test_the_matcher_sees_the_shared_pages_and_a_walk_builds(shop) -> None:
 def test_manifest_hand_must_name_a_recorded_macro_never_a_body(shop) -> None:
     # Resolved by each route's compiler: every playbook of the pack
     # reports the manifest's fault, the pack itself still loads.
-    (shop / "PLAYBOOK.yml").write_text(
+    (shop / "APP.yml").write_text(
         MANIFEST.replace(
             "elsewhere: {macro: launch}",
             "elsewhere: {macro: {steps: [home_screen]}}\n",
@@ -182,13 +183,15 @@ def test_manifest_hand_must_name_a_recorded_macro_never_a_body(shop) -> None:
 
     entries = pb.scan_playbooks("shop")
 
-    assert all("record the body under macros" in (e.error or "") for e in entries)
+    assert all(
+        "record the body as macros/<name>.yml" in (e.error or "") for e in entries
+    )
 
 
 def test_manifest_hand_on_an_undeclared_page_is_refused(shop) -> None:
     # A page entry with a hand and no anchors is not a declaration: the
     # pack refuses it as a page, before any route could inherit it.
-    (shop / "PLAYBOOK.yml").write_text(
+    (shop / "APP.yml").write_text(
         MANIFEST + "  ghost:\n    recover: go_back\n", encoding="utf-8"
     )
 
@@ -197,7 +200,8 @@ def test_manifest_hand_on_an_undeclared_page_is_refused(shop) -> None:
 
 
 def test_a_page_declared_in_the_manifest_and_a_file_is_refused(shop) -> None:
-    (shop / "track.yml").write_text(
+    (shop / "track").mkdir(exist_ok=True)
+    (shop / "track" / "PLAYBOOK.yml").write_text(
         TRACK.replace(
             "  - page: home\n", '  - page: home\n    anchors: ["Files"]\n', 1
         ),
@@ -233,3 +237,128 @@ def test_activation_menu_is_one_line_per_playbook_and_check_flags_twins(shop) ->
         "- mall/buy: buy something [inputs: keyword (what to search)]",
     ]
     assert "same description" in result.output and "mall/buy" in result.output
+
+
+# ---------- a playbook's own recorded hands ----------
+
+LOCAL_BUY = """\
+name: buy
+description: buy with its own recorded search
+route:
+  - start: open
+    macro: launch
+  - page: home
+  - do: find
+    macro: search-own
+  - page: results
+"""
+
+
+def test_a_playbook_macro_file_resolves_by_bare_name_under_the_inline_spelling() -> (
+    None
+):
+    root = _write_pack("shop", MANIFEST, buy=LOCAL_BUY)
+    write_local_macro(root, "buy", "search-own")
+
+    pack = pb.load_pack("shop")
+    (buy,) = (e.spec for e in pb.scan_playbooks("shop", pack) if e.name == "buy")
+
+    assert buy is not None
+    # The route names it bare; it dispatches as the route's own, exactly
+    # like an inline body, and joins the pack's dispatch table.
+    assert buy.nodes[1].macro == "buy.search-own"
+    assert buy.inline_macros["buy.search-own"].name == "buy.search-own"
+    assert set(qualified_all("shop", pack)) == {
+        "shop/launch",
+        "shop/search",
+        "shop/buy.search-own",
+    }
+
+
+def test_an_unreferenced_playbook_macro_is_still_the_routes_to_run() -> None:
+    root = _write_pack("shop", MANIFEST, buy=LOCAL_BUY)
+    write_local_macro(root, "buy", "search-own")
+    write_local_macro(root, "buy", "spare")
+
+    pack = pb.load_pack("shop")
+
+    assert "shop/buy.spare" in qualified_all("shop", pack)
+
+
+def test_a_name_in_both_the_pack_and_the_playbook_is_refused() -> None:
+    root = _write_pack("shop", MANIFEST, buy=LOCAL_BUY)
+    write_local_macro(root, "buy", "search")  # the pack already records `search`
+
+    entries = {e.name: e for e in pb.scan_playbooks("shop")}
+
+    assert "declared both in buy/macros/ and the pack's macros/" in (
+        entries["buy"].error or ""
+    )
+
+
+def test_two_playbooks_may_each_own_a_macro_of_the_same_name() -> None:
+    root = _write_pack(
+        "shop",
+        MANIFEST,
+        buy=LOCAL_BUY,
+        track=LOCAL_BUY.replace("name: buy", "name: track"),
+    )
+    write_local_macro(root, "buy", "search-own")
+    write_local_macro(root, "track", "search-own")
+
+    pack = pb.load_pack("shop")
+    specs = {e.name: e.spec for e in pb.scan_playbooks("shop", pack)}
+
+    assert specs["buy"].nodes[1].macro == "buy.search-own"
+    assert specs["track"].nodes[1].macro == "track.search-own"
+
+
+def test_a_broken_playbook_macro_fails_the_route_that_names_it_with_the_cause() -> None:
+    root = _write_pack("shop", MANIFEST, buy=LOCAL_BUY)
+    write_local_macro(root, "buy", "search-own", "name: other\n")
+
+    pack = pb.load_pack("shop")
+    entries = {e.name: e for e in pb.scan_playbooks("shop", pack)}
+
+    assert pack.local["buy"].macros.errors["search-own"]
+    assert "buy/macros/search-own.yml) is invalid" in (entries["buy"].error or "")
+
+
+def test_an_inline_body_may_not_take_a_recorded_macros_name() -> None:
+    inline = LOCAL_BUY.replace(
+        "    macro: search-own\n", "    macro: {steps: [home_screen]}\n"
+    ).replace("do: find", "do: search-own")
+    root = _write_pack("shop", MANIFEST, buy=inline)
+    write_local_macro(root, "buy", "search-own")
+
+    entries = {e.name: e for e in pb.scan_playbooks("shop")}
+
+    assert "already holds — rename one" in (entries["buy"].error or "")
+
+
+# ---------- optional inputs ----------
+
+
+def test_an_input_with_a_default_is_optional_and_the_menu_says_so() -> None:
+    # The boot's parse prompt tells the model to omit inputs the message
+    # does not specify; a default makes that safe, and the menu names it
+    # so the model knows which omissions the activation will fill.
+    optional = LOCAL_BUY.replace(
+        "description: buy with its own recorded search\n",
+        "description: buy with its own recorded search\n"
+        "inputs:\n  keyword:\n    description: what to buy\n"
+        '  qty:\n    description: how many\n    default: "1"\n',
+    )
+    _write_pack("shop", MANIFEST, buy=optional)
+    write_local_macro(paths.playbooks_dir() / "shop", "buy", "search-own")
+    entries = activation.discover().entries
+    spec, pack = entries["shop/buy"]
+
+    menu = activation.Activation(entries=entries, channel=None)._menu()
+
+    assert "qty (how many; optional, default '1')" in menu
+    assert "keyword (what to buy)" in menu
+    assert build.resolve_inputs(spec, {"keyword": "water"}) == {
+        "keyword": "water",
+        "qty": "1",
+    }

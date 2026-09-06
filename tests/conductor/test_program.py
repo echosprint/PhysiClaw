@@ -497,7 +497,7 @@ def test_session_setup_builds_the_boot_and_hidden_registry() -> None:
 
     assert prog is not None
     assert prog.app == "channel" and prog.spec.name == "boot" and prog.dry
-    assert (paths.playbooks_dir() / "channel" / "boot.yml").exists()
+    assert (paths.playbooks_dir() / "channel" / "boot" / "PLAYBOOK.yml").exists()
     assert isinstance(prog.spec.nodes[-1], ActivateNode)
     activation = prog.activation
     assert activation is not None
@@ -536,7 +536,7 @@ def test_session_setup_builds_no_boot_without_an_enabled_playbook() -> None:
     # turns to read a thread no playbook could answer.
     write_channel(CHANNEL_OPEN)
     write_pack(playbooks={"flow": FLOW.replace("enabled: true", "enabled: false")})
-    (paths_mod.playbooks_dir() / "demo" / "flow.yml").write_text(
+    (paths_mod.playbooks_dir() / "demo" / "flow" / "PLAYBOOK.yml").write_text(
         "name: flow\nenabled: false\n" + FLOW, encoding="utf-8"
     )
 

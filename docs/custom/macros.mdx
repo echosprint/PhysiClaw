@@ -7,7 +7,7 @@ Tokens are expensive. A macro batches many gestures into a single model call, so
 
 ## Create a macro
 
-Scaffold one, then edit the `MACRO.yml` file:
+Scaffold one, then edit the macro file:
 
 ```bash
 physiclaw macros init notify-user-whatsapp
@@ -16,11 +16,10 @@ physiclaw macros init notify-user-whatsapp
 <FileTree>
 - ~/.physiclaw/macros/
   - README.md
-  - notify-user-whatsapp/
-    - MACRO.yml
+  - notify-user-whatsapp.yml
 </FileTree>
 
-### MACRO.yml
+### notify-user-whatsapp.yml
 
 ```yaml
 name: notify-user-whatsapp
@@ -90,7 +89,7 @@ Start the MCP server:
 physiclaw mcp
 ```
 
-Then lint every `MACRO.yml` and replay this one on the live rig:
+Then lint every macro file and replay this one on the live rig:
 
 ```bash
 physiclaw macros check

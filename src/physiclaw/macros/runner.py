@@ -112,7 +112,7 @@ async def run_and_record(
     its own namespace instead of shadowing — or being pruned as — a user
     macro's."""
     name = record_as or spec.name
-    known = store.list_dir_names()
+    known = store.list_names()
     rlog = runlog.RunLogger(name, caller)
 
     def record(ok: bool, step: int | None, reason: str | None, detail: str) -> None:

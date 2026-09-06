@@ -29,9 +29,7 @@ def _pack_files(app: str) -> list[Path]:
 def _manifest(app: str) -> dict:
     from ruamel.yaml import YAML
 
-    return YAML(typ="safe", pure=True).load(
-        read_text(TEMPLATES_ROOT / app / "PLAYBOOK.yml")
-    )
+    return YAML(typ="safe", pure=True).load(read_text(TEMPLATES_ROOT / app / "APP.yml"))
 
 
 def test_templates_exist() -> None:

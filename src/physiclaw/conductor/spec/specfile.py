@@ -1,6 +1,6 @@
 """Shared scalar layer for the conductor's YAML spec files.
 
-A pack's spec file (PLAYBOOK.yml) follows the MACRO.yml conventions — same
+A pack's manifest (APP.yml) follows the macro-file conventions — same
 naming rule, same prose caps, same strict-string coercion hints, same
 YAML 1.2 pure loader. The rules' one true home is the macro layer
 (`macros/model.py` constants, `check_name`'s wording); this module
@@ -17,7 +17,11 @@ from typing import Any, Callable
 from ruamel.yaml import YAML
 
 from physiclaw.common import paths
-from physiclaw.common.paths import PACK_FILENAME
+from physiclaw.common.paths import (
+    PACK_FILENAME,
+    PLAYBOOK_FILENAME,
+    RESERVED_PACK_DIRS,
+)
 from physiclaw.common.placeholders import placeholder_values, resolve_placeholders
 from physiclaw.common.text import read_text
 from physiclaw.macros.model import (
@@ -51,7 +55,7 @@ yaml_loader = YAML(typ="safe", pure=True)
 
 
 # The manifest's sections — what the app IS and what its routes share.
-# Never a route: each playbook is its own `<name>.yml` beside the
+# Never a route: each playbook is its own `<name>/PLAYBOOK.yml` beside the
 # manifest (`load_playbook_docs`), so `playbooks:` is refused with the
 # reason.
 _PACK_TOP_KEYS = frozenset({"app", "description", "placeholders", "pages", "landmarks"})
@@ -85,7 +89,7 @@ def load_yaml(
 
 
 def load_pack_doc(app: str, error_cls: type[Exception]) -> dict | None:
-    """`playbooks/<app>/PLAYBOOK.yml`, the manifest, loaded and
+    """`playbooks/<app>/APP.yml`, the manifest, loaded and
     top-checked: a mapping with only the known sections, no unpopulated
     template placeholders — or empty, which is a valid manifest (the
     file is the pack marker; every section is optional). None when the
@@ -103,8 +107,9 @@ def load_pack_doc(app: str, error_cls: type[Exception]) -> dict | None:
     if "playbooks" in data:
         raise error_cls(
             f"{app}/{PACK_FILENAME}: `playbooks` does not live in the manifest "
-            "— write each playbook as its own <name>.yml beside it (the "
-            "file body is the playbook: name, description, enabled, inputs, route)"
+            "— write each playbook as its own <name>/PLAYBOOK.yml folder beside "
+            "it (the file body is the playbook: name, description, enabled, "
+            "inputs, route)"
         )
     unknown = sorted(set(map(str, data.keys())) - _PACK_TOP_KEYS)
     if unknown:
@@ -116,37 +121,55 @@ def load_pack_doc(app: str, error_cls: type[Exception]) -> dict | None:
 
 
 def load_playbook_docs(
-    app: str, error_cls: type[ValueError], root: Path | None = None
+    app: str,
+    error_cls: type[ValueError],
+    root: Path | None = None,
+    values: dict[str, str] | None = None,
 ) -> tuple[dict[str, Any], dict[str, str]]:
-    """Every playbook file of a pack — `playbooks/<app>/<name>.yml`,
-    any YAML beside the manifest — as raw documents keyed by the file
-    stem (the playbook's name, referenced as `<app>/<name>`), plus the
-    files that would not load, by name with the reason. A bad file
-    excludes itself, never the pack: `scan_playbooks` reports it as an
-    invalid entry. The stem follows the move-name grammar, so a file
-    the grammar refuses is an error entry too; a `_` or `.` prefix is
-    the one skip convention every artifact lister shares (a draft the
-    author parks beside the pack). `root` is the pack's directory when
-    the caller already resolved it."""
+    """Every playbook of a pack — `playbooks/<app>/<name>/PLAYBOOK.yml`,
+    one folder per playbook beside the manifest — as raw documents keyed
+    by the folder name (the playbook's name, referenced as
+    `<app>/<name>`), plus what would not load, by name with the reason.
+    A bad file excludes itself, never the pack: `scan_playbooks` reports
+    it as an invalid entry. The folder name follows the move-name
+    grammar, so a folder the grammar refuses is an error entry too; a
+    `_` or `.` prefix is the one skip convention every artifact lister
+    shares (a draft the author parks beside the pack). Two strays are
+    error entries so they never vanish silently: a `*.yml` at pack level
+    that is not the manifest (a route that belongs in a folder, keyed
+    by its file name so it can never shadow the folder it should be),
+    and a folder with no PLAYBOOK.yml that is not `macros/` or
+    `prompts/`. `root` is the pack's directory when the caller already
+    resolved it; `values` the placeholder values when the caller read
+    them (one read per pack load)."""
     root = paths.pack_root(app) if root is None else root
     name_check = bind(error_cls)[3]
-    try:
-        values = placeholder_values()
-    except ValueError as e:
-        raise error_cls(str(e)) from e
+    if values is None:
+        try:
+            values = placeholder_values()
+        except ValueError as e:
+            raise error_cls(str(e)) from e
     docs: dict[str, Any] = {}
     errors: dict[str, str] = {}
-    for path in sorted(root.glob("*.yml")):
-        if (
-            path.name == PACK_FILENAME
-            or path.name.startswith(("_", "."))
-            or not path.is_file()
-        ):
+    for stray in paths.leaf_files(root, ".yml"):
+        if stray.name != PACK_FILENAME:
+            errors[stray.name] = (
+                f"{app}/{stray.name}: a playbook is a folder — move it to "
+                f"{stray.stem}/{PLAYBOOK_FILENAME}"
+            )
+    for folder in sorted(p for p in root.iterdir() if p.is_dir()):
+        name = folder.name
+        if paths.is_skipped(name) or name in RESERVED_PACK_DIRS:
             continue
-        name = path.stem
-        where = f"{app}/{path.name}"
+        path = folder / PLAYBOOK_FILENAME
+        where = f"{app}/{name}/{PLAYBOOK_FILENAME}"
+        if not path.is_file():
+            errors[name] = (
+                f"{app}/{name}/: a folder with no {PLAYBOOK_FILENAME} is not a playbook"
+            )
+            continue
         try:
-            name_check(name, f"{where}: playbook file name")
+            name_check(name, f"{where}: playbook folder name")
             data = load_yaml(read_text(path), error_cls, where=where, values=values)
             if not isinstance(data, dict):
                 raise error_cls(

@@ -1,4 +1,4 @@
-"""Tests for the boot — `channel/boot.yml` walked by the ordinary
+"""Tests for the boot — `channel/boot/PLAYBOOK.yml` walked by the ordinary
 `Program`, with `step_activate` as its last node: routing, the
 declared bounds, and the rules the field data forced (act on an
 unknown screen; spend nothing on a blocked call; recognize a sleeping
@@ -50,7 +50,7 @@ def _boot(boot_yml: str | None = None) -> Program:
     write_channel(CHANNEL_OPEN)
     write_pack(playbooks={"flow": FLOW})
     if boot_yml is not None:
-        (paths.playbooks_dir() / "channel" / "boot.yml").write_text(
+        (paths.playbooks_dir() / "channel" / "boot" / "PLAYBOOK.yml").write_text(
             boot_yml, encoding="utf-8"
         )
     program, _ = setup.session_setup()
@@ -304,7 +304,7 @@ def test_the_boot_route_is_authorable() -> None:
 def test_a_disabled_boot_means_a_plain_session() -> None:
     write_channel(CHANNEL_OPEN)
     write_pack(playbooks={"flow": FLOW})
-    (paths.playbooks_dir() / "channel" / "boot.yml").write_text(
+    (paths.playbooks_dir() / "channel" / "boot" / "PLAYBOOK.yml").write_text(
         "name: boot\ndescription: off\nenabled: false\nroute:\n"
         "  - page: thread\n  - select: parse\n",
         encoding="utf-8",

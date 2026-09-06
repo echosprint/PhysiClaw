@@ -5,7 +5,7 @@ exact field and rule; the money lint is the safety substance."""
 from __future__ import annotations
 
 import pytest
-from conductor_fakes import CHANNEL_OPEN, write_pack
+from conductor_fakes import CHANNEL_OPEN, write_pack, write_playbook
 
 from physiclaw.common import paths
 from physiclaw.conductor.spec import pack as pb
@@ -80,7 +80,7 @@ def _required_message_pack(app: str = "demo"):
     fixture defaults it (a role macro must carry no required inputs), so
     tests exercising the missing-required lints strip the default here."""
     root = write_pack(app)
-    mp = root / "macros" / "open-app" / "MACRO.yml"
+    mp = root / "macros" / "open-app.yml"
     mp.write_text(
         mp.read_text(encoding="utf-8").replace("    default: hi\n", ""),
         encoding="utf-8",
@@ -525,9 +525,7 @@ def test_do_missing_required_macro_input_rejected() -> None:
 
 def test_load_pack_carries_macro_errors() -> None:
     root = write_pack()
-    bad = root / "macros" / "broken"
-    bad.mkdir()
-    (bad / "MACRO.yml").write_text("name: mismatch\n", encoding="utf-8")
+    (root / "macros" / "broken.yml").write_text("name: mismatch\n", encoding="utf-8")
 
     pack = pb.load_pack("demo")
 
@@ -540,7 +538,7 @@ def test_load_pack_bad_pages_raises_playbook_error() -> None:
 
     root = paths.playbooks_dir() / "demo"
     root.mkdir(parents=True)
-    (root / "PLAYBOOK.yml").write_text(
+    (root / "APP.yml").write_text(
         compose_pack_doc("demo", "Bad Name:\n  anchors: ['x']"), encoding="utf-8"
     )
 
@@ -574,20 +572,13 @@ def test_scaffolded_ios_pack_parses_clean() -> None:
 
 
 def test_scaffolded_pack_parses_clean() -> None:
-    from physiclaw.common.text import write_text
     from physiclaw.conductor.spec import scaffold
 
-    root = paths.playbooks_dir() / "newapp"
-    (root / pb.PACK_MACROS_DIRNAME / scaffold.EXAMPLE_MACRO).mkdir(parents=True)
-    write_text(root / "PLAYBOOK.yml", scaffold.render_manifest_stub("newapp"))
-    write_text(
-        root / f"{scaffold.EXAMPLE_PLAYBOOK}.yml",
-        scaffold.render_playbook_stub("newapp"),
-    )
-    write_text(
-        root / pb.PACK_MACROS_DIRNAME / scaffold.EXAMPLE_MACRO / "MACRO.yml",
-        scaffold.render_example_macro(),
-    )
+    # The real scaffold, whole: manifest, README, the example playbook
+    # folder with its README, the example pack macro.
+    root = scaffold.init_pack("newapp")
+    assert (root / "README.md").is_file()
+    assert (root / scaffold.EXAMPLE_PLAYBOOK / "README.md").is_file()
 
     (entry,) = pb.scan_playbooks("newapp")
 
@@ -602,8 +593,8 @@ def test_scaffolded_pack_parses_clean() -> None:
 def test_an_empty_manifest_is_a_pack() -> None:
     root = paths.playbooks_dir() / "bare"
     root.mkdir(parents=True)
-    (root / "PLAYBOOK.yml").write_text("", encoding="utf-8")
-    (root / "flow.yml").write_text("name: flow\n" + FLOW_MIN, encoding="utf-8")
+    (root / "APP.yml").write_text("", encoding="utf-8")
+    write_playbook(root, "flow", FLOW_MIN)
 
     pack = pb.load_pack("bare")
 
@@ -614,11 +605,11 @@ def test_an_empty_manifest_is_a_pack() -> None:
 
 def test_manifest_refuses_a_playbooks_section() -> None:
     root = write_pack()
-    (root / "PLAYBOOK.yml").write_text(
+    (root / "APP.yml").write_text(
         "app: demo\nplaybooks:\n  x: {description: d, route: []}\n", encoding="utf-8"
     )
 
-    with pytest.raises(PlaybookError, match="own <name>.yml"):
+    with pytest.raises(PlaybookError, match="own <name>/PLAYBOOK.yml"):
         pb.load_pack("demo")
 
 
@@ -626,14 +617,20 @@ def test_a_playbook_file_that_will_not_load_is_an_invalid_entry() -> None:
     root = write_pack(
         pages='results:\n  anchors: ["综合"]\n', playbooks={"flow": FLOW_MIN}
     )
-    (root / "broken.yml").write_text("route: [\n", encoding="utf-8")
-    (root / "Bad Name.yml").write_text("description: d\n", encoding="utf-8")
+    write_playbook(root, "broken", "route: [\n")
+    write_playbook(root, "Bad Name", "description: d\n")
+    (root / "stray.yml").write_text("name: stray\n" + FLOW_MIN, encoding="utf-8")
+    (root / "notes").mkdir()
 
     entries = {e.name: e for e in pb.scan_playbooks("demo")}
 
     assert entries["flow"].spec is not None
     assert "invalid YAML" in (entries["broken"].error or "")
     assert entries["Bad Name"].spec is None and entries["Bad Name"].error
+    # The two strays of the folder layout read as invalid entries, never
+    # as silence: a route left at pack level, a folder with no PLAYBOOK.yml.
+    assert "move it to stray/PLAYBOOK.yml" in (entries["stray.yml"].error or "")
+    assert "no PLAYBOOK.yml" in (entries["notes"].error or "")
 
 
 def test_a_page_declared_in_two_files_is_a_pack_error() -> None:
@@ -711,7 +708,7 @@ def test_inline_body_errors_are_framed_with_the_move() -> None:
 def test_do_macro_rejects_a_non_string_non_mapping() -> None:
     text = VALID.replace("macro: open-app", "macro: 3")
 
-    with pytest.raises(PlaybookError, match="pack macro name or an inline mapping"):
+    with pytest.raises(PlaybookError, match="macro name or an inline mapping"):
         pb.parse_playbook(text, "buy", _pack())
 
 
@@ -719,7 +716,7 @@ def test_disabled_macros_skips_inline_bodies() -> None:
     # An inline macro is not in `pack.macros` — the readiness check must
     # neither KeyError on it nor report it (its gate is the playbook's).
     root = write_pack()
-    mp = root / "macros" / "add-cart" / "MACRO.yml"
+    mp = root / "macros" / "add-cart.yml"
     mp.write_text(mp.read_text(encoding="utf-8") + "enabled: false\n", encoding="utf-8")
     pack = pb.load_pack("demo")
 
@@ -739,9 +736,9 @@ def test_qualified_inline_mints_dispatch_keys() -> None:
 def test_pack_doc_rejects_yaml_aliases() -> None:
     # Inline macros put clause parsing (which materializes per path — the
     # alias-bomb ride) inside the pack file, so the pack door inherits
-    # the MACRO.yml document-wide guard.
+    # the macro-file document-wide guard.
     root = write_pack()
-    (root / "PLAYBOOK.yml").write_text(
+    (root / "APP.yml").write_text(
         "app: demo\ndescription: d\n"
         "pages: &a {home: {anchors: [Files]}}\nplaybooks: *a\n",
         encoding="utf-8",
@@ -826,9 +823,7 @@ def test_disabled_recover_macro_is_reported_not_run() -> None:
     from conductor_fakes import PACK_MACRO
 
     root = write_pack()
-    d = root / "macros" / "go-home"
-    d.mkdir(parents=True)
-    (d / "MACRO.yml").write_text(
+    (root / "macros" / "go-home.yml").write_text(
         PACK_MACRO.format(name="go-home") + "enabled: false\n", encoding="utf-8"
     )
     pack = pb.load_pack("demo")

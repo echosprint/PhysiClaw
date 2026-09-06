@@ -1,11 +1,12 @@
 """The pack door — `playbooks/<app>/` on disk → validated `Playbook`s.
 
-A pack is a folder: `PLAYBOOK.yml`, the MANIFEST (what the app is and
-what its routes share — meta, placeholders, landmarks, pages; every
-section optional, the file may be empty), one `<name>.yml` per
-playbook beside it (the stem is the name, referenced as `<app>/<name>`,
-and `name:` must agree with it), and `macros/<name>/MACRO.yml` for the
-recorded hands routes share. The manifest never carries a route.
+A pack is a folder: `APP.yml`, the MANIFEST (what the app is and what
+its routes share — meta, placeholders, landmarks, pages; every section
+optional, the file may be empty), one `<name>/PLAYBOOK.yml` folder per
+playbook beside it (the folder is the name, referenced as
+`<app>/<name>`, and `name:` must agree with it), `macros/<name>.yml`
+for the recorded hands routes share, and inside a playbook folder its
+own `macros/` and `prompts/`. The manifest never carries a route.
 
 This module loads and scans packs, spells the qualified `app/name`
 dispatch key every macro site shares, and holds the live rule a wake
@@ -13,22 +14,31 @@ requires of a playbook. The model is `model.py`; the compiler is
 `route.py`.
 """
 
+from pathlib import Path
 from typing import Any
 
 from physiclaw.common import paths
-from physiclaw.common.paths import PACK_FILENAME
+from physiclaw.common.paths import (
+    PACK_FILENAME,
+    PACK_MACROS_DIRNAME,
+    PACK_PROMPTS_DIRNAME,
+    PROMPT_SUFFIX,
+)
+from physiclaw.common.placeholders import placeholder_values, resolve_placeholders
+from physiclaw.common.text import read_text
 from physiclaw.conductor.spec import scaffold, specfile
 from physiclaw.conductor.spec.conventions import CHANNEL_APP
 from physiclaw.conductor.spec.model import (
-    PACK_MACROS_DIRNAME,
     AgentNode,
     AskNode,
     DoNode,
+    Files,
     Pack,
     Playbook,
     PlaybookEntry,
     PlaybookError,
     PlaybookInput,
+    Scanned,
     check_name,
     prose,
     require_str,
@@ -96,7 +106,7 @@ def qualified_all(app: str, pack: Pack) -> dict[str, Macro]:
 
 
 def load_pack(app: str) -> Pack:
-    """The app pack, whole: the manifest (`PLAYBOOK.yml` — what the app
+    """The app pack, whole: the manifest (`APP.yml` — what the app
     is and what its routes share: meta, placeholders, landmarks,
     pages), the playbook files beside it (raw, parsed per entry by
     `scan_playbooks`), and the recorded macros. A broken pack macro is
@@ -114,7 +124,11 @@ def load_pack(app: str) -> Pack:
         # its wake, and every door — wake, step, run, check — sees the
         # same pack.
         scaffold.ensure_channel_boot(root)
-    docs, pb_errors = specfile.load_playbook_docs(app, PlaybookError, root)
+    try:
+        values = placeholder_values()  # read once for every file of the pack
+    except ValueError as e:
+        raise PlaybookError(str(e)) from e
+    docs, pb_errors = specfile.load_playbook_docs(app, PlaybookError, root, values)
     try:
         # Appendix + route-declared waypoints across every playbook
         # file, one namespace — the matcher and every playbook validate
@@ -126,27 +140,75 @@ def load_pack(app: str) -> Pack:
         landmarks = pack_landmarks(doc)
     except PagesError as e:
         raise PlaybookError(f"{app}/{PACK_FILENAME} landmarks: {e}") from e
-    macros: dict[str, Macro] = {}
-    errors: dict[str, str] = {}
-    macros_root = root / PACK_MACROS_DIRNAME
-    if macros_root.is_dir():
-        # One scanner for both macro roots: traversal guard, dot-dir
-        # convention, and the broad-except lesson live in `store.scan`.
-        for entry in macro_store.scan(macros_root):
-            if entry.spec is not None:
-                macros[entry.dir_name] = entry.spec
-            else:
-                errors[entry.dir_name] = entry.error or "invalid"
+    # One scanner per leaf kind, run on the pack's folders and on each
+    # playbook's: traversal guard, skip convention, and the broad-except
+    # lesson live in `store.scan` and `paths.leaf_files`.
+    macros = _scan_macros(root / PACK_MACROS_DIRNAME)
     return Pack(
         app=app,
         pages=pages,
-        macros=macros,
-        macro_errors=errors,
+        macros=macros.ok,
+        macro_errors=macros.errors,
         playbook_docs=docs,
         playbook_errors=pb_errors,
+        prompts=_scan_prompts(root / PACK_PROMPTS_DIRNAME, values),
+        local={
+            name: Files(
+                macros=_scan_macros(root / name / PACK_MACROS_DIRNAME),
+                prompts=_scan_prompts(root / name / PACK_PROMPTS_DIRNAME, values),
+            )
+            for name in docs
+        },
         landmarks=landmarks,
         page_recovers=collect_page_recovers(doc),
     )
+
+
+def _scan_macros(root: Path) -> Scanned[Macro]:
+    """The macro files under one `macros/` root, folded from `store.scan`."""
+    out: Scanned[Macro] = Scanned()
+    for entry in macro_store.scan(root):
+        if entry.spec is not None:
+            out.ok[entry.name] = entry.spec
+        else:
+            out.errors[entry.name] = entry.error or "invalid"
+    return out
+
+
+def _scan_prompts(root: Path, values: dict[str, str]) -> Scanned[str]:
+    """The prompt files under one `prompts/` root — `<name>.md`, the
+    whole file verbatim as the model's prose: placeholders filled,
+    trailing whitespace trimmed. An empty file, an unfillable token, or
+    a name the grammar refuses rides as its error, so the route naming
+    it fails with the cause. Nothing else in the folder is read."""
+    out: Scanned[str] = Scanned()
+    for path in paths.leaf_files(root, PROMPT_SUFFIX):
+        try:
+            check_name(path.stem, "prompt file name")
+            text = resolve_placeholders(read_text(path), PlaybookError, values).rstrip()
+            if not text:
+                raise PlaybookError("the prompt file is empty")
+            out.ok[path.stem] = text
+        except Exception as e:  # broad: exclude the file, never the pack
+            out.errors[path.stem] = str(e) or type(e).__name__
+    return out
+
+
+def macros_root(app: str, playbook: str | None = None) -> Path:
+    """Where a recorded hand is written: the pack's `macros/`, or a
+    playbook's own — the layout rule spelled once for every door that
+    scaffolds into a pack (`macros init --app`). Raises PlaybookError
+    when the pack or the playbook is not on disk."""
+    root = paths.pack_root(app)
+    if not (root / PACK_FILENAME).exists():
+        raise PlaybookError(f"no pack {app!r} on disk (missing {root / PACK_FILENAME})")
+    if playbook is not None:
+        if not (root / playbook / paths.PLAYBOOK_FILENAME).is_file():
+            raise PlaybookError(
+                f"no playbook {app}/{playbook} on disk ({root / playbook})"
+            )
+        root = root / playbook
+    return root / PACK_MACROS_DIRNAME
 
 
 def _check_pack_meta(doc: dict, app: str) -> None:
@@ -208,8 +270,8 @@ def scan_playbooks(app: str, pack: Pack | None = None) -> list[PlaybookEntry]:
 
 def stray_dirs() -> list[str]:
     """Folders under a playbooks root holding YAML beside no manifest —
-    an author who wrote a route and forgot the marker. Skips the `_`
-    and `.` prefixes every lister does, and a name a home pack already
+    an author who wrote a pack and forgot `APP.yml`. Skips the `_` and
+    `.` prefixes every lister does, and a name a home pack already
     claims (the home layer shadows the tree's)."""
     packs = set(list_apps())
     out: list[str] = []
@@ -219,9 +281,9 @@ def stray_dirs() -> list[str]:
         for d in sorted(root.iterdir()):
             if (
                 d.is_dir()
-                and not d.name.startswith(("_", "."))
+                and not paths.is_skipped(d.name)
                 and d.name not in packs
-                and any(d.glob("*.yml"))
+                and any(d.rglob("*.yml"))
             ):
                 out.append(f"{root.name}/{d.name}")
     return out
@@ -229,7 +291,7 @@ def stray_dirs() -> list[str]:
 
 def list_apps() -> list[str]:
     """Packs across the search path (the `paths.playbooks_dirs` layering),
-    sorted — a PLAYBOOK.yml marks a pack."""
+    sorted — an APP.yml marks a pack."""
     return sorted(paths.marked_subdirs(paths.playbooks_dirs(), PACK_FILENAME))
 
 
@@ -246,26 +308,27 @@ _PLAY_KEYS = {"name", "description", "enabled", "inputs", "route"}
 
 
 def _parse_playbook_data(data: Any, name: str, pack: Pack) -> Playbook:
-    """One playbook file's document → a validated Playbook. The file
-    stem IS the name; the `name:` inside must agree with it."""
+    """One playbook's document → a validated Playbook. The folder IS
+    the name; the `name:` inside must agree with it."""
     if not isinstance(data, dict):
         raise PlaybookError("a playbook must be a YAML mapping (key: value pairs)")
     unknown = sorted(set(map(str, data.keys())) - _PLAY_KEYS)
     if unknown:
         raise PlaybookError(f"unknown key(s): {', '.join(unknown)}")
     # A playbook names itself, like a macro and a skill do — and the
-    # name must be the file's, so a copied file cannot lie about what
-    # it is (the same rule `app` keeps with the pack folder).
+    # name must be the folder's, so a copied folder cannot lie about
+    # what it is (the same rule `app` keeps with the pack folder).
     if "name" not in data:
         raise PlaybookError(
-            f"every .yml beside the manifest is a playbook, and this one has "
-            f"no `name:` — a playbook starts `name: {name}`"
+            f"a playbook has no `name:` — its {paths.PLAYBOOK_FILENAME} starts "
+            f"`name: {name}`"
         )
     check_name(name, "playbook name")
     declared = require_str(data.get("name"), "`name`")
     if declared != name:
         raise PlaybookError(
-            f"name {declared!r} must equal the file name {name!r} ({name}.yml)"
+            f"name {declared!r} must equal the folder name {name!r} "
+            f"({name}/{paths.PLAYBOOK_FILENAME})"
         )
     description = prose(data.get("description"), "`description`")
     enabled = data.get("enabled", True)
@@ -286,6 +349,7 @@ def _parse_playbook_data(data: Any, name: str, pack: Pack) -> Playbook:
         start=route.start,
         inline_macros=route.inline,
         recovers=route.recovers,
+        prompts_used=route.prompts_used,
     )
 
 
@@ -340,10 +404,10 @@ def disabled_macros(spec: Playbook, pack: Pack) -> list[str]:
             named.add(n.resume)
         elif isinstance(n, AgentNode):
             named.update(n.macros)
-    # One rule, no inline special case: each name resolves through the
-    # merged view, and an inline macro is enabled by construction — its
-    # gate is the playbook's own `enabled:` — so only directory names
-    # can report.
+    # One rule, no special case: each name resolves through the merged
+    # view. An inline body is enabled by construction (its gate is the
+    # playbook's own `enabled:`); a pack macro or a playbook's recorded
+    # file carries its own flag, and both are read here.
     return sorted(
         m for m in named if not (spec.inline_macros.get(m) or pack.macros[m]).enabled
     )

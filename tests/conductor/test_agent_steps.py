@@ -10,6 +10,7 @@ from conductor_fakes import (
     make_screen,
     write_channel,
     write_pack,
+    write_prompt,
 )
 from conductor_fakes import build_program as _program
 from conductor_fakes import (
@@ -214,8 +215,8 @@ def test_agent_prompt_refs_are_validated() -> None:
 
 def test_landmarks_section_is_the_open_spelling() -> None:
     root = write_pack(playbooks={"walk": AGENTED})
-    doc = (root / "PLAYBOOK.yml").read_text(encoding="utf-8")
-    (root / "PLAYBOOK.yml").write_text(
+    doc = (root / "APP.yml").read_text(encoding="utf-8")
+    (root / "APP.yml").write_text(
         doc + 'landmarks:\n  back:\n    label: "back"\n    at: [0.0, 0.0, 0.1, 0.1]\n'
         '  cart-tab:\n    label: "cart"\n    at: [0.6, 0.9, 0.8, 1.0]\n',
         encoding="utf-8",
@@ -228,8 +229,8 @@ def test_controls_is_not_a_pack_section() -> None:
     # The fixed-spot section has ONE spelling; the earlier `controls:`
     # is an unknown key, refused at the pack door.
     root = write_pack(playbooks={"walk": AGENTED}, landmarks=BACK_LANDMARK)
-    doc = (root / "PLAYBOOK.yml").read_text(encoding="utf-8")
-    (root / "PLAYBOOK.yml").write_text(
+    doc = (root / "APP.yml").read_text(encoding="utf-8")
+    (root / "APP.yml").write_text(
         doc.replace("landmarks:", "controls:"), encoding="utf-8"
     )
 
@@ -749,3 +750,120 @@ def test_payment_episode_blocks_a_tap_when_the_sheet_changed() -> None:
     )
     summary = _finish(p, h, step)
     assert "sheet changed after consent" in summary
+
+
+# ---------- prompts as files: `prompt: prompts.<name>` ----------
+
+FILE_PROMPT = AGENTED.replace(
+    '    prompt: |\n      Derive the keyword.\n      Said: "{inputs.user_said}"\n',
+    "    prompt: prompts.parse\n",
+)
+
+
+def test_a_prompt_file_is_the_step_prompt_verbatim_with_refs_filled_later() -> None:
+    from physiclaw.common import paths
+
+    _write(FILE_PROMPT)
+    root = paths.playbooks_dir() / "demo"
+    write_prompt(
+        root, "walk", "parse", '# Keyword\n\nDerive it.\nSaid: "{inputs.user_said}"\n\n'
+    )
+
+    spec, _ = build.load_spec("demo", "walk", require_live=False)
+
+    parse = spec.nodes[0]
+    assert isinstance(parse, AgentNode)
+    # Body only, trailing whitespace trimmed, headings are the author's prose.
+    assert parse.prompt == '# Keyword\n\nDerive it.\nSaid: "{inputs.user_said}"'
+    assert spec.prompts_used == frozenset({"parse"})
+
+
+def test_a_pack_level_prompt_is_shared_by_every_route() -> None:
+    from physiclaw.common import paths
+
+    _write(FILE_PROMPT)
+    root = paths.playbooks_dir() / "demo"
+    write_prompt(root, None, "parse", "Shared brief.")
+
+    spec, _ = build.load_spec("demo", "walk", require_live=False)
+
+    assert spec.nodes[0].prompt == "Shared brief."
+
+
+def test_a_prompt_file_ref_is_validated_like_inline_prose() -> None:
+    from physiclaw.common import paths
+
+    _write(FILE_PROMPT)
+    write_prompt(paths.playbooks_dir() / "demo", "walk", "parse", "Said: {inputs.nope}")
+
+    with pytest.raises(PlaybookError, match="`prompt`"):
+        build.load_spec("demo", "walk", require_live=False)
+
+
+def test_a_missing_prompt_file_names_what_exists() -> None:
+    from physiclaw.common import paths
+
+    _write(FILE_PROMPT)
+    write_prompt(paths.playbooks_dir() / "demo", "walk", "other", "x")
+
+    with pytest.raises(
+        PlaybookError, match="no parse.md sits in.*Available: prompts.other"
+    ):
+        build.load_spec("demo", "walk", require_live=False)
+
+
+def test_an_empty_prompt_file_fails_the_step_with_the_cause() -> None:
+    from physiclaw.common import paths
+
+    _write(FILE_PROMPT)
+    root = paths.playbooks_dir() / "demo"
+    write_prompt(root, "walk", "parse", "   \n")
+
+    pack = pb.load_pack("demo")
+    assert pack.local["walk"].prompts.errors["parse"] == "the prompt file is empty"
+    with pytest.raises(
+        PlaybookError, match="parse.md is invalid: the prompt file is empty"
+    ):
+        build.load_spec("demo", "walk", require_live=False)
+
+
+def test_a_prompt_name_in_both_the_pack_and_the_route_is_refused() -> None:
+    from physiclaw.common import paths
+
+    _write(FILE_PROMPT)
+    root = paths.playbooks_dir() / "demo"
+    write_prompt(root, "walk", "parse", "mine")
+    write_prompt(root, None, "parse", "ours")
+
+    with pytest.raises(
+        PlaybookError, match="declared both in walk/prompts/ and the pack's"
+    ):
+        build.load_spec("demo", "walk", require_live=False)
+
+
+def test_placeholders_fill_in_a_prompt_file_too() -> None:
+    from physiclaw.common import paths
+    from physiclaw.common.placeholders import write_placeholder_values
+
+    write_placeholder_values({"CONTACT": "Alice"})
+    _write(FILE_PROMPT)
+    write_prompt(
+        paths.playbooks_dir() / "demo", "walk", "parse", "Buy for <<CONTACT>>."
+    )
+
+    spec, _ = build.load_spec("demo", "walk", require_live=False)
+
+    assert spec.nodes[0].prompt == "Buy for Alice."
+
+
+def test_inline_prose_that_merely_mentions_prompts_stays_prose() -> None:
+    inline = AGENTED.replace(
+        "      Derive the keyword.\n",
+        "      Derive the keyword, see prompts.parse in the docs.\n",
+    )
+    _write(inline)
+
+    spec, _ = build.load_spec("demo", "walk", require_live=False)
+
+    assert "see prompts.parse in the docs" in spec.nodes[0].prompt
+    assert spec.prompts_used == frozenset()

@@ -53,9 +53,7 @@ def test_roster_names_every_playbook_with_its_state(wake_log) -> None:
 def test_roster_names_the_disabled_macro_that_holds_a_playbook_back(wake_log) -> None:
     write_channel(CHANNEL_OPEN)
     root = write_pack(playbooks={"flow": FLOW})
-    (root / "macros" / "open-app" / "MACRO.yml").write_text(
-        DISABLED_MACRO, encoding="utf-8"
-    )
+    (root / "macros" / "open-app.yml").write_text(DISABLED_MACRO, encoding="utf-8")
 
     setup.session_setup()
 
@@ -67,7 +65,7 @@ def test_roster_carries_an_unusable_pack_as_a_line(wake_log) -> None:
     write_channel(CHANNEL_OPEN)
     bad = paths.playbooks_dir() / "junk"
     bad.mkdir(parents=True)
-    (bad / "PLAYBOOK.yml").write_text("app: [\n", encoding="utf-8")
+    (bad / "APP.yml").write_text("app: [\n", encoding="utf-8")
 
     program, _ = setup.session_setup()
 
@@ -127,7 +125,7 @@ def test_no_channel_pack_is_the_first_reason(wake_log) -> None:
 def test_a_channel_without_a_live_boot_says_so(wake_log) -> None:
     write_channel(CHANNEL_OPEN)
     write_pack(playbooks={"flow": FLOW})
-    (paths.playbooks_dir() / "channel" / "boot.yml").write_text(
+    (paths.playbooks_dir() / "channel" / "boot" / "PLAYBOOK.yml").write_text(
         "name: boot\ndescription: off\nenabled: false\nroute:\n"
         "  - page: thread\n  - select: parse\n",
         encoding="utf-8",

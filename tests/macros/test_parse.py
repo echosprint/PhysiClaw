@@ -1,4 +1,4 @@
-"""Tests for `physiclaw.macros.parse` — MACRO.yml → validated spec:
+"""Tests for `physiclaw.macros.parse` — a macro file → validated spec:
 the `verb: object` step grammar, YAML 1.2 + strict type checks, and the
 check grammar."""
 
@@ -46,8 +46,8 @@ steps:
 MINIMAL = "name: m\ndescription: d\nsteps:\n  - peek\n"
 
 
-def _parse(text: str = VALID, dir_name: str = "notify-user"):
-    return parse_macro(text, dir_name)
+def _parse(text: str = VALID, stem: str = "notify-user"):
+    return parse_macro(text, stem)
 
 
 # ---------- happy path ----------
@@ -119,7 +119,7 @@ def test_parse_macro_unknown_top_key_raises() -> None:
 
 
 def test_parse_macro_name_dir_mismatch_raises() -> None:
-    with pytest.raises(MacroError, match="must equal the directory name"):
+    with pytest.raises(MacroError, match="must equal the file name"):
         parse_macro(VALID, "other-dir")
 
 
@@ -715,7 +715,7 @@ def test_parse_macro_malformed_clause_at_the_cap_reports_its_shape() -> None:
 
 
 def _alias_bomb(levels: int) -> str:
-    """A MACRO.yml whose step objects form a shared-node DAG: each step's
+    """A macro file whose step objects form a shared-node DAG: each step's
     label references the one before it TWICE, so a tree walk costs
     2**levels visits while the file itself stays small."""
     lines = ["name: b", "description: d", "steps:", '  - tap: &a0 ["z"]']
@@ -1109,7 +1109,7 @@ def test_inline_macro_rejects_identity_and_gating_keys(key: str) -> None:
 
 def test_inline_macro_shares_the_macro_step_budget() -> None:
     # One grammar, one budget: an inline body rides the same MAX_STEPS
-    # bound a MACRO.yml gets — no inline-private cap.
+    # bound a macro file gets — no inline-private cap.
     steps = ["home_screen"] * (MAX_STEPS + 1)
 
     with pytest.raises(MacroError, match="too many steps"):

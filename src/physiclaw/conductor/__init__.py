@@ -9,7 +9,7 @@ passes, and the LLM speaks.
 
 Vocabulary, in the order a reader meets it:
 
-    pack       one app's directory: PLAYBOOK.yml + macros/
+    pack       one app's directory: APP.yml + macros/ + <playbook>/PLAYBOOK.yml
     playbook   one task in a pack, written as a route
     entry      one YAML item of a route (its leading key is the kind)
     page       a waypoint entry: where the walk must BE, checked every
@@ -33,7 +33,7 @@ Vocabulary, in the order a reader meets it:
 One wake, end to end:
 
     plugin.session_setup  → setup: a suspension resumes, else the boot
-    the boot              → Program over channel/boot.yml: peek, the thread
+    the boot              → Program over channel/boot/PLAYBOOK.yml: peek, the thread
                             page's declared hands, then `select` —
                             parse_task over the enabled playbooks
     the baton             → activation builds the matching playbook's

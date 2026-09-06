@@ -10,6 +10,7 @@ that let a walk start and then quietly under-perform — legal, and the
 author is told the cost rather than refused.
 """
 
+from physiclaw.common.paths import PACK_PROMPTS_DIRNAME, PROMPT_SUFFIX
 from physiclaw.conductor.spec import reply
 from physiclaw.conductor.spec.conventions import BOOT_PLAYBOOK, CHANNEL_APP
 from physiclaw.conductor.spec.model import (
@@ -20,6 +21,7 @@ from physiclaw.conductor.spec.model import (
     Node,
     Pack,
     Playbook,
+    PlaybookEntry,
     PlaybookError,
     TellNode,
 )
@@ -102,6 +104,26 @@ def check_boot(nodes: list[Node]) -> None:
 
 
 # ---------- the advisories ----------
+
+
+def pack_warnings(pack: Pack, entries: "list[PlaybookEntry]") -> list[str]:
+    """The pack-level advisories `playbooks check` prints, pack-relative:
+    prompt files no route names — a rename that left the old file
+    behind, or prose written before its step. The file costs nothing at
+    run time, but its author believes the model reads it."""
+    used_by = {e.name: e.spec.prompts_used for e in entries if e.spec is not None}
+    shared_used: set[str] = set().union(*used_by.values())
+    out = [
+        f"{PACK_PROMPTS_DIRNAME}/{n}{PROMPT_SUFFIX} is read by no playbook"
+        for n in sorted(set(pack.prompts.ok) - shared_used)
+    ]
+    for pb_name, files in sorted(pack.local.items()):
+        for n in sorted(set(files.prompts.ok) - used_by.get(pb_name, frozenset())):
+            out.append(
+                f"{pb_name}/{PACK_PROMPTS_DIRNAME}/{n}{PROMPT_SUFFIX} is read by "
+                f"no step of {pb_name}"
+            )
+    return out
 
 
 def readiness_warnings(spec: Playbook, pack: Pack) -> list[str]:

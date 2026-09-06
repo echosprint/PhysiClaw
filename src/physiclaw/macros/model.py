@@ -2,7 +2,7 @@
 evaluated against.
 
 Leaf of the package's internal split (only `template` sits below):
-`parse` (MACRO.yml → Macro), `steps` (the executable step hierarchy),
+`parse` (a macro file → Macro), `steps` (the executable step hierarchy),
 `inputs`, `store`, `runner` and `stats` all depend on this module, never
 on each other through it.
 
@@ -73,7 +73,10 @@ MAX_RUN_SECONDS = 300
 # is on NESTING only — an `or` may list as many alternatives as it likes.
 MAX_CLAUSE_DEPTH = 2
 
-MACRO_FILENAME = "MACRO.yml"
+# A macro is one file, `macros/<name>.yml`: the stem is its identity and
+# the `name:` inside must agree. Nothing else in a macros dir is read, so
+# a README.md or the machine-written stats.json can never parse as one.
+MACRO_SUFFIX = ".yml"
 
 # Abort reasons. They live in the leaf module rather than in `runner`
 # because `stats` needs to tell them apart (a `bad_input` run never reached

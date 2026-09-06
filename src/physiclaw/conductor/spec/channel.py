@@ -1,7 +1,7 @@
 """The user channel — `playbooks/channel/`, the ONE infrastructure pack.
 
 The IM thread's page fingerprint, the rehearsed send/open macros, and
-the boot playbook (`boot.yml` — the walk every wake plays before any
+the boot playbook (`boot/PLAYBOOK.yml` — the walk every wake plays before any
 app playbook), recorded and declared on-device like any pack — but
 app playbooks never name it: asks reach it through the conductor's
 node types, and the boot is the conductor's own to run. The
@@ -93,7 +93,9 @@ def _live_boot(pack: Pack) -> "Playbook | None":
         None,
     )
     if entry is None:
-        log.info("conductor: channel has no %s.yml — no boot at wake", BOOT_PLAYBOOK)
+        log.info(
+            "conductor: channel has no %s/PLAYBOOK.yml — no boot at wake", BOOT_PLAYBOOK
+        )
         return None
     if entry.spec is None:
         log.warning("conductor: channel boot is invalid (%s) — no boot", entry.error)

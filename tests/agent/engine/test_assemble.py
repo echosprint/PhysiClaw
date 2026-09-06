@@ -21,9 +21,8 @@ steps:
 
 
 def _write_macro(text: str = MACRO, name: str = "notify-user") -> None:
-    d = paths.macros_dir() / name
-    d.mkdir(parents=True)
-    (d / "MACRO.yml").write_text(text, encoding="utf-8")
+    paths.macros_dir().mkdir(parents=True, exist_ok=True)
+    (paths.macros_dir() / f"{name}.yml").write_text(text, encoding="utf-8")
 
 
 def test_build_prompt_bundle_wires_enabled_macros() -> None:

@@ -67,8 +67,9 @@ playbooks_app.add_typer(
 def init(
     app: Annotated[str, typer.Argument(help="App name (lowercase/digits/hyphens).")],
 ) -> None:
-    """Scaffold a new app pack: one PLAYBOOK.yml (meta + pages + an
-    example walk) and an example pack macro — parse-clean, disabled."""
+    """Scaffold a new app pack: APP.yml (meta + pages), a README, an
+    example playbook folder, and an example pack macro — parse-clean,
+    disabled."""
     from physiclaw.common.paths import PACK_FILENAME
     from physiclaw.conductor.spec import scaffold
     from physiclaw.conductor.spec.conventions import (
@@ -89,10 +90,12 @@ def init(
         typer.echo(
             f"  1. anchor the `{THREAD_PAGE}` page on YOUR chat header in {PACK_FILENAME}"
         )
-        typer.echo("  2. record the send/open gesture paths in macros/*/MACRO.yml")
+        typer.echo("  2. record the send/open gesture paths in macros/*.yml")
         typer.echo("  3. rehearse both, then enable (physiclaw macros run is")
         typer.echo("     per-user-macro; drive a pack's via physiclaw playbooks run);")
-        typer.echo(f"     the boot ({BOOT_PLAYBOOK}.yml) goes live with `open`")
+        typer.echo(
+            f"     the boot ({BOOT_PLAYBOOK}/PLAYBOOK.yml) goes live with `open`"
+        )
         typer.echo(
             f"  4. capture geometry: physiclaw playbooks pages calibrate {CHANNEL_APP}"
         )
@@ -107,9 +110,9 @@ def init(
             f"  1. declare `pages:` in {PACK_FILENAME} (physiclaw playbooks pages propose --live)"
         )
         typer.echo(
-            f"  2. write the route in {scaffold.EXAMPLE_PLAYBOOK}.yml (one playbook "
-            "per file beside the manifest) and its macros, then: physiclaw "
-            "playbooks check"
+            f"  2. write the route in {scaffold.EXAMPLE_PLAYBOOK}/PLAYBOOK.yml (one "
+            "playbook per folder beside the manifest) and its macros, then: "
+            "physiclaw playbooks check"
         )
         typer.echo("  3. capture geometry: physiclaw playbooks pages calibrate " + app)
 
@@ -158,11 +161,19 @@ def install(
     app = src.name
     dest = paths.playbooks_dir() / app
 
-    files = sorted(src.rglob("*.yml"))
-    if not files:
+    # Every declaration and every note travels: the yml files the
+    # parsers read, the prompts and READMEs beside them.
+    files = sorted(
+        f
+        for f in src.rglob("*")
+        if f.is_file()
+        and f.suffix in {".yml", ".md"}
+        and not any(paths.is_skipped(part) for part in f.relative_to(src).parts)
+    )
+    if not any(f.suffix == ".yml" for f in files):
         exit_error(f"{src} contains no pack files")
     texts = {f: read_text(f) for f in files}
-    # PLAYBOOK.yml is the pack manifest — the `action.yml` analog:
+    # APP.yml is the pack manifest — the `action.yml` analog:
     # `name`/`description` plus the `placeholders:` map that drives the
     # prompts below. It installs WITH the pack, tokens intact.
     try:
@@ -412,7 +423,7 @@ def step(
     — the playbook debugger (the studio's playbook panel drives the
     same core with a mouse).
 
-    Each invocation re-reads PLAYBOOK.yml (an edit applies at once),
+    Each invocation re-reads the playbook (an edit applies at once),
     rebuilds the walk at its stored position (cursor, agent outputs, the
     gate's consent), runs the node there — its enter check, its macro or
     episode or ask, its verify check, its declared recovery — and pauses
@@ -652,10 +663,12 @@ def _check_app(app: str) -> "tuple[bool, dict[str, Playbook]]":
         typer.echo(step_fail(str(e)))
         return True, {}
     bad = False
-    for macro_name, err in sorted(pack.macro_errors.items()):
-        typer.echo(step_fail(f"{app}/macros/{macro_name}: {err}"))
+    for rel, err in pack.file_errors():
+        typer.echo(step_fail(f"{app}/{rel}: {err}"))
         bad = True
     entries = pb.scan_playbooks(app, pack)
+    for line in lints.pack_warnings(pack, entries):
+        typer.echo(warn(f"{app}/{line}"))
     disabled: list[str] = []
     for entry in entries:
         if entry.spec is None:

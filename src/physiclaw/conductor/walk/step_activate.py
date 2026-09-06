@@ -2,7 +2,7 @@
 thread, select the playbook it asks for.
 
 At wake the conductor walks the channel pack's boot playbook
-(`channel/boot.yml`): the thread page with the hands it declares for
+(`channel/boot/PLAYBOOK.yml`): the thread page with the hands it declares for
 a locked phone or a stray screen, then this step. On the thread it
 fires ONE `parse_task` micro-call over the menu of enabled playbooks
 (`activation.Activation`); a positive answer becomes the walk's BATON —

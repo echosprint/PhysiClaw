@@ -252,8 +252,8 @@ def test_macro_examples_are_valid_macros() -> None:
         for block in blocks:
             # Read the name from the block rather than hardcoding it: each
             # page demonstrates the messenger its own readers use.
-            dir_name = re.search(r"^name:\s*(\S+)", block, re.M).group(1)
-            spec = parse_macro(block, dir_name)  # raises MacroError
+            stem = re.search(r"^name:\s*(\S+)", block, re.M).group(1)
+            spec = parse_macro(block, stem)  # raises MacroError
             _assert_settle_guard_matches_the_skip(spec, page.relative_to(REPO))
 
 

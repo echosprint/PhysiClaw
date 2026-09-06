@@ -20,7 +20,7 @@ from physiclaw.macros.store import (
     discover_enabled,
     ensure_format_readme,
     init_macro,
-    list_dir_names,
+    list_names,
     render_section,
     scan,
 )
@@ -45,15 +45,15 @@ steps:
 
 
 def _write(name: str, text: str | None = None, *, enabled: bool = True) -> Path:
-    d = paths.macros_dir() / name
-    d.mkdir(parents=True)
+    paths.macros_dir().mkdir(parents=True, exist_ok=True)
     body = (
         text
         if text is not None
         else VALID.format(name=name, enabled=str(enabled).lower())
     )
-    (d / "MACRO.yml").write_text(body, encoding="utf-8")
-    return d
+    md = paths.macros_dir() / f"{name}.yml"
+    md.write_text(body, encoding="utf-8")
+    return md
 
 
 # ---------- scan ----------
@@ -83,50 +83,55 @@ def test_scan_invalid_yaml_keeps_reason() -> None:
     assert "invalid YAML" in (entries[0].error or "")
 
 
-def test_scan_dir_without_macro_yml_keeps_reason() -> None:
-    (paths.macros_dir() / "empty").mkdir(parents=True)
-
-    entries = scan()
-
-    assert entries[0].error == "no MACRO.yml"
-
-
-def test_scan_skips_hidden_and_underscore_dirs() -> None:
+def test_scan_reads_only_yml_files() -> None:
+    # A macro is a leaf file: a stray folder (the old layout, a note dir)
+    # and non-yml files beside the macros are not macros and not errors.
     _write("demo")
-    (paths.macros_dir() / "_draft").mkdir()
-    (paths.macros_dir() / ".git").mkdir()
+    (paths.macros_dir() / "old-shape").mkdir()
+    (paths.macros_dir() / "old-shape" / "MACRO.yml").write_text(
+        "name: x\n", encoding="utf-8"
+    )
+    (paths.macros_dir() / "notes.txt").write_text("x", encoding="utf-8")
 
     entries = scan()
 
-    assert [e.dir_name for e in entries] == ["demo"]
+    assert [e.name for e in entries] == ["demo"]
 
 
-def test_scan_ignores_stats_file_at_root() -> None:
+def test_scan_skips_hidden_and_underscore_files() -> None:
+    _write("demo")
+    _write("_draft")
+    _write(".hidden")
+
+    entries = scan()
+
+    assert [e.name for e in entries] == ["demo"]
+
+
+def test_scan_ignores_stats_and_readme_at_root() -> None:
     _write("demo")
     (paths.macros_dir() / "stats.json").write_text("{}", encoding="utf-8")
+    (paths.macros_dir() / "README.md").write_text("# Macros", encoding="utf-8")
 
     entries = scan()
 
-    assert [e.dir_name for e in entries] == ["demo"]
+    assert [e.name for e in entries] == ["demo"]
 
 
-def test_scan_sorted_by_dir_name() -> None:
+def test_scan_sorted_by_name() -> None:
     _write("zeta")
     _write("alpha")
 
     entries = scan()
 
-    assert [e.dir_name for e in entries] == ["alpha", "zeta"]
+    assert [e.name for e in entries] == ["alpha", "zeta"]
 
 
 def test_scan_rejects_symlink_escaping_root(tmp_path: Path) -> None:
-    outside = tmp_path / "outside-macro"
-    outside.mkdir()
-    (outside / "MACRO.yml").write_text(
-        VALID.format(name="escape", enabled="true"), encoding="utf-8"
-    )
+    outside = tmp_path / "escape.yml"
+    outside.write_text(VALID.format(name="escape", enabled="true"), encoding="utf-8")
     paths.macros_dir().mkdir(parents=True)
-    (paths.macros_dir() / "escape").symlink_to(outside)
+    (paths.macros_dir() / "escape.yml").symlink_to(outside)
 
     entries = scan()
 
@@ -134,22 +139,22 @@ def test_scan_rejects_symlink_escaping_root(tmp_path: Path) -> None:
     assert "outside" in (entries[0].error or "")
 
 
-# ---------- list_dir_names ----------
+# ---------- list_names ----------
 
 
-def test_list_dir_names_missing_root_returns_empty() -> None:
-    assert list_dir_names() == set()
+def test_list_names_missing_root_returns_empty() -> None:
+    assert list_names() == set()
 
 
-def test_list_dir_names_is_identity_not_validity() -> None:
-    # The stats prune set: a dir counts if MACRO.yml exists, valid or not —
-    # no read, no parse.
+def test_list_names_is_identity_not_validity() -> None:
+    # The stats prune set: a file counts if it exists, valid or not — no
+    # read, no parse.
     _write("demo")
     _write("broken", text="steps: [not yaml")
     (paths.macros_dir() / "empty").mkdir()
-    (paths.macros_dir() / "_draft").mkdir()
+    _write("_draft")
 
-    assert list_dir_names() == {"demo", "broken"}
+    assert list_names() == {"demo", "broken"}
 
 
 # ---------- init_macro / ensure_format_readme ----------
@@ -166,7 +171,7 @@ def test_init_macro_scaffold_parses_and_is_disabled() -> None:
     assert entries[0].spec.name == "my-macro"
 
 
-def test_init_macro_rejects_existing_directory() -> None:
+def test_init_macro_rejects_existing_file() -> None:
     init_macro("my-macro")
 
     with pytest.raises(MacroError, match="already exists"):
@@ -277,14 +282,14 @@ def test_a_file_the_loader_cannot_survive_is_excluded_not_fatal(mocker) -> None:
     _write("boom")
     real = store_mod.parse_macro
 
-    def _explode(text: str, dir_name: str):
-        if dir_name == "boom":
+    def _explode(text: str, stem: str):
+        if stem == "boom":
             raise RecursionError("maximum recursion depth exceeded")
-        return real(text, dir_name)
+        return real(text, stem)
 
     mocker.patch.object(store_mod, "parse_macro", side_effect=_explode)
 
-    entries = {e.dir_name: e for e in scan()}
+    entries = {e.name: e for e in scan()}
 
     assert entries["boom"].spec is None
     assert entries["boom"].error  # reason kept, so `macros check` can name it

@@ -18,10 +18,11 @@ never collides. Under an inline `macro:` the macro grammar applies
 """
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, TypeVar
 
 from physiclaw.common import gesture_vocab
+from physiclaw.common.paths import PACK_MACROS_DIRNAME, PACK_PROMPTS_DIRNAME
 from physiclaw.conductor.spec import context, lints, reply
 from physiclaw.conductor.spec.calls import AGENT_TOOLS, CONTRACT_FIELDS, RESERVED_KEYS
 from physiclaw.conductor.spec.conventions import (
@@ -49,7 +50,6 @@ from physiclaw.conductor.spec.limits import (
 from physiclaw.conductor.spec.model import (
     INPUTS_ROOT,
     IRREVERSIBLE_CLASSES,
-    PACK_MACROS_DIRNAME,
     READING_COVERED,
     READING_ELSEWHERE,
     READING_LOCKED,
@@ -63,6 +63,7 @@ from physiclaw.conductor.spec.model import (
     PlaybookError,
     RecoverHand,
     Recovery,
+    Scanned,
     TellNode,
     check_name,
     prose,
@@ -161,6 +162,11 @@ class _Ctx:
     input_names: set[str]
     resolve: "_MacroResolve"
     payloads: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # The prompt files an agent step may name — the pack's and this
+    # route's own, one namespace (no overlap, checked at compile start)
+    # — and the ones it did name.
+    prompts: Scanned[str] = field(default_factory=Scanned)
+    prompts_used: set[str] = field(default_factory=set)
 
     def payloads_with_total(self) -> dict[str, tuple[str, ...]]:
         """The refs a payment step may quote: every recorded return
@@ -179,6 +185,7 @@ class CompiledRoute:
     start: str
     recovers: dict[str, Recovery]
     inline: dict[str, Macro]
+    prompts_used: frozenset[str] = frozenset()
 
 
 def compile_route(
@@ -193,8 +200,18 @@ def compile_route(
     forward pass compiling the moves against the waypoints around them,
     then the lints that need the whole route."""
     entries, wp_ids, start, page_names = _shape(raw, pack)
-    inline: dict[str, Macro] = {}
-    ctx = _Ctx(playbook, pack, input_names, _macro_resolver(playbook, pack, inline))
+    local = pack.local_for(playbook)
+    # The playbook's own recorded hands enter the dispatch table here,
+    # once, under their `<playbook>.<name>` spelling — the inline bodies
+    # the route embeds join them as the compile pass meets them.
+    inline = _local_registry(playbook, pack, local.macros)
+    ctx = _Ctx(
+        playbook,
+        pack,
+        input_names,
+        _macro_resolver(playbook, pack, inline, local.macros),
+        prompts=_prompt_namespace(playbook, pack, local.prompts),
+    )
     moves: list[Node] = []
     seen: dict[str, int] = {}
     recovers: dict[str, Recovery] = {}  # this route's own hands, by page
@@ -289,6 +306,7 @@ def compile_route(
         start=start,
         recovers={**_inherited_hands(ctx), **recovers},
         inline=inline,
+        prompts_used=frozenset(ctx.prompts_used),
     )
 
 
@@ -538,24 +556,61 @@ def _grant(ctx: _Ctx, value: Any, where: str, nid: str) -> tuple[str, str]:
 # ---------- macros ----------
 
 
+def _refuse_shadow(
+    playbook: str, local: set[str], shared: set[str], kind: str, dirname: str
+) -> None:
+    """A name declared both in the playbook's own folder and the pack's
+    is refused, so a bare reference never needs a lookup order."""
+    both = sorted(local & shared)
+    if both:
+        raise PlaybookError(
+            f"{playbook}: {kind}(s) {', '.join(both)} declared both in "
+            f"{playbook}/{dirname}/ and the pack's {dirname}/ — keep one"
+        )
+
+
+def _local_registry(
+    playbook: str, pack: Pack, local: Scanned[Macro]
+) -> dict[str, Macro]:
+    """The route's inline registry, opened with its recorded hands: each
+    `<playbook>/macros/<name>.yml` dispatches as `<playbook>.<name>` —
+    an inline body written down — referenced or not (a stepping tool,
+    an agent's `give:` may name it). A name the pack's `macros/` also
+    holds is refused."""
+    _refuse_shadow(
+        playbook, set(local.ok), set(pack.macros), "macro", PACK_MACROS_DIRNAME
+    )
+    return {
+        f"{playbook}.{name}": replace(spec, name=f"{playbook}.{name}")
+        for name, spec in local.ok.items()
+    }
+
+
 def _macro_resolver(
-    playbook: str, pack: Pack, inline: dict[str, Macro]
+    playbook: str, pack: Pack, inline: dict[str, Macro], local: Scanned[Macro]
 ) -> _MacroResolve:
     """The name-or-inline resolution every macro-carrying slot shares —
     a do's `macro:`, an ask's `resume:`, a page's `recover:`. ONE home
     for the whole idiom: the synthesized-name rule
-    (`<playbook>.<node>[.<role>]`, dot-joined so it can never collide
-    with a directory macro — `check_name` rejects dots), the MacroError
-    framing, the inline registry, and the directory validation (a
-    broken macro reports its cause, an unknown one lists what exists) —
-    so the slots can never drift. Returns the resolved Macro; its
-    `.name` is the dispatch name either way (a directory macro's name
-    IS its directory)."""
+    (`<playbook>.<name>[.<role>]`, dot-joined so it can never collide
+    with a pack macro — `check_name` rejects dots), the MacroError
+    framing, the inline registry, and the file validation (a broken
+    macro reports its cause, an unknown one lists what exists) — so
+    the slots can never drift. Returns the resolved Macro; its `.name`
+    is the dispatch name either way. A bare name resolves against the
+    pack's `macros/` (dispatch `app/<name>`) or this playbook's own
+    (already in `inline`, dispatch `app/<playbook>.<name>`)."""
 
     def resolve(raw: Any, where: str, nid: str, role: str | None = None) -> Macro:
         slot = role or "macro"
         if isinstance(raw, dict):
             mname = f"{playbook}.{nid}" + (f".{role}" if role else "")
+            if role is None and nid in local.ok:
+                raise PlaybookError(
+                    f"{where}: inline `{slot}` would be named {mname!r}, which "
+                    f"the recorded {playbook}/{PACK_MACROS_DIRNAME}/{nid}.yml "
+                    "already holds — rename one"
+                )
             try:
                 spec = parse_inline_macro(raw, mname)
             except MacroError as e:
@@ -564,24 +619,78 @@ def _macro_resolver(
             return spec
         if raw is not None and not isinstance(raw, str):
             raise PlaybookError(
-                f"{where}: `{slot}` must be a pack macro name or an inline "
+                f"{where}: `{slot}` must be a macro name or an inline "
                 "mapping with `steps:`"
             )
         mname = require_str(raw, f"{where}: `{slot}`")
+        if mname in local.errors:
+            raise PlaybookError(
+                f"{where}: macro {mname!r} ({playbook}/{PACK_MACROS_DIRNAME}/"
+                f"{mname}.yml) is invalid: {local.errors[mname]}"
+            )
+        if mname in local.ok:
+            return inline[f"{playbook}.{mname}"]
         if mname in pack.macro_errors:
             raise PlaybookError(
                 f"{where}: pack macro {mname!r} is invalid: {pack.macro_errors[mname]}"
             )
         if mname not in pack.macros:
-            available = ", ".join(sorted(pack.macros)) or "(none)"
+            available = ", ".join(sorted({*pack.macros, *local.ok})) or "(none)"
             raise PlaybookError(
                 f"{where}: {slot} {mname!r} not found in this pack's "
-                f"{PACK_MACROS_DIRNAME}/ — playbooks reference only their own "
-                f"pack's macros. Available: {available}"
+                f"{PACK_MACROS_DIRNAME}/ or {playbook}/{PACK_MACROS_DIRNAME}/ — "
+                f"playbooks reference only their own pack's macros. "
+                f"Available: {available}"
             )
         return pack.macros[mname]
 
     return resolve
+
+
+# `prompt: prompts.<name>` — the reference form, the one string an agent
+# step's `prompt:` may carry that is not the prompt itself; the namespace
+# root is what tells them apart (the `landmarks.` / `macros.` idiom).
+PROMPT_ROOT = "prompts"
+
+
+def _prompt_namespace(playbook: str, pack: Pack, local: Scanned[str]) -> Scanned[str]:
+    """The prompt files this route may name: the pack's `prompts/` and
+    its own `<playbook>/prompts/`, one namespace — a name in both is
+    refused up front (the macro rule)."""
+    _refuse_shadow(
+        playbook, set(local.ok), set(pack.prompts.ok), "prompt", PACK_PROMPTS_DIRNAME
+    )
+    return Scanned(
+        ok={**pack.prompts.ok, **local.ok},
+        errors={**pack.prompts.errors, **local.errors},
+    )
+
+
+def _prompt_text(ctx: _Ctx, raw: str, where: str) -> str:
+    """An agent's `prompt:` — the prose itself, or `prompts.<name>` for
+    the file `prompts/<name>.md` (the pack's or this route's). Resolved
+    here, at parse, so the node carries text either way and nothing
+    downstream knows which form the author chose."""
+    root, sep, name = raw.strip().partition(".")
+    if not sep or root != PROMPT_ROOT or any(c.isspace() for c in name):
+        return raw
+    check_name(name, f"{where}: `prompt` ({PROMPT_ROOT}.<name>)")
+    if name in ctx.prompts.errors:
+        raise PlaybookError(
+            f"{where}: `prompt` names {PROMPT_ROOT}.{name}, and {PACK_PROMPTS_DIRNAME}/"
+            f"{name}.md is invalid: {ctx.prompts.errors[name]}"
+        )
+    if name not in ctx.prompts.ok:
+        available = (
+            ", ".join(f"{PROMPT_ROOT}.{n}" for n in sorted(ctx.prompts.ok)) or "(none)"
+        )
+        raise PlaybookError(
+            f"{where}: `prompt` names {PROMPT_ROOT}.{name}, but no {name}.md sits in "
+            f"this pack's {PACK_PROMPTS_DIRNAME}/ or {ctx.playbook}/"
+            f"{PACK_PROMPTS_DIRNAME}/. Available: {available}"
+        )
+    ctx.prompts_used.add(name)
+    return ctx.prompts.ok[name]
 
 
 def _argless_macro(
@@ -671,7 +780,9 @@ def _parse_agent(
     no pages); tools = an acting episode framed by the adjacent
     waypoints exactly like a `do`. The prompt is the author's whole
     brief — refs validated here, filled once when the step opens."""
-    prompt = require_str(entry.get("prompt"), f"{where}: `prompt`")
+    prompt = _prompt_text(
+        ctx, require_str(entry.get("prompt"), f"{where}: `prompt`"), where
+    )
     if len(prompt) > MAX_PROMPT_LEN:
         raise PlaybookError(
             f"{where}: `prompt` is {len(prompt)} characters (max {MAX_PROMPT_LEN})"
@@ -879,7 +990,7 @@ def _parse_select(
     if not _is_boot(ctx):
         raise PlaybookError(
             f"{where}: `select` is the channel boot's own step — it belongs "
-            f"in {CHANNEL_APP}/{BOOT_PLAYBOOK}.yml only"
+            f"in {CHANNEL_APP}/{BOOT_PLAYBOOK}/PLAYBOOK.yml only"
         )
     if current_page != THREAD_PAGE:
         raise PlaybookError(
@@ -946,7 +1057,7 @@ def _refuse_bodies(raw: Any, where: str) -> None:
     if isinstance(raw.get("macro"), dict):
         raise PlaybookError(
             f"{where}: the manifest names a pack macro for a recover hand — "
-            "record the body under macros/<name>/ and name it here"
+            "record the body as macros/<name>.yml and name it here"
         )
     for reading in RECOVER_READINGS:
         _refuse_bodies(raw.get(reading), where)

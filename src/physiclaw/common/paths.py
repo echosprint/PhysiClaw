@@ -12,8 +12,8 @@ Layout::
     ├── jobs/jobs.md
     ├── models/omniparser_icon_detect/model.onnx
     ├── skills/<name>/SKILL.md           (user-authored; overrides built-in)
-    ├── macros/{README.md, <name>/MACRO.yml, stats.json}  (gesture macros + run stats)
-    ├── playbooks/<app>/{PLAYBOOK.yml, macros/}  (self-contained app packs)
+    ├── macros/{README.md, <name>.yml, stats.json}  (gesture macros + run stats)
+    ├── playbooks/<app>/{APP.yml, README.md, macros/, <playbook>/{PLAYBOOK.yml, macros/, prompts/}}
     ├── playbooks/placeholders.yml       (per-install <<TOKEN>> values, filled at load)
     ├── official/{source.json, skills/, .sync-state.json}  (synced official pack)
     ├── cache/update.json                (update-notice stage marker; Phase B→A)
@@ -36,8 +36,9 @@ File-format rule — the mix above is deliberate, one format per audience
 machines write):
 
     config.toml     the ONE user-edited settings file → TOML
-    MACRO.yml,      the deliberate YAML exceptions: user-edited automation
-    PLAYBOOK.yml    specs (macro step flows, pack pages + playbooks)
+    <name>.yml,     the deliberate YAML exceptions: user-edited automation
+    APP.yml,        specs (macro step flows, pack pages, playbook routes)
+    PLAYBOOK.yml
                     follow the GitHub-Actions shape, and YAML's
                     implicit-typing hazards are fenced by a 1.2 parser +
                     strict type checks (macros/parse.py,
@@ -67,8 +68,52 @@ LOG_DIR: Path = HOME / "log"
 # Tests toggle it with monkeypatch.setattr, like HOME itself.
 SOURCE_LAYER: bool = "PHYSICLAW_HOME" not in os.environ
 
-# The one spelling of a pack's spec filename (playbooks/<app>/PLAYBOOK.yml).
-PACK_FILENAME = "PLAYBOOK.yml"
+# The pack layout's fixed names. A folder with APP.yml is a pack (the
+# app's manifest: what its playbooks share); a folder inside it with
+# PLAYBOOK.yml is a playbook (the route). The two reserved subfolders
+# hold leaf files — recorded hands and the model's prose — at either
+# level, and are never mistaken for a playbook.
+PACK_FILENAME = "APP.yml"
+PLAYBOOK_FILENAME = "PLAYBOOK.yml"
+PACK_MACROS_DIRNAME = "macros"
+PACK_PROMPTS_DIRNAME = "prompts"
+RESERVED_PACK_DIRS = frozenset({PACK_MACROS_DIRNAME, PACK_PROMPTS_DIRNAME})
+PROMPT_SUFFIX = ".md"
+
+# The one skip convention every artifact lister shares: a `_` or `.`
+# prefix parks a draft beside the real files (an editor's swap file, a
+# folder the author is not done with) without it being read.
+SKIP_PREFIXES = ("_", ".")
+
+
+def is_skipped(name: str) -> bool:
+    return name.startswith(SKIP_PREFIXES)
+
+
+def leaf_files(root: Path, suffix: str) -> list[Path]:
+    """``<root>/*<suffix>``, sorted, minus the skip convention — the one
+    walk every leaf-file lister takes (macros, prompts, stray routes),
+    so the rule is read in one place. An absent root is no files."""
+    if not root.is_dir():
+        return []
+    return sorted(
+        p for p in root.glob(f"*{suffix}") if p.is_file() and not is_skipped(p.name)
+    )
+
+
+def marked_subdirs(dirs: list[Path], marker: str) -> set[str]:
+    """Subdir names bearing ``marker`` across a search path — the one
+    union the pack lister takes, with the one skip convention."""
+    names: set[str] = set()
+    for root in dirs:
+        if not root.is_dir():
+            continue
+        names.update(
+            d.name
+            for d in root.iterdir()
+            if d.is_dir() and not is_skipped(d.name) and (d / marker).exists()
+        )
+    return names
 
 
 @functools.cache
@@ -106,7 +151,7 @@ def playbooks_dirs() -> list[Path]:
 
 def pack_root(app: str) -> Path:
     """The directory pack ``app`` loads from — the first search dir
-    carrying ``<app>/PLAYBOOK.yml``; the home dir (the write target)
+    carrying ``<app>/APP.yml``; the home dir (the write target)
     when none does."""
     for d in playbooks_dirs():
         if (d / app / PACK_FILENAME).exists():
@@ -119,24 +164,6 @@ def macros_dirs() -> list[Path]:
     ``macros/`` (the `playbooks_dirs` layering rule). Writes —
     recordings, stats — always target ``macros_dir()``."""
     return _layered(macros_dir(), "macros")
-
-
-def marked_subdirs(dirs: list[Path], marker: str) -> set[str]:
-    """Subdir names bearing ``marker`` across a search path — the one
-    union both artifact listers (packs, macros) share, with one skip
-    convention."""
-    names: set[str] = set()
-    for root in dirs:
-        if not root.is_dir():
-            continue
-        names.update(
-            d.name
-            for d in root.iterdir()
-            if d.is_dir()
-            and not d.name.startswith(("_", "."))
-            and (d / marker).exists()
-        )
-    return names
 
 
 def ensure_dirs() -> None:
@@ -224,17 +251,18 @@ def skills_dir() -> Path:
 
 
 def macros_dir() -> Path:
-    """User-authored gesture macros — one ``<name>/MACRO.yml`` dir per macro
+    """User-authored gesture macros — one ``<name>.yml`` file per macro
     (rehearsed MCP-gesture sequences the agent runs via ``run_macro``), plus a
-    single machine-written ``stats.json`` at the root. Only ``*/MACRO.yml``
-    is scanned, so the stats file can never be read as a macro."""
+    single machine-written ``stats.json`` and the format ``README.md`` at the
+    root. Only ``*.yml`` is scanned, so neither can be read as a macro."""
     return HOME / "macros"
 
 
 def playbooks_dir() -> Path:
     """Self-contained conductor app packs — one ``<app>/`` dir per app
-    holding its ``PLAYBOOK.yml`` manifest (meta, placeholders, landmarks,
-    shared pages), one ``<name>.yml`` per playbook, and the pack's
+    holding its ``APP.yml`` manifest (meta, placeholders, landmarks,
+    shared pages), one ``<playbook>/PLAYBOOK.yml`` folder per playbook
+    (with its own ``macros/`` and ``prompts/``), and the pack's
     private ``macros/``.
     Geometry never lives here; it is captured on-device into
     ``learned_pages_dir()`` — device variance (iPhone models, iOS and app

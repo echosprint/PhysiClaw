@@ -186,4 +186,4 @@ def test_readme_derives_tools_and_caps() -> None:
 
 def test_readme_documents_the_yaml_quoting_gotcha() -> None:
     assert "quote" in README_CONTENT.lower()
-    assert "MACRO.yml" in README_CONTENT
+    assert "macros/<name>.yml" in README_CONTENT

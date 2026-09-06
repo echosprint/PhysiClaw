@@ -50,14 +50,13 @@ steps:
 
 
 def _write(name: str, text: str | None = None, *, enabled: bool = True) -> None:
-    d = paths.macros_dir() / name
-    d.mkdir(parents=True)
+    paths.macros_dir().mkdir(parents=True, exist_ok=True)
     body = (
         text
         if text is not None
         else VALID.format(name=name, enabled=str(enabled).lower())
     )
-    (d / "MACRO.yml").write_text(body, encoding="utf-8")
+    (paths.macros_dir() / f"{name}.yml").write_text(body, encoding="utf-8")
 
 
 class FakeMcp:
@@ -87,7 +86,7 @@ def test_init_scaffolds_a_checkable_macro() -> None:
     result = runner.invoke(app, ["macros", "init", "my-macro"])
 
     assert result.exit_code == 0
-    assert "MACRO.yml" in result.output
+    assert "my-macro.yml" in result.output
     assert "flip `enabled: false` to true" in result.output  # next-steps guidance
     check = runner.invoke(app, ["macros", "check"])
     assert check.exit_code == 0
@@ -159,7 +158,7 @@ def test_check_invalid_macro_exits_one_with_reason() -> None:
     result = runner.invoke(app, ["macros", "check"])
 
     assert result.exit_code == 1
-    assert "must equal the directory name" in result.output
+    assert "must equal the file name" in result.output
 
 
 def test_check_reminds_that_a_disabled_macro_is_not_reachable() -> None:
@@ -368,7 +367,7 @@ def test_runs_replays_one_run_by_bare_hex(mocker) -> None:
 def test_runs_shows_the_arguments_each_step_fired_with(mocker) -> None:
     # The number you edit when a tap lands wrong. It was always recorded;
     # rendering it is what makes the run log answer the rehearsal question
-    # without opening MACRO.yml.
+    # without opening the macro file.
     _write("tap-demo", TAP_MACRO)
     _patch_mcp(mocker)
     ran = runner.invoke(app, ["macros", "run", "tap-demo"])
@@ -544,3 +543,34 @@ def test_run_names_the_missing_pack_macro() -> None:
     result = runner.invoke(app, ["macros", "run", "ghost/x"])
 
     assert result.exit_code == 1 and "pack 'ghost'" in result.output
+
+
+# ---------- init --app: a hand scaffolded into a pack or a route ----------
+
+
+def test_init_app_scaffolds_into_the_pack_or_the_playbook() -> None:
+    from conductor_fakes import FLOW, write_pack
+
+    root = write_pack(playbooks={"flow": FLOW})
+
+    pack_level = runner.invoke(app, ["macros", "init", "shared", "--app", "demo"])
+    route_level = runner.invoke(app, ["macros", "init", "mine", "--app", "demo/flow"])
+
+    assert pack_level.exit_code == 0, pack_level.output
+    assert route_level.exit_code == 0, route_level.output
+    assert (root / "macros" / "shared.yml").is_file()
+    assert (root / "flow" / "macros" / "mine.yml").is_file()
+    assert "playbooks check" in route_level.output  # the pack's check, not the user one
+    # Neither joins the user macros dir.
+    assert not (paths.macros_dir() / "shared.yml").exists()
+
+
+def test_init_app_refuses_an_unknown_pack_or_playbook() -> None:
+    from conductor_fakes import FLOW, write_pack
+
+    write_pack(playbooks={"flow": FLOW})
+
+    assert runner.invoke(app, ["macros", "init", "x", "--app", "ghost"]).exit_code == 1
+    assert (
+        runner.invoke(app, ["macros", "init", "x", "--app", "demo/none"]).exit_code == 1
+    )

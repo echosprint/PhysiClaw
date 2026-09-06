@@ -15,7 +15,6 @@ from physiclaw.macros.model import (
     ALLOWED_STEP_TOOLS,
     ARGLESS_TOOLS,
     HANDLE_OBJECT_CHARS,
-    MACRO_FILENAME,
     MAX_CLAUSE_DEPTH,
     MAX_INPUTS,
     MAX_LABEL_READINGS,
@@ -27,7 +26,7 @@ from physiclaw.macros.model import (
 
 
 def render_init(name: str) -> str:
-    """The scaffold body for ``macros/<name>/MACRO.yml`` — parses clean
+    """The scaffold body for ``macros/<name>.yml`` — parses clean
     (disabled) so `check` passes before any editing."""
     return INIT_TEMPLATE.format(
         name=name, tools="verbs: " + "  ".join(sorted(ALLOWED_STEP_TOOLS))
@@ -41,7 +40,7 @@ def render_init(name: str) -> str:
 # editing (`tests/macros/test_scaffold.py` pins that, including that
 # it deliberately stops before Send).
 INIT_TEMPLATE = """\
-name: {name}                   # must equal the directory name
+name: {name}                   # must equal the file name
 description: Open WeChat, paste a message into your user's chat, stop before Send
 
 # A valid macro is enabled by default; this scaffold starts off. Set it to
@@ -139,11 +138,11 @@ steps:
 README_CONTENT = f"""\
 # Macros
 
-One directory per macro: `~/.physiclaw/macros/<name>/{MACRO_FILENAME}`.
+One file per macro: `~/.physiclaw/macros/<name>.yml`.
 Scaffold one with `physiclaw macros init <name>`, edit it, then:
 
     physiclaw macros list           # every macro: enabled / disabled / invalid
-    physiclaw macros check          # lint every {MACRO_FILENAME}
+    physiclaw macros check          # lint every macro file
     physiclaw mcp                   # the server `run` drives — NOT `server`,
                                     # which also wakes the agent and would
                                     # move the phone mid-rehearsal
@@ -161,7 +160,7 @@ Scaffold one with `physiclaw macros init <name>`, edit it, then:
 
 ## Format
 
-- `name` (required) — must equal the directory name; lowercase/digits/hyphens.
+- `name` (required) — must equal the file name; lowercase/digits/hyphens.
 - `description` (required) — tells the agent when to use it. It, and each
   input's `description` / `example`, must be ONE line of at most
   {MAX_PROSE_LEN} characters: they render verbatim into the cached system
@@ -286,8 +285,8 @@ Habit: quote every text value.
 - A rising `consecutive_aborts` streak in stats means the app layout
   changed; re-rehearse.
 
-`stats.json` here is machine-written; delete a macro's directory and its
-stats go on the next run. When sharing a macro, share only its directory.
+`stats.json` here is machine-written; delete a macro's file and its
+stats go on the next run. When sharing a macro, share the one file.
 
 Fleet-wide switch: `[macros] enabled = false` in `~/.physiclaw/config.toml`
 hides ALL macros from the agent; these CLI commands keep working so you can

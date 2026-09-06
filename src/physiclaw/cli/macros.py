@@ -1,7 +1,7 @@
 """``physiclaw macros`` — author, rehearse, and track gesture macros.
 
 The user's side of `physiclaw.macros`: `init` scaffolds one, `list` shows
-what's on disk, `check` lints every ``MACRO.yml`` (printing exactly why a
+what's on disk, `check` lints every macro file (printing exactly why a
 file is excluded), `runs` replays a past run's per-step log,
 `run` rehearses one macro against the live server — the mandatory test
 step before setting ``enabled: true``, and it takes ``--start-at`` so the
@@ -38,7 +38,7 @@ from physiclaw.macros.model import Macro, MacroError
 
 macros_app = typer.Typer(
     no_args_is_help=True,
-    help="User-authored gesture macros (~/.physiclaw/macros/<name>/MACRO.yml).",
+    help="User-authored gesture macros (~/.physiclaw/macros/<name>.yml).",
 )
 
 # Indent of a step's detail lines, under the step line's own two spaces.
@@ -54,24 +54,55 @@ _SCREEN_CHARS = 200
 @macros_app.command()
 def init(
     name: Annotated[str, typer.Argument(help="Macro name (lowercase/digits/hyphens).")],
+    app: Annotated[
+        str | None,
+        typer.Option(
+            "--app",
+            help="Scaffold into a pack instead: <app> for the pack's macros/, "
+            "<app>/<playbook> for one route's own.",
+        ),
+    ] = None,
 ) -> None:
-    """Scaffold a new macro from a commented template."""
+    """Scaffold a new macro from a commented template — a user macro, or
+    with --app a pack's or a playbook's recorded hand."""
     try:
-        path = macro_store.init_macro(name)
+        path = macro_store.init_macro(name, root=_pack_macros_root(app))
     except MacroError as e:
         exit_error(str(e))
     typer.echo(ok(str(path)))
     typer.echo("Next:")
-    typer.echo("  1. edit it, then: physiclaw macros check")
-    typer.echo(f"  2. rehearse:      physiclaw macros run {name} -i message=hi")
+    if app is not None:
+        typer.echo("  1. edit it, then: physiclaw playbooks check")
+        typer.echo(
+            f"  2. rehearse the route that names it: physiclaw playbooks run {app}"
+        )
+    else:
+        typer.echo("  1. edit it, then: physiclaw macros check")
+        typer.echo(f"  2. rehearse:      physiclaw macros run {name} -i message=hi")
     typer.echo(
         "  3. once it succeeds, flip `enabled: false` to true (or delete the line)"
     )
 
 
+def _pack_macros_root(app: str | None):
+    """Where `--app` puts a macro — `pack.macros_root`, the layout rule's
+    one home; None for the user macros dir."""
+    if app is None:
+        return None
+    from physiclaw.conductor.spec import pack as pb
+
+    name, _, playbook = app.partition("/")
+    if not name or "/" in playbook:
+        exit_error(f"--app takes <app> or <app>/<playbook>, not {app!r}")
+    try:
+        return pb.macros_root(name, playbook or None)
+    except pb.PlaybookError as e:
+        exit_error(str(e))
+
+
 @macros_app.command("list")
 def list_cmd() -> None:
-    """List every macro directory: enabled, disabled, or invalid."""
+    """List every macro file: enabled, disabled, or invalid."""
     macro_store.ensure_format_readme()
     entries = macro_store.scan()
     if not entries:
@@ -89,22 +120,20 @@ def list_cmd() -> None:
             if e.spec is None
             else f"{e.spec.description} ({len(e.spec.steps)} steps)"
         )
-        typer.echo(f"  {tag} {e.dir_name}  {detail}")
+        typer.echo(f"  {tag} {e.name}  {detail}")
 
 
 @macros_app.command()
 def check() -> None:
-    """Validate every MACRO.yml; exit 1 if any is invalid."""
+    """Validate every macro file; exit 1 if any is invalid."""
     macro_store.ensure_format_readme()
     entries = macro_store.scan()
     bad = [e for e in entries if e.spec is None]
     for e in bad:
-        typer.echo(step_fail(f"{e.dir_name}: {e.error or ''}"))
+        typer.echo(step_fail(f"{e.name}: {e.error or ''}"))
     for e in entries:
         if e.spec is not None:
-            typer.echo(
-                ok(e.dir_name if e.spec.enabled else f"{e.dir_name}  (disabled)")
-            )
+            typer.echo(ok(e.name if e.spec.enabled else f"{e.name}  (disabled)"))
     if not entries:
         typer.echo("No macros found.")
     _report_unreachable(entries)
@@ -139,7 +168,7 @@ def _report_unreachable(entries: list[macro_store.ScanEntry]) -> None:
         typer.echo(
             warn(
                 f"disabled, so the agent cannot call: {', '.join(off)}. "
-                "Set `enabled: true` in MACRO.yml once rehearsed."
+                "Set `enabled: true` in the macro file once rehearsed."
             )
         )
 

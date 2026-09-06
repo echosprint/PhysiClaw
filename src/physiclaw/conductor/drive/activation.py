@@ -43,19 +43,22 @@ log = logging.getLogger(__name__)
 
 
 def _menu_input(i: MacroInput) -> str:
-    """One declared input on the parse_task menu: name, description —
-    and the authored
-    `example:`, which is the extraction hint ("五常大米 5kg" shows the
-    shape a value should take better than any rule prose)."""
+    """One declared input on the parse_task menu: name, description, the
+    authored `example:` (the extraction hint — "五常大米 5kg" shows the
+    shape a value should take better than any rule prose), and whether
+    the message may leave it out: an input with a `default:` is
+    optional, and the model is told so rather than left to guess which
+    omissions the activation will forgive."""
     example = f"; e.g. {i.example}" if i.example else ""
-    return f"{i.name} ({i.description}{example})"
+    optional = f"; optional, default {i.default!r}" if not i.required else ""
+    return f"{i.name} ({i.description}{example}{optional})"
 
 
 @dataclass
 class Activation:
     """The parse_task half of the boot: turn a THREAD screen into one
     scoped ask, and its answer into a Program. Reaching a thread screen
-    is the boot route's job (`channel/boot.yml`, walked like any
+    is the boot route's job (`channel/boot/PLAYBOOK.yml`, walked like any
     playbook); this owns only the menu, the call, and the build, and
     rides the boot program for its `select` step (`step_activate.py`).
     `entries` is the single source — the answer space is its keys, the

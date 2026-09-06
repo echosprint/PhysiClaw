@@ -9,7 +9,11 @@ import logging
 from pathlib import Path
 
 from physiclaw.common.bbox import BANDS
-from physiclaw.common.paths import PACK_FILENAME
+from physiclaw.common.paths import (
+    PACK_FILENAME,
+    PACK_MACROS_DIRNAME,
+    PLAYBOOK_FILENAME,
+)
 from physiclaw.conductor.spec import specfile
 from physiclaw.conductor.spec.calls import AGENT_TOOLS
 from physiclaw.conductor.spec.conventions import (
@@ -32,7 +36,6 @@ from physiclaw.conductor.spec.limits import (
 )
 from physiclaw.conductor.spec.model import (
     IRREVERSIBLE_CLASSES,
-    PACK_MACROS_DIRNAME,
     PlaybookError,
     check_name,
 )
@@ -40,7 +43,8 @@ from physiclaw.conductor.spec.route import (
     BARE_HANDS,
 )
 from physiclaw.macros import scaffold as macro_scaffold
-from physiclaw.macros.model import MACRO_FILENAME, MAX_INPUTS
+from physiclaw.macros import store as macro_store
+from physiclaw.macros.model import MAX_INPUTS
 
 log = logging.getLogger(__name__)
 
@@ -103,10 +107,10 @@ def render_playbook_stub(app: str) -> str:
 
 MANIFEST_TEMPLATE = """\
 # The pack MANIFEST — what the app is and what its playbooks share.
-# Never a route: each playbook is its own <name>.yml beside this file
-# (the stem is the name, referenced as {app}/<name>), and the recorded
-# hands routes share live in macros/<name>/MACRO.yml. Every section
-# here is optional; an empty manifest is a valid pack.
+# Never a route: each playbook is its own folder beside this file
+# (<name>/PLAYBOOK.yml, referenced as {app}/<name>), and the recorded
+# hands routes share live in macros/<name>.yml. Every section here is
+# optional; an empty manifest is a valid pack.
 app: {app}           # which app this pack automates = the directory name
 description: EDIT ME — what this pack automates, and when to adopt it
 
@@ -146,8 +150,11 @@ description: EDIT ME — what this pack automates, and when to adopt it
 
 
 PLAYBOOK_TEMPLATE = """\
-# One playbook — this file's stem is its name ({app}/{playbook}); the
-# manifest beside it holds what every playbook shares. A route alternates
+# One playbook — this folder is its name ({app}/{playbook}); the pack's
+# APP.yml holds what every playbook shares, and this folder holds what
+# is this route's alone: macros/<name>.yml it recorded, prompts/<name>.md
+# its agent steps read (`prompt: prompts.<name>`), README.md for people.
+# A route alternates
 # WHERE (a page, checked every time) with WHAT (a move), forward-only,
 # ≤ {max_nodes} moves. What you declare is what runs: nothing retries,
 # unlocks, or waits unless a line here says so. The entries:
@@ -160,8 +167,9 @@ PLAYBOOK_TEMPLATE = """\
 #            `with:` its inputs); the page after it is the landing check.
 #            Money: `irreversible: {classes}` right after an `approve:
 #            payment` ask.
-#   agent  — the model drives inside YOUR prompt with the `tools:` and
-#            `give:` grants you list; `returns:` fields read downstream as
+#   agent  — the model drives inside YOUR prompt (inline, or
+#            `prompt: prompts.<name>` for prompts/<name>.md) with the
+#            `tools:` and `give:` grants you list; `returns:` fields read downstream as
 #            {{name.field}}. No tools = a pure-text call, legal before the
 #            first page. `limit: {{calls, scrolls}}` bounds an episode
 #            (≤ {max_agent_calls} calls).
@@ -173,7 +181,7 @@ PLAYBOOK_TEMPLATE = """\
 # Values: the manifest's placeholders fill at install, {{inputs.x}} /
 # {{node.field}} / {{ask.total}} when the walk reaches the move, {{x}}
 # inside a macro from its `with:`. Reference: ~/.physiclaw/playbooks/README.md.
-name: {playbook}         # = this file's name; referenced as {app}/{playbook}
+name: {playbook}         # = this folder's name; referenced as {app}/{playbook}
 description: EDIT ME — one line saying what task this playbook does
 # A valid playbook is enabled by default; this scaffold starts off.
 enabled: false
@@ -254,21 +262,28 @@ README_CONTENT = """\
 One directory per app, self-contained — everything its playbooks use:
 
     playbooks/<app>/
-      PLAYBOOK.yml         the MANIFEST: what the app is and what its
+      APP.yml              the MANIFEST: what the app is and what its
                            playbooks share — app, description,
                            placeholders, landmarks, and a `pages:`
                            appendix for pages more than one route
                            lands on. Every section optional; an empty
                            file is a valid pack. Never a route.
-      <name>.yml           one playbook per file; the stem is the name
-                           (referenced as <app>/<name>, and `name:`
+      README.md            for people: what the pack does, the device
+                           it was recorded on, the traps. Never loaded.
+      macros/<n>.yml       the pack's hands, shared by every route
+                           (same format as ~/.physiclaw/macros/, never
+                           shown to the model's macro list).
+      <name>/              one playbook per folder; the folder is the
+        PLAYBOOK.yml       name (referenced as <app>/<name>, and `name:`
                            inside must agree) and the body is the
                            playbook: name, description, enabled,
                            inputs, route (page → move → page → move).
-      macros/<n>/MACRO.yml pack-private macros shared across playbooks
-                           (same format as ~/.physiclaw/macros/, never
-                           shown to the model's macro list); single-use
-                           hands embed in their moves instead.
+        macros/<n>.yml     this route's own recorded hands (dispatch
+                           <app>/<name>.<n>); a name may not also be a
+                           pack macro's — there is no lookup order.
+        prompts/<n>.md     this route's prose for the model, verbatim
+                           (`prompt: prompts.<n>` in an agent step).
+        README.md          the route's notes for people. Never loaded.
 
 Validate everything: `physiclaw playbooks check`. Scaffold a pack:
 `physiclaw playbooks init <app>` — or start from a shared template
@@ -317,7 +332,7 @@ alternate readings of one text go inside it (`text: [..]`), and
 `within:` pins it to a band or a box.
 
 The channel pack (`playbooks/channel/`) is the conductor's own: the
-thread page, the send/open macros an `ask` runs, and `boot.yml` — the
+thread page, the send/open macros an `ask` runs, and `boot/` — the
 walk every wake plays before any playbook (reach the thread, read the
 request, hand the matching playbook the baton), a route like any
 other whose `select` step is the one entry only that file may carry.
@@ -330,7 +345,7 @@ A page is declared ONCE per pack — beside its waypoint in one file,
 or in the manifest's `pages:` appendix when routes share it — and
 referenced bare everywhere else; the same page declared in two files
 is a pack error, never a merge.
-Macros embed as `macro: {{steps: [...]}}` (the MACRO.yml grammar minus
+Macros embed as `macro: {{steps: [...]}}` (the macro-file grammar minus
 name/description/enabled, enabled with the playbook); an ask's
 `resume:` and a page's `recover:` take the same form and dispatch
 argument-less.
@@ -347,7 +362,7 @@ app: {CHANNEL_APP}
 description: >-
   The user-channel pack — the conductor's route to YOUR user's IM
   thread: the thread page, the send/open macros its asks run, and the
-  boot ({BOOT_PLAYBOOK}.yml) every wake walks first.
+  boot ({BOOT_PLAYBOOK}/PLAYBOOK.yml) every wake walks first.
 
 # The ONE page the conductor must recognize: your own chat thread in
 # your IM app. Anchor on the chat header (your name / the contact
@@ -429,27 +444,76 @@ def _init_channel_pack(root: Path) -> Path:
     playbook. App packs never name it."""
     from physiclaw.common.text import write_text
 
+    macros_root = root / PACK_MACROS_DIRNAME
+    macros_root.mkdir(parents=True)
     for name, stub in (
         (SEND_MACRO, CHANNEL_SEND_STUB),
         (OPEN_MACRO, CHANNEL_OPEN_STUB),
     ):
-        d = root / PACK_MACROS_DIRNAME / name
-        d.mkdir(parents=True)
-        write_text(d / MACRO_FILENAME, stub)
+        write_text(macro_store.macro_path(macros_root, name), stub)
     write_text(root / PACK_FILENAME, CHANNEL_PACK_STUB)
-    write_text(root / f"{BOOT_PLAYBOOK}.yml", CHANNEL_BOOT_STUB)
+    write_text(root / "README.md", render_pack_readme(CHANNEL_APP))
+    (root / BOOT_PLAYBOOK).mkdir()
+    write_text(root / BOOT_PLAYBOOK / PLAYBOOK_FILENAME, CHANNEL_BOOT_STUB)
     ensure_format_readme()
     return root
 
 
 def ensure_channel_boot(root: Path) -> None:
-    """Materialize `boot.yml` in the channel pack at `root` when it has
-    none — the `ensure_ios_pack` pattern, called as the pack loads: the
+    """Materialize `boot/PLAYBOOK.yml` in the channel pack at `root` when
+    it has none — the `ensure_ios_pack` pattern, called as the pack loads: the
     boot is a template the user owns and edits (its hands, its limits),
     so it lives on disk, but a channel pack recorded before the boot
     was a file must not lose its wake. Written once, then never
     touched. Fail-open."""
-    _ensure_file(root / f"{BOOT_PLAYBOOK}.yml", CHANNEL_BOOT_STUB, "no boot at wake")
+    _ensure_file(
+        root / BOOT_PLAYBOOK / PLAYBOOK_FILENAME, CHANNEL_BOOT_STUB, "no boot at wake"
+    )
+
+
+def render_pack_readme(app: str) -> str:
+    """The pack's `README.md` seed — the author's notes, never loaded.
+    Written once by `init`; the loader reads no `.md` outside `prompts/`."""
+    return PACK_README_TEMPLATE.format(app=app)
+
+
+def render_playbook_readme(app: str, playbook: str) -> str:
+    """A playbook folder's `README.md` seed, same rule."""
+    return PLAYBOOK_README_TEMPLATE.format(app=app, playbook=playbook)
+
+
+PACK_README_TEMPLATE = """\
+# {app}
+
+What this pack automates, in one paragraph, and when the boot should
+offer it.
+
+## Device
+
+The phone, OS version, app version, and system language the hands were
+recorded on. Coordinates replay as-is on the same model; note what
+differs elsewhere.
+
+## Traps
+
+What broke a run and how the pack now avoids it — one line each.
+"""
+
+PLAYBOOK_README_TEMPLATE = """\
+# {app}/{playbook}
+
+What this route does, end to end, and what the user says to start it.
+
+## Recorded facts
+
+Where each hand's coordinates came from, and what the screens looked
+like when they were recorded.
+
+## Rehearsal
+
+    physiclaw playbooks replay {app}/{playbook} --session <id>
+    physiclaw playbooks run {app}/{playbook} -i <input>=<value>
+"""
 
 
 def render_example_macro() -> str:
@@ -469,8 +533,9 @@ def ensure_format_readme() -> None:
 
 
 def init_pack(app: str) -> Path:
-    """Scaffold ``playbooks/<app>/`` — the manifest, a disabled example
-    playbook file, an example pack macro — and return the pack root. Raises
+    """Scaffold ``playbooks/<app>/`` — the manifest, its README, a
+    disabled example playbook folder (route, README), an example pack
+    macro — and return the pack root. Raises
     PlaybookError on a bad name or an existing directory; `ios` is the
     exception, being idempotent (see below)."""
     from physiclaw.common import paths
@@ -490,11 +555,19 @@ def init_pack(app: str) -> Path:
         raise PlaybookError(f"pack directory already exists: {root}")
     if app == CHANNEL_APP:
         return _init_channel_pack(root)
-    macro_dir = root / PACK_MACROS_DIRNAME / EXAMPLE_MACRO
-    macro_dir.mkdir(parents=True)
+    (root / PACK_MACROS_DIRNAME).mkdir(parents=True)
+    (root / EXAMPLE_PLAYBOOK).mkdir()
     write_text(root / PACK_FILENAME, render_manifest_stub(app))
-    write_text(root / f"{EXAMPLE_PLAYBOOK}.yml", render_playbook_stub(app))
-    write_text(macro_dir / MACRO_FILENAME, render_example_macro())
+    write_text(root / "README.md", render_pack_readme(app))
+    write_text(root / EXAMPLE_PLAYBOOK / PLAYBOOK_FILENAME, render_playbook_stub(app))
+    write_text(
+        root / EXAMPLE_PLAYBOOK / "README.md",
+        render_playbook_readme(app, EXAMPLE_PLAYBOOK),
+    )
+    write_text(
+        macro_store.macro_path(root / PACK_MACROS_DIRNAME, EXAMPLE_MACRO),
+        render_example_macro(),
+    )
     ensure_format_readme()
     return root
 
@@ -558,9 +631,8 @@ def ensure_ios_pack() -> None:
     from physiclaw.common import paths
 
     root = paths.playbooks_dir() / IOS_APP
-    # Keyed on the FILE, not the dir: an old-layout ios pack (pages.yml)
-    # self-migrates by gaining the unified spec, while an existing
-    # PLAYBOOK.yml — including a deliberately emptied one — is theirs.
+    # Keyed on the FILE, not the dir: an existing APP.yml — including a
+    # deliberately emptied one — is theirs.
     _ensure_file(root / PACK_FILENAME, IOS_PACK_STUB, "OS pages unavailable")
 
 

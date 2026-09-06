@@ -797,10 +797,9 @@ async def test_run_and_record_keeps_stats_of_disabled_macros() -> None:
     # engine run must not delete a temporarily-disabled macro's stats.
     from physiclaw.common import paths
 
+    paths.macros_dir().mkdir(parents=True, exist_ok=True)
     for name in ("demo", "resting"):
-        d = paths.macros_dir() / name
-        d.mkdir(parents=True)
-        (d / "MACRO.yml").write_text(
+        (paths.macros_dir() / f"{name}.yml").write_text(
             f"name: {name}\ndescription: d\nsteps:\n  - peek\n",
             encoding="utf-8",
         )

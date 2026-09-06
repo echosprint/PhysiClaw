@@ -161,7 +161,7 @@ def _write_pack(app: str, text: str) -> None:
 
     d = paths.playbooks_dir() / app
     d.mkdir(parents=True)
-    (d / "PLAYBOOK.yml").write_text(compose_pack_doc(app, text), encoding="utf-8")
+    (d / "APP.yml").write_text(compose_pack_doc(app, text), encoding="utf-8")
 
 
 def test_scan_app_decls_reads_pack_or_empty() -> None:

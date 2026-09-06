@@ -55,7 +55,7 @@ MAX_LANDMARKS = 12
 # than this add tokens without adding real choices.
 MAX_CANDIDATES = 40
 
-# ---- the boot (channel/boot.yml, step_activate.py) ----
+# ---- the boot (channel/boot/PLAYBOOK.yml, step_activate.py) ----
 
 # How many times the boot's `select` step may take parse_task's
 # `scroll_up` escape — scrolling the thread for an older request —

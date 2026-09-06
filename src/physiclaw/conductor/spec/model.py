@@ -3,13 +3,13 @@ validates against. A leaf: the compiler (`route.py`), the loader
 (`pack.py`), the scaffold, and the walk all import it; it imports none
 of them.
 
-A pack is a folder: `PLAYBOOK.yml`, the MANIFEST (what the app is and
+A pack is a folder: `APP.yml`, the MANIFEST (what the app is and
 what its routes share — meta, placeholders, landmarks, pages; every
-section optional, the file may be empty), one `<name>.yml` per
+section optional, the file may be empty), one `<name>/PLAYBOOK.yml` per
 playbook beside it (the file body is the playbook: name, description,
 enabled, inputs, route; the stem is the name, referenced as
 `<app>/<name>`, and `name:` must agree with it), and
-`macros/<name>/MACRO.yml` for the recorded hands
+`macros/<name>.yml` for the recorded hands
 routes share. The manifest never carries a route.
 
 A playbook is one app task written as a ROUTE: a top-down alternation
@@ -39,8 +39,8 @@ vocabulary and the model classes below carry the same names)::
                 # replaces it whole for that walk
     hand      ::= go_back | force_quit | home_screen | unlock_phone
                 | {tap: landmarks.<name>} | {macro: name | body}
-    macro     ::= name                    # macros/<name>/ — a directory macro
-                | {[inputs] steps}        # inline — MACRO.yml grammar minus
+    macro     ::= name                    # macros/<name>.yml — a recorded macro (pack or playbook)
+                | {[inputs] steps}        # inline — the macro-file grammar minus
                                           # name/description/enabled
 
 The route's shape IS the contract: an optional prefix of pure-text
@@ -77,8 +77,9 @@ and its lints turn a `route:` into the nodes.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Generic, Protocol, TypeVar
 
+from physiclaw.common import paths
 from physiclaw.conductor.spec import specfile
 from physiclaw.conductor.spec.limits import (
     DEFAULT_ASK_ROUNDS,
@@ -86,7 +87,7 @@ from physiclaw.conductor.spec.limits import (
     DEFAULT_RECOVER_LIMIT,
 )
 from physiclaw.conductor.spec.pages import Landmark, PageDecl
-from physiclaw.macros.model import Macro, MacroInput
+from physiclaw.macros.model import MACRO_SUFFIX, Macro, MacroInput
 
 # The three readings a page's `recover:` may key its hands by: the page
 # itself under an overlay, the phone's lock screen (where taps do not
@@ -104,8 +105,6 @@ IRREVERSIBLE_CLASSES = ("payment",)
 # (`ask` is not global: it exists only inside a payment ask's own
 # messages, where the money slots win.)
 INPUTS_ROOT = "inputs"
-
-PACK_MACROS_DIRNAME = "macros"
 
 
 class PlaybookError(specfile.SpecError):
@@ -300,6 +299,9 @@ class Playbook:
     # Declared recovery, page name → its hands: a mismatched page runs
     # ITS hand for the reading, or hands over when it declares none.
     recovers: dict[str, Recovery] = field(default_factory=dict)
+    # The prompt files this route's agent steps read (`prompts.<name>`)
+    # — `playbooks check` names the files no route reads.
+    prompts_used: frozenset[str] = frozenset()
 
     @property
     def activates(self) -> bool:
@@ -337,6 +339,29 @@ class PlaybookEntry:
     error: str | None = None
 
 
+_T = TypeVar("_T")
+
+
+@dataclass(frozen=True)
+class Scanned(Generic[_T]):
+    """One leaf folder, read: what parsed, by bare name, and what did
+    not, with its reason — so a route naming a broken file fails with
+    the cause instead of "not found"."""
+
+    ok: dict[str, _T] = field(default_factory=dict)
+    errors: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class Files:
+    """The leaf folders a playbook owns beside its PLAYBOOK.yml: its
+    recorded hands (`macros/*.yml`) and the model's prose
+    (`prompts/*.md`, placeholders filled, trailing whitespace trimmed)."""
+
+    macros: Scanned[Macro] = field(default_factory=Scanned)
+    prompts: Scanned[str] = field(default_factory=Scanned)
+
+
 @dataclass(frozen=True)
 class Pack:
     """What a playbook validates against: the app's declared pages, its
@@ -347,11 +372,17 @@ class Pack:
     pages: dict[str, PageDecl]
     macros: dict[str, Macro]
     macro_errors: dict[str, str]
-    # The raw playbook files (`<name>.yml` beside the manifest) — parsed
-    # per entry by `scan_playbooks`, so one broken walk excludes itself,
-    # never the pack; the files that would not load ride as errors.
+    # The raw playbook files (`<name>/PLAYBOOK.yml`) — parsed per entry
+    # by `scan_playbooks`, so one broken walk excludes itself, never the
+    # pack; the files that would not load ride as errors.
     playbook_docs: dict = field(default_factory=dict)
     playbook_errors: dict[str, str] = field(default_factory=dict)
+    # The pack's shared prose (`prompts/*.md`) and each playbook's own
+    # leaf folders, by playbook — the route's compiler registers a
+    # playbook's recorded hands under `<playbook>.<name>` beside its
+    # inline bodies and resolves `prompts.<name>` against both levels.
+    prompts: Scanned[str] = field(default_factory=Scanned)
+    local: dict[str, Files] = field(default_factory=dict)
     # The manifest's `pages: <name>: recover:` hands, RAW by page name —
     # the route compiler resolves them (its grammar, its resolver) and
     # every route inherits them for a shared page unless it declares
@@ -360,3 +391,31 @@ class Pack:
     # The pack's declared fixed spots (`landmarks:`) — recover hands and
     # agent grants name them. See `pages.Landmark`.
     landmarks: dict[str, Landmark] = field(default_factory=dict)
+
+    def local_for(self, playbook: str) -> Files:
+        """A playbook's own leaf folders — empty when it has none."""
+        return self.local.get(playbook, Files())
+
+    def file_errors(self) -> list[tuple[str, str]]:
+        """Every leaf file that would not load, as (pack-relative path,
+        reason) — the one list `check` prints, spelled with the layout's
+        own names so a folder rename never leaves a stale message."""
+        macros, prompts = paths.PACK_MACROS_DIRNAME, paths.PACK_PROMPTS_DIRNAME
+        out = [
+            (f"{macros}/{n}{MACRO_SUFFIX}", e)
+            for n, e in sorted(self.macro_errors.items())
+        ]
+        out += [
+            (f"{prompts}/{n}{paths.PROMPT_SUFFIX}", e)
+            for n, e in sorted(self.prompts.errors.items())
+        ]
+        for pb, files in sorted(self.local.items()):
+            out += [
+                (f"{pb}/{macros}/{n}{MACRO_SUFFIX}", e)
+                for n, e in sorted(files.macros.errors.items())
+            ]
+            out += [
+                (f"{pb}/{prompts}/{n}{paths.PROMPT_SUFFIX}", e)
+                for n, e in sorted(files.prompts.errors.items())
+            ]
+        return out
